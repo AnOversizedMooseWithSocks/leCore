@@ -202,6 +202,63 @@ class HolographicMemory:
         return unbind(self.trace, key)
 
 
+def recall_all(trace, keys, codebook, iterative=True):
+    """Recover the value for EVERY key stored in one overloaded trace.
+
+    A single trace (a sum of bind(key_i, value_i)) recalls only a handful of
+    pairs cleanly before the pile-up of cross-terms -- every other pair's noise
+    -- drowns the signal (see HolographicMemory: capacity is finite). The usual
+    fixes treat that crosstalk as irreducible and spread the load (partitioning).
+    This does something different: it PEELS the pairs off one at a time, the way a
+    decoder cancels interference or a photo is developed strongest-signal first.
+
+      1. Unbind every key and snap each estimate to the nearest codebook entry,
+         noting how confident (cosine) each guess is.
+      2. Accept the single MOST confident pair -- the clearest thing in the
+         exposure -- and SUBTRACT bind(key, clean_value) back out of the trace.
+      3. The residual now holds one fewer interferer, so the next-clearest item
+         is sharper. Repeat until every pair is decoded.
+
+    Each correct subtraction makes the rest easier, so this 'successive
+    cancellation' recovers roughly twice as many pairs cleanly as one-shot recall
+    at the same width -- and because it is orthogonal to partitioning (peel WITHIN
+    each region) the two stack into a multiplicative win. The catch is honest:
+    once the clearest remaining item is itself wrong, subtracting it injects error
+    that cascades, so past the capacity cliff this degrades rather than rescues.
+    The remedy is to keep each trace inside its good regime (e.g. by partitioning)
+    and let peeling double it from there.
+
+    Returns, for each key, the index into `codebook` it decoded to. With
+    iterative=False it is plain one-shot recall (no peeling), kept for contrast.
+    """
+    keys = np.asarray(keys, dtype=float)
+    codebook = np.asarray(codebook, dtype=float)
+    units = codebook / (np.linalg.norm(codebook, axis=1, keepdims=True) + 1e-12)
+
+    def best_match(vec):
+        v = vec / (np.linalg.norm(vec) or 1.0)
+        sims = units @ v
+        j = int(sims.argmax())
+        return j, float(sims[j])
+
+    if not iterative:
+        return [best_match(unbind(trace, k))[0] for k in keys]
+
+    residual = np.array(trace, dtype=float)
+    remaining = set(range(len(keys)))
+    decoded = {}
+    while remaining:
+        win_i, win_j, win_c = -1, -1, -2.0
+        for i in remaining:                       # find the clearest remaining pair
+            j, c = best_match(unbind(residual, keys[i]))
+            if c > win_c:
+                win_c, win_i, win_j = c, i, j
+        decoded[win_i] = win_j
+        residual = residual - bind(keys[win_i], codebook[win_j])   # cancel it, sharpen the rest
+        remaining.discard(win_i)
+    return [decoded[i] for i in range(len(keys))]
+
+
 # ---------------------------------------------------------------------------
 # 3b. PARTITIONING THE SPACE  (named regions + routing)
 #
@@ -717,6 +774,56 @@ def demo_partitioning():
     print("  so recall holds up. That is what partitioning buys you.\n")
 
 
+def demo_cancellation():
+    """Show successive cancellation: recover far more pairs from ONE overloaded
+    trace by peeling the clearest item, subtracting it, and repeating -- and show
+    that this stacks on top of partitioning for a compounding win."""
+    print("=" * 70)
+    print("DEMO 2b -- Successive cancellation: recover the whole exposure by peeling")
+    print("=" * 70)
+
+    dim = 1024
+    print("\nAll pairs in a SINGLE trace, recalled three ways. 'one-shot' unbinds")
+    print("each key once; 'peeled' cancels the clearest pair then re-reads the")
+    print("rest (recursively); 'peeled + 8 regions' does the same inside each")
+    print("partition. Accuracy = fraction of keys returning the right value.\n")
+    print(f"  {'pairs':>6}   {'one-shot':>9}   {'peeled':>7}   {'peeled + 8 regions':>19}")
+    for n in (80, 160, 320):
+        one = sic = comp = 0.0
+        trials = 3
+        for s in range(trials):
+            rng = np.random.default_rng(100 + s)
+            keys = np.stack([random_vector(dim, rng) for _ in range(n)])
+            vals = np.stack([random_vector(dim, rng) for _ in range(n)])
+            trace = np.zeros(dim)
+            for k, v in zip(keys, vals):
+                trace = trace + bind(k, v)
+            one += sum(d == i for i, d in enumerate(
+                recall_all(trace, keys, vals, iterative=False))) / n
+            sic += sum(d == i for i, d in enumerate(
+                recall_all(trace, keys, vals, iterative=True))) / n
+            # the same pairs, partitioned into 8 regions, peeled within each
+            anchors = [random_vector(dim, rng) for _ in range(8)]
+            region = [int(np.argmax([cosine(keys[i], a) for a in anchors])) for i in range(n)]
+            ok = 0
+            for p in range(8):
+                idx = [i for i in range(n) if region[i] == p]
+                if not idx:
+                    continue
+                tr = np.zeros(dim)
+                for i in idx:
+                    tr = tr + bind(keys[i], vals[i])
+                dec = recall_all(tr, keys[idx], vals[idx], iterative=True)
+                ok += sum(dec[m] == m for m in range(len(idx)))
+            comp += ok / n
+        print(f"  {n:>6}   {100*one/trials:>8.0f}%   {100*sic/trials:>6.0f}%   "
+              f"{100*comp/trials:>18.0f}%")
+    print("\n  Peeling roughly doubles what a single trace holds; once it is past")
+    print("  the cliff a wrong guess cascades, so partitioning (keep each trace in")
+    print("  its good regime) and peeling COMPOUND -- two filters stacked, the way")
+    print("  film layers colour or a coder codes a residual on top of the gist.\n")
+
+
 def demo_learning():
     """Show learning-from-scratch: teach a few animals, then classify new ones
     it never saw, purely from shared structure."""
@@ -765,6 +872,7 @@ def demo_learning():
 if __name__ == "__main__":
     demo_keyvalue()
     demo_partitioning()
+    demo_cancellation()
     demo_learning()
     demo_reflex()
     demo_drift()

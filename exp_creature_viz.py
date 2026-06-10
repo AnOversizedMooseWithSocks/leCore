@@ -4,7 +4,7 @@ from holographic_creature import GridWorld, CreatureEncoder, HolographicMind, _t
 import io, contextlib
 
 def rollout(seed, encoder, mind=None, steps=60):
-    """One episode on a fixed world layout; record the creature's path + food eaten."""
+    """One episode on a fixed world layout; record the creature's path + stars eaten."""
     w = GridWorld(7, 7, n_poison=2, seed=seed)             # constructor already reset()s
     poison = list(w.poison); path = [(w.cx, w.cy)]; eaten = []
     foods = [(w.fx, w.fy)]; senses = w.senses()
@@ -14,10 +14,12 @@ def rollout(seed, encoder, mind=None, steps=60):
             a = int(rng.integers(4))
         else:
             a = mind.decide(encoder.encode(senses), explore=False)
-        senses, r, ate = w.step(GridWorld.ACTIONS[a])
+        senses, r, ate, done = w.step(GridWorld.ACTIONS[a])
         path.append((w.cx, w.cy))
         if ate:
             eaten.append((w.cx, w.cy)); foods.append((w.fx, w.fy))
+        if done:                                            # poison death or empty battery
+            break
     return dict(poison=poison, path=path, eaten=eaten, foods=foods, w=w.w, h=w.h)
 
 def draw(ax, ep, title):
@@ -45,10 +47,10 @@ with contextlib.redirect_stdout(io.StringIO()):
 
 before = rollout(11, enc, mind=None)
 after  = rollout(11, enc, mind=mind)
-print("random  before: food eaten =", len(before["eaten"]))
-print("trained after : food eaten =", len(after["eaten"]))
+print("random  before: stars collected =", len(before["eaten"]))
+print("trained after : stars collected =", len(after["eaten"]))
 fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-draw(ax[0], before, f"before training (random)\nfood eaten: {len(before['eaten'])}")
-draw(ax[1], after,  f"after training (greedy)\nfood eaten: {len(after['eaten'])}")
+draw(ax[0], before, f"before training (random)\nstars collected: {len(before['eaten'])}")
+draw(ax[1], after,  f"after training (greedy)\nstars collected: {len(after['eaten'])}")
 fig.tight_layout(); fig.savefig("creature_viz.png", dpi=110, bbox_inches="tight"); plt.close(fig)
 print("rendered creature_viz.png")

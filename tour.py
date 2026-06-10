@@ -1,14 +1,15 @@
 """
 tour.py -- a guided tour of the whole holographic system in one run.
 
-Each section exercises a different subsystem with a small, readable example,
-so you can confirm end-to-end that numbers, text, mixed records, key->value
-memory, reasoning, the learning creature, and the image archive are all wired
-up and working together on the same vector substrate.
+Each section exercises a different subsystem with a small, readable example, so
+you can confirm end-to-end that the whole stack works on the same vector
+substrate: numbers, text, mixed records, key->value memory, reasoning, the
+learning creature, the image archive, vision tagging, compositional scenes with
+resonator factoring, the scaling tree/forest, and S3-style content addresses.
 
     python tour.py
 
-(Takes ~15-20 seconds; the creature section trains a little RL agent.)
+(Takes ~25-35 seconds; the creature section trains a little RL agent.)
 """
 import numpy as np
 
@@ -104,9 +105,9 @@ br, bf = _baseline(world, enc)
 with contextlib.redirect_stdout(io.StringIO()):          # hide the per-block training log
     _train(world, enc, mind, episodes=120)
 er, ef = _evaluate(world, enc, mind)
-print(f"  random baseline    : reward {br:+.2f}, food eaten {bf:.1f}")
-print(f"  after 120 episodes : reward {er:+.2f}, food eaten {ef:.1f}   (it taught itself to find food)")
-print("  (run `python holographic_creature.py` for the full demo incl. poison avoidance)")
+print(f"  random baseline    : reward {br:+.2f}, stars collected {bf:.1f}")
+print(f"  after 120 episodes : reward {er:+.2f}, stars collected {ef:.1f}   (it taught itself to find stars)")
+print("  (run `python holographic_creature.py` for the full demo incl. lethal-poison avoidance + energy)")
 
 
 # 8. Image archive ---------------------------------------------------------
@@ -133,6 +134,57 @@ before = arc.stored_bytes(); arc.quantize(4); after = arc.stored_bytes()
 still = sum(arc.recall(imgs[n])[0] == n for n in range(arc.n))
 print(f"  4-bit plates: store {before//1000} KB -> {after//1000} KB, recall still {still}/{arc.n}")
 
+# 9. Vision -----------------------------------------------------------------
+title("9. Vision  (colour, edges, shapes -- the image is just numbers)")
+import holographic_vision as hv
+kinds = ["circle", "rectangle", "triangle", "line"]
+shp_ok = sum(hv.classify_shape(hv.make_shape(k, 64, seed=10 + j)[1]) == k for j, k in enumerate(kinds))
+redcircle, _ = hv.make_shape("circle", 64, seed=1, fg=(235, 70, 70))
+line, _ = hv.make_shape("line", 80, seed=3)
+nlines = len(hv.hough_lines(hv.edges(hv.to_gray(line)), top=2))
+print(f"  HSV hue of a red circle  : wedge {hv.hue_histogram(redcircle).argmax()} (0 = red)")
+print(f"  rule-based shape ID      : {shp_ok}/4 clean shapes ; Hough found {nlines} line(s) in a line image")
+
+# 10. Compositional scene + resonator --------------------------------------
+title("10. Compositional scene  (bind the parts, factor them back with a resonator)")
+import holographic_scene as sc
+coder = sc.SceneCoder(dim=2048, seed=0)
+true = [{"colour": "red", "shape": "circle", "texture": "smooth"},
+        {"colour": "blue", "shape": "rectangle", "texture": "busy"},
+        {"colour": "green", "shape": "triangle", "texture": "vertical"}]
+got = coder.factor_scene(coder.encode_scene(true), 3, sweeps=2)
+key = lambda d: (d["colour"], d["shape"], d["texture"])
+okset = {key(t) for t in true} == {key(g) for g in got}
+print(f"  3 objects bound into ONE scene vector, factored back: "
+      f"{'all 3 recovered' if okset else 'partial'}  {[(g['colour'], g['shape']) for g in got]}")
+print("  (a single holistic tag could name only one of them -- composition keeps the parts)")
+
+# 11. Scaling: recursive tree + forest -------------------------------------
+title("11. Scaling  (one flat memory collapses; a deterministic tree holds)")
+import holographic_tree as ht
+rows = {r["N"]: r for r in ht.capacity_curve([64, 1024], dim=2048, leaf_size=64, probes=60)}
+print(f"  key->value recall@1 at N=64   : flat {rows[64]['flat']:.0%}  tree {rows[64]['tree']:.0%}")
+print(f"  key->value recall@1 at N=1024 : flat {rows[1024]['flat']:.0%}  tree {rows[1024]['tree']:.0%}  "
+      f"(flat has collapsed; the tree keeps each leaf in capacity)")
+fb = ht.forest_benchmark(N=1500, dim=512, leaf_size=64, n_trees=4, beam=4)
+print(f"  approx-NN forest (4 trees)    : recall {fb['forest_recall']:.0%} at {fb['forest_cmp']} "
+      f"comparisons vs {fb['exact_cmp']} for a full scan")
+
+# 12. Content addresses (S3-style) -----------------------------------------
+title("12. Content addresses  (no folders -- the name IS the hierarchy, like S3)")
+import holographic_uri as uri
+store = uri.FacetStore()
+rng2 = np.random.default_rng(0); pal = {"red": (235, 70, 70), "blue": (80, 120, 235), "green": (70, 200, 110)}
+for n in range(30):
+    col = list(pal)[rng2.integers(3)]; shp = kinds[rng2.integers(4)]
+    im, _ = hv.make_shape(shp, 64, seed=n, fg=pal[col])
+    t = sc.auto_tags(im); store.put(n, t, vector=coder.encode(t))
+print(f"  deterministic key from properties     : e.g. '{store.keys()[0]}'")
+print(f"  top-level prefixes (S3 CommonPrefixes) : {list(store.common_prefixes('').keys())}")
+k0, recs0 = list(store.flat.items())[0]
+derived = uri.address_from_content(recs0[0]['vec'], coder)
+print(f"  resonator computes the URI from content: '{derived}' ({'matches' if derived == k0 else 'differs'})")
+
 print("\n" + "-" * 66)
-print("  All eight subsystems ran on the same vector substrate. Wired up.")
+print("  All twelve subsystems ran on the same vector substrate. Wired up.")
 print("-" * 66 + "\n")

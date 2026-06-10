@@ -55,10 +55,18 @@ class ResonatorNetwork:
     def __init__(self, codebooks):
         self.codebooks = [np.asarray(cb) for cb in codebooks]
 
-    def factor(self, composite, iters=100):
+    def factor(self, composite, iters=100, init=None, rng=None):
         # Start every factor as the superposition of its whole codebook -- the
-        # estimate explores all possibilities at once instead of guessing.
-        est = [bundle(list(cb)) for cb in self.codebooks]
+        # estimate explores all possibilities at once instead of guessing. With
+        # init='random' it starts from random unit estimates instead, which lets
+        # several restarts escape a bad fixed point (see multi-object factoring).
+        if init == "random":
+            r = rng or np.random.default_rng()
+            est = []
+            for cb in self.codebooks:
+                v = r.standard_normal(cb.shape[1]); est.append(v / np.linalg.norm(v))
+        else:
+            est = [bundle(list(cb)) for cb in self.codebooks]
         F = len(self.codebooks)
         for _ in range(iters):
             for f in range(F):                       # update in place (Gauss-Seidel)

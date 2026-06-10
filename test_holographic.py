@@ -15,7 +15,7 @@ import pytest
 from holographic_ai import (random_vector, bind, unbind, bundle, cosine, permute,
                             Vocabulary, HolographicMemory, PartitionedMemory,
                             HolographicLearner, geodesic, log_map, exp_map, slerp,
-                            ReflexArc, DriftDetector)
+                            ReflexArc, DriftDetector, recall_all)
 from holographic_encoders import ScalarEncoder, TextEncoder, RecordEncoder
 from holographic_reasoning import (ResonatorNetwork, SemanticCompass,
                                    ConformalPredictor, EpistemicMap, vector_disagreement)
@@ -108,6 +108,23 @@ class TestEngine:
 
         assert acc(part) > acc(single)
         assert acc(part) > 0.9
+
+    def test_successive_cancellation_beats_one_shot(self):
+        # At a load where a single trace is well past one-shot capacity, peeling
+        # the clearest pair and cancelling it should recover far more correctly.
+        r = rng(11)
+        n = 160
+        keys = np.stack([random_vector(DIM, r) for _ in range(n)])
+        vals = np.stack([random_vector(DIM, r) for _ in range(n)])
+        trace = np.zeros(DIM)
+        for k, v in zip(keys, vals):
+            trace = trace + bind(k, v)
+        one = recall_all(trace, keys, vals, iterative=False)
+        sic = recall_all(trace, keys, vals, iterative=True)
+        one_acc = sum(one[i] == i for i in range(n)) / n
+        sic_acc = sum(sic[i] == i for i in range(n)) / n
+        assert sic_acc > one_acc + 0.15      # a clear, not marginal, improvement
+        assert sic_acc > 0.6
 
     def test_geometry_slerp_and_maps(self):
         r = rng(8)
