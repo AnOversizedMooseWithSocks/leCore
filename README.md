@@ -1,5 +1,7 @@
 # Holographic VSA
 
+[![tests](https://github.com/AnOversizedMooseWithSocks/holostuff/actions/workflows/ci.yml/badge.svg)](https://github.com/AnOversizedMooseWithSocks/holostuff/actions/workflows/ci.yml)
+
 A from-scratch, **numpy-only** holographic / vector-symbolic engine - and a small
 web UI on top of it.
 
