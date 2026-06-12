@@ -365,3 +365,43 @@ def test_perception_explains_plan_break():
     # control: the unmutated maze still escapes under reset=False
     w = mk(); w.reset()
     assert replay_plan(w, canon, reset=False)[0] == "escaped"
+
+
+def test_bootstrap_rescue_cracks_the_starved_maze():
+    # THE END-TO-END RESULT, the robust discriminator: on 20x20 seed 11 the
+    # plain protocol probes 0% across every budget tried (under the decaying
+    # epsilon schedule the loop-attractor policy locks in before luck finds the
+    # exit; sustained-high-epsilon runs occasionally escape but never
+    # consolidate). The adaptive rescue -- plain candidate starves, starvation
+    # summons curiosity+rehearsal at adequate capacity -- takes the same maze to
+    # a competent probe (measured 100% at these settings).
+    import io, contextlib
+    from holographic_creature import GridWorld, learn_maze
+
+    def mk():
+        return GridWorld(20, 20, maze=True, fixed_seed=11)
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        _, _, plain = learn_maze(mk, dim=512, episodes=400, mem=4, max_steps=800,
+                                 k=30, candidates=1, bootstrap=False)
+        _, _, rescued = learn_maze(mk, dim=512, episodes=400, mem=4, max_steps=800,
+                                   k=30, candidates=4, bootstrap="auto")
+    assert plain == 0.0                     # the wall is real
+    assert rescued >= 2 / 3                 # the rescue cracks it
+
+
+def test_learn_maze_bootstrap_flag_modes():
+    # The adaptive rescue's API: bootstrap=False is exactly the old plain
+    # protocol, bootstrap="auto" (default) runs plain when not starved -- both
+    # must train a 9x9 maze to competence (where luck has always sufficed, the
+    # rescue stays dormant and behavior is unchanged).
+    import io, contextlib
+    from holographic_creature import GridWorld, learn_maze
+
+    def mk():
+        return GridWorld(width=9, height=9, maze=True, fixed_seed=5)
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        _, _, r_off = learn_maze(mk, dim=256, episodes=150, mem=2, bootstrap=False)
+        _, _, r_auto = learn_maze(mk, dim=256, episodes=150, mem=2)  # default auto
+    assert r_off >= 2 / 3 and r_auto >= 2 / 3

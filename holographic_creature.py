@@ -1015,7 +1015,8 @@ def _forced_dir(senses, last_action):
 
 def run_episode(world, encoder, mind, learn=True, explore=True,
                 eval_epsilon=None, gamma=0.9, max_steps=50, mem=0,
-                corridor_reflex=False, danger_reflex=False, wall_reflex=False):
+                corridor_reflex=False, danger_reflex=False, wall_reflex=False,
+                curiosity=0.0, return_trajectory=False):
     """Live one episode; return (total_reward, stars_collected).
 
     max_steps=None is SURVIVAL MODE: the life runs until the creature dies --
@@ -1037,6 +1038,19 @@ def run_episode(world, encoder, mind, learn=True, explore=True,
     in afterward using Monte-Carlo returns (each action credited with the
     discounted reward that actually followed it -- simple, no bootstrapping).
 
+    'curiosity' (off by default) is the BOOTSTRAP fix for worlds too deep for
+    luck: each cell earns a small intrinsic bonus the FIRST time it is visited
+    this episode, so exploration is rewarded densely instead of only at the
+    (possibly never-reached) exit. The honest magnitude is the world's own
+    arithmetic -- exit_reward / n_free_cells -- so touring the ENTIRE maze sums
+    to exactly one exit reward and curiosity can never dominate the real signal
+    once the exit is found. Measured: under the standard decaying-epsilon
+    schedule, 20x20 seed 11 trains to ZERO escapes (the loop-attractor policy
+    locks in before luck finds the exit; sustained high epsilon occasionally
+    escapes but never consolidates -- plain probes 0% at every budget tried);
+    curiosity turns the early walk into a covering walk that finds the first
+    success while exploration is still high.
+
     'corridor_reflex' is the DECIDE-ONLY-AT-CHOICES lesson, imported from the
     rest of the system (exact scan below the crossover, the gate only where type
     goes blind -- machinery only where there is a real choice). When on, corridor
@@ -1055,6 +1069,7 @@ def run_episode(world, encoder, mind, learn=True, explore=True,
     recent = []                                          # recent actions, newest first
     state = encoder.build_state(senses, recent, mem)
     states, actions, rewards = [], [], []
+    _visited = {(world.cx, world.cy)}                    # for the curiosity bonus
     stars = 0
     steps = 0
     last = None
@@ -1087,6 +1102,9 @@ def run_episode(world, encoder, mind, learn=True, explore=True,
         recent = [name] + recent                         # remember this move
         last = name
         r_total = r
+        if curiosity and (world.cx, world.cy) not in _visited:
+            _visited.add((world.cx, world.cy))
+            r_total += curiosity                         # first visit this episode
         if corridor_reflex:
             while not done and steps < max_steps:
                 fwd = _forced_dir(senses, last)
@@ -1098,6 +1116,9 @@ def run_episode(world, encoder, mind, learn=True, explore=True,
                 recent = [fwd] + recent
                 last = fwd
                 r_total += r
+                if curiosity and (world.cx, world.cy) not in _visited:
+                    _visited.add((world.cx, world.cy))
+                    r_total += curiosity                 # forced cells count too
         states.append(state)
         actions.append(a)
         rewards.append(r_total)                          # the DECISION earns the segment
@@ -1111,6 +1132,8 @@ def run_episode(world, encoder, mind, learn=True, explore=True,
             g = rewards[t] + gamma * g
             returns[t] = g
         mind.remember(states, actions, returns)
+        if return_trajectory:                            # for success REHEARSAL
+            return float(np.sum(rewards)), stars, (states, actions, returns)
 
     return float(np.sum(rewards)), stars
 
@@ -1482,7 +1505,8 @@ def demo_introspect(episodes=240, seed=7):
 
 
 def learn_maze(world_factory, dim=256, episodes=240, gamma=0.97, mem=4,
-               max_steps=500, candidates=3, probe=6, accept=2/3, seed=2):
+               max_steps=500, candidates=3, probe=6, accept=2/3, seed=2,
+               k=15, bootstrap="auto"):
     """Learn to escape a maze reliably -- the rat-in-a-maze protocol, hardened for
     big mazes and ANY maze seed. Returns (encoder, mind, measured_probe_rate).
 
@@ -1501,6 +1525,29 @@ def learn_maze(world_factory, dim=256, episodes=240, gamma=0.97, mem=4,
       67% -> 100%). Epsilon floors and longer training did not help; the
       horizon was the lever.
 
+    * THE BOOTSTRAP RESCUE (bootstrap="auto", the default), for mazes too deep
+      for luck -- and ONLY for those, because measurement cut both ways. On
+      20x20 seed 11 the plain protocol probes 0% at every budget tried (under
+      the decaying epsilon schedule, zero training escapes -- the loop-attractor
+      policy locks in before luck finds the exit; sustained high epsilon
+      occasionally escapes but never consolidates); the rescue -- CURIOSITY (a
+      first-visit cell bonus of exit_reward / n_free_cells, the world's own
+      arithmetic, full coverage summing to exactly one exit reward, switched
+      off at the candidate's first escape because visited-ness is not in the
+      creature's state and the crumbs are unlearnable noise after their job is
+      done) plus REHEARSAL (successful trajectories stored, one re-remembered
+      per episode, so a rare success is consolidated instead of drowned) plus
+      CAPACITY (256/15 holds through 16x16; 20x20 needed dim=512, k=30) --
+      took that seed from impossible to a 67% probe. BUT on 20x20 seed 5,
+      where a bigger budget already found successes by luck (83% plain), the
+      same protocol HURT (0% with it; rehearsal alone 33%): curiosity noise
+      and rehearsed early meanders degrade a signal that was already arriving.
+      So the protocol is a RESCUE, summoned by self-measurement: candidates
+      run PLAIN, and only when a candidate finishes training with zero escapes
+      (starvation -- the data's own signal, no threshold) do subsequent
+      candidates enable the bootstrap. bootstrap=True forces it always on,
+      False never. Speculate-measure-adopt, applied to the protocol itself.
+
     * SPECULATE-MEASURE-ADOPT over whole policies, the organizer's rule applied
       to training runs: even at gamma=0.97 a stray combination still collapsed
       (15-run grid: grand mean 93%, worst run 0%). So this function trains a
@@ -1511,16 +1558,34 @@ def learn_maze(world_factory, dim=256, episodes=240, gamma=0.97, mem=4,
       self-measurement discipline the rest of the system runs on (and the same
       train-several-keep-the-best pattern the UI already uses for foraging)."""
     best = (None, None, -1.0)
+    starved = False                        # did a plain candidate get ZERO escapes?
     for c in range(candidates):
+        use_boot = (bootstrap is True) or (bootstrap == "auto" and starved)
         enc = CreatureEncoder(dim, seed=1)
-        mind = HolographicMind(dim, GridWorld.ACTIONS, k=15, epsilon=0.5,
-                               novelty_bonus=0.2, memory_cap=12000,
+        mind = HolographicMind(dim, GridWorld.ACTIONS, k=k, epsilon=0.5,
+                               novelty_bonus=0.2, memory_cap=800 * k,
                                seed=seed + 97 * c)
         world = world_factory()
+        world.reset()
+        cur = (world.EXIT / max(1, len(world._free_cells()))) if use_boot else 0.0
+        successes = []
+        n_escapes = 0
         for ep in range(episodes):
             mind.epsilon = max(0.05, 0.5 * (1.0 - ep / episodes))
-            run_episode(world, enc, mind, learn=True, explore=True, mem=mem,
-                        corridor_reflex=True, max_steps=max_steps, gamma=gamma)
+            out = run_episode(world, enc, mind, learn=True, explore=True, mem=mem,
+                              corridor_reflex=True, max_steps=max_steps,
+                              gamma=gamma, curiosity=cur,
+                              return_trajectory=use_boot)
+            if world.escaped:
+                n_escapes += 1
+                cur = 0.0                  # curiosity's job (first success) is done
+                if use_boot:
+                    successes.append(out[2])
+            if use_boot and successes:     # consolidate: one success per episode
+                s_, a_, r_ = successes[ep % len(successes)]
+                mind.remember(s_, a_, r_)
+        if n_escapes == 0:
+            starved = True                 # starvation observed: summon the rescue
         got = 0
         world = world_factory()
         for _ in range(probe):
