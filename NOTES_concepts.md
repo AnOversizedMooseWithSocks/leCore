@@ -789,3 +789,43 @@ SELF-DISCOVERY (count and changes from the vectors' own norms), DECOMPOSITION
 cross-validating), COMPRESSION (one norm carries the change count), and the
 DISCIPLINE: the stress test was allowed to find a real wall, the wall was probed
 to a specific diagnosis, and the boundary recorded instead of papered over.
+
+BOOTSTRAP-RESCUE CODA (the wall named its fix; the fix had to be measured into
+shape). The 20x20 thread, pulled end to end. BASELINE: under the standard
+decaying-epsilon schedule, seed 11 trains to ZERO escapes in 400 episodes, and
+plain probes 0% at EVERY budget and horizon tried -- the wall is real. (Honest
+refinement found while pinning: sustained HIGH epsilon occasionally escapes --
+7/80 at constant 0.5 -- so the mechanism is not 'luck is hopeless' but 'the
+loop-attractor policy locks in as epsilon decays, before luck consolidates'.
+The first phrasing was overstated; the docstrings were corrected.) THE RESCUE,
+three pieces, each forced by a measured failure: (1) CURIOSITY -- a first-visit
+cell bonus of exit_reward / n_free_cells, the world's own arithmetic, full
+coverage summing to exactly one exit reward -- finds the first success within
+episodes (4 vs never). But the policy could not HOLD it, and the reason is
+sharp: visited-ness is not in the creature's state, so curiosity returns are
+unlearnable noise -- curiosity drives behaviour, it cannot be encoded; hence the
+HANDOVER (off at first escape). (2) REHEARSAL -- store successful trajectories,
+re-remember one per episode -- consolidates rare successes (87 then 263 training
+escapes) instead of letting hundreds of failures drown them. (3) CAPACITY --
+greedy still looped in a 14-cell attractor at 256/15; 512/30 (and memory_cap
+scaled as 800*k) let the policy hold the maze: 263/400 training escapes, greedy
+4/6. THEN MEASUREMENT CUT THE OTHER WAY: on seed 5, where a bigger budget
+already found successes by luck (83% plain), the SAME protocol HURT -- 0% with
+it, 33% with rehearsal alone: curiosity noise and rehearsed early meanders
+degrade a signal that is already arriving. So the integration is a RESCUE
+SUMMONED BY SELF-MEASUREMENT: candidates run plain; only a candidate finishing
+with zero escapes (starvation -- the data's own signal, no threshold) flips the
+bootstrap on for subsequent candidates. bootstrap="auto" is learn_maze's
+default; True forces, False disables. VERIFIED: seed 5 routes to the plain path
+(83%), seed 11 starves, rescues, and probes 100%; the 16x16 six-seed sweep
+stays 100%. Pinned end-to-end (plain 0% vs rescued >=2/3 on the formerly
+impossible seed; flag modes at 9x9). Concepts: SLIME-MOLD's spirit (coverage-
+driven exploration laying crumbs), SELF-DISCOVERY (starvation observed, not
+configured), COMPRESSION (one success rehearsed into many examples),
+SEQUENCE/TIME (the winning trajectory as the thing consolidated), INTEGRATION
+(speculate-measure-adopt applied to the training protocol itself), and the
+DISCIPLINE at its sharpest: every piece of the design -- the bonus magnitude,
+the handover, the rehearsal, the capacity, and above all the decision to make
+the whole thing a rescue rather than a default -- was forced by a specific
+measured failure, and the one overstated claim found along the way was
+corrected in place.
