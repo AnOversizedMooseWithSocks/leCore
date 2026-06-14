@@ -37,8 +37,23 @@ import numpy as np
 from holographic_ai import bind, bundle, involution, cosine, Vocabulary
 
 
-def _cleanup(vec, names, vocab):
-    """Snap a noisy estimate to the best symbol; return (name, confidence)."""
+def _cleanup(vec, names, vocab, coarse=True):
+    """Snap a noisy estimate to the best symbol; return (name, confidence).
+
+    With `coarse=True` (default) and a large enough vocabulary, this resolves the
+    match COARSE-TO-FINE -- ranking candidates at low dimension first and
+    escalating only when the top gap is not yet statistically settled -- which
+    returns the SAME symbol as a full scan (the gate only stops when the ranking
+    can't change) while touching far fewer dimensions. For small vocabularies the
+    full scan is already cheap, so it is used directly. See holographic_resolution."""
+    if not names:
+        return None, -2.0
+    names = list(names)
+    if coarse and len(names) >= 32:
+        from holographic_resolution import coarse_to_fine
+        M = np.stack([vocab.get(n) for n in names])
+        idx, score, _, _ = coarse_to_fine(vec, M)
+        return names[idx], float(score)
     best_n, best_s = None, -2.0
     for n in names:
         s = cosine(vec, vocab.get(n))

@@ -33,7 +33,83 @@ from holographic_text import STOPWORDS
 app = Flask(__name__)
 
 # one trained mind lives here between requests (single-process dev server)
-STATE = {"mind": None, "dataset": None, "labels": [], "test": [], "raw_len": 0}
+STATE = {"mind": None, "dataset": None, "labels": [], "test": [], "raw_len": 0,
+         "trained_ids": [], "trained_on": []}
+
+# Trained-brain cache, now keyed by the FULL ordered training STACK (tuple of dataset
+# ids). One mind can be trained on several datasets in sequence -- e.g. curriculum to
+# lay down a base structure, then books, then reuters -- and the brain remembers what
+# it was trained on (STATE["trained_on"]). Building a stack trains each dataset into
+# one mind in order; intermediate prefixes are cached too, so extending a stack reuses
+# the work already done. Snapshots are deep copies so a cached prefix is never
+# corrupted when a longer stack builds on top of it. A "fresh" request rebuilds.
+TRAINED = {}                       # (id, id, ...) -> (state_snapshot, build_result)
+
+
+def _snapshot_state():
+    import copy
+    return copy.deepcopy(dict(STATE))
+
+
+def _restore(snapshot):
+    import copy
+    STATE.clear()
+    STATE.update(copy.deepcopy(snapshot))
+
+
+def build_stack(ids, fresh=False):
+    """Train one mind on an ordered stack of datasets, reusing cached prefixes. ids is
+    a tuple of dataset ids in training order. Returns the build-result for the last
+    dataset added, enriched with the full 'trained_on' list and a 'cached' flag."""
+    import copy
+    ids = tuple(ids)
+    if not fresh and ids in TRAINED:
+        snap, result = TRAINED[ids]
+        _restore(snap)
+        out = dict(result); out["cached"] = True
+        out["trained_on"] = list(STATE.get("trained_on", []))
+        out["trained_ids"] = list(STATE.get("trained_ids", []))
+        return out
+
+    if len(ids) == 1:
+        # base of the stack: a fresh mind trained on the one dataset
+        mind = UnifiedMind(dim=2048, seed=0, text_window=3)
+        STATE.clear()
+        STATE.update({"mind": mind, "trained_ids": [], "trained_on": []})
+        result = _absorb_into(mind, ids[0])
+    else:
+        # build (or reuse) the prefix, take an independent copy of its mind, and train
+        # the last dataset on top -- so the prefix's cached mind is left untouched
+        build_stack(ids[:-1], fresh=False)
+        mind = copy.deepcopy(STATE["mind"])
+        prev_ids = list(STATE.get("trained_ids", []))
+        prev_on = list(STATE.get("trained_on", []))
+        STATE["mind"] = mind
+        STATE["trained_ids"] = prev_ids
+        STATE["trained_on"] = prev_on
+        result = _absorb_into(mind, ids[-1])
+
+    TRAINED[ids] = (_snapshot_state(), dict(result))
+    out = dict(result); out["cached"] = False
+    out["trained_on"] = list(STATE.get("trained_on", []))
+    out["trained_ids"] = list(STATE.get("trained_ids", []))
+    return out
+
+
+# kept for backward compatibility (single-dataset load)
+def build_cached(dataset_id, fresh=False):
+    return build_stack((dataset_id,), fresh=fresh)
+
+
+def build(dataset_id):
+    """Backward-compatible single-dataset build: train a fresh mind on one dataset
+    (resets the working stack first). Equivalent to a 'Start fresh' load."""
+    STATE.clear()
+    STATE.update({"mind": None, "dataset": None, "labels": [], "test": [],
+                  "raw_len": 0, "trained_ids": [], "trained_on": []})
+    mind = UnifiedMind(dim=2048, seed=0, text_window=3)
+    STATE.update({"mind": mind, "trained_ids": [], "trained_on": []})
+    return _absorb_into(mind, dataset_id)
 
 
 # ---------------------------------------------------------------------------
@@ -244,11 +320,46 @@ def load_world():
 
 DATASETS = {
     "world": ("Countries (records)", [], load_world),
+    "curriculum": ("Dictionary + encyclopedia (curriculum)", [], None),
     "self": ("This project's own source", [], load_self),
     "reuters": ("Reuters categories", ["reuters"], load_reuters),
     "brown": ("Brown genres", ["brown"], load_brown),
-    "gutenberg": ("Gutenberg authors", ["gutenberg"], load_gutenberg),
+    "gutenberg": ("Books (Gutenberg authors)", ["gutenberg"], load_gutenberg),
     "europarl": ("Europarl languages", ["europarl_raw"], load_europarl),
+}
+
+
+# A small, self-contained curriculum: a dictionary (word meaning) and an
+# encyclopedia (is_a relations) over two clean domains (animals, minerals). Hand-
+# built so it needs no network and the structure is legible in the UI.
+CURRICULUM_DEFS = {
+    "cat": ["animal", "feline", "pet"], "dog": ["animal", "canine", "pet"],
+    "lion": ["animal", "feline", "wild", "predator"], "wolf": ["animal", "canine", "wild", "predator"],
+    "fox": ["animal", "canine", "wild"], "tiger": ["animal", "feline", "wild", "predator"],
+    "animal": ["living", "creature", "mobile"], "feline": ["cat", "lion", "tiger", "animal"],
+    "canine": ["dog", "wolf", "fox", "animal"], "pet": ["animal", "tame"],
+    "wild": ["untamed", "animal"], "predator": ["animal", "hunts"], "living": ["alive"],
+    "creature": ["living", "animal"], "mobile": ["moving"], "tame": ["gentle"],
+    "untamed": ["wild"], "alive": ["living"], "gentle": ["mild"], "mild": ["gentle"],
+    "hunts": ["predator"], "moving": ["mobile"],
+    "rock": ["mineral", "hard", "solid"], "stone": ["mineral", "hard", "solid"],
+    "granite": ["rock", "hard", "igneous"], "marble": ["rock", "hard", "metamorphic"],
+    "iron": ["metal", "mineral", "hard"], "copper": ["metal", "mineral", "shiny"],
+    "mineral": ["solid", "inert", "natural"], "metal": ["mineral", "shiny", "conductive"],
+    "hard": ["solid"], "solid": ["firm"], "shiny": ["bright"], "inert": ["still"],
+    "natural": ["formed"], "conductive": ["conducts"], "firm": ["solid"],
+    "bright": ["shiny"], "still": ["inert"], "igneous": ["rock"], "metamorphic": ["rock"],
+    "formed": ["natural"], "conducts": ["conductive"],
+}
+
+CURRICULUM_FACTS = {
+    "dog": {"is_a": "canine"}, "wolf": {"is_a": "canine"}, "fox": {"is_a": "canine"},
+    "cat": {"is_a": "feline"}, "lion": {"is_a": "feline"}, "tiger": {"is_a": "feline"},
+    "canine": {"is_a": "carnivore"}, "feline": {"is_a": "carnivore"},
+    "carnivore": {"is_a": "mammal"}, "mammal": {"is_a": "animal"}, "animal": {"is_a": "organism"},
+    "granite": {"is_a": "rock"}, "marble": {"is_a": "rock"}, "rock": {"is_a": "mineral"},
+    "iron": {"is_a": "metal"}, "copper": {"is_a": "metal"}, "metal": {"is_a": "mineral"},
+    "mineral": {"is_a": "matter"}, "matter": {"is_a": "substance"},
 }
 
 
@@ -256,7 +367,12 @@ DATASETS = {
 # training one UnifiedMind on a pulled corpus
 # ---------------------------------------------------------------------------
 
-def build(dataset_id):
+def _absorb_into(mind, dataset_id):
+    """Train one dataset INTO an existing mind (the stack's working brain), updating
+    STATE cumulatively: append to trained_on, merge labels, refresh the prose used by
+    the generation/codec experiments. Returns the build-result for this dataset."""
+    if dataset_id == "curriculum":
+        return _absorb_curriculum_into(mind)
     name, pkgs, loader = DATASETS[dataset_id]
     for p in pkgs:
         _ensure(p)
@@ -276,38 +392,90 @@ def build(dataset_id):
         test += [(x, lab, mod) for x, mod in docs[cut:]]
     rng.shuffle(train)
 
-    # SELF-ASSEMBLY: absorb() is the one way to build a mind from examples -- it
-    # discovers modalities, pre-reads the text (word co-occurrence before filing),
-    # learns everything into the one memory, and runs the maintenance pass. The
-    # long-hand read/learn/maintain_now sequence this replaced is what absorb is
-    # sugar for, so behaviour is identical; having ONE path keeps app and library
-    # from drifting.
-    mind = UnifiedMind(dim=1024, seed=0, text_window=3)
-    mind.absorb(train)                              # classification + recall, one memory
+    # absorb() adds to the one memory (it does not reset it), so calling it again
+    # layers this dataset on top of whatever the mind already learned.
+    mind.absorb(train)
     seq_mod = "code" if any(m == "code" for _, _, m in train) else "text"
-    # raw is either a plain string or a list of (text, source) documents (the
-    # latter carries PROVENANCE through to generation/attribution); slice each
-    # form to a budget without losing the document structure
     if isinstance(raw, (list, tuple)) and raw and isinstance(raw[0], (list, tuple)):
         seq_data = [(t[:40000], s) for t, s in raw]
     else:
         seq_data = raw[:160000]
-    mind.learn_sequence(seq_data, n=6, modality=seq_mod)   # generation, same space
+    mind.learn_sequence(seq_data, n=6, modality=seq_mod)
 
-    # scoring is UNTAGGED on purpose: the mind must self-discover each query's
-    # modality (type inference, then the content gate where type goes blind)
     acc = sum(mind.classify(x)[0] == lab for x, lab, _ in test) / max(1, len(test))
     test = [(x, lab) for x, lab, _ in test]
-    STATE.update({"mind": mind, "dataset": name, "labels": sorted(by), "is_code": seq_mod == "code",
-                  "test": test, "raw_len": len(raw), "desc": desc})
+    if isinstance(raw, (list, tuple)) and raw and isinstance(raw[0], (list, tuple)):
+        seq_raw = " ".join(t for t, _ in raw)
+    else:
+        seq_raw = raw if isinstance(raw, str) else ""
+
+    # accumulate STATE across the stack
+    prev_labels = set(STATE.get("labels", []))
+    all_labels = sorted(prev_labels | set(by))
+    trained_on = list(STATE.get("trained_on", [])) + [name]
+    trained_ids = list(STATE.get("trained_ids", [])) + [dataset_id]
+    # the freshly added prose is what the prose experiments should read now
+    STATE.update({"mind": mind, "dataset": " + ".join(trained_on), "labels": all_labels,
+                  "is_code": seq_mod == "code", "test": test, "raw_len": len(raw),
+                  "desc": desc, "seq_raw": seq_raw[:400000],
+                  "trained_on": trained_on, "trained_ids": trained_ids})
+    # any predictor/codec built on an earlier stack is now stale -- drop so it rebuilds
+    for attr in ("_meaning_pred", "_verifier", "_codec"):
+        if hasattr(mind, attr):
+            delattr(mind, attr)
     return {
-        "ok": True, "dataset": name, "desc": desc,
-        "labels": sorted(by),
+        "ok": True, "dataset": " + ".join(trained_on), "desc": desc,
+        "labels": all_labels,
         "counts": mind.memory.live.counts_by_label(),
         "prototypes": mind.memory.live.size(),
         "trained": len(train), "held_out": len(test),
         "accuracy": round(100 * acc),
         "gen_chars": min(len(raw), 160000),
+        "added": name,
+    }
+
+
+def _absorb_curriculum_into(mind):
+    """Train the curriculum (dictionary then encyclopedia) INTO an existing mind, as
+    a base structure other datasets can be layered on. Accumulates STATE."""
+    mind.learn_dictionary(CURRICULUM_DEFS, iters=3)        # layer 1: meaning
+    mind.learn_encyclopedia(CURRICULUM_FACTS)              # layer 3: relations
+
+    # honest layer measurements
+    onehop_ok = sum(1 for c, rel in CURRICULUM_FACTS.items()
+                    if mind.read_role(c, "is_a")[0] == rel["is_a"])
+    onehop = round(100 * onehop_ok / len(CURRICULUM_FACTS))
+    # dictionary domain coherence: nearest meaning-neighbour of a few probes
+    probes = {}
+    for w in ("cat", "wolf", "rock", "iron"):
+        probes[w] = [(n, round(s, 2)) for n, s in mind.define(w, 3)]
+
+    name = "Dictionary + encyclopedia (curriculum)"
+    prev_labels = set(STATE.get("labels", []))
+    all_labels = sorted(prev_labels | set(CURRICULUM_FACTS))
+    trained_on = list(STATE.get("trained_on", [])) + [name]
+    trained_ids = list(STATE.get("trained_ids", [])) + ["curriculum"]
+    STATE.update({"mind": mind, "dataset": " + ".join(trained_on),
+                  "labels": all_labels, "is_code": False,
+                  "test": STATE.get("test", []), "raw_len": STATE.get("raw_len", 0),
+                  "desc": "a dictionary (word meaning) then an encyclopedia (is_a relations) "
+                          "learned natively into the mind, as a base structure",
+                  "trained_on": trained_on, "trained_ids": trained_ids})
+    for attr in ("_meaning_pred", "_verifier", "_codec"):
+        if hasattr(mind, attr):
+            delattr(mind, attr)
+    return {
+        "ok": True, "dataset": " + ".join(trained_on),
+        "desc": "a dictionary (word meaning) and an encyclopedia (is_a relations) "
+                "learned into one mind -- meaning from definitions, knowledge from relations",
+        "labels": all_labels,
+        "counts": mind.memory.live.counts_by_label(),
+        "prototypes": mind.memory.live.size(),
+        "trained": len(CURRICULUM_DEFS), "held_out": 0,
+        "accuracy": onehop,                               # encyclopedia one-hop is_a accuracy
+        "gen_chars": 0, "added": name,
+        "curriculum": {"defs": len(CURRICULUM_DEFS), "facts": len(CURRICULUM_FACTS),
+                       "onehop_is_a": onehop, "probes": probes},
     }
 
 
@@ -333,18 +501,101 @@ def datasets():
 @app.route("/api/unified/load", methods=["POST"])
 def load():
     did = request.json.get("id")
+    fresh = bool(request.json.get("fresh", False))
+    mode = request.json.get("mode", "replace")     # "replace" = fresh base; "add" = on top
     if did not in DATASETS:
         return jsonify({"ok": False, "error": "unknown dataset"})
     try:
-        return jsonify(build(did))
+        if mode == "add" and STATE.get("trained_ids"):
+            ids = tuple(STATE["trained_ids"]) + (did,)
+        else:
+            ids = (did,)
+        return jsonify(build_stack(ids, fresh=fresh))
     except Exception as e:
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e} "
                         "(if this is a missing corpus, a network connection is needed "
                         "the first time to pull it from GitHub)"})
 
 
+@app.route("/api/unified/trained", methods=["GET"])
+def trained_status():
+    """What the CURRENT brain has been trained on (the ordered stack), plus which
+    stacks are cached so they can be rebuilt instantly. Lets you judge whether a
+    fresh brain is needed before adding more."""
+    cached = []
+    for ids, (snap, _r) in TRAINED.items():
+        cached.append(" + ".join(snap.get("trained_on", [])) or snap.get("dataset"))
+    return jsonify({"active": STATE.get("dataset"),
+                    "trained_on": list(STATE.get("trained_on", [])),
+                    "prototypes": (STATE["mind"].memory.live.size() if STATE.get("mind") else 0),
+                    "labels": list(STATE.get("labels", [])),
+                    "cached_stacks": sorted(set(c for c in cached if c))})
+
+
 def _need_mind():
     return STATE["mind"] is None
+
+
+@app.route("/api/unified/curriculum", methods=["POST"])
+def curriculum_query():
+    """Two queries over the curriculum-trained brain: define(word) returns the
+    nearest words by dictionary-learned MEANING, and climb(concept) walks the
+    is_a chain up the absorbed encyclopedia with path-traced throughput. Both run
+    over the SAME mind, showing meaning and relational knowledge side by side."""
+    if _need_mind():
+        return jsonify({"error": "load the Dictionary + encyclopedia (curriculum) dataset first"})
+    mind = STATE["mind"]
+    word = (request.json.get("word") or "").strip().lower()
+    if not word:
+        return jsonify({"error": "enter a word"})
+    out = {"word": word}
+    # layer 1: meaning neighbours from the dictionary
+    near = mind.define(word, 6) if hasattr(mind, "define") else []
+    out["meaning"] = [{"word": w, "sim": round(s, 3)} for w, s in near]
+    # layer 3: is_a chain from the encyclopedia, with per-hop confidence
+    if hasattr(mind, "climb"):
+        chain, tp = mind.climb(word, min_throughput=0.0)
+        out["is_a_chain"] = chain
+        out["throughput"] = round(float(tp), 3)
+    else:
+        out["is_a_chain"] = [word]
+        out["throughput"] = 0.0
+    if not out["meaning"] and len(out["is_a_chain"]) <= 1:
+        out["note"] = ("this word is not in the curriculum -- try one of: "
+                       "dog, wolf, cat, lion, rock, iron, granite, copper")
+    return jsonify(out)
+
+
+@app.route("/api/unified/answer", methods=["POST"])
+def answer():
+    """The QUESTION ROUTER over the live mind: recognizes a question's SHAPE and
+    dispatches to the brain's real operation (define / is_a / role / classify /
+    recall), falling back to labelled text completion. Not a chatbot -- an honest
+    front door that answers from knowledge when it can and says when it is only
+    continuing text."""
+    if _need_mind():
+        return jsonify({"error": "load a dataset first"})
+    q = (request.json.get("question") or "").strip()
+    if not q:
+        return jsonify({"error": "ask a question"})
+    return jsonify(STATE["mind"].answer(q))
+
+
+@app.route("/api/unified/resolution", methods=["POST"])
+def resolution():
+    """How much holographic RESOLUTION does classifying this input need? Returns
+    the per-truncation winner ladder and the dimension at which the answer
+    stabilises -- a low value means the match is robust to heavy truncation
+    (cheap to find coarse-to-fine), full width means it was a close call."""
+    if _need_mind():
+        return jsonify({"error": "load a dataset first"})
+    text = (request.json.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "type some text"})
+    r = STATE["mind"].resolution_profile(text)
+    if not r["profile"]:
+        return jsonify({"error": "no prototypes to compare against"})
+    return jsonify(r)
 
 
 @app.route("/api/unified/classify", methods=["POST"])
@@ -447,6 +698,542 @@ def generate():
     return jsonify({"text": text})
 
 
+@app.route("/api/unified/codec", methods=["POST"])
+def codec_endpoint():
+    """Go both directions: losslessly compress the loaded prose to a rank-code and
+    decompress it back to the exact original, reporting the achievable size and the
+    honest controls (random barely shrinks; structure shrinks a lot). Also attribute
+    a passage to its source if the dataset offers two."""
+    if _need_mind():
+        return jsonify({"error": "load a dataset first"})
+    if STATE.get("is_code"):
+        return jsonify({"error": "the codec demo expects prose \u2014 load Reuters, Brown, or Books"})
+    mind = STATE["mind"]
+    raw = STATE.get("seq_raw")
+    if not raw:
+        return jsonify({"error": "no corpus available"})
+    from holographic_text import _tokens
+    if not hasattr(mind, "_meaning_pred"):
+        sents = [_tokens(s) for s in raw.split(".") if s.strip()][:1500]
+        mind.build_meaning_predictor([s for s in sents if s], order=2)
+    toks = _tokens(raw)[:600]
+    in_vocab = [t for t in toks if t in mind._meaning_pred.idx]
+    r = mind.compress_lossless(in_vocab[:300])
+    recon = mind.decompress_lossless(r["code"])
+    import numpy as _np
+    vocab = mind._meaning_pred.vocab
+    rng = _np.random.default_rng(0)
+    randtoks = [vocab[rng.integers(len(vocab))] for _ in range(300)]
+    rand_ratio = mind.compress_lossless(randtoks)["cost"]["ratio"]
+    return jsonify({
+        "lossless": bool(recon == in_vocab[:300]),
+        "ratio": round(r["cost"]["ratio"], 2),
+        "bits_per_token": round(r["cost"]["bits_per_token"], 2),
+        "baseline": round(r["cost"]["baseline"], 2),
+        "random_ratio": round(rand_ratio, 2),
+        "n": r["cost"]["n"],
+        "note": ("encoder and decoder share the predictor, so the rank stream decompresses "
+                 "to the exact original -- lossless. The size is bounded by structure: real "
+                 "text shrinks well, random data barely (no free lunch), and a perfectly "
+                 "predictable stream would collapse to almost the seed alone")})
+
+
+@app.route("/api/unified/population", methods=["POST"])
+def population_endpoint():
+    """Many NPCs, one mind: train a small shared base, branch several lightweight
+    NPCs that each learn a PRIVATE fact, and show inheritance, isolation,
+    propagation, and the memory saving versus one full brain per NPC."""
+    from holographic_unified import UnifiedMind
+    base = UnifiedMind(dim=512, seed=0)
+    world = [("sword", "weapon"), ("axe", "weapon"), ("apple", "food"),
+             ("bread", "food"), ("gold", "treasure"), ("gem", "treasure"),
+             ("river", "place"), ("cave", "place")]
+    for x, lab in world:
+        base.learn(x, lab)
+    shared = base.share()
+    # three NPCs, each learns something only they know
+    npc_specs = [("Alaric the alchemist", "potion", "alchemy"),
+                 ("Bryn the smith", "anvil", "smithing"),
+                 ("Cora the scout", "map", "navigation")]
+    npcs = [shared.branch(name).learn(word, fact) for name, word, fact in npc_specs]
+    n_pop = int(request.json.get("population", 50))
+    n_pop = max(2, min(500, n_pop))
+
+    def cost_for(n):
+        # n NPCs each with one private prototype
+        return shared.population_cost([shared.branch(f"x{i}").learn(f"w{i}", f"f{i}")
+                                       for i in range(n)])
+    cost = cost_for(n_pop)
+    rows = []
+    # inheritance: each NPC classifies a shared item it never learned
+    for (name, word, fact), npc in zip(npc_specs, npcs):
+        rows.append({"npc": name, "inherits_shared": f"sword -> {npc.classify('sword')}",
+                     "private": f"{word} -> {npc.classify(word)}",
+                     "knows_privately": npc.knows_privately()})
+    # isolation: NPC[1] does not see NPC[0]'s private fact
+    isolation = {"npc": npcs[1].name, "on_alarics_word": npcs[0].knows_privately()[0]
+                 if npcs[0].knows_privately() else "",
+                 "result": npcs[1].classify("potion")}
+    # propagation: Alaric shares his learning; now everyone sees it
+    before = npcs[1].classify("potion")
+    npcs[0].propagate()
+    after = npcs[1].classify("potion")
+    return jsonify({
+        "base_labels": sorted(base.memory.live.labels()),
+        "npcs": rows, "isolation": isolation,
+        "propagation": {"word": "potion", "before": before, "after": after},
+        "cost": cost, "population": n_pop,
+        "note": (f"{n_pop} NPCs sharing one frozen base cost {cost['shared_total']} prototypes "
+                 f"vs {cost['separate_total']} for a full brain each -- a {cost['saving_x']:.0f}x saving "
+                 f"that grows with the base. Each NPC inherits all shared knowledge, keeps its own "
+                 f"private learning isolated, and can propagate that learning back to everyone")})
+
+
+@app.route("/api/unified/bigtext", methods=["POST"])
+def bigtext_endpoint():
+    """Experiment (run on demand): run the heavy text instruments on a LARGE slice of
+    the loaded corpus -- structure score (real vs shuffled vs random), lossless codec
+    ratio, and self-discovered word-boundary F1 -- and report the numbers. This is the
+    kind of run kept out of the test suite; trigger it here and read the results."""
+    if _need_mind():
+        return jsonify({"error": "load a text dataset first"})
+    if STATE.get("is_code"):
+        return jsonify({"error": "the big-text run expects prose \u2014 load Reuters, Brown, or Books"})
+    raw = STATE.get("seq_raw")
+    if not raw:
+        return jsonify({"error": "no corpus available"})
+    mind = STATE["mind"]
+    n_tokens = int(request.json.get("tokens", 3000))
+    n_tokens = max(500, min(20000, n_tokens))
+    import numpy as _np
+    from holographic_text import _tokens
+    try:
+        toks = _tokens(raw)
+        if len(toks) < 500:
+            return jsonify({"error": "corpus too small for a big-text run"})
+        out = {"corpus_tokens": len(toks), "used_tokens": min(n_tokens, len(toks))}
+        # 1) structure score: real vs shuffled vs random (if the verifier is built)
+        if not hasattr(mind, "_verifier"):
+            sents = [_tokens(s) for s in raw.split(".") if s.strip()][:2000]
+            mind.build_meaning_predictor([s for s in sents if s], order=2)
+        if hasattr(mind, "verify_structure"):
+            real = toks[:n_tokens]
+            sh = real[:]; _np.random.default_rng(0).shuffle(sh)
+            vocab = mind._meaning_pred.vocab
+            rnd = [vocab[i] for i in _np.random.default_rng(1).integers(0, len(vocab), len(real))]
+            out["structure"] = {
+                "real": round(float(mind.verify_structure(real)["score"]), 2),
+                "shuffled": round(float(mind.verify_structure(sh)["score"]), 2),
+                "random": round(float(mind.verify_structure(rnd)["score"]), 2)}
+        # 2) lossless codec on a big slice
+        if hasattr(mind, "compress_lossless"):
+            in_vocab = [t for t in toks[:n_tokens] if t in mind._meaning_pred.idx]
+            r = mind.compress_lossless(in_vocab[:min(2000, len(in_vocab))])
+            out["codec"] = {"lossless": bool(r.get("lossless")),
+                            "ratio": round(float(r["cost"]["ratio"]), 3),
+                            "bits_per_token": round(float(r["cost"]["bits_per_token"]), 2),
+                            "tokens": r["cost"]["n"]}
+        # 3) self-discovered boundaries on a big char slice
+        if hasattr(mind, "discover_units"):
+            text = "".join(c for c in raw.lower() if c.isalpha() or c == " ")[:n_tokens * 6]
+            chars, truth = [], set()
+            for ch in text:
+                if ch == " ":
+                    if chars:
+                        truth.add(len(chars) - 1)
+                else:
+                    chars.append(ch)
+            stream = "".join(chars)
+            from holographic_segment import Segmenter, boundary_f1
+            seg = Segmenter(dim=512, order=4, seed=0).fit(stream)
+            bounds = seg.boundaries(stream)
+            rng = _np.random.default_rng(0)
+            rand = set(rng.choice(len(stream), len(bounds), replace=False).tolist())
+            out["segmentation"] = {"chars": len(stream),
+                                   "f1": round(boundary_f1(bounds, truth)["f1"], 2),
+                                   "random_f1": round(boundary_f1(rand, truth)["f1"], 2)}
+        out["note"] = ("a heavy run on a large slice: structure score separates real text from "
+                       "shuffled and random; the codec round-trips losslessly at the shown ratio; "
+                       "and word boundaries are self-discovered well above a random cut. Bump the "
+                       "token count for a bigger experiment")
+        return jsonify(out)
+    except Exception as e:
+        return jsonify({"error": f"{type(e).__name__}: {e}"})
+
+
+@app.route("/api/unified/market", methods=["POST"])
+def market_endpoint():
+    """Experiment (run on demand): does real market data carry the structure the
+    engine's instrument looks for? Raw returns are efficient-market-like (no symmetric
+    band), but VOLATILITY CLUSTERING -- |returns| being positively autocorrelated --
+    is the signature that distinguishes real returns from a shuffle. Reports the lag-1
+    |return| autocorrelation and how many sigma it beats shuffled controls, on the
+    larger datasets, with the shuffle control shown for honesty."""
+    import os
+    import json as _json
+    import numpy as _np
+    from holographic_signal_structure import volatility_clustering, clustering_zscore
+    which = (request.json.get("dataset") or "sol").lower()
+    try:
+        if which.startswith("dai") or which.startswith("weth"):
+            path = "data/dai_weth_big.json"
+            if not os.path.exists(path):
+                return jsonify({"error": "data/dai_weth_big.json not present"})
+            a = _np.array(_json.load(open(path))["ohlcv"], float)
+            close = a[:, 4] if a.shape[1] >= 5 else a[:, -2]
+            series = _np.diff(close) / close[:-1]
+            label = f"DAI/WETH candles ({len(series)} close-to-close returns)"
+        else:
+            from holographic_market import load_ticks, move_series
+            if not os.path.exists("data/sol_5min.npz"):
+                return jsonify({"error": "data/sol_5min.npz not present"})
+            ts, px = load_ticks()
+            series, _burst = move_series(ts, px)
+            label = f"SOL ticks ({len(series)} within-burst moves)"
+        acf1 = volatility_clustering(series)
+        z = clustering_zscore(series, n_shuffle=100)
+        rng = _np.random.default_rng(0)
+        sh = _np.asarray(series, float).copy(); rng.shuffle(sh)
+        return jsonify({
+            "dataset": label, "n": int(len(series)),
+            "vol_clustering_acf1": round(float(acf1), 3),
+            "zscore": round(float(z), 2),
+            "shuffled_acf1": round(float(volatility_clustering(sh)), 3),
+            "structured": bool(z > 2.0),
+            "note": ("real returns show volatility clustering -- bursts of activity cluster in "
+                     "time, so |returns| is positively autocorrelated. The z-score is how many "
+                     "sigma that beats a shuffle of the same returns; >2 is meaningful structure, "
+                     "and the shuffle control collapses to ~0. Raw signed returns carry almost no "
+                     "such structure (efficient-market-like) -- the clustering is the honest signal")})
+    except Exception as e:
+        return jsonify({"error": f"{type(e).__name__}: {e}"})
+
+
+@app.route("/api/unified/sprites", methods=["POST"])
+def sprites_endpoint():
+    """Cross-sprite compression on the real 712-sprite set: a sprite sheet is one
+    structured body, so packing the whole set against shared references beats
+    compressing each sprite on its own. Reports the measured sizes per method."""
+    import os
+    folder = "features/sprites"
+    if not os.path.isdir(folder):
+        return jsonify({"error": "sprite set not found (features/sprites)"})
+    try:
+        import io
+        from PIL import Image
+        import pack_sprites
+        import numpy as _np
+        items = pack_sprites.load_folder(folder)
+        if not items:
+            return jsonify({"error": "no sprites found"})
+        total = len(items)
+        n = int(request.json.get("n", 200))
+        n = max(20, min(total, n))
+        items = items[:n]
+        blob = pack_sprites.pack(items)               # set-pack: shared references, bit-exact
+        # honest baseline: each sprite compressed on its own as an optimized PNG
+        def png_size(a):
+            b = io.BytesIO(); Image.fromarray(a).save(b, "PNG", optimize=True); return len(b.getvalue())
+        per_file = sum(png_size(a) for _nm, a in items)
+        # verify the pack is lossless (the whole point: structure, not loss)
+        exact = all(_np.array_equal(a, b) for (_, a), (_, b) in zip(items, pack_sprites.unpack(blob)))
+        saving = round(per_file / len(blob), 2) if blob else None
+        return jsonify({"total_sprites": total, "used": n,
+                        "set_pack": len(blob), "per_file_png": per_file,
+                        "saving_x": saving, "lossless": bool(exact),
+                        "note": (f"{n} of the {total}-sprite set: packing them as one body against "
+                                 f"shared references is {saving}x smaller than compressing each "
+                                 f"sprite alone ({len(blob):,} vs {per_file:,} bytes), and it is "
+                                 f"bit-exact -- the cross-sprite structure that separate files hide")})
+    except Exception as e:
+        return jsonify({"error": f"{type(e).__name__}: {e}"})
+
+
+@app.route("/api/unified/vault", methods=["POST"])
+def vault_endpoint():
+    """The image repository as one perceptual memory: ingest the photo set, find
+    near-duplicates by a size/format-invariant fingerprint, cluster them, and answer
+    query-by-example -- the same space the rest of the engine uses, applied to
+    pictures. Falls back to the sprite set if no photo sample is present."""
+    import os
+    from image_vault import ImageVault
+    folder = "features/photo_sample" if os.path.isdir("features/photo_sample") else "features/sprites"
+    if not os.path.isdir(folder):
+        return jsonify({"error": "no image set found"})
+    try:
+        v = ImageVault().add_folder(folder)
+        if len(v) == 0:
+            # photo_sample holds .npy arrays; load those directly
+            import numpy as _np
+            import glob as _glob
+            for p in sorted(_glob.glob(os.path.join(folder, "*.npy"))):
+                v.add(_np.load(p), name=os.path.basename(p))
+        if len(v) == 0:
+            return jsonify({"error": "image set is empty"})
+        clusters = v.clusters(threshold=0.9)
+        report = v.report(threshold=0.9)
+        rows = sorted([{"method": m, "bytes": int(b),
+                        "psnr": (None if p == float("inf") else round(p, 1))}
+                       for m, b, p in report], key=lambda r: r["bytes"])[:6]
+        # query-by-example: the first image should match itself best
+        sim = v.most_similar(v.images[0], k=min(3, len(v)))
+        return jsonify({"count": len(v), "folder": folder,
+                        "n_clusters": len(clusters),
+                        "biggest_cluster": max((len(c) for c in clusters), default=1),
+                        "rows": rows,
+                        "query": [{"name": nm, "sim": round(s, 3)} for nm, s in sim],
+                        "note": (f"{len(v)} images grouped into {len(clusters)} perceptual clusters "
+                                 f"by a format-invariant fingerprint; query-by-example and honest "
+                                 f"size/fidelity comparison run over the same vault")})
+    except Exception as e:
+        return jsonify({"error": f"{type(e).__name__}: {e}"})
+
+
+@app.route("/api/unified/factorize", methods=["POST"])
+def factorize_endpoint():
+    """Searching in superposition: bind three random factors into one composite
+    vector, then let the resonator network pull them back out -- recovering the
+    factorization from a combinatorial space far larger than it ever enumerates."""
+    import numpy as _np
+    from holographic_resonator import ResonatorNetwork, map_codebook, map_bind
+    n = int(request.json.get("codebook_size", 50))
+    n = max(10, min(120, n))
+    dim = 1500
+    books = [map_codebook(n, dim, s) for s in range(3)]
+    rng = _np.random.default_rng(int(request.json.get("seed", 0)))
+    true = [int(rng.integers(n)) for _ in range(3)]
+    c = map_bind(*[books[f][true[f]] for f in range(3)])
+    r = ResonatorNetwork(books).factor(c, restarts=25)
+    return jsonify({
+        "true": list(true), "recovered": list(r["factors"]), "solved": r["solved"],
+        "restarts": r["restarts"], "iterations": r["iterations"],
+        "search_space": r["search_space"], "codebook_size": n,
+        "note": ("three random vectors were bound into one; the resonator recovered which "
+                 "vector came from each codebook by searching in superposition -- it never "
+                 "enumerated the " + format(r["search_space"], ",") + " possible combinations")})
+
+
+@app.route("/api/unified/discover", methods=["POST"])
+def discover_endpoint():
+    """Self-discovery of structure: strip the spaces from the loaded prose and let
+    the system rediscover the word boundaries from branching entropy alone -- no
+    labels. Reports the discovered chunks, the F1 against the true (removed) word
+    boundaries, and the compression payoff (discovered chunks vs single characters)."""
+    if _need_mind():
+        return jsonify({"error": "load a dataset first"})
+    if STATE.get("is_code"):
+        return jsonify({"error": "self-discovery expects prose \u2014 load Reuters, Brown, or Books"})
+    raw = STATE.get("seq_raw")
+    if not raw:
+        return jsonify({"error": "no corpus available"})
+    mind = STATE["mind"]
+    text = "".join(c for c in raw.lower() if c.isalpha() or c == " ")[:20000]
+    # ground-truth boundaries (positions before a removed space) and the bare stream
+    chars, truth = [], set()
+    for c in text:
+        if c == " ":
+            if chars:
+                truth.add(len(chars) - 1)
+        else:
+            chars.append(c)
+    stream = "".join(chars)
+    if len(stream) < 200:
+        return jsonify({"error": "corpus too small"})
+    from holographic_segment import Segmenter, boundary_f1, chunk_compression
+    seg = Segmenter(dim=512, order=4, seed=0).fit(stream)
+    bounds = seg.boundaries(stream)
+    chunks = seg.segment(stream)
+    f1 = boundary_f1(bounds, truth)
+    cb, sb = chunk_compression(stream, chunks)
+    import numpy as _np
+    rng = _np.random.default_rng(0)
+    rand = set(rng.choice(len(stream), len(bounds), replace=False).tolist())
+    rf1 = boundary_f1(rand, truth)["f1"]
+    return jsonify({
+        "sample": [" ".join("".join(c) for c in chunks[:30])],
+        "f1": round(f1["f1"], 2), "precision": round(f1["precision"], 2),
+        "recall": round(f1["recall"], 2), "random_f1": round(rf1, 2),
+        "chunk_bits": round(cb, 2), "symbol_bits": round(sb, 2),
+        "note": ("the system never saw spaces -- it found the word boundaries from where "
+                 "its next-character prediction becomes uncertain (branching entropy peaks), "
+                 "and the discovered chunks compress far better than single characters")})
+
+
+@app.route("/api/unified/deliberate", methods=["POST"])
+def deliberate_endpoint():
+    """Think before answering: the system drafts a response, judges it, and refines
+    -- keeping the best and stopping early once it is good enough. Returns the
+    chosen response plus the trace of drafts and the iteration count, so the inner
+    deliberation (and how the thinking time adapts to the query) is visible."""
+    if _need_mind():
+        return jsonify({"error": "load a dataset first"})
+    if STATE.get("is_code"):
+        return jsonify({"error": "deliberation expects prose \u2014 load Reuters, Brown, or Books"})
+    mind = STATE["mind"]
+    query = (request.json.get("query") or "").strip().lower()
+    if not query:
+        return jsonify({"error": "type a query"})
+    if not hasattr(mind, "_meaning_pred") or not hasattr(mind, "_verifier"):
+        raw = STATE.get("seq_raw")
+        if not raw:
+            return jsonify({"error": "no corpus available"})
+        from holographic_text import _tokens
+        sents = [_tokens(s) for s in raw.split(".") if s.strip()][:1500]
+        mind.build_meaning_predictor([s for s in sents if s], order=2)
+    r = mind.deliberate(query, max_iters=8, target_quality=0.45)
+    return jsonify({
+        "query": query,
+        "response": " ".join(r["response"]),
+        "iterations": r["iterations"], "quality": round(r["quality"], 3),
+        "relevance": round(r["relevance"], 3), "structure": round(r["structure"], 2),
+        "trace": [{"draft": " ".join(t["draft"][:14]), "quality": t["quality"]} for t in r["trace"]],
+        "note": ("the system drafts, judges, and refines -- keeping the best draft; the "
+                 "number of iterations is the thinking time, and it adapts to how hard the "
+                 "query is (easy ones settle fast, hard ones take longer)")})
+
+
+@app.route("/api/unified/respond", methods=["POST"])
+def respond_endpoint():
+    """Query-and-generate: answer a typed query with a continuation steered toward
+    what the query is about, kept coherent by the structure guard. Reports the
+    response with its relevance (on-query) and structure (coherent) -- both
+    measured. Trains the meaning predictor + verifier lazily from the loaded prose."""
+    if _need_mind():
+        return jsonify({"error": "load a dataset first"})
+    if STATE.get("is_code"):
+        return jsonify({"error": "query-and-generate expects prose \u2014 load Reuters, Brown, or Books"})
+    mind = STATE["mind"]
+    query = (request.json.get("query") or "").strip().lower()
+    if not query:
+        return jsonify({"error": "type a query"})
+    qw = float(request.json.get("query_weight", 5.0))
+    if not hasattr(mind, "_meaning_pred") or not hasattr(mind, "_verifier"):
+        raw = STATE.get("seq_raw")
+        if not raw:
+            return jsonify({"error": "no corpus available"})
+        from holographic_text import _tokens
+        sents = [_tokens(s) for s in raw.split(".") if s.strip()][:1500]
+        mind.build_meaning_predictor([s for s in sents if s], order=2)
+    steered = mind.respond_report(query, length=30, query_weight=qw)
+    plain = mind.respond_report(query, length=30, query_weight=0.0)
+    return jsonify({
+        "query": query,
+        "steered": {"text": " ".join(steered["response"]),
+                    "relevance": round(steered["relevance"], 3),
+                    "structure": round(steered["structure"], 2)},
+        "unsteered": {"text": " ".join(plain["response"]),
+                      "relevance": round(plain["relevance"], 3),
+                      "structure": round(plain["structure"], 2)},
+        "note": ("the query pulls generation toward its meaning while the structure "
+                 "guard keeps it coherent; relevance should rise over the unsteered "
+                 "baseline without structure collapsing")})
+
+
+@app.route("/api/unified/predictive", methods=["POST"])
+def predictive():
+    """The predictive loop, surfaced: the mind observes the loaded corpus one
+    symbol at a time, anticipating each next token and learning from its surprise.
+    Reports the learning curve (accuracy as it sees more), the surprise/free-energy
+    trace (does it converge?), and a generation-by-anticipation sample. Also
+    measures generalisation -- accuracy on contexts never seen exactly, where an
+    exact n-gram is blind."""
+    if _need_mind():
+        return jsonify({"error": "load a dataset first"})
+    if STATE.get("is_code"):
+        return jsonify({"error": "the predictive loop expects prose \u2014 load Reuters, Brown, or Books"})
+    mind = STATE["mind"]
+    raw = STATE.get("seq_raw")
+    if not raw:
+        return jsonify({"error": "no corpus available for this dataset"})
+    from holographic_text import _tokens
+    toks = _tokens(raw)[:8000]
+    if len(toks) < 200:
+        return jsonify({"error": "corpus too small"})
+    train, held = toks[:int(len(toks) * 0.8)], toks[int(len(toks) * 0.8):]
+    # learning curve: fresh predictor at each budget, accuracy on a held probe
+    probe = held[:400]
+    curve = []
+    for frac in (0.15, 0.4, 0.7, 1.0):
+        mind.build_predictor(order=2)
+        mind.observe_sequence(train[:int(len(train) * frac)])
+        rep = mind.prediction_report(probe)
+        curve.append({"tokens": int(len(train) * frac), "accuracy": round(rep["accuracy"], 3),
+                      "entries": len(mind._predictor._ctx)})
+    # full model: trace + generalisation + a generated sample
+    steps = mind.observe_sequence(train)            # full pass (the live trace)
+    sfe = [s.self_free_energy for s in steps]
+    seen = set(tuple(train[max(0, i - 2):i]) for i in range(1, len(train)))
+    unseen = [(held[max(0, i - 2):i], held[i]) for i in range(1, len(held))
+              if tuple(held[max(0, i - 2):i]) not in seen]
+    gen_hits = sum(mind.anticipate(ctx)[0] == act for ctx, act in unseen[:300])
+    seed = train[:2]
+    sample = mind.generate_predictive(seed, length=24)
+    # PROOF OF STRUCTURE: build the meaning predictor + verifier, then show that a
+    # locally-coherent greedy generation collapses (low structure score) while
+    # steered generation -- defending coherence as a process -- stays in the band.
+    proof = None
+    try:
+        mind.build_meaning_predictor([_tokens(s) for s in raw.split(".") if s.strip()][:1500], order=2)
+        greedy = list(seed)
+        for _ in range(40):
+            w, _c = mind.anticipate_meaning(greedy[-2:])
+            greedy.append(w if w else seed[0])
+        steered = list(seed) + mind.generate_structured(seed, length=40, beam=6)
+        real_v = mind.verify_structure(train[:300])
+        proof = {
+            "real_score": round(real_v["score"], 2), "threshold": round(real_v["threshold"], 2),
+            "greedy_score": round(mind.verify_structure(greedy[2:])["score"], 2),
+            "steered_score": round(mind.verify_structure(steered[2:])["score"], 2),
+            "greedy_sample": " ".join(greedy[2:22]),
+            "steered_sample": " ".join(steered[2:22])}
+        # better structure -> better compression, on the same text vs a shuffle
+        import random as _rnd
+        shuffled = train[:300][:]
+        _rnd.Random(0).shuffle(shuffled)
+        proof["compress_real"] = round(mind.compress_cost(train[:300])["ratio"], 2)
+        proof["compress_shuffled"] = round(mind.compress_cost(shuffled)["ratio"], 2)
+    except Exception:
+        proof = None
+    return jsonify({
+        "curve": curve,
+        "free_energy_start": round(float(np.mean(sfe[:100])), 3),
+        "free_energy_end": round(float(np.mean(sfe[-100:])), 3),
+        "generalization": {"correct": int(gen_hits), "total": min(300, len(unseen)),
+                           "pct": round(100 * gen_hits / max(1, min(300, len(unseen))))},
+        "seed": " ".join(seed), "sample": " ".join(sample), "proof": proof,
+        "note": ("accuracy rises with exposure; free energy (smoothed prediction error) "
+                 "falls as the model learns to anticipate; and it scores on contexts it "
+                 "never saw exactly -- generalising by resonance, where exact lookup is blind")})
+
+
+@app.route("/api/unified/topic_pull", methods=["POST"])
+def topic_pull():
+    """The honest topic-pull experiment, surfaced live: sweep the topic_weight
+    and report coherence, transition validity, and lexical diversity. The kept
+    negative -- coherence that 'rises' only as diversity collapses is the metric
+    being gamed by repetition, not real on-topic language; it shows why deeper
+    conditioning alone does not make this brain an LLM."""
+    if _need_mind():
+        return jsonify({"error": "load a dataset first"})
+    mind = STATE["mind"]
+    if STATE.get("is_code"):
+        return jsonify({"error": "topic pull is a prose experiment \u2014 load Reuters, Brown, or Books"})
+    seed = (request.json.get("seed") or "the").strip().lower()
+    # train the word generator lazily from the loaded corpus (first use only)
+    if not hasattr(mind, "_wordgen"):
+        raw = STATE.get("seq_raw")
+        if not raw:
+            return jsonify({"error": "no corpus available for this dataset"})
+        from holographic_text import _tokens
+        sents = [_tokens(s) for s in raw.split(".") if s.strip()][:1200]
+        mind.learn_word_generator([s for s in sents if s][:1200], order=1)
+    seeds = [seed, "the " + seed, seed + " and the"]
+    rows = mind.topic_pull_tradeoff(seeds, weights=(0.0, 2.0, 8.0, 16.0), length=40)
+    sample0 = " ".join(mind.generate_words(seed, length=30, topic_weight=0.0, seed_rng=1))
+    sampleH = " ".join(mind.generate_words(seed, length=30, topic_weight=16.0, seed_rng=1))
+    return jsonify({"rows": rows, "sample_baseline": sample0, "sample_hot": sampleH})
+
+
 @app.route("/api/unified/attribute", methods=["POST"])
 def attribute():
     """WHO taught this text? Ranks the dataset's sources by how much of the
@@ -511,6 +1298,30 @@ PAGE = r"""
   .big{font-size:26px;font-weight:700;color:var(--amber)}
   .disabled{opacity:.5;pointer-events:none}
   code{background:#0f141b;border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+  /* ---- searchable / categorized / collapsible example cards ---- */
+  .toolbar{position:sticky;top:0;z-index:5;background:var(--bg);padding:12px 0 10px;
+        margin-bottom:6px;border-bottom:1px solid var(--line)}
+  #search{width:100%;font-size:15px;padding:11px 13px}
+  .cats{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+  .cat{cursor:pointer;background:#0f141b;border:1px solid var(--line);color:var(--muted);
+        border-radius:999px;padding:5px 13px;font-size:13px;user-select:none}
+  .cat:hover{color:var(--ink)}
+  .cat.active{background:var(--teal);color:#04201d;border-color:var(--teal);font-weight:600}
+  .count{color:var(--muted);font-size:12.5px;margin-top:8px}
+  .card.collapsible>.card-head{cursor:pointer;display:flex;align-items:flex-start;gap:10px}
+  .card-head .twirl{color:var(--muted);transition:transform .15s;margin-top:2px;font-size:12px}
+  .card.open .card-head .twirl{transform:rotate(90deg)}
+  .card-head .titles{flex:1}
+  .card-head h2{margin:0 0 4px}
+  .card-desc{color:var(--muted);font-size:13px}
+  .card .tags{margin-top:7px}
+  .tag{display:inline-block;background:#0f141b;border:1px solid var(--line);color:var(--muted);
+        border-radius:6px;padding:1px 8px;margin:2px 4px 0 0;font-size:11.5px}
+  .card-body{display:none;margin-top:14px;border-top:1px solid var(--line);padding-top:14px}
+  .card.open>.card-body{display:block}
+  .card.hidden{display:none}
+  .nomatch{color:var(--muted);text-align:center;padding:30px 0}
+  mark{background:var(--amber);color:#04201d;border-radius:2px;padding:0 1px}
 </style></head><body>
 <header>
   <h1>UnifiedMind &mdash; one model, one space</h1>
@@ -518,14 +1329,35 @@ PAGE = r"""
 </header>
 <main>
 
+  <div class="toolbar">
+    <input id="search" placeholder="Search examples &mdash; try &quot;compress&quot;, &quot;predict&quot;, &quot;structure&quot;, &quot;vision&quot;&hellip;" oninput="filterCards()">
+    <div class="cats" id="cats"></div>
+    <div class="count" id="count"></div>
+  </div>
+
   <div class="card">
     <h2>1 &middot; pull + train</h2>
-    <div class="row">
+    <div class="muted">Train one mind on a dataset, or stack several. <b>Start fresh</b> begins a new brain; <b>Add on top</b> layers the dataset onto the current brain &mdash; e.g. dictionary+encyclopedia first to lay down a base structure, then books, then Reuters or country info. Training is cached and shared, so re-building a stack you've made before is instant. The box below always shows what the current brain has been trained on, in order.</div>
+    <div class="row" style="margin-top:8px">
       <select id="ds"></select>
-      <button onclick="load()">Pull &amp; train</button>
+      <button onclick="load('replace')">Start fresh</button>
+      <button onclick="load('add')">Add on top &darr;</button>
+      <label class="muted"><input type="checkbox" id="fresh"> rebuild (ignore cache)</label>
       <span id="loadmsg" class="muted"></span>
     </div>
+    <div id="brainstack" class="out" style="margin-top:8px"></div>
     <div id="trained" class="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>2 &middot; ask <span class="muted">(question router)</span></h2>
+    <div class="muted">This mind is <b>not a chatbot</b> &mdash; but most questions have a shape that maps to something it actually knows. Type a question and it routes to the right operation: <i>"what is a dog?"</i> &rarr; meaning + is_a chain, <i>"is a dog an animal?"</i> &rarr; taxonomic check, <i>"what is the capital of france?"</i> &rarr; a record's role, <i>"classify: &lt;text&gt;"</i> &rarr; nearest category, <i>"what is like &lt;text&gt;"</i> &rarr; nearest memory. Anything it can't map, it continues as text &mdash; and says so, rather than pretending to answer.</div>
+    <div class="row" style="margin-top:8px">
+      <input id="ask_q" placeholder="what is a dog?" style="width:320px"
+             onkeydown="if(event.key==='Enter')askQ()">
+      <button onclick="askQ()">Ask</button>
+    </div>
+    <div id="askout" class="out"></div>
   </div>
 
   <div id="ops" class="disabled">
@@ -533,7 +1365,8 @@ PAGE = r"""
     <h2>2 &middot; classify &amp; recall</h2>
     <textarea id="cq" placeholder="type a sentence in the style of the corpus..."></textarea>
     <div class="row" style="margin-top:8px"><button onclick="classify()">Classify</button>
-      <button class="ghost" onclick="recall()">Recall nearest</button></div>
+      <button class="ghost" onclick="recall()">Recall nearest</button>
+      <button class="ghost" onclick="resolution()">How much resolution?</button></div>
     <div id="cout" class="out"></div>
   </div>
 
@@ -563,6 +1396,16 @@ PAGE = r"""
   </div>
 
   <div class="card">
+    <h2>3&frac34; &middot; curriculum <span class="muted">(dictionary + encyclopedia dataset)</span></h2>
+    <div class="muted">Load the <b>Dictionary + encyclopedia</b> dataset. The mind learns word MEANING from definitions and relational KNOWLEDGE from is_a facts &mdash; both natively. Enter a word to see its meaning-neighbours (the dictionary layer) and its is_a chain climbed as a path-traced ray (the encyclopedia layer), side by side. Try: dog, wolf, cat, lion, rock, iron, granite, copper.</div>
+    <div class="row" style="margin-top:8px">
+      <input id="cur_word" placeholder="word, e.g. dog" style="width:160px">
+      <button onclick="curriculum()">Look up</button>
+    </div>
+    <div id="curout" class="out"></div>
+  </div>
+
+  <div class="card">
     <h2>4 &middot; generate</h2>
     <div class="row">
       <input id="seed" value="the " style="width:160px" placeholder="seed text">
@@ -574,14 +1417,118 @@ PAGE = r"""
   </div>
 
   <div class="card">
-    <h2>4&frac12; &middot; provenance <span class="muted">(source datasets)</span></h2>
+    <h2>4&frac18; &middot; predictive loop <span class="muted">(anticipate &amp; correct)</span></h2>
+    <div class="muted">The active layer on top of storage: the mind reads the corpus one token at a time, <em>anticipates</em> each next token, and learns from its surprise. It predicts by resonance &mdash; so a context it never saw exactly still predicts, generalising from similar ones. Watch accuracy rise with exposure and free energy (prediction error) fall.</div>
+    <div class="row" style="margin-top:8px"><button onclick="predictive()">Live the sequence</button></div>
+    <div id="pout" class="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>4&frac38; &middot; query &amp; generate <span class="muted">(ask it something)</span></h2>
+    <div class="muted">Ask a question; the system generates a continuation steered toward what the query is about, held coherent by the structure guard. It reports how on-query (relevance) and how coherent (structure) the answer is &mdash; and the unsteered baseline beside it, so the query-pull is visible.</div>
+    <div class="row" style="margin-top:8px">
+      <input id="rq" placeholder="e.g. the school and education for children" style="width:300px">
+      <button onclick="respondQuery()">Respond</button>
+    </div>
+    <div id="rqout" class="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>4&frac12; &middot; deliberate <span class="muted">(think before answering)</span></h2>
+    <div class="muted">Rather than emit the first draft, the system drafts a response, judges it (on-query and coherent), and refines &mdash; keeping the best and stopping once it's good enough. The iteration count is the thinking time, and it adapts: easy queries settle fast, hard ones take longer. The trace below is the inner deliberation made visible.</div>
+    <div class="row" style="margin-top:8px">
+      <input id="dq" placeholder="e.g. the school and education for children" style="width:300px">
+      <button onclick="deliberateQuery()">Think &amp; respond</button>
+    </div>
+    <div id="dqout" class="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>4&frac34; &middot; self-discovery <span class="muted">(find the units, no labels)</span></h2>
+    <div class="muted">Strip every space from the text and the system rediscovers the word boundaries on its own &mdash; from where its next-character prediction becomes uncertain (branching entropy peaks at unit ends). The discovered chunks then compress far better than single characters: finding the right decomposition shortens the description.</div>
+    <div class="row" style="margin-top:8px"><button onclick="discover()">Discover the units</button></div>
+    <div id="scout" class="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>4&frac78; &middot; factorize <span class="muted">(pull a composite apart)</span></h2>
+    <div class="muted">Binding combines several vectors into one; the hard inverse is recovering which vector came from each codebook given only the composite. The resonator network does it by searching in superposition &mdash; converging on the factors without ever enumerating the combinatorial space. (Uses self-inverse MAP binding, the algebra factorization needs.)</div>
+    <div class="row" style="margin-top:8px"><button onclick="factorize()">Bind three, then factor</button></div>
+    <div id="fzout" class="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>6 &middot; many NPCs, one mind <span class="muted">(shared base + deltas)</span></h2>
+    <div class="muted">For a game with many NPCs: instead of a full brain each, train one base mind, freeze it, and give every NPC a lightweight overlay that holds only what it personally learned. NPCs inherit all shared knowledge, keep private learning isolated, and can propagate it back to everyone. Because all instances share the same atoms, merging is just superposition.</div>
+    <div class="row" style="margin-top:8px">
+      <label class="muted">population <input id="pop_n" type="number" value="50" min="2" max="500" style="width:90px"></label>
+      <button onclick="population()">Spawn a population</button>
+    </div>
+    <div id="popout" class="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>7 &middot; sprite pack <span class="muted">(cross-sprite compression)</span></h2>
+    <div class="muted">A sprite sheet is one structured body, not hundreds of unrelated files. This packs the real sprite set against shared references and compares it, bit-exact, to compressing each sprite on its own &mdash; the cross-sprite structure that separate files throw away.</div>
+    <div class="row" style="margin-top:8px">
+      <label class="muted">sprites <input id="spr_n" type="number" value="200" min="20" max="712" style="width:90px"></label>
+      <button onclick="sprites()">Pack the set</button>
+    </div>
+    <div id="sprout" class="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>8 &middot; image vault <span class="muted">(perceptual repository)</span></h2>
+    <div class="muted">The image repository as one perceptual memory: ingest the picture set, group near-duplicates by a size- and format-invariant fingerprint, and answer query-by-example &mdash; pictures living in the same kind of space the rest of the engine uses for words and meaning.</div>
+    <div class="row" style="margin-top:8px"><button onclick="vault()">Open the vault</button></div>
+    <div id="vaultout" class="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>9 &middot; market structure <span class="muted">(volatility clustering)</span></h2>
+    <div class="muted">An experiment to run: does real market data carry the structure the engine looks for? Raw signed returns are efficient-market-like, but <b>volatility clustering</b> &mdash; bursts cluster in time, so |returns| are positively autocorrelated &mdash; is the honest signature. Reports the lag-1 |return| autocorrelation and how many sigma it beats a shuffle of the same returns (&gt;2 is real structure; the shuffle control should collapse to ~0).</div>
+    <div class="row" style="margin-top:8px">
+      <select id="mkt_ds"><option value="sol">SOL ticks (~1,500 moves)</option><option value="dai">DAI/WETH candles (~1,000 returns)</option></select>
+      <button onclick="market()">Test for structure</button>
+    </div>
+    <div id="mktout" class="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>10 &middot; big-text run <span class="muted">(heavy experiment)</span></h2>
+    <div class="muted">A heavy run on a large slice of the loaded corpus, kept out of the test suite: structure score (real vs shuffled vs random), the lossless codec ratio, and self-discovered word-boundary F1 &mdash; all at once. Load a sizeable text dataset (Reuters, Brown, Books) first, then run and read the numbers. Bump the token count for a bigger experiment.</div>
+    <div class="row" style="margin-top:8px">
+      <label class="muted">tokens <input id="bt_n" type="number" value="3000" min="500" max="20000" step="500" style="width:100px"></label>
+      <button onclick="bigtext()">Run the big-text experiment</button>
+    </div>
+    <div id="btout" class="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>5 &middot; lossless codec <span class="muted">(compress &harr; decompress)</span></h2>
+    <div class="muted">Both directions, exactly. The predictor ranks the vocabulary at each step; the rank stream is the compressed code, and because the decoder runs the same predictor it decompresses to the exact original. The size is bounded by structure &mdash; real text shrinks, random data barely (no free lunch), and a perfectly predictable stream would collapse to almost the seed alone.</div>
+    <div class="row" style="margin-top:8px"><button onclick="codec()">Compress &amp; restore</button></div>
+    <div id="cxout" class="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>4&frac14; &middot; topic pull <span class="muted">(an honest experiment)</span></h2>
+    <div class="muted">Why isn't this brain an LLM? Generation is a shallow n-gram. This re-ranks word-n-gram candidates by alignment to a running topic vector &mdash; deeper conditioning &mdash; and <em>measures</em> whether it buys coherence. Watch what happens to diversity as the pull increases.</div>
+    <div class="row" style="margin-top:8px">
+      <input id="tp_seed" value="the" style="width:160px" placeholder="seed word">
+      <button onclick="topicPull()">Run the sweep</button>
+    </div>
+    <div id="tpout" class="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>5&frac14; &middot; source tracing <span class="muted">(who taught this?)</span></h2>
     <div class="muted">WHO taught this text? Paste a passage (or trace a generated one above) and the mind ranks the dataset's sources by how much of the text's actual transitions each one taught &mdash; from the same tables generation reads. Strong on real held-out text (measured ~70&ndash;92% top-1 depending on how distinct the sources are); near-uniform on freely-generated text, which legitimately blends everyone.</div>
     <div class="row" style="margin-top:8px">
       <textarea id="attin" rows="3" style="width:100%;background:#0d1626;color:#cfe;border:1px solid #2a3a55;border-radius:6px;padding:6px" placeholder="paste text to trace to its source..."></textarea>
     </div>
     <div class="row" style="margin-top:6px"><button onclick="trace($('attin').value)">Trace sources &rarr;</button></div>
     <div id="trout2" class="out"></div>
-  </div>
   </div>
 
 </main>
@@ -594,20 +1541,146 @@ async function init(){
   const r=await fetch("/api/unified/datasets").then(x=>x.json());
   $("ds").innerHTML=r.datasets.map(d=>`<option value="${d.id}">${d.name}</option>`).join("");
   if(!r.nltk) $("loadmsg").textContent="(install nltk to pull corpora: pip install nltk)";
+  buildCards();
+  refreshStack();
 }
-async function load(){
-  $("loadmsg").textContent="pulling + training\u2026"; $("trained").innerHTML="";
-  const r=await post("/api/unified/load",{id:$("ds").value});
+
+/* ---- example catalog: category, tags, and a one-line description per card.
+   Keyed by a distinctive substring of each card's <h2> text so we never have to
+   touch the panels themselves. Cards not listed default to "Setup". ---- */
+const CATALOG=[
+  {key:"pull + train", cat:"Setup", pinned:true, tags:["corpus","train"],
+    desc:"Pull a real corpus and train one mind you can probe with every example below."},
+  {key:"question router", cat:"Reason", tags:["question","router","answer"],
+    desc:"Ask a question; the router decides whether to answer or complete, and responds."},
+  {key:"classify", cat:"Memory", tags:["classify","recall","nearest"],
+    desc:"Classify an input and recall the closest stored items from the one shared space."},
+  {key:"organize", cat:"Memory", tags:["cluster","organize","structure"],
+    desc:"Watch the mind reorganize what it holds into a tidier structure."},
+  {key:"relations", cat:"Reason", tags:["records","roles","bind"],
+    desc:"Bind role/filler records and query the relations between them."},
+  {key:"curriculum", cat:"Setup", tags:["dictionary","encyclopedia","prior"],
+    desc:"Seed meaning from a dictionary + encyclopedia prior before reading a corpus."},
+  {key:"4 &middot; generate", cat:"Generate", tags:["generate","ngram","text"],
+    desc:"Generate text from the trained mind by sampling its sequence memory."},
+  {key:"predictive loop", cat:"Predict", tags:["anticipate","surprise","free-energy","learning-curve"],
+    desc:"The mind reads a stream, anticipates each next token, and learns from its surprise."},
+  {key:"query &amp; generate", cat:"Generate", tags:["query","steer","relevance","structure"],
+    desc:"Ask something and get a continuation steered toward the query, kept coherent."},
+  {key:"deliberate", cat:"Generate", tags:["think","iterate","adaptive","negotiate"],
+    desc:"Draft, judge, and refine before answering &mdash; thinking time adapts to difficulty."},
+  {key:"self-discovery", cat:"Structure", tags:["segment","boundaries","decompose","no-labels"],
+    desc:"Strip the spaces and the mind rediscovers the word boundaries on its own."},
+  {key:"factorize", cat:"Structure", tags:["resonator","factor","superposition","decompose"],
+    desc:"Bind several vectors into one, then pull them back apart by searching in superposition."},
+  {key:"many NPCs", cat:"Scale", tags:["npc","shared-base","branch","delta","merge","game"],
+    desc:"Run a population of NPCs as one shared mind plus lightweight per-instance deltas."},
+  {key:"sprite pack", cat:"Images", tags:["sprites","compression","cross-file","lossless","game-assets"],
+    desc:"Pack the real sprite set as one body against shared references &mdash; bit-exact, far smaller."},
+  {key:"image vault", cat:"Images", tags:["images","wallpaper","dedup","cluster","query-by-example","perceptual"],
+    desc:"Group the picture repository by perceptual fingerprint and query it by example."},
+  {key:"market structure", cat:"Market", tags:["market","returns","volatility-clustering","experiment","crypto"],
+    desc:"Test whether real market data carries volatility-clustering structure vs a shuffle."},
+  {key:"big-text run", cat:"Experiment", tags:["large","structure","codec","segment","heavy","run-it"],
+    desc:"Heavy on-demand run: structure, lossless codec, and boundary F1 on a large text slice."},
+  {key:"lossless codec", cat:"Compress", tags:["compress","lossless","seed","reversible"],
+    desc:"Compress to a rank-code and decompress to the exact original &mdash; both directions."},
+  {key:"source tracing", cat:"Reason", tags:["attribution","provenance","who-taught"],
+    desc:"Trace a passage back to the sources whose stored transitions best explain it."},
+  {key:"topic pull", cat:"Generate", tags:["steer","topic","honest-negative"],
+    desc:"An honest experiment: does pulling generation toward a topic actually help?"},
+];
+const CATS=["All","Setup","Memory","Predict","Generate","Structure","Compress","Reason","Scale","Images","Market","Experiment"];
+
+function meta(h2text){
+  for(const m of CATALOG){ if(h2text.includes(m.key)) return m; }
+  return {cat:"Setup", tags:[], desc:""};
+}
+function cleanTitle(h2){
+  // strip the leading "N · " numbering and the muted parenthetical for the card title
+  let t=h2.replace(/^\s*[\d&frac;\/¼½¾⅛⅜⅝⅞]+\s*&middot;\s*/,"").trim();
+  return t;
+}
+
+let activeCat="All";
+function buildCards(){
+  const cards=[...document.querySelectorAll("main > .card")];
+  cards.forEach(card=>{
+    const h2=card.querySelector("h2"); if(!h2) return;
+    const m=meta(h2.innerHTML);
+    card.dataset.cat=m.cat;
+    card.dataset.tags=(m.tags||[]).join(" ");
+    card.dataset.title=h2.textContent;
+    card.classList.add("collapsible");
+    // build the head (twirl + title + description + tags) and move the rest into a body
+    const head=document.createElement("div"); head.className="card-head";
+    const titleHTML=h2.innerHTML;
+    const tagHTML=(m.tags||[]).map(t=>`<span class="tag">${t}</span>`).join("");
+    head.innerHTML=`<span class="twirl">&#9656;</span><div class="titles">`+
+      `<h2>${titleHTML}</h2>`+(m.desc?`<div class="card-desc">${m.desc}</div>`:"")+
+      (tagHTML?`<div class="tags">${tagHTML}</div>`:"")+`</div>`;
+    const body=document.createElement("div"); body.className="card-body";
+    // move every original child (except the h2 we copied) into the body
+    [...card.childNodes].forEach(n=>{ if(n!==h2) body.appendChild(n); });
+    h2.remove();
+    card.appendChild(head); card.appendChild(body);
+    head.addEventListener("click",()=>card.classList.toggle("open"));
+    if(m.pinned) card.classList.add("open");   // keep "pull + train" open
+  });
+  // category pills
+  $("cats").innerHTML=CATS.map(c=>`<span class="cat${c==='All'?' active':''}" data-c="${c}" onclick="setCat('${c}')">${c}</span>`).join("");
+  filterCards();
+}
+function setCat(c){
+  activeCat=c;
+  [...document.querySelectorAll(".cat")].forEach(p=>p.classList.toggle("active",p.dataset.c===c));
+  filterCards();
+}
+function filterCards(){
+  const q=($("search").value||"").trim().toLowerCase();
+  const cards=[...document.querySelectorAll("main > .card")];
+  let shown=0;
+  cards.forEach(card=>{
+    const hay=(card.dataset.title+" "+card.dataset.tags+" "+card.dataset.cat+" "+
+      (card.querySelector(".card-desc")?.textContent||"")).toLowerCase();
+    const matchCat=(activeCat==="All"||card.dataset.cat===activeCat);
+    const matchQ=(!q||hay.includes(q));
+    const show=matchCat&&matchQ;
+    card.classList.toggle("hidden",!show);
+    if(show){ shown++; if(q) card.classList.add("open"); }
+  });
+  $("count").textContent=`${shown} example${shown===1?"":"s"}${q?` matching \u201c${q}\u201d`:""}${activeCat!=="All"?` in ${activeCat}`:""}`;
+  let nm=$("nomatch");
+  if(shown===0){ if(!nm){ nm=document.createElement("div"); nm.id="nomatch"; nm.className="nomatch";
+      nm.textContent="No examples match \u2014 try a different word or category."; document.querySelector("main").appendChild(nm);} }
+  else if(nm){ nm.remove(); }
+}
+async function load(mode){
+  mode=mode||"replace";
+  const fresh=$("fresh").checked;
+  const verb=mode==="add"?"adding on top":(fresh?"retraining from scratch":"pulling + training");
+  $("loadmsg").textContent=verb+"\u2026"; $("trained").innerHTML="";
+  const r=await post("/api/unified/load",{id:$("ds").value, fresh:fresh, mode:mode});
   if(!r.ok){$("loadmsg").textContent="";$("trained").innerHTML=`<span class="muted">${r.error}</span>`;return;}
-  $("loadmsg").textContent="";
+  $("loadmsg").textContent=r.cached?"reused cached training (instant)":(r.added?("added "+r.added):"trained");
   const pills=r.labels.map(l=>`<span class="pill">${l}: ${r.counts[l]||0}</span>`).join("");
   $("trained").innerHTML=
     `<div>${r.desc}</div>
-     <div style="margin-top:8px">held-out accuracy <span class="big">${r.accuracy}%</span>
-        <span class="muted">&nbsp; ${r.trained} trained / ${r.held_out} held out &middot;
+     <div style="margin-top:8px">${r.held_out>0?`held-out accuracy <span class="big">${r.accuracy}%</span>&nbsp;`:""}
+        <span class="muted">${r.trained} trained / ${r.held_out} held out &middot;
         ${r.prototypes} prototypes &middot; ${r.gen_chars.toLocaleString()} chars for generation</span></div>
      <div style="margin-top:8px">${pills}</div>`;
+  renderStack(r.trained_on||[]);
   $("ops").classList.remove("disabled");
+}
+function renderStack(list){
+  if(!list||!list.length){ $("brainstack").innerHTML=""; return; }
+  const chain=list.map((n,i)=>`<span class="pill" style="background:#0f2a26;border-color:var(--teal)">${i+1}. ${n}</span>`).join(' <span class="muted">&rarr;</span> ');
+  $("brainstack").innerHTML=`<div><b>current brain trained on:</b> ${chain}</div>`+
+    `<div class="muted" style="margin-top:4px">use &ldquo;Add on top&rdquo; to layer another dataset, or &ldquo;Start fresh&rdquo; for a new brain.</div>`;
+}
+async function refreshStack(){
+  try{ const s=await fetch("/api/unified/trained").then(x=>x.json()); renderStack(s.trained_on||[]); }catch(e){}
 }
 async function classify(){
   const r=await post("/api/unified/classify",{text:$("cq").value});
@@ -691,10 +1764,253 @@ async function relAsk(){
     : `<b style="color:var(--amber)">${a.answer}</b>`;
   $("relout").innerHTML=`ask <b>${v}</b> through [${path}] &rarr; ${answer}${bar}`;
 }
+async function askQ(){
+  const q=($("ask_q").value||"").trim();
+  if(!q){$("askout").innerHTML='<span class="muted">ask a question</span>';return;}
+  const r=await post("/api/unified/answer",{question:q});
+  if(r.error){$("askout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  const A='color:var(--amber)';
+  let html="";
+  if(r.kind==="define"){
+    const mean=(r.meaning||[]).map(m=>`${m[0]} <span class="muted">(${m[1].toFixed(2)})</span>`).join(", ")||'<span class="muted">no meaning learned</span>';
+    const chain=(r.is_a_chain||[]).join(" &rarr; ");
+    html=`<div><span class="muted">meaning &mdash; like:</span> ${mean}</div>`+
+         (chain.includes("&rarr;")?`<div style="margin-top:6px"><span class="muted">is_a:</span> <b style="${A}">${chain}</b></div>`:"");
+  } else if(r.kind==="is_a"){
+    const yes=r.answer;
+    html=`<b style="${A}">${yes?"Yes":"No"}</b> &mdash; <b>${r.subject}</b> ${yes?"is a":"is not a"} <b>${r.ancestor}</b>`+
+         (yes?` <span class="muted">(${r.hops} hops, throughput ${r.throughput})</span>`:"")+
+         `<div style="margin-top:6px"><span class="muted">chain:</span> ${(r.chain||[]).join(" &rarr; ")}</div>`;
+  } else if(r.kind==="role"){
+    html=`the <b>${r.role}</b> of <b>${r.concept}</b> is <b style="${A}">${r.value}</b> <span class="muted">(confidence ${r.confidence})</span>`;
+  } else if(r.kind==="classify"){
+    html=`nearest category: <b style="${A}">${r.label}</b> <span class="muted">(score ${r.score})</span>`;
+  } else if(r.kind==="recall"){
+    html=`nearest memory: <b style="${A}">${r.label}</b> <span class="muted">(score ${r.score})</span>`;
+  } else if(r.kind==="completion"){
+    html=`<div class="muted">${r.note}</div><div style="margin-top:6px"><b style="${A}">${r.text}</b></div>`;
+  } else {
+    html=`<span class="muted">${r.note||r.text||"no answer"}</span>`;
+  }
+  $("askout").innerHTML=html;
+}
+async function codec(){
+  $("cxout").innerHTML='<span class="spin">compressing both ways&hellip;</span>';
+  const r=await post("/api/unified/codec",{});
+  if(r.error){$("cxout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  $("cxout").innerHTML=
+    `<div>round-trip lossless: <b style="color:${r.lossless?'var(--teal2)':'var(--coral)'}">${r.lossless?'exact &#10003;':'mismatch &#10007;'}</b></div>`+
+    `<div style="margin-top:4px">real text: <b style="color:var(--teal2)">${r.bits_per_token}</b> bits/token vs ${r.baseline} baseline &mdash; ratio <b>${r.ratio}</b></div>`+
+    `<div style="margin-top:4px">random control: ratio <b style="color:var(--coral)">${r.random_ratio}</b> (barely shrinks &mdash; no free lunch)</div>`+
+    `<div class="muted" style="margin-top:6px">${r.note}.</div>`;
+}
+async function population(){
+  $("popout").innerHTML='<span class="spin">spawning population&hellip;</span>';
+  const r=await post("/api/unified/population",{population:parseInt($("pop_n").value)||50});
+  if(r.error){$("popout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  let html=`<div class="muted">shared base knows: ${r.base_labels.join(", ")}</div>`;
+  html+=`<div style="margin-top:8px">`;
+  for(const n of r.npcs){
+    html+=`<div style="margin:4px 0"><b style="color:var(--teal2)">${n.npc}</b> &mdash; `+
+      `inherits <code>${n.inherits_shared}</code>, privately <code>${n.private}</code></div>`;
+  }
+  html+=`</div>`;
+  html+=`<div style="margin-top:8px">isolation: <b>${r.isolation.npc}</b> asked about another NPC's private word &rarr; <b style="color:var(--amber)">${r.isolation.result}</b> (doesn't see it)</div>`;
+  html+=`<div style="margin-top:4px">propagation: word "<b>${r.propagation.word}</b>" &mdash; before sharing: <b style="color:var(--coral)">${r.propagation.before}</b>, after a NPC propagates: <b style="color:var(--teal2)">${r.propagation.after}</b></div>`;
+  html+=`<div style="margin-top:8px">memory: <b style="color:var(--teal2)">${r.cost.shared_total.toLocaleString()}</b> prototypes for ${r.population} NPCs vs <b style="color:var(--coral)">${r.cost.separate_total.toLocaleString()}</b> for separate brains &mdash; <b style="color:var(--amber)">${r.cost.saving_x.toFixed(0)}x</b> smaller</div>`;
+  html+=`<div class="muted" style="margin-top:6px">${r.note}.</div>`;
+  $("popout").innerHTML=html;
+}
+async function market(){
+  $("mktout").innerHTML='<span class="spin">testing for structure&hellip;</span>';
+  const r=await post("/api/unified/market",{dataset:$("mkt_ds").value});
+  if(r.error){$("mktout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  $("mktout").innerHTML=
+    `<div>${r.dataset}</div>`+
+    `<div style="margin-top:4px">volatility clustering (|return| lag-1 acf): <b style="color:var(--teal2)">${r.vol_clustering_acf1}</b>, `+
+    `<b style="color:${r.structured?'var(--teal2)':'var(--coral)'}">${r.zscore}&sigma;</b> above shuffle `+
+    `<b style="color:${r.structured?'var(--teal2)':'var(--coral)'}">${r.structured?'&#10003; real structure':'&#10007; not significant'}</b></div>`+
+    `<div style="margin-top:4px">shuffle control: acf <b style="color:var(--coral)">${r.shuffled_acf1}</b> (collapses to ~0)</div>`+
+    `<div class="muted" style="margin-top:6px">${r.note}.</div>`;
+}
+async function bigtext(){
+  $("btout").innerHTML='<span class="spin">running the big-text experiment&hellip;</span>';
+  const r=await post("/api/unified/bigtext",{tokens:parseInt($("bt_n").value)||3000});
+  if(r.error){$("btout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  let h=`<div class="muted">corpus ${r.corpus_tokens.toLocaleString()} tokens, used ${r.used_tokens.toLocaleString()}</div>`;
+  if(r.structure) h+=`<div style="margin-top:6px">structure score &mdash; real <b style="color:var(--teal2)">${r.structure.real}</b>, shuffled <b style="color:var(--amber)">${r.structure.shuffled}</b>, random <b style="color:var(--coral)">${r.structure.random}</b> (higher = more structured)</div>`;
+  if(r.codec) h+=`<div style="margin-top:4px">lossless codec &mdash; <b style="color:${r.codec.lossless?'var(--teal2)':'var(--coral)'}">${r.codec.lossless?'exact':'mismatch'}</b>, ratio <b>${r.codec.ratio}</b> (${r.codec.bits_per_token} bits/token over ${r.codec.tokens})</div>`;
+  if(r.segmentation) h+=`<div style="margin-top:4px">self-discovered boundaries &mdash; F1 <b style="color:var(--teal2)">${r.segmentation.f1}</b> vs <b style="color:var(--coral)">${r.segmentation.random_f1}</b> random (${r.segmentation.chars.toLocaleString()} chars)</div>`;
+  h+=`<div class="muted" style="margin-top:6px">${r.note}.</div>`;
+  $("btout").innerHTML=h;
+}
+async function sprites(){
+  $("sprout").innerHTML='<span class="spin">packing the set&hellip;</span>';
+  const r=await post("/api/unified/sprites",{n:parseInt($("spr_n").value)||200});
+  if(r.error){$("sprout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  $("sprout").innerHTML=
+    `<div>${r.used} of ${r.total_sprites} sprites &mdash; set-pack <b style="color:var(--teal2)">${r.set_pack.toLocaleString()}</b> bytes `+
+    `vs per-file PNG <b style="color:var(--coral)">${r.per_file_png.toLocaleString()}</b> bytes</div>`+
+    `<div style="margin-top:4px">that's <b style="color:var(--amber)">${r.saving_x}x</b> smaller, and <b style="color:var(--teal2)">${r.lossless?'bit-exact &#10003;':'NOT exact &#10007;'}</b></div>`+
+    `<div class="muted" style="margin-top:6px">${r.note}.</div>`;
+}
+async function vault(){
+  $("vaultout").innerHTML='<span class="spin">opening the vault&hellip;</span>';
+  const r=await post("/api/unified/vault",{});
+  if(r.error){$("vaultout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  let q=(r.query||[]).map(x=>`${x.name} (${x.sim})`).join(", ");
+  $("vaultout").innerHTML=
+    `<div>${r.count} images grouped into <b style="color:var(--teal2)">${r.n_clusters}</b> perceptual clusters `+
+    `(biggest holds ${r.biggest_cluster})</div>`+
+    `<div style="margin-top:4px">query-by-example, closest matches: <span style="color:var(--amber)">${q}</span></div>`+
+    (r.rows&&r.rows.length?`<div style="margin-top:6px" class="muted">smallest encoders: `+
+      r.rows.slice(0,3).map(x=>`${x.method} ${x.bytes.toLocaleString()}b`).join(" &middot; ")+`</div>`:"")+
+    `<div class="muted" style="margin-top:6px">${r.note}.</div>`;
+}
+async function factorize(){
+  $("fzout").innerHTML='<span class="spin">searching in superposition&hellip;</span>';
+  const r=await post("/api/unified/factorize",{seed:Math.floor(Math.random()*10000)});
+  if(r.error){$("fzout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  const match=JSON.stringify(r.true)===JSON.stringify(r.recovered);
+  $("fzout").innerHTML=
+    `<div>bound factors (hidden from the solver): <b>[${r.true.join(", ")}]</b></div>`+
+    `<div style="margin-top:4px">resonator recovered: <b style="color:${match?'var(--teal2)':'var(--coral)'}">[${r.recovered.join(", ")}]</b> ${match?'&#10003; exact':'&#10007;'}</div>`+
+    `<div style="margin-top:6px" class="muted">searched a space of <b style="color:var(--amber)">${r.search_space.toLocaleString()}</b> combinations in ${r.restarts} restart(s) &mdash; never enumerated them</div>`+
+    `<div class="muted" style="margin-top:6px">${r.note}.</div>`;
+}
+async function discover(){
+  $("scout").innerHTML='<span class="spin">discovering units&hellip;</span>';
+  const r=await post("/api/unified/discover",{});
+  if(r.error){$("scout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  $("scout").innerHTML=
+    `<div style="margin-bottom:6px">word boundaries recovered from spaceless text: F1 <b style="color:var(--teal2)">${r.f1}</b> `+
+    `(precision ${r.precision}, recall ${r.recall}) vs <b style="color:var(--coral)">${r.random_f1}</b> for a random cut</div>`+
+    `<div style="margin:6px 0"><span class="muted">discovered units:</span><br><span style="color:var(--amber)">${r.sample[0]}</span></div>`+
+    `<div style="margin-top:6px">better structure &rarr; better compression: discovered chunks <b style="color:var(--teal2)">${r.chunk_bits}</b> bits/char vs single characters <b>${r.symbol_bits}</b> bits/char</div>`+
+    `<div class="muted" style="margin-top:6px">${r.note}.</div>`;
+}
+async function deliberateQuery(){
+  const q=($("dq").value||"").trim();
+  if(!q){$("dqout").innerHTML='<span class="muted">type a query</span>';return;}
+  $("dqout").innerHTML='<span class="spin">thinking&hellip;</span>';
+  const r=await post("/api/unified/deliberate",{query:q});
+  if(r.error){$("dqout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  const best=Math.max(...r.trace.map(t=>t.quality));
+  const rows=r.trace.map((t,i)=>{
+    const isbest=Math.abs(t.quality-best)<1e-6;
+    return `<div style="margin:2px 0;font-size:12px">`+
+      `<span class="muted">draft ${i+1}${i===0?' (greedy)':''}:</span> `+
+      `<b style="color:${isbest?'var(--teal2)':'#9fb0c8'}">${t.quality.toFixed(3)}</b> `+
+      `<span class="muted">${t.draft}&hellip;</span>${isbest?' &larr; kept':''}</div>`;
+  }).join("");
+  $("dqout").innerHTML=
+    `<div style="margin-bottom:6px">thought for <b style="color:var(--amber)">${r.iterations}</b> `+
+    `iteration${r.iterations>1?'s':''} &middot; quality ${r.quality} (relevance ${r.relevance}, structure ${r.structure})</div>`+
+    `<div style="margin:8px 0"><span style="color:var(--amber)">${r.response}</span></div>`+
+    `<div style="border-top:1px solid #1e2c45;padding-top:8px"><div class="muted" style="font-size:13px;margin-bottom:4px">the deliberation (inner drafts):</div>${rows}</div>`+
+    `<div class="muted" style="margin-top:6px">${r.note}.</div>`;
+}
+async function respondQuery(){
+  const q=($("rq").value||"").trim();
+  if(!q){$("rqout").innerHTML='<span class="muted">type a query</span>';return;}
+  $("rqout").innerHTML='<span class="spin">generating a response&hellip;</span>';
+  const r=await post("/api/unified/respond",{query:q});
+  if(r.error){$("rqout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  const s=r.steered, u=r.unsteered;
+  const better=s.relevance>=u.relevance;
+  $("rqout").innerHTML=
+    `<div style="margin:6px 0"><span class="muted">steered toward the query</span> `+
+    `<span class="muted">(relevance <b style="color:${better?'var(--teal2)':'#9fb0c8'}">${s.relevance}</b>, structure ${s.structure})</span><br>`+
+    `<span style="color:var(--amber)">${s.text}</span></div>`+
+    `<div style="margin:8px 0;border-top:1px solid #1e2c45;padding-top:8px"><span class="muted">unsteered baseline `+
+    `(relevance ${u.relevance}, structure ${u.structure})</span><br><span class="muted">${u.text}</span></div>`+
+    `<div class="muted" style="margin-top:6px">${r.note}.</div>`;
+}
+async function predictive(){
+  $("pout").innerHTML='<span class="spin">living the sequence&hellip;</span>';
+  const r=await post("/api/unified/predictive",{});
+  if(r.error){$("pout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  const maxacc=Math.max(...r.curve.map(c=>c.accuracy), 0.01);
+  const rows=r.curve.map(c=>{
+    const w=Math.round(c.accuracy/maxacc*180);
+    return `<div style="display:flex;align-items:center;gap:8px;margin:2px 0">`+
+      `<span style="width:64px;font-family:monospace;font-size:12px">${c.tokens} tok</span>`+
+      `<span style="display:inline-block;height:12px;width:${Math.max(2,w)}px;background:var(--teal2);border-radius:3px"></span>`+
+      `<span class="muted" style="font-size:12px">${(c.accuracy*100).toFixed(1)}%  ·  ${c.entries} entries</span></div>`;
+  }).join("");
+  const fe=r.free_energy_start>r.free_energy_end;
+  $("pout").innerHTML=
+    `<div class="muted" style="font-size:13px;margin-bottom:6px">accuracy on a held-out probe as it sees more (learning curve):</div>${rows}`+
+    `<div style="margin-top:8px">free energy (prediction error): <b>${r.free_energy_start}</b> &rarr; <b style="color:${fe?'var(--teal2)':'var(--coral)'}">${r.free_energy_end}</b> ${fe?'(falling &mdash; learning to anticipate)':'(not falling)'}</div>`+
+    `<div style="margin-top:4px">generalisation to <b>unseen</b> contexts: <b style="color:var(--amber)">${r.generalization.correct}/${r.generalization.total}</b> (${r.generalization.pct}%) &mdash; exact lookup scores these blind</div>`+
+    `<div style="margin-top:8px"><span class="muted">generate by anticipation from "${r.seed}":</span><br>${r.seed} <span style="color:var(--amber)">${r.sample}</span></div>`+
+    (r.proof?`<div style="margin-top:12px;border-top:1px solid #1e2c45;padding-top:10px">`+
+      `<div class="muted" style="font-size:13px;margin-bottom:6px">proof of structure (real text scores ~${r.proof.real_score}, threshold ${r.proof.threshold}; lower = more like salad):</div>`+
+      `<div>greedy decoding &rarr; structure <b style="color:var(--coral)">${r.proof.greedy_score}</b>: <span class="muted">${r.proof.greedy_sample}</span></div>`+
+      `<div style="margin-top:4px">steered by the verifier &rarr; structure <b style="color:var(--teal2)">${r.proof.steered_score}</b>: <span class="muted">${r.proof.steered_sample}</span></div>`+
+      `<div class="muted" style="margin-top:6px">greedy collapses into a loop (a locally-coherent salad single-step checks would rate highly); steering by trajectory structure &mdash; projecting each word onto the running context &mdash; defends coherence.</div>`+
+      (r.proof.compress_real!==undefined?`<div style="margin-top:8px">better structure &rarr; better compression: real text compresses to <b style="color:var(--teal2)">${r.proof.compress_real}</b> of baseline, the same words shuffled only <b style="color:var(--coral)">${r.proof.compress_shuffled}</b> &mdash; a predictor is a compressor.</div>`:"")+
+      `</div>`:"")+
+    `<div class="muted" style="margin-top:8px">${r.note}.</div>`;
+}
+async function topicPull(){
+  const seed=($("tp_seed").value||"the").trim();
+  $("tpout").innerHTML='<span class="spin">sweeping the topic pull&hellip;</span>';
+  const r=await post("/api/unified/topic_pull",{seed});
+  if(r.error){$("tpout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  const base=r.rows[0];
+  const rows=r.rows.map(x=>{
+    const divCollapse=x.diversity<base.diversity-0.2;
+    return `<tr><td style="padding:2px 12px 2px 0;font-family:monospace">${x.topic_weight.toFixed(0)}</td>`+
+      `<td style="padding:2px 12px 2px 0">${x.coherence.toFixed(3)}</td>`+
+      `<td style="padding:2px 12px 2px 0">${x.transition_validity.toFixed(3)}</td>`+
+      `<td style="padding:2px 0;color:${divCollapse?'var(--coral)':'#9fb0c8'}">${x.diversity.toFixed(3)}${divCollapse?' &larr; collapsed':''}</td></tr>`;
+  }).join("");
+  $("tpout").innerHTML=
+    `<table style="font-size:13px"><tr class="muted"><th align="left">topic_weight</th><th align="left">coherence</th><th align="left">transition&nbsp;valid</th><th align="left">diversity</th></tr>${rows}</table>`+
+    `<div style="margin-top:8px"><span class="muted">baseline (pull 0):</span> ${r.sample_baseline}</div>`+
+    `<div style="margin-top:4px"><span class="muted">heavy pull (16):</span> <span style="color:var(--coral)">${r.sample_hot}</span></div>`+
+    `<div class="muted" style="margin-top:8px">The coherence number can <em>rise</em> with heavy pull only because the topic vector collapses onto a few frequent words &mdash; diversity craters and the text stops being language. Re-ranking can't add structure the n-gram never proposed; the missing piece is a high-capacity learned next-word function, not this lever.</div>`;
+}
+async function resolution(){
+  const t=($("cq").value||"").trim();
+  if(!t){$("cout").innerHTML='<span class="muted">type some text</span>';return;}
+  const r=await post("/api/unified/resolution",{text:t});
+  if(r.error){$("cout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  const final=r.profile[r.profile.length-1][1];
+  const ladder=r.profile.map(([k,lab,sc])=>{
+    const hit=lab===final;
+    return `<div style="font-family:monospace">${String(k).padStart(5)} dim &rarr; `+
+           `<b style="color:${hit?'var(--amber)':'#7a8aa5'}">${lab}</b> `+
+           `<span class="muted">(${sc.toFixed(2)})</span>${hit?'':' <span class="muted">— not yet settled</span>'}</div>`;
+  }).join("");
+  const robust=r.stable_from<=r.full_dim/2;
+  $("cout").innerHTML=`<div class="muted">winner per truncation (coarse &rarr; fine):</div>${ladder}`+
+    `<div style="margin-top:6px">answer settles at <b style="color:var(--amber)">${r.stable_from}</b> of ${r.full_dim} dims `+
+    `&mdash; ${robust?'robust to heavy truncation (cheap to find coarse-to-fine)':'a close call, needs near-full width'}</div>`;
+}
+async function curriculum(){
+  const w=($("cur_word").value||"").trim().toLowerCase();
+  if(!w){$("curout").innerHTML='<span class="muted">enter a word</span>';return;}
+  const r=await post("/api/unified/curriculum",{word:w});
+  if(r.error){$("curout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  if(r.note){$("curout").innerHTML=`<span class="muted">${r.note}</span>`;return;}
+  const mean=(r.meaning||[]).map(m=>`${m.word} <span class="muted">(${m.sim.toFixed(2)})</span>`).join(", ")
+             || '<span class="muted">no meaning learned for this word</span>';
+  const chain=(r.is_a_chain||[]).join(" &rarr; ");
+  const tp=r.throughput;
+  const tpnote=` <span class="muted">(throughput ${tp.toFixed(2)} &mdash; the is_a ray's accumulated confidence; it fades with depth)</span>`;
+  $("curout").innerHTML=
+    `<div><span class="muted">dictionary &mdash; meaning neighbours:</span> ${mean}</div>`+
+    `<div style="margin-top:8px"><span class="muted">encyclopedia &mdash; is_a chain:</span> `+
+    `<b style="color:var(--amber)">${chain}</b>${chain.includes("&rarr;")?tpnote:""}</div>`;
+}
 init();
 </script>
 </body></html>
 """
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5001, debug=False)
+    import os
+    port = int(os.environ.get("PORT", "5000"))
+    app.run(host="127.0.0.1", port=port, debug=False)

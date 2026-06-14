@@ -61,7 +61,8 @@ class HolographicMind:
     def __init__(self, dim, actions, k=12, epsilon=0.1, novelty_bonus=0.3,
                  memory_cap=6000, seed=0, merge=0.92, ret_alpha=0.1,
                  maintain=False, reorg_duplicate=0.85, redundancy_floor=0.35,
-                 surprise_floor=0.4, maintain_gap=400, buffer_cap=1200, check_every=400):
+                 surprise_floor=0.4, maintain_gap=400, buffer_cap=1200, check_every=400,
+                 capacity=0):
         self.dim = dim
         self.actions = list(actions)        # e.g. ["N", "S", "E", "W"]
         self.k = k                          # prototypes consulted per action
@@ -69,6 +70,31 @@ class HolographicMind:
         self.novelty_bonus = novelty_bonus  # optimism for rarely-tried actions
         self.memory_cap = memory_cap        # max prototypes PER ACTION (evict the rarest)
         self.merge = merge                  # fold into a prototype when cosine >= this
+        # CAPACITY-AWARE LAYERING: a prototype is a bundle (superposition) of its
+        # members, and a bundle has FINITE capacity -- fold too many distinct members
+        # into one and the unit can no longer resemble any of them (the cosine readout
+        # collapses ~1/sqrt(count): the capacity cliff). `capacity` caps how many
+        # members fold into a single prototype; when a matching prototype is already
+        # full, the experience starts a NEW sub-prototype for that action instead of
+        # blurring the full one further. classify()/value() score over ALL of an
+        # action's prototypes, so sub-prototypes are read transparently.
+        #   Measured tradeoff (don't set this blind): on a harsh fixed obstacle world
+        #   where the same egocentric situation recurs constantly, unbounded folding
+        #   (capacity=0) blurred the value memory into a near-degenerate policy
+        #   (~1 star/life), while a cap rescued it (~4 at cap=sqrt(dim)) -- but a tight
+        #   cap fragments memory hard (~100 -> ~8700 prototypes) and is high-variance.
+        #   So the right cap trades fidelity against memory and is task-dependent;
+        #   capacity=0 (no cap) is the default, and a cap is a measured knob, not a
+        #   free win -- capacity_report() exposes the load so you can tune it.
+        self.capacity = capacity
+        # BLIND-STATE COMPASS FALLBACK: when the brain has essentially no memory for
+        # any allowed action here (max support < blind_floor), a random pick is the
+        # worst policy for "I'm lost". If a goal_<dir> token is present in senses, take
+        # that direction instead of guessing -- replacing a coin flip with "follow the
+        # compass," which is strictly better when the value memory is empty here.
+        # 0.0 = off (choose on value+novelty even when blind); set a small positive
+        # floor (e.g. 0.15) to turn it on.
+        self.blind_floor = 0.0
         self.ret_alpha = ret_alpha          # floor on the return step size (recency)
         # Self-maintenance: keep the brain itself from going stale. The base mind
         # never forgets -- its bundles only grow -- and it lets near-duplicate
@@ -232,7 +258,7 @@ class HolographicMind:
         return float((weights * rets).sum() / total), float(sims.max())
 
     def decide(self, state_vec, explore=True, epsilon=None, among=None,
-               senses=None, avoid=("danger", "wall")):
+               senses=None, avoid=("danger", "wall"), soft=()):
         """Choose an action. Mostly greedy on value, with two sources of
         exploration: an epsilon chance of a random move, and (while exploring) a
         novelty bonus that favours actions rarely tried in situations like this.
@@ -254,26 +280,57 @@ class HolographicMind:
         own loop) gets the same safety by passing what the creature senses;
         callers that pass nothing are byte-for-byte unchanged.
 
+        'soft' tiers the veto into HARD vs SOFT blocks. Some obstacles are
+        permanent (a wall: moving into it does nothing) and some are temporary (a
+        red light or a car ahead: wait and it clears). When every direction is
+        blocked, instead of lifting the veto to ALL actions (a blind pick that may
+        drive at a permanent wall), lift it only to the SOFT-blocked ones -- the
+        temporary blocks worth waiting on -- and only fall back to all actions if
+        nothing is soft either (truly walled in). Prefixes in `soft` name the
+        temporary kinds; `soft=()` means no tiering (every block is treated alike).
+
         'among' restricts the choice to a subset of action indices -- the same
         routing move classify() uses for labels (compete only within the
         legitimate pool). When both `among` and `senses` are given the vetoes
         intersect. If everything is vetoed (fully surrounded), the restriction
         lifts: the brain's call. Exploration respects the restriction too -- a
-        random move is random among the allowed, never a coin-flip into poison."""
+        random move is random among the allowed, never a coin-flip into poison.
+
+        'blind_floor': when the brain has no memory for any allowed action (max
+        support < blind_floor) and a goal_<dir> token is present in senses, take the
+        goal direction rather than guessing. Off when blind_floor == 0.0."""
         state_vec = self.perceive_vec(state_vec)
         idxs = list(range(len(self.actions))) if among is None else list(among)
         if senses is not None:
             ok = [i for i in idxs
                   if not any(f"{p}_{self.actions[i]}" in senses for p in avoid)]
-            idxs = ok or idxs                        # fully surrounded: brain's call
+            if ok:
+                idxs = ok                            # some direction is unblocked
+            elif soft:
+                # every direction hard-or-soft blocked: prefer WAITING on a soft
+                # (temporary) block over a blind pick among permanent walls
+                soft_ok = [i for i in idxs
+                           if any(f"{p}_{self.actions[i]}" in senses for p in soft)]
+                idxs = soft_ok or idxs
+            # else: fully walled with nothing soft -- brain's call, keep idxs as-is
         eps = epsilon if epsilon is not None else (self.epsilon if explore else 0.0)
         if self.rng.random() < eps:
             return int(idxs[int(self.rng.integers(len(idxs)))])
         scores = np.full(len(self.actions), -np.inf)
+        supports = {}
         for a in idxs:
             v, support = self.value(state_vec, a)
+            supports[a] = support
             bonus = self.novelty_bonus * (1.0 - support) if explore else 0.0
             scores[a] = v + bonus
+        # blind-state compass fallback: no memory anywhere here, but the compass
+        # points somewhere -- follow it instead of guessing.
+        if (senses is not None and self.blind_floor > 0.0
+                and max(supports.values(), default=0.0) < self.blind_floor):
+            goal_dirs = [i for i in idxs if f"goal_{self.actions[i]}" in senses]
+            if goal_dirs:
+                return int(goal_dirs[0] if len(goal_dirs) == 1
+                           else max(goal_dirs, key=lambda a: scores[a]))
         scores[idxs] += self.rng.normal(0, 1e-6, len(idxs))   # random tie-break
         return int(np.argmax(scores))
 
@@ -319,6 +376,35 @@ class HolographicMind:
             out.append((role, va, vb, va == vb))
         return out
 
+    def penalize_recent(self, amount=0.5, n=4):
+        """Online 'stuck' signal: nudge DOWN the value of the last `n` (state, action)
+        pairs the brain acted on, without waiting for the episode to finish. Learning
+        here is Monte-Carlo at episode end, so a creature trapped in a loop never
+        finishes and never learns the one lesson it needs -- it just gets rescued. This
+        lets a detected loop leave a mark immediately: the prototypes for the moves that
+        led into it get their mean return lowered, so next time the brain is less likely
+        to repeat them.
+
+        Requires the recent-experience buffer, which exists under maintain=True or
+        'auto' (self._buf holds recent (state, action, return)). Returns the number of
+        (state, action) pairs penalised. `amount` is subtracted from each pair's
+        prototype mean return (scaled by the prototype's recency step), matching the
+        units of the returns the brain already learns from."""
+        if not self._buf:
+            return 0
+        hit = 0
+        for s, a, _r in self._buf[-n:]:
+            U = self._unit[a]
+            if not len(U):
+                continue
+            sims = U @ s
+            j = int(sims.argmax())
+            if sims[j] >= self.merge:                 # the prototype this move folded into
+                alpha = max(1.0 / (self._cnt[a][j] + 1.0), self.ret_alpha)
+                self._ret[a][j] -= alpha * amount     # lower its learned value
+                hit += 1
+        return hit
+
     def remember(self, states, action_idxs, returns):
         """Fold one episode's experiences into the prototype memory."""
         states = np.asarray([self.perceive_vec(s) for s in states], float)
@@ -348,7 +434,11 @@ class HolographicMind:
         if len(U):
             sims = U @ state
             j = int(sims.argmax())
-            if sims[j] >= self.merge:                # close enough: it joins this class
+            # capacity-aware: if the nearest prototype is close enough to merge BUT is
+            # already holding `capacity` members, don't blur it further -- fall through
+            # to start a fresh sub-prototype for this same situation instead.
+            full = self.capacity and self._cnt[a][j] >= self.capacity
+            if sims[j] >= self.merge and not full:    # close enough: it joins this class
                 self._sum[a][j] = self._sum[a][j] + state
                 c = self._cnt[a][j]
                 # Recency-weighted return: a true mean at first (1/(c+1)), then a
@@ -376,6 +466,24 @@ class HolographicMind:
     def prototype_count(self):
         """Total prototypes kept across all actions (the compressed memory size)."""
         return int(sum(len(r) for r in self._ret))
+
+    def capacity_report(self):
+        """How loaded the prototype bundles are -- the capacity diagnostic. Returns
+        {'prototypes', 'max_count', 'mean_count', 'overloaded'}: 'overloaded' counts
+        prototypes holding more members than the dimension comfortably supports
+        (count > ~sqrt(dim)), where the unit bundle starts to lose resemblance to its
+        members. With capacity-aware layering on, no prototype exceeds `capacity`, so
+        'overloaded' stays at 0."""
+        soft_cap = self.dim ** 0.5
+        counts = [c for a in range(len(self.actions)) for c in self._cnt[a]]
+        if not counts:
+            return {"prototypes": 0, "max_count": 0, "mean_count": 0.0, "overloaded": 0,
+                    "soft_cap": round(soft_cap, 1)}
+        counts = np.asarray(counts, float)
+        return {"prototypes": int(len(counts)), "max_count": int(counts.max()),
+                "mean_count": float(round(counts.mean(), 2)),
+                "overloaded": int((counts > soft_cap).sum()),
+                "soft_cap": round(soft_cap, 1)}
 
     def prototypes(self):
         """The compressed memory laid out for indexing: (unit vectors, action per

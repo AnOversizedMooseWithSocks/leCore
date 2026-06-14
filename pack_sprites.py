@@ -11,9 +11,20 @@ The fix is a change of REPRESENTATION:
   3. hand all the index planes to a strong general compressor (LZMA), which finds
      the cross-sprite structure that 712 separate GIF streams hide.
 
-Result on the real set: 65 KB, versus 158 KB for zipping the folder and 792 KB
-for the loose GIFs. Lossless and bit-exact; integers throughout (1 byte per pixel,
-a uint8 palette). Delta coding was tried and made it WORSE, so it is not used.
+Result on the real set: 58 KB (v2), versus 65 KB (v1), 158 KB for zipping the
+folder and 792 KB for the loose GIFs. Lossless and bit-exact; integers throughout
+(1 byte per pixel, a uint8 palette). Delta coding was tried and made it WORSE, so
+it is not used.
+
+THE v2 WIN (orientation choice): these are character sprites, and a column down
+the body is more self-similar than a row across it, so storing the index planes
+COLUMN-MAJOR gives LZMA longer runs -- 54,292 vs 64,884 bytes for the index body
+(-16%). Transpose is free and lossless; pack() tries both orientations and keeps
+whichever is smaller, recording the choice in one flag, so a pack can never
+regress below row-major. (Reordering planes by similarity was also tried and does
+NOT pay -- the permutation costs more than the adjacency saves, since LZMA's
+window already finds most cross-sprite matches. Predictive/delta filters lose
+too, as in v1: they break the byte runs LZMA exploits.) v1 blobs still decode.
 
 If a set needs more than 256 colours total, this raises -- those want either
 per-group palettes or plain truecolour compression.
@@ -49,10 +60,22 @@ def pack(items):
     pal = np.stack([(allc >> 24) & 255, (allc >> 16) & 255, (allc >> 8) & 255, allc & 255], -1).astype(np.uint8)
 
     index_blob = b"".join(np.searchsorted(allc, _codes(a)).astype(np.uint8).tobytes() for a in arrs)
-    body = lzma.compress(index_blob, preset=9 | lzma.PRESET_EXTREME)
+    # ORIENTATION CHOICE (the measured v2 win): the index planes compress better
+    # column-major for these character sprites -- vertical structure (a column
+    # down the body) gives LZMA longer runs than horizontal. Transpose is free
+    # and lossless; we try both and keep whichever is smaller, recording the
+    # choice in one flag, so the pack can never regress below row-major. Measured
+    # on the 712-sprite set: 54,292 vs 64,884 bytes for the index body (-16%).
+    col_blob = b"".join(np.searchsorted(allc, _codes(a)).astype(np.uint8).T.copy().tobytes()
+                        for a in arrs)
+    body_row = lzma.compress(index_blob, preset=9 | lzma.PRESET_EXTREME)
+    body_col = lzma.compress(col_blob, preset=9 | lzma.PRESET_EXTREME)
+    transposed = len(body_col) < len(body_row)
+    body = body_col if transposed else body_row
     namedata = lzma.compress("\n".join(names).encode("utf-8"))
 
-    out = [struct.pack("<4sBHB", MAGIC, 1, len(items), len(pal)), pal.tobytes()]
+    out = [struct.pack("<4sBHBB", MAGIC, 2, len(items), len(pal), int(transposed)),
+           pal.tobytes()]
     for _, a in items:                           # per-sprite H, W (sizes may vary)
         out.append(struct.pack("<HH", a.shape[0], a.shape[1]))
     out += [struct.pack("<I", len(namedata)), namedata,
@@ -64,7 +87,13 @@ def unpack(blob):
     """Reverse of pack(): returns [(name, RGBA array), ...], bit-exact."""
     if len(blob) < struct.calcsize("<4sBHB") or blob[:4] != MAGIC:
         raise ValueError("not a pack_sprites blob")
-    magic, _ver, n, K = struct.unpack_from("<4sBHB", blob); pos = struct.calcsize("<4sBHB")
+    ver = blob[4]
+    if ver == 1:                                  # original row-major format
+        magic, _ver, n, K = struct.unpack_from("<4sBHB", blob); pos = struct.calcsize("<4sBHB")
+        transposed = False
+    else:                                         # v2: + 1-byte orientation flag
+        magic, _ver, n, K, tflag = struct.unpack_from("<4sBHBB", blob)
+        pos = struct.calcsize("<4sBHBB"); transposed = bool(tflag)
     pal = np.frombuffer(blob, np.uint8, count=K * 4, offset=pos).reshape(K, 4); pos += K * 4
     shapes = []
     for _ in range(n):
@@ -77,8 +106,11 @@ def unpack(blob):
     items, off = [], 0
     for i in range(n):
         h, w = shapes[i]
-        idx = flat[off:off + h * w].reshape(h, w); off += h * w
-        items.append((names[i], pal[idx]))       # indices -> RGBA, exact
+        if transposed:                            # stored column-major: read W x H, transpose back
+            idx = flat[off:off + h * w].reshape(w, h).T; off += h * w
+        else:
+            idx = flat[off:off + h * w].reshape(h, w); off += h * w
+        items.append((names[i], pal[idx]))        # indices -> RGBA, exact
     return items
 
 

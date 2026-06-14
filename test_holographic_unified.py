@@ -702,3 +702,88 @@ def test_unified_blend_synthesizes_over_learned_classes():
     blend = m.blend("france", "japan", {"language", "currency"})
     assert blend["capital"] == "paris" and blend["continent"] == "europe"   # france frame
     assert blend["language"] == "japanese" and blend["currency"] == "yen"   # japan projected
+
+
+def test_brain_learns_dictionary_and_encyclopedia_natively():
+    # WIRED TO THE BRAIN: the curriculum lives in UnifiedMind, not just in
+    # standalone modules. The mind bootstraps word meaning from definitions into
+    # its own encoder, and absorbs an encyclopedia into its own memory, then
+    # climbs is_a chains with the same find/ask machinery it uses for any record.
+    from holographic_unified import UnifiedMind
+    m = UnifiedMind(dim=2048, seed=0)
+    defs = {
+        "cat": ["animal", "feline", "pet"], "dog": ["animal", "canine", "pet"],
+        "lion": ["animal", "feline", "wild"], "wolf": ["animal", "canine", "wild"],
+        "animal": ["living", "creature"], "feline": ["cat", "lion", "animal"],
+        "canine": ["dog", "wolf", "animal"], "pet": ["animal", "tame"],
+        "wild": ["untamed", "animal"], "living": ["alive"], "creature": ["living", "animal"],
+        "rock": ["mineral", "hard"], "stone": ["mineral", "hard"], "mineral": ["solid"],
+        "hard": ["solid"], "solid": ["firm"], "firm": ["solid"], "tame": ["gentle"],
+        "gentle": ["mild"], "mild": ["gentle"], "untamed": ["wild"], "alive": ["living"],
+    }
+    m.learn_dictionary(defs, iters=3)
+    # dictionary-bootstrapped meaning: cat's neighbours are animals, not minerals
+    near = [w for w, _ in m.define("cat", 4)]
+    assert any(w in ("feline", "animal", "lion") for w in near)
+    assert "rock" not in near and "stone" not in near
+
+    facts = {"dog": {"is_a": "canine"}, "wolf": {"is_a": "canine"}, "cat": {"is_a": "feline"},
+             "canine": {"is_a": "carnivore"}, "feline": {"is_a": "carnivore"},
+             "carnivore": {"is_a": "mammal"}, "mammal": {"is_a": "animal"},
+             "animal": {"is_a": "organism"}}
+    m.learn_encyclopedia(facts)
+    chain, tp = m.climb("dog")
+    assert chain[:5] == ["dog", "canine", "carnivore", "mammal", "animal"]
+    assert m.is_a("dog", "animal")[0] is True
+    assert m.is_a("dog", "plant")[0] is False
+    # throughput decays with depth (calibrated confidence over the brain's memory)
+    assert m.climb("dog", hops=2)[1] > m.climb("dog", hops=4)[1]
+
+
+def test_answer_routes_questions_to_real_operations():
+    # The question ROUTER: a question's shape maps to the brain's real operation,
+    # not to sentence completion. Honest -- it answers from knowledge when it can,
+    # and labels completion as completion when it can't.
+    from holographic_unified import UnifiedMind
+    m = UnifiedMind(dim=2048, seed=0)
+    m.learn_dictionary({
+        "cat": ["animal", "feline"], "dog": ["animal", "canine"], "wolf": ["animal", "canine"],
+        "animal": ["living"], "feline": ["cat", "animal"], "canine": ["dog", "wolf", "animal"],
+        "living": ["alive"], "alive": ["living"],
+    }, iters=3)
+    m.learn_encyclopedia({"dog": {"is_a": "canine"}, "wolf": {"is_a": "canine"},
+                          "canine": {"is_a": "carnivore"}, "carnivore": {"is_a": "mammal"},
+                          "mammal": {"is_a": "animal"}, "animal": {"is_a": "organism"}})
+    # 'what is X' -> define (meaning + is_a chain)
+    a = m.answer("what is a dog?")
+    assert a["kind"] == "define"
+    assert "animal" in a["is_a_chain"]
+    # 'is X a Y' -> taxonomic membership, both polarities
+    assert m.answer("is a dog an animal?")["answer"] is True
+    assert m.answer("is a dog a plant?")["answer"] is False
+    # 'define X' form
+    assert m.answer("define wolf")["kind"] == "define"
+
+
+def test_answer_is_honest_when_it_cannot_map():
+    # A question it can't map and no sequence model to fall back on -> 'unknown',
+    # never a fabricated answer.
+    from holographic_unified import UnifiedMind
+    m = UnifiedMind(dim=2048, seed=0)
+    m.learn_encyclopedia({"dog": {"is_a": "canine"}, "canine": {"is_a": "mammal"}})
+    a = m.answer("what is the meaning of life")
+    assert a["kind"] in ("unknown", "completion")
+    if a["kind"] == "completion":
+        assert "generation, not an answer" in a["note"]
+
+
+def test_answer_role_question_on_records():
+    # 'what is the <role> of <concept>' -> read_role over absorbed records.
+    from holographic_unified import UnifiedMind
+    m = UnifiedMind(dim=2048, seed=0)
+    for _ in range(6):
+        m.learn({"capital": "paris", "currency": "euro"}, "france", "record")
+        m.learn({"capital": "tokyo", "currency": "yen"}, "japan", "record")
+    m.maintain_now()
+    a = m.answer("what is the capital of france?")
+    assert a["kind"] == "role" and a["value"] == "paris"

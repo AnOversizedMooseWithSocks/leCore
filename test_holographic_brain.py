@@ -272,3 +272,98 @@ def test_describe_decodes_states_and_why_differ_explains():
     v = {r: (a, b, sh) for r, a, b, sh in mind.why_differ(s1, s2, enc)}
     assert v["food_x"] == ("east", "west", False)
     assert v["wall_N"] == ("yes", "yes", True)
+
+
+# ---------------------------------------------------------------------------
+# Capacity-aware layering and tiered/blind/online decision refinements
+# ---------------------------------------------------------------------------
+
+def test_capacity_caps_prototype_load_and_preserves_fidelity():
+    # A prototype is a bundle with finite capacity: fold too many distinct members
+    # into one and the unit stops resembling any of them. capacity= caps members per
+    # prototype, splitting instead of blurring. Off (=0) blurs without bound.
+    import numpy as np
+    from holographic_creature import HolographicMind
+    rng = np.random.default_rng(0)
+    base = rng.standard_normal(256)
+    members = [base + 0.01 * rng.standard_normal(256) for _ in range(40)]  # all merge-close
+
+    capped = HolographicMind(dim=256, actions=["N", "S", "E", "W"], merge=0.5, capacity=8, seed=0)
+    blurred = HolographicMind(dim=256, actions=["N", "S", "E", "W"], merge=0.5, capacity=0, seed=0)
+    for s in members:
+        capped.remember([s], [0], [1.0])
+        blurred.remember([s], [0], [1.0])
+    rc, rb = capped.capacity_report(), blurred.capacity_report()
+    assert rc["max_count"] <= 8                       # capacity respected
+    assert rc["overloaded"] == 0                      # nothing past the soft cap
+    assert rb["max_count"] == 40 and rb["overloaded"] >= 1   # one over-loaded bundle
+
+
+def test_capacity_off_is_unchanged():
+    # default capacity=0 reproduces the old single-prototype folding exactly
+    import numpy as np
+    from holographic_creature import HolographicMind
+    rng = np.random.default_rng(1)
+    b = HolographicMind(dim=128, actions=["N", "S"], merge=0.5, seed=0)
+    base = rng.standard_normal(128)
+    for _ in range(20):
+        b.remember([base + 0.01 * rng.standard_normal(128)], [0], [1.0])
+    assert b.capacity_report()["max_count"] == 20     # all folded into one, as before
+
+
+def test_soft_veto_waits_on_temporary_block():
+    # tiered veto: boxed in by permanent walls + a temporary block on the goal side ->
+    # wait on the soft (temporary) block rather than guessing among walls.
+    import numpy as np
+    from holographic_creature import HolographicMind
+    b = HolographicMind(dim=256, actions=["N", "S", "E", "W"], seed=0)
+    senses = {"goal_N": "yes", "traffic_N": "yes",
+              "wall_E": "yes", "wall_S": "yes", "wall_W": "yes"}
+    choice = b.decide(np.zeros(256), senses=senses, avoid=("wall",),
+                      soft=("traffic", "red"), explore=False)
+    assert b.actions[choice] == "N"
+
+
+def test_soft_default_empty_is_unchanged():
+    # soft=() (default) reproduces today's veto-and-lift behaviour: fully blocked ->
+    # all actions back in play (no crash, a real choice returned).
+    import numpy as np
+    from holographic_creature import HolographicMind
+    b = HolographicMind(dim=256, actions=["N", "S", "E", "W"], seed=0)
+    senses = {"wall_N": "yes", "wall_E": "yes", "wall_S": "yes", "wall_W": "yes"}
+    choice = b.decide(np.zeros(256), senses=senses, avoid=("wall",), explore=False)
+    assert choice in range(4)
+
+
+def test_blind_floor_follows_compass_when_lost():
+    # blind-state compass: no memory anywhere + a goal token present -> follow the compass,
+    # don't guess. Off by default (blind_floor=0.0).
+    import numpy as np
+    from holographic_creature import HolographicMind
+    b = HolographicMind(dim=256, actions=["N", "S", "E", "W"], seed=0)
+    assert b.blind_floor == 0.0                       # off by default
+    b.blind_floor = 0.15
+    choice = b.decide(np.zeros(256), senses={"goal_E": "yes"}, explore=False)
+    assert b.actions[choice] == "E"
+
+
+def test_penalize_recent_lowers_a_repeated_move():
+    # online stuck-signal: a detected loop teaches itself -- the penalised
+    # (state, action) gets its learned value lowered.
+    import numpy as np
+    from holographic_creature import HolographicMind
+    rng = np.random.default_rng(2)
+    b = HolographicMind(dim=256, actions=["N", "S", "E", "W"], maintain="auto", merge=0.5, seed=0)
+    s = rng.standard_normal(256)
+    b.remember([s], [0], [1.0])
+    before, _ = b.value(b.perceive_vec(s), 0)
+    hit = b.penalize_recent(amount=1.0, n=4)
+    after, _ = b.value(b.perceive_vec(s), 0)
+    assert hit >= 1 and after < before
+
+
+def test_penalize_recent_noop_without_buffer():
+    # without a recent-experience buffer (maintain off) it's a safe no-op
+    from holographic_creature import HolographicMind
+    b = HolographicMind(dim=64, actions=["N", "S"], seed=0)
+    assert b.penalize_recent() == 0

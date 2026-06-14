@@ -93,6 +93,200 @@ class UnifiedMind:
         self.encoder.learn_text(corpus)
         return self
 
+    def learn_dictionary(self, definitions, iters=3, alpha=0.7):
+        """LANGUAGE CURRICULUM, layer 1 -- learn word MEANING from a dictionary,
+        natively, into the mind's own text encoder. A word's meaning is the bundle
+        of its definition words' meanings; a dictionary is self-referential, so
+        this is a fixed-point iteration on the definition graph (the resonator
+        dynamic applied to a lexicon). Measured separately to peak around three
+        passes before over-diffusing -- so the default is three. After this the
+        encoder's word vectors carry definitional meaning, which every downstream
+        text perception then inherits.
+
+        definitions: {word: [words in its definition]}. Returns self."""
+        from holographic_ai import random_vector
+        rng = np.random.default_rng(0)
+        words = sorted(definitions)
+        wset = set(words)
+        defs = {w: [d for d in definitions[w] if d in wset and d != w] for w in words}
+        base = {w: random_vector(self.dim, rng) for w in words}     # atomic ids
+        meaning = dict(base)
+        for _ in range(max(1, iters)):                              # the recursion
+            nxt = {}
+            for w in words:
+                if defs[w]:
+                    v = np.sum([meaning[d] for d in defs[w]], axis=0)
+                    v = v / (np.linalg.norm(v) + 1e-12)
+                    v = alpha * v + (1 - alpha) * base[w]           # damp toward identity
+                    nxt[w] = v / (np.linalg.norm(v) + 1e-12)
+                else:
+                    nxt[w] = meaning[w]
+            meaning = nxt
+        # write the bootstrapped meaning into the encoder's word-vector store, so
+        # the brain's perception of these words now carries definitional meaning
+        for w, v in meaning.items():
+            self.encoder._text.context[w] = v.copy()
+        self._lexicon_words = wset
+        return self
+
+    def define(self, word, k=5):
+        """The nearest words by learned meaning -- 'what is this word like?',
+        answered from the dictionary-bootstrapped vectors. Returns [(word, sim)].
+        Empty if the word was never in the learned dictionary (so an unknown word
+        yields no spurious neighbours)."""
+        lex = getattr(self, "_lexicon_words", set())
+        if word not in lex:
+            return []
+        wv = self.encoder._text.wordvec(word)
+        if wv is None:
+            return []
+        out = []
+        for w in lex:
+            if w == word:
+                continue
+            ov = self.encoder._text.wordvec(w)
+            if ov is not None:
+                out.append((w, float(wv @ ov / ((np.linalg.norm(wv) * np.linalg.norm(ov)) + 1e-12))))
+        return sorted(out, key=lambda t: -t[1])[:k]
+
+    def learn_encyclopedia(self, facts, maintain=True):
+        """LANGUAGE CURRICULUM, layer 3 -- learn RELATIONAL knowledge (an
+        encyclopedia) natively, by absorbing each concept as a role-bound record
+        into the mind's OWN memory. `facts` is {concept: {role: filler}}, e.g.
+        {'dog': {'is_a': 'canine'}, ...}. After this the mind can climb is_a
+        chains, test taxonomic membership, and find structural relatedness using
+        the SAME find/ask machinery it uses for every other record -- the
+        encyclopedia is not a side table, it is in the brain. Returns self."""
+        self._encyclopedia = dict(facts)
+        for concept, rel in facts.items():
+            self.learn(dict(rel), concept, modality="record")
+        if maintain:
+            self.maintain_now()
+        return self
+
+    def climb(self, concept, role="is_a", hops=99, min_throughput=0.0):
+        """Walk a relation chain (default is_a) up through the absorbed
+        encyclopedia, as a path-traced ray over the mind's own memory. Returns
+        (chain, throughput); a chain whose throughput would fall below
+        min_throughput stops rather than emitting a low-confidence deeper hop."""
+        chain = [concept]
+        cur = concept
+        throughput = 1.0
+        for _ in range(hops):
+            filler, conf = self.read_role(cur, role) if cur in self._class_labels() else (None, 0.0)
+            if filler is None:
+                break
+            t = throughput * max(0.0, float(conf))
+            if t < min_throughput:
+                break
+            throughput = t
+            chain.append(filler)
+            cur = filler
+        return chain, throughput
+
+    def is_a(self, concept, ancestor, role="is_a"):
+        """Taxonomic membership over the absorbed encyclopedia: does `concept`
+        reach `ancestor` by following `role`? Returns (reached, hops, throughput)."""
+        chain, tp = self.climb(concept, role=role)
+        if ancestor in chain:
+            return True, chain.index(ancestor), tp
+        return False, -1, tp
+
+    def _class_labels(self):
+        return set(self.memory.live.labels())
+
+    def answer(self, question):
+        """A QUESTION ROUTER -- the honest middle ground between 'completes your
+        sentence' and 'is a chatbot'. This mind is NOT a language model and does
+        not converse; but it holds real knowledge, and most questions have a
+        SHAPE that maps to one of its actual operations. This recognizes a handful
+        of question forms by template (keyword matching, not natural-language
+        understanding -- it says so), pulls out the argument, and answers from the
+        brain's own knowledge:
+
+          'what is a dog?' / 'define dog' / 'what is dog like?'
+                -> define()  (nearest words by learned meaning)
+                   + climb() (its is_a chain, if an encyclopedia was learned)
+          'is a dog an animal?'      -> is_a()   (taxonomic membership)
+          'what is the capital of france?' / 'capital of france'
+                -> read_role()        (a role of a known concept)
+          'what is this: <text>' / 'classify <text>' / 'what kind of text is ...'
+                -> classify()         (nearest learned category)
+          'what is like <text>'      -> recall() (nearest individual memory)
+
+        Anything it cannot map falls through to generation (sentence completion),
+        clearly LABELLED as a completion rather than an answer, so the system is
+        never pretending to answer when it is really just continuing text.
+
+        Returns {kind, ...} describing which operation answered and the result."""
+        import re
+        q = (question or "").strip()
+        ql = q.lower().rstrip("?.! ").strip()
+        if not ql:
+            return {"kind": "none", "text": "ask me something"}
+
+        # -- 'is X a Y?' / 'is X an Y?' -> taxonomic membership ----------------
+        m = re.match(r"^(?:is|are)\s+(?:a|an|the)?\s*(.+?)\s+(?:a|an|the)?\s*(\S+)$", ql)
+        if m and hasattr(self, "_encyclopedia"):
+            x, y = m.group(1).strip().split()[-1], m.group(2).strip()
+            reached, hops, tp = self.is_a(x, y)
+            return {"kind": "is_a", "subject": x, "ancestor": y,
+                    "answer": bool(reached), "hops": hops, "throughput": round(float(tp), 3),
+                    "chain": self.climb(x)[0]}
+
+        # -- 'capital of france' / 'what is the <role> of <concept>' ----------
+        m = (re.match(r"^what\s+is\s+the\s+(\w+)\s+of\s+(.+)$", ql)
+             or re.match(r"^(\w+)\s+of\s+(.+)$", ql))
+        if m:
+            role, concept = m.group(1).strip(), m.group(2).strip().split()[-1]
+            if concept in self._class_labels() and role in getattr(self, "_fillers", {}):
+                val, conf = self.read_role(concept, role)
+                if val is not None:
+                    return {"kind": "role", "concept": concept, "role": role,
+                            "value": val, "confidence": round(float(conf), 3)}
+
+        # -- 'what is like <text>' -> recall nearest individual ---------------
+        m = re.match(r"^what(?:'s| is)?\s+like\s+(.+)$", ql)
+        if m:
+            (lab, _), score = self.recall(m.group(1).strip())
+            return {"kind": "recall", "label": lab, "score": round(float(score), 3)}
+
+        # -- 'what is X' / 'define X' / 'what is X like' -> meaning + is_a -----
+        m = (re.match(r"^define\s+(.+)$", ql)
+             or re.match(r"^what\s+is\s+(?:a|an|the)?\s*(.+?)(?:\s+like)?$", ql)
+             or re.match(r"^what\s+(?:is|are)\s+(.+)$", ql))
+        if m:
+            word = m.group(1).strip().split()[-1]
+            near = self.define(word, 5) if hasattr(self, "define") else []
+            chain = self.climb(word)[0] if hasattr(self, "climb") else [word]
+            if near or len(chain) > 1:
+                return {"kind": "define", "word": word,
+                        "meaning": [(w, round(s, 3)) for w, s in near],
+                        "is_a_chain": chain}
+
+        # -- 'classify <text>' / 'what kind of text is <text>' ----------------
+        m = (re.match(r"^classify[:\s]+(.+)$", ql)
+             or re.match(r"^what\s+(?:kind|category|genre|type)\s+(?:of\s+\w+\s+)?is[:\s]+(.+)$", ql))
+        if m:
+            label, score = self.classify(m.group(1).strip())
+            return {"kind": "classify", "label": label, "score": round(float(score), 3)}
+
+        # -- nothing matched: this is the sentence-completion path, labelled ---
+        try:
+            text = self.generate(q if q.endswith(" ") else q + " ", length=80)
+        except Exception:
+            text = None
+        if text:
+            return {"kind": "completion",
+                    "note": "I don't recognize this as a question I can answer from "
+                            "knowledge, so I'm continuing the text instead (this is "
+                            "generation, not an answer).",
+                    "text": text}
+        return {"kind": "unknown",
+                "note": "I can't map this to something I know. Try 'what is a dog?', "
+                        "'is a dog an animal?', 'define wolf', or 'what is the capital "
+                        "of france?' -- or load a corpus and I can complete text."}
+
     def perceive(self, x, modality=None):
         """Any input -> one vector in the shared space. This is the only encoder in the
         system; the memory and the brain never encode anything themselves."""
@@ -309,14 +503,100 @@ class UnifiedMind:
     def find(self, role, filler):
         """Which absorbed record holds bind(role, filler)? One hop over the
         mind's own recall store (the same stored vectors recall() scans),
-        restricted to record items. Returns (label, score)."""
+        restricted to record items. Returns (label, score).
+
+        Over a large record store this resolves COARSE-TO-FINE -- ranking at low
+        dimension first and escalating only when the top match is not yet settled
+        -- returning the same record as a full scan for far less work (see
+        holographic_resolution)."""
         from holographic_ai import bind
         probe = bind(self.encoder._roles.get(str(role)), self.encoder.encode(filler))
         items = self._record_items()
         if not items:
             return None, -1.0
+        if len(items) >= 32:
+            from holographic_resolution import coarse_to_fine
+            M = np.stack([it[0] for it in items])
+            idx, score, _, _ = coarse_to_fine(probe, M)
+            return items[idx][1], float(score)
         best = max(items, key=lambda it: float(it[0] @ probe))
         return best[1], float(best[0] @ probe)
+
+    def fractal_dimension(self, x, modality=None):
+        """The fractal (box-counting) dimension of an input's structure -- a
+        perceptual roughness/complexity descriptor the mind can read directly
+        from the data. For an image it is the edge map's dimension (natural
+        scenes ~1.4-1.6, smooth synthetic shapes ~1.0); for a 1-D series it is
+        the self-affinity expressed as a dimension (2 - Hurst). Returns a float."""
+        from holographic_fractal import image_fractal_dimension, hurst_exponent
+        m = modality or self.encoder.infer(x)
+        arr = np.asarray(x)
+        if m == "image" or (arr.ndim >= 2 and arr.dtype != object):
+            return float(image_fractal_dimension(arr))
+        seq = np.asarray(x, float).ravel()
+        return float(2.0 - hurst_exponent(seq))     # self-affinity as a dimension
+
+    def self_affinity(self, series):
+        """Hurst exponent of a 1-D series read by the mind: 0.5 random walk,
+        <0.5 mean-reverting, >0.5 trending. The fractal lens on a time series."""
+        from holographic_fractal import hurst_exponent
+        return float(hurst_exponent(np.asarray(series, float).ravel()))
+
+    def verify_image_structure(self, image, real_patches=None, patch=32):
+        """Does an image carry the spatial-autocorrelation signature of real data
+        (vs noise / corruption)? The text structure verifier, carried to images
+        (holographic_signal_structure). If real_patches is None, calibrates on
+        patches of the image itself. Returns {'score', 'structured', 'threshold'}."""
+        from holographic_signal_structure import SignalStructureVerifier
+        img = np.asarray(image, float)
+        if img.ndim == 3:
+            img = img.mean(axis=2)
+        if real_patches is None:
+            h, w = img.shape
+            real_patches = [img[i:i + patch, j:j + patch]
+                            for i in range(0, max(1, h - patch), patch)
+                            for j in range(0, max(1, w - patch), patch)] or [img]
+        v = SignalStructureVerifier("image").calibrate(real_patches)
+        return {"score": v.structure_score(img), "structured": bool(v.is_structured(img)),
+                "threshold": float(v.threshold)}
+
+    def volatility_structure(self, returns):
+        """Does a return series carry the volatility-clustering signature of real
+        markets (|returns| autocorrelated)? Returns the clustering z-score vs a
+        shuffled control: >2 is meaningful structure, near 0 means none (or too
+        little data). The cross-domain structure verifier for time series."""
+        from holographic_signal_structure import clustering_zscore, volatility_clustering
+        r = np.asarray(returns, float).ravel()
+        return {"clustering": float(volatility_clustering(r)),
+                "zscore": float(clustering_zscore(r))}
+
+    def resolution_profile(self, x, modality=None, among=None):
+        """How much holographic RESOLUTION does classifying this input need? For
+        each truncation dimension, which prototype wins -- and at what dimension
+        does the winner stabilise? A low stabilisation dimension means the answer
+        is robust to heavy truncation (a 'fundamental' match); needing full width
+        means it was a close call. The persistent-homology idea made practical:
+        which structure survives compression. Returns
+        {'profile': [(dim, label, score)], 'stable_from': dim, 'full_dim': D}."""
+        from holographic_resolution import resolution_profile as _rp
+        v = self.perceive(x, modality)
+        protos, labels = [], []
+        for lab, _, unit, _ in self.memory.live._p:
+            if among is None or lab in among:
+                protos.append(unit)
+                labels.append(lab)
+        if not protos:
+            return {"profile": [], "stable_from": 0, "full_dim": self.dim}
+        M = np.stack(protos)
+        prof = _rp(v, M)
+        named = [(k, labels[i], round(s, 3)) for k, i, s in prof]
+        final = prof[-1][1]
+        stable = prof[-1][0]
+        for k, i, _ in prof:
+            if i == final:
+                stable = k
+                break
+        return {"profile": named, "stable_from": stable, "full_dim": self.dim}
 
     def read_role(self, label, role):
         """Decode one role's filler from a LEARNED class -- unbind the role from
@@ -671,6 +951,293 @@ class UnifiedMind:
 
     def generate(self, seed_text, length=160, temperature=0.5, name=None):
         return self._pick_gen(name, seed_text)["gen"].generate(seed_text, length, temperature)
+
+    def build_predictor(self, order=2, reinforce_threshold=0.15, novelty_threshold=0.55):
+        """Give the mind a PREDICTIVE LOOP over symbol sequences: it anticipates
+        the next symbol from recent context, measures its surprise, and learns
+        error-gated (see holographic_predictive). This is the active layer on top
+        of storage -- the mind now expects, notices when it is wrong, and adapts.
+        Returns self."""
+        from holographic_predictive import PredictiveMemory
+        self._predictor = PredictiveMemory(dim=self.dim, order=order, seed=0,
+                                           reinforce_threshold=reinforce_threshold,
+                                           novelty_threshold=novelty_threshold)
+        return self
+
+    def observe_sequence(self, tokens, learn=True):
+        """Run the predictive loop over a token sequence; return the Steps (the
+        surprise/valence/free-energy trace). The mind lives the sequence one
+        anticipation at a time."""
+        if not hasattr(self, "_predictor"):
+            self.build_predictor()
+        return self._predictor.learn_sequence(list(tokens), learn=learn)
+
+    def anticipate(self, recent, soft=False):
+        """What does the mind expect next, and how confident is it? Returns
+        (symbol, confidence). Confidence near 1 is a remembered continuation;
+        around 0.5 is a generalisation from a similar context."""
+        if not hasattr(self, "_predictor"):
+            return None, 0.0
+        return self._predictor.predict(list(recent), soft=soft)
+
+    def generate_predictive(self, seed, length=30, soft=False):
+        """Generate by anticipation: predict the next symbol, append, repeat."""
+        if not hasattr(self, "_predictor"):
+            return []
+        return self._predictor.generate(list(seed), length=length, soft=soft)
+
+    def prediction_report(self, tokens):
+        """How well does the mind anticipate this sequence (no learning)? Returns
+        accuracy plus mean surprise and final free energy -- its self-consistency
+        on the stream."""
+        if not hasattr(self, "_predictor"):
+            return {"accuracy": 0.0, "mean_surprise": 1.0, "free_energy": 1.0}
+        steps = self._predictor.learn_sequence(list(tokens), learn=False)
+        if not steps:
+            return {"accuracy": 0.0, "mean_surprise": 1.0, "free_energy": 1.0}
+        import numpy as _np
+        return {"accuracy": sum(s.hit for s in steps) / len(steps),
+                "mean_surprise": float(_np.mean([max(0.0, s.surprise) for s in steps])),
+                "free_energy": float(steps[-1].self_free_energy)}
+
+    def build_meaning_predictor(self, sentences, order=2, window=2):
+        """Give the mind a MEANING-level predictor: instead of returning a single
+        stored next symbol, it composes a next-MEANING vector from all resonating
+        contexts and settles it to a word (holographic_meaning_predict). Built over
+        a co-occurrence meaning space, which -- measured -- is the right space for
+        'what follows' (the dictionary-curriculum space is for 'what is related').
+        Returns self."""
+        from holographic_meaning_predict import MeaningPredictor
+        stream = [w for s in sentences for w in (s if isinstance(s, list) else s.split())]
+        self._meaning_pred = (MeaningPredictor(dim=self.dim, order=order, seed=0)
+                              .fit_space(sentences, window=window)
+                              .fit_transitions(stream))
+        # calibrate a structure verifier on the same corpus, so the mind can PROVE
+        # whether a sequence carries structure and steer generation to stay in it
+        from holographic_structure import StructureVerifier
+        mp = self._meaning_pred
+        self._verifier = StructureVerifier(mp.vocab, mp.M, mp.idx).calibrate(stream, chunk=150, z_floor=2.0)
+        return self
+
+    def verify_structure(self, tokens):
+        """Proof of meaning: does this sequence carry structure, or is it salad?
+        Returns {'score': float, 'meaningful': bool, 'threshold': float}. The score
+        is how closely the sequence's lag-coherence profile matches real text (0 =
+        typical, more negative = anomalous) -- meaning projected onto context across
+        ranges, not trusted from any single word."""
+        if not hasattr(self, "_verifier"):
+            return {"score": 0.0, "meaningful": False, "threshold": 0.0}
+        toks = list(tokens) if not isinstance(tokens, str) else tokens.split()
+        return {"score": self._verifier.structure_score(toks),
+                "meaningful": bool(self._verifier.is_meaningful(toks)),
+                "threshold": float(self._verifier.threshold)}
+
+    def generate_structured(self, seed, length=30, beam=6, lookback=8):
+        """Generate while PROVING structure step by step: among the predictor's top
+        candidates, keep the one that best preserves the running context's structure
+        -- generation that defends its own coherence, which (measured) escapes the
+        loops plain greedy decoding falls into."""
+        if not hasattr(self, "_meaning_pred") or not hasattr(self, "_verifier"):
+            return []
+        from holographic_structure import steered_generate
+        seed = list(seed) if not isinstance(seed, str) else seed.split()
+        return steered_generate(self._meaning_pred, self._verifier, seed,
+                                length=length, beam=beam, lookback=lookback)
+
+    def share(self):
+        """Freeze this trained mind and return a SharedMind that many lightweight
+        instances (NPCs/agents) can branch from -- they share this heavy base by
+        reference and hold only their own private deltas, instead of each building a
+        full brain (holographic_partition). Learning in a branch can be propagated
+        back so every instance inherits it. Pass capacity>0 to SharedMind for a
+        capacity-aware merge when very many instances propagate into the same label."""
+        from holographic_partition import SharedMind
+        return SharedMind(self)
+
+    def compress_lossless(self, tokens):
+        """Go both directions: losslessly compress a sequence to a compact code (seed
+        + rank stream) via the predictor's ranking, and report the achievable size.
+        decompress_lossless inverts it exactly. Needs build_meaning_predictor."""
+        if not hasattr(self, "_meaning_pred"):
+            return {"code": None, "cost": {"ratio": 1.0}}
+        if not hasattr(self, "_codec"):
+            from holographic_codec import PredictiveCodec
+            self._codec = PredictiveCodec(self._meaning_pred)
+        toks = tokens.split() if isinstance(tokens, str) else list(tokens)
+        return {"code": self._codec.compress(toks), "cost": self._codec.cost(toks),
+                "lossless": self._codec.roundtrip_ok(toks)}
+
+    def decompress_lossless(self, code):
+        """Recover the exact original sequence from a code produced by
+        compress_lossless, by replaying the shared predictor."""
+        if not hasattr(self, "_codec"):
+            from holographic_codec import PredictiveCodec
+            self._codec = PredictiveCodec(self._meaning_pred)
+        return self._codec.decompress(code)
+
+    def attribute_sources(self, tokens, sources, topk=15, order=2):
+        """Source attribution: trace which stored material a passage drew on. sources
+        is {name: token_stream}; returns a provenance distribution over those sources
+        from the predictor's resonance couplings (holographic_codec.SourceAttributor)."""
+        from holographic_codec import SourceAttributor
+        att = SourceAttributor(dim=self.dim, order=order, seed=0).fit(sources)
+        toks = tokens.split() if isinstance(tokens, str) else list(tokens)
+        return att.attribute(toks, topk=topk)
+
+    def factor_composite(self, composite, codebooks, restarts=20):
+        """Pull a single bound composite apart into the factors that built it -- the
+        inverse of binding, by searching in superposition (holographic_resonator).
+        codebooks: a list of (n, dim) bipolar matrices, one per factor slot. Returns
+        the recovered factor index per slot, whether it solved, and the combinatorial
+        search space it searched without enumerating. Uses MAP/bipolar binding (a
+        self-inverse algebra factorization needs; see the module)."""
+        from holographic_resonator import ResonatorNetwork
+        return ResonatorNetwork(codebooks).factor(composite, restarts=restarts)
+
+    def discover_units(self, stream, order=4, percentile=70):
+        """Self-discovery of structure: find the units in a raw symbol stream with
+        no labels, by branching entropy on the substrate (holographic_segment) --
+        prediction is tight inside a unit and uncertain at its end, so boundaries
+        are the entropy peaks. Returns {'chunks', 'boundaries', 'chunk_bits',
+        'symbol_bits'} -- including the MDL payoff (discovered chunks compress better
+        than single symbols). Pass a string or a list of symbols."""
+        from holographic_segment import Segmenter, chunk_compression
+        s = list(stream)
+        seg = Segmenter(dim=self.dim, order=order, seed=0).fit(s)
+        bounds = seg.boundaries(s, percentile)
+        chunks = seg.segment(s, percentile)
+        cb, sb = chunk_compression(s, chunks)
+        return {"chunks": ["".join(map(str, c)) for c in chunks],
+                "boundaries": sorted(bounds),
+                "chunk_bits": float(cb), "symbol_bits": float(sb)}
+
+    def compress_cost(self, tokens):
+        """Better structure means better compression, measured: encode a sequence by
+        the rank of each symbol under the meaning predictor and report the bits, the
+        uniform baseline, and the compression ratio (below 1 means structure was
+        exploited). A predictor IS a compressor. Needs build_meaning_predictor."""
+        if not hasattr(self, "_meaning_pred"):
+            return {"ratio": 1.0, "bits_per_symbol": 0.0, "n": 0}
+        if not hasattr(self, "_compressor"):
+            from holographic_compress import PredictiveCompressor
+            self._compressor = PredictiveCompressor(self._meaning_pred)
+        toks = tokens.split() if isinstance(tokens, str) else list(tokens)
+        return self._compressor.encode_cost(toks)
+
+    def structure_compresses(self, windows):
+        """The link itself: correlation between window structure scores and their
+        compression ratios (negative = more structure -> better compression)."""
+        if not hasattr(self, "_meaning_pred") or not hasattr(self, "_verifier"):
+            return 0.0
+        if not hasattr(self, "_compressor"):
+            from holographic_compress import PredictiveCompressor
+            self._compressor = PredictiveCompressor(self._meaning_pred)
+        from holographic_compress import structure_compression_correlation
+        return structure_compression_correlation(self._verifier, self._compressor, windows)
+
+    def respond(self, query, length=30, query_weight=4.0):
+        """Query-and-generate: answer a query with a continuation steered toward
+        what the query is about, held coherent by the structure guard. Returns the
+        generated token list. Needs build_meaning_predictor first."""
+        if not hasattr(self, "_meaning_pred") or not hasattr(self, "_verifier"):
+            return []
+        from holographic_respond import respond as _respond
+        return _respond(query, self._meaning_pred, self._verifier,
+                        length=length, query_weight=query_weight)
+
+    def respond_report(self, query, length=30, query_weight=4.0):
+        """Answer a query AND measure the answer: returns the response with its
+        relevance to the query (is it on-topic) and its structure score (is it
+        coherent) -- both reported, so the answer is never trusted blindly."""
+        if not hasattr(self, "_meaning_pred") or not hasattr(self, "_verifier"):
+            return {"response": [], "relevance": 0.0, "structure": 0.0}
+        from holographic_respond import respond_report as _rr
+        return _rr(query, self._meaning_pred, self._verifier,
+                   length=length, query_weight=query_weight)
+
+    def deliberate(self, query, max_iters=8, target_quality=0.45, length=26,
+                   query_weight=5.0, seed=0):
+        """Think before answering: draft a response, judge it, and refine -- keeping
+        the best -- stopping early once it is good enough. The number of iterations
+        is the 'thinking time' and adapts to how hard the query is (easy ones settle
+        fast, hard ones take longer). Returns the response with its quality, the
+        iterations used, and the full trace of drafts (the inner deliberation made
+        visible). Needs build_meaning_predictor first."""
+        if not hasattr(self, "_meaning_pred") or not hasattr(self, "_verifier"):
+            return {"response": [], "quality": 0.0, "iterations": 0, "trace": []}
+        if not hasattr(self, "_deliberator"):
+            from holographic_deliberate import Deliberator
+            self._deliberator = Deliberator(self._meaning_pred, self._verifier)
+        return self._deliberator.deliberate(
+            query, max_iters=max_iters, target_quality=target_quality,
+            length=length, query_weight=query_weight, seed=seed)
+
+    def negotiate(self, query, max_iters=8, target_quality=0.55, length=26,
+                  query_weight=5.0, seed=0):
+        """Deliberate under competing judges (coherence vs novelty vs relevance):
+        each draft is scored by all three and the kept draft is the most BALANCED
+        (its weakest pressure least bad), not the one that wins a single axis. The
+        per-judge trace shows the pressures resolving. Needs build_meaning_predictor."""
+        if not hasattr(self, "_meaning_pred") or not hasattr(self, "_verifier"):
+            return {"response": [], "scores": {}, "negotiated": 0.0, "iterations": 0, "trace": []}
+        if not hasattr(self, "_deliberator"):
+            from holographic_deliberate import Deliberator
+            self._deliberator = Deliberator(self._meaning_pred, self._verifier)
+        return self._deliberator.negotiate(
+            query, max_iters=max_iters, target_quality=target_quality,
+            length=length, query_weight=query_weight, seed=seed)
+
+    def anticipate_meaning(self, recent):
+        """Compose and settle a next-MEANING prediction; return (word, confidence).
+        Even when the exact word is missed, the prediction lands near semantically
+        appropriate words -- graded, compositional anticipation."""
+        if not hasattr(self, "_meaning_pred"):
+            return None, 0.0
+        word, _vec, conf = self._meaning_pred.predict_meaning(list(recent))
+        return word, conf
+
+    def meaning_prediction_report(self, tokens):
+        """Exact-symbol accuracy and semantic RANK (did the composed prediction
+        land in the right neighbourhood; 0.5 = chance, 1 = always nearest)."""
+        if not hasattr(self, "_meaning_pred"):
+            return {"exact": 0.0, "semantic_rank": 0.5, "n": 0}
+        toks = [w for s in [tokens] for w in (s if isinstance(s, list) else s.split())] \
+            if isinstance(tokens, str) else list(tokens)
+        return self._meaning_pred.evaluate(toks)
+
+    def learn_word_generator(self, sentences, order=1, window=2):
+        """Train a WORD-level context generator (holographic_generation): a word
+        n-gram for local fluency plus learned meaning vectors for an optional
+        topic pull. Kept separate from the char-level generate() above. Returns
+        self."""
+        from holographic_generation import ContextGenerator
+        self._wordgen = ContextGenerator(dim=self.dim, order=order, window=window,
+                                         seed=0).fit(sentences)
+        return self
+
+    def generate_words(self, seed, length=40, topic_weight=0.0, temperature=0.7,
+                       seed_rng=0):
+        """Generate at the word level. topic_weight blends a topic-alignment pull
+        into the n-gram choice (0 = bare n-gram). NOTE, measured honestly: the
+        topic pull does NOT buy real coherence on this substrate -- it is flat
+        when n-gram candidates are sparse and collapses into degenerate repetition
+        when pushed hard. Use topic_pull_tradeoff() to see the curve. The missing
+        piece for LLM-like behaviour is a high-capacity learned P(next|context),
+        not this re-ranking lever."""
+        if not hasattr(self, "_wordgen"):
+            raise RuntimeError("call learn_word_generator(sentences) first")
+        return self._wordgen.generate(seed, length=length, topic_weight=topic_weight,
+                                      temperature=temperature, seed_rng=seed_rng)
+
+    def topic_pull_tradeoff(self, seeds, weights=(0.0, 2.0, 8.0, 16.0), length=40):
+        """The honest experiment surfaced on the brain: for each topic_weight,
+        mean coherence, transition validity, and lexical diversity. Coherence that
+        'rises' only as diversity collapses is the metric being gamed by repetition,
+        not real on-topic language -- the kept negative that explains why deeper
+        conditioning alone does not make the brain an LLM."""
+        if not hasattr(self, "_wordgen"):
+            raise RuntimeError("call learn_word_generator(sentences) first")
+        return self._wordgen.sweep(seeds, weights=weights, length=length)
 
     def _seq_mem(self):
         if self._sequences is None:

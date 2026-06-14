@@ -1,16 +1,16 @@
 @echo off
 REM ============================================================
-REM  Holographic Archive - Windows launcher
+REM  UnifiedMind console - Windows launcher
 REM  Creates a LOCAL virtual environment in this folder (no admin
 REM  rights needed, nothing system-wide is touched), installs the
-REM  dependencies into it, and starts the web UI.
+REM  dependencies into it, and starts the web UI (unified_app.py).
 REM ============================================================
 setlocal
-title Holographic Archive
+title UnifiedMind console
 cd /d "%~dp0"
 
 echo.
-echo   Holographic Archive
+echo   UnifiedMind console
 echo   ===================
 echo.
 
@@ -31,7 +31,7 @@ if not exist ".venv\Scripts\python.exe" (
     python -m venv .venv
     if errorlevel 1 (
         echo   [!] Could not create the virtual environment.
-        echo       Make sure the "venv" module is available ^(standard with Python 3^).
+        echo       Make sure the ^"venv^" module is available ^(standard with Python 3^).
         pause
         exit /b 1
     )
@@ -57,6 +57,6 @@ echo   A browser window will open shortly.
 echo   Leave this window open while you use the app; press Ctrl+C here to stop.
 echo.
 start "" http://127.0.0.1:5000
-"%PY%" app.py
+"%PY%" unified_app.py
 
 endlocal

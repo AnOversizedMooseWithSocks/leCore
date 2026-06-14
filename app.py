@@ -64,7 +64,7 @@ for _im, _tg in zip(GALLERY, GALLERY_TAGS):
     ARCHIVE.add(_im, tags=_tg)
 
 
-# Load the real sprite set (shipped packed as features/sprites.hsp, 68 KB for 712
+# Load the real sprite set (shipped packed as features/sprites.hsp, 58 KB v2 for 712
 # sprites). Used in two places below: the image vault and the walking creature.
 # Graceful: if the asset is missing the app still runs (synthetic fallbacks).
 SPRITES = {}
@@ -386,7 +386,40 @@ def api_vision():
         return jsonify(_vision_shapes())
     if demo == "emergent":
         return jsonify(_vision_emergent())
+    if demo == "fractal":
+        return jsonify(_vision_fractal())
     return jsonify(_vision_colour())
+
+
+def _vision_fractal():
+    """Fractal dimension of edge maps: natural photos are rough and scale-
+    invariant (high D), synthetic shapes are smooth (D near 1). A measurable
+    natural-vs-synthetic signal, and a texture descriptor the shape work lacked."""
+    import glob as _glob
+    from holographic_fractal import image_fractal_dimension
+    rows = []
+    # synthetic references
+    N = 96
+    yy, xx = np.mgrid[0:N, 0:N].astype(float)
+    circ = (((xx - 48) ** 2 + (yy - 48) ** 2) < 30 ** 2).astype(float) * 255
+    grad = np.tile(np.linspace(0, 255, N), (N, 1))
+    rows.append({"name": "synthetic circle", "kind": "synthetic",
+                 "dimension": round(image_fractal_dimension(circ), 2)})
+    rows.append({"name": "synthetic gradient", "kind": "synthetic",
+                 "dimension": round(image_fractal_dimension(grad), 2)})
+    # real photo samples if present
+    for f in sorted(_glob.glob("features/photo_sample/*.npy")):
+        a = np.load(f)
+        rows.append({"name": os.path.basename(f), "kind": "natural photo",
+                     "dimension": round(image_fractal_dimension(a), 2)})
+    nat = [r["dimension"] for r in rows if r["kind"] == "natural photo"]
+    syn = [r["dimension"] for r in rows if r["kind"] == "synthetic"]
+    note = ("natural-photo edges are rougher (higher fractal dimension) than smooth "
+            "synthetic shapes -- a measurable natural-vs-synthetic signal")
+    return {"demo": "fractal", "rows": rows,
+            "natural_mean": round(float(np.mean(nat)), 2) if nat else None,
+            "synthetic_mean": round(float(np.mean(syn)), 2) if syn else None,
+            "note": note}
 
 
 # --- compositional scene: DCT tags + resonator factoring -----------------
@@ -620,6 +653,40 @@ def _store_address():
 @app.route("/api/store", methods=["POST"])
 def api_store():
     return jsonify(_store_address() if request.form.get("demo") == "address" else _store_keyspace())
+
+
+@app.route("/api/fountain", methods=["POST"])
+def api_fountain():
+    """The OTHER robustness axis. The holographic plate degrades gracefully when
+    part of one analog representation is corrupted (lossy, never exact). A
+    fountain code survives whole-PACKET loss and recovers the data EXACTLY -- as
+    long as enough distinct droplets arrive. Encode a real blob, simulate a lossy
+    channel at the requested loss rate, and report exact-recovery vs survivors,
+    plus the recovery curve (the cliff at the information floor)."""
+    from holographic_fountain import Fountain, recovery_curve
+    loss = float(request.form.get("loss", 30)) / 100.0
+    # a real, structured blob to protect
+    import pickle
+    blob = pickle.dumps({f"row{i}": list(range(i, i + 40)) for i in range(120)})
+    f = Fountain.from_bytes(blob, block_size=64)
+    rng = np.random.default_rng(0)
+    # provision the stream for the expected loss so survivors clear ~1.4k
+    target_survivors = int(f.k * 1.5)
+    n_send = int(target_survivors / max(0.05, 1 - loss))
+    drops = f.droplets(n_send, seed=1)
+    survivors = [d for d in drops if rng.random() > loss]
+    rec = f.decode_bytes(survivors, f.orig_len)
+    exact = rec == blob
+    curve = recovery_curve(f.k, overheads=(1.0, 1.1, 1.2, 1.35, 1.5), trials=6, seed=0)
+    return jsonify({
+        "k": f.k, "block_size": f.block_size, "blob_bytes": f.orig_len,
+        "sent": n_send, "loss_pct": int(loss * 100), "survivors": len(survivors),
+        "survivor_ratio": round(len(survivors) / f.k, 2),
+        "exact_recovery": bool(exact),
+        "curve": [{"overhead": round(o, 2), "success": s} for o, s in curve.items()],
+        "note": ("collect any k(1+eps) droplets, in any order, whichever survived, "
+                 "and the blob returns bit-for-bit; collect fewer than k and nothing "
+                 "returns -- exact above the floor, empty below it")})
 
 
 @app.route("/api/compression", methods=["POST"])
@@ -1535,7 +1602,15 @@ PAGE = r"""
   </div>
 
   <div class="panel">
-    <h2>Batch operations</h2>
+    <h2>Erasure robustness: the other axis</h2>
+    <p class="muted" style="margin:-8px 0 12px">The hologram degrades <em>gracefully</em> when part of one representation is corrupted &mdash; lossy, never exact. A <b>fountain code</b> survives whole-<em>packet</em> loss and recovers the data <b>exactly</b>, as long as enough distinct droplets arrive. A droplet is the XOR of a random subset of blocks &mdash; the binary sibling of a bundle &mdash; and decoding is a peel: blocks resolve one at a time as they become uniquely determined, the same loop-until-resolved pattern used all over this engine.</p>
+    <div class="row" style="align-items:center;gap:10px">
+      <label>channel loss <input id="floss" type="range" min="0" max="60" value="30" oninput="flv.textContent=this.value+'%'"><span id="flv">30%</span></label>
+      <button onclick="runFountain()">Send &amp; recover</button>
+      <span id="fsum" class="spin" style="display:none">pouring droplets&hellip;</span>
+    </div>
+    <div id="fout"></div>
+  </div>
     <p class="muted" style="margin:-8px 0 12px">1-bit hypervectors + Hamming vs the common float32 cosine search, on a 10k-item retrieval task</p>
     <button onclick="runBatch()">Run benchmark</button>
     <span id="batchsum" class="spin" style="margin-left:12px;display:none">running&hellip; (~2s)</span>
@@ -1655,6 +1730,7 @@ PAGE = r"""
       <button data-d="colour" class="on">colour (HSV)</button>
       <button data-d="shapes">edges &amp; shapes</button>
       <button data-d="emergent">emergent classes</button>
+      <button data-d="fractal">fractal dimension</button>
     </div>
     <span id="vissum" class="spin" style="display:none;margin-left:12px">computing&hellip;</span>
     <div id="visout" style="margin-top:14px"></div>
@@ -1787,6 +1863,18 @@ async function runVision(){
   const r=await (await fetch("/api/vision",{method:"POST",body:fd})).json();
   vissum.style.display="none";
   let cap="";
+  if(r.demo==="fractal"){
+    const rows=r.rows.map(x=>{
+      const nat=x.kind==="natural photo";
+      return `<tr><td style="padding:2px 10px 2px 0">${x.name}</td>`+
+             `<td class="muted" style="padding:2px 10px 2px 0">${x.kind}</td>`+
+             `<td style="padding:2px 0;color:${nat?'var(--coral)':'var(--teal2)'}"><b>${x.dimension.toFixed(2)}</b></td></tr>`;
+    }).join("");
+    visout.innerHTML=`<div class="muted" style="font-size:13px;margin-bottom:8px">${r.note}.</div>`+
+      `<table style="font-size:13px"><tr class="muted"><th align="left">image</th><th align="left">kind</th><th align="left">edge fractal D</th></tr>${rows}</table>`+
+      (r.natural_mean!=null?`<div style="margin-top:8px">natural mean <b style="color:var(--coral)">${r.natural_mean}</b> vs synthetic mean <b style="color:var(--teal2)">${r.synthetic_mean}</b></div>`:"");
+    return;
+  }
   if(r.demo==="colour"){
     const sw=r.swatches.map(s=>`<span title="${(s.w*100).toFixed(0)}% of pixels" style="display:inline-block;width:34px;height:34px;border-radius:6px;border:1px solid #22324f;background:rgb(${s.rgb[0]},${s.rgb[1]},${s.rgb[2]})"></span>`).join(" ");
     cap=`<div class="sublabel" style="margin-top:10px">dominant colours (k-means in RGB), most common first</div><div style="margin-top:6px;display:flex;gap:7px">${sw}</div>`;
@@ -1966,6 +2054,29 @@ async function recall(){
      <div class="arrow">&rarr;</div>
      <figure><img src="${r.recon_uri}"><figcaption>reconstruction<br>${r.psnr} dB${r.damage?` &middot; plate ${r.damage}% gone`:""}</figcaption></figure>
      <div style="align-self:center">${verdict}</div></div>`;
+}
+async function runFountain(){
+  fsum.style.display="inline"; fout.innerHTML="";
+  const fd=new FormData(); fd.append("loss", document.getElementById("floss").value);
+  const r=await (await fetch("/api/fountain",{method:"POST",body:fd})).json();
+  fsum.style.display="none";
+  const bars=r.curve.map(c=>{
+    const pct=Math.round(c.success*100);
+    const col=c.success>=0.8?'#7dd87d':(c.success>0?'#e0b341':'#c96868');
+    return `<div style="display:flex;align-items:center;gap:8px;margin:2px 0">`+
+      `<span style="width:54px;font-family:monospace;font-size:12px">${c.overhead.toFixed(2)}k</span>`+
+      `<span style="display:inline-block;height:12px;width:${Math.max(2,pct*1.4)}px;background:${col};border-radius:3px"></span>`+
+      `<span class="muted" style="font-size:12px">${pct}%</span></div>`;
+  }).join("");
+  const ok=r.exact_recovery;
+  fout.innerHTML=
+    `<div style="margin:10px 0;font-size:14px">Protecting a ${r.blob_bytes}-byte blob as <b>${r.k}</b> blocks. `+
+    `Sent <b>${r.sent}</b> droplets, lost <b>${r.loss_pct}%</b>, <b>${r.survivors}</b> survived `+
+    `(${r.survivor_ratio}k). Recovery: <b style="color:${ok?'#7dd87d':'#c96868'}">`+
+    `${ok?'EXACT, bit-for-bit':'incomplete (below the floor)'}</b>.</div>`+
+    `<div class="muted" style="font-size:13px;margin-bottom:6px">recovery probability vs droplets collected (the cliff is the information floor &mdash; k blocks cannot come from &lt;k droplets):</div>`+
+    bars+
+    `<div class="muted" style="font-size:13px;margin-top:8px">${r.note}.</div>`;
 }
 async function runComp(){
   compsum.style.display="inline"; compout.innerHTML="";

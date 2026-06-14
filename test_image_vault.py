@@ -85,3 +85,51 @@ class TestVault:
 
 if __name__ == "__main__":
     import sys; sys.exit(pytest.main([__file__, "-v"]))
+
+
+def test_vault_orientation_is_adaptive_and_lossless():
+    # THE GENERALIZED WIN: the vault tries both orientations per-set and keeps the
+    # smaller (a flag in the body), so it inherits the sprite transpose win
+    # AUTOMATICALLY while never regressing on horizontally-structured data. Both
+    # round-trip exactly.
+    import os
+    import numpy as np
+    import pack_sprites
+    from image_vault import ImageVault
+    folder = "features/sprites"
+    if not os.path.isdir(folder):
+        import pytest
+        pytest.skip("sprite folder not present")
+    # sprites: transpose should be chosen, and round-trip exact
+    sv = ImageVault()
+    for n, a in pack_sprites.load_folder(folder)[:120]:
+        sv.add(a, name=n)
+    cands = sv._candidates(sv._order(0.9))
+    assert cands["palette"][1][0] == 1                  # transpose chosen
+    sl = ImageVault.load(sv.pack())
+    assert all(np.array_equal(sv.images[i], sl.images[i]) for i in range(len(sv.images)))
+
+    # horizontally-structured data: row orientation chosen, still exact
+    rng = np.random.default_rng(0)
+    hv = ImageVault()
+    for k in range(24):
+        g = np.tile(np.linspace(0, 255, 40).astype(np.uint8), (40, 1))
+        g = (g + rng.integers(0, 6, (40, 40))).clip(0, 255).astype(np.uint8)
+        hv.add(np.stack([g, g, g, np.full_like(g, 255)], -1), name=f"h{k}")
+    assert hv._candidates(hv._order(0.9))["palette"][1][0] == 0   # row chosen
+    hl = ImageVault.load(hv.pack())
+    assert all(np.array_equal(hv.images[i], hl.images[i]) for i in range(len(hv.images)))
+
+
+def test_vault_orientation_handles_mixed_sizes():
+    # The transpose decode must respect each image's own (h, w) -- exercise it on
+    # a non-uniform set so the column-major reshape is genuinely tested.
+    import numpy as np
+    from image_vault import ImageVault
+    ms = ImageVault()
+    for k, (h, w) in enumerate([(16, 24), (20, 12), (32, 32), (24, 16)]):
+        a = np.zeros((h, w, 4), np.uint8); a[..., 3] = 255
+        a[:h // 2] = np.array([200, 0, 0, 255], np.uint8)
+        ms.add(a, name=f"m{k}")
+    ml = ImageVault.load(ms.pack())
+    assert all(np.array_equal(ms.images[i], ml.images[i]) for i in range(4))
