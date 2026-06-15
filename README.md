@@ -232,13 +232,13 @@ in, and a Labyrinth mode has it learn the way out of a maze -- all on a prototyp
 **Test suite** (runs the full pytest suite), **Query & recall** (the interactive image demo - degrade an
 image, optionally destroy part of the plate, watch it get recalled), **Recall by description**
 (cross-modal recall - describe an image in words and get the matching one back from the tag address space),
-**Set packer** (delta-code a set of related images against one reference), and **Image vault** (the general store: relate by fingerprint, compress adaptively across lossless and lossy encoders with an honest table, and query by example). The Test suite panel auto-discovers and runs every test_*.py (465 at last count; up to six skip without NLTK or its downloaded corpora). The package also ships the real 712-sprite set packed to ~67 KB at `features/sprites.hsp` (which doubles as a live demo of the sprite packer), and the UI uses it in two places: the Image vault runs relate/compress/query on the whole set, and the learning creature is drawn as a real walking sprite (`amg2`) that turns to face the direction it moves and cycles its two walk frames -- with its baked-in background keyed out (flood-filled from the edges) so it shows real transparency over the grid instead of an opaque tile. The creature also runs on an energy mechanic: it starts each life with 100 energy, every step costs 1, each star it reaches gives +3, and stepping on poison empties the battery -- instant death -- so collecting stars and staying alive are the same goal. Finally, a **Vision** panel shows that the image is just numbers: RGB->HSV colour and dominant-colour extraction, Sobel edges with Hough line/circle detection and Harris corners, a geometric shape classifier, and unsupervised *emergent* classes that fall out of clustering simple feature descriptors -- then a VSA prototype classifier (bundle + cosine cleanup) labels held-out shapes, tying the vision work back to the holographic engine. The panel reports each step's accuracy honestly, including where unsupervised clustering tops out. A final **Compositional scene** panel takes the opposite stance to a holistic descriptor: it reads the DCT coefficient layout as a texture tag (finally using the DCT as a feature, not just for compression), pairs it with HSV colour and geometric shape for automatic per-object tags, then encodes each object as a product of attribute atoms and a scene as their superposition -- so a ResonatorNetwork can factor the parts back out. Multi-object scenes now decompose reliably up to ~5 objects: the old ~50%-at-three ceiling turned out to be a scale bug (normalising the scene) plus missing refinement, not a real capacity limit -- keeping the scene as an unnormalised superposition and adding coordinate-descent sweeps recovers 3-4 objects at 100%. A **Scaling** panel confronts the deepest limit head-on: one holographic trace is a bundle with finite capacity (a 2048-d memory recalls 100% of 64 pairs but ~0% of 2048), so instead of one flat store it grows a deterministic recursive tree -- each node a seeded random hyperplane splitting items at the median, each leaf a small memory kept inside capacity, queries descending with a beam that back-tracks into nearby cells. This is the random projection tree of Dasgupta & Freund and, in spirit, how slime mould beats the size limit of pure diffusion by resolving a broad mass into a hierarchical vein network. The flat memory collapses with scale while the tree holds 100%, and search reaches ~96% recall at a fraction of a full scan's comparisons; per-leaf query 'flux' shows the thick-vein / thin-vein structure. A HoloForest of several differently-seeded trees breaks the single tree's recall ceiling, reaching ~100% recall at a fraction of a full scan's comparisons. Finally, a **Content addresses** panel realises the original partitioning idea the way AWS S3 does: no folders, just a flat keyspace where each object's name encodes the hierarchy. The auto-tags (colour/shape/texture) generate a deterministic URI like `red/circle/smooth`, the key *is* the partition path, and a FacetStore supports S3-style prefix listing and CommonPrefixes roll-up. Where the RP-tree splits by meaningless random hyperplanes, this splits by meaning -- readable, queryable paths -- at the honest cost of bucket skew, with key depth as the lever. And the resonator closes the loop: it recovers an item's URI from its content vector alone, so the address is computed from the content. And the skew problem is now handled: build_indexes gives any hot bucket its own in-bucket HoloForest, so content search inside a popular prefix stays sub-linear -- the bi-level structure (semantic prefix outside, geometric forest inside) realised.
+**Set packer** (delta-code a set of related images against one reference), and **Image vault** (the general store: relate by fingerprint, compress adaptively across lossless and lossy encoders with an honest table, and query by example). The Test suite panel auto-discovers and runs every test_*.py (500 at last count; up to six skip without NLTK or its downloaded corpora). The package also ships the real 712-sprite set packed to ~67 KB at `features/sprites.hsp` (which doubles as a live demo of the sprite packer), and the UI uses it in two places: the Image vault runs relate/compress/query on the whole set, and the learning creature is drawn as a real walking sprite (`amg2`) that turns to face the direction it moves and cycles its two walk frames -- with its baked-in background keyed out (flood-filled from the edges) so it shows real transparency over the grid instead of an opaque tile. The creature also runs on an energy mechanic: it starts each life with 100 energy, every step costs 1, each star it reaches gives +3, and stepping on poison empties the battery -- instant death -- so collecting stars and staying alive are the same goal. Finally, a **Vision** panel shows that the image is just numbers: RGB->HSV colour and dominant-colour extraction, Sobel edges with Hough line/circle detection and Harris corners, a geometric shape classifier, and unsupervised *emergent* classes that fall out of clustering simple feature descriptors -- then a VSA prototype classifier (bundle + cosine cleanup) labels held-out shapes, tying the vision work back to the holographic engine. The panel reports each step's accuracy honestly, including where unsupervised clustering tops out. A final **Compositional scene** panel takes the opposite stance to a holistic descriptor: it reads the DCT coefficient layout as a texture tag (finally using the DCT as a feature, not just for compression), pairs it with HSV colour and geometric shape for automatic per-object tags, then encodes each object as a product of attribute atoms and a scene as their superposition -- so a ResonatorNetwork can factor the parts back out. Multi-object scenes now decompose reliably up to ~5 objects: the old ~50%-at-three ceiling turned out to be a scale bug (normalising the scene) plus missing refinement, not a real capacity limit -- keeping the scene as an unnormalised superposition and adding coordinate-descent sweeps recovers 3-4 objects at 100%. A **Scaling** panel confronts the deepest limit head-on: one holographic trace is a bundle with finite capacity (a 2048-d memory recalls 100% of 64 pairs but ~0% of 2048), so instead of one flat store it grows a deterministic recursive tree -- each node a seeded random hyperplane splitting items at the median, each leaf a small memory kept inside capacity, queries descending with a beam that back-tracks into nearby cells. This is the random projection tree of Dasgupta & Freund and, in spirit, how slime mould beats the size limit of pure diffusion by resolving a broad mass into a hierarchical vein network. The flat memory collapses with scale while the tree holds 100%, and search reaches ~96% recall at a fraction of a full scan's comparisons; per-leaf query 'flux' shows the thick-vein / thin-vein structure. A HoloForest of several differently-seeded trees breaks the single tree's recall ceiling, reaching ~100% recall at a fraction of a full scan's comparisons. Finally, a **Content addresses** panel realises the original partitioning idea the way AWS S3 does: no folders, just a flat keyspace where each object's name encodes the hierarchy. The auto-tags (colour/shape/texture) generate a deterministic URI like `red/circle/smooth`, the key *is* the partition path, and a FacetStore supports S3-style prefix listing and CommonPrefixes roll-up. Where the RP-tree splits by meaningless random hyperplanes, this splits by meaning -- readable, queryable paths -- at the honest cost of bucket skew, with key depth as the lever. And the resonator closes the loop: it recovers an item's URI from its content vector alone, so the address is computed from the content. And the skew problem is now handled: build_indexes gives any hot bucket its own in-bucket HoloForest, so content search inside a popular prefix stays sub-linear -- the bi-level structure (semantic prefix outside, geometric forest inside) realised.
 
 ### From the command line
     python tour.py                    # guided tour of all subsystems (~20s)
     python holographic_creature.py    # any module runs its own demo
     python holographic_encoders.py    # numbers / text / records demos
-    pytest -q                         # the whole test suite (465 tests)
+    pytest -q                         # the whole test suite (500 tests)
 
 ---
 
@@ -979,7 +979,7 @@ The app and tour:
     tour.py       command-line tour of every subsystem
     run.bat       Windows launcher
 
-Tests (465 total):
+Tests (500 total):
 
     test_holographic.py           core engine (bind/bundle/memory/reflex/drift)
     test_holographic_image.py     image store / WHT / quantisation
@@ -1020,6 +1020,57 @@ adds the repo root to its own import path so it still runs from anywhere:
     figures/   rendered results
 
 ---
+
+## Variance and credibility (`holographic_measure.py`)
+
+This whole engine runs on random vectors -- random atoms, random projection trees,
+shuffled splits -- so any single-seed score is one sample from a distribution. A
+variance harness (`measure` / `assert_robust`) runs each load-bearing claim across
+seeds and reports a mean, a standard deviation, and a 95% bootstrap confidence
+interval; the load-bearing tests then assert the **lower CI bound**, not the mean, so a
+lucky seed can't pass a test the typical seed would fail. Measured across seeds on the
+real corpora (run `python holographic_measure.py` for the live table):
+
+| Claim (real corpus) | mean ± std | 95% CI | verdict |
+|---|---|---|---|
+| next-char accuracy (Gutenberg *Alice*, 6-gram) | 0.61 ± 0.00 | [0.61, 0.62] | solid |
+| language ID (UDHR, 6 languages) | 0.99 ± 0.01 | [0.98, 1.00] | solid |
+| word-boundary F1 (Brown, spaceless) | 0.60 ± 0.01 | [0.60, 0.61] | solid |
+| topic classification (Reuters, 5 categories) | 0.83 ± 0.05 | [0.79, 0.86] | solid |
+
+The first three are tight enough that the headline number is essentially seed-proof;
+the Reuters figure carries a real ±0.05 spread (a single seed could read anywhere from
+~0.79 to ~0.86), which is exactly why it's reported with its interval rather than as a
+point estimate, and why its test asserts robustness to a conservative 0.72 floor.
+
+## Where VSA is load-bearing (`holographic_ablate.py`, `ABLATIONS.md`)
+
+The sections above repeatedly find a simple baseline tying the holographic one. Taken
+together that raises a fair question: which subsystems genuinely *need* VSA, and which are
+a showcase where VSA isn't the reason they work? The ablation table answers it the honest
+way — for each subsystem, the dumbest non-holographic baseline runs on the same real data
+and metric, both are measured across seeds, and the confidence intervals decide the
+verdict:
+
+| Subsystem | Holographic | Dumbest honest baseline | Verdict |
+|---|---|---|---|
+| topic classify (Reuters, 5-cat) | **0.83 ± 0.05** | bag-of-words centroid: 0.61 ± 0.06 | **VSA load-bearing** |
+| key→value, **noisy** keys | **0.89 ± 0.07** | exact dict: 0.00 ± 0.00 | **VSA load-bearing** |
+| language ID (UDHR, 6 lang) | 0.99 ± 0.01 | bag-of-trigrams centroid: 0.99 ± 0.00 | uniformity |
+| segmentation (Brown) | 0.60 ± 0.01 | exact count-based entropy: 0.61 ± 0.00 | not load-bearing |
+| recall index (2000 items) | 0.82 ± 0.03 | exact brute-force scan: 1.00 ± 0.00 | scale, not accuracy |
+
+The finding is sharper than "it does text and memory": **VSA is load-bearing exactly where
+the problem is approximate or compositional** — recovering a value from a *corrupted* cue
+(an exact dict scores a flat zero the moment a key is perturbed; cosine cleanup recovers it
+at ~0.89), or folding co-occurrence structure into a representation (topic classification
+beats raw word counts by ~0.22). It is **decorative where an exact, countable statistic
+already settles the task**: character-trigram counts tell languages apart and branching
+entropy finds word boundaries whether or not you express them in VSA, and the exact
+estimators tie or marginally beat the holographic ones. The recall forest is honestly
+behind exact scan on recall but reaches it at ~41% of the comparisons — a sublinear *scale*
+win, recorded as such rather than dressed up. Full write-up in `ABLATIONS.md`; reproduce
+with `python holographic_ablate.py`.
 
 ## Honest limitations
 

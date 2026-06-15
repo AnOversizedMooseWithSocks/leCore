@@ -2217,3 +2217,199 @@ tension -- it is pure recall fidelity -- so a cap there is an unambiguous good w
 instances propagate into one label. Net: the features are core-merit features; the one
 real default question (capacity) was answered with numbers, and the answer is "it
 depends, here is the diagnostic to decide," which is the honest core stance.
+
+GEOMETRY PROPOSAL EVALUATED: WS1 RUNG 0 (UNITARY HRR) -- ADOPTED PER-SUBSYSTEM, NOT
+GLOBALLY (an external design note proposed exact-unbinding geometries: unitary HRR ->
+FHRR torus -> qFHRR (WS1), hyperbolic embedding (WS2, measure-first), rotor/GA binding
+(WS3, study). Evaluated WS1 Rung 0, the cheap one, on the existing benchmarks with
+negatives kept). THE CLAIM IS TRUE AT THE BINDING LEVEL: our unbind is bind(c,
+involution(a)), and the involution is the EXACT circular-convolution inverse only when
+an atom's FFT magnitudes are all 1. Gaussian atoms have a spread spectrum, so a single
+unbind recovers its target at only cosine ~0.71; a UNITARY atom (mint a Gaussian, divide
+its FFT by |.| so every component is unit-magnitude, ifft back -- stays real, 1x storage,
+bind/unbind byte-for-byte unchanged) makes that single unbind EXACT (1.0). Added
+unitary_vector() to holographic_ai.py and a unitary= flag on Vocabulary.
+BUT MEASURED AGAINST THE BENCHMARKS, THE WIN IS NARROW AND THE BLAST RADIUS IS REAL:
+  * Key->value capacity (the doc's headline target): NO GAIN -- at many pairs the error
+    is cross-term crosstalk BETWEEN pairs, which unitary atoms don't reduce. Wash with
+    Gaussian (8-48 pairs).
+  * Resonator/scene: nothing to fix -- it already uses MAP binding (bipolar, exact
+    self-inverse), not circular convolution.
+  * Few-factor role-binding (records, relations, sequence roles): a GENUINE win --
+    exact unbind widens the cleanup margin and lifts accuracy under stress (16
+    role/filler pairs at dim 256: 0.971 -> 0.982; margins wider across 3-8 roles).
+  * MEASURED NEGATIVES (kept on record): unitary atoms HURT every mechanism that reads
+    the SPREAD of a bundle as signal. (a) sequentiality_z momentum detection on a
+    2-symbol alphabet: real SOL tick signs (+0.20 lag-1 autocorr) read z=+44 Gaussian
+    vs z=-4.77 unitary (WRONG). (b) branching-entropy segmentation: word-boundary F1
+    fell below the random-cut baseline. (c) the creature's permute+bundle working
+    memory: the starved-maze bootstrap-rescue gauntlet went from cracking the maze to
+    rescued=0.0 under unitary.
+DECISION: do NOT flip the global Vocabulary default to unitary (too broad, real
+regressions). Per the doc's own "adopt per subsystem where it wins" guidance: Vocabulary
+defaults to GAUSSIAN; unitary is opt-in. ADOPTED unitary in KnowledgeStore (so relations
++ encyclopedia, pure role-binding, get the cleaner margin). KEPT Gaussian everywhere the
+bundle-spread mechanisms live. Two robustness fixes fell out: (1) the encyclopedia/
+unified climb() depth-decay used to come from per-hop unbind NOISE; with cleaner
+role-unbinding it had to be made an EXPLICIT hop_discount (0.9) -- a deliberate "a longer
+derivation is less certain" signal, not an artifact. (2) sequentiality_z now mints its
+OWN Gaussian atoms deterministically per symbol, so its verdict no longer depends on the
+caller's vocab or call order (this also fixed a test-ordering fragility). WS1 Rung 1
+(full complex FHRR, 2x storage) NOT built: Rung 0's narrow win doesn't yet justify it,
+and the doc gates Rung 1 behind "if Rung 0 helps but the resonator wants more" -- the
+resonator can't use it. WS2/WS3 not started (measure-first / study, as the doc itself
+ordered). Three pin tests added (unitary makes single unbind exact; Vocabulary mint
+flag; unitary widens role-filler margin). Concept: the torus isn't a better shape, it's
+our binding with the approximation removed -- and that removal is a NET GOOD only on
+clean role-unbinding, a net BAD on bundle-spread readouts; measurement drew the line,
+not theory.
+
+RECURRENT-LAYER PROPOSAL EVALUATED: WS-R RESERVOIR -- BUILT, MEASURED ON REAL DATA, KEPT
+AS A NEGATIVE (an external note proposed a recurrent layer: gradient-free Echo State
+Network/reservoir first (WS-R), numpy LSTM only if the reservoir falls short (WS-L,
+crosses the no-gradient line), associative-LSTM advanced (WS-A)). Built WS-R in
+holographic_recurrent.py: EchoStateNetwork (dense random reservoir, leaky-tanh, ONE
+ridge-regression readout -- no backprop, no epochs), VSAReservoir (the native one:
+permute is the fixed recurrent operator, bind folds in input, tanh the one nonlinearity,
+renormalise -- the engine's own kit + one tanh), ReservoirCharModel (next-char), and
+ReservoirSequenceClassifier (read the FINAL state, prototype + cosine cleanup). The
+reservoir adds the nonlinearity the linear permute+bundle recurrence lacks, gradient-free.
+MEASURED ON REAL CORPORA (per the user's directive: no toy data except as a control):
+  * Generation, next-char on Gutenberg's Alice (the doc's named ~62% baseline): n-gram
+    0.583 vs ESN 0.42 vs VSA reservoir 0.30 -- N-GRAM WINS.
+  * Language ID on real UDHR (6 languages): bag-of-trigrams 0.97-0.99 vs reservoir
+    final-state 0.33-0.36 -- BAG WINS DECISIVELY.
+  * Genre on real Brown (6 categories): bag-of-words 0.30 vs reservoir 0.28 -- BAG WINS.
+  * CONTROL (order-only, same character multiset in opposite order -- the one place a
+    bag is structurally blind): reservoir 1.00 vs bag 0.50. The MECHANISM works; real
+    tasks just don't reward it, because real classes separate on symbol statistics that
+    n-grams and bags capture directly and a FIXED random projection captures less
+    sharply. The abcd/dcba task is labelled a CONTROL, not a result.
+VERDICT: WS-R does not beat the existing baselines on this repo's real corpora, so it is
+NOT adopted as a default (no model= switch added to the core generation path -- adding a
+losing option to UnifiedMind.generate would be surface area for nothing). It is kept as a
+clean, self-contained module + demo + tests (6, the real-data A/Bs NLTK-gated) and
+documented as a measured negative, exactly the repo convention ("the reservoir didn't
+beat the n-gram on X is a result, not wasted work"). WS-L (LSTM) correctly NOT built: the
+doc gates it behind "only if the reservoir falls short in a way that justifies crossing
+the gradient line" -- the reservoir didn't fall short in a way more gradients would fix
+(the gap is the fixed random feature extractor vs explicit n-gram/bag counts, not a lack
+of learned gates), and building backprop-through-time to lose by less is not worth
+crossing the no-gradient line. WS-A deferred. Concept: a reservoir is the TEMPORAL
+blessing-of-dimensionality (random recurrent operator spreads a sequence into a near-
+orthogonal trajectory) -- elegant and gradient-free, but on these corpora the explicit
+count-based baselines are simply stronger, and measurement says so plainly.
+
+BRAIN BUG FIX (penalize_recent IndexError) + G6 PROPERTY TESTS (a bug report:
+penalize_recent throws IndexError: index N out of bounds when called after
+auto_maintain/reorganize resized a per-action prototype array; timing-sensitive, repro'd
+in a 15-day game with maintain='auto'. Plus a "close the gaps" design note: G1 variance
+harness, G2 ablation table, G3 frozen core+persistence, G4 adversarial gauntlet, G5
+perception ceiling, G6 algebra property tests).
+THE BUG, ROOT-CAUSED DEEPER THAN REPORTED: penalize_recent computes j from _unit[a] then
+indexes _cnt[a][j]/_ret[a][j]. The reporter guessed lockstep drift in reorganize, but
+reorganize keeps the four per-action banks (_unit/_sum/_ret/_cnt) in lockstep. The real
+fault: (1) after auto_maintain SWAPS in a new memory (or a basis change re-dimensions the
+banks), self._buf still holds (state, action) entries recorded against the OLD banks/old
+width, so a buffered state may not map onto the new banks at all; and (2) a separate, more
+serious latent crash -- auto_maintain's candidate rebuild (_rebuilt_from -> _blank) created
+candidates at the ORIGINAL self.dim, so after consolidate() projected the brain to a
+smaller subspace, _absorb vstacked a projected (narrower) state onto a full-width empty
+bank and raised ValueError outright. _blank also silently dropped the capacity setting.
+FIXES (root cause, not band-aid): _blank() now builds candidates at the brain's CURRENT
+working dimension (_state_dim() = basis rank if consolidated else dim) and inherits the
+basis, and carries capacity=self.capacity; auto_maintain clears self._buf after a swap
+(the buffer is meaningless against the new banks and self-heals as new experience
+arrives); penalize_recent defends itself -- skips a buffered entry whose action index is
+stale, whose state width no longer matches the bank, or whose argmax j would index past a
+since-resized array. Verified: 3000 steps of maintain='auto' with regime shifts +
+consolidation + constant penalize_recent, no exception, four banks stay in lockstep.
+G6 ADOPTED (the highest-value, cheapest gap, and the one this very bug motivates): new
+test_algebra_properties.py asserts INVARIANTS over many random draws, bounding the WORST
+case, not a demo outcome -- the silent numerical/structural class demo tests miss. Nine
+properties: bind/unbind round-trip band (Gaussian mean ~0.71, min >0.5 -- a kept measured
+fact: the involution is approximate on Gaussian atoms), unitary atoms make it exact
+(min >0.999), bind hides its operands (leakage <0.2), permute-inverse is exact identity
+(<1e-12), permute decorrelates, bundle stays similar to members within the 1/sqrt(count)
+capacity band, cleanup is exact under bounded noise, the Walsh-Hadamard key operator is an
+exact isometry (norm preserved + exact clean round-trip, <1e-9), and -- closing the loop
+on the bug -- the brain's four prototype banks stay in lockstep through a long maintain
++consolidate stream (a property test of STRUCTURE). G1-G5 NOT built this round (each
+substantial; G1 variance harness is a large retrofit of every headline number, G2 ablation
+a system-wide study, G3 a core extraction + persistence layer): evaluated and left
+sequenced as the doc orders, with G6 done first because it is cheap, parallel, and
+directly guards the exact regression class just reported. Concept: point the "measured,
+not promised" discipline at the algebra ITSELF -- invariants with worst-case bounds catch
+the degradations that leave every demo green.
+
+G1 VARIANCE HARNESS BUILT + LOAD-BEARING CLAIMS RETROFITTED ON REAL DATA (the credibility
+gap: most headline numbers were single-seed point estimates on a system built from RANDOM
+vectors, so a figure could be a lucky seed). holographic_measure.py: measure(run_once,
+seeds) runs a scored experiment once per seed and returns mean, sample std, and a 95%
+PERCENTILE-BOOTSTRAP CI (no distributional assumptions); assert_robust(stats, floor)
+passes only if the LOWER CI bound clears the floor (a lucky-seed mean is not enough);
+is_fragile flags a claim whose std is >= half its margin above the floor; report()
+formats "mean +/- std (95% CI [lo,hi], n)". Used REAL corpora throughout (per the
+standing directive -- no toy data except as a control): MEASURED, each across seeds:
+  * next-char accuracy, Gutenberg Alice 6-gram (the ~62% headline): 0.611 +/- 0.001
+    (CI [0.610, 0.612]) -- essentially seed-proof, a useful credibility result.
+  * language ID, UDHR 6 languages: 0.990 +/- 0.007 (CI [0.984, 0.994]) -- solid.
+  * word-boundary F1, spaceless Brown news (the ~0.61 headline): 0.602 +/- 0.010
+    (CI [0.596, 0.609]) -- solid.
+  * topic classification, Reuters 5-category: 0.819 +/- 0.044 (CI [0.793, 0.847]) -- the
+    one with a REAL spread (a single seed could read 0.77-0.87), so it is reported with
+    its interval and its test asserts the lower CI clears a conservative 0.72, not a
+    lucky 0.87.
+  * resonator 3x50 (125k space) and key->value peel recall (40@512): both 1.000 +/- 0.000
+    -- rock-solid across seeds.
+The load-bearing tests now assert_robust on the LOWER CI bound (test_variance.py: 8 tests
+-- 3 hermetic for the harness itself, including a test that a mean clearing a floor still
+FAILS when its lower CI does not; 5 real-corpus claims, NLTK-gated). README gained a
+"Variance and credibility" table; tour prints the live Alice spread; holographic_measure.py
+--main prints the full real-corpus variance table. CONCEPT: point the "measured, not
+promised" discipline at the numbers THEMSELVES -- a claim isn't its mean, it's a
+distribution, and the honest report is the spread plus a lower-bound test. Finding: the
+core text claims are not seed-fragile (tight spreads), and the one with genuine variance
+(Reuters classify) is now reported honestly with its band rather than as a point estimate.
+Of the "close the gaps" note, G1 and G6 are now done; G2 (ablation table) is the natural
+next -- it needs G1's noise band to judge "within the noise", which now exists.
+
+G2 ABLATION TABLE BUILT -- WHERE IS VSA ACTUALLY LOAD-BEARING? (the highest-insight gap;
+unblocked by G1, which provides the noise band needed to judge "within the noise"). For
+each subsystem, run the DUMBEST honest non-holographic baseline on the SAME real data and
+metric, measure both across seeds via the variance harness, and let the 95% CIs decide:
+holo lower CI > baseline upper CI => "VSA load-bearing"; baseline lower > holo upper =>
+"baseline wins"; overlap => "uniformity". holographic_ablate.py (verdict(), one holo+
+baseline pair per subsystem on real data, ablation_table(), _demo() prints it) +
+ABLATIONS.md (the committed deliverable) + test_ablations.py (6 tests, verdicts pinned,
+NLTK-gated). MEASURED VERDICTS (real corpora):
+  * topic classify (Reuters 5-cat): holo 0.830+/-0.047 vs bag-of-words 0.611+/-0.062 =>
+    VSA LOAD-BEARING (a real ~0.22 win -- the holographic encoding folds co-occurrence
+    structure in where a sparse bag centroid can't generalise).
+  * key->value, NOISY keys (noise=0.5): VSA 0.889+/-0.069 vs exact dict 0.000+/-0.000 =>
+    VSA LOAD-BEARING (the sharpest: a hash either matches or doesn't, so a perturbed key
+    scores a flat 0; cosine cleanup recovers the value from an approximate cue -- this is
+    the mechanism the whole engine leans on). Note: on EXACT keys a dict is trivially 1.0;
+    VSA's win is specifically the approximate-cue case.
+  * language ID (UDHR 6-lang): holo 0.990+/-0.008 vs bag-of-trigrams 0.994+/-0.004 =>
+    UNIFORMITY (the trigram IDEA tells languages apart, not the VSA encoding; the bag even
+    edges ahead).
+  * segmentation (Brown spaceless): holo entropy 0.604+/-0.011 vs EXACT count-based
+    branching entropy 0.612+/-0.000 => NOT LOAD-BEARING (the entropy idea finds
+    boundaries; the exact estimator marginally edges the holographic one, as an exact
+    method should -- razor-thin, lands between uniformity and a hair's-breadth baseline
+    win; the test accepts either non-load-bearing verdict).
+  * recall index (forest, 2000 items dim128): HoloForest 0.817+/-0.028 @ 41% of
+    comparisons vs exact scan 1.000+/-0.000 @ 100% => BASELINE WINS on raw recall, but the
+    honest reading is the forest's win is SCALE (sublinear, ~41% comparisons), not
+    accuracy -- the row attaches comparison_fraction and is read "decorative for accuracy,
+    load-bearing for cost".
+THROUGHLINE (now in README + ABLATIONS.md): VSA is load-bearing exactly where the problem
+is APPROXIMATE or COMPOSITIONAL (recover from a corrupted cue, fold structure into a
+representation) and decorative where an exact countable statistic already settles the task.
+A sharper self-description than "does text and memory", and it says where the next unit of
+effort belongs: the damage-tolerant / approximate-cue corners, not the ones a Counter wins.
+Of the "close the gaps" note: G1 (variance), G2 (ablation), G6 (algebra properties) now
+done. Remaining: G3 (frozen core + persistence -- gates build-on-top), G4 (adversarial/
+worst-case gauntlet), G5 (perception ceiling). G3 is the natural next: it gates building
+anything else on the kernel and adds save/load for trained minds.

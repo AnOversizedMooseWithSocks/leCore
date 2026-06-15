@@ -46,10 +46,12 @@ def test_multi_hop_taxonomy_is_exact_and_throughput_decays():
 
 def test_abstains_when_throughput_too_low():
     # A chain stops climbing once confidence falls below the floor, rather than
-    # emitting an unreliable deeper answer.
+    # emitting an unreliable deeper answer. With exact (unitary-atom) unbinding each
+    # hop is near-lossless, so depth-decay is now an explicit per-hop discount; a high
+    # enough floor still truncates a deep chain.
     e, _ = _toy()
     full, _ = e.climb("dog", min_throughput=0.0)
-    short, _ = e.climb("dog", min_throughput=0.5)
+    short, _ = e.climb("dog", min_throughput=0.75)
     assert len(short) < len(full)
 
 

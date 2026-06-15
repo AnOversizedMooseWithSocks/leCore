@@ -555,3 +555,59 @@ class TestEmergence:
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+def test_unitary_atoms_make_single_unbind_exact():
+    # Rung 0 (unitary HRR): a Gaussian atom's spread FFT spectrum makes the involution
+    # an only-approximate inverse (single unbind ~0.71); a unitary atom (flat spectrum)
+    # makes the SAME involution exact (single unbind 1.0), at no storage cost and with
+    # bind/unbind unchanged.
+    import numpy as np
+    from holographic_ai import unitary_vector, random_vector, bind, unbind, cosine
+    rng = np.random.default_rng(0)
+    # paired measurement
+    gauss, uni = [], []
+    for _ in range(50):
+        a = random_vector(512, rng); b = random_vector(512, rng)
+        gauss.append(cosine(unbind(bind(a, b), a), b))
+        a = unitary_vector(512, rng); b = unitary_vector(512, rng)
+        uni.append(cosine(unbind(bind(a, b), a), b))
+    assert np.mean(uni) > 0.999                      # exact
+    assert np.mean(gauss) < 0.9                       # approximate
+    # a unitary atom has a flat magnitude spectrum and stays real
+    v = unitary_vector(256, rng)
+    mags = np.abs(np.fft.fft(v))
+    assert mags.max() - mags.min() < 1e-9
+    assert not np.iscomplexobj(v)
+
+
+def test_vocabulary_unitary_by_default_and_optout():
+    # The Vocabulary mints Gaussian atoms by default; unitary=True opts in (adopted in
+    # the subsystems where exact unbind measurably wins, e.g. relations/encyclopedia).
+    import numpy as np
+    from holographic_ai import Vocabulary
+    vg = Vocabulary(256, seed=0)                      # default: Gaussian
+    vu = Vocabulary(256, seed=0, unitary=True)        # opt-in: unitary
+    ag = vg.get("x"); au = vu.get("x")
+    assert np.ptp(np.abs(np.fft.fft(ag))) > 0.5       # gaussian: spread spectrum
+    assert abs(np.ptp(np.abs(np.fft.fft(au)))) < 1e-9  # unitary: flat spectrum
+
+
+def test_unitary_widens_role_filler_cleanup_margin():
+    # The measured Rung 0 win on the few-factor role-binding path: exact unbinding
+    # widens the gap between the right filler and the best wrong one.
+    import numpy as np
+    from holographic_ai import unitary_vector, random_vector, bind, unbind, bundle, cosine
+
+    def margin(mint, n_roles=6, dim=512, trials=60):
+        rng = np.random.default_rng(2); ms = []
+        for _ in range(trials):
+            roles = [mint(dim, rng) for _ in range(n_roles)]
+            fillers = [mint(dim, rng) for _ in range(n_roles)]
+            rec = bundle([bind(r, f) for r, f in zip(roles, fillers)])
+            for qi, r in enumerate(roles):
+                est = unbind(rec, r)
+                sims = [cosine(est, c) for c in fillers]
+                ms.append(sims[qi] - max(sims[j] for j in range(n_roles) if j != qi))
+        return float(np.mean(ms))
+    assert margin(unitary_vector) > margin(random_vector)

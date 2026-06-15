@@ -57,6 +57,30 @@ import numpy as np
 #    in the file is just bookkeeping built on top of them.
 # ---------------------------------------------------------------------------
 
+def unitary_vector(dim, rng):
+    """Mint an atom whose frequency spectrum is all unit-magnitude (a UNITARY atom).
+
+    Circular-convolution binding (bind) has an exact inverse only when an atom's FFT
+    magnitudes are all 1 -- then the true inverse C/A equals the conjugate, which is
+    exactly what involution() already computes. A Gaussian atom (random_vector) has a
+    SPREAD spectrum, so involution is only an approximate inverse and a single
+    unbind recovers its target at cosine ~0.71; a unitary atom makes that single
+    unbind EXACT (cosine 1.0). Dividing each FFT component by its magnitude preserves
+    the conjugate symmetry of a real signal's spectrum, so the ifft comes back real --
+    no complex arithmetic, no storage change, and bind/unbind are byte-for-byte the
+    same. Measured win lands on the few-factor role-binding paths (records, relations,
+    sequence roles), where it widens the cleanup margin and lifts accuracy under stress
+    (e.g. 16 role/filler pairs at dim 256: 0.971 -> 0.982); it does NOT help heavily
+    superposed key->value stores (there the error is cross-term crosstalk between pairs,
+    which unitary atoms don't reduce) -- so it is a mint choice, not a global default.
+    """
+    f = np.fft.fft(rng.standard_normal(dim))
+    f = f / np.abs(f)                       # every component -> unit magnitude (unitary)
+    v = np.real(np.fft.ifft(f))             # conjugate-symmetric f keeps this real
+    n = np.linalg.norm(v)
+    return v / n if n > 0 else v
+
+
 def random_vector(dim, rng):
     """Mint a fresh 'atom': a random vector scaled to unit length.
 
@@ -148,15 +172,26 @@ class Vocabulary:
     known symbol -- this is what turns a fuzzy recall back into a crisp answer.
     """
 
-    def __init__(self, dim, seed=0):
+    def __init__(self, dim, seed=0, unitary=False):
         self.dim = dim
         self.rng = np.random.default_rng(seed)
         self.vectors = {}  # name -> clean unit vector
+        # Atom mint. Gaussian by default. unitary=True mints all-unit-magnitude-spectrum
+        # atoms, which make circular-convolution unbinding EXACT (the involution becomes
+        # the true inverse) -- measured to widen the cleanup margin on few-factor
+        # role-binding (records, relations, sequence roles). It is opt-in PER SUBSYSTEM,
+        # not a global default, because exact unbinding measurably HURTS the mechanisms
+        # that read the SPREAD of a bundle as a signal -- branching-entropy segmentation,
+        # the small-alphabet sequentiality test, and the creature's permute+bundle
+        # working memory (the starved-maze bootstrap rescue went to 0 under unitary).
+        # Adopt where it wins; leave the rest Gaussian.
+        self.unitary = unitary
 
     def get(self, name):
         """Return the vector for a symbol, creating it on first sight."""
         if name not in self.vectors:
-            self.vectors[name] = random_vector(self.dim, self.rng)
+            mint = unitary_vector if self.unitary else random_vector
+            self.vectors[name] = mint(self.dim, self.rng)
         return self.vectors[name]
 
     def cleanup(self, noisy, candidates=None):

@@ -367,3 +367,52 @@ def test_penalize_recent_noop_without_buffer():
     from holographic_creature import HolographicMind
     b = HolographicMind(dim=64, actions=["N", "S"], seed=0)
     assert b.penalize_recent() == 0
+
+
+def test_penalize_recent_survives_maintenance_and_basis_change():
+    # Regression: penalize_recent must not crash when auto_maintain / consolidate have
+    # rebuilt or re-dimensioned the prototype banks after a (state, action) was
+    # buffered. Drive a long maintain='auto' stream with regime shifts (so refresh
+    # candidates swap in) and a consolidation partway, calling penalize_recent
+    # throughout. Must complete with the four per-action arrays in lockstep.
+    import numpy as np
+    from holographic_creature import HolographicMind
+    rng = np.random.default_rng(1)
+    m = HolographicMind(dim=48, actions=["N", "S", "E", "W"], maintain="auto",
+                        merge=0.5, seed=1, check_every=25, buffer_cap=150)
+    for step in range(2000):
+        center = (step // 250) % 4
+        s = rng.standard_normal(48) + (center == 0) * 2.0
+        a = int(rng.integers(4))
+        m.remember([s], [a], [float(rng.standard_normal() + (a == center))])
+        if step % 5 == 0:
+            m.penalize_recent(amount=0.5, n=4)        # must never raise
+        if step == 600:
+            m.consolidate(energy=0.95)                # change the working dimension
+    for ai in range(4):
+        lens = {len(m._unit[ai]), len(m._cnt[ai]), len(m._ret[ai]), len(m._sum[ai])}
+        assert len(lens) == 1                          # four arrays stay in lockstep
+
+
+def test_penalize_recent_skips_stale_buffer_entries_safely():
+    # A buffer entry whose state width no longer matches the current banks (as after a
+    # basis change) is skipped, not indexed into -- penalize_recent returns cleanly.
+    import numpy as np
+    from holographic_creature import HolographicMind
+    m = HolographicMind(dim=32, actions=["N", "S"], maintain="auto", merge=0.5, seed=0)
+    rng = np.random.default_rng(0)
+    for _ in range(60):
+        m.remember([rng.standard_normal(32)], [int(rng.integers(2))], [rng.standard_normal()])
+    # inject a deliberately stale, wrong-width buffer entry
+    m._buf.append((np.zeros(7), 0, 0.0))              # 7 != 32, and a valid action
+    m._buf.append((np.zeros(32), 5, 0.0))             # action index out of range
+    assert m.penalize_recent(amount=0.5, n=4) >= 0    # no crash; bad entries skipped
+
+
+def test_auto_maintain_candidates_keep_capacity_setting():
+    # _blank() (used to build maintenance candidates) must carry the capacity setting,
+    # or a maintained brain silently loses capacity-aware layering after a swap.
+    from holographic_creature import HolographicMind
+    m = HolographicMind(dim=32, actions=["N", "S"], capacity=8, seed=0)
+    blank = m._blank()
+    assert blank.capacity == 8

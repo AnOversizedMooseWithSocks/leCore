@@ -164,11 +164,17 @@ class UnifiedMind:
             self.maintain_now()
         return self
 
-    def climb(self, concept, role="is_a", hops=99, min_throughput=0.0):
+    def climb(self, concept, role="is_a", hops=99, min_throughput=0.0, hop_discount=0.9):
         """Walk a relation chain (default is_a) up through the absorbed
         encyclopedia, as a path-traced ray over the mind's own memory. Returns
         (chain, throughput); a chain whose throughput would fall below
-        min_throughput stops rather than emitting a low-confidence deeper hop."""
+        min_throughput stops rather than emitting a low-confidence deeper hop.
+
+        Each hop applies an explicit `hop_discount` (<1): a deduction reached through
+        more inference steps is less certain. With exact (unitary-atom) unbinding each
+        hop is near-lossless, so this depth penalty is stated deliberately rather than
+        emerging from unbinding noise -- the 'how far has this traveled' signal is
+        intended. hop_discount=1.0 disables it."""
         chain = [concept]
         cur = concept
         throughput = 1.0
@@ -176,7 +182,7 @@ class UnifiedMind:
             filler, conf = self.read_role(cur, role) if cur in self._class_labels() else (None, 0.0)
             if filler is None:
                 break
-            t = throughput * max(0.0, float(conf))
+            t = throughput * max(0.0, float(conf)) * hop_discount   # explicit depth penalty
             if t < min_throughput:
                 break
             throughput = t

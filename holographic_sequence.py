@@ -130,10 +130,34 @@ def sequentiality_z(members, vocab, n_shuffle=15, seed=0):
         return 0.0                                   # too few to test honestly
     cands = sorted({str(e) for m in members for e in m})
 
+    # This transition test mints its OWN Gaussian atoms, deterministically per symbol,
+    # rather than using whatever atoms the passed `vocab` holds. Measured negative:
+    # exact-unbinding (unitary) atoms BREAK this test on tiny alphabets -- on real SOL
+    # tick signs (a 2-symbol U/D series with a true +0.20 lag-1 sign autocorrelation)
+    # unitary atoms report z=-4.77 (no order) while Gaussian atoms correctly report
+    # z=+44. With only two heavily-repeated symbols the permute + exact-unbind
+    # transition model goes degenerate; Gaussian atoms' mild spectral noise is what
+    # lets the score-margin statistic track real order. Deterministic per-symbol
+    # minting also makes the verdict independent of the caller's vocab and call order.
+    # `vocab` is now used only for its .dim. A recorded place exact unbind is a net
+    # negative, so Gaussian is kept on purpose.
+    dim = vocab.dim
+    _atoms = {}
+
+    def _atom(sym):
+        sym = str(sym)
+        if sym not in _atoms:
+            # seed each atom from the symbol name so the same symbol always maps to the
+            # same vector within this call, independent of insertion order
+            r = np.random.default_rng(abs(hash((seed, sym))) % (2**32))
+            v = r.standard_normal(dim)
+            _atoms[sym] = v / (np.linalg.norm(v) or 1.0)
+        return _atoms[sym]
+
     def tmodel(ms):
-        toks = [bind(vocab.get(str(a)), permute(vocab.get(str(b)), 1))
+        toks = [bind(_atom(a), permute(_atom(b), 1))
                 for m in ms for a, b in zip(m, m[1:])]
-        return bundle(toks) if toks else np.zeros(vocab.dim)
+        return bundle(toks) if toks else np.zeros(dim)
 
     def next_margin(model, ms):
         # SCORE MARGIN, not argmax accuracy: how much higher the TRUE next
@@ -144,8 +168,8 @@ def sequentiality_z(members, vocab, n_shuffle=15, seed=0):
         margins = []
         for m in ms:
             for a, b in zip(m, m[1:]):
-                probe = permute(unbind(model, vocab.get(str(a))), -1)
-                sc = {s: cosine(probe, vocab.get(s)) for s in cands}
+                probe = permute(unbind(model, _atom(a)), -1)
+                sc = {s: cosine(probe, _atom(s)) for s in cands}
                 others = np.mean([sc[s] for s in cands if s != str(b)]) if len(cands) > 1 else 0.0
                 margins.append(sc[str(b)] - others)
         return float(np.mean(margins)) if margins else 0.0

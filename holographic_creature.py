@@ -394,11 +394,21 @@ class HolographicMind:
             return 0
         hit = 0
         for s, a, _r in self._buf[-n:]:
+            if not (0 <= a < len(self._unit)):
+                continue                              # action index from a stale buffer
             U = self._unit[a]
-            if not len(U):
-                continue
+            # A maintenance pass (reorganize / auto_maintain swap / basis change) can
+            # rebuild or re-dimension the prototype banks AFTER this (s, a) was buffered,
+            # so a buffered state may no longer match the current bank's width, and the
+            # four per-action arrays are only guaranteed in lockstep at rest. Skip any
+            # buffer entry that doesn't line up cleanly rather than indexing past an
+            # array that maintenance has since resized.
+            if not len(U) or U.shape[1] != np.asarray(s).shape[-1]:
+                continue                              # state lives in a different space now
             sims = U @ s
             j = int(sims.argmax())
+            if j >= len(self._cnt[a]) or j >= len(self._ret[a]):
+                continue                              # banks out of lockstep -> don't index
             if sims[j] >= self.merge:                 # the prototype this move folded into
                 alpha = max(1.0 / (self._cnt[a][j] + 1.0), self.ret_alpha)
                 self._ret[a][j] -= alpha * amount     # lower its learned value
@@ -553,9 +563,24 @@ class HolographicMind:
         return before, self.prototype_count()
 
     # -- fully autonomous variant: no thresholds, decide by measured fit ---------
+    def _state_dim(self):
+        """The width of the space the brain currently operates in: the basis rank after
+        consolidate()/_expand_basis(), else the raw dim. Candidate memories must be
+        built at THIS width, because the recent-experience buffer they are rebuilt from
+        already lives in the projected space."""
+        return self._basis.shape[1] if self._basis is not None else self.dim
+
     def _blank(self):
+        d = self._state_dim()
         m = HolographicMind(self.dim, self.actions, k=self.k, merge=self.merge,
-                            ret_alpha=self.ret_alpha)
+                            ret_alpha=self.ret_alpha, capacity=self.capacity)
+        if d != self.dim:
+            # the buffer's states live in the projected space, so the candidate's empty
+            # prototype banks must have that width too (otherwise the first _absorb
+            # vstacks a d-wide state onto a self.dim-wide empty array and mismatches)
+            m._sum = [np.zeros((0, d)) for _ in range(len(self.actions))]
+            m._unit = [np.zeros((0, d)) for _ in range(len(self.actions))]
+            m._basis = self._basis                     # same subspace, so value()/decide line up
         return m
 
     def _clone(self, src=None):
@@ -655,6 +680,11 @@ class HolographicMind:
                     m.reorganize(duplicate=float(chosen[0].split("@")[1]))
             self._sum, self._unit = m._sum, m._unit
             self._ret, self._cnt = m._ret, m._cnt
+            # the recent-experience buffer was recorded against the OLD prototype banks
+            # (and possibly an old basis width); after a swap/refresh it no longer maps
+            # onto the new banks, so clear it rather than leave stale (s, a) entries that
+            # an online consumer like penalize_recent would have to second-guess.
+            self._buf = []
             self.reorganizations += 1
         return chosen[0], chosen[1].prototype_count()
 

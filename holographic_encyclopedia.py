@@ -81,11 +81,20 @@ class Encyclopedia:
         """One hop: the direct parent, with cleanup confidence."""
         return self._read(concept, "is_a")
 
-    def climb(self, concept, hops=99, min_throughput=0.0):
+    def climb(self, concept, hops=99, min_throughput=0.0, hop_discount=0.9):
         """Walk the is_a chain up to `hops` steps, as a relation ray. Returns
         (chain, throughput): chain starts at `concept`; throughput is the product
         of hop confidences. Stops on a dead end or when throughput would fall
-        below min_throughput (abstaining rather than emitting noise)."""
+        below min_throughput (abstaining rather than emitting noise).
+
+        Each hop also applies an explicit `hop_discount` (<1): a longer chain of
+        deductions is less certain than a short one, so confidence in a conclusion
+        decays with the number of inference steps that produced it. This used to fall
+        out of per-hop unbinding NOISE; with exact (unitary-atom) unbinding each hop is
+        near-lossless, so the depth penalty is now stated deliberately rather than
+        relying on an approximation artifact -- the calibrated 'how far has this
+        deduction traveled' signal is intended, not incidental. hop_discount=1.0
+        disables it (pure cleanup confidence)."""
         chain = [concept]
         cur = concept
         throughput = 1.0
@@ -93,7 +102,7 @@ class Encyclopedia:
             f, conf = self._read(cur, "is_a")
             if f is None:
                 break
-            t = throughput * max(0.0, conf)
+            t = throughput * max(0.0, conf) * hop_discount   # explicit depth penalty
             if t < min_throughput:
                 break
             throughput = t

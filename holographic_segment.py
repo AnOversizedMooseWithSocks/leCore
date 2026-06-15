@@ -53,7 +53,14 @@ class Segmenter:
     def __init__(self, dim=512, order=4, seed=0):
         self.dim = dim
         self.order = order
-        self.atoms = Vocabulary(dim, seed)
+        # Gaussian atoms on purpose. Branching entropy here reads the SPREAD of a
+        # next-symbol bundle as uncertainty; that estimate relies on Gaussian atom
+        # statistics. Measured negative: exact-unbind (unitary) atoms degrade the
+        # boundary signal (word-boundary F1 falls below the random-cut baseline on the
+        # app's spaceless-text probe), the same way they break the small-alphabet
+        # transition test in holographic_sequence. Unitary helps clean role-unbinding,
+        # not entropy-over-bundle -- so this stays Gaussian.
+        self.atoms = Vocabulary(dim, seed, unitary=False)
         self._next = defaultdict(lambda: np.zeros(dim))   # exact context -> next-atom bundle
         self._charset = []
         self._Cmat = None
