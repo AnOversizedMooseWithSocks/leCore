@@ -74,6 +74,22 @@ def test_ngram_backoff_never_stalls_on_unseen_context():
     assert ng.next_char("zzzz") in ng.alphabet
 
 
+def test_nucleus_decoding_is_backward_compatible_and_more_coherent():
+    # top_p=1.0 (the default) must reproduce the old plain-temperature output exactly, and
+    # top_p<1.0 (nucleus) must produce at least as many real words -- the coherence gain
+    # propagated into the core generator, with a default that changes nothing.
+    text = (" ".join(s for sents in TOPICS.values() for s in sents) + " ") * 6
+    ng = HolographicNGram(dim=1024, n=4, seed=0).fit(text)
+    import numpy as np
+    a = ng.generate("the ", length=200, temperature=0.6, rng=np.random.default_rng(0))
+    b = ng.generate("the ", length=200, temperature=0.6, rng=np.random.default_rng(0), top_p=1.0)
+    assert a == b                                       # default == explicit 1.0 (no behaviour change)
+    vocab = {w for sents in TOPICS.values() for sent in sents for w in _tokens(sent)}
+    nuc = ng.generate("the ", length=200, temperature=0.6, rng=np.random.default_rng(0), top_p=0.85)
+    assert (HolographicNGram.real_word_fraction(nuc, vocab)
+            >= HolographicNGram.real_word_fraction(a, vocab))   # nucleus no less coherent
+
+
 def _corpora_present():
     try:
         import nltk  # noqa: F401

@@ -169,6 +169,24 @@ class UniversalEncoder:
         # an unrecognised modality name: treat the input as an opaque symbol
         return self._symbols.get(str(x))
 
+    # -- persistence: everything but the learned word co-occurrence is seed-derived, so a
+    # round-trip stores config + the text encoder's learned context and rebuilds the rest.
+    def to_state(self):
+        return {
+            "dim": int(self.dim), "seed": int(self.seed),
+            "number_range": [float(self._scalar.lo), float(self._scalar.hi)],
+            "text_window": int(self._text.window),
+            "text": self._text.to_state(),
+        }
+
+    @classmethod
+    def from_state(cls, state):
+        enc = cls(int(state["dim"]), seed=int(state["seed"]),
+                  number_range=tuple(state["number_range"]),
+                  text_window=int(state["text_window"]))
+        enc._text = TextEncoder.from_state(state["text"])
+        return enc
+
 
 # ---------------------------------------------------------------------------
 # 2. THE BACK-ENDS  (small machines the rest of the project composes)

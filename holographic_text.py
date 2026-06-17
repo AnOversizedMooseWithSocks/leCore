@@ -30,7 +30,7 @@ Needs: numpy, holographic_ai.py, holographic_encoders.py beside it.
 import numpy as np
 from collections import defaultdict, Counter
 
-from holographic_ai import cosine, bind, unbind, bundle, permute, Vocabulary
+from holographic_ai import cosine, bind, bundle, permute, Vocabulary
 from holographic_encoders import TextEncoder
 
 
@@ -188,7 +188,7 @@ STOPWORDS = {
     "i", "his", "her", "their", "our", "your", "my", "not", "do", "does", "did",
     "so", "if", "then", "than", "into", "out", "up", "down", "over", "near",
     "every", "more", "one", "two", "very", "again", "while", "around", "across",
-    "right", "back", "whole", "single", "after", "before", "ahead", "did",
+    "right", "back", "whole", "single", "after", "before", "ahead",
 }
 
 
@@ -400,7 +400,12 @@ class HolographicNGram:
         dist = self._distribution(ctx)
         return max(dist, key=dist.get)
 
-    def generate(self, seed_text, length=160, temperature=0.5, rng=None):
+    def generate(self, seed_text, length=160, temperature=0.5, rng=None, top_p=1.0):
+        """Sample text one character at a time from the learned distribution. top_p<1.0
+        switches on NUCLEUS decoding: at each step keep only the smallest set of
+        likeliest characters whose probability sums to top_p, and sample within it --
+        trimming the unlikely tail that breaks words. top_p=1.0 (the default) is the
+        original plain-temperature behaviour exactly, so existing callers are unchanged."""
         rng = rng or np.random.default_rng(0)
         out = seed_text.lower() if self.fold_case else seed_text
         for _ in range(length):
@@ -409,7 +414,15 @@ class HolographicNGram:
             weights = np.clip(np.array([dist[c] for c in chars]), 0, None) ** (1.0 / temperature)
             if weights.sum() <= 0:
                 break
-            out += chars[int(rng.choice(len(chars), p=weights / weights.sum()))]
+            p = weights / weights.sum()
+            if top_p < 1.0:                              # nucleus: keep the top-p mass only
+                order = np.argsort(p)[::-1]
+                cum = np.cumsum(p[order])
+                keep = order[:max(1, int(np.searchsorted(cum, top_p)) + 1)]
+                masked = np.zeros_like(p)
+                masked[keep] = p[keep]
+                p = masked / masked.sum()
+            out += chars[int(rng.choice(len(chars), p=p))]
         return out
 
     def predict_accuracy(self, text):
@@ -511,7 +524,7 @@ def demo_text():
     print(f"   next-letter guess right {100 * acc:.0f}% of the time on held-out text "
           f"(vs {100 * base:.0f}% for always-guess-space)")
     print(f"   but {100 * real:.0f}% of the WORDS it invents are real words -- word")
-    print(f"   structure fell out of letter statistics, with no notion of a word")
+    print("   structure fell out of letter statistics, with no notion of a word")
     print(f"   sample: \"{sample}\"")
     print("\n   Honest verdict: locally it reads like the training text, globally it")
     print("   drifts into nonsense -- exactly what a small n-gram model does. It has")

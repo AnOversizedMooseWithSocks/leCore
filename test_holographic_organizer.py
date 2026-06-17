@@ -162,3 +162,79 @@ def test_autonomous_reorg_does_not_oversplit_single_mode():
     acc = np.mean([mind.classify(sample(c := int(r.integers(K))), "vector")[0] == c for _ in range(400)])
     assert acc >= 0.9
     assert mind.live.size() == K        # exactly one prototype per class, no over-split
+
+
+def test_subprototype_classify_is_vectorized_and_matches_the_loop():
+    # The brain's hottest scan (every classify/recall/decide routes through it) runs as one
+    # cached matrix-vector product. It must give bit-for-bit the same winner as the old
+    # per-prototype loop -- including the `among` modality restriction.
+    rng = np.random.default_rng(0)
+    dim = 256
+    m = SubPrototypeMemory()
+    for c in range(30):
+        for _ in range(2):
+            m.add(rng.standard_normal(dim) + c * 0.02, f"c{c}")
+
+    def loop_classify(vec, among=None):
+        best, bs = None, -2.0
+        for label, _, unit, _ in m._p:
+            if among is not None and label not in among:
+                continue
+            s = float(unit @ vec)
+            if s > bs:
+                best, bs = label, s
+        return best, bs
+
+    labels = list(m.labels())
+    for _ in range(40):
+        v = rng.standard_normal(dim)
+        a, b = m.classify(v), loop_classify(v)
+        # the WINNER is always identical; the score matches to machine epsilon (the matrix
+        # product and the per-element loop sum in a different order, ~1e-15 apart)
+        assert a[0] == b[0] and abs(a[1] - b[1]) < 1e-9
+        among = set(rng.choice(labels, size=5, replace=False).tolist())
+        a, b = m.classify(v, among=among), loop_classify(v, among=among)
+        assert a[0] == b[0] and abs(a[1] - b[1]) < 1e-9
+
+
+def test_subprototype_cache_invalidates_on_in_place_update():
+    # add() can fold a vector into an existing same-label prototype, mutating its unit
+    # vector in place without changing the prototype count. The cached stack must NOT go
+    # stale: querying with the updated prototype's own unit scores ~1.0.
+    rng = np.random.default_rng(1)
+    dim = 256
+    m = SubPrototypeMemory()
+    m.add(rng.standard_normal(dim), "A")
+    _ = m.classify(rng.standard_normal(dim))     # populate the cache
+    m.add(rng.standard_normal(dim), "A")         # in-place fold, count unchanged
+    label, score = m.classify(m._p[0][2])
+    assert label == "A" and abs(score - 1.0) < 1e-9
+
+
+def test_fingering_prescreen_skips_only_when_safe_and_never_changes_the_choice():
+    # Salt-finger pre-screen (revisited concept #1): default OFF is unchanged behaviour;
+    # ON, it may only SKIP the resolution sweep when no class fingers -- it must reach the
+    # SAME organization the full measured sweep would, on both unimodal and bimodal worlds.
+    import copy
+    from holographic_organizer import _multimodal_world
+
+    # bimodal world: a split helps, so the pre-screen must run the full sweep (same choice)
+    enc, sample, K, _ = _multimodal_world(seed=0, dim=512, n_classes=3, modes=2)
+    m = SelfOrganizingMind(dim=512, seed=0)
+    rng = np.random.default_rng(0)
+    for _ in range(300):
+        c = int(rng.integers(K))
+        m.observe_vector(enc.encode(sample(c)), c)
+    a = copy.deepcopy(m).auto_reorganize()
+    b = copy.deepcopy(m).auto_reorganize(fingering_prescreen=True)
+    assert a == b and a is not None and a[0].startswith("k=")     # split chosen both ways
+
+    # unimodal world: nothing fingers, so the pre-screen skips the sweep -- same "keep"
+    encu, sampleu, Ku, _ = _multimodal_world(seed=2, dim=512, n_classes=3, modes=1)
+    mu = SelfOrganizingMind(dim=512, seed=0)
+    for _ in range(300):
+        c = int(rng.integers(Ku))
+        mu.observe_vector(encu.encode(sampleu(c)), c)
+    a = copy.deepcopy(mu).auto_reorganize()
+    b = copy.deepcopy(mu).auto_reorganize(fingering_prescreen=True)
+    assert a == b == ("keep", mu.live.size())                     # keep chosen both ways

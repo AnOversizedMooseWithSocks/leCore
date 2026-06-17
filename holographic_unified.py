@@ -22,7 +22,6 @@ self-maintenance, not a single magic method.
 
 import numpy as np
 
-from holographic_ai import cosine
 from holographic_mind import UniversalEncoder, _Index
 from holographic_organizer import SelfOrganizingMind
 from holographic_creature import HolographicMind
@@ -56,6 +55,7 @@ class UnifiedMind:
     def __init__(self, dim=1024, seed=0, number_range=(-4.0, 4.0), maintain='auto',
                  check_every=60, text_window=2):
         self.dim = dim
+        self.seed = seed                   # remembered for owned faculties (scene, morph)
         self.maintain = maintain
         self.check_every = check_every
         # ONE perception, shared by everything below
@@ -68,6 +68,11 @@ class UnifiedMind:
         # ONE decision brain (assembled when an action set is declared)
         self._brain = None
         self._actions = None
+        # ONE scene faculty (compose/decompose visual scenes; built on first use, on the
+        # same substrate -- it is part of this mind, not a separate engine)
+        self._scene = None
+        self._groles = None    # group-key atoms for nested (scene-of-scenes) composition
+        self._hcap = None      # opt-in FHRR high-capacity key-value memory (built on first use)
         self._taught = 0
         self._label_modality = {}    # which modality each label came from (for routing)
         self._fillers = {}           # role -> set of values seen in absorbed records
@@ -476,7 +481,7 @@ class UnifiedMind:
         if self._recall is None:
             return []
         return [(v, lab, x) for v, (lab, x) in
-                zip(self._recall.vecs, self._recall.payloads)
+                zip(self._recall.vecs, self._recall.payloads, strict=True)
                 if isinstance(x, dict)]
 
     def _class_vec(self, label):
@@ -955,8 +960,16 @@ class UnifiedMind:
             raise RuntimeError("next_symbol needs the flat engine: learn_sequence(text, hierarchical=False)")
         return g["gen"].next_char(context)
 
-    def generate(self, seed_text, length=160, temperature=0.5, name=None):
-        return self._pick_gen(name, seed_text)["gen"].generate(seed_text, length, temperature)
+    def generate(self, seed_text, length=160, temperature=0.5, name=None, top_p=1.0):
+        """Continue text from the chosen sequence schema. top_p<1.0 requests nucleus
+        decoding; it is forwarded only to flat n-gram generators that support it (the
+        hierarchical schema generator decodes its own way), so the argument is safe and
+        backward-compatible everywhere."""
+        gen = self._pick_gen(name, seed_text)["gen"]
+        try:
+            return gen.generate(seed_text, length, temperature, top_p=top_p)
+        except TypeError:
+            return gen.generate(seed_text, length, temperature)   # generator without top_p
 
     def build_predictor(self, order=2, reinforce_threshold=0.15, novelty_threshold=0.55):
         """Give the mind a PREDICTIVE LOOP over symbol sequences: it anticipates
@@ -1099,6 +1112,97 @@ class UnifiedMind:
         self-inverse algebra factorization needs; see the module)."""
         from holographic_resonator import ResonatorNetwork
         return ResonatorNetwork(codebooks).factor(composite, restarts=restarts)
+
+    # -- one scene faculty, on the same substrate ---------------------------
+    def scene(self):
+        """The mind's own scene coder (compose/decompose visual attribute scenes), built
+        lazily on this mind's dim and seed so it shares the substrate rather than being a
+        separate engine. All scene methods below go through it."""
+        if self._scene is None:
+            from holographic_scene import SceneCoder
+            self._scene = SceneCoder(dim=min(self.dim, 1024), seed=self.seed)
+        return self._scene
+
+    def compose_scene(self, tag_list):
+        """Run the resonator FORWARD on this mind's scene coder: bind chosen attribute
+        atoms (colour/shape/texture) into a single scene vector that was never stored.
+        The inverse of decompose_scene()."""
+        return self.scene().encode_scene(tag_list)
+
+    def decompose_scene(self, scene_vec, n_objects, sweeps=2):
+        """Factor a scene vector back into its per-object attribute tags -- the backward
+        resonator, on the mind's own scene coder. Verifies a composed scene by recovering
+        exactly what built it."""
+        return self.scene().factor_scene(scene_vec, n_objects, sweeps=sweeps)
+
+    def _group_roles(self):
+        """A small vocabulary of group-key atoms, seed-derived so a nested scene
+        reconstructs from the same seed (regenerate-from-seed at the group level too)."""
+        if getattr(self, "_groles", None) is None:
+            from holographic_ai import Vocabulary
+            self._groles = Vocabulary(min(self.dim, 1024), seed=self.seed + 11, derived=True)
+        return self._groles
+
+    def high_capacity_memory(self):
+        """An opt-in FHRR (complex-phasor) key->value trace memory and its atom vocab,
+        for the one regime where the complex domain measurably beats the real-valued core:
+        a LARGE number of pairs crammed into one vector (see holographic_fhrr -- ~0.90 vs
+        ~0.61 recovery at 40 pairs/256-d). The real-HRR memory stays the default everywhere
+        else, since at normal loads both are perfect. Returns (PhasorMemory, PhasorVocabulary)
+        sharing this mind's seed, so the store is seed-deterministic like the rest."""
+        from holographic_fhrr import PhasorMemory, PhasorVocabulary
+        if getattr(self, "_hcap", None) is None:
+            d = min(self.dim, 1024)
+            self._hcap = (PhasorMemory(d), PhasorVocabulary(d, seed=self.seed + 23, derived=True))
+        return self._hcap
+
+    def compose_nested(self, groups):
+        """Fractal composition -- the SAME bind+superpose that builds a scene from objects,
+        applied ONE LEVEL UP to build a scene-of-scenes. `groups` is a dict {group_key:
+        tag_list}; each tag_list is composed into a sub-scene vector, that vector is bound
+        to its group-key atom, and the bound sub-scenes are superposed. Same above, same
+        below: a sub-scene is to the super-scene exactly what an object is to a scene.
+
+        Recovery (decompose_nested) is near-perfect for 2-3 groups and degrades gracefully
+        beyond as group-binding cross-talk accumulates -- the same capacity limit the flat
+        scene has, now measured at the group level: ~1.00 at 2 groups, ~0.97 at 3, ~0.89 at
+        4, ~0.82 at 5 (2 objects each). Returns the super-scene vector."""
+        from holographic_ai import bind
+        gr = self._group_roles()
+        sc = self.scene()
+        parts = [bind(gr.get(str(k)), sc.encode_scene(tags)) for k, tags in groups.items()]
+        return np.sum(parts, axis=0)
+
+    def decompose_nested(self, super_scene, group_sizes, sweeps=2):
+        """Invert compose_nested: for each group key, unbind its sub-scene out of the
+        super-scene and factor that sub-scene back into per-object tags -- the same
+        unbind-then-factor at two levels. `group_sizes` is {group_key: n_objects}. Returns
+        {group_key: [recovered tags]}. A nested scene is real when it analyses straight back
+        to the groups-of-objects it was built from."""
+        from holographic_ai import unbind
+        gr = self._group_roles()
+        sc = self.scene()
+        out = {}
+        for k, n in group_sizes.items():
+            sub = unbind(super_scene, gr.get(str(k)))
+            out[k] = sc.factor_scene(sub, n, sweeps=sweeps)
+        return out
+
+    def render_scene(self, tag_list, S=96, seed=0):
+        """Render composed attribute tags to an actual RGB image via the scene renderer."""
+        from holographic_scene import make_scene
+        return make_scene([(t["shape"], t["colour"]) for t in tag_list], S=S, seed=seed)
+
+    def morph_scene(self, img_a, img_b, steps=9):
+        """Morph between two images in the DCT-coefficient domain (structure-blending
+        slerp, not a ghosting crossfade), reusing the generation bundle's morph on a DCT
+        basis sized to these images. Part of this mind's generative repertoire."""
+        from holographic_archive import HolographicArchive
+        from holographic_generate import morph_images
+        S = img_a.shape[0]
+        arch = HolographicArchive(shape=img_a.shape, capacity=2,
+                                  keep=min(900, (S * S) // 2), dim=32768, seed=self.seed)
+        return morph_images(arch.M, img_a, img_b, steps=steps)
 
     def discover_units(self, stream, order=4, percentile=70):
         """Self-discovery of structure: find the units in a raw symbol stream with
@@ -1409,8 +1513,6 @@ class UnifiedMind:
                     log.append((step, "blocked",
                                 f"context missing bindings: {unbound}"))
                     continue
-                bound = " ".join(context.get(t, t) if t == "<_>" else t
-                                 for t in template)
                 # fill each <_> in order from the slot_keys' context values
                 vals = [context[k] for k in slot_keys]
                 parts, vi = [], 0

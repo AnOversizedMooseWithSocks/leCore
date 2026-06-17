@@ -266,7 +266,7 @@ def demo_consolidation():
         c.support, c.committed = 10.0, True
         mind.concepts.append(c)
     print(f"\n  committed concepts before consolidation: {len(mind.committed())}")
-    print(f"  (two of them are near-duplicates of the same thing)")
+    print("  (two of them are near-duplicates of the same thing)")
     mind.consolidate()
     print(f"  committed concepts after consolidation : {len(mind.committed())}")
     print("\n  Prototypes that drifted onto the same thing are fused -- the inventory")

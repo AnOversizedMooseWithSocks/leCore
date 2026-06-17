@@ -285,13 +285,13 @@ def demo_compass():
 
     query = bundle([good_region, bad_region])  # a point sitting between the two
     d = compass.direction(query)
-    print(f"\nFrom a point between the success and failure regions, the compass")
-    print(f"points toward success and away from failure:")
+    print("\nFrom a point between the success and failure regions, the compass")
+    print("points toward success and away from failure:")
     print(f"  similarity of direction to success region: {cosine(d, good_region):+.2f}")
     print(f"  similarity of direction to failure region: {cosine(d, bad_region):+.2f}")
     before = cosine(query, good_region)
     after = cosine(compass.steer(query, step=0.4), good_region)
-    print(f"\nSteering the point along the compass moves it toward success:")
+    print("\nSteering the point along the compass moves it toward success:")
     print(f"  similarity to success region: {before:+.2f} -> {after:+.2f}\n")
 
 

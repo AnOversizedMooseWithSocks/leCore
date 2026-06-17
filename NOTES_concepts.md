@@ -40,6 +40,29 @@ signal has to be held-out accuracy itself, which is exactly what
 `auto_reorganize` already measures. A real salt-finger memory would need a
 low-dimensional variable to stratify on; the substrate deliberately has none.
 
+REVISITED (after the projection/consolidation work, concept 7, which discovers a
+~22-36-dim subspace the prototypes share -- the low-dimensional variable the note
+said we lacked). Re-measured the two-means stratification gain, this time on the
+REAL encoded multimodal world (`_multimodal_world`, classes with genuine sub-modes
+through the UniversalEncoder) rather than synthetic Gaussian blobs. Two honest
+findings: (a) the signal is NOT dead at 512-d on the real substrate -- bimodal vs
+unimodal classes separate by ~7 sigma, essentially identical full-512-d and
+in-basis (7.17 vs 7.01). The original 0.3-sigma decay was an artifact of
+structureless synthetic blobs; the encoder's real structure carries the signal.
+(b) The gain PREDICTS the payoff: correlation 0.94 between a class's two-means gain
+and the held-out accuracy benefit of actually splitting it (bimodal gain ~39 vs
+unimodal ~1.07). So the pre-screen the original declared unavailable does work
+here. SHIPPED as a CONSERVATIVE, default-off option on `auto_reorganize`
+(`fingering_prescreen=True`): when no class fingers (max gain < finger_floor) it
+skips the expensive 4-resolution sweep and short-circuits to "keep" -- it can only
+AVOID work, never change the measured choice (verified: identical organization to
+the full sweep on both bimodal -> k=2 and unimodal -> keep worlds; ~21% faster on a
+stable memory, 10.7 -> 8.4 ms). The lesson cuts both ways: the original negative
+was real for the test it ran, but the test bed (synthetic blobs) was not the
+substrate, and a capability unlocked later (the consolidation lens) made it worth
+re-measuring on real data -- where it became a small honest win. Pinned in
+test_holographic_organizer.py.
+
 ## 2. Surface tension  -- NOT implemented (likely a refinement, and we have a curation negative)
 
 Water minimizes surface area; a membrane resists deformation in proportion to
@@ -2413,3 +2436,687 @@ Of the "close the gaps" note: G1 (variance), G2 (ablation), G6 (algebra properti
 done. Remaining: G3 (frozen core + persistence -- gates build-on-top), G4 (adversarial/
 worst-case gauntlet), G5 (perception ceiling). G3 is the natural next: it gates building
 anything else on the kernel and adds save/load for trained minds.
+
+GENERATION LOW-HANGING BUNDLE BUILT -- PROCEDURAL OUTPUT IN FOUR MODALITIES (the
+highest-value roadmap's Tier 1, and the third of its "if you do only three things" after
+G1+G2 and unitary HRR; the on-ramp to the generative work). holographic_generate.py drives
+decoders the engine already has, no learned distribution, no gradients; each generator
+beats the dumbest honest baseline on a measurable metric:
+  * IMAGE/VIDEO morph: slerp between two stored images IN THE DCT-COEFFICIENT DOMAIN
+    (interpolate coefficient direction + magnitude), inverse-transform per frame. Honest
+    win is ANTI-GHOSTING, measured precisely: a pixel crossfade midpoint IS the
+    double-exposure 0.5a+0.5b (distance 0 -- both pictures visible at once); the
+    coefficient-domain morph blends STRUCTURE so its midpoint sits ~0.06 away from that
+    double image. (Measured the wrong metric first -- frame-evenness -- where a crossfade
+    trivially wins by construction; the RIGHT metric is ghosting, and slerp wins it
+    clearly. Kept that as the lesson.) morph_video() threads keyframes (de-dupes shared
+    endpoints: 3 transitions x 8 = 7+7+8 = 22 frames).
+  * TEXT: nucleus (top-p) decoding + optional repetition penalty over the existing
+    holographic n-gram distribution. Honest win is COHERENCE: real-word fraction
+    0.79 (plain temperature) -> ~1.00 (nucleus p=0.85), because trimming the unlikely tail
+    removes the garbage chars that break words -- at a modest diversity cost (distinct-4gram
+    0.87 -> 0.77). That is the real top-p tradeoff, reported not hidden. The repetition
+    penalty defaults OFF: measured, this n-gram does not loop (repeat-rate ~0), so it is a
+    knob not a fix -- kept that negative honestly rather than claiming a repetition win.
+  * AUDIO: sonify a symbolic sequence to a real 16-bit WAV (stdlib wave) -- each distinct
+    symbol -> a fixed chromatic pitch, deterministic and repeatable, short sine tones with
+    a click-avoiding fade. This is faithful RENDERING, not a learned synthesiser; the
+    honest claim (asserted) is distinct symbols -> distinguishable repeatable pitches, NOT
+    "sounds good".
+test_generate.py: 8 tests (image/audio hermetic, text coherence A/B NLTK-gated on real
+Alice). README "Procedural generation" section; tour "procedural:" line (distinct from the
+pre-existing "generation:" line, which documents WHY the heavier learned-P(next|context)
+path is still needed -- the two are complementary: procedural ships now, learned generation
+is the next tier). CONCEPT: generation here is driving STORED STRUCTURE forward (morph,
+re-rank, render), not learning a distribution -- cheap, honest, shippable, and the on-ramp
+to native generation (run the resonator FORWARD to compose new attribute scenes rather than
+interpolate stored ones). Of the roadmap: Tier 0 (G1+G2) done, Tier 1 (unitary HRR +
+generation bundle + G6 property tests) now ALL done. Next per the ranking: Tier 2 -- G3
+(frozen core + persistence, the gate) then the reservoir (already built, kept as a negative
+on generation but it is the 4-way-leverage component), then forward scene render.
+
+G3 FROZEN CORE + PERSISTENCE BUILT -- THE GATE FOR BUILD-ON-TOP (the roadmap's Tier 2
+first item; "nothing in build-on-top is safe to layer until the core stops shifting", and
+a trained mind could not be saved at all). Done as a NON-BREAKING EXTRACTION per the flat-
+module preference -- a new facade module + purely additive methods on existing classes, no
+edits to any existing logic.
+  * holographic_core.py: re-exports the kernel primitives (random_vector, unitary_vector,
+    bind, unbind, involution, bundle, permute, cosine, slerp, Vocabulary) + a free
+    cleanup() -- the STABLE surface build-on-top code imports. It is an EXTRACTION not a
+    rewrite: the functions still live in holographic_ai.py, so existing files are
+    untouched; new layers import the frozen surface instead of a subsystem's internals.
+    CORE_VERSION + STATE_VERSION stamps.
+  * Versioned save/load: save(obj,path)/load(path) round-trip any object exposing
+    to_state()/from_state() through a SINGLE npz (a _flatten that stores arrays + lists-of-
+    arrays + a tiny JSON meta sidecar, allow_pickle=False). Stamped with STATE_VERSION;
+    an incompatible or UNSTAMPED state fails LOUDLY on load (refuses rather than returning
+    a silently-wrong object) -- tested.
+  * Persistence added to the three LEAF objects that hold the core learned state:
+    - Vocabulary: dim/unitary + every name->vector (exact round-trip).
+    - HolographicMind: the four per-action banks (_sum/_unit/_ret/_cnt) + the consolidation
+      _basis + config; reloads deciding IDENTICALLY, including the hard case of a
+      CONSOLIDATED brain (low-rank basis present), verified across many probes; banks stay
+      in lockstep. The recent-experience buffer + transient EMAs are deliberately NOT saved
+      (self-healing scratch; saving them would only reintroduce the stale-buffer hazard the
+      maintenance code guards against). Captured self._seed in the ctor for this (additive).
+    - HoloForest: trees are a pure function of (seed, tree idx, node id), so we save only
+      items + config and REBUILD deterministically -- a saved-then-loaded forest recalls
+      identically. Captured _seed/_leaf_size/_n_trees in the ctor (additive).
+  * UnifiedMind persistence DEFERRED ON PURPOSE: it is a deep composite (encoder,
+    SelfOrganizingMind, lazy sub-objects, journals, format gates) whose faithful round-trip
+    is out of proportion to this round; shipping a fragile half-version would be worse than
+    not shipping it. Kept as an honest deferral rather than a half-done claim. The three
+    leaf objects are what the reservoir / generation / forward-render layers actually need
+    to persist.
+  * Verified the core is a SUFFICIENT build surface: every primitive the reservoir and the
+    generation bundle use is re-exported by holographic_core (the document's "recurrent
+    layer builds against the kernel only" criterion).
+test_core_persistence.py: 9 tests (kernel re-export identity, cleanup parity, exact
+Vocabulary round-trip, trained-brain + CONSOLIDATED-brain identical decisions, forest
+identical recall, version-mismatch + unstamped-state + no-to_state() all raise). README
+"Frozen core + persistence" section; tour "core:" line (saves a consolidated brain to npz,
+reloads, shows identical decisions). VALIDATED the three edited modules (holographic_ai,
+holographic_creature, holographic_tree) broke nothing: full brain/tree/navigator/slime
+suites + the creature gauntlet INCLUDING the rescue_cracks canary all pass. Roadmap: Tier 0
+(G1+G2) + Tier 1 (unitary HRR, generation bundle, G6) + Tier 2's G3 now done. Next per the
+ranking: the reservoir is already built (kept as a negative on generation but it is the
+4-way-leverage sequencer), so the live Tier 2 item is FORWARD COMPOSITIONAL SCENE RENDER --
+run the resonator forward to compose NEW attribute scenes, render via the decomposition
+renderer, vary over time for procedural video. That is the real native-generation step the
+generative direction is aiming at, and it now has a buildable, persistable core under it.
+
+FORWARD COMPOSITIONAL GENERATION BUILT -- NATIVE GENERATION (the roadmap's live Tier 2
+item and the real payoff of the generative direction: step up from the morph bundle
+[interpolate what's STORED] to composing what was NEVER stored). holographic_compose.py
+runs the EXISTING decomposition machinery FORWARD: the scene path normally goes backward
+(image -> auto_tags -> SceneCoder.factor_scene resonates the scene vector into its
+colour/shape/texture atoms); forward it is pick tags -> encode_scene (bind + UNNORMALISED
+superpose) -> a scene vector -> make_scene renders it to a real RGB image. No new model, no
+gradients -- existing structure driven forward, built on the frozen core + the SceneCoder/
+make_scene that already existed.
+THE HONEST BAR (this is the whole point): a generated scene is meaningful only if it can be
+ANALYSED STRAIGHT BACK to the spec it was built from, so every generator is measured by
+ROUND-TRIP, and the combinations are drawn NOVEL (excluded from a "seen" set) so a correct
+round-trip proves COMPOSITION not recall. MEASURED:
+  * novel single-object compose->factor: 40/40 exact; the ENTIRE composable space
+    (7 colours x 4 shapes x 4 textures = 112) round-trips >=97%.
+  * novel multi-object scenes (explain-away peel): 2-obj 30/30, 3-obj 30/30, 4-obj 29/30.
+  * render->auto-tag fidelity: shape 40/40, colour 40/40 -- the generated PIXELS read back
+    as the composed shape/colour, so the image is a real analysable picture not noise
+    (texture is carried in the vector but not painted by make_scene, so render fidelity is
+    judged on shape+colour).
+  * animation: hold base tags, sweep ONE attribute through a sequence, compose+render a
+    frame each; the trajectory is "real" iff every frame's vector factors back to its
+    intended value -- 100% on-target for a colour sweep AND a shape sweep, each frame
+    carrying its rendered image (procedural video by composition).
+test_compose.py: 8 tests (single + multi-object round-trip, novelty-not-recall, render
+fidelity, valid image, colour-sweep + shape-sweep animation faithfulness, full-space
+coverage). README "Forward compositional generation" section; tour "compose:" line.
+CONCEPT: generation here is RUN THE FACTORISER BACKWARDS -- the same resonator that
+DECOMPOSES a scene into atoms COMPOSES new scenes from chosen atoms, and the proof it
+worked is that decomposition recovers exactly what composition put in. That round-trip is
+what makes "native generation" an honest claim rather than "we made a picture": the
+artefact is verifiable against its own spec. Roadmap status: Tier 0 (G1+G2), all of Tier 1
+(unitary HRR, generation bundle, G6), and Tier 2 (G3 core+persistence, reservoir already
+built, AND now forward scene render) -- the entire high-value spine of the roadmap is done.
+Remaining are Tier 3 conditionals (FHRR only if a resonator result demands it; G4
+adversarial gauntlet; G5 perception ceiling as a reservoir rider) and Tier 4 defer/declines
+(numpy LSTM, hyperbolic/rotors, price prediction, learned-distribution gen). The procedural
++ compositional generation path the user wanted is now in place end to end: interpolate
+stored plates (morph), decode with better sampling (nucleus text), sonify sequences (audio),
+AND compose+render NEW verifiable scenes with animation (this) -- all measured, all honest.
+
+WIRED THE GENERATIVE + PERSISTENCE WORK INTO THE LIVE APP (user directive: "make sure we
+wire everything up. Don't leave functionality in test files"). The recent capability was
+built into modules + proven in tour + tests, but NOT reachable from the UnifiedMind console
+(unified_app.py). Added FOUR panels, each a real Flask endpoint + frontend card + JS +
+CATALOG entry (so they show up in the searchable/categorised card UI):
+  * /api/unified/compose -- "compose a scene": run the resonator FORWARD to compose a NOVEL
+    multi-object scene, render it (returns a base64 PNG data URL), and prove it by
+    round-trip (factor the vector back + auto-tag the rendered pixels), plus a colour-sweep
+    animation strip. Mind-independent (uses SceneCoder + make_scene).
+  * /api/unified/morph -- "morph": coefficient-domain slerp between two rendered shapes vs a
+    pixel crossfade, with the two midpoints shown side by side and their ghosting distances
+    (crossfade midpoint IS the double-exposure -> ~0; coeff morph blends structure -> >0).
+  * /api/unified/nucleus -- "nucleus text": top-p decoding over the loaded mind's FLAT
+    n-gram vs plain temperature, reporting the real-word coherence gain. Correctly resolves
+    the flat HolographicNGram among _gens (hierarchical schema gens have no _distribution
+    and get a clear decline). Verified live: nucleus 0.97 real-word vs temperature 0.79.
+  * /api/unified/persist -- "save & reload": snapshot the mind's learned meaning space
+    (encoder._text.context word->vector) into a Vocabulary, save through holographic_core's
+    versioned save(), reload via load(), and verify identical vectors AND identical
+    nearest-neighbour structure for a probe word, plus that a bumped state_version is
+    refused. This is the user-facing face of G3 persistence (full UnifiedMind serialisation
+    stays deferred; the learned meaning space is the meaningful, cleanly-persistable slice).
+TWO REAL BUGS surfaced BECAUSE of the wiring (the point of wiring): (1) make_scene's
+palette had no "grey" while COLOURS includes "grey", so composing a grey object crashed the
+renderer -- FIXED (grey now renders). (2) test_every_card_has_a_catalog_entry hardcoded a
+DUPLICATE copy of the catalog keys (brittle, and exactly the "logic stranded in a test"
+the directive warns against) -- rewrote it to DERIVE the keys from the app's own CATALOG
+via the page source, which then caught a substring collision ("factorize" inside
+"factorizer" in the compose card's h2) -- reworded the h2 to "resonator". Audited all recent
+test files: only test fns + tiny fixtures, no stranded reusable functionality.
+test_app_generative.py: 9 tests hitting the LIVE routes (panels present + wired, compose
+round-trips, morph beats crossfade on ghosting, nucleus needs/uses a dataset, persist
+round-trips the meaning space, version guard). Measurement tools (holographic_measure,
+holographic_ablate) intentionally stay CLI/tour-facing (heavy multi-seed corpus loops are
+wrong for a web request); the reservoir stays unfeatured (it is a kept negative). Tour gains
+an "app:" line confirming 4/4 endpoints live; README notes the wiring under the generative
+sections. Everything reachable from the UI now, not stranded in the library or tests.
+
+PROPAGATION SWEEP -- making the new advancements utilized at ALL levels of the stack
+(user directive). Audited where each advancement lives vs where it SHOULD be used, then
+filled the genuine gaps (measure-first, backward-compatible defaults, keep negatives).
+FINDINGS + ACTIONS:
+  1. PERSISTENCE was SILOED: only Vocabulary/HolographicMind/HoloForest could round-trip,
+     but the BIGGEST stateful object -- SelfOrganizingMind (== UnifiedMind.memory) -- had
+     none. Added to_state/from_state to SubPrototypeMemory, TextEncoder, UniversalEncoder,
+     and SelfOrganizingMind; registered SOM in the core registry; upgraded core save/load
+     _flatten/_rebuild to recurse into NESTED dicts (so a composite object persists through
+     one npz). SOM now round-trips with IDENTICAL classifications.
+     - REAL CORRECTNESS BUG surfaced by this: a reloaded mind diverged on NEVER-SEEN words
+       because the Vocabulary rng was reset to seed-start while the original had advanced
+       during training, so unknown-word index atoms minted differently. FIX: persist the
+       Vocabulary rng bit-generator state in to_state, restore it in from_state -- now even
+       post-reload mints match a never-saved run, verified by identical classifications on
+       unknown-word probes. (Captured self.seed on Vocabulary too; additive.)
+     - App /api/unified/persist UPGRADED from saving just word-vectors to saving the WHOLE
+       SelfOrganizingMind (prototypes + labels + encoder), verifying identical
+       classifications on reload.
+  2. NUCLEUS DECODING was siloed in holographic_generate + one app panel; the CORE
+     generator (HolographicNGram.generate, used everywhere incl. /api/unified/generate)
+     still did plain temperature. PROPAGATED: added top_p=1.0 param to
+     HolographicNGram.generate (top_p=1.0 is BYTE-IDENTICAL to the old behaviour --
+     backward compatible; top_p<1.0 = native nucleus). Threaded top_p through
+     UnifiedMind.generate (try/except so hierarchical schema gens that lack it are safe)
+     and the main /api/unified/generate route + a top-p control on the primary Generate
+     panel. Measured on real Alice: default temp real-word 0.889 -> native nucleus(0.85)
+     0.985. holographic_generate.generate_text kept as the richer path (it also has the
+     repetition penalty); no duplication that matters.
+  3. UNITARY ATOMS in holographic_mind._roles / RecordEncoder -- MEASURED, NOT ADOPTED
+     (kept negative). Records do role-filler binding (the unitary win case), so measured
+     Gaussian vs unitary field-recovery under stress: 8-12 fields both perfect; 24 fields
+     Gaussian 0.990 vs unitary 0.994 (+0.003, CIs OVERLAP -- within the noise). For the
+     RecordEncoder's actual few-field use there is NO measurable gain, and switching risks
+     the categorical-symbol path that feeds bundle-based similarity, so NOT adopted. The
+     discipline: measured, doesn't help here, don't adopt.
+TESTS: +SelfOrganizingMind round-trip (incl. unknown-word probes) in test_core_persistence;
++backward-compatible nucleus test in test_holographic_text; app persist test upgraded to
+whole-memory. All edits ADDITIVE (new methods + captured seeds + json import + nested
+flatten + a backward-compatible top_p default). VALIDATED: the foundational Vocabulary
+change rippled nowhere -- brain/tree/navigator/slime/image/vision/scene/measurement suites
++ the creature gauntlet INCLUDING the rescue_cracks canary all pass. Net: persistence spans
+the stack, nucleus is native to the core generator and reachable from the main panel, and
+the one advancement that DIDN'T help where it was a candidate (unitary in records) is on
+the record as a measured negative.
+
+SPEED + COMPRESSION PASS, AND "ONE BRAIN" INTEGRATION (user directive: optimize speed/
+compression where possible, and make sure everything routes through the main brain --
+"I don't want a bunch of different brains").
+ONE-BRAIN INTEGRATION: audited the *Mind/*Brain landscape. Architecture was already
+well-composed -- UnifiedMind is the main brain and OWNS its parts (SelfOrganizingMind as
+.memory, HolographicMind as ._brain assembled on actions(), SharedMind for NPCs); the
+design comments even say "ONE perception / ONE memory / ONE decision brain". The
+FRAGMENTATION was in the app: the compose + morph endpoints built their OWN standalone
+SceneCoder / HolographicArchive instead of using STATE["mind"]. FIX: gave UnifiedMind an
+OWNED scene faculty -- lazy self._scene = SceneCoder(min(dim,1024), seed) (a singleton on
+the same substrate), plus methods compose_scene / decompose_scene / render_scene /
+morph_scene. Routed the app's /compose and /morph endpoints through STATE["mind"] (falling
+back to a fresh UnifiedMind only if none loaded, so the panels still work standalone).
+Captured self.seed on UnifiedMind for the owned faculties (additive). Now there is one
+brain with a scene faculty, not a parallel scene engine.
+SPEED: profiled the hot primitives -- found Vocabulary.cleanup was ~1925us on 500
+candidates because it LOOPED in Python calling cosine() per name. Vectorised it to ONE
+cached matrix-vector product (stack @ noisy / ||noisy||; stored atoms are unit-length so
+the dot is the cosine up to the query norm -> same argmax). ~9.5x faster (1925 -> 202us),
+bit-for-bit identical answer (verified vs the old loop on 20 probes). Cache (_matrix())
+rebuilds only when the atom set changes; the explicit-candidate-subset path keeps the
+simple loop (small, one-off). This speeds the WHOLE stack since cleanup is used in text
+classification, scene factoring, recall, brain perception. Checked the other
+max(key=lambda: cosine) scans -- they are small-N classifier scans (4-6 classes), NOT
+hotspots, so left alone (don't optimise what isn't measured hot).
+COMPRESSION: holographic_core.save now stores float arrays as float32 by DEFAULT ->
+~halves every saved mind (SelfOrganizingMind 126200 -> 64752 bytes). Vectors are only
+compared by cosine where float32 is ample; on realistic probes behaviour is unchanged
+(a decision only flips on an exact tie). HONEST nuance kept: float32 CAN flip a near-tied
+classification, so save(compress=False) is the bit-exact opt-out, and the two bit-exact
+round-trip tests (Vocabulary vectors, SOM classifications) use compress=False; a new test
+asserts compress=True halves the file AND preserves classifications on 60 realistic probes
+(>=58/60). brain round-trip stays identical at float32 (atol 1e-4). TESTS: +float32
+compression test; existing exact tests pinned to compress=False. All edits additive/
+behaviour-preserving. VALIDATED: cleanup vectorisation broke nothing -- brain/relations/
+encyclopedia/sequence/segment/mind/resonator + creature gauntlet incl. rescue_cracks canary
+all pass; scene integration green across unified/scene/compose/app suites. Net: one brain
+that owns its scene faculty, a ~9x faster cleanup felt across the stack, and half-size
+saves by default with an exact opt-out.
+
+UNIFIEDMIND INTERNAL-CONSISTENCY / DEDUP AUDIT (user directive: make UnifiedMind utilise
+all its capabilities consistently; find duplicate efforts to fold into one generic helper;
+find where some features do things better -- compression/speed/proofs -- and apply the best
+approach uniformly; note that a lot was developed in tests/siloed and now under one roof may
+still need optimisation).
+FINDINGS + ACTIONS:
+  1. DUPLICATE + INCONSISTENT SPEED (the big one): the brain's HOTTEST scan,
+     SubPrototypeMemory.classify / label_scores (every UnifiedMind classify/recall/decide/
+     classify_robust routes through it), was STILL a Python per-prototype loop -- the exact
+     pattern already vectorised in Vocabulary.cleanup, and the fast (mat @ vec).argmax form
+     already existed elsewhere (holographic_mind.py:279, organizer kmeans:145). Applied the
+     best approach uniformly: cached unit-matrix product + masked argmax. ~17x faster at 64
+     prototypes (56->3.2us), gap widens with prototype count. Winner BIT-IDENTICAL to the
+     old loop; score matches to machine epsilon (matrix sum order vs per-element loop, ~1e-16
+     -- verified zero label diffs over 40 probes incl. the `among` modality restriction).
+     - REAL STALENESS BUG caught by measuring: add() can fold a vector into an existing
+       same-label prototype, mutating its unit IN PLACE without changing the prototype count,
+       which left the cached matrix stale (classify returned 0.72 instead of 1.0 for a
+       prototype's own unit). FIX: a _gen mutation counter bumped on every add(), and the
+       _stack cache keyed on it (plus list identity + length). Now correct. This is why the
+       project measures optimisations -- it would have silently corrupted online learning.
+  2. SMALL-N CLASSIFIER SCANS (LanguageID.identify ~265, TopicSorter.classify ~334 in
+     holographic_text.py): max(key=lambda: cosine) over a HANDFUL of profiles/prototypes
+     (one per language / per topic). NOT hot (called once per query, tiny N), and the
+     dict-comprehension max is readable. Deliberately LEFT ALONE -- vectorising would trade
+     readability (a stated preference) for no measurable gain. Don't optimise what isn't hot.
+  3. COMPRESSION CONSISTENCY: the persist panel now saves the WHOLE SelfOrganizingMind at
+     float32 by default (the core save() compression from the prior pass) -- verified end to
+     end: 19 prototypes, identical classifications, ~half the bytes. The codec/archive
+     already quantise; no redundant uncompressed store found.
+  4. PROOFS/VERIFICATION: round-trip verification is present where it is meaningful (compose
+     -> factor-back; codec roundtrip_ok; verify_structure lag-coherence). find() already uses
+     the smart coarse_to_fine escalating resolve for large stores. No duplicate verification
+     logic to fold; the recall-type paths return a similarity score which is the right
+     confidence signal for an approximate store (a hard round-trip only makes sense for the
+     exactly-invertible compose/codec paths). Left as-is by design.
+TESTS: +2 in test_holographic_organizer (vectorised classify matches the loop incl. `among`;
+cache invalidates on in-place update). All edits additive/behaviour-preserving. VALIDATED:
+organizer/unified/mind/relations/encyclopedia + text/sequence/segment/predictive/structure +
+the creature gauntlet INCLUDING rescue_cracks canary all pass -- the foundational classify
+change is behaviour-identical through the whole brain. Net: the brain's core scan now uses
+the one fast pattern everywhere it's hot, with a correctness fix the speedup surfaced; the
+genuinely-tiny scans stay readable; compression and verification are already consistent where
+they belong.
+
+THIRD-PARTY STATIC-ANALYSIS PASS (user directive: use third-party tools to analyse the
+code, look online if needed, do another pass). Installed and ran ruff 0.15, vulture 2.16,
+bandit 1.9 (pip --break-system-packages). Triaged by signal -- fixed real issues, left
+deliberate compact-style and false positives alone.
+FIXED (real issues):
+  * B033 (ruff): STOPWORDS set in holographic_text.py contained "did" TWICE -- removed the
+    stray duplicate (harmless to behaviour since a set dedupes, but a copy-paste slip).
+  * F841 dead computations in PRODUCTION code: holographic_unified.py built a `bound`
+    string that was immediately superseded by the vals/parts fill loop and never read
+    (leftover from an earlier approach) -- removed. holographic_schema.py computed `pos` and
+    `gen_atoms` in the source-attribution path, never read -- removed (kept `segments=[]`
+    which IS used). unified_app self-discovery endpoint fetched `mind = STATE["mind"]` and
+    never used it -- removed.
+  * F401 unused imports (22): removed across the stack. Notably several `cosine` imports
+    became unused BECAUSE the earlier vectorisation replaced per-name cosine loops with the
+    matrix path -- confirms that refactor was thorough. After this, F811 (redefinition) went
+    to zero on its own (the unused module-level cosine that shadowed in-method imports was
+    the cause).
+  * F541 f-strings without placeholders (17): dropped the stray f-prefix on constant
+    strings in _demo()/__main__ print blocks. Cosmetic.
+  * bandit B306 MEDIUM: unified_app persist endpoint used tempfile.mktemp() (deprecated,
+    TOCTOU race). Switched to mkstemp() (atomic create + fd), os.close the fd, use the path.
+    Verified the persist panel still round-trips.
+  * B905 zip-without-strict: added strict=True to the two zips with a real 1:1 invariant
+    (SubPrototypeMemory.label_scores labels/sims; UnifiedMind._record_items vecs/payloads).
+    Turns a silent truncation into a loud failure -- consistent with the project's
+    fail-loudly stance (version guard). Verified the invariants actually hold on real data.
+LEFT ALONE (deliberate / false positive):
+  * vulture flagged app.py @app.route handlers as "unused functions" -- FALSE POSITIVE
+    (Flask calls them via the decorator; vulture can't see that). The flagged METHODS
+    (penalize_recent, capacity_report, replay_plan, is_a_transitive, quantize, changes) are
+    all exercised by tests/tour -- genuine public API, not dead. Net: NO genuinely dead
+    PRODUCTION code found -- the consolidation passes worked.
+  * ruff E702 (semicolons), E741 (ambiguous `l`), E731 (lambda assign), B007/B008: compact
+    scientific-code style and intentional; readable-code preference says leave them.
+  * Two F841 in _demo()/__main__ scaffolding (organizer `test`, scene `true_tags`): demo
+    illustration, not production logic -- left.
+All edits additive/behaviour-preserving (removals of provably-dead code + one security
+hardening + two fail-loud guards). VALIDATED: full batched suite incl. the rescue_cracks
+canary, tour smoke, both apps import -- all green at 539 (no new tests; this was cleanup +
+hardening). Tooling recorded here so the pass can be re-run: `ruff check --select F,B`,
+`vulture *.py --min-confidence 60`, `bandit -r app.py unified_app.py -ll`.
+
+REVISIT PASS (user: recent capabilities may make old experiments bear fruit -- salt
+fingering, surface tension, gravity lensing, spectral decomposition). Checked each named
+concept HONESTLY against what we've actually built lately (vectorised cleanup/classify,
+float32 compression, full-stack persistence, the owned scene faculty + faster resonator,
+nucleus decoding, and the projection/consolidation low-rank lens). The discipline: only
+re-open where a recent capability touches what ORIGINALLY blocked the idea; do not
+manufacture revivals.
+  * SALT FINGERING (#1) -- RE-OPENED and shipped a small win. The original block was "no
+    low-dimensional variable to stratify on"; the consolidation work later produced exactly
+    that (the ~22-36-dim shared subspace). Re-measuring on the REAL encoded substrate (not
+    synthetic blobs) showed the signal was never actually dead there (~7 sigma) and predicts
+    split benefit at r=0.94. Added the conservative default-off fingering_prescreen to
+    auto_reorganize (skips the sweep when nothing fingers; never changes the choice; ~21%
+    faster on stable memories). See the REVISITED note in sec.1.
+  * SURFACE TENSION (#2) -- still parked. It was a REFINEMENT of a gate that already works,
+    plus a standing curation negative. Nothing recent touches the gate or that negative, so
+    there is no new opening. (Would only matter if the 1-SE rule were shown to mis-fire.)
+  * GRAVITY LENSING (#3) -- still parked. It RE-DESCRIBES existing machinery (frequency
+    weighting + the multi-resolution organizer's coarse/fine images). Recent work didn't
+    create a non-redundant prediction, so still no new mechanism falls out.
+  * PRISM / SPECTRAL DECOMPOSITION (#5) -- already real in the ResonatorNetwork, which the
+    recent work made an OWNED, faster faculty on UnifiedMind (scene()/decompose_scene). So
+    the idea is now better-integrated than when parked, but the forager premise it once
+    seemed to point at stays refuted (no state aliasing). No new separate mechanism; the
+    improvement was integration, already done in the one-brain pass.
+NET: one genuine re-opening that measurement turned into a small shipped optimization, and
+three concepts honestly confirmed as still-correctly-parked (a refinement, a re-description,
+and an already-realised idea) -- recent capabilities did not change their blockers. The
+honest correction worth keeping: salt fingering's original negative was measured on
+synthetic Gaussian blobs, not the real encoded substrate; re-measuring on real data (made
+worth doing by the consolidation lens) flipped it. +1 test (fingering pre-screen invariants).
+
+## REVISIT PASS -- re-examining the shelved concepts against recent capabilities
+
+Prompt: a lot of new capability has landed (vectorised cleanup + prototype classify,
+full-stack persistence, the owned scene faculty on UnifiedMind, native nucleus decoding,
+float32 saves). The salt-fingering note set the precedent: a clean negative became a small
+win once a LATER capability (the consolidation lens) lifted its specific blocker, and the
+lesson was "re-measure when a capability unlocks, on REAL data." So each shelved concept was
+re-checked against the new capabilities -- does any stated blocker actually lift? Measured,
+not asserted. The honest result: the verdicts HOLD. Writing down the re-check because a
+negative re-check is itself the deliverable here -- it records that these were reconsidered
+with the new tools and did not move, and WHY.
+
+1. Salt fingering -- ALREADY revisited and shipped (fingering_prescreen, default-off, can
+   only avoid work never change the choice). Nothing further to do; this IS the precedent.
+
+2. Surface tension (coherence-scaled split margin vs the flat 1-SE rule) -- RE-MEASURED, and
+   the blocker holds for a sharper reason than before. The recent vectorised classify makes
+   per-prototype coherence cheap, so the "too expensive to justify a refinement" cost
+   argument is gone -- but cost was never the real blocker. Measured the flat 1-SE gate on
+   the standard beds: it splits the bimodal world (k=2) and keeps the unimodal world (k=1)
+   on 6/6 seeds each -- ZERO errors. There is no mistake for a coherence-scaled margin to
+   correct. A refinement that makes a perfect gate more complex is not a win. Verdict
+   unchanged: not implemented, now with a measurement showing the gate is error-free on the
+   exact task surface tension targets.
+
+3. Gravity lensing (bend hot queries toward massive prototypes; "multiple images") -- the
+   one non-redundant prediction (keep coarse+fine prototypes for a trafficked class) is still
+   exactly what the multi-resolution organizer does on demand. Vectorised classify now scans
+   all sub-prototypes in ONE matrix product, so a frequency-weighted bend is a pure prior
+   with no error to fix. No new mechanism. Verdict unchanged.
+
+5. Prism / spectral decomposition -- its legitimate home, the ResonatorNetwork, is now a
+   first-class faculty on UnifiedMind (compose_scene/decompose_scene). Re-measured the
+   resonator's ceiling by object count on the owned faculty: 30/30, 30/30, 29/30, 30/30,
+   29/30 exact scene round-trips for 1..5 objects. It is already near-perfect; the 1/30
+   residual is HRR cross-term noise, not a structural gap a spectral pre-separation would
+   fix. The analogy is fully realised and needs nothing. Verdict unchanged (now with a
+   ceiling measurement on the new faculty).
+
+The throughline (consistent with the whole project): a capability unlock is a reason to
+RE-MEASURE a shelved idea, not to assume it now works. Salt fingering moved because a new
+capability supplied the precise thing its blocker named (a low-dim subspace) AND re-measuring
+on real data showed a real, correlated payoff. The others did not move because their blockers
+were never "missing capability" -- they were "the existing mechanism already does this" or
+"there is no error to fix," and the new tools, measured, confirm that rather than overturn it.
+No new features this pass: the deliverable is the kept, re-verified negatives.
+
+## FRACTAL SWEEP -- self-similarity, inception of structure, regenerate-from-seed
+
+Prompt: look for ways to make things more fractal across levels -- same above same below,
+inception of structure/functionality, deterministic reconstruction from seed values. Held
+to the project rule: self-similarity earns its place only as a MEASURED win, not a metaphor.
+
+AUDIT (what is already fractal -- mapped, not reinvented):
+  * REGENERATE-FROM-SEED is already the deep theme and already realised at multiple levels:
+    Vocabulary.to_state stores the RECIPE (seed + ordered names) not the matrix and replays
+    get() to reconstruct -- measured 170x smaller than a raw 400x512 float32 matrix (4824 vs
+    819200 bytes), exact round-trip. derived_atom(seed,name) mints each atom as a pure
+    function of (seed,name) via blake2b (order-independent), so a derived vocabulary persists
+    as just names. HoloForest rebuilds its trees from seed; consolidate() rebuilds its basis
+    by SVD. The leaf-level fractal compression is DONE and measured.
+  * The honest BOUNDARY the codebase already respects: SEED-DERIVED structure (atoms, trees,
+    basis) compresses to a recipe; LEARNED structure (prototypes, the encoder's co-occurrence
+    context) is genuinely not seed-derivable and is stored explicitly. Conflating them would
+    be a cheat. Verified the prototype/context stores correctly keep raw vectors -- not a
+    missed fractal opportunity, the correct call.
+
+NEW WIN (a level that was NOT yet self-similar, now is, measured):
+  * Scene composition was FLAT -- a scene is a bag of objects (encode_scene = unnormalised
+    superposition). Tested whether the SAME machinery works one level up: bind each sub-scene
+    to a group-role atom, superpose the groups, then unbind one group and factor it. IT WORKS
+    -- the unbind is noisy (cos ~0.58, cross-talk from the other group) but the resonator's
+    explain-away cleans it to EXACT sub-scene recovery. So the algebra is already self-similar
+    enough for recursion; it just was not exposed. Measured ceiling (honest, kept): 2 groups
+    1.00, 3 groups 0.97, 4 groups 0.89, 5 groups 0.82 (2 objects each); 3x3=9 objects 0.87.
+    The same capacity limit the flat scene has, one level up. SHIPPED as UnifiedMind.
+    compose_nested / decompose_nested (the same bind+superpose / unbind+factor, recursively),
+    with group-role atoms minted DERIVED (seed-reconstructable -- the whole nesting regenerates
+    from one seed; verified identical super-scene across two minds of the same seed). Wired
+    into the app as the "nested scene" panel (/api/unified/nested) with per-group round-trip
+    proof + rendered sub-scenes, through the loaded mind's own faculty (one brain). Tour gains
+    a "nested:" line; app now 5/5 generative endpoints. Tests: 2 in test_compose (round-trip +
+    seed-determinism, and the 3-group >=0.9 boundary) and 2 app-wiring tests.
+    One bug the wiring tests caught and I fixed: inserting the nested JS accidentally consumed
+    the `async function morphScene(){` declaration line, orphaning the morph body -- the morph
+    panel test failed instantly and visibly (what the wiring tests are for), restored.
+
+THROUGHLINE: the fractal principle was already correctly applied where it is VALID
+(regenerate seed-derived structure; store learned structure) -- so the sweep did not bolt on
+metaphor. The one genuinely new level (recursive scene-of-scenes) was shipped because the
+algebra already supported it and the round-trip MEASURES exact at the useful depth, with the
+decay honestly reported. Same above, same below -- where measurement says it holds.
+
+## "IS THE APPROACH DATED?" -- a literature pass with measurement
+
+Prompt: someone called the approach dated; search for better ways. Did a real literature
+pass (VSA/HDC surveys and comparisons) and checked the one concrete lead by MEASURING it on
+this substrate, per the project rule.
+
+HONEST ASSESSMENT (sourced): largely NOT dated.
+  * The core primitives are current and well-founded: Plate's real-valued HRR (circular
+    convolution binding), resonator networks for factoring (Frady/Kent/Sommer 2020), cleanup
+    memory. None are superseded; they are the standard VSA toolkit in the 2022/2023 Kleyko
+    surveys and the Schlegel et al. 2021 comparison.
+  * VSA/HDC is a LIVE area, not a relic: "vector symbolic architecture" is just the older
+    name for hyperdimensional computing (both current), and neuro-symbolic AI rose in 2025
+    specifically to address LLM hallucination with interpretable symbolic reasoning -- which
+    is exactly what this from-scratch, deterministic, interpretable engine is. A "dated"
+    critique most likely compares it to deep learning, which is a CATEGORY difference (the
+    project deliberately uses no frameworks/pretrained models/GPU), not obsolescence.
+
+THE ONE CONCRETE LEAD -- FHRR -- CHECKED BY MEASUREMENT:
+  * Schlegel, Neubert & Protzel (2021, the most-cited recent cross-VSA comparison) find FHRR
+    (Fourier HRR: complex unit-phasor atoms, bind = elementwise complex multiply) performs
+    best across their benchmarks. The project defaults to real-valued HRR.
+  * Measured on THIS substrate (dim 256, pairs in one key->value trace): FHRR holds far more
+    pairs -- 40 pairs real-HRR 0.61 vs FHRR 0.90; 60 pairs 0.40 vs 0.74. The advantage is
+    real and large under load.
+  * CORRECTION to a natural assumption: the project's existing `unitary` atoms (unit-magnitude
+    SPECTRUM, real domain) do NOT capture this -- unitary-HRR tracks real-HRR (0.41 vs 0.40 at
+    60 pairs), not FHRR (0.74). The win comes from staying in the complex phasor domain.
+  * BOUNDARIES, also measured (kept, honest): (a) at LOW load (<=~10 pairs/256-d, or the
+    few-factor records the project normally builds at 512-1024) both are 1.000 -- FHRR changes
+    nothing, so the readable real-valued default loses nothing by staying default. (b) FHRR
+    does NOT raise the nested-scene composition ceiling: I measured the OUTER group-binding
+    layer (real-HRR perfect to 12 groups), so that ceiling is the resonator factoring a NOISY
+    UNBOUND sub-scene -- a different bottleneck FHRR can't fix. (I was about to assume FHRR
+    would help nesting; the measurement refuted it.)
+
+ACTION: shipped FHRR as a self-contained, opt-in module (holographic_fhrr.py: phasor atoms,
+bind/unbind/bundle/sim, PhasorVocabulary, PhasorMemory), exposed through UnifiedMind as an
+owned faculty (high_capacity_memory(); one brain, seed-deterministic, singleton). Did NOT rip
+out the real-HRR core -- it is the right readable default and not dated, and FHRR only wins in
+the high-load key-value regime the project rarely hits. Demonstrated in the tour (real-HRR 52%
+vs FHRR 95% at 40 pairs), and tested (test_holographic_fhrr.py: exact algebra, the high-load
+WIN >0.1 margin, the low-load NON-win both at 1.000, the owned faculty). The deliverable is an
+honest assessment + one measured capability earning its place where it measurably wins, with
+its boundaries kept as recorded negatives. The approach is current; FHRR is a tool added for a
+specific regime, not a verdict that the core was wrong.
+
+## VECTOR DATABASES -- a literature pass, and the one transferable technique (quantization)
+
+Prompt: lots of talk about vector databases storing info/files; any recent developments to
+improve the brain? Searched current VDB/ANN literature (2025-2026) and assessed against the
+project's hard constraints (from-scratch NumPy, deterministic, no external services).
+
+HONEST ASSESSMENT: the PRODUCTS don't fit and wouldn't help; one TECHNIQUE transfers.
+  * Vector databases (Pinecone, Milvus, Qdrant, Weaviate, pgvector, FAISS) are external
+    services / heavy C++ deps for million-to-billion-scale retrieval. Adopting one violates
+    the project's premise (no frameworks, no services, runs anywhere, deterministic) -- the
+    same category mismatch as "use a transformer." And the scale is wrong: this is a KB-scale
+    engine, not a billion-vector store.
+  * HNSW (the dominant VDB index) specifically CONFLICTS with the project's core principle:
+    its graph is built by order-dependent incremental insertion with random level assignment,
+    so it is NOT seed-reproducible the way everything here is. The project's HoloForest
+    (random-projection trees) is the right approximate index precisely because it rebuilds
+    deterministically from a seed.
+  * The literature actually VALIDATES the project's design at its scale: the Feb-2026 filtered-
+    ANN study found approximate indexes are often chosen even when an EXACT sequential scan
+    gives perfect recall at comparable latency -- i.e. brute-force wins at small/moderate
+    scale (which is where this project lives). And the Nov-2025 B+ANN paper identifies HNSW's
+    weakness as "fine-grained pairwise computations" and moves toward batching vectors so
+    distance can use MATRIX MULTIPLICATION instead of pairwise dot-products -- which is exactly
+    the vectorised cleanup/classify this project already adopted. The brain is aligned with
+    where ANN research is heading, not behind it.
+
+THE TRANSFERABLE TECHNIQUE -- QUANTIZATION -- MEASURED:
+  * Vector DBs shrink stored embeddings with scalar (int8), binary, and product quantization
+    (ScaNN's anisotropic PQ, etc.). The project stored learned vectors at float32. Measured
+    int8 and binary (sign) quantization of prototype units vs classification fidelity:
+    - Clean 6-class world: int8 1.000, binary 1.000 (both lossless).
+    - Crowded 100-class noisy space: int8 1.000, binary 1.000 STILL lossless -- because at
+      dim 512 the prototypes are near-orthogonal (concentration of measure), so even 1 sign
+      bit/dim preserves the nearest-neighbour argmax.
+  * SHIPPED int8 as an opt-in save level: holographic_core.save(obj, path, quant="int8") --
+    each float array -> signed 8-bit ints with a per-array scale, dequantised on load. Measured
+    8881 bytes vs 26944 (float32) vs 51544 (float64) for a trained SelfOrganizingMind: ~3x
+    smaller than float32, ~5.8x vs float64, classification lossless (acc 1.000, same-class on
+    120 probes). float32 stays the DEFAULT (int8 can flip an exact tie, same as float32 only
+    a touch more, so it is opt-in for when stored size matters). Vocabulary recipe path
+    untouched. Empty-array edge guarded. Pinned in test_core_persistence.
+  * Binary (32x) NOT shipped: lossless on near-orthogonal data but fragile on genuine near-ties
+    (sub-modes of one class), and the project's stores are small enough that int8 is plenty.
+    Kept as a measured note. The RP-trees already use sign-based routing, so the project is
+    not missing the binary idea where it matters.
+
+NET: vector databases are the wrong tool at this scale and break determinism; the brain's
+recall is already aligned with current ANN design (batched matrix distance + deterministic
+RP-trees + exact-wins-at-small-scale). The one part worth borrowing -- scalar quantization --
+is now an opt-in int8 save level, measured lossless at the working dimension. An honest "no"
+to the products, a measured "yes" to the one technique that fits.
+
+## DYNAMIC QUANTIZATION -- precision per array from the data's own complexity and size
+
+Prompt: what if quantization were dynamic, depending on the complexity or size of the data?
+Followed the project rule -- measure whether a data signal actually predicts where coarse
+quantization is safe, build the selector only if it does, keep the boundaries.
+
+THE SIGNAL (measured): vector SEPARATION predicts quantization headroom. The min over rows of
+(1 - best-other-cosine) -- the worst row's margin -- tracks complexity: high-dim separated
+~0.87, low-dim packed ~0.45, near-duplicate twins ~0.01. And quantization is safe across a
+huge range: binary (1 sign bit/dim) stays lossless for classification until the margin is
+~0.01, where even float32 fails under noise because the data itself is ambiguous. So coarse
+precision is safe almost everywhere -- the question is finding the few arrays where it is not.
+
+THE SELECTOR (measured to engage, not collapse to one level): _auto_quant_kind picks the
+COARSEST level whose reconstruction keeps every row's self-recognition AND >= 0.7 of its
+float top1-top2 margin (so a noisy query will not flip). On synthetic regimes it correctly
+adapts: high-dim separated -> binary; low-dim 24d/8d -> int8; near-duplicate twins -> int8;
+tight cluster -> int8. On a real trained mind it chose a MIX -- {f32:2, int8:1, bin:1} --
+genuinely per-array, not one fixed choice.
+
+THE SAFETY RULE (the real subtlety): binary preserves DIRECTION but destroys MAGNITUDE, so it
+is safe only for UNIT-NORM arrays (the cosine-compared `units`), never for magnitude-carrying
+accumulators (`sums`) that continued learning needs. So binary is in the candidate ladder only
+when the rows are unit-norm (+/-0.05); otherwise the ladder starts at int8 (8-bit magnitude,
+same precision class as the float32 default). Plus a SIZE floor: arrays under ~1024 elements
+stay float32 (the per-array scale/spec overhead is not worth it, and tiny arrays are not what
+makes a file big -- the 'size' half of the prompt). Verified: after an auto-save reload, the
+mind keeps observing and stays uncorrupted (acc 1.000), because the accumulators were never
+binarised.
+
+SHIPPED: holographic_core.save(obj, path, quant="auto"). Per float64 array -> binary (np.
+packbits of the signs, ~32x), int8 (scale, ~4x), or float32, recorded in a per-array __qspec__
+the loader decodes. MEASURED on a trained SelfOrganizingMind: float32 26944B, fixed int8 8881B,
+auto 6246B -- ~4.3x vs float32, ~1.4x smaller than fixed int8 -- and classifications match
+float32 EXACTLY (200/200 same-class). The win over fixed int8: it compresses harder where the
+data allows (binary on the well-separated unit-norm matrix) AND is safer where it does not
+(it can only ever pick a level the measured separation supports). float32 stays the default;
+int8 and auto are opt-in. Pinned in test_core_persistence (the dynamic mix engages, fidelity
+matches float32, continued learning survives, the unit-norm gate, the size floor). Demoed in
+the tour. The resolution of last round's caution: dynamic selection with a margin gate is what
+makes the aggressive binary level SAFE to offer, which a blanket default could not be.
+
+## APPLY RECENT WORK ACROSS THE STACK -- a cross-stack audit that caught a real boundary
+
+Prompt: make sure the recent improvements are applied to the main brain and all levels of the
+stack where applicable. Audited each recent capability at each level (library -> UnifiedMind
+faculty -> app endpoint/UI -> tour), and -- the valuable part -- ran the quantization save
+levels against EVERY persistable object, not just the SelfOrganizingMind they were measured on.
+
+ALREADY WIRED (verified): nested composition (UnifiedMind.compose_nested/decompose_nested +
+app "nested scene" panel + tour); FHRR high-capacity memory (UnifiedMind.high_capacity_memory()
++ app panel + tour); int8/auto quantization (core.save + /api/unified/persist endpoint + the
+persist panel's float32/int8/auto selector + tour). So the surfaces were all connected.
+
+THE BOUNDARY THE AUDIT CAUGHT (the reason cross-stack testing matters): quant="auto" was
+measured only on the SelfOrganizingMind (classification). Run against the CREATURE VALUE-BRAIN
+(HolographicMind) it flipped 62/200 action decisions -- a silent corruption. Root cause: auto's
+binary level. Measured why: binary distorts the pairwise-similarity (Gram) geometry by
+~0.117-0.204 on EVERY array, including the prototype memory's (0.204). It only LOOKED safe on
+the SelfOrganizingMind because wide-margin classification argmax is robust to a 0.2 similarity
+shift; the value brain's finer linear readback is not. int8's Gram drift is ~0.002, so int8 is
+decision-safe everywhere (classification 0 flips, value brain 1/200 = tie-level, recall forest
+0 flips). Binary's safety is DECISION-SPECIFIC and cannot be verified at the generic persistence
+layer (which does not know whether the consumer does wide-margin argmax or fine value readback).
+
+THE FIX: quant="auto" now adapts only among the magnitude-preserving, decision-safe levels
+{int8, float32} -- int8 where the margin gate proves it lossless, float32 for tiny/marginal
+arrays. The 1-bit binary auto-selection from the previous round is REMOVED (helpers deleted),
+because the cross-stack check showed it is not generically safe. This walks back last round's
+headline "auto picks binary, 4.3x" to an honest "auto picks int8/float32, ~3x, decision-safe on
+every brain type." A correction kept in the open, exactly the project's rule: built it, a
+broader test revealed the boundary, corrected it. quant="auto" verified across SelfOrganizingMind
+(0 flips), HolographicMind value brain (1/200 tie-level), HoloForest (0 flips); pinned by a new
+value-brain safety test in test_core_persistence. (Aside, noted not fixed: a consolidated
+HolographicMind's value() rejects a raw unprojected probe -- a pre-existing issue independent of
+quantization, it fails before any save.)
+
+LESSON: "lossless on the object I measured" is not "lossless on the stack." A quantization
+level's safety depends on how the CONSUMER reads the vectors (wide-margin argmax vs fine
+magnitude readback), so a generic persistence option must only auto-select levels that are
+decision-safe for the most sensitive consumer -- which is int8, not binary.
+
+## CREATURE: AUDIT FOR LATEST TECH -- already optimized, one robustness fix, one kept negative
+
+Prompt: make sure the creature stuff is updated and optimized for the latest tech. Audited the
+HolographicMind value-brain's hot paths against the recent improvements, MEASURING on a REAL
+trained creature (real GridWorld + CreatureEncoder + episodes), not synthetic random vectors --
+which matters: a random-vector brain has NO low-rank structure, so consolidation found rank 94
+of 94 and made decide() 8x SLOWER (pure projection overhead, no compression). On a REAL creature
+the prototypes are bundles of a small sense-atom vocabulary, so consolidation finds rank 9 and
+decide() is 5.4x faster (827 -> 152 us) -- the NOTES claim holds, on real data only.
+
+ALREADY OPTIMIZED (verified): value() is the vectorised matrix-product pattern already (sims =
+U @ state, cosine to every prototype at once); decide() projects the state ONCE via perceive_vec
+then loops the 4 actions; consolidation (the projection/low-rank work) gives the 5.4x. So the
+creature already carries the latest tech.
+
+KEPT NEGATIVE (measured, not shipped): batching the 4 per-action matmuls into one concatenated
+(Ntotal x rank) product. Measured 55 vs 58 us -- only ~5% -- because the matmul was never the
+bottleneck (rank 9, tiny); the per-action top-k (argpartition over ~1000-2000 prototypes) and the
+weighted readback dominate and are unchanged by batching. It was also NOT bit-identical (tie
+ordering shifts when sims are sliced from a combined array vs computed per action). 5% for added
+caching/offset/invalidation complexity AND a behaviour change is not worth it -- not shipped.
+
+SHIPPED (a real robustness update): value() now projects a RAW full-dim probe into the low-rank
+basis when the brain is consolidated. decide() and app.py perceive (project) first, but DIRECT
+value() callers (the core save/reload demo, the tour persistence check, _greedy) pass a raw probe
+-- which CRASHED on a consolidated brain (matmul dim mismatch, confirmed live). The fix is a cheap
+side-effect-free lift (state @ basis when the width is the full dim; already-projected vectors are
+left alone). It deliberately does NOT call perceive_vec, which also feeds the flux-guard ring --
+calling that inside value() would double-count out-of-basis energy on every per-action call.
+Verified: raw-probe value() now matches the pre-projected path exactly (idempotent), decide()
+unchanged, the rescue_cracks canary passes (creature behaviour preserved). Pinned in
+test_holographic_brain.
+
+(Noted from the previous round, now FIXED by this: the "consolidated value() rejects a raw probe"
+gap was this same bug.) Net: the creature was already optimized with the latest tech; the audit's
+deliverable is the confirming measurement, one robustness fix, and one honest negative.

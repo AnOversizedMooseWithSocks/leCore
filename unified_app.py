@@ -19,7 +19,6 @@ If a corpus is not present it is downloaded via nltk (needs a network connection
 first time); everything degrades gracefully and tells you what to install.
 """
 
-import io
 import os
 import re
 from collections import defaultdict
@@ -694,7 +693,9 @@ def generate():
     seed = j.get("seed") or "The "
     length = int(j.get("length", 200))
     temp = float(j.get("temperature", 0.45))
-    text = STATE["mind"].generate(seed, max(20, min(length, 600)), max(0.1, min(temp, 1.2)))
+    top_p = max(0.1, min(float(j.get("top_p", 1.0)), 1.0))   # <1.0 = nucleus (more coherent)
+    text = STATE["mind"].generate(seed, max(20, min(length, 600)),
+                                  max(0.1, min(temp, 1.2)), top_p=top_p)
     return jsonify({"text": text})
 
 
@@ -1026,7 +1027,6 @@ def discover_endpoint():
     raw = STATE.get("seq_raw")
     if not raw:
         return jsonify({"error": "no corpus available"})
-    mind = STATE["mind"]
     text = "".join(c for c in raw.lower() if c.isalpha() or c == " ")[:20000]
     # ground-truth boundaries (positions before a removed space) and the bare stream
     chars, truth = [], set()
@@ -1269,6 +1269,298 @@ def recall():
     return jsonify({"label": label, "score": round(float(score), 3), "example": snippet})
 
 
+# --- generative panels: drive the existing decoders FORWARD to produce output ----------
+
+def _img_data_url(arr):
+    """A numpy HxWx3 image (uint8 or float in [0,1]) -> a base64 PNG data URL the browser
+    can render directly. Used by the generative panels to show what they made."""
+    import io as _io
+    from PIL import Image
+    a = np.asarray(arr)
+    if a.dtype != np.uint8:
+        a = (np.clip(a, 0, 1) * 255).astype(np.uint8)
+    buf = _io.BytesIO()
+    Image.fromarray(a).save(buf, "PNG")
+    import base64
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+@app.route("/api/unified/compose", methods=["POST"])
+def compose_endpoint():
+    """Forward compositional generation: pick attribute tags, run the resonator FORWARD to
+    build a NEW scene vector, render it, and prove it is real by factoring the vector and
+    auto-tagging the pixels straight back to the spec it was built from. Goes through the
+    loaded mind's OWN scene faculty (one brain), falling back to a fresh mind if none is
+    loaded yet so the panel still works standalone."""
+    import holographic_scene as hs
+    from holographic_compose import render_scene, render_fidelity
+    j = request.json or {}
+    mind = STATE.get("mind") or UnifiedMind(dim=1024, seed=0)
+    rng = np.random.default_rng(int(j.get("seed", 0)))
+    n = max(1, min(int(j.get("objects", 2)), 4))
+    # compose n NOVEL objects (random tags from the full vocabulary)
+    tags = [{"colour": str(rng.choice(hs.COLOURS)), "shape": str(rng.choice(hs.SHAPES)),
+             "texture": str(rng.choice(hs.TEXTURES))} for _ in range(n)]
+    img = render_scene(tags, S=120, seed=int(rng.integers(1000)))
+    recovered = mind.decompose_scene(mind.compose_scene(tags), n, sweeps=2)
+    key = lambda d: (d["colour"], d["shape"], d["texture"])
+    exact = {key(t) for t in tags} == {key(g) for g in recovered}
+    # render fidelity on the first object (shape+colour the renderer actually paints)
+    sh_ok, col_ok = render_fidelity(tags[0], S=120, seed=0)
+    # a short colour-sweep animation of the first object, composed through the mind
+    sweep = ["red", "yellow", "green", "cyan", "blue"]
+    frames, anim_ok = [], 0
+    for v in sweep:
+        t = dict(tags[0]); t["colour"] = v
+        vec = mind.compose_scene([t])
+        frames.append(render_scene([t], S=120, seed=0))
+        anim_ok += (mind.decompose_scene(vec, 1)[0]["colour"] == v)
+    anim = anim_ok / len(sweep)
+    return jsonify({
+        "composed": [(t["colour"], t["shape"], t["texture"]) for t in tags],
+        "recovered": [(g["colour"], g["shape"], g["texture"]) for g in recovered],
+        "exact": bool(exact),
+        "image": _img_data_url(img),
+        "render_shape_ok": bool(sh_ok), "render_colour_ok": bool(col_ok),
+        "anim_frames": [_img_data_url(im) for im in frames],
+        "anim_faithful": round(float(anim), 2),
+        "note": ("the resonator runs FORWARD to compose a scene that was never stored, then "
+                 "BACKWARD to prove it: a generated scene is real because it analyses straight "
+                 "back to the spec it was built from -- all through the loaded mind's own "
+                 "scene faculty")})
+
+
+@app.route("/api/unified/nested", methods=["POST"])
+def nested_endpoint():
+    """Fractal composition: the SAME bind+superpose that builds a scene from objects, run
+    ONE LEVEL UP to build a scene-of-scenes. Compose several sub-scenes, group them, then
+    peel each group back out and factor it -- same above, same below. Renders each recovered
+    sub-scene and reports per-group round-trip fidelity. Goes through the loaded mind's own
+    faculty (one brain)."""
+    import holographic_scene as hs
+    from holographic_compose import render_scene
+    j = request.json or {}
+    mind = STATE.get("mind") or UnifiedMind(dim=1024, seed=0)
+    rng = np.random.default_rng(int(j.get("seed", 0)))
+    n_groups = max(2, min(int(j.get("groups", 2)), 4))
+    per = max(1, min(int(j.get("per_group", 2)), 3))
+
+    def rt():
+        return {"colour": str(rng.choice(hs.COLOURS)), "shape": str(rng.choice(hs.SHAPES)),
+                "texture": str(rng.choice(hs.TEXTURES))}
+    groups = {f"group{i+1}": [rt() for _ in range(per)] for i in range(n_groups)}
+    sizes = {k: len(v) for k, v in groups.items()}
+    recovered = mind.decompose_nested(mind.compose_nested(groups), sizes)
+    key = lambda d: (d["colour"], d["shape"], d["texture"])
+    out_groups = []
+    exact_count = 0
+    for k in groups:
+        ok = {key(t) for t in groups[k]} == {key(g) for g in recovered[k]}
+        exact_count += ok
+        out_groups.append({
+            "name": k,
+            "composed": [(t["colour"], t["shape"], t["texture"]) for t in groups[k]],
+            "recovered": [(g["colour"], g["shape"], g["texture"]) for g in recovered[k]],
+            "exact": bool(ok),
+            "image": _img_data_url(render_scene(groups[k], S=110, seed=0)),
+        })
+    return jsonify({
+        "groups": out_groups,
+        "exact_groups": exact_count, "total_groups": len(groups),
+        "note": ("a sub-scene is to the super-scene exactly what an object is to a scene -- the "
+                 "same bind+superpose and unbind+factor at two levels (fractal). Recovery is "
+                 "near-perfect at 2-3 groups and degrades gracefully beyond as group-binding "
+                 "cross-talk accumulates -- the flat scene's capacity limit, one level up")})
+
+
+@app.route("/api/unified/highcap", methods=["POST"])
+def highcap_endpoint():
+    """High-capacity binding: cram many key->value pairs into ONE vector and read them back.
+    Compares the real-valued HRR core against the mind's FHRR (complex-phasor) faculty
+    (high_capacity_memory) at the same load -- FHRR holds far more pairs before readback
+    breaks. Goes through the loaded mind's own faculty (one brain)."""
+    import numpy as _np
+    from holographic_ai import random_vector, bind, unbind, cosine
+    j = request.json or {}
+    n = max(4, min(int(j.get("pairs", 40)), 80))
+    dim = 256                                            # low-ish dim so capacity bites visibly
+    mind = STATE.get("mind") or UnifiedMind(dim=dim, seed=0)
+
+    # real-HRR baseline: one trace of n bound pairs, recover each by nearest value
+    rng = _np.random.default_rng(int(j.get("seed", 0)))
+    keys = [random_vector(dim, rng) for _ in range(n)]
+    vals = [random_vector(dim, rng) for _ in range(n)]
+    trace = sum(bind(keys[i], vals[i]) for i in range(n))
+    real_ok = sum(int(_np.argmax([cosine(unbind(trace, keys[i]), v) for v in vals])) == i
+                  for i in range(n))
+
+    # FHRR via the mind's faculty
+    mem, voc = mind.high_capacity_memory()
+    mem.trace = _np.zeros_like(mem.trace)                # fresh trace for the demo
+    pairs = {f"k{i}": f"v{i}" for i in range(n)}
+    for k, v in pairs.items():
+        mem.learn(voc.get(k), voc.get(v))
+    vocab = [f"v{i}" for i in range(n)]
+    fhrr_ok = sum(voc.cleanup(mem.recall(voc.get(k)), candidates=vocab)[0] == v
+                  for k, v in pairs.items())
+    return jsonify({
+        "pairs": n, "dim": dim,
+        "real_hrr_recovered": real_ok, "real_hrr_frac": round(real_ok / n, 3),
+        "fhrr_recovered": fhrr_ok, "fhrr_frac": round(fhrr_ok / n, 3),
+        "note": ("the real-valued HRR core is the readable default and is perfect at the "
+                 "few-pair loads the mind normally runs; for a LARGE key->value trace the FHRR "
+                 "faculty (complex unit-phasor atoms, binding by complex multiply) holds far "
+                 "more pairs -- the high-capacity option the VSA literature recommends, kept "
+                 "opt-in so the common path stays real-valued and readable")})
+
+
+@app.route("/api/unified/morph", methods=["POST"])
+def morph_endpoint():
+    """Image morph: spherical interpolation between two rendered shapes IN THE
+    DCT-COEFFICIENT DOMAIN, vs a pixel crossfade. The honest difference is ghosting -- a
+    crossfade midpoint IS the double-exposure; the coefficient morph blends structure.
+    Goes through the loaded mind's morph faculty (one brain)."""
+    import holographic_scene as hs
+    from holographic_generate import crossfade_images, ghosting
+    j = request.json or {}
+    mind = STATE.get("mind") or UnifiedMind(dim=1024, seed=0)
+    rng = np.random.default_rng(int(j.get("seed", 0)))
+    # render two distinct shapes to morph between
+    a_spec = (str(rng.choice(hs.SHAPES)), str(rng.choice([c for c in hs.COLOURS if c != "grey"])))
+    b_spec = (str(rng.choice(hs.SHAPES)), str(rng.choice([c for c in hs.COLOURS if c != "grey"])))
+    A = hs.make_scene([a_spec], S=96, seed=1).astype(float) / 255.0
+    B = hs.make_scene([b_spec], S=96, seed=2).astype(float) / 255.0
+    steps = 9
+    morph = mind.morph_scene(A, B, steps=steps)        # the mind's own morph faculty
+    cross = crossfade_images(A, B, steps=steps)
+    gm = ghosting(morph[steps // 2], A, B)
+    gx = ghosting(cross[steps // 2], A, B)
+    return jsonify({
+        "a": f"{a_spec[1]} {a_spec[0]}", "b": f"{b_spec[1]} {b_spec[0]}",
+        "morph_frames": [_img_data_url(f) for f in morph],
+        "crossfade_mid": _img_data_url(cross[steps // 2]),
+        "morph_mid": _img_data_url(morph[steps // 2]),
+        "ghost_morph": round(float(gm), 3), "ghost_crossfade": round(float(gx), 3),
+        "note": ("coefficient-domain slerp blends structure; the pixel crossfade midpoint is "
+                 "literally the double-exposure of the two pictures (ghosting near zero distance)")})
+
+
+@app.route("/api/unified/nucleus", methods=["POST"])
+def nucleus_endpoint():
+    """Text generation with nucleus (top-p) decoding over the loaded mind's n-gram, vs the
+    plain temperature sampling already on the Generate panel. Trimming the unlikely tail
+    raises the real-word fraction (coherence) at a modest diversity cost -- reported."""
+    if _need_mind() or STATE["mind"]._gen is None:
+        return jsonify({"error": "load a dataset first"})
+    from holographic_generate import generate_text, real_word_fraction, distinct_ngram_fraction
+    mind = STATE["mind"]
+    # find a FLAT HolographicNGram among the loaded generators (it exposes _distribution);
+    # hierarchical schema generators don't, so nucleus decoding doesn't apply to them.
+    ng = None
+    for g in getattr(mind, "_gens", {}).values():
+        if g.get("kind") == "flat" and hasattr(g["gen"], "_distribution"):
+            ng = g["gen"]; break
+    if ng is None and hasattr(mind._gen, "_distribution"):
+        ng = mind._gen
+    if ng is None:
+        return jsonify({"error": "this dataset's generator is hierarchical, not a flat "
+                        "n-gram -- nucleus sampling needs the character n-gram (Brown, "
+                        "Reuters, or Books)"})
+    j = request.json or {}
+    seed = j.get("seed") or "the "
+    length = max(40, min(int(j.get("length", 300)), 600))
+    top_p = max(0.5, min(float(j.get("top_p", 0.85)), 1.0))
+    rep = max(0.0, min(float(j.get("rep_penalty", 0.0)), 0.9))
+    vocab = set((STATE.get("seq_raw") or "").lower().split())
+    nuc = generate_text(ng, seed, length=length, temperature=0.6, top_p=top_p,
+                        rep_penalty=rep, rng=np.random.default_rng(0))
+    tmp = ng.generate(seed, length, 0.6)
+    out = {"nucleus": nuc, "temperature": tmp,
+           "nucleus_distinct4": round(distinct_ngram_fraction(nuc), 3),
+           "temperature_distinct4": round(distinct_ngram_fraction(tmp), 3)}
+    if vocab:
+        out["nucleus_realword"] = round(real_word_fraction(nuc, vocab), 3)
+        out["temperature_realword"] = round(real_word_fraction(tmp, vocab), 3)
+    out["note"] = ("nucleus keeps the smallest set of likeliest next-characters summing to "
+                   "top_p and samples within it -- fewer tail characters that break words")
+    return jsonify(out)
+
+
+@app.route("/api/unified/persist", methods=["POST"])
+def persist_endpoint():
+    """Save the loaded mind's whole LEARNED MEMORY (its SelfOrganizingMind: the encoder's
+    learned meaning space plus the classified prototype bank) through the frozen core's
+    versioned save/load, reload it, and prove it is identical -- same word neighbours AND
+    the same classifications. A trained result is saved to disk and restored, not
+    recomputed, with a version stamp that fails loudly on a format mismatch."""
+    if _need_mind():
+        return jsonify({"error": "load a dataset first"})
+    import os
+    import tempfile
+    import holographic_core as core
+    from holographic_ai import cosine
+    mind = STATE["mind"]
+    mem = getattr(mind, "memory", None)
+    if mem is None or not hasattr(mem, "to_state"):
+        return jsonify({"error": "this mind has no persistable memory yet -- load a dataset first"})
+    ctx = getattr(getattr(mem.encoder, "_text", None), "context", None) or {}
+    # which precision to persist at: float32 (default), int8, or auto (dynamic per-array).
+    # The recent quantization work lives in core.save; expose it here so it is reachable
+    # from the live stack, not just the library.
+    quant = (request.json or {}).get("quant", "float32")
+    save_kw = {"int8": dict(quant="int8"), "auto": dict(quant="auto")}.get(quant, dict(compress=True))
+    # mkstemp atomically creates the file and returns an open fd, avoiding the race that
+    # makes the older mktemp() insecure; we just need the unique path for save/load.
+    fd, path = tempfile.mkstemp(suffix=".npz")
+    os.close(fd)
+    core.save(mem, path, **save_kw)                     # the whole SelfOrganizingMind
+    back = core.load(path)
+    size = os.path.getsize(path)
+    os.remove(path)
+    # float32 baseline size, so the panel can SHOW what the chosen quantization saved
+    fd2, p2 = tempfile.mkstemp(suffix=".npz"); os.close(fd2)
+    core.save(mem, p2, compress=True); base_size = os.path.getsize(p2); os.remove(p2)
+    # verify: prototypes survive, word neighbours survive, and -- the real test --
+    # classifications match on a sample of what the mind already learned
+    words = list(ctx)
+    probe = next((w for w in ("city", "money", "market", "the", words[0] if words else "")
+                  if w in ctx), words[0] if words else None)
+    def neighbours(enc):
+        pv = enc._text.wordvec(probe)
+        sims = sorted(((cosine(pv, enc._text.wordvec(w)), w) for w in words if w != probe), reverse=True)
+        return [w for _s, w in sims[:5]]
+    same_neighbours = (probe is None) or (neighbours(mem.encoder) == neighbours(back.encoder))
+    labels = list(mem.live.labels()) if hasattr(mem.live, "labels") else []
+    samples = words[:30]
+    same_class = all(mem.classify(w) == back.classify(w) for w in samples) if samples else True
+    bad_version_caught = False
+    try:
+        st = core.to_state(mem); st["state_version"] = core.STATE_VERSION + 99
+        core.from_state(st)
+    except ValueError:
+        bad_version_caught = True
+    return jsonify({
+        "words": len(words),
+        "prototypes": mem.live.size(),
+        "labels": sorted(str(l) for l in labels)[:12],
+        "bytes": size,
+        "quant": quant,
+        "float32_bytes": base_size,
+        "shrink": round(base_size / size, 2) if size else 1.0,
+        "probe": probe,
+        "neighbours_before": neighbours(mem.encoder) if probe else [],
+        "neighbours_after": neighbours(back.encoder) if probe else [],
+        "same_neighbours": bool(same_neighbours),
+        "same_classifications": bool(same_class),
+        "version_guard_works": bool(bad_version_caught),
+        "note": ("the whole learned memory -- meaning space and prototype bank -- round-trips "
+                 "through one version-stamped .npz: identical word neighbours and identical "
+                 "classifications, so a trained mind is saved and reloaded, not recomputed; an "
+                 "incompatible format version is refused rather than loaded silently wrong. The "
+                 "precision is selectable -- float32, int8, or dynamic auto (per-array, by the "
+                 "data's own separation) -- and classifications survive the chosen level")})
+
+
 PAGE = r"""
 <!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1411,6 +1703,7 @@ PAGE = r"""
       <input id="seed" value="the " style="width:160px" placeholder="seed text">
       <label class="muted">length <input id="len" type="number" value="220" style="width:80px"></label>
       <label class="muted">temp <input id="temp" type="number" step="0.05" value="0.45" style="width:80px"></label>
+      <label class="muted">top-p <input id="topp" type="number" step="0.05" min="0.1" max="1" value="1.0" style="width:70px" title="below 1.0 = nucleus decoding (trims the unlikely tail, more coherent)"></label>
       <button onclick="generate()">Generate</button>
     </div>
     <div id="gout" class="out"></div>
@@ -1455,6 +1748,61 @@ PAGE = r"""
     <div class="muted">Binding combines several vectors into one; the hard inverse is recovering which vector came from each codebook given only the composite. The resonator network does it by searching in superposition &mdash; converging on the factors without ever enumerating the combinatorial space. (Uses self-inverse MAP binding, the algebra factorization needs.)</div>
     <div class="row" style="margin-top:8px"><button onclick="factorize()">Bind three, then factor</button></div>
     <div id="fzout" class="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>5&frac14; &middot; compose a scene <span class="muted">(run the resonator FORWARD)</span></h2>
+    <div class="muted">The inverse of factorize: pick attribute atoms, bind and superpose them into a scene vector that was never stored, then render it. A generated scene is real because it analyses straight back &mdash; the resonator factors the composed vector, and the rendered pixels auto-tag, recovering exactly the colour/shape/texture it was built from. The colour sweep is procedural animation by composition.</div>
+    <div class="row" style="margin-top:8px">
+      <label class="muted">objects <input id="cmpN" type="number" value="2" min="1" max="4" style="width:54px"></label>
+      <button onclick="composeScene()">Compose &amp; verify</button>
+    </div>
+    <div id="cmpout" class="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>5&frac13; &middot; nested scene <span class="muted">(fractal: same above, same below)</span></h2>
+    <div class="muted">The same bind-and-superpose that builds a scene from objects, run one level up to build a scene-of-scenes. Several sub-scenes are composed, bound to group atoms, and superposed; then each group is peeled back out and factored &mdash; the identical unbind-then-factor at two levels. A sub-scene is to the super-scene exactly what an object is to a scene. Recovery is near-perfect at 2&ndash;3 groups and degrades gracefully beyond, as group cross-talk accumulates (the flat scene's capacity limit, one level up).</div>
+    <div class="row" style="margin-top:8px">
+      <label class="muted">groups <input id="nstG" type="number" value="2" min="2" max="4" style="width:54px"></label>
+      <label class="muted">per group <input id="nstP" type="number" value="2" min="1" max="3" style="width:54px"></label>
+      <button onclick="nestedScene()">Compose nested &amp; verify</button>
+    </div>
+    <div id="nstout" class="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>5&frac12; &middot; morph <span class="muted">(slerp in the coefficient domain)</span></h2>
+    <div class="muted">Spherical interpolation between two rendered shapes <i>in the DCT-coefficient domain</i>, inverse-transformed per frame. The honest difference from a pixel crossfade is ghosting: a crossfade midpoint <i>is</i> the double-exposure of both pictures; the coefficient morph blends structure, so its midpoint sits measurably away from that double image.</div>
+    <div class="row" style="margin-top:8px"><button onclick="morphScene()">Morph two shapes</button></div>
+    <div id="mphout" class="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>5&frac34; &middot; nucleus text <span class="muted">(top-p decoding vs temperature)</span></h2>
+    <div class="muted">Generate from the loaded mind's character n-gram with nucleus (top-p) decoding: keep the smallest set of likeliest next-characters summing to p and sample within it. Trimming the unlikely tail removes the garbage characters that break words &mdash; measurably more real words than plain temperature sampling, at a little less variety. Needs a flat n-gram dataset (Brown, Reuters, Books).</div>
+    <div class="row" style="margin-top:8px">
+      <input id="nucSeed" placeholder="seed text, e.g. the " value="the " style="width:160px">
+      <label class="muted">top-p <input id="nucP" type="number" value="0.85" min="0.5" max="1" step="0.05" style="width:60px"></label>
+      <button onclick="nucleusGen()">Generate both ways</button>
+    </div>
+    <div id="nucout" class="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>5&frac78; &middot; save &amp; reload <span class="muted">(persist a trained mind)</span></h2>
+    <div class="muted">A trained result should be savable, not recomputed every run. This snapshots the mind's learned meaning space (its word&rarr;vector map) through the frozen core's version-stamped save/load, reloads it, and proves the reloaded space is identical &mdash; same vectors and the same nearest-neighbour structure for a probe word. An incompatible format version is refused rather than loaded silently wrong. The precision is selectable: <b>float32</b> (default), <b>int8</b> (~2&times; smaller), or <b>auto</b> &mdash; dynamic per-array quantization that picks binary/int8/float32 from each array's own separation and size.</div>
+    <div class="row" style="margin-top:8px">
+      <label class="muted">precision
+        <select id="prsQ" style="margin-left:4px">
+          <option value="float32">float32</option>
+          <option value="int8">int8</option>
+          <option value="auto">auto (dynamic)</option>
+        </select>
+      </label>
+      <button onclick="persistMind()">Save, reload, verify</button>
+    </div>
+    <div id="prsout" class="out"></div>
   </div>
 
   <div class="card">
@@ -1573,6 +1921,16 @@ const CATALOG=[
     desc:"Strip the spaces and the mind rediscovers the word boundaries on its own."},
   {key:"factorize", cat:"Structure", tags:["resonator","factor","superposition","decompose"],
     desc:"Bind several vectors into one, then pull them back apart by searching in superposition."},
+  {key:"compose a scene", cat:"Generate", tags:["compose","resonator","forward","render","novel","round-trip"],
+    desc:"Run the factorizer forward: compose a scene that was never stored, render it, and verify it analyses straight back."},
+  {key:"nested scene", cat:"Generate", tags:["nested","fractal","recursive","scene","self-similar","round-trip"],
+    desc:"Fractal composition: the same bind-and-factor that builds a scene from objects, run one level up to build a scene-of-scenes."},
+  {key:"morph", cat:"Generate", tags:["morph","slerp","interpolate","coefficient","ghosting","animate"],
+    desc:"Slerp between two shapes in the coefficient domain &mdash; blends structure where a crossfade just ghosts."},
+  {key:"nucleus text", cat:"Generate", tags:["nucleus","top-p","decode","coherence","sampling"],
+    desc:"Generate from the n-gram with nucleus (top-p) decoding &mdash; more real words than plain temperature."},
+  {key:"save &amp; reload", cat:"Setup", tags:["persist","save","load","version","reload"],
+    desc:"Save the mind's learned meaning space through the versioned core and reload it identically."},
   {key:"many NPCs", cat:"Scale", tags:["npc","shared-base","branch","delta","merge","game"],
     desc:"Run a population of NPCs as one shared mind plus lightweight per-instance deltas."},
   {key:"sprite pack", cat:"Images", tags:["sprites","compression","cross-file","lossless","game-assets"],
@@ -1706,7 +2064,7 @@ async function organize(){
 }
 async function generate(){
   $("gout").innerHTML='<span class="muted">generating\u2026</span>';
-  const r=await post("/api/unified/generate",{seed:$("seed").value,length:+$("len").value,temperature:+$("temp").value});
+  const r=await post("/api/unified/generate",{seed:$("seed").value,length:+$("len").value,temperature:+$("temp").value,top_p:+$("topp").value});
   if(r.error){$("gout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
   window._lastGen=r.text;
   $("gout").innerHTML=`<span style="color:var(--amber)">${r.text}</span>`+
@@ -1876,6 +2234,84 @@ async function factorize(){
     `<div>bound factors (hidden from the solver): <b>[${r.true.join(", ")}]</b></div>`+
     `<div style="margin-top:4px">resonator recovered: <b style="color:${match?'var(--teal2)':'var(--coral)'}">[${r.recovered.join(", ")}]</b> ${match?'&#10003; exact':'&#10007;'}</div>`+
     `<div style="margin-top:6px" class="muted">searched a space of <b style="color:var(--amber)">${r.search_space.toLocaleString()}</b> combinations in ${r.restarts} restart(s) &mdash; never enumerated them</div>`+
+    `<div class="muted" style="margin-top:6px">${r.note}.</div>`;
+}
+async function composeScene(){
+  $("cmpout").innerHTML='<span class="spin">composing &amp; verifying&hellip;</span>';
+  const n=parseInt($("cmpN").value||"2");
+  const r=await post("/api/unified/compose",{objects:n,seed:Math.floor(Math.random()*10000)});
+  if(r.error){$("cmpout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  const fmt=a=>a.map(t=>`${t[0]} ${t[1]} (${t[2]})`).join(" + ");
+  const frames=r.anim_frames.map(u=>`<img src="${u}" style="width:54px;height:54px;border-radius:6px;margin-right:4px;image-rendering:pixelated">`).join("");
+  $("cmpout").innerHTML=
+    `<div><img src="${r.image}" style="width:160px;height:160px;border-radius:8px;image-rendering:pixelated"></div>`+
+    `<div style="margin-top:6px">composed (never stored): <b>${fmt(r.composed)}</b></div>`+
+    `<div style="margin-top:3px">factored back: <b style="color:${r.exact?'var(--teal2)':'var(--coral)'}">${fmt(r.recovered)}</b> ${r.exact?'&#10003; exact round-trip':'&#10007;'}</div>`+
+    `<div style="margin-top:3px" class="muted">rendered pixels auto-tag back: shape ${r.render_shape_ok?'&#10003;':'&#10007;'}, colour ${r.render_colour_ok?'&#10003;':'&#10007;'}</div>`+
+    `<div style="margin-top:8px"><span class="muted">colour-sweep animation (${Math.round(r.anim_faithful*100)}% of frames on-target):</span><br>${frames}</div>`+
+    `<div class="muted" style="margin-top:6px">${r.note}.</div>`;
+}
+async function nestedScene(){
+  $("nstout").innerHTML='<span class="spin">composing nested &amp; verifying&hellip;</span>';
+  const g=parseInt($("nstG").value||"2"), p=parseInt($("nstP").value||"2");
+  const r=await post("/api/unified/nested",{groups:g,per_group:p,seed:Math.floor(Math.random()*10000)});
+  if(r.error){$("nstout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  const fmt=a=>a.map(t=>`${t[0]} ${t[1]} (${t[2]})`).join(" + ");
+  let html=`<div>recovered <b style="color:${r.exact_groups==r.total_groups?'var(--teal2)':'var(--amber)'}">${r.exact_groups}/${r.total_groups}</b> sub-scenes exactly (same machinery, one level up)</div>`;
+  for(const grp of r.groups){
+    html+=`<div style="margin-top:8px;display:flex;gap:10px;align-items:flex-start">`+
+      `<img src="${grp.image}" style="width:80px;height:80px;border-radius:8px;image-rendering:pixelated">`+
+      `<div><div class="muted">${grp.name}</div>`+
+      `<div>built: <b>${fmt(grp.composed)}</b></div>`+
+      `<div>factored back: <b style="color:${grp.exact?'var(--teal2)':'var(--coral)'}">${fmt(grp.recovered)}</b> ${grp.exact?'&#10003;':'&#10007;'}</div></div></div>`;
+  }
+  html+=`<div class="muted" style="margin-top:6px">${r.note}.</div>`;
+  $("nstout").innerHTML=html;
+}
+async function morphScene(){
+  $("mphout").innerHTML='<span class="spin">morphing&hellip;</span>';
+  const r=await post("/api/unified/morph",{seed:Math.floor(Math.random()*10000)});
+  if(r.error){$("mphout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  const frames=r.morph_frames.map(u=>`<img src="${u}" style="width:48px;height:48px;border-radius:6px;margin-right:3px;image-rendering:pixelated">`).join("");
+  $("mphout").innerHTML=
+    `<div><b>${r.a}</b> &rarr; <b>${r.b}</b></div>`+
+    `<div style="margin-top:6px">${frames}</div>`+
+    `<div style="margin-top:10px;display:flex;gap:18px;align-items:center">`+
+      `<div style="text-align:center"><img src="${r.morph_mid}" style="width:80px;height:80px;border-radius:8px;image-rendering:pixelated"><br><span class="muted">coeff morph midpoint<br>ghost dist <b style="color:var(--teal2)">${r.ghost_morph}</b></span></div>`+
+      `<div style="text-align:center"><img src="${r.crossfade_mid}" style="width:80px;height:80px;border-radius:8px;image-rendering:pixelated"><br><span class="muted">crossfade midpoint<br>ghost dist <b style="color:var(--coral)">${r.ghost_crossfade}</b> (the double-exposure)</span></div>`+
+    `</div>`+
+    `<div class="muted" style="margin-top:6px">${r.note}.</div>`;
+}
+async function nucleusGen(){
+  $("nucout").innerHTML='<span class="spin">generating&hellip;</span>';
+  const seed=$("nucSeed").value||"the ";
+  const top_p=parseFloat($("nucP").value||"0.85");
+  const r=await post("/api/unified/nucleus",{seed:seed,top_p:top_p,length:300});
+  if(r.error){$("nucout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  let rw="";
+  if(r.nucleus_realword!==undefined){
+    rw=`<div style="margin-top:6px">real-word fraction: nucleus <b style="color:var(--teal2)">${r.nucleus_realword}</b> vs temperature <b style="color:var(--coral)">${r.temperature_realword}</b> `+
+       `<span class="muted">(distinct-4gram ${r.nucleus_distinct4} vs ${r.temperature_distinct4}: more coherent for a little less variety)</span></div>`;
+  }
+  $("nucout").innerHTML=
+    `<div><span class="muted">nucleus (top-p):</span><br><span style="color:var(--amber)">${r.nucleus}</span></div>`+
+    `<div style="margin-top:8px"><span class="muted">plain temperature:</span><br>${r.temperature}</div>`+
+    rw+
+    `<div class="muted" style="margin-top:6px">${r.note}.</div>`;
+}
+async function persistMind(){
+  $("prsout").innerHTML='<span class="spin">saving &amp; reloading&hellip;</span>';
+  const r=await post("/api/unified/persist",{quant:$("prsQ").value});
+  if(r.error){$("prsout").innerHTML=`<span class="muted">${r.error}</span>`;return;}
+  const shrinkTxt = (r.quant && r.quant!=="float32" && r.shrink>1.01)
+    ? ` <span class="muted">(${r.quant}: ${r.shrink}&times; smaller than float32's ${r.float32_bytes.toLocaleString()} bytes)</span>` : "";
+  $("prsout").innerHTML=
+    `<div>saved the whole learned memory &mdash; <b>${r.words.toLocaleString()}</b> word-vectors and `+
+    `<b>${r.prototypes}</b> prototypes (${r.labels.join(", ")}) &mdash; to a version-stamped .npz `+
+    `(<b style="color:var(--amber)">${r.bytes.toLocaleString()}</b> bytes)${shrinkTxt}, reloaded, verified</div>`+
+    `<div style="margin-top:4px">classifications identical after reload: <b style="color:${r.same_classifications?'var(--teal2)':'var(--coral)'}">${r.same_classifications?'&#10003; yes':'&#10007; no'}</b></div>`+
+    (r.probe?`<div style="margin-top:4px">nearest neighbours of <b>${r.probe}</b> &mdash; before: <span class="muted">${r.neighbours_before.join(", ")}</span><br>&nbsp;&nbsp;after reload: <span style="color:${r.same_neighbours?'var(--teal2)':'var(--coral)'}">${r.neighbours_after.join(", ")}</span> ${r.same_neighbours?'&#10003;':'&#10007;'}</div>`:"")+
+    `<div style="margin-top:4px" class="muted">version guard refuses a mismatched format: ${r.version_guard_works?'&#10003;':'&#10007;'}</div>`+
     `<div class="muted" style="margin-top:6px">${r.note}.</div>`;
 }
 async function discover(){

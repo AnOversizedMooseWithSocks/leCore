@@ -34,7 +34,7 @@ import itertools
 import heapq
 import numpy as np
 
-from holographic_ai import HolographicMemory, random_vector, cosine
+from holographic_ai import HolographicMemory, random_vector
 
 
 class HoloTree:
@@ -163,6 +163,9 @@ class HoloForest:
         self.trees = [HoloTree(dim, leaf_size=leaf_size, seed=seed + t) for t in range(n_trees)]
         self.items = None
         self.last_comparisons = 0
+        self._seed = seed                   # remembered for persistence (trees are seed-derived)
+        self._leaf_size = leaf_size
+        self._n_trees = n_trees
 
     def build(self, items):
         self.items = np.asarray(items, float)
@@ -183,6 +186,30 @@ class HoloForest:
         self.last_comparisons = len(cand)
         sims = self.items[cand] @ query
         return int(cand[int(sims.argmax())])
+
+    # -- persistence: the trees are seed-derived, so we save only the items + config
+    # and rebuild deterministically (a saved-then-loaded forest recalls identically).
+    def to_state(self):
+        """Snapshot the forest: its config and the stored items. The random
+        hyperplanes are a pure function of (seed, tree index, node id), so reload
+        rebuilds byte-identical trees from the items alone."""
+        return {
+            "kind": "HoloForest",
+            "dim": int(self.dim),
+            "n_trees": int(self._n_trees),
+            "leaf_size": int(self._leaf_size),
+            "seed": int(self._seed),
+            "items": (self.items.copy() if self.items is not None else None),
+        }
+
+    @classmethod
+    def from_state(cls, state):
+        """Rebuild a HoloForest from a to_state() snapshot, re-growing its trees."""
+        f = cls(int(state["dim"]), n_trees=int(state["n_trees"]),
+                leaf_size=int(state["leaf_size"]), seed=int(state["seed"]))
+        if state.get("items") is not None:
+            f.build(np.asarray(state["items"], float))
+        return f
 
 
 # ======================================================================

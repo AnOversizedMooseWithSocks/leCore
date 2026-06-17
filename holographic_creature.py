@@ -23,7 +23,7 @@ Needs: numpy, and holographic_ai.py beside it.
 """
 
 import numpy as np
-from holographic_ai import random_vector, cosine, bind, bundle, permute, Vocabulary
+from holographic_ai import random_vector, bind, bundle, permute, Vocabulary
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +123,7 @@ class HolographicMind:
         self.reorganizations = 0
         self.last_choice = None             # what the autonomous step last decided to do
         self.rng = np.random.default_rng(seed)
+        self._seed = seed                   # remembered so a trained brain can be persisted
         n = len(self.actions)
         # Per action, parallel arrays so recall is one matrix-vector product:
         #   _sum  : running SUM of member state vectors (the un-normalised bundle)
@@ -246,6 +247,17 @@ class HolographicMind:
         U = self._unit[action_idx]
         if not len(U):
             return 0.0, 0.0
+        # Robustness: decide() perceives (projects) the state once before the per-action
+        # loop, so value() normally gets a vector already in the prototype space. But a
+        # DIRECT caller (a demo, a save/reload check, _greedy) may pass a RAW full-dim probe
+        # to a consolidated brain, whose prototypes live in the low-rank basis. Project it
+        # here if its width is the full dim -- a cheap, side-effect-free lift (unlike
+        # perceive_vec, which also feeds the flux-guard ring, so we must NOT call that here
+        # or a direct value() call would double-count out-of-basis energy). An already-
+        # projected vector (basis width) is left untouched.
+        state_vec = np.asarray(state_vec, float)
+        if self._basis is not None and state_vec.shape[-1] == self._basis.shape[0]:
+            state_vec = state_vec @ self._basis
         sims = U @ state_vec
         rets = self._ret[action_idx]
         if sims.size > self.k:                       # keep only the k nearest prototypes
@@ -687,6 +699,54 @@ class HolographicMind:
             self._buf = []
             self.reorganizations += 1
         return chosen[0], chosen[1].prototype_count()
+
+    # -- persistence: round-trip a TRAINED brain --------------------------------
+    # Saves the learned value memory (the four per-action banks), the projection
+    # basis if the brain has consolidated, and the config needed to reconstruct an
+    # identical decision-maker. The recent-experience buffer and transient EMAs are
+    # deliberately NOT persisted -- they are self-healing scratch state that refills
+    # as the reloaded brain sees new experience, and saving them would only risk the
+    # stale-buffer hazards the maintenance code already guards against.
+    _STATE_FIELDS = ("k", "epsilon", "novelty_bonus", "memory_cap", "merge", "ret_alpha",
+                     "maintain", "reorg_duplicate", "redundancy_floor", "surprise_floor",
+                     "maintain_gap", "buffer_cap", "check_every", "capacity",
+                     "blind_floor", "expand_at", "experiences", "reorganizations")
+
+    def to_state(self):
+        """A snapshot of this trained brain: config + the learned per-action banks +
+        the consolidation basis. Reload with HolographicMind.from_state()."""
+        cfg = {f: getattr(self, f) for f in self._STATE_FIELDS}
+        return {
+            "kind": "HolographicMind",
+            "dim": int(self.dim),
+            "actions": list(self.actions),
+            "seed": int(self._seed) if hasattr(self, "_seed") else 0,
+            "config": cfg,
+            "sum": [a.copy() for a in self._sum],
+            "unit": [a.copy() for a in self._unit],
+            "ret": [a.copy() for a in self._ret],
+            "cnt": [a.copy() for a in self._cnt],
+            "basis": (self._basis.copy() if self._basis is not None else None),
+        }
+
+    @classmethod
+    def from_state(cls, state):
+        """Rebuild a trained HolographicMind from a to_state() snapshot. The reloaded
+        brain decides identically to the saved one (same banks, same basis)."""
+        cfg = dict(state.get("config", {}))
+        m = cls(int(state["dim"]), list(state["actions"]), seed=int(state.get("seed", 0)),
+                k=cfg.get("k", 12), merge=cfg.get("merge", 0.92),
+                ret_alpha=cfg.get("ret_alpha", 0.1), capacity=cfg.get("capacity", 0),
+                maintain=cfg.get("maintain", False))
+        for f in cls._STATE_FIELDS:
+            if f in cfg:
+                setattr(m, f, cfg[f])
+        m._sum = [np.asarray(a, float) for a in state["sum"]]
+        m._unit = [np.asarray(a, float) for a in state["unit"]]
+        m._ret = [np.asarray(a, float) for a in state["ret"]]
+        m._cnt = [np.asarray(a, float) for a in state["cnt"]]
+        m._basis = (np.asarray(state["basis"], float) if state.get("basis") is not None else None)
+        return m
 
 
 # ---------------------------------------------------------------------------
@@ -1397,7 +1457,7 @@ def demo_creature():
         run_episode(world, enc_s, mind_s, learn=True, explore=True, mem=3,
                     max_steps=100, danger_reflex=True)
     s, a, pd = _survive(world, enc_s, mind_s, mem=3)
-    print(f"\n  SURVIVAL (life ends only at death; mem=3 + danger reflex):")
+    print("\n  SURVIVAL (life ends only at death; mem=3 + danger reflex):")
     print(f"    stars per life {s:.0f}, lifespan {a:.0f} steps, poison deaths {pd*100:.0f}%")
 
     # Avoidance reflex over all four directions (honest aggregate, not one
@@ -1607,10 +1667,10 @@ def demo_introspect(episodes=240, seed=7):
     busy = sum(1 for f in flux if f > np.mean(flux)) if flux else 0
     print("(b) Recursion, branching & partitioning (HoloForest, the image vault's index)")
     print(f"    one tree recursively splits the {protos} prototypes on a random")
-    print(f"    hyperplane at each node -- a BINARY BRANCHING that PARTITIONS the")
+    print("    hyperplane at each node -- a BINARY BRANCHING that PARTITIONS the")
     print(f"    memory into {st['leaves']} leaf cells at depth {st['depth']} "
           f"(~{st['avg_leaf']:.0f} prototypes each).")
-    print(f"    Recalling the most similar past situation to a noisy cue then agrees")
+    print("    Recalling the most similar past situation to a noisy cue then agrees")
     print(f"    with an exact scan {100 * hits / trials:.0f}% of the time while comparing ~"
           f"{comps / trials:.0f} prototypes, not all {protos} "
           f"({protos / max(comps / trials, 1):.1f}x fewer); query 'flux' concentrates")
@@ -1787,10 +1847,10 @@ def demo_self_maintaining(dim=256, seed=0):
             curve_p.append(round(acc(plain) * 100))
             curve_a.append(round(acc(auto) * 100))
 
-    print(f"\n  Post-shift recovery (greedy accuracy, every 750 steps after the shift):")
+    print("\n  Post-shift recovery (greedy accuracy, every 750 steps after the shift):")
     print(f"    plain brain   : {curve_p}   ({plain.prototype_count()} prototypes)")
     print(f"    autonomous    : {curve_a}   ({auto.prototype_count()} prototypes)")
-    print(f"\n  The autonomous brain decided, with nothing tuned, to:")
+    print("\n  The autonomous brain decided, with nothing tuned, to:")
     for when, what in choices:
         tag = "before the shift" if when < shift_at else "after the shift "
         print(f"    step {when:>4} ({tag}) -> {what}")

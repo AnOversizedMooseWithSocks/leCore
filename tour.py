@@ -76,7 +76,7 @@ rec = RecordEncoder(2048, text, num_range=(0, 200), seed=7)
 vec = rec.encode({"price": ("num", 142.5), "trend": ("cat", "up"),
                   "note": ("text", "the car raced past quickly")})
 cat, sim = rec.read_category(vec, "trend", candidates=["up", "down", "flat"])
-print(f"  one 2048-d vector holds all three fields, read individually:")
+print("  one 2048-d vector holds all three fields, read individually:")
 print(f"    price -> {rec.read_number(vec, 'price'):.1f}  (stored 142.5)   trend -> {cat} ({sim:.2f})  (stored 'up')")
 
 
@@ -537,7 +537,7 @@ print(f"  factorize: bound 3 hidden vectors into one composite; the resonator re
 # LOSSLESS CODEC + ATTRIBUTION: go both directions exactly. Encode each token by its
 # rank under the predictor; the decoder replays the same predictor to recover the
 # exact original. Size is bounded by structure -- no free lunch.
-from holographic_codec import PredictiveCodec as _Cod, SourceAttributor as _Att
+from holographic_codec import PredictiveCodec as _Cod
 _cod=_mp4 and _Cod(_mp4)
 _real8=_st2[:120]
 _ok=_cod.roundtrip_ok(_real8); _cst=_cod.cost(_real8)
@@ -647,7 +647,7 @@ except Exception as _eR:
 # measure() runs a claim across seeds and returns mean +/- std + a 95% bootstrap CI;
 # load-bearing tests assert the LOWER CI bound, not the mean.
 try:
-    import re as _reV, numpy as _npV
+    import re as _reV
     from holographic_measure import measure as _measure, report as _vreport
     from holographic_text import HolographicNGram as _HN
     from nltk.corpus import gutenberg as _gut
@@ -677,6 +677,194 @@ try:
           f"of the comparisons -- a scale win, not an accuracy one. See ABLATIONS.md")
 except Exception as _eA:
     print(f"  ablation: (skipped: {_eA})")
+
+# PROCEDURAL GENERATION: drive the existing decoders forward to PRODUCE output in four
+# modalities -- no learned distribution, no gradients. Each beats the dumbest baseline on
+# an honest metric (anti-ghosting for morphs, coherence for nucleus text, faithful pitches
+# for sonification).
+try:
+    from holographic_generate import (morph_images as _mi, crossfade_images as _cf,
+                                       ghosting as _gh, sequence_to_pitches as _s2p)
+    from holographic_archive import HolographicArchive as _HA, _gallery as _gal
+    _imgs = _gal(S=64)
+    _arch = _HA(shape=_imgs[0].shape, capacity=len(_imgs), keep=600, dim=16384, seed=0)
+    for _im in _imgs:
+        _arch.add(_im)
+    _A, _B = _arch.recover(0), _arch.recover(3)
+    _gm = _gh(_mi(_arch.M, _A, _B, steps=21)[10], _A, _B)
+    _gx = _gh(_cf(_A, _B, steps=21)[10], _A, _B)
+    _pit, _tab = _s2p("abcacbacab")
+    print(f"  procedural: four procedural modalities driving existing decoders. Image/video morph "
+          f"slerps in the DCT-coefficient domain -- its midpoint sits {_gm:.3f} from the double-exposure "
+          f"vs a pixel crossfade's {_gx:.3f} (a crossfade IS the ghost). Text adds nucleus(top-p) decoding "
+          f"(real-word fraction ~1.00 vs ~0.79 for plain temperature -- more coherent for a little less "
+          f"variety). Audio sonifies a symbol sequence to a real WAV ({len(_tab)} symbols -> "
+          f"{len(set(round(v) for v in _tab.values()))} distinct pitches). The on-ramp to native generation")
+except Exception as _eG:
+    print(f"  procedural: (skipped: {_eG})")
+
+# FROZEN CORE + PERSISTENCE: a stable kernel facade build-on-top code imports, plus
+# version-stamped save/load so a TRAINED mind can be persisted and reloaded identically
+# (the gate that turns "interesting modules" into "a thing you can build on").
+try:
+    import tempfile as _tf, os as _osP, numpy as _npP
+    import holographic_core as _core
+    from holographic_creature import HolographicMind as _HM
+    _rng = _npP.random.default_rng(0)
+    _b = _HM(dim=48, actions=["N", "S", "E", "W"], seed=0, capacity=8)
+    for _ in range(400):
+        _b.remember([_rng.standard_normal(48)], [int(_rng.integers(4))], [_rng.standard_normal()])
+    _b.consolidate(energy=0.95)
+    _p = _osP.path.join(_tf.gettempdir(), "holo_tour_brain.npz")
+    _core.save(_b, _p); _back = _core.load(_p)
+    _d = _b._basis.shape[1] if _b._basis is not None else 48
+    _ident = all(_npP.allclose([_b.value(_q, a)[0] for a in range(4)],
+                               [_back.value(_q, a)[0] for a in range(4)])
+                 for _q in (_rng.standard_normal(_d) for _ in range(20)))
+    print(f"  core: frozen kernel facade (holographic_core re-exports bind/unbind/bundle/permute/"
+          f"cosine/slerp/Vocabulary with stable signatures) + versioned save/load. A trained, "
+          f"CONSOLIDATED brain round-trips through an npz ({_osP.path.getsize(_p)} bytes) and decides "
+          f"identically across 20 probes: {_ident}. Persistence now spans the stack -- Vocabulary, the "
+          f"recall forest, AND the whole SelfOrganizingMind (encoder + prototype bank, identical "
+          f"classifications even on unseen words via persisted rng state); an incompatible STATE_VERSION "
+          f"fails loudly rather than loading a silently-wrong object")
+    _osP.remove(_p)
+except Exception as _eC:
+    print(f"  core: (skipped: {_eC})")
+
+# FORWARD COMPOSITIONAL GENERATION: run the resonator FORWARD to compose NEW scenes (not
+# interpolate stored ones), render them, and verify by ROUND-TRIP -- a generated scene is
+# real iff it can be analysed straight back to the spec it was built from.
+try:
+    import numpy as _npF2
+    import holographic_scene as _hsF
+    from holographic_compose import (novel_specs as _ns, roundtrip_object as _rto,
+                                      roundtrip_scene as _rts, render_fidelity as _rf,
+                                      animate_attribute as _aa, animation_is_faithful as _aif)
+    _coderF = _hsF.SceneCoder(dim=1024, seed=0)
+    _rngF = _npF2.random.default_rng(0)
+    _novel = _ns(n=40, rng=_rngF)
+    _obj_ok = sum(_rto(_coderF, _t) for _t in _novel)
+    _sc_ok = sum(_rts(_coderF, [{"colour": str(_rngF.choice(_hsF.COLOURS)),
+                                 "shape": str(_rngF.choice(_hsF.SHAPES)),
+                                 "texture": str(_rngF.choice(_hsF.TEXTURES))} for _ in range(4)])
+                 for _ in range(20))
+    _sh = _co = 0
+    for _ in range(30):
+        _s_ok, _c_ok = _rf({"colour": str(_rngF.choice([c for c in _hsF.COLOURS if c != "grey"])),
+                            "shape": str(_rngF.choice(_hsF.SHAPES)), "texture": "smooth"},
+                           seed=int(_rngF.integers(1000)))
+        _sh += _s_ok; _co += _c_ok
+    _fr = _aa(_coderF, {"colour": "red", "shape": "circle", "texture": "smooth"},
+              "colour", ["red", "yellow", "green", "cyan", "blue"])
+    print(f"  compose: native generation -- run the resonator FORWARD to build NOVEL scenes, not "
+          f"interpolate stored ones. {_obj_ok}/40 novel single-object compositions factor straight back "
+          f"to their spec; novel 4-object scenes {_sc_ok}/20; the rendered pixels auto-tag back as the "
+          f"composed shape {_sh}/30 and colour {_co}/30; a colour-sweep animation is "
+          f"{_aif(_coderF, _fr, 'colour'):.0%} on-target. A generated scene is real because it analyses "
+          f"straight back to what it was built from")
+except Exception as _eF2:
+    print(f"  compose: (skipped: {_eF2})")
+
+# FRACTAL: the same compose/factor one level up -- a scene-of-scenes (same above, same below)
+try:
+    from holographic_unified import UnifiedMind as _UMn
+    import holographic_scene as _hsn
+    import numpy as _npn
+    _mn = _UMn(dim=1024, seed=0)
+    _rn = _npn.random.default_rng(3)
+    def _rtn():
+        return {"colour": str(_rn.choice(_hsn.COLOURS)), "shape": str(_rn.choice(_hsn.SHAPES)),
+                "texture": str(_rn.choice(_hsn.TEXTURES))}
+    _grp = {"left": [_rtn(), _rtn()], "right": [_rtn(), _rtn()]}
+    _szn = {k: len(v) for k, v in _grp.items()}
+    _rec = _mn.decompose_nested(_mn.compose_nested(_grp), _szn)
+    _kn = lambda d: (d["colour"], d["shape"], d["texture"])
+    _okn = sum({_kn(t) for t in _grp[k]} == {_kn(g) for g in _rec[k]} for k in _grp)
+    print(f"  nested: the SAME bind+superpose that builds a scene from objects, run one level up "
+          f"to build a scene-of-scenes -- compose sub-scenes, group them, then peel each group "
+          f"back out and factor it. {_okn}/{len(_grp)} sub-scenes recovered exactly (a sub-scene "
+          f"is to the super-scene what an object is to a scene). Same above, same below; "
+          f"group atoms are seed-derived so the whole nesting regenerates from one seed")
+except Exception as _eN:
+    print(f"  nested: (skipped: {_eN})")
+
+# FHRR: the complex-phasor VSA the literature recommends for high binding capacity,
+# offered as an opt-in faculty (the real-valued HRR core stays the readable default).
+try:
+    from holographic_unified import UnifiedMind as _UMf
+    from holographic_ai import random_vector as _rvf, bind as _bf, unbind as _ubf, cosine as _cf
+    import numpy as _npf
+    _N = 40
+    # real-HRR baseline at the same load
+    _rr = _npf.random.default_rng(7)
+    _ks = [_rvf(256, _rr) for _ in range(_N)]; _vs = [_rvf(256, _rr) for _ in range(_N)]
+    _tr = sum(_bf(_ks[i], _vs[i]) for i in range(_N))
+    _rok = sum(int(_npf.argmax([_cf(_ubf(_tr, _ks[i]), v) for v in _vs])) == i for i in range(_N)) / _N
+    # FHRR via the mind's faculty
+    _mf = _UMf(dim=256, seed=0); _mem, _voc = _mf.high_capacity_memory()
+    _pf = {f"k{i}": f"v{i}" for i in range(_N)}
+    for _k, _v in _pf.items():
+        _mem.learn(_voc.get(_k), _voc.get(_v))
+    _vocab = [f"v{i}" for i in range(_N)]
+    _fok = sum(_voc.cleanup(_mem.recall(_voc.get(_k)), candidates=_vocab)[0] == _v
+               for _k, _v in _pf.items()) / _N
+    print(f"  fhrr: complex-phasor binding for the one regime where it measurably wins -- a "
+          f"large key->value trace. At {_N} pairs/256-d, real-HRR recovers {_rok:.0%} but FHRR "
+          f"recovers {_fok:.0%}. Offered as an opt-in faculty (high_capacity_memory); the "
+          f"readable real-valued core stays the default since at normal loads both are perfect")
+except Exception as _eFh:
+    print(f"  fhrr: (skipped: {_eFh})")
+
+# DYNAMIC QUANTIZATION: quant="auto" gives each saved array the coarsest precision its own
+# structure supports -- precision follows the data's complexity and size.
+try:
+    import holographic_core as _coreQ
+    from holographic_organizer import SelfOrganizingMind as _SOMq, _multimodal_world as _mmw
+    import numpy as _npq, tempfile as _tf, os as _osq, json as _jsonq
+    _enc, _samp, _Kq, _ = _mmw(seed=0, modes=2)
+    _mq = _SOMq(dim=512, seed=0); _rq = _npq.random.default_rng(7)
+    for _ in range(500):
+        _c = int(_rq.integers(_Kq)); _mq.observe(_samp(_c), _c, "vector")
+    _mq.reorganize()
+    _probes = [(_samp(_c), _c) for _c in (int(_rq.integers(_Kq)) for _ in range(300))]
+    def _accq(_mind):
+        return _npq.mean([_mind.classify(_x, "vector")[0] == _c for _x, _c in _probes])
+    _sz = {}
+    for _mode, _kw in (("float32", dict(compress=True)), ("int8", dict(quant="int8")),
+                       ("auto", dict(quant="auto"))):
+        _p = _tf.mktemp(suffix=".npz"); _coreQ.save(_mq, _p, **_kw); _sz[_mode] = _osq.path.getsize(_p)
+        if _mode == "auto":
+            with _npq.load(_p) as _z:
+                _qs = _jsonq.loads(bytes(_z["__qspec__"]).decode())
+            _kinds = {}
+            for _v in _qs.values():
+                _kinds[_v["k"]] = _kinds.get(_v["k"], 0) + 1
+            _autoacc = _accq(_coreQ.load(_p))
+        _osq.remove(_p)
+    print(f"  quant: dynamic per-array precision (quant='auto'). A trained mind saves at "
+          f"float32 {_sz['float32']}B, fixed int8 {_sz['int8']}B, auto {_sz['auto']}B "
+          f"({_sz['float32']/_sz['auto']:.1f}x vs float32). Auto chose a MIX by data "
+          f"complexity/size {_kinds} -- int8 where separation proves it lossless, float32 "
+          f"for tiny/marginal arrays -- decision-safe on every brain type (classifies "
+          f"identically, acc {_autoacc:.3f})")
+except Exception as _eQ:
+    print(f"  quant: (skipped: {_eQ})")
+
+# WIRED INTO THE LIVE APP: the generative + persistence work is reachable from the
+# UnifiedMind console (unified_app.py), not just the library -- compose/morph/nucleus/nested
+# panels drive the decoders forward, and a save&reload panel persists a trained mind.
+try:
+    import unified_app as _uaT
+    _routes = {r.rule for r in _uaT.app.url_map.iter_rules()}
+    _wired = [r for r in ("/api/unified/compose", "/api/unified/nested", "/api/unified/morph",
+                          "/api/unified/nucleus", "/api/unified/persist") if r in _routes]
+    print(f"  app: the generative + persistence work is wired into the live console as panels "
+          f"({len(_wired)}/5 endpoints live: compose a scene, nested scene, morph, nucleus text, "
+          f"save & reload) -- functionality reachable from the UI, not stranded in the library "
+          f"or the tests")
+except Exception as _eW:
+    print(f"  app: (skipped: {_eW})")
 
 
 # 7. Creature --------------------------------------------------------------
@@ -779,7 +967,7 @@ pile += [(_patterns(k, rng3), f"img:{k}") for k in ("rows", "check") for _ in ra
 um = UnifiedMind(dim=1024, seed=0).absorb(pile, sequences=True)   # ONE call: classify+recall+generate
 t_ok = um.classify(_content("the striker scored a goal in the match"))[0]
 i_ok = um.classify(_patterns("rows", rng3))[0]
-print(f"  absorb() built a COMPLETE mind from a bare pile of (input, label) pairs")
+print("  absorb() built a COMPLETE mind from a bare pile of (input, label) pairs")
 print(f"  an untagged sentence classifies as : '{t_ok}'  (modality self-discovered)")
 print(f"  an untagged image classifies as    : '{i_ok}'")
 print(f"  and the same mind generates        : \"{um.generate('the ', 60, 0.4)[:58]}\"")

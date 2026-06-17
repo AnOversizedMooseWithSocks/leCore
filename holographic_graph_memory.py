@@ -21,7 +21,6 @@ which blurs at scale exactly like the overloaded maze field.
 
 import numpy as np
 
-from holographic_ai import cosine
 
 
 def _unit(v):

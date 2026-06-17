@@ -39,7 +39,7 @@ smaller buckets; and a still-too-big bucket can fall back to an RP-tree inside i
 
 import numpy as np
 from holographic_ai import bundle, cosine
-from holographic_scene import auto_tags, SceneCoder, COLOURS, SHAPES, TEXTURES
+from holographic_scene import auto_tags, SceneCoder
 
 DEFAULT_ORDER = ("colour", "shape", "texture")
 

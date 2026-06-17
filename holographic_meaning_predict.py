@@ -44,7 +44,7 @@ Needs: numpy, holographic_ai, holographic_predictive.
 """
 import numpy as np
 
-from holographic_ai import bundle, permute, cosine, Vocabulary
+from holographic_ai import bundle, permute, Vocabulary
 
 
 def cooccurrence_space(sentences, dim=512, window=2, seed=0):

@@ -42,7 +42,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from holographic_ai import Vocabulary, bundle, permute, cosine, random_vector
+from holographic_ai import Vocabulary, bundle, permute, cosine
 
 
 @dataclass

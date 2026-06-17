@@ -114,7 +114,7 @@ def demo_staircase():
     print("\nStream: flat near 0, a brief spike at steps 18-20, then sustained")
     print("jumps to 1.0 (step 40) and 2.0 (step 80).\n")
     print(f"  layers committed at steps : {layers}")
-    print(f"  (the transient spike at 18-20 forms no layer -- heat diffused it away)")
+    print("  (the transient spike at 18-20 forms no layer -- heat diffused it away)")
     print(f"  salt staircase (every 10) : {[round(salt[i], 2) for i in range(0, 120, 10)]}")
     print("\n  The slow component steps 0 -> 1 -> 2 in discrete layers; the fast one")
     print("  absorbed the noise. Transient vs permanent, told apart by two rates.\n")

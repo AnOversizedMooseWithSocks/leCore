@@ -143,6 +143,29 @@ class TextEncoder:
         scored.sort(key=lambda r: r[1], reverse=True)
         return scored[:n]
 
+    # -- persistence: store BOTH the learned context AND the index atoms minted so far.
+    # Index atoms are seed-derived, but minting advances a shared rng, so a reloaded
+    # encoder that re-mints them in a different order would diverge for words seen only as
+    # neighbours (not as context keys). Saving the minted atoms makes wordvec() exact.
+    def to_state(self):
+        return {
+            "dim": int(self.dim), "window": int(self.window), "seed": int(self.index.seed),
+            "words": list(self.context.keys()),
+            "context": (np.stack(list(self.context.values())) if self.context
+                        else np.zeros((0, self.dim))),
+            "index": self.index.to_state(),
+        }
+
+    @classmethod
+    def from_state(cls, state):
+        from holographic_ai import Vocabulary
+        te = cls(int(state["dim"]), window=int(state["window"]), seed=int(state["seed"]))
+        ctx = np.asarray(state["context"], float)
+        te.context = {w: ctx[i] for i, w in enumerate(state["words"])}
+        if "index" in state:
+            te.index = Vocabulary.from_state(state["index"])
+        return te
+
 
 # ---------------------------------------------------------------------------
 # 3. MIXED RECORDS  (numbers + categories + text in one vector)

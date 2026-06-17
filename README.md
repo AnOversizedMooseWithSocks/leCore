@@ -232,13 +232,13 @@ in, and a Labyrinth mode has it learn the way out of a maze -- all on a prototyp
 **Test suite** (runs the full pytest suite), **Query & recall** (the interactive image demo - degrade an
 image, optionally destroy part of the plate, watch it get recalled), **Recall by description**
 (cross-modal recall - describe an image in words and get the matching one back from the tag address space),
-**Set packer** (delta-code a set of related images against one reference), and **Image vault** (the general store: relate by fingerprint, compress adaptively across lossless and lossy encoders with an honest table, and query by example). The Test suite panel auto-discovers and runs every test_*.py (500 at last count; up to six skip without NLTK or its downloaded corpora). The package also ships the real 712-sprite set packed to ~67 KB at `features/sprites.hsp` (which doubles as a live demo of the sprite packer), and the UI uses it in two places: the Image vault runs relate/compress/query on the whole set, and the learning creature is drawn as a real walking sprite (`amg2`) that turns to face the direction it moves and cycles its two walk frames -- with its baked-in background keyed out (flood-filled from the edges) so it shows real transparency over the grid instead of an opaque tile. The creature also runs on an energy mechanic: it starts each life with 100 energy, every step costs 1, each star it reaches gives +3, and stepping on poison empties the battery -- instant death -- so collecting stars and staying alive are the same goal. Finally, a **Vision** panel shows that the image is just numbers: RGB->HSV colour and dominant-colour extraction, Sobel edges with Hough line/circle detection and Harris corners, a geometric shape classifier, and unsupervised *emergent* classes that fall out of clustering simple feature descriptors -- then a VSA prototype classifier (bundle + cosine cleanup) labels held-out shapes, tying the vision work back to the holographic engine. The panel reports each step's accuracy honestly, including where unsupervised clustering tops out. A final **Compositional scene** panel takes the opposite stance to a holistic descriptor: it reads the DCT coefficient layout as a texture tag (finally using the DCT as a feature, not just for compression), pairs it with HSV colour and geometric shape for automatic per-object tags, then encodes each object as a product of attribute atoms and a scene as their superposition -- so a ResonatorNetwork can factor the parts back out. Multi-object scenes now decompose reliably up to ~5 objects: the old ~50%-at-three ceiling turned out to be a scale bug (normalising the scene) plus missing refinement, not a real capacity limit -- keeping the scene as an unnormalised superposition and adding coordinate-descent sweeps recovers 3-4 objects at 100%. A **Scaling** panel confronts the deepest limit head-on: one holographic trace is a bundle with finite capacity (a 2048-d memory recalls 100% of 64 pairs but ~0% of 2048), so instead of one flat store it grows a deterministic recursive tree -- each node a seeded random hyperplane splitting items at the median, each leaf a small memory kept inside capacity, queries descending with a beam that back-tracks into nearby cells. This is the random projection tree of Dasgupta & Freund and, in spirit, how slime mould beats the size limit of pure diffusion by resolving a broad mass into a hierarchical vein network. The flat memory collapses with scale while the tree holds 100%, and search reaches ~96% recall at a fraction of a full scan's comparisons; per-leaf query 'flux' shows the thick-vein / thin-vein structure. A HoloForest of several differently-seeded trees breaks the single tree's recall ceiling, reaching ~100% recall at a fraction of a full scan's comparisons. Finally, a **Content addresses** panel realises the original partitioning idea the way AWS S3 does: no folders, just a flat keyspace where each object's name encodes the hierarchy. The auto-tags (colour/shape/texture) generate a deterministic URI like `red/circle/smooth`, the key *is* the partition path, and a FacetStore supports S3-style prefix listing and CommonPrefixes roll-up. Where the RP-tree splits by meaningless random hyperplanes, this splits by meaning -- readable, queryable paths -- at the honest cost of bucket skew, with key depth as the lever. And the resonator closes the loop: it recovers an item's URI from its content vector alone, so the address is computed from the content. And the skew problem is now handled: build_indexes gives any hot bucket its own in-bucket HoloForest, so content search inside a popular prefix stays sub-linear -- the bi-level structure (semantic prefix outside, geometric forest inside) realised.
+**Set packer** (delta-code a set of related images against one reference), and **Image vault** (the general store: relate by fingerprint, compress adaptively across lossless and lossy encoders with an honest table, and query by example). The Test suite panel auto-discovers and runs every test_*.py (555 at last count; up to six skip without NLTK or its downloaded corpora). The package also ships the real 712-sprite set packed to ~67 KB at `features/sprites.hsp` (which doubles as a live demo of the sprite packer), and the UI uses it in two places: the Image vault runs relate/compress/query on the whole set, and the learning creature is drawn as a real walking sprite (`amg2`) that turns to face the direction it moves and cycles its two walk frames -- with its baked-in background keyed out (flood-filled from the edges) so it shows real transparency over the grid instead of an opaque tile. The creature also runs on an energy mechanic: it starts each life with 100 energy, every step costs 1, each star it reaches gives +3, and stepping on poison empties the battery -- instant death -- so collecting stars and staying alive are the same goal. Finally, a **Vision** panel shows that the image is just numbers: RGB->HSV colour and dominant-colour extraction, Sobel edges with Hough line/circle detection and Harris corners, a geometric shape classifier, and unsupervised *emergent* classes that fall out of clustering simple feature descriptors -- then a VSA prototype classifier (bundle + cosine cleanup) labels held-out shapes, tying the vision work back to the holographic engine. The panel reports each step's accuracy honestly, including where unsupervised clustering tops out. A final **Compositional scene** panel takes the opposite stance to a holistic descriptor: it reads the DCT coefficient layout as a texture tag (finally using the DCT as a feature, not just for compression), pairs it with HSV colour and geometric shape for automatic per-object tags, then encodes each object as a product of attribute atoms and a scene as their superposition -- so a ResonatorNetwork can factor the parts back out. Multi-object scenes now decompose reliably up to ~5 objects: the old ~50%-at-three ceiling turned out to be a scale bug (normalising the scene) plus missing refinement, not a real capacity limit -- keeping the scene as an unnormalised superposition and adding coordinate-descent sweeps recovers 3-4 objects at 100%. A **Scaling** panel confronts the deepest limit head-on: one holographic trace is a bundle with finite capacity (a 2048-d memory recalls 100% of 64 pairs but ~0% of 2048), so instead of one flat store it grows a deterministic recursive tree -- each node a seeded random hyperplane splitting items at the median, each leaf a small memory kept inside capacity, queries descending with a beam that back-tracks into nearby cells. This is the random projection tree of Dasgupta & Freund and, in spirit, how slime mould beats the size limit of pure diffusion by resolving a broad mass into a hierarchical vein network. The flat memory collapses with scale while the tree holds 100%, and search reaches ~96% recall at a fraction of a full scan's comparisons; per-leaf query 'flux' shows the thick-vein / thin-vein structure. A HoloForest of several differently-seeded trees breaks the single tree's recall ceiling, reaching ~100% recall at a fraction of a full scan's comparisons. Finally, a **Content addresses** panel realises the original partitioning idea the way AWS S3 does: no folders, just a flat keyspace where each object's name encodes the hierarchy. The auto-tags (colour/shape/texture) generate a deterministic URI like `red/circle/smooth`, the key *is* the partition path, and a FacetStore supports S3-style prefix listing and CommonPrefixes roll-up. Where the RP-tree splits by meaningless random hyperplanes, this splits by meaning -- readable, queryable paths -- at the honest cost of bucket skew, with key depth as the lever. And the resonator closes the loop: it recovers an item's URI from its content vector alone, so the address is computed from the content. And the skew problem is now handled: build_indexes gives any hot bucket its own in-bucket HoloForest, so content search inside a popular prefix stays sub-linear -- the bi-level structure (semantic prefix outside, geometric forest inside) realised.
 
 ### From the command line
     python tour.py                    # guided tour of all subsystems (~20s)
     python holographic_creature.py    # any module runs its own demo
     python holographic_encoders.py    # numbers / text / records demos
-    pytest -q                         # the whole test suite (500 tests)
+    pytest -q                         # the whole test suite (555 tests)
 
 ---
 
@@ -979,7 +979,7 @@ The app and tour:
     tour.py       command-line tour of every subsystem
     run.bat       Windows launcher
 
-Tests (500 total):
+Tests (555 total):
 
     test_holographic.py           core engine (bind/bundle/memory/reflex/drift)
     test_holographic_image.py     image store / WHT / quantisation
@@ -1071,6 +1071,151 @@ estimators tie or marginally beat the holographic ones. The recall forest is hon
 behind exact scan on recall but reaches it at ~41% of the comparisons — a sublinear *scale*
 win, recorded as such rather than dressed up. Full write-up in `ABLATIONS.md`; reproduce
 with `python holographic_ablate.py`.
+
+## Procedural generation, four modalities (`holographic_generate.py`)
+
+The engine can also *produce* output, not just analyse and remember it -- procedurally,
+by driving decoders it already has, with no learned distribution and no gradients. Each
+generator clears the same bar as everything else: it beats the dumbest honest baseline on
+a measurable metric (`python holographic_generate.py` prints the live numbers).
+
+- **Image & video morph.** Spherical interpolation between two stored images *in the DCT
+  coefficient domain*, inverse-transformed per frame. The win over a pixel crossfade is
+  measurable and specific: a crossfade midpoint *is* the double-exposure of the two
+  pictures (ghosting, distance 0 from `0.5a + 0.5b`); the coefficient-domain morph blends
+  structure, so its midpoint sits measurably away from that double image (~0.06). Threaded
+  through a list of keyframes, that's procedural video.
+- **Text.** Nucleus (top-p) decoding with an optional repetition penalty, over the
+  existing holographic n-gram distribution. Trimming the unlikely tail raises the
+  real-word fraction from ~0.79 (plain temperature sampling) to ~1.00 -- markedly more
+  coherent -- at a modest diversity cost (distinct-4-gram ~0.87 → ~0.77). That's the real
+  top-p tradeoff, reported rather than hidden; the repetition penalty defaults off because
+  this n-gram doesn't loop.
+- **Audio.** Sonify an existing symbolic sequence: map each symbol to a fixed pitch and
+  render short sine tones to a real WAV. This is faithful *rendering*, not a learned
+  synthesiser -- the honest claim (asserted in the tests) is that distinct symbols produce
+  distinguishable, repeatable pitches, deterministically.
+
+This is the on-ramp to native generation: the next step up, below, runs the resonator
+*forward* to compose new attribute scenes rather than interpolate stored ones.
+
+## Forward compositional generation (`holographic_compose.py`)
+
+The step up from interpolating what's stored to **composing what was never stored**. The
+scene decomposition path runs backward (image → auto-tag → resonator factors the scene
+vector into its colour/shape/texture atoms); this runs the same machinery *forward* — pick
+attribute tags, `encode_scene` binds and superposes them into a scene vector, and
+`make_scene` renders it to an actual image. No new model, no gradients: existing structure
+driven forward.
+
+The honest part is the bar. A generated scene is only meaningful if it can be **analysed
+straight back to the spec it was built from**, so every generator is measured by
+*round-trip fidelity*, and the combinations are drawn to be **novel** (excluded from any
+"seen" set) so a correct round-trip proves composition, not recall:
+
+- **Novel single-object compositions** factor back to their exact tags ~100% (40/40), and
+  the whole composable vocabulary (7 colours × 4 shapes × 4 textures) round-trips ≥97%.
+- **Novel multi-object scenes** recover the full set of objects through 4 per scene
+  (~29–30/30), via the resonator's explain-away peel.
+- **Rendered pixels auto-tag back** to the composed shape and colour (≈40/40 each) — the
+  generated image is a real, analysable picture, not noise.
+- **Animation** is composing a frame per step while one attribute sweeps a sequence; the
+  trajectory is "real" because every frame's vector factors back to its intended value
+  (100% on-target for a colour or shape sweep), each frame carrying its rendered image —
+  procedural video by composition.
+- **Nested composition (fractal).** The same bind-and-superpose that builds a scene from
+  objects builds a *scene-of-scenes* one level up: each sub-scene is composed, bound to a
+  seed-derived group atom, and superposed; `decompose_nested` peels each group back out and
+  factors it — the identical unbind-then-factor at two levels. A sub-scene is to the
+  super-scene exactly what an object is to a scene ("same above, same below"). Measured
+  recovery: exact at 2 groups (1.00), ~0.97 at 3, then graceful decay (0.89 at 4, 0.82 at
+  5) as group-binding cross-talk accumulates — the flat scene's capacity limit, one level
+  up. The group atoms are derived, so the whole nesting regenerates from one seed.
+
+All of this is **wired into the live console**, not just the library: the UnifiedMind app
+(`unified_app.py`) carries panels for *compose a scene* (forward composition + round-trip +
+animation), *morph* (coefficient-domain slerp vs crossfade), *nucleus text* (top-p decoding
+vs temperature), and *save & reload* (persist the learned meaning space through the
+versioned core). Each is backed by a real endpoint and covered by tests that hit the live
+routes.
+
+## Frozen core + persistence (`holographic_core.py`)
+
+The kernel that everything builds *on* now has a stable, documented import surface, and a
+trained mind can be saved and reloaded instead of recomputed. This is the gate that turns
+"interesting modules" into "a thing you can build on."
+
+- **The kernel facade.** `holographic_core` re-exports the primitives —
+  `random_vector`, `unitary_vector`, `bind`, `unbind`, `bundle`, `permute`, `cosine`,
+  `slerp`, `cleanup`, `Vocabulary` — with stable signatures. It's an *extraction, not a
+  rewrite*: the functions still live in `holographic_ai.py`, so nothing existing changes;
+  build-on-top code (the reservoir, the generation bundle, the forward renderer to come)
+  imports from the frozen surface rather than reaching into a subsystem's internals.
+- **Versioned save/load.** `save(obj, path)` / `load(path)` round-trip any object that
+  exposes `to_state()` / `from_state()` — `Vocabulary`, `HolographicMind`, `HoloForest`,
+  and the whole `SelfOrganizingMind` (the heart of `UnifiedMind`: its learned encoder plus
+  the classified prototype bank) — through a single npz, stamped with a `STATE_VERSION`. A
+  trained, *consolidated* brain (one that has projected into a low-rank basis) reloads with
+  its banks and basis intact and decides identically; the recall forest's seed-derived
+  trees rebuild byte-for-byte from the stored items; and a saved memory classifies
+  identically after reload **even on never-seen words**, because the vocabulary's rng state
+  is persisted so atoms minted after a reload match a run that was never saved. An
+  incompatible version **fails loudly** on load rather than returning a silently-wrong
+  object. The recent-experience buffer and transient EMAs are deliberately not persisted —
+  they're self-healing scratch state.
+
+## Performance and storage
+
+A couple of measured wins that touch the whole stack, both behaviour-preserving:
+
+- **Vectorised cleanup.** `Vocabulary.cleanup` over the full vocabulary (the hot path used
+  by text classification, scene factoring, and recall) now runs as one cached
+  matrix-vector product instead of a Python loop of per-name cosines — about **9× faster**
+  on a 500-atom vocabulary (~1900µs → ~200µs), with bit-for-bit the same answer (stored
+  atoms are unit length, so the dot is the cosine up to the query's norm, which doesn't
+  change the argmax). The stacked matrix is cached and rebuilt only when the atom set
+  changes. The explicit-candidate-subset path keeps the simple loop, since those sets are
+  small and one-off.
+- **Vectorised prototype classification.** `SubPrototypeMemory.classify` /`label_scores` —
+  the single most-called scan in the brain, since every `classify`, `recall`, `decide`, and
+  `classify_robust` routes through it — uses the same cached unit-matrix product instead of
+  a per-prototype loop. The winner is identical to the old loop (scores match to machine
+  epsilon, since a matrix product and a per-element loop sum in a different order). The
+  cache is keyed on a mutation counter so an in-place online update can never leave it
+  stale.
+- **Half-size saves.** `holographic_core.save` stores float arrays as **float32** by
+  default, roughly halving every saved mind (e.g. a small `SelfOrganizingMind` 126 KB →
+  65 KB). These vectors are only ever compared by cosine, where float32 is far more
+  precision than the decisions need; on realistic probes behaviour is unchanged (a
+  classification only flips on an exact tie, where either answer is equally valid). Pass
+  `compress=False` for a bit-exact round-trip when that matters.
+- **FHRR for high-capacity binding** (`holographic_fhrr.py`, opt-in). The literature's
+  most-cited cross-VSA comparison recommends FHRR (complex unit-phasor atoms, binding by
+  element-wise complex multiplication) for capacity. Measured on this substrate, an FHRR
+  key→value trace holds far more pairs than the real-valued HRR core before readback breaks
+  (at 40 pairs / 256-d: ~0.90 vs ~0.61; at 60: ~0.74 vs ~0.40). It's offered as an owned
+  faculty (`UnifiedMind.high_capacity_memory()`) for that specific high-load regime — the
+  readable real-valued HRR stays the default, since at the few-factor loads the engine
+  normally runs both are already perfect, and the project's `unitary` atoms (real domain) do
+  *not* capture FHRR's advantage on their own.
+- **int8 quantized saves** (`save(..., quant="int8")`, opt-in). The scalar-quantisation
+  trick vector databases use to shrink stored embeddings: each float array is stored as
+  signed 8-bit integers with a per-array scale, dequantised on load. ~3× smaller than
+  float32 (~5–6× vs float64). Measured **lossless for classification** at the working
+  dimension — the prototypes are near-orthogonal there, so 8-bit precision leaves the
+  nearest-neighbour argmax unchanged (verified on crowded 100-class spaces). Like float32 it
+  can flip an exact tie, so float32 stays the default; int8 is for when stored size matters.
+- **Dynamic quantization** (`save(..., quant="auto")`, opt-in). Precision per array follows
+  the data's own complexity and size: an array whose separation proves 8-bit lossless is
+  stored as int8 (~4×), tiny or marginal arrays as float32. The level is chosen by a measured
+  margin gate (int8 is taken only when it preserves every row's self-recognition and ≥70 % of
+  its top1–top2 margin), so an auto save matches a float32 save's *decisions* — verified
+  decision-safe across the whole stack: the classification memory (0 flips), the recall forest
+  (0 flips), and the creature value-brain (tie-level). Only magnitude-preserving levels are
+  auto-selected: a 1-bit binary level was tested and dropped, because it distorts the
+  pairwise-similarity geometry by ~0.1–0.2 on every array and only survives where the decision
+  is a wide-margin classification argmax (it flipped 62/200 of the value-brain's actions) — its
+  safety is decision-specific and can't be verified at the generic persistence layer.
 
 ## Honest limitations
 
@@ -1588,15 +1733,17 @@ with `python holographic_ablate.py`.
 - **`NOTES_concepts.md`** records natural-process analogies (double diffusion /
   salt fingering, surface tension, gravity lensing, flocking, prism/spectral
   decomposition, demoscene) considered as possible improvements, and what honest
-  measurement said about each. Two were tested to clean negatives -- the
-  salt-finger variance pre-screen is mathematically unavailable at 512-d
-  (separation decays from 3.9 sigma at dim 8 to noise by dim 128), and
-  flocking-style local policy consensus loses to measured best-pick when
-  candidates disagree -- and a third (prism) had its premise refuted cheaply
-  before it was built (wall-pocket dithering is not caused by state fusion). The
-  value is the recorded reasoning: the analogies generated hypotheses, the
-  measurements killed the wrong ones early, and the elimination sharpened the
-  real open problem (a value-estimate trap, not a representation one).
+  measurement said about each. Most were parked or tested to clean negatives, with
+  the recorded reasoning the real value. One was later **re-opened**: the
+  salt-finger variance pre-screen, originally judged unavailable at 512-d, was
+  re-measured on the *real encoded substrate* (not synthetic blobs) after the
+  consolidation work gave us a low-rank lens — the signal is strong there (~7 sigma)
+  and predicts split benefit (r ≈ 0.94), so it now ships as a conservative,
+  default-off fast path on `auto_reorganize` that can only skip work, never change
+  the measured choice. The flocking and prism negatives stand (local policy
+  consensus loses to measured best-pick; wall-pocket dithering is not caused by
+  state fusion). The lesson: an honest negative is real for the test it ran, but a
+  capability unlocked later can make the same idea worth re-measuring on real data.
 
 ## License
 

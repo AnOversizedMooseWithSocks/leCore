@@ -43,7 +43,7 @@ from collections import defaultdict
 
 import numpy as np
 
-from holographic_ai import Vocabulary, bundle, permute
+from holographic_ai import Vocabulary
 
 
 class Segmenter:

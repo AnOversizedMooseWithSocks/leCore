@@ -505,9 +505,7 @@ class SchemaGenerator:
         out, trace = self.model.generate_traced(length, seed_atoms, temperature, rng)
         text = from_symbols(out, self.modality, **self.tok_kw)
         total = Counter()
-        segments, pos = [], len(from_symbols(list(seed_atoms), self.modality,
-                                             **self.tok_kw)) if seed_atoms else 0
-        gen_atoms = out[len(seed_atoms):]
+        segments = []
         cursor = len(seed_atoms)
         for n_atoms, who in trace:
             seg_atoms = out[cursor:cursor + n_atoms]

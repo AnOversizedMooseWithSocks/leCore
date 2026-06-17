@@ -42,7 +42,7 @@ demo at the bottom runs the real A/Bs; the numbers are reported, win or lose.
 """
 import numpy as np
 
-from holographic_ai import bind, cosine, permute
+from holographic_ai import bind, permute
 
 
 # ---------------------------------------------------------------------------

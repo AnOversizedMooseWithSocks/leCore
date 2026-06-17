@@ -271,16 +271,16 @@ def test_page_has_searchable_card_system():
 
 
 def test_every_card_has_a_catalog_entry():
-    # each card's <h2> must match exactly one catalog key, so all are tagged/categorized
+    # each card's <h2> must match exactly one catalog key, so all are tagged/categorized.
+    # The keys are read from the app's own CATALOG (the source of truth) rather than a
+    # hardcoded copy, so a newly added card is checked automatically.
     import re
     c = _client()
-    body = c.get("/").get_data(as_text=True).split("<script>")[0]
+    page = c.get("/").get_data(as_text=True)
+    body = page.split("<script>")[0]
     h2s = re.findall(r"<h2>(.*?)</h2>", body, re.S)
-    keys = ["pull + train", "question router", "classify", "organize", "relations",
-            "curriculum", "4 &middot; generate", "predictive loop", "query &amp; generate",
-            "deliberate", "self-discovery", "factorize", "many NPCs", "sprite pack",
-            "image vault", "market structure", "big-text run", "lossless codec",
-            "source tracing", "topic pull"]
+    keys = re.findall(r'\{key:"((?:[^"\\]|\\.)*)"', page)   # CATALOG keys from the page script
+    assert len(keys) >= 14
     assert len(h2s) >= 14
     for h in h2s:
         matched = [k for k in keys if k in h]

@@ -293,7 +293,7 @@ def demo_region():
         print("  {:13s} {}".format(name, "  ".join(f"{str(x):5s}" for x in row)))
 
     q = slerp(a, far, 0.55)                 # just outside A
-    print(f"\nSteering a point toward region A pulls it inside:")
+    print("\nSteering a point toward region A pulls it inside:")
     print(f"  signed distance {region_a.sdf(q):+.2f} -> {region_a.sdf(region_a.steer(q, step=0.7)):+.2f}"
           f"   (negative = inside)\n")
 

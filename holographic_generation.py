@@ -51,13 +51,12 @@ kept negative, not a coherence win.)
 
 Needs: numpy, holographic_text, holographic_encoders.
 """
-import math
 from collections import Counter, defaultdict
 
 import numpy as np
 
 from holographic_encoders import TextEncoder
-from holographic_text import _content, _tokens, STOPWORDS
+from holographic_text import _tokens, STOPWORDS
 from holographic_ai import cosine, bundle
 
 

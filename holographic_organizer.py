@@ -45,6 +45,7 @@ class SubPrototypeMemory:
     def __init__(self, protos=None):
         # each entry: [label, sum_vector, unit_vector, count]
         self._p = [list(p) for p in (protos or [])]
+        self._gen = 0          # bumped on every mutation, so the cached stack can't go stale
 
     @staticmethod
     def _unit(v):
@@ -68,32 +69,60 @@ class SubPrototypeMemory:
             p[1] = p[1] + vec
             p[2] = self._unit(p[1])
             p[3] += 1
+        self._gen += 1          # the prototype set changed -> invalidate the cached stack
+
+    def _stack(self):
+        """Cached (labels, unit-matrix) view of the prototypes for batched scoring.
+        Keyed on a mutation counter (_gen) bumped by every add/split/merge, so an
+        in-place prototype update can't leave a stale matrix. Repeated classify/
+        label_scores over a stable memory pay the stack cost once. This is the same fast
+        path Vocabulary.cleanup uses, applied to the hottest scan in the brain (every
+        classify/recall/decide routes through here)."""
+        gen = getattr(self, "_gen", 0)
+        cache = getattr(self, "_stack_cache", None)
+        if cache is None or cache[0] != gen or cache[1] is not self._p or cache[2] != len(self._p):
+            labels = [p[0] for p in self._p]
+            mat = (np.stack([p[2] for p in self._p]) if self._p else np.zeros((0, 0)))
+            self._stack_cache = (gen, self._p, len(self._p), labels, mat)
+        return self._stack_cache[3], self._stack_cache[4]
 
     def classify(self, vec, among=None):
         """Nearest sub-prototype across every label. If `among` is given (a set of
         allowed labels), only those compete -- this is how a router restricts a query
-        to one modality's concepts, so a text query never loses to an image prototype."""
-        best_label, best_s = None, -2.0
-        for label, _, unit, _ in self._p:
-            if among is not None and label not in among:
-                continue
-            s = float(unit @ vec)
-            if s > best_s:
-                best_label, best_s = label, s
-        return best_label, best_s
+        to one modality's concepts, so a text query never loses to an image prototype.
+
+        Runs as one matrix-vector product against the cached unit-prototype stack
+        (prototypes are unit length, so the dot is the cosine up to the query norm --
+        same argmax), then a single masked argmax. Bit-for-bit the same winner as the
+        old per-prototype loop."""
+        if not self._p:
+            return None, -2.0
+        labels, mat = self._stack()
+        sims = mat @ vec
+        if among is not None:
+            mask = np.array([lab in among for lab in labels])
+            if not mask.any():
+                return None, -2.0
+            sims = np.where(mask, sims, -np.inf)
+        j = int(sims.argmax())
+        return labels[j], float(sims[j])
 
     def label_scores(self, vec, among=None):
         """The best score per LABEL (not just the winner) -- the full evidence
         vector a single probe sees. Multi-probe (multi-ray) classification needs
         this so several independent encodings of one query can be z-scored and
         combined: one ray gives a label its score, the ensemble averages them."""
+        if not self._p:
+            return {}
+        labels, mat = self._stack()
+        sims = mat @ vec
         scores = {}
-        for label, _, unit, _ in self._p:
-            if among is not None and label not in among:
+        for lab, s in zip(labels, sims, strict=True):   # labels and sims are 1:1 by construction
+            if among is not None and lab not in among:
                 continue
-            s = float(unit @ vec)
-            if label not in scores or s > scores[label]:
-                scores[label] = s
+            s = float(s)
+            if lab not in scores or s > scores[lab]:
+                scores[lab] = s
         return scores
 
     def labels(self):
@@ -110,6 +139,26 @@ class SubPrototypeMemory:
 
     def copy(self):
         return SubPrototypeMemory([[p[0], p[1].copy(), p[2].copy(), p[3]] for p in self._p])
+
+    # -- persistence: round-trip the prototype bank (label, sum, unit, count) -----------
+    def to_state(self):
+        """Snapshot the prototypes as parallel arrays + the labels. Reload restores an
+        identical memory (same prototypes -> identical classification)."""
+        return {
+            "labels": [p[0] for p in self._p],
+            "sums": (np.stack([p[1] for p in self._p]) if self._p else np.zeros((0, 0))),
+            "units": (np.stack([p[2] for p in self._p]) if self._p else np.zeros((0, 0))),
+            "counts": np.array([p[3] for p in self._p], dtype=float),
+        }
+
+    @classmethod
+    def from_state(cls, state):
+        labels = list(state["labels"])
+        sums = np.asarray(state["sums"], float)
+        units = np.asarray(state["units"], float)
+        counts = np.asarray(state["counts"], float)
+        protos = [[labels[i], sums[i], units[i], int(counts[i])] for i in range(len(labels))]
+        return cls(protos)
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +315,28 @@ class SelfOrganizingMind:
     def classify(self, x, modality=None):
         return self.live.classify(self.encoder.encode(x, modality))
 
+    # -- persistence: round-trip the learned encoder + the live prototype bank + config.
+    # The replay buffer is scratch (it only feeds the next reorganize and refills as new
+    # data arrives), so it is not persisted -- the same stance the creature brain takes.
+    def to_state(self):
+        return {
+            "kind": "SelfOrganizingMind",
+            "dim": int(self.encoder.dim), "seed": int(self.encoder.seed),
+            "buffer_cap": int(self.buffer_cap),
+            "max_k": int(self.split.max_k), "coherence": float(self.split.coherence),
+            "encoder": self.encoder.to_state(),
+            "live": self.live.to_state(),
+        }
+
+    @classmethod
+    def from_state(cls, state):
+        m = cls(dim=int(state["dim"]), seed=int(state["seed"]),
+                buffer_cap=int(state.get("buffer_cap", 20000)),
+                max_k=int(state.get("max_k", 6)), coherence=float(state.get("coherence", 0.45)))
+        m.encoder = UniversalEncoder.from_state(state["encoder"])
+        m.live = SubPrototypeMemory.from_state(state["live"])
+        return m
+
     def observe_vector(self, v, label):
         """Absorb an ALREADY-ENCODED vector. The normal observe() runs the input
         through this memory's own UniversalEncoder, but some inputs are encoded
@@ -373,7 +444,42 @@ class SelfOrganizingMind:
         ok = sum(model.classify(v)[0] == label for v, label in val)
         return ok / len(val)
 
-    def auto_reorganize(self, resolutions=(1, 2, 3, 4), val_frac=0.3, min_val=30):
+    def _fingering_gain(self, examples):
+        """Salt-finger pre-screen: the largest two-means stratification gain across the
+        labels in `examples`. A class with genuine sub-modes ("a finger") scores high
+        (two centroids fit its members far better than one); a single-mode blob scores
+        ~1. REVISITED finding (NOTES sec.1): on the REAL encoded substrate this signal is
+        strong and correlates ~0.94 with the held-out benefit of splitting -- the original
+        negative was on synthetic Gaussian blobs that lack the encoder's structure. So when
+        the max gain sits at the unimodal floor, no class can be helped by a split and the
+        expensive multi-resolution sweep is guaranteed to choose k=1."""
+        by_label = defaultdict(list)
+        for v, label in examples:
+            by_label[label].append(v)
+        best = 1.0
+        for vecs in by_label.values():
+            if len(vecs) < 2 * self.split.min_points:
+                continue
+            M = np.stack(vecs)
+            one = M.mean(0)
+            c = M - one
+            if not np.any(c):
+                continue
+            _, _, V = np.linalg.svd(c, full_matrices=False)
+            proj = c @ V[0]
+            a = M[proj <= 0].mean(0) if (proj <= 0).any() else one
+            b = M[proj > 0].mean(0) if (proj > 0).any() else one
+            for _ in range(2):
+                da = ((M - a) ** 2).sum(1); db = ((M - b) ** 2).sum(1); mk = da <= db
+                if mk.any(): a = M[mk].mean(0)
+                if (~mk).any(): b = M[~mk].mean(0)
+            ss1 = float((c ** 2).sum())
+            ss2 = float(np.minimum(((M - a) ** 2).sum(1), ((M - b) ** 2).sum(1)).sum())
+            best = max(best, ss1 / (ss2 + 1e-9))
+        return best
+
+    def auto_reorganize(self, resolutions=(1, 2, 3, 4), val_frac=0.3, min_val=30,
+                        fingering_prescreen=False, finger_floor=1.5):
         """Speculate, measure, adopt -- with no thresholds. Hold out a slice of recent
         experience, build a candidate organization at each resolution (1 prototype per
         label up to a few sub-prototypes), and SELECT the resolution that classifies
@@ -387,7 +493,13 @@ class SelfOrganizingMind:
         on the same held-out slice, so a richer resolution is not handicapped by less
         data. Once a resolution is chosen, it is REFIT on all the data before going
         live, so nothing is wasted. Returns (chosen, prototype_count) or None if there
-        is too little data."""
+        is too little data.
+
+        fingering_prescreen (default OFF -> identical behaviour to before): a cheap
+        salt-finger check that SKIPS the full sweep when no class shows sub-mode
+        structure (max two-means gain below finger_floor), short-circuiting to "keep".
+        It can only avoid work, never change which organization is chosen -- if any
+        class fingers, the full measured sweep runs exactly as before."""
         buf = list(self.buffer)
         rng = np.random.default_rng(len(buf))          # deterministic split per call
         rng.shuffle(buf)
@@ -395,6 +507,12 @@ class SelfOrganizingMind:
         fit, val = buf[:cut], buf[cut:]
         if len(val) < min_val:
             return None
+
+        # optional pre-screen: if nothing is fingering, the sweep can only pick k=1, so
+        # skip it. Conservative -- it never overrides the measured choice, only avoids it.
+        if fingering_prescreen and self._fingering_gain(fit) < finger_floor:
+            self._since_reorg = 0
+            return ("keep", self.live.size())
 
         # select the resolution -- all candidates on equal footing (fit -> val)
         scored = [(k, self._accuracy(self._shadow_at_k(fit, k), val)) for k in resolutions]

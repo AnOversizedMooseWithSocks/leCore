@@ -312,7 +312,7 @@ def demo_navigator(n_items=2000, dim=256, leaf_size=48, seed=0):
     recall, comps = evaluate(world, enc, mind)
 
     wide = base[-1]
-    print(f"\nLearned adaptive navigator:")
+    print("\nLearned adaptive navigator:")
     print(f"  recall {recall*100:.0f}%   {comps:.0f} comparisons   "
           f"({mind.prototype_count()} prototypes learned)")
     print(f"\n  It matches the widest beam's recall ({wide['recall']*100:.0f}% at "

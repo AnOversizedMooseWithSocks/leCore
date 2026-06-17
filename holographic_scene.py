@@ -29,7 +29,7 @@ holographic_image (the DCT), and holographic_vision (shape geometry).
 import functools
 import numpy as np
 
-from holographic_ai import bind, bundle, random_vector, cosine
+from holographic_ai import bind, random_vector, cosine
 from holographic_reasoning import ResonatorNetwork
 from holographic_image import _dct_matrix
 import holographic_vision as hv
@@ -386,7 +386,8 @@ def make_scene(specs, S=96, seed=0, bg=(14, 22, 38)):
     """Draw several coloured shapes into one image.  `specs` is a list of
     (shape, colour) pairs; shapes are placed in a row.  Returns the RGB image."""
     palette = {"red": (235, 70, 70), "yellow": (235, 205, 60), "green": (70, 200, 110),
-               "cyan": (60, 200, 210), "blue": (80, 120, 235), "magenta": (210, 80, 200)}
+               "cyan": (60, 200, 210), "blue": (80, 120, 235), "magenta": (210, 80, 200),
+               "grey": (160, 168, 178)}
     img = np.empty((S, S, 3), np.uint8); img[:] = np.array(bg, np.uint8)
     n = len(specs); cell = S // n
     ry = (S - cell) // 2                                # centre shapes vertically
@@ -433,7 +434,7 @@ def _demo():
     true_tags = [{"colour": "red", "shape": "circle"}, {"colour": "blue", "shape": "rectangle"}]
     sv = coder.encode_scene([{**o} for o in objs]) if objs else None
     recovered = coder.factor_scene(sv, 2) if sv is not None else []
-    print(f"\n2-object scene  [red circle | blue rectangle]")
+    print("\n2-object scene  [red circle | blue rectangle]")
     print(f"  holistic colour tag     : '{holistic}'  (one label for the whole image -- blurred)")
     print(f"  compositional segments  : {[(o['colour'], o['shape']) for o in objs]}")
     print(f"  resonator factors scene : {[(o['colour'], o['shape']) for o in recovered]}")

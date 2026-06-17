@@ -416,3 +416,28 @@ def test_auto_maintain_candidates_keep_capacity_setting():
     m = HolographicMind(dim=32, actions=["N", "S"], capacity=8, seed=0)
     blank = m._blank()
     assert blank.capacity == 8
+
+
+def test_value_is_robust_to_a_raw_probe_on_a_consolidated_brain():
+    # decide() projects the state once before the per-action loop, but a DIRECT value()
+    # caller (a demo, a save/reload check, _greedy) may hand a raw full-dim probe to a
+    # consolidated brain whose prototypes live in the low-rank basis. value() must project
+    # it rather than crash, and must give the same answer as a pre-projected vector.
+    import numpy as _np
+    import holographic_creature as hc
+    import io
+    import contextlib
+    world = hc.GridWorld(width=10, height=10, seed=1)
+    enc = hc.CreatureEncoder(dim=256, seed=0)
+    mind = hc.HolographicMind(dim=256, actions=list(hc.GridWorld.ACTIONS), seed=0, capacity=32)
+    with contextlib.redirect_stdout(io.StringIO()):
+        hc._train(world, enc, mind, episodes=120, max_steps=40)
+    raw = enc.build_state(world.senses())
+    mind.consolidate()
+    # raw probe no longer crashes
+    from_raw = [mind.value(raw, a)[0] for a in range(len(mind.actions))]
+    assert all(_np.isfinite(from_raw))
+    # and matches the pre-projected path (the guard is idempotent, no double projection)
+    pv = mind.perceive_vec(raw)
+    from_proj = [mind.value(pv, a)[0] for a in range(len(mind.actions))]
+    assert _np.allclose(from_raw, from_proj)
