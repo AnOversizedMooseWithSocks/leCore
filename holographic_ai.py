@@ -449,6 +449,23 @@ class HolographicMemory:
         return unbind(self.trace, key)
 
 
+def _install_c_kernel_if_requested():
+    import os
+
+    enabled = os.environ.get("HOLOSTUFF_USE_C", "").lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return
+    try:
+        import holographic_c as _holographic_c
+        _holographic_c.install(globals(), strict=True)
+    except Exception:
+        if os.environ.get("HOLOSTUFF_C_STRICT", "").lower() in {"1", "true", "yes", "on"}:
+            raise
+
+
+_install_c_kernel_if_requested()
+
+
 def recall_all(trace, keys, codebook, iterative=True):
     """Recover the value for EVERY key stored in one overloaded trace.
 

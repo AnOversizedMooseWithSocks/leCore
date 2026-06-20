@@ -1,0 +1,322 @@
+# HoloC Kernel Plan
+
+This directory is for a pure C rewrite of the architectural kernel of the
+holographic neuro-symbolic system. It is not a speed-port of whichever Python
+test is slow this week. The target is the invariant substrate that every useful
+layer depends on.
+
+## Decision
+
+The highest leverage C target is:
+
+```text
+hardware-optimized VSA substrate
+    -> fixed-width holographic trace memory
+    -> sparse memory-neuron grid
+    -> optional capacity partitioning
+```
+
+In current `holostuff` terms, that means extracting the stable core of
+`holographic_ai.py`, `holographic_core.py`, and the trace/memory pieces used by
+`holographic_unified.py` into a small C library. It does not mean rewriting
+`app.py`, `unified_app.py`, every experiment, or the high-level Python research
+surface.
+
+## Current Implementation
+
+This directory now builds a small static C99 library:
+
+```sh
+make -C c test
+```
+
+Implemented:
+
+- `include/holo_core.h`
+- `include/holo_trace.h`
+- `src/holo_core.c`
+- `src/holo_trace.c`
+- `tests/test_core.c`
+- `tests/test_trace.c`
+
+The current kernel provides deterministic key generation, unitary key
+generation, FFT-backed circular-convolution bind/unbind, bundle, permute,
+cleanup/top-k, additive holographic trace memory, binary trace save/load, and
+tests for algebraic roundtrip, cleanup, trace recall, cached-spectrum recall,
+and snapshot parity. Trace recall caches `FFT(trace)` until the next store, and
+cleanup can use precomputed action norms for static action dictionaries. The
+default build uses a portable radix-2 FFT; macOS can enable Accelerate/vDSP for
+the same bind/unbind and trace-recall contracts:
+
+```sh
+make -C c test HOLO_USE_ACCELERATE=1
+```
+
+## Python Replacement Path
+
+The repository root now has a Makefile. On macOS it builds the Accelerate-backed
+C kernel by default:
+
+```sh
+make c
+make c-test
+```
+
+Existing Python experiments can opt into the C-backed `bind`, `unbind`, and
+`HolographicMemory` replacements without changing their imports:
+
+```sh
+HOLOSTUFF_USE_C=1 python benchmark_holographic.py
+make benchmark-c
+make experiments-c
+```
+
+Programmatic callers can install the same backend explicitly:
+
+```python
+import holographic_c
+holographic_c.install(strict=True)
+```
+
+Set `HOLOSTUFF_C_STRICT=1` to fail loudly if the shared C library is missing.
+Without the environment switch, `holographic_ai.py` stays NumPy-only.
+
+## Benefit Experiment
+
+The first proof experiment is trace-store plus action-recall throughput against
+the current NumPy implementation:
+
+```sh
+make -C c bench-compare PYTHON=/Users/ratimics/develop/.venvs/holostuff/bin/python
+make -C c bench-compare HOLO_USE_ACCELERATE=1 PYTHON=/Users/ratimics/develop/.venvs/holostuff/bin/python
+```
+
+The workload excludes vector setup from the timed section. It measures only the
+architectural hot path:
+
+```text
+store:
+    trace += bind(state, action)
+
+query:
+    context = unbind(trace, query_state)
+    top action = cleanup(context, action_matrix, precomputed_action_norms)
+```
+
+On Apple clang / arm64, with `pairs=8`, `actions=8`, `queries=1024`, and five
+repeats, the optimized portable scalar backend shows the first boundary:
+
+| dim | C store speedup | C query speedup | accuracy |
+| ---: | ---: | ---: | ---: |
+| 128 | ~5.2x | ~7.6x | 1.0 / 1.0 |
+| 256 | ~2.5x | ~3.4x | 1.0 / 1.0 |
+| 512 | ~1.6x | ~2.3x | 1.0 / 1.0 |
+| 1024 | ~1.0x | ~1.6x | 1.0 / 1.0 |
+
+That is the useful scalar boundary after caching trace spectra: even the
+portable backend now beats NumPy query throughput at 1024 dimensions. Enabling
+the vDSP backend moves the same architectural loop onto hardware-optimized
+FFTs, vector reductions, and complex spectrum multiplication:
+
+| dim | Accelerate store speedup | Accelerate query speedup | accuracy |
+| ---: | ---: | ---: | ---: |
+| 128 | ~13.8x | ~21.9x | 1.0 / 1.0 |
+| 256 | ~7.1x | ~11.3x | 1.0 / 1.0 |
+| 512 | ~5.0x | ~8.5x | 1.0 / 1.0 |
+| 1024 | ~2.9x | ~4.7x | 1.0 / 1.0 |
+
+That proves the right lever: the C core pays off when it owns the architectural
+loop and maps the algebra to the platform FFT. The biggest query win is not just
+"C instead of Python"; it is representing trace memory in the form the algebra
+actually consumes.
+
+## Why This Kernel
+
+The local project learnings point to the same shape:
+
+- `../crlplrimes/docs/holonet-retrospective.md`: Layer 1, the VSA compute
+  engine, is the foundation. Layer 2+ experiments are useful only when they sit
+  on a clean bind/unbind/bundle/keygen substrate.
+- `../crlplrimes/README.md`: the model proposes, the grounding operator
+  decides, and the trace remembers. A C kernel should make the trace cheap,
+  deterministic, and auditable.
+- `../crlplrimes/docs/symbolic-domain-interface.md`: domain soundness belongs
+  outside the model. The kernel should expose rows, ids, and scores, not bury
+  verifier policy in vector math.
+- `../crlplrimes/docs/next-phase-plan.md`: flat holographic traces need
+  capacity management before long-running memory can be trusted.
+- `../agent-orchestration-report-2026-06-05.md`: module boundaries are
+  architectural. The C layer needs a narrow contract and no hidden shared state.
+- `../EGREGOREGRAMMING_101.md`: memory has tiers. The substrate should support
+  immediate traces, recent/consolidated traces, and durable core snapshots
+  without changing the algebra.
+
+Together, these argue for a C substrate that is small enough to verify, fast
+enough to call on every decision, and explicit enough to sit under multiple
+symbolic domains.
+
+## What To Rewrite First
+
+### 1. Vector Symbolic Algebra
+
+Rewrite these primitives first:
+
+- deterministic atom/key generation
+- flat-spectrum/unitary key generation
+- dot/cosine/norm/normalize
+- bundle and weighted bundle
+- bind/unbind by circular convolution
+- permute/rotate
+- cleanup/top-k over an aligned matrix of candidate vectors
+
+This is the direct replacement for the architectural center of
+`holographic_ai.py`. It should be boring, tight C: fixed dimensions chosen at
+init, aligned buffers, explicit workspaces, no heap allocation in the hot path.
+
+### 2. Holographic Trace Memory
+
+Build one reusable trace type:
+
+```text
+store(state, action, weight)
+    trace += bind(state_key, action_key) * weight
+
+recall(query_state)
+    action_context = unbind(cached_fft(trace), query_state)
+    scores = cleanup(action_context, action_matrix, precomputed_action_norms)
+```
+
+This is the "the trace remembers" piece. It gives `holostuff` a single durable
+mechanism for associative memory, action scoring, relation recall, and
+candidate suggestion.
+
+### 3. Memory-Neuron Grid
+
+Above the trace, implement the CRLPLRIMES memory-neuron pattern:
+
+```text
+fast tick:
+    route state to K nearest memory neurons
+    read context features from their traces
+    return four features to the scorer/orchestrator
+
+slow tick:
+    after a verifier or ground-truth operator confirms an action
+    store bind(state, verified_action) into the active traces
+    update centroids gently
+```
+
+The kernel should expose context features, not own the final policy. The neural
+or symbolic scorer learns how much to trust them.
+
+### 4. Capacity Partitioning
+
+Flat traces have finite capacity. Add deterministic partitioning after the basic
+trace works:
+
+- fixed anchor/router partitions for small C implementation first
+- later HoloTree/HoloForest-style routing if measurements justify it
+- per-partition counters and fidelity estimates
+- shadow rebuild/swap hooks for self-organization experiments
+
+This should be measured with trace rows before becoming a default.
+
+## What Not To Rewrite First
+
+Do not start with:
+
+- Flask apps or UI panels
+- every `holographic_*.py` experiment
+- `UnifiedMind` as a monolith
+- text corpus loaders or NLTK paths
+- scene demos, image vault UI, or long-form tour code
+- a fully holographic neural network
+
+Those are orchestration and research surfaces. They should call the C kernel
+through Python bindings once the substrate is stable.
+
+## Proposed C Layout
+
+```text
+c/
+  README.md
+  Makefile
+  include/
+    holo_core.h          # implemented: vector engine, algebra API
+    holo_trace.h         # implemented: trace memory API
+    holo_memory_grid.h   # next: sparse memory-neuron grid API
+  src/
+    holo_core.c          # implemented: scalar ops + radix-2/vDSP FFT bind
+    holo_trace.c         # implemented: cached-spectrum trace + save/load
+    holo_memory_grid.c   # next
+  tests/
+    test_core.c          # implemented
+    test_trace.c         # implemented
+    test_memory_grid.c   # next
+  bindings/
+    python/              # optional CPython extension or cffi wrapper
+```
+
+The C API should be C99-compatible, with optional platform acceleration behind
+compile-time switches:
+
+- Apple: Accelerate/vDSP for FFT, dot products, and spectrum multiply
+- Linux: FFTW or portable radix-2 fallback
+- SIMD: NEON/AVX paths guarded by feature checks
+- baseline: deterministic scalar fallback that always passes tests
+
+## Kernel Contract
+
+The C layer should guarantee:
+
+- deterministic keygen from `(seed, name_or_id, dim)`
+- no hot-path allocation after init
+- explicit workspace ownership
+- aligned contiguous vector storage
+- stable binary snapshot with magic, version, dim, dtype, and endianness
+- no verifier, policy, app, or domain-specific logic inside the algebra
+- row-friendly diagnostics: stored count, fidelity, route ids, capacity load,
+  score margin, and checksum
+
+The implemented core already follows the first five rules for `holo_core` and
+`holo_trace`; route ids and capacity load belong to the next memory-grid layer.
+
+## First Milestone
+
+The first milestone is implemented:
+
+1. `holo_engine_create(dim, seed)`
+2. `holo_keygen(engine, id, out)`
+3. `holo_bind(engine, a, b, out)`
+4. `holo_unbind(engine, pair, key, out)`
+5. `holo_bundle(engine, vectors, weights, count, out)`
+6. `holo_cleanup_topk(query, matrix, labels, k, out)`
+7. tests proving:
+   - unit vectors stay normalized
+   - bind/unbind roundtrip works for unitary keys
+   - cleanup recovers noisy vectors
+   - trace store/recall recovers the right action above a margin
+   - saved and loaded traces score identically
+
+The concrete API names are `holo_engine_create`, `holo_keygen`,
+`holo_keygen_unitary`, `holo_bind`, `holo_unbind`, `holo_bundle`,
+`holo_cleanup_topk`, and the `holo_trace_*` family.
+
+Next: wire Python to C behind the same public semantics as
+`holographic_core.py`, then port memory-neuron context extraction.
+
+## Opinion
+
+The C rewrite should be a substrate, not a second product. The architectural
+kernel is the thing that makes every later system possible:
+
+```text
+symbols become vectors
+relations become reversible bindings
+experience becomes a fixed-width trace
+traces become context features
+verifiers decide what is true
+snapshots make the mind durable
+```
+
+That is the part worth making hardware-close.
