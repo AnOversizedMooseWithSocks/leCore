@@ -4217,3 +4217,140 @@ The de-siloing is real -- one factorizer for new code (the dense path deprecated
 proven by test_integration.py running each faculty THROUGH the mind end to end (the §6 lesson: a shared kernel is
 not a shared manifold); and every faculty carries its measured negatives. The corollary the plan set out to
 enforce holds: there is one MIND the primitives serve, not a drawer of disconnected experiments beside it.
+
+## Wiring check -- integration plan verified against the live code (clean, with two flagged boundaries)
+
+Re-ran the plan's own audit (the 14 modules it found with ZERO references in UnifiedMind) plus a
+faculty-presence + full-integration-suite pass. Verdict: every plan item is wired and works; two honest
+boundaries are flagged below (neither a missed item).
+
+Module references in UnifiedMind now (was 0/14):
+  * 12/14 wired DIRECTLY: symbolic, kan, sbc, peel, manifold, flow, assembly, hopfield, splat, dynamics,
+    denoise (+ the antiperiodic concept via manifold).
+  * ratedistortion: 0 direct refs but reachable TRANSITIVELY -- UnifiedMind.save -> holographic_core.save
+    (quant='rd') -> holographic_ratedistortion. Intended (the plan said rd lives in core.save; the mind now
+    requests it). VERIFIED reachable.
+  * machine (HoloMachine VM): 0 refs -- INTENTIONALLY standalone per plan §5 ("a VM, adjacent to the mind,
+    not a faculty"). Correct.
+
+Faculty presence (live UnifiedMind, all callable): decompose_signal, denoise, fit_function, chain_structure,
+decode_structure, decompose_structure, factor_composite (routing+deprecated dense), solve_maze, assemble,
+learn_dynamics, save/load/to_state/from_state, generate_vector, splat_field; plus Vocabulary.cleanup(energy=).
+UnifiedMind public-method count 86 -> 99. All 18 integration tests pass.
+
+Duplication table (§4) -- all four rows now closed:
+  * factor_composite -> SBC resonator: DONE (routes to decompose_structure on L; dense deprecated).
+  * vector generate -> hopfield.generate (B10): DONE (generate_vector).
+  * save path -> quant='rd': DONE (UnifiedMind.save requests it via core.save).
+  * compress_lossless vs symbolic/recipe: the one row left as a doc cross-link -- now CLOSED: compress_lossless's
+    docstring documents the boundary (lossless entropy coding of discrete TOKENS vs decompose_signal's lossy
+    generating LAW over a CONTINUOUS signal; both kept, different levels).
+
+TWO FLAGGED BOUNDARIES (honest, neither is a missed plan item):
+  1. holographic_mobius MODULE: the plan's only mobius reference was "(mobius for the antiperiodic basis)" in
+     decompose_signal -- that role IS wired and tested (manifold.detect_topology classifies 'mobius' and
+     manifold_dictionary builds the ODD-harmonic basis itself; sin(x)+0.4sin(3x) decodes as mobius). But the
+     standalone holographic_mobius module -- its AxialEncoder (the double-angle map for AXIAL data: theta ==
+     theta+pi, orientation/director fields) and antiperiodic_split helper -- is NOT on the mind's call path
+     (referenced only in a docstring, the tour, and its own tests). The AxialEncoder is a distinct ENCODER
+     capability the plan never listed for wiring; it remains a standalone study, like machine. CANDIDATE for a
+     future encoder faculty (e.g. perceive(..., axial=True)) if wanted -- not done, not claimed.
+  2. splat -> archive: splat_field is wired (a 2-D field as a Gaussian-splat superposition + denoiser). The
+     DEEPER integration item 10 gestured at -- storing ARCHIVE images AS splat bundles beside the WHT plates --
+     is the addendum's documented build target and is NOT done. splat is connected to the mind as a faculty,
+     not (yet) fused into the archive store.
+
+No code paths regressed (persistence, brain, organizer, scene, relations, schema, resonator, algebra suites all
+green). The only change this check made was the compress_lossless docstring cross-link.
+
+## Axial perception + the splat-bundle archive (shipped) -- the two wiring-check boundaries closed
+
+The wiring check flagged two modules whose CAPABILITY was reachable but whose own code was not on the
+mind's path. Both are now wired, each through its real published method, each measured.
+
+AXIAL MODALITY (holographic_mobius.AxialEncoder -> the encoder). An axial value is one where theta and
+theta+pi mean the SAME thing -- an unoriented line, a director/nematic field, a crystal axis. On a circle
+they sit apart; the fix is the double-angle map theta -> 2*theta onto RP^1 (the Mobius base). UniversalEncoder
+now builds an AxialEncoder(dim//2) and exposes modality="axial": it takes the real [Re, Im] embedding of the
+phasor, which PRESERVES the FHRR cosine and lands the value in the SAME real space as every other modality,
+so the one memory can learn / classify / recall orientations correctly. UnifiedMind gains axial_similarity()
+and decode_axial(). MEASURED (dim 512): sim(theta, theta+pi)=+1.00 (same orientation) where the plain number
+modality gives +0.76 and cannot see the flip as identity; sim(theta, theta+pi/2)=-0.17 (orthogonal); decode is
+mod pi (1.2 and 1.2+pi both read 1.20); and a flipped A-orientation still classifies as A. OPT-IN: a bare float
+infers as "number" (infer() cannot tell axial from a plain angle), so axial must be declared.
+
+SPLAT-BUNDLE ARCHIVE (holographic_splat + new holographic_splat_archive). A 2-D field is a SUPERPOSITION of
+Gaussian primitives -- a bundle. SplatArchive stores a gallery as splat codes (cy, cx, amp, sigma) per channel
+BESIDE the WHT-plate archive. Because matching pursuit orders splats by decreasing residual energy, the stored
+list is already importance-sorted, which buys: PROGRESSIVE REFINEMENT for free (recover(i, k) renders a k-prefix
+-- a coarser valid preview; gallery 27.3 dB full vs 19.6 dB at K/4), an EXACT region query (the splats whose
+centre lies in a box ARE what is there), and a fixed tunable byte budget. holographic_splat also gains the
+addendum's named HRR functions: splat_bundle() encodes a scene as ONE hypervector (quantised per-region peak
+occupancy bound to region roles, bundled) and recall_region() reads a region back by unbinding its role and
+cleaning up against orthogonal level atoms -- RELIABLE (100% exact-level recall up to 36 regions at dim 4096)
+but COARSE (a quantised occupancy, not the splats). UnifiedMind gains splat_archive().
+
+KEPT NEGATIVES (measured, not hidden):
+  * The splat archive is LOSSY and, on the DCT-friendly _gallery, the WHT plates BEAT it on quality at a matched
+    byte budget (WHT keep=120 reconstructs near-exactly: 163.7 dB at 75 KB vs splat 27.3 dB at 55 KB). The
+    addendum's "match or beat WHT quality" bar is NOT met for quality on these smooth images -- DCT is ideal for
+    gradients. The splat archive's real value is the ADDED region-query + progressive-refinement + compact code,
+    not quality parity; it sits BESIDE the plates, not in place of them. No damage-tolerant joint recovery either
+    (the plates' strength under erasure). Isotropic splats only (anisotropic covariances / gradient refinement =
+    full 3DGS, out of scope).
+  * recall_region is coarse (quantised levels), not a continuous descriptor; the exact per-splat content is
+    SplatArchive.region.
+
+LESSON BANKED: this engine's unbind is unbind(composite, key) -- composite FIRST. A reversed call
+(unbind(key, composite)) returns ~orthogonal noise and silently destroys recall; it cost a full mis-diagnosis as
+a "VSA capacity cliff" before a one-line bind/unbind round-trip check (cosine ~0, not ~1) exposed the real cause.
+Always sanity-check the round-trip before blaming capacity.
+
+Tests: +3 (axial modality theta==theta+pi incl. flip-invariant classify; splat archive recover/refine/region/
+recall; splat_bundle superposition carries region signal). 698 -> 701.
+
+## Two investigations that did NOT earn a build (kept negatives + the mechanism, so they aren't re-tried blindly)
+
+Two reframes were proposed -- "bitspace as a loss surface" and "primes as local minima" -- and prototyped
+and measured on the real substrate (exp_bitspace.py / exp_primes.py, not shipped). Both are accurate
+DESCRIPTIONS of things the engine already does, but neither produced a refinement worth shipping. The
+measurements and the reason each failed:
+
+BITSPACE AS A LOSS SURFACE -- per-component bit allocation vs B5's single global step. B5
+(geometry_preserving_code) quantizes all KLT coefficients with ONE delta found by bisection to hit a target
+mean cosine. Tested a per-component allocation that greedily descends a pairwise-cosine-error surface over
+bit-allocations, at a MATCHED bit budget, on a controlled low-rank codebook and on real SOL price windows.
+  * B5 already achieves recall@1 = 0.94-1.00 at every budget tested (down to target_cos 0.97). There is
+    essentially NO recall headroom to recover.
+  * On idealized low-rank data the per-component code MATCHES B5's recall and roughly HALVES the pairwise-
+    geometry error at the same bits (e.g. 0.019 -> 0.009) -- a real but modest win on a metric recall does
+    not need.
+  * On REAL SOL windows the per-component greedy is WORSE: it stalls at ~45 bits (flat-ish spectrum, no
+    dominant low-rank structure to allocate selectively) and gets recall 0.74 vs B5's 0.94-0.99. The single
+    global step is the right move for near-flat spectra.
+  WHY: the KLT orders directions by BETWEEN-vector variance, so one global step already crushes mainly the
+  non-discriminative directions, and a uniform step is the water-filling solution for the retained
+  components. B5 is already near rate-distortion-optimal for the recall geometry. Not worth the squeeze.
+
+PRIMES AS LOCAL MINIMA -- log-prime matching pursuit as a factorization/compression algorithm. The idea:
+decompose a value's log as a sum over a log-prime basis {log2, log3, log5, ...} by greedy residual descent,
+so prime-power values land on exact lattice minima.
+  * The ALGORITHM FAILS. Coordinate/greedy descent over log-primes recovers ONLY pure powers of the first
+    basis prime (2^16, 2^10 correct); EVERY multi-prime smooth number is recovered WRONG -- 3^10 -> "2^16",
+    360 -> "2^8", 2^6*3^6 -> "2^16". Reason: smooth numbers are DENSE in log space (2^16 ~= 3^10 to 0.10 in
+    log), so the residual landscape is a thicket of shallow SPURIOUS near-minima, not clean isolated ones;
+    greedy descent lands on the wrong one. The "local minima" intuition is actively misleading here.
+  * EXACT factorization (trial division -- not matching pursuit) does work: ~2x on a smooth-integer signal
+    (901 vs 1680 raw bits). But it is WORSE than raw on functional signals and worse than nothing on random
+    data, and -- decisively -- the engine's own symbolic compressor nails a functional signal like y=3x^2
+    EXACTLY (44 bits, residual 5e-13) where the prime code spends 723. Prime factorization only helps on
+    smooth-INTEGER signals with no functional form, which the engine does not process (its inputs are float
+    hypervectors, prices, structured states).
+  WHY: the reframe restates the already-documented observation ("prime powers compress dramatically; large
+  primes/random do not") but does not become a buildable capability -- the MP version is mathematically
+  wrong, and the exact version has no home in the engine's data. Not worth the squeeze.
+
+THE COMMON THREAD (the part worth keeping): both phrases name the move the engine already makes -- pick the
+representation where the hard thing becomes a downhill walk (log turns x into +, KLT decorrelates, the
+Hopfield energy turns recall into descent). They are good descriptions of the design, not new leverage over
+it. Measured, written down, moved on.

@@ -393,3 +393,69 @@ def test_splat_field_faculty_reconstructs_and_denoises():
     noisy = T + 0.10 * rng.standard_normal(T.shape)
     clean = UnifiedMind(dim=128, seed=0).splat_field(noisy, k=30, denoise=True)
     assert psnr(T, clean) > psnr(T, noisy) + 1.0            # the splat fit denoises (no capacity for noise)
+
+
+# ============== Wiring-check follow-ups: axial perception + the splat-bundle archive ===============
+# Boundary 1: holographic_mobius's AxialEncoder wired as the "axial" modality (theta == theta+pi).
+# Boundary 2: a splat-bundle image archive beside the WHT plates, + the addendum's splat_bundle/recall_region.
+
+def test_axial_modality_treats_theta_and_theta_plus_pi_as_the_same():
+    import math
+    m = UnifiedMind(dim=512, seed=0)
+    t = 0.7
+    assert m.axial_similarity(t, t + math.pi) > 0.99          # a pi flip is the SAME orientation
+    assert m.axial_similarity(t, t + math.pi / 2) < 0.5       # an orthogonal orientation is dissimilar
+    # decode is mod pi: theta and theta+pi both read back as the same angle in [0, pi)
+    assert abs(m.decode_axial(m.perceive(1.2, "axial")) - 1.2) < 0.05
+    assert abs(m.decode_axial(m.perceive(1.2 + math.pi, "axial")) - 1.2) < 0.05
+
+    # learn / classify over orientations: an A reported as a pi flip still classifies as A
+    rng = np.random.default_rng(0)
+    for _ in range(15):
+        m.learn(float(rng.uniform(0.0, 0.4)), "A", modality="axial")     # cluster near 0.2
+        m.learn(float(rng.uniform(1.2, 1.6)), "B", modality="axial")     # cluster near 1.4
+    assert m.classify(0.2 + math.pi, modality="axial")[0] == "A"         # flip-invariant classification
+
+
+def test_splat_archive_reconstructs_refines_and_region_queries():
+    from holographic_archive import _gallery
+    from holographic_splat import psnr
+    imgs = _gallery(48)
+    K = 120
+    m = UnifiedMind(dim=128, seed=0)
+    arch = m.splat_archive((48, 48, 3), keep=K)
+    for im in imgs:
+        arch.add(im)
+
+    # reconstruction is reasonable, and a PREFIX is a coarser-but-valid preview (progressive refinement)
+    full = np.mean([psnr(imgs[i], arch.recover(i)) for i in range(arch.n)])
+    quarter = np.mean([psnr(imgs[i], arch.recover(i, k=K // 4)) for i in range(arch.n)])
+    assert full > 15.0 and full > quarter + 1.0               # quality rises with k (importance order)
+
+    # EXACT region query: every returned splat's centre lies inside the requested box
+    box = (0, 24, 0, 24)
+    here, _patch = arch.region(0, box)
+    for chan in here:
+        assert all(0 <= cy < 24 and 0 <= cx < 24 for (cy, cx, _a, _s) in chan)
+
+    # content recall on a noisy copy lands on the right image
+    noisy = imgs[3] + 0.05 * np.random.default_rng(0).standard_normal(imgs[3].shape)
+    assert arch.recall(noisy)[0] == 3
+
+
+def test_splat_bundle_is_a_superposition_carrying_region_signal():
+    from holographic_splat import splat_fit, splat_bundle, recall_region
+    # a single blob in the TOP-LEFT, empty bottom-right
+    G = 48
+    ys, xs = np.mgrid[0:G, 0:G]
+    T = np.exp(-((ys - 8) ** 2 + (xs - 8) ** 2) / (2 * 5.0 ** 2))
+    T = T / T.max()
+    splats = splat_fit(T, 10)
+
+    scene, ctx = splat_bundle(splats, T.shape, dim=4096, grid=4)
+    assert scene.shape == (4096,)
+    # content-addressable region read: the OCCUPIED region recalls more energy than an EMPTY one.
+    # (Only a coarse signal -- exact per-splat recovery is the archive's job; this is the VSA cliff.)
+    occupied = recall_region(scene, (0, 0), ctx)              # top-left: has the blob
+    empty = recall_region(scene, (3, 3), ctx)                 # bottom-right: empty
+    assert occupied > empty

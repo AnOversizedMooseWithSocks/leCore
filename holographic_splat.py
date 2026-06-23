@@ -79,3 +79,51 @@ def psnr(a, b, peak=1.0):
     """Peak-signal-to-noise ratio in dB between two arrays (99.0 if identical)."""
     mse = float(np.mean((np.asarray(a, float) - np.asarray(b, float)) ** 2))
     return 99.0 if mse == 0.0 else float(10.0 * np.log10(peak * peak / mse))
+
+
+# --- the HOLOGRAPHIC layer: a splat scene AS a bundle, queryable by region ----------------------
+# "a splat scene is a bundle" made literal: bundle a per-region descriptor of the splats, each bound
+# to a region role, into ONE hypervector, and read a region back by unbinding its role. This is the
+# content-addressable "what's roughly HERE" query the archive's exact splat-list lookup complements.
+
+def splat_bundle(splats, shape, dim=4096, grid=8, levels=5, seed=0):
+    """Encode a splat scene as ONE hypervector: partition `shape` into grid x grid regions, quantise each
+    region's PEAK occupancy to one of `levels` near-orthogonal level atoms, and bundle bind(region_role,
+    level_atom) over all regions. Returns (scene_hv, ctx); ctx carries the role + level codebooks + grid so
+    recall_region can read a region back. The bundle IS a superposition -- the engine's bundle over the
+    scene's own primitives. (Quantised levels with ORTHOGONAL atoms, not a continuous RBF value, so the
+    per-region readback survives the bundle crosstalk -- the readout is robust, the value is coarse.)"""
+    from holographic_ai import bind, bundle, Vocabulary
+    H, W = shape[0], shape[1]
+    rendered = splat_render(splats, (H, W))
+    roles = Vocabulary(dim, seed=seed)
+    lvl = Vocabulary(dim, seed=seed + 1)                  # `levels` near-orthogonal occupancy atoms
+    peak = float(np.abs(rendered).max()) + 1e-12
+    parts, desc = [], {}
+    for gy in range(grid):
+        for gx in range(grid):
+            ys, ye = gy * H // grid, (gy + 1) * H // grid
+            xs, xe = gx * W // grid, (gx + 1) * W // grid
+            energy = float(np.clip(np.abs(rendered[ys:ye, xs:xe]).max() / peak, 0.0, 1.0))
+            q = int(round(energy * (levels - 1)))         # quantise PEAK occupancy to a level index
+            desc[(gy, gx)] = q / (levels - 1)
+            parts.append(bind(roles.get(f"cell:{gy}:{gx}"), lvl.get(f"lvl:{q}")))
+    ctx = {"roles": roles, "lvl": lvl, "levels": levels, "grid": grid, "desc": desc}
+    return (bundle(parts) if parts else np.zeros(dim)), ctx
+
+
+def recall_region(scene_hv, cell, ctx):
+    """Read a region's quantised occupancy back out of a splat-bundle by unbinding its role and cleaning
+    up against the orthogonal level atoms -- content-addressable region lookup. `cell` is (gy, gx). Returns
+    the recovered occupancy in [0, 1]. COARSE by design (quantised levels); for exact per-splat region
+    content use SplatArchive.region, the precise complement."""
+    from holographic_ai import unbind
+    roles, lvl, L = ctx["roles"], ctx["lvl"], ctx["levels"]
+    noisy = unbind(np.asarray(scene_hv, float), roles.get(f"cell:{cell[0]}:{cell[1]}"))
+    best_q, best_s = 0, -2.0
+    for q in range(L):
+        a = lvl.get(f"lvl:{q}")
+        s = float(noisy @ a / (np.linalg.norm(noisy) * np.linalg.norm(a) + 1e-12))
+        if s > best_s:
+            best_q, best_s = q, s
+    return best_q / (L - 1)

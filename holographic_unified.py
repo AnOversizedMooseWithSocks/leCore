@@ -303,6 +303,26 @@ class UnifiedMind:
         system; the memory and the brain never encode anything themselves."""
         return self.encoder.encode(x, modality)
 
+    # -- axial perception (orientation-like values; holographic_mobius via the encoder) ----
+    # An AXIAL value is one where theta and theta+pi mean the SAME thing -- the orientation of an
+    # unoriented line, a director field, a crystal axis. modality="axial" encodes it on the Mobius
+    # base (the double-angle map), so learn / classify / recall over orientations no longer treat a
+    # value and its pi-flip as different. It is OPT-IN: declare modality="axial" (a bare float still
+    # infers as "number" -- the scalar encoder, which has no notion that theta and theta+pi are the
+    # same orientation and simply encodes them as two unrelated values).
+    def axial_similarity(self, a, b):
+        """Cosine similarity of two axial values (radians): ~+1 when they are the same orientation,
+        INCLUDING the theta vs theta+pi case (a pi flip is invisible). Contrast self.perceive on the
+        plain 'number' modality, which encodes theta and theta+pi as two unrelated values and so does
+        NOT recognize a pi flip as the same orientation."""
+        from holographic_ai import cosine
+        return cosine(self.perceive(a, "axial"), self.perceive(b, "axial"))
+
+    def decode_axial(self, vec):
+        """Recover the axial value in [0, pi) from an axial hypervector -- the inverse of
+        perceive(theta, 'axial'). Lets a recalled/blended orientation be read back as an angle."""
+        return self.encoder.decode_axial(vec)
+
     # -- one memory: classification + organization -------------------------
     def learn(self, x, label, modality=None):
         # SELF-DISCOVERY: if the caller does not name the modality, the encoder
@@ -1076,7 +1096,12 @@ class UnifiedMind:
     def compress_lossless(self, tokens):
         """Go both directions: losslessly compress a sequence to a compact code (seed
         + rank stream) via the predictor's ranking, and report the achievable size.
-        decompress_lossless inverts it exactly. Needs build_meaning_predictor."""
+        decompress_lossless inverts it exactly. Needs build_meaning_predictor.
+
+        BOUNDARY (vs decompose_signal): this is LOSSLESS entropy coding of a discrete TOKEN
+        sequence against a learned next-token predictor -- it reconstructs the exact tokens.
+        decompose_signal instead fits a generating LAW to a CONTINUOUS signal (a small savable
+        Formula seed), which is lossy/approximate. Different levels of 'compression'; both kept."""
         if not hasattr(self, "_meaning_pred"):
             return {"code": None, "cost": {"ratio": 1.0}}
         if not hasattr(self, "_codec"):
@@ -1515,12 +1540,26 @@ class UnifiedMind:
         DENOISER -- a few smooth Gaussians have no capacity for high-frequency noise.
 
         KEPT NEGATIVE / SCOPE: isotropic splats and a fixed scale set (the honest matching-pursuit
-        baseline); anisotropic covariances and gradient refinement (full 3DGS), and storing archive
-        images AS splat bundles, are documented build targets, not done here."""
+        baseline); anisotropic covariances and gradient refinement (full 3DGS) remain out of scope.
+        Storing a whole gallery AS splat codes is now splat_archive() (holographic_splat_archive)."""
         from holographic_splat import splat_fit, splat_render
         splats = splat_fit(np.asarray(target, float), k)
         rendered = splat_render(splats, np.asarray(target).shape)
         return rendered if denoise else (splats, rendered)
+
+    def splat_archive(self, shape, keep=40):
+        """Open a SPLAT-BUNDLE image archive (holographic_splat_archive) -- a gallery stored as Gaussian-
+        splat codes BESIDE the WHT-plate archive (a splat scene is a bundle). add(image) fits K splats per
+        channel; recover(i, k) renders them (a k-prefix is a progressively-refined preview, since matching
+        pursuit stores them in importance order); recall(query) finds an image by content; region(i, box)
+        is an EXACT 'what is here' query. Returns a fresh SplatArchive for `shape`.
+
+        KEPT NEGATIVE: this is LOSSY -- the WHT-plate archive is EXACT undamaged and, on DCT-friendly
+        images, beats it on quality at a matched byte budget; the splat archive's win is the ADDED
+        region-query + progressive-refinement (and a compact code), not quality parity. It sits beside the
+        plates, not in place of them."""
+        from holographic_splat_archive import SplatArchive
+        return SplatArchive(shape, keep=keep)
 
     def render_scene(self, tag_list, S=96, seed=0):
         """Render composed attribute tags to an actual RGB image via the scene renderer."""

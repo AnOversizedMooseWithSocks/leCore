@@ -66,6 +66,13 @@ class UniversalEncoder:
         self._roles = Vocabulary(dim, seed + 1)          # record field-name atoms
         self._scalar = ScalarEncoder(dim, number_range[0], number_range[1], seed + 2)
         self._text = TextEncoder(dim, window=text_window, seed=seed + 3)
+        # AXIAL perception: orientation-like values where theta and theta+pi are the SAME state (an
+        # unoriented line, a director/nematic field, a crystal axis). holographic_mobius's AxialEncoder
+        # uses the double-angle map theta -> 2*theta so those coincide; we keep the phasor at dim//2 and
+        # take its real [Re, Im] embedding, which preserves the FHRR cosine and lands axial values in the
+        # SAME real space as every other modality (so the one memory can hold orientations correctly).
+        from holographic_mobius import AxialEncoder
+        self._axial = AxialEncoder(max(2, dim // 2), seed=seed + 5)
         self._projections = {}                            # input length -> fixed matrix
 
     # -- learning word co-occurrence is optional but sharpens text similarity ---
@@ -104,6 +111,26 @@ class UniversalEncoder:
         if not len(seq):
             return np.zeros(self.dim)
         return bundle([permute(self.encode(el), i + 1) for i, el in enumerate(seq)])
+
+    def _encode_axial(self, theta):
+        """An axial value (radians) -> a real hypervector via the double-angle map, so theta and
+        theta+pi map to the SAME vector. The real [Re, Im] embedding of AxialEncoder's phasor keeps
+        the axial cosine and lives in the shared real space; padded/truncated to dim for odd dims."""
+        z = self._axial.encode(float(theta))              # complex phasor (dim//2,)
+        v = np.concatenate([z.real, z.imag])              # real [Re, Im] -- preserves the FHRR cosine
+        if len(v) < self.dim:
+            v = np.concatenate([v, np.zeros(self.dim - len(v))])
+        v = v[:self.dim]
+        n = np.linalg.norm(v)
+        return v / n if n else v
+
+    def decode_axial(self, vec):
+        """Recover the axial value in [0, pi) from a real axial hypervector (the inverse of the
+        modality='axial' encoding) -- reconstruct the phasor from its [Re, Im] halves, then decode."""
+        v = np.asarray(vec, float)
+        d2 = self._axial.dim
+        z = v[:d2] + 1j * v[d2:2 * d2]
+        return self._axial.decode(z)
 
     def infer(self, x):
         """Name the modality this input would encode as -- the SELF-DISCOVERY step.
@@ -152,6 +179,10 @@ class UniversalEncoder:
             return self._encode_image(x)
         if modality == "number":
             return self._scalar.encode(float(x))
+        if modality == "axial":
+            # opt-in (infer() can't tell an axial float from a plain number); declare it for
+            # orientation-like data where theta == theta+pi -- see _encode_axial.
+            return self._encode_axial(x)
         if modality in ("text", "code"):
             # a sentence (or token list) as an order-insensitive bundle of its word
             # vectors -- see infer() for why token lists must land here and not in

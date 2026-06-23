@@ -1583,6 +1583,26 @@ print(f"  generate a vector (B10 diffusion)   : nearest-pattern cosine="
       f"{max(cosine(_gv, _cb[i]) for i in range(8)):.3f}; splat a field -> {len(_sp)} Gaussians at "
       f"{_psnr(_T, _rend):.0f} dB (a splat scene is a bundle)")
 
+# axial perception: an orientation (theta == theta+pi) on the Mobius base, wired as the "axial" modality
+import math as _math
+_t = 0.7
+print(f"  axial modality (theta==theta+pi)    : sim(t, t+pi)={um.axial_similarity(_t, _t + _math.pi):+.2f} "
+      f"(same orientation) vs the plain number modality "
+      f"{cosine(um.perceive(_t, 'number'), um.perceive(_t + _math.pi, 'number')):+.2f} -- a pi flip is "
+      f"invisible to axial, not to a scalar")
+
+# splat-bundle archive: a field stored as splat codes, with progressive refinement + an exact region query,
+# plus the holographic per-region readout (splat_bundle/recall_region)
+from holographic_splat import splat_bundle as _sb, recall_region as _rr
+_arch = um.splat_archive((_G, _G), keep=80); _arch.add(_T)
+_full = _psnr(_T, _arch.recover(0)); _quarter = _psnr(_T, _arch.recover(0, k=20))
+_here, _ = _arch.region(0, (0, _G // 2, 0, _G // 2))
+_scene, _ctx = _sb(_sp, _T.shape, dim=4096, grid=4)
+_occ = max(_rr(_scene, (_gy, _gx), _ctx) for _gy in range(4) for _gx in range(4))
+print(f"  splat-bundle archive (beside WHT)   : recover {_full:.0f} dB full / {_quarter:.0f} dB at K/4 "
+      f"(progressive); region query found {sum(len(h) for h in _here)} splats in a quadrant (exact); "
+      f"recall_region peak occupancy={_occ:.2f}")
+
 print("\n" + "-" * 66)
 print("  All fifteen subsystems ran on the same vector substrate. Wired up.")
 print("-" * 66 + "\n")
