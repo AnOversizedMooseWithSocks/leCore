@@ -2309,6 +2309,296 @@ def _rec(beta):
 print(f"  N={_Nr} codebook, {_F} factors: linear cleanup recovers={_rec(None)}; sharpened (beta=25) recovers={_rec(25)} "
       f"(the readout lesson that lifted the SBC resonator, applied to the older one)")
 
+title("De-Doppler detection: a Doppler drift is a binding (permute), and bh_fdr is the look-elsewhere veto")
+from holographic_dedoppler import dedoppler_bank as _ddb
+_um = UnifiedMind(dim=256, seed=0)
+_Td, _Fd = 24, 96
+_drd = _np.arange(-3.0, 3.0001, 0.5)
+def _wf(drift, chan, amp, seed, rfi=None, ramp=0.0, on=True):
+    _r = _np.random.default_rng(seed); w = _r.standard_normal((_Td, _Fd))
+    if on:
+        for t in range(_Td):
+            w[t, int(round(chan + drift * t)) % _Fd] += amp     # the drifting narrowband signal
+    if rfi is not None:
+        w[:, rfi] += ramp                                       # stationary RFI (every frame, no drift)
+    return w
+# a narrowband signal drifting +1.5 bins/frame: stationary integration loses it, de-drift recovers it
+_sig = _wf(1.5, 40, 2.4, 7)
+_z = _ddb(_sig, _drd)
+_stat = _z[list(_drd).index(0.0)].max(); _best = _z.max(); _rate = _drd[int(_z.max(axis=1).argmax())]
+print(f"  stationary integration peak = {_stat:.1f} sigma (lost in noise); de-Doppler bank peak = {_best:.1f} sigma "
+      f"at drift {_rate:+.1f} bins/frame (true +1.5)")
+_det = _um.detect_drifting(_sig, alpha=0.01)
+print(f"  detect_drifting found {len(_det)} signal(s); top: drift {_det[0]['drift']:+.1f}, channel {_det[0]['channel']}, "
+      f"{_det[0]['snr']:.1f} sigma, p={_det[0]['pvalue']:.1e}")
+# ON-OFF cadence: a strong stationary RFI is rejected because it persists in the OFF pointing
+_on = _wf(1.5, 30, 2.4, 21, rfi=70, ramp=2.4)
+_off = _wf(1.5, 30, 0.0, 121, rfi=70, ramp=2.4, on=False)
+_nc = _um.detect_drifting(_on, alpha=0.01); _wc = _um.detect_drifting(_on, alpha=0.01, off=_off)
+_rfi_nc = any(abs(d['drift']) < 1e-9 and abs(d['channel'] - 70) <= 1 for d in _nc)
+_rfi_wc = any(abs(d['drift']) < 1e-9 and abs(d['channel'] - 70) <= 1 for d in _wc)
+_sig_wc = any(abs(d['drift'] - 1.5) < 0.6 and abs(d['channel'] - 30) <= 1 for d in _wc)
+print(f"  cadence: strong RFI detected without OFF = {_rfi_nc}; with OFF the RFI is "
+      f"{'rejected' if not _rfi_wc else 'KEPT'} and the drifting signal is {'kept' if _sig_wc else 'LOST'}")
+
+title("Self-verifying storage: a Merkle tree built from bind + bundle (detect + localise a tamper in log n)")
+import numpy as _vnp
+from holographic_ai import bind as _vbind, cosine as _vcos
+_vm = __import__("holographic_unified").UnifiedMind(dim=512, seed=0)
+_vrng = _vnp.random.default_rng(3)
+_vitems = [_vrng.standard_normal(512) for _ in range(32)]          # 32 stored item vectors
+_vtree = _vm.verify_store(_vitems)                                 # commit: the root is the tamper-evident checksum
+print(f"  committed {len(_vitems)} items; clean store verifies = {_vtree.verify(_vitems)}")
+_vtamp = list(_vitems); _vtamp[19] = _vrng.standard_normal(512)    # silently change item 19
+_vidx, _vchecks = _vtree.locate(_vtamp)
+print(f"  one item changed: detected = {not _vtree.verify(_vtamp)}, localised to slot {_vidx} (true 19) "
+      f"in {_vchecks} checks (<= log2(32)+1 = 6)")
+_vswap = list(_vitems); _vswap[4], _vswap[27] = _vswap[27], _vswap[4]   # reorder two slots
+print(f"  two slots swapped: caught = {_vtree.locate(_vswap)[0] is not None} "
+      f"(a plain bundle is commutative -- position binding defeats it)")
+_va, _vb = 7, 20; _vda = _vrng.standard_normal(512)                # the kept negative: the root is LINEAR
+_vdb = _vnp.fft.irfft(_vnp.fft.rfft(-_vbind(_vtree.positions[_va], _vda)) / _vnp.fft.rfft(_vtree.positions[_vb]), n=512)
+_vforge = list(_vitems); _vforge[_va] = _vitems[_va] + _vda; _vforge[_vb] = _vitems[_vb] + _vdb
+_vfr = sum(_vbind(_vtree.positions[i], _vnp.asarray(_vforge[i], float)) for i in range(32))
+_vu = lambda v: v / (_vnp.linalg.norm(v) + 1e-12)
+print(f"  kept negative: a deconvolution-canceled pair leaves the root at cosine "
+      f"{_vcos(_vu(_vfr), _vu(_vtree.root())):.5f} of the original -- an invisible collision "
+      f"(corruption-evidence, not crypto tamper-proofing)")
+
+title("Fractional power encoding: continuous position as a binding, and compute on whole functions (BLD-7)")
+import numpy as _fpnp
+from holographic_ai import bind as _fpbind, cosine as _fpcos
+_fpm = __import__("holographic_unified").UnifiedMind(dim=512, seed=0)
+from holographic_encoders import ScalarEncoder as _FPSE                # 1-D FPE was already the ScalarEncoder
+_fps = _FPSE(dim=512, lo=0, hi=10, seed=1, kernel="rbf", bandwidth=3.0)
+print(f"  1-D (already the ScalarEncoder): cos(bind(fpe(2),fpe(3)), fpe(5)) = "
+      f"{_fpcos(_fpbind(_fps.encode(2.0), _fps.encode(3.0)), _fps.encode(5.0)):.5f}  (shift-as-bind, exact)")
+_fpe = _fpm.vector_function_encoder(2, bounds=[(0, 10), (0, 10)])      # N-D: a 2-D point
+_fpp = _fpnp.array([3.0, 4.0]); _fpd = _fpnp.array([1.5, 2.0])
+print(f"  2-D shift-as-bind: cos(bind(fpe(p),fpe(d)), fpe(p+d)) = "
+      f"{_fpcos(_fpbind(_fpe.encode(_fpp), _fpe.encode(_fpd)), _fpe.encode(_fpp + _fpd)):.5f}")
+_fpq = _fpnp.array([4.0, 5.0])
+print(f"  2-D kernel is the product of the axis kernels: measured {_fpcos(_fpe.encode(_fpp), _fpe.encode(_fpq)):.3f}"
+      f" vs product {_fpe.kernel_at(_fpq - _fpp):.3f}")
+_fpf = _fpe.bundle([(2.0, 2.0), (7.0, 3.0), (4.0, 6.0)], [1.0, 0.6, 0.8])   # a function as a bundle
+print(f"  a function f = sum w_i fpe(p_i): query at its points "
+      f"{[round(_fpe.query(_fpf, p), 2) for p in [(2, 2), (7, 3), (4, 6)]]} vs empty (9.5,9.5) {_fpe.query(_fpf, (9.5, 9.5)):.2f}")
+_fpfs = _fpe.shift(_fpf, (1.0, 1.0))                                   # translate the WHOLE function with one bind
+print(f"  shifted by one binding: query at (3,3)=p0+(1,1) rises to {_fpe.query(_fpfs, (3.0, 3.0)):.2f} "
+      f"(capacity cliff kept: a function is a bundle, separation fades as atoms pile up)")
+
+title("Spectral structure kernel: one Laplacian gives the basis (line->DCT, ring->DFT) AND the topology (EXP-5/6)")
+import numpy as _spnp
+_spm = __import__("holographic_unified").UnifiedMind(dim=256, seed=0)
+from holographic_spectral import cycle_laplacian as _spcyc, laplacian_eigenbasis as _speig, betti_numbers as _spbetti
+_spw, _ = _speig(_spcyc(16))                                          # cycle Laplacian eigenbasis IS the DFT
+print(f"  cycle C_16 Laplacian eigenvalues == 4 sin^2(pi k/16): "
+      f"{_spnp.allclose(_spw, _spnp.sort([4*_spnp.sin(_spnp.pi*k/16)**2 for k in range(16)]))}  (the harmonic basis, derived)")
+print(f"  Hodge harmonic dim == Betti numbers: 4-cycle {_spbetti(4,[(0,1),(1,2),(2,3),(3,0)])} (1 comp, 1 loop), "
+      f"filled triangle {_spbetti(3,[(0,1),(1,2),(0,2)],[(0,1,2)])} (loop filled)")
+_spN = 300; _spi = _spnp.arange(_spN)                                 # a smooth field on a SPHERE
+_spphi = _spnp.arccos(1 - 2*(_spi+0.5)/_spN); _spth = _spnp.pi*(1+5**0.5)*_spi
+_spP = _spnp.stack([_spnp.sin(_spphi)*_spnp.cos(_spth), _spnp.sin(_spphi)*_spnp.sin(_spth), _spnp.cos(_spphi)], 1)
+_spf = _spP[:,2]**2 - 1/3 + _spP[:,0]*_spP[:,1]
+_spfn = _spf + 0.3*_spnp.random.default_rng(0).standard_normal(_spN)
+_spsb = _spm.spectral_basis(_spP, k=10, n_basis=12)
+print(f"  sphere field denoise (detector calls it 'line'): kNN-Laplacian basis err "
+      f"{_spnp.linalg.norm(_spsb.denoise(_spfn)-_spf):.2f} from a noisy {_spnp.linalg.norm(_spfn-_spf):.2f} "
+      f"-- the data-driven basis where the line fallback can't reach")
+
+title("Persistent homology: name a shape by its holes -- torus and sphere the 1-D detector can't (EXP-7)")
+import numpy as _tpnp
+_tpm = __import__("holographic_unified").UnifiedMind(dim=256, seed=0)
+_tpNu, _tpNv = 24, 12                                                 # a TORUS surface
+_tpu = _tpnp.repeat(_tpnp.linspace(0, 2*_tpnp.pi, _tpNu, endpoint=False), _tpNv)
+_tpv = _tpnp.tile(_tpnp.linspace(0, 2*_tpnp.pi, _tpNv, endpoint=False), _tpNu)
+_tptorus = _tpnp.column_stack([(2+0.8*_tpnp.cos(_tpv))*_tpnp.cos(_tpu), (2+0.8*_tpnp.cos(_tpv))*_tpnp.sin(_tpu), 0.8*_tpnp.sin(_tpv)])
+_tpnm, _tpb, _ = _tpm.manifold_topology(_tptorus)
+print(f"  torus  -> Betti {_tpb} = '{_tpnm}'  (1 piece, 2 loops, 1 void -- two periods, structurally named)")
+_tpN = 200; _tpi = _tpnp.arange(_tpN)                                 # a SPHERE
+_tpphi = _tpnp.arccos(1 - 2*(_tpi+0.5)/_tpN); _tpth = _tpnp.pi*(1+5**0.5)*_tpi
+_tpsphere = _tpnp.column_stack([_tpnp.sin(_tpphi)*_tpnp.cos(_tpth), _tpnp.sin(_tpphi)*_tpnp.sin(_tpth), _tpnp.cos(_tpphi)])
+_tpnm2, _tpb2, _ = _tpm.manifold_topology(_tpsphere)
+print(f"  sphere -> Betti {_tpb2} = '{_tpnm2}'  (no loops, 1 void -- B2 is what tells it from a line)")
+_tpth2 = _tpnp.linspace(0, 2*_tpnp.pi, 40, endpoint=False)            # a RING, as detect_topology would call it
+_tpring = _tpnp.column_stack([_tpnp.cos(_tpth2), _tpnp.sin(_tpth2), _tpnp.zeros(40)])
+print(f"  ring   -> '{_tpm.manifold_topology(_tpring)[0]}'  (reproduces the hand-coded detector on the case it knows; "
+      f"GF(2) Betti, exact, no SVD timeout)")
+
+title("Fast topology as a GATE + spectral basis at scale: is_manifold guards denoise; ChebFSI lifts the O(n^3) eigh")
+import numpy as _mgnp, time as _mgtime
+_mgm = __import__("holographic_unified").UnifiedMind(dim=256, seed=0)
+_mgrng = _mgnp.random.default_rng(0)
+def _mgsphere(n):
+    i = _mgnp.arange(n); ph = _mgnp.arccos(1 - 2*(i+0.5)/n); th = _mgnp.pi*(1+5**0.5)*i
+    return _mgnp.column_stack([_mgnp.sin(ph)*_mgnp.cos(th), _mgnp.sin(ph)*_mgnp.sin(th), _mgnp.cos(ph)])
+_mgSph = _mgsphere(200); _mgBlob = _mgrng.standard_normal((200, 4))     # a clean manifold vs a structureless blob
+_mgGS = _mgm.is_manifold(_mgSph); _mgGB = _mgm.is_manifold(_mgBlob)
+print(f"  is_manifold gate:  sphere -> {_mgGS['is_manifold']} (topology '{_mgGS['topology']}', B0={_mgGS['betti'][0]})   "
+      f"blob -> {_mgGB['is_manifold']} (B0={_mgGB['betti'][0]}, dense_scales={_mgGB['dense_scales']})")
+_mgf = _mgSph[:,2]**2 - 0.5*_mgSph[:,0]; _mgfn = _mgf + 0.3*_mgrng.standard_normal(200)
+_mgD = _mgm.denoise(_mgfn, method="spectral", points=_mgSph, check_manifold=True)   # premise holds -> proceeds
+_mggn = _mgBlob[:,0] + 0.3*_mgrng.standard_normal(200)
+try:
+    _mgm.denoise(_mggn, method="spectral", points=_mgBlob, check_manifold=True); _mgref = "NO-RAISE(bug)"
+except ValueError:
+    _mgref = "refused"
+print(f"  check_manifold guard: sphere denoise {_mgnp.linalg.norm(_mgfn-_mgf):.2f}->{_mgnp.linalg.norm(_mgD-_mgf):.2f}; "
+      f"blob -> {_mgref} (graph low-pass is not manifold denoising; check_manifold=False overrides)")
+_mgBig = _mgsphere(2500); _mgbf = _mgBig[:,2]**2 - 0.5*_mgBig[:,0]; _mgbfn = _mgbf + 0.3*_mgrng.standard_normal(2500)
+_mgt0 = _mgtime.time(); _mgbd = _mgm.denoise(_mgbfn, method="spectral", points=_mgBig); _mgdt = _mgtime.time() - _mgt0
+from holographic_spectral import knn_laplacian as _mgkl, laplacian_eigenbasis as _mgle
+_, _mgVe = _mgle(_mgkl(_mgBig, 10), 12); _mgee = _mgnp.linalg.norm(_mgVe @ (_mgVe.T @ _mgbfn) - _mgbf)
+print(f"  spectral basis at scale (n=2500): ChebFSI denoise {_mgnp.linalg.norm(_mgbd-_mgbf):.2f} ~= exact eigh {_mgee:.2f} "
+      f"in {_mgdt:.2f}s -- sparse-matvec partial eigensolver, no O(n^3) dense eigh")
+
+title("Hodge decomposition: split a flow into transport + circulation + topology, and denoise it (EXP-8)")
+import numpy as _hgnp
+from holographic_spectral import boundary_matrices as _hgbm
+_hgm = __import__("holographic_unified").UnifiedMind(dim=256, seed=0)
+_hgtris_all = []                                                      # triangulated 3x3 grid, one triangle removed -> a hole
+for _cy in range(2):
+    for _cx in range(2):
+        _a = _cy*3+_cx; _hgtris_all += [(_a,_a+1,_a+4),(_a,_a+4,_a+3)]
+_hgtris = [t for t in _hgtris_all if t != (0,1,4)]
+_hgE = sorted({tuple(sorted(e)) for t in _hgtris_all for e in [(t[0],t[1]),(t[1],t[2]),(t[0],t[2])]})
+_hgd1, _hgd2 = _hgbm(9, _hgE, _hgtris)
+_hgrng = _hgnp.random.default_rng(0)
+_hgflow = _hgd1.T @ _hgrng.standard_normal(9) + _hgd2 @ _hgrng.standard_normal(len(_hgtris))   # gradient + curl
+_hgg, _hgc, _hgh = _hgm.hodge_decomposition(9, _hgE, _hgflow, _hgtris)
+print(f"  split sums exactly: err {_hgnp.linalg.norm(_hgg+_hgc+_hgh-_hgflow):.1e}; "
+      f"orthogonal <grad,curl>={_hgg@_hgc:.1e}; harmonic dim == B1 (the hole's loop)")
+_hgclean = _hgd1.T @ _hgrng.standard_normal(9)                        # a pure transport (gradient) flow
+_hgnoisy = _hgclean + 0.5*_hgrng.standard_normal(len(_hgE))
+_hgden = _hgm.denoise_flow(9, _hgE, _hgnoisy, _hgtris, keep=("gradient","harmonic"))
+print(f"  denoise a transport flow (drop curl): err {_hgnp.linalg.norm(_hgden-_hgclean):.2f} "
+      f"from a noisy {_hgnp.linalg.norm(_hgnoisy-_hgclean):.2f}  (on a tree, curl+harmonic are zero -- kept negative)")
+
+title("Clifford Cl(3,0) binding: rotors compose 3D rotations EXACTLY, where commutative bind can't (EXP-9)")
+import numpy as _clnp
+_clm = __import__("holographic_unified").UnifiedMind(dim=256, seed=0)
+_clcl = _clm.clifford()
+print(f"  e1 rotated 90 about e3 -> {_clnp.round(_clcl.rotate(_clcl.rotor([0,0,1], _clnp.pi/2), [1,0,0]), 4)}  (= e2, exact)")
+_clrng = _clnp.random.default_rng(0)
+_clmax = 0.0                                                          # composition is exact
+for _ in range(100):
+    _clRA = _clcl.rotor(_clrng.standard_normal(3), _clrng.uniform(0,_clnp.pi))
+    _clRB = _clcl.rotor(_clrng.standard_normal(3), _clrng.uniform(0,_clnp.pi))
+    _clv = _clrng.standard_normal(3)
+    _clmax = max(_clmax, _clnp.linalg.norm(_clcl.rotate(_clRA, _clcl.rotate(_clRB, _clv)) - _clcl.rotate(_clcl.compose(_clRA, _clRB), _clv)))
+print(f"  rotor product == sequential rotation: max err over 100 = {_clmax:.1e}  (HRR convolution can't represent SO(3))")
+_clRA, _clRB = _clcl.rotor([1,0,0], 1.1), _clcl.rotor([0,1,0], 0.7)   # order matters
+_clp = _clnp.array([0.3,-0.5,0.8])
+_clgap = _clnp.linalg.norm(_clcl.rotate(_clcl.compose(_clRA,_clRB), _clp) - _clcl.rotate(_clcl.compose(_clRB,_clRA), _clp))
+print(f"  non-commutative: A-then-B vs B-then-A differ by {_clgap:.3f}; a COMMUTATIVE bind collapses that to 0 "
+      f"(2^d growth + versors-only are the kept negatives)")
+
+title("Optimal transport: Wasserstein measures how far distributions sit apart, where bin-wise saturates (BLD-8)")
+import numpy as _wsnp
+_wsm = __import__("holographic_unified").UnifiedMind(dim=256, seed=0)
+_wsx = _wsnp.arange(50)
+def _wsg(mu): _v = _wsnp.exp(-0.5*((_wsx-mu)/2.0)**2); return _v/_v.sum()
+_wsa, _wsb = _wsg(15), _wsg(25)                                       # a shift of 10
+_wstrue = float(_wsnp.sum(_wsnp.abs(_wsnp.cumsum(_wsa)-_wsnp.cumsum(_wsb))))
+print(f"  Sinkhorn W = {_wsm.wasserstein(_wsa, _wsb, eps=0.5):.3f}  ==  1-D closed form W1 = {_wstrue:.3f}")
+print("  shift -> Wasserstein vs Euclidean vs cosine (support gone by shift~8):")
+_wsref = _wsg(15)
+for _wsshift in (5, 10, 20):
+    _wss = _wsg(15+_wsshift)
+    _wsW = _wsm.wasserstein(_wsref, _wss, eps=0.5)
+    _wse = _wsnp.linalg.norm(_wsref-_wss); _wsc = (_wsref@_wss)/(_wsnp.linalg.norm(_wsref)*_wsnp.linalg.norm(_wss))
+    print(f"    shift={_wsshift:2d}: W={_wsW:5.2f}   eucl={_wse:.3f} (saturates)   cos={_wsc:.4f} (collapses)")
+print(f"  eps knob (kept negative): too large blurs the distance high, too small underflows the kernel -- "
+      f"default scales eps to the cost")
+
+title("Above/below sweep: the Tero flow solver's flux, split into transport + circulation (flow + Hodge + B1)")
+import numpy as _fcnp
+_fcm = __import__("holographic_unified").UnifiedMind(dim=256, seed=0)
+def _fcgrid(R, C):
+    nbr = {}
+    for r in range(R):
+        for c in range(C):
+            nbr[(r, c)] = [(r+dr, c+dc) for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)] if 0<=r+dr<R and 0<=c+dc<C]
+    return nbr
+_fcres = _fcm.flow_circulation(_fcgrid(5, 5), (0, 0), (4, 4))
+print(f"  5x5 grid: loops (B1) = {_fcres['loops']}; transport energy {_fcres['transport_energy']:.2f}, "
+      f"circulation {_fcres['circulation_energy']:.2f} -> redundancy {_fcres['redundancy']:.3f} of the flux circulates")
+_fctree = {0:[1], 1:[0,2,3], 2:[1], 3:[1,4], 4:[3]}                   # a tree: forced route
+_fct = _fcm.flow_circulation(_fctree, 0, 4)
+print(f"  tree:     loops (B1) = {_fct['loops']}; redundancy {_fct['redundancy']:.3f} (forced unique route -> zero circulation)")
+print("  the flux the solver computed and threw away IS a Hodge flow: gradient = transport (divergence == "
+      "injected current), harmonic = circulation (dim == B1)")
+
+title("Above/below sweep: the graph-Laplacian basis wired into denoise() -- the curved-manifold map it lacked")
+import numpy as _sdnp
+_sdm = __import__("holographic_unified").UnifiedMind(dim=256, seed=0)
+_sdrng = _sdnp.random.default_rng(0)
+_sdN = 200
+_sdi = _sdnp.arange(_sdN)
+_sdphi = _sdnp.arccos(1 - 2*(_sdi+0.5)/_sdN); _sdtta = _sdnp.pi*(1+5**0.5)*_sdi
+_sdP = _sdnp.column_stack([_sdnp.sin(_sdphi)*_sdnp.cos(_sdtta),
+                           _sdnp.sin(_sdphi)*_sdnp.sin(_sdtta), _sdnp.cos(_sdphi)])   # points on a 2-sphere
+_sdf = _sdP[:,2]**2 - 0.5*_sdP[:,0]                                                    # a smooth field on it
+_sdfn = _sdf + 0.3*_sdrng.standard_normal(_sdN)
+_sdspec = _sdnp.linalg.norm(_sdm.denoise(_sdfn, method="spectral", points=_sdP) - _sdf)   # geometry-aware
+_sdtraj = _sdnp.linalg.norm(_sdm.denoise(_sdfn, method="trajectory", rank=8) - _sdf)      # geometry-blind
+print(f"  lone field on a 2-sphere, raw noise error {_sdnp.linalg.norm(_sdfn-_sdf):.2f}:")
+print(f"    denoise(method='spectral', points=...) = {_sdspec:.2f}   <- uses the cloud's geometry")
+print(f"    denoise(method='trajectory')           = {_sdtraj:.2f}   (geometry-blind, cannot see the curvature)")
+print("  the only denoiser in the faculty needing no example set and no codebook -- just the manifold's own geometry")
+
+title("Self-hosting: two engine loops moved into VSA programs (PnP restoration + B10 generation)")
+import numpy as _shnp
+_shm = __import__("holographic_unified").UnifiedMind(dim=512, seed=7)
+_shD = _shm.dim
+_shrng = _shnp.random.default_rng(0)
+_shB = _shrng.standard_normal((6, _shD)); _shB /= _shnp.linalg.norm(_shB, axis=1, keepdims=True)
+_shsamp = _shnp.stack([c @ _shB for c in _shrng.standard_normal((40, 6))])      # a low-rank signal manifold
+_shclean = _shrng.standard_normal(6) @ _shB
+_shmask = (_shrng.random(_shD) > 0.5).astype(float)                              # measurement: erase half
+_shfwd = lambda x: _shmask * x; _shadj = lambda y: _shmask * y
+_shy = _shfwd(_shclean) + 0.05 * _shrng.standard_normal(_shD)
+_shrest, _shtr = _shm.restore_procedure(_shy, _shfwd, _shadj, _shsamp, mu=0.8)   # PnP AS A PROGRAM
+print(f"  restore_procedure  = ITERATE [APPLY datafit; APPLY denoise]")
+print(f"    half-masked signal rel-error {_shnp.linalg.norm(_shy-_shclean)/_shnp.linalg.norm(_shclean):.2f} "
+      f"-> {_shnp.linalg.norm(_shrest-_shclean)/_shnp.linalg.norm(_shclean):.2f}   ({_shtr[0][2]} iters, {_shtr[0][3]})")
+_shfill = _shnp.stack([_shm._machine()._atom(f"sh_fill:{i}") for i in range(5)])
+_shsamp2, _shtr2 = _shm.generate_procedure(_shfill, steps=12, seed=3)            # B10 diffusion AS A PROGRAM
+_shfn = _shfill / _shnp.linalg.norm(_shfill, axis=1, keepdims=True)
+_shbest = max(float(_shsamp2 @ f / (_shnp.linalg.norm(_shsamp2)*_shnp.linalg.norm(f))) for f in _shfn)
+print(f"  generate_procedure = ITERATE [APPLY diffuse]  (denoise from noise)")
+print(f"    generated sample lands on the manifold at cosine {_shbest:.2f}   ({_shtr2[0][2]} iters)")
+print("  the restoration LOOP and the generative PROCESS are now stored, composable, recipe-savable programs --")
+print("  process not object; the procedure tax (noisy reads) is the price of being data, not a faster path")
+
+title("Honesty as a STRUCTURAL lint: audit a protocol-as-data for the search-without-null anti-pattern (D1)")
+_aum = __import__("holographic_unified").UnifiedMind(dim=256, seed=0)
+# a protocol is program-as-data: an ordered list of analysis steps. audit_procedure reads the structure BACK
+# from the program VECTOR (unbind+cleanup) and checks the honesty discipline as a structural property.
+_au_good = _aum.audit_procedure(steps=["encode", "combination_search", "oos_split", "calibrated_null", "fdr", "decide"])
+print(f"  complete protocol [encode->search->split->null->fdr->decide]  sound={_au_good['sound']}  roles={_au_good['roles']}")
+_au_bad = _aum.audit_procedure(steps=["encode", "combination_search", "oos_split", "fdr", "decide"])
+print(f"  search WITHOUT a null [encode->search->split->fdr->decide]    sound={_au_bad['sound']}  "
+      f"flagged={[c for c, _m in _au_bad['violations']]}")
+_au_rest = _aum.audit_procedure(steps=["datafit", "denoise"])
+print(f"  no-search restoration loop [datafit->denoise]                 sound={_au_rest['sound']}  (not trigger-happy)")
+print("  the step structure is recovered from the program vector -- the discipline is a query, not a habit")
+
+title("A research log as a knowledge structure: query findings, and catch the log's own contradictions (D3)")
+_kbm = __import__("holographic_unified").UnifiedMind(dim=256, seed=0)
+_kb = _kbm.finding_registry()
+_kb.add("efficiency_ratio", "momentum", +1, condition="horizon_10d", note="ER strengthens momentum at 10d")
+_kb.add("efficiency_ratio", "momentum", -1, condition="intraday", note="ER backfires intraday")
+_kb.add("low_vol", "vol_expansion", +1, note="low vol precedes expansion")
+_kb.add("bracket_order", "convexity", +1, note="the bracket looks convex")
+_kb.add("bracket_order", "convexity", -1, note="the bracket's drift masquerades as convexity")
+_kb_q = _kb.query(subject="efficiency_ratio", k=2)                       # similarity recall over structured claims
+print(f"  query subject=efficiency_ratio -> findings {sorted(r['index'] for r in _kb_q)} (role-sensitive recall)")
+for _t in _kb.tensions():
+    print(f"  {_t['type'].upper():11s} tension: {_t['subject']}->{_t['object']}  conditions={_t['conditions']}")
+print("  CONDITIONED = reconcilable (effect depends on the differing dimension); FLAT = one must be wrong")
+print("  retrieval is holographic (cosine over the bound claim); the verdict is exact (polarity + condition)")
+
 print("\n" + "-" * 66)
 print("  Every subsystem -- through gradient-free learning -- ran on the same vector substrate. Wired up.")
 print("-" * 66 + "\n")

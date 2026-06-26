@@ -824,6 +824,27 @@ class UnifiedMind:
             out.append((role, f1, f2, f1 == f2, min(c1, c2)))
         return out
 
+    def finding_registry(self):
+        """The findings registry (backlog D3): a research log as a holographic KNOWLEDGE STRUCTURE. Record
+        structured claims -- a SUBJECT affects an OBJECT with a +1/-1 POLARITY (helps / hurts), optionally
+        under a CONDITION (a regime) -- then recall them by similarity and detect the log's OWN
+        contradictions. It extends the relations layer (the same role-bound records KnowledgeStore's
+        explain/analogy run on) with the piece a research log needs: distinguishing a FLAT contradiction
+        (two opposite-polarity findings about the same claim under the same/absent condition -- one must be
+        wrong) from a CONDITIONED tension (the same under DIFFERENT conditions -- reconcilable, the outcome is
+        conditioned on the differing dimension). Retrieval is holographic (cosine over the bound claim); the
+        verdict is exact (polarity sign, condition equality). Lazily created and cached on the mind's own
+        dimension/seed; call .add / .query / .tensions on the returned FindingRegistry.
+
+        SCOPE (kept negative): findings are STRUCTURED claims, not free prose -- turning narrative into
+        structured claims is an NLP step this engine does not do (no embeddings, no parser)."""
+        reg = getattr(self, "_finding_registry", None)
+        if reg is None:
+            from holographic_knowledge import FindingRegistry
+            reg = FindingRegistry(dim=self.dim, seed=self.seed)
+            self._finding_registry = reg
+        return reg
+
     def explain_splits(self, label, contrast_floor=0.25):
         """INCEPTION: the mind explains its own memory organization. When the
         self-organizing memory has split `label` into sub-prototypes (because
@@ -1116,6 +1137,30 @@ class UnifiedMind:
             r["fdr_significant"] = bool(sig)
             r["detected"] = bool(r["decision"] == "MATCH" and sig)
         return rows
+
+    def detect_drifting(self, waterfall, drifts=None, alpha=0.01, off=None):
+        """Find a DRIFTING narrowband signal in a spectrogram -- the SETI detection problem (Tarter,
+        Siemion seats) cast in the engine's OWN primitives. A Doppler frequency drift is a cyclic
+        SHIFT of the spectrum over time, and the engine already shifts: `permute` is exactly the
+        rigid-shift transform holographic_video.py uses for motion compensation (and a shift is also
+        a binding, bind(x, delta_k) == permute(x, k)). So "de-Doppler integration" -- the matched
+        filter that recovers a drifting signal a STATIONARY detector loses -- is permute-ing each
+        frame back by the drift before summing. The look-elsewhere control over the (drift x channel)
+        search grid is `bh_fdr` with the DEPENDENT correction (the drift cells overlap; the honest,
+        conservative choice). Supply `off` (an OFF-target spectrogram in the ON-OFF cadence radio
+        astronomers use) to reject stationary RFI: a real signal is ON-only, terrestrial interference
+        persists across the cadence.
+
+        `waterfall` is (T frames x F bins). Returns detections [{drift, channel, snr, pvalue}, ...]
+        sorted by SNR. Deterministic. MEASURED at the field's S/N>=10 regime: ~96% recall at 0%
+        false-positive; the cadence rejects a strong stationary RFI ~100% while keeping the drifting
+        signal ~94%. KEPT NEGATIVE: below ~10 sigma integrated the dependent-FDR correction over the
+        many cells is conservative (a lone weak signal needs ~5 sigma) -- matching turboSETI's own
+        S/N>=10 search threshold, which exists for exactly this reason.
+        """
+        from holographic_dedoppler import detect_drifting as _dd
+        off_arr = None if off is None else np.asarray(off, float)
+        return _dd(np.asarray(waterfall, float), drifts=drifts, alpha=alpha, off=off_arr)
 
     def _scan_cue_null(self, modality, route, n=1500):
         """Procedure-matched per-cue noise floor for `scan`: the distribution of recognize()'s OWN sim on
@@ -1691,6 +1736,92 @@ class UnifiedMind:
         return _decompose(np.asarray(composed), codebooks, L, restarts=restarts, iters=iters,
                           seed=self.seed if seed is None else seed, readout=readout, confidence=confidence, k=k)
 
+    # -- self-verifying storage: tamper-evidence as an O(log n) property of the structure (BLD-1) -----
+    def verify_store(self, items, seed=None):
+        """Commit to a list of item vectors with a tamper-evident composition tree (holographic_verify) --
+        the holographic Merkle tree, built from the same bind + bundle the rest of the mind uses. Returns a
+        CompositionTree whose `.root()` is the commitment; `.verify(items)` detects any later change and
+        `.locate(items)` returns the index of a single changed item in <= log2(n) composite comparisons (the
+        descent depth, independent of how many items are stored).
+
+        Position is bound into each leaf, so a reordering is caught -- a plain bundle, being commutative, would
+        miss it. The honest bound, on the record in the module: the root is LINEAR, so this is evidence of
+        ACCIDENTAL corruption / uncoordinated tampering, NOT cryptographic tamper-proofing -- a key-aware
+        adversary can cancel a change by deconvolution and leave the root bit-for-bit unchanged."""
+        from holographic_verify import CompositionTree
+        return CompositionTree(items, seed=self.seed if seed is None else seed)
+
+    def vector_function_encoder(self, n_dims, bounds=None, kernel="rbf", bandwidth=3.0):
+        """An N-dimensional Fractional Power Encoder (holographic_fpe) on this mind's dim and seed: encode a
+        continuous point in R^n so that a SHIFT is a BINDING and the similarity is a designed PRODUCT kernel,
+        and represent / query / shift whole FUNCTIONS as bundles of weighted encoded points.
+
+        The 1-D case is already the ScalarEncoder (encode(x) = "base^x", with shift-as-bind and a Bochner
+        kernel); this is the step up to a vector domain and the compute-on-functions algebra the resonator /
+        scene-factoring literature builds on. Returns a VectorFunctionEncoder. The standing capacity cliff
+        applies -- a function is a bundle, so too many superposed points drown each in the others' cross-talk."""
+        from holographic_fpe import VectorFunctionEncoder
+        return VectorFunctionEncoder(n_dims, dim=min(self.dim, 1024), bounds=bounds,
+                                     kernel=kernel, bandwidth=bandwidth, seed=self.seed)
+
+    def spectral_basis(self, points, k=10, n_basis=12):
+        """The data-driven decomposition basis for a signal on a manifold (holographic_spectral, EXP-6): the
+        lowest eigenvectors of the kNN-graph Laplacian of the sample points -- the smoothest functions the
+        manifold admits. On a line this is the DCT / elementary basis and on a ring the harmonic basis (so it
+        matches decompose_signal's hand-picked choice), and on a manifold the topology detector cannot name
+        (a sphere, a torus, a curved surface) it is the right basis where the line/elementary fallback is not.
+        Returns a SpectralBasis with decompose / reconstruct / denoise. Dense eigh -> moderate N (C1)."""
+        from holographic_spectral import SpectralBasis
+        return SpectralBasis(points, k=k, n_basis=n_basis)
+
+    def manifold_topology(self, points, lo=1.3, hi=2.6, steps=7, max_points=250):
+        """Name a point cloud's topology by persistent homology (holographic_topology, EXP-7): the Betti
+        signature (components, loops, voids) that persists across a scale band. The principled generalisation
+        of detect_topology -- it reproduces "line" (1,0,0) and "ring" (1,1,0) on the cases that detector knows,
+        and extends to ones it cannot name structurally: a torus (1,2,1) and a sphere (1,0,1). Returns
+        (name, (B0,B1,B2), scale-histogram). It reads a WELL-SAMPLED manifold's topology -- finicky on uneven
+        or noisy clouds and blind to non-topological geometry (pair it with spectral_basis for the geometry),
+        and the cloud is subsampled to max_points for tractability (dense reduction -> moderate N, C1)."""
+        from holographic_topology import persistent_topology
+        return persistent_topology(points, lo=lo, hi=hi, steps=steps, max_points=max_points)
+
+    def is_manifold(self, points, max_dense_scales=1, lo=1.3, hi=2.6, steps=7, max_points=250):
+        """A fast structural GATE: does this point cloud form a single connected low-dimensional MANIFOLD, or is
+        it a dense blob with no clean topology? Runs persistent homology (now sub-second on a blob, where it once
+        ground for ~30s) and reads its verdict. Returns a dict {is_manifold, topology, betti, dense_scales}:
+        is_manifold is True iff the cloud is ONE connected piece (B0 == 1) AND at most `max_dense_scales` scale
+        bands were too dense to read a clean complex.
+
+        The point is to check a premise CHEAPLY before a manifold-assuming operation. denoise(method='spectral'),
+        for instance, projects a field onto the cloud's smooth modes -- its premise is a smooth field on a curved
+        manifold. On a blob that premise fails and the 'denoise' is just graph low-pass; measured, on a 2-sphere
+        spectral denoise cleans 3.74->1.08, but on a random blob it barely moves (4.37->4.20). This gate is the
+        honest signal of which case you are in, fast enough to run inline (pass check_manifold=True to denoise to
+        wire it as a guard). Same finickiness as manifold_topology: it reads a WELL-SAMPLED manifold, and a
+        disconnected manifold (B0 > 1) reads as not-a-manifold by design (the gate wants one connected piece)."""
+        name, betti, hist = self.manifold_topology(points, lo=lo, hi=hi, steps=steps, max_points=max_points)
+        dense = int(hist.get("dense_scales", 0))
+        ok = (betti[0] == 1) and (dense <= int(max_dense_scales))   # one component, and readable at enough scales
+        return {"is_manifold": bool(ok), "topology": name, "betti": betti, "dense_scales": dense}
+
+    def hodge_decomposition(self, n_verts, edges, flow, triangles=None):
+        """Split an edge flow into three L2-orthogonal parts (holographic_spectral, EXP-8): gradient (curl-free
+        transport from a vertex potential), curl (local circulation around filled triangles), and harmonic
+        (global circulation around the holes -- its dimension equals B1, so the harmonic part IS the flow's
+        topology, tying to EXP-7). For the Tero flow solver and graph-signal analysis. On a tree (no cycles,
+        no triangles) curl and harmonic vanish and all flow is gradient (kept negative). Returns
+        (gradient, curl, harmonic)."""
+        from holographic_spectral import hodge_decomposition as _hd
+        return _hd(n_verts, edges, flow, triangles)
+
+    def denoise_flow(self, n_verts, edges, flow, triangles=None, keep=("gradient", "harmonic")):
+        """Denoise an edge flow by keeping only its structurally-valid Hodge components and dropping the rest
+        (holographic_spectral, EXP-8) -- e.g. drop the curl of a transport flow that should not circulate
+        around cells, removing the share of isotropic noise that lands there. Beats naive edge-smoothing on a
+        flow. Returns the reconstruction from the kept parts."""
+        from holographic_spectral import denoise_flow as _df
+        return _df(n_verts, edges, flow, triangles, keep=keep)
+
     # -- one scene faculty, on the same substrate ---------------------------
     def scene(self):
         """The mind's own scene coder (compose/decompose visual attribute scenes), built
@@ -1903,7 +2034,7 @@ class UnifiedMind:
 
     def denoise(self, x, method="auto", samples=None, codebook=None, sigma=None,
                 rank=8, beta=25.0, steps=3, forward=None, adjoint=None, mu=0.5, pnp_steps=30,
-                readout="softmax"):
+                readout="softmax", points=None, spectral_k=10, spectral_nbasis=12, check_manifold=False):
         """Clean a noisy signal by projecting it onto a manifold -- Milanfar's thesis that a denoiser
         IS a map of the manifold clean signals live on. One call over holographic_denoise +
         holographic_hopfield, picking the map by the structure you supply a prior for:
@@ -1920,6 +2051,14 @@ class UnifiedMind:
                               matrix is low-rank for a smooth/structured signal (SSA/Cadzow), so project the
                               windows onto their own subspace and reconstruct. The second prior-free method
                               beside nlm (nlm needs a patch SET; this takes a raw 1-D signal).
+          method='spectral' : clean a lone scalar FIELD living on a known manifold GEOMETRY -- pass the point
+                              coordinates as points=<(N, d)> and x as the field value at each of those N points.
+                              Builds the kNN graph-Laplacian eigenbasis (EXP-5/6) and projects the field onto
+                              its low-frequency modes. The NONLINEAR-manifold map the linear methods lack: it is
+                              the only denoiser here that needs no example set and no codebook, just the cloud's
+                              own geometry. Measured on a smooth field over a 2-sphere, it cleans error 4.1->0.9
+                              where the geometry-blind options barely move it (trajectory 3.1, DCT 4.2) -- a
+                              linear/1-D prior cannot see a curved manifold's smoothness.
           method='pnp'       : Plug-and-Play / RED restoration of a degraded measurement x = forward(clean)
                               + noise, using the adaptive manifold map as the prior (needs forward/adjoint).
           method='auto'      : codebook if a `codebook` is given, else adaptive manifold if `samples`
@@ -1935,6 +2074,10 @@ class UnifiedMind:
         `readout='sparsemax'` switches the codebook/recall branches from the softmax blend (which
         over-smooths a continuous manifold) to the sparse Hopfield-Fenchel-Young readout; the default
         'softmax' leaves every path bit-for-bit unchanged.
+
+        `check_manifold=True` (method='spectral' only) first verifies the points form a single connected manifold
+        via is_manifold and raises if they do not -- the spectral map's premise -- rather than silently returning
+        graph low-pass on a blob. Default False keeps the path overhead-free and backward-compatible.
 
         A denoiser needs a PRIOR; a single vector with no manifold cannot be cleaned (no free lunch), so
         `samples` (clean rows) or `codebook` (atoms) is required for every method but 'nlm' (which uses
@@ -1961,6 +2104,23 @@ class UnifiedMind:
 
         if method == "trajectory":                    # lone 1-D signal: prior built from its OWN windows (SSA)
             return trajectory_denoise(x, window=None, rank=rank)
+
+        if method == "spectral":              # lone scalar FIELD on a known manifold GEOMETRY -> graph-Laplacian map
+            if points is None:
+                raise ValueError("method='spectral' needs points=<(N, d) coordinates>; x is the field over "
+                                 "those N points (the manifold's own geometry IS the prior)")
+            pts = np.atleast_2d(np.asarray(points, float))
+            if check_manifold:                # opt-in premise check (cheap now PH is fast): the spectral map
+                chk = self.is_manifold(pts)   # assumes a smooth field on a CONNECTED manifold; on a blob it is
+                if not chk["is_manifold"]:     # only graph low-pass, so refuse loudly unless overridden
+                    raise ValueError(
+                        f"method='spectral' premise fails: the points are not a single connected manifold "
+                        f"(topology={chk['topology']!r}, dense_scales={chk['dense_scales']}). The spectral "
+                        f"denoiser would be graph low-pass, not manifold denoising. Pass check_manifold=False "
+                        f"to proceed anyway.")
+            from holographic_spectral import SpectralBasis
+            sb = SpectralBasis(pts, k=spectral_k, n_basis=spectral_nbasis)
+            return sb.denoise(x)
 
         if method == "codebook":
             if codebook is None:
@@ -2096,6 +2256,39 @@ class UnifiedMind:
         from holographic_flow import solve_maze_flow
         return solve_maze_flow(world, steps=steps, mu=mu, dt=dt)
 
+    def flow_circulation(self, nbr, start, goal, steps=200, mu=1.5, dt=0.2):
+        """Decompose a solved Tero/Physarum flow into TRANSPORT and CIRCULATION -- the analysis layer the flow
+        solver lacked, wiring it to the Helmholtz-Hodge split (EXP-8) and the graph's topology (the B1 of
+        EXP-5/7). Runs the flow on the adjacency graph `nbr` (the same one `solve_maze`/`tero_solve` take),
+        reads the CONVERGED signed edge flux (`holographic_flow.tero_flux` -- the quantity the solver computes
+        and discards), then Hodge-splits it: the GRADIENT part is the net source->goal transport (its
+        divergence is the injected current), and the HARMONIC part is circulation around the graph's loops (its
+        dimension is the graph's B1). A maze graph has no filled triangles, so there is no curl. Returns a dict
+        {loops, redundancy, transport_energy, circulation_energy, flux, edges, n_vertices}: `loops` = B1 (the
+        graph's independent cycles), and `redundancy` = the harmonic fraction of the flux energy -- how much of
+        the converged flow CIRCULATES rather than transports. It is exactly 0 on a tree (the route is forced),
+        and on a loopy graph it varies with mu (a previously-hidden property of the flow: at high mu competing
+        thick tubes leave more circulating flux). Returns None if start and goal are disconnected."""
+        from holographic_flow import tero_flux
+        from holographic_spectral import hodge_decomposition, betti_numbers
+        res = tero_flux(nbr, start, goal, steps=steps, mu=mu, dt=dt)
+        if res is None:
+            return None
+        n, edges, flux = res
+        gradient, _curl, harmonic = hodge_decomposition(n, edges, flux, None)   # graph -> no triangles -> no curl
+        _, b1 = betti_numbers(n, edges, None)
+        circ = float(np.dot(harmonic, harmonic))
+        total = float(np.dot(flux, flux)) + 1e-30
+        return {
+            "loops": b1,
+            "redundancy": circ / total,
+            "transport_energy": float(np.dot(gradient, gradient)),
+            "circulation_energy": circ,
+            "flux": flux,
+            "edges": edges,
+            "n_vertices": n,
+        }
+
     def assemble(self, target, library, frag_len=2, steps=300, mu=1.5, dt=0.2, energy=None):
         """Assemble `target` from a `library` of overlapping fragments by MIN-ENERGY flow search
         (holographic_assembly) -- Rosetta-style fragment assembly (choose a fragment per position to
@@ -2125,6 +2318,18 @@ class UnifiedMind:
         from holographic_assembly import compare_structures as _cmp
         return _cmp(a, b, dim=(self.dim if dim is None else dim),
                     seed=(self.seed if seed is None else seed), tol=tol)
+
+    def wasserstein(self, a, b, cost=None, eps=None):
+        """The Wasserstein (earth-mover's) distance between two distributions by Sinkhorn iteration
+        (holographic_transport, BLD-8) -- the least work to MOVE one onto the other, mass times the ground
+        distance it travels. Unlike a bin-wise metric (Euclidean/cosine), it keeps GROWING as two distributions
+        move apart even after they stop overlapping (a peak at bin 12 vs bin 20 reads farther from bin 10 than
+        bin 12 does), which is the right answer when the bins carry geometry (position, time, frequency).
+        `cost` is the ground-distance matrix (default |i-j|); `eps` is the entropic regularisation (default
+        scales to the cost). KEPT NEGATIVES: the eps knob (too large blurs the distance high, too small
+        underflows the kernel) and O(n*m) per iteration. Returns the distance."""
+        from holographic_transport import wasserstein as _w
+        return _w(a, b, cost=cost, eps=eps)
 
     def learn_dynamics(self, states, ridge=1e-3):
         """Learn a fixed dynamics operator U so that state(t+1) ~ bind(U, state(t)) -- dynamics as an
@@ -2555,6 +2760,20 @@ class UnifiedMind:
         improvement over the engine's bind."""
         from holographic_tensor import TensorBindMemory
         return TensorBindMemory(np.asarray(keys, float), np.asarray(values, float), rank=rank)
+
+    def clifford(self):
+        """Cl(3,0) geometric algebra as a PARALLEL binding mode (holographic_clifford) -- the geometric-product
+        cousin of tensor_bind, for GEOMETRIC structure. Its seat: rotors compose 3D rotations EXACTLY (the
+        product of two rotors IS the rotor of the composed rotation, measured error ~1e-15) and
+        NON-COMMUTATIVELY (rotation order is preserved), which the engine's COMMUTATIVE convolution bind cannot
+        do -- a commutative binding gives one answer for both orders and so carries the whole order-gap as
+        error. Returns a CliffordAlgebra with product / rotor / rotate / compose / reverse. KEPT NEGATIVE: 2^d
+        dimension growth (Cl(3,0)=8, Cl(10,0)=1024), and it binds VERSORS (rotors), not arbitrary atoms -- a
+        parallel tool for the rotation-shaped corner, not a general HRR bind replacement."""
+        if getattr(self, "_clifford", None) is None:
+            from holographic_clifford import CliffordAlgebra
+            self._clifford = CliffordAlgebra()
+        return self._clifford
 
     def splat_aniso(self, field, k=12, steps=200, denoise=False):
         """Represent an n-D field (a 2-D image or a 3-D volume) as a superposition of ANISOTROPIC Gaussian
@@ -3167,6 +3386,26 @@ class UnifiedMind:
             def _matmul(acc):
                 return self.exact_matmul(W, acc)
             handlers["matmul"] = _matmul
+        inv = getattr(self, "_invprob", None)
+        if inv is not None:                             # INV: restore a degraded measurement AS A PROGRAM --
+            def _datafit(acc):                          # ITERATE [APPLY datafit; APPLY denoise] is the PnP/RED loop
+                return acc - inv["mu"] * inv["adjoint"](inv["forward"](acc) - inv["y"])
+            handlers["datafit"] = _datafit
+            handlers["denoise"] = inv["prior"]          # the inverse problem's own manifold prior (overrides generic)
+        gen = getattr(self, "_generator", None)
+        if gen is not None:                             # GEN: generative diffusion AS A PROGRAM: ITERATE [APPLY diffuse]
+            def _diffuse(acc):                          # one self-scheduled denoise-from-noise step: anneal beta up,
+                import numpy as _np                     # cool injected noise down; ITERATE stops when the cooled,
+                from holographic_hopfield import dense_cleanup   # sharpened cleanup reaches a fixed point on the manifold
+                s = gen; frac = s["t"] / max(1, s["steps"] - 1)
+                beta = s["beta0"] + (s["beta1"] - s["beta0"]) * frac
+                noise = s["noise0"] * max(0.0, 1.0 - frac)
+                z = dense_cleanup(acc, s["codebook"], beta=beta, steps=1, readout=s["readout"])
+                if noise > 0:
+                    z = z + noise * s["rng"].standard_normal(z.size) / _np.sqrt(z.size)
+                z = z / (_np.linalg.norm(z) + 1e-12); s["t"] += 1
+                return z
+            handlers["diffuse"] = _diffuse
         pipe = getattr(self, "_pipe", None)
         if pipe is not None:                            # PIPE-1: the data-analysis pipeline's faculties.
             handlers.update(self._pipeline_handlers(pipe))   # (its 'denoise' overrides the generic one,
@@ -3181,6 +3420,75 @@ class UnifiedMind:
         import numpy as _np
         self._matmul_W = None if W is None else _np.asarray(W, dtype=float)
         return self
+
+    def set_inverse_problem(self, y, forward, adjoint, prior, mu=0.8):
+        """Configure the inverse problem that APPLY datafit / APPLY denoise solve as a PROGRAM. After this,
+        ITERATE [APPLY datafit; APPLY denoise] runs the Plug-and-Play/RED restoration loop: datafit pulls ACC
+        toward the measurement (ACC <- ACC - mu*adjoint(forward(ACC) - y)) and denoise applies `prior`, an
+        acc->acc manifold map. `forward`/`adjoint` are the operator A and its transpose A^T. Pass y=None to
+        disable (datafit becomes a no-op and denoise reverts to the generic faculty). Usually set via
+        restore_procedure(); exposed for hand-built restoration programs."""
+        M = self._machine()
+        if "datafit" not in M.fac_atoms:                # register the faculty atom so a program can name it
+            M.fac_atoms["datafit"] = M._atom("fac:datafit"); M.faculty_names.append("datafit")
+        self._invprob = None if y is None else {"y": np.asarray(y, float), "forward": forward,
+                                                 "adjoint": adjoint, "prior": prior, "mu": float(mu)}
+        return self
+
+    def set_generator(self, codebook, steps=12, beta0=4.0, beta1=40.0, noise0=0.6, seed=0, readout="softmax"):
+        """Configure the generative diffusion that APPLY diffuse runs as a PROGRAM. After this,
+        ITERATE [APPLY diffuse] denoises from pure noise onto the `codebook` manifold -- the B10 sampler as a
+        procedure. The diffuse step anneals beta up and injected noise down over `steps`; ITERATE halts when the
+        cooled, sharpened cleanup reaches a fixed point. A composed/continuous codebook gives novel-but-valid
+        samples; a BARE codebook degenerates to a stored atom (the kept B10 negative). Deterministic in `seed`.
+        Usually set via generate_procedure(); exposed for hand-built generative programs."""
+        import numpy as _np
+        M = self._machine()
+        if "diffuse" not in M.fac_atoms:
+            M.fac_atoms["diffuse"] = M._atom("fac:diffuse"); M.faculty_names.append("diffuse")
+        V = _np.atleast_2d(_np.asarray(codebook, float))
+        V = V / (_np.linalg.norm(V, axis=1, keepdims=True) + 1e-12)   # unit rows, as hopfield.generate uses
+        self._generator = {"codebook": V, "steps": int(steps), "beta0": float(beta0), "beta1": float(beta1),
+                           "noise0": float(noise0), "readout": readout, "rng": _np.random.default_rng(seed), "t": 0}
+        return self
+
+    def generate_procedure(self, codebook, steps=12, beta0=4.0, beta1=40.0, noise0=0.6, seed=0,
+                           readout="softmax", max_loop=None):
+        """Generate a sample by running the B10 diffusion AS A VSA PROGRAM -- ITERATE [APPLY diffuse] from a noise
+        seed -- so the generative PROCESS is a stored, composable procedure (savable via to_recipe), not Python
+        control flow. Process, not object. Returns (sample_vector, trace). Matches hopfield.generate's quality
+        (it lands on the manifold), up to ITERATE's convergence-stop replacing the fixed step count. Kept
+        negatives: B10's (a bare codebook converges to a stored atom; feed a composed manifold for novelty) and
+        the procedure tax (a noisy unbind-and-clean per instruction read -- slower than the direct loop, which is
+        the price of being data, not a faster path)."""
+        import numpy as _np
+        self.set_generator(codebook, steps=steps, beta0=beta0, beta1=beta1, noise0=noise0, seed=seed, readout=readout)
+        M = self._machine()
+        if "_diffuse_step" not in M.functions:
+            self.learn_procedure("_diffuse_step", [("APPLY", "diffuse"), ("HALT", "a")])
+        z0 = self._generator["rng"].standard_normal(self.dim)
+        z0 = z0 / (_np.linalg.norm(z0) + 1e-12)
+        return self.run_procedure([("ITERATE", "_diffuse_step"), ("HALT", "a")], init_acc=z0,
+                                  converge_tol=0.9999, max_loop=max_loop or max(40, steps * 3))
+
+    def restore_procedure(self, y, forward, adjoint, samples, mu=0.8, rank=24, steps=60):
+        """Restore a degraded measurement y = forward(clean) + noise by running Plug-and-Play/RED AS A VSA PROGRAM
+        -- ITERATE [APPLY datafit; APPLY denoise] -- so the restoration LOOP is a stored, composable procedure
+        rather than Python control flow. The manifold prior is fit from `samples` (clean rows). Returns
+        (restored_vector, trace). Reaches the same error-to-truth as denoise(method='pnp'); ITERATE halts at the
+        fixed point, typically in far fewer iterations than a fixed step budget. Kept negative: the procedure tax
+        (noisy instruction reads) -- this is the being-data form of restoration, not a faster path."""
+        import numpy as _np
+        from holographic_denoise import fit_manifold_full, adaptive_manifold_denoise
+        S = _np.atleast_2d(_np.asarray(samples, float))
+        basis, _, mean = fit_manifold_full(S, rank=min(int(rank), S.shape[1]))
+        prior = lambda v: adaptive_manifold_denoise(v, basis, mean, sigma=None)
+        self.set_inverse_problem(y, forward, adjoint, prior, mu=mu)
+        M = self._machine()
+        if "_pnp_step" not in M.functions:
+            self.learn_procedure("_pnp_step", [("APPLY", "datafit"), ("APPLY", "denoise"), ("HALT", "a")])
+        return self.run_procedure([("ITERATE", "_pnp_step"), ("HALT", "a")],
+                                  init_acc=_np.asarray(adjoint(y), float), converge_tol=0.99999, max_loop=steps)
 
     # ---- PIPE-1: an automatic data-analysis pipeline expressed as a VSA PROGRAM ----------------------
     # The pipeline is NOT Python control flow -- it is a HoloMachine program (APPLY faculties, an ITERATE
@@ -3677,6 +3985,33 @@ class UnifiedMind:
         like any recipe. Reproduces the assembled program bit-exactly. CALL is runtime, so out of scope."""
         from holographic_typed import program_to_recipe
         return program_to_recipe(self._machine(), program)
+
+    def audit_procedure(self, steps=None, program=None, n_steps=None):
+        """Audit a PROTOCOL for honesty anti-patterns (backlog D1): treat an analysis procedure as
+        program-as-data and check its STRUCTURE -- does a SEARCH/recall step have a procedure-matched NULL,
+        does a searched-and-scored family carry FDR control, is there an out-of-sample SPLIT between selecting
+        and deciding? The check reads the step structure BACK FROM THE PROGRAM VECTOR (the same noisy
+        unbind+cleanup the VM runs), so the honesty discipline becomes a structural query on the protocol
+        vector rather than a habit you maintain and find missing after a fake edge slips through.
+
+        Pass `steps` -- an ordered list of faculty-step names (encode, combination_search, calibrated_null,
+        fdr, oos_split, decide, ...), which is assembled into a protocol vector and audited -- or a prebuilt
+        (`program` vector, `n_steps`). Returns {sound, roles, sequence, violations}, where each violation is
+        a (code, message) and `sound` is True iff no rule fires.
+
+        SCOPE / KEPT NEGATIVE: a structural lint on DECLARED steps, not a data-flow analysis -- 'scores the
+        same rows it selected on' is approximated by the order check (no SPLIT between SEARCH and DECIDE), not
+        by tracking data identity; and the per-step decode is bounded by the program vector's capacity, so a
+        protocol must be short to read reliably (the procedure tax). An unknown step name carries no
+        obligation (fails open, not a false alarm)."""
+        from holographic_protocol import build_protocol, audit_protocol
+        M = self._machine()
+        if steps is not None:
+            program, n_steps = build_protocol(M, list(steps))
+        if program is None or n_steps is None:
+            raise ValueError("audit_procedure needs steps=<list of step names>, or program=<vec> with "
+                             "n_steps=<int>")
+        return audit_protocol(M, program, n_steps)
 
     def attribute(self, text, name=None):
         """WHO taught this? If the sequence model was fit on (text, source)

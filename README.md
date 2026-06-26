@@ -239,6 +239,174 @@ signal channels found, zero noise channels detected; naive per-channel threshold
 the eighty, FDR holds it to 0; and the SPRT spends 1.0 samples on a clear channel but ~1.8 on a faint one —
 deciding, per channel, as fast as the evidence allows.
 
+**And the same two disciplines reach into radio astronomy.** `detect_drifting(waterfall)` is the SETI search for a
+narrowband technosignature that drifts in frequency because of the relative motion between us and its source. The
+insight is that a Doppler drift is a cyclic *shift* of the spectrum over time, and a cyclic shift is the engine's
+own `permute` — the same rigid-shift transform the video coder uses for motion compensation, and equally a binding
+(`bind(x, δ_k) == permute(x, k)`). So "de-Doppler integration" — the matched filter that recovers a drifting signal
+a stationary detector loses — is just permute-ing each frame back by the drift before summing, and the look-elsewhere
+control over the (drift × channel) search grid is `bh_fdr`, exactly as `scan` controls it across channels. Measured on
+synthetic spectrograms at the field's S/N≥10 regime: a stationary integration loses a drifting signal in the noise
+(~2.9σ) while de-drifting at the right rate recovers it (~6.2σ) and reports the rate; naive per-cell thresholding fires
+on ~100% of pure-noise scans, FDR holds it to ~0%; recall reaches ~96% at zero false-positive; and supplying an
+OFF-target spectrogram lets the ON-OFF cadence reject a strong stationary RFI ~100% of the time (it persists in the
+OFF pointing) while keeping the drifting ON-only signal ~94%. The kept negative is the field's own lesson: below ~10σ
+integrated the dependent-FDR correction over the many cells is conservative — which is precisely why turboSETI searches
+at S/N≥10. Two engine primitives — a shift-is-a-binding and a false-discovery veto — doing the radio astronomer's job.
+
+**A store that checks itself.** `verify_store(items)` gives the engine a tamper-evident commitment — the
+structural idea of a Merkle tree, built from nothing but the two kernel primitives. A Merkle tree hashes each
+item, hashes pairs of hashes up to a single root, and uses that root to detect any change and the tree to
+localise *which* item changed in O(log n); here the hash's structural role is played by *bundle* and the leaf
+by *bind*. Each item is bound to its slot key (`leaf_i = bind(pos_i, item_i)`), every internal node is the
+bundle (sum) of its children, and the root is the whole-store composite. Rebuild the root from the current
+items and compare: any change to any item — or to which slot it sits in — shifts it; then descend, following
+at each node the child whose composite no longer matches, and the changed item falls out in ≤ log₂(n)
+comparisons regardless of how many are stored. Binding the *position* into each leaf is what makes a reordering
+visible: a plain bundle is commutative, so without slot keys a swap would leave the root identical. The honest
+bound is kept loud, because it is the whole distance from a cryptographic Merkle tree: the root is *linear*, so
+the map from items to root is many-to-one and collisions exist — a key-aware adversary can cancel a change to
+one item with a compensating change to another (a deconvolution) and leave the root bit-for-bit unchanged. So
+this is evidence of *accidental* corruption and uncoordinated tampering, not tamper-proofing against an
+adversary who knows the keys; and the descent localises one change per pass. (The plan had also expected that
+quantising the checksums to save space would blind it to small tampers — measured, it does not, because in
+1024 dimensions a tamper always pushes some component across a quantiser boundary.)
+
+**And the engine learned to measure itself against the outside.** A `benchmarks/` harness puts two faculties
+up against the off-the-shelf tool a practitioner would reach for, with the project's rule that where the
+standard tool wins, it is reported, not hidden. The geometry-preserving `quant='rd'` code — consolidation/KLT,
+then water-filling, then a bit-exact rANS coder — beats general-purpose `zlib`/`lzma` by ~34× on data with real
+low-rank structure (it spends bits only on the directions that carry variance), and *loses* to int8+zlib on
+full-rank random data, where there is nothing for the KLT to exploit and the shared basis costs more than it
+saves — exactly the right read, since the engine's stored states are low-rank and random vectors are not. The
+`HoloForest` matches an exact brute-force scan's recall@1 up to ~10k items while touching 3% of the comparisons
+at 20k, but the exact scan is a single BLAS matrix-vector product, so the forest only wins on wall-clock past
+~20k items: it buys sublinear *work*, not raw speed against a tight inner loop. The reachable baselines were
+audited first — denoising, forecasting, and classification have no fair in-constraints opponent (their usual
+ones are banned dependencies), so they are left out rather than measured against a strawman.
+
+**Then continuous encoding went multi-dimensional.** Fractional Power Encoding — encode a value by raising a
+base vector to a real power, so that shifting the value is a *binding* and the similarity is a kernel you
+*design* — turned out to already be in the box: the 1-D `ScalarEncoder` is exactly this (`encode(x)` =
+"base^x", with a Bochner kernel), and because `bind` is circular convolution it multiplies the codes' spectra
+and so adds their positions, giving `bind(encode(x), encode(s)) == encode(x+s)` to numerical exactness. The
+genuine new step (`vector_function_encoder`, `holographic_fpe.py`) is up from a scalar to a *vector* domain and
+to whole *functions*: a point in Rⁿ is encoded by binding one per-axis FPE per coordinate (a shift along any
+axis is still one binding, and the kernel is the product of the per-axis kernels — an n-D RBF), and a function
+f: Rⁿ→R is a weighted superposition of encoded points that reads as a holographic kernel-density estimate when
+queried and translates by a *single* binding. The standing cliff is kept on the record: a function is a bundle,
+so query separation decays as the atom count grows (measured +0.39 → +0.01 from 2 to 128 atoms); and where a
+scalar already suffices, the n-D machinery buys nothing — 1-D FPE *is* the ScalarEncoder.
+
+**Then the hand-picked bases became one operator.** `decompose_signal` chose a basis by detected topology —
+line→elementary, ring→harmonic — but those are not special cases to enumerate, they are two readings of one
+object: the graph Laplacian's eigenbasis. The eigenbasis of a *path* graph is exactly the DCT (the elementary
+basis) and the eigenbasis of a *cycle* graph is exactly the DFT (the harmonic basis), so a single operator
+(`holographic_spectral.py`, faculty `spectral_basis`) subsumes both — and extends to manifolds the topology
+detector cannot name. On a sphere, which the detector can only call "line", the kNN-graph Laplacian's low
+eigenvectors recover a smooth field (denoise error 1.9 from a noisy 6.1) where the line/index-order basis
+barely moves it (5.2): the data-driven basis is measurably right where the hand-picked fallback is not. The
+same operator also reads topology — the Hodge Laplacian's harmonic dimension equals the Betti numbers (a
+4-cycle → one component and one loop, a filled triangle → the loop gone), which is the spectral route the next
+piece builds on. The honest scope is stated: dense `eigh` bounds it to moderate N (a huge graph would need a
+sparse solver, i.e. a second dependency), and the eigenvector signs are fixed to a convention so the basis is
+reproducible — the same bit-exact-tie discipline the `bind_batch` lesson taught.
+
+**Then topology stopped being a hand-coded list.** `detect_topology` names a 1-D signal's shape by fitting
+harmonics — line, ring, mobius, torus — but that is a fixed menu that only sees what it has a fit for. The
+principled version reads topology straight off a point cloud, the way computational topology does: build a
+Vietoris-Rips complex at a distance scale, count its holes by dimension (the Betti numbers — components,
+loops, voids), and keep the signature that *persists* across the widest scale band (`holographic_topology.py`,
+faculty `manifold_topology`). It reproduces what `detect_topology` gets — a contractible cloud is (1,0,0)
+"line", a loop is (1,1,0) "ring" — and extends to shapes it cannot name structurally: a *torus* is (1,2,1),
+two loops around a void, and a *sphere* is (1,0,1), no loops but one void (B₁ alone orders line→circle→torus
+0/1/2; B₂ is what separates a sphere from a line, since both have no loops). The first cut computed Betti
+numbers with a dense real `matrix_rank` and *timed out on the torus*; reducing the boundary operators over
+GF(2) instead — columns as integer bitmasks, XOR elimination, the standard persistent-homology twist — is
+exact and drops the torus from a timeout to half a second, and it agrees with EXP-5's Hodge-Laplacian Betti
+route on every fixed complex (two operators corroborating one answer). The negatives are kept loud: persistent
+homology is finicky on small, noisy, or unevenly sampled clouds (a sine's delay embedding, dense at its
+turning points, fragments at the median scale — so this reads a well-sampled manifold, not an arbitrary
+trajectory), it is blind to non-topological geometry by design (a circle and an ellipse are both (1,1,0), so
+it wants EXP-6's geometry beside it), and the cloud is subsampled to keep the complex tractable.
+
+**Then flows split into what they're made of.** The same boundary operators that count holes (EXP-5/7) also
+take an edge flow apart. The Helmholtz-Hodge decomposition (`hodge_decomposition`, `denoise_flow`) splits any
+flow on a graph into three orthogonal pieces: a *gradient* part (curl-free transport running downhill from a
+vertex potential — what a source-to-sink flow is made of), a *curl* part (circulation around the filled
+triangles), and a *harmonic* part (the remainder, both divergence-free and curl-free — the global circulation
+that wraps the holes). The split is exact and the pieces are orthogonal to floating point, the harmonic part
+is genuinely div- and curl-free, and its dimension is exactly B₁ — so the harmonic flow *is* the topology the
+previous piece counts, the two operators meeting on one complex. It denoises: a noisy transport flow, with its
+curl dropped, comes back closer to the truth than the noisy input (1.1 from a noisy 1.9) and well past naive
+edge-smoothing (3.6), which over-smooths. And the kept negative falls straight out of the topology — on a
+tree, with no cycles and no triangles, there is nothing to circulate, so curl and harmonic are exactly zero
+and every flow is pure gradient.
+
+**Then a second way to bind arrived, for the rotation-shaped corner.** Like `tensor_bind`, the geometric
+product of Clifford algebra Cl(3,0) (`clifford`, `holographic_clifford.py`) is a parallel binding mode, not a
+drop-in for circular convolution — its seat is geometric structure, specifically 3D rotations. A rotor
+(`cos(θ/2) − sin(θ/2)·B`) rotates a vector by the sandwich `R v R̃`, and two facts make it beat convolution
+here: composing rotations is *exact* (the product of two rotors is the rotor of the composed rotation —
+measured error ~1e-15 against applying the rotations in sequence), and it is *non-commutative* (rotation order
+matters, and the product captures it — two orders of the same pair land a measured ~0.7 apart on a probe
+vector). HRR's circular convolution is commutative, so it returns one answer for both orders by construction
+and must carry that whole order-gap as error; that gap, which convolution provably cannot close, is the
+concrete sense in which Clifford wins on rotations. The negatives are exactly what you'd expect of a
+specialised algebra and are kept on the record: Cl(n,0) needs 2ⁿ components (8 here, 1024 for ten dimensions),
+so it is affordable only for low-dimensional geometric domains, not as a general high-D substrate; and it binds
+*versors* — a unit rotor's inverse is its reverse, but an arbitrary multivector's is not — so it is a
+geometric-transform algebra, not a general key→value memory like HRR. A parallel tool for the corner it fits,
+in the same spirit as the tensor-product bind.
+
+**Then distance learned to move mass.** A bin-wise distance — Euclidean, cosine — compares two distributions
+height-by-height and is blind to *where* the mass sits: two histograms that don't overlap score maximally far
+no matter how far apart they actually are, so a peak at bin 12 reads exactly as distant from a peak at bin 10
+as a peak at bin 40 does. The Wasserstein (earth-mover's) distance instead measures the least work to *move*
+one distribution onto the other — mass times the ground distance it travels — so it keeps growing as the
+distributions move apart even with no shared support (`wasserstein`, `holographic_transport.py`). It is
+computed by the Sinkhorn algorithm: add an entropy term, which turns optimal transport into a Gibbs kernel
+`exp(−C/ε)` and a pair of alternating diagonal rescalings that converge to the transport plan, the distance
+being the plan against the cost. It matches the 1-D closed form (the L1 distance between CDFs) to a thousandth,
+and where it earns its place is exactly the case bin-wise metrics miss: a shift of 5, 10, 20 reads as a
+distance of 5, 10, 20, while Euclidean saturates flat at ~0.53 for every non-overlapping shift and cosine
+collapses to zero — both unable to tell a near miss from a far one. The kept negatives are the ε knob and the
+cost: too large an ε blurs the plan toward independence and inflates the distance (a same-mean pair with true
+distance ~3.6 reads ~4.9 at ε=50), too small underflows the kernel between separated supports into a broken
+answer, and the dense kernel is O(n·m) per iteration — so the default ε scales to the cost, and a wide cost
+range wants an explicit ε or a log-domain solver.
+
+**Then the flow solver learned to see its own circulation.** An above/below sweep of the new spectral machinery
+found the obvious home it hadn't reached: the Tero flow solver computes a Poiseuille flux on every edge each
+step, uses it to thicken tubes, and *throws it away* once it has the path. That flux is exactly the kind of
+edge flow the Helmholtz-Hodge decomposition takes apart. So `tero_flux` now exposes the converged flux and
+`flow_circulation` splits it: the gradient part is the net source-to-goal transport (its divergence is the
+injected current, to a part in a million), and the harmonic part is *circulation* around the graph's loops —
+its dimension exactly the graph's B₁, the loop count the topology kernels already measure. A maze graph has no
+filled triangles, so there is no curl. What this buys is a previously-hidden read on the flow: the harmonic
+energy fraction is how much of the converged flux circulates rather than transports — exactly zero on a tree,
+where the route is forced, and nonzero on a loopy grid in a way that varies with the saturation exponent μ (at
+high μ competing thick tubes leave more flux going in circles). One restraint is worth recording as part of the
+sweep: the flow solver builds its own conductance-weighted Laplacian, and it was *not* rerouted through the
+shared `graph_laplacian` — that dynamics is tie-sensitive, and a different summation order could flip a
+trajectory, the `bind_batch` lesson. The shared *helper* was extracted inside the module; the shared *kernel*
+was deliberately left alone. Not everything that looks duplicated should be merged.
+
+**Then a second sweep found the denoiser's blind spot.** Re-running the discipline over the full geometry
+toolkit — spectral, topology, transport — most of it was already where it counted, which is the honest usual
+result of a sweep. The one genuine gap was in the denoise faculty: it could map a *linear* subspace
+(`manifold`/`adaptive`, which need an example set) but had no map for a *curved* manifold's geometry, and none
+of its methods could clean a lone scalar field sitting on a point cloud. That is exactly what the EXP-5/6
+graph-Laplacian eigenbasis does, so it went in as `denoise(method='spectral', points=…)` — the nonlinear-manifold
+map, needing no example set and no codebook, just the cloud's own geometry. On a smooth field over a 2-sphere it
+cleans error 4.1→0.9 where the geometry-blind options barely move it (trajectory/SSA 3.1, a fixed DCT low-pass
+4.2), because a linear or 1-D prior cannot see a curved manifold's smoothness. The transport and topology kernels
+stayed standalone, and that is a finding, not a failure: the sweep turned up no existing bin-wise distribution
+comparison for Wasserstein to improve (the market compares price *windows* by cosine and forecasts by proper
+score; the de-Doppler search already uses the field-standard matched-filter bank), and persistent homology is
+held back from the 1-D topology detector by its delay-embedding sampling negative. Resisting the urge to force
+those is the other half of the discipline.
+
 **Then the resonator got a calibrated voice.** The SBC resonator could already say `verified` — True when the
 recovered factors rebuild the product exactly — but that certificate is uselessly brittle on an approximate
 input: corrupt one block of a noisy bind and `verified` goes False even though the resonator found exactly the
@@ -654,13 +822,13 @@ in, and a Labyrinth mode has it learn the way out of a maze -- all on a prototyp
 **Test suite** (runs the full pytest suite), **Query & recall** (the interactive image demo - degrade an
 image, optionally destroy part of the plate, watch it get recalled), **Recall by description**
 (cross-modal recall - describe an image in words and get the matching one back from the tag address space),
-**Set packer** (delta-code a set of related images against one reference), and **Image vault** (the general store: relate by fingerprint, compress adaptively across lossless and lossy encoders with an honest table, and query by example). The Test suite panel auto-discovers and runs every test_*.py (852 at last count; up to six skip without NLTK or its downloaded corpora). The package also ships the real 712-sprite set packed to ~67 KB at `features/sprites.hsp` (which doubles as a live demo of the sprite packer), and the UI uses it in two places: the Image vault runs relate/compress/query on the whole set, and the learning creature is drawn as a real walking sprite (`amg2`) that turns to face the direction it moves and cycles its two walk frames -- with its baked-in background keyed out (flood-filled from the edges) so it shows real transparency over the grid instead of an opaque tile. The creature also runs on an energy mechanic: it starts each life with 100 energy, every step costs 1, each star it reaches gives +3, and stepping on poison empties the battery -- instant death -- so collecting stars and staying alive are the same goal. Finally, a **Vision** panel shows that the image is just numbers: RGB->HSV colour and dominant-colour extraction, Sobel edges with Hough line/circle detection and Harris corners, a geometric shape classifier, and unsupervised *emergent* classes that fall out of clustering simple feature descriptors -- then a VSA prototype classifier (bundle + cosine cleanup) labels held-out shapes, tying the vision work back to the holographic engine. The panel reports each step's accuracy honestly, including where unsupervised clustering tops out. A final **Compositional scene** panel takes the opposite stance to a holistic descriptor: it reads the DCT coefficient layout as a texture tag (finally using the DCT as a feature, not just for compression), pairs it with HSV colour and geometric shape for automatic per-object tags, then encodes each object as a product of attribute atoms and a scene as their superposition -- so a ResonatorNetwork can factor the parts back out (and that resonator now takes an optional softmax-sharpened cleanup -- the SBC readout lesson swept down -- which recovers more at high codebook load; default off, so the small-vocabulary scene case is unchanged). Multi-object scenes now decompose reliably up to ~5 objects: the old ~50%-at-three ceiling turned out to be a scale bug (normalising the scene) plus missing refinement, not a real capacity limit -- keeping the scene as an unnormalised superposition and adding coordinate-descent sweeps recovers 3-4 objects at 100%. A **Scaling** panel confronts the deepest limit head-on: one holographic trace is a bundle with finite capacity (a 2048-d memory recalls 100% of 64 pairs but ~0% of 2048), so instead of one flat store it grows a deterministic recursive tree -- each node a seeded random hyperplane splitting items at the median, each leaf a small memory kept inside capacity, queries descending with a beam that back-tracks into nearby cells. This is the random projection tree of Dasgupta & Freund and, in spirit, how slime mould beats the size limit of pure diffusion by resolving a broad mass into a hierarchical vein network. The flat memory collapses with scale while the tree holds 100%, and search reaches ~96% recall at a fraction of a full scan's comparisons; per-leaf query 'flux' shows the thick-vein / thin-vein structure. A HoloForest of several differently-seeded trees breaks the single tree's recall ceiling, reaching ~100% recall at a fraction of a full scan's comparisons. Finally, a **Content addresses** panel realises the original partitioning idea the way AWS S3 does: no folders, just a flat keyspace where each object's name encodes the hierarchy. The auto-tags (colour/shape/texture) generate a deterministic URI like `red/circle/smooth`, the key *is* the partition path, and a FacetStore supports S3-style prefix listing and CommonPrefixes roll-up. Where the RP-tree splits by meaningless random hyperplanes, this splits by meaning -- readable, queryable paths -- at the honest cost of bucket skew, with key depth as the lever. And the resonator closes the loop: it recovers an item's URI from its content vector alone, so the address is computed from the content. And the skew problem is now handled: build_indexes gives any hot bucket its own in-bucket HoloForest, so content search inside a popular prefix stays sub-linear -- the bi-level structure (semantic prefix outside, geometric forest inside) realised.
+**Set packer** (delta-code a set of related images against one reference), and **Image vault** (the general store: relate by fingerprint, compress adaptively across lossless and lossy encoders with an honest table, and query by example). The Test suite panel auto-discovers and runs every test_*.py (947 at last count; up to six skip without NLTK or its downloaded corpora). The package also ships the real 712-sprite set packed to ~67 KB at `features/sprites.hsp` (which doubles as a live demo of the sprite packer), and the UI uses it in two places: the Image vault runs relate/compress/query on the whole set, and the learning creature is drawn as a real walking sprite (`amg2`) that turns to face the direction it moves and cycles its two walk frames -- with its baked-in background keyed out (flood-filled from the edges) so it shows real transparency over the grid instead of an opaque tile. The creature also runs on an energy mechanic: it starts each life with 100 energy, every step costs 1, each star it reaches gives +3, and stepping on poison empties the battery -- instant death -- so collecting stars and staying alive are the same goal. Finally, a **Vision** panel shows that the image is just numbers: RGB->HSV colour and dominant-colour extraction, Sobel edges with Hough line/circle detection and Harris corners, a geometric shape classifier, and unsupervised *emergent* classes that fall out of clustering simple feature descriptors -- then a VSA prototype classifier (bundle + cosine cleanup) labels held-out shapes, tying the vision work back to the holographic engine. The panel reports each step's accuracy honestly, including where unsupervised clustering tops out. A final **Compositional scene** panel takes the opposite stance to a holistic descriptor: it reads the DCT coefficient layout as a texture tag (finally using the DCT as a feature, not just for compression), pairs it with HSV colour and geometric shape for automatic per-object tags, then encodes each object as a product of attribute atoms and a scene as their superposition -- so a ResonatorNetwork can factor the parts back out (and that resonator now takes an optional softmax-sharpened cleanup -- the SBC readout lesson swept down -- which recovers more at high codebook load; default off, so the small-vocabulary scene case is unchanged). Multi-object scenes now decompose reliably up to ~5 objects: the old ~50%-at-three ceiling turned out to be a scale bug (normalising the scene) plus missing refinement, not a real capacity limit -- keeping the scene as an unnormalised superposition and adding coordinate-descent sweeps recovers 3-4 objects at 100%. A **Scaling** panel confronts the deepest limit head-on: one holographic trace is a bundle with finite capacity (a 2048-d memory recalls 100% of 64 pairs but ~0% of 2048), so instead of one flat store it grows a deterministic recursive tree -- each node a seeded random hyperplane splitting items at the median, each leaf a small memory kept inside capacity, queries descending with a beam that back-tracks into nearby cells. This is the random projection tree of Dasgupta & Freund and, in spirit, how slime mould beats the size limit of pure diffusion by resolving a broad mass into a hierarchical vein network. The flat memory collapses with scale while the tree holds 100%, and search reaches ~96% recall at a fraction of a full scan's comparisons; per-leaf query 'flux' shows the thick-vein / thin-vein structure. A HoloForest of several differently-seeded trees breaks the single tree's recall ceiling, reaching ~100% recall at a fraction of a full scan's comparisons. Finally, a **Content addresses** panel realises the original partitioning idea the way AWS S3 does: no folders, just a flat keyspace where each object's name encodes the hierarchy. The auto-tags (colour/shape/texture) generate a deterministic URI like `red/circle/smooth`, the key *is* the partition path, and a FacetStore supports S3-style prefix listing and CommonPrefixes roll-up. Where the RP-tree splits by meaningless random hyperplanes, this splits by meaning -- readable, queryable paths -- at the honest cost of bucket skew, with key depth as the lever. And the resonator closes the loop: it recovers an item's URI from its content vector alone, so the address is computed from the content. And the skew problem is now handled: build_indexes gives any hot bucket its own in-bucket HoloForest, so content search inside a popular prefix stays sub-linear -- the bi-level structure (semantic prefix outside, geometric forest inside) realised.
 
 ### From the command line
     python tour.py                    # guided tour of all subsystems (~20s)
     python holographic_creature.py    # any module runs its own demo
     python holographic_encoders.py    # numbers / text / records demos
-    pytest -q                         # the whole test suite (852 tests)
+    pytest -q                         # the whole test suite (947 tests)
 
 ---
 
@@ -1282,6 +1450,94 @@ are already compressible on their own (gradients, photos) per-file PNG/JPEG win,
 and the built-in benchmark shows both so the choice is clear. A lossy
 Walsh-Hadamard tier was prototyped and dropped because it never beat JPEG.
 
+**Then the engine moved two more of its own loops into the substrate.** A self-hosting audit asked which
+hand-written Python procedures could be re-expressed as VSA programs running on the engine's own stored-program
+machine — where a program is a hypervector, control flow is `IFMATCH`/`ITERATE`/`CALL`, and `APPLY <faculty>`
+invokes a real faculty as a step. The rule is exact: a procedure is movable iff it is *orchestration* whose
+every step is a hypervector→hypervector map and whose state is one accumulator — which the data-analysis
+pipeline (PIPE-1) and the recurrent linear map (`ITERATE [APPLY matmul]`) already showed. Two of the engine's
+remaining canonical iterate-to-fixed-point loops fit and were knocked out. `restore_procedure` runs Plug-and-Play/
+RED restoration as the program `ITERATE [APPLY datafit; APPLY denoise]`: on a half-masked low-rank signal it
+recovers to the *same* error-to-truth as the Python `denoise(method='pnp')` (raw rel-error 0.86 → 0.17),
+converging in six iterations where the Python loop runs a fixed forty. `generate_procedure` runs the B10
+generative diffusion as `ITERATE [APPLY diffuse]` from a noise seed — a self-cooling step that anneals β up and
+injected noise down, with the loop halting when the sharpened cleanup lands on the manifold (cosine 1.000, the
+same sample the Python `generate` produces). The payoff is not speed — both carry the honest procedure tax of a
+noisy unbind-and-clean per instruction read, and the numerics underneath never leave NumPy — it is that the
+restoration *loop* and the generative *process* are now stored, composable, recipe-savable objects rather than
+control flow: process, not object. The boundary stayed where the audit drew it; the numerical primitives (the
+FFT bind, the SVD, Sinkhorn) *are* the substrate and cannot become programs that run on themselves.
+
+**Then a faculty that had become fast was promoted to a gate, and the basis it guards learned to scale.** A
+performance audit found persistent homology (made 83× faster a session earlier) was the lone heavy outlier;
+fixing it left a dividend. Now that naming a cloud's topology is sub-second even on a structureless blob, it
+becomes a first-class *gate*: `is_manifold` reads the Betti signature and answers whether a cloud is a single
+connected manifold (sphere → `True`, B0=1) or a dense blob with no clean topology (random 4-D cloud → `False`,
+fragmented and dense). The gate earns its keep next door, on the spectral denoiser, whose premise is a *smooth
+field on a curved manifold* — exactly the thing `is_manifold` checks. With `check_manifold=True`,
+`denoise(method='spectral')` runs the gate first and refuses loudly on a blob (where the "denoise" is only graph
+low-pass, not manifold denoising) with an escape hatch to override; measured, the spectral map cleans a 2-sphere
+field 3.74 → 1.08 but barely moves a blob (4.37 → 4.20), so the gate names which case you are in for free. The
+second half was harder. The spectral basis built its modes with `np.linalg.eigh`, which computes *all* n
+eigenvectors at O(n³) to keep the lowest twelve — fine to ~1500 points, painful past 3000 (4.4 s) and worse at
+5000 (22 s). A partial eigensolver should compute only the smooth modes, but four textbook shortcuts were
+prototyped and *measured to fail*: shifted Lanczos and block subspace iteration both compress the wanted modes
+against the shift and converge to the wrong subspace; unshifted Lanczos works small then degrades; a
+graph-Tikhonov low-pass (no eigendecomposition at all) is robust and fast but a *soft* filter attenuates the
+signal modes along with the noise (denoise 3.2 vs eigh 1.2); Nyström landmark-extension drifts worse as n grows.
+The honest root cause is degeneracy — a 2-sphere's Laplacian carries 2l+1 modes at each eigenvalue, so a *count*
+cutoff like n_basis=12 lands inside a degenerate block and no count-based iterative method can cleanly separate
+it. The method that does is the one real sparse eigensolvers use: Chebyshev-filtered subspace iteration, where a
+polynomial filter amplifies the wanted low-eigenvalue subspace by orders of magnitude so a block iteration
+converges *through* the degeneracy. Built on a *sparse* kNN-Laplacian matvec (O(n·k), byte-identical to the
+dense operator to 2e-14, never forming the n×n matrix) it matches the exact eigh's denoise to a projector
+difference of ~0 in the verified range with a speedup that grows as eigh's O(n³) bites — ~4× at 3000 points,
+~7× at 4500 — and `SpectralBasis` switches to it automatically above a point threshold while keeping the exact
+dense eigh below (faster there, and bit-identical, so every existing result is unchanged). The kept negatives
+travel with it: it is an approximation whose projector error grows slowly with n, and it lifts the *eigh* cost,
+not the O(n²) distance build, which still caps practical use at a few thousand points — a spatial index would be
+the next rung.
+
+**Then the honesty discipline became something you can lint.** A forwarded backlog proposed turning a session's
+worth of analysis methods into VSA programs, and grounding it against the live code was the usual humbling
+exercise: most of it was already built (the stored-program VM, the self-hosting procedure layer, and every part
+of the "honesty harness keystone" — `walk_forward_recall` *is* the six-check harness, `scan` *is* the parallel
+SPRT+FDR detector), one flagship item was the capacity cliff in disguise (running N independent computations in
+one superposed bundle and reading N exact scalars back is exactly the thing the engine has measured can't be
+done), and the market half bet against the efficient-market negative already on the books. The one genuinely-new,
+on-mission idea survived the audit: turn the honesty discipline from a habit you maintain into a *structural
+property you can check*. Because a protocol — an analysis procedure — is program-as-data, its step structure can
+be read back from its program vector (the VM's own unbind+cleanup), and the canonical artifact-factory becomes a
+structural query: a SEARCH/recall step that proposes candidates from the data with no procedure-matched NULL to
+confirm they beat noise. `audit_procedure` builds a protocol from a list of faculty-steps, recovers the structure
+holographically, and flags three anti-patterns — a search with no null, a searched-and-scored family with no FDR
+control, and selecting-then-scoring with no out-of-sample split between them — while staying targeted enough not
+to flag an honest no-search procedure like a restoration loop. The kept negatives are explicit: it is a
+structural lint on *declared* steps, not a data-flow analysis (so "scores the same rows it selected on" is
+approximated by the order check — no split between select and decide — since the single-accumulator VM doesn't
+track data lineage), and the per-step decode is bounded by the program vector's capacity, so a protocol must be
+short enough to read reliably (the procedure tax, verified to round-trip exactly at protocol length). The
+discipline the whole project runs on — the procedure-matched null, the out-of-sample split, the exact arbiter —
+is now a thing a program can be checked *for*, not only a thing a person remembers to do.
+
+**Then the research log learned to catch its own contradictions.** The other genuinely-new idea from the same
+backlog — a registry of findings you query by similarity and that flags its own tensions — turned out to have its
+substrate already present (the relations layer's role-bound records and analogy-as-unbind), missing only the one
+operation a research log actually needs: contradiction detection. A finding is encoded the way every record in
+the engine is — `bind(SUBJECT, x) + bind(OBJECT, y) + bind(CONDITION, c)` with a stored ±1 polarity — so the
+existing explain/analogy operations compose with it for free. What the registry adds is two things. Recall is
+*role-sensitive*: querying for findings where momentum is the OBJECT does not surface ones where it is the
+subject, the dividend of structured encoding over a bag of words. And tension detection distinguishes a *flat
+contradiction* — two opposite-polarity findings making the same claim under the same or absent condition, where
+one must be wrong — from a *conditioned tension* — the same opposition under *different* conditions, which is
+reconcilable because the outcome is conditioned on the differing dimension. "Efficiency-ratio strengthens
+momentum at the 10-day horizon" versus "efficiency-ratio backfires intraday" is the latter, and the registry
+says so rather than calling it a contradiction. The discipline holds: retrieval is holographic (a cosine over the
+bound claim finds the candidate conflicts) but the verdict is exact (the polarity sign and the condition
+equality decide), the same one-exact-door rule the whole engine runs on. The honest boundary stays where the
+audit drew it — findings are *structured* claims, not free prose; turning a 2300-line narrative log into
+structured claims is an NLP step this engine, with no embeddings and no parser, does not do.
+
 **More engine pieces** (each with a runnable demo): residue (exact integer)
 arithmetic on vectors, signed-distance regions of the sphere, a predictive filter
 that stays quiet on the expected, a unified scalar "field" abstraction,
@@ -1401,7 +1657,7 @@ The app and tour:
     tour.py       command-line tour of every subsystem
     run.bat       Windows launcher
 
-Tests (852 total):
+Tests (947 total):
 
     test_holographic.py           core engine (bind/bundle/memory/reflex/drift)
     test_holographic_image.py     image store / WHT / quantisation
@@ -1437,7 +1693,36 @@ Tests (852 total):
                                   denoise; SBC factorizer + decode_structure (peel); factor_composite
                                   de-siloed; opt-in energy cleanup; solve_maze / assemble / learn_dynamics;
                                   the mind saves/loads (quant='rd'); generate_vector + splat_field; the
-                                  axial modality (theta==theta+pi, Mobius); the splat-bundle archive
+                                  axial modality (theta==theta+pi, Mobius); the splat-bundle archive; the
+                                  is_manifold gate + check_manifold guard on spectral denoise; spectral
+                                  denoise scaling to a large cloud via the Chebyshev partial eigensolver
+    test_holographic_dedoppler.py de-Doppler drift detection: a permute-based matched-filter bank +
+                                  bh_fdr look-elsewhere + ON-OFF cadence (the detect_drifting faculty)
+    test_holographic_verify.py    self-verifying storage: the holographic Merkle tree (bind+bundle) detects
+                                  + localises a single tamper in <= log2(n) checks (the verify_store faculty)
+    test_benchmarks.py            external-baseline harness (BLD-2): the rd code vs zlib/lzma and the forest
+                                  vs exact brute-force NN, asserting the honest direction (incl. where stdlib wins)
+    test_theory_references.py     BLD-3: every test THEORY.md cites must exist, so the guarantees doc can't rot
+    test_holographic_fpe.py       BLD-7: N-D fractional power encoding -- n-D shift-as-bind, product kernel,
+                                  compute-on-functions (a function as a bundle, queried + shifted by bind);
+                                  pins that 1-D FPE was already the ScalarEncoder, plus the capacity cliff
+    test_holographic_spectral.py  EXP-5/6/8: the graph/Hodge Laplacian operator -- cycle eigenbasis IS the DFT,
+                                  Hodge harmonic dim == Betti numbers, the eigenbasis as a basis-selector
+                                  (matches elementary/DCT on a line, beats it on a sphere), the Chebyshev-filtered
+                                  partial eigensolver matching exact eigh at scale (sparse matvec, no O(n^3)),
+                                  and the Hodge decomposition of an edge flow (gradient + curl + harmonic)
+    test_holographic_topology.py  EXP-7: principled topology by persistent homology -- a point cloud's Betti
+                                  signature names line/ring (matching detect_topology) and torus (1,2,1) /
+                                  sphere (1,0,1) it cannot; GF(2) Betti agrees with the Hodge route
+    test_holographic_clifford.py  EXP-9: Cl(3,0) geometric algebra as a parallel binding mode -- rotors compose
+                                  3D rotations EXACTLY (~1e-15) and non-commutatively, the rotation-shaped win
+                                  the commutative convolution bind can't reach; 2^d growth is the kept negative
+    test_holographic_transport.py BLD-8: Wasserstein distance by Sinkhorn -- tracks how far distributions sit
+                                  apart even with no overlap (where Euclidean/cosine saturate); matches the 1-D
+                                  closed form; the eps knob (blur high / underflow) is the kept negative
+    test_holographic_flow.py      B6 + sweep: the Tero flow solver, and `tero_flux` exposing the converged edge
+                                  flux as a Hodge-decomposable flow -- gradient divergence == injected current,
+                                  harmonic dimension == B1 (loops), zero circulation on a tree (flow_circulation)
                                   (recover/refine/region) + splat_bundle/recall_region; and the honesty layer
                                   woven into recognition (calibrated recognize + classify/recall abstention,
                                   SPRT stream, FDR-controlled batch); coherence-gated maintenance
@@ -1515,6 +1800,12 @@ Tests (852 total):
                                   and to the image archive (`federated_archive`, K HolographicArchive
                                   shards with a directory -- capacity federates, recovery conserved)
     test_holographic_relations.py meaning as the recovered relationship: explain/name/map/chain
+    test_holographic_protocol.py  D1: protocol-as-data anti-pattern audit -- a protocol's step structure read
+                                  back from its program vector, flagging a SEARCH with no procedure-matched
+                                  NULL and a select-then-score with no out-of-sample SPLIT (the audit_procedure faculty)
+    test_holographic_knowledge.py D3: the findings registry -- a research log as a holographic knowledge
+                                  structure: structured claims recalled by (role-sensitive) similarity, and the
+                                  log's own contradictions detected, flat vs conditioned (the finding_registry faculty)
     test_creature_gauntlet.py     the maze gauntlet: gamified debugging, system lessons in mazes
     test_app_creature.py          the app's creature endpoint round-trip
 
@@ -1694,6 +1985,18 @@ A couple of measured wins that touch the whole stack, both behaviour-preserving:
   epsilon, since a matrix product and a per-element loop sum in a different order). The
   cache is keyed on a mutation counter so an in-place online update can never leave it
   stale.
+- **Vectorised FHRR cleanup.** `PhasorVocabulary.cleanup` over the full atom set is the same
+  loop-to-matvec win in the complex domain, found by the INV-5 profiling pass (INV-1's
+  cosine-grep had missed it, because the FHRR similarity is a *helper* call, not a literal
+  cosine). The FHRR similarity is the real part of the normalised complex inner product, and
+  `real(vdot(b, q)) == Re(b)·Re(q) + Im(b)·Im(q)`, so the whole atom set scores as **two real
+  matrix-vector products** — about **11× faster** at 2000 atoms (~19.6ms → ~1.8ms),
+  argmax-identical with similarities matching to ~1e-16. The honest subtlety kept on the
+  record: the *obvious* `np.real(B.conj() @ q)` is no faster than the loop, because `B.conj()`
+  allocates a full complex copy whose cost matches the matvec — the no-copy real-matvec form is
+  the actual win. Cached like the others, invalidated when a new atom is minted; the
+  candidate-subset path scores the same way without caching. (This is a value-cleanup path, not
+  the creature's tie-sensitive decision path, which the `bind_batch` lesson keeps hands off.)
 - **Half-size saves.** `holographic_core.save` stores float arrays as **float32** by
   default, roughly halving every saved mind (e.g. a small `SelfOrganizingMind` 126 KB →
   65 KB). These vectors are only ever compared by cosine, where float32 is far more
@@ -2241,6 +2544,10 @@ A couple of measured wins that touch the whole stack, both behaviour-preserving:
   structure the shadow cannot show (measured under a shift: rank 9 -> 13,
   danger 4% -> 100% visible). Compress when stable, grow at anomaly -- the
   flux-guard pattern's fourth appearance. Pinned in test_holographic_brain.py.
+- **`THEORY.md`** gathers the load-bearing claims in one place, each tagged *cited theorem* vs
+  *measured here* with a pointer to the test that backs it (a `test_theory_references.py` check keeps those
+  pointers live). It is the project's notion of rigor — cited where the math is known, measured where it is
+  not, and the kept negatives that bound every claim.
 - **`NOTES_concepts.md`** records natural-process analogies (double diffusion /
   salt fingering, surface tension, gravity lensing, flocking, prism/spectral
   decomposition, demoscene) considered as possible improvements, and what honest

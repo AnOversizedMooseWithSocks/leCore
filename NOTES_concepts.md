@@ -6468,3 +6468,647 @@ actionable nuances: prefer sparsemax when cleanup beta-sensitivity is a concern;
 spot is readout-dependent (softmax ~25, sparsemax ~8) and mildly load-dependent (lower at low D). No code
 change and no test-count change -- writing the measured non-finding down so the three derivation attempts are
 not re-run.
+
+## De-Doppler drift detection: a binding-is-a-shift, in radio astronomy (DDD, shipped)
+
+The detection cluster (Tarter, Siemion, Cranmer seats) had every primitive a turboSETI triage needs --
+streaming SPRT, FDR, calibrated nulls -- but no faculty that put them on the field's actual signal: a
+narrowband technosignature that DRIFTS in frequency (the Doppler shift from relative motion). The whole
+detector turned out to be two engine primitives reused, no new machinery:
+
+- A Doppler drift is a cyclic SHIFT of the spectrum over time, and a cyclic shift is the engine's `permute`
+  (np.roll) -- the SAME rigid-shift transform holographic_video.py uses for motion-compensated compression,
+  and equally a binding: bind(x, delta_k) == permute(x, k), exact to 1e-9. So "de-Doppler integration" -- the
+  matched filter that recovers a drifting signal a stationary detector loses -- is just permute-ing each frame
+  back by the drift before summing. The bank sweeps every candidate drift; the peak reports BOTH the signal and
+  its drift rate.
+- The look-elsewhere control over the (drift x channel) grid is `bh_fdr` (dependent / Benjamini-Yekutieli --
+  the drift cells overlap, so the tests ARE dependent), exactly as `scan` controls it across channels.
+
+MEASURED on synthetic spectrograms at the field's S/N>=10 regime:
+- Stationary integration LOSES a drifting signal (~2.9 sigma, noise level); de-drift at the right rate RECOVERS
+  it (~6.2 sigma). The de-drift via the bind kernel is bit-identical to np.roll (the shift-is-a-bind identity).
+- Look-elsewhere: naive per-cell thresholding fires on ~100% of pure-noise scans (1664 cells); bh_fdr on ~0%.
+- ROC: recall ~96% at 0% false-positive at integrated ~12 sigma (the field's <1%-FP-@-95% bar).
+- ON-OFF cadence: a STRONG stationary RFI (S/N 12) that WOULD be detected on its own is rejected ~100% (it
+  persists in the OFF pointing), while the drifting ON-only signal is kept ~94%.
+
+KEPT NEGATIVE: below ~10 sigma integrated, recall falls off -- the dependent-FDR correction over the many cells
+is conservative (a lone weak signal needs ~5 sigma to clear the multiple-testing bar). Not a flaw but a match:
+turboSETI's own search threshold is S/N>=10 precisely because it scans so many places. The detector is as honest
+about the cost of the bank as the field is. Structurally this is also the learn_dynamics move (a known operator
+advancing/reversing a state): de-Doppler integration == recall_at over the drift operator.
+
+Wired as `UnifiedMind.detect_drifting(waterfall, drifts=None, alpha=0.01, off=None)` beside the scan/stream
+detection faculties, delegating to holographic_dedoppler (dedoppler_bank + detect_drifting). Deterministic.
+Tests: +3 (852 -> 855), in test_holographic_dedoppler.py.
+
+## Above/below sweep after de-Doppler: pain-point hunt, one optimization shipped (sweep + DDD-opt)
+
+The discipline (Moose): after unblocking something, old negatives may be retired and new paths open; and sweep
+for places we are SLOW, skip compression, or do work we don't need. Findings, all measured:
+
+- **de-Doppler bank vectorization -- KEPT NEGATIVE.** Replacing the bank's per-(drift,frame) `permute` loop with
+  a fancy-index gather is FASTER for small inputs (6.7x at T=24,F=96) but SLOWER at scale (0.5x -- a regression --
+  at T=128,F=2048): np.roll's C implementation beats a fancy-index gather once arrays are large. The shipped loop
+  is the right choice. The genuine fast algorithm is the Taylor-tree / fast-folding de-Doppler (turboSETI's,
+  O(F log T)), a real algorithm not a quick vectorize -- noted as the scale path, not built.
+- **Codebase already well-vectorized.** A grep for per-item cosine/dot loops in hot paths found only ONE
+  (`holographic_archive.py` `tags_of`, on small tag lists -- not a pain point). The GEN-1 vectorized-recall sweep
+  did its job.
+- **SHIPPED FIX -- resonator confidence null keyed by SHAPE, not content.** A cProfile of a confidence workload
+  showed `_resonator_noise_null` dominating (12 of 13 s, 833k FFTs). The cache key hashed full codebook CONTENT,
+  forcing a multi-second cold fit for every new codebook set. Measured: across five random codebook contents of
+  one shape the p-value is IDENTICAL for every decision-relevant agreement (>=0.45 -- the regime where a
+  factorization is trustworthy); content only shifts the deep-abstain tail (agreement ~0.27, answer "abstain"
+  regardless). So the content hash was redundant work. Dropped it; the null is now keyed on shape
+  (B, L, codebook sizes, restarts, iters, readout, k). Result: three DIFFERENT codebook sets of one shape now
+  cost ONE cold fit (7828 ms) + two 13 ms cache hits, not three cold fits; one fit per shape for a whole run /
+  test suite. Calibration verified UNCHANGED (the corruption sweep p-values match the pre-change A2 result
+  exactly: p 0.010 while factors recover, rising to 0.57 as they fail). The resonator's FFT inner loop has a
+  further ~30-50% available by caching per-factor rffts across the leave-one-out binds, but that touches the
+  tie-sensitive per-block kernel (the bind_batch lesson) so it was NOT taken -- the cache-key fix is numerically
+  identical and safe.
+
+Tests: +1 (855 -> 856), in test_integration.py (test_resonator_null_keyed_by_shape_not_content).
+
+## Self-verifying storage: the holographic Merkle tree (BLD-1, shipped)
+
+The one genuinely new capability the cross-project comparison surfaced: tamper-evidence as an O(log n) property
+of the structure itself, with no prior engine analog -- and it rides entirely on the two kernel primitives, so
+it stays in-substrate. A segment tree whose COMBINE is bundle over POSITION-bound items: leaf_i = bind(pos_i,
+item_i); each internal node = sum of its children; root = the whole-store composite. DETECT by rebuilding the
+root from current items and comparing; LOCALISE by descending from the root, following the child whose composite
+no longer matches its committed value -- the changed item in <= log2(n)+1 comparisons (root check + descent
+depth), independent of n.
+
+Measured (the BLD-1 bar, deterministic): a single full tamper localised 40/40 in <= log2(64)+1 = 7 checks, 0
+false positives on clean data; a slot SWAP detected and localised (position binding defeats the bundle's
+commutativity -- without it a reorder is invisible).
+
+KEPT NEGATIVES (measured, load-bearing):
+1. LINEAR, NOT CRYPTOGRAPHIC -- the headline. The root is a linear combination, so items -> root is
+   R^(n*D) -> R^D, many-to-one for n>1: collisions EXIST and are CONSTRUCTIBLE. A key-aware adversary picks any
+   change da to item a, then changes item b by db = deconv(-bind(pos_a, da), pos_b) so bind(pos_b, db) exactly
+   cancels it -- the root is bit-for-bit unchanged (measured: cosine 1.0000, an invisible forgery). A
+   cryptographic Merkle tree resists this (a hash collision is hard; cancelling a linear sum is a division). So
+   the guarantee is evidence of ACCIDENTAL corruption / uncoordinated tampering, NOT tamper-proofing.
+2. SINGLE-TAMPER LOCALISATION -- the descent follows one differing child, so several uncoordinated changes are
+   detected at the root but only one path is returned per pass.
+3. O(n) SPACE -- localisation needs the per-node composites kept; a root-only commitment is O(1) but detect-only.
+
+A guess the plan got WRONG, kept on the record: quantising the stored checksums to save space was expected to
+create a small-tamper detection floor (the "keep leaves in capacity" worry that bounds superposition elsewhere).
+Measured, it does NOT bind here -- detection stays 100% down to 2-bit checksums even at n=1024, because in high
+dimension a tamper always pushes some component across a quantiser boundary. So the checksums are kept exact
+float and the quant option is not exposed.
+
+Tests: +5 (856 -> 861), in test_holographic_verify.py (selftest wrapper + single-tamper localise-in-log-checks +
+position-binding-catches-reorder + the linear-collision kept negative + the verify_store faculty round-trip).
+
+## External-baseline benchmark harness (BLD-2, shipped)
+
+The field's most convincing habit -- "N times the standard tool for a real job" -- adopted with the project's
+discipline: the case where the standard tool WINS stays on the record. INV-2 first audited which baselines are
+even reachable in NumPy/Flask-only (sklearn/faiss/statsmodels are banned): general-purpose compression has a
+fair stdlib opponent (zlib/lzma), exact NN is a fair opponent for sublinear recall; denoising/forecasting/
+classification have no fair in-constraints standard tool, so they are NOT benchmarked rather than measured
+against a strawman.
+
+Two runnable, deterministic comparisons in benchmarks/ (numbers checked into benchmarks/README.md):
+
+bench_compression.py -- the geometry-preserving rd code (quant='rd': KLT + water-filling + rANS) vs int8 fed to
+zlib/lzma, at matched cosine fidelity. MEASURED (bits/vector): on rank-8 structured data rd wins ~34x at N=2000
+(111 vs ~3800; the KLT basis amortizes over the batch, so the win grows with N); on FULL-RANK RANDOM data rd
+LOSES (6851 vs 3826 at N=2000) -- no low-rank to exploit, the basis costs more than it saves. The kept negative:
+rd is the right tool exactly when the data is low-rank, which the engine's stored states are and random vectors
+are not.
+
+bench_recall.py -- the HoloForest (sublinear approximate NN) vs an exact items@query scan. MEASURED: the forest
+matches exact recall@1 up to ~10k items and touches a shrinking fraction of the comparisons (467/826/952/616 =
+93%/41%/11%/3% as N goes 500->20000); recall@1 holds 100% to 8k, 97% at 20k. The kept negative: on WALL-TIME the
+exact scan is one BLAS matvec, so fast that the forest's pure-Python traversal only overtakes it past ~20k items.
+The forest buys sublinear WORK (what matters when comparisons are expensive or N is large), not raw wall-clock at
+small N against a tight BLAS loop.
+
+Tests: +3 (861 -> 864), in test_benchmarks.py (rd-wins-on-structure-loses-on-random + reproducibility +
+forest-sublinear-and-near-exact).
+
+## INV-5: unblockable-negative profiling pass (shipped)
+
+The discipline: unblocking something (denoising, learned energy, SBC, the rd-code, the vectorized-recall
+pattern) can retire an old negative -- old results may no longer hold -- so re-profile the heavy non-confidence
+workloads and re-scan for missed loops. cProfile + a STATIC scan for the loops INV-1's cosine-grep could not
+see: loops that call a similarity HELPER rather than a literal cosine / @ / np.dot.
+
+Found ONE real win, on the record as a table:
+- FHRR PhasorVocabulary.cleanup -- a per-candidate `for nm in names: fhrr_sim(noisy, self.vectors[nm])`. INV-1
+  missed it precisely because fhrr_sim is a helper, not a literal cosine. VECTORIZED to two REAL matvecs
+  (real(vdot(b,q)) == Re(b).Re(q) + Im(b).Im(q)) with the stacked real/imag matrices cached -- ~11x at k=2000
+  (19.6 -> 1.8 ms), argmax-identical, sims matching to ~1e-16. The honest subtlety: the OBVIOUS vectorization
+  `np.real(B.conj() @ q)` is NO faster than the loop, because B.conj() allocates a full complex copy whose cost
+  matches the matvec -- the real-matvec-no-copy form is the actual win. SHIPPED.
+- archive recall_by_tags -- its for-loops are TAG set-logic (words/nums), not similarity-over-N; not a target.
+- Lexicon.nearest -- already vectorized in the prior above/below sweep; the residual loops format the top-k.
+- creature decide -- has per-action loops, but it is the TIE-SENSITIVE maze path the bind_batch lesson keeps
+  hands off (a 1e-12-identical change once flipped a trajectory). NOT touched, by policy.
+- recurrent/_next_dist, schema/_ppm_dist -- small-alphabet n-gram/PPM distributions, not similarity-over-N.
+
+So the pass confirms the engine is otherwise well-vectorized (reinforcing INV-1 and OOS-1): one genuine missed
+loop, fixed; everything else either already done, not a similarity loop, or deliberately tie-protected.
+
+Tests: +1 (864 -> 865), in test_holographic_fhrr.py (vectorized cleanup matches a brute-force loop on both the
+all-atoms and the subset paths, and the cache invalidates when a new atom is minted).
+
+## BLD-3: theory-and-guarantees document (shipped)
+
+The project's notion of rigor, finally consolidated. THEORY.md gathers the load-bearing claims into one place
+and tags each by what backs it: [CITED] for a literature theorem (Plate HRR capacity, Smolensky tensor binding,
+Ramsauer/Krotov modern Hopfield, Wald SPRT, Benjamini-Hochberg/Yekutieli FDR, Tero flow, Duda ANS, Dasgupta
+RP-trees), [MEASURED] for a result proven here with a named test pointer, [KEPT NEGATIVE] for a measured limit.
+The rule: no claim appears without either a citation or a test. Sections -- the algebra (the
+bind=convolution=phase=tensor identity), capacity (the cliff + the modern-Hopfield superset + FHRR), geometry &
+compression (consolidation/KLT + rd vs zlib), search (RP-forest + Tero), detection & honesty (RecallNull + SPRT
++ FDR), self-verifying storage (the linear-collision negative), determinism (the bit-exact tie-break
+discipline), and a table of the standing kept-negatives.
+
+A test (test_theory_references.py) parses THEORY.md and asserts every `test_file.py::test_function` it cites
+resolves to a real function -- so the document is SELF-BACKING and cannot rot into asserting a test that no
+longer exists. This is the doc's own guarantee, in the engine's measure-don't-assert spirit.
+
+Tests: +1 (865 -> 866), in test_theory_references.py.
+
+## BLD-4 & BLD-5 (de-Doppler scale/precision): prototyped/reasoned, NOT wired -- kept so they aren't re-tried
+
+Both were the conditional ("only if scale/precision matters") tail of the BLD list. Resolved honestly rather
+than built speculatively:
+
+BLD-5 -- sub-bin de-drift via a fractional (Fourier phase-ramp) shift instead of the bank's integer-bin
+`permute(wf[t], -int(round(d*t)))`. PROTOTYPED and MEASURED. First, a real bug to note: the 2-D `fourier_shift`
+is NOT 1-D-safe -- on a 1-D frame its `reshape([F,1])` broadcasts `(F,)*(F,1)` into an `(F,F)` array (it
+silently produced a spurious 50-sigma peak until a correct 1-D phase-ramp shift was used). With the correct 1-D
+shift: a MODEST peak-SNR gain on sub-bin drifts, largest at half-integer rates where integer rounding is worst
+(+0.7 sigma at drift 0.5; marginal at 0.3; tied on integer drifts). CRUCIALLY, NO drift-rate-resolution benefit:
+on a fine (0.05) drift grid the INTEGER bank already recovers sub-bin drifts (0.25/0.5/0.75) with ZERO error --
+the matched-filter peak lands on the true drift regardless of the per-frame rounding. So the item fails its own
+bar ("strictly better drift-rate recovery"): a fraction-of-a-sigma SNR gain, no resolution gain, an FFT-per-frame
+cost. Does NOT earn its place; the integer de-drift stays. Kept negative.
+
+BLD-4 -- Taylor-tree / fast-folding de-Doppler (O(F log T) vs the bank's O(F*T*n_drift)). PARKED, on the same
+discipline as OOS-1 (the native-kernel rejection): a SCALE-ONLY optimization with no demonstrated current
+bottleneck (the bank runs fine at the verified spectrogram sizes), and the tree's bit-identity is non-trivial
+for the FRACTIONAL drift grid the bank searches (the classic Taylor tree computes integer-slope sums). The right
+trigger is a real SETI-scale search that profiling shows the loop cannot clear -- with numbers in hand, not
+before. The Taylor-tree is the known approach when that day comes.
+
+## BLD-7: N-dimensional fractional power encoding + compute-on-functions (shipped)
+
+The backlog framed FPE as a thing to BUILD to beat the "locality-preserving RBF approximation." Measurement
+flipped the premise: the 1-D ScalarEncoder is ALREADY a fractional power encoder. encode(x) =
+irfft(exp(i*scale*x*phases)) is literally "raise the base to power x"; its kernel_at is the Bochner kernel
+(sinc/rbf); and because the engine's bind is circular convolution -- spectrum multiply = phase add --
+bind(encode(x), encode(s)) == encode(x+s) to numerical exactness (cosine 1.00000). So 1-D FPE, with
+shift-as-bind and a designed kernel, has been here all along; "beat the RBF encoder" is moot because it IS the
+FPE/RBF encoder. (Pinned in test_holographic_fpe.py::test_scalar_encoder_is_already_fpe_shift_as_bind_and_kernel.)
+
+The genuine addition (holographic_fpe.py, faculty m.vector_function_encoder) is the step up from a scalar to a
+VECTOR domain and to FUNCTIONS, which the engine did not have:
+  * N-D encoding -- a point in R^n is encoded by binding one per-axis 1-D FPE per coordinate. A shift along any
+    axis is still ONE binding (2-D shift-as-bind cosine 1.00000), and the kernel is the PRODUCT of the per-axis
+    kernels (measured 0.920 vs the 0.914 product at a 2-D offset) -- an n-D RBF for rbf axes.
+  * Compute on functions -- f: R^n -> R as a weighted superposition of encoded points, f = sum_i w_i encode(p_i);
+    querying reads sum_i w_i kernel(q, p_i) (a holographic KDE: high at placed points 0.81/0.69/0.78, low at an
+    empty spot 0.06); and the WHOLE function translates by ONE binding, bind(f, encode(delta)) = sum_i w_i
+    encode(p_i + delta) -- the rigid-shift-is-a-bind trick the motion compensator uses, lifted to a function.
+
+KEPT NEGATIVES (measured in the selftest): the standing capacity cliff applies -- a function is a bundle, so
+query separation (placed vs empty) decays as atoms pile up (+0.39 at K=2 -> +0.01 at K=128); and where a scalar
+suffices the n-D machinery buys nothing, since 1-D FPE IS the ScalarEncoder. Reuses the verified ScalarEncoder
+per axis (DRY) and the engine's bind/cosine -- no new dependency, nothing learned.
+
+Tests: +9 (866 -> 875), 8 in test_holographic_fpe.py + 1 faculty test in test_integration.py.
+
+## EXP-5 + EXP-6: the spectral structure kernel + the Laplacian eigenbasis basis-selector (shipped)
+
+One operator, two readings. holographic_spectral.py builds the graph and Hodge Laplacians from a point cloud or
+a simplicial complex and exposes their eigendecomposition (C2: eigenvector signs fixed -- largest-magnitude
+component positive -- so the basis is reproducible, the bind_batch tie-break class of bug).
+
+EXP-5 (the operator + its sanity): the cycle-graph Laplacian eigenbasis IS the DFT (eigenvalues 4 sin^2(pi
+k/n)); a ring signal reconstructs from it to 1e-15. And the Hodge Laplacian's HARMONIC dimension equals the
+Betti numbers -- 4-cycle (1,1), filled triangle (1,0), two components (2,0) -- the spectral route to topology
+EXP-7 will use.
+
+EXP-6 (the basis-selector, generalising decompose_signal's hand-picked list): the path-graph Laplacian
+eigenbasis IS the DCT/elementary basis (line denoise 1.134 == DCT 1.134, identical to 1e-6), and the cycle's IS
+the harmonic basis -- so the Laplacian eigenbasis SUBSUMES the line->elementary / ring->harmonic special cases.
+And it extends to manifolds the topology detector can only call "line": on a sphere, the kNN-Laplacian low
+eigenvectors recover a smooth degree-2 field (denoise 1.925 from a noisy 6.112) where the line/index-order basis
+barely helps (5.235). The data-driven basis is measurably right where the hand-picked fallback is not. Faculty
+m.spectral_basis(points, k, n_basis) -> a SpectralBasis with decompose/reconstruct/denoise.
+
+KEPT NEGATIVES (C1/C2, on the record in the module): dense eigh -> moderate N (a huge sparse graph would need
+scipy, a banned dependency); and where the manifold genuinely IS a simple line or ring, the hand-picked basis is
+cheaper and exact -- the data-driven basis earns its place only where the topology is unknown or off the
+hand-coded list. Only NumPy; nothing learned.
+
+Tests: +8 (875 -> 883), 7 in test_holographic_spectral.py + 1 faculty test in test_integration.py.
+
+## EXP-7: principled topology by persistent homology (shipped)
+
+detect_topology names a 1-D signal's shape from a hand-coded menu (line/ring/mobius/torus via harmonic fits).
+EXP-7 (holographic_topology.py, faculty manifold_topology) reads topology straight off a point cloud: build a
+Vietoris-Rips complex at scale eps, count holes by dimension (Betti numbers B0/B1/B2 = components/loops/voids
+via B_k = n_k - rank(d_k) - rank(d_{k+1})), and keep the signature that PERSISTS across a scale band auto-set
+from the cloud's median NN distance. Reproduces detect_topology on its cases (contractible -> (1,0,0) "line",
+loop -> (1,1,0) "ring") and extends to ones it can't name: torus (1,2,1) and sphere (1,0,1). B1 orders
+line(0)<circle(1)<torus(2); B2 is what tells a sphere (1) from a line (0), both B1=0.
+
+THE FIX THAT MADE IT WORK: the first cut computed Betti via dense real np.linalg.matrix_rank and TIMED OUT on
+the torus (the d3 rank on a VR complex is too big for an O(n^3) SVD). Reducing the boundary matrices over GF(2)
+-- columns as integer bitmasks, XOR twist reduction (the standard PH approach) -- is exact and drops the torus
+from a timeout to ~0.5s. It is Z/2 homology (= integer homology absent 2-torsion, which none of these shapes
+has), and it AGREES with EXP-5's Hodge-Laplacian harmonic-dimension Betti route on every fixed complex (pinned
+in the selftest -- two operators, one answer).
+
+KEPT NEGATIVES (measured): PH is finicky on small/noisy/UNEVENLY sampled clouds -- a sine's delay embedding
+(dense at turning points, sparse between) fragments at the median scale (reads (32,0,0), not a ring), so this
+reads a WELL-SAMPLED manifold's topology, not an arbitrary trajectory; the delay-embedding bridge to
+detect_topology's 1-D signals needs even resampling first. It is BLIND to non-topological geometry by design
+(a circle and an ellipse are both (1,1,0)) -- pair it with EXP-6 geometry. And cost grows fast with the
+complex, so the cloud is subsampled to max_points and dense reduction bounds it to moderate N (C1).
+
+Tests: +9 (883 -> 892), 8 in test_holographic_topology.py + 1 faculty test in test_integration.py.
+
+## EXP-8: the Helmholtz-Hodge decomposition of an edge flow (shipped)
+
+The same boundary operators that count holes (EXP-5/7) take an edge flow APART. Added to holographic_spectral.py
+(hodge_decomposition, denoise_flow; faculties on UnifiedMind). Any flow on a graph splits into three L2-ORTHOGONAL
+parts: flow = gradient + curl + harmonic.
+  * GRADIENT = d1^T phi -- curl-free transport from a vertex potential (the source-to-sink part).
+  * CURL     = d2 psi   -- divergence-free circulation around the filled triangles (local rotation).
+  * HARMONIC = remainder -- both div-free AND curl-free: the GLOBAL circulation wrapping the holes. Its dimension
+    is exactly B1, so the harmonic part IS the flow's topology (meets EXP-7 on one complex).
+Computed by least-squares solves of the graph Laplacian (for phi) and the triangle Laplacian (for psi); the
+harmonic part is what neither explains.
+
+MEASURED: the split sums to the flow at 1e-16 and the parts are orthogonal to 1e-15; the harmonic part of a
+random flow is div-free and curl-free to 1e-15; denoising a transport flow (drop curl) returns 1.088 from a noisy
+1.915 and well past naive edge-smoothing's 3.592 (which over-smooths). KEPT NEGATIVE: on a TREE (no cycles, no
+triangles) curl and harmonic are exactly zero -- nothing to circulate -- so all flow is gradient; this falls
+straight out of the topology (B1=0, no triangles). For the Tero flow solver and graph-signal denoising.
+
+Tests: +5 (892 -> 897), 4 in test_holographic_spectral.py + 1 faculty test in test_integration.py.
+
+## EXP-9: Clifford Cl(3,0) geometric algebra as a parallel binding mode (shipped)
+
+A second way to bind, alongside circular-convolution bind -- the geometric product of Cl(3,0) (8-dim
+multivectors, holographic_clifford.py, faculty m.clifford()). Like tensor_bind, NOT a drop-in: a parallel mode
+whose seat is GEOMETRIC structure, specifically 3D rotations. The product is built from the blade Cayley table
+(blades as bitmasks over {e1,e2,e3}; product = XOR of masks + a reordering sign; e_i^2=+1).
+
+THE WIN IT IS BUILT FOR (measured): a rotor R = cos(t/2) - sin(t/2) B rotates a vector by the sandwich v' =
+R v R~. Composing rotations is EXACT -- the geometric product of two rotors IS the rotor of the composed
+rotation (max err ~1e-15 over 200 random pairs vs applying them in sequence) -- and NON-COMMUTATIVE (the two
+orders of a pair land ~0.66 apart on a probe vector). HRR's circular convolution is COMMUTATIVE, so it returns
+one answer for both orders and carries that whole order-gap as unavoidable error; that gap, which convolution
+provably cannot close, is the concrete sense in which Clifford beats it on rotations. Rotors are length-
+preserving and exactly invertible by their reverse (~1e-15).
+
+KEPT NEGATIVES (measured / on the record): 2^d DIMENSION GROWTH -- Cl(n,0) needs 2^n components (Cl(3,0)=8,
+Cl(10,0)=1024), affordable only for low-dim geometric domains, not a general high-D substrate (HRR's fixed-D
+FFT bind is the right tool there). And it binds VERSORS, not arbitrary atoms -- a unit rotor times its reverse
+is the identity (clean unbind), but a random multivector times its reverse is NOT, so this is a geometric-
+transform algebra, not a general key->value memory like HRR. Narrow win-condition: a parallel tool for the
+rotation-shaped corner, like tensor_bind is for the capacity corner.
+
+Tests: +9 (897 -> 906), 8 in test_holographic_clifford.py + 1 faculty test in test_integration.py.
+
+## BLD-8: optimal transport by Sinkhorn (shipped)
+
+A transport-geometry distance between distributions, for the case bin-wise metrics get wrong. Euclidean/cosine
+compare two distributions height-by-height and are blind to WHERE the mass sits: two histograms with no overlap
+are maximally far no matter how far apart they actually are (a peak at bin 12 reads as distant from bin 10 as a
+peak at bin 40 does). The Wasserstein (earth-mover's) distance measures the least work to MOVE one onto the
+other -- mass times the ground distance it travels -- so it keeps growing as distributions move apart even with
+no shared support. holographic_transport.py (faculty m.wasserstein(a, b, cost, eps)) computes it by the Sinkhorn
+algorithm: add an entropy term -> a Gibbs kernel K = exp(-C/eps) and a pair of alternating diagonal rescalings
+(u <- a/(Kv), v <- b/(K^T u)) converging to the transport plan P; the distance is <P, C>.
+
+MEASURED: matches the 1-D closed form W1 = sum |CDF_a - CDF_b| to ~1e-3 (W=10.000 on a shift-10 pair). The win:
+a shift of 5/10/20 reads as a distance of 5/10/20, while Euclidean saturates flat at ~0.53 for every
+non-overlapping shift and cosine collapses to ~0 -- both unable to tell a near miss from a far one. A custom
+cost matrix changes the geometry (a ring/cyclic cost lets mass wrap around, shrinking the distance).
+
+KEPT NEGATIVES (measured): THE EPS KNOB -- too LARGE blurs the plan toward the independent coupling and inflates
+the distance (a same-mean narrow-vs-wide pair with true W1~3.6 reads ~4.9 at eps=50); too SMALL underflows the
+kernel between separated supports (exp(-C/eps) rounds to 0) into a broken answer (eps=0.01 on a shift-10 pair
+returns 3.4 instead of 10). The default RULE scales eps to the cost (0.02 * median nonzero cost), sharp without
+underflowing for well-conditioned cost matrices; a wide cost range wants an explicit eps or a log-domain solver
+(out of scope). Also O(n*m) per iteration (dense kernel + matvecs). And the entropic self-distance W_eps(a,a) is
+a small positive bias, not exactly 0 (debias via the Sinkhorn divergence if an exact zero is needed) -- here
+self << cross is what matters.
+
+Tests: +9 (906 -> 915), 8 in test_holographic_transport.py + 1 faculty test in test_integration.py.
+
+## Above/below sweep: the Tero flow solver wired to the Hodge decomposition (shipped)
+
+A sweep of the three new geometry kernels (spectral / topology / transport) for where they belong lower or
+apply elsewhere. The genuine, load-bearing finding: the Tero flow-conductance solver (holographic_flow.py)
+computes a Poiseuille flux Q_uv = D_uv(p_u - p_v) on every edge each step, uses it to thicken tubes, and
+DISCARDS it once it has the path. That flux is exactly the edge flow EXP-8's Helmholtz-Hodge decomposition
+takes apart.
+
+WIRED: `tero_flux(nbr, start, goal)` exposes the converged signed flux (refactored to share a `_tero_converge`
+helper with tero_solve, bit-identical -- flow tests still green). Faculty `flow_circulation(nbr, start, goal)`
+splits it: GRADIENT = net source->goal transport (its divergence is the injected current, max 1.000 = I0),
+HARMONIC = circulation around the graph's loops (dimension = B1, the loop count EXP-5/7 already measure). A maze
+graph has no filled triangles -> no curl. Returns {loops (B1), redundancy (harmonic energy fraction),
+transport_energy, circulation_energy, flux, edges, n_vertices}.
+
+MEASURED: on a 4x4 grid, B1=9 = E-V+1, gradient divergence exactly I0 at source/goal (0 elsewhere), harmonic
+subspace dim == B1. The harmonic FRACTION is a previously-hidden read on the flow -- how much of the converged
+flux circulates rather than transports: EXACTLY 0 on a tree (forced route), and on a loopy grid it varies with
+mu (5x5 grid: 0.73 at mu=4 down to 0 at mu=1 -- at high mu, competing thick tubes leave more circulating flux).
+This connects three kernels: the flow solver + EXP-8 (Hodge) + EXP-7/5 (B1 topology).
+
+A RESTRAINT kept on the record (also a sweep outcome): the flow solver builds its OWN conductance-weighted
+Laplacian, deliberately NOT rerouted through the shared graph_laplacian -- the dynamics is tie-sensitive and a
+different summation order could flip a trajectory (the bind_batch lesson). The shared HELPER was extracted
+inside the module; the shared KERNEL was left alone. Not everything that looks duplicated should be merged.
+Two other candidates were audited and rejected as forced: decompose_signal (1-D symbolic regression, not a
+point-cloud basis projection) and Wasserstein-into-the-honesty-layer (the score distributions are already
+characterized by their thresholds/likelihood ratios).
+
+Tests: +6 (915 -> 921), 5 in test_holographic_flow.py + 1 faculty test in test_integration.py.
+
+## Above/below sweep of the geometry toolkit: spectral denoise wired, transport/topology kept standalone (shipped)
+
+After the geometry toolkit (BLD-7, EXP-5/6/7/8/9, BLD-8) the standing above/below discipline was run over the
+three new kernels (spectral / topology / transport), grounded in a live-code audit. The honest result: most
+connections were ALREADY in place, and exactly one genuine gap was found and wired.
+
+ALREADY WIRED (confirmed, not re-done): the Tero flow solver -> Hodge split (transport vs circulation,
+flow_circulation faculty) was already built; the spectral and GF(2) boundary-operator routes corroborate (the
+selftest pins their Betti agreement) rather than duplicate; the flow solver's conductance-weighted Laplacian is
+deliberately NOT routed through the shared graph_laplacian (tie-sensitive dynamics, the bind_batch lesson).
+
+THE ONE GENUINE WIRING -- denoise(method='spectral', points=...): the unified denoise faculty could map a LINEAR
+subspace (manifold/adaptive, which need an example set) but had no map for a CURVED manifold's geometry, and none
+of its methods could clean a lone scalar field on a point cloud. The EXP-5/6 graph-Laplacian eigenbasis is exactly
+that map. New signature params: points=<(N,d) coordinates>, spectral_k=10, spectral_nbasis=12; x is the field over
+those N points. MEASURED on a smooth field over a 2-sphere: cleans error 4.078 -> 0.862, where the geometry-blind
+options barely move it (trajectory/SSA 3.113, fixed DCT low-pass 4.182) -- a linear/1-D prior cannot see a curved
+manifold's smoothness. It is the only denoiser in the faculty needing no example set and no codebook, just the
+cloud's own geometry (the nonlinear-manifold completion of Milanfar's "denoiser = manifold map" framing).
+
+KEPT STANDALONE (a finding, not a failure): Wasserstein found NO existing bin-wise distribution comparison to
+improve -- the market compares price WINDOWS by cosine and forecasts by proper score, the de-Doppler search uses
+the field-standard permute+matched-filter bank; persistent homology is blocked from the 1-D detect_topology by
+its delay-embedding uneven-sampling negative. Forcing either would be churn.
+
+Tests: +1 (921 -> 922), test_spectral_denoise_faculty in test_integration.py.
+
+## Self-hosting: PnP restoration and B10 generation moved into VSA programs (shipped)
+
+Following the self-hosting audit (which mapped the boundary: a Python procedure is movable into a VSA program
+iff it is ORCHESTRATION whose every step is a hypervector->hypervector map and whose state is one accumulator),
+two of the engine's remaining canonical iterate-to-fixed-point loops were re-expressed as programs running on
+the HoloMachine -- joining PIPE-1 (the data-analysis pipeline) and the matmul-iterate (a recurrent linear map)
+that were already there. Neither replaces its fast Python faculty; each adds the BEING-DATA form (a stored,
+composable, recipe-savable procedure -- process, not object).
+
+RESTORE -- Plug-and-Play/RED as a program: ITERATE [APPLY datafit; APPLY denoise]. `restore_procedure(y,
+forward, adjoint, samples, mu)` fits a manifold prior from `samples`, configures the inverse problem
+(`set_inverse_problem`), and runs the two-step body to a fixed point. The `datafit` handler is the gradient
+step ACC <- ACC - mu*adjoint(forward(ACC)-y); the `denoise` handler is the prior. MEASURED: on a half-masked
+low-rank signal (raw rel-error 0.863) it recovers to rel-error 0.167 -- the SAME error-to-truth as the Python
+`pnp_restore` -- converging in 6 ITERATE iterations where the Python loop runs a fixed 40.
+
+GENERATE -- B10 diffusion as a program: ITERATE [APPLY diffuse] from a noise seed. `generate_procedure(codebook,
+steps, seed)` configures a self-cooling `diffuse` handler (`set_generator`) that anneals beta up and injected
+noise down per call; ITERATE halts when the sharpened cleanup reaches a fixed point on the manifold. MEASURED:
+lands on the codebook manifold at cosine 1.000 (the same sample `hopfield.generate` produces), in 13 iterations
+(the 12-step schedule + the convergence check). The generative PROCESS is now a stored, composable procedure.
+
+The schedule wrinkle is the one non-obvious bit: `generate` is a SCHEDULED loop (beta/noise change per step),
+which a bare ITERATE (same body each step) cannot express -- so the schedule lives in the stateful `diffuse`
+handler (it carries the step counter and advances), and ITERATE's fixed-point stop naturally coincides with the
+cooled, sharpened cleanup converging. PnP needs no such trick: it is a TRUE fixed-point iterate (same
+datafit+denoise body each step), the cleanest ITERATE fit.
+
+KEPT NEGATIVES: (1) the PROCEDURE TAX -- a noisy unbind-and-clean per instruction read makes the program form
+slower than the direct Python loop; this is the price of being data, not a faster path. (2) the numerics never
+leave NumPy -- datafit/denoise/diffuse are NumPy faculties behind APPLY; the FFT bind / SVD / Sinkhorn cannot
+themselves become programs (they ARE the substrate -- circular). (3) B10's own negative travels: a BARE codebook
+generation converges to a stored atom; feed a composed/continuous manifold for novel-but-valid samples. (4) the
+capacity cliff still bounds program length (~32 instr at dim 1024, ~128 at 4096) -- these procedures are short
+(1-2 body instructions under an ITERATE), well inside it.
+
+Tests: +2 (922 -> 924), test_restore_procedure_pnp_as_program + test_generate_procedure_diffusion_as_program in
+test_integration.py.
+
+## Persistent topology: simplex budget + reused distance matrix (deployable speed) (shipped)
+
+Deployment feedback: persistent_topology was too slow for a rolling study (~4s/call on the user's windows, and
+~32s on a 250-point cloud here). The cost was twofold: (1) the pairwise distance matrix was REBUILT at every one
+of the 7 band scales (and again in _median_nn) -- 8x redundant; (2) on a DENSE cloud with no clean low-dim
+topology (a market delay embedding is the canonical case), the VR complex EXPLODES at the wider scales -- ~120k
+tetrahedra at the top of the band on a 250-point blob -- and the GF(2) reduction over them dominates.
+
+THE FIX (no accuracy change on the legitimate use case): the distance matrix is computed ONCE and threaded
+through (`_median_nn`, `betti_at_scale`, `_build_complex` all take an optional precomputed D), and a SIMPLEX
+BUDGET caps the triangle/tetrahedron enumeration (`tri_budget`/`tet_budget`, default 15000). A well-sampled
+low-dim manifold's complex is sparse and never approaches the budget (a 250-point sphere peaks at ~6k tris /
+~10k tets); a blob hits it at the wide scales. Hitting the budget IS the signal the cloud is not a clean
+manifold there: that scale returns B1/B2 as None (unreliable) and is skipped, `histogram['dense_scales']` reports
+how many band scales exploded, and if EVERY scale is too dense the result is said plainly as "dense (no clean
+topology)" rather than a misleading Betti number.
+
+MEASURED: a 250-point Gaussian blob went 32.5s -> 0.39s (83x), with `dense_scales: 3` flagging that 3 of 7 band
+scales were too dense to read. The four manifolds still classify correctly (line/circle ~0s, torus 0.16s,
+sphere 0.17s) and the sine-embedding kept-negative still holds (it does NOT read as a clean ring).
+
+HONEST SCOPE (unchanged by this fix -- a speed/honesty fix, not a capability claim): persistent homology still
+tracks the shape of a FIXED point cloud, not the dynamics of a 1-D signal -- on a market delay embedding its
+B0 counts shadow volatility (point spread), which is why a sine fragments rather than reading as a loop. The
+budget makes it FAST and makes it SAY when the cloud is a blob; it does not make it the right tool for 1-D
+time-series regime detection. That remains a kept negative.
+
+Tests: +2 (924 -> 926), test_dense_cloud_is_capped_and_flagged + test_budget_does_not_change_clean_manifolds in
+test_holographic_topology.py.
+
+## Fast topology promoted to a gate; SpectralBasis scaled with a Chebyshev partial eigensolver (shipped)
+
+Two things off the back of the persistent-homology speedup (83x, prior section). A performance audit profiled the
+remaining faculties at REALISTIC sizes (not test sizes -- small inputs hide scale-dependent cost): Wasserstein/
+Sinkhorn early-stops and returns small histograms; the de-Doppler bank, Kuramoto sync, creature, and the learning
+modules are all bounded or cached. Persistent topology was the lone heavy outlier (a unique combo of redundant
+recompute + combinatorial explosion), and it was already fixed. The one latent O(n^3) left was SpectralBasis's
+eigh. So: a dividend from the topology fix, and the eigh.
+
+THE GATE (the dividend). Now that naming a cloud's topology is sub-second even on a structureless blob,
+persistent homology becomes a first-class GATE. `is_manifold(points)` runs `manifold_topology` and returns
+{is_manifold, topology, betti, dense_scales}; is_manifold is True iff the cloud is ONE connected piece (B0 == 1)
+and at most `max_dense_scales` band scales were too dense to read. It earns its keep on the spectral denoiser,
+whose premise is a smooth field on a CONNECTED manifold -- exactly what the gate checks. `denoise(method=
+'spectral', check_manifold=True)` runs the gate first and raises on a non-manifold (with an escape hatch:
+check_manifold=False) rather than silently returning graph low-pass. MEASURED: the spectral map cleans a 2-sphere
+field 3.74 -> 1.08, but on a random 4-D blob it barely moves (4.37 -> 4.20) -- the gate names which case you are
+in for free. Default off keeps the path overhead-free and backward-compatible.
+
+THE EIGENSOLVER (the hard half) -- and the KEPT NEGATIVES of FOUR failed approaches before the one that works.
+SpectralBasis built its modes with np.linalg.eigh: ALL n eigenvectors at O(n^3) to keep the lowest ~12. Fine to
+~1500 points (0.6s), painful at 3000 (4.4s), worse at 5000 (22s). A partial solver should compute only the
+smooth modes. The honest difficulty is DEGENERACY: a 2-sphere's Laplacian carries 2l+1 modes at each eigenvalue
+(cumulative block boundaries are perfect squares 1,4,9,16,25), so a COUNT cutoff like n_basis=12 lands INSIDE a
+degenerate block (l=3 spans modes 10-16) and the smooth subspace at that cutoff is itself ambiguous. Measured
+failures, kept on record:
+  * Shifted Lanczos (M = sigma*I - L, top-k Ritz): the wanted modes cluster near sigma at the top of the shift;
+    single-vector Lanczos converges to the WRONG subspace (projector diff ~4, denoise 8.0 vs eigh 1.2). 14-28x
+    speed but useless.
+  * Block subspace iteration on the same shift: the smooth modes compress to a tiny relative spread near sigma
+    (convergence ratio ~1), so it never converges (projector diff ~2-3.5, denoise 8.5-15.8).
+  * Unshifted Lanczos on L, smallest-k Ritz: works at n=400 (0.92 == 0.92) but DEGRADES with n (n=1500: 2.48 vs
+    1.37) -- single-vector Lanczos cannot capture a degenerate subspace, and the degeneracy worsens the larger
+    the cloud.
+  * Graph-Tikhonov low-pass x = (I + gamma*L)^-1 fn via CG (NO eigendecomposition): robust and fast (0.002-0.17s)
+    but a SOFT filter ATTENUATES the signal modes along with the noise (best 3.2 vs eigh 1.2). The field z^2-0.5x
+    lives in l<=2; a gentle filter that suppresses l>=3 also suppresses l<=2, so it cannot match a hard k-mode
+    cutoff. Fundamentally not a substitute -- a kept negative about soft vs hard spectral filtering.
+  * Nystrom (landmark eigh + kNN extension): preserves the hard cutoff on the subsample but the extension error
+    GROWS with n (1.67 at 800 -> 3.62 at 3000), i.e. it degrades exactly where eigh is too slow to use. Useless.
+
+THE METHOD THAT WORKS: Chebyshev-filtered subspace iteration (ChebFSI) -- what real sparse eigensolvers use. A
+degree-d Chebyshev polynomial of [lambda_cut, lambda_max] stays bounded on that interval and grows fast BELOW
+lambda_cut, so it AMPLIFIES the wanted low-eigenvalue subspace by orders of magnitude; a block subspace
+iteration then converges THROUGH the degeneracy (the block captures degenerate modes; the filter gives a real
+gap). lambda_cut is estimated by a few cheap Lanczos steps (eigenvalue ESTIMATES at the extreme converge even
+when the VECTORS do not under degeneracy). The decisive piece is the SPARSE matvec: the kNN Laplacian has ~k
+nonzeros per row, so v -> Lv is O(n*k) (verified byte-identical to the dense knn_laplacian, max diff 2e-14),
+never forming the n x n matrix. Dense-matvec ChebFSI matched eigh EXACTLY (projector diff 0.00) but was barely
+faster (the dense matvec is the bottleneck); the sparse matvec is what turns it into a real speedup.
+
+MEASURED (tuned oversample=14, outer=6, deg=24): projector diff to the exact eigh is 0.000 at n=1800, 0.013 at
+3000, 0.310 at 4500 (denoise within ~2% throughout), with speedup GROWING as eigh's O(n^3) bites: 1.7x at 1800,
+3.8x at 3000, 7.1x at 4500. SpectralBasis switches to ChebFSI above `partial_threshold` (default 2000) and keeps
+the exact dense eigh below -- faster there AND bit-identical, so every existing test/selftest (small clouds)
+is unchanged.
+
+KEPT NEGATIVES (travelling in the docstrings and tests): ChebFSI is an APPROXIMATION whose projector error grows
+slowly with n; and it lifts the EIGH O(n^3), NOT the O(n^2) kNN distance build, which itself caps practical use
+at a few thousand points -- a spatial index would be the next rung. Below threshold the exact eigh is used
+(faster and exact). The is_manifold gate inherits manifold_topology's scope: it reads a WELL-SAMPLED manifold,
+and a disconnected manifold (B0 > 1) reads as not-a-manifold by design (the gate wants one connected piece).
+
+Tests: +5 (926 -> 931). test_cheb_eigenbasis_matches_full_eigh_at_scale +
+test_spectral_basis_thresholds_to_exact_below_cutoff in test_holographic_spectral.py; test_is_manifold_gate_faculty
++ test_spectral_denoise_check_manifold_guard + test_spectral_denoise_scales_to_large_cloud in test_integration.py.
+
+## Backlog triage + D1: the honesty discipline as a structural lint on protocol-vectors (shipped)
+
+A forwarded "VSA-program backlog" proposed porting a session of analysis methods into VSA programs. The
+engine's rule is to ground against the LIVE code, not the proposal, and the audit was the usual humbling one:
+most of it is already built. A1 (program convention + interpreter) is `holographic_machine.py` (the
+stored-program VM) plus the mind's `learn_procedure`/`run_procedure`/`index_procedures`/`canonicalize_procedure`
+layer. C1 (the "honesty harness keystone") is already `walk_forward_recall` -- the same six checks the backlog
+describes (a shuffled-outcomes null that must collapse to chance, a persistence baseline the signal must beat, a
+chance band, scale-correlation, net-of-cost). E3 (massive parallel scan) is `scan` (SPRT-per-channel + honest
+per-channel-length FDR). A3 (the exact arbiter) is `RecallNull.pvalue` / `SPRTRecall.decide` / `bh_fdr`, and the
+self-hosting audit already drew the boundary. So C1/E3/A1/A3 are shipped; the backlog author rebuilds the harness
+by hand because they didn't know to call it `walk_forward_recall` -- the denoising/self-hosting lesson again.
+
+TWO THINGS THE TRIAGE FOUND WRONG, kept on record so they aren't rebuilt:
+  * A2 (the "superposed null engine," the backlog's claimed single biggest speed win) is the capacity cliff in
+    disguise. The null is ALREADY batched -- `RecallNull.fit` scores all n_null random queries in one matmul,
+    `(units @ Q.T).max(axis=0)` -- so there is no sequential loop to parallelize. And running N independent
+    computations in one superposed bundle and reading N exact scalars back is exactly the thing the engine has
+    measured cannot be done (a 2048-d bundle recalls ~100% of 64 items, ~0% of 2048); the crosstalk would land
+    in the null that must stay exact. The backlog even says "verify the superposed run equals N separate runs
+    first" -- the verification would just re-derive the cliff.
+  * The market half (B, D2, E1/E2) bets against a documented negative: SOL returns came back efficient-market-
+    like (shuffle-indistinguishable, survived 10x the data), and the dynamics operator only ties a trivial mean
+    predictor. Faster search over absent structure finds the absence faster.
+
+THE ONE GENUINELY-NEW, ON-MISSION IDEA -- and the one thing built (D1). Turn the honesty discipline from a habit
+you maintain into a STRUCTURAL PROPERTY you can check. Because a protocol (an analysis procedure) is
+program-as-data, its step structure can be READ BACK from its program vector (the VM's own unbind+cleanup), and
+anti-patterns become structural queries. `holographic_protocol.py`:
+  * `build_protocol(machine, steps)` assembles an ordered list of faculty-step NAMES (encode, combination_search,
+    calibrated_null, fdr, oos_split, decide, ...) into one program vector. The names match real mind faculties
+    (recall, RecallNull, bh_fdr, walk_forward_recall), so a protocol is a real analysis program, not a toy.
+  * `protocol_role_sequence` decodes the program VECTOR position-by-position and maps each APPLY's faculty to a
+    ROLE (SEARCH / NULL / FDR / SPLIT / DECIDE / ENCODE / NEUTRAL) via a default, extensible taxonomy.
+  * `audit_protocol` evaluates three rules over the recovered structure: (R1) a SEARCH with no procedure-matched
+    NULL -- the canonical artifact-factory; (R2) a searched-and-scored FAMILY (SEARCH + DECIDE) with no FDR /
+    look-elsewhere control; (R3) selecting then scoring (SEARCH then a later DECIDE) with no out-of-sample SPLIT
+    between them. Returns {sound, roles, sequence, violations}.
+Wired as the mind faculty `audit_procedure(steps=[...])` (or a prebuilt program+n_steps).
+
+WHY this is the SOUND version of D1 (and where the backlog over-reached): the backlog imagined checking "a whole
+space of protocols in ONE operation" -- but reading a per-protocol property out of a SUPERPOSITION of protocols
+is the same A2 capacity cliff. So that framing is dropped: the audit reads ONE protocol vector at a time, which
+is genuinely holographic (structure recovered by unbind+cleanup) AND correct.
+
+MEASURED (the selftest IS the earns-its-place measurement): the protocol structure round-trips EXACTLY from the
+program vector at protocol length (decode reliable for ~6-step protocols at dim 4096); a complete honest protocol
+reads sound; each of the three anti-patterns is flagged on a protocol built to contain it; and a no-search
+procedure (a restoration loop: datafit -> denoise) is NOT flagged -- targeted, not trigger-happy.
+
+KEPT NEGATIVES (in the docstrings and tests): it is a STRUCTURAL lint on DECLARED steps, not a data-flow analysis
+-- the single-accumulator VM does not encode per-step data lineage, so "scores the exact rows it selected on" is
+approximated by the ORDER check (no SPLIT between SEARCH and DECIDE), not by tracking data identity. The per-step
+decode is bounded by the program vector's capacity, so a protocol must be SHORT to read reliably (the procedure
+tax; longer protocols need a larger dim). And an unknown faculty name carries NO obligation (role NEUTRAL), so a
+missing taxonomy entry fails OPEN (no false alarm), not closed.
+
+Tests: +8 (931 -> 939). test_holographic_protocol.py (selftest + structure-round-trips + complete-is-sound +
+the three anti-pattern flags + no-search-not-flagged) and test_audit_procedure_faculty in test_integration.py.
+
+## D3: the findings registry -- a research log as a holographic knowledge structure (shipped)
+
+The second genuinely-new idea from the forwarded backlog (D3), built after D1 and measured the same way. A
+research log that you query by similarity and that detects its OWN contradictions. The substrate was already
+present -- the relations layer (`holographic_relations.KnowledgeStore`) encodes role-bound records and runs
+explain / name / analogy-as-unbind on them -- so the only thing missing was the operation a research log
+actually needs: contradiction detection.
+
+A FINDING is a structured claim: a SUBJECT affects an OBJECT with a POLARITY (+1 helps/strengthens, -1
+hurts/backfires), optionally under a CONDITION (a regime: a horizon, a session, an asset). It is encoded the way
+every record in the engine is: `finding = bind(SUBJ, subject) + bind(OBJ, object) [+ bind(COND, condition)]`, so
+the existing explain/analogy operations compose with it for free. `holographic_knowledge.FindingRegistry`:
+  * `add(subject, object, polarity, condition=None, note=None)` -- stores the structured record plus two
+    vectors: the FULL finding (subj+obj+cond, for query) and the CLAIM (subj+obj only, for tension pairing).
+  * `query(subject=, object=, condition=)` -- recall by similarity to a PARTIAL claim. Bundle the binds for the
+    given slots, cosine against findings. ROLE-SENSITIVE: object=momentum recalls findings where momentum is the
+    OBJECT, not where it is the subject (the dividend of structured encoding over a bag of words).
+  * `tensions(claim_tol=0.85)` -- THE HEADLINE. For every pair whose CLAIMS match (cosine of their subj+obj
+    bindings >= tol) and whose POLARITIES are opposite, report a tension, classified FLAT (same/absent condition
+    -- genuinely conflicting, one must be wrong) or CONDITIONED (different conditions -- reconcilable, the
+    outcome is conditioned on the differing dimension).
+
+The backlog's exact example works: "ER strengthens momentum at 10d" (+1, horizon_10d) vs "ER backfires intraday"
+(-1, intraday) is flagged CONDITIONED (reconcilable), while a planted "bracket convex" (+1) vs "bracket drift
+masquerades as convexity" (-1), both unconditioned, is flagged FLAT (must resolve).
+
+THE EXACT-DOOR DISCIPLINE (the engine's rule, again): RETRIEVAL is holographic -- the cosine over the bound claim
+finds candidate conflicts -- but the VERDICT is EXACT: the polarity sign and the condition equality decide. With
+unitary atoms two identical claims give claim-cosine 1.0 and "same subject, different object" gives ~0.5, so
+claim_tol=0.85 cleanly requires BOTH subject and object to match (different objects are different claims, not
+contradictions). Wired as the lazily-cached mind faculty `finding_registry()`.
+
+MEASURED (the selftest IS the earns-its-place gate): query by subject/object recalls the right findings and is
+role-sensitive (a finding with the token in the SUBJECT slot is NOT matched by an OBJECT query); the conditioned
+tension and the flat contradiction are each classified correctly; and exactly the two genuine tensions are found
+-- no false positives from random similarity, and same-polarity findings about the same claim are NOT flagged
+(they agree).
+
+KEPT NEGATIVES (in the docstrings and tests): findings are STRUCTURED claims, NOT free prose -- turning a
+2300-line narrative log into structured claims is an NLP step this engine does not do (no embeddings, no parser);
+that is the manual / future-LLM boundary, stated plainly. And the tension scan is O(n^2) pairwise claim-cosine --
+fine for a few thousand findings; a HoloForest pre-filter is the standard sublinear answer at larger scale,
+noted but not needed yet.
+
+Tests: +8 (939 -> 947). test_holographic_knowledge.py (selftest + query-by-subject + role-sensitivity + the
+flat-vs-conditioned classification + no-false-positives + same-direction-not-a-tension + signed-polarity) and
+test_finding_registry_faculty in test_integration.py.

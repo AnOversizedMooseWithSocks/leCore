@@ -38,12 +38,40 @@ from collections import deque
 import numpy as np
 
 
-def tero_solve(nbr, start, goal, steps=200, mu=1.5, dt=0.2, I0=1.0):
-    """Solve a maze/graph by the Tero flow-conductance model. `nbr` is an adjacency dict
-    {cell: [neighbour cells]} (the same one the ant solver uses); start and goal are nodes. Returns the
-    shortest-path cell list, or None if start and goal are not connected. Deterministic."""
+def _weighted_laplacian(edges, idx, n, D):
+    """The conductance-weighted graph Laplacian, accumulated PER EDGE exactly as the Tero step needs it.
+    Kept LOCAL to the flow solver -- deliberately NOT routed through holographic_spectral.graph_laplacian:
+    this dynamics is tie-sensitive, and a different summation order could flip a trajectory (the bind_batch
+    lesson). The small duplication is the safe choice; sharing the arithmetic order is what matters here."""
+    A = np.zeros((n, n))
+    for (u, v) in edges:
+        c = D[(u, v)]
+        iu, iv = idx[u], idx[v]
+        A[iu, iu] += c; A[iv, iv] += c
+        A[iu, iv] -= c; A[iv, iu] -= c
+    return A
+
+
+def _grounded_solve(A, n, idx, start, gi, I0):
+    """Solve A p = b for node pressures: current I0 injected start->goal, sink grounded (which removes the
+    constant nullspace so the system is full rank). A is modified in place (the grounding row)."""
+    b = np.zeros(n)
+    b[idx[start]] = I0
+    b[gi] = -I0
+    A[gi, :] = 0.0; A[gi, gi] = 1.0; b[gi] = 0.0
+    try:
+        return np.linalg.solve(A, b)
+    except np.linalg.LinAlgError:
+        return np.linalg.lstsq(A, b, rcond=None)[0]
+
+
+def _tero_converge(nbr, start, goal, steps, mu, dt, I0):
+    """Run the Tero conductance dynamics to convergence; return (nodes, idx, edges, D) or None if start/goal
+    are absent or the graph has no edges. The shared core of tero_solve (which reads a path out of D) and
+    tero_flux (which reads the steady flux) -- the exact arithmetic the original tero_solve ran, just factored
+    so the flux can be read from the same converged state."""
     nodes = list(nbr)
-    idx = {n: i for i, n in enumerate(nodes)}
+    idx = {nd: i for i, nd in enumerate(nodes)}
     n = len(nodes)
     if start not in idx or goal not in idx:
         return None
@@ -57,25 +85,47 @@ def tero_solve(nbr, start, goal, steps=200, mu=1.5, dt=0.2, I0=1.0):
     D = {e: 1.0 for e in edges}                          # initial conductivity: every tube open
     gi = idx[goal]
     for _ in range(steps):
-        A = np.zeros((n, n))
-        b = np.zeros(n)
-        for (u, v) in edges:                             # weighted Laplacian (unit-length grid edges)
-            c = D[(u, v)]
-            iu, iv = idx[u], idx[v]
-            A[iu, iu] += c; A[iv, iv] += c
-            A[iu, iv] -= c; A[iv, iu] -= c
-        b[idx[start]] = I0
-        b[gi] = -I0
-        A[gi, :] = 0.0; A[gi, gi] = 1.0; b[gi] = 0.0     # ground the sink: removes the constant nullspace
-        try:
-            p = np.linalg.solve(A, b)
-        except np.linalg.LinAlgError:
-            p = np.linalg.lstsq(A, b, rcond=None)[0]
+        A = _weighted_laplacian(edges, idx, n, D)        # weighted Laplacian (unit-length grid edges)
+        p = _grounded_solve(A, n, idx, start, gi, I0)
         for (u, v) in edges:                             # Poiseuille flux + saturating Tero adaptation
             q = abs(D[(u, v)] * (p[idx[u]] - p[idx[v]]))
             f = q ** mu / (1.0 + q ** mu)
             D[(u, v)] += dt * (f - D[(u, v)])
+    return nodes, idx, edges, D
+
+
+def tero_solve(nbr, start, goal, steps=200, mu=1.5, dt=0.2, I0=1.0):
+    """Solve a maze/graph by the Tero flow-conductance model. `nbr` is an adjacency dict
+    {cell: [neighbour cells]} (the same one the ant solver uses); start and goal are nodes. Returns the
+    shortest-path cell list, or None if start and goal are not connected. Deterministic."""
+    res = _tero_converge(nbr, start, goal, steps, mu, dt, I0)
+    if res is None:
+        return None
+    _, _, _, D = res
     return _extract_path(D, nbr, start, goal)
+
+
+def tero_flux(nbr, start, goal, steps=200, mu=1.5, dt=0.2, I0=1.0):
+    """Run the Tero model and return its CONVERGED signed edge flux as a Hodge-decomposable flow:
+    (n_vertices, edges_as_sorted_index_pairs, flux). The flux Q_uv = D_uv (p_u - p_v) on each edge is the
+    quantity tero_solve computes every step and throws away once it has the path. Decomposing it (the
+    Helmholtz-Hodge split in holographic_spectral) separates the NET source->goal transport -- the gradient
+    part, whose divergence is the injected current -- from CIRCULATION around the graph's loops -- the harmonic
+    part, whose dimension is the graph's B1. A maze graph has no filled triangles, so there is no curl term.
+    Returns None if start and goal are disconnected. Deterministic."""
+    if start not in nbr or goal not in nbr or _bfs(nbr, start, goal) is None:
+        return None                                         # disconnected -> no meaningful steady flux
+    res = _tero_converge(nbr, start, goal, steps, mu, dt, I0)
+    if res is None:
+        return None
+    nodes, idx, edges, D = res
+    n = len(nodes)
+    gi = idx[goal]
+    A = _weighted_laplacian(edges, idx, n, D)            # one final solve at the converged conductances
+    p = _grounded_solve(A, n, idx, start, gi, I0)
+    eidx = [(idx[u], idx[v]) for (u, v) in edges]        # idx[u] < idx[v] already, so these are sorted
+    flux = np.array([D[(u, v)] * (p[idx[u]] - p[idx[v]]) for (u, v) in edges])
+    return n, eidx, flux
 
 
 def _extract_path(D, nbr, start, goal):

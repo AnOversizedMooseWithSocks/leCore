@@ -1726,3 +1726,378 @@ def test_federation_report_measures_conservation_law_and_recommends_shards():
     assert rep["federated"]["stored"] == 4 * b              # 4 shards -> 4 x the per-vector budget
     assert 0.7 < rep["conservation_ratio"] < 1.3            # partitioning the dimension conserves capacity (~1)
     assert rep["recommended_shards"] == math.ceil(500 / b)  # the shard recommendation for the target item count
+
+
+def test_resonator_null_keyed_by_shape_not_content():
+    """The calibrated resonator null is a property of the search SHAPE, not codebook CONTENT (measured:
+    the p-value is identical across random codebook contents of one shape for every decision-relevant
+    agreement). So two different codebook sets of the same shape SHARE one cached null -- the multi-second
+    cold fit is paid once per shape, not once per codebook set (a big saving across a suite of same-shape
+    minds). Pins the cache-key fix so a content hash is never re-added."""
+    from holographic_sbc import sbc_codebook, _resonator_noise_null
+    B, L, F = 8, 8, 2
+    cbsA = [sbc_codebook(B, L, 6, seed=10 + k) for k in range(F)]
+    cbsB = [sbc_codebook(B, L, 6, seed=20 + k) for k in range(F)]   # different content, SAME shape
+    cbsC = [sbc_codebook(B, L, 9, seed=30 + k) for k in range(F)]   # different shape (codebook size 9 vs 6)
+    nA = _resonator_noise_null(cbsA, L, restarts=2, iters=8, m=20)
+    nB = _resonator_noise_null(cbsB, L, restarts=2, iters=8, m=20)
+    nC = _resonator_noise_null(cbsC, L, restarts=2, iters=8, m=20)
+    assert nA is nB                                                 # same shape -> SHARED cached null (the fix)
+    assert nC is not nA                                             # different shape -> its own null
+    # the readout is part of the procedure, so a different readout is a different null
+    nA_sparse = _resonator_noise_null(cbsA, L, restarts=2, iters=8, m=20, readout="sparsemax")
+    assert nA_sparse is not nA
+
+
+def test_vector_function_encoder_faculty():
+    """BLD-7: the N-D FPE encoder is a faculty of UnifiedMind, built on the mind's dim/seed. Through the mind:
+    a 2-D shift is a binding (exact), and a function bundled from encoded points reads high at its points and
+    low elsewhere -- the compute-on-functions algebra on the shared substrate."""
+    from holographic_ai import bind, cosine
+    m = UnifiedMind(dim=512, seed=0)
+    enc = m.vector_function_encoder(2, bounds=[(0, 10), (0, 10)])
+    # shift-as-bind in 2-D, exact in direction
+    p = np.array([3.0, 4.0]); d = np.array([1.5, 2.0])
+    assert cosine(bind(enc.encode(p), enc.encode(d)), enc.encode(p + d)) > 0.999
+    # a function localises at its placed points
+    f = enc.bundle([(2.0, 2.0), (7.0, 3.0)], [1.0, 0.7])
+    assert min(enc.query(f, (2.0, 2.0)), enc.query(f, (7.0, 3.0))) > 3 * enc.query(f, (9.5, 9.5))
+    # built on the mind's seed -> two minds with the same seed give identical codes
+    m2 = UnifiedMind(dim=512, seed=0)
+    assert np.allclose(enc.encode(p), m2.vector_function_encoder(2, bounds=[(0, 10), (0, 10)]).encode(p))
+
+
+def test_spectral_basis_faculty():
+    """EXP-6: the Laplacian eigenbasis is a faculty of UnifiedMind. Through the mind, on a sphere (a manifold
+    the topology detector can only call 'line'), the data-driven basis denoises a smooth field where a line/
+    index-order basis cannot -- the basis-selector generalising decompose_signal's hand-picked choice."""
+    m = UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(5)
+    N = 300
+    idx = np.arange(N)
+    phi = np.arccos(1 - 2 * (idx + 0.5) / N)
+    theta = np.pi * (1 + 5 ** 0.5) * idx
+    P = np.stack([np.sin(phi) * np.cos(theta), np.sin(phi) * np.sin(theta), np.cos(phi)], 1)
+    f = P[:, 2] ** 2 - 1 / 3 + P[:, 0] * P[:, 1]
+    fn = f + 0.3 * rng.standard_normal(N)
+    sb = m.spectral_basis(P, k=10, n_basis=12)
+    err_lap = np.linalg.norm(sb.denoise(fn) - f)
+    DCTi = np.stack([np.ones(N) / np.sqrt(N)] +
+                    [np.sqrt(2 / N) * np.cos(np.pi * (np.arange(N) + 0.5) * kk / N) for kk in range(1, 12)]).T
+    err_line = np.linalg.norm(DCTi @ (DCTi.T @ fn) - f)
+    assert err_lap < 0.6 * err_line
+    # and the basis round-trips a signal that lives in it
+    c = rng.standard_normal(12)
+    assert np.allclose(sb.decompose(sb.reconstruct(c)), c, atol=1e-9)
+
+
+def test_manifold_topology_faculty():
+    """EXP-7: persistent-homology topology is a faculty of UnifiedMind. Through the mind, a torus is named
+    (1,2,1) and a sphere (1,0,1) -- topologies the 1-D detect_topology cannot name -- while a ring stays
+    (1,1,0), reproducing the hand-coded detector on the case it knows."""
+    m = UnifiedMind(dim=256, seed=0)
+    # torus
+    Nu, Nv = 24, 12
+    u = np.repeat(np.linspace(0, 2 * np.pi, Nu, endpoint=False), Nv)
+    v = np.tile(np.linspace(0, 2 * np.pi, Nv, endpoint=False), Nu)
+    torus = np.column_stack([(2 + 0.8 * np.cos(v)) * np.cos(u), (2 + 0.8 * np.cos(v)) * np.sin(u), 0.8 * np.sin(v)])
+    name, betti, _ = m.manifold_topology(torus)
+    assert betti == (1, 2, 1) and name == "torus"
+    # sphere
+    N = 200
+    i = np.arange(N)
+    phi = np.arccos(1 - 2 * (i + 0.5) / N)
+    tta = np.pi * (1 + 5 ** 0.5) * i
+    sphere = np.column_stack([np.sin(phi) * np.cos(tta), np.sin(phi) * np.sin(tta), np.cos(phi)])
+    assert m.manifold_topology(sphere)[1] == (1, 0, 1)
+    # a ring still reads as detect_topology would call it
+    th = np.linspace(0, 2 * np.pi, 40, endpoint=False)
+    ring = np.column_stack([np.cos(th), np.sin(th), np.zeros(40)])
+    assert m.manifold_topology(ring)[0] == "ring"
+
+
+def test_hodge_flow_decomposition_faculty():
+    """EXP-8: the Helmholtz-Hodge flow decomposition is a faculty of UnifiedMind. Through the mind, a transport
+    flow splits into orthogonal parts that sum exactly, the harmonic part is genuinely curl/divergence-free,
+    and dropping the noisy curl denoises a flow better than the raw input."""
+    from holographic_spectral import boundary_matrices
+    m = UnifiedMind(dim=256, seed=0)
+    # a triangulated 3x3 grid with one triangle removed -> a hole (B1=1)
+    tris_all = []
+    for cy in range(2):
+        for cx in range(2):
+            a = cy * 3 + cx
+            tris_all += [(a, a + 1, a + 4), (a, a + 4, a + 3)]
+    tris = [t for t in tris_all if t != (0, 1, 4)]
+    edges = sorted({tuple(sorted(e)) for t in tris_all for e in [(t[0], t[1]), (t[1], t[2]), (t[0], t[2])]})
+    V = 9
+    d1, d2 = boundary_matrices(V, edges, tris)
+    rng = np.random.default_rng(0)
+    flow = d1.T @ rng.standard_normal(V) + d2 @ rng.standard_normal(len(tris))
+    g, c, h = m.hodge_decomposition(V, edges, flow, tris)
+    assert np.linalg.norm(g + c + h - flow) < 1e-9                 # orthogonal parts sum to the flow
+    assert np.linalg.norm(d1 @ h) < 1e-9 and np.linalg.norm(d2.T @ h) < 1e-9   # harmonic is div/curl-free
+    # denoise a transport flow through the mind
+    clean = d1.T @ rng.standard_normal(V)
+    noisy = clean + 0.5 * rng.standard_normal(len(edges))
+    den = m.denoise_flow(V, edges, noisy, tris, keep=("gradient", "harmonic"))
+    assert np.linalg.norm(den - clean) < np.linalg.norm(noisy - clean)
+
+
+def test_clifford_rotor_faculty():
+    """EXP-9: Cl(3,0) geometric algebra is a parallel binding mode of UnifiedMind. Through the mind, rotor
+    composition is exact (the product of rotors == sequential rotation) and non-commutative -- the rotation-
+    shaped win the engine's commutative convolution bind cannot reach."""
+    m = UnifiedMind(dim=256, seed=0)
+    cl = m.clifford()
+    rng = np.random.default_rng(0)
+    # exact composition
+    RA = cl.rotor(rng.standard_normal(3), 1.2)
+    RB = cl.rotor(rng.standard_normal(3), 0.6)
+    v = rng.standard_normal(3)
+    assert np.linalg.norm(cl.rotate(RA, cl.rotate(RB, v)) - cl.rotate(cl.compose(RA, RB), v)) < 1e-12
+    # non-commutative (a real order gap, which a commutative bind would collapse to zero)
+    gap = np.linalg.norm(cl.rotate(cl.compose(RA, RB), v) - cl.rotate(cl.compose(RB, RA), v))
+    assert gap > 1e-6
+    # the faculty is cached (same algebra object)
+    assert m.clifford() is cl
+
+
+def test_wasserstein_faculty():
+    """BLD-8: optimal-transport distance is a faculty of UnifiedMind. Through the mind, Wasserstein tracks how
+    far two distributions sit apart even with no overlap, where the engine's bin-wise comparison saturates --
+    the transport-geometry distance for histograms/spectra/distributions over a metric space."""
+    m = UnifiedMind(dim=256, seed=0)
+    x = np.arange(50)
+
+    def g(mu):
+        v = np.exp(-0.5 * ((x - mu) / 2.0) ** 2)
+        return v / v.sum()
+
+    ref = g(10)
+    w_near = m.wasserstein(ref, g(25))                     # shift 15 -- already non-overlapping (sig=2)
+    w_far = m.wasserstein(ref, g(40))                      # shift 30 -- also non-overlapping
+    assert w_far > w_near                                   # farther distributions -> larger distance
+    # bin-wise Euclidean saturates: both shifts are non-overlapping, so it cannot tell them apart
+    e_near = np.linalg.norm(ref - g(25))
+    e_far = np.linalg.norm(ref - g(40))
+    assert abs(e_far - e_near) < 0.05 and (w_far - w_near) > 10.0
+    # matches the 1-D closed form
+    w_true = float(np.sum(np.abs(np.cumsum(ref) - np.cumsum(g(40)))))
+    assert abs(m.wasserstein(ref, g(40), eps=0.5) - w_true) < 0.2
+
+
+def test_flow_circulation_faculty():
+    """Above/below sweep: the flow solver wired to the Hodge split + topology. Through UnifiedMind,
+    flow_circulation runs a Tero flow and decomposes its flux into transport + circulation, reporting the
+    graph's loop count (B1) and the redundancy (harmonic energy fraction) -- zero on a tree, nonzero on a
+    loopy grid."""
+    m = UnifiedMind(dim=256, seed=0)
+
+    def grid(R, C):
+        nbr = {}
+        for r in range(R):
+            for c in range(C):
+                nbr[(r, c)] = [(r + dr, c + dc) for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                               if 0 <= r + dr < R and 0 <= c + dc < C]
+        return nbr
+
+    # a loopy grid: real loops, and the gradient flux carries the injected current
+    res = m.flow_circulation(grid(4, 4), (0, 0), (3, 3))
+    assert res["loops"] == len(res["edges"]) - res["n_vertices"] + 1     # B1 = E - V + 1
+    assert res["loops"] > 0
+    assert res["transport_energy"] > 0
+    assert 0.0 <= res["redundancy"] <= 1.0
+
+    # a tree: the route is forced, so there is no circulation at all
+    tree = {0: [1], 1: [0, 2, 3], 2: [1], 3: [1, 4], 4: [3]}
+    rt = m.flow_circulation(tree, 0, 4)
+    assert rt["loops"] == 0 and rt["redundancy"] < 1e-9 and rt["circulation_energy"] < 1e-9
+
+    # disconnected -> None
+    assert m.flow_circulation({"A": ["B"], "B": ["A"], "C": ["D"], "D": ["C"]}, "A", "D") is None
+
+
+def test_spectral_denoise_faculty():
+    """Above/below sweep: the EXP-5/6 graph-Laplacian eigenbasis is wired SIDEWAYS into the unified denoise
+    faculty as method='spectral' -- the nonlinear-manifold map the linear methods lacked. It denoises a lone
+    scalar field on a curved manifold (a 2-sphere) using only the cloud's geometry, beating the geometry-blind
+    options (trajectory/SSA) that cannot see the curvature."""
+    m = UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+    N = 200
+    i = np.arange(N)
+    phi = np.arccos(1 - 2 * (i + 0.5) / N)
+    tta = np.pi * (1 + 5 ** 0.5) * i
+    P = np.column_stack([np.sin(phi) * np.cos(tta), np.sin(phi) * np.sin(tta), np.cos(phi)])
+    f = P[:, 2] ** 2 - 0.5 * P[:, 0]                        # a smooth field on the sphere
+    fn = f + 0.3 * rng.standard_normal(N)
+    den = m.denoise(fn, method="spectral", points=P)
+    traj = m.denoise(fn, method="trajectory", rank=8)      # geometry-blind: treats the field as a 1-D sequence
+    assert np.linalg.norm(den - f) < np.linalg.norm(fn - f)            # genuinely denoises
+    assert np.linalg.norm(den - f) < 0.5 * np.linalg.norm(traj - f)    # and crushes the geometry-blind baseline
+    # the guard: spectral needs the geometry
+    try:
+        m.denoise(fn, method="spectral")
+        assert False, "should require points="
+    except ValueError:
+        pass
+
+
+def test_is_manifold_gate_faculty():
+    """The now-fast persistent homology turned into a first-class GATE: is_manifold names a clean connected
+    manifold True and a dense blob False, sub-second. A 2-sphere is a manifold (B0=1); a random high-dim blob is
+    not (fragmented / dense). This is the cheap premise-check for manifold-assuming operations."""
+    m = UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+    N = 200
+    i = np.arange(N)
+    phi = np.arccos(1 - 2 * (i + 0.5) / N)
+    tta = np.pi * (1 + 5 ** 0.5) * i
+    sphere = np.column_stack([np.sin(phi) * np.cos(tta), np.sin(phi) * np.sin(tta), np.cos(phi)])
+    s = m.is_manifold(sphere)
+    assert s["is_manifold"] is True and s["betti"][0] == 1            # one connected manifold
+    b = m.is_manifold(rng.standard_normal((200, 4)))
+    assert b["is_manifold"] is False                                   # a blob is not a clean manifold
+    assert b["betti"][0] != 1 or b["dense_scales"] > 1                # because fragmented or too dense
+
+
+def test_spectral_denoise_check_manifold_guard():
+    """check_manifold=True wires is_manifold as a guard on the spectral denoiser: it proceeds on a manifold but
+    REFUSES on a blob (whose 'denoise' would be mere graph low-pass), with check_manifold=False as the escape
+    hatch. Default off leaves the path overhead-free and unchanged."""
+    m = UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(1)
+    N = 200
+    i = np.arange(N)
+    phi = np.arccos(1 - 2 * (i + 0.5) / N)
+    tta = np.pi * (1 + 5 ** 0.5) * i
+    P = np.column_stack([np.sin(phi) * np.cos(tta), np.sin(phi) * np.sin(tta), np.cos(phi)])
+    f = P[:, 2] ** 2 - 0.5 * P[:, 0]
+    fn = f + 0.3 * rng.standard_normal(N)
+    out = m.denoise(fn, method="spectral", points=P, check_manifold=True)   # manifold -> proceeds
+    assert np.linalg.norm(out - f) < np.linalg.norm(fn - f)
+    Pb = rng.standard_normal((200, 4))
+    gn = Pb[:, 0] + 0.3 * rng.standard_normal(200)
+    try:
+        m.denoise(gn, method="spectral", points=Pb, check_manifold=True)    # blob -> refuses
+        assert False, "check_manifold=True should refuse a non-manifold cloud"
+    except ValueError:
+        pass
+    m.denoise(gn, method="spectral", points=Pb, check_manifold=False)       # escape hatch -> proceeds
+
+
+def test_spectral_denoise_scales_to_large_cloud():
+    """method='spectral' scales to a large cloud via SpectralBasis's Chebyshev-filtered partial eigensolver
+    (sparse matvec, no O(n^3) eigh): a smooth field on a 2500-point sphere is denoised through the faculty, and
+    the result matches the exact dense eigh basis to within tolerance."""
+    from holographic_spectral import knn_laplacian, laplacian_eigenbasis
+    m = UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(2)
+    N = 2500
+    i = np.arange(N)
+    phi = np.arccos(1 - 2 * (i + 0.5) / N)
+    tta = np.pi * (1 + 5 ** 0.5) * i
+    P = np.column_stack([np.sin(phi) * np.cos(tta), np.sin(phi) * np.sin(tta), np.cos(phi)])
+    f = P[:, 2] ** 2 - 0.5 * P[:, 0]
+    fn = f + 0.3 * rng.standard_normal(N)
+    den = m.denoise(fn, method="spectral", points=P)                  # > threshold -> ChebFSI path
+    _, Ve = laplacian_eigenbasis(knn_laplacian(P, 10), 12)
+    err_exact = np.linalg.norm(Ve @ (Ve.T @ fn) - f)
+    assert np.linalg.norm(den - f) < 1.15 * err_exact + 1e-9          # matches exact at scale
+    assert np.linalg.norm(den - f) < np.linalg.norm(fn - f)           # and denoises
+
+
+def test_restore_procedure_pnp_as_program():
+    """Self-hosting: Plug-and-Play/RED restoration expressed AS A VSA PROGRAM -- ITERATE [APPLY datafit; APPLY
+    denoise] -- through restore_procedure. It recovers a half-masked low-rank signal to the SAME error-to-truth
+    as the Python denoise(method='pnp') loop, and the trace confirms it ran as an ITERATE-to-fixed-point program."""
+    from holographic_denoise import pnp_restore, fit_manifold_full, adaptive_manifold_denoise
+    m = UnifiedMind(dim=512, seed=7)
+    D = m.dim
+    rng = np.random.default_rng(0)
+    basis = rng.standard_normal((6, D)); basis /= np.linalg.norm(basis, axis=1, keepdims=True)
+    samples = np.stack([c @ basis for c in rng.standard_normal((40, 6))])
+    clean = rng.standard_normal(6) @ basis
+    mask = (rng.random(D) > 0.5).astype(float)
+    forward = lambda x: mask * x
+    adjoint = lambda y: mask * y
+    y = forward(clean) + 0.05 * rng.standard_normal(D)
+
+    restored, trace = m.restore_procedure(y, forward, adjoint, samples, mu=0.8, steps=60)
+    raw_err = np.linalg.norm(y - clean) / np.linalg.norm(clean)
+    vsa_err = np.linalg.norm(restored - clean) / np.linalg.norm(clean)
+    # the Python faculty, same operator and prior
+    bfull, _, mean = fit_manifold_full(samples, rank=24)
+    prior = lambda v: adaptive_manifold_denoise(v, bfull, mean, sigma=None)
+    py_err = np.linalg.norm(pnp_restore(y, forward, adjoint, prior, mu=0.8, steps=60) - clean) / np.linalg.norm(clean)
+
+    assert vsa_err < 0.4 * raw_err                 # genuinely restores (raw ~0.86 -> ~0.17)
+    assert abs(vsa_err - py_err) < 0.05            # same error-to-truth as the Python loop
+    assert trace[0][0] == "ITERATE" and trace[0][3] == "converged"   # it ran as a fixed-point PROGRAM
+
+
+def test_generate_procedure_diffusion_as_program():
+    """Self-hosting: the B10 generative diffusion expressed AS A VSA PROGRAM -- ITERATE [APPLY diffuse] from a
+    noise seed -- through generate_procedure. The self-cooling diffuse step walks a random vector onto the
+    codebook manifold; over a bare codebook it lands on a stored atom (the kept B10 negative), and the trace
+    confirms it ran as a program. Deterministic in the seed."""
+    m = UnifiedMind(dim=512, seed=7)
+    M = m._machine()
+    fillers = np.stack([M._atom(f"gen_fill:{i}") for i in range(5)])
+    fn = fillers / np.linalg.norm(fillers, axis=1, keepdims=True)
+
+    sample, trace = m.generate_procedure(fillers, steps=12, seed=3)
+    best = max(float(sample @ f / (np.linalg.norm(sample) * np.linalg.norm(f))) for f in fn)
+    assert best > 0.95                             # lands on the manifold (a valid sample)
+    assert abs(np.linalg.norm(sample) - 1.0) < 1e-6   # a unit vector
+    assert trace[0][0] == "ITERATE"                # it ran as a program
+    # determinism: same seed -> same sample
+    sample2, _ = m.generate_procedure(fillers, steps=12, seed=3)
+    assert np.linalg.norm(sample - sample2) < 1e-9
+
+
+def test_audit_procedure_faculty():
+    """D1: protocol-as-data anti-pattern auditing is a faculty of UnifiedMind. Treat an analysis procedure as
+    program-as-data and read its STRUCTURE back from the vector: a complete honest protocol (search + null +
+    fdr + a split between select and decide) is sound; a search with no procedure-matched null is flagged; and
+    a no-search procedure carries no obligation, so it is not falsely flagged. The honesty discipline becomes a
+    structural query on the protocol vector rather than a habit."""
+    m = UnifiedMind(dim=256, seed=0)
+    # a complete, honest protocol reads sound
+    good = m.audit_procedure(steps=["encode", "combination_search", "oos_split", "calibrated_null", "fdr", "decide"])
+    assert good["sound"] and good["violations"] == []
+    assert "search" in good["roles"] and "null" in good["roles"]
+    # the canonical artifact-factory: a search with no procedure-matched null is flagged
+    bad = m.audit_procedure(steps=["encode", "combination_search", "oos_split", "fdr", "decide"])
+    assert not bad["sound"]
+    assert any(code == "search_without_null" for code, _msg in bad["violations"])
+    # targeted, not trigger-happy: a no-search restoration loop has no honesty obligation
+    restore = m.audit_procedure(steps=["datafit", "denoise"])
+    assert restore["sound"]
+
+
+def test_finding_registry_faculty():
+    """D3: the findings registry is a faculty of UnifiedMind -- a research log as a holographic knowledge
+    structure. Through the mind, structured claims are recalled by similarity and the log's own
+    contradictions are detected: a horizon-conditioned tension (same claim, opposite polarity, DIFFERENT
+    conditions) is distinguished from a flat contradiction (same claim, opposite polarity, same/no
+    condition). The registry is cached on the mind."""
+    m = UnifiedMind(dim=256, seed=0)
+    reg = m.finding_registry()
+    i0 = reg.add("efficiency_ratio", "momentum", +1, condition="horizon_10d")
+    i1 = reg.add("efficiency_ratio", "momentum", -1, condition="intraday")
+    reg.add("low_vol", "vol_expansion", +1)
+    i4 = reg.add("bracket_order", "convexity", +1)
+    i5 = reg.add("bracket_order", "convexity", -1)
+    # similarity recall finds the related findings
+    assert {r["index"] for r in reg.query(subject="efficiency_ratio", k=2)} == {i0, i1}
+    # the headline: conditioned tension vs flat contradiction, correctly classified, no false positives
+    tens = {(t["a"], t["b"]): t["type"] for t in reg.tensions()}
+    assert tens.get((i0, i1)) == "conditioned"
+    assert tens.get((i4, i5)) == "flat"
+    assert len(tens) == 2
+    # the registry is cached on the mind (same instance back)
+    assert m.finding_registry() is reg
+
+

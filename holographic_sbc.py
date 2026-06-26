@@ -158,12 +158,17 @@ def _resonator_noise_null(codebooks, L, restarts, iters, m=100, seed=12345, read
     confidence to random picks therefore rates pure noise as a near-certain detection (measured p ~ 0.003); the
     null has to include the resonator's own overfitting or it lies. The null is a property of the search
     CONFIGURATION (it is stable across different random codebooks of the same shape -- measured mean 0.262-0.269
-    over three), so it is cached per codebook set + (restarts, iters, READOUT); the first confidence call on a
-    codebook set + readout pays for it, the rest are free. The readout is part of the procedure, so the null is
-    re-fit when it changes -- sparsemax manufactures a different noise-floor agreement than softmax."""
+    over three), so it is cached per codebook SHAPE -- (B, L, codebook sizes) + (restarts, iters, READOUT, k) --
+    and NOT per codebook content. Measured (the cache-key sweep): across five different random codebook sets of
+    one shape the p-value is IDENTICAL for every decision-relevant agreement (>=0.45, the regime where a
+    factorization is trustworthy); content only shifts the deep-abstain tail near the noise-floor mean (~0.27),
+    where the answer is "abstain" regardless. So the first confidence call for a given shape pays the ~m-run fit
+    and every later call -- ANY codebook of that shape, any mind in the process -- is free (one fit per shape for
+    the whole run, not one per codebook set; this also collapses the cost across a test suite that builds many
+    same-shape minds). The readout is part of the procedure, so the null is re-fit when it changes -- sparsemax
+    manufactures a different noise-floor agreement than softmax."""
     B = len(codebooks[0][0])
-    sig = (B, L, tuple(len(cb) for cb in codebooks), restarts, iters, readout, (k if readout == "topk" else 0),
-           hash(tuple(int(x) for cb in codebooks for a in cb for x in np.asarray(a))) & 0xffffffff)
+    sig = (B, L, tuple(len(cb) for cb in codebooks), restarts, iters, readout, (k if readout == "topk" else 0))
     if sig not in _RESONATOR_NULL_CACHE:
         r = np.random.default_rng(seed)
         out = np.empty(m)

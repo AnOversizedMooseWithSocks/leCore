@@ -96,3 +96,24 @@ def test_unified_mind_high_capacity_faculty_is_owned_and_works():
     ok = sum(voc.cleanup(mem.recall(voc.get(k)), candidates=vocab)[0] == v
              for k, v in pairs.items())
     assert ok >= 28                                      # ~30/30 measured; real-HRR would lose several
+
+
+def test_phasor_cleanup_vectorized_matches_bruteforce():
+    # the vectorized cleanup (real-matvec + lazy cache) must pick the SAME atom as a per-candidate loop, on
+    # both the all-atoms (cached) path and the candidates-subset path -- the INV-5 vectorization, kept honest
+    import numpy as np
+    from holographic_fhrr import PhasorVocabulary, fhrr_sim, phasor_atom
+    rng = np.random.default_rng(3)
+    voc = PhasorVocabulary(256, seed=0)
+    for i in range(120):
+        voc.get(f"v{i}")
+    names = list(voc.vectors)
+    for _ in range(20):
+        q = voc.vectors[names[int(rng.integers(120))]] + 0.4 * phasor_atom(256, rng)
+        ref = max(names, key=lambda nm: fhrr_sim(q, voc.vectors[nm]))
+        assert voc.cleanup(q)[0] == ref                       # all-atoms cached path
+        assert voc.cleanup(q, candidates=names)[0] == ref     # subset path
+    # the cache must invalidate when a new atom is minted (stale-cache guard)
+    before = voc.cleanup(voc.vectors[names[0]])[0]
+    voc.get("v_new")
+    assert voc.cleanup(voc.vectors[names[0]])[0] in (before, "v_new") and len(voc._clean_cache[1]) == 121
