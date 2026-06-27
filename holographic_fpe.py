@@ -66,10 +66,20 @@ class VectorFunctionEncoder:
         if len(bounds) != n_dims:
             raise ValueError("bounds must have one (lo, hi) pair per dimension")
         self.bounds = [(float(lo), float(hi)) for lo, hi in bounds]
+        # `bandwidth` may be a SCALAR (isotropic -- the same falloff on every axis, the original behaviour) or a
+        # PER-AXIS list/array (ANISOTROPIC / steering, RT-IV1): a small bandwidth makes an axis SMOOTH (wide,
+        # slow-falloff kernel), a large bandwidth makes it SHARP. A diagonal anisotropic kernel like this is the
+        # bounded form of Milanfar's steering kernel -- n bandwidths, not a per-point covariance that overfits.
+        if np.isscalar(bandwidth):
+            self.bandwidth = [float(bandwidth)] * self.n_dims
+        else:
+            self.bandwidth = [float(b) for b in bandwidth]
+            if len(self.bandwidth) != self.n_dims:
+                raise ValueError(f"per-axis bandwidth must have {self.n_dims} entries, got {len(self.bandwidth)}")
         # One independent base per axis (distinct seeds) so the axes are orthogonal sub-codes; binding them
         # keeps each coordinate separately recoverable and makes the kernel factor across axes.
         self.axes = [
-            ScalarEncoder(self.dim, lo=lo, hi=hi, seed=seed * 97 + k + 1, kernel=kernel, bandwidth=bandwidth)
+            ScalarEncoder(self.dim, lo=lo, hi=hi, seed=seed * 97 + k + 1, kernel=kernel, bandwidth=self.bandwidth[k])
             for k, (lo, hi) in enumerate(self.bounds)
         ]
 

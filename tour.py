@@ -1337,6 +1337,45 @@ try:
 except Exception as _eRV:
     print(f"  reversible-model: (skipped: {_eRV})")
 
+# ANISOTROPIC / STEERING KERNELS (RT-IV1, reverse-transfer from the DCC thread): the FPE encoder now takes a
+# PER-AXIS bandwidth -- a diagonal steering kernel (smooth along one axis, sharp along another). On DENSE
+# directional data (an edge/ridge) the steered kernel beats the isotropic RBF; on isotropic data it doesn't
+# (kept negative). See holographic_steering.py.
+try:
+    import numpy as _npST
+    from holographic_steering import steer_bandwidths as _sbST, kernel_regress as _krST
+    from holographic_fpe import VectorFunctionEncoder as _VFST
+    def _fST(p): return _npST.tanh(3.0*(p[1]-5.0))                     # flat x, sharp y (a dense ridge)
+    _gST=_npST.linspace(0.5,9.5,12); _Xt=_npST.array([[x,y] for x in _gST for y in _gST]); _yt=_npST.array([_fST(p) for p in _Xt])
+    _rg=_npST.random.default_rng(0); _Xq=_rg.uniform(1,9,(60,2)); _yq=_npST.array([_fST(p) for p in _Xq])
+    _bw=_sbST(_Xt,_yt,base=2.0); _B=[(0,10),(0,10)]
+    _ani=_krST(_VFST(2,dim=1024,bounds=_B,bandwidth=_bw,seed=1),_Xt,_yt,_Xq)
+    _iso=_krST(_VFST(2,dim=1024,bounds=_B,bandwidth=2.0,seed=1),_Xt,_yt,_Xq)
+    _ar=_npST.sqrt(_npST.mean((_ani-_yq)**2)); _ir=_npST.sqrt(_npST.mean((_iso-_yq)**2))
+    print(f"  STEERING KERNELS (RT-IV1): FPE per-axis bandwidth; on a dense ridge the steered kernel "
+          f"(bw {[round(float(b),1) for b in _bw]}) regresses at RMSE {_ar:.2f} vs isotropic {_ir:.2f} -- "
+          f"pools along the flat axis, sharp across the edge")
+except Exception as _eST:
+    print(f"  steering-kernels: (skipped: {_eST})")
+
+# SPECTRAL ITERATION (RT-I1, reverse-transfer): a bind operator is DIAGONAL in the Fourier basis, so its
+# eigendecomposition is FREE (the rfft). k binds = raising the transfer to the k-th power (ONE eval); the limit
+# is closed-form; convergence is read off the spectrum before running. Subdivision = dynamics = diffusion =
+# resonator are all "iterate a linear operator." See holographic_iterate.py.
+try:
+    import numpy as _npIT
+    from holographic_iterate import step_k as _skIT, spectral_profile as _spIT
+    from holographic_dynamics import Propagator as _PrIT
+    _rg=_npIT.random.default_rng(0); _n=256
+    _U=_npIT.fft.irfft(0.9*_npIT.exp(1j*_rg.uniform(0,2*_npIT.pi,_n//2+1)), n=_n); _st=_rg.standard_normal(_n)
+    _k=20; _diff=_npIT.max(_npIT.abs(_PrIT(_U,_U).rollout(_st,_k)[-1] - _skIT(_st,_U,_k)))   # one eval vs k binds
+    _prof=_spIT(_U)
+    print(f"  SPECTRAL ITERATION (RT-I1): {_k}-step jump in ONE eval matches {_k} binds to {_diff:.0e} "
+          f"(eigendecomposition = the free FFT); regime read off the spectrum: '{_prof['regime']}' "
+          f"(max|eigenvalue| {_prof['max_magnitude']:.2f})")
+except Exception as _eIT:
+    print(f"  spectral-iteration: (skipped: {_eIT})")
+
 # UPSTREAM FROM A SIBLING PROJECT (TuneFM): improvements that help every application,
 # each verified on this substrate before adoption.
 try:

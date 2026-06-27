@@ -2944,3 +2944,56 @@ def test_auto_cleanup_scheduler_through_the_mind():
     fx_cl, fx_below = measure("fixed", k=3)
     assert ad_below < 0.1 and fx_below < 0.1
     assert ad_cl < fx_cl                                      # fewer cleanups, matched fidelity
+
+
+# ---- anisotropic / steering kernel regression through the mind (RT-IV1) ----------------------------
+
+def test_steering_regress_through_the_mind():
+    import numpy as np
+    m = UnifiedMind(dim=1024, seed=1)
+
+    def f(p):
+        return np.tanh(3.0 * (p[1] - 5.0))                # dense ridge: flat x, sharp y
+    g = np.linspace(0.5, 9.5, 12)
+    Xtr = np.array([[x, y] for x in g for y in g])
+    ytr = np.array([f(p) for p in Xtr])
+    rng = np.random.default_rng(0)
+    Xq = rng.uniform(1, 9, (60, 2))
+    yq = np.array([f(p) for p in Xq])
+
+    pred, bw = m.steering_regress(Xtr, ytr, Xq, bounds=[(0, 10), (0, 10)], base=2.0)
+    steered_rmse = float(np.sqrt(np.mean((pred - yq) ** 2)))
+    assert bw[0] < bw[1]                                  # x (flat) smoother than y (sharp)
+    # the steered anisotropic kernel beats a matched isotropic baseline on this directional data
+    from holographic_steering import kernel_regress
+    from holographic_fpe import VectorFunctionEncoder
+    iso = VectorFunctionEncoder(2, dim=1024, bounds=[(0, 10), (0, 10)], bandwidth=2.0, seed=1)
+    iso_rmse = float(np.sqrt(np.mean((kernel_regress(iso, Xtr, ytr, Xq) - yq) ** 2)))
+    assert steered_rmse < iso_rmse
+
+
+# ---- spectral iteration of a learned propagator through the mind (RT-I1) ---------------------------
+
+def test_propagator_spectral_jump_through_the_mind():
+    import numpy as np
+    from holographic_ai import bind, cosine
+    from holographic_dynamics import Propagator
+    m = UnifiedMind(dim=256, seed=7)
+    # a learnable trajectory: a fixed bind operator applied repeatedly
+    rng = np.random.default_rng(1)
+    U_true = np.fft.irfft(0.97 * np.exp(1j * rng.uniform(0, 2 * np.pi, 129)), n=256)
+    s0 = rng.standard_normal(256)
+    traj = [s0]
+    for _ in range(20):
+        traj.append(bind(U_true, traj[-1]))
+    traj = np.array(traj)
+    # the one-eval k-step jump matches the learned propagator's own k-bind rollout to tolerance
+    from holographic_iterate import step_k
+    U = m.learn_dynamics(traj).U
+    jump = m.propagator_jump(traj, traj[0], 6)
+    assert np.max(np.abs(jump - Propagator(U, U).rollout(traj[0], 6)[-1])) < 1e-9
+    # and it tracks the actual trajectory closely (learning error only)
+    assert cosine(jump, traj[6]) > 0.99
+    # the spectrum reads a regime without running
+    prof = m.propagator_spectrum(traj)
+    assert prof["regime"] in ("contractive", "marginal", "divergent")

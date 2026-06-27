@@ -9170,3 +9170,87 @@ health signal tracks drift, the adaptive-beats-fixed scheduler bar (~5 vs ~16 cl
 the no-cleanup degradation control; plus a mind-level integration test (reversibility_audit + run_with_auto_cleanup
 through the mind). Files: holographic_reversible.py, ISA_REVERSIBLE.md, holographic_unified.py,
 test_holographic_reversible.py, test_integration.py, tour.py, README, holostuff_crosscutting_backlog.md.
+
+
+ANISOTROPIC / STEERING KERNELS (RT-IV1 -- the DCC reverse-transfer item deferred while the ISA spine was built;
+now picked up): a direction-dependent metric for the FPE encoder. holographic_fpe.py's VectorFunctionEncoder now
+accepts a PER-AXIS bandwidth (a list, one per axis) as well as a scalar -- a diagonal anisotropic kernel: SMALL
+bandwidth on an axis = a wide, smooth kernel there; LARGE bandwidth = a sharp one. This is the bounded form of
+Milanfar's steering kernel (Takeda/Farsiu/Milanfar 2007) -- n bandwidths, not a per-point covariance that
+overfits -- and it is the same object as an anisotropic Gaussian splat (per-splat covariance), the cross-
+connection Drettakis' seat noted. Backward-compatible: a scalar bandwidth broadcasts to all axes (the original
+isotropic behaviour). holographic_steering.py adds steer_bandwidths (fit per-axis bandwidths from the data's
+directional smoothness -- sharp axis -> large bandwidth) and kernel_regress (FPE-kernel-weighted Nadaraya-Watson),
+plus the mind faculty steering_regress.
+
+THE BAR met, in the RIGHT REGIME (this took several honest iterations to locate): on DENSE, strongly-directional
+data -- a sharp ridge/edge, constant along one axis and sharp across another -- the steered anisotropic kernel
+beats the best isotropic RBF by ~8% (grid-vs-grid), pooling the many same-value samples ALONG the flat direction
+while staying sharp across the edge. This is the regime steering kernels are actually designed for (image edges,
+dense samples).
+
+THE KEPT NEGATIVES (loud, because anisotropy is easy to oversell -- several iterations of the prototype kept
+failing until the regime was right): (1) On SPARSE scattered data the advantage collapses to ~1-3% -- not enough
+samples to pool along the flat direction; isotropic stays the honest baseline. (2) On ISOTROPIC data (equal
+structure both axes) anisotropy gives ~0%, as it must not. (3) The framing "low frequency = can pool widely" is
+WRONG when the low-frequency axis still spans a full period over the domain -- there must be a genuine
+low-VARIATION direction, not merely low frequency. (4) The STEERING ESTIMATE is unreliable on scattered data: a
+per-axis gradient estimated from scattered points is polluted by the OTHER axes varying and can point the WRONG
+way (an early prototype steered backwards) -- it needs dense/grid sampling (neighbours that differ in just one
+axis) to estimate cleanly, and a perfectly-flat axis gives gradient 0 (guarded against nan). A full per-point
+covariance is worse still (the splat module's own anisotropy negative). So: diagonal bandwidths, dense
+directional data, isotropic as the fallback. SEATS: Milanfar (steering-kernel regression) + Drettakis
+(anisotropic splats).
+
+NEXT (the reverse-transfer thread): RT-I1 (operator_limit / spectral-iteration -- the subdivision = dynamics =
+diffusion = resonator unification, the most beautiful but most O(n^3)-haunted; do it in the Fourier/structured
+form). The broader BACKLOG.md items (external-baseline harness, theory-and-guarantees doc) also remain.
+
+Tests: +8 (1148 -> 1156). test_holographic_steering.py (7): FPE per-axis bandwidth is anisotropic, scalar
+bandwidth is backward-compatible, per-axis length is checked, the anisotropic-beats-isotropic dense-ridge bar,
+steering recovers the right direction on dense data, steering handles a perfectly-flat axis (no nan), and the
+isotropic-data no-advantage kept negative; plus a mind-level integration test (steering_regress beats a matched
+isotropic baseline on the dense ridge through the mind). Files: holographic_fpe.py, holographic_steering.py,
+holographic_unified.py, test_holographic_steering.py, test_integration.py, tour.py, README,
+holostuff_crosscutting_backlog.md.
+
+
+SPECTRAL ITERATION (RT-I1 -- the last and most conceptual DCC reverse-transfer item; the unification the backlog
+called "the most beautiful but most O(n^3)-haunted"): diagonalise an iterated bind operator once, evaluate any
+level or the limit in closed form. In holographic_iterate.py. THE KEY INSIGHT that dissolves the O(n^3) worry: a
+bind is circular convolution, which is DIAGONAL in the Fourier basis -- so the eigenvalues of the bind operator U
+are simply its rfft spectrum and the eigenvectors are the Fourier modes. The eigendecomposition is FREE (it is
+the FFT), never a dense SVD at D=4096 (exactly what the topology module timed out on). This is "live in the
+Fourier/structured form where the spectrum is free."
+
+The unification the backlog pointed at: subdivision (Stam's exact eval), the dynamics propagator's k-step rollout
+(learn_dynamics), the diffusion sampler's steady state (hopfield.generate), and the resonator's fixed points are
+ALL "iterate a linear operator." Given U: (1) the k-step iterate is ONE eval -- raise the transfer to the k-th
+power -- matching k sequential binds to FFT tolerance (~1e-15, MEASURED: a 20-step jump == 20 binds to 9e-16);
+(2) the limit is closed-form -- decaying modes (|eigenvalue|<1) vanish, persistent modes (|.|~1) remain, a
+contractive operator's limit is 0 with NO iteration; (3) convergence/stall is READ OFF the spectrum before
+running -- the regime from max|eigenvalue| (contractive -> decays, marginal -> persists, divergent -> blows up),
+and the power-iteration rate from the spectral gap |lambda_2|/|lambda_1| (small gap -> slow / near-degenerate
+stall). Mind faculties propagator_jump (one-eval k-step) and propagator_spectrum (regime + gap, without running).
+
+THE KEPT NEGATIVES: only LINEAR operators diagonalise this way; the TRUE resonator is nonlinear (alternating
+projection + cleanup) and needs delay-embedding -- the spectral prediction is exact for the linear iterate (the
+dynamics propagator, power iteration) and only a HEURISTIC for the nonlinear resonator (the dynamics module's own
+nonlinearity negative). So the clean exact results are the linear iterate; the "predict a resonator stall from the
+spectrum" bar is met in its linear cousin (power-iteration convergence from the spectral gap), with the nonlinear
+caveat on the record. Eigenvector sign is pinned (largest-|entry| positive) for determinism -- the ISA-1 fence.
+SEATS: Stam (exact subdivision eval = an eigendecomposition of the refinement matrix) + Stoudenmire (spectral/
+low-rank) + Koopman/DMD.
+
+*** THE DCC REVERSE-TRANSFER THREAD IS COMPLETE: RT-III1 (graph-Laplacian denoise) -> RT-II1 (nonlinear manifold
+chart) -> RT-IV1 (steering kernels) -> RT-I1 (spectral iteration). Four reverse-transfers from the 3D/DCC domain
+into the engine, each measured with its kept negative; the reverse-transfer paid (the engine gained a graph
+filter, a curved-manifold chart, a direction-dependent metric, and a free closed-form operator iterate). ***
+
+Tests: +8 (1156 -> 1164). test_holographic_iterate.py (7): the eigendecomposition is the free rfft, the k-step
+jump matches the k-bind rollout, the contractive limit is closed-form zero, a divergent operator has no finite
+limit, the regime is read off the spectrum before running, the spectral gap predicts power-iteration speed, and
+the dominant eigenvector is deterministic + unit + the power-iteration fixed direction; plus a mind-level
+integration test (propagator_jump matches the learned propagator's rollout + propagator_spectrum reads a regime).
+Files: holographic_iterate.py, holographic_unified.py, test_holographic_iterate.py, test_integration.py, tour.py,
+README, holostuff_crosscutting_backlog.md.

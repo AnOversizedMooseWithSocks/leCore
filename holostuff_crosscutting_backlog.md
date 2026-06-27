@@ -282,7 +282,21 @@ audit, not enthusiasm; every item is a HYPOTHESIS with a bar and a stated failur
 
 ## Group I — Diagonalise the iterated operator: the spectral-limit family
 
-### RT-I1 — `operator_limit` / spectral-iteration   ◆ GENUINELY UN-BUILT
+### RT-I1 — `operator_limit` / spectral-iteration   ◆ GENUINELY UN-BUILT   ✓ SHIPPED
+*Shipped: holographic_iterate.py. THE KEY INSIGHT: a bind is circular convolution -> DIAGONAL in the Fourier
+basis, so the eigenvalues of the operator U are just its rfft spectrum (the eigendecomposition is FREE, no dense
+O(n^3) SVD -- "live in the Fourier form"). step_k jumps k binds in ONE eval (raise the transfer to the k-th
+power), matching the k-bind rollout to ~1e-15 (MEASURED: 20-step jump == 20 binds to 9e-16); limit is closed-form
+(contractive -> 0, no iteration); spectral_profile reads the regime (contractive/marginal/divergent) and the
+spectral gap (slow if near-degenerate) BEFORE running. Mind faculties propagator_jump + propagator_spectrum. Kept
+negative: only LINEAR operators diagonalise -- the true (nonlinear) resonator needs delay-embedding, so the
+"predict a resonator stall" bar is met in its linear cousin (power-iteration convergence from the gap) with the
+nonlinearity caveat. Determinism: eigenvector sign pinned (ISA-1 fence). test_holographic_iterate.py (7) + 1
+integration. 1156 -> 1164.
+
+**THE DCC REVERSE-TRANSFER THREAD IS COMPLETE (RT-III1, RT-II1, RT-IV1, RT-I1).** Graph-Laplacian denoise ->
+nonlinear manifold chart -> steering kernels -> spectral iteration. Four reverse-transfers from the 3D/DCC domain
+into the engine, each measured with its kept negative.
 - **Cross-connection.** Stam's exact subdivision eval (DCC-B3) is an eigendecomposition of the refinement matrix
   — diagonalise once, evaluate any level / the limit in closed form. The SAME math three faculties need and none
   does: the dynamics propagator (`learn_dynamics`, k-step rollout = k binds; U is a per-frequency Fourier transfer
@@ -350,7 +364,15 @@ audit, not enthusiasm; every item is a HYPOTHESIS with a bar and a stated failur
 
 ## Group IV — Kernels, metrics, and noise: the designed-spectrum family
 
-### RT-IV1 — anisotropic / steering kernels (a direction-dependent metric)   ◆ GENUINELY UN-BUILT
+### RT-IV1 — anisotropic / steering kernels (a direction-dependent metric)   ◆ GENUINELY UN-BUILT   ✓ SHIPPED
+*Shipped: holographic_fpe.py's VectorFunctionEncoder now takes a PER-AXIS bandwidth (scalar still works,
+backward-compatible) -- a diagonal steering kernel (small bw = smooth axis, large bw = sharp). holographic_
+steering.py adds steer_bandwidths (fit per-axis bandwidth from data) + kernel_regress; mind faculty
+steering_regress. Bar met IN THE RIGHT REGIME: on DENSE directional data (a sharp ridge) the steered kernel beats
+the best isotropic RBF ~8% (pools along the flat axis, sharp across the edge). Kept negatives (loud): on SPARSE
+data the win is ~1-3% (isotropic stays baseline); on ISOTROPIC data ~0%; "low frequency" is not "low variation";
+and the steering ESTIMATE is unreliable on scattered data (gradient polluted by other axes -- needs dense/grid),
+a full per-point covariance worse still. test_holographic_steering.py (7) + 1 integration. 1148 -> 1156.
 - **Cross-connection.** Anisotropic Gaussian splats (DCC-B5, covariance per splat) ARE steering kernels —
   Milanfar's own steering-kernel regression (Takeda, Farsiu, Milanfar 2007): a local kernel whose shape adapts to
   the data's direction.

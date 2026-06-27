@@ -2127,6 +2127,35 @@ class UnifiedMind:
         from holographic_reversible import auto_cleanup_run
         return auto_cleanup_run(initial, steps, codebook, floor=floor, schedule=schedule, k=k)
 
+    def steering_regress(self, X, y, X_query, bounds, base=2.0, dim=None):
+        """Anisotropic (steering) kernel regression (RT-IV1): fit a PER-AXIS bandwidth to the data's directional
+        structure (a sharp axis gets a large bandwidth, a flat axis a small one), build an anisotropic FPE
+        encoder, and predict X_query by FPE-kernel-weighted averaging. Returns (predictions, bandwidths). Beats
+        the isotropic RBF on DENSE directional data (an edge/ridge); on sparse or isotropic data the advantage is
+        marginal and the bandwidth estimate is unreliable -- isotropic is the honest baseline there."""
+        from holographic_steering import steer_bandwidths, kernel_regress
+        from holographic_fpe import VectorFunctionEncoder
+        bw = steer_bandwidths(X, y, base=base)
+        enc = VectorFunctionEncoder(len(bounds), dim=(dim or self.dim), bounds=bounds, bandwidth=bw, seed=self.seed)
+        return kernel_regress(enc, X, y, X_query), bw
+
+    def propagator_jump(self, states, state, k):
+        """Jump a learned dynamics operator k steps in ONE eval (RT-I1): the closed-form k-step iterate via the
+        FREE Fourier spectrum (a bind is diagonal in the Fourier basis), matching the k-bind rollout to FFT
+        tolerance. Diagonalise once, evaluate any level -- the same math Stam's subdivision eval uses."""
+        from holographic_iterate import step_k
+        U = self.learn_dynamics(states).U
+        return step_k(state, U, k)
+
+    def propagator_spectrum(self, states):
+        """Read a learned dynamics operator's convergence off its FREE FFT spectrum (RT-I1) WITHOUT running:
+        the regime (contractive -> decays; marginal -> persists; divergent -> blows up), the spectral_gap
+        (small -> slow/near-degenerate stall, the linear cousin of a resonator stall), and the dominant frequency.
+        The eigendecomposition of the bind operator is just its rfft -- no dense O(n^3) work."""
+        from holographic_iterate import spectral_profile
+        U = self.learn_dynamics(states).U
+        return spectral_profile(U)
+
     def tree_structure(self, tree):
         """Encode an expression tree as a typed structure at this mind's dim/seed. A leaf is a str symbol;
         an internal node is (op, *children). The EML-tree's holographic encoding, generalised."""
