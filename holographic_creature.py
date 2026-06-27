@@ -33,6 +33,40 @@ from holographic_ai import random_vector, bind, bundle, permute, Vocabulary
 class HolographicMind:
     """Perceive -> decide -> learn, by remembering experiences as PROTOTYPES.
 
+    THE THREE MINDS -- one division of labour, so this never gets confusing again:
+      - UnifiedMind     : THE ONE MIND (holographic_unified.py) -- every general faculty (the single encoder,
+                          the memory, recall, planning, denoising, the decision machinery). Everything builds
+                          on it; it uses THIS class internally for value-learning.
+      - CreatureMind    : a SPECIALIZED LAYER on UnifiedMind (holographic_creature_mind.py) -- the reference
+                          demo; subclass UnifiedMind and add domain wiring. Build agents THIS way.
+      - HolographicMind : the RL ENGINE  <<< THIS CLASS.  A per-action prototype value memory + greedy policy,
+                          used by UnifiedMind. NOT an agent-building pattern -- build agents from CreatureMind,
+                          never directly from here.
+
+    WHY THIS ENGINE IS KEPT (measured, exp_value_memory.py): its value memory substantially BEATS
+    value-learning built on the unified SelfOrganizingMind -- in-sample 0.96 vs 0.57, generalization 0.75 vs
+    0.25 (chance) -- and the gap is NOT just soft-vs-hard: a mechanism-matched soft k-NN rival on the unified
+    memory ALSO fails (0.57 / 0.25). The bespoke edge is its PER-ACTION prototype organization (a Q-value
+    regression by soft k-NN over similar states), which a situation-class + value-table does not replicate.
+    So the value memory earns its place; the unified memory does not do this out of the box.
+
+    HOW TO USE IT: do NOT build a new agent directly from this class -- it is the engine, not the pattern. The
+    public shape for creature behaviour is holographic_creature_mind.CreatureMind(UnifiedMind): a thin LAYER
+    on the one UnifiedMind that inherits the single encoder, the memory, planning, recall, and the decision
+    machinery, and uses this engine internally. Through UnifiedMind the encoding goes through the ONE encoder
+    (decide/reinforce call perceive, bypassing the creature encoder), and the memory/brain never encode
+    themselves -- the "one encoder" rule holds where it is stated.
+
+    ON THE CreatureEncoder (holographic_creature.py): it is NOT redundant duplication to retire. It is the
+    creature DOMAIN's encoder -- role/filler binding (the shared primitive) PLUS two things perceive does not
+    provide: build_state's action-memory (a working memory of recent moves) and the `seen` tracking that
+    HolographicMind.describe REQUIRES to decode a state back into sense terms. The rescue canary is
+    tie-sensitive to its EXACT output (see the kept-negative in CreatureEncoder.encode: a 1e-16 change flips
+    the trajectory). Creature-style agents reuse it on PURPOSE -- navigator's "inception" demo and app's maze
+    console run the same brain+encoder in a different world. Like the value memory, it earns its place; routing
+    these through perceive would drop describe/action-memory and re-baseline the whole tie-sensitive suite. The
+    value memory and this encoder both stay, measured/grounded.
+
     An experience is (state_vector, action, return). A naive store would keep
     every single one, but the creature meets the same egocentric situation again
     and again -- "star east, wall north" happens in a thousand different cells --
@@ -62,7 +96,7 @@ class HolographicMind:
                  memory_cap=6000, seed=0, merge=0.92, ret_alpha=0.1,
                  maintain=False, reorg_duplicate=0.85, redundancy_floor=0.35,
                  surprise_floor=0.4, maintain_gap=400, buffer_cap=1200, check_every=400,
-                 capacity=0):
+                 capacity=0, robust_returns=False):
         self.dim = dim
         self.actions = list(actions)        # e.g. ["N", "S", "E", "W"]
         self.k = k                          # prototypes consulted per action
@@ -116,6 +150,17 @@ class HolographicMind:
         self.maintain_gap = maintain_gap
         self.buffer_cap = buffer_cap        # size of the recent-experience window (a budget)
         self.check_every = check_every      # look this often, in new experiences (a budget)
+        # MAINTENANCE BUDGET (Request 2): how many candidate memories auto_maintain builds and
+        # scores each tick. The defaults reproduce the full 8-way search exactly. A deployment
+        # that knows it is quiet (a stable courier) can trim these -- fewer fold grains, and/or
+        # drop the REFRESHING family that only earns its keep after a regime shift -- so a calm
+        # stretch stops paying full model-selection cost on every tick. Set on the instance (or
+        # overridden per call). NOTE these are CALLER controls, not an auto-gate on `surprise`:
+        # surprise here is an EMA of reward prediction error, which tracks reward NOISE as much
+        # as regime change, so it stays high in a noisy-but-stable world and is not a reliable
+        # "nothing shifted" signal -- the caller, who knows the deployment, decides the cadence.
+        self.maintain_grains = (0.9, 0.82, 0.75)   # fold grains tried in each family
+        self.maintain_refresh = True               # include the refreshing (forget-old) family
         self.surprise = 0.0                 # EMA of |actual return - predicted value|
         self._since_reorg = 0
         self._buf = []                      # recent (state, action, return) for self-checking
@@ -134,6 +179,14 @@ class HolographicMind:
         self._unit = [np.zeros((0, dim)) for _ in range(n)]
         self._ret = [np.zeros(0) for _ in range(n)]
         self._cnt = [np.zeros(0) for _ in range(n)]
+        # ROBUST RETURNS (D2, opt-in): an outlier reward (a fluke jackpot, a sensor glitch) folded straight into
+        # a prototype's running-mean return swings the value estimate. When robust_returns is on, winsorise the
+        # residual to +/- k * `_ret_dev` before folding it in, where `_ret_dev` is ONE running estimate of the
+        # typical |residual| (the reward NOISE scale -- shared across prototypes because the noise scale, unlike
+        # the mean, is roughly constant). Measured ~3x lower value error under outlier rewards, no cost on clean
+        # data. A single scalar, so it stays cheap and serialises trivially; off by default (bit-identical).
+        self.robust_returns = bool(robust_returns)
+        self._ret_dev = None                # lazy: seeded from the first residual so the scale starts sensibly
         self.experiences = 0                # total raw experiences absorbed (compression stat)
         # PROJECTION consolidation (see consolidate()): once set, every incoming
         # state is projected into this shared low-rank basis -- with a residual
@@ -269,6 +322,60 @@ class HolographicMind:
             return 0.0, 0.0
         return float((weights * rets).sum() / total), float(sims.max())
 
+    def _value_projected(self, state_vec, action_idx):
+        """value() WITHOUT the basis-width check -- the hot-path fast path (Request 3).
+
+        decide() runs perceive_vec ONCE before its per-action loop, so by the time values are
+        scored the state is already in prototype space; the public value() still re-checks the
+        width on every call to stay safe for direct callers. This private variant assumes the
+        caller has already projected (or never consolidated), so it skips the branch. The numbers
+        are BIT-IDENTICAL to value() on an already-projected (or raw, un-consolidated) state -- it
+        only drops the conditional, never changes the math. Used by value_batch below."""
+        U = self._unit[action_idx]
+        if not len(U):
+            return 0.0, 0.0
+        sims = U @ state_vec
+        rets = self._ret[action_idx]
+        if sims.size > self.k:
+            top = np.argpartition(sims, -self.k)[-self.k:]
+            sims, rets = sims[top], rets[top]
+        weights = np.clip(sims, 0.0, None)
+        total = weights.sum()
+        if total <= 1e-9:
+            return 0.0, 0.0
+        return float((weights * rets).sum() / total), float(sims.max())
+
+    def value_batch(self, state_vec, action_idxs=None):
+        """Score several actions for one state in a single call: returns (values, supports) as
+        aligned arrays. Equivalent to calling value() for each action, but it does the
+        basis projection ONCE up front (not once per action) and then takes the no-branch fast
+        path per action -- so the result is BIT-IDENTICAL to a value() loop while a consolidated
+        brain handed a RAW state pays for one projection instead of len(action_idxs).
+
+        HONEST NOTE on speed: this is an API convenience, not a hot-path win. Measured on real
+        trained brains, scoring all actions in one batched call is within a few percent of the
+        per-action loop -- the per-action prototype banks are small and BLAS already runs four
+        little matrix-vector products about as fast as one stacked one, while the per-action
+        top-k (argpartition) is irreducible and cannot be merged. The one real saving is the
+        single projection for the consolidated-brain raw-state case above. (A stacked one-matmul
+        form was measured to be both SLOWER -- the concatenate costs more than it saves -- and
+        NOT bit-identical to the per-action product, differing at ~1e-16, the same tie-break
+        hazard that kept bind_batch out of the encoder. So it is deliberately not used.)
+
+        action_idxs: which actions to score (default: all). state_vec may be raw or projected."""
+        idxs = list(range(len(self.actions))) if action_idxs is None else list(action_idxs)
+        state_vec = np.asarray(state_vec, float)
+        # project ONCE (Request 3) -- a side-effect-free lift, exactly as value() does per call,
+        # so the per-action results below match value()'s bit-for-bit. NOT perceive_vec: that
+        # feeds the flux-guard ring and must run only once per real perception, not per scoring.
+        if self._basis is not None and state_vec.shape[-1] == self._basis.shape[0]:
+            state_vec = state_vec @ self._basis
+        values = np.zeros(len(idxs))
+        supports = np.zeros(len(idxs))
+        for i, a in enumerate(idxs):
+            values[i], supports[i] = self._value_projected(state_vec, a)
+        return values, supports
+
     def decide(self, state_vec, explore=True, epsilon=None, among=None,
                senses=None, avoid=("danger", "wall"), soft=()):
         """Choose an action. Mostly greedy on value, with two sources of
@@ -388,6 +495,37 @@ class HolographicMind:
             out.append((role, va, vb, va == vb))
         return out
 
+    # ---- planning: corridor baking + re-anchoring (the navigation faculty) ----------------------
+    # MIGRATION NOTE (Phase 0): these expose the SAME corridor-planning capability UnifiedMind has
+    # (UnifiedMind.plan / replan_needed), by delegating to the one shared module both use -- so an NPC
+    # running on a creature can bake a route and re-anchor without the engine having to invert the
+    # creature<->mind relationship first. The general logic lives in holographic_plan (and the directed
+    # / gated faculties under it), not duplicated here; this is just the creature reaching it. The full
+    # "creature builds on UnifiedMind" inversion (and access to the mind's recall / recognize / denoise,
+    # which touch the mind's OWN memory and so need the relationship settled) is a later phase. These two
+    # are substrate-level (they operate on supplied vectors, not the creature's value memory), so they add
+    # the capability with zero weight and leave the decision path bit-identical.
+
+    def plan(self, start, field_step, max_steps=14, floor=0.15, action_of=None, is_branch=None):
+        """Bake one CORRIDOR -- a short executable route to the next decision point -- on the directed
+        substrate, the way past the per-structure capacity cap. `field_step(node) -> next_or_None` is the
+        caller's downhill stepper (a goal gradient, a flow field, this brain's own greedy move); the rollout
+        stops at `is_branch(node)` (a junction worth a real decide()) or `max_steps` (keep it at/under the
+        dim's reliable decode depth, ~15 at dim 512-1024). Returns a Plan (the plan hypervector, the decoded
+        tile route, the decoded direction labels via `action_of`, and a per-step throughput). The courier
+        executes the baked steps and re-anchors via replan_needed(); the brain is consulted once per
+        corridor, not once per tile. Same capability as UnifiedMind.plan()."""
+        from holographic_plan import plan as _plan
+        return _plan(start, field_step, max_steps=max_steps, floor=floor, seed=self._seed,
+                     action_of=action_of, is_branch=is_branch)
+
+    def replan_needed(self, p, executed, tile_ok=None, floor=0.15):
+        """The cheap per-tick guard for a baked Plan: re-anchor (call plan() again) when the plan is
+        exhausted, the next baked step's throughput is below `floor`, or `tile_ok(next_tile)` reports the
+        next tile is blocked; else execute the next baked step. No value() calls, no decode work."""
+        from holographic_plan import replan_needed as _replan
+        return _replan(p, executed, tile_ok=tile_ok, floor=floor)
+
     def penalize_recent(self, amount=0.5, n=4):
         """Online 'stuck' signal: nudge DOWN the value of the last `n` (state, action)
         pairs the brain acted on, without waiting for the episode to finish. Learning
@@ -468,7 +606,16 @@ class HolographicMind:
                 # IMPROVING policy instead of being dragged down forever by the
                 # noisy returns of early exploration. (Standard RL running average.)
                 alpha = max(1.0 / (c + 1.0), self.ret_alpha)
-                self._ret[a][j] += alpha * (ret - self._ret[a][j])
+                resid = ret - self._ret[a][j]
+                if self.robust_returns:                  # D2: clamp an outlier reward's pull to +/- k robust-scales
+                    if self._ret_dev is None:
+                        self._ret_dev = abs(resid) + 1e-6   # seed the scale from the first residual seen
+                    clamp = 3.0 * self._ret_dev          # winsorise: a fluke can move the value by at most this
+                    resid_w = max(-clamp, min(clamp, resid))
+                    self._ret[a][j] += alpha * resid_w
+                    self._ret_dev += 0.05 * (abs(ret - self._ret[a][j]) - self._ret_dev)   # track the noise scale
+                else:
+                    self._ret[a][j] += alpha * resid     # plain running average (unchanged default path)
                 self._cnt[a][j] = c + 1.0
                 v = self._sum[a][j]; nv = np.linalg.norm(v)
                 self._unit[a][j] = v / nv if nv > 0 else v
@@ -585,7 +732,8 @@ class HolographicMind:
     def _blank(self):
         d = self._state_dim()
         m = HolographicMind(self.dim, self.actions, k=self.k, merge=self.merge,
-                            ret_alpha=self.ret_alpha, capacity=self.capacity)
+                            ret_alpha=self.ret_alpha, capacity=self.capacity,
+                            robust_returns=self.robust_returns)
         if d != self.dim:
             # the buffer's states live in the projected space, so the candidate's empty
             # prototype banks must have that width too (otherwise the first _absorb
@@ -601,6 +749,7 @@ class HolographicMind:
         m = self._blank()
         m._sum = [x.copy() for x in src._sum]; m._unit = [x.copy() for x in src._unit]
         m._ret = [x.copy() for x in src._ret]; m._cnt = [x.copy() for x in src._cnt]
+        m._ret_dev = src._ret_dev                  # D2: carry the running robust scale into the clone
         return m
 
     def _rebuilt_from(self, experiences):
@@ -623,7 +772,7 @@ class HolographicMind:
         rew = [r for s, a, r in val if self._greedy(mind, s) == a]
         return (float(np.mean(rew)) if rew else 0.0), np.array(rew)
 
-    def auto_maintain(self):
+    def auto_maintain(self, grains=None, refresh=None):
         """Speculate, measure, adopt -- with no behavioural thresholds. We build two
         families of candidate memories and judge them on a held-out slice of recent
         experience:
@@ -647,7 +796,18 @@ class HolographicMind:
         (recent) data" discipline the organizer uses, kept leakage-free by rebuilding
         only after the choice is made. Within the winning family we still take the
         leanest candidate that is statistically as good as the best. So a regime shift
-        draws a refresh; a quiet stretch draws a fold; neither is tuned for."""
+        draws a refresh; a quiet stretch draws a fold; neither is tuned for.
+
+        BUDGET (Request 2): `grains` is the tuple of fold grains tried in each family
+        (default: the instance's self.maintain_grains); `refresh` toggles the refreshing
+        family (default: self.maintain_refresh). Both default to the full 8-way search.
+        A quiet deployment can pass fewer grains and refresh=False to score as few as one
+        candidate per tick -- the caller's call, since (as the constructor notes) surprise
+        is not a reliable auto-signal. With refresh=False the brain stops watching for a
+        regime shift, so a stable courier that turns it off should periodically run a full
+        tick (plain auto_maintain()) to re-check, exactly the asymmetric cost above."""
+        grains = self.maintain_grains if grains is None else tuple(grains)
+        refresh = self.maintain_refresh if refresh is None else bool(refresh)
         self._added = 0
         buf = list(self._buf)
         self.rng.shuffle(buf)
@@ -657,29 +817,31 @@ class HolographicMind:
             return
 
         preserving = [("keep", self._clone())]
-        for g in (0.9, 0.82, 0.75):
+        for g in grains:
             c = self._clone(); c.reorganize(duplicate=g)
             preserving.append((f"fold@{g}", c))
-        base = self._rebuilt_from(fit)
-        refreshing = [("refresh", base)]
-        for g in (0.9, 0.82, 0.75):
-            c = self._clone(base); c.reorganize(duplicate=g)
-            refreshing.append((f"refresh+fold@{g}", c))
+        if refresh:
+            base = self._rebuilt_from(fit)
+            refreshing = [("refresh", base)]
+            for g in grains:
+                c = self._clone(base); c.reorganize(duplicate=g)
+                refreshing.append((f"refresh+fold@{g}", c))
+        else:
+            refreshing = []                     # stable-deployment budget: don't pay to forget
 
         def score(group):
             return [(name, m, (pv := self._policy_value(m, val))[0], pv[1]) for name, m in group]
         P, R = score(preserving), score(refreshing)
         bestP = max(P, key=lambda z: z[2])
-        bestR = max(R, key=lambda z: z[2])
-        pooled = bestP[3] if bestP[2] >= bestR[2] else bestR[3]
-        se = pooled.std() / np.sqrt(len(pooled)) if len(pooled) > 1 else 0.0
-
-        if bestR[2] > bestP[2]:                 # recent decisions better -> the world moved
+        bestR = max(R, key=lambda z: z[2]) if R else None      # R empty when refresh=False
+        if bestR is not None and bestR[2] > bestP[2]:   # recent decisions better -> the world moved
             group, best = R, bestR
-        else:                                    # compress without forgetting
+        else:                                    # compress without forgetting (or no refresh family)
             group, best = P, bestP
+        # 2-sigma band read off the WINNING family's pooled rewards (not chosen by hand)
+        se = best[3].std() / np.sqrt(len(best[3])) if len(best[3]) > 1 else 0.0
         # within the winning family, take the leanest whose decisions are statistically
-        # as good as the best (a 2-sigma band read off the data, not chosen by hand)
+        # as good as the best
         pool = [z for z in group if z[2] >= best[2] - 2 * se]
         chosen = min(pool, key=lambda z: z[1].prototype_count())
 
@@ -710,7 +872,7 @@ class HolographicMind:
     _STATE_FIELDS = ("k", "epsilon", "novelty_bonus", "memory_cap", "merge", "ret_alpha",
                      "maintain", "reorg_duplicate", "redundancy_floor", "surprise_floor",
                      "maintain_gap", "buffer_cap", "check_every", "capacity",
-                     "blind_floor", "expand_at", "experiences", "reorganizations")
+                     "blind_floor", "expand_at", "experiences", "reorganizations", "robust_returns")
 
     def to_state(self):
         """A snapshot of this trained brain: config + the learned per-action banks +
@@ -754,7 +916,18 @@ class HolographicMind:
 # ---------------------------------------------------------------------------
 
 class CreatureEncoder:
-    """Turn the creature's egocentric senses into a single unit vector.
+    """Turn the creature's egocentric senses into a single unit vector -- the creature DOMAIN's encoder.
+
+    RELATION TO THE ONE ENCODER (read first, so this is never mistaken for a stray duplicate): the system's
+    general encoder is UnifiedMind.perceive (UniversalEncoder), and through UnifiedMind the brain/memory get
+    their vectors from it -- they never encode themselves. THIS class is the standalone creature domain's
+    encoder, used by the creature's own training/demo harness and by creature-style agents that deliberately
+    reuse the same machinery in another world (holographic_navigator's "inception" demo, app's maze console,
+    holographic_lookahead). It is NOT redundant with perceive: it does role/filler binding (the shared
+    primitive) PLUS two things perceive does not -- build_state's action-memory (below) and the `seen`
+    tracking that HolographicMind.describe needs to decode a state back into sense terms. And the rescue
+    canary is tie-sensitive to its EXACT output (see the kept-negative in encode()). So it stays a focused,
+    deliberate component, the same way the per-action value memory does (measured, exp_value_memory.py).
 
     A 'sense' is a dict of feature -> value, e.g.
         {"food_x": "east", "food_y": "none", "danger_E": "yes", ...}
@@ -1864,6 +2037,37 @@ def demo_self_maintaining(dim=256, seed=0):
     print("  from recent experience once it moves (forget the stale regime). The plain")
     print("  brain, with no upkeep, stays stuck on the old policy. Same recovery and")
     print("  leanness as the hand-tuned version -- but chosen by measurement, not by me.")
+
+
+def _d2_selftest():
+    """D2: robust_returns winsorises outlier rewards so a fluke (a jackpot, a sensor glitch) cannot swing a
+    prototype's running-mean value -- measured markedly lower value error under outlier rewards, with no cost on
+    clean data; and the flag survives save/load (old saves default to off)."""
+    import numpy as _np
+    dim = 256
+
+    def trial(robust, outliers, seed):
+        rng = _np.random.default_rng(seed)
+        brain = HolographicMind(dim, ["a", "b"], merge=0.8, robust_returns=robust)
+        s = rng.standard_normal(dim)
+        s /= _np.linalg.norm(s) + 1e-12                              # one fixed state -> one prototype for action a
+        for _ in range(150):
+            r = rng.normal(20.0, 5.0) if (outliers and rng.random() < 0.08) else rng.normal(1.0, 0.3)
+            brain.remember([s], [0], [float(r)])                     # noisy/outlier rewards, true mean 1.0
+        est, _ = brain.value(s, 0)
+        return abs(est - 1.0)
+
+    err_plain = _np.mean([trial(False, True, s) for s in range(8)])
+    err_robust = _np.mean([trial(True, True, s) for s in range(8)])
+    assert err_robust < err_plain * 0.6, (err_robust, err_plain)    # robust markedly closer under outliers
+
+    clean_plain = _np.mean([trial(False, False, s) for s in range(8)])
+    clean_robust = _np.mean([trial(True, False, s) for s in range(8)])
+    assert clean_robust < clean_plain * 1.3 + 0.02, (clean_robust, clean_plain)   # no meaningful cost on clean data
+
+    b = HolographicMind(dim, ["a", "b"], robust_returns=True)
+    b2 = HolographicMind.from_state(b.to_state())
+    assert b2.robust_returns is True                                # the flag survives save/load
 
 
 if __name__ == "__main__":

@@ -178,7 +178,16 @@ def _structure_project(z, roles, fillers, beta, steps=1, readout="softmax"):
     return out / (np.linalg.norm(out) + 1e-12)
 
 
-def generate_structure(roles, fillers, steps=16, beta0=4.0, beta1=60.0, noise0=0.5, seed=0, readout="softmax"):
+def _decode_combo(z, roles, fillers):
+    """The hard decoded combination of a composed vector: per role, unbind the slot and take the argmax filler.
+    This is the structure's discrete CONTENT -- when it stops changing across diffusion steps, the generated
+    structure has settled (the B3 stop signal)."""
+    from holographic_ai import unbind
+    return tuple(int(np.argmax(fillers @ unbind(z, r))) for r in roles)
+
+
+def generate_structure(roles, fillers, steps=16, beta0=4.0, beta1=60.0, noise0=0.5, seed=0, readout="softmax",
+                       early_stop=False, min_steps=None, patience=3, stats=None):
     """Generate a novel-but-VALID composed structure by denoising from noise over the COMPOSED manifold
     (B10 + the Eno reframe). The same annealed diffusion as generate() -- random start, beta up, noise down --
     but the denoiser is `_structure_project` (slot-wise) instead of a bare-codebook cleanup, so the walk lands
@@ -191,11 +200,23 @@ def generate_structure(roles, fillers, steps=16, beta0=4.0, beta1=60.0, noise0=0
     `readout='sparsemax'` keeps validity (the result still reencodes its decoded combination at cosine
     1.000) while CURING generative mode collapse: softmax funnels many random seeds into the same few
     structures (measured diversity 0.03-0.5), sparsemax stays diverse (0.6-1.0, nearly every seed distinct).
-    Deterministic in `seed`."""
+    Deterministic in `seed`.
+
+    ADAPTIVE STOP (B3, opt-in early_stop=True; pass stats={} to read stats['steps']): the decoded combination
+    SETTLES well before the fixed schedule ends, so stop once it has been STABLE for `patience` steps past a
+    `min_steps` floor (default steps//2, past the high-noise exploration phase) -- Eno's condition, stability
+    not FIRST-convergence, so novelty is not amputated. On stopping, one final crisp `_structure_project` at
+    full beta (no noise) sharpens the settled combination. Measured: ~50% fewer steps, the SAME structure as
+    the full run on every seed (novelty + diversity preserved), and the final snap restores validity to 1.000 --
+    so unlike the splat fit's soft-plateau stop, this one is essentially FREE (the hard decoded combination IS
+    an effective certificate). Off by default (early_stop=False is bit-identical to the fixed schedule)."""
     rng = np.random.default_rng(seed)
     dim = roles.shape[1]
     z = rng.standard_normal(dim)
     z /= np.linalg.norm(z) + 1e-12
+    _ms = (max(6, steps // 2)) if min_steps is None else min_steps   # floor: past the high-noise exploration phase
+    _last = None
+    _stable = 0
     for t in range(steps):
         frac = t / max(1, steps - 1)
         beta = beta0 + (beta1 - beta0) * frac              # sharpen toward the manifold
@@ -204,4 +225,59 @@ def generate_structure(roles, fillers, steps=16, beta0=4.0, beta1=60.0, noise0=0
         if noise > 0:
             z = z + noise * rng.standard_normal(dim) / np.sqrt(dim)
         z /= np.linalg.norm(z) + 1e-12
+        if early_stop:                                     # B3: stop once the decoded structure has SETTLED -- stable
+            combo = _decode_combo(z, roles, fillers)       # for `patience` steps past the floor (stability, not
+            _stable = _stable + 1 if combo == _last else 0  # first-convergence -- Eno's condition preserves novelty)
+            _last = combo
+            if t + 1 >= _ms and _stable >= patience:
+                z = _structure_project(z, roles, fillers, beta1, 1, readout=readout)   # final crisp snap, no noise
+                z /= np.linalg.norm(z) + 1e-12             # the settled combo at full beta -> validity back to 1.000
+                if stats is not None:
+                    stats["steps"] = t + 1
+                return z
+    if stats is not None:
+        stats["steps"] = steps
     return z
+
+
+def _b3_selftest():
+    """B3: the adaptive-stop diffusion stops once the decoded structure has SETTLED (stable past a min_steps
+    floor), reaching the SAME structure as the full fixed schedule on every seed at ~half the steps, with the
+    final crisp snap restoring validity to 1.000 -- essentially free, novelty preserved. OFF by default runs
+    the full schedule (bit-identical)."""
+    from holographic_ai import random_vector, bind
+    dim, S, V, STEPS = 512, 4, 8, 16
+    rng = np.random.default_rng(1)
+    roles = np.stack([random_vector(dim, rng) for _ in range(S)])
+    fillers = np.stack([random_vector(dim, rng) for _ in range(V)])
+
+    def reencode(combo):
+        out = np.sum([bind(roles[i], fillers[combo[i]]) for i in range(S)], axis=0)
+        return out / (np.linalg.norm(out) + 1e-12)
+
+    matches = 0
+    combos = set()
+    saved = []
+    for s in range(12):
+        st_f = {}
+        zf = generate_structure(roles, fillers, steps=STEPS, seed=s, readout="sparsemax", stats=st_f)
+        assert st_f["steps"] == STEPS, st_f                          # OFF by default: full schedule
+        st_e = {}
+        ze = generate_structure(roles, fillers, steps=STEPS, seed=s, readout="sparsemax",
+                                early_stop=True, stats=st_e)
+        cf = _decode_combo(zf, roles, fillers)
+        ce = _decode_combo(ze, roles, fillers)
+        if cf == ce:
+            matches += 1
+        combos.add(ce)
+        saved.append(st_e["steps"])
+        assert float(reencode(ce) @ ze) > 0.999, (s, float(reencode(ce) @ ze))   # final snap -> validity ~1.0
+
+    assert matches == 12, matches                                   # same structure as full run on every seed
+    assert len(combos) >= 10, len(combos)                           # diversity preserved (novelty not amputated)
+    assert max(saved) < STEPS, saved                                # stopped before the cap on every seed
+
+
+if __name__ == "__main__":
+    _b3_selftest()
+    print("holographic_hopfield B3 adaptive-stop diffusion selftest passed")

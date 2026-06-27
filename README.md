@@ -828,13 +828,13 @@ in, and a Labyrinth mode has it learn the way out of a maze -- all on a prototyp
 **Test suite** (runs the full pytest suite), **Query & recall** (the interactive image demo - degrade an
 image, optionally destroy part of the plate, watch it get recalled), **Recall by description**
 (cross-modal recall - describe an image in words and get the matching one back from the tag address space),
-**Set packer** (delta-code a set of related images against one reference), and **Image vault** (the general store: relate by fingerprint, compress adaptively across lossless and lossy encoders with an honest table, and query by example). The Test suite panel auto-discovers and runs every test_*.py (999 at last count; up to six skip without NLTK or its downloaded corpora). The package also ships the real 712-sprite set packed to ~67 KB at `features/sprites.hsp` (which doubles as a live demo of the sprite packer), and the UI uses it in two places: the Image vault runs relate/compress/query on the whole set, and the learning creature is drawn as a real walking sprite (`amg2`) that turns to face the direction it moves and cycles its two walk frames -- with its baked-in background keyed out (flood-filled from the edges) so it shows real transparency over the grid instead of an opaque tile. The creature also runs on an energy mechanic: it starts each life with 100 energy, every step costs 1, each star it reaches gives +3, and stepping on poison empties the battery -- instant death -- so collecting stars and staying alive are the same goal. Finally, a **Vision** panel shows that the image is just numbers: RGB->HSV colour and dominant-colour extraction, Sobel edges with Hough line/circle detection and Harris corners, a geometric shape classifier, and unsupervised *emergent* classes that fall out of clustering simple feature descriptors -- then a VSA prototype classifier (bundle + cosine cleanup) labels held-out shapes, tying the vision work back to the holographic engine. The panel reports each step's accuracy honestly, including where unsupervised clustering tops out. A final **Compositional scene** panel takes the opposite stance to a holistic descriptor: it reads the DCT coefficient layout as a texture tag (finally using the DCT as a feature, not just for compression), pairs it with HSV colour and geometric shape for automatic per-object tags, then encodes each object as a product of attribute atoms and a scene as their superposition -- so a ResonatorNetwork can factor the parts back out (and that resonator now takes an optional softmax-sharpened cleanup -- the SBC readout lesson swept down -- which recovers more at high codebook load; default off, so the small-vocabulary scene case is unchanged). Multi-object scenes now decompose reliably up to ~5 objects: the old ~50%-at-three ceiling turned out to be a scale bug (normalising the scene) plus missing refinement, not a real capacity limit -- keeping the scene as an unnormalised superposition and adding coordinate-descent sweeps recovers 3-4 objects at 100%. A **Scaling** panel confronts the deepest limit head-on: one holographic trace is a bundle with finite capacity (a 2048-d memory recalls 100% of 64 pairs but ~0% of 2048), so instead of one flat store it grows a deterministic recursive tree -- each node a seeded random hyperplane splitting items at the median, each leaf a small memory kept inside capacity, queries descending with a beam that back-tracks into nearby cells. This is the random projection tree of Dasgupta & Freund and, in spirit, how slime mould beats the size limit of pure diffusion by resolving a broad mass into a hierarchical vein network. The flat memory collapses with scale while the tree holds 100%, and search reaches ~96% recall at a fraction of a full scan's comparisons; per-leaf query 'flux' shows the thick-vein / thin-vein structure. A HoloForest of several differently-seeded trees breaks the single tree's recall ceiling, reaching ~100% recall at a fraction of a full scan's comparisons. Finally, a **Content addresses** panel realises the original partitioning idea the way AWS S3 does: no folders, just a flat keyspace where each object's name encodes the hierarchy. The auto-tags (colour/shape/texture) generate a deterministic URI like `red/circle/smooth`, the key *is* the partition path, and a FacetStore supports S3-style prefix listing and CommonPrefixes roll-up. Where the RP-tree splits by meaningless random hyperplanes, this splits by meaning -- readable, queryable paths -- at the honest cost of bucket skew, with key depth as the lever. And the resonator closes the loop: it recovers an item's URI from its content vector alone, so the address is computed from the content. And the skew problem is now handled: build_indexes gives any hot bucket its own in-bucket HoloForest, so content search inside a popular prefix stays sub-linear -- the bi-level structure (semantic prefix outside, geometric forest inside) realised.
+**Set packer** (delta-code a set of related images against one reference), and **Image vault** (the general store: relate by fingerprint, compress adaptively across lossless and lossy encoders with an honest table, and query by example). The Test suite panel auto-discovers and runs every test_*.py (1031 at last count; up to six skip without NLTK or its downloaded corpora). The package also ships the real 712-sprite set packed to ~67 KB at `features/sprites.hsp` (which doubles as a live demo of the sprite packer), and the UI uses it in two places: the Image vault runs relate/compress/query on the whole set, and the learning creature is drawn as a real walking sprite (`amg2`) that turns to face the direction it moves and cycles its two walk frames -- with its baked-in background keyed out (flood-filled from the edges) so it shows real transparency over the grid instead of an opaque tile. The creature also runs on an energy mechanic: it starts each life with 100 energy, every step costs 1, each star it reaches gives +3, and stepping on poison empties the battery -- instant death -- so collecting stars and staying alive are the same goal. Finally, a **Vision** panel shows that the image is just numbers: RGB->HSV colour and dominant-colour extraction, Sobel edges with Hough line/circle detection and Harris corners, a geometric shape classifier, and unsupervised *emergent* classes that fall out of clustering simple feature descriptors -- then a VSA prototype classifier (bundle + cosine cleanup) labels held-out shapes, tying the vision work back to the holographic engine. The panel reports each step's accuracy honestly, including where unsupervised clustering tops out. A final **Compositional scene** panel takes the opposite stance to a holistic descriptor: it reads the DCT coefficient layout as a texture tag (finally using the DCT as a feature, not just for compression), pairs it with HSV colour and geometric shape for automatic per-object tags, then encodes each object as a product of attribute atoms and a scene as their superposition -- so a ResonatorNetwork can factor the parts back out (and that resonator now takes an optional softmax-sharpened cleanup -- the SBC readout lesson swept down -- which recovers more at high codebook load; default off, so the small-vocabulary scene case is unchanged). Multi-object scenes now decompose reliably up to ~5 objects: the old ~50%-at-three ceiling turned out to be a scale bug (normalising the scene) plus missing refinement, not a real capacity limit -- keeping the scene as an unnormalised superposition and adding coordinate-descent sweeps recovers 3-4 objects at 100%. A **Scaling** panel confronts the deepest limit head-on: one holographic trace is a bundle with finite capacity (a 2048-d memory recalls 100% of 64 pairs but ~0% of 2048), so instead of one flat store it grows a deterministic recursive tree -- each node a seeded random hyperplane splitting items at the median, each leaf a small memory kept inside capacity, queries descending with a beam that back-tracks into nearby cells. This is the random projection tree of Dasgupta & Freund and, in spirit, how slime mould beats the size limit of pure diffusion by resolving a broad mass into a hierarchical vein network. The flat memory collapses with scale while the tree holds 100%, and search reaches ~96% recall at a fraction of a full scan's comparisons; per-leaf query 'flux' shows the thick-vein / thin-vein structure. A HoloForest of several differently-seeded trees breaks the single tree's recall ceiling, reaching ~100% recall at a fraction of a full scan's comparisons. Finally, a **Content addresses** panel realises the original partitioning idea the way AWS S3 does: no folders, just a flat keyspace where each object's name encodes the hierarchy. The auto-tags (colour/shape/texture) generate a deterministic URI like `red/circle/smooth`, the key *is* the partition path, and a FacetStore supports S3-style prefix listing and CommonPrefixes roll-up. Where the RP-tree splits by meaningless random hyperplanes, this splits by meaning -- readable, queryable paths -- at the honest cost of bucket skew, with key depth as the lever. And the resonator closes the loop: it recovers an item's URI from its content vector alone, so the address is computed from the content. And the skew problem is now handled: build_indexes gives any hot bucket its own in-bucket HoloForest, so content search inside a popular prefix stays sub-linear -- the bi-level structure (semantic prefix outside, geometric forest inside) realised.
 
 ### From the command line
     python tour.py                    # guided tour of all subsystems (~20s)
     python holographic_creature.py    # any module runs its own demo
     python holographic_encoders.py    # numbers / text / records demos
-    pytest -q                         # the whole test suite (999 tests)
+    pytest -q                         # the whole test suite (1031 tests)
 
 ---
 
@@ -1753,6 +1753,18 @@ intermediate (measured deviation ~0.98 at a separation where phase differences r
 states have no well-defined intermediate for any method. So the win holds while the change keeps per-component phase
 differences under π. **`phase_morph`** ships it.
 
+That same lesson now reaches the image morph path (C2). The mind's `morph_scene` blended images in the
+DCT-coefficient domain, a structure slerp that avoids a ghosting crossfade but interpolates a feature's *shape*.
+Adding `method='phase'` blends in the 2-D FFT domain instead, interpolating each bin's magnitude and phase
+separately. By the Fourier shift theorem a translation is a phase ramp, so the phase morph *slides* a translated
+feature to its intermediate position as a compact moving blob, where the DCT slerp smears it into an elongated
+oval spanning both positions — visible directly when the frames are rendered. Measured on a translated blob, the
+midpoint keeps about 97% of its peak height under the phase morph versus about 85% under the DCT slerp at a small
+shift. And the wrapping bound is exactly the one the vector version has: at a large translation the bin phase
+differences exceed π, the shortest arc wraps, and the morph falls back to a ghosted crossfade — slightly worse
+than the DCT slerp at the largest shifts. So `'phase'` is the right choice for small-motion morphs and `'dct'`
+for arbitrary structure change. It is opt-in, the default path unchanged.
+
 A last piece in this arc applies the same adaptive-compute idea to iteration COUNT rather than sample count. The
 resonator that factors a bound product runs an annealed alternating projection, and it already returned early once a
 restart's picks verified — but its inner loop always ran a fixed fifty iterations even after the estimate had
@@ -1832,6 +1844,166 @@ jittered accumulation, and with no new information the jitter could not manufact
 never held. So jittered accumulation does not sharpen past the refit; the only lever is the sampling resolution of the
 target, and a finer-grid refit uses it better. Nothing is wired — the experiment and its negative are recorded, in
 keeping with the rule that a kept negative is a result.
+
+With the rendering backlog complete, a cross-cutting sweep asked whether those same lessons transfer
+elsewhere in the stack — into text generation, image generation, and the creature brain — or down into the
+kernel. The sweep's own finding was that most of the powers are usage patterns that live above the substrate
+(the kernel, in high dimension, is already near-optimal), so the work concentrates in the faculties that run
+multi-step processes. The first transfer applies the resonator's adaptive-stop idea to the anisotropic splat
+fit, whose covariances are otherwise optimised for a fixed two hundred Adam steps. A convergence-gated stop —
+halting once the reconstruction error has stopped improving relative to where it started — saves roughly twenty
+to forty percent of those steps on a field the splats cannot fit perfectly, at a few-percent cost in final
+error. Two honest caveats are kept loud. Unlike the resonator's stop, which fires on an exact reconstruction
+certificate and is therefore free, a continuous fit has only a soft plateau, so stopping always costs a little
+quality — it is a speed/quality knob, off by default and bit-identical to the fixed schedule when off. And
+Adam's momentum takes about thirty steps to warm up, during which the error barely moves; a naive
+relative-improvement test mistakes that warm-up for convergence and stops almost immediately with a useless
+fit, which is why a minimum-steps floor guards it. The option ships on `splat_aniso`.
+
+The same adaptive-stop idea moves to text — to the diffusion that generates composed structures. That sampler
+starts from noise and anneals onto the manifold of role-filler structures over a fixed schedule, but the
+structure it is building, read off as the hard combination of fillers in each slot, settles well before the
+schedule ends. Stopping once that combination has held stable for a few steps — Eno's condition, stability
+rather than the first sign of convergence, so the late exploration that gives different seeds different
+structures is not cut off — reaches the same structure the full run would, on every seed tested, at about half
+the steps. A single crisp projection at the moment of stopping, at full sharpness with the noise turned off,
+restores the result's validity to a perfect re-encoding. Unlike the splat fit's soft plateau, this stop is
+essentially free, because the hard decoded combination is an exact certificate of where the walk has landed.
+Diversity across seeds is preserved, which was the property worth protecting. The option ships on
+`generate_structure`.
+
+A third transfer was expected to pay and did not, which is worth recording. A splat render is a sum of smooth
+Gaussians and is visibly over-smoothed, so the plan was to post-process it with the looping negative-lobe
+sharpener that recovered detail from over-smoothed signals elsewhere. It does not work, for a structural reason.
+Deconvolution assumes the smooth thing is a blurred copy of the truth, but a splat render is not a blurred copy
+of anything — it is a sparse sum of Gaussians, which is closer to a blurred copy of the splat centres, a handful
+of spikes. Deconvolving it therefore drives it toward those spikes, not toward the edges the splats dropped, and
+the error rises at every setting tried. The control makes the point precise: the very same sharpener, run on a
+genuine Gaussian blur of the truth, recovers about forty percent of the error. The machinery works; a splat
+render simply is not a blur. This is the image-domain version of a lesson the project keeps running into —
+jittered samples could not manufacture detail without new information, a degenerate codebook could not generate
+novelty, and here a lossy smooth basis cannot have its discarded high frequency sharpened back into existence.
+The probe and its control ship as a kept negative, with no faculty.
+
+Back on the creature side, the brain's value memory keeps a running mean of the returns each prototype has
+seen, and that mean is vulnerable to a single freak reward — a jackpot, a sensor glitch — which folds straight
+in and drags the estimate off. The robust-statistics fix is to clamp how far any one reward can pull the mean:
+winsorise the update to a few robust scales of the typical reward noise before it lands. The only state this
+needs is a single running estimate of that noise scale, shared across prototypes because the noise scale, unlike
+the mean, is roughly constant from one situation to the next, which keeps it cheap and easy to serialise.
+Measured against the plain running average under eight-percent outlier rewards, the winsorised value sits about
+three times closer to the true expected reward, and on clean rewards it costs nothing. It is opt-in on the
+action set and off by default. The same outlier-robust accumulation that protected an averaged reconstruction
+elsewhere protects an averaged value here.
+
+The anisotropic splat fit had a kept negative of its own: the loss is non-convex, so the result depends on the
+warm start, and the one-shot path — place all the splats at once by matching pursuit, then run a single joint
+gradient fit — can settle into a poor local optimum, sometimes even diverging if pushed too long. The remedy is
+the densification idea from Gaussian splatting, built here from scratch. Grow the splat set in stages: place a
+few wide splats on the signal, optimise them jointly, then place narrower splats only where the optimised
+reconstruction still errs, and optimise again. On a deliberately multi-scale target — a broad smooth blob with
+small sharp details — the staged version reaches an error around a millionth where the one-shot plateaus near a
+thousandth and then diverges, and crucially the one-shot cannot close that gap at any number of steps. The
+staged placement is simply a far better starting point, landing the final joint fit in a basin the one-shot
+never finds. It costs more total compute, several optimisation rounds rather than one, and the advantage is
+specific to multi-scale content; on a single-scale field the one-shot is already near-optimal. This does not
+manufacture detail, the way the failed sharpening probe tried to — it finds a better arrangement of the detail
+that is genuinely there. The faculty is `splat_densify`.
+
+The one promising candidate below the faculties, down at the encoder, also paid off. The scalar encoder maps a
+number to a vector with uniform resolution across its range — by construction, since its kernel is
+shift-invariant. The equidistribution idea from the rendering work says resolution should follow density: spend
+more of it where the values you actually encode cluster, less where they are sparse. Because this encoder has
+no discrete kernels to move, the equivalent is to warp its input axis by the cumulative distribution of the
+value density, so dense regions are stretched out and get finer effective resolution. Fitting that warp from a
+sample of the distribution lowers decode error under noise by roughly half to three-quarters on a clustered
+distribution, and ties exactly on a uniform one, where the warp is the identity — the control that proves the
+gain comes from the density structure and not from the machinery. The honest catch is that this is a
+reallocation, not a free lunch: dense-region decodes get several times better, but sparse and
+out-of-distribution decodes get several times worse. A resolution floor, mixing the density warp with the
+identity so a minimum share of resolution is kept everywhere, bounds that degradation — without it a sparse
+region collapses to near-zero resolution and decodes there go catastrophic, which is the same validity-radius
+lesson the irradiance cache taught. It is opt-in via `fit_resolution` and off by default.
+
+One creature-side transfer was expected to be marginal and turned out to be actively harmful, which is the more
+interesting result. The plan was to drive exploration from a low-discrepancy sequence instead of random moves,
+on the theory that low-discrepancy points cover a space more evenly. But a creature does not place independent
+samples in its state space — it walks, and a walk accumulates displacement. A low-discrepancy sequence over the
+four moves is balanced, north against south and east against west, so the steps cancel and the agent barely
+leaves where it started; on an open grid it covers about a dozen cells in four hundred steps. A random walk,
+whose whole character is the imbalance a low-discrepancy sequence is designed to remove, drifts diffusively and
+covers more than a hundred and fifty. The transfer that paid for direct sampling is harmful for sequential
+exploration because the two goals are opposed: low discrepancy minimises the imbalance of a point set, and
+spatial exploration is the cumulative sum of the steps, which needs that imbalance to go anywhere. It ships as a
+kept negative, with no faculty; the real coverage lever for a walking agent is count-based novelty, a piece of
+which the brain's existing novelty bonus already provides.
+
+A text-side combination was expected to help and turned out to change nothing, for a reason worth recording. The
+steered generator restricts to the predictor's most-likely candidates and then keeps whichever one the coherence
+verifier scores highest, discarding the predictor's own ranking at that final step. The plan was to combine the
+two scores by the balance heuristic — the multiple-importance-sampling rule for weighting two estimators by
+reliability — rather than letting the verifier override. Measured on a corpus with a deliberate greedy loop
+trap, the verifier does its job and escapes the loop where plain greedy decoding gets stuck, but the balance
+combination produces output identical to verifier-only selection, on both fluency and looping. The reason is
+that the predictor is already spent: it gates the candidate set down to its top handful before the verifier
+chooses, and within that handful the likelihoods are nearly flat, so once they are put on a common scale they
+form an almost uniform factor that cannot move the verifier's pick. The balance heuristic needs two estimators
+of the same quantity over the same support; a gate followed by a re-ranker is not that, so there is nothing to
+balance. It ships as a kept no-op with no faculty.
+
+The research item was to give the reactive creature a forward model and let it plan — and it produced the
+session's richest negative. The creature picks the action with the best learned value in the current state, with
+no model of what each action would do next. The plan was to learn a per-action transition operator from its own
+experience, roll it out a few steps to imagine each action's consequences, and pick the best rollout — with the
+rollout re-anchored at every step, the RAY-1 lesson, so the prediction would not compound error and decay. The
+re-anchoring half worked exactly as RAY-1 predicts: a naive rollout of the learned operator decays with depth
+(prediction cosine 0.65 to 0.53 over four steps) while re-anchoring each predicted state to the manifold of seen
+states holds it constant at about 0.77. But the planning half is redundant, and the reason is sharp. The four
+predicted leaves — one per first action — sit at about 0.97 pairwise cosine: a single bind displacement per
+action collapses every action to nearly the same predicted next-state, because in the egocentric sense-space the
+*average* sense-change is similar in every direction and the directional specificity washes out. So the lookahead
+bonus barely varies across actions (standard deviation 0.007) while the reactive value varies a lot (0.37), and
+the planner ranks the actions identically to the plain value function — 98 to 100% agreement, so it can never
+choose differently. A secondary structural reason compounds it: the creature's value already *is* the Monte-Carlo
+discounted return, so model-based lookahead is recomputing, through a noisy model, what the model-free value
+already encodes. It ships as a kept negative with no faculty. The throughline with the other negatives is exact:
+a sound technique applied to an operation whose shape defeats it — here a per-action linear operator asked to
+capture position-dependent, action-specific consequences it cannot represent.
+
+The arc closed with a sweep of six probes the panel pre-judged as no-ops — transfers where a technique that paid
+off for one operation was asked to work on a structurally different one, with a strong prior it would not. All
+six were measured on the real substrate and all six confirmed the prior, for two distinct reasons. Three fail to
+concentration of measure — the high-dimensional kernel is already near-optimal, so there is no slack to win.
+Building codebook atoms by repulsion on the sphere instead of i.i.d. Gaussian lowers their mutual coherence by
+only about 3% and their mean coherence not at all, with identical recall capacity, even after hundreds of
+relaxation steps. Low-discrepancy noise in the diffusion sampler matches i.i.d. noise exactly on diversity and
+validity, because the sampler is attractor-dominated — the cleanup step, not the noise spread, decides where it
+lands. Denoising the creature's noisy observation by snapping it to the seen-state manifold does not improve the
+decision — the value read-out's similarity-weighting already absorbs independent noise — and it over-smooths at
+low noise, the same clean-signal negative the manifold denoiser carries. The other three fail because the
+technique's precondition does not hold. Negative-lobe sharpening of a cleanup peak amplifies noise and hurts
+discrete recovery, because hard nearest-neighbour is already optimal for deciding which atom a vector is.
+Throughput-gating generation on a coherence floor has nothing to fire on, because steered generation already
+pulls any start toward coherent continuations, so the running coherence never cleanly marks an incoherent tail.
+And blending the creature's safety reflex into its value by a balance heuristic cannot give the guarantee a hard
+veto gives — a soft penalty picks a lethal move whenever the value advantage exceeds it, and a safety constraint
+is not an estimator to weight by reliability. They ship together as kept negatives with no faculty, because the
+measured reason each fails is the useful artifact.
+
+**Corridor planning (re-anchoring).** A route stored as one bundle hits the HRR capacity cliff fast:
+an undirected chain of consecutive binds decodes only a handful of tiles before crosstalk wins (about
+one tile at dim 512, five at dim 2048), and even the directed structure that suppresses the predecessor
+leak decodes only its reliable prefix — roughly fifteen tiles at dim 512 to 1024. That prefix length is
+the real cap, and it is a property of the encoding and the dimension, not a fixed limit. The way past it
+is the move a path tracer makes when a ray's throughput decays: rather than push one structure further
+than it can carry, re-anchor. The `plan` faculty bakes a corridor — the next twelve to sixteen steps of
+following a goal field downhill, short enough to decode cleanly — as a directed structure, and returns
+the compact plan vector, the decoded route, and a per-step throughput. A courier executes the baked steps
+with no further thinking and calls `replan_needed` each tick, a cheap index-and-compare that re-anchors
+the moment the plan is exhausted, the next step's throughput falls below a floor, or a supplied tile-check
+says the next tile is blocked. Arbitrarily long routes become a sequence of cap-sized, individually-clean
+corridors, with the expensive decision made once per corridor rather than once per tile. It is built
+entirely on the directed structure (RAY-3) and the throughput-gated walk (RAY-1) the engine already had.
 
 **More engine pieces** (each with a runnable demo): residue (exact integer)
 arithmetic on vectors, signed-distance regions of the sphere, a predictive filter
@@ -1952,7 +2124,7 @@ The app and tour:
     tour.py       command-line tour of every subsystem
     run.bat       Windows launcher
 
-Tests (999 total):
+Tests (1031 total):
 
     test_holographic.py           core engine (bind/bundle/memory/reflex/drift)
     test_holographic_image.py     image store / WHT / quantisation
@@ -2151,7 +2323,11 @@ Tests (999 total):
     test_holographic_phasemorph.py  FHRR phase-domain morph (PHASE-1): interpolating a feature's phase (phase shift
                                     = motion) moves it at constant velocity and stays a valid unit phasor, where the
                                     amplitude blend eases non-uniformly and collapses in magnitude; kept negative --
-                                    the shortest arc wraps past per-component phase diff pi (phase_morph)
+                                    the shortest arc wraps past per-component phase diff pi (phase_morph). C2
+                                    extends the same lesson to the IMAGE morph: morph_scene(method='phase') slides a
+                                    translated feature in the 2-D FFT domain (compact, ~97% midpoint peak) where the
+                                    DCT slerp smears it (~85%) -- same wrapping bound at large shifts
+                                    (morph_image_phase)
     test_holographic_adaptive_resonator.py
                                     resonator early-stop (ADAPT-2): stopping the moment the picks VERIFY matches
                                     fixed-count accuracy at lower average iteration cost (easily-solved
@@ -2180,6 +2356,73 @@ Tests (999 total):
                                     fit at sub-pixel offsets and accumulating beats the base refit only by
                                     supersampling, and a finer-grid refit given the same samples is strictly better --
                                     jittering does not sharpen past the refit; the lever is sampling resolution
+    test_holographic_aniso_earlystop.py
+                                    anisotropic splat-fit adaptive stop (C3): a convergence-gated early-stop saves
+                                    ~20-40% of the fixed Adam steps at a few-percent MSE cost -- a speed/quality
+                                    knob, NOT free (a soft plateau, unlike the resonator's exact certificate);
+                                    off by default, with an Adam-warm-up floor (aniso_fit early_stop)
+    test_holographic_diffusion_earlystop.py
+                                    adaptive-stop diffusion (B3): generate_structure stops once the decoded
+                                    structure has SETTLED (stable past a floor, not first-convergence -- Eno's
+                                    condition), reaching the same structure as the full schedule on every seed
+                                    at ~half the steps; a final crisp snap restores validity to 1.000 --
+                                    essentially free, novelty + diversity preserved (generate_structure early_stop)
+    test_holographic_splatsharpen.py
+                                    splat-render sharpening (C4) -- KEPT NEGATIVE: a 2-D Van Cittert sharpener
+                                    recovers detail from a GENUINE blur (control), but sharpening a splat render
+                                    cannot recover the edges the lossy splat basis discarded (the render is
+                                    sum-of-Gaussians(centres), not blur(truth) -- you cannot un-throw-away detail)
+    test_holographic_robust_returns.py
+                                    robust reward accumulation (D2): robust_returns winsorises outlier rewards in
+                                    the brain's value, so a fluke (jackpot / sensor glitch) cannot swing a
+                                    prototype's running-mean value -- ~3x lower value error under outlier rewards,
+                                    no cost on clean data; off by default (HolographicMind robust_returns)
+    test_holographic_densify.py   coarse-to-fine splat densification (C1): growing the splat set in stages
+                                    (place coarse, jointly fit, place fine on the residual, fit again) is a far
+                                    better warm start than the one-shot fit -- it reaches a basin the one-shot
+                                    cannot reach at any step count (~1e-6 vs ~1e-3), fixing the aniso
+                                    local-optimum negative (densify_fit / splat_densify)
+    test_holographic_adaptive_encoder.py
+                                    adaptive encoder resolution (A3): ScalarEncoder.fit_resolution warps the
+                                    input axis by the value-density CDF (with a resolution floor) -- ~55-73% lower
+                                    decode error on a non-uniform distribution, ties on a uniform one (the
+                                    control); a REALLOCATION, not free (dense better, sparse worse, floor-bounded)
+    test_holographic_ldexplore.py low-discrepancy exploration (D1) -- KEPT NEGATIVE: low-discrepancy action
+                                    selection covers an order of magnitude FEWER cells than epsilon-random (12 vs
+                                    162 in 400 steps) -- a walk accumulates displacement, so balanced steps cancel
+                                    and stay local; random's imbalance is the diffusive drift that explores
+    test_holographic_misgen.py    MIS-weighted steered generation (B1) -- KEPT NO-OP: combining the predictor's
+                                    coupling score and the verifier's coherence score by the balance heuristic
+                                    matches verifier-only EXACTLY -- steered_generate already spends the predictor
+                                    gating the candidate beam, so within the beam the coupling is too flat to move
+                                    the verifier's pick (MIS needs two estimators over a common support, not a
+                                    gate followed by a re-ranker)
+    test_holographic_lookahead.py the creature's re-anchored lookahead (D4) -- KEPT NEGATIVE: a per-action
+                                    bind-displacement forward model COLLAPSES the actions (the four predicted
+                                    leaves sit at ~0.97 pairwise cosine -- the average sense-change is similar
+                                    across directions), so model-based lookahead ranks the actions the same as the
+                                    reactive value (98-100% agreement) and cannot decide differently. Re-anchoring
+                                    keeps the rollout on-manifold (RAY-1 confirmed) but there is nothing to improve
+    test_holographic_plan.py        corridor planning (re-anchoring): bake a short route on the directed
+                                    substrate, run it cheap, re-anchor when the throughput gate trips -- the
+                                    way past the per-structure capacity cap (one brain call per corridor)
+    test_holographic_probesweep.py
+                                    the cross-cutting PROBE SWEEP -- six transfers the panel pre-judged no-op, all
+                                    measured and KEPT NEGATIVE: A1 low-discrepancy codebook (~3% coherence, identical
+                                    capacity), A2 negative-lobe cleanup (deconvolution hurts discrete cleanup), B2
+                                    throughput-gated generation (no incoherent tail to gate -- steering already
+                                    defends coherence), B4 low-discrepancy diffusion noise (attractor-dominated, ==
+                                    i.i.d.), D3 MIS-blended safety (a hard veto is not an estimator -- a soft penalty
+                                    cannot guarantee safety), D5 observation denoise (the encoder already absorbs
+                                    noise; snapping over-smooths a clean signal)
+    test_holographic_creature_batch.py
+                                    the brain's batched-scoring API (value_batch / _value_projected,
+                                    bit-identical to the value() loop -- tie-sensitivity demands it) and the
+                                    auto_maintain BUDGET knob (grains / refresh, default = the full search)
+    test_holographic_creature_mind.py
+                                    CreatureMind(UnifiedMind): a specialized mind built as a LAYER on the one
+                                    mind -- senses through the one encoder, acts/learns via inherited decide/
+                                    reinforce, plans via inherited plan; one object, faculties reused not rebuilt
     test_creature_gauntlet.py     the maze gauntlet: gamified debugging, system lessons in mazes
     test_app_creature.py          the app's creature endpoint round-trip
 

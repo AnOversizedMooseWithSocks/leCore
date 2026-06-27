@@ -30,6 +30,20 @@ from holographic_creature import HolographicMind
 class UnifiedMind:
     """Perceive once, into one space; remember, organize, recall, and decide over it.
 
+    THE THREE MINDS -- one division of labour, so this never gets confusing again:
+      - UnifiedMind     : THE ONE MIND  <<< THIS CLASS.  Every general, composable faculty lives here -- the
+                          single encoder (perceive), the self-organising memory, recall/recognize, planning,
+                          denoising, and the decision machinery. Everything is built on this; it depends on
+                          nothing domain-specific. New capability that ANY mind could use belongs here.
+      - CreatureMind    : a SPECIALIZED LAYER on this one mind (holographic_creature_mind.py) -- subclasses
+                          UnifiedMind, inherits every faculty, and adds only domain wiring (sense/act/learn).
+                          The reference demo of the pattern; build any new specialized mind the same way.
+      - HolographicMind : the RL ENGINE (holographic_creature.py) -- a per-action prototype value memory +
+                          greedy policy that THIS mind uses internally for value-learning (decide/reinforce
+                          delegate to it). MEASURED to beat value-learning built on the unified memory
+                          (exp_value_memory.py), so it is kept, not a remnant. It is NOT an agent-building
+                          pattern: build agents from CreatureMind, never directly from the engine.
+
       read(corpus)                     -- let perception pre-learn word co-occurrence
       absorb(examples)                 -- SELF-ASSEMBLY: build a working mind from a pile
                                           of (input, label[, modality]) examples
@@ -1422,11 +1436,15 @@ class UnifiedMind:
         return out
 
     # -- one decision brain, on the same substrate -------------------------
-    def actions(self, names):
+    def actions(self, names, robust_returns=False):
+        """Declare the creature brain's action set. `robust_returns=True` (D2, opt-in) winsorises outlier rewards
+        in each prototype's running-mean value: a fluke reward (a jackpot, a sensor glitch) is clamped to a few
+        robust-scales before it folds in, so it cannot swing the value estimate -- measured ~3x lower value error
+        under outlier rewards, no cost on clean data. Off by default (the plain running average)."""
         self._actions = list(names)
         self._brain = HolographicMind(self.dim, self._actions, k=12, epsilon=0.1,
                                       novelty_bonus=0.15, memory_cap=8000,
-                                      maintain=self.maintain)
+                                      maintain=self.maintain, robust_returns=robust_returns)
         return self
 
     def decide(self, state, explore=False, epsilon=None, modality=None,
@@ -2102,6 +2120,32 @@ class UnifiedMind:
         return gated_traverse(make_step(ds), ds.nodes[start_index], floor=floor,
                               max_steps=max_steps, min_steps=min_steps)
 
+    def plan(self, start, field_step, max_steps=14, floor=0.15, seed=None,
+             action_of=None, is_branch=None):
+        """Bake one CORRIDOR -- a short executable route to the next decision point -- on the directed
+        substrate, the way PAST the per-structure capacity cap. A route stored as one bundle decodes only
+        a handful of tiles before crosstalk wins; rather than push one structure past its reliable depth,
+        roll out the goal field's downhill path for ~12-16 steps (`field_step(node) -> next_or_None`, the
+        caller's gradient/flow/policy step; stop early at `is_branch(node)` -- a junction worth a real
+        decision -- or at `max_steps`), bake it as a directed chain, and return a Plan: the compact plan
+        hypervector, the decoded tile route, the decoded direction labels (if `action_of` is given), and a
+        per-step throughput. The courier executes the baked steps with NO further thinking and re-anchors at
+        the decision point via replan_needed(); the brain is consulted once per corridor, not once per tile.
+        Keep max_steps at or under the dim's reliable decode depth (~15 at dim 512-1024) so the plan never
+        claims steps it cannot carry. Built on directed_structure (RAY-3) + gated_traverse (RAY-1)."""
+        from holographic_plan import plan as _plan
+        return _plan(start, field_step, max_steps=max_steps, floor=floor,
+                     seed=self.seed if seed is None else seed,
+                     action_of=action_of, is_branch=is_branch)
+
+    def replan_needed(self, p, executed, tile_ok=None, floor=0.15):
+        """The cheap per-tick guard for a baked Plan: should the courier abandon it and re-anchor (call
+        plan() again)? True when the plan is exhausted, the next baked step's throughput has fallen below
+        `floor`, or `tile_ok(next_tile)` reports the next tile is no longer clear/on-route. Otherwise False
+        -- execute the next baked step. No value() calls, no decode work: a list index and a comparison."""
+        from holographic_plan import replan_needed as _replan
+        return _replan(p, executed, tile_ok=tile_ok, floor=floor)
+
     # ---- the DECOMPOSE / DENOISE / FIT half of the loop (integration plan, Tier 1) -------------
     # UnifiedMind was already strong on one half of the loop: COMPOSE / RECALL / PREDICT / GENERATE.
     # These three faculties add the inverse half -- take a FOREIGN signal APART into a generator (a
@@ -2585,7 +2629,7 @@ class UnifiedMind:
                          noise0=noise0, seed=self.seed if seed is None else seed, readout=readout)
 
     def generate_structure(self, roles, fillers, steps=16, beta0=4.0, beta1=60.0, noise0=0.5, seed=None,
-                           readout="softmax"):
+                           readout="softmax", early_stop=False, min_steps=None, stats=None):
         """GENERATE a novel-but-valid COMPOSED structure by denoising from noise over the composition manifold
         (B10 + the Eno reframe) -- the composed-subspace answer to `generate_vector`'s kept negative. Same
         annealed diffusion, but the denoiser is a slot-wise projection (unbind each role, snap the filler to
@@ -2603,10 +2647,18 @@ class UnifiedMind:
         them together -- while sparsemax stays DIVERSE (0.6-1.0, nearly every seed a distinct valid structure).
         It is the same metastable-mixing fix as the cleanup/resonator readout, here curing generative mode
         collapse at no validity cost. Default stays softmax for backward-compatibility; sparsemax is the
-        recommended setting when sampling for variety."""
+        recommended setting when sampling for variety.
+
+        ADAPTIVE STOP (B3, opt-in early_stop=True; pass stats={} to read stats['steps']): the decoded structure
+        settles well before the fixed schedule ends, so stop once it has been STABLE for a few steps past a
+        floor (Eno's condition: stability, not first-convergence -- novelty preserved). Measured ~50% fewer
+        steps, the SAME structure as the full run on every seed, and a final crisp snap restores validity to
+        1.000 -- essentially FREE (the hard decoded combination is an effective certificate, unlike the splat
+        fit's soft plateau). Off by default (bit-identical to the fixed schedule)."""
         from holographic_hopfield import generate_structure as _gs
         return _gs(np.asarray(roles, float), np.asarray(fillers, float), steps=steps, beta0=beta0,
-                   beta1=beta1, noise0=noise0, seed=self.seed if seed is None else seed, readout=readout)
+                   beta1=beta1, noise0=noise0, seed=self.seed if seed is None else seed, readout=readout,
+                   early_stop=early_stop, min_steps=min_steps, stats=stats)
 
     def svg_canvas(self):
         """The holographic vector-graphics (SVG) faculty (holographic_svg.HolographicSVG) -- the sharp,
@@ -3016,7 +3068,7 @@ class UnifiedMind:
             self._clifford = CliffordAlgebra()
         return self._clifford
 
-    def splat_aniso(self, field, k=12, steps=200, denoise=False):
+    def splat_aniso(self, field, k=12, steps=200, denoise=False, early_stop=False, stats=None):
         """Represent an n-D field (a 2-D image or a 3-D volume) as a superposition of ANISOTROPIC Gaussian
         splats -- the real 3D-Gaussian-Splatting primitive (oriented, elliptical/ellipsoidal Gaussians with a
         full covariance), fit by gradient descent on the reconstruction MSE (holographic_splat.aniso_fit:
@@ -3026,12 +3078,40 @@ class UnifiedMind:
         is (center, amplitude, L) with L the inverse-covariance Cholesky factor; denoise=True returns just the
         rendered field (a few smooth Gaussians cannot hold high-frequency noise).
 
+        ADAPTIVE STOP (C3, opt-in early_stop=True; pass stats={} to read stats['steps']): stop the fixed Adam
+        schedule once the reconstruction MSE has converged -- measured ~40% fewer steps at a few-percent MSE
+        cost. KEPT CAVEAT: this is a SPEED/QUALITY knob, not free -- a continuous fit has only a soft plateau,
+        not the resonator's exact certificate, so stopping always costs a little MSE; off by default
+        (bit-identical to the fixed-step fit). A min_steps floor inside aniso_fit guards Adam's ~30-step warm-up
+        (a naive relative test would mistake the warm-up for convergence and stop with a terrible fit).
+
         KEPT NEGATIVE / SCOPE: the loss is non-convex, so this finds a LOCAL optimum -- more splats do not help
         monotonically (a clean K=4 fit can beat a messier K=8 one) and the result depends on the isotropic warm
         start; and this is the from-scratch core of 3DGS only -- no tile rasteriser, no spherical-harmonic
         view-dependent colour, no GPU speed."""
         from holographic_splat import aniso_fit
-        splats, rendered = aniso_fit(np.asarray(field, float), k, steps=steps)
+        splats, rendered = aniso_fit(np.asarray(field, float), k, steps=steps,
+                                     early_stop=early_stop, stats=stats)
+        return rendered if denoise else (splats, rendered)
+
+    def splat_densify(self, field, k=12, stage_steps=(50, 80, 210), denoise=False, stats=None):
+        """Fit an n-D field with K ANISOTROPIC Gaussian splats COARSE-TO-FINE (C1) -- 3D-Gaussian-Splatting
+        densification, from scratch (holographic_splat.densify_fit). Rather than placing all K splats at once and
+        running one joint gradient fit (`splat_aniso`), grow the set in stages: place a fraction on the current
+        residual (coarse scales first), jointly optimise, then place more where the re-optimised reconstruction
+        still errs, and optimise again. `stage_steps` is the Adam steps per stage (the last should be long enough
+        to fully converge the whole set). Returns (splats, rendered); denoise=True returns just the rendered
+        field; pass stats={} to read stats['stages'].
+
+        WHY USE THIS over splat_aniso (measured): the staged placement is a far better WARM START for the final
+        joint fit, landing in a better basin of the non-convex loss. On a multi-scale target (a broad blob + small
+        sharp details) it reaches MSE the one-shot CANNOT reach at any step count (~1e-6 vs ~1e-3, where the
+        one-shot then DIVERGES past ~300 steps) -- directly addressing splat_aniso's local-optimum kept negative
+        (its result 'depends on the isotropic warm start'; a staged warm start is a much better one). The trade is
+        more total compute (several optimisation rounds); the win is on MULTI-SCALE content -- on a single-scale
+        field the one-shot is already near-optimal."""
+        from holographic_splat import densify_fit
+        splats, rendered = densify_fit(np.asarray(field, float), k, stage_steps=stage_steps, stats=stats)
         return rendered if denoise else (splats, rendered)
 
     def image_archive(self, shape, capacity, keep=None, dim=32768, thumb=12):
@@ -3080,10 +3160,18 @@ class UnifiedMind:
         from holographic_scene import make_scene
         return make_scene([(t["shape"], t["colour"]) for t in tag_list], S=S, seed=seed)
 
-    def morph_scene(self, img_a, img_b, steps=9):
-        """Morph between two images in the DCT-coefficient domain (structure-blending
-        slerp, not a ghosting crossfade), reusing the generation bundle's morph on a DCT
-        basis sized to these images. Part of this mind's generative repertoire."""
+    def morph_scene(self, img_a, img_b, steps=9, method="dct"):
+        """Morph between two images. method='dct' (default) blends in the DCT-coefficient domain (structure
+        slerp, not a ghosting crossfade). method='phase' (C2) blends in the 2-D FFT domain, interpolating each
+        bin's magnitude and PHASE separately -- the phase-vocoder move (holographic_phasemorph.morph_image_phase):
+        by the Fourier shift theorem a translation is a phase ramp, so the phase morph SLIDES a translated feature
+        to its intermediate position (a compact moving blob) where the DCT slerp interpolates its SHAPE and smears
+        it. Measured win for SMALL displacements; the kept BOUND is that a large translation wraps the phase ramp
+        (bin phase differences exceed pi) and falls back to a crossfade -- so 'phase' is for small-motion morphs,
+        'dct' for arbitrary structure change. Part of this mind's generative repertoire."""
+        if method == "phase":
+            from holographic_phasemorph import morph_image_phase
+            return morph_image_phase(np.asarray(img_a, float), np.asarray(img_b, float), steps=steps)
         from holographic_archive import HolographicArchive
         from holographic_generate import morph_images
         S = img_a.shape[0]

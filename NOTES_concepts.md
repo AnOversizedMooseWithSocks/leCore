@@ -7820,3 +7820,528 @@ wired -- `holographic_jittersplat` records the experiment and the negative.
 
 Tests: +1 (998 -> 999). test_holographic_jittersplat.py (the module _selftest: jittered beats base only by
 supersampling; a finer-grid refit beats jittered -- jittering doesn't sharpen past the refit).
+
+## Anisotropic splat-fit adaptive stop -- C3 (cross-cutting: ADAPT-2 -> image gen)
+
+The first cross-cutting transfer: the resonator's adaptive-stop (ADAPT-2) applied to splat_aniso's gradient
+fit, which optimises the covariances for a FIXED 200 Adam steps. Stop when the reconstruction MSE has converged.
+
+THE CRITERION (and why the obvious one fails twice):
+- Relative-improvement-over-a-window vs the CURRENT MSE FAILS on a near-perfectly-fittable field: the fit
+  descends geometrically toward zero, so each window still halves the error (> tol relative) forever and the
+  stop never fires. FIX: measure window improvement against the INITIAL error (a fixed scale) -- it fires
+  whether the fit plateaus at a residual floor OR descends geometrically toward zero.
+- Adam's momentum needs ~30 steps to warm up; during the warm-up the MSE barely moves, so a naive test
+  mistakes it for convergence and stops at step ~20 with a terrible fit. FIX: a min_steps floor (default 40).
+
+MEASURED: ~20-40% fewer steps on under-fit fields (a busy 9-blob field stops near ~121 of 200), less on a
+near-perfectly fittable one, at a few-percent MSE cost.
+
+THE KEPT CAVEAT (the honest difference from ADAPT-2): the resonator early-stop is FREE because it has an EXACT
+reconstruction certificate (stop when the picks verify -- same answer, sooner). A continuous gradient fit has
+only a SOFT plateau, so stopping ALWAYS costs a little MSE -- this is a speed/quality KNOB, not a free lunch.
+Off by default (early_stop=False is bit-identical to the fixed-step fit).
+
+Wired as early_stop= on aniso_fit and the splat_aniso faculty (pass stats={} to read stats['steps']).
+
+Tests: +2 (999 -> 1001). test_holographic_aniso_earlystop.py (the module _c3_selftest) and
+test_aniso_early_stop_saves_steps_at_small_cost in test_integration.py.
+
+## Adaptive-stop diffusion -- B3 (cross-cutting: ADAPT-2 -> text gen)
+
+The resonator's adaptive-stop applied to generate_structure (the B10 composed-manifold diffusion), which runs
+a FIXED annealing schedule. The structure being built -- read as the hard combination of fillers per slot
+(_decode_combo: unbind each role, argmax the filler) -- SETTLES well before the schedule ends, so stop once it
+has been stable for `patience` steps past a `min_steps` floor (default steps//2, past the high-noise phase).
+
+ENO'S CONDITION (don't amputate novelty): stop on STABILITY, not first-convergence. The late, lower-noise part
+of the walk is where different seeds diverge into different structures; cutting it off on the first converged
+step would collapse diversity. Stability-for-`patience`-steps past a floor preserves it -- MEASURED: 20 distinct
+structures both ways, and the SAME structure as the full run on every seed (so the stop changes WHEN it lands,
+not WHERE).
+
+WHY IT IS FREE (unlike C3): a continuous splat fit has only a soft plateau, so stopping always costs a little
+MSE. Here the hard decoded combination is an effective CERTIFICATE -- once it is stable, the output is
+determined. The early-stopped z is mid-anneal (slightly less sharp: validity ~0.967), so on stopping we apply
+one final crisp `_structure_project` at full beta with NO noise, which sharpens the settled combination and
+restores validity to 1.000. Same structure, full validity, ~50% fewer steps.
+
+Wired as early_stop=/min_steps= on generate_structure (module + faculty; pass stats={} to read stats['steps']).
+Off by default (early_stop=False is bit-identical to the fixed schedule).
+
+Tests: +2 (1001 -> 1003). test_holographic_diffusion_earlystop.py (the module _b3_selftest) and
+test_generate_structure_early_stop_matches_full_at_half_the_steps in test_integration.py.
+
+## Splat-render sharpening -- C4 (cross-cutting: XDATA-3 -> image gen) -- KEPT NEGATIVE
+
+THE PROPOSAL (Milanfar's seat, RED/Van Cittert): a splat render is a sum of smooth Gaussians, hence
+over-smoothed (splat_aniso's own negative says a few Gaussians cannot hold high frequency), so sharpen it with
+the XDATA-3 negative-lobe loop to recover edge detail. High upside on paper.
+
+THE MEASURED ANSWER: it does NOT work, for a STRUCTURAL reason (not tuning). Van Cittert deconvolution assumes
+the smooth signal is blur(truth) -- a CONVOLUTION of what you want. A splat render is not that: it is a sparse
+sum of Gaussians, ~= blur(the splat CENTRES), a handful of spikes. Deconvolving it drives toward those centres
+(spikes/ringing), NOT toward the discarded edges. Sharpening the render at every sigma/iters tested makes it
+WORSE (relative error rises ~5-8%).
+
+THE DECISIVE CONTROL: the SAME 2-D Van Cittert sharpener on a GENUINE Gaussian blur of the truth RECOVERS ~42%
+of the error (0.37 -> 0.22). The machinery works; the negative is specifically that a splat render is
+sum-of-Gaussians(centres), not blur(truth).
+
+THE LESSON: the image-domain twin of the ACCUM-1 jitter negative and the generate_vector bare-codebook negative
+-- you cannot manufacture detail that was never stored. A lossy smooth basis THREW AWAY the high frequency; no
+negative-lobe loop recovers information that is not in the render. Sharpening un-low-passes a genuinely
+low-passed signal; it cannot un-throw-away a lossy approximation.
+
+No faculty, no tour line (the finding is the negative). The 2-D Van Cittert (gauss_blur2 + vc_sharpen2 in
+holographic_splatsharpen.py) is the vehicle for the control.
+
+Tests: +1 (1003 -> 1004). test_holographic_splatsharpen.py (the module _selftest: control recovers from a true
+blur, negative shows the splat render cannot be improved at any setting).
+
+## Robust reward/value accumulation -- D2 (cross-cutting: ACCUM-3 -> creature brain)
+
+ACCUM-3's outlier clamping applied to the creature brain's value memory. Each prototype keeps a running-mean
+return (`_ret[a][j] += alpha*(ret - mean)`); a single freak reward (a jackpot, a sensor glitch) folds straight
+in and drags the estimate. robust_returns winsorises the residual to +/- k * `_ret_dev` before it lands, where
+`_ret_dev` is the running typical |residual| (the reward NOISE scale).
+
+THE DESIGN CHOICE (why ONE global scalar, not a per-prototype array): `_ret` is touched at 8+ sites (init,
+append, evict, reorganize, clone, save/load); a parallel per-prototype scale array would be invasive and would
+break old saves. ONE running scalar suffices because the noise SCALE -- unlike the mean -- is roughly constant
+across prototypes, so a global |residual| estimate winsorises a mean-1 prototype and a mean-5 prototype equally
+well (measured). It is cheap, serialises trivially (it is transient scratch -- like the existing EMAs, it is NOT
+persisted and re-seeds from the first post-reload residual; only the FLAG is saved, via _STATE_FIELDS).
+
+MEASURED: under 8% outlier rewards, ~3x lower value error than the plain running average (1.57 -> 0.53 in
+isolation; the integration/selftest assert the brain's value() is markedly closer to the true mean). On CLEAN
+data: no cost (0.0561 vs 0.0550). The win is ~3x, not ACCUM-3's ~100x, because the floored-alpha EMA already
+damps outliers somewhat -- winsorisation adds the rest.
+
+Off by default (robust_returns=False -> the plain update path is bit-identical). Wired as robust_returns= on
+HolographicMind and the actions() faculty; carried through _blank/_clone and persisted via _STATE_FIELDS.
+
+Tests: +2 (1004 -> 1006). test_holographic_robust_returns.py (the module _d2_selftest: lower error under
+outliers, no clean-data cost, flag survives save/load) and test_robust_returns_resists_outlier_rewards in
+test_integration.py.
+
+## Coarse-to-fine splat densification -- C1 (cross-cutting: SCALE-1 + ADAPT-1 + 3DGS -> image gen)
+
+3D-Gaussian-Splatting densification, from scratch. The one-shot aniso_fit places all K splats by matching
+pursuit then runs ONE joint gradient fit; its kept negative is that the non-convex loss makes the result
+depend on the warm start (a poor local optimum, sometimes divergence). densify_fit grows the set in STAGES:
+place a fraction on the current residual (coarse scales first), jointly optimise ALL, place more where the
+re-optimised fit still errs, optimise again.
+
+THE MEASURED WIN (and why it is real, not just more steps): on a multi-scale target (broad blob + small sharp
+details) densify reaches MSE ~1e-6 where the one-shot plateaus near ~1e-3 -- and the one-shot CANNOT close the
+gap at ANY step count (measured 280/450/700 steps: it stays ~1e-3 and then DIVERGES past ~300, the non-convex
+instability the negative warns of). So the staged placement is a strictly better WARM START, landing the final
+joint fit in a basin the one-shot never finds. At MATCHED total compute (splat-steps) densify already wins; the
+trade is that it uses several optimisation rounds, and the win is specific to MULTI-SCALE content (on a
+single-scale field the one-shot is already near-optimal).
+
+NOT manufacturing detail (contrast C4): C4 tried to sharpen detail the splats discarded and failed (you cannot
+recover what was not stored). C1 does the opposite -- it finds a better ARRANGEMENT of the detail genuinely
+present in the target. Different operation, different (positive) result.
+
+REFACTOR: the Adam loop was extracted into the shared `_aniso_optimize(target, centers, amps, Ls, ...)` so
+aniso_fit (iso warm start) and densify_fit (staged warm start) use ONE gradient engine -- no duplication; the
+C3 early-stop lives in the helper. aniso_fit is bit-identical after the refactor (its selftest + the splat
+suite confirm). Wired as the `splat_densify` faculty (pass stats={} to read stats['stages']).
+
+Tests: +2 (1006 -> 1008). test_holographic_densify.py (the module _c1_selftest: densify reaches a markedly
+better optimum than the one-shot) and test_splat_densify_beats_one_shot_on_multiscale in test_integration.py.
+
+## Adaptive encoder resolution -- A3 (cross-cutting: CACHE-3 -> encoder) -- the one promising below-stack item
+
+CACHE-3's equidistribution (place resolution by density) applied to the ScalarEncoder. The sweep's premise was
+that the kernel is already near-optimal, so below-stack transfers are mostly negative -- A3 is the exception.
+
+THE MAPPING: the ScalarEncoder is NOT a grid of kernels -- it is a Fourier-phase encoder whose kernel is
+shift-invariant (uniform resolution across [lo,hi] by construction, Bochner). So "place kernels adaptively" has
+no discrete kernels to move; the equivalent is to WARP the input axis by the value-density CDF, stretching dense
+regions so they get finer effective resolution. fit_resolution(samples) fits that monotonic warp; encode warps
+x before the phase rotation, decode unwarps the result.
+
+THE FLOOR (the irradiance-caching validity-radius lesson, AGAIN): a PURE CDF warp drives sparse regions to
+~zero resolution, where decodes go catastrophic (measured: sparse-region error 0.0073 uniform -> 0.2569 warped,
+~35x WORSE) -- and those catastrophic tail decodes drag down the AVERAGE too. Mixing the CDF with the identity
+(floor=0.2: keep >= 20% resolution everywhere) bounds the sparse loss to ~4x and LIFTS the in-distribution win
+from ~15% to ~73%. Local weights with a validity radius, third appearance (after irradiance caching and the
+splat refit).
+
+MEASURED: non-uniform (bimodal) distribution ~55-73% lower decode error under noise; UNIFORM distribution ties
+(warp = identity -- the control proving the gain is from density structure, not the machinery). KEPT CAVEAT: a
+REALLOCATION, not free -- dense decodes ~4x better, sparse/out-of-distribution ~4x worse (floor-bounded). Fit
+only when decoding in-distribution values.
+
+REFACTOR: encode() split into _phase_encode(u) (the raw Fourier encoding) + the warp; decode() builds its grid
+with _phase_encode and unwarps the result. Unfitted (no fit_resolution call) -> warp is the identity ->
+bit-identical to the plain encoder. A primitive enhancement (no UnifiedMind faculty -- the mind has no scalar
+faculty to attach it to; a faculty must earn its method).
+
+Tests: +2 (1008 -> 1010). test_holographic_adaptive_encoder.py (the module _a3_selftest: win on non-uniform,
+tie on uniform, unfitted bit-identical) and test_adaptive_encoder_resolution_on_nonuniform_data in
+test_integration.py.
+
+## Low-discrepancy exploration -- D1 (cross-cutting: SAMPLE-1 -> creature) -- KEPT NEGATIVE
+
+THE PROPOSAL (Togelius's seat, caveat on record): SAMPLE-1's low-discrepancy sampling covers a space more evenly
+than i.i.d. random, so drive the creature's exploration from a low-discrepancy sequence instead of epsilon-random.
+
+THE MEASURED ANSWER: it actively HURTS (not just neutral), for a structural reason. SAMPLE-1's win is for placing
+each sample INDEPENDENTLY. A creature WALKS its state space, and a walk ACCUMULATES displacement. A
+low-discrepancy sequence over the four moves is BALANCED (N vs S, E vs W spread evenly in time), so the steps
+CANCEL and the agent stays pinned near start. A random walk's runs and imbalances ARE the diffusive drift that
+explores. Measured (open grid, 400 steps): random ~162 distinct cells, low-discrepancy ~12 -- an order of
+magnitude WORSE.
+
+THE LESSON: this pins down WHY a transfer that pays for direct sampling fails for sequential exploration. Low
+discrepancy MINIMISES the imbalance of a point set; spatial exploration NEEDS the imbalance (displacement is the
+cumulative SUM of the steps; a balanced sum is ~zero). Opposed goals. Togelius's caveat ("buys almost nothing
+over a handful of discrete actions") is stronger than predicted -- harmful, not neutral. The real coverage lever
+is count-based / novelty exploration, partly already in the brain's novelty_bonus.
+
+No faculty, no tour line (the finding is the negative).
+
+Tests: +1 (1010 -> 1011). test_holographic_ldexplore.py (the module _selftest: low-discrepancy covers far fewer
+cells than random; sanity that random does drift).
+
+## MIS-weighted steered generation -- B1 (cross-cutting: MIS-1 -> text gen) -- KEPT NO-OP
+
+THE PROPOSAL (Pharr's seat, balance heuristic, precondition on record): steered_generate keeps the candidate
+with the best verifier (coherence) score among the predictor's top-beam, discarding the predictor's ranking at
+selection. So combine the predictor's coupling score and the verifier's coherence score by the balance
+heuristic, weighting each by reliability, instead of letting the verifier override.
+
+THE MEASURED ANSWER: NO-OP -- the balance combination gives results IDENTICAL to verifier-only, structurally.
+steered_generate already uses the predictor as the candidate GATE (it restricts to the top-`beam` before the
+verifier picks). WITHIN that beam the coupling scores are nearly flat (all are the most-probable continuations),
+so after the softmax that puts them on a common scale the predictor's factor is ~uniform and cannot move the
+argmax of the product. The verifier dominates -> MIS == verifier. The predictor's information is ALREADY fully
+spent on gating; re-using it as a within-beam weight is redundant.
+
+MEASURED (loop-trap corpus: a frequent 'ping pong' cycle mixed with coherent clauses): the verifier DOES escape
+the greedy loop (distinct-token ratio ~0.44 vs greedy ~0.15 -- the setup is real), but the balance combination
+matches the verifier EXACTLY on both fluency (valid-bigram rate) and anti-looping (distinct ratio).
+
+THE LESSON: MIS combines two estimators of the SAME quantity over a COMMON support on a common scale (Pharr's
+precondition). The predictor does not estimate over the same set as the verifier -- it FILTERS to its top-beam
+first -- so there is nothing for the balance heuristic to balance. A gate followed by a re-ranker is not the MIS
+setting. (Compare D1: another transfer that fails because the operation is structurally different from the one
+the technique was built for.)
+
+No faculty, no tour line (the finding is the no-op).
+
+Tests: +1 (1011 -> 1012). test_holographic_misgen.py (the module _selftest: verifier escapes the loop -- setup
+real; MIS == verifier on distinct ratio -- the no-op).
+
+## Phase-domain image morph -- C2 (cross-cutting: phase vocoder / PHASE-1 -> the image morph path)
+
+The SAME phase-domain lesson PHASE-1 already established for FHRR vectors, now applied to morph_scene (which only
+did DCT-coefficient slerp). NOT a new principle -- the rediscovery is honest: PHASE-1 + its wrapping bound were
+already on record for vectors; C2 is its application to images.
+
+THE MAPPING: morph in the 2-D FFT domain, interpolating each bin's MAGNITUDE linearly and PHASE along the
+shortest arc. By the Fourier shift theorem a translation is a phase ramp, so phase interpolation SLIDES a
+translated feature to its intermediate position (a compact moving blob) where the DCT slerp interpolates the
+feature's SHAPE and SMEARS it into an elongated oval. VERIFIED VISUALLY (rendered the frames, did not trust the
+scalar): at shift 6 the DCT midpoint is a stretched oval, the phase midpoint a compact round blob sliding cleanly.
+
+MEASURED (blob on 48x48, metric = midpoint peak / endpoint peak): shift 6 -> DCT 0.85 vs phase 0.97 (phase
+WINS); shift 16 -> DCT 0.70 vs phase 0.67 (the wrap -- phase slightly WORSE). Through morph_scene on a 28x28
+field: phase 0.83 vs dct 0.73.
+
+THE BOUND (kept loud, same as the vector version): phase is mod 2*pi. For a LARGE translation the bin phase
+differences exceed pi, the shortest arc wraps, and the morph falls back to a ghosted crossfade (rendered: BOTH
+methods show two blobs at shift 24). The win holds only within the per-step displacement that keeps bin phase
+differences under pi -- the Nyquist limit on phase, exactly the phase-unwrapping problem the vocoder lives with.
+So method='phase' is for small-motion morphs, method='dct' for arbitrary structure change.
+
+Wired as morph_scene(method='phase') (default 'dct' -> bit-identical). Added morph_image_phase to the existing
+holographic_phasemorph.py rather than a new module (same family).
+
+Tests: +2 (1012 -> 1014). test_holographic_phasemorph_image_c2_selftest (the module _c2_selftest: phase slide
+beats crossfade small, wraps large) and test_morph_scene_phase_slides_translation_better_than_dct in
+test_integration.py.
+
+## Re-anchored lookahead for the creature -- D4 (cross-cutting: RAY-1 -> model-based planning) -- KEPT NEGATIVE
+
+THE PROPOSAL (the research item; Baker / Adamatzky): the creature is purely REACTIVE (best learned value in the
+current state, no forward model). Give it one -- a per-action transition operator learned from its experience --
+roll it out a few steps to imagine each action's consequences, pick the best rollout, RE-ANCHORING each predicted
+state (RAY-1: clean up every hop or the rollout compounds error and decays).
+
+PART 1 -- THE MECHANISM WORKS (RAY-1 confirmed in a new domain). Forward model: delta_a = normalize(mean
+unbind(next, state)); predict(s,a) = bind(s, delta_a). Naive rollout DECAYS with depth (cosine to true 0.65 ->
+0.53 over four steps). Re-anchoring the predicted state to a codebook of seen states each step holds it
+ON-MANIFOLD (cosine ~constant 0.77 across depth). Re-anchoring is as load-bearing here as for bind-chain traversal.
+
+PART 2 -- THE APPLICATION IS REDUNDANT (the kept negative). Re-anchored lookahead ranks the four actions
+IDENTICALLY to the plain reactive value -- 98-100% action-rank agreement -- so it can never decide differently;
+on stars it ties the reactive policy and loses its small epsilon (marginally worse). PRECISE ROOT CAUSE
+(diagnosed): the four predicted leaves sit at 0.974-0.994 PAIRWISE COSINE -- a single per-action bind displacement
+COLLAPSES all actions to nearly the same predicted next-state, because in the egocentric sense-space the AVERAGE
+sense-change is similar across directions (directional specificity is lost in the averaging). So the lookahead
+bonus varies by std 0.0075 across actions while the reactive value varies by std 0.37 -- lookahead carries no
+differentiated signal. Secondary structural reason: the creature's value IS the Monte-Carlo discounted return,
+already horizon-aware, so model-based planning recomputes (through a noisy model) what the model-free value
+already encodes.
+
+THE CROSS-CUTTING LESSON (throughline with C4, D1, B1): the re-anchoring transfer is mechanically sound, but the
+creature's state space does not admit a forward model good enough for the application. The structural mismatch is
+egocentric-sense-space averaging -- a per-action linear/bind operator cannot capture the position-dependent,
+action-specific consequences a real lookahead needs, so it predicts the same future for every action and the
+planner is blind. A right technique applied to an operation whose shape defeats it -- the same failure as the
+splat sharpener (a sum is not a blur), LD exploration (independent points for a sequential walk), and MIS
+generation (a gate, not a second estimator).
+
+No faculty, no tour line (the finding is the negative).
+
+Tests: +1 (1014 -> 1015). test_holographic_lookahead.py (the module _selftest, CI-fast ~1.7s: the forward model
+collapses the actions -- leaves > 0.9 pairwise cosine -- so lookahead-vs-reactive rank agreement > 0.9).
+
+## The cross-cutting PROBE SWEEP -- A1, A2, B2, B4, D3, D5 -- SIX KEPT NEGATIVES
+
+The cross-cutting backlog's probe items: transfers the panel pre-judged as no-ops. All six measured on the real
+substrate, all six confirmed the prior. They ship as ONE shared module (holographic_probesweep.py) with one
+measurement+assert and one test each -- no faculty, no tour line. The reason each fails is the artifact, and it is
+the C4/D1/B1/D4 throughline: a sound technique applied to an operation whose shape defeats it. Two failure classes:
+
+CONCENTRATION OF MEASURE (the kernel is already near-optimal -- no slack to win):
+  A1 LD/blue-noise codebook [SAMPLE-1 -> kernel]. Riesz repulsion vs i.i.d. atoms: max coherence ~3% lower, MEAN
+     coherence unchanged, at every dim 64..1024; capacity identical (40 pairs in d=512: 0.70 recall both); 500
+     steps barely move it. Random atoms are already near-uniform on the sphere. NO-OP.
+  B4 LD sampling in generation [SAMPLE-1 -> text]. LD-noise diffusion == i.i.d.-noise diffusion on diversity (41 vs
+     42 distinct atoms) and validity (0.507 vs 0.510) -- the diffusion is ATTRACTOR-dominated (cleanup decides the
+     landing, not the noise). A categorical token draw is a single pick and cannot use LD at all. NO-OP.
+  D5 Observation denoising [XDATA-1/2 -> creature]. Snapping the noisy state to the seen-state manifold does not
+     improve the decision -- argmax preserved ~equally from raw and denoised (0.68 vs 0.68 low noise) because the
+     value's similarity-weighting already absorbs noise -- and OVER-SMOOTHS at low noise (value err 0.34 -> 0.42).
+     The high-dim encoder is its own denoiser. NO-OP.
+
+WRONG-SHAPED OPERATION (the technique's precondition does not hold):
+  A2 Negative-lobe cleanup sharpening [XDATA-3 -> kernel]. Deconvolving the similarity profile (subtract
+     alpha*(G-I)@s) then argmax HURTS discrete cleanup (correlated atoms: 0.18 -> 0.00, amplifies noise) and is a
+     no-op for orthogonal atoms (G~=I). Hard NN is already Bayes-optimal for 'which atom'. NEGATIVE.
+  B2 Throughput-gated generation [RAY-1 -> text]. The running coherence does NOT separate in-distribution from a
+     garbage seed (means -37 vs -39, overlapping) -- steered generation pulls any start back to coherent
+     continuations, so there is no incoherent tail for a gate to catch. The coherence defense is redundant; the
+     abstention has nothing to fire on. REDUNDANT NO-OP.
+  D3 MIS-combined decision [MIS-1 -> creature]. In typical states the soft blend == the veto (0 lethal choices over
+     84 sensed-danger states, because value already disfavours danger). But the veto's value is the RESIDUAL the
+     value misestimates (survival bench: ~0.6%/step -> 67-73% of long lives die without it); a soft penalty picks a
+     lethal move whenever the value margin exceeds the penalty, so it cannot give the guarantee. A safety
+     constraint is not an estimator to blend. NEGATIVE.
+
+Tests: +6 (1015 -> 1021). test_holographic_probesweep.py (one test per probe; the module _selftest runs all six
+asserts, CI-fast ~0.8s).
+
+## Creature-brain performance pass: value_batch / budget knob -- and a MEASURED NEGATIVE on batched value
+
+Three requests for holographic_creature, all bound by the hard constraint that the creature is
+TIE-SENSITIVE (a 1e-16 difference at the top-k boundary flips a maze trajectory -- the bind_batch
+lesson). So every change had to be BIT-IDENTICAL to enter the decision path, or stay out. Each was
+measured before shipping.
+
+REQUEST 1 -- batched value() for speed: MEASURED NO SPEEDUP, kept negative. The premise was that a
+single stacked `U_all @ state` plus a segment-reduce would cut the hot path. It does not, for two
+reasons measured on real trained brains (banks ~84/action, dim 512, 6000 value calls):
+  - No speedup at any scale. A bit-identical per-action-gemv batch is ~2% faster (the value()
+    wrapper overhead is negligible); a stacked one-matmul is 73% SLOWER (the per-call concatenate
+    costs more than it saves); a PERSISTENT stack (no per-call concat) is 0.94-1.01x at banks
+    84/300/800; a padded-tensor vectorised top-k is 1.03-1.05x. BLAS already runs four small
+    matrix-vector products about as fast as one big one, and the per-action top-k (argpartition)
+    is irreducible -- it cannot be merged because k is per action.
+  - The stacked matmul is also NOT bit-identical to the per-action product: BLAS gemv blocks by row
+    count, so `concat(U) @ s` differs from `[U_a @ s]` at ~1e-16 -- the exact tie-break hazard that
+    kept bind_batch out of the encoder. (An M-INDEPENDENT reduction `(U*s).sum(1)` IS batchable
+    bit-identically, but does not match gemv, so adopting it would shift the whole baseline.)
+  A cProfile of a real run shows why the lever was misjudged: decide() is 44% of the run and
+  encode() (the per-sense binds -> FFTs; _raw_fft alone is 25% of total) is the OTHER 44%. value()
+  is genuinely efficient; the cost is real work, not Python overhead. The other half (encode) is the
+  bind_batch territory already known to be tie-unsafe. value_batch is still SHIPPED as the requested
+  API (bit-identical), honestly documented as an interface convenience, not a hot-path win.
+
+REQUEST 3 -- skip the basis-width check in value(): mostly a NO-OP. decide() runs perceive_vec once,
+so value() already receives a projected state and its width-check evaluates FALSE -- no redundant
+projection happens. The only real saving is for a CONSOLIDATED brain handed a RAW state scoring
+several actions: value_batch projects ONCE instead of once per action (measured 1.11x on that path).
+Shipped as `_value_projected` (value() minus the branch, bit-identical) and folded into value_batch.
+
+REQUEST 2 -- cheaper auto_maintain: shipped as a caller-controlled BUDGET knob (grains / refresh on
+auto_maintain, plus instance defaults), NOT an auto-gate. Measured findings:
+  - The proposed surprise auto-gate is UNRELIABLE: self.surprise is an EMA of reward prediction
+    error, which tracks reward NOISE as much as regime change, so it sat at 0.77 (floor 0.4) after
+    stable training -- it is not a "nothing shifted" signal. So the knob is caller-controlled.
+  - Savings are large: full 8-way 31 ms/tick; 1 grain + refresh (4 cand) 17 ms; 1 grain, no refresh
+    (2 cand) 9 ms; keep-only (1 cand) 3 ms.
+  - It is a speed/SELECTION-thoroughness trade, not free. Trimming fold grains is the safer lever
+    (both families still compete -- no missed-shift risk -- and here 1 grain picked the SAME memory
+    as 3, same held-out value); dropping the refresh family is sharper (it changed the selection
+    from a refresh to a preserve), so a stable courier that turns refresh off should periodically run
+    a full tick. Default (grains=(0.9,0.82,0.75), refresh=True) reproduces current behaviour exactly
+    -- the rescue-cracks canary passes unchanged.
+
+Tests: +6 (1021 -> 1027). test_holographic_creature_batch.py (value_batch / _value_projected
+bit-identity on un-consolidated and consolidated-raw states; budget default-is-full and lean-trims).
+
+## Corridor planning (re-anchoring): plan() / replan_needed -- the way past the per-structure capacity cap
+
+A user stress-testing fleet turn-by-turn navigation hit a "capacity limit" on how many steps a set of
+directions could hold. That limit is the HRR cliff, and it is a property of the ENCODING and the dimension,
+not a holostuff wall -- and the fix was already in the box:
+
+  - MEASURED cliff: a route stored as ONE undirected bundle (consecutive bind(tile_i, tile_{i+1})) decodes
+    only ~1 tile at dim 512, ~3 at 1024, ~5 at 2048 before crosstalk + the predecessor leak win.
+  - MEASURED fix: the SAME route as a DIRECTED structure (the permutation direction role, RAY-3) walked
+    with the throughput gate (RAY-1) decodes its full reliable prefix -- 15/15 at dim 512-1024 for a
+    16-route, 23/23 at dim 2048. The cap is just that prefix length; more dim buys more.
+
+The way PAST the per-structure cap is re-anchoring, exactly Russian roulette for a decaying ray: don't push
+one structure past its reliable depth -- bake a CORRIDOR (the next ~12-16 downhill steps, short enough to
+decode cleanly), execute it, and re-anchor at the decision point. Arbitrarily long routes become a sequence
+of cap-sized clean corridors; the brain is consulted once per corridor, not once per tile.
+
+holographic_plan.py is the API for that pattern, built ENTIRELY on existing tested pieces (holographic_directed
++ holographic_traverse):
+  - plan(start, field_step, max_steps, floor, action_of, is_branch) rolls out the goal field's downhill path
+    (field_step is the caller's gradient/flow/policy step; stops at is_branch or max_steps), bakes it as a
+    directed chain, and returns a Plan(memory, nodes, route, actions, throughputs, stopped, ds): the compact
+    plan hypervector, the decoded tile route, the decoded direction labels, and a per-step throughput.
+  - replan_needed(plan, executed, tile_ok, floor) is the cheap per-tick guard -- True (re-anchor) on
+    exhaustion / next-step throughput below floor / a blocked next tile; else execute the baked step. No
+    value() calls, no decode work.
+Wired into UnifiedMind as plan() / replan_needed (general functionality belongs in the mind, not siloed in
+the creature). KEPT NEGATIVE: a corridor that REVISITS a tile (a tight loop) can confuse cleanup, since two
+steps map to near-identical vectors -- straight corridors to the next decision point are distinct by
+construction; loops want segmenting.
+
+This is also the right answer to the batched-value request: baking a corridor collapses the ~72% trivial
+straight-line steps into near-free executions of a baked plan, so the per-tick value() loop that batching
+tried (and measured-failed) to speed up barely runs on those steps at all -- the brain only fires at the
+decision points. value_batch remains the (bit-identical, no-speedup) API for the genuine decisions that
+remain.
+
+Tests: +2 (1027 -> 1029). test_holographic_plan.py (selftest: at-cap corridor decodes fully, over-cap
+reports only its reliable prefix, replan_needed gating) + a UnifiedMind integration test.
+
+## Creature-mind migration, Phase 0: the creature reaches the planning faculty
+
+The audit for the creature<->UnifiedMind migration (holostuff_creature_migration_plan.md) found the real
+silo is ACCESS, not extraction: the creature's surface is almost all the RL layer (value/decide/remember/
+auto_maintain/...), it does not hoard general functionality, and UnifiedMind currently WRAPS it
+(self._brain). The genuinely-general faculties (plan, directed_structure, traverse, recall, denoise) live in
+the mind and the creature simply cannot call them.
+
+Phase 0 (behavior-preserving, shippable now) closes the part the navigation user needs: HolographicMind.plan
+/ replan_needed, delegating to the SAME holographic_plan module UnifiedMind.plan uses -- so an NPC on a
+creature can bake a corridor and re-anchor without the engine first inverting the creature<->mind
+relationship. These two are substrate-level (operate on supplied vectors, not the creature's value memory),
+so they add the capability with zero weight, no nesting (the creature does NOT build a UnifiedMind, which
+would build its own nested brain), no circular import, and -- confirmed -- a bit-identical decision path (the
+rescue-cracks canary passes unchanged).
+
+Phases 1-2 (invert the dependency so the creature is a layer ON UnifiedMind; optionally unify the encoder/
+memory onto the shared substrate, which is behavior-CHANGING and needs a canary re-baseline) are real
+architectural commitments left for Moose to direct -- see the migration plan for the options (composition
+recommended over inheritance for this shape), constraints (tie-sensitivity, the wide standalone surface, the
+circular-wrapping problem), and sequencing.
+
+Tests: +1 (1029 -> 1030). test_creature_plan_bakes_a_corridor in test_holographic_creature_batch.py.
+
+## CreatureMind: the creature as a LAYER on the one mind (the architecture, made concrete)
+
+Moose's architecture, stated plainly: there is ONE mind (UnifiedMind) where all general functionality lives
+-- the single encoder, the memory, recall, planning, denoising, the decision machinery -- and specialized
+minds (creature behavior, image generation, ...) are thin LAYERS on top that inherit every faculty and add
+only their domain wiring. The creature mind is the reference DEMO of that pattern. UnifiedMind's own encoder
+docstring already declares the intent -- "this is the only encoder in the system; the memory and the brain
+never encode anything themselves" -- and the standalone creature's separate CreatureEncoder is exactly the
+deviation from it.
+
+holographic_creature_mind.CreatureMind(UnifiedMind) writes the target shape down: it subclasses UnifiedMind
+(inherits the whole faculty suite), names its actions, and expresses the creature loop entirely over
+inherited faculties -- `sense` is the one encoder's `perceive` in record mode (no separate encoder), `act`
+is the inherited `decide`, `learn` is the inherited `reinforce`, and `plan` / `recall` / `denoise` are
+there for free. So a CreatureMind is, in ONE object, a full mind that also acts, learns, and navigates --
+the specialization is a handful of convenience methods, nothing rebuilt. It is the template for any other
+specialized mind: subclass UnifiedMind and wire your domain on top.
+
+MEASURED (selftest): a CreatureMind senses through the one encoder (bit-identical to perceive(...,'record')),
+learns the rewarded action via inherited decide/reinforce, and bakes a corridor via the inherited plan
+faculty -- all on one object.
+
+This sits BESIDE the standalone HolographicMind (the lower-level RL engine UnifiedMind still wraps today)
+during the migration; the migration plan's later phases retire that duplication (one encoder, one memory)
+and move the RL methods out of UnifiedMind's core into the layer -- a wide change touching the tests/tour
+that call unified.reinforce/decide, with a canary re-baseline, since the creature is a teaching demo not a
+frozen artifact. CreatureMind is where that migration lands, written down now so the destination is real.
+
+Also fixed in passing: plan()'s decode walked up to len(nodes)+2 steps, so a permissive floor let the
+terminal node's noisy unbind oscillate PAST the corridor end ([1..6,5,6,5]); capped to exactly the
+corridor's edge count (len(nodes)-1), the decode never invents tiles beyond what was rolled out.
+
+Tests: +1 (1030 -> 1031). test_holographic_creature_mind.py (CreatureMind selftest: one encoder for senses,
+act/learn on inherited machinery, inherited planning -- the layer-on-one-mind pattern).
+
+## MEASURED: is the bespoke creature value memory a redundant old path? -- No. (a kept result + negative)
+
+The long-running confusion was whether HolographicMind's prototype value memory is a "tumor" duplicating the
+unified mind, or an essential component. Audit first: HolographicMind imports only the shared kernel
+(bind/bundle/permute/Vocabulary), and through UnifiedMind its ENCODING already goes through the one encoder
+(decide/reinforce call perceive; the creature encoder is bypassed) and the calibrated honesty layer is wired
+in. The one thing genuinely separate is its value MEMORY (per-action prototype banks + soft k-NN returns
+regression) -- and the modern advancements (Hopfield cleanup, resonator, denoise) address clean recall /
+factorization, not value regression, so it was not obvious they would help it.
+
+So we measured it instead of guessing (exp_value_memory.py). Task: 16 egocentric situations (4 food dirs x 4
+distractor combos, best action = move toward food), train on 12, test greedy accuracy on all 16 (in-sample +
+held-out generalization). All learners handed the SAME perceive-encoded vectors (encoder not a variable),
+SAME episode stream, SAME exploration -- only the value memory differs. 6 seeds, dim 512.
+
+  RESULT (greedy accuracy, chance 0.25):
+    bespoke per-action memory : in 0.96   gen 0.75
+    unified-memory, hard class: in 0.57   gen 0.21  (NEGATIVE -- naive replacement fails)
+    unified-memory, soft k-NN : in 0.57   gen 0.25  (NEGATIVE -- mechanism-matched rival ALSO fails)
+
+The bespoke memory wins decisively, and -- the important negative -- the gap is NOT just soft-vs-hard: a soft
+k-NN value regression built on the unified SelfOrganizingMind (the fair, mechanism-matched rival) still
+collapses to chance generalization. The bespoke's edge is its PER-ACTION prototype organization: action a's
+bank holds every state where a was taken, so value(s,a) is a soft k-NN Q-value regression over similar states
+across ALL situations -- which generalizes ("states like this, when you went east, paid off"). The
+situation-class + value-table structure first buckets the state into a class (losing the cross-situation
+regression), and even soft-weighting over classes does not recover it (it only approaches the bespoke at a
+tuned high novelty_floor: floor=0.7 gives soft gen 0.67, still under 0.75 and floor-sensitive).
+
+VERDICT: the value memory is a deliberate, measured-essential RL engine, not a redundant old path. Keep it.
+The remaining "confusion" to fix is only the SURFACE: the public pattern for an agent is
+CreatureMind(UnifiedMind) (not building from HolographicMind directly), and the one real duplication left is
+the standalone CreatureEncoder still used by navigator/moe/lookahead/core/app -- a minor cleanup (route them
+through the mind's encoder), not an excision. The measurement saved a wrong refactor; the negative is kept.
+
+Tests: +0 (no faculty changed; HolographicMind docstring updated to record the verdict, exp_value_memory.py
+kept as provenance).
+
+## Follow-up: is the standalone CreatureEncoder a stray duplicate? -- No (the value-memory lesson, again)
+
+After the value-memory result, the last "loose thread" looked like the standalone CreatureEncoder used
+outside UnifiedMind. Looking closely (not assuming) settled it the same way: it is NOT redundant. Through
+UnifiedMind the encoding already goes through the ONE encoder (perceive; the brain/memory never encode
+themselves), so the rule holds where stated. CreatureEncoder is the creature DOMAIN's encoder: role/filler
+binding (the shared primitive) PLUS (a) build_state's action-memory -- a working memory of recent moves
+perceive has no notion of (app's maze console uses it) -- and (b) the `seen` role/value tracking that
+HolographicMind.describe REQUIRES to decode a state back into sense terms. The rescue canary is tie-sensitive
+to its exact output (the kept-negative in encode(): a 1e-16 change flips the trajectory). And the modules
+reuse it ON PURPOSE: navigator is an explicit "inception" demo (same brain + same encoder, new world), not
+accidental duplication -- and it is three modules (navigator/lookahead/app), not the five I'd loosely said
+(moe/core use only the engine, never the encoder).
+
+So, like the per-action value memory, CreatureEncoder earns its place; routing those uses through perceive
+would drop describe + action-memory and re-baseline the whole tie-sensitive suite. Corrected the docstrings
+(HolographicMind + CreatureEncoder) to say this accurately instead of mislabeling it "duplication to tidy."
+The genuine, low-value, optional leftover is only the ~2-line role/filler bind+bundle that appears in both
+encoders; factoring it to a shared helper is cosmetic and touches the tie-sensitive path, so it is not done.
+
+Tests: +0 (docstrings/comments only; no behavior changed).

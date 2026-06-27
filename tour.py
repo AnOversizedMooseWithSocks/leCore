@@ -1769,6 +1769,17 @@ _dwalk = um.directed_traverse(_dsx, 0, floor=0.2, max_steps=20)
 print(f"  directed structure (direction role) : node 3 -> successor {_dsucc[0]} (cos {_dsucc[1]:.2f}), "
       f"predecessor suppressed (cos {_dpred:+.2f}); forward walk {_dwalk.payloads}")
 
+# corridor planning (re-anchoring): bake a short route on the directed substrate, run it cheap, re-anchor
+# at the decision point -- the way PAST the per-structure capacity cap (one brain call per corridor, not per tile)
+_ptiles = _np.random.default_rng(0).standard_normal((11, um.dim))
+_ptiles = _ptiles / _np.linalg.norm(_ptiles, axis=1, keepdims=True)
+def _pfield(_cur):
+    _i = int(_np.argmax(_ptiles @ (_cur / (_np.linalg.norm(_cur) + 1e-12))))
+    return _ptiles[_i + 1] if _i + 1 < len(_ptiles) else None
+_plan = um.plan(_ptiles[0], _pfield, max_steps=10, floor=0.12)
+print(f"  corridor plan (re-anchoring)        : baked {len(_plan.route)} steps in one plan() "
+      f"(min throughput {min(_plan.throughputs):.2f}); replan when exhausted -> {um.replan_needed(_plan, len(_plan.route))}")
+
 # multiple importance sampling: combine hard 1-NN + soft Hopfield per-query (balance heuristic beats naive avg)
 from holographic_encoders import ScalarEncoder as _SE
 _me = _SE(512, lo=0.0, hi=1.0, seed=1, kernel="rbf", bandwidth=6.0)
@@ -1936,6 +1947,77 @@ _r2g_re = um.gated_traverse(_r2re, _r2["chain"][0], floor=0.20, max_steps=17)
 _r2g_raw = um.gated_traverse(_r2raw, _r2["chain"][0], floor=0.20, max_steps=17)
 print(f"  re-anchoring load-bearing (RAY-2)   : re-anchored reaches {len(_r2g_re.payloads)}/12 hops vs raw "
       f"{len(_r2g_raw.payloads)}/12 (no cleanup -> noise compounds, gate stops the dark ray)")
+
+# C3 (cross-cutting): adaptive-stop on the anisotropic splat fit -- a busy field converges before the fixed 200 steps
+_c3ys, _c3xs = np.mgrid[0:40, 0:40]
+_c3rng = np.random.default_rng(0)
+_c3field = sum(_c3rng.uniform(0.4, 1.0) * np.exp(-(((_c3xs - _c3rng.uniform(6, 34)) ** 2
+              + (_c3ys - _c3rng.uniform(6, 34)) ** 2) / _c3rng.uniform(8, 30))) for _ in range(7))
+_c3st = {}
+um.splat_aniso(_c3field, k=6, steps=200, early_stop=True, stats=_c3st)
+print(f"  aniso fit adaptive-stop (C3)        : converged at {_c3st['steps']}/200 Adam steps "
+      f"(speed/quality knob -- a soft plateau, not free)")
+
+# B3 (cross-cutting): adaptive-stop diffusion -- the composed structure settles before the fixed schedule ends
+_b3rng = np.random.default_rng(5)
+_b3roles = np.stack([random_vector(um.dim, _b3rng) for _ in range(4)])
+_b3fillers = np.stack([random_vector(um.dim, _b3rng) for _ in range(8)])
+_b3zf = um.generate_structure(_b3roles, _b3fillers, seed=2, readout="sparsemax")
+_b3st = {}
+_b3ze = um.generate_structure(_b3roles, _b3fillers, seed=2, readout="sparsemax", early_stop=True, stats=_b3st)
+_b3same = (tuple(int(np.argmax(_b3fillers @ unbind(_b3zf, r))) for r in _b3roles)
+           == tuple(int(np.argmax(_b3fillers @ unbind(_b3ze, r))) for r in _b3roles))
+print(f"  diffusion adaptive-stop (B3)        : settled at {_b3st['steps']}/16 steps, same structure {_b3same} "
+      f"(free -- the decoded combo is a certificate)")
+
+# D2 (cross-cutting): robust reward accumulation -- a fluke reward cannot swing the brain's value estimate
+def _d2_value(_robust):
+    _d2br = HolographicMind(um.dim, ["a", "b"], merge=0.8, robust_returns=_robust)
+    _d2r = np.random.default_rng(1)
+    _d2s = np.random.default_rng(0).standard_normal(um.dim)
+    _d2s = _d2s / np.linalg.norm(_d2s)
+    for _ in range(150):
+        _rew = _d2r.normal(20.0, 5.0) if _d2r.random() < 0.08 else _d2r.normal(1.0, 0.3)
+        _d2br.remember([_d2s], [0], [float(_rew)])
+    return _d2br.value(_d2s, 0)[0]
+print(f"  robust reward accumulation (D2)     : value under 8% outlier rewards -- plain {_d2_value(False):.2f} "
+      f"vs robust {_d2_value(True):.2f} (true 1.00; winsorising resists the flukes)")
+
+# C1 (cross-cutting): coarse-to-fine splat densification -- the staged warm start escapes the one-shot's local optimum
+_c1ys, _c1xs = np.mgrid[0:56, 0:56]
+_c1T = (np.exp(-(((_c1xs - 28) ** 2 + (_c1ys - 28) ** 2) / 300.0))
+        + sum(0.8 * np.exp(-(((_c1xs - _cx) ** 2 + (_c1ys - _cy) ** 2) / 8.0))
+              for _cx, _cy in [(12, 12), (44, 16), (16, 44), (42, 42)]))     # broad blob + small sharp details
+_c1one = float(((um.splat_aniso(_c1T, k=12, steps=210)[1] - _c1T) ** 2).mean())
+_c1cf = float(((um.splat_densify(_c1T, k=12)[1] - _c1T) ** 2).mean())
+print(f"  coarse-to-fine densify (C1)         : multi-scale MSE one-shot {_c1one:.5f} vs densify {_c1cf:.5f} "
+      f"(a basin the one-shot cannot reach at any step count)")
+
+# A3 (cross-cutting): adaptive encoder resolution -- warp the input axis by the value-density CDF (with a floor)
+_a3rng = np.random.default_rng(0)
+_a3clustered = np.clip(np.where(_a3rng.random(4000) < 0.5, _a3rng.normal(0.25, 0.04, 4000),
+                                _a3rng.normal(0.75, 0.04, 4000)), 0, 1)
+def _a3err(_fit):
+    _enc = ScalarEncoder(um.dim, 0.0, 1.0, seed=1, kernel="rbf", bandwidth=2.0)
+    if _fit:
+        _enc.fit_resolution(_a3clustered)
+    _t = np.clip(np.where(_a3rng.random(150) < 0.5, _a3rng.normal(0.25, 0.04, 150),
+                          _a3rng.normal(0.75, 0.04, 150)), 0, 1)
+    return float(np.mean([abs(_enc.decode(_enc.encode(float(x))
+                 + 0.4 * _a3rng.standard_normal(um.dim) / np.sqrt(um.dim), 400) - float(x)) for x in _t]))
+print(f"  adaptive encoder resolution (A3)    : decode err on clustered values -- uniform {_a3err(False):.4f} "
+      f"vs density-warped {_a3err(True):.4f} (a reallocation: dense better, sparse worse)")
+
+# C2 (cross-cutting): phase-domain scene morph -- a translation is a phase ramp, so the phase morph SLIDES it
+_c2ys, _c2xs = np.mgrid[0:28, 0:28]
+def _c2blob(_cx):
+    return np.exp(-(((_c2xs - _cx) ** 2 + (_c2ys - 14) ** 2) / (2 * 3.0 ** 2)))
+def _c2midpeak(_fr):
+    _m = _fr[len(_fr) // 2]; _e = 0.5 * (_fr[0].max() + _fr[-1].max()); return float(_m.max() / (_e + 1e-12))
+_c2a, _c2b = _c2blob(10), _c2blob(16)                                # a blob translated 6px
+print(f"  phase-domain scene morph (C2)       : translated-blob midpoint peak -- dct slerp "
+      f"{_c2midpeak(um.morph_scene(_c2a, _c2b, method='dct')):.3f} (smears) vs phase "
+      f"{_c2midpeak(um.morph_scene(_c2a, _c2b, method='phase')):.3f} (slides; wraps past pi)")
 
 # axial perception: an orientation (theta == theta+pi) on the Mobius base, wired as the "axial" modality
 import math as _math
@@ -2843,6 +2925,22 @@ _mid = _svg.morph(_A, _B, steps=5)[2]
 print(f"  morph A->B (vector interpolation): midpoint circle x = {_mid[0][1]:.2f} "
       f"(between {_A[0][1]:.2f} and {_B[0][1]:.2f}) -- arithmetic on vectors interpolates the picture")
 print("  an SVG <rect>/<circle> has exact edges at any zoom -- the sharp, resolution-independent cousin of splats")
+
+# CreatureMind: the reference DEMO of a specialized mind built ON the one UnifiedMind -- subclass + wire,
+# inherit every faculty, reimplement nothing. A creature that is also a full mind, in one object.
+from holographic_creature_mind import CreatureMind as _CM
+_cm = _CM(dim=512, actions=("N", "S", "E", "W"), seed=0)
+for _ in range(6):
+    _cm.learn({"food_x": "east"}, "E", 1.0); _cm.learn({"food_x": "west"}, "W", 1.0)
+_cm_act = _cm.act({"food_x": "east"}, explore=False)          # learned policy, via the INHERITED decide
+_cm_tiles = _np.random.default_rng(0).standard_normal((7, 512))
+_cm_tiles = _cm_tiles / _np.linalg.norm(_cm_tiles, axis=1, keepdims=True)
+def _cm_field(_c):
+    _i = int(_np.argmax(_cm_tiles @ (_c / (_np.linalg.norm(_c) + 1e-12))))
+    return _cm_tiles[_i + 1] if _i + 1 < len(_cm_tiles) else None
+_cm_plan = _cm.plan(_cm_tiles[0], _cm_field, max_steps=6, floor=0.12)   # the INHERITED planning faculty
+print(f"  CreatureMind (a layer on the one mind): senses->'{_cm_act}' via inherited decide, AND "
+      f"baked a {len(_cm_plan.route)}-step corridor via inherited plan -- one object, faculties reused not rebuilt")
 
 print("\n" + "-" * 66)
 print("  Every subsystem -- through gradient-free learning -- ran on the same vector substrate. Wired up.")

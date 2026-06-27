@@ -2238,6 +2238,22 @@ def test_directed_traverse_walks_chain_forward():
     res = m.directed_traverse(ds, start_index=0, floor=0.2, max_steps=20)
     assert res.payloads == list(range(1, 9)) and res.stopped == "floor"
 
+def test_plan_bakes_a_corridor_and_replan_gates():
+    """Corridor planning through the mind: plan() rolls out a goal-field corridor, bakes it on the directed
+    substrate, and returns the decoded route + per-step throughput; replan_needed re-anchors when the plan
+    is exhausted or a tile is blocked. The brain is consulted once per corridor, not once per tile."""
+    rng = np.random.default_rng(0)
+    m = UnifiedMind(dim=1024, seed=0)
+    tiles = rng.standard_normal((11, 1024)); tiles /= np.linalg.norm(tiles, axis=1, keepdims=True)
+    def field_step(cur):
+        i = int(np.argmax(tiles @ (cur / (np.linalg.norm(cur) + 1e-12))))
+        return tiles[i + 1] if i + 1 < len(tiles) else None
+    p = m.plan(tiles[0], field_step, max_steps=10, floor=0.12, action_of=lambda a, b: "go")
+    assert p.route == list(range(1, 11))                       # whole corridor baked and decoded
+    assert len(p.actions) == 10 and min(p.throughputs) > 0.12
+    assert m.replan_needed(p, 0, floor=0.12) is False          # on-route, execute the baked step
+    assert m.replan_needed(p, len(p.route), floor=0.12) is True # exhausted -> re-anchor
+
 def test_mis_recover_beats_naive_average_and_singles():
     """MIS-1: m.mis_recover combines hard 1-NN and soft Hopfield per-query by the balance heuristic. On a mix
     of on-grid + off-grid cues over a coarse sharp-kernel manifold it beats naive averaging AND both singles,
@@ -2469,3 +2485,124 @@ def test_reanchoring_is_load_bearing_for_deep_traversal():
     g_raw = m.gated_traverse(raw_step, start, floor=0.20, max_steps=L + 5)
     assert g_re.payloads == list(range(1, L + 1))               # re-anchored: every hop, in order
     assert len(g_raw.payloads) < len(g_re.payloads) - 5         # raw: collapses early (noise compounds)
+
+def test_aniso_early_stop_saves_steps_at_small_cost():
+    """C3: m.splat_aniso(early_stop=True) stops the Adam fit once the reconstruction has converged -- meaningfully
+    fewer steps than the fixed 200 at a small MSE cost on an under-fit field; OFF by default runs the full
+    schedule (bit-identical fixed-step fit)."""
+    import numpy as np
+    m = UnifiedMind(dim=64, seed=0)
+    ys, xs = np.mgrid[0:48, 0:48]
+    rng = np.random.default_rng(0)
+    field = sum(rng.uniform(0.4, 1.0) * np.exp(-(((xs - rng.uniform(6, 42)) ** 2
+                + (ys - rng.uniform(6, 42)) ** 2) / rng.uniform(8, 40))) for _ in range(9))   # busy -> residual floor
+    st_full = {}
+    m.splat_aniso(field, k=8, steps=200, stats=st_full)
+    assert st_full["steps"] == 200                                   # off by default: full schedule
+    st_es = {}
+    _, rendered = m.splat_aniso(field, k=8, steps=200, early_stop=True, stats=st_es)
+    assert 40 <= st_es["steps"] <= 175, st_es                        # stopped well before the cap (meaningful saving)
+    mse_full = float(((m.splat_aniso(field, k=8, steps=200)[1] - field) ** 2).mean())
+    assert float(((rendered - field) ** 2).mean()) <= mse_full * 1.15 + 1e-6   # at a small MSE cost
+
+def test_generate_structure_early_stop_matches_full_at_half_the_steps():
+    """B3: m.generate_structure(early_stop=True) stops once the decoded structure has settled -- the SAME
+    structure as the full schedule at fewer steps, validity intact; off by default runs the full schedule."""
+    import numpy as np
+    from holographic_ai import random_vector, unbind
+    m = UnifiedMind(dim=512, seed=0)
+    rng = np.random.default_rng(3)
+    roles = np.stack([random_vector(512, rng) for _ in range(4)])
+    fillers = np.stack([random_vector(512, rng) for _ in range(8)])
+
+    def combo(z):
+        return tuple(int(np.argmax(fillers @ unbind(z, r))) for r in roles)
+
+    st_f = {}
+    zf = m.generate_structure(roles, fillers, seed=7, readout="sparsemax", stats=st_f)
+    assert st_f["steps"] == 16                                       # off by default: full schedule
+    st_e = {}
+    ze = m.generate_structure(roles, fillers, seed=7, readout="sparsemax", early_stop=True, stats=st_e)
+    assert combo(ze) == combo(zf)                                    # same structure (novelty preserved)
+    assert st_e["steps"] < 16, st_e                                  # fewer steps
+
+def test_robust_returns_resists_outlier_rewards():
+    """D2: m.actions(robust_returns=True) winsorises outlier rewards in the brain's value -- a fluke reward
+    cannot swing the estimate, so the value stays closer to the true mean than the plain running average; off by
+    default is the plain average."""
+    import numpy as np
+    def learn(robust, seed):
+        m = UnifiedMind(dim=128, seed=0)
+        m.actions(["a", "b"], robust_returns=robust)
+        rng = np.random.default_rng(seed)
+        state = tuple(float(x) for x in rng.standard_normal(4))     # one fixed state (a 4-tuple observation)
+        for _ in range(150):
+            r = rng.normal(20.0, 5.0) if rng.random() < 0.08 else rng.normal(1.0, 0.3)
+            m.reinforce(state, "a", float(r))
+        sv = m.perceive(state)
+        return abs(m._brain.value(sv, 0)[0] - 1.0)
+    err_plain = np.mean([learn(False, s) for s in range(5)])
+    err_robust = np.mean([learn(True, s) for s in range(5)])
+    assert err_robust < err_plain * 0.7, (err_robust, err_plain)    # robust closer to the true value under outliers
+
+def test_splat_densify_beats_one_shot_on_multiscale():
+    """C1: m.splat_densify (coarse-to-fine) reaches a markedly better optimum than m.splat_aniso (one-shot) on a
+    multi-scale target -- the staged warm start escapes the local optimum the one-shot is stuck in."""
+    import numpy as np
+    m = UnifiedMind(dim=64, seed=0)
+    ys, xs = np.mgrid[0:56, 0:56]
+    T = (np.exp(-(((xs - 28) ** 2 + (ys - 28) ** 2) / 300.0))
+         + sum(0.8 * np.exp(-(((xs - cx) ** 2 + (ys - cy) ** 2) / 8.0))
+               for cx, cy in [(12, 12), (44, 16), (16, 44), (42, 42)]))
+
+    def mse(z):
+        return float(((z - T) ** 2).mean())
+
+    one = mse(m.splat_aniso(T, k=12, steps=210)[1])
+    st = {}
+    cf = mse(m.splat_densify(T, k=12, stats=st)[1])
+    assert st["stages"] == 3, st
+    assert cf < one * 0.5, (cf, one)                                # densify reaches a markedly better optimum
+
+def test_adaptive_encoder_resolution_on_nonuniform_data():
+    """A3: ScalarEncoder.fit_resolution warps the encoder's input axis by the value-density CDF, so a non-uniform
+    distribution decodes markedly better under noise than the uniform encoder; an unfitted encoder is the plain
+    encoder (the warp is the identity)."""
+    import numpy as np
+    from holographic_encoders import ScalarEncoder
+    rng = np.random.default_rng(0)
+    clustered = np.clip(np.where(rng.random(4000) < 0.5,
+                                 rng.normal(0.25, 0.04, 4000), rng.normal(0.75, 0.04, 4000)), 0, 1)
+
+    def err(fit):
+        enc = ScalarEncoder(512, 0.0, 1.0, seed=1, kernel="rbf", bandwidth=2.0)
+        if fit:
+            enc.fit_resolution(clustered)
+        test = np.clip(np.where(rng.random(300) < 0.5,
+                                rng.normal(0.25, 0.04, 300), rng.normal(0.75, 0.04, 300)), 0, 1)
+        return float(np.mean([abs(enc.decode(enc.encode(float(x))
+                     + 0.4 * rng.standard_normal(512) / np.sqrt(512), 400) - float(x)) for x in test]))
+
+    assert err(True) < err(False) * 0.8                              # the fitted encoder decodes in-distribution better
+
+def test_morph_scene_phase_slides_translation_better_than_dct():
+    """C2: morph_scene(method='phase') slides a translated blob to its intermediate position (a compact, sharp
+    midpoint) where method='dct' smears it -- a higher midpoint peak for a small translation."""
+    import numpy as np
+    m = UnifiedMind(dim=64, seed=0)
+    S = 28
+    ys, xs = np.mgrid[0:S, 0:S]
+
+    def blob(cx):
+        return np.exp(-(((xs - cx) ** 2 + (ys - 14) ** 2) / (2 * 3.0 ** 2)))
+
+    a, b = blob(10), blob(16)                                       # small translation (shift 6)
+
+    def midpeak(frames):
+        mid = frames[len(frames) // 2]
+        ends = 0.5 * (float(frames[0].max()) + float(frames[-1].max()))
+        return float(mid.max() / (ends + 1e-12))
+
+    ph = midpeak(m.morph_scene(a, b, method="phase"))
+    dc = midpeak(m.morph_scene(a, b, method="dct"))
+    assert ph > dc, (ph, dc)                                        # phase slides compactly; dct smears
