@@ -265,3 +265,362 @@ likely a small/no-op gain. *Seats: Milanfar (denoising), Olshausen (sparse codin
 *Assembled from the live code. Each item names a SEAT and that field's REAL published methods; no opinion is
 attributed beyond what the method itself argues. Negatives are flagged where the prior says the transfer
 won't pay — confirming the engine is already right is a result the project keeps.*
+
+---
+
+# Part II — the DCC reverse-transfer (3-D modeling → the stack)
+
+*A second reverse-transfer sweep, this time from the DCC (3-D modeling) backlog rather than the rendering one.
+The brief (Moose): "our entire holographic system is geometry, so if we are adding 3D-modeling things, some of
+it should apply elsewhere." The founding thesis run in reverse. The organising realisation: holostuff was never
+non-geometric — a hypervector is a point, `bind` a rigid motion, `bundle` a centroid, `cleanup` a nearest-point
+projection, `consolidation` the low-D subspace, the capacity cliff concentration-of-measure crowding. The DCC
+items add EXPLICIT 3-D geometry on top of that IMPLICIT high-D geometry, so the question is: which explicit-3-D
+operation is a special case of a general geometric operation the rest of the stack LACKS (◆ genuinely un-built)
+or UNDER-USES (○ already general, an enrichment)? ▽ = an analogy to hold lightly. Labels set by a live code
+audit, not enthusiasm; every item is a HYPOTHESIS with a bar and a stated failure mode, nothing prototyped.*
+
+## Group I — Diagonalise the iterated operator: the spectral-limit family
+
+### RT-I1 — `operator_limit` / spectral-iteration   ◆ GENUINELY UN-BUILT
+- **Cross-connection.** Stam's exact subdivision eval (DCC-B3) is an eigendecomposition of the refinement matrix
+  — diagonalise once, evaluate any level / the limit in closed form. The SAME math three faculties need and none
+  does: the dynamics propagator (`learn_dynamics`, k-step rollout = k binds; U is a per-frequency Fourier transfer
+  → diagonalise → k-step jump is ONE eval, limit is the dominant eigenvector); the diffusion sampler
+  (`hopfield.generate`, steady state = leading eigenstructure); the resonator (stalls at wrong fixed points —
+  exactly what the eigen-spectrum predicts).
+- **Grounded:** `dynamics` uses the Fourier transfer but never a closed-form limit/eigendecomposition; resonator
+  has "fixed point" language but no spectral eval. Genuinely un-built.
+- **Faculty / seats:** eigendecompose an iterated linear operator, expose k-step + limit closed-form, read
+  convergence/stall off the spectrum. Stam (subdivision eval) + Stoudenmire (spectral/low-rank) + Koopman/DMD.
+- **Above/below:** BELOW. **Bar:** jump k dynamics steps in one eval matching the k-bind rollout to tolerance;
+  predict a resonator non-convergence from the spectrum BEFORE running. **Fail:** only linear operators
+  diagonalise; nonlinear needs delay-embedding (dynamics' own negative). Dense eigendecomp is O(n³) (the
+  `topology` module already timed out on this) — live in the Fourier/structured form where the spectrum is free,
+  not a dense SVD at D=4096. Eigenvector sign/order ties → the determinism fence (fix the sign convention; the
+  `spectral` module already does).
+
+## Group II — Flatten the manifold: charts & embeddings
+
+### RT-II1 — nonlinear manifold chart (conformal / ARAP / Tutte)   ◆ GENUINELY UN-BUILT
+- **Cross-connection — and the irony.** The least-holostuff item on the backlog, UV unwrapping (DCC-D1:
+  LSCM/ARAP/Tutte), is secretly the most general: distortion-minimizing flattening of a curved 2-manifold to a
+  low-D chart — the embedding problem the whole stack faces and only solves LINEARLY.
+- **Grounded:** the only manifold-to-low-D map is `consolidation` (SVD = LINEAR). A nonlinear, distortion-aware
+  chart is not there. (consolidation is the ○ linear member; this is the nonlinear extension.)
+- **Faculty / seats:** a faithful low-D chart of ANY holostuff manifold (concept space, creature state/value
+  space, codebook similarity graph). Payoffs: (1) interpretability — finally SEE the concept manifold / brain
+  state space; Tutte draws the scene/concept graph or the HoloForest directly. (2) a tighter storage coordinate
+  than raw SVD where the manifold is curved. Olshausen (representation geometry) + consolidation + Tutte + Lévy/Liu.
+- **Above/below:** BOTH. **Bar:** a conformal/ARAP chart of a KNOWN curved manifold (the FPE ring/torus; the
+  `energy` module's torus) beats linear SVD on 2-D reconstruction fidelity and visibly separates classes the SVD
+  blurs. **Fail:** parameterization assumes a disk-topology chart — a closed manifold needs seams/cuts first (the
+  `topology` module finds the genus → where to cut); high curvature makes some distortion unavoidable (LSCM's own
+  limit) — honest, not a bug.
+
+## Group III — Signals on graphs and fields
+
+### RT-III1 — graph-Laplacian / spectral-graph filtering   ◆ GENUINELY UN-BUILT   ← panel #1
+- **Cross-connection.** Mesh smoothing as graph-signal denoising (DCC-C2) filters a signal (vertex positions) on a
+  graph. holostuff is full of graphs — the codebook similarity graph, the HoloForest, the store adjacency, the
+  scene/sequence chains.
+- **Grounded:** `graph_memory` does cosine k-means clustering, NOT a Laplacian or spectral filtering. Genuinely
+  un-built.
+- **Faculty / seats:** Taubin (λ|μ, no-shrink) / bilateral / spectral-graph filters that denoise/regularize the
+  CODEBOOK over its own k-NN similarity graph (non-local means on the concept graph), low-pass a value function
+  over a state graph, smooth an embedding. Milanfar ("A Tour of Modern Image Filtering" links denoisers to graph
+  Laplacians) + Taubin.
+- **Above/below:** BELOW. **Bar:** denoising a noisy codebook over its k-NN graph beats per-vector denoising on
+  recall; Taubin avoids the volume-shrink a naive Laplacian causes. **Fail:** building the graph is O(n²) UNLESS
+  you reuse the HoloForest's sublinear k-NN (reuse the index you already have).
+
+### RT-III2 — level-set extraction (the boundary of any field)   ○ ALREADY GENERAL
+- **Cross-connection.** Marching cubes (DCC-B4/B6) extracts the surface where an SDF crosses zero. The `field`
+  module is already general ("the SDF, the value function, the density/void map, the compass: every one is a
+  field"), so this generalises to "extract the threshold-crossing surface of any field": a classifier decision
+  boundary, the honesty layer's p=α confidence region, an attractor basin boundary, the memory-void edge. Quílez
+  (fields) + the field module.
+- **Above/below:** ABOVE. **Bar:** extract the p=α surface of the honesty layer and show it bounds the abstain
+  region. **Fail:** marching needs a sampled grid — curse of dimensionality at D=4096; practical only on 2-3-D
+  PROJECTIONS of the field (ties to RT-II1: chart first, then march).
+
+### RT-III3 — smooth-min as a general soft-combine   ▽ HOLD LIGHTLY
+- Quílez's smooth-minimum (the SDF blend, DCC-B4) is a cousin of the softmax / modern-Hopfield cleanup already in
+  the stack. The softmax is already there, so this is a small operator, not a capability — a one-liner, not a sprint.
+
+## Group IV — Kernels, metrics, and noise: the designed-spectrum family
+
+### RT-IV1 — anisotropic / steering kernels (a direction-dependent metric)   ◆ GENUINELY UN-BUILT
+- **Cross-connection.** Anisotropic Gaussian splats (DCC-B5, covariance per splat) ARE steering kernels —
+  Milanfar's own steering-kernel regression (Takeda, Farsiu, Milanfar 2007): a local kernel whose shape adapts to
+  the data's direction.
+- **Grounded:** no anisotropic similarity / steering kernel in the encoders or denoiser. Genuinely un-built.
+- **Faculty / seats:** an anisotropic FPE kernel (similarity stretched along informative directions), a local-
+  COVARIANCE manifold representation (covariance = local tangent space), steering-kernel denoising. Milanfar
+  (steering kernels) + Drettakis (aniso splats).
+- **Above/below:** BELOW. **Bar:** an anisotropic encoder kernel beats the isotropic RBF on data with directional
+  structure (smooth along one axis, sharp along another). **Fail:** per-point covariances are expensive and
+  overfit with few samples (the splat module's own aniso kept negative) — keep isotropic as the honest baseline.
+
+### RT-IV2 — procedural noise = the FPE kernel = the diffusion noise schedule   ○ ALREADY GENERAL
+- **Cross-connection.** Procedural noise (Perlin/Worley, DCC-D4) is designed-spectrum randomness, and holostuff
+  already connects spectrum↔kernel via Bochner (the FPE kernel IS its phase distribution's characteristic
+  function). So procedural noise, the FPE kernel, and the diffusion sampler's noise schedule are ONE object: a
+  single "designed-spectrum noise" knob. Quílez (noise) + Puckette (spectra) + the FPE/Bochner thread.
+- **Above/below:** BELOW. **Bar:** coloured-noise injection in the B10 diffusion (instead of white) yields
+  better-structured samples. **Fail:** may simply tie white noise — keep it on the record if so.
+
+## Group V — Factoring, frames, and constraints
+
+### RT-V1 — instancing = factored (template × parameter) storage   ○ → ◆ for the index
+- **Cross-connection.** Instancing (DCC-A3: instance = `bind(geometry, transform)`, scene = `bundle`) is
+  weight-sharing / factored storage, which the stack already does twice (the FPE function rep `f = Σ wᵢ encode(pᵢ)`;
+  the `RecordEncoder` schema instanced with field values). The ◆ piece is THE REGION QUERY: generalise
+  `recall_region` into "index ANY bundle by WHERE its members live" — time, frequency, feature, or position.
+  Plate (binding) + Drettakis (a splat scene is a bundle).
+- **Above/below:** MIDDLE. **Bar:** region-query a bundle of time-stamped events by time-window with calibrated
+  precision (reuse `splat_region`). **Fail:** the capacity cliff — a bundle drowns its members past K; past it,
+  fall back to the explicit list (the constructed-vs-stored rule again).
+
+### RT-V2 — skinning = partition-of-unity soft-assignment = a MoE on frames   ○ ALREADY GENERAL
+- **Cross-connection.** Skinning (DCC-E2) blends bones' transforms by per-vertex weights — a partition-of-unity
+  soft-assignment to local frames, exactly the `moe` module's `GatedMixture` (present). The ◆ enrichment: skinning
+  blends ROTATIONS, and rotor / dual-quaternion blending (no candy-wrapper collapse) beats naive averaging — so
+  anywhere the MoE's local models are transforms, use rotor blending. The `moe` module + Macklin (clean transform
+  blends).
+- **Above/below:** MIDDLE. **Bar:** a rotor-blended MoE of local frames beats a linear-blended one on a
+  rotation-structured task. **Fail:** only matters where the local models are rotations — niche.
+
+### RT-V3 — constrained projection: generalise IK's constraints upward   ◆ (extends the A4 unification)
+- **Cross-connection.** IK (DCC-E3) is already the same "iterate-a-projection" faculty as resonator + denoise +
+  dynamics + cloth (A4). What IK ADDS is a CONSTRAINT VOCABULARY (joint limits, reach targets, pole vectors).
+  Push it up: constrained GENERATION (projection-onto-the-constraint each diffusion step — "make a scene where X
+  holds"), constrained RECALL (nearest stored item satisfying a predicate), constrained PLANNING. Macklin
+  (constraint projection) + the generation/recall threads.
+- **Above/below:** ABOVE. **Bar:** constrained generation (B10 diffusion + a projection step) yields samples that
+  satisfy a hard predicate while staying valid, and beats rejection sampling on cost. **Fail:** non-convex
+  constraints aren't projections and can stall (the resonator's wrong-fixed-point problem returns) — keep it as a
+  kept negative where it does.
+
+## Group VI — The order question (deepest, held lightly)   ▽
+
+### RT-VI1 — non-commutative binding for order in general
+- **Cross-connection.** HRR's `bind` is COMMUTATIVE (order-blind) — which is why sequences/time/causality lean on
+  the `permute` workaround. The DCC need for exact non-commutative rotation composition is the same need: the
+  `clifford` result is precisely that a non-commutative product captures order where commutative convolution
+  provably cannot (its measured 0.66 order-gap). The provocation: is a non-commutative binding the right substrate
+  for order IN GENERAL, and is `permute` a patch over a missing primitive? Plate (HRR + its commutativity limit) +
+  the Clifford result + the sequence/recurrent thread.
+- **Above/below:** BELOW (most speculative). **Held lightly:** Clifford's 2^d blow-up rules it out as a general
+  high-D substrate (its own kept negative); the takeaway is CONCEPTUAL ("use a non-commutative op where order is
+  load-bearing"), not "replace `bind`". **Bar:** a principled non-commutative bind encodes order with less
+  crosstalk than `permute` on a sequence task. **Fail:** any non-commutative substrate likely costs more than one
+  FFT — measure the tradeoff before believing the win.
+
+## Part II priority (panel, value over effort, ◆ only)
+
+1. **RT-III1 graph-Laplacian** — cleanest, clearest bar, REUSES the HoloForest for the k-NN graph. Denoise-the-
+   codebook is an immediately testable win. **✓ SHIPPED** (holographic_graphsignal.py; Taubin no-shrink + the
+   high-noise win over per-vector, low-noise kept negative).
+2. **RT-II1 manifold chart** — highest interpretability payoff (see the concept space at last), `topology` guides
+   the cuts, upgrades the storage coordinate. Most visible result for the least new theory. **✓ SHIPPED**
+   (holographic_chart.py; Isomap beats linear SVD on a curved manifold 5/5 seeds, Laplacian-Eigenmaps secondary).
+3. **RT-IV1 steering / anisotropic kernel** — solid, bounded, Milanfar's own method; carries a known overfit
+   negative so the bar is honest from the start. **← next.**
+4. **RT-I1 operator-limit / spectral-iteration** — the most beautiful unification (subdivision = dynamics =
+   diffusion = resonator) but the most research-heavy and O(n³)-haunted; do it in the Fourier/structured form, and
+   only after the cheaper three prove the reverse-transfer pays.
+
+The ○ enrichments (RT-III2 level-sets, RT-IV2 designed-spectrum noise, RT-V1 region-query, RT-V2 skinning-as-MoE,
+RT-III3 smooth-min) ride along with their DCC items at no extra research cost. RT-VI1 (order) stays a written
+provocation until something cheaper forces the issue.
+
+---
+
+# Part III — the VSA ISA backlog: maturing the assembly layer
+
+*A THIRD backlog merged in for unified sequencing (Moose's request). Different genre from Parts I-II (those
+are reverse-transfer sweeps; this is an ISA-maturation DEPENDENCY SPINE -- the order IS the deliverable). The
+audit's finding: holostuff has ALREADY built a VSA instruction-set architecture -- the kernel (bind/unbind/
+bundle/permute/cosine/involution/atom-gen) is the instruction set; HoloMachine is an accumulator-machine
+assembler+interpreter (LOAD/BIND/BUNDLE/PERMUTE/CALL/APPLY/IFMATCH/ITERATE/REPEAT/HALT, assemble(), run(), a
+function library, program-as-data); StructureRecipe is the bytecode/IR; the resonator is the disassembler.
+This is what assembly/ISA history says to do NEXT, in dependency order. Topical successor to the (complete)
+holostuff_vm_backlog.md (VM-1..3, PIPE-1, SYN-1, REC-1, GEN-1 all done). Each item: SEAT + real method, a bar,
+an anticipated kept negative.*
+
+## The spine (why this order)
+Everything an ISA does -- extensions, safe optimization, registers, calling conventions, higher languages -- is
+defined RELATIVE TO a written contract of the base instructions' exact semantics. So the contract comes first.
+GROUNDED COST OF ITS ABSENCE (verified in live code, June 2026): the determinism/tie-break behaviour is
+specified FOUR different ways across modules -- `cleanup` leans on numpy's implicit argmax (ties -> lowest
+index, written nowhere; holographic_ai.py `int(sims.argmax())`), `spectral` invented "largest-magnitude
+component positive" explicitly citing "the same bit-exact-tie class as the bind_batch bug", `flow` carries its
+own `_weighted_laplacian`, and `holographic_chart.py` (RT-II1, just shipped) reinvented the SAME sign rule as a
+private `_fix_signs` rather than sharing it. Same bug class, re-litigated four times, with code duplication as
+the price. The contract (Tier 0) ends that.
+
+## Tier 0 — The contract (do first; everything is defined against it)
+
+### ISA-1 — write the ISA contract: exact base-instruction semantics, determinism included   [BUILD]   ✓ SHIPPED
+*Shipped: ISA.md (per-instruction observable semantics, EXACT/TOL tags, the arch/microarch boundary) +
+holographic_determinism.py (`fix_eigvec_signs`, `argmax_tiebreak`) as the one home for the determinism rule;
+spectral.sign_fix and chart._fix_signs de-siloed onto it BIT-EXACT (the fourth scattered copy removed, 19
+spectral/chart tests unchanged). 1091->1098.*
+- **Seat/basis.** Cranmer (reproducible-analysis discipline, RECAST -- a frozen re-runnable contract) + Macklin
+  (the bit-exact tie-break lesson is his territory; this also answers his STANDING determinism-audit request).
+- **Order.** FIRST. Unblocks the §7 vectorization work SAFELY, prerequisite for the extension discipline
+  (ISA-3) and every new instruction (ISA-4/5), and captures the bind_batch lesson permanently.
+- **What.** A written spec of each base instruction's exact, frozen, observable semantics -- inputs, outputs,
+  normalization, edge cases (NaN, zero vector, ties), and ONE determinism/tie-break rule superseding the four
+  scattered ones (argmax ties -> lowest index; eigvec sign -> largest-magnitude component positive; reductions
+  in a fixed documented order). The architecture; FFT/BLAS/forest impls are microarchitecture BELOW it. Plus
+  the de-silo: ONE shared sign-convention utility that `spectral` and `chart` CITE instead of each reinventing.
+- **Why.** x86's durability is that the ISA is a frozen contract while implementations vary underneath. The
+  bind_batch bug IS a microarch change (batched BLAS, bit-exact to 1e-12) leaking through an under-specified
+  contract. Write the contract and the leak has a name and a test.
+- **How.** A THEORY.md-adjacent `ISA.md`: one section per instruction; the determinism rule stated once; the
+  microarch/arch boundary drawn explicitly. A small shared determinism utility module the scattered sites adopt.
+- **Bar.** Every base op has a written spec with edge cases enumerated; the four scattered tie-break conventions
+  are reconciled into one documented rule and the modules updated to CITE it, not reinvent it.
+- **Anticipated negative.** Over-specifying freezes incidental float quirks as contract. Spec the OBSERVABLE
+  semantics callers depend on (the argmax decision, the unbind exactness), not every last reduction bit no
+  caller can observe -- and say which is which.
+
+### ISA-2 — the conformance suite + reference implementations (the contract's teeth)   [BUILD]   ✓ SHIPPED
+*Shipped: holographic_reference.py (definitional reference impls -- `ref_bind` a direct O(D^2) convolution etc.,
+verified vs the kernel to machine epsilon) + the TOL/EXACT conformance checks (`value_conformant`/
+`exact_conformant`/`decision_conformant`) + `run_conformance` exposed as the mind faculty `conformance_report()`.
+test_isa_conformance.py: all base ops conform, the convolution-identity golden vectors, and the bind_batch-class
+regression -- a value-conformant change that flips a decision is caught BY CONSTRUCTION. 1098->1107.*
+- **Seat/basis.** Cranmer (conformance discipline; golden tests as the spec made executable).
+- **Order.** SECOND, immediately after ISA-1 -- a contract with no enforcement is just prose.
+- **What.** Per instruction, a definitional reference implementation (simplest, slowest, obviously-correct) plus
+  golden vectors. ANY implementation (FFT `bind`, `bind_batch`, a future BLAS `bundle`) must match the reference
+  to a stated tolerance AND match the tie-break rule EXACTLY (zero tolerance where the tie is observable).
+- **Why.** This is what lets §7 go fast without fear: a vectorized op is "conformant" iff it passes the suite.
+  §7's "pin the vectorized op to the scalar result" tests become INSTANCES of this suite.
+- **How.** `test_isa_conformance.py`: reference impls + golden vectors + the tie-break regression -- including a
+  regression test for the bind_batch bug ITSELF (a summation-reordered bind that flips a trajectory must FAIL).
+- **Bar.** The suite catches the bind_batch-class bug by construction; all current kernel impls pass; flow's
+  duplicated Laplacian can now be de-duplicated BECAUSE the shared version is conformance-pinned.
+- **Anticipated negative.** Tolerance is a judgment call. Resolution (from ISA-1): numeric tolerance on the
+  CONTINUOUS outputs, EXACT match on the OBSERVABLE decision (the argmax, the tie-break).
+
+## Tier 1 — The extension discipline
+
+### ISA-3 — formalize the ISA-extension framing for the parallel bind modes   [BUILD]   ✓ SHIPPED
+*Shipped: ISA_EXTENSIONS.md -- the base instruction set frozen and listed (boundary principle: base = the
+kernel almost every faculty uses, so `permute` is base; extension = regime-specific opt-in module), one page per
+extension (regime / measured win / cost / conformance), and the earning-its-place proposal template. Regime wins
+measured fresh: Clifford exact 3-D rotation (err 1.1e-16), FPE designed kernel (1.0->0.04 vs flat random atoms),
+tensor capacity (recall 0.87 vs HRR 0.28 at overload). test_isa_extensions.py pins all three + base-unchanged.
+1107->1111. Tiers 0-1 of the ISA spine complete.*
+- **Seat/basis.** Stoudenmire (tensor/capacity extension) + Plate (what stays in the minimal base ISA).
+- **Order.** THIRD -- an extension is defined RELATIVE TO the base contract (ISA-1).
+- **What.** Document Clifford-bind (rotations), tensor-bind (capacity), FPE (spatial/continuous) as named,
+  opt-in ISA EXTENSIONS -- the VSA analog of x86 + SSE/AVX/AES-NI. Each gets a one-page spec: its REGIME, the
+  MEASURED win over base `bind`, its OWN conformance tests, and the standing rule that the base kernel stays
+  minimal. Plus a proposal template ("a new bind mode must earn its place by a measured regime win").
+- **Why.** Real ISAs grow as base + extensions, not by bloating the base -- holostuff already does this by
+  instinct (the Clifford docstring states the rule). Naming it makes it policy.
+- **How.** `ISA_EXTENSIONS.md`, one page per extension; enumerate and freeze the base instruction set.
+- **Bar.** Each existing extension has its spec page; a new-extension template with the earning-its-place bar;
+  the base kernel explicitly listed and minimal.
+- **Anticipated negative.** The base/extension boundary is debatable (is `permute` base or extension?). Pick a
+  principle -- base = what (almost) every faculty uses; extension = regime-specific -- and apply it consistently.
+
+## Tier 2 — The machine model (improve HoloMachine, governed by the contract)
+
+### ISA-4 — accumulator -> a small register file   [BUILD]   ✓ SHIPPED
+*Shipped: HoloMachine grown from one ACC to named slots R0..R7 with two additive opcodes, STORE r / RECALL r
+(backward-compatible -- all 14 prior machine tests pass). Slots held SEPARATELY -> reads are EXACT (cosine 1.000,
+bit-for-bit). The bar: a k-instruction intermediate needed again costs a full re-derivation without registers but
+one RECALL with them. Kept negative measured: a BUNDLED register file (the disk pattern) has a literal capacity
+cliff -- perfect to ~16 slots at dim 1024, then degrades (64 -> ~0.92); holds 64 at dim 4096. Register count is a
+capacity question for the bundled rep, which is why the slots are separate. test_isa_registers.py (5) + 1
+integration. 1111 -> 1117.*
+- **Seat/basis.** Plate (composition / role-addressing) + the machine thread. **Order.** FOURTH -- new
+  instructions (LOAD/STORE to a slot) that must conform to the contract; cheapest concrete HoloMachine win.
+- **Grounded.** HoloMachine has "one register: the accumulator (ACC)" -- the most primitive design.
+- **What.** A handful of named vector slots (registers) beyond ACC, with load/store opcodes, so a program holds
+  intermediates without re-deriving them (slots = named vectors with unitary roles; reads exact, cost low).
+- **Bar.** A program that re-threads a value through ACC repeatedly is shorter / uses fewer binds with
+  registers; register reads are exact.
+- **Anticipated negative (lovely + VSA-native).** "Register pressure" is LITERAL: if the register file is a
+  bundle, slots share the crosstalk budget, so too many registers degrade readback. Measure how many slots fit
+  before recall drops -- register count is a capacity question, not a free choice.
+
+### ISA-5 — a documented calling convention + a permute-stack for recursion   [BUILD]   ✓ SHIPPED
+*Shipped: (1) the ABI in ISA.md -- CALL f is an ACC->ACC transform (ACC = arg/return), and registers + the
+permute-stack are FRAME-LOCAL so a callee cannot corrupt the caller (every register callee-saved by
+construction; measured cosine 1.000). (2) The permute-stack (PUSH/POP opcodes + stack_push/stack_pop) -- push =
+permute+bundle, pop = cleanup+inverse-permute; reverse-via-stack runs correctly through the machine. Kept
+negative measured: the holographic stack's depth is crosstalk-bounded (safe ~4-8 at dim 1024, ~0.48 by depth 16)
+-- same shape as the B8 cliff; exact deep work uses the registers. Backward-compatible (prior machine tests
+pass). test_isa_callstack.py (5) + 1 integration. 1117 -> 1123. Tiers 0-2 of the spine complete.*
+- **Seat/basis.** Plate (the ABI) + the machine thread. **Order.** FIFTH -- builds on ISA-4; needs the contract
+  for the new stack instructions.
+- **Grounded.** `CALL` "extracts the named function and runs it on the current ACC" (the implicit convention);
+  `permute` exists.
+- **What.** Formalize the ACC-threading CALLING CONVENTION (what CALL passes/preserves) and add a STACK using
+  `permute` as push (unbind as pop) so HoloMachine programs can recurse and nest calls.
+- **Bar.** A small recursive program (e.g. a recursive structure builder) runs correctly via the stack; the
+  convention is documented and the function library obeys it.
+- **Anticipated negative.** Stack depth is bounded by crosstalk too -- each permute-push rides a bundle, so deep
+  recursion hits the capacity cliff (same shape as the B8 iterated-decode cliff). Measure the safe depth.
+
+## Tier 3 — The layers above assembly
+
+### ISA-6 — a macro layer: parameterized recipe/procedure templates   [BUILD]
+- **Seat/basis.** Puckette (Pd/Max -- he built a composition language over real-time primitives) + the recipe/
+  procedure thread. **Order.** SIXTH -- assembly before macros; builds on the recipe IR + procedure scaffolding.
+- **Grounded.** `procedure_to_recipe`, `learn_recipe_grammar`, `generate_procedure`, `recall_procedure` exist --
+  a "procedure" abstraction already halfway to a named subroutine/macro.
+- **What.** Parameterized templates -- a recipe/procedure with HOLES filled at instantiation -- plus a small
+  named-template library.
+- **Bar.** A parameterized template instantiated with different arguments produces the correct distinct
+  structures BIT-EXACT (the recipe's exactness carries); a starter library exists.
+- **Anticipated negative.** Macro HYGIENE -- a template that captures/rebinds atoms collides with the caller's
+  atoms. Needs a fresh-atom discipline for template holes.
+
+### ISA-7 — a higher-level language compiling to the recipe IR   [RESEARCH]
+- **Seat/basis.** Puckette (a declarative DSP language over primitives) + Eno (language-as-generative-system) +
+  Plate. **Order.** SEVENTH -- top of the tower; depends on ISA-6 + the IR. Research-heavy, so late.
+- **Grounded.** The DCC material-node-graph-as-StructureRecipe and the typed-structure unification (program =
+  tree = scene = one recipe) are ALREADY early forms of "a higher-level description that lowers to the IR."
+- **What.** A small high-level language with a compiler lowering to StructureRecipe. Frame the typed unification
+  as the IR this language targets.
+- **Bar.** A declarative spec (start with ONE domain -- material graph or scene spec) compiles to a correct
+  recipe and realizes bit-exact; round-trips.
+- **Anticipated negative.** A general-purpose language is large and easy to over-scope. SCOPE TO ONE DOMAIN
+  FIRST; do not build a general language up front. Most speculative -- last for a reason.
+
+## Tier 4 — The reversible/quantum discipline (the frontier)
+
+### ISA-8 — adopt the reversible-computing / error-correction model (cleanup = error correction)   [RESEARCH]
+- **Seat/basis.** Stoudenmire (quantum-inspired/tensor networks; flagged FHRR as "a stop on the road from
+  quantum amplitudes to classical hypervectors") + the FHRR/honesty/coherence threads. **Order.** LAST --
+  longest-horizon, most conceptual. Its one practical sub-part (the auto-cleanup scheduler) could pull earlier.
+- **What.** Make the engine's true nature explicit -- VSA assembly is not x86; it is noisy, bounded, REVERSIBLE,
+  structurally a reversible/quantum ISA where `cleanup` = error correction, `capacity` = coherence budget,
+  re-anchoring = an error-correction round. Then import: (a) a REVERSIBILITY AUDIT -- classify each instruction
+  as exactly invertible (bind/unbind, permute) vs information-destroying (bundle, cleanup); (b) an ERROR-BUDGET
+  TRACKER + AUTO-CLEANUP SCHEDULER -- estimate accumulated crosstalk along a program (reusing the capacity
+  diagnostic) and insert a `cleanup` BEFORE the cliff (generalizing RAY-1 re-anchoring + the shipped
+  coherence-gate from store-maintenance to program-execution); (c) connect FHRR's diagonal-UNITARY structure
+  (`bind` = phase rotation) to the quantum-gate framing for principled capacity bounds.
+- **Bar.** The auto-cleanup scheduler keeps a long program's output above a fidelity threshold at FEWER cleanups
+  than a fixed schedule (echoing the coherence-gate's matched accuracy at ~1/3 the passes); the reversibility
+  audit classifies each instruction correctly.
+- **Anticipated negative (loud).** The quantum analogy is INSPIRATIONAL, not literal: VSA is not a quantum
+  computer (no exponential superposition, no physical entanglement). Borrow the discipline (budget + error-
+  correct + reversibility bookkeeping); do NOT overclaim the physics. The practical do-able core is (b) the
+  scheduler; (a) and (c) are framing.
+
+## Part III order, at a glance
+ISA-1 (contract) -> ISA-2 (conformance suite) -> ISA-3 (extension discipline) -> ISA-4 (register file) ->
+ISA-5 (calling convention + permute-stack) -> ISA-6 (macros) -> ISA-7 (HLL, scope to one domain) [research] ->
+ISA-8 (reversible/quantum; practical core = auto-cleanup scheduler) [research, frontier]. Tiers 0-1 (ISA-1..3)
+are the do-now block; Tiers 2-3 (ISA-4..7) mature the machine and grow the language tower; Tier 4 (ISA-8) is the
+conceptual frontier with one practical scheduler inside it.

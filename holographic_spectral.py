@@ -41,13 +41,11 @@ import numpy as np
 
 def sign_fix(V):
     """Make each eigenvector's largest-magnitude component positive, so eigh's sign-ambiguous output becomes a
-    reproducible basis (C2). Operates column-wise; returns the same array for convenience."""
-    V = np.asarray(V, float)
-    for j in range(V.shape[1]):
-        i = int(np.argmax(np.abs(V[:, j])))
-        if V[i, j] < 0:
-            V[:, j] = -V[:, j]
-    return V
+    reproducible basis (C2). Thin delegate to the ONE determinism contract --
+    holographic_determinism.fix_eigvec_signs -- so this convention is CITED, not re-invented (ISA-1). copy=False
+    preserves the in-place, return-same-array behaviour callers have always had; bit-identical output."""
+    from holographic_determinism import fix_eigvec_signs
+    return fix_eigvec_signs(V, copy=False)
 
 
 # --- Laplacians from connectivity -------------------------------------------

@@ -1350,6 +1350,17 @@ class UnifiedMind:
                 "headroom_log10": float(np.log10(headroom)) if headroom > 0 else float("-inf"),
                 "alpha": alpha, "coverage_vs_load": coverage}
 
+    def conformance_report(self, dim=64, seed=0):
+        """Run the ISA conformance suite (ISA-2): check every production base instruction against its
+        definitional reference implementation, per the contract in ISA.md. Returns {op: {'passed', 'class', 
+        'max_diff'}} where class is 'TOL' (a continuous output, conformant within numeric tolerance) or 'EXACT'
+        (a decision / exact reindex, conformant bit-for-bit). The kernel is conformant iff every op passes -- and
+        this is what makes a vectorized op safe to adopt: it is 'conformant' iff it passes here. The bind_batch
+        class (a value-conformant change that flips a decision) is caught because decisions are pinned
+        separately and exactly (see test_isa_conformance.py)."""
+        from holographic_reference import run_conformance
+        return run_conformance(dim=dim, seed=seed)
+
     def calibration_report(self, n=2000, alphas=(0.01, 0.05, 0.1, 0.2), seed=12345):
         """Validate that the false-alarm probabilities recognize() and recall_calibrated() report are
         actually CALIBRATED. Draw `n` random unit vectors -- pure noise, matching nothing by construction --
@@ -2114,6 +2125,57 @@ class UnifiedMind:
         steps = (len(nodes) - 1) if steps is None else steps
         return traverse(np.asarray(memory), nodes, steps, cleanup=cleanup, beta=beta)
 
+    def _plan_vocab(self):
+        """The seed-deterministic atom source for shaped plans/records on this mind (regenerable from the
+        mind's seed, like every other store). Cached."""
+        if getattr(self, "_pvocab", None) is None:
+            from holographic_planshape import ShapeVocab
+            self._pvocab = ShapeVocab(min(self.dim, 1024), seed=self.seed + 31)
+        return self._pvocab
+
+    def plan_shape(self, actions, scopes, branch_skeleton=None):
+        """Build the SHAPE (the decode key) for a contingency plan: the action and scope value codebooks and a
+        nested-dict branch skeleton {name: {name: {...}}}. Hand this to decode_plan / descend so reading a plan
+        vector is a deterministic unbind-and-clean walk, not the resonator's blind search."""
+        from holographic_planshape import plan_shape
+        return plan_shape(actions, scopes, branch_skeleton)
+
+    def encode_plan(self, plan):
+        """Encode a PlanNode contingency tree (a primary action, a scope, named branches each a PlanNode) as ONE
+        hypervector -- the structured branching output the planner was missing, the HRR role-filler nested
+        encoding. import PlanNode from holographic_planshape to build the tree."""
+        from holographic_planshape import encode_plan
+        return encode_plan(plan, self._plan_vocab())
+
+    def decode_plan(self, vec, shape):
+        """Decode a plan vector back to a PlanNode GIVEN ITS SHAPE (from plan_shape) -- schema-guided, so it
+        stays exact far past the resonator's blind-parse cap. The returned node's confidence is the measured
+        decode cosine of its action."""
+        from holographic_planshape import decode_plan
+        return decode_plan(vec, shape, self._plan_vocab())
+
+    def descend(self, vec, situation, shape):
+        """Walk a plan vector to the branch matching the current SITUATION (a branch-name str, or a state
+        vector), returning the actions along that path -- the generalisation of IFMATCH from one gated
+        instruction to a named branch tree WITH ABSTENTION (no branch clears the measured noise floor -> the
+        node's primary action). Togelius's behavior-tree selector + Cranmer's measured floor."""
+        from holographic_planshape import descend
+        return descend(vec, situation, shape, self._plan_vocab())
+
+    def encode_record(self, fields):
+        """Encode a flat record {field_name: value_name} as one vector -- the GENERAL 'bring your own shape'
+        path for any structured output (a scientific decision record, a classified state), not just plans. One
+        bundle of role-bound value atoms."""
+        from holographic_planshape import encode_record
+        return encode_record(fields, self._plan_vocab())
+
+    def decode_record(self, vec, schema):
+        """Decode a flat record GIVEN ITS SHAPE: schema = {field_name: [possible_value_names]} (the per-field
+        codebooks). Unbinds each role and cleans against that field's codebook -- a deterministic walk. Returns
+        {field_name: value_name}."""
+        from holographic_planshape import decode_record
+        return decode_record(vec, schema, self._plan_vocab())
+
     def directed_structure(self, n, edges=None, seed=None):
         """Encode a directed SEQUENCE or GRAPH with a permutation DIRECTION ROLE (RAY-3): the successor of
         each edge is bound through a fixed permutation, M = superpose bind(node_i, perm(node_j)), so unbinding
@@ -2355,6 +2417,47 @@ class UnifiedMind:
         residual at the stored sharp positions."""
         from holographic_twolayer import smooth_sharp_reconstruct
         return smooth_sharp_reconstruct(code)
+
+    def graph_denoise(self, vectors, k=8, method="taubin", lam=0.55, mu=-0.58, iters=8, sublinear=False):
+        """Denoise / regularize a SET of vectors (a noisy codebook, an embedding, a value function) over its
+        own k-NN similarity graph -- the graph-signal filter the stack lacked (reverse-transfer RT-III1; mesh
+        smoothing mapped back onto the concept graph). `method='taubin'` is Taubin's lambda|mu no-shrink
+        low-pass; 'laplacian' is the naive shrinking baseline. Where `denoise` cleans ONE vector against a
+        manifold, this cleans a whole set USING its own redundancy (non-local means on the graph).
+
+        Helps most at HIGH noise on a curved manifold whose local neighbourhoods survive when the global linear
+        subspace is corrupted (measured: beats per-vector consolidation 6/6 seeds at rel-noise 1.2, and Taubin
+        keeps its norm where the naive Laplacian collapses). KEPT NEGATIVE: at low noise a per-vector
+        consolidation denoiser is better and this over-smooths. `sublinear=True` builds the k-NN graph from a
+        HoloForest's recall_k instead of the O(n^2) dense scan -- reuse the index for large sets."""
+        from holographic_graphsignal import graph_denoise
+        forest = None
+        if sublinear:
+            from holographic_tree import HoloForest
+            V = np.asarray(vectors, float)
+            forest = HoloForest(V.shape[1], seed=self.seed).build(V)   # index over the vectors' own dim
+        return graph_denoise(vectors, k=k, method=method, lam=lam, mu=mu, iters=iters, forest=forest)
+
+    def manifold_chart(self, vectors, dim=2, method="isomap", k=10, sublinear=False):
+        """Flatten a CURVED hypervector manifold to a low-D coordinate chart -- the nonlinear extension of
+        `consolidation` (which is a LINEAR SVD chart and folds a curved manifold) (reverse-transfer RT-II1; UV
+        unwrapping mapped onto the concept/state manifold). `method='isomap'` is the geodesic-preserving chart
+        (recommended -- unrolls the manifold); 'spectral' is Laplacian Eigenmaps (local cluster structure, the
+        graph-spectral cousin of `graph_denoise`'s Laplacian). Use it to SEE the concept space / a brain's state
+        space, or as a tighter storage coordinate where the manifold is curved.
+
+        Measured: on a swiss roll lifted into high-D, Isomap beats the linear SVD chart on geodesic-distance
+        fidelity and class separation 5/5 seeds. SCOPE: a chart assumes disk topology -- a CLOSED manifold (a
+        torus, genus>0) needs a cut first (the `topology` faculty finds the genus); a flat manifold is better
+        served by the linear `consolidation`. `sublinear=True` finds neighbours via a HoloForest (RT-III1's
+        index reuse); the geodesic step is otherwise O(N^3), so subsample for very large sets."""
+        from holographic_chart import manifold_chart
+        forest = None
+        if sublinear:
+            from holographic_tree import HoloForest
+            V = np.asarray(vectors, float)
+            forest = HoloForest(V.shape[1], seed=self.seed).build(V)
+        return manifold_chart(vectors, dim=dim, method=method, k=k, forest=forest)
 
     def denoise(self, x, method="auto", samples=None, codebook=None, sigma=None,
                 rank=8, beta=25.0, steps=3, forward=None, adjoint=None, mu=0.5, pnp_steps=30,

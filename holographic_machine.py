@@ -47,13 +47,36 @@ Pure NumPy, deterministic, no new dependencies.
 import numpy as np
 from holographic_ai import bind, unbind, bundle, cosine, permute, derived_atom
 
-OPCODES = ["LOAD", "BIND", "BUNDLE", "PERMUTE", "CALL", "APPLY", "IFMATCH", "ITERATE", "REPEAT", "HALT"]
+OPCODES = ["LOAD", "BIND", "BUNDLE", "PERMUTE", "CALL", "APPLY", "IFMATCH", "ITERATE", "REPEAT", "HALT",
+           "STORE", "RECALL",                                  # STORE r / RECALL r: a small register file (ISA-4)
+           "PUSH", "POP"]                                      # PUSH / POP: the permute-stack for nesting (ISA-5)
 DEFAULT_DATA = list("abcdef")
 COUNT_MAX = 8                      # REPEAT's count operand ranges over cnt:1 .. cnt:COUNT_MAX
+REGISTERS = ["R0", "R1", "R2", "R3", "R4", "R5", "R6", "R7"]   # a handful of named slots beyond ACC (ISA-4)
 # Faculty names an APPLY instruction can name. APPLY <faculty> means ACC := faculty(ACC) -- a unary
 # map run by a host (the mind) that supplies the handlers; the bare VM has none, so APPLY is a no-op
 # here. This is the extension point that lets a procedure invoke the engine's faculties as steps.
 DEFAULT_FACULTIES = ["cleanup", "denoise", "matmul"]
+
+
+# ---- the permute-stack (ISA-5): a LIFO stack in the vector substrate -----------------------------------------
+# push is permute+bundle (shift the existing items one level deeper, drop the new item on top); pop is
+# cleanup+inverse-permute (the top is the un-permuted item, so clean it out, peel it off, un-shift the rest).
+# It is a genuine stack, but a HOLOGRAPHIC one: every level rides the same bundle, so depth is bounded by
+# crosstalk -- deep stacks blur exactly like the B8 iterated-decode cliff (safe depth ~4-8 at dim 1024). Use it
+# for shallow nesting of cleanup-able items; for arbitrary intermediates at any depth, use the (exact) registers.
+def stack_push(stack, x):
+    """Push x onto the permute-stack. The existing stack is permuted one step (pushed deeper); x lands on top."""
+    return x if stack is None else bundle([x, permute(stack, 1)])
+
+
+def stack_pop(stack, codebook):
+    """Pop the top of the permute-stack, cleaning it against `codebook`. Returns (top_vec, remaining_stack).
+    The top is the only un-permuted term, so cleanup recovers it; subtracting it and inverse-permuting restores
+    the stack one level shallower. Exact for codebook items until the depth cliff."""
+    top = max(codebook, key=lambda c: cosine(stack, c))      # the un-permuted item wins -- that is the top
+    rest = permute(stack - top, -1)                          # peel the top off and un-shift the remaining stack
+    return top, rest
 
 
 class HoloMachine:
@@ -72,6 +95,7 @@ class HoloMachine:
         self.data_atoms = {d: self._atom(f"dat:{d}") for d in self.data_names}
         self.fac_atoms = {f: self._atom(f"fac:{f}") for f in self.faculty_names}  # APPLY's operand codebook
         self.cnt_atoms = {n: self._atom(f"cnt:{n}") for n in range(1, COUNT_MAX + 1)}  # REPEAT's count codebook
+        self.reg_atoms = {r: self._atom(f"reg:{r}") for r in REGISTERS}  # STORE/RECALL's register-name codebook
         # the holographic function LIBRARY: named sub-programs, all held in one vector, callable by name
         self.functions = {}       # name -> assembled program vector
         self.fn_atoms = {}        # name -> unitary name atom (the 'address' of the function)
@@ -92,6 +116,8 @@ class HoloMachine:
             arg_vec = self.fac_atoms[arg]                          # APPLY's operand is a faculty NAME
         elif op == "REPEAT":
             arg_vec = self.cnt_atoms[arg]                          # REPEAT's operand is a small-integer count
+        elif op in ("STORE", "RECALL"):
+            arg_vec = self.reg_atoms[arg]                          # STORE/RECALL's operand is a register name
         else:
             arg_vec = self.data_atoms.get(arg, self.op_atoms["HALT"])   # IFMATCH/value operand is a data atom
         return bundle([bind(self.OP, self.op_atoms[op]), bind(self.ARG, arg_vec)])
@@ -134,6 +160,8 @@ class HoloMachine:
             arg = self._nearest(self.fac_atoms, unbind(raw, self.ARG))
         elif op == "REPEAT":
             arg = self._nearest(self.cnt_atoms, unbind(raw, self.ARG))
+        elif op in ("STORE", "RECALL"):
+            arg = self._nearest(self.reg_atoms, unbind(raw, self.ARG))
         else:
             arg = self._nearest(self.data_atoms, unbind(raw, self.ARG))
         return op, arg
@@ -160,6 +188,8 @@ class HoloMachine:
           'goal' / 'maxloop'."""
         handlers = handlers or {}
         acc = init_acc
+        regs = {}                                    # the register file: named slots held SEPARATELY -> exact reads
+        stack = None                                 # the permute-stack: a LIFO of cleanup-able items (ISA-5)
         trace = []
         pc = 0
         for _step in range(max_steps):              # cap on TOTAL instructions executed (the safety net)
@@ -222,6 +252,31 @@ class HoloMachine:
                 matched = acc is not None and cosine(acc, self.data_atoms[tgt]) >= branch_tol
                 trace.append(("IFMATCH", tgt))
                 pc += 1 if matched else 2                                   # skip the guarded instruction on no-match
+                continue
+            if op == "STORE":                                              # ACC -> register slot (exact)
+                reg = self._nearest(self.reg_atoms, unbind(raw, self.ARG))
+                regs[reg] = acc                                            # separate named slot: no crosstalk
+                trace.append(("STORE", reg))
+                pc += 1
+                continue
+            if op == "RECALL":                                             # register slot -> ACC (exact)
+                reg = self._nearest(self.reg_atoms, unbind(raw, self.ARG))
+                if reg in regs:
+                    acc = regs[reg]                                        # exact read -- the value is returned verbatim
+                trace.append(("RECALL", reg))
+                pc += 1
+                continue
+            if op == "PUSH":                                               # push ACC onto the permute-stack
+                if acc is not None:
+                    stack = stack_push(stack, acc)
+                trace.append(("PUSH",))
+                pc += 1
+                continue
+            if op == "POP":                                                # pop the top of the permute-stack into ACC
+                if stack is not None:
+                    acc, stack = stack_pop(stack, list(self.data_atoms.values()))  # cleaned vs the value codebook
+                trace.append(("POP",))
+                pc += 1
                 continue
             arg = self._nearest(self.data_atoms, unbind(raw, self.ARG))
             trace.append((op, arg))

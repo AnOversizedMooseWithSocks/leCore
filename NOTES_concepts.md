@@ -8724,3 +8724,340 @@ repetition. test_holographic_dynamics.py: re-anchoring a rollout does not help (
 .py: the dedup_chunks and decompose_scene_tiled faculties through the mind. Files: holographic_scene.py,
 holographic_plan.py, holographic_unified.py, test_holographic_scene.py, test_holographic_plan.py,
 test_holographic_dynamics.py, test_integration.py, tour.py, README.
+
+
+SCHEMA-GUIDED TYPED PLANS + descend (the structured branching output the planning work was missing):
+a colleague who hit the route/planning case asked for a first-class Plan/PlanNode type (primary action, named
+contingency branches, scope, confidence) plus a decode helper, so the bind/bundle tree is not re-derived by
+hand each time. The audit found the ENCODING already proven (holographic_typed.encode_tree / StructureRecipe lay
+down exactly this role-filler tree, bit-exact) and a NAME collision (holographic_plan.Plan is the corridor
+planner's namedtuple). New module holographic_planshape.py ships the type and the decode.
+
+THE LOAD-BEARING IDEA (why a user-provided SHAPE is the right design, not sugar): the shape IS the decode key.
+Decoding a foreign vector with no shape is the resonator's blind, crosstalk-bounded parse (decompose_structure),
+which caps -- the typed module says so itself, a StructureRecipe is a GENERATOR not a parser. With the shape
+KNOWN, decode is a deterministic walk: unbind exactly the roles the shape names, clean against exactly the
+codebooks it gives, recurse on exactly the field it marks recursive. No search. The decode-vs-evaluate line
+again -- a known structure turns a decode-SEARCH into clean unbinds, so a 3- or 4-level plan round-trips every
+action and scope EXACTLY where the blind parse would crater. Measured: per-node branch fan-out holds past 16 at
+dim 1024 (the cap is the per-node bundle width, the HRR capacity bound -- a huge node nests, the same lesson).
+
+WHAT SHIPPED. encode_record / decode_record: the GENERAL "bring your own shape" path -- a flat record of named
+symbolic fields (a scientific decision record, a classified state) <-> one vector, decoded against per-field
+codebooks. PlanNode + PlanShape + encode_plan / decode_plan: the concrete contingency tree and its schema-guided
+round-trip. descend(vec, situation, shape): the walk to the branch matching the current situation -- the genuine
+generalisation of the machine's IFMATCH from one gated instruction (fire iff cosine(state, x) >= tol) to a named
+branch tree, matching the situation against branch condition keys by cosine and ABSTAINING (returning the node's
+primary action -- "no contingency applies") when none clears a MEASURED noise floor. Mind faculties: plan_shape,
+encode_plan, decode_plan, descend, encode_record, decode_record.
+
+PANEL GROUNDING (seats + real published methods, no fabricated opinions). Plate (HRR): recursive role-filler
+binding with per-level normalisation (bundle already does it); the per-node fan-out cap is his capacity bound,
+kept as the negative. Olshausen (resonator networks): the resonator is the UNKNOWN-structure tool the schema
+path AVOIDS -- it stays the fallback. Togelius (game AI): descend is a behavior-tree selector ("best child whose
+condition fires, else fall through"); the decodable, readable tree is the explainability his field wants.
+Cranmer (calibrated detection): the branch gate is a MEASURED noise floor and confidence is the MEASURED decode
+cosine, not a magic threshold (a simple cousin of RecallNull; upgrade to the full null for a controlled
+false-match RATE). Macklin (bit-exact tie-breaks): argmax ties broken deterministically, encode and descend
+run-to-run identical (a determinism test pins it). Eno (the reframe): the output shape is not formatting, it is
+the choice of which structure to impose, which determines what is recoverable -- so the shape is a first-class
+decode key, optional (omit it and you are back to the resonator's discovery).
+
+KEPT HONESTLY. confidence rides on the PlanNode OBJECT (builder metadata); it is NOT encoded into the vector,
+because forcing a scalar into the bundle decodes lossily and would betray the honest-number rule -- decode
+instead fills the returned node's confidence with the measured decode cosine. And schema-guided decode NEEDS the
+schema: a truly foreign vector of unknown shape falls back to the capping resonator. This is explicitly "decode
+a structure you have the shape for", which is the plan/protocol case -- exactly why providing the shape is the
+right design, not a limitation of it.
+
+Tests: +11 (1067 -> 1078). test_holographic_planshape.py: the module self-test, flat-record round-trip +
+measured per-field confidence, plan round-trip exact, a deep tree held by schema guidance, descend walking to the
+right branch, descend abstaining when no branch applies, descend matching a state VECTOR (and abstaining on an
+unrelated one), and determinism of encode/descend/noise-floor. test_integration.py: the plan faculties
+(encode_plan/decode_plan/descend) and the general record faculty through UnifiedMind. Files:
+holographic_planshape.py, holographic_unified.py, test_holographic_planshape.py, test_integration.py, tour.py,
+README.
+
+
+GRAPH-SIGNAL DENOISING (reverse-transfer RT-III1 -- mesh smoothing mapped back onto the concept graph):
+the DCC reverse-transfer sweep asked which 3-D operation is a special case of a general operation the stack
+LACKS. Mesh smoothing (filter a signal -- vertex positions -- on the mesh graph) is one: holostuff is full of
+graphs (the codebook similarity graph, the HoloForest, the store adjacency, the scene/sequence chains), and
+`graph_memory` only does cosine k-means CLUSTERING, never a Laplacian or spectral FILTER. New module
+holographic_graphsignal.py is that filter -- denoise/regularize a set of vectors over its own k-NN similarity
+graph (non-local means on the concept graph).
+
+THE TAUBIN POINT. A naive graph-Laplacian smooth denoises but SHRINKS: every step pulls mass toward the graph
+mean (its transfer (1-lam*k)^n < 1 for every graph frequency k>0, DC included), so the whole codebook collapses.
+Taubin's lam|mu pair (Taubin 1995) alternates a shrink step (lam>0) with an un-shrink step (mu<0, |mu|>lam) so
+the combined transfer (1-lam*k)(1-mu*k) is ~1 at low frequency (DC preserved -> no shrink) and <1 at high
+frequency (noise removed) -- the classic no-shrink low-pass.
+
+MEASURED ON A CURVED HIGH-RANK MANIFOLD (the regime where a LOCAL graph beats a GLOBAL-linear method), with the
+kept negative. (1) Taubin robustly AVOIDS the shrink -- mean norm stays ~0.88-0.98 (toward the clean norm as
+noise rises) where the naive Laplacian always collapses to ~0.41-0.54. Unambiguous. (2) Graph filtering BEATS
+per-vector denoising (consolidation onto the global low-rank subspace) ONLY at HIGH noise: rel-noise 1.2 ->
+Taubin quality 0.865 vs consolidate 0.837, winning 6/6 seeds; moderate noise ties; LOW noise (rel-0.5) ->
+consolidation wins 0/6 (0.968 vs 0.953) and the graph filter OVER-SMOOTHS. KEPT NEGATIVE: the local k-NN graph
+helps precisely when noise is high enough to corrupt the global linear subspace while the curved manifold's
+local neighbourhoods survive; when the signal is already clean, the global linear denoiser is better and the
+graph filter only blurs it. The decode-vs-evaluate cousin: the graph filter pays when the structure is genuinely
+non-linear/local, not when a few global components already capture it.
+
+The doc's flagged failure mode (building the k-NN graph is O(n^2)) is handled by REUSING the HoloForest's
+sub-linear `recall_k` for the neighbours (its own docstring already names it "the neighbour-search step that
+non-local-means denoising needs"; `graph_denoise(..., sublinear=True)`), and by holding the graph as sparse
+neighbour lists so the filter step is O(n*k), not a dense n*n matvec. Mind faculty: graph_denoise(vectors, k,
+method='taubin'|'laplacian', sublinear). PANEL SEATS: Milanfar ("A Tour of Modern Image Filtering" links
+denoisers to graph Laplacians) + Taubin (the no-shrink lam|mu surface filter).
+
+This is RT-III1, the panel's #1 reverse-transfer pick (cleanest bar, reuses the HoloForest). The full DCC
+reverse-transfer backlog (11 items, Groups I-VI) is captured as Part II of holostuff_crosscutting_backlog.md;
+the remaining ◆ picks in order are RT-II1 (nonlinear manifold chart), RT-IV1 (steering/anisotropic kernel), and
+RT-I1 (operator-limit / spectral-iteration).
+
+Tests: +6 (1078 -> 1084). test_holographic_graphsignal.py: the module self-test, Taubin denoises + avoids the
+shrink (norm kept where naive collapses), graph beats per-vector at high noise across seeds, the low-noise kept
+negative (per-vector wins), and knn_graph determinism + row-normalisation. test_integration.py: the graph_denoise
+faculty beating per-vector at high noise through the mind. Files: holographic_graphsignal.py,
+holographic_unified.py, test_holographic_graphsignal.py, test_integration.py, tour.py, README,
+holostuff_crosscutting_backlog.md.
+
+
+NONLINEAR MANIFOLD CHART (reverse-transfer RT-II1 -- UV unwrapping mapped back onto the concept manifold):
+the second DCC reverse-transfer pick. UV unwrapping (LSCM/ARAP/Tutte) is the least-holostuff item on the
+backlog and secretly the most general -- distortion-minimizing FLATTENING of a curved 2-manifold to a low-D
+chart, the embedding problem the whole stack faces and only solved LINEARLY by `consolidation` (an SVD). A
+LINEAR projection FOLDS a curved manifold: points far apart ALONG the manifold land on top of each other in the
+2-D chart. New module holographic_chart.py is the nonlinear extension.
+
+TWO METHODS, both pure NumPy, both reuse RT-III1's k-NN graph. (1) ISOMAP (Tenenbaum-de Silva-Langford 2000) --
+the primary, geodesic-PRESERVING chart: approximate along-manifold distance by shortest paths on the k-NN graph
+(Floyd-Warshall), then classical-MDS to 2-D; this UNROLLS the curve. (2) LAPLACIAN EIGENMAPS (Belkin-Niyogi
+2003) -- the graph-spectral cousin: the bottom non-trivial eigenvectors of the SAME graph Laplacian whose
+high-frequency components RT-III1's Taubin filter REMOVES (so the two reverse-transfer items are one operator
+used two ways). It preserves LOCAL neighbourhood structure but distorts GLOBAL distances -- kept as the honest
+secondary, not the default.
+
+MEASURED on a swiss roll lifted into D=256 (the canonical curved 2-manifold whose ambient variance defeats a
+linear projection). Isomap BEATS linear SVD/consolidation robustly: geodesic-distance correlation ~0.83 vs
+~0.76 and class separation (4 bands adjacent on the manifold but FOLDED by SVD) ~0.86 vs ~0.76, winning 5/5
+seeds on both (on a clean roll the geo-corr gap is wider, 0.95 vs 0.52). Laplacian Eigenmaps preserves local
+neighbourhoods but its global geo-corr trails SVD here -- the kept nuance.
+
+FAILURE MODE the doc flagged (honest, not a bug): a chart assumes disk topology (genus 0). A CLOSED manifold (a
+torus, genus 1) cannot flatten to a plane without a SEAM -- cut it first, and the `topology` faculty finds the
+genus that says where. A 1-manifold ring charts to a circle with no cut; a genus>0 surface needs the cut. High
+curvature also makes some distortion unavoidable (LSCM's own limit). The geodesic step is Floyd-Warshall O(N^3)
+-- fine for a few hundred points; subsample to landmarks or reuse the HoloForest neighbours (RT-III1's O(N^2)
+graph-build fix) for more. Determinism: the eigenvector sign is pinned (largest-|entry| made positive) so the
+chart is bit-stable -- the sign/order tie the determinism fence warns about. Mind faculty:
+manifold_chart(vectors, dim, method='isomap'|'spectral', k, sublinear). PANEL SEATS: Olshausen (representation
+geometry) + the consolidation thread + Tutte (graph drawing) + Lévy/Liu (LSCM/ARAP).
+
+Two of the four DCC reverse-transfer ◆ items now shipped (RT-III1 graph-Laplacian, RT-II1 manifold chart). The
+remaining ◆ picks in order: RT-IV1 (steering/anisotropic kernel), RT-I1 (operator-limit / spectral-iteration).
+Full backlog: Part II of holostuff_crosscutting_backlog.md.
+
+Tests: +7 (1084 -> 1091). test_holographic_chart.py: the module self-test, Isomap beats SVD on geodesic
+fidelity across seeds, Isomap separates classes the linear chart folds, the chart is deterministic, the spectral
+method runs, and geodesics stay finite when the raw k-NN graph starts disconnected (connectivity repair).
+test_integration.py: the manifold_chart faculty beating linear SVD on a curved manifold through the mind. Files:
+holographic_chart.py, holographic_unified.py, test_holographic_chart.py, test_integration.py, tour.py, README,
+holostuff_crosscutting_backlog.md.
+
+
+THE DETERMINISM CONTRACT (ISA-1 -- the first item of the VSA ISA backlog, Part III of the cross-cutting
+backlog): the "learn from assembly" lens found that holostuff has ALREADY built a VSA instruction-set
+architecture (the kernel is the instruction set; HoloMachine the assembler+interpreter; StructureRecipe the IR;
+the resonator the disassembler), and an ISA is durable only if the EXACT OBSERVABLE semantics of its base
+instructions are a frozen contract while implementations vary underneath. The audit found the cost of NOT having
+that contract, paid right now: the determinism/tie-break behaviour was specified FOUR different ways --
+cleanup's implicit numpy argmax (ties->lowest index, written nowhere), spectral's "largest-magnitude component
+positive" (explicitly citing "the same bit-exact-tie class as the bind_batch bug"), flow's private weighted
+Laplacian, and -- the fourth, added two builds ago during RT-II1 -- chart's private `_fix_signs` reinventing the
+same sign rule. Same bug class, re-litigated four times, code duplication as the price.
+
+WHAT SHIPPED. (1) ISA.md -- the written contract: per-instruction observable semantics (bind/unbind/bundle/
+permute/cosine/involution/random_vector + the cleanup decision), each tagged EXACT (a decision / exact reindex,
+pinned bit-for-bit) or TOL (a continuous value, conformant within numeric tolerance), with the real edge cases
+grounded from the kernel (zero-sum bundle -> zero vector; zero-norm cosine -> 0.0; permute exact+invertible;
+involution exactly self-inverse). The ARCHITECTURE/MICROARCHITECTURE boundary stated explicitly: the observable
+DECISION is architecture (pinned); how the continuous numbers are computed (FFT vs direct, batched vs looped) is
+microarchitecture (free within tolerance, provided the decision it feeds is unchanged) -- bind_batch is exactly
+such a variant, which is why it could be bit-exact to 1e-12 yet flip a trajectory through an unpinned argmax
+tie. (2) holographic_determinism.py -- the executable embodiment of the ONE determinism rule: `fix_eigvec_signs`
+(the reconciled sign convention) and `argmax_tiebreak` (names cleanup's lowest-index convention so it is
+citable). (3) THE DE-SILO: spectral.sign_fix and chart._fix_signs are now thin delegates to the shared utility,
+BIT-EXACT (copy=False preserves spectral's in-place behaviour; the 19 spectral/chart tests still pass unchanged)
+-- the fourth scattered copy is gone, the convention has one home.
+
+THE ANTICIPATED NEGATIVE, kept: a contract must not over-specify. ISA.md freezes only the OBSERVABLE semantics
+callers depend on (the argmax decision, unbind's approximate-recovery guarantee, the edge-case returns), NOT the
+FFT's internal rounding, the bits of a reduction no decision observes, or the basis within a degenerate
+eigenspace -- pinning those would mistake incidental float behaviour for architecture and block the very
+optimization (the bind_batch speed-up) the contract exists to make safe. SEATS: Cranmer (reproducible-analysis /
+frozen re-runnable contract, RECAST) + Macklin (the bit-exact tie-break lesson; this also answers his standing
+determinism-audit request). NEXT in the spine: ISA-2 (the conformance suite + reference implementations + a
+regression for the bind_batch class itself -- the contract's teeth), then ISA-3 (the extension discipline).
+
+Tests: +7 (1091 -> 1098). test_holographic_determinism.py: the sign rule is deterministic / sign-invariant
+(V and -V -> the same fixed basis) / idempotent, the copy flag preserves each call site's behaviour, the argmax
+tie-break picks the lowest index, and the de-silo is bit-exact (spectral.sign_fix and chart._fix_signs now equal
+the shared rule). Files: holographic_determinism.py, ISA.md, holographic_spectral.py, holographic_chart.py,
+test_holographic_determinism.py, tour.py, README, holostuff_crosscutting_backlog.md.
+
+
+THE CONFORMANCE SUITE (ISA-2 -- the second item of the VSA ISA spine; the teeth for ISA.md): a contract with no
+enforcement is just prose, so this is the enforcement. For each base instruction there is now a DEFINITIONAL
+reference implementation (holographic_reference.py) -- the simplest, obviously-correct version: `ref_bind` is a
+direct O(D^2) circular convolution (NOT an FFT), `ref_involution` the explicit reversal, `ref_permute` the
+explicit index roll -- verified against the production kernel to MACHINE EPSILON (bind vs direct conv: 1e-16;
+involution/permute: exact). The FFT `bind` genuinely IS circular convolution, now provable by a slow reference.
+
+THE TOL/EXACT SPLIT, made callable (the ISA-1 boundary enforced). `value_conformant` (continuous outputs match
+within numeric tolerance) for bind/unbind/bundle/cosine; `exact_conformant` (bit-for-bit) for involution/permute;
+`decision_conformant` (same cleanup pick under argmax_tiebreak) for the observable decision. `run_conformance`
+checks every production op against its reference and returns {op: passed/class/max_diff}; exposed as the mind
+faculty `conformance_report()` (the conformance harness made first-class, beside calibration_report). A
+vectorized op is "conformant" iff it passes here -- which is exactly what makes the §7 vectorization sweep safe
+to pursue.
+
+THE CENTERPIECE -- the bind_batch-class regression, caught BY CONSTRUCTION. The bug was a value-conformant
+change (bit-exact to 1e-12) that flipped a creature's trajectory through an unpinned argmax tie. The suite
+catches the whole class because it checks the DECISION separately and exactly: a similarity vector perturbed by
+a SUB-TOLERANCE amount (1e-12) passes `value_conformant` but fails `decision_conformant` -- a value-only suite
+would accept it, the contract's decision check rejects it. And the literal mechanism is pinned too: the same
+numbers summed in two orders (x = [1e16, 1, -1e16, -1]) give -1.0 vs 0.0, and on a near-tie that flips the
+argmax. GOLDEN VECTORS are the hand-verifiable convolution identities (bind(a, delta0)==a; bind(a, delta_k)==
+roll(a,k); bind commutative; the round-trip recovers b as the cleanup WINNER -- approximate because involution
+is an exact inverse only for unitary vectors, not random ones, so the guarantee is the decision, not a 1e-9
+match) -- goldens that cannot rot the way frozen float arrays would. EDGE CASES pinned: zero-sum bundle -> zero
+vector; zero-norm cosine -> 0.0.
+
+SEATS: Cranmer (the conformance/measurement discipline; golden tests as the spec made executable). NEXT in the
+spine: ISA-3 (the extension discipline -- document Clifford/tensor/FPE as named, opt-in ISA extensions, base
+kernel stays minimal). NOTE (honest): the doc suggested ISA-2 lets flow's Laplacian be de-duplicated, but the
+audit shows flow's `_weighted_laplacian` is a DIFFERENT construction (edge-conductance for the Tero solve) than
+the k-NN similarity Laplacian in graphsignal/chart -- not a duplicate to merge, so that de-silo is not forced.
+
+Tests: +9 (1098 -> 1107). test_isa_conformance.py: all base ops conform to their references (TOL/EXACT), the
+convolution-identity golden vectors, exact ops bit-for-bit + self-inverse/invertible, the zero-vector edges, and
+the bind_batch-class regression (a value-conformant change that flips a decision is caught; a summation reorder
+flips an argmax). test_integration.py: the conformance_report faculty passing for the live kernel. Files:
+holographic_reference.py, ISA.md (referenced), holographic_unified.py, test_isa_conformance.py,
+test_integration.py, tour.py, README, holostuff_crosscutting_backlog.md.
+
+
+THE GOVERNED EXTENSIONS (ISA-3 -- the third item of the VSA ISA spine; closes the Tier 0-1 do-now block): real
+instruction sets grow as base + extensions, never by bloating the base. The audit confirmed holostuff already
+does this by instinct (the Clifford module's docstring states the rule), so ISA-3 makes it POLICY:
+ISA_EXTENSIONS.md is the VSA analog of x86 + SSE/AVX/AES-NI -- a minimal base kernel plus named, opt-in bind-mode
+EXTENSIONS, each justified by a MEASURED regime win over base `bind`.
+
+THE BASE/EXTENSION BOUNDARY (the principle, applied to the debatable `permute` case): BASE = what (almost) every
+faculty uses, the holographic_ai.py kernel; EXTENSION = regime-specific, a separate opt-in module. By that rule
+the base instruction set is frozen as random_vector / bind / unbind / bundle / permute / cosine / involution /
+the cleanup decision (full semantics in ISA.md) -- and `permute` is BASE (it lives in the kernel, used across
+the sequence/creature/structure faculties for order). The three extensions are NOT base.
+
+THE THREE EXTENSIONS, each with a regime win MEASURED FRESH this session: (1) Clifford-bind (the geometric
+product, holographic_clifford.py) -- regime 3-D rotations; win: rotation composition is EXACT and is one product
+(the geometric product of two rotors IS the composed rotor, error 1.1e-16), and non-commutative so it captures
+order base convolution cannot; cost: 2^d-dimensional, rules it out as a general substrate. (2) FPE/VFA
+(holographic_fpe.py) -- regime continuous/spatial values; win: a DESIGNED Bochner kernel makes nearby values
+similar (smooth monotone falloff 1.0->0.9->0.66->0.41->0.22->0.11->0.04 over offset 0..3) where independent
+random atoms have NO continuity (all ~0 off-diagonal); cost: it is an encoder, not a general bind, and the
+kernel is a design choice. (3) Tensor-product bind (holographic_tensor.py) -- regime high capacity at the cost
+of D^2 storage; win: at a load that overloads HRR, tensor recall 0.87 vs HRR 0.28 (D=32, 12 pairs); cost: D^2
+numbers vs D, and a generic full-rank binding cannot be MPS-compressed without losing recall (the frontier is
+HRR(D) < tensor-train(~2rD) < full tensor(D^2)).
+
+THE NEW-EXTENSION PROPOSAL TEMPLATE (the earning-its-place bar, baked into the doc): name & module (base
+untouched -- conformance_report still passes); regime (and where NOT to use it); the base-bind baseline it must
+beat; the MEASURED win on real data with the regime stated; its own conformance test; cost & kept negative
+stated as loudly as the win. No measured regime win -> not an extension; the base stays minimal. SEATS:
+Stoudenmire (the tensor/capacity extension) + Plate (what stays in the minimal base ISA). The honesty/anticipated
+negative (the boundary is debatable) is resolved by picking the principle and applying it consistently rather
+than case-by-case.
+
+Tiers 0-1 of the ISA spine are now complete (ISA-1 contract, ISA-2 conformance teeth, ISA-3 extension
+discipline) -- the do-now block that makes the whole engine safer to optimize and systematizes a design
+holostuff already followed by instinct. NEXT: ISA-4 (accumulator -> a small register file; register pressure is
+literally a capacity-cliff question), the first machine-model item.
+
+Tests: +4 (1107 -> 1111). test_isa_extensions.py: Clifford exact rotation composition (length-preserving +
+invertible), FPE's designed kernel is continuous and beats random atoms, tensor-bind's higher recall at an
+overloading load, and the base kernel stays minimal/unchanged when the extensions are imported. Files:
+ISA_EXTENSIONS.md, test_isa_extensions.py, tour.py, README, holostuff_crosscutting_backlog.md.
+
+
+THE REGISTER FILE (ISA-4 -- the first machine-model item of the ISA spine): HoloMachine ran everything through
+ONE accumulator (ACC). ISA-4 grows it to a handful of named slots (REGISTERS R0..R7) with two new opcodes,
+STORE r (ACC -> slot) and RECALL r (slot -> ACC). Backward-compatible: the two opcodes are additive, existing
+programs are untouched (all 14 prior machine tests pass), and the operand is cleaned against a new reg_atoms
+codebook exactly like REPEAT's counts or APPLY's faculty names.
+
+THE DESIGN HINGES ON THE KEPT NEGATIVE (the lovely VSA-native one): how is the register file held? Two options,
+and the measurement decides. (A) SEPARATE NAMED SLOTS (a Python dict in run()): reads are EXACT (the value is
+returned verbatim, cosine 1.000, bit-for-bit via np.array_equal), no crosstalk, no capacity limit. (B) ONE
+BUNDLE (the machine's existing "disk" pattern, bundle of bind(reg_role_i, value_i) with a distinct role per
+register): the slots share the crosstalk budget, so readback degrades as registers pile in -- "register pressure"
+is LITERAL, the capacity cliff applied to the register file. MEASURED: a bundled file reads back perfectly to ~16
+registers at dim 1024, then degrades (32 -> 0.99, 64 -> 0.93/0.91); at dim 4096 it holds 64. So register count is
+a CAPACITY QUESTION for the bundled rep, not a free choice. The machine therefore holds slots SEPARATELY -- the
+measurement is the justification for the design, exactly the project's pattern (ship the working design, keep the
+negative that rules out the alternative on record).
+
+THE BAR (registers save re-derivation): a value needed again after ACC moves on costs a full re-derivation
+without registers but ONE RECALL with them. For a k-instruction intermediate M, registers replace k instructions
+with 1 (plus 1 STORE) -- fewer instructions, and the recalled M is EXACT regardless of how it was produced (a
+re-derivation that ran a lossy APPLY step would not even reproduce M; RECALL always does). SEATS: Plate (the
+clean HRR slot/role algebra the register file is built from) + Eno (a small, well-chosen set of named slots as a
+generative constraint -- a handful, not unlimited).
+
+NEXT in the spine: ISA-5 (a documented calling convention + a permute-stack for recursion -- and the kept
+negative there is the same family: stack depth is bounded by crosstalk, like the B8 iterated-decode cliff).
+
+Tests: +6 (1111 -> 1117). test_isa_registers.py: exact read, bit-for-bit recall of an intermediate, the
+re-derivation-instruction saving, 8 independent slots, and the bundled-file capacity-cliff kept negative; plus a
+mind-level integration test (exact recall through the mind's machine + a register-free program still runs).
+Files: holographic_machine.py, test_isa_registers.py, test_integration.py, tour.py, README,
+holostuff_crosscutting_backlog.md.
+
+
+THE CALLING CONVENTION + PERMUTE-STACK (ISA-5 -- the second machine-model item of the ISA spine): two parts, a
+documented ABI and a substrate stack. (1) THE CALLING CONVENTION (ISA.md's new ABI section): CALL f runs library
+function f as an ACC->ACC transform -- ACC is the argument in and the return value out, and the whole function
+library obeys it. The preservation guarantee is the nice part: registers (R0..R7) and the permute-stack are
+FRAME-LOCAL -- each CALL runs in its own run() frame with a fresh register file and a fresh stack, so a callee
+CANNOT corrupt the caller's registers or stack (measured: a callee overwriting its R0 leaves the caller's R0
+bit-identical, cosine 1.000). In ABI terms every register is callee-saved by construction -- the caller spills
+nothing to keep a value across a CALL. Recursion (self-CALL with an IFMATCH base case) runs under the existing
+depth guard (8).
+
+(2) THE PERMUTE-STACK (PUSH/POP opcodes + module-level stack_push/stack_pop): a LIFO in the vector substrate.
+PUSH is permute+bundle (shift the existing items one level deeper, drop ACC on top); POP is cleanup +
+inverse-permute (the top is the only un-permuted term -- clean it out, peel it off, un-shift the rest). It is the
+explicit-stack form of recursion -- e.g. reversing a sequence by pushing every element then popping pops them in
+reverse, the textbook stack-replaces-recursion pattern -- and it runs correctly through the machine (push a,b,c,d
+-> first POP yields 'd').
+
+THE KEPT NEGATIVE, measured (the spine's recurring lesson, a third time): the permute-stack is a HOLOGRAPHIC
+stack -- every level rides one bundle, so depth is bounded by crosstalk exactly like the B8 iterated-decode
+cliff. SAFE DEPTH ~4-8 items at dim 1024 (LIFO recovery 1.00 to depth 4, ~0.92 at 8, ~0.48 by 16; a little
+deeper at dim 4096). So the permute-stack is for shallow nesting of cleanup-able items; for arbitrary
+intermediates at any depth, use the registers (exact, frame-local). This is the SAME capacity lesson the bundled
+register file taught (ISA-4) and the bundled disk before it: superposition buys composability and pays in a
+crosstalk cliff -- measure it, keep the exact path for what must be exact. SEATS: Plate (the HRR role/permute
+algebra the convention and stack are built from) + the machine thread.
+
+NEXT in the spine (Tier 3): ISA-6 (a macro layer -- parameterized recipe/procedure templates over the assembly,
+the procedure abstraction is already halfway there). Then ISA-7 (a small HLL, research) and ISA-8
+(reversible/quantum bind, the frontier).
+
+Tests: +6 (1117 -> 1123). test_isa_callstack.py: frame-local registers (the ABI guarantee) and frame-local stack,
+the permute-stack LIFO primitive, reverse-via-stack through the machine (the bar), and the depth-cliff kept
+negative; plus a mind-level integration test (reverse-via-stack + frame-local registers through the mind's
+machine). Files: holographic_machine.py, ISA.md, test_isa_callstack.py, test_integration.py, tour.py, README,
+holostuff_crosscutting_backlog.md.
