@@ -1128,6 +1128,152 @@ try:
 except Exception as _eTR:
     print(f"  trajectory-denoise: (skipped: {_eTR})")
 
+# GRAPH-SIGNAL DENOISE (reverse-transfer RT-III1): mesh smoothing mapped onto the concept graph -- denoise a
+# whole noisy codebook over its OWN k-NN similarity graph. Taubin's lam|mu low-pass denoises WITHOUT the
+# volume-shrink a naive Laplacian causes, and at high noise the local graph beats a per-vector linear denoise.
+try:
+    import numpy as _npGS
+    from holographic_unified import UnifiedMind as _UMGS
+    _mGS = _UMGS(dim=512, seed=0); _rgGS = _npGS.random.default_rng(0); _DG, _NG = 512, 100
+    _tg = _npGS.linspace(0, 1, _NG); _omg = _rgGS.uniform(1, 10, _DG); _phg = _rgGS.uniform(0, 2 * _npGS.pi, _DG)
+    _cleanG = _npGS.cos(2 * _npGS.pi * _npGS.outer(_tg, _omg) + _phg)
+    _cleanG /= _npGS.linalg.norm(_cleanG, axis=1, keepdims=True)
+    _nzG = _rgGS.standard_normal((_NG, _DG)); _nzG /= _npGS.linalg.norm(_nzG, axis=1, keepdims=True)
+    _noisyG = _cleanG + 1.2 * _nzG
+    _qG = lambda X: float(_npGS.mean(_npGS.sum(X / _npGS.linalg.norm(X, axis=1, keepdims=True) * _cleanG, axis=1)))
+    _taubG = _mGS.graph_denoise(_noisyG, method="taubin"); _naiveG = _mGS.graph_denoise(_noisyG, method="laplacian")
+    print(f"  GRAPH-SIGNAL DENOISE (codebook over its k-NN graph): quality {_qG(_noisyG):.2f} -> Taubin {_qG(_taubG):.2f}; "
+          f"norm kept {_npGS.linalg.norm(_taubG, axis=1).mean():.2f} vs naive-Laplacian "
+          f"{_npGS.linalg.norm(_naiveG, axis=1).mean():.2f} (Taubin avoids the shrink)")
+except Exception as _eGS:
+    print(f"  graph-signal denoise: (skipped: {_eGS})")
+
+# NONLINEAR MANIFOLD CHART (reverse-transfer RT-II1): UV unwrapping mapped onto the concept manifold -- flatten
+# a CURVED manifold to a low-D chart. A linear SVD (consolidation) FOLDS a swiss roll; Isomap preserves the
+# along-manifold (geodesic) distance and unrolls it, so classes adjacent on the roll but folded together by SVD
+# come apart.
+try:
+    import numpy as _npMC
+    from holographic_unified import UnifiedMind as _UMMC
+    from holographic_chart import geodesic_distances as _geoMC
+    _mMC = _UMMC(dim=256, seed=0); _rgMC = _npMC.random.default_rng(0); _NM, _DM = 300, 256
+    _uM = _rgMC.uniform(0, 1, _NM); _vM = _rgMC.uniform(0, 1, _NM); _angM = 1.5 * _npMC.pi * (1 + 2 * _uM)
+    _rollM = _npMC.stack([_angM * _npMC.cos(_angM), 21 * _vM, _angM * _npMC.sin(_angM)], 1)
+    _QM = _npMC.linalg.qr(_rgMC.standard_normal((_DM, 3)))[0]; _XM = _rollM @ _QM.T + 0.05 * _rgMC.standard_normal((_NM, _DM))
+    _GtM = _geoMC(_XM, k=10); _iuM = _npMC.triu_indices(_NM, 1)
+    _gcM = lambda Y: float(_npMC.corrcoef(_npMC.sqrt(((Y[:, None] - Y[None]) ** 2).sum(-1))[_iuM], _GtM[_iuM])[0, 1])
+    _isoM = _mMC.manifold_chart(_XM, dim=2, method="isomap")
+    _svM = (_XM - _XM.mean(0)) @ _npMC.linalg.svd(_XM - _XM.mean(0), full_matrices=False)[2][:2].T
+    print(f"  NONLINEAR MANIFOLD CHART (swiss roll -> 2-D): geodesic fidelity SVD/linear {_gcM(_svM):.2f} vs "
+          f"Isomap {_gcM(_isoM):.2f} -- the linear chart folds the curve, the geodesic chart unrolls it")
+except Exception as _eMC:
+    print(f"  manifold-chart: (skipped: {_eMC})")
+
+# THE DETERMINISM CONTRACT (ISA-1): the engine has a written ISA (ISA.md) with ONE tie-break/sign rule, now
+# CITED in one place instead of re-invented per module. The sign convention -- the same bit-exact-tie class as
+# the bind_batch bug -- lived in FOUR scattered copies; spectral and chart now both route through the contract.
+try:
+    import numpy as _npDC
+    from holographic_determinism import fix_eigvec_signs as _fesDC
+    from holographic_spectral import sign_fix as _sfDC
+    from holographic_chart import _fix_signs as _cfDC
+    _Vdc = _npDC.random.default_rng(0).standard_normal((24, 5))
+    _same = (_npDC.allclose(_fesDC(_Vdc), _fesDC(-_Vdc))                 # V and -V -> the SAME fixed basis
+             and _npDC.array_equal(_sfDC(_Vdc.copy()), _fesDC(_Vdc))    # spectral cites the contract, bit-exact
+             and _npDC.array_equal(_cfDC(_Vdc), _fesDC(_Vdc)))          # chart cites the contract, bit-exact
+    print(f"  DETERMINISM CONTRACT (ISA.md): one sign/tie-break rule, four scattered copies reconciled to one -- "
+          f"spectral & chart cite it bit-exactly, sign ambiguity removed: {_same}")
+except Exception as _eDC:
+    print(f"  determinism-contract: (skipped: {_eDC})")
+
+# THE CONFORMANCE SUITE (ISA-2): the contract's teeth. Every production base instruction is checked against a
+# definitional reference (a direct O(D^2) convolution for bind, etc.) -- TOL on continuous outputs, EXACT on
+# decisions. A vectorized op is "conformant" iff it passes here, and the bind_batch class (a value-conformant
+# change that flips a DECISION) is caught because decisions are pinned separately and exactly.
+try:
+    from holographic_unified import UnifiedMind as _UMCF
+    from holographic_reference import value_conformant as _vcCF, decision_conformant as _dcCF
+    import numpy as _npCF
+    _rep = _UMCF(dim=64, seed=0).conformance_report(dim=64, seed=0)
+    _allok = all(_r["passed"] for _r in _rep.values())
+    _ops = ", ".join(f"{_o}[{_r['class']}]" for _o, _r in list(_rep.items())[:4])
+    # the bind_batch class in one line: a sub-tolerance change that flips the cleanup decision
+    _sims = _npCF.array([0.5, 0.5, 0.3]); _bad = _sims + _npCF.array([0.0, 1e-12, 0.0])
+    _caught = _vcCF(_sims, _bad) and not _dcCF(_sims, _bad)
+    print(f"  CONFORMANCE SUITE (ISA.md teeth): all base ops conform = {_allok} ({_ops}, ...); "
+          f"bind_batch class caught (sub-tol change flips a decision) = {_caught}")
+except Exception as _eCF:
+    print(f"  conformance-suite: (skipped: {_eCF})")
+
+# THE GOVERNED EXTENSIONS (ISA-3): base `bind` stays RISC; three named, opt-in EXTENSIONS each earn their place
+# with a measured regime win (the VSA analog of x86 + SSE/AVX). See ISA_EXTENSIONS.md.
+try:
+    import numpy as _npEX, math as _mEX
+    from holographic_clifford import CliffordAlgebra as _CAEX
+    from holographic_fpe import VectorFunctionEncoder as _VFEX
+    from holographic_tensor import TensorBindMemory as _TBEX
+    from holographic_ai import random_vector as _rvEX, bind as _bEX, unbind as _ubEX, bundle as _blEX, cosine as _csEX
+    _cl = _CAEX(); _vEX = _npEX.random.default_rng(0).standard_normal(3)
+    _R1 = _cl.rotor(_npEX.array([0,0,1.0]), _mEX.pi/3); _R2 = _cl.rotor(_npEX.array([1.0,0,0]), _mEX.pi/4)
+    _clerr = _npEX.max(_npEX.abs(_cl.rotate(_R2,_cl.rotate(_R1,_vEX)) - _cl.rotate(_cl.compose(_R2,_R1),_vEX)))
+    _fpe = _VFEX(1, dim=1024, bounds=[(0,3)], kernel="rbf", seed=0)
+    _fk = _csEX(_fpe.encode([0.0]), _fpe.encode([1.0]))               # continuous similarity at offset 1.0
+    _rg = _npEX.random.default_rng(0); _D=32; _ks=[_rvEX(_D,_rg) for _ in range(12)]; _vs=[_rvEX(_D,_rg) for _ in range(12)]
+    _hrr = _npEX.mean([_csEX(_ubEX(_blEX([_bEX(k,v) for k,v in zip(_ks,_vs)]),_ks[i]),_vs[i]) for i in range(12)])
+    _tm = _TBEX(_ks,_vs); _tn = _npEX.mean([_csEX(_tm.recall(_ks[i]),_vs[i]) for i in range(12)])
+    print(f"  GOVERNED EXTENSIONS (ISA_EXTENSIONS.md): Clifford exact 3-D rotation (err {_clerr:.0e}) | "
+          f"FPE continuous kernel (cos {_fk:.2f} at offset 1 vs ~0 for random atoms) | "
+          f"tensor capacity (recall {_tn:.2f} vs HRR {_hrr:.2f} at overload)")
+except Exception as _eEX:
+    print(f"  governed-extensions: (skipped: {_eEX})")
+
+# THE REGISTER FILE (ISA-4): HoloMachine grows from one accumulator to a handful of named slots (STORE r /
+# RECALL r). Slots are held SEPARATELY -> reads are EXACT; a value survives ACC being overwritten and comes back
+# verbatim with one RECALL instead of a full re-derivation. Kept negative: a BUNDLED file has a literal capacity
+# cliff (register pressure), which is why the slots are separate.
+try:
+    import numpy as _npRG
+    from holographic_machine import HoloMachine as _HMRG
+    from holographic_ai import cosine as _csRG, random_vector as _rvRG, bind as _bRG, unbind as _ubRG, bundle as _blRG
+    _mRG = _HMRG(dim=1024, seed=7)
+    _pRG = [("LOAD","a"),("STORE","R0"),("LOAD","b"),("BIND","c"),("RECALL","R0"),("HALT","a")]
+    _accRG,_ = _mRG.run(_mRG.assemble(_pRG))
+    _exact = _csRG(_accRG, _mRG.data_atoms["a"])
+    def _bf(n):                                              # bundled-file readback at n registers (the cliff)
+        _rg=_npRG.random.default_rng(0); _ro=[_rvRG(1024,_rg) for _ in range(n)]; _va=[_rvRG(1024,_rg) for _ in range(n)]
+        _f=_blRG([_bRG(_ro[i],_va[i]) for i in range(n)])
+        return _npRG.mean([int(_npRG.argmax([_csRG(_ubRG(_f,_ro[i]),_va[j]) for j in range(n)]))==i for i in range(n)])
+    print(f"  REGISTER FILE (ISA-4): separate slots read EXACT (RECALL R0 cosine {_exact:.3f}); "
+          f"kept negative -- a BUNDLED file degrades with count: 8 regs {_bf(8):.2f} -> 64 regs {_bf(64):.2f} (literal register pressure)")
+except Exception as _eRG:
+    print(f"  register-file: (skipped: {_eRG})")
+
+# THE CALLING CONVENTION + PERMUTE-STACK (ISA-5): ACC is arg/return; registers and the stack are FRAME-LOCAL, so
+# a callee cannot corrupt the caller (preserved automatically). The permute-stack (PUSH/POP) is a LIFO in the
+# substrate -- exact at shallow depth, with a crosstalk depth cliff (same shape as the B8 cliff). See ISA.md.
+try:
+    import numpy as _npCS
+    from holographic_machine import HoloMachine as _HMCS, stack_push as _spCS, stack_pop as _ppCS
+    from holographic_ai import cosine as _csCS, random_vector as _rvCS
+    _mCS = _HMCS(dim=1024, seed=7)
+    _mCS.define("clob", [("LOAD","f"),("STORE","R0"),("HALT","a")])      # a callee that clobbers ITS R0
+    _pCS = [("LOAD","a"),("STORE","R0"),("CALL","clob"),("RECALL","R0"),("HALT","a")]
+    _accCS,_ = _mCS.run(_mCS.assemble(_pCS))
+    _frame = _csCS(_accCS, _mCS.data_atoms["a"])                         # caller's R0 preserved across CALL?
+    def _depth(n):                                                        # permute-stack LIFO recovery at depth n
+        _rg=_npCS.random.default_rng(0); _at=[_rvCS(1024,_rg) for _ in range(n)]; _s=None
+        for _a in _at: _s=_spCS(_s,_a)
+        _ok=0
+        for _e in range(n-1,-1,-1):
+            _t,_s=_ppCS(_s,_at)
+            if int(_npCS.argmax([_csCS(_t,_c) for _c in _at]))==_e: _ok+=1
+        return _ok/n
+    print(f"  CALLING CONVENTION + STACK (ISA-5): registers frame-local (caller's R0 survives a callee clobber, "
+          f"cosine {_frame:.3f}); permute-stack LIFO exact shallow ({_depth(4):.2f} @ depth 4) -> blurs deep "
+          f"({_depth(16):.2f} @ depth 16, the crosstalk cliff)")
+except Exception as _eCS:
+    print(f"  calling-convention: (skipped: {_eCS})")
+
 # UPSTREAM FROM A SIBLING PROJECT (TuneFM): improvements that help every application,
 # each verified on this substrate before adoption.
 try:
@@ -1691,6 +1837,22 @@ _hard = um.decode_structure(_M, _nodes, cleanup="hard")
 _raw = um.decode_structure(_M, _nodes, cleanup=None)
 print(f"  decode a 16-node chain (B7->B8)     : per-peel cleanup {_ncor(_hard)}/15 hops, "
       f"raw (no cleanup) only {_ncor(_raw)}/15 -- cleaning each hop is what makes it decode")
+
+# decode_plan / descend: a CONTINGENCY PLAN as a typed tree (action + named branches + scope), decoded back
+# GIVEN ITS SHAPE -- a deterministic unbind walk, not the resonator's blind parse. descend generalises IFMATCH
+# (one gated instruction) to a named branch tree WITH ABSTENTION ('no contingency applies' -> primary action).
+from holographic_planshape import PlanNode as _PN
+_pa = ["advance", "hold", "retreat", "scan", "abort", "reroute"]; _ps2 = ["global", "local", "step", "mission"]
+_plan = _PN("advance", "mission", branches={
+    "blocked": _PN("reroute", "local", branches={"lowfuel": _PN("hold", "step")}),
+    "contact": _PN("abort", "mission")})
+_pshape = um.plan_shape(_pa, _ps2, {"blocked": {"lowfuel": {}}, "contact": {}})
+_pvec = um.encode_plan(_plan)
+_pback = um.decode_plan(_pvec, _pshape)
+print(f"  decode_plan (schema-guided)         : a 2-level contingency plan -> back exactly = {_pback == _plan}, "
+      f"root='{_pback.action}' conf={_pback.confidence}")
+print(f"  descend (IFMATCH generalised)       : blocked -> {' -> '.join(um.descend(_pvec, 'blocked', _pshape))}; "
+      f"clear -> {' -> '.join(um.descend(_pvec, 'clear', _pshape))} (abstains, no branch applies)")
 
 # energy cleanup: the B1 dense-Hopfield update as an OPT-IN flag, identical to argmax at high beta
 from holographic_ai import Vocabulary as _Vc, random_vector as _rv

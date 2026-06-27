@@ -2746,3 +2746,134 @@ def test_decompose_scene_tiled_faculty_beats_whole_past_the_cap():
     whole = coder.factor_scene(coder.encode_scene(objs), 15, sweeps=3)
     assert len(keys(tiled) & keys(objs)) >= 13          # tiling recovers nearly all 15
     assert len(keys(tiled) & keys(objs)) > len(keys(whole) & keys(objs)) + 5   # well past the capped whole scene
+
+
+# ---- schema-guided plans + descend through the mind (the structured branching output) ------------
+
+def test_plan_faculties_round_trip_and_descend_through_the_mind():
+    from holographic_planshape import PlanNode
+    m = UnifiedMind(dim=1024, seed=0)
+    actions = ["advance", "hold", "retreat", "scan", "abort", "reroute"]
+    scopes = ["global", "local", "step", "mission"]
+    plan = PlanNode("advance", "mission", branches={
+        "blocked": PlanNode("reroute", "local", branches={"lowfuel": PlanNode("hold", "step")}),
+        "contact": PlanNode("abort", "mission")})
+    shape = m.plan_shape(actions, scopes, {"blocked": {"lowfuel": {}}, "contact": {}})
+    vec = m.encode_plan(plan)
+    assert m.decode_plan(vec, shape) == plan                       # schema-guided round-trip through the mind
+    assert m.descend(vec, "blocked", shape) == ["advance", "reroute"]
+    assert m.descend(vec, "contact", shape) == ["advance", "abort"]
+    assert m.descend(vec, "clear", shape) == ["advance"]           # abstain: no branch applies
+
+
+def test_general_record_faculty_round_trips_a_structured_output():
+    m = UnifiedMind(dim=1024, seed=0)
+    rec = {"phase": "stationary", "regime": "high_vol", "call": "hold"}
+    schema = {"phase": ["stationary", "drifting"], "regime": ["low_vol", "high_vol"], "call": ["hold", "act"]}
+    assert m.decode_record(m.encode_record(rec), schema) == rec
+
+
+# ---- graph-signal denoising through the mind (reverse-transfer RT-III1) ---------------------------
+
+def test_graph_denoise_faculty_beats_per_vector_at_high_noise():
+    m = UnifiedMind(dim=512, seed=0)
+    rng = np.random.default_rng(0)
+    D, N = 512, 100
+    t = np.linspace(0, 1, N)
+    omega = rng.uniform(1, 10, D); phi = rng.uniform(0, 2 * np.pi, D)
+    clean = np.cos(2 * np.pi * np.outer(t, omega) + phi); clean /= np.linalg.norm(clean, axis=1, keepdims=True)
+    nz = rng.standard_normal((N, D)); nz /= np.linalg.norm(nz, axis=1, keepdims=True)
+    noisy = clean + 1.2 * nz                                        # high noise -- the graph filter's regime
+
+    def quality(X):
+        Xn = X / np.linalg.norm(X, axis=1, keepdims=True)
+        return float(np.mean(np.sum(Xn * clean, axis=1)))
+
+    def per_vector(X):
+        m0 = X.mean(0); Vt = np.linalg.svd(X - m0, full_matrices=False)[2]
+        return max(quality(m0 + (X - m0) @ Vt[:r].T @ Vt[:r]) for r in (8, 16, 24))
+
+    taub = m.graph_denoise(noisy, k=8, method="taubin")
+    assert quality(taub) > quality(noisy)                          # the faculty denoises
+    assert quality(taub) > per_vector(noisy)                       # and beats per-vector at high noise
+    # the no-shrink property vs the naive baseline, through the mind
+    naive = m.graph_denoise(noisy, k=8, method="laplacian")
+    assert np.linalg.norm(taub, axis=1).mean() > np.linalg.norm(naive, axis=1).mean() + 0.2
+
+
+# ---- nonlinear manifold chart through the mind (reverse-transfer RT-II1) --------------------------
+
+def test_manifold_chart_faculty_beats_linear_svd_on_a_curved_manifold():
+    m = UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+    N, D = 300, 256
+    u = rng.uniform(0, 1, N); v = rng.uniform(0, 1, N)
+    ang = 1.5 * np.pi * (1 + 2 * u)
+    roll = np.stack([ang * np.cos(ang), 21 * v, ang * np.sin(ang)], 1)
+    Q = np.linalg.qr(rng.standard_normal((D, 3)))[0]
+    X = roll @ Q.T + 0.05 * rng.standard_normal((N, D))
+    lab = np.clip((u * 4).astype(int), 0, 3)
+
+    from holographic_chart import geodesic_distances
+    Gt = geodesic_distances(X, k=10); iu = np.triu_indices(N, 1)
+
+    def geo_corr(Y):
+        dy = np.sqrt(((Y[:, None, :] - Y[None, :, :]) ** 2).sum(-1))[iu]
+        return float(np.corrcoef(dy, Gt[iu])[0, 1])
+
+    def sep(Y):
+        Yc = Y - Y.mean(0); cen = np.stack([Yc[lab == c].mean(0) for c in range(4)])
+        return float((np.argmin(((Yc[:, None, :] - cen[None, :, :]) ** 2).sum(-1), 1) == lab).mean())
+
+    iso = m.manifold_chart(X, dim=2, method="isomap")
+    svd = (X - X.mean(0)) @ np.linalg.svd(X - X.mean(0), full_matrices=False)[2][:2].T
+    assert iso.shape == (N, 2)
+    assert geo_corr(iso) > geo_corr(svd)                   # the nonlinear chart preserves the manifold metric
+    assert sep(iso) > sep(svd)                             # and separates classes the linear chart folds
+
+
+# ---- the ISA conformance suite as a mind faculty (ISA-2) ------------------------------------------
+
+def test_conformance_report_faculty_passes_for_the_live_kernel():
+    m = UnifiedMind(dim=64, seed=0)
+    report = m.conformance_report(dim=64, seed=0)
+    # every base instruction conforms to its definitional reference
+    for op, r in report.items():
+        assert r["passed"], f"{op} not conformant: {r}"
+    # the TOL/EXACT split is reported and correct
+    assert report["bind"]["class"] == "TOL"
+    assert report["permute"]["class"] == "EXACT" and report["permute"]["max_diff"] == 0.0
+
+
+# ---- the HoloMachine register file through the mind (ISA-4) ---------------------------------------
+
+def test_register_file_exact_recall_through_the_mind():
+    from holographic_ai import cosine, bind
+    m = UnifiedMind(dim=1024, seed=7)
+    M = m._machine()
+    # store 'a' in R0, overwrite ACC, recall R0 -> exact
+    prog = [("LOAD", "a"), ("STORE", "R0"), ("LOAD", "b"), ("BIND", "c"), ("RECALL", "R0"), ("HALT", "a")]
+    acc, _ = M.run(M.assemble(prog))
+    assert cosine(acc, M.data_atoms["a"]) > 0.99999
+    # a program WITHOUT register opcodes still runs identically (backward-compatible)
+    plain = [("LOAD", "a"), ("BIND", "b"), ("HALT", "a")]
+    acc2, _ = M.run(M.assemble(plain))
+    assert cosine(acc2, bind(M.data_atoms["a"], M.data_atoms["b"])) > 0.99
+
+
+# ---- the permute-stack and calling convention through the mind (ISA-5) ----------------------------
+
+def test_permute_stack_and_frame_local_registers_through_the_mind():
+    from holographic_ai import cosine
+    m = UnifiedMind(dim=1024, seed=7)
+    M = m._machine()
+    # reverse-via-stack: push a,b,c then the first POP yields 'c' (LIFO)
+    prog = [("LOAD", "a"), ("PUSH", "_"), ("LOAD", "b"), ("PUSH", "_"),
+            ("LOAD", "c"), ("PUSH", "_"), ("POP", "_"), ("HALT", "a")]
+    acc, _ = M.run(M.assemble(prog))
+    assert cosine(acc, M.data_atoms["c"]) > 0.99
+    # frame-local registers: a callee clobbering its R0 leaves the caller's R0 intact (the ABI guarantee)
+    M.define("clob", [("LOAD", "f"), ("STORE", "R0"), ("HALT", "a")])
+    prog2 = [("LOAD", "a"), ("STORE", "R0"), ("CALL", "clob"), ("RECALL", "R0"), ("HALT", "a")]
+    acc2, _ = M.run(M.assemble(prog2))
+    assert cosine(acc2, M.data_atoms["a"]) > 0.99999
