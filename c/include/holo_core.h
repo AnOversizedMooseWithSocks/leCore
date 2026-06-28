@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 typedef struct holo_engine holo_engine;
+typedef struct holo_action_index holo_action_index;
 
 typedef struct holo_match {
     size_t index;
@@ -89,6 +90,18 @@ int holo_cleanup_topk_with_norms(size_t dim,
                                  size_t count,
                                  size_t k,
                                  holo_match *out);
+
+holo_action_index *holo_action_index_create(size_t dim, size_t count);
+void holo_action_index_destroy(holo_action_index *index);
+size_t holo_action_index_dim(const holo_action_index *index);
+size_t holo_action_index_count(const holo_action_index *index);
+int holo_action_index_set(holo_action_index *index,
+                          const double *vectors,
+                          const uint64_t *labels);
+int holo_action_index_search(const holo_action_index *index,
+                             const double *query,
+                             size_t k,
+                             holo_match *out);
 
 #ifdef __cplusplus
 }

@@ -333,6 +333,23 @@ int holo_trace_score_actions_with_norms(const holo_trace *trace,
                                         out);
 }
 
+int holo_trace_query_index(const holo_trace *trace,
+                           const double *query_state,
+                           const holo_action_index *index,
+                           size_t k,
+                           holo_match *out)
+{
+    int rc;
+    if (!trace || !trace->work || !index || holo_action_index_dim(index) != trace->dim) {
+        return HOLO_EINVAL;
+    }
+    rc = holo_trace_recall(trace, query_state, trace->work);
+    if (rc != HOLO_OK) {
+        return rc;
+    }
+    return holo_action_index_search(index, trace->work, k, out);
+}
+
 double holo_trace_fidelity(const holo_trace *trace)
 {
     if (!trace || trace->stored_count == 0) {

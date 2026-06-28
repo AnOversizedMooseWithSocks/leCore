@@ -202,7 +202,7 @@ def _write_markdown(
     lines = [
         "# C Kernel CI Evidence",
         "",
-        "Scalar C build, C unit tests, and repeated C-vs-NumPy benchmarks ran in CI.",
+        "Scalar C build, C unit tests, and repeated C-vs-NumPy trace + action-index benchmarks ran in CI.",
         "",
         "## Environment",
         "",
@@ -212,10 +212,10 @@ def _write_markdown(
         f"- Machine: `{platform.machine()}`",
         f"- Git SHA: `{os.environ.get('GITHUB_SHA', 'local')}`",
         "",
-        "## Trace Kernel Gate",
+        "## Trace + Action-Index Gate",
         "",
         (
-            f"Gate: every measured trace dimension must reach at least "
+            f"Gate: every measured trace/action-index dimension must reach at least "
             f"{args.min_store_speedup:.2f}x store speedup, "
             f"{args.min_query_speedup:.2f}x query speedup, and "
             f"{args.min_accuracy:.2f} C accuracy."

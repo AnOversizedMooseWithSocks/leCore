@@ -5,9 +5,9 @@
 #include <time.h>
 
 #if defined(HOLO_USE_ACCELERATE) && HOLO_USE_ACCELERATE
-#define HOLO_BENCH_RUNTIME "c_accelerate_spectral_trace"
+#define HOLO_BENCH_RUNTIME "c_accelerate_spectral_trace_index"
 #else
-#define HOLO_BENCH_RUNTIME "c_scalar_spectral_trace"
+#define HOLO_BENCH_RUNTIME "c_scalar_spectral_trace_index"
 #endif
 
 static double now_seconds(void)
@@ -24,10 +24,10 @@ static double now_seconds(void)
 static int bench_one(size_t dim, size_t pairs, size_t actions_n, size_t queries)
 {
     holo_engine *engine = NULL;
+    holo_action_index *action_index = NULL;
     holo_trace trace;
     double *states = NULL;
     double *actions = NULL;
-    double *action_norms = NULL;
     uint64_t *labels = NULL;
     holo_match match[1];
     double t0;
@@ -43,13 +43,11 @@ static int bench_one(size_t dim, size_t pairs, size_t actions_n, size_t queries)
     }
     states = (double *)calloc(pairs * dim, sizeof(*states));
     actions = (double *)calloc(actions_n * dim, sizeof(*actions));
-    action_norms = (double *)calloc(actions_n, sizeof(*action_norms));
     labels = (uint64_t *)calloc(actions_n, sizeof(*labels));
-    if (!states || !actions || !action_norms || !labels || holo_trace_init(&trace, engine) != HOLO_OK) {
+    if (!states || !actions || !labels || holo_trace_init(&trace, engine) != HOLO_OK) {
         fprintf(stderr, "allocation/init failed\n");
         free(states);
         free(actions);
-        free(action_norms);
         free(labels);
         holo_engine_destroy(engine);
         return 1;
@@ -65,7 +63,17 @@ static int bench_one(size_t dim, size_t pairs, size_t actions_n, size_t queries)
         if (holo_keygen(engine, 20000 + (uint64_t)i, actions + i * dim) != HOLO_OK) {
             return 1;
         }
-        action_norms[i] = holo_norm(dim, actions + i * dim);
+    }
+    action_index = holo_action_index_create(dim, actions_n);
+    if (!action_index || holo_action_index_set(action_index, actions, labels) != HOLO_OK) {
+        fprintf(stderr, "action index init failed\n");
+        holo_action_index_destroy(action_index);
+        holo_trace_dispose(&trace);
+        free(states);
+        free(actions);
+        free(labels);
+        holo_engine_destroy(engine);
+        return 1;
     }
 
     t0 = now_seconds();
@@ -82,14 +90,11 @@ static int bench_one(size_t dim, size_t pairs, size_t actions_n, size_t queries)
     t0 = now_seconds();
     for (i = 0; i < queries; ++i) {
         const size_t j = i % pairs;
-        if (holo_trace_score_actions_with_norms(&trace,
-                                                states + j * dim,
-                                                actions,
-                                                action_norms,
-                                                labels,
-                                                actions_n,
-                                                1,
-                                                match) != HOLO_OK) {
+        if (holo_trace_query_index(&trace,
+                                   states + j * dim,
+                                   action_index,
+                                   1,
+                                   match) != HOLO_OK) {
             return 1;
         }
         correct += match[0].label == (uint64_t)(j % actions_n);
@@ -111,10 +116,10 @@ static int bench_one(size_t dim, size_t pairs, size_t actions_n, size_t queries)
            query_seconds > 0.0 ? (double)queries / query_seconds : 0.0,
            queries ? (double)correct / (double)queries : 0.0);
 
+    holo_action_index_destroy(action_index);
     holo_trace_dispose(&trace);
     free(states);
     free(actions);
-    free(action_norms);
     free(labels);
     holo_engine_destroy(engine);
     return 0;

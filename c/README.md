@@ -44,13 +44,15 @@ generation, FFT-backed circular-convolution bind/unbind, fixed-vector batch
 binding, bundle, permute, cleanup/top-k, additive holographic trace memory,
 binary trace save/load, and tests for algebraic roundtrip, cleanup, vectorized
 fixed binding, trace recall, spectrum-native trace storage, lazy real-trace
-materialization, and snapshot parity. Trace memory stores its canonical state as
-an accumulated bound-pair spectrum, so `learn()` updates
+materialization, reusable C-owned action dictionaries, and snapshot parity.
+Trace memory stores its canonical state as an accumulated bound-pair spectrum,
+so `learn()` updates
 `sum(FFT(state) * FFT(action))` directly and `recall()` can unbind without first
 transforming a real trace. The real trace is materialized lazily for `.trace`,
 save/load, and compatibility checks. Fixed-vector binding reuses `FFT(fixed)`
-across a row stack, and cleanup can use precomputed action norms for static
-action dictionaries. The default build uses a portable radix-2 FFT;
+across a row stack, and `holo_action_index` owns aligned action vectors, labels,
+and precomputed norms for static action dictionaries. The default build uses a
+portable radix-2 FFT;
 macOS can enable Accelerate/vDSP for the same bind/unbind, `bind_fixed`, and
 trace-recall contracts:
 
@@ -109,12 +111,12 @@ store:
 
 query:
     context = unbind(trace_spectrum, query_state)
-    top action = cleanup(context, action_matrix, precomputed_action_norms)
+    top action = holo_action_index_search(action_index, context)
 ```
 
 On Apple clang / arm64, with `pairs=8`, `actions=8`, `queries=2048`, and seven
 repeats via `make c-ci-evidence`, the spectrum-native portable scalar backend
-shows the first boundary:
+with C-owned action-index readout shows the first boundary:
 
 | dim | C store speedup | C query speedup | accuracy |
 | ---: | ---: | ---: | ---: |
@@ -193,7 +195,7 @@ store(state, action, weight)
 
 recall(query_state)
     action_context = unbind(trace_spectrum, query_state)
-    scores = cleanup(action_context, action_matrix, precomputed_action_norms)
+    scores = holo_action_index_search(action_index, action_context)
 ```
 
 This is the "the trace remembers" piece. It gives `holostuff` a single durable

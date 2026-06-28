@@ -57,6 +57,11 @@ int holo_trace_score_actions_with_norms(const holo_trace *trace,
                                         size_t action_count,
                                         size_t k,
                                         holo_match *out);
+int holo_trace_query_index(const holo_trace *trace,
+                           const double *query_state,
+                           const holo_action_index *index,
+                           size_t k,
+                           holo_match *out);
 
 double holo_trace_fidelity(const holo_trace *trace);
 

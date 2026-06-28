@@ -48,6 +48,14 @@ struct holo_engine {
     double *real;
 };
 
+struct holo_action_index {
+    size_t dim;
+    size_t count;
+    double *vectors;
+    double *norms;
+    uint64_t *labels;
+};
+
 static uint64_t splitmix64(uint64_t *x)
 {
     uint64_t z;
@@ -792,4 +800,84 @@ int holo_cleanup_topk_with_norms(size_t dim,
         }
     }
     return HOLO_OK;
+}
+
+holo_action_index *holo_action_index_create(size_t dim, size_t count)
+{
+    holo_action_index *index;
+    if (dim == 0 || count == 0) {
+        return NULL;
+    }
+    if (count > ((size_t)-1) / dim) {
+        return NULL;
+    }
+    index = (holo_action_index *)calloc(1, sizeof(*index));
+    if (!index) {
+        return NULL;
+    }
+    index->vectors = (double *)alloc_zeroed(dim * count, sizeof(index->vectors[0]));
+    index->norms = (double *)alloc_zeroed(count, sizeof(index->norms[0]));
+    index->labels = (uint64_t *)alloc_zeroed(count, sizeof(index->labels[0]));
+    if (!index->vectors || !index->norms || !index->labels) {
+        holo_action_index_destroy(index);
+        return NULL;
+    }
+    index->dim = dim;
+    index->count = count;
+    return index;
+}
+
+void holo_action_index_destroy(holo_action_index *index)
+{
+    if (!index) {
+        return;
+    }
+    free_aligned(index->vectors);
+    free_aligned(index->norms);
+    free_aligned(index->labels);
+    free(index);
+}
+
+size_t holo_action_index_dim(const holo_action_index *index)
+{
+    return index ? index->dim : 0;
+}
+
+size_t holo_action_index_count(const holo_action_index *index)
+{
+    return index ? index->count : 0;
+}
+
+int holo_action_index_set(holo_action_index *index,
+                          const double *vectors,
+                          const uint64_t *labels)
+{
+    size_t i;
+    if (!index || !index->vectors || !index->norms || !index->labels || !vectors) {
+        return HOLO_EINVAL;
+    }
+    memcpy(index->vectors, vectors, index->dim * index->count * sizeof(index->vectors[0]));
+    for (i = 0; i < index->count; ++i) {
+        index->norms[i] = holo_norm(index->dim, index->vectors + i * index->dim);
+        index->labels[i] = labels ? labels[i] : (uint64_t)i;
+    }
+    return HOLO_OK;
+}
+
+int holo_action_index_search(const holo_action_index *index,
+                             const double *query,
+                             size_t k,
+                             holo_match *out)
+{
+    if (!index || !index->vectors || !index->norms || !index->labels) {
+        return HOLO_EINVAL;
+    }
+    return holo_cleanup_topk_with_norms(index->dim,
+                                        query,
+                                        index->vectors,
+                                        index->norms,
+                                        index->labels,
+                                        index->count,
+                                        k,
+                                        out);
 }

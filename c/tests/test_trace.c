@@ -27,6 +27,8 @@ int main(void)
 {
     holo_engine *engine = holo_engine_create(DIM, 99);
     holo_engine *wrong_dim = NULL;
+    holo_action_index *action_index = NULL;
+    holo_action_index *wrong_index = NULL;
     holo_trace *heap_trace = NULL;
     holo_trace trace;
     holo_trace loaded;
@@ -62,6 +64,11 @@ int main(void)
         }
         require_ok(holo_trace_store(&trace, states + i * DIM, actions + i * DIM, 1.0), "trace store");
     }
+    action_index = holo_action_index_create(DIM, ACTIONS);
+    require(action_index != NULL, "action index create");
+    require_ok(holo_action_index_set(action_index, actions, labels), "action index set");
+    require(holo_action_index_dim(action_index) == DIM, "action index dim");
+    require(holo_action_index_count(action_index) == ACTIONS, "action index count");
 
     require(trace.stored_count == ACTIONS, "stored count");
     require(fabs(holo_trace_fidelity(&trace) - 0.5) < 1e-12, "fidelity");
@@ -95,7 +102,18 @@ int main(void)
                                                        match),
                    "score actions with norms");
         require(match[0].label == labels[i], "trace with norms recalls matching action");
+        require_ok(holo_trace_query_index(&trace,
+                                          states + i * DIM,
+                                          action_index,
+                                          1,
+                                          match),
+                   "trace query action index");
+        require(match[0].label == labels[i], "trace action index recalls matching action");
     }
+    wrong_index = holo_action_index_create(DIM / 2U, ACTIONS);
+    require(wrong_index != NULL, "wrong-dim action index create");
+    require(holo_trace_query_index(&trace, states, wrong_index, 1, match) == HOLO_EINVAL,
+            "wrong-dim action index rejected");
 
     require_ok(holo_trace_save(&trace, "build/test_trace.htr"), "trace save");
     wrong_dim = holo_engine_create(DIM / 2U, 99);
@@ -137,6 +155,8 @@ int main(void)
     require(match[0].label == labels[0], "trace set keeps recall");
 
     remove("build/test_trace.htr");
+    holo_action_index_destroy(wrong_index);
+    holo_action_index_destroy(action_index);
     holo_trace_dispose(&loaded);
     holo_trace_dispose(&trace);
     holo_engine_destroy(wrong_dim);
