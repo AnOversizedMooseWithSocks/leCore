@@ -457,6 +457,64 @@ int holo_bind(holo_engine *engine, const double *a, const double *b, double *out
     return HOLO_OK;
 }
 
+int holo_bind_fixed_many(holo_engine *engine,
+                         const double *fixed,
+                         const double *rows,
+                         size_t count,
+                         double *out)
+{
+    size_t row;
+    const size_t n = engine ? engine->dim : 0;
+    if (!engine || !fixed || (!rows && count > 0) || (!out && count > 0)) {
+        return HOLO_EINVAL;
+    }
+    if (count == 0) {
+        return HOLO_OK;
+    }
+#if HOLO_USE_ACCELERATE
+    memcpy(engine->ar, fixed, n * sizeof(engine->ar[0]));
+    memset(engine->ai, 0, n * sizeof(engine->ai[0]));
+    fft_split(engine, &engine->za, 0);
+    for (row = 0; row < count; ++row) {
+        const double *src = rows + row * n;
+        double *dst = out + row * n;
+        memcpy(engine->br, src, n * sizeof(engine->br[0]));
+        memset(engine->bi, 0, n * sizeof(engine->bi[0]));
+        fft_split(engine, &engine->zb, 0);
+        vDSP_zvmulD(&engine->za, 1, &engine->zb, 1, &engine->zb, 1, (vDSP_Length)n, 1);
+        fft_split(engine, &engine->zb, 1);
+        memcpy(dst, engine->br, n * sizeof(dst[0]));
+    }
+#else
+    size_t i;
+    for (i = 0; i < n; ++i) {
+        engine->a[i].re = fixed[i];
+        engine->a[i].im = 0.0;
+    }
+    fft(engine->a, n, 0);
+    for (row = 0; row < count; ++row) {
+        const double *src = rows + row * n;
+        double *dst = out + row * n;
+        for (i = 0; i < n; ++i) {
+            engine->b[i].re = src[i];
+            engine->b[i].im = 0.0;
+        }
+        fft(engine->b, n, 0);
+        for (i = 0; i < n; ++i) {
+            const double re = engine->a[i].re * engine->b[i].re - engine->a[i].im * engine->b[i].im;
+            const double im = engine->a[i].re * engine->b[i].im + engine->a[i].im * engine->b[i].re;
+            engine->b[i].re = re;
+            engine->b[i].im = im;
+        }
+        fft(engine->b, n, 1);
+        for (i = 0; i < n; ++i) {
+            dst[i] = engine->b[i].re;
+        }
+    }
+#endif
+    return HOLO_OK;
+}
+
 int holo_unbind(holo_engine *engine, const double *pair, const double *key, double *out)
 {
     size_t i;

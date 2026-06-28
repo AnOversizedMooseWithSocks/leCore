@@ -33,6 +33,8 @@ int main(void)
     double pair_freq_imag[DIM];
     double recovered[DIM];
     double matrix[4 * DIM];
+    double fixed_many[4 * DIM];
+    double scalar_pair[DIM];
     uint64_t labels[4] = {10, 11, 12, 13};
     holo_match matches[2];
     double noisy[DIM];
@@ -61,6 +63,15 @@ int main(void)
 
     for (i = 0; i < 4; ++i) {
         require_ok(holo_keygen(engine, 1000 + i, matrix + i * DIM), "matrix key");
+    }
+    require_ok(holo_bind_fixed_many(engine, a, matrix, 4, fixed_many), "bind fixed many");
+    for (i = 0; i < 4; ++i) {
+        size_t j;
+        require_ok(holo_bind(engine, a, matrix + i * DIM, scalar_pair), "scalar bind for fixed many");
+        for (j = 0; j < DIM; ++j) {
+            require(fabs(fixed_many[i * DIM + j] - scalar_pair[j]) < 1e-10,
+                    "bind fixed many matches scalar bind");
+        }
     }
     for (i = 0; i < DIM; ++i) {
         noisy[i] = matrix[2 * DIM + i] + 0.05 * a[i];

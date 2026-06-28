@@ -40,13 +40,15 @@ Implemented:
 - `tests/test_trace.c`
 
 The current kernel provides deterministic key generation, unitary key
-generation, FFT-backed circular-convolution bind/unbind, bundle, permute,
-cleanup/top-k, additive holographic trace memory, binary trace save/load, and
-tests for algebraic roundtrip, cleanup, trace recall, cached-spectrum recall,
-and snapshot parity. Trace recall caches `FFT(trace)` until the next store, and
-cleanup can use precomputed action norms for static action dictionaries. The
-default build uses a portable radix-2 FFT; macOS can enable Accelerate/vDSP for
-the same bind/unbind and trace-recall contracts:
+generation, FFT-backed circular-convolution bind/unbind, fixed-vector batch
+binding, bundle, permute, cleanup/top-k, additive holographic trace memory,
+binary trace save/load, and tests for algebraic roundtrip, cleanup, vectorized
+fixed binding, trace recall, cached-spectrum recall, and snapshot parity. Trace
+recall caches `FFT(trace)` until the next store, fixed-vector binding reuses
+`FFT(fixed)` across a row stack, and cleanup can use precomputed action norms
+for static action dictionaries. The default build uses a portable radix-2 FFT;
+macOS can enable Accelerate/vDSP for the same bind/unbind, `bind_fixed`, and
+trace-recall contracts:
 
 ```sh
 make -C c test HOLO_USE_ACCELERATE=1
@@ -62,8 +64,11 @@ make c
 make c-test
 ```
 
-Existing Python experiments can opt into the C-backed `bind`, `unbind`, and
-`HolographicMemory` replacements without changing their imports:
+Existing Python experiments can opt into the C-backed `bind`, `bind_fixed`,
+`unbind`, and `HolographicMemory` replacements without changing their imports.
+The `bind_fixed` replacement uses the C path for small row stacks, where the
+fixed spectrum reuse wins, and leaves wider stacks on NumPy's batched real FFT
+by default. Tune that cutoff with `HOLOSTUFF_C_BIND_FIXED_MAX_ROWS`:
 
 ```sh
 HOLOSTUFF_USE_C=1 python benchmark_holographic.py
@@ -83,8 +88,8 @@ Without the environment switch, `holographic_ai.py` stays NumPy-only.
 
 ## Benefit Experiment
 
-The first proof experiment is trace-store plus action-recall throughput against
-the current NumPy implementation:
+The proof experiments compare trace-store/action-recall throughput and the
+new fixed-vector batch bind against the current NumPy implementation:
 
 ```sh
 make -C c bench-compare PYTHON=/Users/ratimics/develop/.venvs/holostuff/bin/python

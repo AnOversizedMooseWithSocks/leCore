@@ -36,7 +36,7 @@ OBJS := $(BUILD_DIR)/holo_core.o $(BUILD_DIR)/holo_trace.o
 TESTS := $(BUILD_DIR)/test_core $(BUILD_DIR)/test_trace
 BENCHES := $(BUILD_DIR)/bench_trace
 
-.PHONY: all shared test bench bench-compare clean
+.PHONY: all shared test bench bench-fixed bench-compare clean
 
 all: $(LIB) $(SHLIB)
 
@@ -70,8 +70,12 @@ test: $(TESTS)
 bench: $(BENCHES)
 	./$(BUILD_DIR)/bench_trace
 
-bench-compare: $(BENCHES)
+bench-fixed: $(SHLIB)
+	HOLOSTUFF_C_LIB=$(abspath $(SHLIB)) $(PYTHON) benchmarks/bench_bind_fixed.py --summary
+
+bench-compare: $(BENCHES) $(SHLIB)
 	$(PYTHON) benchmarks/bench_trace.py --summary --binary ./$(BUILD_DIR)/bench_trace
+	HOLOSTUFF_C_LIB=$(abspath $(SHLIB)) $(PYTHON) benchmarks/bench_bind_fixed.py --summary
 
 clean:
 	rm -rf build

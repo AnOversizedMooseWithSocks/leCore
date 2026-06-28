@@ -42,6 +42,11 @@ int holo_keygen(holo_engine *engine, uint64_t id, double *out);
 int holo_keygen_unitary(holo_engine *engine, uint64_t id, double *out);
 
 int holo_bind(holo_engine *engine, const double *a, const double *b, double *out);
+int holo_bind_fixed_many(holo_engine *engine,
+                         const double *fixed,
+                         const double *rows,
+                         size_t count,
+                         double *out);
 int holo_unbind(holo_engine *engine, const double *pair, const double *key, double *out);
 int holo_spectrum_from_real(holo_engine *engine,
                             const double *in,

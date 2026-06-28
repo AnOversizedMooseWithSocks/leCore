@@ -18,7 +18,7 @@ help:
 	  'Targets:' \
 	  '  make c              build the C kernel shared/static library' \
 	  '  make c-test         run C kernel tests' \
-	  '  make c-bench        compare Python NumPy trace vs C trace' \
+	  '  make c-bench        compare NumPy vs C trace and bind_fixed kernels' \
 	  '  make deps           install base + experiment Python dependencies' \
 	  '  make test           build C kernel, then run pytest' \
 	  '  make benchmark      run benchmark_holographic.py with NumPy core' \

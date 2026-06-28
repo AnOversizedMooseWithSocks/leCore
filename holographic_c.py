@@ -1,9 +1,9 @@
 """Optional ctypes bridge to the C holographic kernel.
 
 The public surface mirrors the small part of ``holographic_ai`` that benefits
-most from the C core: bind/unbind and single-trace key-value memory. If the
-shared library is not built, or a vector dimension is not a power of two, this
-module falls back to the NumPy semantics.
+most from the C core: bind/unbind, fixed-vector batch binding, and single-trace
+key-value memory. If the shared library is not built, or a vector dimension is
+not a power of two, this module falls back to the NumPy semantics.
 """
 
 from __future__ import annotations
@@ -21,12 +21,30 @@ import numpy as np
 _DOUBLE_P = ctypes.POINTER(ctypes.c_double)
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+
+_BIND_FIXED_MAX_C_ROWS = max(0, _env_int("HOLOSTUFF_C_BIND_FIXED_MAX_ROWS", 8))
+
+
 def _is_power_of_two(n: int) -> bool:
     return n > 0 and (n & (n - 1)) == 0
 
 
 def _fallback_bind(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return np.real(np.fft.ifft(np.fft.fft(a) * np.fft.fft(b)))
+
+
+def _fallback_bind_fixed(role: np.ndarray, rows: np.ndarray) -> np.ndarray:
+    return np.fft.irfft(
+        np.fft.rfft(role)[None, :] * np.fft.rfft(rows, axis=1),
+        n=rows.shape[1],
+        axis=1,
+    )
 
 
 def _fallback_involution(a: np.ndarray) -> np.ndarray:
@@ -41,6 +59,13 @@ def _vector(x) -> np.ndarray:
     arr = np.ascontiguousarray(x, dtype=np.float64)
     if arr.ndim != 1:
         raise ValueError("holographic vectors must be one-dimensional")
+    return arr
+
+
+def _matrix(x) -> np.ndarray:
+    arr = np.ascontiguousarray(x, dtype=np.float64)
+    if arr.ndim != 2:
+        raise ValueError("holographic row stacks must be two-dimensional")
     return arr
 
 
@@ -81,6 +106,16 @@ class _Backend:
 
         lib.holo_bind.argtypes = [ctypes.c_void_p, _DOUBLE_P, _DOUBLE_P, _DOUBLE_P]
         lib.holo_bind.restype = ctypes.c_int
+        self.holo_bind_fixed_many = getattr(lib, "holo_bind_fixed_many", None)
+        if self.holo_bind_fixed_many:
+            self.holo_bind_fixed_many.argtypes = [
+                ctypes.c_void_p,
+                _DOUBLE_P,
+                _DOUBLE_P,
+                ctypes.c_size_t,
+                _DOUBLE_P,
+            ]
+            self.holo_bind_fixed_many.restype = ctypes.c_int
         lib.holo_unbind.argtypes = [ctypes.c_void_p, _DOUBLE_P, _DOUBLE_P, _DOUBLE_P]
         lib.holo_unbind.restype = ctypes.c_int
 
@@ -167,6 +202,7 @@ def install(target_globals: dict | None = None, *, strict: bool = False) -> bool
 
         target_globals = holographic_ai.__dict__
     target_globals["bind"] = bind
+    target_globals["bind_fixed"] = bind_fixed
     target_globals["unbind"] = unbind
     target_globals["HolographicMemory"] = HolographicMemory
     return True
@@ -199,6 +235,24 @@ def unbind(composite, key) -> np.ndarray:
     out = np.empty(dim, dtype=np.float64)
     with _BACKEND.lock:
         _BACKEND.check(_BACKEND.lib.holo_unbind(engine, _ptr(comp), _ptr(key_arr), _ptr(out)))
+    return out
+
+
+def bind_fixed(role, B) -> np.ndarray:
+    role_arr = _vector(role)
+    rows = _matrix(B)
+    if rows.shape[1] != role_arr.size:
+        raise ValueError("bind_fixed role and rows must have the same vector dimension")
+    if rows.shape[0] == 0:
+        return np.empty_like(rows)
+    dim = int(role_arr.size)
+    engine = _BACKEND.engine(dim) if _BACKEND else None
+    fn = _BACKEND.holo_bind_fixed_many if _BACKEND else None
+    if not engine or not fn or rows.shape[0] > _BIND_FIXED_MAX_C_ROWS:
+        return _fallback_bind_fixed(role_arr, rows)
+    out = np.empty(rows.shape, dtype=np.float64)
+    with _BACKEND.lock:
+        _BACKEND.check(fn(engine, _ptr(role_arr), _ptr(rows), rows.shape[0], _ptr(out)))
     return out
 
 
