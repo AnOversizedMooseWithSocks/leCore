@@ -11,7 +11,7 @@ HOLO_USE_ACCELERATE ?= $(DEFAULT_HOLO_USE_ACCELERATE)
 C_MAKE := $(MAKE) -C c HOLO_USE_ACCELERATE=$(HOLO_USE_ACCELERATE) PYTHON=$(PYTHON)
 C_ENV := HOLOSTUFF_USE_C=1 HOLOSTUFF_C_STRICT=1
 
-.PHONY: help all deps check-experiment-deps c c-test c-bench test test-py benchmark benchmark-c ablations ablations-c stress stress-c experiments experiments-c demos clean
+.PHONY: help all deps check-experiment-deps c c-test c-bench c-ci-evidence test test-py benchmark benchmark-c ablations ablations-c stress stress-c experiments experiments-c demos clean
 
 help:
 	@printf '%s\n' \
@@ -19,6 +19,7 @@ help:
 	  '  make c              build the C kernel shared/static library' \
 	  '  make c-test         run C kernel tests' \
 	  '  make c-bench        compare NumPy vs C trace and bind_fixed kernels' \
+	  '  make c-ci-evidence  compile CI evidence that scalar C trace beats NumPy' \
 	  '  make deps           install base + experiment Python dependencies' \
 	  '  make test           build C kernel, then run pytest' \
 	  '  make benchmark      run benchmark_holographic.py with NumPy core' \
@@ -44,6 +45,9 @@ c-test:
 
 c-bench:
 	$(C_MAKE) bench-compare
+
+c-ci-evidence:
+	$(PYTHON) c/benchmarks/ci_evidence.py
 
 test: c
 	$(PYTEST)
