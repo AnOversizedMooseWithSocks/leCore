@@ -3131,3 +3131,283 @@ def test_facetstore_hot_bucket_is_the_shared_structured_index():
     key = uri.make_key(tag)
     assert key in s._idx and isinstance(s._idx[key], StructuredIndex)
     assert s._idx[key].keying == "projection"
+
+
+def test_fwd7_euler_edit_operators_through_the_mind():
+    """FWD-7: the Euler edit operators are real UnifiedMind faculties and preserve the manifold/Euler
+    invariants end-to-end. split_edge then collapse_edge round-trips through the mind exactly; flip_edge
+    keeps the surface a closed manifold with chi unchanged."""
+    import numpy as np
+    from collections import Counter
+    from holographic_unified import UnifiedMind
+    from holographic_mesh import Mesh
+    from holographic_eulerops import _face_with_directed_edge, _third
+
+    um = UnifiedMind(dim=256, seed=0)
+    cube = um.mesh_box(2.0, 2.0, 2.0)
+    tm = Mesh(cube.vertices.copy(), [tuple(t) for t in cube.triangulate()])
+    chi0 = tm.euler_characteristic()
+
+    # find a flippable interior edge (apexes not already connected)
+    d = Counter()
+    for f in tm.faces:
+        for k in range(3):
+            d[(f[k], f[(k + 1) % 3])] += 1
+    es = set(tm.edges())
+    a = b = None
+    for (x, y) in d:
+        if (y, x) in d:
+            cc = _third(tm.faces[_face_with_directed_edge(tm.faces, x, y)], x, y)
+            dd = _third(tm.faces[_face_with_directed_edge(tm.faces, y, x)], x, y)
+            if (min(cc, dd), max(cc, dd)) not in es:
+                a, b = x, y
+                break
+    assert a is not None
+
+    def canon(mesh):
+        return tuple(sorted(tuple(f[f.index(min(f)):] + f[:f.index(min(f))]) for f in mesh.faces))
+
+    # split then collapse via the faculties -> exact restoration
+    split, m = um.mesh_split_edge(tm, a, b)
+    assert split.n_vertices == tm.n_vertices + 1 and split.euler_characteristic() == chi0
+    back = um.mesh_collapse_edge(split, keep=a, remove=m)
+    assert back is not None and canon(back) == canon(tm)
+
+    # flip via the faculty -> closed manifold, chi unchanged
+    flipped = um.mesh_flip_edge(tm, a, b)
+    assert flipped.is_manifold() and flipped.is_closed() and flipped.euler_characteristic() == chi0
+
+
+def test_fwd4_mesh_smoothing_through_the_mind():
+    """FWD-4: Taubin mesh smoothing is a real UnifiedMind faculty (the shipped graphsignal filter wired onto a
+    mesh). It denoises a noisy sphere without shrinking it, and preserves connectivity/chi end-to-end -- only
+    vertices move. The naive Laplacian baseline shrinks, confirming Taubin's no-shrink win."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_meshsmooth import _icosphere, laplacian_smooth
+    from holographic_mesh import Mesh
+
+    um = UnifiedMind(dim=256, seed=0)
+    clean = _icosphere(3)
+    rng = np.random.default_rng(0)
+    noisy = Mesh(clean.vertices + rng.normal(0.0, 0.05, clean.vertices.shape), list(clean.faces))
+
+    re = lambda m: float(np.abs(np.linalg.norm(m.vertices, axis=1) - 1.0).mean())
+    mr = lambda m: float(np.linalg.norm(m.vertices, axis=1).mean())
+
+    out = um.mesh_smooth(noisy, iters=10)
+    assert re(out) < 0.6 * re(noisy)                       # denoised
+    assert mr(out) > 0.95                                  # no shrink
+    assert out.faces == clean.faces                        # connectivity untouched
+    assert out.euler_characteristic() == clean.euler_characteristic()
+    assert mr(laplacian_smooth(noisy, iters=10)) < mr(out) - 0.05   # baseline shrinks
+
+
+def test_fwd6_mesh_curvature_through_the_mind():
+    """FWD-6: curvature and crease detection are real UnifiedMind faculties. Mean/Gaussian curvature on a unit
+    sphere are ~1, the angle defect obeys Gauss-Bonnet exactly (validated against the kernel's chi), and the
+    cube's 12 sharp edges are detected -- all end-to-end through the mind."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_meshsmooth import _icosphere
+    from holographic_meshcurvature import gauss_bonnet_defect
+
+    um = UnifiedMind(dim=256, seed=0)
+    sphere = _icosphere(3)
+
+    H = um.mesh_curvature(sphere, kind="mean")
+    K = um.mesh_curvature(sphere, kind="gaussian")
+    assert 0.8 < float(H.mean()) < 1.25 and 0.8 < float(K.mean()) < 1.25   # ~1 on the unit sphere
+    assert abs(gauss_bonnet_defect(sphere)) < 1e-6                          # exact topological check
+
+    conf = um.mesh_curvature_confidence(sphere)
+    assert conf.shape == (sphere.n_vertices,) and np.all((conf >= 0) & (conf <= 1))
+
+    assert len(um.mesh_creases(um.mesh_box(2, 2, 2), threshold_deg=30.0)) == 12   # cube = 12 sharp edges
+    assert len(um.mesh_creases(sphere, threshold_deg=30.0)) == 0                   # sphere = none
+
+
+def test_fwd5_surface_geodesics_through_the_mind():
+    """FWD-5: surface geodesics and geodesic soft-selection are real UnifiedMind faculties. On a unit sphere the
+    geodesic from the pole tracks the great-circle distance, the antipode is the farthest point (~pi, exceeding
+    the straight-line distance), and a geodesic soft-selection correctly EXCLUDES the antipode that a Euclidean
+    ball of the same radius would bleed into -- all end-to-end through the mind."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_meshsmooth import _icosphere
+
+    um = UnifiedMind(dim=256, seed=0)
+    s = _icosphere(3)
+    north = int(np.argmax(s.vertices[:, 2]))
+    south = int(np.argmin(s.vertices[:, 2]))
+
+    g = um.mesh_geodesic(s, north)
+    true_geo = np.arccos(np.clip(s.vertices[:, 2], -1.0, 1.0))
+    assert float(np.corrcoef(g, true_geo)[0, 1]) > 0.99       # tracks the analytic great circle
+    assert abs(g[south] - np.pi) < 0.2                         # antipode ~ pi
+    assert g[south] > float(np.linalg.norm(s.vertices[south] - s.vertices[north]))   # > straight-line
+
+    sel = um.mesh_soft_selection(s, north, radius=2.5)
+    assert sel[north] == 1.0 and sel[south] == 0.0            # geodesic excludes the antipode...
+    assert float(np.linalg.norm(s.vertices[south] - s.vertices[north])) < 2.5        # ...Euclidean would not
+
+
+def test_fwd3_uv_unwrapping_through_the_mind():
+    """FWD-3: UV unwrapping is a real UnifiedMind faculty -- classical MDS of the mesh geodesic matrix (Isomap on
+    explicit edges). A flat developable patch unwraps nearly isometrically through the mind, the UV is flip-free
+    (no overlap), and on a curved cap the Isomap chart beats a naive linear projection -- all end-to-end."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_meshuv import flat_grid_mesh, hemisphere_cap
+
+    um = UnifiedMind(dim=256, seed=0)
+
+    flat = flat_grid_mesh(9)
+    uv = um.mesh_uv_unwrap(flat)
+    assert um.mesh_uv_distortion(flat, uv) < 0.07               # near-isometric on a developable patch
+    # flip-free packing (locally injective: no overlap)
+    signs = []
+    for (a, b, c) in flat.faces:
+        e1 = uv[b] - uv[a]; e2 = uv[c] - uv[a]
+        signs.append(np.sign(e1[0] * e2[1] - e1[1] * e2[0]))
+    signs = np.asarray(signs)
+    assert max(int((signs > 0).sum()), int((signs < 0).sum())) == len(signs)   # all one winding
+
+    cap = hemisphere_cap(3)
+    iso = um.mesh_uv_distortion(cap, um.mesh_uv_unwrap(cap, method="isomap"))
+    planar = um.mesh_uv_distortion(cap, um.mesh_uv_unwrap(cap, method="planar"))
+    assert iso < planar                                         # geodesic chart wins on the curved surface
+
+
+def test_fwd7_modeler_verbs_through_the_mind():
+    """FWD-7: the core modeler verbs (extrude / inset / dissolve) are real UnifiedMind faculties, each producing a
+    VALID mesh -- chi preserved, still a closed manifold -- with its exact geometric signature, end-to-end."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_meshsmooth import _icosphere
+    from holographic_meshverbs import _face_normal
+
+    um = UnifiedMind(dim=256, seed=0)
+    s = _icosphere(2)
+    chi0 = s.euler_characteristic()
+
+    # extrude: valid mesh + cap moved exactly `distance` along the normal
+    nrm = _face_normal(s.vertices, s.faces[0])
+    cap_before = np.mean([s.vertices[v] for v in s.faces[0]], axis=0)
+    ex = um.mesh_extrude(s, 0, distance=0.3)
+    assert ex.euler_characteristic() == chi0 and ex.is_closed() and ex.is_manifold()
+    cap_after = ex.vertices[ex.n_vertices - 3:].mean(axis=0)
+    assert abs(float(np.dot(cap_after - cap_before, nrm)) - 0.3) < 1e-9
+
+    # inset + dissolve: valid meshes
+    ins = um.mesh_inset(s, 0, ratio=0.4)
+    diss = um.mesh_dissolve_vertex(s, 5)
+    for m in (ins, diss):
+        assert m.euler_characteristic() == chi0 and m.is_closed() and m.is_manifold()
+    assert diss.n_vertices == s.n_vertices - 1
+
+
+def test_fwd8_subdivision_through_the_mind():
+    """FWD-8: Loop subdivision is a real UnifiedMind faculty. Through the mind it quadruples faces, preserves chi
+    and the closed-manifold property, leaves a flat mesh exactly flat (affine reproduction), and smooths an
+    angular mesh (the low-pass signature) -- end-to-end."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_meshsmooth import _icosphere
+    from holographic_meshuv import flat_grid_mesh
+    from holographic_meshcurvature import dihedral_angles
+    from holographic_meshsubdiv import _triangles
+    from holographic_mesh import box, Mesh
+
+    um = UnifiedMind(dim=256, seed=0)
+
+    s = _icosphere(1)
+    sub = um.mesh_subdivide(s, 1)
+    assert sub.n_faces == 4 * s.n_faces
+    assert sub.euler_characteristic() == s.euler_characteristic() and sub.is_closed() and sub.is_manifold()
+
+    # affine reproduction: flat stays flat
+    assert float(np.max(np.abs(um.mesh_subdivide(flat_grid_mesh(5), 2).vertices[:, 2]))) < 1e-12
+
+    # low-pass: dihedral spread drops on a cube
+    cube = box()
+    before = float(np.std(list(dihedral_angles(Mesh(cube.vertices.copy(), _triangles(cube))).values())))
+    after = float(np.std(list(dihedral_angles(um.mesh_subdivide(cube, 2)).values())))
+    assert after < before
+
+
+def test_fwd10_inverse_kinematics_through_the_mind():
+    """FWD-10: FABRIK inverse kinematics is a real UnifiedMind faculty -- and it runs through the mind's OWN
+    project_onto_constraints engine (IK as iterate-a-projection). Through the mind: a reachable target is hit to
+    tolerance with every bone length and the root preserved, and an unreachable target fully extends the chain."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_meshik import chain
+
+    um = UnifiedMind(dim=256, seed=0)
+    arm = chain(4, 1.0)
+    rest = [float(np.linalg.norm(arm[i + 1] - arm[i])) for i in range(len(arm) - 1)]
+
+    target = np.array([2.0, 1.5, 0.5])
+    posed, _ = um.solve_ik(arm, target, iters=30)
+    assert np.linalg.norm(posed[-1] - target) < 1e-6                      # reaches the target
+    new = [float(np.linalg.norm(posed[i + 1] - posed[i])) for i in range(len(posed) - 1)]
+    assert np.allclose(new, rest, atol=1e-9)                              # bones preserved
+    assert np.allclose(posed[0], arm[0], atol=1e-12)                      # root fixed
+
+    far, _ = um.solve_ik(arm, np.array([100.0, 0.0, 0.0]), iters=60)
+    assert abs(float(np.linalg.norm(far[-1] - far[0])) - sum(rest)) < 1e-4   # unreachable -> fully extended
+
+
+def test_fwd9_skinning_through_the_mind():
+    """FWD-9: linear blend skinning is a real UnifiedMind faculty. Through the mind: a shared rigid bone transform
+    is reproduced exactly on every vertex (the partition-of-unity guarantee), faces are untouched, and the
+    candy-wrapper kept negative shows -- a 50/50 twist collapses a unit ring's radius to cos(theta/2)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_mesh import box
+    from holographic_meshskin import make_transform, rotation, linear_blend_skin
+
+    um = UnifiedMind(dim=256, seed=0)
+
+    # rigid reproduction + faces preserved, on a box
+    M = make_transform(rot=rotation([0.2, 1.0, 0.3], 0.5), translation=[1.0, 0.0, -0.5])
+    b = box()
+    transforms = np.stack([M, M])
+    skinned = um.skin_mesh(b, transforms, np.ones((b.n_vertices, 2)) * np.array([0.3, 0.7]))
+    expected = (np.hstack([b.vertices, np.ones((b.n_vertices, 1))]) @ M.T)[:, :3]
+    assert np.allclose(skinned.vertices, expected, atol=1e-12)   # shared transform reproduced exactly
+    assert skinned.faces == b.faces                              # connectivity untouched
+
+    # candy-wrapper kept negative (via the module's blend): radius = cos(theta/2)
+    phi = np.linspace(0, 2 * np.pi, 24, endpoint=False)
+    ring = np.stack([np.cos(phi), np.sin(phi), np.zeros_like(phi)], axis=1)
+    bones = np.stack([np.eye(4), make_transform(axis=[0, 0, 1], angle=2 * np.pi / 3)])
+    radius = float(np.mean(np.linalg.norm(linear_blend_skin(ring, bones, np.full((24, 2), 0.5))[:, :2], axis=1)))
+    assert abs(radius - np.cos(np.pi / 3)) < 1e-9                # 120-degree twist -> radius 0.5
+
+
+def test_fwd11_mesh_sdf_bridge_through_the_mind():
+    """FWD-11: the mesh<->SDF bridge is a real UnifiedMind faculty. Through the mind: an analytic sphere SDF
+    extracts (marching tetrahedra) to a closed-manifold sphere whose vertices lie on the sphere, the reverse
+    mesh->SDF matches the analytic distance, and a splat (metaball) field meshes to a closed blob -- end-to-end."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_meshbridge import sphere_sdf, metaball_field
+
+    um = UnifiedMind(dim=256, seed=0)
+
+    # SDF -> mesh: closed manifold sphere, vertices on the sphere
+    sphere = um.mesh_from_sdf(sphere_sdf(radius=1.0), ((-1.5,) * 3, (1.5,) * 3), res=20)
+    assert sphere.is_closed() and sphere.is_manifold() and sphere.euler_characteristic() == 2
+    radii = np.linalg.norm(sphere.vertices, axis=1)
+    assert abs(float(radii.mean()) - 1.0) < 0.02
+
+    # mesh -> SDF: matches analytic |p|-1, correct sign
+    got = um.mesh_to_sdf(sphere, np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]]))
+    assert got[0] < 0 and got[1] > 0 and abs(got[1] - 1.0) < 0.05
+
+    # splat -> mesh: a metaball blob meshes to a closed manifold
+    blob = um.mesh_from_sdf(metaball_field(np.array([[-0.4, 0, 0], [0.4, 0, 0]]), radius=0.4),
+                            ((-1.5,) * 3, (1.5,) * 3), res=20, level=0.5)
+    assert blob.is_closed() and blob.is_manifold()

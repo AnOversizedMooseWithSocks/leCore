@@ -9498,3 +9498,484 @@ returns the same record as the bare forest it replaced, every query. test_integr
 content search IS a StructuredIndex (keying='projection'), the de-siloing made real. Files: holographic_tree.py,
 holographic_uri.py, holographic_unified.py, test_holographic_tree.py, test_holographic_uri.py,
 test_integration.py, README, NOTES_concepts.md.
+
+
+--------------------------------------------------------------------------------
+FWD-7 -- the explicit mesh can finally be EDITED, not just described. The kernel (FWD-1) shipped the half-edge
+substrate and the Euler invariants but was effectively read-only. This adds the LOCAL EULER OPERATORS -- the
+bounded connectivity rewrites known since Baumgart/Mantyla that every higher modeling op (subdivide, bevel,
+decimate, remesh) decomposes into.
+
+SCOPE (honest): this ships the PRIMITIVE Euler-operator layer (flip / split / collapse / split_face) -- the
+substrate FWD-7's user-facing modeler VERBS (extrude / bevel / inset / loop-cut / bridge / dissolve) decompose
+into (extrude = a loop of MEV+MEF, loop-cut = a ring of split_edge, dissolve = KEV/KEF). Those verbs are the
+REMAINING FWD-7 work. The primitives already satisfy FWD-7's stated bar -- manifold-preserving on valid input,
+deterministic per the ISA contract, and undoable via the make/kill round-trips -- so this is the foundation
+the verbs stand on, not FWD-7 complete. NOTE ON ORDERING: the forward backlog puts Tier 1 (FWD-3/4/5/6, the
+ADAPT-SHIPPED items that wire chart/graphsignal/steering onto meshes) ABOVE FWD-7 (Tier 2) by leverage; these
+primitives were built first as the natural continuation of the kernel, but Tier 1 is the higher-leverage path
+and is where the work resumes next. The panel converged here over the bigger forward items: the [Stam] seat
+(subdivision surfaces ARE sequences of Euler operators; his exact Catmull-Clark evaluation is the rigor
+reference) called it the floor everything else stands on; the [Pharr] seat set the bar (the result must stay
+a renderer-valid manifold, not merely "run"); the [Cranmer] seat supplied the measurement (make/kill inverse
+pairs give an exact do-then-undo round-trip -- the cleanest correctness witness, not an in-sample fit). FWD-11
+(the mesh<->SDF<->splat VSA bridge, the [Plate]/[Quilez]/[Drettakis] seats) is the higher-value follow-on but
+bigger and benefits from having real edit operators first.
+
+WHAT SHIPPED (holographic_eulerops.py; additive, four standalone operators + four UnifiedMind faculties):
+  * flip_edge(mesh, a, b)        -- rotate the shared edge of two triangles. V/E/F (hence chi) unchanged: the
+    purest rewrite. The Delaunay-remeshing primitive. Its own inverse (flipping the new edge c-d restores the
+    old). PRECONDITION kept loud: refuses if c-d already exists (would be shared by 3 faces -> non-manifold).
+  * split_edge(mesh, a, b)       -- insert a midpoint vertex, splitting the incident triangle(s). V+1, chi
+    unchanged. Returns (new_mesh, m). The refinement primitive.
+  * collapse_edge(mesh, keep, remove) -- the INVERSE of split_edge: merge an edge's endpoints. V-1, chi
+    unchanged. The decimation/LOD primitive. GUARDED by the LINK CONDITION: keep and remove may share
+    neighbours only at the apexes of their shared faces; otherwise the contraction would weld the surface
+    onto itself, so it returns None. Not every edge is collapsible -- a true property of meshes, made
+    operational (the caller must handle the refusal), not a code shortcoming.
+  * split_face(mesh, f, i, j)    -- cut a polygon with a diagonal between two corners (MEF). E+1, F+1, chi
+    unchanged. The one operator that works on n-gons, not just triangles.
+
+DESIGN CHOICE (readability over pointer surgery): each operator uses the half-edge adjacency to FIND the local
+patch (which faces share the edge, the opposite apexes) then REWRITES THE FACE LIST and lets the new Mesh
+rebuild its own half-edge table -- so the combinatorics stay legible and there is no cache to invalidate or
+twin pointer to fix by hand. Cost: a rebuild per edit, consistent with the kernel's recorded "NumPy is the
+wrong tool for per-element mesh loops" negative (which this module inherits and re-flags).
+
+DETERMINISM (ISA EXACT class): new vertices are APPENDED (index = old count); faces rewritten in face order;
+vertex removal reindexes by one fixed rule (drop the index, decrement higher ones). Pure function of
+(mesh, selection) -> byte-identical out (asserted). No float comparison ever chooses connectivity.
+
+KEPT NEGATIVES: (1) collapse_edge is not always legal (link condition) -- refuses rather than break the mesh;
+(2) flip into an existing edge is illegal -- refuses; (3) flip/split/collapse require triangle faces on the
+touched faces and raise otherwise (split_face is the n-gon operator); (4) the per-element Python-loop bound
+remains -- fine for interactive single edits, a compiled core is still the eventual need for heavy remeshing.
+
+Tests: +12 (1209 -> 1221). test_holographic_eulerops.py (+11): flip chi/V/E/F-invariance and flip-back
+round-trip; the flip duplicate-edge refusal; split_edge vertex-add + chi preservation; the split->collapse
+exact make/kill round-trip; the collapse link-condition refusal (bipyramid equator) and a legal collapse
+(bipyramid -> tetrahedron); split_edge's non-triangle rejection; split_face n-gon chi preservation and its
+adjacent-corner rejection; operator determinism. test_integration.py (+1): the operators as UnifiedMind
+faculties preserving the invariants end-to-end (split->collapse restores; flip stays a closed manifold).
+Files: holographic_eulerops.py (new), test_holographic_eulerops.py (new), holographic_unified.py (4 faculties),
+test_integration.py, README, NOTES_concepts.md, tour.py.
+
+
+--------------------------------------------------------------------------------
+FWD-4 -- the first TIER 1 ADAPT-SHIPPED item: mesh smoothing is the shipped Taubin filter, wired onto a mesh.
+The forward backlog's real insight is that the matured intrinsic-geometry toolkit turns the "conventional" DCC
+items into adaptations of shipped faculties, and the panel converged here (over the out-of-order FWD-7
+primitives) because Tier 1 is the highest-leverage path AND valuable under either fork of the native-vs-mesh
+strategic decision. FWD-4 is the cleanest of the four: `graphsignal.taubin_filter(vectors, nbr_idx, nbr_w)`
+already exists and is tested, so mesh smoothing is THREE substitutions and nothing else -- vertex positions as
+the signal, the mesh 1-ring as `nbr_idx`, cotangent weights as `nbr_w`. This is a WIRE, not a re-implementation.
+
+WHAT SHIPPED (holographic_meshsmooth.py; additive; one UnifiedMind faculty `mesh_smooth`):
+  * cotangent_adjacency(mesh) / uniform_adjacency(mesh) -> (nbr_idx, nbr_w) in the (V, k_max) padded,
+    row-normalised format the shipped filter consumes. COTANGENT = the discrete Laplace-Beltrami weight
+    w_ij = (cot a + cot b)/2 over the two adjacent triangles' opposite angles -- geometry-aware (accounts for
+    triangle shape), so it approximates true surface diffusion, not mesh-connectivity diffusion. Triangulates
+    internally (cotangents are triangle angles); clamps negative (obtuse) weights to >= 0.
+  * taubin_smooth(mesh, lam, mu, iters, weights) -> a new Mesh, smoothed positions, FACES UNTOUCHED (so all
+    connectivity and Euler invariants preserved -- only vertices move). Delegates the filtering to the shipped
+    graphsignal.taubin_filter. laplacian_smooth ships as the shrinking baseline.
+
+WHY TAUBIN not naive Laplacian: lambda-only Laplacian smoothing SHRINKS the surface toward its centroid;
+Taubin alternates a shrink (lambda>0) and a larger un-shrink (mu<0, |mu|>lambda) step, preserving low-frequency
+extent while removing high-frequency noise.
+
+MEASURED (the [Milanfar] denoiser-as-manifold-map bar, the [Cranmer] no-shrink test): on a noisy unit sphere
+(subdiv-3 icosphere, sigma=0.05), Taubin cut radial error 0.0400 -> 0.0177 (a 56% denoise) and KEPT the mean
+radius at 1.009 (no shrink), while the naive Laplacian collapsed the mean radius to 0.894. Connectivity and chi
+unchanged. Deterministic (byte-identical positions run-to-run).
+
+KEPT NEGATIVES (loud):
+  * Fixed strength over-smooths an already-clean mesh (it is a low-pass) -- proper use needs a noise estimate;
+    the faculty exposes lam/mu/iters and does NOT auto-tune (the sigma-estimate discipline, deferred).
+  * COTANGENT IS NOT UNIFORMLY BETTER. On THIS regular sphere with isotropic noise, UNIFORM weights denoise a
+    touch better (0.0146 vs 0.0177) -- a near-regular mesh with directionless noise has no triangle-shape
+    variation for cotangent to exploit. Cotangent's real edge is IRREGULAR meshes / feature preservation; it is
+    the default for that reason, but we keep the honest finding rather than assert a superiority that isn't
+    there in this case.
+  * Cotangent weights can go negative on obtuse triangles -> clamped to >= 0 (the standard intrinsic/clamped
+    cotangent mitigation; exact on well-shaped meshes, a documented approximation on very obtuse ones).
+
+ORDERING NOTE: this resumes the backlog at its real highest-leverage point. Remaining Tier 1: FWD-6 (curvature
+/ feature detection via steering + Laplacian -- which FWD-4's crease-aware mode wants), then FWD-3 (UV via
+manifold_chart on mesh edges) and FWD-5 (geodesics via chart.geodesic_distances), both of which need the
+seam/atlas machinery (ARCH-4) because they replace manifold_chart/geodesic_distances' k-NN graph with explicit
+mesh edges. The FWD-7 modeler verbs (extrude/bevel/inset/loop-cut/bridge/dissolve) stand on the already-shipped
+primitive Euler operators and are Tier 2.
+
+Tests: +10 (1221 -> 1231). test_holographic_meshsmooth.py (+9): Taubin denoises; no-shrink; the Laplacian
+baseline shrinks; connectivity + chi preserved (vertices-only); both weightings denoise (no false cotangent
+superiority); adjacency is row-normalised + rectangular; cotangent weights non-negative; quad topology kept;
+determinism. test_integration.py (+1): mesh_smooth as a UnifiedMind faculty denoising without shrink end-to-end.
+Files: holographic_meshsmooth.py (new), test_holographic_meshsmooth.py (new), holographic_unified.py (faculty),
+test_integration.py, README, NOTES_concepts.md, tour.py.
+
+
+--------------------------------------------------------------------------------
+FWD-6 -- Tier 1, item four: mesh curvature & feature detection, the item with the most RIGOROUS reference of
+the forward set because discrete differential geometry hands us exact identities to check against. Three
+measurements, each reusing shipped machinery or grounded in a hard invariant:
+
+WHAT SHIPPED (holographic_meshcurvature.py; additive; three UnifiedMind faculties + a confidence faculty):
+  * mean_curvature(mesh) -> |H| via the discrete mean-curvature-normal operator K(x_i)=(1/A_i) sum_j w_ij
+    (x_i-x_j) = 2 H_i n_i, with w_ij the cotangent edge weights REUSED from FWD-4 (curvature and smoothing are
+    the same operator -- one applied, one measured) and A_i the barycentric vertex area. On a unit sphere
+    H=1/R=1.
+  * gaussian_curvature(mesh) -> angle defect / area (K=1/R^2=1 on the unit sphere), with the strongest check in
+    the module: gauss_bonnet_defect(mesh) = (total angle defect) - 2*pi*chi, which is ~0 to FLOATING POINT for
+    a closed mesh by discrete Gauss-Bonnet -- the curvature estimate validated against the Euler characteristic
+    FWD-1 computes.
+  * dihedral_angles(mesh) / detect_creases(mesh, threshold_deg) -> sharp-edge detection via the angle between
+    adjacent face normals. A cube's 12 edges are 90-degree creases; a smooth sphere has none.
+  * curvature_confidence(mesh) -> per-vertex [0,1] reliability from 1-ring regularity (the noise negative made
+    actionable).
+
+THE [MILANFAR] STRUCTURE-TENSOR / STEERING CONNECTION: curvature is the surface's local shape -- the directions
+and rates it bends -- which is exactly the anisotropic local metric a steering kernel encodes (structure tensor
+on geometry, not image gradients). The curvature field + crease set are what an adaptive operator STEERS by
+(subdivide where |K| is high, smooth along creases not across them, split shading normals at sharp edges). This
+ships the scalar curvatures + crease set (the measurable core); the anisotropic steering of downstream
+operators is the consumer.
+
+MEASURED (the exact references): on a subdiv-3 unit icosphere -- Gauss-Bonnet total defect = 2*pi*chi to 6e-14
+(machine precision); mean Gaussian K=1.022, mean |H|=1.010 (both ~1); per-vertex coefficient-of-variation 0.07
+(the noise negative). On a cube -- exactly 12 creases, each a 90-degree dihedral; the 6 flat triangulation
+diagonals correctly excluded; a smooth sphere yields 0 creases. Deterministic.
+
+KEPT NEGATIVES (loud):
+  * Per-vertex curvature is NOISY on coarse/irregular meshes -- the MEAN over a closed surface is accurate and
+    the Gauss-Bonnet TOTAL is exact, but individual vertex values vary (CoV 0.07 even on a regular sphere). The
+    estimate needs a reasonably regular 1-ring; curvature_confidence scores per-vertex reliability so a caller
+    can down-weight rather than trust blindly.
+  * The exact Gauss-Bonnet check is for CLOSED meshes; an open mesh carries a boundary (geodesic-curvature)
+    term, so its total defect is not 2*pi*chi and the check is skipped there.
+  * Angle defect + the cotangent operator assume TRIANGLE faces; n-gons are triangulated for the computation
+    (face normals / dihedral use Newell so they work on n-gons directly).
+
+REFACTOR (additive, backward-compatible): exposed `cotangent_edge_weights(mesh)` from holographic_meshsmooth
+(the raw, un-clamped Laplace-Beltrami edge weights), used internally by FWD-4's cotangent_adjacency and reused
+by FWD-6's mean_curvature -- so the cotangent computation lives in one place. FWD-4's selftest + 9 tests
+re-verified green after the refactor.
+
+Tests: +13 (1231 -> 1244). test_holographic_meshcurvature.py (+12): Gauss-Bonnet exact on a closed mesh (and on
+a cube); unit-sphere mean/Gaussian curvature ~1; barycentric vertex areas sum to surface area; cube = 12
+creases at 90deg; triangulated cube still 12 (flat diagonals excluded); smooth sphere = 0 creases; per-vertex
+noise negative; confidence in range; determinism. test_integration.py (+1): curvature + creases as UnifiedMind
+faculties end-to-end with the exact Gauss-Bonnet validation. Files: holographic_meshcurvature.py (new),
+test_holographic_meshcurvature.py (new), holographic_meshsmooth.py (additive cotangent_edge_weights),
+holographic_unified.py (3 faculties), test_integration.py, README, NOTES_concepts.md, tour.py.
+
+
+--------------------------------------------------------------------------------
+FWD-5 -- Tier 1, the geodesic item: distance ALONG the surface, and the foundation FWD-3 (UV) stands on. The
+shipped chart.geodesic_distances computes geodesics as shortest paths on a graph (Floyd over a k-NN graph), and
+chart.classical_mds embeds any distance matrix. The honest ADAPT-SHIPPED move: run the same shortest-path idea
+on the EXPLICIT MESH EDGE graph (true surface connectivity, real Euclidean edge lengths) instead of a k-NN
+approximation. FWD-3 will feed the resulting geodesic matrix to the shipped classical_mds for the UV chart.
+
+WHAT SHIPPED (holographic_meshgeodesic.py; additive; two UnifiedMind faculties):
+  * geodesic_distances(mesh, source) -- single-source Dijkstra along mesh edges (Euclidean weights) -> distance
+    to every vertex. Along the surface, not the straight line through the void.
+  * geodesic_matrix(mesh) -- all-pairs (repeated Dijkstra); the distance matrix FWD-3's classical-MDS UV chart
+    consumes.
+  * geodesic_soft_selection(mesh, source, radius, falloff) -- a [0,1] falloff by geodesic distance that does NOT
+    bleed to vertices near in 3-D space but far across the surface (the geodesic-vs-Euclidean win).
+
+MEASURED (vs the analytic great circle on a unit sphere): geodesic from the pole correlates with arccos(z) at
+corr=0.994; antipode (north->south) geodesic = 3.136 ~ pi, GREATER than the Euclidean diameter (2.0). The
+geodesic-vs-Euclidean contrast made concrete: a soft selection at radius 2.5 EXCLUDES the antipode (geodesic
+~pi > 2.5) that a Euclidean ball of the same radius would INCLUDE (straight-line 2.0 < 2.5) -- the "even on the
+surface, no bleed" property. Deterministic (Dijkstra ties break on integer vertex index).
+
+KEPT NEGATIVES (loud):
+  * The edge-graph geodesic is APPROXIMATE. It overestimates the polyhedron's own face-crossing geodesic (edge
+    restriction), and vs a SMOOTH surface sits a few percent high overall (+7.7% net on the sphere) with a tiny
+    chord-effect undercut possible near the source (edges are chords, slightly shorter than arcs; <1%). The
+    earlier draft asserted a clean ">= true geodesic" bound -- that is WRONG against a smooth reference (61/258
+    sphere vertices slightly undercut), so the test now measures the net overestimate AND the bounded undercut
+    rather than claim a one-sided bound that does not hold. Accept where the mesh is fine and curvature mild.
+  * All-pairs is O(V * E log V) -- fine here, not for very large meshes; a heat-method solve is the next step.
+
+Tests: +10 (1244 -> 1254). test_holographic_meshgeodesic.py (+9): great-circle correlation; net overestimate
+with bounded undercut; antipode farthest + exceeds Euclidean; soft-selection excludes the antipode a Euclidean
+ball includes (no bleed); soft-selection in range; matrix symmetric + zero diagonal; reachability on a closed
+mesh; flat-grid along-grid >= straight-line sanity; determinism. test_integration.py (+1): geodesic + soft
+selection as UnifiedMind faculties with the geodesic-vs-Euclidean contrast end-to-end. Files:
+holographic_meshgeodesic.py (new), test_holographic_meshgeodesic.py (new), holographic_unified.py (2 faculties),
+test_integration.py, README, NOTES_concepts.md, tour.py. NEXT: FWD-3 (UV unwrapping) feeds geodesic_matrix to
+the shipped classical_mds -- the last Tier 1 item, needing seam handling for closed surfaces (ties to ARCH-4).
+
+
+--------------------------------------------------------------------------------
+FWD-3 -- Tier 1 CLOSED: UV unwrapping, the payoff of FWD-5 and the backlog's sharpest irony. UV, the
+"least-holostuff" item on the original DCC list, is a near-direct reuse of shipped, tested faculties. The shipped
+chart.classical_mds embeds any distance matrix; chart.manifold_chart's Isomap is exactly "classical MDS of the
+GEODESIC matrix". So UV unwrapping = feed the mesh's OWN geodesic distances (FWD-5's geodesic_matrix, on explicit
+edges) to the shipped classical_mds; the 2-D embedding IS the UV chart. Machinery shipped, substitution is "mesh
+geodesics in place of k-NN geodesics".
+
+WHAT SHIPPED (holographic_meshuv.py; additive; two UnifiedMind faculties):
+  * uv_unwrap(mesh, method) -- (V,2) UV packed to ~[0,1]^2. 'isomap' (geodesic-preserving, wins on curved),
+    'planar' (linear PCA, exact on developable), 'spectral' (Laplacian eigenmaps).
+  * uv_distortion(mesh, uv) -- per-edge STRETCH spread (log-ratio std): 0 = isometric, grows with curvature.
+  * flat_grid_mesh / hemisphere_cap / puncture -- developable reference, curved test surface, closed->disk seam.
+
+MEASURED: flat isotropic patch unwraps near-isometric (stretch spread 0.049); curved hemisphere cap 0.233
+(Gauss -- unavoidable); punctured sphere 0.507 (closed needs a real seam). The bar's "charts don't overlap after
+packing" met EXACTLY: both flat and cap unwraps are 100% orientation-consistent (zero flipped triangles ->
+locally injective). The bar's "beats a baseline": on the CURVED cap, Isomap (0.233) beats a naive linear PCA
+projection (0.456) -- geodesic preservation wins where the surface bends.
+
+KEPT NEGATIVES (loud):
+  * Disk-topology required. A CLOSED surface has no boundary and cannot flatten to a disk without a CUT; direct
+    unwrapping distorts badly. puncture() opens it crudely (one vertex), and the test MEASURES the punctured
+    sphere distorting far more than a cap -- the seam-need made concrete. A good seam (a cut path placed by the
+    topology/genus faculty) is ARCH-4, deferred.
+  * On a DEVELOPABLE (flat) surface the linear 'planar' projection is EXACTLY isometric (0.000) and BEATS Isomap
+    (0.049) -- Isomap carries the edge-graph geodesic's small approximation error. Isomap is NOT universally
+    better; it wins on curved surfaces (its purpose) and slightly loses to linear on flat ones. This mirrors
+    chart.py's own philosophy ("linear SVD remains the right choice when the manifold is flat"). Pick by curvature.
+  * The unwrap is sensitive to triangulation ANISOTROPY: a FAN triangulation (all diagonals one way) biases the
+    edge-graph geodesic and distortion GROWS with resolution (measured 0.14 -> 0.17, 5x5 -> 15x15); an ISOTROPIC
+    (alternating-diagonal) mesh behaves correctly, distortion SHRINKS toward isometric as it refines
+    (0.063 -> 0.044). flat_grid_mesh uses alternating diagonals for this reason -- the bias is documented, not
+    hidden by picking a passing triangulation. (This diagnosis corrected a first-draft threshold of <0.06 on a
+    fan grid that fails at 0.14; the honest finding is the anisotropy, kept on record.)
+
+Tests: +10 (1254 -> 1264). test_holographic_meshuv.py (+9): flat near-isometric; non-degenerate UV; no flipped
+triangles (no overlap, both surfaces); curved cap distorts more than flat; Isomap beats planar on curved; planar
+beats Isomap on flat (the honest reverse, planar exact); punctured sphere is a disk and distorts most; unit-square
+packing; determinism. test_integration.py (+1): UV unwrap through the mind, flip-free, Isomap-beats-planar on the
+cap end-to-end. Files: holographic_meshuv.py (new), test_holographic_meshuv.py (new), holographic_unified.py
+(2 faculties), test_integration.py, README, NOTES_concepts.md, tour.py.
+
+TIER 1 COMPLETE: FWD-4 (smoothing), FWD-5 (geodesics), FWD-6 (curvature/creases), FWD-3 (UV) all shipped -- the
+cheap, high-leverage wires that turn the matured intrinsic-geometry toolkit (chart, graphsignal, steering,
+spectral-iteration) onto explicit meshes. NEXT: Tier 2 -- FWD-7 modeler VERBS (extrude/bevel/inset/loop-cut/
+bridge/dissolve, decomposing into the shipped primitive Euler operators), FWD-8 subdivision (reuses
+spectral-iteration), FWD-9 rig/skinning (reuses moe), FWD-10 IK (reuses iterate-a-projection); then Tier 3
+FWD-11 (mesh<->SDF<->splat bridge). ARCH items interleave (ARCH-4 atlas/seams would give FWD-3 a real seam).
+
+
+--------------------------------------------------------------------------------
+FWD-7 (core) -- Tier 2 LEAD: the modeller VERBS, built on the explicit mesh kernel. The shipped primitive Euler
+operators (holographic_eulerops: flip/split_edge/collapse/split_face) are the atomic invariant-preserving moves;
+these are the human-facing operations on top. Backlog thesis: the verbs DECOMPOSE into Euler operators -- the
+honest frame, with one explicit caveat (extrude needs MEV, which the four shipped primitives don't include, so it
+is a direct face-list construction in the primitives' style, not a literal call sequence we can't make).
+
+WHAT SHIPPED (holographic_meshverbs.py; additive; three UnifiedMind faculties):
+  * extrude_face(mesh, face, distance) -- lift a face along its normal + side walls. The iconic verb.
+  * inset_face(mesh, face, ratio) -- shrink a face toward its centroid + surrounding ring (in-plane).
+  * dissolve_vertex(mesh, vertex) -- remove a vertex + its umbrella, fan-triangulate the hole (Euler KEV). The
+    decimation cousin collapse_edge (shipped) instead merges the vertex onto a neighbour.
+  Shared helper _ring_walls wires the side/ring walls with windings that SUPPLY the freed directed edges (the
+  manifold-balance condition). Walls triangulated -> output stays pure-triangle (safe for cotangent/curvature).
+
+MEASURED -- each verb produces a VALID mesh (the bar) with an EXACT geometric signature:
+  * All three PRESERVE chi (=2) and keep a closed mesh CLOSED + MANIFOLD, on both a triangle mesh (icosphere) and
+    a QUAD mesh (box, degree-3 vertices) -- robust across mesh types.
+  * extrude: cap moves EXACTLY `distance` (0.300) along the face normal and ONLY along it; outward extrude
+    increases signed volume (box 1.0 -> 1.5).
+  * inset: central-face area EXACTLY (1-ratio)^2 of the original; central face stays coplanar (normal preserved).
+  * dissolve: removes EXACTLY one vertex (icosphere 66 -> 65).
+  Deterministic (new vertices are pure functions of input positions; faces appended in fixed order).
+
+KEPT NEGATIVES / SCOPE (loud):
+  * CORE three only. bevel, bridge, loop-cut are the FWD-7 remainder, deferred: bevel/bridge need vertex
+    DUPLICATION with an offset/correspondence (fiddly, easy to get subtly wrong); a general loop-cut needs robust
+    loop tracing on an arbitrary triangle mesh. Three correct measured verbs > six shaky ones.
+  * extrude is NOT a literal composition of the four shipped primitives (it needs MEV, not in the set) -- the
+    decomposition is the conceptual model, the direct construction is the honest implementation. Said plainly in
+    the module docstring rather than overclaimed.
+  * dissolve_vertex fan-triangulates the hole from one ring vertex -- valid TOPOLOGICALLY (covers the polygon,
+    stays manifold) but not a quality remesh for a wildly non-convex link; a curvature-aware fill is out of scope.
+
+Tests: +11 (1264 -> 1275). test_holographic_meshverbs.py (+10): extrude/inset/dissolve each preserve
+chi+closed+manifold; extrude cap moves exactly distance along normal; extrude increases volume; inset area =
+(1-ratio)^2; inset coplanar; dissolve removes one vertex; all three on a quad box; determinism.
+test_integration.py (+1): the three verbs through the mind with the exact extrude signature end-to-end. Files:
+holographic_meshverbs.py (new), test_holographic_meshverbs.py (new), holographic_unified.py (3 faculties),
+test_integration.py, README, NOTES_concepts.md, tour.py. NEXT: FWD-7 remainder (bevel/bridge/loop-cut) OR
+FWD-8 subdivision (reuses spectral-iteration), FWD-9 rig/skinning (reuses moe), FWD-10 IK (iterate-a-projection).
+
+
+--------------------------------------------------------------------------------
+FWD-8 -- Tier 2: mesh subdivision (Loop, for triangle meshes). Subdivision is two operations braided, and naming
+them honestly is the point: (1) REFINE -- split each triangle into 4 (a topological op; an Euler-operator
+sequence per the Stam seat; the genuinely NEW part), and (2) SMOOTH -- move every vertex to a Loop-weighted
+neighbour average (a graph-signal LOW-PASS, the SAME family as FWD-4's Taubin on the shipped graphsignal, whose
+smooth limit lives in the low-frequency eigenspace holographic_spectral computes -- the "reuses spectral-iteration"
+half). So: refinement new, smoothing is the spectral low-pass the engine already owns.
+
+WHAT SHIPPED (holographic_meshsubdiv.py; additive; one UnifiedMind faculty):
+  * loop_subdivide(mesh, levels=1) -- Loop subdivision with the proper masks: interior edge vertex 3/8(a+b)+
+    1/8(c+d), boundary edge midpoint; interior vertex reposition (1-n*beta)v + beta*sum(nbrs) with Warren's
+    beta=(1/n)(5/8-(3/8+1/4 cos 2pi/n)^2), boundary 3/4 v + 1/8(prev+next); retriangulate 1->4. Non-triangle
+    input is triangulated first (Loop is a triangle scheme). Returns a new triangle Mesh.
+
+MEASURED (the bar -- a valid mesh with the exact subdivision properties):
+  * Each level multiplies faces by EXACTLY 4 (icosphere(1) 32 -> 128 -> 512) and gives V'=V+E (one new vertex
+    per edge; 18+48=66). chi preserved, closed mesh stays a closed manifold.
+  * AFFINE REPRODUCTION (the exact rigor reference, the Stam seat's ask): a FLAT mesh stays flat to machine
+    precision (<1e-12 in z) because the Loop masks are barycentric -- the discrete analogue of Catmull-Clark
+    reproducing a plane.
+  * SMOOTHING (low-pass signature, made geometric): dihedral-angle spread on a cube drops 0.740 -> 0.102 over
+    two levels -- the low-pass character of the smoothing step, dramatic and clear.
+  Deterministic (weighted averages; edges visited in sorted order -> fixed new-vertex indices).
+
+KEPT NEGATIVES (loud):
+  * Loop is a TRIANGLE scheme. A quad mesh (box) is triangulated first, so the result reflects that
+    triangulation, not a Catmull-Clark quad refinement. Catmull-Clark (the quad scheme) is a separate operator,
+    not shipped.
+  * The limit surface is NOT the input's circumscribed smooth shape -- subdividing an inscribed icosphere does
+    not reproduce the exact sphere (subdivision surfaces have their own limit). The exact-reproduction guarantee
+    is for AFFINE/planar input only; for curved input the scheme smooths toward its own limit (the honest claim).
+
+Tests: +9 (1275 -> 1284). test_holographic_meshsubdiv.py (+8): faces x4; V'=V+E; chi + closed manifold; flat
+stays flat (affine reproduction, exact); smooths an angular cube (spread roughly halved or more); two levels x16;
+all-triangle output from a quad input; determinism. test_integration.py (+1): subdivision through the mind --
+quadruple, chi/manifold preserved, flat-stays-flat, cube-smoothed end-to-end. Files: holographic_meshsubdiv.py
+(new), test_holographic_meshsubdiv.py (new), holographic_unified.py (1 faculty), test_integration.py, README,
+NOTES_concepts.md, tour.py. NEXT: FWD-9 rig/skinning (reuses moe), FWD-10 IK (iterate-a-projection); or the
+FWD-7 remainder (bevel/bridge/loop-cut); then Tier 3 FWD-11 (mesh<->SDF<->splat bridge).
+
+
+--------------------------------------------------------------------------------
+FWD-10 -- Tier 2, the cleanest reuse on the list: inverse kinematics (FABRIK) expressed LITERALLY through the
+shipped iterate-a-projection engine. IK asks: given a chain of fixed-length bones and a TARGET for the tip, where
+must the joints go so the tip reaches it while every bone keeps its length? FABRIK (Forward And Backward Reaching
+IK) is exactly "iterate a projection onto constraints" -- each reaching pass projects each joint onto the sphere
+of correct distance from its neighbour, root and target pinned. The engine ALREADY owns that loop:
+holographic_denoise.project_onto_constraints (the mind's project_onto_constraints faculty -- Macklin's one object
+under the resonator, the PnP denoiser, and PBD) sweeps a list of projection callables in order until they jointly
+hold, and that sweep IS FABRIK's forward/backward reaching. So this module does not reimplement the iteration; it
+BUILDS the kinematic-chain projections and hands them to the shipped sweeper. Reuse is literal, not a resemblance.
+
+WHAT SHIPPED (holographic_meshik.py; additive; one UnifiedMind faculty solve_ik):
+  * solve_ik(joints, target, iters=20, tol=None) -- pose a chain (n+1,3) so the tip reaches target; pure call into
+    project_onto_constraints over the chain projections. Returns (new_joints, n_sweeps).
+  * chain(n, length, axis) -- a straight test chain.
+  Projections: forward reach (pin tip to target, then end->root move inner joint onto radius-L sphere of outer);
+  backward reach (pin root, then root->end move outer joint onto radius-L sphere of inner). One sweep = one
+  forward + one backward FABRIK pass.
+
+MEASURED (the bar):
+  * REACHABLE target (within total chain length): tip reaches it to <1e-6 in 30 sweeps.
+  * Every BONE LENGTH preserved to 1e-9 (the hard constraint FABRIK maintains exactly) and ROOT fixed to 1e-12.
+  * UNREACHABLE target (beyond reach): chain fully EXTENDS -- tip at distance (total length=4.000) from root,
+    pointing straight at the target (cos > 1-1e-6). The correct degenerate outcome, measured not failed.
+  * Convergence MONOTONE in sweeps. Works on longer chains (8 bones). Deterministic (pure geometry, no RNG; a
+    zero-length direction falls back to a fixed axis -- deterministic tie-break, the Macklin bit-exact lesson).
+
+KEPT NEGATIVES (loud):
+  * Plain FABRIK has NO joint-angle limits and no obstacle avoidance -- position constraints only. A per-joint
+    cone projection would slot into the SAME sweep, but is not shipped.
+  * An UNREACHABLE target cannot be reached by any solver -- the honest outcome is the fully-extended chain.
+  * FABRIK returns A solution, not THE solution -- a redundant chain has many poses reaching a target; this is
+    the one the sweep lands on from the given start (deterministic but start-dependent).
+
+Tests: +9 (1284 -> 1293). test_holographic_meshik.py (+8): reaches reachable target; preserves every bone length;
+root fixed; unreachable fully extends; extended chain points at target; convergence monotone in sweeps; longer
+chain (8 bones); determinism. test_integration.py (+1): IK through the mind via its own project_onto_constraints,
+reachable hit + bones/root preserved + unreachable extended end-to-end. Files: holographic_meshik.py (new),
+test_holographic_meshik.py (new), holographic_unified.py (1 faculty solve_ik), test_integration.py, README,
+NOTES_concepts.md, tour.py. Tier 2 now: FWD-7 core, FWD-8, FWD-10 shipped. NEXT: FWD-9 rig/skinning (LBS as a
+mixture of expert bone-transforms <-> moe); or the FWD-7 remainder (bevel/bridge/loop-cut); then Tier 3 FWD-11.
+
+
+--------------------------------------------------------------------------------
+FWD-9 -- Tier 2, the last core item: skinning/rigging (linear blend skinning) as a SOFT mixture of expert
+bone-transforms. Skinning deforms a vertex as a WEIGHTED COMBINATION of what each bone's transform would do to it,
+weights summing to one -- structurally a mixture of experts (bones = experts, skin weights = gate).
+
+THE HONEST REUSE FINDING (reported, not buried -- like FWD-8's spectral nuance): holostuff's mixture of experts
+(holographic_moe.GatedMixture) is the HARD, SPARSE, LEARNED kind (top-1 router, gate = the creature brain, only
+the chosen expert runs). LBS is the OPPOSITE regime: SOFT, DENSE, FIXED (every bone contributes, painted weights
+form a partition of unity, no learning, no winner-take-all). So the moe connection is real but CONCEPTUAL, not a
+literal call: skinning is the soft/dense cousin of the engine's hard/sparse GatedMixture. Same experts+gating
+skeleton, different gating regime. (Contrast FWD-10, where the iterate-a-projection reuse WAS literal.)
+
+WHAT SHIPPED (holographic_meshskin.py; additive; one UnifiedMind faculty skin_mesh):
+  * linear_blend_skin(vertices, transforms, weights) -- v' = sum_b w_b (M_b v); weights row-normalised. (V,3) out.
+  * skin_mesh(mesh, transforms, weights) -- same, returns a new Mesh (deformed vertices, faces untouched).
+  * make_transform / rotation(axis,angle) -- build the 4x4 bone transforms (Rodrigues rotation + translation).
+
+MEASURED (the bar):
+  * RIGID REPRODUCTION (the partition-of-unity guarantee, LBS's analogue of subdivision's affine reproduction):
+    if every bone shares one rigid transform M, LBS reproduces M EXACTLY (1e-12) on every vertex for ANY weights.
+  * Single-bone (weight 1) vertex = exactly that bone's transform; identity transforms leave the mesh fixed;
+    translation interpolation is the weighted midpoint; skin_mesh leaves faces untouched. Deterministic.
+
+THE KEPT NEGATIVE, MEASURED TO CLOSED FORM (the point of the module): LBS averages the bone MATRICES, not the
+rotations, so a vertex blended 50/50 across a large relative TWIST collapses toward the bone axis (the infamous
+"candy-wrapper" artifact). Exact, not vague: a unit ring twisted by theta has blended radius EXACTLY |cos(theta/2)|
+-- 0.5 at 120 degrees, 0.000 (full collapse) at 180. The test asserts that closed form at several angles.
+Dual-quaternion skinning fixes it by blending rotations properly -- the honest next step, not shipped.
+
+Tests: +10 (1293 -> 1303). test_holographic_meshskin.py (+9): shared rigid transform reproduced exactly for any
+weights; identity fixed; single-bone exact; unnormalized weights treated as partition of unity; translation
+interpolation; candy-wrapper = cos(theta/2) at several angles; full collapse at 180; skin_mesh preserves faces;
+determinism. test_integration.py (+1): skinning through the mind -- rigid reproduction + faces preserved + the
+candy-wrapper closed form end-to-end. Files: holographic_meshskin.py (new), test_holographic_meshskin.py (new),
+holographic_unified.py (1 faculty skin_mesh), test_integration.py, README, NOTES_concepts.md, tour.py.
+
+TIER 2 CORE COMPLETE: FWD-7 core (extrude/inset/dissolve), FWD-8 subdivision, FWD-9 skinning, FWD-10 IK -- the
+rig (skeleton+IK) -> skin animation pipeline. The honest reuse ledger across Tier 2: IK's iterate-a-projection was
+LITERAL; subdivision's spectral low-pass and skinning's moe-mixture were CONCEPTUAL cousins (named precisely, not
+overclaimed). NEXT: FWD-7 remainder (bevel/bridge/loop-cut); Tier 3 FWD-11 (mesh<->SDF<->splat bridge); ARCH items
+(ARCH-4 atlas/seams -> a real FWD-3 seam; ARCH-1 StructureRecipe validator+edit-ops mirroring the Euler operators).
+
+
+--------------------------------------------------------------------------------
+FWD-11 -- Tier 3, the highest-value item: the mesh <-> SDF <-> splat bridge. A surface can be carried three ways
+-- explicit MESH (verts+faces), implicit SDF (a scalar field, negative inside, zero level-set = the surface), or
+SPLAT field (a superposition of Gaussians, holographic_splat). Same geometry, three costumes -- the project's
+recurring thesis. This is the bridge that converts between them and measures the round-trip.
+
+THE GENUINELY NEW PIECE: isosurface extraction (SDF -> mesh). The mesh kernel's own header says "no marching
+cubes" -- so extracting a mesh from an implicit field was the one missing direction. Supplied here via MARCHING
+TETRAHEDRA (not cubes) on purpose: a tiny unambiguous case set (per tet 0/1/2 triangles by how many of 4 corners
+are inside) vs marching cubes' 256 cases + ambiguous faces; and MANIFOLD BY CONSTRUCTION (a crossing lives on a
+grid edge shared by every tet touching it, welded by edge identity; the tet's quad split is interior, so adjacent
+patches always agree -- no cracks). Cube split into 6 tets sharing a main diagonal (Kuhn decomposition).
+
+WHAT SHIPPED (holographic_meshbridge.py; additive; two UnifiedMind faculties):
+  * mesh_from_sdf(sdf, bounds, res, level) [faculty] / marching_tetrahedra(values, axes, level) -- extract the
+    level-set isosurface of a sampled field as a watertight, OUTWARD-oriented triangle Mesh. The bridge's core.
+  * mesh_to_sdf(mesh, points) [faculty] -- signed distance from a mesh (vectorised closest-point-on-triangle,
+    Ericson's region test; sign from the nearest face normal). The reverse direction.
+  * sample_field / sphere_sdf / metaball_field -- grid sampler, analytic sphere SDF, and the splat-as-implicit
+    Gaussian sum (a bundle of Gaussians thresholded is an isosurface).
+
+MEASURED (the bar, against analytic references):
+  * SDF -> mesh: the analytic unit sphere extracts to a CLOSED MANIFOLD (chi=2), 100% OUTWARD-oriented faces,
+    vertices on the sphere (mean r=0.999 +/- 0.001). A radius-0.7 sphere -> r=0.699 +/- 0.001. Resolution scales
+    (res 12/20/28 -> 1536/4392/9216 faces).
+  * mesh -> SDF: a sphere mesh's signed distance matches analytic |p|-1 at probes (<0.05), correct inside/outside
+    sign (origin negative, far point positive).
+  * SPLAT -> mesh: a sum of Gaussian splats (metaball field) iso-extracts to a closed-manifold blob -- the splat
+    representation entering the mesh world through the SAME extractor. Deterministic.
+
+KEPT NEGATIVES (loud):
+  * mesh_to_sdf signs by the NEAREST FACE NORMAL -- exact for convex-ish closed meshes, can mis-sign deep
+    concavities or thin sheets (generalized winding number is the fix, not shipped). The magnitude is always right.
+  * Marching-tet resolution is the grid's: sharp features below the cell size are rounded; the round-trip recovers
+    the SHAPE to grid resolution, not the original connectivity.
+  * It emits edge-welded triangle soup (no triangle-quality guarantee) -- a downstream Taubin smooth/remesh
+    (FWD-4) is the cleanup, which is exactly why those faculties exist.
+
+Tests: +10 (1303 -> 1313). test_holographic_meshbridge.py (+9): SDF->mesh closed manifold sphere; vertices on
+sphere; radius scales; 100% outward orientation; resolution scaling; mesh->SDF matches analytic; sign correct;
+splat->mesh closed blob; determinism. test_integration.py (+1): the full bridge through the mind (SDF->mesh,
+mesh->SDF, splat->mesh) end-to-end. Files: holographic_meshbridge.py (new), test_holographic_meshbridge.py (new),
+holographic_unified.py (2 faculties), test_integration.py, README, NOTES_concepts.md, tour.py.
+
+TIER 3 OPENED with the bridge. The FWD backlog is now: Tier 1 (FWD-3/4/5/6) DONE; Tier 2 core (FWD-7 core, FWD-8,
+FWD-9, FWD-10) DONE; Tier 3 FWD-11 DONE. REMAINING: FWD-7 remainder (bevel/bridge/loop-cut); ARCH items (ARCH-4
+atlas/seams -> a real FWD-3 seam; ARCH-1 StructureRecipe validator+edit-ops mirroring the Euler operators; ARCH-3
+geometry-weighted graph ops; etc.). The mesh DCC suite is now broadly complete end to end.

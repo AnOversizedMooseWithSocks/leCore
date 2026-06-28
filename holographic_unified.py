@@ -2777,6 +2777,187 @@ class UnifiedMind:
         from holographic_gltf import glb_to_mesh
         return glb_to_mesh(data)
 
+    # ---- FWD-7: local Euler EDIT operators -- the rewrites that let the modeler CHANGE a mesh ---------
+    # The four workhorses every remesher/decimator decomposes into, on the shipped half-edge kernel. Each
+    # returns a NEW Mesh, keeps the surface a valid manifold, and bookkeeps the Euler characteristic exactly;
+    # the make/kill pairs (flip's self-inverse, split/collapse) give exact do-then-undo round-trips. Higher
+    # ops (subdivide, bevel, decimate) are sequences of these and are later items.
+
+    def mesh_flip_edge(self, mesh, a, b):
+        """Rotate the edge shared by two triangles (holographic_eulerops, FWD-7): remove edge a-b, add edge
+        c-d between the opposite apexes. V/E/F (hence chi) unchanged -- the Delaunay-remeshing primitive.
+        Refuses if c-d already exists (would be non-manifold). Returns a new Mesh."""
+        from holographic_eulerops import flip_edge
+        return flip_edge(mesh, a, b)
+
+    def mesh_split_edge(self, mesh, a, b):
+        """Insert a midpoint vertex on edge {a,b}, splitting the incident triangle(s) (holographic_eulerops,
+        FWD-7): the refinement primitive. V+1, chi unchanged. Returns (new_mesh, m) where m is the new vertex
+        index; collapse_edge(new_mesh, keep=a, remove=m) is its exact inverse."""
+        from holographic_eulerops import split_edge
+        return split_edge(mesh, a, b)
+
+    def mesh_collapse_edge(self, mesh, keep, remove):
+        """Merge edge endpoint `remove` into `keep` (holographic_eulerops, FWD-7): the decimation/LOD
+        primitive and the inverse of split_edge. V-1, chi unchanged. Returns a new Mesh, or None if the
+        collapse would break the manifold (the LINK CONDITION) -- a true precondition the caller must handle."""
+        from holographic_eulerops import collapse_edge
+        return collapse_edge(mesh, keep, remove)
+
+    def mesh_split_face(self, mesh, f_index, i, j):
+        """Cut polygon face `f_index` with a diagonal between its i-th and j-th corners (holographic_eulerops,
+        FWD-7): MEF, the one operator that works on n-gons, not just triangles. E+1, F+1, chi unchanged.
+        Returns a new Mesh."""
+        from holographic_eulerops import split_face
+        return split_face(mesh, f_index, i, j)
+
+    def mesh_smooth(self, mesh, lam=0.55, mu=-0.58, iters=8, weights="cotangent"):
+        """Taubin lambda|mu no-shrink mesh smoothing / denoising (holographic_meshsmooth, FWD-4): the shipped
+        `graphsignal.taubin_filter` WIRED onto explicit mesh geometry -- 3-D vertex positions as the signal,
+        the mesh's 1-ring as the graph, cotangent (discrete Laplace-Beltrami) weights by default. Removes
+        vertex noise while preserving the overall extent (no volume shrink, unlike a naive Laplacian). Faces
+        are untouched, so connectivity and every Euler invariant are preserved -- only vertices move. Returns a
+        new Mesh. `weights='uniform'` for the umbrella baseline. Kept negative: fixed strength over-smooths an
+        already-clean mesh (it is a low-pass) -- needs a noise estimate; this exposes lam/mu/iters, no auto-tune."""
+        from holographic_meshsmooth import taubin_smooth
+        return taubin_smooth(mesh, lam=lam, mu=mu, iters=iters, weights=weights)
+
+    def mesh_curvature(self, mesh, kind="mean"):
+        """Per-vertex curvature of a mesh (holographic_meshcurvature, FWD-6). kind='mean' -> |H| via the
+        cotangent Laplacian of positions (reusing FWD-4's weights; H=1/R on a sphere); kind='gaussian' -> the
+        area-normalised angle defect (K=1/R^2 on a sphere), whose TOTAL equals 2*pi*chi exactly by discrete
+        Gauss-Bonnet. Returns an array of length V. Kept negative: per-vertex values are noisy on coarse/
+        irregular meshes (the mean is accurate); `mesh_curvature_confidence` scores per-vertex reliability."""
+        from holographic_meshcurvature import mean_curvature, gaussian_curvature
+        if kind == "mean":
+            return mean_curvature(mesh)
+        if kind == "gaussian":
+            return gaussian_curvature(mesh)
+        raise ValueError(f"kind must be 'mean' or 'gaussian', got {kind!r}")
+
+    def mesh_curvature_confidence(self, mesh):
+        """A per-vertex confidence in [0,1] for the curvature estimate (holographic_meshcurvature, FWD-6), from
+        1-ring regularity -- low where the neighbourhood is sliver-heavy or sparse, so a caller can down-weight
+        unreliable curvature rather than trust it (the noise kept-negative made actionable)."""
+        from holographic_meshcurvature import curvature_confidence
+        return curvature_confidence(mesh)
+
+    def mesh_creases(self, mesh, threshold_deg=30.0):
+        """The sharp edges of a mesh (holographic_meshcurvature, FWD-6): interior edges whose DIHEDRAL angle
+        (between the two adjacent faces) exceeds `threshold_deg`. A cube returns its 12 edges; a smooth sphere
+        returns none. Feeds crease-aware smoothing, adaptive subdivision, and shading-normal splitting. Returns
+        a sorted list of (lo,hi) vertex-index edges."""
+        from holographic_meshcurvature import detect_creases
+        return detect_creases(mesh, threshold_deg=threshold_deg)
+
+    def mesh_geodesic(self, mesh, source):
+        """Single-source surface geodesic distance (holographic_meshgeodesic, FWD-5): shortest path ALONG mesh
+        edges from vertex `source` to every vertex (Dijkstra with Euclidean edge weights) -- distance over the
+        surface, not the straight line through the void. Returns an array of length V. The along-surface metric
+        UV seams (FWD-3), soft selections, and remesh spacing all want. Kept negative: the edge-graph distance
+        is approximate (a few percent over the smooth geodesic, with a tiny chord-effect undercut near source)."""
+        from holographic_meshgeodesic import geodesic_distances
+        return geodesic_distances(mesh, source)
+
+    def mesh_soft_selection(self, mesh, source, radius, falloff="smooth"):
+        """A soft-selection falloff in [0,1] per vertex by GEODESIC distance from `source` within `radius`
+        (holographic_meshgeodesic, FWD-5): 1 at the source, smoothly to 0 at the radius. Because it measures
+        along the surface it does NOT bleed to vertices near in 3-D space but far across the surface (a Euclidean
+        brush's failure on a thin neck or a folded region). `falloff`: 'smooth' or 'linear'. Returns length-V."""
+        from holographic_meshgeodesic import geodesic_soft_selection
+        return geodesic_soft_selection(mesh, source, radius, falloff=falloff)
+
+    def mesh_uv_unwrap(self, mesh, method="isomap"):
+        """UV-unwrap a (disk-topology) mesh to 2-D coordinates (holographic_meshuv, FWD-3): classical MDS of the
+        mesh's GEODESIC distance matrix -- Isomap on explicit edges -- so surface distances are preserved as well
+        as a plane allows. The shipped manifold-chart machinery pointed at real mesh connectivity. Returns (V,2)
+        UV in ~[0,1]^2. `method`: 'isomap' (geodesic; wins on curved surfaces), 'planar' (linear; exact on
+        developable surfaces), 'spectral' (Laplacian eigenmaps). Kept negative: a CLOSED surface needs a seam
+        (cut) first -- `holographic_meshuv.puncture` opens it crudely; a real seam is the ARCH-4 atlas piece."""
+        from holographic_meshuv import uv_unwrap
+        return uv_unwrap(mesh, method=method)
+
+    def mesh_uv_distortion(self, mesh, uv):
+        """The per-edge STRETCH distortion of a UV map (holographic_meshuv, FWD-3): spread of (UV edge length /
+        3-D edge length), 0 = isometric, growing with Gaussian curvature (Gauss: a curved surface cannot flatten
+        without stretch). The scale-invariant flatness score -- lower is a better parameterisation."""
+        from holographic_meshuv import uv_distortion
+        return uv_distortion(mesh, uv)
+
+    def mesh_extrude(self, mesh, face_index, distance):
+        """EXTRUDE a face (holographic_meshverbs, FWD-7): lift face `face_index` along its outward normal by
+        `distance` and wall it in -- the iconic modelling verb. Preserves the Euler characteristic and keeps a
+        closed mesh a closed manifold; the cap moves exactly `distance` along the normal. Returns a new Mesh."""
+        from holographic_meshverbs import extrude_face
+        return extrude_face(mesh, face_index, distance)
+
+    def mesh_inset(self, mesh, face_index, ratio):
+        """INSET a face (holographic_meshverbs, FWD-7): shrink face `face_index` toward its centroid by `ratio`,
+        ringing it with new faces around a smaller central face (in-plane, so the central face stays coplanar; its
+        area is exactly (1-ratio)^2 of the original). Preserves chi + closed + manifold. Returns a new Mesh."""
+        from holographic_meshverbs import inset_face
+        return inset_face(mesh, face_index, ratio)
+
+    def mesh_dissolve_vertex(self, mesh, vertex):
+        """DISSOLVE a vertex (holographic_meshverbs, FWD-7; the Euler KEV verb): remove `vertex` and its incident
+        faces, then fan-triangulate the hole, leaving the surrounding ring fixed. Preserves chi + closed +
+        manifold, one fewer vertex. Distinct from `mesh_collapse_edge` (the decimation cousin). Returns a Mesh."""
+        from holographic_meshverbs import dissolve_vertex
+        return dissolve_vertex(mesh, vertex)
+
+    def mesh_subdivide(self, mesh, levels=1):
+        """Loop-SUBDIVIDE a triangle mesh (holographic_meshsubdiv, FWD-8): refine each triangle into four and
+        low-pass smooth with the Loop masks (a C2 limit surface). Two operations braided -- a topological refine
+        (an Euler-operator sequence, the new part) and a graph-signal low-pass smooth (the spectral family FWD-4
+        also uses). Each level multiplies faces by 4, adds one vertex per edge, preserves chi, and keeps a closed
+        mesh a closed manifold; a flat mesh stays flat exactly, a curved one is smoothed toward the Loop limit.
+        A non-triangle input is triangulated first (Loop is a triangle scheme). Returns a new Mesh."""
+        from holographic_meshsubdiv import loop_subdivide
+        return loop_subdivide(mesh, levels=levels)
+
+    def solve_ik(self, joints, target, iters=20, tol=None):
+        """Inverse kinematics by FABRIK (holographic_meshik, FWD-10): move a chain of `joints` (n+1, 3) so the
+        end-effector reaches `target`, keeping every bone's rest length and the root fixed. Implemented LITERALLY
+        through this mind's own `project_onto_constraints` engine -- FABRIK's forward/backward reaching IS a
+        Gauss-Seidel sweep of bone-length + endpoint-pin projections, so IK is the iterate-a-projection faculty in
+        the kinematic-chain costume. Returns (new_joints (n+1,3), n_sweeps). For an UNREACHABLE target the chain
+        fully extends toward it (the honest degenerate outcome). Kept negative: plain FABRIK has no joint-angle
+        limits -- a per-joint cone projection would slot into the same sweep but is not shipped here."""
+        from holographic_meshik import solve_ik as _solve_ik
+        return _solve_ik(joints, target, iters=iters, tol=tol)
+
+    def skin_mesh(self, mesh, transforms, weights):
+        """Linear-blend-SKIN a mesh (holographic_meshskin, FWD-9): deform each vertex as the weighted combination
+        of what each bone transform would do to it -- v' = sum_b w_b (M_b v), weights a partition of unity. This
+        is a SOFT mixture of expert bone-transforms (the soft/dense cousin of this engine's hard/sparse top-1
+        `moe.GatedMixture` -- same experts+gating skeleton, different gating regime). `transforms` is (B,4,4),
+        `weights` is (V,B). Returns a new Mesh (deformed vertices, faces untouched). A shared rigid transform is
+        reproduced exactly. Kept negative: LBS averages matrices not rotations, so a 50/50 twist collapses the
+        radius to cos(theta/2) (the candy-wrapper artifact) -- dual-quaternion skinning is the fix, not shipped."""
+        from holographic_meshskin import skin_mesh as _skin_mesh
+        return _skin_mesh(mesh, transforms, weights)
+
+    def mesh_from_sdf(self, sdf, bounds, res=24, level=0.0):
+        """Extract a MESH from an implicit field (holographic_meshbridge, FWD-11; SDF -> mesh): sample the scalar
+        field `sdf` (a callable points(N,3)->values, e.g. `sphere_sdf` or a `metaball_field` of Gaussian splats) on
+        a res^3 grid over `bounds`=((x0,y0,z0),(x1,y1,z1)) and extract its `level` isosurface by MARCHING
+        TETRAHEDRA -- the isosurface extractor the mesh kernel deliberately lacked, and the bridge that lets the
+        engine's implicit/splat representations enter the mesh world. The result is a watertight, outward-oriented
+        triangle Mesh (a closed genus-0 field gives chi=2). Kept negative: resolution is the grid's -- features
+        below the cell size are rounded. Returns a Mesh."""
+        from holographic_meshbridge import sample_field, marching_tetrahedra
+        values, axes = sample_field(sdf, bounds, res)
+        return marching_tetrahedra(values, axes, level=level)
+
+    def mesh_to_sdf(self, mesh, points):
+        """Signed distance from a MESH at query points (holographic_meshbridge, FWD-11; mesh -> implicit): the
+        unsigned distance to the nearest triangle, signed by the nearest face normal (negative inside). The reverse
+        of mesh_from_sdf, completing the mesh<->SDF bridge. `points` is (N,3); returns (N,). Kept negative: the
+        nearest-normal sign is exact for convex-ish closed meshes but can mis-sign deep concavities (the magnitude
+        is always right; a generalized winding number is the fix, not shipped)."""
+        from holographic_meshbridge import mesh_to_sdf as _mesh_to_sdf
+        return _mesh_to_sdf(mesh, points)
+
     # ---- the SEARCH & DYNAMICS faculties (integration plan, Tier 3) -----------------------------
     # Min-cost search on a graph or a trellis (a maze; a fragment assembly) and learned linear
     # dynamics -- the last modules built beside the mind, now faculties of it. Where the structure is

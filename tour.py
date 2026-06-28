@@ -3324,6 +3324,202 @@ print("  KEPT NEGATIVE: the half-edge kernel is Python-loop bound -- correct + d
 print("  but won't scale to interactive million-poly editing without a compiled core ('NumPy-only' is the engine's")
 print("  rule, not an interactive mesh editor's). The vectorized paths (Euler, normals, buffers) are the fast ones.")
 
+title("FWD-7: the explicit mesh can be EDITED -- local Euler operators, exact make/kill round-trips")
+# The kernel (FWD-1) was read-only. These are the LOCAL connectivity rewrites every remesher/decimator
+# decomposes into: flip (Delaunay), split (refine), collapse (decimate), split_face (n-gon). Each keeps the
+# surface a valid manifold and bookkeeps chi exactly; the make/kill pairs give an exact do-then-undo round-trip.
+from holographic_mesh import Mesh as _MeshFwd7
+from collections import Counter as _CounterFwd7
+from holographic_eulerops import _face_with_directed_edge as _fwde, _third as _thirdv
+_tm = _MeshFwd7(_cube.vertices.copy(), [tuple(t) for t in _cube.triangulate()])
+_chi0 = _tm.euler_characteristic()
+print(f"  triangulated the box: V{_tm.n_vertices} E{_tm.n_edges} F{_tm.n_faces} chi={_chi0}  (closed manifold = {_tm.is_closed()})")
+# pick a flippable interior edge (apexes not already an edge)
+_dirs = _CounterFwd7()
+for _f in _tm.faces:
+    for _k in range(3):
+        _dirs[(_f[_k], _f[(_k + 1) % 3])] += 1
+_es = set(_tm.edges())
+_ea = _eb = None
+for (_x, _y) in _dirs:
+    if (_y, _x) in _dirs:
+        _cc = _thirdv(_tm.faces[_fwde(_tm.faces, _x, _y)], _x, _y)
+        _dd = _thirdv(_tm.faces[_fwde(_tm.faces, _y, _x)], _x, _y)
+        if (min(_cc, _dd), max(_cc, _dd)) not in _es:
+            _ea, _eb = _x, _y
+            break
+_flip = _meshm.mesh_flip_edge(_tm, _ea, _eb)
+print(f"  flip_edge {{{_ea},{_eb}}}: V{_flip.n_vertices} E{_flip.n_edges} F{_flip.n_faces} chi={_flip.euler_characteristic()} "
+      f"-- V/E/F all unchanged, still closed manifold = {_flip.is_closed()}")
+_split, _mid = _meshm.mesh_split_edge(_tm, _ea, _eb)
+print(f"  split_edge {{{_ea},{_eb}}}: V{_split.n_vertices} (added midpoint #{_mid}) chi={_split.euler_characteristic()}  (refinement: V+1, chi held)")
+_back = _meshm.mesh_collapse_edge(_split, keep=_ea, remove=_mid)
+
+def _canon_fwd7(_m):
+    return tuple(sorted(tuple(_f[_f.index(min(_f)):] + _f[:_f.index(min(_f))]) for _f in _m.faces))
+print(f"  collapse_edge keep={_ea} remove={_mid}: V{_back.n_vertices} -- split then collapse restores the mesh exactly = {_canon_fwd7(_back) == _canon_fwd7(_tm)}")
+# the link condition: an equatorial edge of a bipyramid is NOT collapsible (would weld the surface)
+_bpv = [[0, 0, 1], [1, 0, 0], [-0.5, 0.87, 0], [-0.5, -0.87, 0], [0, 0, -1]]
+_bp = _MeshFwd7(_bpv, [(0, 1, 2), (0, 2, 3), (0, 3, 1), (4, 2, 1), (4, 3, 2), (4, 1, 3)])
+print(f"  link condition: collapse of bipyramid equator {{1,2}} refused (returns None) = {_meshm.mesh_collapse_edge(_bp, keep=1, remove=2) is None}  "
+      f"(not every edge is collapsible -- a true mesh property, made operational, not hidden)")
+
+title("FWD-4 (Tier 1, ADAPT-SHIPPED): mesh smoothing IS the shipped Taubin filter, wired onto a mesh")
+# The forward backlog's real insight: the matured intrinsic-geometry toolkit turns the "conventional" DCC
+# items into adaptations of shipped faculties. graphsignal.taubin_filter already exists -- mesh smoothing is
+# three substitutions: vertex positions as the signal, the mesh 1-ring as the graph, cotangent weights. A wire.
+from holographic_meshsmooth import _icosphere as _icos, laplacian_smooth as _lapsm
+import numpy as _np_fwd4
+_clean = _icos(3)
+_rng4 = _np_fwd4.random.default_rng(0)
+_noisy = _MeshFwd7(_clean.vertices + _rng4.normal(0.0, 0.05, _clean.vertices.shape), list(_clean.faces))
+_re = lambda _m: float(_np_fwd4.abs(_np_fwd4.linalg.norm(_m.vertices, axis=1) - 1.0).mean())
+_mr = lambda _m: float(_np_fwd4.linalg.norm(_m.vertices, axis=1).mean())
+_taub = _meshm.mesh_smooth(_noisy, iters=10)
+_lap = _lapsm(_noisy, iters=10)
+print(f"  noisy unit sphere (sigma=0.05): radial err {_re(_noisy):.4f}, mean radius {_mr(_noisy):.3f}")
+print(f"  Taubin smooth (cotangent, no-shrink): radial err -> {_re(_taub):.4f} ({100*(1-_re(_taub)/_re(_noisy)):.0f}% denoise), "
+      f"mean radius KEPT at {_mr(_taub):.3f}  -- connectivity + chi untouched (faces identical = {_taub.faces == _clean.faces})")
+print(f"  naive Laplacian baseline: mean radius SHRANK to {_mr(_lap):.3f}  (the kept negative -- why Taubin's lambda|mu exists)")
+
+title("FWD-6 (Tier 1): mesh curvature & creases -- with an EXACT topological reference (Gauss-Bonnet)")
+# Discrete differential geometry gives exact identities to check against: the angle defect IS Gaussian
+# curvature, and its TOTAL over a closed mesh equals 2*pi*chi exactly (Gauss-Bonnet) -- the curvature estimate
+# validated against the Euler characteristic the kernel computes. Mean curvature reuses FWD-4's cotangent weights.
+from holographic_meshcurvature import (gauss_bonnet_defect as _gbdef, gaussian_curvature as _gcurv,
+                                       mean_curvature as _hcurv)
+_gb = _gbdef(_clean)                                    # _clean is the unit sphere from the FWD-4 demo
+_Kc = _gcurv(_clean)
+_Hc = _hcurv(_clean)
+print(f"  unit sphere: Gauss-Bonnet total defect = 2*pi*chi to {abs(_gb):.1e}  (EXACT -- validated against chi=2)")
+print(f"  unit sphere curvature: mean Gaussian K={float(_Kc.mean()):.3f}, mean |H|={float(_Hc.mean()):.3f}  (both ~1 = 1/R, 1/R^2)")
+_cube_creases = _meshm.mesh_creases(_meshm.mesh_box(2.0, 2.0, 2.0), threshold_deg=30.0)
+_sphere_creases = _meshm.mesh_creases(_clean, threshold_deg=30.0)
+print(f"  crease detection (dihedral angle): cube -> {len(_cube_creases)} sharp edges (all 90deg), "
+      f"smooth sphere -> {len(_sphere_creases)}  (feeds crease-aware smoothing + adaptive subdivision)")
+print(f"  KEPT NEGATIVE: per-vertex curvature is noisy on coarse meshes (CoV {float(_Hc.std()/_Hc.mean()):.2f}) "
+      f"-- the mean is right, mesh_curvature_confidence scores per-vertex reliability")
+
+title("FWD-5 (Tier 1): surface geodesics -- distance ALONG the surface, not through the void")
+# The shipped chart.geodesic_distances runs shortest paths on a k-NN graph; the adapt-shipped move is to run the
+# same idea on the EXPLICIT MESH EDGE graph. This feeds FWD-3's UV seams + soft selections. Validated against the
+# analytic great-circle distance, and contrasted with the Euclidean distance that 'bleeds' across the surface.
+_north = int(_np_fwd4.argmax(_clean.vertices[:, 2]))   # the sphere's north-pole vertex
+_south = int(_np_fwd4.argmin(_clean.vertices[:, 2]))
+_geo = _meshm.mesh_geodesic(_clean, _north)
+_true = _np_fwd4.arccos(_np_fwd4.clip(_clean.vertices[:, 2], -1.0, 1.0))
+_euclid_ns = float(_np_fwd4.linalg.norm(_clean.vertices[_south] - _clean.vertices[_north]))
+print(f"  unit sphere geodesic from the pole vs analytic great-circle arccos(z): correlation {float(_np_fwd4.corrcoef(_geo, _true)[0,1]):.4f}")
+print(f"  north->south geodesic = {float(_geo[_south]):.3f} (~pi, the long way ROUND the surface) > Euclidean {_euclid_ns:.3f} (straight through)")
+_sel = _meshm.mesh_soft_selection(_clean, _north, radius=2.5)
+print(f"  soft-selection radius 2.5: antipode weight = {float(_sel[_south]):.1f} (EXCLUDED -- geodesic ~pi > 2.5), "
+      f"but a Euclidean ball would INCLUDE it ({_euclid_ns:.1f} < 2.5)  -- geodesic doesn't bleed across the surface")
+
+title("FWD-3 (Tier 1, the payoff): UV unwrapping = the shipped MDS chart on the mesh's OWN geodesics")
+# UV -- the 'least-holostuff' DCC item -- is a near-direct reuse: feed FWD-5's mesh geodesic matrix to the shipped
+# chart.classical_mds and the 2-D embedding IS the UV chart (Isomap on explicit edges). Wins on curved surfaces;
+# a linear projection is the right tool on flat ones. Closed surfaces need a seam (the kept negative).
+from holographic_meshuv import flat_grid_mesh as _flat_grid, hemisphere_cap as _hemicap
+_flatm = _flat_grid(9)                                   # a flat developable patch (isotropic triangulation)
+_uvflat = _meshm.mesh_uv_unwrap(_flatm)
+_flips = sum(1 for (a, b, c) in _flatm.faces
+             if (_uvflat[b][0]-_uvflat[a][0])*(_uvflat[c][1]-_uvflat[a][1])
+              - (_uvflat[b][1]-_uvflat[a][1])*(_uvflat[c][0]-_uvflat[a][0]) < 0)
+print(f"  flat developable patch: stretch distortion {float(_meshm.mesh_uv_distortion(_flatm, _uvflat)):.3f} (near-isometric), "
+      f"{_flips} flipped triangles (charts don't overlap)")
+_capm = _hemicap(3)                                      # a curved cap: Isomap should beat a linear projection
+_iso = float(_meshm.mesh_uv_distortion(_capm, _meshm.mesh_uv_unwrap(_capm, method="isomap")))
+_lin = float(_meshm.mesh_uv_distortion(_capm, _meshm.mesh_uv_unwrap(_capm, method="planar")))
+print(f"  curved cap: Isomap (geodesic) distortion {_iso:.3f} < linear projection {_lin:.3f}  -- geodesic chart wins where the surface bends")
+print(f"  KEPT NEGATIVE: a CLOSED surface (a sphere) can't flatten to a disk without a seam/cut -- ARCH-4 places a real one")
+
+title("FWD-7 (Tier 2): modeler verbs -- extrude / inset / dissolve, built on the explicit mesh kernel")
+# The shipped Euler primitives (flip/split/collapse) are the atomic moves; these are the human-facing verbs on
+# top. Each produces a VALID mesh (chi preserved, still a closed manifold) with an EXACT geometric signature.
+from holographic_meshsmooth import _icosphere as _ico_verbs
+from holographic_meshverbs import _face_normal as _fn_verbs
+_vsphere = _ico_verbs(2)
+_chi_v = _vsphere.euler_characteristic()
+_nrm_v = _fn_verbs(_vsphere.vertices, _vsphere.faces[0])
+_cap0 = _np_fwd4.mean([_vsphere.vertices[v] for v in _vsphere.faces[0]], axis=0)
+_exm = _meshm.mesh_extrude(_vsphere, 0, distance=0.3)
+_cap1 = _exm.vertices[_exm.n_vertices - 3:].mean(axis=0)
+print(f"  EXTRUDE face 0 by 0.3: chi {_vsphere.euler_characteristic()} -> {_exm.euler_characteristic()} (preserved), closed+manifold={_exm.is_closed() and _exm.is_manifold()}, "
+      f"cap moved {float(_np_fwd4.dot(_cap1 - _cap0, _nrm_v)):.3f} along the normal (exact)")
+_insm = _meshm.mesh_inset(_vsphere, 0, ratio=0.4)
+def _triA(V, f):
+    a, b, c = V[f[0]], V[f[1]], V[f[2]]; return 0.5 * float(_np_fwd4.linalg.norm(_np_fwd4.cross(b - a, c - a)))
+_a0 = _triA(_vsphere.vertices, _vsphere.faces[0]); _a1 = _triA(_insm.vertices, _insm.faces[_vsphere.n_faces - 1])
+print(f"  INSET   face 0 by 0.4: central-face area ratio {_a1 / _a0:.3f} = (1-0.4)^2 = {0.6 ** 2:.3f} (exact), chi preserved")
+_dissm = _meshm.mesh_dissolve_vertex(_vsphere, 5)
+print(f"  DISSOLVE vertex 5: V {_vsphere.n_vertices} -> {_dissm.n_vertices} (-1), chi {_dissm.euler_characteristic()} preserved, closed+manifold={_dissm.is_closed() and _dissm.is_manifold()}")
+print(f"  (bevel / bridge / loop-cut are the FWD-7 remainder -- deferred honestly rather than shipped shaky)")
+
+title("FWD-8 (Tier 2): Loop subdivision -- refine (new topology) + low-pass smooth (the spectral family)")
+# Subdivision is two operations braided: a topological REFINE (1 triangle -> 4, an Euler-operator sequence) and a
+# graph-signal LOW-PASS smooth (the same family FWD-4's Taubin uses). Measured: exact x4, affine reproduction, smoothing.
+from holographic_meshsmooth import _icosphere as _ico_sd
+from holographic_meshuv import flat_grid_mesh as _flat_sd
+from holographic_meshcurvature import dihedral_angles as _dih_sd
+from holographic_meshsubdiv import _triangles as _tri_sd
+from holographic_mesh import box as _box_sd, Mesh as _Mesh_sd
+_s_sd = _ico_sd(1)
+_sub_sd = _meshm.mesh_subdivide(_s_sd, 1)
+print(f"  icosphere: faces {_s_sd.n_faces} -> {_sub_sd.n_faces} (x4 exact), vertices {_s_sd.n_vertices} -> {_sub_sd.n_vertices} (V+E), "
+      f"chi {_sub_sd.euler_characteristic()} preserved, closed+manifold={_sub_sd.is_closed() and _sub_sd.is_manifold()}")
+_flat_sub = _meshm.mesh_subdivide(_flat_sd(5), 2)
+print(f"  AFFINE REPRODUCTION: a flat mesh subdivides to max |z| = {float(_np_fwd4.max(_np_fwd4.abs(_flat_sub.vertices[:, 2]))):.0e} (stays flat to machine precision -- the rigor reference)")
+_cube_sd = _box_sd()
+_before_sd = float(_np_fwd4.std(list(_dih_sd(_Mesh_sd(_cube_sd.vertices.copy(), _tri_sd(_cube_sd))).values())))
+_after_sd = float(_np_fwd4.std(list(_dih_sd(_meshm.mesh_subdivide(_cube_sd, 2)).values())))
+print(f"  SMOOTHING (low-pass): cube dihedral-angle spread {_before_sd:.3f} -> {_after_sd:.3f} over 2 levels -- the smoothing step IS a spectral low-pass")
+
+title("FWD-10 (Tier 2): inverse kinematics (FABRIK) = the mind's OWN project_onto_constraints engine")
+# IK is "iterate a projection onto bone-length constraints" -- so FABRIK runs LITERALLY through the shipped
+# project_onto_constraints sweeper (the same engine behind the resonator and the PnP denoiser), not a reimplementation.
+from holographic_meshik import chain as _chain_ik
+_arm = _chain_ik(4, 1.0)                                  # 4 bones, total reach 4, along +x
+_rest_ik = [float(_np_fwd4.linalg.norm(_arm[i + 1] - _arm[i])) for i in range(len(_arm) - 1)]
+_tgt_ik = _np_fwd4.array([2.0, 1.5, 0.5])
+_posed, _sweeps = _meshm.solve_ik(_arm, _tgt_ik, iters=30)
+_new_ik = [float(_np_fwd4.linalg.norm(_posed[i + 1] - _posed[i])) for i in range(len(_posed) - 1)]
+print(f"  reachable target [2.0, 1.5, 0.5]: tip reaches it to {float(_np_fwd4.linalg.norm(_posed[-1] - _tgt_ik)):.0e} in {_sweeps} sweeps, "
+      f"all 4 bone lengths preserved ({max(abs(a - b) for a, b in zip(_new_ik, _rest_ik)):.0e}), root fixed")
+_far_ik, _ = _meshm.solve_ik(_arm, _np_fwd4.array([100.0, 0.0, 0.0]), iters=60)
+print(f"  UNREACHABLE target: chain fully extends -- tip at distance {float(_np_fwd4.linalg.norm(_far_ik[-1] - _far_ik[0])):.3f} from root (= total reach 4.0), pointing straight at it")
+print(f"  the same iterate-a-projection engine that cleans a noisy code and factors a scene also solves the arm")
+
+title("FWD-9 (Tier 2): linear blend skinning = a SOFT mixture of expert bone-transforms")
+# Skinning blends what each bone would do to a vertex, weights summing to 1 -- structurally a mixture of experts
+# (the soft/dense cousin of the engine's hard/sparse top-1 moe.GatedMixture). Rigid reproduction is exact; the
+# candy-wrapper artifact is the kept negative, measured to closed form.
+from holographic_meshskin import linear_blend_skin as _lbs, make_transform as _mt, rotation as _rot
+_pts_sk = _np_fwd4.array([[1.0, 0.3, -0.2], [0.5, -1.0, 0.4], [-0.7, 0.2, 1.0]])
+_Msk = _mt(rot=_rot([0.2, 1.0, 0.3], 0.7), translation=[0.5, -0.2, 1.0])
+_shared = _lbs(_pts_sk, _np_fwd4.stack([_Msk, _Msk, _Msk]), _np_fwd4.array([[0.2, 0.5, 0.3]] * 3))
+_exp_sk = (_np_fwd4.hstack([_pts_sk, _np_fwd4.ones((3, 1))]) @ _Msk.T)[:, :3]
+print(f"  RIGID REPRODUCTION: 3 bones sharing one transform, arbitrary weights -> reproduced exactly (max err {float(_np_fwd4.max(_np_fwd4.abs(_shared - _exp_sk))):.0e}) -- the partition-of-unity guarantee")
+_phi_sk = _np_fwd4.linspace(0, 2 * _np_fwd4.pi, 32, endpoint=False)
+_ring_sk = _np_fwd4.stack([_np_fwd4.cos(_phi_sk), _np_fwd4.sin(_phi_sk), _np_fwd4.zeros_like(_phi_sk)], axis=1)
+for _th_sk in (2 * _np_fwd4.pi / 3, _np_fwd4.pi):
+    _r_sk = float(_np_fwd4.mean(_np_fwd4.linalg.norm(_lbs(_ring_sk, _np_fwd4.stack([_np_fwd4.eye(4), _mt(axis=[0, 0, 1], angle=_th_sk)]), _np_fwd4.full((32, 2), 0.5))[:, :2], axis=1)))
+    print(f"  CANDY-WRAPPER negative: a 50/50 twist of {round(float(_np_fwd4.degrees(_th_sk)))} deg collapses the unit ring to radius {_r_sk:.3f} = cos(theta/2) = {float(abs(_np_fwd4.cos(_th_sk / 2))):.3f} (LBS averages matrices, not rotations -- DQS is the fix)")
+
+title("FWD-11 (Tier 3): the mesh <-> SDF <-> splat bridge -- three views of one surface, made convertible")
+# The mesh kernel deliberately had no marching cubes. FWD-11 supplies isosurface extraction (marching TETRAHEDRA,
+# manifold by construction) so the engine's implicit (SDF) and splat representations can enter the mesh world.
+from holographic_meshbridge import sphere_sdf as _sphere_sdf, metaball_field as _metaball
+_sphere_b = _meshm.mesh_from_sdf(_sphere_sdf(radius=1.0), ((-1.5,) * 3, (1.5,) * 3), res=20)
+_radii_b = _np_fwd4.linalg.norm(_sphere_b.vertices, axis=1)
+_Vb = _sphere_b.vertices
+_outward_b = sum(1 for (a, b, c) in _sphere_b.faces if _np_fwd4.dot(_np_fwd4.cross(_Vb[b] - _Vb[a], _Vb[c] - _Vb[a]), (_Vb[a] + _Vb[b] + _Vb[c]) / 3.0) > 0)
+print(f"  SDF -> MESH: unit sphere |p|-1 extracted to {_sphere_b.n_faces} faces, closed manifold chi={_sphere_b.euler_characteristic()}, "
+      f"vertices on sphere (r={float(_radii_b.mean()):.3f} +/- {float(_radii_b.std()):.3f}), {_outward_b}/{_sphere_b.n_faces} outward-oriented")
+_sdf_probe = _meshm.mesh_to_sdf(_sphere_b, _np_fwd4.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]]))
+print(f"  MESH -> SDF: signed distance at origin = {float(_sdf_probe[0]):.3f} (inside, ~-1) and at [2,0,0] = {float(_sdf_probe[1]):.3f} (outside, ~+1) -- matches analytic |p|-1")
+_blob_b = _meshm.mesh_from_sdf(_metaball(_np_fwd4.array([[-0.4, 0, 0], [0.4, 0, 0]]), radius=0.4), ((-1.5,) * 3, (1.5,) * 3), res=20, level=0.5)
+print(f"  SPLAT -> MESH: a sum of 2 Gaussian splats iso-extracts to a {_blob_b.n_faces}-face blob (closed manifold={_blob_b.is_closed() and _blob_b.is_manifold()}) -- splats enter the mesh world through the same extractor")
+
 title("One routing fabric: the chunkers/tilers/stores converge -- pick the pivot, get the regime (StructuredIndex keying)")
 # The capacity-cliff cure ("route each item to a bounded-load bucket") had been re-grown five times. It is
 # ONE fabric: you escape the cliff HORIZONTALLY and address shards by a PIVOT -- and the pivot you pick IS the
