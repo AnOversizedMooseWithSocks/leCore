@@ -10764,3 +10764,495 @@ test_integration.py, README, NOTES_concepts.md, tour.py. Faculty count -> 290.
 -- but the dedup turned out AUTOMATIC (content-hashing already shares), so the only genuinely-new deliverables are the
 explicit diff (for transmission) and the saving measurement. Shipped those; recorded the rest as a kept finding. This
 was the thin item flagged in advance; the measurement confirmed it. ***
+
+
+--------------------------------------------------------------------------------
+RT-V -- OCCLUSION RECALL: alpha-compositing carried to bundle readout. The first of the two high-value reverse
+transfers from the 3DGS-concepts sweep, and the one that targets the engine's OLDEST standing negative -- the linear
+bundle capacity cliff (separation collapses ~1/sqrt(count) as atoms pile up).
+
+THE TRANSFER (as above, so below): 3DGS composites front-to-back with a running transmittance so each pixel SATURATES
+after the front few splats -- the tail is occluded, not summed. holostuff's bundle is the opposite (a linear, order-
+free sum that washes out). The fix the graphics side already found, transferred to recall: sort atoms by relevance to
+the cue, accumulate front-to-back, each atom contributing only what the front has not explained. Concretely this is
+matching pursuit as the readout -- pick the most-relevant atom, record its share, SUBTRACT its explained part (the
+transmittance), repeat.
+
+WHAT SHIPPED (holographic_occlusion.py; additive; one UnifiedMind faculty):
+  * occlusion_recall(cue, codebook, m, min_share) [occlusion_recall] -- recover the components present in `cue` (a
+    bundle of codebook atoms) as (index, weight) pairs in front-to-back (descending-relevance) order. `m` fixes the
+    count; else stop below `min_share`.
+
+MEASURED (the bar): HIGH LOAD M=50 over a 200-atom codebook -- occlusion holds F1 1.000 while the linear / softmax /
+TopK top-m readouts all wash out TOGETHER to 0.914 (they re-rank the same cosines, so for component recovery they are
+identical -- the doc's point, confirmed); LOW LOAD M=4 -- occlusion TIES linear at 1.000 (the kept negative); weighted
+recovery error 0.005 with the heaviest atom recovered FIRST; deterministic.
+
+WHY DISTINCT FROM THE HOPFIELD READOUTS IT RESEMBLES: softmax (z = V^T softmax(beta V q)) and TopK also saturate, but
+they are GLOBAL and ORDER-FREE. Occlusion's SEQUENTIAL transmittance -- a later atom sees less BECAUSE an earlier one
+absorbed it -- is the new ingredient, and the measurement separates them cleanly (occlusion 1.000 vs softmax/TopK
+0.914 at high load).
+
+KEPT NEGATIVES (loud):
+  * at LOW load / few well-separated atoms it TIES plain linear recall and hard-NN -- the win is a PURE HIGH-LOAD
+    phenomenon (the regime occlusion was invented for), exactly as the Hopfield update ties hard-NN on single-item
+    identity (B1).
+  * this IS matching pursuit / OMP-style recovery in VSA clothing -- stated plainly. The contribution is the transfer
+    (front-to-back saturating readout breaking the cliff) and the measured separation from the order-free readouts.
+  * SORTING/ITERATION is the price (each step scans the codebook O(N*D)); on a large store the nearest-first step is
+    what HoloForest provides sub-linearly -- this module does the dense scan.
+  * THRESHOLD stopping (min_share) slightly OVER-recovers at very high load (noise-floor picks); fixing the count with
+    `m` is exact.
+
+Tests: +9 (1492 -> 1501). test_holographic_occlusion.py (+8): high-load beats linear; softmax/TopK reduce to linear
+for recovery; low-load ties linear; recovers all present at high load; weighted recovery; front-to-back heaviest
+first; threshold stopping ~right count; determinism. test_integration.py (+1): occlusion recall through the mind.
+Files: holographic_occlusion.py (new), test_holographic_occlusion.py (new), holographic_unified.py (1 faculty),
+test_integration.py, README, NOTES_concepts.md, tour.py. Faculty count -> 291.
+
+*** RT-V from the 3DGS->Gaussian-data-structure sweep. The alpha-compositing transfer breaks the linear-bundle cliff
+for multi-component recall, holding perfect F1 where the order-free readouts wash out -- with the low-load tie kept
+loud, and the matching-pursuit identity acknowledged honestly. The high-value rung of the two worth climbing. ***
+
+
+--------------------------------------------------------------------------------
+RT-VI -- CONTEXT-DEPENDENT MEANING IN A HARMONIC BASIS. The second of the two high-value reverse transfers from the
+3DGS-concepts sweep, and the DEEPEST substrate fit: it points the engine's own FFT/phase/FPE basis at MEANING instead
+of geometry.
+
+THE TRANSFER (as above, so below): a 3DGS splat's COLOUR is a function of view direction, expanded in spherical
+harmonics -- DC term = base colour, higher degrees = smooth view-dependent variation. holostuff's FHRR/FPE already
+uses PHASE = a point on the circle = a direction, so an atom whose MEANING is a function of a context angle is native:
+represent content(theta) in a CIRCULAR-harmonic (Fourier) basis. The DC term is the context-FREE meaning (today's
+fixed atom, exactly); higher harmonics encode how the meaning shifts with context. Reading at a context angle is the
+harmonic sum -- the analog of unbinding with an FPE-encoded role(theta). This gives CONTEXT-CONDITIONED / POLYSEMOUS
+atoms (a word's sense under different contexts; a filler that means different things under different roles).
+
+WHAT SHIPPED (holographic_harmonic.py; additive; three UnifiedMind faculties):
+  * harmonic_atom(thetas, meanings, n_harmonics) [harmonic_atom] -- fit a context-conditioned atom: the circular-
+    harmonic coefficients (least squares) of the meaning function sampled at (context angle, meaning) pairs. K keeps
+    the DC plus K-1 harmonics (2K-1 coefficient vectors).
+  * harmonic_decode(atom, theta) [harmonic_decode] -- the meaning at context angle theta (the harmonic sum).
+  * harmonic_dc(atom) [harmonic_dc] -- the DC (degree-0), context-free meaning -- exactly the plain fixed atom.
+
+MEASURED (the bar): POLYSEMY -- 3 distinct senses at 3 contexts each recovered at their context (cosine >0.999), a
+between-context decodes to a blend (cos 0.69/0.68); DEGREE-0 FALLBACK -- a context-free atom decodes EXACTLY (<1e-10)
+from the DC alone (the backward-compatible reduction to the plain atom, the way beta->inf reduces Hopfield to
+hard-NN); SMOOTH WIN -- a meaning function band-limited to B=3 reconstructs EXACTLY at K=B+1 (7 vectors, err 1.9e-14)
+for ANY context, BEATING a per-context nearest-neighbor store at 24 vectors (err 4.13); DEGENERATE TRAP -- a
+non-smooth meaning function is NOT captured by a few harmonics (err 10.5, worsens with K); deterministic.
+
+WHY SUBSTRATE-ALIGNED, NOT BOLTED ON: spherical harmonics are Fourier-on-the-sphere; the core bind is FFT-on-a-domain,
+FHRR is phasors, and the manifold module already picks harmonic bases for ring/torus topologies. The engine's own
+native basis pointed at appearance/meaning -- the same move RT-IV1 made with anisotropy, one concept over.
+
+KEPT NEGATIVES (loud):
+  * for CONTEXT-FREE atoms the harmonic expansion spends coefficients for no gain -- the DC term suffices, so it MUST
+    tie the plain atom there (and does, by construction). The win exists ONLY where the context variation is real AND
+    smooth.
+  * if the variation is NOT smooth it degenerates to storing every context (measured) -- the bare-codebook
+    degenerate-sampler trap from B10, in this basis.
+  * CIRCULAR harmonics only (a 1-D context angle, the FPE phase case); full SPHERICAL harmonics over a 2-D direction
+    is the natural extension and is NOT implemented.
+  * the fit is least squares: 2K-1 >= samples interpolates exactly, else smooths/aliases -- choose K against the
+    sample count and the expected smoothness.
+
+Tests: +9 (1501 -> 1510). test_holographic_harmonic.py (+8): polysemy recovery; between-context blend; degree-0
+fallback exact; DC is the context-free mean; smooth exact at K=B+1; beats per-context NN; non-smooth degenerate trap;
+determinism. test_integration.py (+1): context atom through the mind (polysemy + degree-0 fallback). Files:
+holographic_harmonic.py (new), test_holographic_harmonic.py (new), holographic_unified.py (3 faculties),
+test_integration.py, README, NOTES_concepts.md, tour.py. Faculty count -> 294.
+
+*** RT-VI from the 3DGS->Gaussian-data-structure sweep. Context-conditioned / polysemous atoms on the engine's own
+FFT/phase/FPE substrate -- distinct meaning per context where the variation is smooth, with the DC term as the exact
+backward-compatible fallback and the "store every context" degenerate trap kept loud. The deepest rung of the two
+worth climbing; both now climbed. ***
+
+
+--------------------------------------------------------------------------------
+CLONE-VS-SPLIT DENSITY CONTROL -- scale-aware splat densification (the first of the two REFINEMENTS from the 3DGS sweep).
+
+THE REFINEMENT: 3DGS densifies where error is high but DISTINGUISHES two moves by the splat's scale -- CLONE (high
+error at a SMALL splat: duplicate-and-nudge to COVER an under-served region) vs SPLIT (high error at a WIDE splat:
+subdivide into two NARROWER splats to RESOLVE fine structure it smears). The engine's existing splat_densify
+(`densify_fit`, staged residual placement) adds capacity where error is, but is SCALE-BLIND -- it never asks cover vs
+resolve. This adds exactly that distinction, refining an EXISTING splat set.
+
+DE-DUP CATCH (the discipline working): the first wiring collided -- `splat_densify` ALREADY EXISTS (the coarse-to-fine
+densify_fit). The collision was a NAME clash, not a functional duplicate (the existing one places fresh splats on the
+residual from scratch; this refines an existing set with the scale-aware cover-vs-resolve decision). Renamed the new
+faculty to `splat_clone_split`; both now coexist as complements.
+
+WHAT SHIPPED (holographic_splatdensify.py; additive; one UnifiedMind faculty splat_clone_split):
+  * clone_splat(splat, residual, shape) -- the COVER primitive: a same-scale splat at the residual peak in the
+    splat's footprint (original kept).
+  * split_splat(splat, residual, shape) -- the RESOLVE primitive: two narrower (sigma/1.6) splats at the two largest
+    residual peaks (original removed).
+  * clone_split_densify(splats, target, n_densify, scale_thresh) -- rank splats by footprint residual error; for the
+    highest-error ones CLONE if narrow (< scale_thresh) else SPLIT. scale_thresh defaults to the median sigma.
+
+MEASURED (the bar -- and the WRONG move can be worse than nothing): COVER (ridge fit by one small splat) -- clone
+0.0065 beats split 0.0086, and split is WORSE than the 0.0080 baseline (subdividing the small splat loses coverage);
+RESOLVE (twin peaks smeared by one wide splat) -- split 0.0006 beats clone 0.0020 decisively; MIXED (ridge + twin
+peaks) -- scale-aware 0.00704 beats always-clone 0.00799 (misses the peaks) and always-split 0.00917 (hurts the
+ridge) at a fixed splat budget. Each blind strategy handles only one error type; the scale rule does the right move
+for each. Deterministic.
+
+KEPT NEGATIVES (loud):
+  * REFINES splat_densify's from-scratch placement -- the "add capacity where error is high" half was shipped; the
+    new part is the scale-aware COVER-vs-RESOLVE decision on an existing set, and the measurement that the wrong move
+    can be worse than nothing.
+  * ISOTROPIC splats (the (cy,cx,amp,sigma) domain) -- scale = sigma directly; anisotropic per-axis cover-vs-resolve
+    is the natural extension, not implemented.
+  * the scale threshold is a HEURISTIC (median sigma); on a SINGLE-SCALE target the distinction is moot (the win
+    needs mixed scales).
+  * split positions are the two largest residual peaks in the footprint (a deterministic stand-in for 3DGS's sampling
+    the original Gaussian) -- adequate for two-peak resolution, not general multi-modal placement.
+
+Tests: +7 (1510 -> 1517). test_holographic_splatdensify.py (+6): clone wins cover; split worse than baseline on a
+small splat; split wins resolve; scale-aware beats both blind; split removes original / clone keeps it (narrower vs
+same scale); determinism. test_integration.py (+1): splat_clone_split through the mind beats both blind on a mixed
+target. Files: holographic_splatdensify.py (new), test_holographic_splatdensify.py (new), holographic_unified.py
+(1 faculty, name-collision resolved), test_integration.py, README, NOTES_concepts.md, tour.py. Faculty count -> 295.
+
+*** Clone-vs-split refinement from the 3DGS sweep. Sharpens WHERE densification capacity goes -- cover an under-served
+region (clone a small splat) vs resolve fine structure (split a wide one) -- beating both scale-blind strategies, with
+the de-dup catch (it complements, not duplicates, the existing splat_densify) on the record. ***
+
+
+--------------------------------------------------------------------------------
+MCMC BIRTH-DEATH RELOCATION -- conserve capacity instead of dropping it (the second REFINEMENT from the 3DGS sweep,
+and the LAST item of that sweep).
+
+THE REFINEMENT: 3DGS-as-MCMC (Kheradmand et al. 2024) replaces heuristic prune with a birth-death move -- a DEAD
+(low-opacity) Gaussian is RELOCATED to a high-density region rather than dropped, so a fixed budget is never wasted on
+dead samples. holostuff's bounded memory does the opposite: evict-rarest DELETES the lowest-count prototype (the
+creature's `memory_cap` path, "forget the rarest"). Eviction DROPS capacity; birth-death CONSERVES it -- move the
+dead atom to an under-represented region. Ties into the B10 generative-denoising sampler (birth-death IS an MCMC
+move, the discrete kin of running the cleanup backwards from noise).
+
+DE-DUP AUDIT (the discipline): confirmed the eviction is a pure DROP (creature line 657: find argmin count, np.delete)
+and no relocate-vs-drop logic exists anywhere -- birth-death is genuinely absent. This faculty is additive; the
+creature's eviction is left unchanged.
+
+WHAT SHIPPED (holographic_relocate.py; additive; one UnifiedMind faculty splat_relocate):
+  * birth_death_relocate(splats, target, dead_frac) -- find the DEAD splats (|amplitude| below dead_frac of the
+    largest) and RELOCATE each to the current residual peak (the most under-represented region), subtracting after
+    each so successive relocations find distinct peaks. The splat COUNT is conserved (moved, not removed).
+
+MEASURED (the bar): budget 12 splats, 7 dead -- RELOCATE to residual peaks 0.00167 BEATS DROP 0.00730 (~4.4x lower
+MSE; eviction shrinks the budget to 5 and wastes it) and BEATS RANDOM relocation 0.00723 (the principled target -- the
+under-represented region -- is what wins, not the move alone); count conserved 12->12; no-dead is a no-op;
+deterministic.
+
+KEPT NEGATIVES (loud):
+  * SUCCESSOR to evict-rarest -- the DROP was already in the box (the creature's bounded memory); the new part is
+    CONSERVING capacity by relocating a dead atom to an under-represented region instead of deleting it.
+  * ISOTROPIC splats (the "Gaussians-as-samples" structure). The same drop-vs-relocate choice applies to the
+    creature's prototype eviction and any bounded store -- that broader wiring is noted, not done (eviction unchanged).
+  * the relocation TARGET is the residual peak (a deterministic stand-in for 3DGS-MCMC's opacity-weighted sampling) --
+    redistributes toward high RESIDUAL (the under-served region), the right target for COVERAGE, the honest
+    simplification of the MCMC move.
+  * NO dead splats -> NO-OP (nothing to redistribute); the win exists only when capacity is being wasted.
+
+Tests: +7 (1517 -> 1524). test_holographic_relocate.py (+6): relocate beats drop; residual target beats random; count
+conserved; no-dead no-op; relocate improves reconstruction; determinism. test_integration.py (+1): splat_relocate
+through the mind beats drop at a conserved budget. Files: holographic_relocate.py (new), test_holographic_relocate.py
+(new), holographic_unified.py (1 faculty), test_integration.py, README, NOTES_concepts.md, tour.py. Faculty count
+-> 296.
+
+*** Birth-death relocation from the 3DGS sweep -- the successor to evict-rarest. Conserve capacity by relocating a
+dead atom to an under-represented region instead of dropping it (~4.4x better than eviction at a fixed budget), with
+the principled-target-beats-random result and the de-dup audit (the drop was the only thing in the box) on the record.
+This CLOSES the 3DGS-concepts sweep: RT-V (occlusion), RT-VI (harmonic context), clone-vs-split, and birth-death --
+all four reverse transfers climbed. ***
+
+
+--------------------------------------------------------------------------------
+SPEED-1 -- GRAM-CACHED OCCLUSION RECALL (Batch-OMP). The first fix from the occlusion-speed panel review. Occlusion
+recall (RT-V) broke the bundle capacity cliff but cost ~170x the linear readout -- a sequential matching pursuit,
+O(M*N*D), M rescans of the dictionary. The panel found this is the speed problem of greedy sparse recovery, solved
+three ways in compressed sensing (cache the Gram = the D factor; approximate the search = the N factor; batch the
+selection = the M factor). This ships the D-factor one, the highest-value and the one the user's RAM hunch pointed at.
+
+THE FIX (Rubinstein-Zibulevsky-Elad 2008, Batch-OMP): occlusion is PLAIN matching pursuit, so rather than recomputing
+cb @ residual each step (O(N*D)) it maintains the correlation vector alpha = cb @ residual and updates it through one
+Gram COLUMN per pick: alpha -= share*G[:,j] (O(N)) -- the D factor leaves the inner loop. G = cb @ cb.T is a CACHED
+precompute, computed once and reused across cues (the engine's normal case: one fixed vocabulary, many recalls).
+
+WHAT SHIPPED (holographic_occlusion.py extended; additive, backward-compatible; one new UnifiedMind faculty):
+  * build_gram(codebook) [build_occlusion_gram] -- the cached Gram matrix G = cb @ cb.T.
+  * occlusion_recall(..., gram=G) -- the fast path; gram=None keeps the original rescan, bit-for-bit unchanged.
+
+MEASURED: the Gram-cached path recovers IDENTICAL atoms in IDENTICAL order (it is exact, not approximate), with
+weights matching the rescan to MACHINE EPSILON (~1e-16) across every tested regime (D 256..2048, M up to 300, both
+fixed-count and threshold-stop modes). Timed ~12x faster at D=512 and ~23x at D=1024 -- the speedup grows with D
+because the per-step cost drops from O(N*D) to O(N). That takes occlusion from ~170x slower than linear to ~7x, exact.
+
+KEPT NEGATIVES (loud):
+  * the Gram costs O(N^2) memory and an O(N^2*D) one-time precompute -- it pays when the codebook is REUSED across
+    cues (it is), not for a one-shot recall against a throwaway dictionary. Without gram=, the original O(M*N*D)
+    rescan runs unchanged.
+  * the Gram path is the same recurrence REASSOCIATED through G -- identical atoms/order in every tested regime, but
+    weights differ by ~1e-16 (so exact-tuple == fails; compare indices). A true knife-edge argmax tie could in
+    principle differ (the bind_batch class of issue) -- did not manifest anywhere tested.
+  * this is the D-factor fix only. The N-factor (HoloForest sublinear selection, approximate) and M-factor (batch
+    selection a la CoSaMP/IHT, gradient-powered) remain on the backlog (PANEL_occlusion_speed_backlog.md).
+
+Tests: +6 (1524 -> 1530). test_holographic_occlusion.py (+5): build_gram; Gram path identical atoms/order; weights
+match to epsilon; threshold-stop matches; gram=None backward compatible. test_integration.py (+1): Gram fast path
+through the mind recovers identical atoms. Files: holographic_occlusion.py (extended), test_holographic_occlusion.py,
+holographic_unified.py (1 faculty + occlusion_recall gram param), test_integration.py, README, NOTES_concepts.md,
+tour.py. Faculty count -> 297.
+
+*** SPEED-1 from the occlusion-speed panel review. The RAM hunch made concrete: cache the Gram, update correlations
+through a column instead of rescanning -- exact (identical recovery, weights to 1e-16), ~23x faster at D=1024, taking
+occlusion from ~170x slower than linear to ~7x. The D-factor fix; N- and M-factor fixes (and the gradient-optimizer
+unlock) on the backlog. ***
+
+
+--------------------------------------------------------------------------------
+RAM-1 -- GRAM WORKING-SET CACHE (the RAM hunch, infrastructure). The companion to SPEED-1. SPEED-1 made occlusion
+recall ~23x faster by passing a cached Gram, but the caller had to hold it; RAM-1 makes the Gram DURABLE -- a
+vocabulary queried many times pays the O(N^2 D) precompute ONCE and the second recall is a zero-precompute hit, with
+the caller needing nothing but cache=True. This is the Gram-specific realization of the cache-layer working-set the
+engine has been growing toward (the general working-set faculty -- promoting ReflexCache -- remains its own backlog).
+
+WHAT SHIPPED (holographic_occlusion.py extended; additive; mind gains a cache flag, not a new faculty):
+  * GramCache(max_entries=4) -- a bounded working-set cache of codebook Grams. Keyed by codebook OBJECT IDENTITY (id,
+    O(1), no per-call hashing of the large codebook) and GC-SAFE via a weakref callback (a collected codebook's entry
+    is dropped, so an id is never reused stale); LRU-bounded. Methods: gram(codebook), clear(), len(), hits/misses.
+  * UnifiedMind.occlusion_recall(..., cache=True) -- the mind keeps a lazy GramCache and auto-builds/reuses the Gram.
+
+MEASURED: first cache=True call builds + caches (1 miss); the second call with the same codebook is a HIT (no rebuild);
+recovery through the cache is IDENTICAL to the explicit-gram fast path and to the rescan; the cache stays LRU-bounded;
+the weakref callback drops an entry once its codebook is garbage-collected (asserted). Deterministic.
+
+DESIGN NOTE (why id-keying, not content-hashing): hashing a large codebook every call (O(N D)) would erode SPEED-1's
+win on the fast path, and the mind's own caches key by cheap identities (generation/shape/n) rather than content
+hashes (which the engine reserves for small scene atoms). id-keying is O(1); weakref makes it GC-safe so an id can
+never be reused for a stale Gram.
+
+KEPT NEGATIVES (loud):
+  * the cache assumes codebooks are IMMUTABLE (the engine's norm -- a vocabulary is built once). If a codebook is
+    mutated IN PLACE while keeping the same object, the cached Gram goes stale (identity unchanged, contents not);
+    call .clear() or pass gram= explicitly in that unusual case.
+  * each cached Gram is O(N^2) memory x max_entries -- the cache is bounded for exactly this reason.
+  * this is the Gram-specific working-set; the general cache-layer faculty (the six-item backlog) is broader and
+    unbuilt.
+
+Tests: +6 (1530 -> 1536). test_holographic_occlusion.py (+5): cache hit reuses same object; identical recovery
+through the cache; LRU bound; clear; weakref GC invalidation. test_integration.py (+1): cache=True reuses the Gram
+through the mind (hit on the second call, identical recovery). Files: holographic_occlusion.py (extended),
+test_holographic_occlusion.py, holographic_unified.py (occlusion_recall cache param + lazy _gram_cache),
+test_integration.py, README, NOTES_concepts.md, tour.py.
+
+*** RAM-1 from the occlusion-speed panel review. The RAM hunch finished: the Gram is now durable -- build once, reuse
+across cues, zero precompute on the second call -- via a bounded, GC-safe, id-keyed working-set cache. SPEED-1 + RAM-1
+together: the D-factor fix, cached. Remaining: GRAD-2 (the general optimizer), then the M-factor (batch selection) and
+N-factor (HoloForest selection) fixes. ***
+
+
+--------------------------------------------------------------------------------
+GRAD-2 -- A GENERAL GRADIENT-DESCENT OPTIMIZER (the gradients hunch, made first-class). The 3D-Gaussian-splatting work
+brought a real optimizer into the engine: the anisotropic splat fit (holographic_splat._aniso_optimize) runs Adam with
+HAND-DERIVED analytic gradients -- gradient descent, no autodiff, inside the NumPy-only rule -- and the cache module
+already carried finite-difference gradients (gradient_cache_fd). Both halves of a general gradient-descent capability
+were in the box but SILOED: the optimizer woven into the splat-specific gradients, the FD gradient specialized to
+field-maps-at-anchors. GRAD-2 promotes them to ONE reusable faculty, so "gradients on the fly" is first-class for the
+whole engine. (The splat module's embedded Adam is left UNCHANGED -- specialized for speed; this is the general twin
+beside it, the same update rule extracted.) It is also the prerequisite the occlusion-speed panel flagged for IHT --
+the gradient-native sparse-recovery member (GRAD-1) is a gradient step plus a threshold, wanting exactly this
+optimizer underneath.
+
+WHAT SHIPPED (holographic_optimize.py; +2 mind faculties):
+  * fd_gradient(f, x, eps=1e-5) -- the central finite-difference gradient of a scalar f: R^n -> R at x (2*n
+    evaluations, perturbing a copy one coordinate at a time). The general scalar-loss companion to the engine's
+    field-map FD helper.
+  * optimize(loss, x0, grad=None, steps, lr, b1, b2, eps, tol, patience, min_steps, fd_eps, stats) -- minimize
+    loss(x) from x0 by Adam (the exact bias-corrected update the splat fit uses, generalized). Analytic grad(x) where
+    supplied (fast); finite-difference fallback where not. Optional convergence-gated early stop; stats={} reads the
+    step count and loss trajectory. Returns the optimized x.
+
+MEASURED (selftest + 8 wrapper tests + 1 integration): CONVEX quadratic -> its minimum (off 1.1e-9); LEAST-SQUARES ->
+the lstsq solution (off 5.2e-11); the FD fallback reaches the SAME minimum as the analytic-gradient run, and
+fd_gradient matches a known analytic gradient to 8e-11; NON-CONVEX Rosenbrock -> ~[0.99, 0.98] near (1,1) in 8000
+steps; convergence-gated early stop reports fewer steps than the budget; fd_gradient does not mutate its input;
+deterministic (Adam + central FD are RNG-free given x0). Through the mind: least-squares -> lstsq, FD fallback -> the
+quadratic min, fd_gradient matches analytic.
+
+KEPT NEGATIVES (loud):
+  * NO AUTODIFF (the constraint): supply an analytic grad for speed; the FD fallback costs 2*n loss evaluations PER
+    STEP -- fine for small n, expensive for large n.
+  * general gradient descent inherits its limits -- a poor lr diverges or crawls, and on a non-convex loss it finds a
+    LOCAL minimum from the given start (Rosenbrock gets close, not exact, in a fixed budget). A workhorse, not a
+    global solver.
+  * the splat module keeps its OWN embedded Adam (the splat gradients inlined for speed); this is the general
+    extraction beside it, not a replacement. Refactoring the splat fit to call through here is a separate, optional
+    step.
+
+Tests: +9 (1536 -> 1545). test_holographic_optimize.py (+8): convex quadratic; least-squares; FD fallback matches the
+analytic run; fd_gradient matches analytic; fd_gradient preserves its input; Rosenbrock close; early stop fewer steps;
+deterministic. test_integration.py (+1): the optimizer through the mind (least-squares -> lstsq, FD fallback, mind
+fd_gradient). Files: holographic_optimize.py, test_holographic_optimize.py, holographic_unified.py (optimize +
+fd_gradient faculties, near gradient_cache), test_integration.py, README, NOTES_concepts.md, tour.py.
+
+*** GRAD-2 from the occlusion-speed panel review. The gradients hunch finished: the splat fit's hand-derived-gradient
+Adam, plus the cache module's finite differences, are now ONE engine-wide capability -- minimize any scalar loss,
+gradients on the fly, no autodiff. Next: GRAD-1 (IHT recovery built ON this optimizer -- the gradient-native member of
+the sparse-recovery family), then the M-factor (batch selection, CoSaMP/SP) and N-factor (HoloForest selection). ***
+
+
+--------------------------------------------------------------------------------
+GRAD-1 -- ITERATIVE HARD THRESHOLDING RECOVERY (the gradient-native sparse-recovery member, built on GRAD-2). The
+engine had two ways to recover the components of a bundle cue = sum_i w_i * codebook[i]: the LINEAR readout (one-shot
+correlations + top-m, washes out at load) and OCCLUSION recall (GREEDY matching pursuit -- take the most-relevant
+atom, subtract, repeat, never revisiting a pick). GRAD-1 adds the third: PROJECTED GRADIENT DESCENT -- a gradient step
+on the reconstruction loss, then PROJECT onto the K-sparse set (keep the K largest coefficients), ITERATED, so a
+coefficient dropped at one step can RETURN. That support revision is the point: greedy MP cannot undo an early wrong
+pick; IHT can.
+
+BUILT ON GRAD-2: the gradient step is exactly the descent GRAD-2's optimize() generalized -- the loss is
+0.5*||cue - c@codebook||^2, gradient -codebook@(cue - c@codebook), analytic and cheap. With NO threshold (K=N) IHT
+reduces to plain gradient descent on that loss = the LEAST-SQUARES solution (matched to ~1e-11), the same point
+optimize() finds. The hard-threshold projection is the ONE thing that turns the optimizer into a sparse recovery
+method. This is the panel's flagged use of the 3DGS gradient machinery for recovery, made literal.
+
+WHAT SHIPPED (holographic_iht.py; +1 mind faculty iht_recall):
+  * hard_threshold(c, K) -- the K-sparse projection H_K (keep the K largest |c|, zero the rest; K>=len is identity).
+  * iht_recall(cue, codebook, K, steps=300, mu=None, tol=1e-12) -- IHT recovery, returns (index, weight) descending
+    by |weight| (occlusion_recall's signature, for a head-to-head). mu defaults to 1/||codebook||_2^2 (1/Lipschitz,
+    the standard descent-guaranteeing IHT step).
+
+MEASURED -- IHT vs occlusion (greedy MP) vs linear as dictionary COHERENCE rises (M=12, N=200, D=512, 12 seeds):
+  * INCOHERENT (random dictionary): IHT F1 1.000 TIES occlusion 1.000; linear lags (0.958).
+  * The CROSSOVER is the honest finding -- NEITHER dominates:
+      - MILD coherence: greedy occlusion is BETTER (0.96 vs IHT 0.87) -- when the cue still points cleanly at the
+        true atoms, subtract-and-move wins and IHT's iterations spread energy onto correlated decoys.
+      - HIGH coherence: IHT PULLS AHEAD (0.71 vs occlusion 0.54) -- greedy MP's early wrong picks on a coherent
+        dictionary become UNRECOVERABLE; IHT keeps revising its support and corrects them. The classic
+        matching-pursuit-vs-IHT result, reproduced.
+  * K=N bridge: IHT with no threshold matches numpy lstsq to ~1e-11 -- the reduction to gradient descent, confirming
+    the GRAD-2 connection.
+
+KEPT NEGATIVES (loud):
+  * NOT a universal win over occlusion: at LOW-MILD dictionary coherence greedy matching pursuit recovers a BETTER
+    support. IHT is the COHERENT-regime method, not a strict upgrade -- the crossover is real and on the record.
+  * needs two knobs occlusion does not -- the sparsity K and the step size mu (a bad mu crawls or overshoots) -- plus
+    an iteration budget.
+  * projected gradient descent, so it finds the K-sparse stationary point reachable from the zero start, not a
+    certified global optimum.
+
+Tests: +7 (1545 -> 1552). test_holographic_iht.py (+6): ties occlusion incoherent; beats occlusion coherent; K=N
+reduces to lstsq; hard_threshold keeps the K largest; returns descending by magnitude; deterministic.
+test_integration.py (+1): IHT recall through the mind (perfect incoherent, beats occlusion coherent). Files:
+holographic_iht.py, test_holographic_iht.py, holographic_unified.py (iht_recall faculty after build_occlusion_gram),
+test_integration.py, README, NOTES_concepts.md, tour.py.
+
+*** GRAD-1 from the occlusion-speed panel review -- the gradient-native member, built ON GRAD-2. The three recovery
+routes now sit side by side: linear (one-shot), occlusion (greedy MP), IHT (projected gradient descent). The 3DGS
+gradient machinery serves recovery, not just fitting -- and the honest crossover (greedy wins at low coherence, IHT at
+high) is measured. Remaining occlusion-speed items: SPEED-3 (batch selection, CoSaMP/Subspace Pursuit -- the M-factor)
+and SPEED-2 (HoloForest-accelerated selection -- the N-factor, approximate, ship last). ***
+
+
+--------------------------------------------------------------------------------
+SPEED-3 -- CoSaMP BATCH-SELECTION RECOVERY (the strongest recovery-family member; the M-factor). The recovery family
+had three members: LINEAR (one-shot correlations + top-m), OCCLUSION (greedy matching pursuit, one atom/step), and IHT
+(projected gradient descent). SPEED-3 adds the fourth and strongest: CoSaMP (Compressive Sampling Matching Pursuit,
+Needell-Tropp 2009) does BATCH selection with a LEAST-SQUARES solve each round -- identify the 2K atoms most correlated
+with the residual, MERGE with the current support, solve least-squares over that merged set (the optimal coefficients),
+PRUNE to the K largest, repeat. The LS solve is the difference: it gets exact coefficients and corrects errors the
+greedy and gradient methods cannot, converging in a handful of rounds instead of M sequential picks. It is the
+M-factor companion to SPEED-1 (which removed the D factor by caching the Gram): ~2-3 ROUNDS, not M passes.
+
+WHAT SHIPPED (holographic_cosamp.py; +1 mind faculty cosamp_recall):
+  * cosamp_recall(cue, codebook, K, iters=15, tol=1e-10, stats=None) -- CoSaMP recovery; returns (index, weight)
+    descending by |weight| (occlusion_recall / iht_recall signature). stats={} reads stats['rounds'].
+
+MEASURED -- CoSaMP vs IHT vs occlusion vs linear (M=12, N=200, D=512, 12 seeds) as dictionary COHERENCE rises:
+  * CoSaMP recovers PERFECTLY at EVERY coherence tested -- F1 1.000 at coh 0.0/0.5/1.0/1.5 and on up to 8.0 -- while
+    occlusion falls to 0.54 and IHT to 0.71. The least-squares-over-merged-support disambiguates correlated atoms the
+    greedy/gradient methods get stuck on.
+  * Converges in ~2-3 ROUNDS (vs occlusion's M=12 sequential picks) -- the M-factor win.
+  * Coefficients are EXACT: weight RMSE ~8e-16 (the LS solve) vs occlusion's ~0.069 (greedy subtraction accumulates
+    coefficient error).
+
+THE HONEST CLIFF (kept negative): CoSaMP is NOT magic -- it falls off at the fundamental sparse-recovery PHASE
+TRANSITION, when the load M approaches the dimension D (the problem becomes underdetermined and NO method can recover).
+Measured at D=128: F1 1.000 at M/D=0.16, 0.83 at M/D=0.31, ~0.57-0.59 once M/D exceeds ~0.5. Recovery lives below
+roughly M < D/3.
+
+THE COST (kept negative): each round solves a least-squares over ~2K-3K atoms, so the per-round cost grows with K
+(~1.7 ms at M=12, ~57 ms at M=100 for N=400, D=1024). CoSaMP buys accuracy and few rounds with a per-round LS solve --
+a clear win at small-to-moderate K, while occlusion's cheap per-pick subtraction (with the SPEED-1 Gram) stays
+attractive at very large K or when an approximate recovery suffices.
+
+THE RECOVERY FAMILY, COMPLETE (four members, each with its regime):
+  * linear    -- one-shot correlation + top-m. Cheapest; washes out at load.
+  * occlusion -- greedy matching pursuit. One pass, can't revise; degrades on coherent dictionaries; cheap per pick
+    (and the SPEED-1 Gram makes it ~23x faster). Heaviest-recovered-first is its robust claim.
+  * IHT       -- projected gradient descent (GRAD-1). Revises its support; holds at high coherence (0.71) better than
+    greedy; needs mu/K/iterations; reduces to lstsq at K=N (the GRAD-2 bridge).
+  * CoSaMP    -- batch LS + prune (SPEED-3). STRONGEST: perfect across coherence, exact coefficients, ~2-3 rounds;
+    cost = a per-round LS solve; falls off at M/D > ~0.3 (the phase transition no method beats).
+
+Tests: +8 (1552 -> 1560). test_holographic_cosamp.py (+7): perfect across coherence; beats occlusion coherent; exact
+coefficients; few rounds; the phase-transition cliff; descending by magnitude; deterministic. test_integration.py
+(+1): CoSaMP through the mind (near-perfect coherent, ahead of IHT and occlusion, few rounds). Files:
+holographic_cosamp.py, test_holographic_cosamp.py, holographic_unified.py (cosamp_recall faculty after iht_recall),
+test_integration.py, README, NOTES_concepts.md, tour.py.
+
+*** SPEED-3 from the occlusion-speed panel review -- the M-factor, and the recovery family's strongest member. With
+the four routes side by side and their regimes measured, only the N-factor remains: SPEED-2 (HoloForest-accelerated
+atom selection -- Approximate MP / MIPS, approximate so its F1 cost must be measured, shipped last). ***
+
+
+--------------------------------------------------------------------------------
+SPEED-2 -- FOREST-ROUTED OCCLUSION SELECTION (the N-factor; SHIPPED AS A KEPT NEGATIVE). The occlusion-speed analysis
+named three factors in occlusion's O(M*N*D) cost. SPEED-1 removed D (cached Gram). SPEED-3 removed M (CoSaMP batch
+rounds). SPEED-2 is the N factor: occlusion's pick-the-most-relevant-atom step is a max-inner-product search over the
+whole dictionary, and a HoloForest answers it by comparing only the atoms ROUTED to the query's leaves -- genuinely
+sub-linear in N. This is the last occlusion-speed item, and the panel flagged it "approximate, measure the F1 cost,
+ship last." The measurement is the deliverable, and it is a kept negative.
+
+WHAT SHIPPED (holographic_occlusion.py extended; +2 mind faculties):
+  * build_occlusion_forest(codebook, n_trees=4, leaf_size=64, seed=0) -- a HoloForest over the codebook, built once
+    and reused across cues like the SPEED-1 Gram.
+  * occlusion_recall_forest(cue, codebook, m, forest=None, beam=4, ...) -- occlusion recall with the per-step
+    selection routed through the forest (recall_k for the most-similar unselected atom). Returns (index, weight)
+    descending, like occlusion_recall.
+
+MEASURED -- forest vs exact occlusion (D=512, M=12, 5 seeds), pushing N:
+  * N=500:  forest F1 1.000, but SPEED 0.09x (11x SLOWER) -- the forest still compares ~94% of atoms; routing
+    overhead dominates.
+  * N=2000: forest F1 1.000, SPEED 0.20x, compares ~42%.
+  * N=5000: comparisons finally drop to ~12% (the sub-linearity is REAL) -- but F1 falls to 0.767 and it is still
+    0.64x (slower).
+
+THE TWO KEPT NEGATIVES (loud -- this is why it is shipped as a documented regression, not a default):
+  1. SPEED: the exact selection is a single vectorized BLAS matrix-vector product (codebook @ residual); the forest
+     routes through trees in Python per step. The routing overhead outweighs the saved comparisons until N is very
+     large -- a REGRESSION at every scale measured. Exact occlusion with the SPEED-1 Gram is the right default.
+  2. ACCURACY: the forest is APPROXIMATE, so exactly when N is large enough to compare few candidates (~12% at
+     N=5000) it misses the true best atom often enough to drop F1 to ~0.77 (exact 1.0). The approximation cost
+     arrives precisely when the comparison saving does.
+  So this path is for the VERY-LARGE-N, approximate-acceptable regime only. (Same shape of lesson as the C-kernel
+  backend: a real mechanism that measures as a regression at operating dimensions -- kept callable so the failure is
+  visible, not hidden.)
+
+THE THREE-FACTOR PICTURE, COMPLETE: occlusion's O(M*N*D) ->
+  * D-factor: SPEED-1 cached Gram -- EXACT, ~23x, the default win.
+  * M-factor: SPEED-3 CoSaMP batch rounds -- EXACT, strongest recovery, ~2-3 rounds.
+  * N-factor: SPEED-2 forest selection -- APPROXIMATE, sub-linear comparisons but a regression at current scale (this
+    item). The exact paths win until N is enormous.
+
+Tests: +5 (1560 -> 1565). test_holographic_occlusion.py (+4): sub-linear comparisons; accurate at moderate N; never
+beats exact (the approximation kept negative); deterministic. test_integration.py (+1): forest occlusion through the
+mind (accurate at moderate N, sub-linear, exact matches or beats it). Files: holographic_occlusion.py (extended),
+test_holographic_occlusion.py, holographic_unified.py (build_occlusion_forest + occlusion_recall_forest faculties),
+test_integration.py, README, NOTES_concepts.md, tour.py.
+
+*** SPEED-2 from the occlusion-speed panel review -- the N-factor, measured to its honest conclusion. The
+occlusion-speed backlog is now CLOSED: D-factor (Gram) and M-factor (CoSaMP) are exact wins; the N-factor (forest) is
+a measured regression at operating scale, kept callable with its negatives loud. ***

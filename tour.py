@@ -3772,6 +3772,170 @@ _sav_sd = _meshm.scene_dedup_saving([_base_sd] + [_var_sd(i) for i in range(8)])
 print(f"  a variant changing one subtree: delta is +{len(_d_sd['added'])}/-{len(_d_sd['removed'])} components vs {len(_scomp_sd(_var1_sd))} full; base+delta rebuilds it exactly: {_apply_sd(_scomp_sd(_base_sd), _d_sd) == _scomp_sd(_var1_sd)}")
 print(f"  storing 9 scenes that share subtrees: {_sav_sd['naive']} components naively -> {_sav_sd['unique']} unique ({_sav_sd['saving_x']:.1f}x) -- content-hashing dedups for free.  *** reverse item R6; honest finding: the dedup is automatic, the diff is the new part ***")
 
+title("RT-V occlusion recall: front-to-back compositing breaks the bundle capacity cliff")
+# 3DGS composites front-to-back so a pixel saturates after the front few splats. The transfer: sort atoms by relevance
+# to a loaded cue, subtract each one's explained part (transmittance), and the tail is OCCLUDED, not summed -- so
+# multi-component recall survives far past the linear cliff that washes out.
+_rng_oc = _np_fwd4.random.default_rng(0); _Noc, _Doc = 200, 512
+_cb_oc = _rng_oc.standard_normal((_Noc, _Doc)); _cb_oc = _cb_oc / _np_fwd4.linalg.norm(_cb_oc, axis=1, keepdims=True)
+def _f1_oc(pred, true):
+    pred = set(pred); _tp = len(pred & true)
+    _p = _tp / len(pred) if pred else 0.0; _r = _tp / len(true) if true else 0.0
+    return 2 * _p * _r / (_p + _r) if (_p + _r) > 0 else 0.0
+print("  load M | linear/softmax/TopK F1 | OCCLUSION F1")
+for _M_oc in (5, 25, 50):
+    _fo = _fl = 0.0
+    for _sd_oc in range(15):
+        _r_oc = _np_fwd4.random.default_rng(_sd_oc); _S_oc = set(_r_oc.choice(_Noc, _M_oc, replace=False).tolist())
+        _cue_oc = _cb_oc[list(_S_oc)].sum(0); _cue_oc = _cue_oc / _np_fwd4.linalg.norm(_cue_oc)
+        _fo += _f1_oc([j for j, _ in _meshm.occlusion_recall(_cue_oc, _cb_oc, m=_M_oc)], _S_oc)
+        _fl += _f1_oc(list(_np_fwd4.argsort(-(_cb_oc @ _cue_oc))[:_M_oc]), _S_oc)
+    print(f"   {_M_oc:3d}   |        {_fl/15:.3f}          |   {_fo/15:.3f}")
+print("  the order-free readouts wash out together as load grows; occlusion's sequential subtraction holds perfect recall -- ties them at low load (kept negative).  *** RT-V: alpha-compositing breaks the engine's oldest cliff ***")
+
+title("RT-VI context-dependent meaning: spherical harmonics -> a polysemous atom on the FPE phase substrate")
+# A 3DGS splat's colour is a function of view direction, expanded in spherical harmonics (DC = base colour). The
+# transfer: an atom whose MEANING is a function of a context angle, in a circular-harmonic basis. DC = the context-
+# free meaning (the plain fixed atom, exactly); higher harmonics = how the meaning shifts with context.
+_rng_hm = _np_fwd4.random.default_rng(0); _Dhm = 256
+_senses = [_rng_hm.standard_normal(_Dhm) for _ in range(3)]; _senses = [s / _np_fwd4.linalg.norm(s) for s in _senses]
+_ctx = [0.0, 2 * 3.14159265 / 3, 4 * 3.14159265 / 3]
+_patom = _meshm.harmonic_atom(_ctx, _senses, n_harmonics=2)   # one polysemous atom, 3 senses
+print("  one atom, 3 senses placed at 3 contexts -- decode at each context recovers the right sense:")
+for _i, (_t, _s) in enumerate(zip(_ctx, _senses)):
+    _rec = _meshm.harmonic_decode(_patom, _t)
+    print(f"    context {_t:.2f} -> cosine to sense {_i} = {float(_rec @ _s / _np_fwd4.linalg.norm(_rec)):.4f}")
+# degree-0 fallback: a context-free atom reduces to the plain atom exactly (backward-compatible)
+_const = _rng_hm.standard_normal(_Dhm)
+_cfree = _meshm.harmonic_atom([0.0, 1.0, 2.0], [_const, _const, _const], n_harmonics=1)
+print(f"  a CONTEXT-FREE atom: decode error at arbitrary context = {float(_np_fwd4.linalg.norm(_meshm.harmonic_decode(_cfree, 0.77) - _const)):.1e} -- the DC term IS the plain atom (degree-0 fallback, exact).  *** RT-VI: the engine's own basis pointed at meaning ***")
+
+title("Clone-vs-split density control: cover an under-served region vs resolve fine structure")
+# 3DGS densifies by the splat's SCALE: clone a small high-error splat to COVER, split a wide one to RESOLVE. The
+# engine's splat_densify adds capacity where error is but is scale-blind; this adds the cover-vs-resolve decision.
+from holographic_splat import splat_render as _sr_cs, splat_refit as _rf_cs
+from holographic_splatdensify import clone_splat as _cl_cs, split_splat as _sp_cs
+_ys_cs, _xs_cs = _np_fwd4.mgrid[0:64, 0:64]
+_ridge_cs = _np_fwd4.exp(-(((_xs_cs - 14) ** 2) / 6.0 + ((_ys_cs - 32) ** 2) / 120.0))      # needs COVER
+_twin_cs = (_np_fwd4.exp(-(((_xs_cs - 46) ** 2 + (_ys_cs - 30) ** 2) / 4.0)) + _np_fwd4.exp(-(((_xs_cs - 52) ** 2 + (_ys_cs - 30) ** 2) / 4.0)))  # needs RESOLVE
+_tgt_cs = _ridge_cs + _twin_cs
+_sp0_cs = _rf_cs([(32, 14, 0.0, 1.0), (30, 49, 0.0, 3.5)], _tgt_cs)                          # small splat + wide splat
+_res_cs = _tgt_cs - _sr_cs(_sp0_cs, _tgt_cs.shape)
+def _mse_cs(a, b): return float(((a - b) ** 2).mean())
+def _blind_cs(strat):
+    _o = []
+    for _s in _sp0_cs:
+        _o += (_sp_cs(_s, _res_cs, _tgt_cs.shape) if strat == "split" else [_s] + _cl_cs(_s, _res_cs, _tgt_cs.shape))
+    return _mse_cs(_sr_cs(_rf_cs(_o, _tgt_cs), _tgt_cs.shape), _tgt_cs)
+_scale_cs = _mse_cs(_sr_cs(_meshm.splat_clone_split(_sp0_cs, _tgt_cs), _tgt_cs.shape), _tgt_cs)
+print(f"  mixed target (a ridge needing cover + twin peaks needing resolve), fixed splat budget:")
+print(f"    always-clone {_blind_cs('clone'):.5f} (misses the peaks) | always-split {_blind_cs('split'):.5f} (hurts the ridge) | SCALE-AWARE {_scale_cs:.5f}")
+print("  each blind strategy handles only one error type; the scale rule does the right move for each -- and the wrong move can be worse than nothing.  *** clone-vs-split: sharpening WHERE capacity goes ***")
+
+title("MCMC birth-death relocation: conserve a dead atom by moving it, don't drop it (successor to evict-rarest)")
+# The engine's bounded memory evicts the rarest (drops capacity). 3DGS-as-MCMC relocates a dead atom to an under-
+# represented region instead -- conserving the budget. Here: a fixed budget with dead splats jammed in a corner.
+from holographic_relocate import birth_death_relocate as _bdr
+_ys_bd, _xs_bd = _np_fwd4.mgrid[0:64, 0:64]
+_tgt_bd = sum(_np_fwd4.exp(-(((_xs_bd - cx) ** 2 + (_ys_bd - cy) ** 2) / 12.0))
+              for cx, cy in [(16, 16), (48, 16), (16, 48), (48, 48), (32, 32), (32, 10)])
+_useful_bd = [(16, 16, 0.0, 3.5), (48, 16, 0.0, 3.5), (16, 48, 0.0, 3.5), (48, 48, 0.0, 3.5), (32, 32, 0.0, 3.5), (32, 10, 0.0, 3.5)]
+_splats_bd = _rf_cs(_useful_bd + [(2, 2, 0.0, 1.0)] * 6, _tgt_bd)        # 6 dead splats in the corner
+_thr_bd = 0.05 * _np_fwd4.abs([s[2] for s in _splats_bd]).max()
+_n_dead_bd = int((_np_fwd4.abs([s[2] for s in _splats_bd]) < _thr_bd).sum())
+_drop_bd = _mse_cs(_sr_cs(_rf_cs([s for s in _splats_bd if abs(s[2]) >= _thr_bd], _tgt_bd), _tgt_bd.shape), _tgt_bd)
+_reloc_sp = _meshm.splat_relocate(_splats_bd, _tgt_bd)
+_reloc_bd = _mse_cs(_sr_cs(_reloc_sp, _tgt_bd.shape), _tgt_bd)
+print(f"  budget 12 splats, {_n_dead_bd} dead:")
+print(f"    DROP dead (evict, budget shrinks to {12 - _n_dead_bd}): MSE {_drop_bd:.5f} | RELOCATE to under-served regions (count conserved {len(_reloc_sp)}): MSE {_reloc_bd:.5f}")
+print(f"  relocating conserves the budget and redistributes it where the data is -- ~{_drop_bd / _reloc_bd:.0f}x better than dropping.  *** birth-death: conserve capacity, don't drop it ***")
+
+title("SPEED-1: Gram-cached occlusion recall -- cache the dictionary's Gram, stop rescanning it (Batch-OMP)")
+# Occlusion recall broke the capacity cliff but cost ~170x the linear readout (M rescans of the dictionary). The fix
+# from compressed sensing: precompute the Gram G = cb @ cb.T once, update correlations through a Gram column per pick
+# instead of rescanning. EXACT (identical recovery), and the D factor leaves the inner loop.
+import time as _time_sp
+_rng_sp = _np_fwd4.random.default_rng(0); _Nsp, _Dsp = 400, 1024
+_cb_sp = _rng_sp.standard_normal((_Nsp, _Dsp)); _cb_sp = _cb_sp / _np_fwd4.linalg.norm(_cb_sp, axis=1, keepdims=True)
+_G_sp = _meshm.build_occlusion_gram(_cb_sp)                  # the cached precompute (reused across cues)
+_r_sp = _np_fwd4.random.default_rng(1); _S_sp = _r_sp.choice(_Nsp, 200, replace=False)
+_cue_sp = _cb_sp[_S_sp].sum(0); _cue_sp = _cue_sp / _np_fwd4.linalg.norm(_cue_sp)
+_a_sp = _meshm.occlusion_recall(_cue_sp, _cb_sp, m=200)                  # rescan path
+_b_sp = _meshm.occlusion_recall(_cue_sp, _cb_sp, m=200, gram=_G_sp)      # Gram-cached fast path
+_t0 = _time_sp.perf_counter()
+for _ in range(20): _meshm.occlusion_recall(_cue_sp, _cb_sp, m=200)
+_t_resc = (_time_sp.perf_counter() - _t0) / 20
+_t0 = _time_sp.perf_counter()
+for _ in range(20): _meshm.occlusion_recall(_cue_sp, _cb_sp, m=200, gram=_G_sp)
+_t_gram = (_time_sp.perf_counter() - _t0) / 20
+print(f"  D={_Dsp}, recovering 200 items from one bundle:")
+print(f"    rescan path {_t_resc*1e3:6.2f}ms  ->  Gram-cached {_t_gram*1e3:5.2f}ms   ({_t_resc/_t_gram:.0f}x faster)")
+print(f"    identical atoms recovered? {[j for j,_ in _a_sp]==[j for j,_ in _b_sp]}  (exact -- weights match to machine epsilon)")
+print("  the bottleneck was recompute-what-you-already-know: the Gram is a cached precompute, reused across cues.  *** SPEED-1: the RAM hunch, measured ***")
+
+title("RAM-1: a Gram working-set cache -- build the Gram once, reuse it across cues (zero precompute on the 2nd call)")
+# SPEED-1 made the readout fast IF you hold the Gram. RAM-1 makes the Gram durable: pass cache=True and the mind keeps
+# a bounded, GC-safe, id-keyed cache, so a vocabulary queried many times pays the O(N^2 D) precompute ONCE.
+_meshm.occlusion_recall(_cue_sp, _cb_sp, m=200, cache=True)             # 1st call: builds + caches (a MISS)
+for _ in range(4): _meshm.occlusion_recall(_cue_sp, _cb_sp, m=200, cache=True)   # repeated cues: cache HITS
+print(f"  5 recalls against the same vocabulary: {_meshm._gram_cache.misses} Gram build (miss), {_meshm._gram_cache.hits} reuses (hits) -- the precompute is paid ONCE.")
+print("  keyed by codebook identity (O(1), no per-call hashing), GC-safe via weakref, LRU-bounded.  *** RAM-1: the Gram, made durable ***")
+
+title("GRAD-2: the splat-fit Adam, generalized -- minimize any scalar loss, gradients on the fly (no autodiff)")
+# 3D-Gaussian splatting brought a real optimizer into the engine (Adam with hand-derived gradients). GRAD-2 promotes
+# it to a general faculty: minimize ANY loss, with an analytic gradient where you have one, finite differences where
+# you don't. Here: a least-squares loss, descended to the same answer numpy's lstsq gives.
+_A_g2 = _np_fwd4.random.default_rng(7).standard_normal((20, 6))
+_b_g2 = _np_fwd4.random.default_rng(8).standard_normal(20)
+_sol_g2 = _np_fwd4.linalg.lstsq(_A_g2, _b_g2, rcond=None)[0]
+_x_g2 = _meshm.optimize(lambda z: float(((_A_g2 @ z - _b_g2) ** 2).sum()), _np_fwd4.zeros(6),
+                        grad=lambda z: 2 * _A_g2.T @ (_A_g2 @ z - _b_g2), steps=2000, lr=0.02)
+print(f"  least-squares descended through the mind vs numpy lstsq: agree to {float(_np_fwd4.linalg.norm(_x_g2 - _sol_g2)):.1e}")
+# and with NO analytic gradient supplied, the finite-difference fallback reaches the same minimum
+_t_g2 = _np_fwd4.array([1.0, -2.0, 0.5])
+_xfd_g2 = _meshm.optimize(lambda z: float(((z - _t_g2) ** 2).sum()), _np_fwd4.zeros(3), steps=400, lr=0.1)
+print(f"  same fit with NO gradient (finite differences on the fly): off by {float(_np_fwd4.linalg.norm(_xfd_g2 - _t_g2)):.1e}.  *** GRAD-2: the gradients hunch, first-class ***")
+
+title("GRAD-1: IHT recall -- the gradient-native recovery route, built on GRAD-2 (it REVISES its support)")
+# Three ways to recover a bundle's components now sit side by side: linear (one-shot), occlusion (greedy matching
+# pursuit), and IHT (projected gradient descent -- a gradient step + keep-the-K-largest, iterated). On a COHERENT
+# dictionary, greedy MP's early wrong picks are unrecoverable; IHT keeps revising and wins. Build a coherent dictionary:
+_rg1 = _np_fwd4.random.default_rng(101)
+_cbc = _rg1.standard_normal((200, 512)) + 1.5 * _rg1.standard_normal(512)      # shared component -> mutual coherence
+_cbc = _cbc / _np_fwd4.linalg.norm(_cbc, axis=1, keepdims=True)
+_Sc = _rg1.choice(200, 12, replace=False); _wc = _rg1.uniform(0.5, 1.5, 12)
+_cuec = (_wc[:, None] * _cbc[_Sc]).sum(0); _truec = set(int(_i) for _i in _Sc)
+def _f1_t(_rec):
+    _g = set(_i for _i, _ in _rec); _tp = len(_g & _truec)
+    _p = _tp / max(len(_g), 1); _r = _tp / max(len(_truec), 1)
+    return 2 * _p * _r / max(_p + _r, 1e-12)
+_iht_f1 = _f1_t(_meshm.iht_recall(_cuec, _cbc, 12))
+_occ_f1 = _f1_t(_meshm.occlusion_recall(_cuec, _cbc, m=12))
+print(f"  recover 12 atoms from a coherent dictionary: IHT F1 {_iht_f1:.3f}  vs  greedy occlusion {_occ_f1:.3f} -- support revision corrects MP's stuck early picks.")
+print("  with K=N (no threshold) IHT reduces to plain gradient descent = the least-squares solution -- the same descent GRAD-2 generalized.  *** GRAD-1: the third recovery route ***")
+
+title("SPEED-3: CoSaMP -- the strongest recovery route (batch select + least-squares each round), completes the family")
+# The four routes on the SAME coherent bundle from the IHT demo above (_cbc/_cuec/_truec/_f1_t): linear (one-shot),
+# occlusion (greedy MP), IHT (gradient + threshold), and CoSaMP (batch 2K candidates + least-squares + prune, ~2-3
+# rounds). The least-squares solve disambiguates the correlated atoms the others get stuck on.
+_lin_f1 = _f1_t([(int(_i), float(_v)) for _i, _v in zip(
+    _np_fwd4.argpartition(_cbc @ _cuec, -12)[-12:], (_cbc @ _cuec)[_np_fwd4.argpartition(_cbc @ _cuec, -12)[-12:]])])
+_cos_st = {}
+_cos_f1 = _f1_t(_meshm.cosamp_recall(_cuec, _cbc, 12, stats=_cos_st))
+print(f"  recover 12 atoms from a coherent dictionary -- linear {_lin_f1:.3f} | occlusion {_occ_f1:.3f} | IHT {_iht_f1:.3f} | CoSaMP {_cos_f1:.3f} (in {_cos_st['rounds']} rounds)")
+print("  CoSaMP's per-round least-squares gets exact coefficients and corrects what greedy MP can't -- the cost is that LS solve, and it falls off only as the load nears the dimension.  *** SPEED-3: the recovery family complete ***")
+
+title("SPEED-2: forest-routed selection -- the N-factor is REAL (sub-linear), but a measured regression at this scale")
+# The last occlusion-speed factor: occlusion's pick-the-best-atom step is a max-inner-product search, and a HoloForest
+# answers it by comparing only the atoms ROUTED to the query -- sub-linear in N. Build a forest over a big dictionary:
+_cbF = _np_fwd4.random.default_rng(9).standard_normal((4000, 256))
+_cbF = _cbF / _np_fwd4.linalg.norm(_cbF, axis=1, keepdims=True)
+_SF = _np_fwd4.random.default_rng(10).choice(4000, 12, replace=False); _cueF = _cbF[_SF].sum(0)
+_F = _meshm.build_occlusion_forest(_cbF, seed=0)
+_recF = _meshm.occlusion_recall_forest(_cueF, _cbF, 12, forest=_F)
+print(f"  N=4000 dictionary: the forest ranked only {_F.last_comparisons} of 4000 atoms per pick -- the sub-linearity is real.")
+print("  BUT: the exact scan is a single BLAS matvec the Python tree-routing can't beat until N is enormous, and the approximate pick costs F1 exactly when it saves comparisons -- so exact occlusion + the SPEED-1 Gram stays the default.  *** SPEED-2: the N-factor, measured to its honest end (kept negative) ***")
+
 title("One routing fabric: the chunkers/tilers/stores converge -- pick the pivot, get the regime (StructuredIndex keying)")
 # The capacity-cliff cure ("route each item to a bounded-load bucket") had been re-grown five times. It is
 # ONE fabric: you escape the cliff HORIZONTALLY and address shards by a PIVOT -- and the pivot you pick IS the

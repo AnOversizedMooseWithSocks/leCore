@@ -1335,6 +1335,27 @@ class UnifiedMind:
         from holographic_cache import interp_first_order
         return interp_first_order(cache, q, validity_radius, global_weights=global_weights)
 
+    def optimize(self, loss, x0, grad=None, steps=200, lr=0.05, b1=0.9, b2=0.999, eps=1e-8,
+                 tol=0.0, patience=10, min_steps=20, fd_eps=1e-5, stats=None):
+        """GENERAL GRADIENT-DESCENT OPTIMIZER (holographic_optimize, GRAD-2) -- minimize any scalar `loss(x)` from
+        `x0` by Adam (the exact bias-corrected update the splat fit uses, generalized). Supply `grad(x)` for the
+        analytic gradient (fast); omit it for the finite-difference fallback (2*n loss evaluations per step). This
+        promotes the 3DGS work's gradient machinery -- the splat fit's hand-derived-gradient Adam, plus the cache
+        module's finite differences -- to a first-class engine capability: gradients on the fly, with no autodiff
+        (the NumPy-only rule). `tol > 0` enables convergence-gated early stop; pass stats={} for steps and the loss
+        trajectory. Underpins IHT recovery (GRAD-1) and any fit/alignment problem. Kept negative: no autodiff (FD is
+        the general fallback and costs 2*n evals/step); gradient descent finds a LOCAL minimum on a non-convex loss."""
+        from holographic_optimize import optimize
+        return optimize(loss, x0, grad=grad, steps=steps, lr=lr, b1=b1, b2=b2, eps=eps,
+                        tol=tol, patience=patience, min_steps=min_steps, fd_eps=fd_eps, stats=stats)
+
+    def fd_gradient(self, f, x, eps=1e-5):
+        """The central finite-difference gradient of a scalar function f: R^n -> R at x (holographic_optimize,
+        GRAD-2) -- 2*n evaluations, perturbing a copy one coordinate at a time. The general scalar-loss companion to
+        the cache module's field-map finite differences; the 'gradient' for optimize() when no analytic one exists."""
+        from holographic_optimize import fd_gradient
+        return fd_gradient(f, x, eps=eps)
+
     def adaptive_anchors(self, x, y, n, floor=0.05, power=0.5):
         """Place n cache/codebook anchor positions along `x` so they crowd where the field `y` bends (high
         curvature) and thin out where it is flat -- irradiance caching's adaptive record density instead of a
@@ -1826,6 +1847,93 @@ class UnifiedMind:
         from holographic_traverse import gated_traverse
         return gated_traverse(step, start, floor=floor, max_steps=max_steps, min_steps=min_steps)
 
+    def occlusion_recall(self, cue, codebook, m=None, min_share=0.05, gram=None, cache=False):
+        """OCCLUSION RECALL (holographic_occlusion, RT-V) -- recover the components present in `cue` (a bundle /
+        superposition of `codebook` atoms) by an ordered, saturating front-to-back readout: take the most-relevant
+        atom, record its share, SUBTRACT its explained part (the transmittance), repeat. The alpha-compositing
+        transfer: the front explains the cue, the tail is OCCLUDED rather than summed, so multi-component recall
+        survives FAR past the linear-bundle capacity cliff (measured F1 ~1.0 at high load where the linear /
+        softmax / TopK top-m readouts wash out to ~0.91). Returns (index, weight) pairs in descending-relevance
+        order; `m` fixes the count, else stop below `min_share`.
+
+        SPEED (SPEED-1, Batch-OMP): pass a cached `gram` from build_occlusion_gram(codebook) -- the per-step
+        dictionary rescan becomes a Gram-column update (the D factor leaves the inner loop), EXACT (identical
+        atoms/order, weights to ~1e-16) and measured ~23x faster at D=1024. RAM (RAM-1): pass `cache=True` instead and
+        this mind keeps a bounded GramCache, so a vocabulary queried many times pays the Gram precompute ONCE and the
+        second call is a zero-precompute hit -- the caller need not manage the Gram. Kept negative: at LOW load it
+        TIES plain linear recall; the Gram cache assumes immutable codebooks."""
+        from holographic_occlusion import occlusion_recall
+        if cache and gram is None:
+            if not hasattr(self, "_gram_cache"):
+                from holographic_occlusion import GramCache
+                self._gram_cache = GramCache()
+            gram = self._gram_cache.gram(codebook)         # RAM-1: build once, reuse across cues (id-keyed, GC-safe)
+        return occlusion_recall(cue, codebook, m=m, min_share=min_share, gram=gram)
+
+    def build_occlusion_gram(self, codebook):
+        """The cached Gram matrix for occlusion_recall's fast path (holographic_occlusion, SPEED-1) -- G = codebook @
+        codebook.T, computed ONCE and reused across cues. Pass it as occlusion_recall(..., gram=G): the readout then
+        updates correlations through a Gram column per pick instead of rescanning the dictionary (O(N) vs O(N*D) per
+        step). Pays whenever the same codebook is queried more than once (the engine's normal case); costs O(N^2)
+        memory -- the storage-for-speed trade (Rubinstein-Zibulevsky-Elad 2008, Batch-OMP)."""
+        from holographic_occlusion import build_gram
+        return build_gram(codebook)
+
+    def build_occlusion_forest(self, codebook, n_trees=4, leaf_size=64, seed=0):
+        """Build a HoloForest over `codebook` for forest-routed occlusion selection (holographic_occlusion, SPEED-2,
+        the N-factor) -- built once, reused across cues like the SPEED-1 Gram. Pass it as occlusion_recall_forest(...,
+        forest=F). See occlusion_recall_forest for the measured trade-off (it is a kept negative at current scale)."""
+        from holographic_occlusion import build_occlusion_forest
+        return build_occlusion_forest(codebook, n_trees=n_trees, leaf_size=leaf_size, seed=seed)
+
+    def occlusion_recall_forest(self, cue, codebook, m, forest=None, beam=4, n_trees=4, seed=0):
+        """OCCLUSION RECALL, FOREST-ROUTED (holographic_occlusion, SPEED-2) -- occlusion recall with the per-step
+        atom selection routed through a HoloForest instead of an exact O(N) scan. The N-FACTOR: the pick-the-most-
+        relevant-atom step is a max-inner-product search, and the forest answers it by comparing only the atoms ROUTED
+        to the query's leaves -- genuinely sub-linear in the dictionary size N. Returns (index, weight) descending,
+        like occlusion_recall.
+
+        SHIPPED AS A KEPT NEGATIVE (the capability is real, its limits are loud and measured): the comparison count IS
+        sub-linear (~12% of the atoms at N=5000), but at this engine's operating scale it is a REGRESSION -- the exact
+        selection is a single vectorized BLAS matrix-vector product that the Python-level tree routing cannot beat
+        until N is very large (measured ~0.1x speed at N=500, ~0.6x at N=5000, still slower), AND the forest is
+        APPROXIMATE, so when N is finally large enough to compare few candidates the approximate pick drops recovery
+        F1 to ~0.77 (exact is 1.0). For everything at current scale, exact occlusion_recall (with a cached Gram) wins
+        on BOTH speed and accuracy; this path is for the very-large-N, approximate-acceptable regime only. The
+        N-factor of the occlusion-speed analysis, measured to its honest conclusion."""
+        from holographic_occlusion import occlusion_recall_forest
+        return occlusion_recall_forest(cue, codebook, m, forest=forest, beam=beam, n_trees=n_trees, seed=seed)
+
+    def iht_recall(self, cue, codebook, K, steps=300, mu=None, tol=1e-12):
+        """IHT RECALL (holographic_iht, GRAD-1) -- recover the K active atoms of `cue` (a bundle of `codebook` rows)
+        by ITERATIVE HARD THRESHOLDING: projected gradient descent, a gradient step on the reconstruction loss then
+        keep the K largest coefficients, ITERATED. The gradient-native sibling of occlusion_recall (greedy matching
+        pursuit) and the linear readout: unlike greedy MP it REVISES its support, so a coefficient dropped at one step
+        can return -- which is why it holds up on a COHERENT dictionary where greedy MP's early wrong picks become
+        unrecoverable. Built on GRAD-2: the gradient step is the descent optimize() generalized, and with K=N (no
+        threshold) IHT reduces to plain gradient descent = the least-squares solution; the hard-threshold projection
+        is the one thing that makes it sparse recovery. Returns (index, weight) pairs descending by |weight|, the same
+        shape as occlusion_recall. MEASURED: ties occlusion when incoherent (both ~perfect), BEATS it at high
+        coherence (F1 0.71 vs 0.54). Kept negative: greedy MP wins at LOW-MILD coherence -- IHT is the coherent-regime
+        method, not a strict upgrade; it needs the sparsity K and a step size mu (defaulted to 1/Lipschitz)."""
+        from holographic_iht import iht_recall
+        return iht_recall(cue, codebook, K, steps=steps, mu=mu, tol=tol)
+
+    def cosamp_recall(self, cue, codebook, K, iters=15, tol=1e-10, stats=None):
+        """CoSaMP RECALL (holographic_cosamp, SPEED-3) -- recover the K active atoms of `cue` by BATCH selection with
+        a least-squares solve each round: correlate the residual with every atom, take the 2K most-correlated, MERGE
+        with the current support, solve least-squares over that merged set, PRUNE to the K largest, repeat. The
+        strongest member of the recovery family (linear / occlusion / IHT / CoSaMP): the least-squares solve gets
+        EXACT coefficients and corrects errors the greedy and gradient methods cannot, so it recovers PERFECTLY across
+        dictionary coherence where occlusion falls to ~0.54 and IHT to ~0.71 -- and converges in ~2-3 ROUNDS, not M
+        sequential picks (the M-factor companion to SPEED-1's D-factor Gram). Returns (index, weight) descending by
+        |weight|, the same shape as occlusion_recall / iht_recall; pass stats={} for stats['rounds']. Kept negatives:
+        each round costs a least-squares solve (cost grows with K), and it FALLS OFF at the underdetermined phase
+        transition when the load M approaches the dimension D (recovery lives below ~M < D/3 -- no method recovers
+        above it)."""
+        from holographic_cosamp import cosamp_recall
+        return cosamp_recall(cue, codebook, K, iters=iters, tol=tol, stats=stats)
+
     def factor_composite(self, composite, codebooks, restarts=20, L=None, iters=None, seed=0, confidence=False,
                          readout="softmax"):
         """Pull a single bound composite APART into the factors that built it -- the inverse of binding,
@@ -1958,6 +2066,31 @@ class UnifiedMind:
         from holographic_fpe import VectorFunctionEncoder
         return VectorFunctionEncoder(n_dims, dim=min(self.dim, 1024), bounds=bounds,
                                      kernel=kernel, bandwidth=bandwidth, seed=self.seed)
+
+    def harmonic_atom(self, thetas, meanings, n_harmonics):
+        """CONTEXT-CONDITIONED ATOM (holographic_harmonic, RT-VI) -- a polysemous atom whose decoded MEANING is a
+        function of a context angle, represented in a CIRCULAR-harmonic (Fourier) basis on this engine's own FHRR/FPE
+        phase substrate (the spherical-harmonics transfer: phase = a point on the circle = a direction). Fit from
+        (context angle, meaning) pairs; `n_harmonics`=K keeps the DC plus K-1 harmonics. The DC term is the
+        context-FREE meaning -- exactly the plain fixed atom, so a context-free atom reduces to the plain atom at K=1
+        (backward-compatible). Returns a harmonic atom to read with harmonic_decode / harmonic_dc. Measured: distinct
+        senses at distinct contexts are each recovered (cos>0.999) and blend between; a smooth (band-limited) meaning
+        is exact at K=B+1, beating per-context storage. Kept negative: for context-free atoms the DC suffices (ties
+        the plain atom by construction); if the variation is not smooth it degenerates to storing every context."""
+        from holographic_harmonic import harmonic_atom
+        return harmonic_atom(thetas, meanings, n_harmonics)
+
+    def harmonic_decode(self, atom, theta):
+        """Read a context-conditioned atom (holographic_harmonic, RT-VI) at context angle `theta` -- the harmonic
+        sum giving the meaning in that context. The analog of unbinding with an FPE-encoded role(theta)."""
+        from holographic_harmonic import harmonic_decode
+        return harmonic_decode(atom, theta)
+
+    def harmonic_dc(self, atom):
+        """The DC (degree-0), context-FREE meaning of a context-conditioned atom (holographic_harmonic, RT-VI) --
+        exactly the plain fixed atom, the backward-compatible fallback."""
+        from holographic_harmonic import harmonic_dc
+        return harmonic_dc(atom)
 
     def spectral_basis(self, points, k=10, n_basis=12):
         """The data-driven decomposition basis for a signal on a manifold (holographic_spectral, EXP-6): the
@@ -4038,6 +4171,36 @@ class UnifiedMind:
         none clears it. The PSNR-budget analog of mesh_select_lod's pixel budget."""
         from holographic_splatprune import select_splat_lod
         return select_splat_lod(chain, min_psnr)
+
+    def splat_clone_split(self, splats, target, n_densify=None, scale_thresh=None):
+        """SCALE-AWARE CLONE-VS-SPLIT DENSIFICATION (holographic_splatdensify) -- the 3DGS densification DISTINCTION
+        that the engine's existing splat_densify (`densify_fit`, staged residual placement) was missing: it adds
+        capacity where error is high but is SCALE-BLIND. This refines an EXISTING splat set by asking, per high-error
+        splat, whether the region needs COVERING or RESOLVING. Rank the splats by the residual error in their
+        footprint and, for the highest-error ones, CLONE if narrow (sigma < scale_thresh -- add a same-scale copy to
+        COVER an under-served region) else SPLIT (replace a wide splat with two narrower ones to RESOLVE fine
+        structure it was smearing). `n_densify` caps how many splats to densify (default all); `scale_thresh` defaults
+        to the set's median sigma. The inverse of splat_prune/merge: those COARSEN, this REFINES -- and it sharpens
+        WHERE new capacity goes (measured: scale-aware beats always-clone and always-split on a mixed-error target at
+        a fixed budget, and the WRONG move can be worse than nothing -- splitting a small splat loses coverage). Kept
+        negative: complements splat_densify's from-scratch placement (the new part is the cover-vs-resolve decision on
+        an existing set); isotropic splats."""
+        from holographic_splatdensify import clone_split_densify
+        return clone_split_densify(splats, target, n_densify=n_densify, scale_thresh=scale_thresh)
+
+    def splat_relocate(self, splats, target, dead_frac=0.05):
+        """MCMC BIRTH-DEATH RELOCATION (holographic_relocate) -- the successor to evict-rarest. The engine's bounded
+        memory DROPS the rarest when a store is full (the creature's `memory_cap` path); 3DGS-as-MCMC instead
+        RELOCATES a dead atom to an under-represented region, CONSERVING the budget. This moves the DEAD splats
+        (|amplitude| below `dead_frac` of the largest) each to the current residual peak -- the most under-represented
+        region -- subtracting after each so successive relocations find distinct peaks, and keeping the splat COUNT
+        fixed (a birth-death move, not a drop). The discrete kin of the B10 generative-denoising sampler. Measured:
+        relocating to residual peaks beats DROPPING (~4x lower MSE -- eviction shrinks and wastes the budget) and
+        beats RANDOM relocation (the principled target matters), at a conserved count. Kept negative: the drop was
+        already in the box (the creature's eviction is unchanged); this conserves capacity instead -- isotropic
+        splats, and a no-op when nothing is dead."""
+        from holographic_relocate import birth_death_relocate
+        return birth_death_relocate(splats, target, dead_frac=dead_frac)
 
     def render_scene(self, tag_list, S=96, seed=0):
         """Render composed attribute tags to an actual RGB image via the scene renderer."""

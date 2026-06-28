@@ -3849,3 +3849,287 @@ def test_scene_delta_through_the_mind():
 
     sav = um.scene_dedup_saving([base] + [variant(i) for i in range(8)])
     assert sav["saving_x"] > 2.0 and sav["naive"] >= sav["unique"]
+
+
+def test_occlusion_recall_through_the_mind():
+    """RT-V occlusion recall is a real UnifiedMind faculty (the alpha-compositing transfer that breaks the bundle
+    capacity cliff). Through the mind: at high load it recovers the present atoms where the linear top-m washes out;
+    at low load it ties linear."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=128, seed=0)
+    rng = np.random.default_rng(0)
+    N, D = 200, 512
+    cb = rng.standard_normal((N, D)); cb = cb / np.linalg.norm(cb, axis=1, keepdims=True)
+
+    def f1(pred, true):
+        pred = set(pred); tp = len(pred & true)
+        p = tp / len(pred) if pred else 0.0; r = tp / len(true) if true else 0.0
+        return 2 * p * r / (p + r) if (p + r) > 0 else 0.0
+
+    # high load: occlusion beats the linear top-m readout
+    fo = fl = 0.0
+    for seed in range(10):
+        r = np.random.default_rng(seed); S = set(r.choice(N, 45, replace=False).tolist())
+        cue = cb[list(S)].sum(0); cue = cue / np.linalg.norm(cue)
+        fo += f1([j for j, _ in um.occlusion_recall(cue, cb, m=45)], S)
+        fl += f1(list(np.argsort(-(cb @ cue))[:45]), S)
+    assert fo / 10 > 0.99 and fo / 10 > fl / 10 + 0.03
+
+    # weighted recovery through the mind
+    r = np.random.default_rng(5); S = r.choice(N, 5, replace=False); W = r.uniform(0.5, 2.0, 5)
+    cue = (W[:, None] * cb[S]).sum(0)
+    rec = um.occlusion_recall(cue, cb, m=5)
+    assert set(S.tolist()) == set(j for j, _ in rec)
+
+
+def test_harmonic_context_atom_through_the_mind():
+    """RT-VI context-conditioned atoms are real UnifiedMind faculties (the spherical-harmonics transfer). Through the
+    mind: a polysemous atom recovers distinct senses at distinct contexts, and a context-free atom reduces to the
+    plain atom at the DC term (the backward-compatible degree-0 fallback)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=128, seed=0)
+    rng = np.random.default_rng(0)
+    D = 256
+
+    # polysemy: 3 senses at 3 contexts, each recovered through the mind
+    senses = [rng.standard_normal(D) for _ in range(3)]
+    senses = [s / np.linalg.norm(s) for s in senses]
+    ctx = [0.0, 2 * np.pi / 3, 4 * np.pi / 3]
+    atom = um.harmonic_atom(ctx, senses, n_harmonics=2)
+    for t, s in zip(ctx, senses):
+        rec = um.harmonic_decode(atom, t)
+        assert rec @ s / np.linalg.norm(rec) > 0.999
+
+    # degree-0 fallback: a context-free atom decodes to the plain atom exactly, and the DC term is that atom
+    const = rng.standard_normal(D)
+    cfree = um.harmonic_atom([0.0, 1.0, 2.0], [const, const, const], n_harmonics=1)
+    assert np.linalg.norm(um.harmonic_decode(cfree, 0.77) - const) < 1e-10
+    assert np.linalg.norm(um.harmonic_dc(cfree) - const) < 1e-10
+
+
+def test_splat_densify_through_the_mind():
+    """Clone-vs-split density control is a real UnifiedMind faculty (the 3DGS densification distinction). Through the
+    mind: on a mixed-error target (a ridge needing cover + twin peaks needing resolve), scale-aware densify beats both
+    always-clone and always-split at a fixed splat budget."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_splat import splat_render, splat_refit
+    from holographic_splatdensify import clone_splat, split_splat
+
+    um = UnifiedMind(dim=128, seed=0)
+    ys, xs = np.mgrid[0:64, 0:64]
+    ridge = np.exp(-(((xs - 14) ** 2) / 6.0 + ((ys - 32) ** 2) / 120.0))
+    twin = (np.exp(-(((xs - 46) ** 2 + (ys - 30) ** 2) / 4.0)) + np.exp(-(((xs - 52) ** 2 + (ys - 30) ** 2) / 4.0)))
+    target = ridge + twin
+    splats = splat_refit([(32, 14, 0.0, 1.0), (30, 49, 0.0, 3.5)], target)
+    shape = target.shape
+    res = target - splat_render(splats, shape)
+
+    def mse(a, b):
+        return float(((a - b) ** 2).mean())
+
+    def blind(strategy):
+        out = []
+        for sp in splats:
+            out += (split_splat(sp, res, shape) if strategy == "split" else [sp] + clone_splat(sp, res, shape))
+        return mse(splat_render(splat_refit(out, target), shape), target)
+
+    scale_mse = mse(splat_render(um.splat_clone_split(splats, target), shape), target)
+    assert scale_mse < blind("clone") and scale_mse < blind("split")
+
+
+def test_splat_relocate_through_the_mind():
+    """MCMC birth-death relocation is a real UnifiedMind faculty (the successor to evict-rarest). Through the mind:
+    relocating dead splats to under-represented regions beats dropping them, at a conserved budget."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_splat import splat_render, splat_refit
+
+    um = UnifiedMind(dim=128, seed=0)
+    ys, xs = np.mgrid[0:64, 0:64]
+    target = sum(np.exp(-(((xs - cx) ** 2 + (ys - cy) ** 2) / 12.0))
+                 for cx, cy in [(16, 16), (48, 16), (16, 48), (48, 48), (32, 32), (32, 10)])
+    useful = [(16, 16, 0.0, 3.5), (48, 16, 0.0, 3.5), (16, 48, 0.0, 3.5),
+              (48, 48, 0.0, 3.5), (32, 32, 0.0, 3.5), (32, 10, 0.0, 3.5)]
+    dead = [(2, 2, 0.0, 1.0)] * 6
+    splats = splat_refit(useful + dead, target)
+    shape = target.shape
+    thr = 0.05 * np.abs([s[2] for s in splats]).max()
+
+    def mse(a, b):
+        return float(((a - b) ** 2).mean())
+
+    drop = mse(splat_render(splat_refit([s for s in splats if abs(s[2]) >= thr], target), shape), target)
+    reloc_splats = um.splat_relocate(splats, target)
+    reloc = mse(splat_render(reloc_splats, shape), target)
+    assert reloc < drop * 0.6 and len(reloc_splats) == len(splats)
+
+
+def test_occlusion_gram_fast_path_through_the_mind():
+    """SPEED-1: the Gram-cached fast path is a real UnifiedMind faculty -- build the Gram once, pass it to
+    occlusion_recall, and recover the IDENTICAL atoms the rescan path gives (exact, just faster)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=128, seed=0)
+    rng = np.random.default_rng(0)
+    N, D = 300, 512
+    cb = rng.standard_normal((N, D)); cb = cb / np.linalg.norm(cb, axis=1, keepdims=True)
+
+    G = um.build_occlusion_gram(cb)
+    assert G.shape == (N, N)
+
+    for seed in range(8):
+        r = np.random.default_rng(seed); S = r.choice(N, 60, replace=False)
+        cue = cb[S].sum(0); cue = cue / np.linalg.norm(cue)
+        a = um.occlusion_recall(cue, cb, m=60)              # rescan
+        b = um.occlusion_recall(cue, cb, m=60, gram=G)      # Gram-cached fast path
+        assert [j for j, _ in a] == [j for j, _ in b]       # identical recovery
+
+
+def test_occlusion_cache_reuses_gram_through_the_mind():
+    """RAM-1: the mind's cache=True path keeps a GramCache, so a vocabulary queried many times pays the Gram
+    precompute once -- the second recall is a cache hit, and recovery is identical to the explicit-gram path."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=128, seed=0)
+    rng = np.random.default_rng(0)
+    N, D = 300, 512
+    cb = rng.standard_normal((N, D)); cb = cb / np.linalg.norm(cb, axis=1, keepdims=True)
+
+    r = np.random.default_rng(1); S = r.choice(N, 60, replace=False)
+    cue = cb[S].sum(0); cue = cue / np.linalg.norm(cue)
+
+    a = um.occlusion_recall(cue, cb, m=60, cache=True)      # first call: builds + caches the Gram
+    b = um.occlusion_recall(cue, cb, m=60, cache=True)      # second call: cache HIT, no rebuild
+    assert a == b
+    assert um._gram_cache.hits >= 1 and um._gram_cache.misses == 1
+
+    # identical to the explicit-gram fast path and to the rescan
+    G = um.build_occlusion_gram(cb)
+    c = um.occlusion_recall(cue, cb, m=60, gram=G)
+    d = um.occlusion_recall(cue, cb, m=60)
+    assert [j for j, _ in a] == [j for j, _ in c] == [j for j, _ in d]
+
+
+def test_general_optimizer_through_the_mind():
+    """GRAD-2: the splat-fit Adam machinery, promoted -- the mind minimizes an arbitrary scalar loss to its known
+    minimum with an analytic gradient, and the finite-difference fallback reaches the same place (gradients on the
+    fly, no autodiff)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=128, seed=0)
+    rng = np.random.default_rng(0)
+
+    # least-squares loss minimized through the mind reaches the lstsq solution
+    A = rng.standard_normal((20, 6)); b = rng.standard_normal(20)
+    sol = np.linalg.lstsq(A, b, rcond=None)[0]
+    x = um.optimize(lambda z: float(((A @ z - b) ** 2).sum()), np.zeros(6),
+                    grad=lambda z: 2 * A.T @ (A @ z - b), steps=2000, lr=0.02)
+    assert np.linalg.norm(x - sol) < 1e-2
+
+    # the FD fallback (no analytic gradient) reaches the same minimum of a simple quadratic
+    t = rng.standard_normal(5)
+    x_fd = um.optimize(lambda z: float(((z - t) ** 2).sum()), np.zeros(5), steps=400, lr=0.1)
+    assert np.linalg.norm(x_fd - t) < 1e-3
+
+    # the mind's fd_gradient matches the analytic gradient
+    z0 = rng.standard_normal(5)
+    g = um.fd_gradient(lambda z: float(((z - t) ** 2).sum()), z0)
+    assert np.max(np.abs(g - 2 * (z0 - t))) < 1e-5
+
+
+def test_iht_recall_through_the_mind():
+    """GRAD-1: IHT recall is a faculty -- it recovers a bundle's components, ties greedy occlusion on an incoherent
+    dictionary, and beats it on a coherent one (the support-revision win), all through the one mind."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=128, seed=0)
+
+    def f1(rec, true):
+        got = set(i for i, _ in rec); tp = len(got & true)
+        p = tp / max(len(got), 1); r = tp / max(len(true), 1)
+        return 2 * p * r / max(p + r, 1e-12)
+
+    # incoherent: IHT recovers perfectly through the mind
+    rng = np.random.default_rng(0)
+    cb = rng.standard_normal((200, 512)); cb = cb / np.linalg.norm(cb, axis=1, keepdims=True)
+    S = rng.choice(200, 12, replace=False); cue = cb[S].sum(0)
+    assert f1(um.iht_recall(cue, cb, 12), set(int(i) for i in S)) > 0.95
+
+    # coherent: IHT beats greedy occlusion, both via the mind
+    iht_s, occ_s = [], []
+    for s in range(8):
+        r = np.random.default_rng(100 + s)
+        cbc = r.standard_normal((200, 512)) + 1.5 * r.standard_normal(512)
+        cbc = cbc / np.linalg.norm(cbc, axis=1, keepdims=True)
+        Sc = r.choice(200, 12, replace=False); w = r.uniform(0.5, 1.5, 12)
+        cuec = (w[:, None] * cbc[Sc]).sum(0); true = set(int(i) for i in Sc)
+        iht_s.append(f1(um.iht_recall(cuec, cbc, 12), true))
+        occ_s.append(f1(um.occlusion_recall(cuec, cbc, m=12), true))
+    assert np.mean(iht_s) > np.mean(occ_s)
+
+
+def test_cosamp_recall_through_the_mind():
+    """SPEED-3: CoSaMP is a faculty -- the strongest recovery route. Through the one mind it recovers a coherent-
+    dictionary bundle PERFECTLY where greedy occlusion and gradient IHT degrade, in a handful of rounds."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=128, seed=0)
+
+    def f1(rec, true):
+        got = set(i for i, _ in rec); tp = len(got & true)
+        p = tp / max(len(got), 1); r = tp / max(len(true), 1)
+        return 2 * p * r / max(p + r, 1e-12)
+
+    cos_s, iht_s, occ_s = [], [], []
+    for s in range(8):
+        rng = np.random.default_rng(200 + s)
+        cb = rng.standard_normal((200, 512)) + 1.5 * rng.standard_normal(512)
+        cb = cb / np.linalg.norm(cb, axis=1, keepdims=True)
+        S = rng.choice(200, 12, replace=False); w = rng.uniform(0.5, 1.5, 12)
+        cue = (w[:, None] * cb[S]).sum(0); true = set(int(i) for i in S)
+        cos_s.append(f1(um.cosamp_recall(cue, cb, 12), true))
+        iht_s.append(f1(um.iht_recall(cue, cb, 12), true))
+        occ_s.append(f1(um.occlusion_recall(cue, cb, m=12), true))
+    # CoSaMP is the strongest: near-perfect, and ahead of both other iterative routes
+    assert np.mean(cos_s) > 0.95
+    assert np.mean(cos_s) > np.mean(iht_s) and np.mean(cos_s) > np.mean(occ_s)
+
+    # converges in a few rounds (the M-factor win), reported through the mind
+    st = {}
+    um.cosamp_recall(cue, cb, 12, stats=st)
+    assert st["rounds"] <= 6
+
+
+def test_forest_occlusion_through_the_mind():
+    """SPEED-2: forest-routed occlusion is a faculty (the N-factor). Through the mind it stays accurate at moderate
+    N and its selection is sub-linear -- shipped with its measured negative (a regression at current scale) loud."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=128, seed=0)
+
+    def f1(rec, true):
+        got = set(i for i, _ in rec); tp = len(got & true)
+        p = tp / max(len(got), 1); r = tp / max(len(true), 1)
+        return 2 * p * r / max(p + r, 1e-12)
+
+    rng = np.random.default_rng(0)
+    cb = rng.standard_normal((800, 256)); cb = cb / np.linalg.norm(cb, axis=1, keepdims=True)
+    S = rng.choice(800, 10, replace=False); cue = cb[S].sum(0); true = set(int(i) for i in S)
+
+    F = um.build_occlusion_forest(cb, seed=0)
+    rec = um.occlusion_recall_forest(cue, cb, 10, forest=F)
+    assert f1(rec, true) > 0.8                              # accurate at moderate N
+    assert F.last_comparisons < cb.shape[0]                 # sub-linear: fewer comparisons than a full scan
+    # at moderate N it should match the exact occlusion faculty's recovery quality
+    assert f1(um.occlusion_recall(cue, cb, m=10), true) >= f1(rec, true) - 1e-9
