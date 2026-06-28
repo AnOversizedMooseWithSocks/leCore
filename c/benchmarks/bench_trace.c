@@ -5,9 +5,9 @@
 #include <time.h>
 
 #if defined(HOLO_USE_ACCELERATE) && HOLO_USE_ACCELERATE
-#define HOLO_BENCH_RUNTIME "c_accelerate_norms"
+#define HOLO_BENCH_RUNTIME "c_accelerate_spectral_trace"
 #else
-#define HOLO_BENCH_RUNTIME "c_scalar_norms"
+#define HOLO_BENCH_RUNTIME "c_scalar_spectral_trace"
 #endif
 
 static double now_seconds(void)

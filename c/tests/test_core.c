@@ -31,6 +31,9 @@ int main(void)
     double pair[DIM];
     double pair_freq_real[DIM];
     double pair_freq_imag[DIM];
+    double accum_freq_real[DIM] = {0.0};
+    double accum_freq_imag[DIM] = {0.0};
+    double materialized_pair[DIM];
     double recovered[DIM];
     double matrix[4 * DIM];
     double fixed_many[4 * DIM];
@@ -60,6 +63,22 @@ int main(void)
     require_ok(holo_unbind_spectrum(engine, pair_freq_real, pair_freq_imag, a, recovered),
                "unbind spectrum");
     require(holo_cosine(DIM, b, recovered) > 0.999999, "spectrum unbind roundtrip");
+    require_ok(holo_bind_spectrum_accumulate(engine,
+                                             a,
+                                             b,
+                                             1.0,
+                                             accum_freq_real,
+                                             accum_freq_imag),
+               "bind spectrum accumulate");
+    require_ok(holo_real_from_spectrum(engine,
+                                       accum_freq_real,
+                                       accum_freq_imag,
+                                       materialized_pair),
+               "real from spectrum");
+    for (i = 0; i < DIM; ++i) {
+        require(fabs(materialized_pair[i] - pair[i]) < 1e-10,
+                "spectrum-accumulated bind materializes to scalar bind");
+    }
 
     for (i = 0; i < 4; ++i) {
         require_ok(holo_keygen(engine, 1000 + i, matrix + i * DIM), "matrix key");

@@ -17,6 +17,7 @@ typedef struct holo_trace {
     double *work;
     double *spectrum_real;
     double *spectrum_imag;
+    int real_valid;
     int spectrum_valid;
     uint64_t stored_count;
     double total_weight;

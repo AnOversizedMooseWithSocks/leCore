@@ -43,10 +43,14 @@ The current kernel provides deterministic key generation, unitary key
 generation, FFT-backed circular-convolution bind/unbind, fixed-vector batch
 binding, bundle, permute, cleanup/top-k, additive holographic trace memory,
 binary trace save/load, and tests for algebraic roundtrip, cleanup, vectorized
-fixed binding, trace recall, cached-spectrum recall, and snapshot parity. Trace
-recall caches `FFT(trace)` until the next store, fixed-vector binding reuses
-`FFT(fixed)` across a row stack, and cleanup can use precomputed action norms
-for static action dictionaries. The default build uses a portable radix-2 FFT;
+fixed binding, trace recall, spectrum-native trace storage, lazy real-trace
+materialization, and snapshot parity. Trace memory stores its canonical state as
+an accumulated bound-pair spectrum, so `learn()` updates
+`sum(FFT(state) * FFT(action))` directly and `recall()` can unbind without first
+transforming a real trace. The real trace is materialized lazily for `.trace`,
+save/load, and compatibility checks. Fixed-vector binding reuses `FFT(fixed)`
+across a row stack, and cleanup can use precomputed action norms for static
+action dictionaries. The default build uses a portable radix-2 FFT;
 macOS can enable Accelerate/vDSP for the same bind/unbind, `bind_fixed`, and
 trace-recall contracts:
 
@@ -101,27 +105,28 @@ architectural hot path:
 
 ```text
 store:
-    trace += bind(state, action)
+    trace_spectrum += FFT(state) * FFT(action)
 
 query:
-    context = unbind(trace, query_state)
+    context = unbind(trace_spectrum, query_state)
     top action = cleanup(context, action_matrix, precomputed_action_norms)
 ```
 
-On Apple clang / arm64, with `pairs=8`, `actions=8`, `queries=1024`, and five
-repeats, the optimized portable scalar backend shows the first boundary:
+On Apple clang / arm64, with `pairs=8`, `actions=8`, `queries=2048`, and seven
+repeats via `make c-ci-evidence`, the spectrum-native portable scalar backend
+shows the first boundary:
 
 | dim | C store speedup | C query speedup | accuracy |
 | ---: | ---: | ---: | ---: |
-| 128 | ~5.2x | ~7.6x | 1.0 / 1.0 |
-| 256 | ~2.5x | ~3.4x | 1.0 / 1.0 |
-| 512 | ~1.6x | ~2.3x | 1.0 / 1.0 |
-| 1024 | ~1.0x | ~1.6x | 1.0 / 1.0 |
+| 128 | ~7.3x | ~6.9x | 1.0 / 1.0 |
+| 256 | ~3.7x | ~3.3x | 1.0 / 1.0 |
+| 512 | ~2.0x | ~1.8x | 1.0 / 1.0 |
 
-That is the useful scalar boundary after caching trace spectra: even the
-portable backend now beats NumPy query throughput at 1024 dimensions. Enabling
-the vDSP backend moves the same architectural loop onto hardware-optimized
-FFTs, vector reductions, and complex spectrum multiplication:
+That is the useful scalar boundary after making the trace spectrum-native:
+stores no longer pay an inverse FFT only to have recall transform the trace
+back to frequency space. Enabling the vDSP backend moves the same architectural
+loop onto hardware-optimized FFTs, vector reductions, and complex spectrum
+multiplication:
 
 | dim | Accelerate store speedup | Accelerate query speedup | accuracy |
 | ---: | ---: | ---: | ---: |
@@ -184,10 +189,10 @@ Build one reusable trace type:
 
 ```text
 store(state, action, weight)
-    trace += bind(state_key, action_key) * weight
+    trace_spectrum += FFT(state_key) * FFT(action_key) * weight
 
 recall(query_state)
-    action_context = unbind(cached_fft(trace), query_state)
+    action_context = unbind(trace_spectrum, query_state)
     scores = cleanup(action_context, action_matrix, precomputed_action_norms)
 ```
 

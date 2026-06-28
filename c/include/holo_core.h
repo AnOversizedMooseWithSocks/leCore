@@ -42,6 +42,12 @@ int holo_keygen(holo_engine *engine, uint64_t id, double *out);
 int holo_keygen_unitary(holo_engine *engine, uint64_t id, double *out);
 
 int holo_bind(holo_engine *engine, const double *a, const double *b, double *out);
+int holo_bind_spectrum_accumulate(holo_engine *engine,
+                                  const double *a,
+                                  const double *b,
+                                  double weight,
+                                  double *freq_real,
+                                  double *freq_imag);
 int holo_bind_fixed_many(holo_engine *engine,
                          const double *fixed,
                          const double *rows,
@@ -52,6 +58,10 @@ int holo_spectrum_from_real(holo_engine *engine,
                             const double *in,
                             double *freq_real,
                             double *freq_imag);
+int holo_real_from_spectrum(holo_engine *engine,
+                            const double *freq_real,
+                            const double *freq_imag,
+                            double *out);
 int holo_unbind_spectrum(holo_engine *engine,
                          const double *pair_freq_real,
                          const double *pair_freq_imag,

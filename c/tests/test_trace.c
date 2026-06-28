@@ -34,6 +34,8 @@ int main(void)
     double states[ACTIONS * DIM];
     double actions[ACTIONS * DIM];
     double action_norms[ACTIONS];
+    double expected_trace[DIM] = {0.0};
+    double pair[DIM];
     double copied[DIM];
     uint64_t labels[ACTIONS] = {1, 2, 3, 4};
     holo_match match[1];
@@ -54,11 +56,23 @@ int main(void)
         require_ok(holo_keygen_unitary(engine, 100 + i, states + i * DIM), "state key");
         require_ok(holo_keygen(engine, 200 + i, actions + i * DIM), "action key");
         action_norms[i] = holo_norm(DIM, actions + i * DIM);
+        require_ok(holo_bind(engine, states + i * DIM, actions + i * DIM, pair), "expected pair");
+        for (size_t j = 0; j < DIM; ++j) {
+            expected_trace[j] += pair[j];
+        }
         require_ok(holo_trace_store(&trace, states + i * DIM, actions + i * DIM, 1.0), "trace store");
     }
 
     require(trace.stored_count == ACTIONS, "stored count");
     require(fabs(holo_trace_fidelity(&trace) - 0.5) < 1e-12, "fidelity");
+    require(trace.spectrum_valid == 1, "store keeps trace spectrum valid");
+    require(trace.real_valid == 0, "store invalidates lazy real trace");
+    require_ok(holo_trace_copy(&trace, copied), "lazy trace copy");
+    require(trace.real_valid == 1, "copy materializes lazy real trace");
+    for (i = 0; i < DIM; ++i) {
+        require(fabs(copied[i] - expected_trace[i]) < 1e-9,
+                "lazy real trace matches accumulated scalar binds");
+    }
 
     for (i = 0; i < ACTIONS; ++i) {
         require_ok(holo_trace_score_actions(&trace,

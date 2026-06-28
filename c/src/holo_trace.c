@@ -71,6 +71,55 @@ static void free_aligned(void *ptr)
 #endif
 }
 
+static int trace_ensure_spectrum(holo_trace *trace)
+{
+    int rc;
+    if (!trace || !trace->engine || !trace->trace || !trace->spectrum_real || !trace->spectrum_imag) {
+        return HOLO_EINVAL;
+    }
+    if (trace->spectrum_valid) {
+        return HOLO_OK;
+    }
+    if (!trace->real_valid) {
+        return HOLO_EINVAL;
+    }
+    rc = holo_spectrum_from_real(trace->engine,
+                                 trace->trace,
+                                 trace->spectrum_real,
+                                 trace->spectrum_imag);
+    if (rc != HOLO_OK) {
+        return rc;
+    }
+    trace->spectrum_valid = 1;
+    return HOLO_OK;
+}
+
+static int trace_ensure_real(holo_trace *trace)
+{
+    int rc;
+    if (!trace || !trace->engine || !trace->trace || !trace->spectrum_real || !trace->spectrum_imag) {
+        return HOLO_EINVAL;
+    }
+    if (trace->real_valid) {
+        return HOLO_OK;
+    }
+    if (!trace->spectrum_valid) {
+        rc = trace_ensure_spectrum(trace);
+        if (rc != HOLO_OK) {
+            return rc;
+        }
+    }
+    rc = holo_real_from_spectrum(trace->engine,
+                                 trace->spectrum_real,
+                                 trace->spectrum_imag,
+                                 trace->trace);
+    if (rc != HOLO_OK) {
+        return rc;
+    }
+    trace->real_valid = 1;
+    return HOLO_OK;
+}
+
 holo_trace *holo_trace_create(holo_engine *engine)
 {
     holo_trace *trace;
@@ -117,6 +166,8 @@ int holo_trace_init(holo_trace *trace, holo_engine *engine)
     }
     trace->engine = engine;
     trace->dim = dim;
+    trace->real_valid = 1;
+    trace->spectrum_valid = 1;
     return HOLO_OK;
 }
 
@@ -140,6 +191,7 @@ int holo_trace_clear(holo_trace *trace)
     memset(trace->trace, 0, trace->dim * sizeof(trace->trace[0]));
     memset(trace->spectrum_real, 0, trace->dim * sizeof(trace->spectrum_real[0]));
     memset(trace->spectrum_imag, 0, trace->dim * sizeof(trace->spectrum_imag[0]));
+    trace->real_valid = 1;
     trace->spectrum_valid = 1;
     trace->stored_count = 0;
     trace->total_weight = 0.0;
@@ -155,6 +207,7 @@ int holo_trace_set(holo_trace *trace,
         return HOLO_EINVAL;
     }
     memcpy(trace->trace, values, trace->dim * sizeof(trace->trace[0]));
+    trace->real_valid = 1;
     trace->spectrum_valid = 0;
     trace->stored_count = stored_count;
     trace->total_weight = total_weight;
@@ -163,10 +216,17 @@ int holo_trace_set(holo_trace *trace,
 
 int holo_trace_copy(const holo_trace *trace, double *out)
 {
-    if (!trace || !trace->trace || !out) {
+    holo_trace *mutable_trace;
+    int rc;
+    if (!trace || !out) {
         return HOLO_EINVAL;
     }
-    memcpy(out, trace->trace, trace->dim * sizeof(out[0]));
+    mutable_trace = (holo_trace *)trace;
+    rc = trace_ensure_real(mutable_trace);
+    if (rc != HOLO_OK) {
+        return rc;
+    }
+    memcpy(out, mutable_trace->trace, mutable_trace->dim * sizeof(out[0]));
     return HOLO_OK;
 }
 
@@ -175,22 +235,29 @@ int holo_trace_store(holo_trace *trace,
                      const double *action,
                      double weight)
 {
-    size_t i;
     int rc;
-    if (!trace || !trace->engine || !trace->trace || !trace->work || !state || !action) {
+    if (!trace || !trace->engine || !trace->trace || !trace->spectrum_real || !trace->spectrum_imag ||
+        !state || !action) {
         return HOLO_EINVAL;
     }
     if (weight == 0.0) {
         return HOLO_OK;
     }
-    rc = holo_bind(trace->engine, state, action, trace->work);
+    rc = trace_ensure_spectrum(trace);
     if (rc != HOLO_OK) {
         return rc;
     }
-    for (i = 0; i < trace->dim; ++i) {
-        trace->trace[i] += weight * trace->work[i];
+    rc = holo_bind_spectrum_accumulate(trace->engine,
+                                       state,
+                                       action,
+                                       weight,
+                                       trace->spectrum_real,
+                                       trace->spectrum_imag);
+    if (rc != HOLO_OK) {
+        return rc;
     }
-    trace->spectrum_valid = 0;
+    trace->real_valid = 0;
+    trace->spectrum_valid = 1;
     trace->stored_count += 1;
     trace->total_weight += weight;
     return HOLO_OK;
@@ -202,7 +269,7 @@ int holo_trace_recall(const holo_trace *trace,
 {
     holo_trace *mutable_trace;
     int rc;
-    if (!trace || !trace->engine || !trace->trace || !query_state || !out_action_context) {
+    if (!trace || !trace->engine || !query_state || !out_action_context) {
         return HOLO_EINVAL;
     }
     if (trace->stored_count == 0) {
@@ -210,15 +277,9 @@ int holo_trace_recall(const holo_trace *trace,
         return HOLO_OK;
     }
     mutable_trace = (holo_trace *)trace;
-    if (!mutable_trace->spectrum_valid) {
-        rc = holo_spectrum_from_real(mutable_trace->engine,
-                                     mutable_trace->trace,
-                                     mutable_trace->spectrum_real,
-                                     mutable_trace->spectrum_imag);
-        if (rc != HOLO_OK) {
-            return rc;
-        }
-        mutable_trace->spectrum_valid = 1;
+    rc = trace_ensure_spectrum(mutable_trace);
+    if (rc != HOLO_OK) {
+        return rc;
     }
     return holo_unbind_spectrum(mutable_trace->engine,
                                 mutable_trace->spectrum_real,
@@ -284,8 +345,18 @@ int holo_trace_save(const holo_trace *trace, const char *path)
 {
     FILE *fp;
     holo_trace_header header;
+    holo_trace *mutable_trace;
     uint64_t sum;
-    if (!trace || !trace->trace || !path) {
+    int rc;
+    if (!trace || !path) {
+        return HOLO_EINVAL;
+    }
+    mutable_trace = (holo_trace *)trace;
+    rc = trace_ensure_real(mutable_trace);
+    if (rc != HOLO_OK) {
+        return rc;
+    }
+    if (!mutable_trace->trace) {
         return HOLO_EINVAL;
     }
     memset(&header, 0, sizeof(header));
@@ -300,9 +371,9 @@ int holo_trace_save(const holo_trace *trace, const char *path)
     if (!fp) {
         return HOLO_EIO;
     }
-    sum = checksum_trace(trace->trace, trace->dim);
+    sum = checksum_trace(mutable_trace->trace, mutable_trace->dim);
     if (fwrite(&header, sizeof(header), 1, fp) != 1 ||
-        fwrite(trace->trace, sizeof(double), trace->dim, fp) != trace->dim ||
+        fwrite(mutable_trace->trace, sizeof(double), mutable_trace->dim, fp) != mutable_trace->dim ||
         fwrite(&sum, sizeof(sum), 1, fp) != 1) {
         fclose(fp);
         return HOLO_EIO;
@@ -345,6 +416,7 @@ int holo_trace_load(holo_trace *trace, holo_engine *engine, const char *path)
     }
     trace->stored_count = header.stored_count;
     trace->total_weight = header.total_weight;
+    trace->real_valid = 1;
     trace->spectrum_valid = 0;
     if (fread(trace->trace, sizeof(double), trace->dim, fp) != trace->dim ||
         fread(&expected, sizeof(expected), 1, fp) != 1) {

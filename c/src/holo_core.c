@@ -457,6 +457,52 @@ int holo_bind(holo_engine *engine, const double *a, const double *b, double *out
     return HOLO_OK;
 }
 
+int holo_bind_spectrum_accumulate(holo_engine *engine,
+                                  const double *a,
+                                  const double *b,
+                                  double weight,
+                                  double *freq_real,
+                                  double *freq_imag)
+{
+    size_t i;
+    const size_t n = engine ? engine->dim : 0;
+    if (!engine || !a || !b || !freq_real || !freq_imag) {
+        return HOLO_EINVAL;
+    }
+    if (weight == 0.0) {
+        return HOLO_OK;
+    }
+#if HOLO_USE_ACCELERATE
+    memcpy(engine->ar, a, n * sizeof(engine->ar[0]));
+    memset(engine->ai, 0, n * sizeof(engine->ai[0]));
+    memcpy(engine->br, b, n * sizeof(engine->br[0]));
+    memset(engine->bi, 0, n * sizeof(engine->bi[0]));
+    fft_split(engine, &engine->za, 0);
+    fft_split(engine, &engine->zb, 0);
+    vDSP_zvmulD(&engine->za, 1, &engine->zb, 1, &engine->za, 1, (vDSP_Length)n, 1);
+    for (i = 0; i < n; ++i) {
+        freq_real[i] += weight * engine->ar[i];
+        freq_imag[i] += weight * engine->ai[i];
+    }
+#else
+    for (i = 0; i < n; ++i) {
+        engine->a[i].re = a[i];
+        engine->a[i].im = 0.0;
+        engine->b[i].re = b[i];
+        engine->b[i].im = 0.0;
+    }
+    fft(engine->a, n, 0);
+    fft(engine->b, n, 0);
+    for (i = 0; i < n; ++i) {
+        const double re = engine->a[i].re * engine->b[i].re - engine->a[i].im * engine->b[i].im;
+        const double im = engine->a[i].re * engine->b[i].im + engine->a[i].im * engine->b[i].re;
+        freq_real[i] += weight * re;
+        freq_imag[i] += weight * im;
+    }
+#endif
+    return HOLO_OK;
+}
+
 int holo_bind_fixed_many(holo_engine *engine,
                          const double *fixed,
                          const double *rows,
@@ -554,6 +600,36 @@ int holo_spectrum_from_real(holo_engine *engine,
     for (i = 0; i < n; ++i) {
         freq_real[i] = engine->a[i].re;
         freq_imag[i] = engine->a[i].im;
+    }
+#endif
+    return HOLO_OK;
+}
+
+int holo_real_from_spectrum(holo_engine *engine,
+                            const double *freq_real,
+                            const double *freq_imag,
+                            double *out)
+{
+    size_t i;
+    const size_t n = engine ? engine->dim : 0;
+    if (!engine || !freq_real || !freq_imag || !out) {
+        return HOLO_EINVAL;
+    }
+#if HOLO_USE_ACCELERATE
+    memcpy(engine->ar, freq_real, n * sizeof(engine->ar[0]));
+    memcpy(engine->ai, freq_imag, n * sizeof(engine->ai[0]));
+    fft_split(engine, &engine->za, 1);
+    for (i = 0; i < n; ++i) {
+        out[i] = engine->ar[i];
+    }
+#else
+    for (i = 0; i < n; ++i) {
+        engine->a[i].re = freq_real[i];
+        engine->a[i].im = freq_imag[i];
+    }
+    fft(engine->a, n, 1);
+    for (i = 0; i < n; ++i) {
+        out[i] = engine->a[i].re;
     }
 #endif
     return HOLO_OK;
