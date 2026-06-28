@@ -3936,6 +3936,88 @@ _recF = _meshm.occlusion_recall_forest(_cueF, _cbF, 12, forest=_F)
 print(f"  N=4000 dictionary: the forest ranked only {_F.last_comparisons} of 4000 atoms per pick -- the sub-linearity is real.")
 print("  BUT: the exact scan is a single BLAS matvec the Python tree-routing can't beat until N is enormous, and the approximate pick costs F1 exactly when it saves comparisons -- so exact occlusion + the SPEED-1 Gram stays the default.  *** SPEED-2: the N-factor, measured to its honest end (kept negative) ***")
 
+title("W1: mixture of experts with a LEARNED gate -- routes by the input's CONTENT, not by a rule")
+# The mind's own dispatch routes by RULE (which verb, what type). A mixture-of-experts gate is TRAINED, so it routes
+# by content -- two experts owning different halves of the number line; the gate learns to send each value to the
+# right one, which a type check could never do.
+_moe_t = _meshm.mixture_of_experts(seed=2, number_range=(0.0, 1.0))
+_rgm = _np_fwd4.random.default_rng(1)
+_lo = [(float(_rgm.uniform(0.02, 0.46)), "L", None) for _ in range(60)]
+_hi = [(float(_rgm.uniform(0.54, 0.98)), "H", None) for _ in range(60)]
+_moe_t.add_expert("low", _lo); _moe_t.add_expert("high", _hi)
+_moe_t.train_gate(_lo + _hi, epochs=14)
+_moe_test = [(float(_rgm.uniform(0.02, 0.46)), "L") for _ in range(40)] + [(float(_rgm.uniform(0.54, 0.98)), "H") for _ in range(40)]
+_moe_acc = float(_np_fwd4.mean([_moe_t.predict(_x, None)[0] == _lab for _x, _lab in _moe_test]))
+print(f"  two experts split the number line; the trained gate routes held-out values by VALUE at {_moe_acc*100:.0f}% accuracy -- a learned route, not a rule.")
+print("  the gate is itself a creature brain, trained from whether the routed expert was right.  *** W1: a learned gate, wired ***")
+
+title("W2: closed-form kinematics -- position += velocity is ONE binding, velocity is UNBIND (binding IS a rigid shift)")
+# The core thesis pointed at motion: integrate a trajectory by pure binding and decode each position; read the
+# velocity between two positions by unbind. The closed-form twin of learn_dynamics (which LEARNS its operator).
+_kin = _meshm.kinematics(dim=2048, lo=-50.0, hi=50.0, seed=1)
+_kdec, _ktrue = _kin.trajectory(0.0, 2.0, a=0.0, steps=8)
+_kerr = float(_np_fwd4.max(_np_fwd4.abs(_kdec - _ktrue)))
+_kvel = float(_kin.read_velocity(10.0, 13.0))
+print(f"  x0=0, v0=2 integrated by BINDING for 8 steps -> decodes the true path to within {_kerr:.2f}; velocity between 10 and 13 read by UNBIND = {_kvel:.1f}.")
+print("  the operator is the encoder's own shift, exact by construction -- not fitted.  *** W2: binding is motion, wired ***")
+
+title("W4: a versioned store -- commit, edit, rollback (the undo/redo spine, history as keyframes + deltas)")
+# Every version is committed and exactly recoverable: rows keyed by stable id, history stored as keyframes + lossless
+# deltas (the video codec's GOP structure, here for an edit timeline). The undo/redo the editable-mesh vision needs.
+_vs = _meshm.versioned_store()
+_id1, _id2 = _vs.new_id(), _vs.new_id()
+_rows0 = {_id1: _np_fwd4.ones(_meshm.dim), _id2: _np_fwd4.zeros(_meshm.dim)}
+_v0 = _vs.commit(_rows0, [_id1, _id2], note="initial")
+_vs.commit({_id1: _np_fwd4.full(_meshm.dim, 7.0), _id2: _np_fwd4.zeros(_meshm.dim)}, [_id1, _id2], note="edit")  # change a row
+_back, _ = _vs.checkout(_v0)
+_exact = bool(_np_fwd4.array_equal(_back[_id1], _rows0[_id1]))
+_rb = _vs.rollback(_v0)
+print(f"  commit -> edit -> checkout(v0) reconstructs the original exactly: {_exact}; rollback to v0 is itself version {_rb} (history never erased, head now {_vs.head()}).")
+print("  an optional proof can gate a commit -- a failing proof is logged and rejected, the store left unchanged.  *** W4: versioning + rollback, wired ***")
+
+title("W3: a motion-compensated video codec -- a rigid pan is one bind, so the residual nearly vanishes")
+# Keyframe + motion-compensated residual: a rigid shift is a single bind, so the inter-frame residual is tiny and the
+# codec beats per-frame storage. (Non-rigid change leaves a large residual -- the honest boundary, kept.)
+_vbase = _np_fwd4.zeros((40, 48)); _vyy, _vxx = _np_fwd4.mgrid[0:40, 0:48]
+for _vc in [(10, 12), (20, 30), (30, 18), (15, 40)]:
+    _vbase = _vbase + _np_fwd4.exp(-((_vyy - _vc[0]) ** 2 + (_vxx - _vc[1]) ** 2) / 30.0)
+_vbase = _vbase / _vbase.max()
+_vframes = [_np_fwd4.roll(_vbase, 2 * _t, axis=1) for _t in range(6)]      # rigid cyclic pan
+from holographic_video import HolographicVideo as _HV4
+_vcodec = _meshm.video_codec(dim=2048, key_keep=150, res_keep=30, gop_len=6, seed=0)
+_vpk, _vtot = _vcodec.encode(_vframes); _vps = _vcodec.mean_psnr(_vframes, _vpk)
+_vitot, _vips = _HV4.intra_baseline(_vframes, keep=150, dim=2048, seed=0)
+print(f"  6-frame rigid pan -- per-frame intra: {_vitot} bytes @ {_vips:.0f} dB; motion-compensated GOP: {_vtot} bytes @ {_vps:.0f} dB (fewer bytes, higher quality).")
+print("  the motion vector is one number, the residual is what a shift can't predict -- the token codec's trick, in the image domain.  *** W3: motion compensation, wired ***")
+
+title("FS-1: sculpt brushes -- a local falloff-weighted edit of a FIELD, then re-mesh correct topology at any resolution")
+# A surface carried as a field whose level-set IS the surface: brush the field (inflate/carve/smooth/grab/...) and
+# re-extract -- the resolution-independent move a fixed mesh can't do. The brush is exactly 0 outside its ball.
+from holographic_meshbridge import metaball_field as _mbf4, sample_field as _sf4, marching_tetrahedra as _mt4
+_sfield = _mbf4(_np_fwd4.array([[0.0, 0.0, 0.0]]), radius=0.4)
+_sbounds = ((-1.5, -1.5, -1.5), (1.5, 1.5, 1.5))
+_sgrid = _np_fwd4.stack(_np_fwd4.meshgrid(*[_np_fwd4.linspace(-1.5, 1.5, 26)] * 3, indexing="ij"), -1).reshape(-1, 3)
+_sbase = int((_sfield(_sgrid) > 0.5).sum())
+_sinf = _meshm.sculpt(_sfield, "inflate", _np_fwd4.zeros(3), 1.0, strength=0.4)
+_sfar = _sgrid[_np_fwd4.linalg.norm(_sgrid, axis=1) > 1.0 + 1e-9]
+_sloc = float(_np_fwd4.max(_np_fwd4.abs(_sinf(_sfar) - _sfield(_sfar))))
+_svals, _saxes = _sf4(_sinf, _sbounds, 26); _smesh = _mt4(_svals, _saxes, level=0.5)
+print(f"  inflate brush: surface grows {_sbase} -> {int((_sinf(_sgrid) > 0.5).sum())} cells, field changes by {_sloc:.0e} OUTSIDE the ball (local), re-mesh stays manifold ({len(_smesh.faces)} faces, watertight: {_smesh.is_manifold()}).")
+print("  the same brush reshapes the creature's value landscape -- reward shaping, one falloff-weighted operator on any field.  *** FS-1: sculpt the field, re-mesh ***")
+
+title("FS-3: splat export -- write the field's Gaussians as a standard 3DGS .ply a browser renderer can display")
+# The splat params are already in hand; this is a format adapter. The one real bit of math: L (Cholesky of the
+# inverse covariance) -> scale + rotation quaternion, by eigen-decomposing the precision (principal_axes).
+import tempfile as _tf3, os as _os3
+from holographic_splatexport import splats_from_ply as _sfp3, quaternion_to_rotation as _q2r3
+_fsplats = _meshm.field_to_splats(_np_fwd4.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]), radius=0.4)
+_plypath = _os3.path.join(_tf3.gettempdir(), "tour_splats.ply")
+_nply = _meshm.export_splats(_fsplats, path=_plypath, fmt="ply")
+_recs3 = _sfp3(_plypath); _os3.remove(_plypath)
+_std3 = float(_np_fwd4.array(_recs3[0]["scale"])[0])
+print(f"  pulled {_nply} Gaussians from a metaball field (no fit) and wrote a 3DGS .ply; re-import recovers the isotropic std {_std3:.2f} (= the metaball radius).")
+print("  L -> scale + rotation by eigen-decomposing the precision; base colour only (SH colour noted, not faked); a flat covariance raises, not garbage.  *** FS-3: a field, displayable as splats ***")
+
 title("One routing fabric: the chunkers/tilers/stores converge -- pick the pivot, get the regime (StructuredIndex keying)")
 # The capacity-cliff cure ("route each item to a bounded-load bucket") had been re-grown five times. It is
 # ONE fabric: you escape the cliff HORIZONTALLY and address shards by a PIVOT -- and the pivot you pick IS the

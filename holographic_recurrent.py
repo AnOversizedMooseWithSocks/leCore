@@ -26,6 +26,13 @@ Two flavours live here:
     nonlinearity, renormalise to stay on the unit sphere. It adds essentially nothing
     to the codebase and lives in the same hypervector space as everything else.
 
+WHERE THE MIND'S `reservoir` FACULTY LIVES (cross-reference, not a deprecation): UnifiedMind.reservoir is
+backed by holographic_reservoir.HolographicESN -- the permute-based, substrate-native reservoir promoted to a
+faculty. THIS module is kept as the broader research bench: the readable classic-dense EchoStateNetwork, the
+VSAReservoir, the ReservoirSequenceClassifier (used in tour.py), and the honest real-corpora measurements below.
+It is NOT a superseded duplicate to retire -- it is the comparison/measurement home; the mind exposes the one
+clean reservoir via holographic_reservoir.
+
 HONEST STANCE (kept on the record, measured on REAL corpora): a reservoir is a WORSE
 language model than a big gated network at equal size; its virtue is being gradient-free,
 not topping a leaderboard. Measured here on the repo's own data, it does NOT beat the

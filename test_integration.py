@@ -4133,3 +4133,183 @@ def test_forest_occlusion_through_the_mind():
     assert F.last_comparisons < cb.shape[0]                 # sub-linear: fewer comparisons than a full scan
     # at moderate N it should match the exact occlusion faculty's recovery quality
     assert f1(um.occlusion_recall(cue, cb, m=10), true) >= f1(rec, true) - 1e-9
+
+
+def test_mixture_of_experts_learned_gate_through_the_mind():
+    """W1: mixture_of_experts is a faculty -- a LEARNED gate routes by the input's CONTENT, which the mind's rule
+    dispatch cannot. Two experts own different halves of the number line; the trained gate sends each value to the
+    right one, beating any single expert."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=512, seed=0)
+    rng = np.random.default_rng(1)
+    lo = [(rng.uniform(0.02, 0.46), "L", None) for _ in range(60)]
+    hi = [(rng.uniform(0.54, 0.98), "H", None) for _ in range(60)]
+
+    moe = um.mixture_of_experts(seed=2, number_range=(0.0, 1.0))
+    moe.add_expert("low", lo)
+    moe.add_expert("high", hi)
+    moe.train_gate(lo + hi, epochs=14)
+
+    test = ([(rng.uniform(0.02, 0.46), "L", None) for _ in range(40)]
+            + [(rng.uniform(0.54, 0.98), "H", None) for _ in range(40)])
+    learned = np.mean([moe.predict(x, mod)[0] == lab for x, lab, mod in test])
+    single = max(np.mean([moe.predict_with(i, x, mod) == lab for x, lab, mod in test]) for i in range(2))
+    assert learned >= 0.85               # routes by value, nearly perfectly
+    assert learned > single + 0.25       # clearly beats either single expert
+
+
+def test_kinematics_binding_is_motion_through_the_mind():
+    """W2: kinematics is a faculty -- the VSA-is-geometry thesis pointed at motion. A trajectory integrated by pure
+    BINDING decodes to the true positions, and the velocity between two positions is read by UNBIND."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=128, seed=0)
+    kin = um.kinematics(dim=2048, lo=-50.0, hi=50.0, seed=1)
+
+    # integrate x0=0, v0=2, no acceleration, for 10 steps -- positions advance by binding
+    decoded, true = kin.trajectory(0.0, 2.0, a=0.0, steps=10)
+    assert np.max(np.abs(decoded - true)) < 1.0          # binding-integrated path tracks the true motion
+    assert true[-1] == 20.0                               # x = x0 + v*t = 2*10
+
+    # velocity read off two positions by unbind
+    v = kin.read_velocity(10.0, 13.0)
+    assert abs(v - 3.0) < 1.0                              # 13 - 10 = 3, recovered by unbind+decode
+
+    # the honest boundary: a path leaving the encoder range raises
+    raised = False
+    try:
+        kin.trajectory(0.0, 100.0, steps=5)               # 100*5 = 500 >> hi=50
+    except ValueError:
+        raised = True
+    assert raised
+
+
+def test_versioned_store_commit_rollback_through_the_mind():
+    """W4: versioned_store is a faculty -- commit/edit/rollback round-trips EXACTLY, the proof gate rejects a bad
+    commit (and only logs it), and a rollback is itself recorded so history is never erased."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=64, seed=0)
+    vs = um.versioned_store()
+    rng = np.random.default_rng(0)
+
+    a, b, c = vs.new_id(), vs.new_id(), vs.new_id()
+    r = {a: rng.standard_normal(64), b: rng.standard_normal(64)}
+    v0 = vs.commit(r, [a, b], note="initial")
+
+    # edit: add a row, change another
+    r2 = {a: r[a], b: rng.standard_normal(64), c: rng.standard_normal(64)}
+    v1 = vs.commit(r2, [a, b, c], note="edit")
+    assert v1 == v0 + 1
+
+    # checkout v0 reconstructs the ORIGINAL state exactly
+    rows0, order0 = vs.checkout(v0)
+    assert order0 == [a, b]
+    assert np.array_equal(rows0[a], r[a]) and np.array_equal(rows0[b], r[b])
+
+    # rollback to v0 -> live state matches v0 again, and the rollback is a NEW recorded version
+    vr = vs.rollback(v0)
+    rows_back, order_back = vs.checkout(vr)
+    assert order_back == [a, b] and np.array_equal(rows_back[b], r[b])
+    assert vs.head() == vr and vr > v1                     # history grew; nothing erased
+
+    # a proof that always fails rejects the commit (returns -1) and leaves the store unchanged
+    before = vs.head()
+    rej = vs.commit(r2, [a, b, c], proof=lambda rows, order: False, note="bad")
+    assert rej == -1 and vs.head() == before
+    assert any(entry["accepted"] is False for entry in vs.history())
+
+
+def test_video_codec_motion_compensation_through_the_mind():
+    """W3: video_codec is a faculty -- on a rigid pan (motion = a cyclic shift), the keyframe + motion-compensated-
+    residual GOP codec beats per-frame intra storage: fewer bytes AND higher PSNR, because a shift is one bind that
+    nearly zeroes the residual."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_video import HolographicVideo
+
+    um = UnifiedMind(dim=128, seed=0)
+    rng = np.random.default_rng(0)
+    H, W = 40, 48
+    base = np.zeros((H, W))
+    yy, xx = np.mgrid[0:H, 0:W]
+    for _ in range(6):
+        cy, cx = rng.integers(4, H - 4), rng.integers(4, W - 4)
+        base += np.exp(-((yy - cy) ** 2 + (xx - cx) ** 2) / 30.0)
+    base = base / base.max()
+    frames = [np.roll(base, 2 * t, axis=1) for t in range(6)]   # rigid cyclic pan
+
+    codec = um.video_codec(dim=2048, key_keep=150, res_keep=30, gop_len=6, seed=0)
+    packets, total = codec.encode(frames)
+    gop_psnr = codec.mean_psnr(frames, packets)
+    intra_total, intra_psnr = HolographicVideo.intra_baseline(frames, keep=150, dim=2048, seed=0)
+
+    assert total < intra_total          # fewer bytes
+    assert gop_psnr > intra_psnr        # and higher quality -- the motion-compensation win
+
+    # decode round-trips to the right number of frames at the right shape
+    recon = codec.decode(packets)
+    assert len(recon) == len(frames) and recon[0].shape == frames[0].shape
+
+
+def test_sculpt_brush_local_remesh_through_the_mind():
+    """FS-1: sculpt is a faculty -- a brush edits a field LOCALLY (bit-identical outside the ball), the surface grows
+    where inflated, and the re-extracted mesh stays watertight/manifold. Sculpt the field, re-mesh correct topology --
+    the resolution-independent move a fixed mesh cannot do."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_meshbridge import metaball_field, sample_field, marching_tetrahedra
+
+    um = UnifiedMind(dim=128, seed=0)
+    fn = metaball_field(np.array([[0.0, 0.0, 0.0]]), radius=0.4)
+    bounds = ((-1.5, -1.5, -1.5), (1.5, 1.5, 1.5)); res, level = 28, 0.5
+    (x0, y0, z0), (x1, y1, z1) = bounds
+    xs = np.linspace(x0, x1, res); ys = np.linspace(y0, y1, res); zs = np.linspace(z0, z1, res)
+    grid = np.stack(np.meshgrid(xs, ys, zs, indexing="ij"), -1).reshape(-1, 3)
+
+    p = np.zeros(3)
+    inflated = um.sculpt(fn, "inflate", p, 1.0, strength=0.4)
+
+    # LOCAL: unchanged outside the brush ball
+    far = grid[np.linalg.norm(grid - p, axis=1) > 1.0 + 1e-9]
+    assert np.max(np.abs(inflated(far) - fn(far))) < 1e-12
+    # GREW: more of the volume rises above the mesh level
+    assert int((inflated(grid) > level).sum()) > int((fn(grid) > level).sum())
+    # WATERTIGHT/MANIFOLD re-extract
+    vals, axes = sample_field(inflated, bounds, res)
+    mesh = marching_tetrahedra(vals, axes, level=level)
+    assert mesh.is_manifold() and len(mesh.faces) > 0
+
+
+def test_splat_export_roundtrip_through_the_mind():
+    """FS-3: export_splats + field_to_splats are faculties -- pull a metaball field's Gaussians as splats and write
+    the standard 3DGS .ply; re-importing recovers the covariance (the L -> scale+rotation conversion round-trips)."""
+    import os, tempfile
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_splatexport import splats_from_ply, quaternion_to_rotation, principal_axes
+
+    um = UnifiedMind(dim=64, seed=0)
+
+    # pull splats from a metaball field's centres (no fit), then export to .ply
+    centers = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    splats = um.field_to_splats(centers, radius=0.4)
+    assert len(splats) == 2
+
+    tmp = os.path.join(tempfile.gettempdir(), "holo_mind_splats.ply")
+    n = um.export_splats(splats, path=tmp, fmt="ply")
+    recs = splats_from_ply(tmp)
+    os.remove(tmp)
+    assert n == 2 and len(recs) == 2
+    # the isotropic std round-trips to the metaball radius
+    s0 = np.array(recs[0]["scale"])
+    assert np.allclose(s0, 0.4, atol=1e-4)
+    assert np.allclose(recs[0]["position"], [0.0, 0.0, 0.0], atol=1e-5)
+
+    # the json path also works through the mind
+    js = um.export_splats(splats, fmt="json")
+    assert isinstance(js, str) and "splats" in js

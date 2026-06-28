@@ -1825,6 +1825,21 @@ class UnifiedMind:
             self._codec = PredictiveCodec(self._meaning_pred)
         return self._codec.decompress(code)
 
+    def video_codec(self, dim=None, key_keep=400, res_keep=80, bits=8, gop_len=6, max_shift=8, seed=0):
+        """MOTION-COMPENSATED VIDEO/FRAME CODEC (holographic_video, HolographicVideo) -- the rigid-shift-is-a-bind
+        property made into a temporal codec. Encodes a grayscale frame sequence as a group-of-pictures: every
+        gop_len-th frame is stored whole (a keyframe), the rest as a one-number MOTION VECTOR plus a holographically-
+        compressed RESIDUAL against the motion-shifted previous reconstruction. A rigid pan is exactly a shift, so the
+        residual nearly vanishes and the codec is a strict rate-distortion win over per-frame storage; non-rigid
+        change leaves a large residual and is an honest loss (the kept boundary). This is the image-domain twin of the
+        token codec (compress_lossless) -- both spend bits only on what a predictor cannot foresee. Returns a
+        HolographicVideo on the mind's dim: `encode(frames)` -> (packets, total_bytes), `decode(packets)` -> frames,
+        `mean_psnr(frames, packets)`, and the static `intra_baseline(frames, keep, ...)` to compare against. Serves
+        the Stam/Puckette (temporal) and Duda (compression) seats. Delegates to holographic_video."""
+        from holographic_video import HolographicVideo
+        return HolographicVideo(dim=dim or self.dim, key_keep=key_keep, res_keep=res_keep, bits=bits,
+                                gop_len=gop_len, max_shift=max_shift, seed=seed)
+
     def attribute_sources(self, tokens, sources, topk=15, order=2):
         """Source attribution: trace which stored material a passage drew on. sources
         is {name: token_stream}; returns a provenance distribution over those sources
@@ -2470,6 +2485,20 @@ class UnifiedMind:
         variants). The saving is automatic from content-hashing; this quantifies it. Returns a dict."""
         from holographic_scenedelta import scene_dedup_saving
         return scene_dedup_saving(scenes)
+
+    def versioned_store(self, gop_len=8):
+        """VERSIONED STORE with rollback (holographic_history, VersionedStore) -- a store whose every version is
+        committed and exactly recoverable: the undo/redo and scene-versioning piece for the editable-mesh authoring
+        vision, a natural companion to scene_delta. State is rows (vectors) keyed by stable integer ids plus their
+        order; the history is keyframes + lossless row-keyed deltas (the same keyframe/GOP structure the video codec
+        uses, here for an edit timeline). Build: `new_id()` for stable row ids, `commit(rows, order, proof=None,
+        note='')` to record a version (an optional `proof(rows, order)` gate must return True or the commit is
+        rejected and only logged -- proof-gated reorganization), `checkout(version)` to reconstruct any past state
+        EXACTLY, `rollback(version)` to revert (itself recorded, so history is never erased), `head()`, and
+        `history()` (the audit of every attempt). Returns a VersionedStore on the mind's dim. Delegates to
+        holographic_history."""
+        from holographic_history import VersionedStore
+        return VersionedStore(self.dim, gop_len=gop_len)
 
     def scene_translation(self, t):
         """A 4x4 translation transform for scene_graph nodes (holographic_scenegraph)."""
@@ -3391,6 +3420,21 @@ class UnifiedMind:
         from holographic_meshbridge import mesh_to_sdf as _mesh_to_sdf
         return _mesh_to_sdf(mesh, points)
 
+    def sculpt(self, field_fn, kind, p, radius, strength=0.3, **kw):
+        """SCULPT a field with a falloff-weighted brush (holographic_sculpt, FS-1) -- a local edit of a field
+        FUNCTION (vectorized: P of shape (N,3) -> (N,)) in a ball around point `p`, returning the EDITED field
+        function. `kind` is one of inflate / carve / smooth / grab / flatten / pinch (grab needs drag=..., flatten
+        needs level=...). Because a surface is carried as a field whose level-set IS the surface, sculpting the field
+        and RE-EXTRACTING (marching_tetrahedra) gives resolution-independent topology editing -- the move a fixed mesh
+        cannot do. The brush leaves the field BIT-IDENTICAL outside the ball (the falloff is exactly 0 past the
+        radius), so the surface changes only where you brushed and the re-extract stays watertight/manifold. Works on
+        ANY field, not just the surface SDF: the same operator reshapes the creature's value landscape (reward
+        shaping) or a density/memory field -- the radius+falloff the bare `reinforce` lacks. KEPT HONEST: on a DENSE
+        field the re-extract is still O(res^3) per stroke -- the narrow-band sparse field (the next FS item) is what
+        makes a stroke cost O(brush). Delegates to holographic_sculpt.apply_brush."""
+        from holographic_sculpt import apply_brush
+        return apply_brush(field_fn, kind, p, radius, s=strength, **kw)
+
     def route_representation(self, operation):
         """The routing POLICY (holographic_route, ARCH-7): the representation whose capability set supports
         `operation` -- e.g. booleans ("union"/"intersection"/"difference") route to "sdf" (field min/max), explicit
@@ -3557,6 +3601,20 @@ class UnifiedMind:
         forward k then back k returns the start at cosine ~1.0) is the durable win regardless of regime."""
         from holographic_dynamics import Propagator
         return Propagator.learn(np.asarray(states, float), ridge=ridge)
+
+    def kinematics(self, dim=None, lo=-50.0, hi=50.0, seed=1):
+        """CLOSED-FORM KINEMATICS on the substrate (holographic_physics, Kinematics) -- physics as an algebra of
+        binds. Position advances by velocity as ONE binding (x += v is bind(state_x, state_v)), acceleration advances
+        velocity the same way, and the velocity BETWEEN two observed positions is read by UNBIND (bind x_b with the
+        involution of x_a, decode). The direct embodiment of the engine's core thesis, 'binding is a rigid shift,'
+        pointed at motion -- the Stam/Macklin seats' territory. This is the CLOSED-FORM twin of learn_dynamics
+        (Propagator), which LEARNS its operator from data; here the operator is the encoder's own shift, exact by
+        construction rather than fitted. Returns a Kinematics over [lo, hi] (the mind's dim by default): state(x),
+        step(S_x, S_v), trajectory(x0, v0, a, steps) -- integrate by pure binding and decode each position, which
+        RAISES if the true path leaves the encoder's range (the honest boundary) -- and read_velocity(x_a, x_b).
+        Delegates to holographic_physics."""
+        from holographic_physics import Kinematics
+        return Kinematics(dim=dim or self.dim, lo=lo, hi=hi, seed=seed)
 
     # ---- the GENERATIVE faculties (integration plan, Tier 4) -----------------------------------
     # Generation is denoising run backwards, and a splat scene is a bundle -- so the last two modules
@@ -3733,6 +3791,31 @@ class UnifiedMind:
         rendered = splat_render(splats, target.shape)
         return rendered if denoise else (splats, rendered)
 
+    def export_splats(self, splats, path=None, fmt="ply", colors=None):
+        """EXPORT Gaussian splats to a browser-renderer format (holographic_splatexport, FS-3) -- so a field/scene
+        can be DISPLAYED as splats (the GPU's job; the engine stays the authoring brain). `splats` is a list of
+        (center, amplitude, L), L the Cholesky of the inverse covariance (aniso_fit's native format; field_to_splats
+        produces it from a metaball field). fmt='ply' writes the STANDARD 3D-Gaussian-Splatting .ply to `path` (opens
+        in any 3DGS viewer) and returns the count; fmt='json' returns a compact JSON string for a three.js
+        Gaussian-billboard shader. The core conversion is L -> scale + rotation quaternion by eigen-decomposing the
+        precision (principal_axes). KEPT HONEST: base colour only -- holostuff splats carry no view-dependent
+        spherical-harmonic colour (a further add, not faked); a degenerate/flat covariance is RAISED, not garbage.
+        Delegates to holographic_splatexport."""
+        from holographic_splatexport import splats_to_ply, splats_to_json
+        if fmt == "json":
+            return splats_to_json(splats, colors=colors)
+        if path is None:
+            raise ValueError("fmt='ply' needs a path to write to")
+        return splats_to_ply(splats, path, colors=colors)
+
+    def field_to_splats(self, centers, radius=0.5, amp=1.0):
+        """Pull a metaball FIELD's Gaussians directly as exportable splats (holographic_splatexport, FS-3) -- no fit:
+        the centres ARE the splat positions and the metaball `radius` IS the isotropic standard deviation. Returns a
+        list of (center, amp, L) with L = (1/radius) I, ready for export_splats. For an already-fitted anisotropic
+        field, pass aniso_fit's (center, amp, L) to export_splats directly."""
+        from holographic_splatexport import field_to_splats
+        return field_to_splats(centers, radius=radius, amp=amp)
+
     def distributed_forward(self, layers, x, K=1, cleanup_books=None, relu=True):
         """A federated (and optionally deep, cleanup-gated) forward pass in the holographic space -- Path D's
         compute win: the storage array's federation applied to the MATMUL. A linear layer's weight rows stored
@@ -3885,6 +3968,21 @@ class UnifiedMind:
         from holographic_reservoir import HolographicESN
         return HolographicESN(n_in, dim=self.dim, rho=rho, leak=leak, in_scale=in_scale,
                               seed=self.seed, recurrence=recurrence)
+
+    def mixture_of_experts(self, dim=None, seed=0, number_range=(-4.0, 4.0)):
+        """MIXTURE OF EXPERTS with a LEARNED GATE (holographic_moe, GatedMixture) -- a bank of specialists plus a
+        trained holographic gate (itself a creature brain) that routes each input to ONE expert, learned from reward.
+        This is the genuinely distinct routing the mind's own dispatch is NOT: `decide`/`classify`/`recognize` route
+        by RULE (which verb you called, what type the input is), whereas the MoE gate is TRAINED -- so it routes by
+        the input's CONTENT, which a type check cannot do (two experts owning different halves of the number line; the
+        gate sends each value to the right one). Build it: `add_expert(name, examples)` / `add_linear_expert(...)` for
+        specialists, `train_gate(examples, epochs)` to learn the routing from outcomes, then `predict(x, modality)`.
+        Returns a GatedMixture on the mind's dim/seed. Measured: the learned gate beats any single expert by a wide
+        margin and approaches the oracle; it also beats CONFIDENCE routing when a specialist can be confidently wrong
+        (the outcome-trained gate is not fooled). Serves the Olshausen/Togelius seats -- learned, interpretable
+        routing. Delegates to holographic_moe."""
+        from holographic_moe import GatedMixture
+        return GatedMixture(dim=dim or self.dim, seed=seed, number_range=number_range)
 
     def prototype_classifier(self, levels=32, bandwidth=3.5):
         """Gradient-free CLASSIFICATION -- the HDC/VSA prototype learner, the other truly derivative-free

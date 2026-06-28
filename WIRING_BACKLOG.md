@@ -148,3 +148,16 @@ store, and — pending a probe — a hierarchical memory), plus **one duplicate 
 `reservoir`). Wiring W1–W4 closes the real gap; W5 and the `automaton` note are conditional on a measurement. That is
 the integration plan's discipline applied to the whole tree: one mind those primitives serve, not a drawer of
 disconnected experiments beside it — and where something is correctly left out, the reason is written down.
+
+---
+
+## RESOLUTION (all items closed)
+
+- **W1 mixture_of_experts** — WIRED. Learned gate routes by content (>=0.85 on number-line split, beats either single expert). +1 integration test.
+- **W2 kinematics** — WIRED. Binding-is-motion: trajectory by bind tracks truth, velocity by unbind, out-of-range raises. +1 integration test.
+- **W4 versioned_store** — WIRED. Commit/edit/rollback exact round-trip, proof-gated, history never erased. +1 integration test.
+- **W3 video_codec** — WIRED. Rigid pan: motion-compensated GOP beats per-frame intra (fewer bytes AND higher PSNR); non-rigid change kept as the honest loss. +1 integration test.
+- **W5 graph_memory** — PROBED → NOT WIRED. Measured vs the flat store at 12→400 labels: comparisons sub-linear (10→33 vs 12→400) but accuracy collapses (1.00→0.55) while flat stays perfect. The flat scan is optimal for classification; the hierarchy's home is sparse navigable structure, not high-dim NN. Consistent with the module's own tests. Left as a documented alternative.
+- **C1 recurrent** — DOCUMENTED → NOT RETIRED. Not a pure duplicate: two reservoir flavours + a ReservoirSequenceClassifier used by tour.py + real-corpora kept-negatives. Added a cross-reference note; the mind's clean reservoir is holographic_reservoir.HolographicESN. Nothing deleted (retiring would break the tour).
+
+Faculties added across the wiring backlog: **4** (mixture_of_experts, kinematics, versioned_store, video_codec). Tests added: **4** integration tests. The engine is now either wired or documented as deliberately-standalone, end to end.

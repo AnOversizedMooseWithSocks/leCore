@@ -11256,3 +11256,249 @@ test_integration.py, README, NOTES_concepts.md, tour.py.
 *** SPEED-2 from the occlusion-speed panel review -- the N-factor, measured to its honest conclusion. The
 occlusion-speed backlog is now CLOSED: D-factor (Gram) and M-factor (CoSaMP) are exact wins; the N-factor (forest) is
 a measured regression at operating scale, kept callable with its negatives loud. ***
+
+
+--------------------------------------------------------------------------------
+W1 -- MIXTURE OF EXPERTS WITH A LEARNED GATE, WIRED (the wiring backlog begins). holographic_moe.GatedMixture -- a
+bank of specialists plus a trained holographic gate (itself a creature brain) that routes each input to ONE expert,
+learned from reward -- existed, tested, but was NOT a mind faculty (the only references in UnifiedMind were docstrings:
+the module overview and a note in the soft-bone-mixture faculty calling itself the soft cousin of moe.GatedMixture).
+This is the genuinely distinct routing the mind's own dispatch is NOT: decide/classify/recognize route by RULE (which
+verb, what type), whereas the MoE gate is TRAINED, so it routes by the input's CONTENT -- which a type check cannot do.
+
+WHAT SHIPPED (+1 mind faculty mixture_of_experts; module + test wrapper already existed):
+  * mixture_of_experts(dim=None, seed=0, number_range=(-4,4)) -- returns a GatedMixture on the mind's dim/seed. Build:
+    add_expert(name, examples) / add_linear_expert(...) for specialists, train_gate(examples, epochs) to learn the
+    routing from outcomes, predict(x, modality) to infer. (Note: the training method is train_gate, not the "fit" the
+    backlog guessed -- the probe corrected it.)
+
+MEASURED (the module's own tests, now reachable through the mind): the learned gate routes two number-line experts by
+VALUE at >=0.85 accuracy, beating either single expert by >0.25 (a type check could never do this); cross-modal it
+beats any single expert by a wide margin and approaches the oracle; and it beats CONFIDENCE routing when a specialist
+is confidently wrong (the outcome-trained gate is not fooled). Serves the Olshausen/Togelius seats -- learned,
+interpretable routing.
+
+Tests: +1 (1565 -> 1566). test_integration.py (+1): the learned content-routing gate through the mind (two number-line
+experts, routes by value, beats either single expert). The module's test_holographic_moe.py was already in the suite.
+Files: holographic_unified.py (mixture_of_experts faculty, by reservoir/prototype_classifier), test_integration.py,
+README, NOTES_concepts.md, tour.py.
+
+*** W1 from the wiring backlog -- highest value, a genuinely distinct routing capability now reachable through the one
+mind. Remaining wiring: W2 kinematics (ties VSA-is-geometry), W4 versioned_store, W3 video codec, W5 graph_memory
+(probe-first), C1 retire recurrent. ***
+
+
+--------------------------------------------------------------------------------
+W2 -- CLOSED-FORM KINEMATICS, WIRED (the VSA-is-geometry thesis, pointed at motion). holographic_physics.Kinematics --
+physics as an algebra of binds: position += velocity is ONE binding, acceleration advances velocity the same way, and
+the velocity BETWEEN two observed positions is read by UNBIND -- existed, tested, but was NOT a mind faculty (the only
+'kinematics' hits in UnifiedMind were the FABRIK and blendpose INVERSE-kinematics docstrings, a different thing). This
+is the direct embodiment of the engine's core thesis ('binding is a rigid shift') applied to motion, and the
+CLOSED-FORM twin of the already-wired learn_dynamics (Propagator), which LEARNS its operator from data -- here the
+operator is the encoder's own shift, exact by construction.
+
+WHAT SHIPPED (+1 mind faculty kinematics; module + test wrapper already existed):
+  * kinematics(dim=None, lo=-50, hi=50, seed=1) -- returns a Kinematics over [lo, hi] on the mind's dim. state(x),
+    step(S_x, S_v) (x += v as one bind), trajectory(x0, v0, a, steps) (integrate by pure binding, decode each
+    position; RAISES if the true path leaves the encoder's range -- the honest boundary), read_velocity(x_a, x_b)
+    (unbind two positions, decode).
+
+MEASURED (through the mind): a trajectory x0=0, v0=2 integrated by pure BINDING decodes to the true positions (max
+error < 1.0 over 10 steps, endpoint x=20); the velocity between positions 10 and 13 is read by UNBIND as ~3.0; and a
+path that leaves the encoder range (v0=100, 5 steps -> 500 >> hi=50) raises ValueError -- the boundary kept honest.
+Serves the Stam/Macklin seats.
+
+Tests: +1 (1566 -> 1567). test_integration.py (+1): binding-is-motion through the mind (trajectory tracks truth,
+velocity by unbind, out-of-range raises). The module's test_holographic_physics.py was already in the suite. Files:
+holographic_unified.py (kinematics faculty, by learn_dynamics), test_integration.py, README, NOTES_concepts.md,
+tour.py.
+
+*** W2 from the wiring backlog -- the closed-form kinematic twin of learn_dynamics, the cleanest demonstration that
+binding is a rigid transform. Remaining wiring: W4 versioned_store, W3 video codec, W5 graph_memory (probe-first),
+C1 retire recurrent. ***
+
+
+--------------------------------------------------------------------------------
+W4 -- VERSIONED STORE WITH ROLLBACK, WIRED (undo/redo for the authoring vision). holographic_history.VersionedStore --
+a store whose every version is committed and exactly recoverable, history as keyframes + lossless row-keyed deltas
+(the same keyframe/GOP structure the video codec uses, here for an edit timeline) -- existed, tested, but was NOT a
+mind faculty (the only 'versioned' hit in UnifiedMind was a docstring about the kernel's versioned LOADER, unrelated).
+This is the practical undo/redo and scene-versioning piece for the editable-mesh authoring vision the FS plan heads
+toward, and a natural companion to the shipped scene_delta.
+
+WHAT SHIPPED (+1 mind faculty versioned_store; module + test wrapper already existed):
+  * versioned_store(gop_len=8) -- returns a VersionedStore on the mind's dim. new_id() for stable row ids,
+    commit(rows, order, proof=None, note='') (rows={id:vector}, order=[ids]; an optional proof(rows,order) gate must
+    return True or the commit is rejected and only logged -- proof-gated reorganization; returns the version index or
+    -1), checkout(version) (reconstruct any past state EXACTLY), rollback(version) (revert, itself recorded so history
+    is never erased), head(), history() (the audit of every attempt).
+
+MEASURED (through the mind): commit -> edit (add+change rows) -> checkout(v0) reconstructs the ORIGINAL state exactly;
+rollback(v0) reverts the live state AND is a new recorded version (head grows, nothing erased); a proof that always
+fails rejects the commit (returns -1), leaves the store unchanged, and the rejection is in the audit history. Serves
+Duda (compression) and the editable-mesh authoring vision.
+
+Tests: +1 (1567 -> 1568). test_integration.py (+1): commit/edit/rollback through the mind (exact round-trip, proof
+gate rejects, history never erased). The module's test_holographic_history.py was already in the suite. Files:
+holographic_unified.py (versioned_store faculty, by scene_delta), test_integration.py, README, NOTES_concepts.md,
+tour.py.
+
+*** W4 from the wiring backlog -- versioning/rollback now reachable through the mind, the undo/redo spine for the
+editable-mesh vision. Remaining wiring: W3 video codec, W5 graph_memory (probe-first), C1 retire recurrent. ***
+
+
+--------------------------------------------------------------------------------
+W3 -- MOTION-COMPENSATED VIDEO CODEC, WIRED (the rigid-shift-is-a-bind property as a codec). holographic_video.Holo-
+graphicVideo -- a keyframe + motion-compensated-residual GOP coder: every gop_len-th frame is stored whole, the rest
+as a one-number motion vector plus a holographically-compressed residual against the motion-shifted previous
+reconstruction -- existed, tested, but was NOT a mind faculty (the only 'video' hit in UnifiedMind was a docstring
+about the rigid-shift transform it uses). The mind had token/sequence compression and the rate-distortion code but no
+image-domain motion-compensated codec; this is that, and the image twin of compress_lossless (both spend bits only on
+what a predictor cannot foresee).
+
+WHAT SHIPPED (+1 mind faculty video_codec; module + test wrapper already existed):
+  * video_codec(dim=None, key_keep=400, res_keep=80, bits=8, gop_len=6, max_shift=8, seed=0) -- returns a Holographic-
+    Video on the mind's dim. encode(frames) -> (packets, total_bytes), decode(packets) -> frames, mean_psnr(frames,
+    packets), and the static intra_baseline(frames, keep, ...) to compare against.
+
+MEASURED (through the mind, on a rigid cyclic pan -- motion = exactly a roll): the GOP codec uses FEWER bytes (12922 vs
+14112, ~8%) AND achieves HIGHER PSNR (49.8 vs 41.7) than per-frame intra storage -- the motion-compensation win,
+because a shift is one bind that nearly zeroes the residual; decode round-trips to the right frames. KEPT NEGATIVE
+(the module's own boundary): when the inter-frame change is NOT a rigid shift, the residual is large and the codec is
+an honest LOSS -- rigid motion is the regime it wins. Serves Stam/Puckette (temporal) and Duda (compression).
+
+Tests: +1 (1568 -> 1569). test_integration.py (+1): GOP beats intra on a rigid pan through the mind (fewer bytes,
+higher PSNR, decode round-trips). The module's test_holographic_video.py was already in the suite. Files:
+holographic_unified.py (video_codec faculty, by compress_lossless), test_integration.py, README, NOTES_concepts.md,
+tour.py.
+
+*** W3 from the wiring backlog -- the motion-compensated codec now reachable through the mind, rigid-shift-is-a-bind
+made into compression. Remaining wiring: W5 graph_memory (probe-first), C1 retire recurrent. ***
+
+
+--------------------------------------------------------------------------------
+W5 + C1 -- PROBED, AND HONESTLY NOT CHANGED (the wiring backlog closes with two measured non-actions). Both items the
+backlog flagged as "probe first / cleanup" turned out, on measurement, to be correctly left as they are -- the engine's
+discipline working as designed.
+
+W5 -- HIERARCHICAL GRAPH MEMORY: PROBED -> NOT WIRED. holographic_graph_memory.GraphMemory (a cosine-kmeans hierarchy,
+the explicit hierarchical upgrade of the flat SelfOrganizingMind) was to be wired ONLY if it measurably beat the flat
+memory at scale. Measured head-to-head vs a flat prototype store (256-dim Gaussian clusters, 12->400 labels):
+    labels |  flat acc  flat cmp | graph acc  graph cmp
+        12 |   1.000      12     |   1.000      10.4
+        50 |   1.000      50     |   0.920      20.1
+       150 |   1.000     150     |   0.743      26.4
+       400 |   1.000     400     |   0.547      33.5
+The hierarchy's COMPARISONS are genuinely sub-linear (10->33 while flat grows 12->400), BUT its ACCURACY COLLAPSES
+(1.00->0.55) while the flat scan stays PERFECT (1.00) -- one wrong turn high in the tree is unrecoverable (high-dim
+nearest-neighbour does not tree-route well). The flat scan is already optimal for classification; the sub-linear
+comparisons do not compensate for the accuracy loss. VERDICT: NOT wired for classification -- consistent with the
+module's OWN test docstring, which already records "NOT adopted for classification ... its home is sparse, navigable
+structure (sequence/transition graphs), the same place the slime maze solver wins." Left as a documented alternative.
+(The probe also re-confirmed: classify_vector returns (label, score), not the bare label.)
+
+C1 -- holographic_recurrent: NOT RETIRED, cross-referenced instead. The backlog flagged it as a superseded duplicate
+of holographic_reservoir (which backs the mind's reservoir faculty). On probe it is NOT a mere duplicate: it carries
+TWO reservoir flavours (classic-dense EchoStateNetwork + native VSAReservoir), a ReservoirSequenceClassifier USED BY
+tour.py, and extensive honest real-corpora measurements (its own kept-negatives: a reservoir is a worse language model
+than a gated net, measured on Alice/UDHR/Brown). Retiring it would break the tour and discard a measurement bench.
+ACTION: added a one-line cross-reference note to its docstring -- the mind exposes the one clean reservoir via
+holographic_reservoir.HolographicESN (the permute-based, substrate-native one); holographic_recurrent is kept as the
+comparison/measurement home. No code behavior changed; nothing deleted.
+
+THE WIRING BACKLOG IS NOW CLOSED: W1 (mixture_of_experts) wired, W2 (kinematics) wired, W4 (versioned_store) wired,
+W3 (video_codec) wired, W5 (graph_memory) probed -> not wired (measured non-win), C1 (recurrent) documented -> not
+retired (not a duplicate). Four genuine siloed capabilities brought into the one mind; two probe-first items honestly
+left alone with the measurement on record. The "drawer of disconnected experiments" is now either wired or documented
+as deliberately-standalone. Next backlog: the Field-First Sculpting plan (FS-1 brushes, FS-3 splat export, FS-2 sparse
+band, FS-4 the loop, FS-5 FPE field) -- new build toward the 3D authoring app.
+
+
+================================================================================
+FIELD-FIRST SCULPTING BACKLOG (the 3D authoring app -- new build, not wiring)
+================================================================================
+
+--------------------------------------------------------------------------------
+FS-1 -- IMPLICIT-FIELD SCULPT BRUSHES (the brush API the rest builds on). A surface is carried as a FIELD whose
+level-set is the surface (marching_tetrahedra meshes it). FS-1 packages the field atoms as SCULPT BRUSHES: a brush is
+a LOCAL, falloff-weighted edit of a field FUNCTION in a ball around a point. Sculpt the field, RE-EXTRACT correct
+topology at any resolution -- the resolution-independent move (DynaMesh/Sculptris) a fixed-mesh pipeline cannot do.
+
+WHAT SHIPPED (holographic_sculpt.py; +1 mind faculty sculpt):
+  * falloff(d, r, kind) -- the radial weight (vectorized), MATCHING the shipped soft-selection brush
+    (geodesic_soft_selection): 'smooth' = smoothstep 1-(3t^2-2t^3), 'linear' = 1-t, exactly 0 beyond the radius.
+  * brush_inflate / brush_carve -- raise / lower the field in the ball (grow / shrink a high-inside surface).
+  * brush_smooth -- blend toward the local average (Laplacian smoothing of the field).
+  * brush_grab -- drag the field's domain by a vector inside the ball (pull the surface along).
+  * brush_flatten -- pull the field toward a target level. brush_pinch -- drag the domain toward the brush centre.
+  * apply_brush(fn, kind, p, r, s, **kw) -- dispatch by name (grab needs drag=, flatten needs level=).
+  * UnifiedMind.sculpt(field_fn, kind, p, radius, strength, **kw) -- returns the edited field function.
+
+THE KEY GUARANTEE (FS plan's "Done when", measured): a brush leaves the field BIT-IDENTICAL outside the ball (all six
+brushes change the field by <1e-12 at every point past the radius -- the falloff is exactly 0 there), so the surface
+changes ONLY where you brushed; inflate GROWS the surface (304->624 cells above the mesh level) and carve SHRINKS it
+(->32) -- the expected signed move in the band; the re-extracted mesh stays MANIFOLD (3120 faces). Works on ANY field:
+the same inflate brush raises a value landscape locally (REWARD SHAPING -- the radius+falloff bare `reinforce` lacks),
+unchanged outside the ball. Deterministic (pure functions, no RNG).
+
+KEPT HONEST: on a DENSE field the re-extract is still O(res^3) per stroke -- FS-2 (the narrow band) is what makes a
+stroke cost O(brush); FS-1 is the brush math, not yet the fast representation. A grab/pinch dragging past the band can
+fold the level set; keep the drag within the radius (FS-2's reinitialize re-distances). The brushes are Euclidean
+(3-D geometry); the hypersphere Field generalizes with an angular metric (same construction).
+
+Tests: +9 (1569 -> 1578). test_holographic_sculpt.py (+8): inflate grows/carve shrinks; all six brushes local;
+re-extract manifold; grab displaces inside only; reshapes a value field; falloff shapes + zero beyond radius;
+dispatch + unknown; deterministic. test_integration.py (+1): sculpt brush local re-mesh through the mind (local,
+grew, manifold). Files: holographic_sculpt.py, test_holographic_sculpt.py, holographic_unified.py (sculpt faculty,
+by mesh_to_sdf), test_integration.py, README, NOTES_concepts.md, tour.py.
+
+*** FS-1 from the Field-First Sculpting plan -- the sculpt-brush API, on any field, with the local-edit guarantee
+that makes resolution-independent re-meshing work. Next: FS-3 splat export (the .ply/JSON adapter, share
+principal_axes with steering/QEM), then FS-2 the narrow-band sparse field (the hard one), FS-4 the loop, FS-5 FPE. ***
+
+
+--------------------------------------------------------------------------------
+FS-3 -- SPLAT EXPORT: THE .ply / JSON ADAPTER (display a field as splats). The splat parameters are already in hand
+(aniso_fit returns (center, amp, L), L the Cholesky of the inverse covariance), so this is a FORMAT ADAPTER: write the
+engine's Gaussians to what a browser splat renderer reads, so a field/scene can be DISPLAYED as splats (the GPU's job;
+the engine stays the authoring brain).
+
+WHAT SHIPPED (holographic_splatexport.py; +2 mind faculties export_splats, field_to_splats):
+  * principal_axes(precision) -- THE core math: eigen-decompose the symmetric precision P = L Lᵀ into (scales,
+    rotation), scale_i = 1/sqrt(eigenvalue_i) (the per-axis std), rotation = the eigenvectors (a proper rotation).
+    The L -> scale+rotation conversion. Raises on a non-PD (degenerate/flat) covariance -- surfaced, not faked.
+  * rotation_to_quaternion / quaternion_to_rotation -- the 3DGS rot_0..3 quaternion.
+  * splats_to_json / splats_from_json -- compact JSON for a three.js Gaussian-billboard shader.
+  * splats_to_ply / splats_from_ply -- the STANDARD 3D-Gaussian-Splatting .ply (INRIA binary layout: log-scale,
+    logit-opacity, SH-DC colour) that opens in any 3DGS viewer, plus a reader to round-trip-test it.
+  * field_to_splats(centers, radius) -- pull a metaball field's Gaussians directly (no fit; centres ARE positions,
+    radius IS the isotropic std -> L = (1/radius) I).
+  * UnifiedMind.export_splats(splats, path, fmt='ply'|'json', colors) and field_to_splats.
+
+MEASURED (round-trip is the "Done when"): principal_axes reconstructs a known SPD covariance to 1e-9; the quaternion
+round-trips (matrix->quat->matrix); the .ply export->re-import recovers the covariance (1e-5), position, base colour,
+and opacity; JSON round-trips; field_to_splats turns a metaball radius into the splat std exactly; a flat/degenerate
+covariance is RAISED, not garbage. Deterministic.
+
+PROBE-CORRECTION (kept honest): the build plan expected the L->principal-axes math to live in THREE places already
+(splat export, QEM, the steering kernel) and asked for one shared principal_axes helper. The LIVE-code probe DISPROVED
+that: the steering kernel uses DIAGONAL bandwidths (its own kept negative -- a full covariance overfits); QEM SOLVES a
+3x3 linear system (argmin vᵀQv, midpoint fallback when singular); consolidation's KLT is an SVD of a DATA matrix.
+None eigen-decomposes a 3x3 form into principal axes. So principal_axes is built cleanly HERE, where the conversion
+genuinely lives, and NOT retrofitted into modules doing different math (that would make them worse, not shared). The
+"three call sites" was an over-optimistic plan assumption; the finding is recorded rather than forced. (This is the
+plan's own warning -- "re-probe; this codebase keeps turning out to already have things under another name" -- applied
+in reverse: it turned out NOT to have them the way the plan assumed.)
+
+KEPT HONEST: base colour only -- no view-dependent spherical-harmonic colour (a further add, noted not faked); a
+degenerate covariance raises (QEM's singular-guard discipline).
+
+Tests: +8 (1578 -> 1586). test_holographic_splatexport.py (+7): principal_axes reconstructs covariance; quaternion
+round-trip; .ply round-trip (covariance/position/colour/opacity); JSON round-trip; field_to_splats isotropic std;
+degenerate raises; deterministic. test_integration.py (+1): metaball field -> splats -> .ply -> re-import through the
+mind. Files: holographic_splatexport.py, test_holographic_splatexport.py, holographic_unified.py (export_splats +
+field_to_splats faculties, by splat_field), test_integration.py, README, NOTES_concepts.md, tour.py.
+
+*** FS-3 from the Field-First Sculpting plan -- a field can now be exported as splats for a browser renderer, with the
+L->scale+rotation math built where it belongs and the plan's "three shared call sites" premise honestly corrected.
+Next: FS-2 the narrow-band sparse field (the hard one -- O(brush) strokes), then FS-4 the loop, FS-5 FPE. ***
