@@ -3628,6 +3628,150 @@ print(f"  BRIDGE two squares -> an open tube: {_tube_v2.n_faces} side quads, man
 _f0_v2 = tuple(_cube_v2.faces[0]); _lc_v2 = _meshm.mesh_loop_cut(_cube_v2, 0, (_f0_v2[0], _f0_v2[1]))
 print(f"  LOOP-CUT a cube -> a new edge ring: F {_cube_v2.n_faces}->{_lc_v2.n_faces} (the ring crosses 4 quads, splitting each), still closed manifold, chi {_lc_v2.euler_characteristic()} preserved.  *** FWD modeler verb set complete ***")
 
+title("Scene-graph algebra: one scene, two costumes -- geometry (instance + merge) AND structure (a recipe), provably consistent")
+# The capstone joining the FWD mesh kernel to the ARCH-1 recipe algebra. A scene graph -- meshes at its leaves,
+# transforms on its edges -- reads two ways: flatten it to a pile of triangles, OR encode it to one hypervector.
+# The theorem: swapping siblings changes NEITHER view (merge and bundle both commute). The scene IS the recipe.
+_scene_sg = _meshm.scene_graph(children=[_meshm.scene_graph(_meshm.scene_translation([2, 0, 0]), mesh=_cube_v2),
+                                         _meshm.scene_graph(_meshm.scene_translation([0, 2, 0]), mesh=_cube_v2)])
+_flat_sg = _meshm.scene_flatten(_scene_sg)
+print(f"  GEOMETRY view: a scene of 2 cubes -> instanced + merged into one mesh, V={_flat_sg.n_vertices} F={_flat_sg.n_faces}; the +x instance lands at centroid {_np_fwd4.round(_flat_sg.vertices[_flat_sg.vertices[:, 0] > 1].mean(0), 1).tolist()}")
+_rec_sg = _meshm.scene_to_recipe(_scene_sg)
+from holographic_recipeops import validate as _validate_sg
+print(f"  STRUCTURE view: the SAME scene -> a StructureRecipe, realising to one hypervector; a valid recipe ARCH-1 operates on = {_validate_sg(_rec_sg)[0]}")
+_swap_sg = _meshm.scene_graph(children=[_scene_sg.children[1], _scene_sg.children[0]])
+_geo_ok_sg = bool(_np_fwd4.allclose(_np_fwd4.sort(_flat_sg.vertices, axis=0), _np_fwd4.sort(_meshm.scene_flatten(_swap_sg).vertices, axis=0)))
+_vec_ok_sg = bool(_np_fwd4.allclose(_rec_sg.outputs()[0], _meshm.scene_to_recipe(_swap_sg).outputs()[0], atol=1e-12))
+print(f"  CONSISTENCY THEOREM: swap the two siblings -> geometry identical={_geo_ok_sg} AND holographic vector identical={_vec_ok_sg} (merge and bundle both commute).  *** the scene graph IS the recipe: VSA is geometry, made concrete ***")
+
+title("QEM decimation: the quadric error metric -- collapse the edge that moves the surface least (a bundle of plane constraints)")
+# The one piece the engine lacked for a principled simplifier: the COST of a collapse. A per-vertex quadric is a
+# bundle of incident-plane constraints (Sigma nn^T) and the collapse cost is read off as a quadratic -- so it's
+# bind/bundle/readout in disguise, and (the reverse thesis) the general "merge what loses the least" operator.
+from holographic_meshsmooth import _icosphere as _icosphere_qem
+_ico_qem = _icosphere_qem(2)                               # V66 F128 unit sphere
+_qem_dec = _meshm.mesh_qem_decimate(_ico_qem, 64)
+_qem_mean, _qem_max = _meshm.mesh_surface_deviation(_ico_qem, _qem_dec)
+print(f"  decimate icosphere F{_ico_qem.n_faces} -> F{_qem_dec.n_faces} (half): still closed manifold, chi {_qem_dec.euler_characteristic()} preserved; surface moved mean {_qem_mean:.4f}, max {_qem_max:.4f}")
+# naive shortest-edge->midpoint baseline, same target, for the comparison
+from holographic_eulerops import collapse_edge as _ce_qem
+from holographic_meshqem import _edges as _edges_qem
+_m_qem = _ico_qem
+while _m_qem.n_faces > 64:
+    _rk_qem = sorted(((float(_np_fwd4.linalg.norm(_m_qem.vertices[a] - _m_qem.vertices[b])), a, b) for (a, b) in _edges_qem(_m_qem)), key=lambda t: (t[0], t[1], t[2]))
+    _done_qem = False
+    for (_, a, b) in _rk_qem:
+        _k_qem, _r_qem = (a, b) if a < b else (b, a)
+        _nm_qem = _ce_qem(_m_qem, _k_qem, _r_qem)
+        if _nm_qem is None:
+            _k_qem, _r_qem = _r_qem, _k_qem; _nm_qem = _ce_qem(_m_qem, _k_qem, _r_qem)
+        if _nm_qem is None:
+            continue
+        _kn_qem = _k_qem if _k_qem < _r_qem else _k_qem - 1
+        _nm_qem.vertices[_kn_qem] = 0.5 * (_m_qem.vertices[_k_qem] + _m_qem.vertices[_r_qem]); _m_qem = _nm_qem; _done_qem = True; break
+    if not _done_qem:
+        break
+_nv_mean, _nv_max = _meshm.mesh_surface_deviation(_ico_qem, _m_qem)
+print(f"  vs naive shortest-edge collapse at the same face count: naive moved mean {_nv_mean:.4f}, max {_nv_max:.4f} -> QEM is {_nv_mean / _qem_mean:.1f}x better on mean, {_nv_max / _qem_max:.1f}x on max (it spends its budget on the flats, keeps the features).  *** first item off the geometry->stack backlog ***")
+
+title("Octahedral normals: quantize on the sphere, not in ambient bits -- 2 numbers for 2 degrees of freedom")
+# A unit normal has only 2 DOF (it lives on S^2), so quantizing 3 x/y/z components wastes a third of the budget on
+# a constrained coordinate. The octahedral map folds the sphere into a square; the bits land where the freedom is.
+# This is manifold quantization -- the engine's "binary quant breaks the geometry" negative, turned into a method.
+_rng_oct = _np_fwd4.random.default_rng(0)
+_Noct = _rng_oct.standard_normal((8000, 3)); _Noct = _Noct / _np_fwd4.linalg.norm(_Noct, axis=-1, keepdims=True)
+def _ang_oct(a, b): return _np_fwd4.degrees(_np_fwd4.arccos(_np_fwd4.clip(_np_fwd4.sum(a * b, axis=-1), -1, 1)))
+_oct_rt = _meshm.oct_decode_normals(_meshm.oct_encode_normals(_Noct, 8), 8)
+print(f"  encode 8000 unit normals at 8 bits/component (16 bits each) -> decode: mean angular error {_ang_oct(_Noct, _oct_rt).mean():.4f} deg, max {_ang_oct(_Noct, _oct_rt).max():.4f} deg (and the continuous map is an EXACT bijection)")
+def _qn_oct(a, bits):
+    _lv = (1 << bits) - 1; return _np_fwd4.round((a + 1) * 0.5 * _lv) / _lv * 2 - 1
+_nb_oct = _np_fwd4.stack([_qn_oct(_Noct[:, 0], 5), _qn_oct(_Noct[:, 1], 5), _qn_oct(_Noct[:, 2], 6)], axis=-1)
+_nb_oct = _nb_oct / _np_fwd4.linalg.norm(_nb_oct, axis=-1, keepdims=True)
+print(f"  at the SAME 16-bit budget, naive x/y/z quantization (5+5+6 bits) gives mean {_ang_oct(_Noct, _nb_oct).mean():.4f} deg -> octahedral is {_ang_oct(_Noct, _nb_oct).mean() / _ang_oct(_Noct, _oct_rt).mean():.1f}x more accurate for free.  *** the S^2 case of reverse item R3 (manifold quantization), paired with QEM off backlog item A2 ***")
+
+title("Bandwidth + a singularity cross-check: measure how much spectrum to keep, and when the fractal dimension lies")
+# The engine already measures fractal DIMENSION three ways; the missing pieces were the BANDWIDTH a signal occupies
+# (which drives a band-limited encoder) and a cross-check that catches the dimension lying on a lone discontinuity.
+_n_bw = 8192
+_smooth_bw = _np_fwd4.sin(2 * _np_fwd4.pi * 3 * _np_fwd4.arange(_n_bw) / _n_bw)
+_white_bw = _np_fwd4.random.default_rng(2).standard_normal(_n_bw)
+print(f"  spectral bandwidth (95% energy): a smooth sinusoid {_meshm.spectral_bandwidth(_smooth_bw):.4f} of Nyquist (band-limited) vs white noise {_meshm.spectral_bandwidth(_white_bw):.3f} (broadband) -- the number that sets the encoder's bandwidth knob")
+_rng_bw = _np_fwd4.random.default_rng(1)
+_f_bw = _np_fwd4.fft.rfftfreq(_n_bw); _amp_bw = _np_fwd4.zeros(len(_f_bw)); _amp_bw[1:] = _f_bw[1:] ** (-(2 * 0.3 + 1) / 2)
+_fbm_bw = _np_fwd4.fft.irfft(_amp_bw * _np_fwd4.exp(1j * _rng_bw.uniform(0, 2 * _np_fwd4.pi, len(_f_bw))), _n_bw)
+_ds_f, _di_f, _ag_f = _meshm.fractal_confidence(_fbm_bw)
+_step_bw = _np_fwd4.zeros(_n_bw); _step_bw[_n_bw // 2:] = 1.0
+_ds_s, _di_s, _ag_s = _meshm.fractal_confidence(_step_bw)
+print(f"  cross-check on clean fBm: spectral D {_ds_f:.2f}, increment D {_di_f:.2f} -> AGREE ({_ag_f}); on a STEP: spectral {_ds_s:.2f}, increment {_di_s:.2f} -> DISAGREE ({_ag_s}) -- the lone discontinuity fools the slope, the flag catches it.  *** first fractal-optics backlog item; de-dup: dimension was already shipped ***")
+
+title("Auto-bandwidth KDE: the band-limit matched to the data -- the encoder's kernel as a density estimator")
+# The disciplined form of the 'band-limited encoding' item, landed where the encoder actually delivers: its RBF
+# kernel IS a KDE, and the kernel bandwidth IS the band-limit. Leave-one-out likelihood picks the bandwidth that
+# matches the data -- neither over-smoothing (over-band-limiting) nor under-smoothing (aliasing the samples).
+_bim = lambda x: 0.5 * _np_fwd4.exp(-0.5 * ((x - 0.3) / 0.05) ** 2) + 0.5 * _np_fwd4.exp(-0.5 * ((x - 0.7) / 0.07) ** 2)
+_rng_kde = _np_fwd4.random.default_rng(0); _xs_kde = []
+while len(_xs_kde) < 400:
+    _c_kde = _rng_kde.uniform(0, 1)
+    if _rng_kde.uniform(0, 6) < _bim(_c_kde): _xs_kde.append(_c_kde)
+_xs_kde = _np_fwd4.array(_xs_kde); _qx_kde = _np_fwd4.linspace(0.02, 0.98, 200); _truth_kde = _bim(_qx_kde)
+def _srmse_kde(e, t):
+    _a = _np_fwd4.sum(e * t) / _np_fwd4.sum(e * e); return _np_fwd4.sqrt(_np_fwd4.mean((_a * e - t) ** 2))
+_est_kde, _bw_kde = _meshm.density_estimate(_xs_kde, 0, 1, _qx_kde, dim=1024, method="lcv")
+_def_kde, _ = _meshm.density_estimate(_xs_kde, 0, 1, _qx_kde, dim=1024, bandwidth=1.8)
+print(f"  400 samples from a bimodal density -> KDE via the encoder: LCV picks bandwidth {_bw_kde:.1f}, estimate correlates {_np_fwd4.corrcoef(_est_kde, _truth_kde)[0, 1]:.3f} with truth")
+print(f"  shape error: LCV-matched bandwidth {float(_srmse_kde(_est_kde, _truth_kde)):.3f} vs the fixed default (1.8, too wide) {float(_srmse_kde(_def_kde, _truth_kde)):.3f} -> {float(_srmse_kde(_def_kde, _truth_kde) / _srmse_kde(_est_kde, _truth_kde)):.1f}x better by matching the band-limit to the data.  *** second fractal-optics item; the audit: sinc isn't tunable, so it landed on RBF-as-KDE ***")
+
+title("Screen-space LOD: the error-budget resolution rule (coarse_to_fine) carried to meshes")
+# QEM decimates and surface_deviation measures; this DECIDES which level to show -- the coarsest mesh whose error,
+# projected to the screen, stays under a pixel budget. Full detail up close, coarser far away. The engine's own
+# resolution-by-error-budget rule, in the mesh domain.
+from holographic_meshsmooth import _icosphere as _icos_lod
+_lod_chain = _meshm.mesh_lod_chain(_icos_lod(2), targets=(0.5, 0.25, 0.125))
+print(f"  LOD chain off a sphere: " + ", ".join(f"F{_l.n_faces}(err {_l.max_error:.3f})" for _l in _lod_chain))
+_lod_picks = [(d, _meshm.mesh_select_lod(_lod_chain, d, 2.0)) for d in (2.0, 15.0, 60.0, 200.0)]
+print("  pick the cheapest mesh that looks right (2px budget): " + ", ".join(f"{d:.0f}u->F{_lod_chain[p].n_faces}" for d, p in _lod_picks) + "  *** geometry->stack: decimate, measure, SELECT -- coarse_to_fine for geometry ***")
+
+title("Binding stability: when does bind/unbind preserve the signal? -- spectral flatness predicts the distortion")
+# The band-limit-preservation regime test, grounded in the real bind. Trefethen's transient-growth lens found none
+# (the cleanup contracts monotonically, linear ops stay spectrally flat); the real axis is the KEY's spectral
+# flatness -- unbind(bind(x,k),k) returns x convolved with |K|^2, exact only when |K|=1 everywhere (a unitary key).
+from holographic_ai import unitary_vector as _uvec_bs, random_vector as _rvec_bs
+_uni_bs = _uvec_bs(1024, _np_fwd4.random.default_rng(1)); _ran_bs = _rvec_bs(1024, _np_fwd4.random.default_rng(2))
+_rep_u = _meshm.binding_stability(_uni_bs); _rep_r = _meshm.binding_stability(_ran_bs)
+print(f"  a UNITARY key: flatness {_rep_u['flatness']:.3f} -> bind/unbind distortion {_rep_u['distortion']:.1e} (exact, stable={_rep_u['stable']})")
+print(f"  a RANDOM  key: flatness {_rep_r['flatness']:.3f} -> bind/unbind distortion {_rep_r['distortion']:.2f} (lossy, stable={_rep_r['stable']}) -- flatness is the diagnostic for 'safe to bind/unbind repeatedly?'  *** fractal-optics item; Trefethen transient-growth came up empty, the real axis is linear flatness ***")
+
+title("Splat LOD: prune the negligible splats by contribution -- the splat twin of mesh decimation")
+# A splat renders as amp*gaussian (unit-norm), so its energy is amp^2: keep the largest-|amp| splats, refit, and the
+# survivors absorb the overlap. Prune->measure->select mirrors the mesh LOD's decimate->measure->select.
+from holographic_splat import splat_fit as _sfit_lod, splat_render as _srend_lod, splat_refit as _sref_lod, psnr as _psnr_lod
+_yy_lod, _xx_lod = _np_fwd4.mgrid[0:64, 0:64]
+_g_lod = lambda cy, cx, s: _np_fwd4.exp(-((_yy_lod - cy) ** 2 + (_xx_lod - cx) ** 2) / (2 * s * s))
+_tgt_lod = 1.0 * _g_lod(18, 20, 5) + 0.8 * _g_lod(40, 44, 7) + 0.6 * _g_lod(48, 15, 4) + 0.4 * _g_lod(12, 50, 3)
+_full_lod = _sfit_lod(_tgt_lod, 60, refit=True)
+_chain_lod = _meshm.splat_lod_chain(_full_lod, _tgt_lod, keeps=(40, 20, 10, 5))
+print("  LOD chain (prune + refit): " + ", ".join(f"{_c[1]}sp@{_c[2]:.0f}dB" for _c in _chain_lod))
+_rng_lod = _np_fwd4.random.default_rng(0)
+_rand_lod = _sref_lod([_full_lod[i] for i in _rng_lod.permutation(len(_full_lod))[:20]], _tgt_lod)
+print(f"  at 20 splats: contribution-ranked {float(_psnr_lod(_srend_lod(_meshm.splat_prune(_full_lod, _tgt_lod, 20), (64, 64)), _tgt_lod)):.1f}dB vs random {float(_psnr_lod(_srend_lod(_rand_lod, (64, 64)), _tgt_lod)):.1f}dB -- keeping the splats that carry the energy is ~20dB better.  *** geometry->stack: prune, measure, SELECT ***")
+
+title("Scene delta: variants share components for free (content-addressed) -- the diff is what you transmit")
+# scene_to_recipe names every component by content hash, so shared subtrees share atoms automatically; the dedup is
+# free. The genuinely-new piece is the explicit DIFF (send the base once, then small deltas) and measuring the saving.
+from holographic_scenegraph import SceneNode as _SN_sd, translation as _tr_sd
+from holographic_mesh import box as _box_sd
+from holographic_scenedelta import scene_components as _scomp_sd, apply_scene_delta as _apply_sd
+_cube_sd = _box_sd(); _oth_sd = _box_sd(2, 1, 1)
+def _var_sd(i, changed=True):
+    _ch = [_SN_sd(_tr_sd([0,0,0]), mesh=_cube_sd), _SN_sd(_tr_sd([2,0,0]), mesh=_cube_sd), _SN_sd(_tr_sd([0,2,0]), mesh=_oth_sd), _SN_sd(_tr_sd([2,2,0]), mesh=_cube_sd)]
+    if changed: _ch[i%4]=_SN_sd(_tr_sd([float(i),5,0]), mesh=_cube_sd)
+    return _SN_sd(children=_ch)
+_base_sd = _var_sd(0, changed=False); _var1_sd = _var_sd(1)
+_d_sd = _meshm.scene_delta(_base_sd, _var1_sd)
+_sav_sd = _meshm.scene_dedup_saving([_base_sd] + [_var_sd(i) for i in range(8)])
+print(f"  a variant changing one subtree: delta is +{len(_d_sd['added'])}/-{len(_d_sd['removed'])} components vs {len(_scomp_sd(_var1_sd))} full; base+delta rebuilds it exactly: {_apply_sd(_scomp_sd(_base_sd), _d_sd) == _scomp_sd(_var1_sd)}")
+print(f"  storing 9 scenes that share subtrees: {_sav_sd['naive']} components naively -> {_sav_sd['unique']} unique ({_sav_sd['saving_x']:.1f}x) -- content-hashing dedups for free.  *** reverse item R6; honest finding: the dedup is automatic, the diff is the new part ***")
+
 title("One routing fabric: the chunkers/tilers/stores converge -- pick the pivot, get the regime (StructuredIndex keying)")
 # The capacity-cliff cure ("route each item to a bounded-load bucket") had been re-grown five times. It is
 # ONE fabric: you escape the cliff HORIZONTALLY and address shards by a PIVOT -- and the pivot you pick IS the

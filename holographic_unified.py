@@ -667,6 +667,66 @@ class UnifiedMind:
         from holographic_fractal import hurst_exponent
         return float(hurst_exponent(np.asarray(series, float).ravel()))
 
+    def spectral_bandwidth(self, x, energy_fraction=0.95):
+        """The BANDWIDTH a signal occupies (holographic_bandwidth) -- the fraction of Nyquist (in [0,1]) holding
+        `energy_fraction` of the spectral energy: small for band-limited content, near 1 for broadband noise. The
+        number that drives a band-limited encoder's bandwidth knob. Complements the shipped fractal_dimension (which
+        says how rough) with how much spectrum to keep. Kept negative: it is an ENERGY rolloff, so a fractal's
+        front-loaded 1/f^b energy can read a small bandwidth even though its self-similar detail extends higher --
+        honest about fidelity-for-a-budget, not lossless bandwidth."""
+        from holographic_bandwidth import spectral_bandwidth
+        return spectral_bandwidth(x, energy_fraction=energy_fraction)
+
+    def fractal_confidence(self, x, tol=0.15):
+        """A singularity CROSS-CHECK for a 1-D signal's fractal dimension (holographic_bandwidth): two independent
+        slope estimators -- the power-spectrum slope D=(5-gamma)/2 and an increment-variance estimator -- and
+        whether they AGREE. The shipped fractal_dimension is a single estimator and silently returns a wrong number
+        for a step or a pure tone; this flags those (agree=False). Returns (d_spectral, d_increment, agree). Trust a
+        fractal dimension only when agree is True. (R/S Hurst is deliberately NOT a co-validator here -- it weights
+        coarse scales differently and disagrees even on clean fBm.)"""
+        from holographic_bandwidth import fractal_confidence
+        return fractal_confidence(x, tol=tol)
+
+    def density_estimate(self, samples, lo, hi, query, dim=1024, seed=None, method="lcv", bandwidth=None):
+        """Kernel DENSITY ESTIMATE via the encoder (holographic_kde): bundle the encoded samples, then density(x) ~
+        bundle . encode(x) = (1/n) sum K(x - s_i), with the RBF kernel bandwidth AUTO-SELECTED (the band-limit
+        matched to the data) and the output normalized to integrate to ~1 over [lo,hi]. method='lcv' (leave-one-out
+        likelihood, robust -- beats a fixed default ~5-7x by matching the kernel to the data) or 'silverman' (cheap,
+        over-smooths multimodal). Returns (density_at_query, chosen_bandwidth). The disciplined form of the
+        band-limited-encoding faculty: the encoder's documented RBF-as-KDE use, where the bandwidth IS the
+        band-limit. Kept negatives: the sinc kernel's bandwidth is NOT tunable (only RBF); bandwidth selection fixes
+        smoothing, not capacity (a too-small dim cannot be rescued)."""
+        from holographic_kde import density_estimate
+        return density_estimate(samples, lo, hi, query, dim=dim, seed=self.seed if seed is None else seed,
+                                method=method, bandwidth=bandwidth)
+
+    def kde_bandwidth(self, samples, lo, hi, method="lcv"):
+        """The RBF kernel bandwidth for a density estimate over [lo,hi] (holographic_kde): 'lcv' (leave-one-out
+        likelihood, robust, matches the data's structure) or 'silverman' (rule of thumb, over-smooths multimodal).
+        The band-limit auto-matched to the data. Returns a float."""
+        from holographic_kde import kde_bandwidth
+        return kde_bandwidth(samples, lo, hi, method=method)
+
+    def spectral_flatness(self, v):
+        """SPECTRAL FLATNESS of a vector (holographic_flatness): the Wiener entropy of its power spectrum (geometric
+        mean / arithmetic mean), in (0,1]. 1.0 = a perfectly flat spectrum = a UNITARY, distortion-free binding key;
+        lower = peakier = more lossy as a key. The diagnostic for "is this safe to bind/unbind repeatedly?" --
+        unbind(bind(x,k),k) returns x convolved with |K|^2, which is x only when |K|=1 everywhere (flatness 1).
+        Returns a float."""
+        from holographic_flatness import spectral_flatness
+        return spectral_flatness(v)
+
+    def binding_stability(self, v, tol=0.05):
+        """BINDING-STABILITY regime diagnostic for a key (holographic_flatness): {'flatness', 'distortion',
+        'stable'}, where distortion is the measured single-round bind/unbind error and 'stable' iff it is within tol
+        (effectively unitary). Spectral flatness PREDICTS distortion monotonically. The band-limit-preservation
+        regime test grounded in the real bind: the engine already mints the stable (unitary) regime via
+        unitary_vector; this measures where any vector sits on it. Kept finding: the Trefethen transient-growth
+        concern does not materialize -- linear ops preserve a white spectrum and the cleanup contracts monotonically;
+        the real stability axis is this linear flatness."""
+        from holographic_flatness import binding_stability
+        return binding_stability(v, tol=tol)
+
     def verify_image_structure(self, image, real_patches=None, patch=32):
         """Does an image carry the spatial-autocorrelation signature of real data
         (vs noise / corruption)? The text structure verifier, carried to images
@@ -2237,6 +2297,67 @@ class UnifiedMind:
         from holographic_typed import nested_scene_to_recipe
         return nested_scene_to_recipe(self, groups)
 
+    def scene_graph(self, transform=None, mesh=None, children=None, name=None):
+        """Build a SCENE-GRAPH node (holographic_scenegraph): a 4x4 `transform`, an optional leaf `mesh`, optional
+        child nodes -- the geometry capstone that joins the FWD mesh kernel to the ARCH-1 recipe algebra. The node
+        can be read two ways (see scene_flatten / scene_to_recipe). Transform builders are on the mind:
+        scene_translation / scene_scaling / scene_rotation / scene_compose_transforms. Returns a SceneNode."""
+        from holographic_scenegraph import SceneNode
+        return SceneNode(transform=transform, mesh=mesh, children=children, name=name)
+
+    def scene_flatten(self, node):
+        """The GEOMETRY view of a scene graph (holographic_scenegraph): instance every leaf mesh through its
+        ACCUMULATED transform (parent transforms composed down the graph) and MERGE into one Mesh. Returns a Mesh.
+        Kept negative: this INSTANCES and concatenates -- it does not weld or boolean-merge overlapping geometry
+        (that is mesh_csg's job); two touching cubes flatten to two components, not one solid."""
+        from holographic_scenegraph import flatten_scene
+        return flatten_scene(node)
+
+    def scene_to_recipe(self, node, dim=None, seed=None):
+        """The STRUCTURE view of a scene graph (holographic_scenegraph): encode the graph as a StructureRecipe --
+        transforms BOUND to content, siblings BUNDLED -- realising to one hypervector. A well-formed recipe that the
+        ARCH-1 operators (validate_recipe / recipe_reorder_members) apply to. The consistency theorem: swapping
+        siblings leaves BOTH the flattened geometry and this vector identical (merge and bundle are commutative) --
+        the scene is one object in two costumes, and they agree. Returns a StructureRecipe."""
+        from holographic_scenegraph import scene_to_recipe
+        return scene_to_recipe(node, dim=self.dim if dim is None else dim, seed=self.seed if seed is None else seed)
+
+    def scene_delta(self, base, variant):
+        """The component DIFF between two scenes (holographic_scenedelta): {'added', 'removed'} content-hashed
+        component ids, so a variant can be TRANSMITTED as its delta (send the base once, then small deltas). A
+        one-subtree change is a couple of components; apply_scene_delta rebuilds the variant's component set exactly.
+        Kept negative (honest): the component SHARING itself is AUTOMATIC from content-addressed atoms (shared
+        subtrees share ids for free) -- this adds the explicit diff/transmission, not a new dedup mechanism."""
+        from holographic_scenedelta import scene_delta
+        return scene_delta(base, variant)
+
+    def scene_dedup_saving(self, scenes):
+        """Measure the content-addressed dedup saving across a set of scenes (holographic_scenedelta): {'naive',
+        'unique', 'saving_x'} -- how much the automatic component sharing buys (measured ~4-6x across a base + its
+        variants). The saving is automatic from content-hashing; this quantifies it. Returns a dict."""
+        from holographic_scenedelta import scene_dedup_saving
+        return scene_dedup_saving(scenes)
+
+    def scene_translation(self, t):
+        """A 4x4 translation transform for scene_graph nodes (holographic_scenegraph)."""
+        from holographic_scenegraph import translation
+        return translation(t)
+
+    def scene_scaling(self, s):
+        """A 4x4 scale transform (uniform scalar or per-axis length-3) for scene_graph nodes."""
+        from holographic_scenegraph import scaling
+        return scaling(s)
+
+    def scene_rotation(self, axis, angle):
+        """A 4x4 rotation transform (Rodrigues, radians) for scene_graph nodes."""
+        from holographic_scenegraph import rotation
+        return rotation(axis, angle)
+
+    def scene_compose_transforms(self, *matrices):
+        """Compose 4x4 transforms (the product M0 @ M1 @ ..., parent then child) for scene_graph nodes."""
+        from holographic_scenegraph import compose_transforms
+        return compose_transforms(*matrices)
+
     def chain_structure(self, n):
         """Build an n-node linked-list CHAIN as a typed structure (B7), at this mind's dim/seed:
         M = superpose_i bind(node_i, node_{i+1}). Returns (recipe, nodes) -- realize(recipe) gives the
@@ -2866,6 +2987,60 @@ class UnifiedMind:
         collapse would break the manifold (the LINK CONDITION) -- a true precondition the caller must handle."""
         from holographic_eulerops import collapse_edge
         return collapse_edge(mesh, keep, remove)
+
+    def mesh_qem_decimate(self, mesh, target_faces):
+        """QEM (quadric error metric) DECIMATION (holographic_meshqem, Garland-Heckbert): greedily collapse the
+        lowest-cost edge -- cost = how far the collapse moves the surface, read from a per-vertex quadric (an
+        accumulated BUNDLE of incident-plane constraints) -- via the guarded mesh_collapse_edge, until <=
+        target_faces. Preserves features instead of eroding them; beats a naive shortest-edge collapse on surface
+        error (~1.8x mean, ~3x max on a sphere). Returns a new Mesh. Kept negatives: closed meshes (open-boundary
+        preservation deferred); minimizes plane-distance, not radius; halts above target if no safe collapse
+        remains. Pair with mesh_surface_deviation to measure the result."""
+        from holographic_meshqem import qem_decimate
+        return qem_decimate(mesh, target_faces)
+
+    def mesh_surface_deviation(self, mesh_a, mesh_b):
+        """A decimation QUALITY metric (holographic_meshqem): (mean, max) point-to-surface distance from mesh_a's
+        vertices to mesh_b's triangles -- how far one mesh's surface sits from the other's points. Use to measure
+        how much a decimation (e.g. mesh_qem_decimate) moved the surface. Returns (mean, max)."""
+        from holographic_meshqem import surface_deviation
+        return surface_deviation(mesh_a, mesh_b)
+
+    def mesh_lod_chain(self, mesh, targets=(0.5, 0.25, 0.125)):
+        """Build a level-of-detail CHAIN (holographic_lod): QEM-decimate `mesh` to successively coarser levels at
+        the given face-count fractions, measuring each level's surface deviation from the original. Returns a
+        fine->coarse list of LODLevel(mesh, n_faces, mean_error, max_error); the first is the original (zero error).
+        Pair with mesh_select_lod to choose a level by viewing distance."""
+        from holographic_lod import build_lod_chain
+        return build_lod_chain(mesh, targets=targets)
+
+    def mesh_select_lod(self, chain, distance, pixel_threshold, screen_height_px=1080, fov_deg=60.0):
+        """Choose a level of detail by SCREEN-SPACE ERROR (holographic_lod): the index of the coarsest level in
+        `chain` whose error, projected to the screen at `distance`, stays under `pixel_threshold` -- the cheapest
+        mesh that looks right. The engine's error-budget resolution selection (coarse_to_fine) carried to meshes:
+        full detail up close, coarser far away. Returns an int index into the chain. Kept negative: the error is
+        geometric surface deviation, not a perceptual/silhouette metric."""
+        import math
+        from holographic_lod import select_lod
+        return select_lod(chain, distance, pixel_threshold, screen_height_px=screen_height_px,
+                          fov_rad=math.radians(fov_deg))
+
+    def oct_encode_normals(self, normals, bits=8):
+        """OCTAHEDRAL-encode unit normals to compact integer codes (holographic_octnormal, Cigolle et al. 2014):
+        map each S^2 unit vector to 2 numbers (project onto the octahedron, unfold the lower hemisphere) and
+        quantize to `bits` per component -- spending the budget on the sphere's 2 intrinsic DOF, not 3 ambient
+        x/y/z. Returns integer codes (N,2) in [0, 2^bits). At equal storage this beats naive xyz quantization ~3x
+        (the manifold-quantization win, reverse item R3's S^2 instance). Decode with oct_decode_normals. Kept
+        negative: this is the S^2 map specifically -- the PRINCIPLE generalizes to FHRR phasors (phase angle) and
+        normalized codes, the literal map does not."""
+        from holographic_octnormal import oct_quantize
+        return oct_quantize(normals, bits=bits)
+
+    def oct_decode_normals(self, codes, bits=8):
+        """Decode octahedral integer codes (N,2) back to unit normals (N,3) (holographic_octnormal). Inverse of
+        oct_encode_normals."""
+        from holographic_octnormal import oct_dequantize
+        return oct_dequantize(codes, bits=bits)
 
     def mesh_split_face(self, mesh, f_index, i, j):
         """Cut polygon face `f_index` with a diagonal between its i-th and j-th corners (holographic_eulerops,
@@ -3831,6 +4006,38 @@ class UnifiedMind:
         content-addressable 'what is at grid cell (gy, gx)?' query, routed to the cell's tile bundle."""
         from holographic_splat import recall_region_tiled
         return recall_region_tiled(scene, tuple(cell))
+
+    def splat_prune(self, splats, target, keep):
+        """PRUNE a splat set to its `keep` highest-contribution splats (largest |amplitude|, since each splat's
+        reconstruction energy is amp^2 for the engine's unit-norm gaussians) and refit the survivors (holographic_
+        splatprune). Contribution-ranked prune + refit degrades gracefully and beats naive pruning by a wide margin
+        (~20 dB at half the splats on a smooth field). Returns the pruned, refitted splat list. The splat twin of
+        mesh decimation."""
+        from holographic_splatprune import splat_prune
+        return splat_prune(splats, target, keep)
+
+    def splat_merge(self, splats, target, radius):
+        """MERGE splats closer than `radius` into one (amplitude-weighted centre and scale, summed amplitude) and
+        refit (holographic_splatprune) -- reduces the count with bounded quality loss. Returns the merged list. Kept
+        negative: merge is lossy by construction (one Gaussian cannot equal two); the radius trades count for
+        quality."""
+        from holographic_splatprune import splat_merge
+        return splat_merge(splats, target, radius)
+
+    def splat_lod_chain(self, splats, target, keeps=(40, 20, 10, 5)):
+        """Build a splat LEVEL-OF-DETAIL chain (holographic_splatprune): prune to each count in `keeps`, measuring
+        reconstruction PSNR at each. Returns a fine->coarse list of (splats, count, psnr); the first is the refitted
+        full set. The splat-domain twin of mesh_lod_chain -- the engine's error-budget resolution selection, with the
+        budget in PSNR. Pair with splat_select_lod."""
+        from holographic_splatprune import splat_lod_chain
+        return splat_lod_chain(splats, target, keeps=keeps)
+
+    def splat_select_lod(self, chain, min_psnr):
+        """Choose a splat LOD by QUALITY budget (holographic_splatprune): the index of the FEWEST-splat level whose
+        PSNR still meets `min_psnr` -- the cheapest splat set that looks right -- falling back to the finest level if
+        none clears it. The PSNR-budget analog of mesh_select_lod's pixel budget."""
+        from holographic_splatprune import select_splat_lod
+        return select_splat_lod(chain, min_psnr)
 
     def render_scene(self, tag_list, S=96, seed=0):
         """Render composed attribute tags to an actual RGB image via the scene renderer."""

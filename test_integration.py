@@ -3603,3 +3603,249 @@ def test_fwd7_remainder_modeler_verbs_through_the_mind():
     lc = um.mesh_loop_cut(cube, 0, (f0[0], f0[1]))
     assert lc.is_manifold() and lc.is_closed() and lc.euler_characteristic() == 2
     assert lc.n_faces == cube.n_faces + 4
+
+
+def test_scene_graph_algebra_through_the_mind():
+    """The scene-graph capstone is a real UnifiedMind faculty set: a scene read as GEOMETRY (scene_flatten instances
+    + merges) and as STRUCTURE (scene_to_recipe encodes to a recipe), with the two views consistent -- swapping
+    siblings changes neither the flattened geometry nor the realised vector (merge and bundle both commute), tying
+    the FWD mesh kernel to the ARCH-1 recipe algebra."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_mesh import box
+    from holographic_recipeops import validate
+
+    um = UnifiedMind(dim=256, seed=0)
+    cube = box()
+    scene = um.scene_graph(children=[um.scene_graph(um.scene_translation([2, 0, 0]), mesh=cube),
+                                     um.scene_graph(um.scene_translation([0, 2, 0]), mesh=cube)])
+
+    # GEOMETRY view: two cubes instanced + merged
+    flat = um.scene_flatten(scene)
+    assert flat.n_vertices == 2 * cube.n_vertices and flat.n_faces == 2 * cube.n_faces
+    assert np.allclose(flat.vertices[flat.vertices[:, 0] > 1].mean(axis=0), [2, 0, 0], atol=1e-9)
+
+    # STRUCTURE view: a valid recipe ARCH-1 operates on
+    assert validate(um.scene_to_recipe(scene))[0]
+
+    # CONSISTENCY THEOREM: swap siblings -> geometry AND vector identical
+    swapped = um.scene_graph(children=[scene.children[1], scene.children[0]])
+    a, b = um.scene_flatten(scene), um.scene_flatten(swapped)
+    assert np.allclose(np.sort(a.vertices, axis=0), np.sort(b.vertices, axis=0)) and a.n_faces == b.n_faces
+    assert np.allclose(um.scene_to_recipe(scene).outputs()[0], um.scene_to_recipe(swapped).outputs()[0], atol=1e-12)
+
+
+def test_qem_decimation_through_the_mind():
+    """QEM decimation is a real UnifiedMind faculty: the quadric error metric wired to the guarded collapse, with a
+    surface-deviation quality metric. Through the mind: decimate an icosphere (closed manifold + chi preserved) and
+    confirm QEM beats a naive midpoint collapse on surface error."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_meshsmooth import _icosphere
+    from holographic_eulerops import collapse_edge
+    from holographic_meshqem import _edges
+
+    um = UnifiedMind(dim=128, seed=0)
+    ico = _icosphere(2)
+    qem = um.mesh_qem_decimate(ico, 64)
+    assert qem.is_manifold() and qem.is_closed() and qem.euler_characteristic() == 2 and qem.n_faces <= 64
+
+    # naive midpoint baseline for the comparison
+    m = ico
+    while m.n_faces > 64:
+        ranked = sorted(((float(np.linalg.norm(m.vertices[i] - m.vertices[j])), i, j) for (i, j) in _edges(m)),
+                        key=lambda t: (t[0], t[1], t[2]))
+        done = False
+        for (_, i, j) in ranked:
+            keep, remove = (i, j) if i < j else (j, i)
+            nm = collapse_edge(m, keep, remove)
+            if nm is None:
+                keep, remove = remove, keep
+                nm = collapse_edge(m, keep, remove)
+            if nm is None:
+                continue
+            kn = keep if keep < remove else keep - 1
+            nm.vertices[kn] = 0.5 * (m.vertices[keep] + m.vertices[remove])
+            m = nm; done = True; break
+        if not done:
+            break
+    q_mean, q_max = um.mesh_surface_deviation(ico, qem)
+    n_mean, n_max = um.mesh_surface_deviation(ico, m)
+    assert q_mean < n_mean and q_max < n_max
+
+
+def test_octahedral_normal_encoding_through_the_mind():
+    """Octahedral normal encoding is a real UnifiedMind faculty: quantize unit normals on their S^2 manifold (2
+    intrinsic DOF) instead of 3 ambient x/y/z. Through the mind: round-trip is accurate at 8 bits, and at an equal
+    16-bit budget it beats naive xyz quantization -- the manifold-quantization win (reverse item R3's S^2 case)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=128, seed=0)
+    rng = np.random.default_rng(0)
+    N = rng.standard_normal((4000, 3)); N = N / np.linalg.norm(N, axis=-1, keepdims=True)
+
+    def ang(a, b):
+        return np.degrees(np.arccos(np.clip(np.sum(a * b, axis=-1), -1, 1)))
+
+    recovered = um.oct_decode_normals(um.oct_encode_normals(N, 8), 8)
+    assert np.allclose(np.linalg.norm(recovered, axis=-1), 1.0, atol=1e-9)
+    assert ang(N, recovered).max() < 1.0
+
+    # equal 16-bit budget: oct (8+8) beats naive xyz (5+5+6)
+    def qn(a, bits):
+        levels = (1 << bits) - 1
+        return np.round((a + 1) * 0.5 * levels) / levels * 2 - 1
+    nb = np.stack([qn(N[:, 0], 5), qn(N[:, 1], 5), qn(N[:, 2], 6)], axis=-1)
+    nb = nb / np.linalg.norm(nb, axis=-1, keepdims=True)
+    assert ang(N, recovered).mean() < ang(N, nb).mean()
+
+
+def test_spectral_bandwidth_and_fractal_crosscheck_through_the_mind():
+    """The bandwidth driver + singularity cross-check are real UnifiedMind faculties (the genuinely-new parts of the
+    fractal/bandwidth probe; dimension itself is already shipped). Through the mind: bandwidth separates smooth from
+    broadband, the cross-check agrees on clean fBm and FLAGS a step the shipped single-estimator dimension would
+    misread."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=128, seed=0)
+    n = 8192
+
+    smooth = np.sin(2 * np.pi * 3 * np.arange(n) / n)
+    white = np.random.default_rng(2).standard_normal(n)
+    assert um.spectral_bandwidth(smooth) < 0.05 and um.spectral_bandwidth(white) > 0.5
+
+    # clean fBm: cross-check agrees
+    rng = np.random.default_rng(1)
+    f = np.fft.rfftfreq(n); amp = np.zeros(len(f)); amp[1:] = f[1:] ** (-(2 * 0.5 + 1) / 2)
+    fbm = np.fft.irfft(amp * np.exp(1j * rng.uniform(0, 2 * np.pi, len(f))), n)
+    assert um.fractal_confidence(fbm)[2]
+
+    # a step: cross-check flags it (the kept negative the shipped dimension can't catch)
+    step = np.zeros(n); step[n // 2:] = 1.0
+    assert not um.fractal_confidence(step)[2]
+
+
+def test_auto_bandwidth_kde_through_the_mind():
+    """Auto-bandwidth KDE is a real UnifiedMind faculty (the disciplined band-limited-encoding faculty, landed on the
+    encoder's RBF-as-KDE use). Through the mind: LCV bandwidth selection matches the kernel to the data and the
+    estimate tracks a bimodal density, beating a fixed default bandwidth several-fold."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=128, seed=0)
+    bimodal = lambda x: 0.5 * np.exp(-0.5 * ((x - 0.3) / 0.05) ** 2) + 0.5 * np.exp(-0.5 * ((x - 0.7) / 0.07) ** 2)
+    rng = np.random.default_rng(0)
+    xs = []
+    while len(xs) < 400:
+        c = rng.uniform(0, 1)
+        if rng.uniform(0, 6) < bimodal(c):
+            xs.append(c)
+    xs = np.array(xs)
+    qx = np.linspace(0.02, 0.98, 200)
+    truth = bimodal(qx)
+
+    est, bw = um.density_estimate(xs, 0, 1, qx, dim=1024, method="lcv")
+    assert np.corrcoef(est, truth)[0, 1] > 0.95
+    assert um.kde_bandwidth(xs, 0, 1, "lcv") == bw
+
+    def shape_rmse(e, t):
+        a = np.sum(e * t) / np.sum(e * e)
+        return np.sqrt(np.mean((a * e - t) ** 2))
+    e_def, _ = um.density_estimate(xs, 0, 1, qx, dim=1024, bandwidth=1.8)
+    assert shape_rmse(est, truth) < shape_rmse(e_def, truth) / 3
+
+
+def test_mesh_lod_policy_through_the_mind():
+    """The screen-space-error LOD policy is a real UnifiedMind faculty (the geometric instance of the engine's
+    error-budget resolution selection, on top of QEM). Through the mind: build a chain off a sphere, then the
+    selected level coarsens with viewing distance -- full detail up close, coarser far away."""
+    from holographic_unified import UnifiedMind
+    from holographic_meshsmooth import _icosphere
+
+    um = UnifiedMind(dim=128, seed=0)
+    chain = um.mesh_lod_chain(_icosphere(2), targets=(0.5, 0.25, 0.125))
+    assert len(chain) >= 3
+    assert chain[0].max_error == 0.0                       # the original is the fine end
+    assert all(chain[i].n_faces > chain[i + 1].n_faces for i in range(len(chain) - 1))
+
+    picks = [um.mesh_select_lod(chain, d, 2.0) for d in (2.0, 15.0, 200.0)]
+    assert picks[0] == 0 and picks[-1] > 0                 # full up close, coarser far
+    assert all(picks[i] <= picks[i + 1] for i in range(len(picks) - 1))
+
+
+def test_binding_stability_through_the_mind():
+    """The binding-stability regime test is a real UnifiedMind faculty (the band-limit-preservation item grounded in
+    the real bind). Through the mind: spectral flatness separates a unitary key (exact bind/unbind, stable) from a
+    random one (lossy, unstable)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_ai import unitary_vector, random_vector
+
+    um = UnifiedMind(dim=128, seed=0)
+    uni = unitary_vector(1024, np.random.default_rng(1))
+    ran = random_vector(1024, np.random.default_rng(2))
+
+    assert um.spectral_flatness(uni) > 0.97 > um.spectral_flatness(ran)
+    rep_u = um.binding_stability(uni)
+    rep_r = um.binding_stability(ran)
+    assert rep_u["stable"] and rep_u["distortion"] < 1e-6
+    assert not rep_r["stable"] and rep_r["distortion"] > 0.5
+
+
+def test_splat_prune_and_lod_through_the_mind():
+    """Splat prune/merge + LOD are real UnifiedMind faculties (the splat twin of the mesh LOD policy). Through the
+    mind: contribution prune beats naive, the LOD chain degrades gracefully, and selection by PSNR budget keeps more
+    splats for a tighter budget."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_splat import splat_fit, splat_render, splat_refit, psnr
+
+    um = UnifiedMind(dim=128, seed=0)
+    yy, xx = np.mgrid[0:64, 0:64]
+    g = lambda cy, cx, s: np.exp(-((yy - cy) ** 2 + (xx - cx) ** 2) / (2 * s * s))
+    target = 1.0 * g(18, 20, 5) + 0.8 * g(40, 44, 7) + 0.6 * g(48, 15, 4)
+    full = splat_fit(target, 50, refit=True)
+
+    contrib = um.splat_prune(full, target, 18)
+    rng = np.random.default_rng(0)
+    rand = splat_refit([full[i] for i in rng.permutation(len(full))[:18]], target)
+    assert psnr(splat_render(contrib, (64, 64)), target) > psnr(splat_render(rand, (64, 64)), target) + 6
+
+    chain = um.splat_lod_chain(full, target, keeps=(30, 15, 8))
+    psnrs = [c[2] for c in chain]
+    assert all(psnrs[i] >= psnrs[i + 1] - 1e-6 for i in range(len(psnrs) - 1))
+    # a tighter PSNR budget keeps MORE splats (compare counts, not chain indices)
+    assert chain[um.splat_select_lod(chain, 40.0)][1] >= chain[um.splat_select_lod(chain, 25.0)][1]
+
+    assert len(um.splat_merge(full, target, 4.0)) < len(full)
+
+
+def test_scene_delta_through_the_mind():
+    """Scene component delta + dedup measurement are real UnifiedMind faculties (the explicit diff/transmission layer
+    over the automatic content-addressed sharing). Through the mind: a one-subtree change is a small delta, and the
+    dedup saving across variants is measured."""
+    from holographic_unified import UnifiedMind
+    from holographic_scenegraph import SceneNode, translation
+    from holographic_mesh import box
+    from holographic_scenedelta import scene_components, apply_scene_delta
+
+    um = UnifiedMind(dim=128, seed=0)
+    cube, other = box(), box(2, 1, 1)
+
+    def variant(i, changed=True):
+        ch = [SceneNode(translation([0, 0, 0]), mesh=cube), SceneNode(translation([2, 0, 0]), mesh=cube),
+              SceneNode(translation([0, 2, 0]), mesh=other), SceneNode(translation([2, 2, 0]), mesh=cube)]
+        if changed:
+            ch[i % 4] = SceneNode(translation([float(i), 5, 0]), mesh=cube)
+        return SceneNode(children=ch)
+
+    base = variant(0, changed=False)
+    var = variant(1)
+    d = um.scene_delta(base, var)
+    assert len(d["added"]) + len(d["removed"]) < len(scene_components(var))
+    assert apply_scene_delta(scene_components(base), d) == scene_components(var)
+
+    sav = um.scene_dedup_saving([base] + [variant(i) for i in range(8)])
+    assert sav["saving_x"] > 2.0 and sav["naive"] >= sav["unique"]

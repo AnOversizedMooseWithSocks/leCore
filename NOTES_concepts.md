@@ -10318,3 +10318,449 @@ NOTES_concepts.md, tour.py. Faculty count -> 265.
 
 *** With this, the FWD direct-modeling verb set is complete: extrude/inset/dissolve (FWD-7) + bevel/bridge/loop-cut
 (remainder). The broad FWD DCC pipeline + the full §ARCH inward-mirror block are both done. ***
+
+
+--------------------------------------------------------------------------------
+HOLOGRAPHIC SCENE-GRAPH ALGEBRA -- the capstone that joins the FWD mesh kernel to the ARCH-1 recipe algebra. A
+scene graph (leaves are meshes, edges are transforms) read TWO ways at once: as GEOMETRY (instance + merge) and as
+STRUCTURE (encode to a StructureRecipe). The point is that the two views are CONSISTENT -- VSA is geometry, and the
+scene is one object wearing both costumes.
+
+WHAT SHIPPED (holographic_scenegraph.py; additive; seven UnifiedMind faculties):
+  * SceneNode(transform, mesh, children) [scene_graph] -- a node: a 4x4 transform, an optional leaf mesh, optional
+    children.
+  * identity/translation/scaling/rotation/compose_transforms [scene_translation/scene_scaling/scene_rotation/
+    scene_compose_transforms] -- 4x4 transform builders (rotation is Rodrigues).
+  * flatten_scene(node) [scene_flatten] -- the GEOMETRY view: instance every leaf through its accumulated transform
+    (parent transforms composed down the graph) and MERGE into one Mesh.
+  * scene_to_recipe(node, dim, seed) [scene_to_recipe] -- the STRUCTURE view: encode as a StructureRecipe
+    (transforms BOUND to content via bind, siblings BUNDLED), realising to one hypervector. Leaf/transform atom
+    names are content hashes (hashlib).
+
+THE CONSISTENCY THEOREM (the unification, measured): swapping two siblings leaves the flattened GEOMETRY identical
+(same sorted vertices, same face count -- a mesh merge is commutative) AND the realised VECTOR identical (bundle is
+commutative). So a structural edit from ARCH-1 (recipe_reorder_members on the sibling bundle) is a no-op on the
+geometry too -- the two representations agree. The scene recipe is a WELL-FORMED recipe (passes ARCH-1's validate),
+so the recipe Euler operators apply to scenes.
+
+MEASURED (the bar): INSTANCING -- a scene of 2 cubes flattens to one mesh V=16 F=12, the +x instance lands with its
+centroid at its translation; NESTED transforms compose to +2 (parent then child); CONSISTENCY -- sibling swap
+leaves geometry AND vector identical; distinct transforms -> distinct structure vectors; the scene is a valid
+recipe; deterministic (same scene -> byte-identical mesh and vector).
+
+KEPT NEGATIVES (loud):
+  * flatten_scene INSTANCES and concatenates -- it does NOT weld coincident vertices or boolean-merge overlapping
+    geometry (that is mesh_csg / ARCH-7's job); two touching cubes flatten to two components, not one solid. This is
+    scene assembly, not constructive solid geometry.
+  * scene_to_recipe encodes the scene's STRUCTURE (which transform holds which content), not its geometry -- the
+    mesh hash distinguishes meshes but the vector is a structural index, and recovering geometry is scene_flatten's
+    job, not the vector's.
+  * the encoding bundles siblings, so (decode ceiling) a node with very many children loses per-child
+    recoverability from the root vector -- the same capacity cliff every bundle carries; wide scenes index
+    structurally but are not meant to be decoded child-by-child from the root.
+
+Tests: +14 (1394 -> 1408). test_holographic_scenegraph.py (+13): transform builders (translation/rotation/scaling/
+compose); instancing merges; instance lands at translation; nested transforms compose; identity node; sibling-swap
+geometry identical; sibling-swap vector identical; valid recipe; distinct scenes -> distinct vectors; determinism.
+test_integration.py (+1): the full scene-graph algebra through the mind. Files: holographic_scenegraph.py (new),
+test_holographic_scenegraph.py (new), holographic_unified.py (7 faculties), test_integration.py, README,
+NOTES_concepts.md, tour.py. Faculty count -> 272.
+
+*** This is the geometry capstone: the FWD mesh pipeline + the §ARCH inward mirror now meet in one object -- a scene
+that is simultaneously a pile of triangles and a composed hypervector, with the two provably consistent. The
+standing thesis (VSA is geometry) made concrete: the scene graph IS the recipe. ***
+
+
+--------------------------------------------------------------------------------
+QEM DECIMATION -- the quadric error metric (Garland-Heckbert, SIGGRAPH 1997), the one genuinely-missing piece of a
+principled mesh simplifier. From the geometry->stack backlog sweep: the engine already had the guarded
+collapse_edge (eulerops, the link-condition refusal made operational), the heapq priority-descent with
+deterministic ties (HoloForest/Dijkstra), the curvature read-out (meshcurvature), and the greedy-by-error loop
+shape (matching pursuit) -- ONLY the cost function (the quadric) was absent. This supplies it and wires it to the
+shipped collapse.
+
+WHAT SHIPPED (holographic_meshqem.py; additive; two UnifiedMind faculties):
+  * vertex_quadrics(mesh) -- per-vertex 4x4 error quadrics Q_v = sum over incident faces of (plane plane^T),
+    plane = [n, -n.p]; v^T Q_v v is the summed squared distance from v to its incident planes.
+  * contraction_target(Q, p_i, p_j) -- the optimal merged position argmin v^T Q v and its cost; singular 3x3 ->
+    best of {midpoint, endpoints}.
+  * qem_decimate(mesh, target_faces) [mesh_qem_decimate] -- greedily collapse the lowest-cost edge (deterministic
+    ties by vertex index) via the guarded collapse_edge, ACCUMULATING quadrics through each collapse (the survivor
+    inherits Q_keep + Q_remove), until <= target_faces.
+  * surface_deviation(mesh_a, mesh_b) [mesh_surface_deviation] -- (mean, max) point-to-surface distance (a
+    decimation quality metric; uses the closed-form point-to-triangle distance).
+
+WHY IT BELONGS IN THIS ENGINE (the reverse thesis, concrete): a quadric is Q_v = sum of (plane plane^T) -- an
+OUTER-PRODUCT ACCUMULATION = a BUNDLE of plane constraints in matrix form, with the collapse cost read out as a
+quadratic. That is bind/bundle/readout in a different costume. So QEM IS a general "merge the two items whose
+combined representation loses the least" operator, which is exactly reverse item R2 (prototype compaction in the
+creature -- combine redundant prototypes instead of evicting), and the same shape as the splat merge / codebook
+merge. Build it once for meshes; it is the merge operator everywhere. (R2 is a future wire on this.)
+
+MEASURED (the bar): icosphere V66 F128 -> QEM F64, closed manifold, chi PRESERVED (2); QEM BEATS a naive
+shortest-edge->midpoint baseline on MEAN point-to-surface error (~1.8x) AND dramatically on MAX error (~3x -- naive
+spikes where it collapses a feature edge); a vertex's own quadric vanishes at the vertex (it lies on its incident
+planes); the cost is never negative; deterministic.
+
+KEPT NEGATIVES (loud):
+  * QEM minimizes squared distance to incident PLANES, not the true surface or any invariant -- so on a sphere the
+    optimal points sit slightly OFF-RADIUS (|r-1| a touch worse than the chord-midpoint baseline) while being
+    CLOSER to the actual surface (point-to-surface, the honest metric, is much better, esp. max). The plane metric
+    is the right one; radius fidelity is not what it optimizes.
+  * CLOSED meshes are in scope; OPEN-mesh boundary preservation (the standard high-weight perpendicular-plane
+    penalty per boundary edge) is deferred.
+  * The loop recomputes edge costs each pass (clear + correct); the incremental heap-with-lazy-deletion that makes
+    QEM near-linear is the standard perf upgrade, deferred (the panel's "delegate the heavy grind" call) -- this is
+    the readable, correct version for moderate meshes.
+  * collapse_edge REFUSES manifold-breaking collapses (link condition); the decimator tries the next-cheapest edge
+    and HALTS if no safe collapse remains -- so it may stop above target_faces. A true mesh property, operational.
+
+Tests: +11 (1408 -> 1419). test_holographic_meshqem.py (+10): quadric vanishes at its vertex; quadric symmetric;
+cost non-negative; singular -> midpoint fallback; decimate preserves closed manifold + chi; reaches target; QEM
+beats naive mean error; QEM beats naive max error; surface_deviation zero for identical mesh; determinism.
+test_integration.py (+1): QEM through the mind, beating naive. Files: holographic_meshqem.py (new),
+test_holographic_meshqem.py (new), holographic_unified.py (2 faculties), test_integration.py, README,
+NOTES_concepts.md, tour.py. Faculty count -> 274.
+
+*** First item off the geometry->stack backlog: the sweep found the engine had every part of a decimator but the
+quadric; this is the quadric, and (per the reverse thesis) it is the general error-minimizing MERGE operator -- the
+same Sigma-nn^T-and-read-the-cost shape the creature's prototype compaction (R2) wants. ***
+
+
+--------------------------------------------------------------------------------
+OCTAHEDRAL NORMAL ENCODING -- quantize a unit vector on its MANIFOLD, not its ambient bits (Cigolle, Donow,
+Evangelakos, Mara, McGuire, Meyer, JCGT 2014). From the geometry->stack backlog item A2: the shipped quantizer
+(int8/quant='rd') quantizes a value's ambient bits, but a unit normal has only 2 DOF (it lives on S^2), so
+quantizing 3 x/y/z components wastes a third of the budget on a constrained coordinate. The octahedral map projects
+onto the octahedron (L1) and unfolds the lower hemisphere into a 2D square -- 2 numbers, bounded error, bits on the
+intrinsic DOF.
+
+WHAT SHIPPED (holographic_octnormal.py; additive; two UnifiedMind faculties):
+  * oct_encode(normals) / oct_decode(uv) -- the continuous bijection S^2 <-> [-1,1]^2 (exact to float precision).
+  * oct_quantize(normals, bits) [oct_encode_normals] -- integer codes (N,2) in [0, 2^bits).
+  * oct_dequantize(codes, bits) [oct_decode_normals] -- unit normals back.
+  * _sign_nz -- sign that returns +1 at zero (np.sign gives 0, which breaks the fold at the poles, e.g. [0,0,-1]).
+
+WHY IT BELONGS (reverse thesis): manifold quantization made concrete -- "spend bits on the surface the data lives
+on" -- which is the engine's binary-quantization-distorts-the-geometry negative turned into a method. The same
+PRINCIPLE is reverse item R3: the FHRR phasor memory is unit-magnitude complex (S^1) and a normalized hypervector
+lives on a high-D sphere, so both want their intrinsic coordinate quantized (for a phasor that analog is the PHASE
+ANGLE -- one number, not two). Octahedral is the concrete S^2 instance; R3 is the principle carried to the phasor
+memory (a future wire).
+
+MEASURED (the bar): continuous round-trip EXACT (max ~1e-6 deg, a bijection); 8-bit quantized round-trip small +
+BOUNDED (max 0.93 deg, mean 0.34); at an EQUAL 16-bit budget octahedral (8+8) BEATS naive x/y/z (5+5+6,
+renormalized) on mean angular error 0.34 vs 1.20 deg (~3.5x) -- the manifold-quantization win; axis-aligned + the
+z<0 pole survive (the fold edge case, fixed by _sign_nz); decode outputs unit vectors; deterministic.
+
+KEPT NEGATIVES (loud):
+  * At EQUAL bits-PER-COMPONENT naive xyz is more accurate -- because it spends 50% more bits (3 comps vs 2). The
+    octahedral win is a STORAGE win (same accuracy in 2 numbers naive needs ~2.5-3 for), stated so the per-component
+    numbers aren't misread.
+  * Octahedral is specific to S^2 (3-D unit vectors). It does NOT generalize verbatim to S^1 (FHRR phasors) or a
+    high-D sphere -- those use the SAME PRINCIPLE with a different intrinsic coordinate. The literal map is for
+    normals; R3 is the principle, not this function.
+  * The fold has measure-zero seams (the octahedron edges, z=0) where the (u,v) representation is non-unique; points
+    there still decode to a valid unit vector -- the standard harmless oct caveat.
+
+Tests: +9 (1419 -> 1428). test_holographic_octnormal.py (+8): continuous round-trip exact; axis-aligned + poles
+roundtrip; 8-bit bounded error; codes in range; decode outputs unit vectors; more bits -> lower error; oct beats
+naive at equal budget; determinism. test_integration.py (+1): octahedral through the mind, beating naive. Files:
+holographic_octnormal.py (new), test_holographic_octnormal.py (new), holographic_unified.py (2 faculties),
+test_integration.py, README, NOTES_concepts.md, tour.py. Faculty count -> 276.
+
+*** Second item off the geometry->stack backlog (item A2, paired with QEM). The concrete S^2 case of manifold
+quantization -- the same "quantize the intrinsic DOF" principle reverse item R3 wants for the FHRR phasor memory. ***
+
+
+--------------------------------------------------------------------------------
+SPECTRAL BANDWIDTH + A SINGULARITY CROSS-CHECK -- the genuinely-new parts of the fractal-optics backlog's
+"fractal-dimension/bandwidth probe" (item 2). The DE-DUP discipline applied to the engine itself: the audit found
+fractal DIMENSION is already shipped (box-counting + R/S Hurst in holographic_fractal; the fractal_dimension /
+self_affinity faculties), so this ships ONLY the two missing pieces the review named, not another dimension.
+
+WHAT SHIPPED (holographic_bandwidth.py; additive; two UnifiedMind faculties):
+  * spectral_bandwidth(x, energy_fraction) [spectral_bandwidth] -- the fraction of Nyquist holding that energy
+    fraction; the number that drives a band-limited encoder's bandwidth knob (the next item). Small for band-limited
+    content, near 1 for broadband. GENUINELY NEW (the review's "the probe's real job is bandwidth measurement").
+  * spectral_dimension(x) -- the power-spectrum-slope dimension D=(5-gamma)/2 (Berry & Klein), a fast estimator used
+    as a cross-check term (NOT the engine's primary dimension).
+  * fractal_confidence(x) [fractal_confidence] -- (d_spectral, d_increment, agree): two INDEPENDENT slope estimators
+    and whether they agree -- the singularity flag. The shipped single-estimator dimension silently returns a wrong
+    number for a step/tone; this catches it.
+
+MEASURED (the bar): bandwidth smooth sinusoid 0.0007 << white noise 0.947 of Nyquist; rougher fBm (lower Hurst) ->
+more bandwidth; on clean fBm of known H the two slope estimators AGREE and bracket D=2-H (spectral 1.70 / increment
+1.65 at H=0.3); a STEP (isolated singularity) -> spectral 2.03 / increment 1.50 DISAGREE -> flag fires; a pure tone
+-> disagree -> flag fires; deterministic.
+
+A MEASURED FINDING (kept): the cross-check uses spectral-slope vs increment-variance, NOT the shipped R/S Hurst --
+because R/S reads a DIFFERENT number on the same clean fBm (it is a range statistic weighting coarse/low-frequency
+trend-dominated scales, while the slope methods fit the whole power law). They measure different things, so R/S is a
+poor naive co-validator here. The honest cross-check is slope-vs-slope. (R/S stays correct for what it ships for --
+series persistence.) An instance of the backlog discipline: check the live code, build only the delta, and report
+exactly where two methods legitimately disagree.
+
+KEPT NEGATIVES (loud):
+  * spectral_bandwidth is an ENERGY rolloff: a fractal's front-loaded 1/f^b energy can read a small bandwidth even
+    though its self-similar detail extends higher -- band-limiting to the energy-bandwidth keeps the bulk, discards
+    the fine detail (the fundamental fractal trade; superoscillation is the standing proof it can't be cheated for
+    free). Honest about fidelity-for-a-budget, not lossless bandwidth.
+  * the power-spectrum-slope dimension is the one FOOLED by singularities -- it exists here only as a cross-check
+    term, never the engine's reported dimension; trust a dimension only when agree.
+  * 1-D signals; higher-D the slope relation is approximate, and images already use the shipped box-counting.
+
+Tests: +10 (1428 -> 1438). test_holographic_bandwidth.py (+9): bandwidth separates smooth/broadband; bandwidth in
+[0,1]; rougher fBm -> more bandwidth; spectral D recovers fBm; increment D recovers fBm; cross-check agrees on fBm;
+cross-check flags a step; cross-check flags a pure tone; determinism. test_integration.py (+1): bandwidth +
+cross-check through the mind. Files: holographic_bandwidth.py (new), test_holographic_bandwidth.py (new),
+holographic_unified.py (2 faculties), test_integration.py, README, NOTES_concepts.md, tour.py. Faculty count -> 278.
+
+*** First fractal-optics backlog item. The de-dup lesson again: the engine already had fractal dimension three ways,
+so the real work was the BANDWIDTH driver (for the next item, the band-limited-encoding faculty) and the cross-check
+the single-estimator dimension lacked. Build only the delta. ***
+
+
+--------------------------------------------------------------------------------
+AUTO-BANDWIDTH KDE VIA THE ENCODER -- the disciplined form of the fractal-optics backlog's "band-limited-encoding
+faculty" (Item N). A LIVE AUDIT of the encoder reshaped the ask, and the slog produced several kept negatives before
+landing on what actually delivers.
+
+THE AUDIT (what the review's premise got wrong about the live code):
+  * The SINC kernel's bandwidth is NOT tunable -- its width is fixed at scale=1/(hi-lo); the `bandwidth` parameter
+    only affects the RBF phases. So "tune the sinc ideal filter to Nyquist" does not apply; only RBF bandwidth is
+    selectable. KEPT NEGATIVE.
+  * The encoder is a SCALAR encoder, not a function encoder -- reconstructing an oscillatory function by bundling
+    weighted samples + Nadaraya-Watson collapses to the mean and does not benefit from bandwidth tuning. KEPT
+    NEGATIVE (the failed approach; measured RMSE ~0.7 = predicting the mean).
+  * The encoder's DOCUMENTED use is the RBF kernel as a KDE ("a bundle of encoded points reads as a proper KDE"),
+    and THERE the bandwidth IS the band-limit with a real optimum (U-shaped error). The faculty lands here.
+
+WHAT SHIPPED (holographic_kde.py; additive; two UnifiedMind faculties):
+  * kde_bandwidth(samples, lo, hi, method) [kde_bandwidth] -- RBF bandwidth by 'lcv' (leave-one-out likelihood,
+    robust) or 'silverman' (cheap fallback).
+  * density_estimate(samples, lo, hi, query, dim, seed, method) [density_estimate] -- KDE via the encoder (bundle of
+    encoded samples, density ~ bundle . encode(x)), bandwidth auto-selected, output normalized to integrate ~1.
+    Returns (density_at_query, bandwidth).
+
+THE KEY BUG FOUND + KEPT: LCV REQUIRES a NORMALIZED kernel. The encoder's kernel is unnormalized (its integral grows
+with width), so naive LCV collapses to the WIDEST bandwidth (measured: it picked bw=2, the floor). The selection
+normalizes the Gaussian per candidate (1/(std*sqrt(2pi))) and then LCV works -- landing near the ground-truth
+optimum on both bimodal (bw 39 vs optimum 40) and unimodal (bw 22 vs optimum 20) densities. The encoder is still
+used for the actual estimate; only the selection normalizes.
+
+MEASURED (the bar): bimodal density -- LCV bw 39 near optimum 40, shape RMSE 0.17 BEATS the fixed default (bw 1.8)
+1.16 by 6.8x and Silverman 0.45; estimate correlation 0.99 with truth; unimodal -- LCV near optimum, beats default
+~7x; the density integrates to ~1; a too-small dim (16 vs 1024) gives worse correlation at the same bandwidth (the
+capacity negative); deterministic.
+
+KEPT NEGATIVES (loud):
+  * SINC bandwidth is not tunable in the shipped encoder (only RBF) -- the review's sinc-ideal-filter knob does not
+    apply.
+  * LCV requires normalized kernels (the bug above) -- naive LCV on the encoder's unnormalized kernel collapses.
+  * Silverman's rule (fallback) over-smooths MULTIMODAL data (~2.6x vs LCV's ~6.8x) -- the standard caveat.
+  * Bandwidth selection fixes the SMOOTHING match, NOT capacity: a too-small dim cannot be rescued by any bandwidth.
+  * Function reconstruction (vs density estimation) is NOT this encoder's job (the failed Nadaraya-Watson approach).
+
+Tests: +10 (1438 -> 1448). test_holographic_kde.py (+9): LCV beats default bimodal; LCV near optimum bimodal; LCV
+near optimum unimodal; estimate correlates with truth; Silverman beats default but worse than LCV; density
+integrates to ~1; capacity negative (small dim worse); silverman bandwidth is a number; determinism.
+test_integration.py (+1): auto-bandwidth KDE through the mind. Files: holographic_kde.py (new),
+test_holographic_kde.py (new), holographic_unified.py (2 faculties), test_integration.py, README, NOTES_concepts.md,
+tour.py. Faculty count -> 280.
+
+*** Second fractal-optics backlog item. The audit reshaped the review's over-promise (tune the sinc to Nyquist)
+into what the shipped encoder actually supports: auto-bandwidth KDE, where the bandwidth IS the band-limit and LCV
+matches it to the data 6.8x better than the default. The kept negatives (sinc not tunable, NW collapses, LCV needs
+normalization) are the audit working. ***
+
+
+--------------------------------------------------------------------------------
+SCREEN-SPACE-ERROR LOD POLICY -- the geometry->stack backlog's "geometric screen-space-error policy." The piece that
+turns QEM decimation + surface_deviation (both shipped) into an actual DECISION: which simplification to show.
+
+THE REVERSE-THESIS CONNECTION (why it belongs here): this is the engine's own error-budget RESOLUTION SELECTION
+carried to meshes. coarse_to_fine refines a query only until an error budget is met; multires_pyramid keeps a signal
+at several scales; the equidistribution rule places resolution where needed. select_lod is that rule for geometry --
+the coarsest level of a decimation chain whose error, projected to the screen, meets a pixel budget. The principle
+is the one the engine already uses for signals and queries; only the domain (meshes) and the budget unit (pixels)
+are new.
+
+WHAT SHIPPED (holographic_lod.py; additive; two UnifiedMind faculties):
+  * build_lod_chain(mesh, targets) [mesh_lod_chain] -- QEM-decimate to coarser levels at face-count fractions,
+    measuring each level's surface deviation (mean, max) from the ORIGINAL. Returns fine->coarse LODLevel records;
+    level 0 is the original (zero error).
+  * screen_space_error(world_error, distance, screen_height_px, fov_rad) -- project a world error to screen pixels:
+    sse = world_error * screen_height / (2 * distance * tan(fov/2)).
+  * select_lod(chain, distance, pixel_threshold, ...) [mesh_select_lod] -- index of the COARSEST level whose max
+    screen-space error stays under the pixel budget (the cheapest mesh that looks right at that distance).
+
+MEASURED (the bar): chain off an icosphere F[128, 64, 32, 16] with max deviation [0.0, 0.072, 0.105, 0.174]
+(monotone -- fewer faces, growing error); screen error falls with distance; LOD selection by distance [0,0,0,2,3]
+across 2..200 units (full detail up close, F16 far away) -- monotone coarsening; the choice is TIGHT (at d=50 it
+picks F32 at 1.97px while F16 would breach the 2px budget); a tighter pixel threshold or higher screen resolution
+forces a finer level; deterministic.
+
+KEPT NEGATIVES (loud):
+  * the error driving the policy is GEOMETRIC surface deviation (a Hausdorff-style distance), not a perceptual or
+    silhouette metric -- a coarse mesh can be within the pixel budget on average yet show a visible silhouette
+    break. The policy is exactly as good as surface_deviation is.
+  * the projection ignores foreshortening and screen position (the standard conservative LOD estimate, not a
+    per-pixel bound).
+  * the chain inherits QEM's limits (closed meshes, boundary handling) -- this selects among levels, it does not
+    improve them.
+
+Tests: +13 (1448 -> 1461). test_holographic_lod.py (+12): chain has several levels; first level is the original
+zero-error; face count strictly decreases; deviation only grows; screen error falls with distance; screen error
+scales with resolution; LOD coarsens with distance; full detail up close / coarser far; selection is tight; tighter
+threshold never coarser; higher resolution never coarser; determinism. test_integration.py (+1): LOD policy through
+the mind. Files: holographic_lod.py (new), test_holographic_lod.py (new), holographic_unified.py (2 faculties),
+test_integration.py, README, NOTES_concepts.md, tour.py. Faculty count -> 282.
+
+*** geometry->stack backlog item, completing the QEM decimation story (decimate -> measure -> SELECT). The reverse
+thesis again: a geometric LOD policy is the engine's error-budget resolution selection (coarse_to_fine) in the mesh
+domain -- same rule, different units. ***
+
+
+--------------------------------------------------------------------------------
+BINDING-STABILITY REGIME TEST -- the fractal-optics backlog's "band-limit-preservation regime test" (Trefethen
+transient-growth / pseudospectra spirit), grounded in the engine's actual bind. The investigation measured all three
+relevant operations on the real substrate; the Trefethen framing came up empty and the real story is a LINEAR one.
+
+WHAT THE INVESTIGATION FOUND (all measured, in the self-test):
+  * LINEAR ops preserve the band-limit -- bind, bundle, permute all map a white spectrum to a white spectrum
+    (high-frequency-energy fraction ~0.5 throughout). No spectral concentration.
+  * The CLEANUP shows NO transient growth -- a pure HIGH-FREQUENCY perturbation of a stored atom, iterated through
+    the dense-associative (modern-Hopfield) cleanup, contracts MONOTONICALLY to zero (one step at usable beta). The
+    non-normal transient amplification Trefethen's lens looks for does not appear.
+  * So the real stability axis is a LINEAR property of the binding KEY: its SPECTRAL FLATNESS. unbind(bind(x,k),k)
+    returns x convolved with |K|^2, equal to x only when |K|=1 everywhere -- a UNITARY key (flatness 1.0). A random
+    key (flatness ~0.5) DISTORTS, and the distortion compounds catastrophically over a chain.
+
+WHAT SHIPPED (holographic_flatness.py; additive; two UnifiedMind faculties):
+  * spectral_flatness(v) [spectral_flatness] -- Wiener entropy (geometric/arithmetic mean of the power spectrum),
+    (0,1]; 1.0 = unitary, distortion-free key.
+  * binding_distortion(key, seed, trials) -- the measured single-round bind/unbind distortion (ground truth flatness
+    predicts).
+  * binding_stability(v, tol) [binding_stability] -- {'flatness', 'distortion', 'stable'}: the regime diagnostic for
+    a key.
+
+THE DE-DUP (what is NOT new): the stable regime itself is already shipped -- unitary_vector mints flat-spectrum
+atoms, and holographic_array / holographic_assembly already use them "for exact unbind." What was missing, and is the
+genuinely-new contribution, is the DIAGNOSTIC: measuring where any vector sits on the stability spectrum, and the
+regime test confirming flatness predicts distortion. Answers "is this key safe to bind/unbind repeatedly?"
+
+MEASURED (the bar): flatness unitary 1.000 vs random 0.594; a unitary key is EXACT (chain-64 bind/unbind error <
+1e-9), a random key distorts ~0.93 and compounds; flatness PREDICTS distortion -- across keys blended unitary->random
+the flatness falls [1.0, 0.95, 0.81, 0.57, 0.3] and distortion rises [0.0, 0.33, 0.75, 1.13, 1.47] monotonically;
+linear ops preserve a white spectrum; the cleanup contracts monotonically; deterministic.
+
+KEPT NEGATIVES (loud):
+  * the stable regime is NOT new (unitary_vector exists); this adds the MEASUREMENT. And unitarity is a mint CHOICE,
+    not a free default -- the engine's own record notes a starved-maze bootstrap that went to zero under unitary
+    atoms (their flatness removes a redundancy some paths rely on). Flatness tells you the binding cost, not that
+    unitary is always right.
+  * the Trefethen transient-growth framing, taken literally, came up EMPTY -- the honest result is a linear-stability
+    story (key flatness), not a non-normal-dynamics one. Reported as found.
+  * flatness governs binding (convolution) specifically; bundle capacity and cleanup confusability are separate axes.
+
+Tests: +10 (1461 -> 1471). test_holographic_flatness.py (+9): flatness separates unitary/random; unitary key exact;
+random key lossy; unitary chain stays exact; flatness predicts distortion monotonically; linear ops preserve white
+spectrum; cleanup contracts monotonically (no transient growth); binding stability report; determinism.
+test_integration.py (+1): binding stability through the mind. Files: holographic_flatness.py (new),
+test_holographic_flatness.py (new), holographic_unified.py (2 faculties), test_integration.py, README,
+NOTES_concepts.md, tour.py. Faculty count -> 284.
+
+*** Third fractal-optics backlog item. The Trefethen lens looked for transient growth and found none -- a clean
+negative -- so the honest deliverable is the LINEAR stability diagnostic the data actually pointed at: spectral
+flatness predicts binding distortion, with unitary keys (already shipped) as the flatness=1 exact regime. ***
+
+
+--------------------------------------------------------------------------------
+SPLAT PRUNE / MERGE + A QUALITY-BUDGET LOD CHAIN -- the geometry->stack backlog's "splat prune/merge + exporter."
+The splat-domain twin of the mesh LOD policy: reduce an existing splat set while holding quality, and pick a level
+for a budget -- there the budget was screen-space pixels, here it is reconstruction PSNR.
+
+THE KEY MOVE: each splat renders as amp * gaussian and the engine's gaussians are UNIT-NORM, so a splat's
+reconstruction energy is exactly amp^2 -- "which splats matter" is "which have the largest |amp|". Drop the rest,
+then one joint amplitude REFIT (splat_refit, the closed-form lstsq already in the engine) lets the survivors absorb
+the overlap the removed ones carried. Contribution-ranked prune + refit degrades gracefully and dominates naive
+pruning by a wide margin.
+
+WHAT SHIPPED (holographic_splatprune.py; additive; four UnifiedMind faculties):
+  * splat_prune(splats, target, keep) [splat_prune] -- keep the top-`keep` splats by |amp|, refit.
+  * splat_merge(splats, target, radius) [splat_merge] -- merge splats closer than radius (amplitude-weighted centre
+    and scale, summed amplitude), refit; reduces count.
+  * splat_lod_chain(splats, target, keeps) [splat_lod_chain] -- prune to each count, measuring PSNR; returns
+    fine->coarse (splats, count, psnr).
+  * select_splat_lod(chain, min_psnr) [splat_select_lod] -- the fewest-splat level meeting the PSNR budget.
+
+MEASURED (the bar): full 60 splats 44.5 dB; prune to 20 -- contribution 38.3 dB DOMINATES random 18.3 / worst (keep
+smallest) 16.6 (a ~20 dB margin); LOD chain counts [60,40,20,10,5] -> PSNR [44.5,43.7,38.3,32.0,29.0] (graceful,
+monotone); merge to 29 splats 39.9 dB (bounded loss); budget-30 keeps 10 splats, budget-43 keeps 40 (tighter budget
+-> more splats); deterministic.
+
+KEPT NEGATIVES (loud):
+  * NO .ply / .spz exporter. Those are 3D-Gaussian-splatting formats (per-splat position, scale, rotation, opacity,
+    spherical-harmonic colour); the engine's splats are 2-D field primitives (cy, cx, amp, sigma) -- the format does
+    not fit the representation, so shipping it would be a mislabelled stub. Stated, not faked.
+  * prune/merge operate on the ISOTROPIC splat format (splat_fit's output); the anisotropic splats (aniso_fit) carry
+    a covariance and have their own optimiser; this does not prune them.
+  * |amp| ranking is a proxy for true contribution when splats OVERLAP (energies not independent); the refit
+    compensates but a jointly-removable overlapping pair is not detected as such -- good enough, not optimal.
+  * merge is lossy by construction (one Gaussian cannot equal two); a large radius over a busy region loses real
+    structure.
+
+Tests: +12 (1471 -> 1483). test_holographic_splatprune.py (+11): contribution prune beats random; beats keeping
+smallest; keep-all returns full; prune reduces count; LOD chain counts decrease; LOD PSNR degrades gracefully; merge
+reduces count; merge loss bounded; tighter budget keeps more; selection meets budget; determinism.
+test_integration.py (+1): splat prune/LOD through the mind. Files: holographic_splatprune.py (new),
+test_holographic_splatprune.py (new), holographic_unified.py (4 faculties), test_integration.py, README,
+NOTES_concepts.md, tour.py. Faculty count -> 288.
+
+*** geometry->stack backlog item. The splat twin of the mesh LOD policy (decimate->measure->select becomes
+prune->measure->select), same error-budget resolution selection in a different domain. The .ply/.spz exporter was
+DECLINED honestly -- the format is for 3D Gaussians and the engine's splats are 2-D field primitives. ***
+
+
+--------------------------------------------------------------------------------
+SCENE COMPONENT DELTA -- the geometry->stack backlog's reverse item R6 ("cluster/scene delta"). The investigation
+measured it on the real scene-graph and found the honest scope, which is the point worth recording:
+
+THE SAVING IS AUTOMATIC. scene_to_recipe names every component (mesh, transform) by CONTENT HASH, so two scenes that
+share a subtree already share the identical atom; stored in any content-addressed table they dedup for FREE --
+measured 3.86x fewer stored components across a base + 8 variants each changing one of four subtrees (54 -> 14). There
+is NO new delta ALGEBRA to invent; content-addressing already does the sharing (the same reason a content-addressed
+blob store dedups a repo). This is the thin-item outcome flagged before the probe -- reported plainly.
+
+WHAT SHIPPED (holographic_scenedelta.py; additive; two UnifiedMind faculties) -- only the genuinely-useful,
+NOT-automatic operations:
+  * scene_delta(base, variant) [scene_delta] -- {'added', 'removed'} content-hashed component ids: the explicit DIFF,
+    so a variant is TRANSMITTED as its delta (send base once, then small deltas) rather than re-sent whole.
+  * apply_scene_delta(base_components, delta) -- rebuild the variant's component set from base + delta (exact).
+  * scene_components(scene) -- the content-hashed component-id set (the handle sharing keys on).
+  * scene_dedup_saving(scenes) [scene_dedup_saving] -- {'naive', 'unique', 'saving_x'}: quantify the automatic
+    sharing.
+
+MEASURED (the bar): a one-subtree change -> delta 1+1 vs full 6 components; base+delta rebuilds the variant exactly;
+an identical scene -> empty delta; dedup across 9 scenes saves 3.86x (54 -> 14 components); deterministic.
+
+KEPT NEGATIVES (loud):
+  * the dedup saving is AUTOMATIC from content-addressed atoms, NOT a contribution of this module -- it exposes and
+    measures it and adds the transmittable diff. Stated, not dressed up as a new mechanism. (This was the thin item
+    flagged before probing; the probe confirmed it.)
+  * the delta is over COMPONENTS (the heavy mesh/transform atoms); the scene TREE wiring is rebuilt by the recipe, so
+    a delta that only re-wires shared components reads as an empty component delta though the scene changed.
+  * sharing requires BIT-IDENTICAL components (the hash is exact) -- a near-but-not-identical mesh does not dedup;
+    this is why geometric quantization (making near-identical things identical) matters upstream.
+
+Tests: +9 (1483 -> 1492). test_holographic_scenedelta.py (+8): one-subtree change is small; reconstruction exact;
+identical scene empty delta; dedup saving above 1x; dedup accounting consistent; variants share most components;
+apply-delta round trip with added+removed; determinism. test_integration.py (+1): scene delta through the mind.
+Files: holographic_scenedelta.py (new), test_holographic_scenedelta.py (new), holographic_unified.py (2 faculties),
+test_integration.py, README, NOTES_concepts.md, tour.py. Faculty count -> 290.
+
+*** Reverse item R6, probed honestly. The reverse thesis held -- a scene delta IS a content-addressed component diff
+-- but the dedup turned out AUTOMATIC (content-hashing already shares), so the only genuinely-new deliverables are the
+explicit diff (for transmission) and the saving measurement. Shipped those; recorded the rest as a kept finding. This
+was the thin item flagged in advance; the measurement confirmed it. ***
