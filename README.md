@@ -806,8 +806,16 @@ Double-click **`run.bat`** - it installs dependencies on first run, starts the
 server, and opens `http://127.0.0.1:5000`.
 
 ### Any platform
-    pip install -r requirements.txt
+Use whichever command launches Python 3 on your system (`python` on Windows or
+some installs, `python3` on many macOS/Linux installs):
+
+    python -m pip install -r requirements.txt
     python app.py            # then open http://127.0.0.1:5000
+
+If `python` is not available, use `python3` in the same commands:
+
+    python3 -m pip install -r requirements.txt
+    python3 app.py
 
 If `pip install` fails with **"Access is denied" / WinError 5** (a system-wide
 Python you can't write to), install into a local virtual environment instead -
@@ -816,6 +824,12 @@ which is exactly what `run.bat` now does automatically:
     python -m venv .venv
     .venv\Scripts\python -m pip install -r requirements.txt
     .venv\Scripts\python app.py
+
+On macOS/Linux, the same isolated setup is:
+
+    python3 -m venv .venv
+    .venv/bin/python -m pip install -r requirements.txt
+    .venv/bin/python app.py
 
 (or add `--user` to the `pip install` to install just for your account.)
 
@@ -834,7 +848,7 @@ image, optionally destroy part of the plate, watch it get recalled), **Recall by
     python tour.py                    # guided tour of all subsystems (~20s)
     python holographic_creature.py    # any module runs its own demo
     python holographic_encoders.py    # numbers / text / records demos
-    pytest -q                         # the whole test suite (1624 tests)
+    python -m pytest -q               # the whole test suite (1624 tests)
 
 ---
 
