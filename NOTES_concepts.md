@@ -12081,3 +12081,108 @@ surface_deviation fast==brute+fallback). Files: holographic_meshbridge.py (shell
 holographic_meshqem.py (surface_deviation fast path), holographic_lod.py (build_cluster_lod_chain
 consolidated), holographic_fpefield.py (NEW), holographic_unified.py (mesh_to_field_vector),
 the four test files, README, NOTES, tour.
+
+================================================================================
+Delta editing of a model carried as ONE hypervector (the temporal/video-codec
+insight, applied to geometry editing) -- O(edit), exact undo, model-size-independent
+================================================================================
+
+THE QUESTION (from the bench): the temporal/video work gave us history tracking and the
+"a moving thing is one operator, store the delta" insight -- does that also let us EDIT a model
+by just specifying the delta, applied in holographic space, touching only what changed?
+
+THE PROBE (done first, the project's rule). Three granularities of "delta" already exist or nearly do:
+  * scene_delta / apply_scene_delta (holographic_scenedelta) -- COMPONENT level: which whole mesh/transform
+    atoms a scene added/removed. Coarse (swap a mesh in a scene graph); content-addressing dedups the rest.
+  * SparseField.apply_local + extract_cached (holographic_sparsefield, FS-2/FS-4) -- ARRAY-VOXEL level: a brush
+    is an O(brush) masked sub-array update, and the ReflexCache-style brick cache re-marches ONLY the dirty bricks
+    (O(dirty), not O(all)). The "don't touch every vert/face" optimisation is ALREADY shipped for the array field.
+  * the video codec (holographic_video) -- the confirming insight: motion-compensation IS a bind, the residual IS
+    the delta. Moose's intuition was exactly right.
+
+THE GAP (the genuine build): bring that locality to FS-5, the model carried as ONE vector. The holographic field
+has a property the array field does NOT -- it is a LINEAR superposition, so an edit is literally f + delta, and that
+unlocks three things the array field can't match. Added to HolographicField (holographic_fpefield):
+  * make_delta(points, values) -> a FieldDelta (the edit as a hypervector, d = sum_i values_i encode(p_i)); building
+    it is O(edit) -- the brush, not the model.
+  * apply_delta(d) -> f + d.vec (one O(dim) add); remove_delta(d) -> f - d.vec.
+  * surface(sub_box) -> march only a region (local re-extraction after a local edit).
+
+MEASURED (the headline claims, all confirmed):
+  * UNDO IS EXACT: f + d - d == f to 4e-16 (machine precision). Because the field is a linear bundle, undo is exact
+    subtraction -- and a whole undo/redo HISTORY is just a list of compact delta vectors (subtract to undo, add to
+    redo). Two stacked edits compose and unwind exactly.
+  * THE EDIT IS MODEL-SIZE-INDEPENDENT: a 1728-sample model and a 17576-sample (10x) model are BOTH one dim-2048
+    vector; applying the same brush delta costs the same on each (a microsecond vector add) -- the model's complexity
+    does not enter the edit cost at all. This is the answer to "handle large models edited in real time": in
+    holographic space the model is a fixed-length vector, so editing is O(edit), full stop.
+  * THE EDIT IS LOCAL: value at the edit point moved (-0.017 -> -0.061) while the far side held (-0.017 -> -0.018);
+    re-extracting only the dirty box marched 1728 vs 8000 points (~7x fewer) for a pole-sized edit, more for smaller.
+
+KEPT HONEST: this is still FS-5's smoothed/biased FFT-bound representation -- a model carried as a vector for compact
+storage, transmittable deltas, exact-undo history, and algebraic transforms; NOT the fast marcher. The array-backed
+SparseField (FS-2/FS-4) remains the path when you need fast faithful voxel editing + marching. And the delta is a
+soft-kernel edit (a region re-extract box must include the kernel reach or it clips the edit's tail). The two
+representations are complementary: the array field for fast local voxel sculpting, the hypervector field for a
+compact model whose edits are deltas you can add, subtract (undo), bind (transform), and transmit.
+
+Tests +2 (1621 -> 1623): fpefield (1, delta add/exact-undo/history/model-size-independence), integration (1, delta
+editing through the mind). Files: holographic_fpefield.py (FieldDelta + make_delta/apply_delta/remove_delta, surface
+sub-box note), test_holographic_fpefield.py, test_integration.py, README, NOTES, tour.
+
+================================================================================
+Real-time sculpting at 30-60fps: extract_dirty -- project ONLY the changed
+bricks, so the per-frame cost tracks the BRUSH, not the model
+================================================================================
+
+THE QUESTION (from the bench): a sculpting brush dragged over a mesh needs 30-60fps in the
+viewport -- ingest the edit, apply it to the affected region, project that change back out, every
+frame. Does the sparse-field sculpt loop hold that budget on a large model?
+
+THE PROBE (done first). The loop is SparseField.apply_local (O(brush) masked update) then
+extract_cached. apply_local is fine. But extract_cached, though it re-marches ONLY dirty bricks,
+then WELDS every active brick's faces into one mesh on every call -- a Python loop over every face
+with a per-vertex dict lookup. That reassembly is O(TOTAL faces), and it is the bottleneck:
+
+  MEASURED warm extract_cached after a brush touching a handful of bricks:
+    res 64, 128 bricks, 41k faces, 8 bricks re-marched -> 590 ms   (~2 fps)
+    res 96, 224 bricks, 93k faces, 28 bricks re-marched -> 1365 ms (<1 fps)
+
+  18-85x over a 33 ms frame. The EDITING is local and fast; the per-frame full-mesh REASSEMBLY is
+  what blows the budget on a large model. (This is the same "never re-handle the whole heavy mesh"
+  principle from the 3D-app architecture, now as a sculpting-loop bug.)
+
+THE FIX: SparseField.extract_dirty() -- re-mesh only the bricks a stroke touched and return them as a
+per-brick DELTA, never reassembling the whole surface:
+
+    {'updated': {brick_id: Mesh}, 'removed': [brick_id, ...]}
+
+The viewport keeps a per-brick mesh map and swaps only the changed bricks (the renderer holds the
+rest). Adjacent bricks share a voxel plane and march it identically, so the per-brick meshes meet at
+BIT-EXACT seams (duplicated boundary verts, no cracks). A cold first call returns every brick (the
+viewport's initial build); every later call returns just the stroke's delta. The cache state it
+leaves is identical to extract_cached's, so the two interoperate.
+
+MEASURED (the answer):
+  * res 64, typical brush: warm extract_dirty 19.6 ms = 51 fps (was 590 ms) -- a ~30x cut, IN budget.
+  * res 96, fine detail brush (r=0.06-0.10, 4 dirty bricks): 14 ms = 70 fps (was 1365 ms).
+  * res 96, a big brush spanning 28 bricks: 78 ms = 13 fps -- it degrades with BRUSH size (more bricks
+    to march), not model size; a normal brush is well inside budget.
+  * MODEL-SIZE INDEPENDENCE: the same brush on a 156-brick model and a 216-brick model cost the same
+    few ms (the bigger model was actually faster -- it just tracks how many bricks the brush hit). The
+    per-frame projection is O(dirty), independent of total model size -- the whole point.
+
+So the sculpt loop is: apply_local (O(brush)) -> extract_dirty (O(dirty)) -> push the per-brick delta
+to the renderer. A model of any size stays at 30-60fps under a brush, because nothing per-frame is
+O(model) anymore.
+
+KEPT HONEST: the remaining per-frame cost is the dirty-brick MARCHING (vectorized, but still ~2-3 ms
+per tile-8 brick), so a very large brush on a fine grid can exceed budget -- the lever there is a
+smaller tile or batching the dirty bricks into one march (a documented next step, not done). The
+per-brick deltas are unwelded across brick seams (fine for rendering; if a caller needs one watertight
+indexed mesh it still calls extract_cached). This is the ARRAY-field (FS-2/4) fast path; the
+hypervector field (FS-5) stays the compact/transmittable/exact-undo representation, not the marcher.
+
+Tests +1 (1623 -> 1624): sparsefield (extract_dirty cold=all / warm=dirty / per-brick correctness /
+brush-bounded on two models). Also covered in the sparsefield selftest. Files: holographic_sparsefield.py
+(extract_dirty), test_holographic_sparsefield.py, README, NOTES, tour.

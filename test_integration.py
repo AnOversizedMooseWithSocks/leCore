@@ -4590,3 +4590,24 @@ def test_surface_as_a_hypervector_edit_is_bind_through_the_mind():
 
     extract = field.surface(((-1.3, -1.3, -1.3), (1.3, 1.3, 1.3)), res=18)
     assert extract.n_faces > 0
+
+
+def test_holographic_field_delta_editing_through_the_mind():
+    """A model carried as one hypervector (mesh_to_field_vector) is edited by a DELTA: apply adds it in O(dim), undo
+    subtracts it exactly. The edit cost is independent of model size -- the headline for real-time editing of large
+    models in holographic space."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=64, seed=0)
+    m = um.mesh_from_sdf(lambda P: np.linalg.norm(P, axis=1) - 0.6, ((-1, -1, -1), (1, 1, 1)), res=20, vectorized=True)
+    field = um.mesh_to_field_vector(m, ((-1.4, -1.4, -1.4), (1.4, 1.4, 1.4)), dim=2048, bandwidth=18.0, grid=12)
+
+    q = np.array([0.6, 0.0, 0.0])
+    delta = field.make_delta(np.array([q, q + [0.05, 0, 0], q - [0.05, 0, 0]]), np.array([-0.35, -0.35, -0.35]))
+    edited = field.apply_delta(delta)
+    assert edited.value([q])[0] < field.value([q])[0]              # the edit pushed the surface out there
+    undone = edited.remove_delta(delta)
+    assert np.max(np.abs(undone.f - field.f)) < 1e-9               # exact undo
+    # local re-extraction of just the edited region
+    region = edited.surface(((0.3, -0.4, -0.4), (1.1, 0.4, 0.4)), res=12)
+    assert region.n_faces > 0

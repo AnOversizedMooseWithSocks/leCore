@@ -100,3 +100,42 @@ def test_deterministic_build():
     assert av.keys() == bv.keys()
     for k in av:
         assert av[k] == bv[k]
+
+
+def test_extract_dirty_returns_only_changed_bricks_for_realtime_sculpting():
+    """The sculpting fast path: extract_dirty re-meshes only the bricks a stroke touched and returns them as a
+    per-brick delta, never reassembling the whole mesh -- so the per-frame projection is O(brush), not O(model)."""
+    import numpy as np, time
+    from holographic_sparsefield import SparseField, _smooth_falloff
+    bounds = ((-1., -1, -1), (1., 1, 1)); voxel = 2.0 / 64; band = 4 * voxel
+
+    def sphere(P):
+        return np.linalg.norm(P, axis=1) - 0.6
+
+    sf = SparseField.from_field(sphere, bounds[0], bounds[1], voxel, band, tile=8)
+    cold = sf.extract_dirty()
+    assert set(cold["updated"]) == set(sf.active) and not cold["removed"]   # cold = all active bricks
+
+    p = np.array([0.6, 0., 0.]); r = 0.12
+    def inflate(P):
+        return -0.5 * band * _smooth_falloff(np.linalg.norm(P - p, axis=1), r)
+    sf.apply_local(inflate, p, r)
+    warm = sf.extract_dirty()
+    assert 0 < len(warm["updated"]) < len(sf.active)                        # warm = only the touched bricks
+
+    # a delta brick equals a fresh march of that brick (correct geometry)
+    from holographic_meshbridge import marching_tetrahedra_vec
+    for b, bm in warm["updated"].items():
+        blk, ax = sf._materialize(b[0] * sf.tile, b[1] * sf.tile, b[2] * sf.tile, sf.tile + 1, sf.tile + 1, sf.tile + 1)
+        assert bm.n_faces == marching_tetrahedra_vec(blk, ax, level=0.0).n_faces
+
+    # MODEL-SIZE INDEPENDENCE: the per-frame delta is BRUSH-bounded on any model -- a small fraction of the total
+    # bricks, whatever the model's size. (The full measurement of constant per-frame cost is in NOTES.)
+    assert len(warm["updated"]) < 0.25 * len(sf.active)                    # the stroke's delta is a small slice of the model
+    def four(P):
+        cs = [np.array([0.5, 0, 0.]), np.array([-0.5, 0, 0.]), np.array([0, 0.5, 0.]), np.array([0, -0.5, 0.])]
+        return np.min([np.linalg.norm(P - c, axis=1) - 0.4 for c in cs], axis=0)
+    big = SparseField.from_field(four, bounds[0], bounds[1], voxel, band, tile=8); big.extract_dirty()
+    big.apply_local(inflate, np.array([0.5 + 0.4, 0., 0.]), r)
+    bw = big.extract_dirty()
+    assert 0 < len(bw["updated"]) < 0.25 * len(big.active)                 # same brush, different model -> still brush-bounded

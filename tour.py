@@ -4125,6 +4125,35 @@ print(f"  and the surface itself can BE a hypervector (FS-5): {_sm4.n_faces} fac
       f"{_herr:.0e}. Moving the whole surface is now algebra. (Kept honest: the re-marched extract is a smoothed, "
       f"~15%-biased estimate, bandwidth the bias knob, dim the noise floor -- a representation, not the fast path.)")
 
+# Delta editing: an edit is a delta vector; undo is exact subtraction; the cost does not depend on model size.
+_hq = _np_fwd4.array([0.6, 0.0, 0.0])
+_hbump = _np_fwd4.array([_hq + _o for _o in [(0, 0, 0), (0.05, 0, 0), (0, 0.05, 0), (0, 0, 0.05)]])
+_hdelta = _hfield.make_delta(_hbump, _np_fwd4.full(len(_hbump), -0.35))
+_hedited = _hfield.apply_delta(_hdelta)
+_hundone = _hedited.remove_delta(_hdelta)
+print(f"  and EDITING that model is a DELTA in holographic space -- the video-codec insight (store the keyframe, "
+      f"add small deltas) applied to geometry: a brush is one vector add (value at the pole {float(_hfield.value([_hq])[0]):+.3f}"
+      f" -> {float(_hedited.value([_hq])[0]):+.3f}), undo is EXACT subtraction (f+d-d back to {float(_np_fwd4.abs(_hundone.f-_hfield.f).max()):.0e}), "
+      f"and the cost is MODEL-SIZE-INDEPENDENT (the model is one fixed vector). Only the dirty region need re-march.")
+
+# Real-time sculpting (the array field, FS-2/4): project ONLY the changed bricks, so a brush holds 30-60fps.
+from holographic_sparsefield import SparseField as _SF, _smooth_falloff as _sfall
+_scv = 2.0 / 64; _scb = 4 * _scv
+_scf = _SF.from_field(lambda P: _np_fwd4.linalg.norm(P, axis=1) - 0.6, (-1., -1, -1), (1., 1, 1), _scv, _scb, tile=8)
+_scf.extract_dirty()                                                 # cold build (warm the cache)
+_scp = _np_fwd4.array([0.6, 0., 0.])
+def _scinfl(P): return -0.5 * _scb * _sfall(_np_fwd4.linalg.norm(P - _scp, axis=1), 0.1)
+_scf.apply_local(_scinfl, _scp, 0.1)
+import copy as _cpmod
+_scf2 = _cpmod.deepcopy(_scf)
+_t0 = _time_fwd.time(); _scfull = _scf.extract_cached(); _tfull = (_time_fwd.time() - _t0) * 1000
+_scf2._cache_dirty = set(_scf2.active) if False else _scf2._cache_dirty   # (keep dirty marks)
+_t0 = _time_fwd.time(); _scd = _scf2.extract_dirty(); _tdirty = (_time_fwd.time() - _t0) * 1000
+print(f"  and for the FAST sculpt path -- a brush at 30-60fps -- the trick is to project ONLY the bricks that "
+      f"changed: re-welding the whole {_scfull.n_faces}-face mesh every frame costs {_tfull:.0f}ms, but returning just "
+      f"the {len(_scd['updated'])} dirty bricks (extract_dirty) is {_tdirty:.0f}ms = {1000/max(_tdirty,0.1):.0f}fps. The per-frame "
+      f"cost tracks the BRUSH, not the model -- a model of any size stays interactive because nothing per-frame is O(model).")
+
 title("One routing fabric: the chunkers/tilers/stores converge -- pick the pivot, get the regime (StructuredIndex keying)")
 # The capacity-cliff cure ("route each item to a bounded-load bucket") had been re-grown five times. It is
 # ONE fabric: you escape the cliff HORIZONTALLY and address shards by a PIVOT -- and the pivot you pick IS the

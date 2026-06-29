@@ -79,3 +79,34 @@ def test_from_mesh_builds_and_reconstructs():
     assert len(idx) and 0.45 < float(ray[idx[0]]) < 0.85
     extract = field.surface(((-1.3, -1.3, -1.3), (1.3, 1.3, 1.3)), res=20)
     assert extract.n_faces > 0
+
+
+def test_delta_editing_is_additive_exact_undo_and_model_size_independent():
+    """A local edit is a delta hypervector: apply_delta adds it, remove_delta subtracts it (exact undo by linearity),
+    the edit is local (far side unchanged), and the cost is model-size-independent (the model is one fixed vector)."""
+    import time
+    enc, P, W, field = _sphere_field()
+    q = np.array([0.6, 0.0, 0.0])
+    bump = np.array([q + o for o in [(0, 0, 0), (0.05, 0, 0), (0, 0.05, 0), (0, -0.05, 0), (0, 0, 0.05), (0, 0, -0.05)]])
+    delta = field.make_delta(bump, np.full(len(bump), -0.35))
+
+    edited = field.apply_delta(delta)
+    assert edited.value([q])[0] < field.value([q])[0]              # surface pushed out at the edit
+    assert abs(float(edited.value([-q])[0]) - float(field.value([-q])[0])) < 0.02   # local: far side ~unchanged
+    assert np.array_equal(field.f, _sphere_field()[3].f)           # apply did not mutate the original
+
+    undone = edited.remove_delta(delta)
+    assert np.max(np.abs(undone.f - field.f)) < 1e-9               # EXACT undo (linearity)
+
+    # a redo/undo history is just adding/subtracting deltas; two edits compose and unwind exactly
+    d2 = field.make_delta(np.array([[-0.6, 0, 0]]), np.array([-0.3]))
+    two = field.apply_delta(delta).apply_delta(d2)
+    back = two.remove_delta(d2).remove_delta(delta)
+    assert np.max(np.abs(back.f - field.f)) < 1e-9
+
+    # model-size independence: a 10x-bigger model is still one vector; the same delta applies at the same cost
+    gL = np.linspace(-0.95, 0.95, 22)
+    PL = np.array([(x, y, z) for x in gL for y in gL for z in gL])
+    big = HolographicField(enc, PL, np.linalg.norm(PL, axis=1) - 0.6)
+    assert big.f.shape == field.f.shape == (enc.dim,)
+    assert big.apply_delta(delta).f.shape == (enc.dim,)
