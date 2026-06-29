@@ -4355,13 +4355,11 @@ class UnifiedMind:
         to fully converge the whole set). Returns (splats, rendered); denoise=True returns just the rendered
         field; pass stats={} to read stats['stages'].
 
-        WHY USE THIS over splat_aniso (measured): the staged placement is a far better WARM START for the final
-        joint fit, landing in a better basin of the non-convex loss. On a multi-scale target (a broad blob + small
-        sharp details) it reaches MSE the one-shot CANNOT reach at any step count (~1e-6 vs ~1e-3, where the
-        one-shot then DIVERGES past ~300 steps) -- directly addressing splat_aniso's local-optimum kept negative
-        (its result 'depends on the isotropic warm start'; a staged warm start is a much better one). The trade is
-        more total compute (several optimisation rounds); the win is on MULTI-SCALE content -- on a single-scale
-        field the one-shot is already near-optimal."""
+        WHY USE THIS over splat_aniso (measured): the staged placement can be a far better WARM START for the final
+        joint fit, landing in a better basin of the non-convex loss when the final stage gets enough refinement.
+        This directly addresses splat_aniso's local-optimum kept negative (its result 'depends on the isotropic
+        warm start'; a staged warm start can be a much better one). The trade is more total compute; the win is on
+        MULTI-SCALE content -- on a single-scale field the one-shot is already near-optimal."""
         from holographic_splat import densify_fit
         splats, rendered = densify_fit(np.asarray(field, float), k, stage_steps=stage_steps, stats=stats)
         return rendered if denoise else (splats, rendered)
