@@ -1528,16 +1528,32 @@ class UnifiedMind:
         return out
 
     # -- one decision brain, on the same substrate -------------------------
-    def actions(self, names, robust_returns=False):
+    def actions(self, names, robust_returns=False, value_backend="table"):
         """Declare the creature brain's action set. `robust_returns=True` (D2, opt-in) winsorises outlier rewards
         in each prototype's running-mean value: a fluke reward (a jackpot, a sensor glitch) is clamped to a few
         robust-scales before it folds in, so it cannot swing the value estimate -- measured ~3x lower value error
-        under outlier rewards, no cost on clean data. Off by default (the plain running average)."""
+        under outlier rewards, no cost on clean data. Off by default (the plain running average).
+
+        `value_backend` picks the brain's value/policy representation: 'table' (default, the prototype memory),
+        'holo' (the two-bundle hypervector policy), or 'routed' (the hypervector policy with the routing fabric
+        pushing the capacity cliff back). With 'holo'/'routed' the whole brain runs on a fixed-size, savable,
+        composable hypervector policy -- so anywhere the creature is used in the holographic space, the
+        holographic creature can be used instead (decide/reinforce are unchanged)."""
         self._actions = list(names)
         self._brain = HolographicMind(self.dim, self._actions, k=12, epsilon=0.1,
                                       novelty_bonus=0.15, memory_cap=8000,
-                                      maintain=self.maintain, robust_returns=robust_returns)
+                                      maintain=self.maintain, robust_returns=robust_returns,
+                                      value_backend=value_backend)
         return self
+
+    def use_holographic_brain(self, routed=False):
+        """Swap the (already-declared) creature brain to a holographic backend in place -- 'routed' for the
+        cliff-pushed-back routing variant, else the plain two-bundle policy. Lets existing code that calls
+        decide/reinforce run on a hypervector policy without re-plumbing. (Re-declares a fresh brain on the
+        same action set; any table-mode learning is not carried over.)"""
+        if not self._actions:
+            raise RuntimeError("declare actions() before switching the brain backend")
+        return self.actions(self._actions, value_backend=("routed" if routed else "holo"))
 
     def decide(self, state, explore=False, epsilon=None, modality=None,
                senses=None, avoid=("danger", "wall"), explore_if_unrecognized=None):
@@ -4287,6 +4303,242 @@ class UnifiedMind:
         from holographic_energy import LearnedEnergyMemory
         return LearnedEnergyMemory.learn(patterns, noise=noise, n_hidden=n_hidden,
                                          epochs=epochs, beta=beta, seed=self.seed)
+
+    def procedural_noise(self, n_dims=2, dim=1024, bounds=None, octaves=4, lacunarity=2.0,
+                         gain=0.5, base_bandwidth=2.0, seed=None):
+        """G1 -- holographic band-limited procedural noise as a FIELD; fBm as an octave BUNDLE.
+
+        Returns a holographic_noise.FractalNoise: `.query(point)` evaluates the amplitude-weighted sum of
+        per-octave band fields, each a single hypervector (an FPE bundle of random-weighted RBF kernels).
+        Frequency is bandwidth (base_bandwidth * lacunarity^o), amplitude is gain^o. Seats: Stam (spectral
+        noise), Berry (fBm/band-limit), Quilez (noise as a procedural-SDF primitive).
+        KEPT NEGATIVE: band-limited/smooth by construction (no sharp/discontinuous noise), and FFT-bound --
+        each kernel is one encode, so deep fully-filled fBm is expensive (kernels are capped per octave)."""
+        from holographic_noise import FractalNoise
+        return FractalNoise(n_dims, dim=dim, bounds=bounds, octaves=octaves, lacunarity=lacunarity,
+                            gain=gain, base_bandwidth=base_bandwidth,
+                            seed=self.seed if seed is None else seed)
+
+    def material(self, channels=None, dim=1024, bandwidth=3.0, bounds=None):
+        """G2 -- a PBR material as a role-filler HRR record; textures as FPE functions over UV.
+
+        `channels` maps a name (albedo, roughness, normal, height, ...) to (uv_points, values); each becomes
+        a texture field over the UV square, and the material binds them under per-name role atoms into one
+        record = sum_r bind(role_r, channel_r). Returns a holographic_material.Material: sample() is exact
+        (stored field), the record composes/blends/transmits as one vector, and transform_uv re-UVs every
+        channel with a single bind. Seats: Plate (the record), Pharr (PBR channels), Drettakis (per-primitive
+        material). KEPT NEGATIVE: band-limited (smooth textures; sharp masks stay raster) and the bare-record
+        channel recovery carries ~sqrt(n)/sqrt(dim) crosstalk (raise dim to buy capacity)."""
+        from holographic_fpe import VectorFunctionEncoder
+        from holographic_material import Material, texture_field
+        if bounds is None:
+            bounds = [(0.0, 1.0), (0.0, 1.0)]
+        enc = VectorFunctionEncoder(2, dim=dim, bounds=bounds, bandwidth=bandwidth, seed=self.seed)
+        mat = Material(enc)
+        if channels:
+            for name, (pts, vals) in channels.items():
+                mat.add(name, texture_field(enc, pts, vals))
+        return mat
+
+    def displace(self, target, scalar_fn, amount, use_uv=False):
+        """G3 -- displace a surface along its normal by amount*scalar_fn. Dispatches on the target type.
+
+        On a HolographicField the offset is a field DELTA (apply_delta of -amount*scalar at the field points),
+        O(edit) with EXACT remove_delta undo; returns (displaced_field, delta). On a Mesh each vertex moves
+        along its normal; returns the displaced Mesh. Seats: Pharr (displacement), Quilez (SDF displace = add
+        to distance). KEPT NEGATIVE: the SDF path is the near-surface shader approximation (exact only where
+        |grad sdf|=1); mesh displacement can self-intersect for large amounts on concavities."""
+        from holographic_displace import displace_sdf, displace_mesh
+        from holographic_fpefield import HolographicField
+        if isinstance(target, HolographicField):
+            return displace_sdf(target, scalar_fn, amount)
+        return displace_mesh(target, scalar_fn, amount, use_uv=use_uv)
+
+    def bump(self, mesh, scalar_fn, amount, eps=1e-3):
+        """G3 -- bump mapping: perturb a mesh's shading normals from a scalar field's slope, NO vertices move.
+        Returns an (V,3) array of tilted unit normals. The cheap fake-detail path (silhouette unchanged)."""
+        from holographic_displace import bump_normals
+        return bump_normals(mesh, scalar_fn, amount, eps=eps)
+
+    def terrain(self, bounds=None, octaves=5, lacunarity=2.0, gain=0.5, base_bandwidth=2.0,
+                dim=1024, seed=None):
+        """G4 -- a holographic fBm heightfield, liftable to a displaced-grid mesh or a heightfield SDF.
+
+        Returns a holographic_terrain.Terrain (`.height(xy)`, `.heightmap(res)`); use holographic_terrain's
+        terrain_to_mesh / terrain_to_sdf to lift it. A composition of G1 (height) and the displacement idea,
+        so LOD is just re-sampling. Seats: Stam, Berry. KEPT NEGATIVE: no erosion (pure fBm statistics), and
+        the heightfield SDF (z - height) is sign-correct but not a true Euclidean distance where it is steep."""
+        from holographic_terrain import Terrain
+        return Terrain(bounds=bounds, octaves=octaves, lacunarity=lacunarity, gain=gain,
+                       base_bandwidth=base_bandwidth, dim=dim, seed=self.seed if seed is None else seed)
+
+    def lsystem(self, axiom, productions, stochastic=None):
+        """G5 -- a context-free L-system grammar; productions are a holographic record, output is a scenegraph.
+
+        Returns a holographic_grammar.LSystem (`.expand(n)` parallel-rewrites the string); interpret it with
+        turtle_to_segments and assemble with segments_to_scene / grow_plant (each segment instanced through a
+        transform -- a recursive bundle that scene_to_recipe turns back into a holographic recipe). The one
+        genuinely new geometry capability. Seat: Plate (HRR productions). KEPT NEGATIVE: recursive composition,
+        not a biological growth simulation (no tropism/competition); deterministic context-free (optionally
+        seeded-stochastic)."""
+        from holographic_grammar import LSystem
+        return LSystem(axiom, productions, stochastic=stochastic, rng_seed=self.seed)
+
+    def attribute_field(self, encoder, points, values, weights=None):
+        """G6 -- a per-vertex/texel attribute as a RESOLUTION-INDEPENDENT field over the surface domain.
+
+        Same construction as a texture (an FPE function), but the intent is a data channel: bake it to a
+        coarse mesh, subdivide, re-bake, and shared points keep their values because the field never changed
+        -- only the sample points densified. Returns the field vector; sample with holographic_attributes.
+        sample_attribute. A light raster store (attach_attribute/get_attribute) coexists for hard masks.
+        KEPT NEGATIVE: band-limited (smooth attributes interpolate; hard 0/1 masks come back smoothed)."""
+        from holographic_attributes import attribute_field
+        return attribute_field(encoder, points, values, weights=weights)
+
+    def sdf_object(self, seed=None, complexity=3):
+        """S2 -- a procedurally generated 3D OBJECT as an SDF tree, from a seed (the demoscene seed->world).
+
+        Returns a holographic_sdf.SDF: a few transformed primitives combined by CSG / smooth-union with an
+        occasional round/twist. Render with sdf_render, emit a shader with sdf_shader, represent it with
+        .to_tree() (a holographic recipe). Seat: Quilez (tiny seed, structured world). KEPT NEGATIVE: a
+        generator, not an art director -- a random tree can subtract most of itself away or leave a
+        disconnected surface; marching rounds sub-cell features."""
+        from holographic_procgen import procedural_object
+        return procedural_object(self.seed if seed is None else seed, complexity=complexity)
+
+    def sdf_render(self, sdf_node, bounds=((-2, -2, -2), (2, 2, 2)), res=40):
+        """S1 -- march an SDF tree to a triangle Mesh through the engine's existing marching bridge."""
+        from holographic_procgen import object_to_mesh
+        return object_to_mesh(sdf_node, bounds=bounds, res=res)
+
+    def sdf_shader(self, sdf_node, name="map"):
+        """S1 -- emit a complete Shadertoy-ready GLSL fragment shader (map() + raymarch + normals + light)
+        for an SDF tree -- the demoscene OUTPUT. The shader embeds its own DSL in a header comment, so it
+        round-trips back to a tree. Seat: Quilez (raymarched SDFs). KEPT NEGATIVE: twist/displace are
+        domain warps (not exact distances) -- the emitter flags them and the raymarcher must shorten steps."""
+        return sdf_node.to_glsl(name=name)
+
+    def sdf_parse(self, dsl_text):
+        """S1 -- parse a compact SDF DSL string back into an SDF tree -- the INPUT side of shader I/O.
+        (kind p0 p1 ... child0 child1 ...); the inverse of node.to_dsl()."""
+        from holographic_sdf import parse_dsl
+        return parse_dsl(dsl_text)
+
+    def menger_fractal(self, iterations=3, size=1.0):
+        """S1 -- the canonical Menger-sponge FRACTAL model as an SDF (a box minus recursive crosses). Evals,
+        marches to a mesh, AND emits a GLSL loop -- the demoscene fractal. Seat: Quilez."""
+        from holographic_sdf import menger
+        return menger(iterations, size)
+
+    def greeble(self, base_mesh, seed=None, density=0.7, max_height=0.15, footprint=0.5):
+        """S2 -- cover a base mesh's faces with extruded greeble boxes (the G5 panel idea on any surface) ->
+        a merged Mesh of mechanical hull detail. Seat: Quilez/demoscene. KEPT NEGATIVE: instancing, not CSG
+        -- greebles can intersect the hull (which is how greebling actually looks)."""
+        from holographic_procgen import greeble_mesh
+        return greeble_mesh(base_mesh, seed=self.seed if seed is None else seed,
+                            density=density, max_height=max_height, footprint=footprint)
+
+    def vegetated_terrain(self, seed=None, n_plants=10, plant_iterations=3, terrain_kwargs=None):
+        """S2 -- a fBm terrain (G4) with L-system plants (G5) scattered on its surface -> one scenegraph.
+        Returns (scene_node, terrain). Composes terrain + grammar + scatter; flatten_scene gives the mesh.
+        KEPT NEGATIVE: a deterministic scatter at the terrain height, not an ecology (no collision/clustering)."""
+        from holographic_procgen import vegetated_terrain
+        return vegetated_terrain(self.seed if seed is None else seed, n_plants=n_plants,
+                                 plant_iterations=plant_iterations, terrain_kwargs=terrain_kwargs)
+
+    def procedural_compression(self, sdf_node, bounds=((-1.2, -1.2, -1.2), (1.2, 1.2, 1.2)), res=48):
+        """S3/C1 -- measure procedural representation AS compression: the tiny generator (DSL) vs the
+        expanded geometry it marches to. Returns {dsl, dsl_bytes, mesh_faces, mesh_bytes, ratio}. The
+        finding it makes concrete: a generator's size is CONSTANT in its output's complexity (a Menger
+        DSL is 12 bytes at any depth), so storing the LAW escapes the capacity/complexity wall -- the same
+        MDL principle as symbolic_regress/compress_signal, for geometry. KEPT NEGATIVE: only compressible
+        content has a short generator (an arbitrary mesh does not); procedural compression is lossy and
+        content-restricted, not a universal codec."""
+        from holographic_procbridge import procedural_compression
+        return procedural_compression(sdf_node, bounds=bounds, res=res)
+
+    def soft_min(self, a, b, k):
+        """S3/C4 -- the log-sum-exp soft minimum, -k*log(exp(-a/k)+exp(-b/k)); k->0 gives min(a,b). This is
+        the SAME log-sum-exp the modern-Hopfield/softmax cleanup uses (softmax is a soft-arg-MAX; this is a
+        soft-arg-MIN over distances): a smooth CSG union of geometry and a soft recall of a memory are one
+        temperature-controlled operator, with k playing the role of 1/beta. The SDF's smooth_union and the
+        memory cleanup are the same math seen in two domains."""
+        from holographic_procbridge import soft_min
+        return soft_min(a, b, k)
+
+    def evolving_atom(self, n_harmonics=3, dim=None, forgetting=1.0, delta=1e-6):
+        """SUBSTRATE EVOLUTION -- a context-conditioned atom that updates its OWN harmonic coefficients as
+        (context angle, meaning) pairs stream in, via online Recursive Least Squares (the batch
+        harmonic_atom fit made autonomous). Returns a holographic_harmonic.OnlineHarmonicAtom: `.observe(
+        theta, meaning)` folds in one observation by a rank-1 Sherman-Morrison step, `.decode(theta)` reads
+        the current meaning. forgetting=1.0 converges to the batch least-squares fit; forgetting<1.0 turns
+        the codebook into a dynamical system that TRACKS a drifting meaning function. No RNG, no autodiff --
+        the engine's own least squares, online. KEPT NEGATIVE: forgetting<1 trades steady-state accuracy on
+        a stationary function for tracking a non-stationary one."""
+        from holographic_harmonic import OnlineHarmonicAtom
+        return OnlineHarmonicAtom(n_harmonics, self.dim if dim is None else dim,
+                                  forgetting=forgetting, delta=delta)
+
+    def optimize_toolchain(self, tool_vecs, goal_sig, length, steps=200, lr=0.5):
+        """DIFFERENTIABLE ORCHESTRATION -- optimize a whole tool-chain JOINTLY against a chain-level
+        structural score, instead of scoring tools independently. `tool_vecs` (N, D) are the registry's
+        tool vectors (tools already live in hyperspace); `goal_sig` is the desired composed chain signature
+        (the order-encoded superposition a working chain would produce). Optimizes a soft selection over
+        tools per step by gradient ASCENT on cosine(chain_signature, goal_sig) -- the gradient derived
+        analytically through cosine/superposition/permute/softmax in numpy, NO autodiff (the same
+        gradient-without-a-framework method as holographic_optimize). Returns (indices, score). KEPT
+        NEGATIVE: a local optimum of a non-convex landscape; on orthogonal/easy tool sets per-position
+        greedy already wins -- the gain is on CORRELATED tool sets where independent scoring is misled by
+        cross-talk between positions."""
+        from holographic_orchestrator import optimize_toolchain
+        return optimize_toolchain(tool_vecs, goal_sig, length, steps=steps, lr=lr)
+
+    def holographic_value_head(self, n_actions, dim=None, routed=False, n_buckets=64):
+        """The creature's value/policy AS a pure-VSA program. Returns a HolographicValueHead (or, with
+        routed=True, a RoutedValueHead whose routing fabric pushes the capacity cliff back ~n_buckets-fold):
+        a drop-in for the creature's value backend (same value(state, action)->(value, support) and
+        absorb(state, action, ret) API), but the whole per-action policy is bundles -- Q_a (return-weighted
+        state superposition) and N_a (the normaliser) -- so value(s,a) = <s,Q_a>/<s,N_a> reproduces the
+        brain's Nadaraya-Watson average while learning is one bundling step and the policy is a fixed-size,
+        savable, COMPOSABLE hypervector ({Q, N}, or policy_atom() folded into two bindable vectors) instead of
+        a growing (vector, scalar) table. KEPT NEGATIVE: a single bundle pair has finite capacity (matches the
+        tabular brain at low load, degrades past ~dim distinct situations); routing trades n_buckets-fold
+        memory to push that cliff back."""
+        d = self.dim if dim is None else dim
+        if routed:
+            from holographic_valuehead import RoutedValueHead
+            return RoutedValueHead(d, n_actions, n_buckets=n_buckets)
+        from holographic_valuehead import HolographicValueHead
+        return HolographicValueHead(d, n_actions)
+
+    def fast_creature_encoder(self, dim=None, seed=1):
+        """Compiled, fully in-VSA perception for the creature loop: a FastCreatureEncoder whose per-step
+        role/filler binds (FFT convolutions) are precomputed once into a codebook, so perceiving recurring
+        senses is a gather+sum -- no per-step FFT. Bit-identical to the plain CreatureEncoder, ~8x faster at
+        steady state. With the holographic value head (decide=dot, learn=bundle) the whole perceive->decide->
+        learn loop becomes array ops, keeping the creature inside the holographic space (no Python<->VSA
+        round-trip per step). `perception_codebook()` exposes the compiled (features, dim) matrix."""
+        from holographic_creature import FastCreatureEncoder
+        return FastCreatureEncoder(self.dim if dim is None else dim, seed=seed)
+
+    def encode_record(self, keys, values):
+        """Encode a record/structure -- bundle of bind(key_i, value_i) -- in ONE batched FFT (bundle_bind),
+        the vectorised form of the role/filler encode loop VSA programs run constantly. Keeps the operation
+        inside the holographic space (one array op) instead of a Python loop of per-pair binds."""
+        from holographic_ai import bundle_bind
+        return bundle_bind(keys, values)
+
+    def unbind_keys(self, trace, keys):
+        """Unbind one trace against many keys in ONE batched FFT (unbind_all) -- the vectorised form of the
+        per-key unbind loop decoders/resonators run. Returns (k, dim): row i is the estimate freed by key i."""
+        from holographic_ai import unbind_all
+        return unbind_all(trace, keys)
+
+    def nearest_in(self, query, matrix):
+        """Nearest row of a codebook matrix to `query` -- argmax(matrix @ query) (nearest), the reusable
+        matmul form of a per-row cosine loop. Exact. Returns (index, score)."""
+        from holographic_ai import nearest
+        return nearest(query, matrix)
 
     def tensor_bind(self, keys, values, rank=None):
         """A TENSOR-PRODUCT (outer-product) binding memory -- the uncompressed cousin of HRR's circular

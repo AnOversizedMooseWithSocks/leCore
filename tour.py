@@ -4154,6 +4154,246 @@ print(f"  and for the FAST sculpt path -- a brush at 30-60fps -- the trick is to
       f"the {len(_scd['updated'])} dirty bricks (extract_dirty) is {_tdirty:.0f}ms = {1000/max(_tdirty,0.1):.0f}fps. The per-frame "
       f"cost tracks the BRUSH, not the model -- a model of any size stays interactive because nothing per-frame is O(model).")
 
+title("Holographic geometry & appearance (G1-G6): noise, materials, displace, terrain, grammar, attributes -- all field-native")
+# Everything that sits on a mesh lives in the SAME algebra as the geometry: noise is a field, a texture is a
+# function, a material is a record, displacement is a delta, terrain is fBm, a plant is a scenegraph. One space.
+import numpy as _np_geo
+from holographic_noise import FractalNoise as _FN_geo
+_fbm = _FN_geo(2, dim=512, bounds=[(0, 8), (0, 8)], octaves=4, gain=0.85, base_bandwidth=3.0, seed=3)
+_prof = _np_geo.array([_fbm.query([_x, 4.0]) for _x in _np_geo.linspace(0.3, 7.7, 200)])
+_rough = float(_np_geo.std(_np_geo.diff(_prof)) / (_np_geo.std(_prof) + 1e-9))
+print(f"  G1 NOISE: fBm is the OCTAVE BUNDLE -- one query sums {len(_fbm.fields)} band fields, each a hypervector (an FPE bundle of random RBF kernels). Roughness/amplitude = {_rough:.3f}, rises with persistence; band-limited by the kernel.")
+
+from holographic_fpe import VectorFunctionEncoder as _VFE_geo
+from holographic_material import Material as _Mat_geo, texture_field as _tex_geo, compose_object as _compose_geo
+from holographic_ai import unbind as _unbind_geo, cosine as _cos_geo
+_uenc = _VFE_geo(2, dim=1024, bounds=[(0, 1), (0, 1)], bandwidth=3.0, seed=1)
+_ugrid = [(_u, _v) for _u in _np_geo.linspace(0.05, 0.95, 9) for _v in _np_geo.linspace(0.05, 0.95, 9)]
+_mat = _Mat_geo(_uenc, {"albedo": _tex_geo(_uenc, _ugrid, [_u for (_u, _v) in _ugrid]),
+                        "roughness": _tex_geo(_uenc, _ugrid, [0.5] * len(_ugrid))})
+_recalls = [float(_cos_geo(_mat.channel(_n), _Mat_geo._unit(_mat.channels[_n]))) for _n in _mat.channels]
+_shifted = _mat.transform_uv(_np_geo.array([0.15, 0.0]))
+_shift_ok = float(abs(_shifted.sample("albedo", [0.55, 0.5]) - _mat.sample("albedo", [0.4, 0.5])))
+print(f"  G2 MATERIAL: a PBR material is the HRR record sum_r bind(role_r, channel_r). sample() is exact; the bare record recovers channels BALANCED (cosine {[round(_r,2) for _r in _recalls]}); transform_uv re-UVs EVERY channel with ONE bind (shift error {_shift_ok:.3f}).")
+
+from holographic_fpefield import HolographicField as _HF_geo
+from holographic_displace import displace_sdf as _dsdf_geo
+_senc = _VFE_geo(3, dim=2048, bounds=[(-1, 1)] * 3, bandwidth=6.0, seed=1)
+_sax = _np_geo.linspace(-0.8, 0.8, 6)
+_gx, _gy, _gz = _np_geo.meshgrid(_sax, _sax, _sax, indexing="ij")
+_SP = _np_geo.stack([_gx.ravel(), _gy.ravel(), _gz.ravel()], axis=1)
+_slab = _HF_geo(_senc, _SP, _SP[:, 2])                      # sdf = z, surface at z=0
+_disp, _delta = _dsdf_geo(_slab, lambda _p: 1.0, 0.2)      # push outward by a constant 0.2
+_before = float(_slab.value([[0.0, 0.0, 0.0]])[0]); _after = float(_disp.value([[0.0, 0.0, 0.0]])[0])
+_undo_err = float(_np_geo.max(_np_geo.abs(_disp.remove_delta(_delta).f - _slab.f)))
+print(f"  G3 DISPLACE: an SDF offset is a field DELTA (make_delta with NEGATIVE values pushes outward). Surface value {_before:.3f} -> {_after:.3f}; remove_delta undoes it EXACTLY ({_undo_err:.0e}).")
+
+from holographic_terrain import Terrain as _Terr_geo, terrain_to_mesh as _t2m_geo
+_terr = _Terr_geo(bounds=[(0, 4), (0, 4)], octaves=4, gain=0.6, dim=512, seed=7)
+_tmesh = _t2m_geo(_terr, 12)
+print(f"  G4 TERRAIN: fBm heightfield lifted to a UV'd grid mesh -- {_tmesh.n_vertices} verts, {len(_tmesh.faces)} tris, z = height(x,y) exactly. A composition of G1; LOD is just re-sampling. (No erosion -- kept negative.)")
+
+from holographic_grammar import LSystem as _LS_geo, turtle_to_segments as _turtle_geo
+_algae = _LS_geo("A", {"A": "AB", "B": "A"})
+_lens = [len(_algae.expand(_n)) for _n in range(7)]
+_plant = _LS_geo("X", {"X": "F[+X][-X]FX", "F": "FF"})
+_segs = _turtle_geo(_plant.expand(4))
+print(f"  G5 GRAMMAR (the new one): L-system parallel rewriting -- algae A->AB,B->A gives EXACTLY Fibonacci lengths {_lens}; a branching plant turtles into {len(_segs)} skeleton segments, assembled as a scenegraph (a recursive bundle). Productions are themselves a holographic record.")
+
+from holographic_attributes import attribute_field as _af_geo, bake_to_vertices as _bake_geo
+_afield = _af_geo(_uenc, _ugrid, [_u for (_u, _v) in _ugrid])
+_coarse = _np_geo.array([[_u, 0.5] for _u in _np_geo.linspace(0.2, 0.8, 7)])
+_dense = _np_geo.array([[_u, 0.5] for _u in _np_geo.linspace(0.2, 0.8, 13)])
+_gap = float(_np_geo.max(_np_geo.abs(_bake_geo(_uenc, _afield, _coarse) - _bake_geo(_uenc, _afield, _dense)[::2])))
+print(f"  G6 ATTRIBUTE: a per-vertex channel as a RESOLUTION-INDEPENDENT field -- bake at a coarse and a dense sampling, shared points agree to {_gap:.0e} (it is a function, not a frozen array). Hard masks fall back to a raster store.")
+print("  Six faculties, one algebra: a textured, displaced, attributed object is one composable hypervector.  *** G1-G6: geometry & appearance go holographic-native ***")
+
+title("The demoscene layer (S1-S2): a 3D SDF/shader algebra -- objects, fractals, greebles, vegetated terrain, GLSL out")
+# holographic_field's `Field` lives on the VSA hypersphere; THIS is its Cartesian sibling -- signed-distance
+# fields over R^3 you can raymarch. One SDF tree is FOUR things at once: a mesh, a recipe, a DSL, a shader.
+from holographic_sdf import sphere as _sph_geo, box as _sbox_geo, torus as _stor_geo, menger as _meng_geo, parse_dsl as _pdsl_geo
+import numpy as _np_sdf
+_scene = _sph_geo(1.0).smooth_union(_stor_geo(0.9, 0.25).rotate([1, 0, 0], 1.2), 0.3).rounded(0.05)
+_P = _np_sdf.hstack([_np_sdf.linspace(0, 1.5, 60)[:, None], _np_sdf.zeros((60, 2))])
+_hard = float(_np_sdf.max(_np_sdf.abs(_np_sdf.diff(_sph_geo(1.0).union(_stor_geo(0.9, 0.25)).eval(_P), 2))))
+_soft = float(_np_sdf.max(_np_sdf.abs(_np_sdf.diff(_sph_geo(1.0).smooth_union(_stor_geo(0.9, 0.25), 0.3).eval(_P), 2))))
+print(f"  S1 SDF: a tree of primitives under CSG + the demoscene smooth-min (seam curvature {_soft:.3f} vs {_hard:.3f} hard -- {_hard/max(_soft,1e-6):.0f}x less creased). DSL = {_scene.to_dsl()}")
+_back = _pdsl_geo(_scene.to_dsl())
+_Q = _np_sdf.random.default_rng(0).uniform(-2, 2, (40, 3))
+print(f"  S1 I/O: that DSL round-trips to the SAME field (max err {float(_np_sdf.max(_np_sdf.abs(_scene.eval(_Q)-_back.eval(_Q)))):.0e}); to_glsl() emits a {len(_scene.to_glsl())}-char Shadertoy shader (map + raymarch + lighting) that embeds its own DSL.")
+from holographic_typed import tree_to_recipe as _t2r_geo, op_kinds as _ok_geo
+_rec = _t2r_geo(512, 0, _scene.to_tree())
+print(f"  S1 REPRESENT: the SAME shader is one holographic RECIPE (typed.tree_to_recipe -- {len(_ok_geo(_rec))} op kinds): a demoscene shader as a VSA structure you can store/compose/factor.")
+
+from holographic_procgen import procedural_object as _po_geo, object_to_mesh as _o2m_geo, greeble_mesh as _gm_geo, vegetated_terrain as _vt_geo
+from holographic_mesh import box as _mbox_geo
+from holographic_scenegraph import flatten_scene as _fs_geo
+_obj = _po_geo(7, complexity=3)
+_omesh = _o2m_geo(_obj, res=32)
+print(f"  S2 OBJECTS: one seed -> one SDF object ({len(_obj.to_dsl())}-char tree) -> {_omesh.n_faces} faces. Different seed, different object -- the demoscene seed->world, deterministic.")
+_meng_mesh = _o2m_geo(_meng_geo(2, 1.0), bounds=((-1.2, -1.2, -1.2), (1.2, 1.2, 1.2)), res=44)
+_greeb = _gm_geo(_mbox_geo(1, 1, 1), seed=3, density=1.0)
+print(f"  S2 FRACTAL/GREEBLE: the Menger sponge marches to {_meng_mesh.n_faces} faces (the holes ARE the surface); greebling a box's faces takes it 8 -> {_greeb.n_vertices} verts of hull detail.")
+_vscene, _vterr = _vt_geo(seed=5, n_plants=6, plant_iterations=2)
+print(f"  S2 VEGETATION: L-system plants scattered across a fBm terrain at the surface height -> one scene, {_fs_geo(_vscene).n_faces} faces. Terrain (G4) + grammar (G5) + scatter, composed.  *** S1-S2: the demoscene layer ***")
+
+title("The creature's value head AS a VSA program: policy = hypervectors, learn = bundling, decide = a dot -- measured vs the tabular brain")
+# The creature is holographic OUTSIDE (role-bound states, prototype bundles) but TABULAR inside: per action a
+# growing list of prototype vectors paired with a parallel array of SCALAR returns. This folds that table
+# into the holographic space -- Q_a = sum ret*unit(state), N_a = sum unit(state), value = <s,Q>/<s,N>.
+from holographic_valuehead import HolographicValueHead as _HVH
+from holographic_creature import HolographicMind as _HM_vh
+import numpy as _np_vh
+def _vh_run(_P, _D=384, _A=3, _seed=0):
+    _rng = _np_vh.random.default_rng(_seed)
+    _S = _rng.normal(size=(_P, _D)); _S /= _np_vh.linalg.norm(_S, axis=1, keepdims=True)
+    _V = _rng.uniform(0, 1, size=(_P, _A))
+    _holo = _HVH(_D, _A); _brain = _HM_vh(dim=_D, actions=list(range(_A)), epsilon=0.0, maintain=False)
+    for _p in range(_P):
+        for _a in range(_A):
+            for _ in range(3):
+                _s = _S[_p] + _rng.normal(0, 0.02, _D); _s /= _np_vh.linalg.norm(_s)
+                _r = _V[_p, _a] + _rng.normal(0, 0.05)
+                _holo.absorb(_s, _a, _r); _brain._absorb(_s, _a, _r)
+    _best = _V.argmax(axis=1)
+    _ha = _np_vh.mean([_holo.decide(_S[_p]) == _best[_p] for _p in range(_P)])
+    _ba = _np_vh.mean([int(_np_vh.argmax([_brain.value(_S[_p], _a)[0] for _a in range(_A)])) == _best[_p] for _p in range(_P)])
+    return float(_ha), float(_ba), _holo.nbytes
+_hlo, _blo, _bytes = _vh_run(8)
+_hhi, _bhi, _ = _vh_run(380)
+print(f"  LOW load (8 situations): holographic value head MATCHES the tabular brain -- best-action accuracy {_hlo:.2f} vs {_blo:.2f}. value(s,a)=<s,Q_a>/<s,N_a> reproduces the brain's Nadaraya-Watson average.")
+print(f"  HIGH load (380 ~ dim): holo DEGRADES to {_hhi:.2f} (the VSA capacity cliff, KEPT NEGATIVE) while the growing tabular table holds {_bhi:.2f}. The trade: a FIXED {_bytes} B savable hypervector policy {{Q,N}} with graceful degradation, vs an exact but unbounded list.")
+print("  Learning is one bundling step (Q_a += ret*u); the policy is hypervectors -- savable/bindable/composable like a recipe. The creature's one tabular part can live in holographic space.  *** value head as a VSA program ***")
+# ... and WIRED into the live creature behind value_backend='holo': the whole brain runs on the hypervector policy.
+from holographic_creature import CreatureEncoder as _CE_vh, GridWorld as _GW_vh, run_episode as _re_vh
+def _maze_backend(_backend, _size=7, _mseed=3, _eps=90):
+    _enc = _CE_vh(384, seed=1)
+    _mind = _HM_vh(384, _GW_vh.ACTIONS, k=15, epsilon=0.5, novelty_bonus=0.2, memory_cap=12000, seed=1, value_backend=_backend)
+    _w = _GW_vh(_size, _size, maze=True, fixed_seed=_mseed)
+    for _ep in range(_eps):
+        _mind.epsilon = max(0.05, 0.5 * (1.0 - _ep / _eps))
+        _re_vh(_w, _enc, _mind, learn=True, explore=True, mem=4, corridor_reflex=True, max_steps=90)
+    _got = 0
+    for _ in range(20):
+        _re_vh(_w, _enc, _mind, learn=False, explore=False, eval_epsilon=0.05, mem=4, corridor_reflex=True, max_steps=90)
+        _got += _w.escaped
+    if _backend == "holo":
+        _b = _mind._value_head.nbytes
+    else:
+        _b = sum(_mind._sum[_a].nbytes + _mind._unit[_a].nbytes + _mind._ret[_a].nbytes + _mind._cnt[_a].nbytes for _a in range(len(_mind.actions)))
+    return _got / 20, _b
+_tr, _tb = _maze_backend("table"); _hr, _hb = _maze_backend("holo")
+print(f"  WIRED into the live creature on a real 7x7 maze: table backend escapes {_tr:.0%} (policy {_tb} B, grows) vs holo backend escapes {_hr:.0%} (policy {_hb} B, FIXED). Same control, a tiny savable hypervector policy -- the whole brain now runs in holographic space.")
+# ROUTING pushes the capacity cliff back; TD bootstrapping beats Monte-Carlo; the policy composes into other VSA programs.
+from holographic_valuehead import RoutedValueHead as _RVH, HolographicValueHead as _PVH, decide_from_atom as _dfa, discounted_return as _dret
+def _cliff_acc(_head, _P=1024, _D=256, _A=3):
+    _rng = _np_vh.random.default_rng(0); _S = _rng.normal(size=(_P, _D)); _S /= _np_vh.linalg.norm(_S, axis=1, keepdims=True)
+    _V = _rng.uniform(0, 1, size=(_P, _A))
+    for _p in range(_P):
+        for _a in range(_A): _head.absorb(_S[_p], _a, _V[_p, _a])
+    _b = _V.argmax(axis=1)
+    return float(_np_vh.mean([_head.decide(_S[_p]) == _b[_p] for _p in range(_P)]))
+print(f"  Step A ROUTING: at 1024 situations (4x dim) the single-bundle head holds {_cliff_acc(_PVH(256,3)):.2f} (past the cliff) while the routed head holds {_cliff_acc(_RVH(256,3,n_buckets=64)):.2f} -- bounded buckets, 'cull don't batch' for value storage.")
+# composability: fold the policy into two bindable hypervectors, drive a decision purely in-VSA
+_rng_c = _np_vh.random.default_rng(0)
+_sits = [_rng_c.normal(size=512) for _ in range(4)]; _sits = [_s/_np_vh.linalg.norm(_s) for _s in _sits]
+_codes = _np_vh.stack([_rng_c.normal(size=512) for _ in range(3)]); _codes /= _np_vh.linalg.norm(_codes, axis=1, keepdims=True)
+_ph = _PVH(512, 3)
+for _i, _s in enumerate(_sits):
+    for _ in range(5):
+        for _a in range(3): _ph.absorb(_s, _a, 1.0 if _a == _i % 3 else 0.1)
+_MQ, _MN = _ph.policy_atom(_codes)
+_match = sum(_dfa(_MQ, _MN, _s, _codes) == _ph.decide(_s) for _s in _sits)
+print(f"  Step B TD: n-step return is a discounted bundle ({_dret([0.0],0.9,bootstrap=2.0):.2f}=gamma*V), eligibility a decaying bundle -- TD prediction beats Monte-Carlo (see selftest). COMPOSABLE: the policy folds into two bindable hypervectors and drives decisions in-VSA ({_match}/4 match the head), so a VSA program can carry and run the creature with no Python round-trip.  *** holographic creature: cliff back, TD, everywhere, composable ***")
+# COMPILED PERCEPTION: the last per-step boundary (an FFT bind per sense) precomputed once -> perceive is a gather+sum.
+from holographic_creature import CreatureEncoder as _CEbase, FastCreatureEncoder as _FCE, GridWorld as _GWp, HolographicMind as _HMp, run_episode as _rep
+import time as _time_vh
+_base = _CEbase(256, seed=1); _fast = _FCE(256, seed=1)
+_sset = [{'wall_N': _a, 'goal_E': _b} for _a in ('yes', 'no') for _b in ('far', 'near', 'none')]
+_ident = all(_np_vh.array_equal(_base.encode(_s), _fast.encode(_s)) for _s in _sset)
+_b2 = _CEbase(256, seed=1); _f2 = _FCE(256, seed=1)
+_t0 = _time_vh.time(); [_b2.encode(_sset[_i % len(_sset)]) for _i in range(3000)]; _tb = _time_vh.time() - _t0
+_t0 = _time_vh.time(); [_f2.encode(_sset[_i % len(_sset)]) for _i in range(3000)]; _tf = _time_vh.time() - _t0
+print(f"  COMPILED PERCEPTION: bit-identical to the plain encoder ({_ident}), but the per-step role/filler FFT bind is precomputed once -- 3000 perceptions {_tb*1000:.0f}ms -> {_tf*1000:.0f}ms ({_tb/_tf:.1f}x), steady state 0 FFTs/step.")
+_encp = _FCE(256, seed=1); _mindp = _HMp(256, _GWp.ACTIONS, k=15, epsilon=0.5, novelty_bonus=0.2, memory_cap=12000, seed=1, value_backend='routed')
+_wp = _GWp(7, 7, maze=True, fixed_seed=3)
+for _ep in range(110):
+    _mindp.epsilon = max(0.05, 0.5 * (1.0 - _ep / 110))
+    _rep(_wp, _encp, _mindp, learn=True, explore=True, mem=4, corridor_reflex=True, max_steps=90)
+_gp = 0
+for _ in range(20):
+    _rep(_wp, _encp, _mindp, learn=False, explore=False, eval_epsilon=0.05, mem=4, corridor_reflex=True, max_steps=90); _gp += _wp.escaped
+print(f"  FULLY IN-VSA LOOP: compiled perceive (gather+sum) + routed brain (decide=dot, learn=bundle) escapes the 7x7 maze {_gp/20:.0%} -- the whole perceive->decide->learn loop is array ops, the creature a VSA program end-to-end.  *** in-VSA perception ***")
+# VECTORIZED PROGRAM PRIMITIVES: the common inner-loop ops (record encode, multi-key decode) in ONE array op.
+from holographic_ai import bind as _bnd, bundle as _bnl, unbind as _unb, bundle_bind as _bb, unbind_all as _ua
+import time as _tprim
+_rngp = _np_vh.random.default_rng(0)
+def _rvp(): _v = _rngp.normal(size=512); return _v / _np_vh.linalg.norm(_v)
+_K = 24; _roles = _np_vh.stack([_rvp() for _ in range(_K)]); _vals = _np_vh.stack([_rvp() for _ in range(_K)])
+_trace = _rvp(); _keys = _np_vh.stack([_rvp() for _ in range(_K)])
+_t = _tprim.time(); [_bnl([_bnd(_roles[i], _vals[i]) for i in range(_K)]) for _ in range(1500)]; _tel = _tprim.time() - _t
+_t = _tprim.time(); [_bb(_roles, _vals) for _ in range(1500)]; _teb = _tprim.time() - _t
+_t = _tprim.time(); [_np_vh.stack([_unb(_trace, _keys[i]) for i in range(_K)]) for _ in range(1500)]; _tdl = _tprim.time() - _t
+_t = _tprim.time(); [_ua(_trace, _keys) for _ in range(1500)]; _tdb = _tprim.time() - _t
+print(f"  VECTORIZED PRIMITIVES: record encode (bind+bundle over {_K} roles) {_tel*1000:.0f}ms -> bundle_bind {_teb*1000:.0f}ms ({_tel/_teb:.1f}x); multi-key decode {_tdl*1000:.0f}ms -> unbind_all {_tdb*1000:.0f}ms ({_tdl/_tdb:.1f}x). Audit found cleanup + bind_batch were already vectorized; the missing piece was the convenience layer so programs actually call it -- one batched FFT, not a Python loop.  *** in-VSA primitives ***")
+
+title("Bridges to the rest of the stack (S3): does the SDF/procedural layer unlock anything? -- MEASURED, negatives kept")
+# The honest cross-pollination check. Two wins, two negatives/already-dones -- a negative ruled out by
+# measurement is as valuable as a win, so all four are on the record.
+from holographic_procbridge import procedural_compression as _pc_geo, soft_min as _sm_geo, fpe_smooth as _fs_geo
+from holographic_sdf import sphere as _psph_geo, menger as _pmeng_geo
+import numpy as _np_pb
+# C1 WIN: the generator is CONSTANT in size while output complexity explodes -- the capacity/complexity escape
+_c1 = [_pc_geo(_pmeng_geo(_d, 1.0), res=40) for _d in (1, 2, 3)]
+print(f"  C1 COMPRESSION (win): menger DSL stays {_c1[0]['dsl_bytes']} B while the mesh grows "
+      f"{_c1[0]['mesh_faces']}->{_c1[2]['mesh_faces']} faces (ratio ~{_c1[0]['ratio']:.0f}x). Store the LAW, not the geometry -- MDL for shape.")
+# C4 WIN: smooth-union and the memory cleanup are ONE temperature operator
+_a = _psph_geo(1.0); _c = _psph_geo(1.0).translate([1.5, 0, 0]); _P = _np_pb.array([[0.75, 0, 0.0]])
+_hard = float(_np_pb.minimum(_a.eval(_P), _c.eval(_P))[0])
+_gaps = [round(abs(float(_a.smooth_union(_c, _k).eval(_P)[0]) - _hard), 4) for _k in (0.5, 0.1, 0.01)]
+print(f"  C4 SOFT OPERATOR (win): smooth_union->hard union as k->0 (gaps {_gaps}) -- EXACTLY as Hopfield/softmax cleanup->hard NN as beta->inf. soft_min IS the cleanup's log-sum-exp, in distance space.")
+# C2 NEGATIVE (kept): the FPE field is a kernel smoother that over-smooths -- it does NOT beat doing nothing
+_rng = _np_pb.random.default_rng(0); _x = _np_pb.linspace(0, 1, 120); _clean = _np_pb.sin(2 * _np_pb.pi * 2 * _x)
+_noisy = _clean + _rng.normal(0, 0.3, 120)
+_snr = lambda c, e: 10 * _np_pb.log10(_np_pb.var(c) / (_np_pb.var(c - e) + 1e-12))
+print(f"  C2 DENOISING (KEPT NEGATIVE): the FPE field as a denoiser HURTS ({float(_snr(_clean, _noisy)):.1f}dB noisy -> {float(_snr(_clean, _fs_geo(_x, _noisy, 6.0))):.1f}dB) -- a band-limited kernel smoother, dominated by the shipped denoisers. NOT wired in.")
+print("  C3 STRUCTURE (already done): an SDF scene IS a tree_to_recipe recipe -- decode_structure reads it back; nothing to build.  *** S3: measured, two wins and two honest negatives ***")
+
+title("Substrate Evolution + Differentiable Orchestration: a self-organizing codebook and gradient-optimized tool-chains")
+# Two upgrades that elevate things to be composable/autonomous in a VSA program -- both numpy, no autodiff.
+from holographic_harmonic import harmonic_atom as _ha_geo, OnlineHarmonicAtom as _oha_geo
+import numpy as _np_evo
+_rng_evo = _np_evo.random.default_rng(7); _D = 16
+_th = _rng_evo.uniform(0, 2 * _np_evo.pi, 40)
+_c = {k: _rng_evo.normal(size=_D) for k in range(5)}
+def _mf(t):
+    return (_c[0] + _np_evo.cos(t) * _c[1] + _np_evo.cos(2 * t) * _c[2] + _np_evo.sin(t) * _c[3] + _np_evo.sin(2 * t) * _c[4])
+_means = [_mf(t) for t in _th]
+_batch = _ha_geo(_th, _means, n_harmonics=3)
+_online = _oha_geo(3, _D, forgetting=1.0).observe_many(_th, _means)
+print(f"  SUBSTRATE EVOLUTION: harmonic_atom's batch lstsq fit becomes ONLINE (Recursive Least Squares, rank-1 Sherman-Morrison). Streaming {len(_th)} obs converges to the batch fit (coeff gap {float(_np_evo.max(_np_evo.abs(_online.W - _batch['coeffs']))):.0e}) -- the codebook self-organizes.")
+_shift = _rng_evo.normal(size=_D); _dth = _rng_evo.uniform(0, 2 * _np_evo.pi, 80)
+def _g(t, i): return _mf(t) + (i / 80.0) * _shift
+_track = _oha_geo(3, _D, forgetting=0.85); _still = _oha_geo(3, _D, forgetting=1.0)
+for _i, _t in enumerate(_dth):
+    _track.observe(_t, _g(_t, _i)); _still.observe(_t, _g(_t, _i))
+_pr = _rng_evo.uniform(0, 2 * _np_evo.pi, 20)
+_te = float(_np_evo.mean([_np_evo.linalg.norm(_track.decode(t) - _g(t, 79)) for t in _pr]))
+_se = float(_np_evo.mean([_np_evo.linalg.norm(_still.decode(t) - _g(t, 79)) for t in _pr]))
+print(f"  ... and with a forgetting factor it becomes a DYNAMICAL SYSTEM that TRACKS a drifting meaning: decode err {_te:.2f} (tracking) vs {_se:.2f} (frozen on stale data).")
+
+from holographic_orchestrator import chain_signature as _cs_geo, optimize_toolchain as _ot_geo
+_rng_o = _np_evo.random.default_rng(0); _N, _Do, _L = 12, 256, 4
+_base = _rng_o.normal(size=(_N, _Do)) + 2.0 * _rng_o.normal(size=(1, _Do))    # correlated tools (shared component)
+_V = _base / _np_evo.linalg.norm(_base, axis=1, keepdims=True)
+_true = list(_rng_o.choice(_N, _L, replace=False)); _goal = _cs_geo(_V[_true])
+_greedy = list(_np_evo.argsort(_V @ _goal)[::-1][:_L])                        # position-blind per-tool score
+_gsig = _cs_geo(_V[_greedy]); _gcos = float(_gsig @ _goal) / (_np_evo.linalg.norm(_gsig) * _np_evo.linalg.norm(_goal))
+_idx, _dcos = _ot_geo(_V, _goal, _L, steps=300)
+_rec = sum(1 for a, b in zip(_idx, _true) if a == b)
+print(f"  DIFFERENTIABLE ORCHESTRATION: optimize a WHOLE tool-chain jointly by analytic-gradient ascent on cosine(chain_signature, goal) -- numpy, NO autodiff. On CORRELATED tools it recovers {_rec}/{_L} of the true chain (composed cosine {_dcos:.3f}) vs position-blind greedy {_gcos:.3f}.")
+print("  The softmax tool-selection is the SAME soft operator that unifies smooth-union and memory cleanup: a soft tool choice and a soft recall are one math.  *** Evolution + differentiable orchestration ***")
+
 title("One routing fabric: the chunkers/tilers/stores converge -- pick the pivot, get the regime (StructuredIndex keying)")
 # The capacity-cliff cure ("route each item to a bounded-load bucket") had been re-grown five times. It is
 # ONE fabric: you escape the cliff HORIZONTALLY and address shards by a PIVOT -- and the pivot you pick IS the

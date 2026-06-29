@@ -12204,3 +12204,423 @@ argmax is a guarantee numerical code does not make. FIX: assert the robust DIREC
 d_greedy -- the verifier escapes the loop more than greedy, true in both environments) instead of a
 brittle magnitude; the structural no-op stays strict. No behavior change, just a magnitude assertion
 relaxed to the qualitative claim it was really standing in for. Files: holographic_misgen.py.
+
+================================================================================
+Holographic-native geometry & appearance: noise, materials, displacement,
+terrain, grammar, attributes (G1-G6)  [+40 tests: 1624 -> 1664]
+================================================================================
+
+Built the six-item geometry/appearance backlog as field-native faculties -- everything that sits on a
+mesh living in the SAME holographic algebra as the geometry, so a textured, displaced object is one
+composable hypervector. All additive, default-off, deterministic.
+
+G1 NOISE (holographic_noise.py). Band-limited procedural noise AS A FIELD: a single band is one
+hypervector -- an FPE bundle of random-weighted RBF kernels, f = sum_i w_i encode(p_i) with w_i ~ N(0,1)
+on a jittered lattice -- so querying it is a smooth Gaussian-process sample whose correlation length is
+~1/bandwidth (measured lag-1 autocorr 0.998). fBm is the OCTAVE BUNDLE: a weighted superposition of
+per-octave band fields at bandwidth base*lacunarity^o, amplitude gain^o; fBm(x) = sum_o gain^o query(band_o, x).
+Roughness (normalized lag-1 variation -- wiggle per unit amplitude, the robust measure after a lag-1-on-
+coarse-features attempt and a window-fragile high-pass attempt both mis-fired) tracks persistence
+(0.031 -> 0.055 for gain 0.25 -> 0.90). KEPT NEGATIVE: smooth-spectrum only (no hard edges); FFT-bound
+(each kernel is one encode), so kernels are capped per octave and deep fBm is expensive.
+
+G2 MATERIALS (holographic_material.py). The centerpiece and purest VSA fit. A texture is an FPE function
+over UV (encoder.bundle(uv, values)); a material is a role-filler HRR record sum_r bind(role_r, channel_r)
+with role atoms from hashlib(name) seeds (cross-run deterministic, NOT salted hash()). KEY LESSON from a
+0.73-crosstalk failure: a small-norm channel (a height bump) gets SWAMPED by big-norm channels because
+their scrambled crosstalk inflates the query denominator and rescales the small channel down (~0.3x).
+TWO FIXES: (a) sample() reads the EXACT stored field (no crosstalk) -- the unbind path is only for
+recovering from a BARE record after transmission; (b) the record binds UNIT-normalized channel directions
+so capacity is BALANCED (recovery 0.48/0.48/0.46, no swamping; cosine is scale-free so values are
+unchanged). transform_uv re-UVs every channel with ONE bind (bind associativity: bind(bind(role,f),shift)
+= bind(role,shift(f))); blend is linear. compose_object binds geometry+appearance under balanced roles;
+recovery is a 2-item capacity cliff at dim 1024, so the test is a MARGIN check (each side recovers its own
+>3x the other: app 0.545, geom 0.580) not an absolute cosine. KEPT NEGATIVE: band-limited (sharp masks
+stay raster); bare-record recovery carries ~sqrt(n)/sqrt(dim) crosstalk.
+
+G3 DISPLACE/BUMP (holographic_displace.py). SDF displacement IS a field delta: make_delta with NEGATIVE
+values pushes the surface outward (its documented sign), apply_delta adds it (O(edit)), remove_delta undoes
+it EXACTLY (2.2e-16). Mesh displacement moves vertices along normals by amount*scalar; bump tilts shading
+normals from the scalar's tangential slope without moving vertices. KEPT NEGATIVE: the SDF path is the
+near-surface shader approximation (exact only where |grad sdf|=1); mesh displacement can self-intersect.
+
+G4 TERRAIN (holographic_terrain.py). A 2-D fBm heightfield (composition of G1) liftable to a displaced-grid
+mesh (z=height, UV'd for materials) or a heightfield SDF (z-height: sign-correct, marchable). Roughness
+tracks persistence (0.171 -> 0.198). The transect's box-counting dimension reads ~0.96 (a near-curve) --
+NOT a 1<D<2 fractal -- which is exactly the band-limited scope inherited from G1, so the kept negative
+holds rather than being papered over. KEPT NEGATIVE: no erosion (pure fBm statistics); heightfield SDF is
+not a true Euclidean distance where steep.
+
+G5 GRAMMAR (holographic_grammar.py). The one genuinely NEW capability. Context-free L-system parallel
+rewriting (algae A->AB,B->A gives exactly Fibonacci generation lengths), a 3D turtle (F/+/-/&/^/\//[/])
+emitting a skeleton, scenegraph assembly (each strut instanced through a transform -- a recursive bundle
+that scene_to_recipe turns back into a holographic recipe), plus recursive greeble subdivision. Productions
+are themselves a holographic record sum_s bind(sym_s, exp_s) (a rule recovers at cosine 0.62). Branching
+fills the plane measurably (skeleton box-counting dimension 0.14 -> 0.91 with depth). KEPT NEGATIVE:
+recursive composition, not a biological growth simulation; deterministic context-free.
+
+G6 ATTRIBUTES (holographic_attributes.py). A per-vertex/texel attribute as a RESOLUTION-INDEPENDENT FPE
+field (it is a function, so baking at a coarse and a dense sampling agrees at shared points to 0.0) -- plus
+a light additive raster store (.data dict on the mesh) for hard masks. KEPT NEGATIVE: field path is
+band-limited (hard 0/1 masks smooth; use the raster store).
+
+Wired as six UnifiedMind faculties (procedural_noise, material, displace/bump, terrain, lsystem,
+attribute_field), each delegating with locally-scoped imports. Files: the six modules, their six
+test_*.py (35 tests), five integration tests in test_integration.py (noise-displaces-a-field-with-exact-
+undo, material-composes-with-geometry, terrain-lifts-and-takes-a-material, grown-plant-becomes-a-recipe,
+attribute-field-resolution-independent), README counts, NOTES, tour.
+
+================================================================================
+The demoscene layer: a 3D SDF/shader algebra + procedural objects, fractals,
+greebles, and vegetated terrain (S1-S2)  [+21 tests: 1664 -> 1685]
+================================================================================
+
+DE-DUP FIRST (the rule earning its keep again): holographic_field.py ALREADY carries the demoscene
+lineage -- but its `Field` lives on the VSA HYPERSPHERE (it unit-normalizes every point, measures
+geodesic arccos(cosine) distance) -- the right space for "SDF = brain value = density", the WRONG space
+for geometry you raymarch. So the new work is the CARTESIAN sibling, not a duplicate: signed-distance
+fields over R^3 with the same operator family (union, smooth-union, domain warp/repeat).
+
+S1 SDF/SHADER ALGEBRA (holographic_sdf.py). A 3D signed-distance EXPRESSION TREE, one uniform `SDF(kind,
+params, children)` node so eval / GLSL / DSL / holographic-tree all dispatch on `kind`. It serves four
+masters at once:
+  * EVALUABLE -- node.eval(P:(N,3)) is vectorized numpy, so the engine's EXISTING mesh_from_sdf /
+    marching_tetrahedra_vec renders any tree to a watertight mesh (brain = authoritative SDF, browser =
+    the muscle that raymarches -- as above, so below). Primitives sphere/box/torus/cylinder/plane;
+    exact CSG union(min)/intersect(max)/subtract; IQ polynomial smooth-union (creaseless: measured
+    seam curvature 0.003 vs 0.025 hard, ~8x); transforms translate/scale(d*s)/rotate; DOMAIN REPETITION
+    (finite kernel -> infinite field, tiles exactly); round/onion shells; twist/displace domain warps.
+  * REPRESENTABLE -- to_tree() folds params into the op name ('sphere(1.0)') giving the exact
+    (op, child0, ...) shape typed.tree_to_recipe already encodes, so a shader IS one holographic recipe
+    vector (rode the EXISTING tree encoder -- no new recipe machinery).
+  * INPUT/OUTPUT -- to_dsl()/parse_dsl() round-trip a compact s-expression (parse(emit(t)) evals
+    identically); to_glsl() emits a COMPLETE Shadertoy fragment shader (helper fns + map() + raymarch +
+    calcNormal + lighting), built by a recursive emitter that threads a point-variable through
+    transforms. The shader EMBEDS its own DSL in a header comment, so a shader reads back to a tree.
+  * MENGER is a first-class recursive fractal primitive (box minus crosses at every scale): it evals,
+    marches, AND emits a real GLSL for-loop helper -- the canonical demoscene fractal in the algebra.
+KEPT NEGATIVES: union/intersect/subtract are exact, smooth-union is the standard bounded approximation,
+and twist/displace are domain warps that BREAK unit-gradient (bounded Lipschitz fields, not true
+distances) -- the emitter flags them ("shorten ray steps") rather than pretend. Non-uniform scale is
+omitted (it does not preserve a distance field). GLSL is emit-only; the editable canonical form is the
+DSL/tree (a shader reads back via its embedded DSL, NOT by parsing arbitrary GLSL).
+
+S2 PROCEDURAL GENERATION (holographic_procgen.py). The composition layer turning S1 + G1-G6 into the
+three asks: (1) `procedural_object(seed)` -- a random SDF tree (Quilez's tiny-seed-to-world), deterministic
+per seed, renders + emits + represents; (2) FRACTAL/GREEBLE models -- menger re-exported, plus
+`greeble_mesh(base, seed)` lifting the G5 flat-panel greeble onto ANY mesh's faces (centroid + normal,
+extruded boxes, merged); (3) `scatter_on_terrain` / `vegetated_terrain` -- L-system plants (G5) instanced
+across a fBm terrain (G4) at the surface height with per-instance jitter, into one scenegraph. Measured:
+object marches to 5940 faces, menger(2) to ~150k faces (the holes ARE the surface), greeble 8->56 verts,
+scatter lands every instance at terrain height exactly (1e-9). KEPT NEGATIVES: procedural_object is a
+generator not an art director (a random subtract can erase most of itself / leave disconnected pieces);
+greeble is instancing not CSG (greebles intersect the hull -- which is how greebling looks); scatter is a
+deterministic placement, not an ecology.
+
+Wired as seven UnifiedMind faculties: sdf_object, sdf_render, sdf_shader, sdf_parse, menger_fractal,
+greeble, vegetated_terrain. Files: the two modules, test_holographic_sdf.py (10) + test_holographic_procgen.py
+(7), four integration tests (sdf-object-renders-and-round-trips-dsl-and-recipe, sdf-shader-shadertoy-ready,
+menger-and-greeble, vegetated-terrain), README counts, NOTES, tour.
+
+================================================================================
+Bridges from the procedural/SDF layer to the rest of the stack -- MEASURED
+(compression, the soft operator, denoising, structure)  [+7 tests: 1685 -> 1692]
+================================================================================
+
+The question: do the recent SDF/procedural changes (S1-S2) UNLOCK anything elsewhere? We measured every
+candidate on the real substrate BEFORE building (the engine's own rule), and the answer split cleanly
+into two wins and two negatives/already-dones. All four are kept loud in holographic_procbridge.py,
+because a connection ruled out by measurement is as valuable as one ruled in.
+
+C1 -- COMPRESSION / COMPLEXITY (WIN, wired as `procedural_compression`). A procedural generator's size is
+CONSTANT in its output's complexity: a Menger sponge's DSL is 12 BYTES whether it marches to 100k or 250k
+faces (measured ratios 130,000-500,000x). Storing the GENERATOR instead of the expanded geometry escapes
+the capacity/complexity wall for any content that HAS a short generator -- the SAME MDL principle as
+symbolic_regress/compress_signal ("find the law, store the law"), now for geometry, and the same spirit
+as domain repetition (an unbounded tiled field from one bounded cell). KEPT NEGATIVE: only COMPRESSIBLE
+content has a short generator; an arbitrary scanned/random mesh does not (the symbolic-regression "not
+everything has a law" negative). Procedural compression is lossy and content-restricted, not a universal
+codec.
+
+C4 -- THE SOFT OPERATOR (WIN, a unification, wired as `soft_min`). The SDF smooth-union and the engine's
+memory cleanup are the SAME temperature-controlled soft operator. Measured: smooth_union(k->0) converges
+to the hard union exactly (gap 0.125 -> 0.0025 as k: 0.5 -> 0.01), precisely as the modern-Hopfield/softmax
+cleanup at beta->inf becomes the hard nearest-neighbour (a celebrated engine fact). `soft_min(a,b,k) =
+-k*log(exp(-a/k)+exp(-b/k))` is the log-sum-exp form -- the SAME log-sum-exp softmax uses: softmax is a
+soft-arg-MAX, soft_min is a soft-arg-MIN over distances, with k = 1/beta. A smooth blend of geometry and a
+soft recall of a memory are one piece of math seen in two domains. (Practical payoff is modest -- it is a
+unification, not a speed-up -- which is why it ships as one measured fact + a shared primitive, not a rewrite.)
+
+C2 -- FPE FIELD AS A DENOISER (NEGATIVE, kept; NOT wired into `denoise`). An FPE field fit to noisy samples
+is a kernel/RBF regressor (Nadaraya-Watson). Measured: it HURTS on uniformly-sampled smooth signals
+(SNR 7.7 -> 2.5 dB; it over-smooths), rounds sharp edges badly (9.7 -> 3.0 dB), and on non-uniformly sampled
+signals it is at best marginal and SEED-DEPENDENT -- not a reliable win. The shipped trajectory/SSA and
+spectral denoisers dominate. So it is deliberately NOT added to the denoise faculty (it would degrade it);
+`fpe_smooth` is kept only as the honest record of the attempt and a scattered-data smoother for a caller
+who explicitly wants one. The negative is locked into the test suite (test asserts it does NOT beat the
+noisy signal on uniform sampling).
+
+C3 -- SDF SCENE AS A FACTORABLE STRUCTURE (ALREADY DONE). An SDF tree IS a typed.tree_to_recipe recipe, so
+decode_structure / decompose_structure / op_kinds already read its structure back -- nothing to build,
+noted so the panel does not "discover" it again (the recurring denoising-session lesson: it was already in
+the box).
+
+Wired: two UnifiedMind faculties (procedural_compression, soft_min); fpe_smooth stays a module function
+(the kept negative). Files: holographic_procbridge.py, test_holographic_procbridge.py (6), one integration
+test (procedural-compression-and-soft-operator-through-the-mind), README counts, NOTES, tour.
+
+================================================================================
+Substrate Evolution + Differentiable Orchestration: the harmonic codebook becomes
+self-organizing, tool-chains become composable & optimized  [+8 tests: 1692 -> 1700]
+================================================================================
+
+Two requested upgrades, both elevating something to be first-class and composable in VSA programs, both
+NumPy-only and gradient-WITHOUT-autodiff (the engine's standing rule).
+
+SUBSTRATE EVOLUTION (holographic_harmonic.py -> OnlineHarmonicAtom; faculty `evolving_atom`). harmonic_atom
+fits a context-conditioned meaning atom ONCE, by np.linalg.lstsq over (context-angle, meaning) samples in a
+circular-harmonic basis. The evolution step makes that fit AUTONOMOUS: Recursive Least Squares is the EXACT
+online form of the same least-squares solution -- each observation updates the coefficient matrix W and the
+inverse-covariance P by a rank-1 Sherman-Morrison step, no refit, no stored history. So the "codebook" stops
+being a frozen table and becomes a self-organizing dynamical system.
+  * MEASURED: with forgetting=1.0 the online stream CONVERGES to the batch lstsq fit (max coeff gap 1.6e-7).
+  * MEASURED: with forgetting<1.0 it down-weights stale evidence and TRACKS a drifting meaning function --
+    decode error on the CURRENT function 0.43 (tracking) vs 2.24 (no-forgetting, still trusting old data).
+  * Deterministic given the observation stream; it is the engine's own least squares run online, not a
+    backprop-learned weight. KEPT NEGATIVE: forgetting<1 trades steady-state accuracy on a STATIONARY
+    function for the ability to follow a non-stationary one -- on stationary data, forgetting=1 is better.
+
+DIFFERENTIABLE ORCHESTRATION (holographic_orchestrator.py -> optimize_toolchain / Planner.plan_differentiable;
+faculty `optimize_toolchain`). The orchestrator already maps tools into hyperspace (every Tool has a .vec),
+and plan/score rank them by an INDEPENDENT per-tool cosine. The differentiable upgrade optimizes a WHOLE
+chain JOINTLY against a chain-level structural score. A chain's signature is the order-encoded superposition
+sum_s permute(tool_s.vec, s) (the engine's permute = np.roll; order-sensitive). Given a goal signature (what
+a working composed chain should look like), a SOFT selection -- a softmax distribution over tools at each of
+L steps -- is optimized by gradient ASCENT on cosine(chain_signature, goal_sig). The gradient is derived
+ANALYTICALLY through cosine -> superposition -> permute -> softmax, in numpy, NO autodiff (the same
+gradient-without-a-framework method as holographic_optimize). argmax of the converged soft selection gives
+the discrete chain of real Tools.
+  * MEASURED: on a CORRELATED tool set (tools sharing a common component, where independent scoring is misled
+    by cross-talk between positions) the optimizer recovers the true ordered chain (4/4, composed cosine
+    1.000) while position-blind per-tool greedy scores 0.853. Deterministic.
+  * KEPT NEGATIVE: gradient ascent finds a LOCAL optimum of a non-convex landscape; on ORTHOGONAL/easy tool
+    sets per-position greedy already recovers the chain (no gain) -- the win is specifically the correlated /
+    interacting-positions regime. It optimizes against a SUPPLIED goal signature (from a demonstrated chain),
+    not an end-task reward.
+
+The connective tissue (the first ask, "more things composable in VSA programs"): the harmonic codebook is
+now a live self-organizing atom rather than a static fit, and the tool registry's chains are now a
+differentiable object optimized in the same hyperspace as everything else -- both elevated to first-class,
+composable, evolving citizens of a VSA program. The optimizer's softmax-over-scores is the SAME soft
+operator the last session unified (C4): a soft tool-selection and a soft memory recall are one piece of math.
+
+Wired: two UnifiedMind faculties (evolving_atom, optimize_toolchain); OnlineHarmonicAtom + optimize_toolchain/
+chain_signature/Planner.plan_differentiable in the two modules. Files: holographic_harmonic.py,
+holographic_orchestrator.py, their two test files (+6), two integration tests (evolving-atom-converges,
+differentiable-toolchain), README counts, NOTES, tour.
+
+================================================================================
+The creature's value head AS a VSA program -- policy = hypervectors, learn =
+bundling, decide = a dot (measured head-to-head vs the tabular brain)  [+7: 1700 -> 1707]
+================================================================================
+
+THE DIAGNOSIS. The creature mind (HolographicMind) is holographic on the OUTSIDE -- states are role-bound
+bundles, prototypes are superpositions, perceive is bundle-and-cosine, describe/why_differ are real
+unbind+cleanup -- but TABULAR on the inside. For each action it keeps a GROWING list of prototype direction
+vectors (self._unit[a]) paired with a PARALLEL NUMPY ARRAY OF SCALAR mean-returns (self._ret[a]); value(s,a)
+is a numpy kernel-weighted average of those scalars and _absorb is "classify to nearest prototype, nudge its
+scalar return, or vstack a new one." That scalar-return table is the one part of the brain that is not itself
+a VSA program -- the reason the creature "functions a little different" from the recipes / SDF trees /
+orchestrator that were all elevated to LIVE in the holographic space.
+
+THE TRANSFORMATION (holographic_valuehead.HolographicValueHead; faculty `holographic_value_head`). The
+creature's value is exactly a Nadaraya-Watson estimator, value(s,a)=sum_i sim(s,proto_i)*ret_i / sum_i
+sim(s,proto_i), and a sum is a BUNDLE. So keep, per action, just two hypervectors:
+    Q_a = sum_i ret_i * unit(state_i)     N_a = sum_i unit(state_i)
+and because <s, unit(state_i)> IS the cosine, value(s,a) = <s,Q_a>/<s,N_a> reproduces the SAME average -- but
+the whole per-action policy is TWO fixed-length vectors instead of an unbounded list, learning is one
+bundling step (Q_a += ret*u ; N_a += u -- the holographic complement, O(1) and history-independent), and the
+policy {Q, N} is a savable / bindable / composable hypervector program. Same drop-in API as the brain:
+value(state, action)->(value, support) and absorb(state, action, ret).
+
+MEASURED HEAD-TO-HEAD against the REAL tabular brain (same experience stream through both, value mechanism
+isolated -- no consolidation/projection):
+  * LOW load (P=8 distinct situations, D=512): holo MATCHES tabular -- best-action accuracy 0.88 vs 0.88,
+    value RMSE 0.05 to the true value. The two-bundle head reproduces the brain's decisions.
+  * HIGH load (P=500 ~ D): holo DEGRADES to 0.52 (toward chance) while the tabular table stays at 0.93 --
+    the VSA CAPACITY CLIFF. KEPT NEGATIVE: the scalar table is effectively exact and grows without bound;
+    folding everything into 2 vectors per action blurs under cross-talk past ~D situations. The win is one
+    composable, FIXED-SIZE (24,600 B at BOTH loads), gracefully-degrading hypervector policy that is
+    consistent with the rest of the stack -- NOT higher small-scale accuracy.
+  * Two more kept caveats: the head's `support` is the similarity MASS <s,N_a> (a sum), not the tabular
+    NEAREST-prototype similarity (a max) -- a different, mass-based familiarity it cannot cheaply turn into
+    "nearest" without the list it discards; and it uses a LINEAR kernel (the table clips negative sims and
+    keeps k-nearest), mostly harmless in high dimensions where dissimilar states are near-orthogonal.
+
+WHERE THIS SITS. This is the value HEAD made holographic, measured before any surgery on the live brain
+(backward-compatible by construction -- the tabular brain is untouched and still the default). The clean
+follow-ups, in order: (1) wire it into HolographicMind.decide/_absorb behind a value_backend='holo' flag and
+re-run the head-to-head on the creature's actual maze/world task; (2) lean the high-load case on the routing
+fabric / sparse codes / resonator to push the cliff back (the honest capacity remedy); (3) TD bootstrapping
+as VSA (n-step returns as discounted bundles, eligibility traces as a decaying bundle) -- the genuine frontier.
+
+Wired: faculty holographic_value_head; module holographic_valuehead.py; test_holographic_valuehead.py (6) +
+one integration test (value-head-is-a-savable-policy); README counts, NOTES, tour.
+
+================================================================================
+Holographic value backend WIRED into the live creature (value_backend='holo'):
+the whole brain runs on a hypervector policy  [+4 tests: 1707 -> 1711]
+================================================================================
+
+The previous step built HolographicValueHead standalone and measured it on synthetic situations. This step
+WIRES it into HolographicMind behind a flag and re-runs the comparison on the creature's REAL task.
+
+THE WIRING (holographic_creature.py). A new constructor flag value_backend='table' (default, BIT-IDENTICAL)
+| 'holo'. In 'holo' mode the brain instantiates a HolographicValueHead(dim, n_actions) and value() /
+_value_projected() / _absorb() return through it -- so decide()'s scoring loop, exploration, vetoes, and the
+corridor reflex are all UNCHANGED; only the value storage/recall swaps from the growing prototype table to
+the two-bundle hypervector policy. The head is fixed-size, so the consolidation/projection machinery is
+simply unused in this mode. Default 'table' is untouched and still the default (its own tests, incl. the
+maze gauntlet, pass unchanged).
+
+MEASURED HEAD-TO-HEAD on the creature's actual GridWorld mazes (same enc/seed/episodes, only the backend
+differs), trained 150 episodes, escape rate over 20 eval runs:
+  * 7x7 maze (seed 3): table 100% escape, policy 345,408 B (grows) | holo 100% escape, policy 16,416 B FIXED.
+  * 9x9 maze (seed 5): table 100% escape, policy 275,504 B (grows) | holo 100% escape, policy 16,416 B FIXED.
+So on the real task at this scale the holographic backend TIES control performance (100% vs 100%) while the
+policy is a fixed ~16 KB hypervector program {Q, N} -- ~17-21x smaller than the table and, unlike the table,
+CONSTANT regardless of maze size / experience count. The capacity cliff measured earlier (synthetic, P~dim)
+is where it would degrade: a world with far more distinct junction-states than the dimension can hold. At
+maze scale (dim 256, a few hundred experiences) the brain sits well below the cliff, so the win is clean:
+same escape, a tiny fixed savable policy, and the creature's one tabular part now lives in holographic space.
+
+HONEST SCOPE. This validates the backend at maze scale; it does NOT claim a win at all scales (the cliff is
+real and on record). support is still mass-based not nearest-based (the novelty bonus uses it but escape was
+unaffected here). The remaining frontier is unchanged: push the cliff back with the routing fabric for very
+large worlds, and TD bootstrapping as VSA.
+
+Wired: HolographicMind.value_backend flag; value/_value_projected/_absorb routed; test_creature_holo_backend.py
+(4 -- default-unchanged, routing, fixed-size policy, learns-a-real-maze); README counts, NOTES, tour.
+
+================================================================================
+Holographic creature: cliff pushed back (routing), TD as VSA, usable everywhere,
+and composable into other VSA programs  [+7 tests: 1711 -> 1718]
+================================================================================
+
+Four moves on the holographic value head, in the order they were asked.
+
+STEP A -- ROUTING PUSHES THE CAPACITY CLIFF BACK (RoutedValueHead; value_backend='routed'). A single (Q_a,
+N_a) pair blurs past ~dim distinct situations. RoutedValueHead routes every state to one of B buckets by a
+fixed random-projection sign hash (LSH -- the same mechanism as HoloForest / the RP trees) and keeps a
+(Q, N) per bucket, so each bundle holds only the situations that hash together -- bounded load. MEASURED at
+1024 situations (4x dim=256): single-bundle 0.39 -> routed(64 buckets) 0.89 best-action accuracy; at the
+cliff (256) 0.57 -> 0.94. KEPT NEGATIVE: B-fold memory, and a query reads only its own bucket so two similar
+states on opposite sides of a hash plane miss each other (boundary smoothing). 'cull, don't batch' for value.
+
+STEP B -- TD AS VSA (discounted_return, EligibilityTrace). Learning stays a bundling step; only the TARGET
+changes from a realised return (Monte-Carlo) to a bootstrapped one (TD). An n-step return is a DISCOUNTED
+BUNDLE of rewards plus a bootstrap (sum gamma^k r_k + gamma^n V), and the eligibility trace is a DECAYING
+BUNDLE of recent states (e <- gamma*lambda*e + unit(state)) -- both first-class. MEASURED on the canonical
+random-walk value prediction (Sutton & Barto 6.2): after 40 episodes TD RMSE 0.085 < MC RMSE 0.134 --
+bootstrapping converges with lower error (lower variance). The bootstrap V(s') is read from the head, so the
+whole TD loop stays in the holographic space.
+
+USABLE EVERYWHERE (UnifiedMind.actions(value_backend=...), use_holographic_brain()). The creature is held as
+self._brain and used by decide/reinforce; actions() now takes value_backend='table'|'holo'|'routed', and
+use_holographic_brain(routed=) swaps an existing brain to a hypervector policy in place. So anywhere the
+creature is used inside the engine, the holographic creature can be used instead -- decide/reinforce unchanged.
+
+COMPOSABLE INTO OTHER VSA PROGRAMS (policy_atom, decide_from_atom, from_policy). The policy folds into TWO
+bindable hypervectors -- M_Q = sum_a bind(code_a, Q_a), M_N = sum_a bind(code_a, N_a) -- so it is one object
+that can be bound into a recipe/structure and carried around the VSA space. decide_from_atom drives a choice
+straight from {M_Q, M_N, action codebook, state} by unbind+dot -- a decision made INSIDE the VSA program, no
+trip back through Python (the slow boundary). MEASURED: atom-driven decisions match the head 4/4 within
+capacity; from_policy round-trips a saved policy exactly. KEPT NEGATIVE: folding all actions into two
+D-vectors adds cross-talk, so atom-driving matches only within capacity (few actions / large dim).
+
+WHY IT MATTERS (the performance point). Crossing Python<->VSA is the expensive boundary; everything here keeps
+the decide/learn loop and now the policy itself as array ops / hypervectors, so a VSA program can carry and
+drive the creature without round-tripping. The remaining boundary is perception (senses dict -> encode); a
+fully in-VSA perceive is the next frontier, alongside routing the live maze brain for very large worlds.
+
+Wired: RoutedValueHead, discounted_return, EligibilityTrace, policy_atom/decide_from_atom/from_policy in
+holographic_valuehead.py; value_backend='routed' in HolographicMind; actions(value_backend=) +
+use_holographic_brain + routed faculty in UnifiedMind. Tests: +5 valuehead, +1 creature-backend, +1
+integration. README counts, NOTES, tour.
+
+================================================================================
+Compiled, fully in-VSA perception: the creature loop becomes array ops end-to-end
+(FastCreatureEncoder)  [+5 tests: 1718 -> 1723]
+================================================================================
+
+THE LAST BOUNDARY. With the holographic value head, decide is a dot and learn is a bundle -- but PERCEPTION
+still did an FFT bind (a convolution) per sense feature EVERY step, recomputing the same role/filler bind
+whenever a feature recurred. That per-step convolution was the last expensive Python<->VSA crossing in the
+creature loop.
+
+THE FIX (FastCreatureEncoder, subclass of CreatureEncoder; faculty fast_creature_encoder). Cache each bound
+atom the first time its (role, value) is seen; thereafter perception is a GATHER + bundle (a sum) -- pure
+array ops, no per-step FFT. Because it caches the EXACT same scalar bind and bundles in the same sorted
+order, the output is BIT-IDENTICAL to the plain encoder (only the redundant convolutions are skipped). Kept
+an opt-in subclass so the tie-sensitive rescue canary keeps the plain encoder by default.
+perception_codebook() exposes the cached atoms as one (features, dim) matrix -- the in-VSA form of the senses
+dict (perceive = indicator @ matrix).
+
+MEASURED:
+  * Bit-identical: np.array_equal to CreatureEncoder.encode on every tested sense set.
+  * Speed: 4000 perceptions 537ms -> 65ms (8.3x); 7-8 FFT binds done at warm-up, ~12000 avoided -- steady
+    state is 0 FFTs per step.
+  * Full in-VSA loop: compiled perceive (gather+sum) + ROUTED hypervector brain (decide=dot, learn=bundle)
+    learns the 7x7 maze to 100% escape -- the whole perceive->decide->learn loop is array ops, the creature a
+    VSA program end-to-end, with the routing fabric giving capacity headroom for large worlds.
+
+WHY IT MATTERS. Moose's performance point: crossing Python<->VSA is the expensive boundary, and things inside
+VSA are faster. The loop now stays inside: perception is a gather, decision a dot, learning a bundle, the
+policy a pair of bindable hypervectors. The remaining per-step Python is just the world's senses dict and the
+episode control flow (the environment, not the mind).
+
+Wired: FastCreatureEncoder + perception_codebook in holographic_creature.py; fast_creature_encoder faculty in
+UnifiedMind. Tests (focused only -- the full suite is left to CI per request): test_creature_fast_perceive.py
+(4) + one integration test. README counts, NOTES, tour.
+
+================================================================================
+Vectorized VSA-program primitives: the common ops in one array op, not a Python
+FFT loop  [+6 tests: 1723 -> 1729]
+================================================================================
+
+AUDIT FIRST (the honest finding). Of the operations VSA programs run constantly, cleanup was ALREADY
+vectorized -- Vocabulary.cleanup is a cached matrix @ query + argmax, not a Python cosine loop. The batched
+FFT primitives bind_batch / bind_fixed ALSO already existed. What was missing was the convenience layer over
+them for the two most common patterns, so encoders and decoders still hand-looped FFTs:
+  * record/structure encoding: bundle([bind(role_i, val_i) for i]) -- K FFT binds per call.
+  * multi-key decode/resonate: [unbind(trace, k) for k in keys] -- N FFT unbinds per call.
+
+ADDED (holographic_ai.py, the core, importable by every program):
+  * involution_batch(K) -- involution over a stack in one op.
+  * unbind_all(trace, keys) = bind_fixed(trace, involution_batch(keys)) -- one trace unbound against many
+    keys in ONE batched FFT (the decode/resonator loop, vectorised).
+  * bundle_bind(keys, values) = bundle(bind_batch(keys, values)) -- a record/structure encoded in ONE
+    batched FFT (the role/filler loop, vectorised).
+  * nearest(query, matrix) = argmax(matrix @ query) -- the reusable matmul cleanup, EXACT (no epsilon), for
+    the scattered [cosine(q, v) for v in set] loops.
+
+MEASURED: bundle_bind and unbind_all match their scalar loops exactly here (max diff 0.0) and run ~4.4x /
+~4.6x faster at K=24; nearest's argmax equals the cosine loop's. KEPT NEGATIVE: the batched FFT can differ
+from the scalar bind loop at ~1e-16 -- enough to flip a knife-edge tie-break -- so tie-sensitive encoders
+(the maze-rescue CreatureEncoder, which is why it uses the cached bit-identical FastCreatureEncoder instead)
+keep the scalar/cached form; wide-margin encoders adopt the batched form.
+
+ADOPTED safely: HolographicLearner.encode (the classifier's record encoder) now runs through bundle_bind --
+classification is wide-margin, test_holographic.py (43 tests) green. (holographic_encoders.RecordEncoder
+already used bind_batch.) Exposed as UnifiedMind faculties encode_record / unbind_keys / nearest_in for
+programs built on the mind. CreatureEncoder is deliberately NOT switched (tie-sensitive) -- it has the cached
+FastCreatureEncoder for its in-VSA speedup.
+
+WHY IT MATTERS. These are the operations a VSA program runs in its inner loop; doing each as one array op
+(batched FFT or matmul) instead of a Python loop keeps the program inside VSA space, where it is fast. The
+audit's lesson held again: some of the "missing" vectorization was already in the box (cleanup, bind_batch) --
+the real gap was the thin convenience layer that lets the common ops actually call it.
+
+Wired: involution_batch / unbind_all / bundle_bind / nearest in holographic_ai.py; HolographicLearner.encode
+via bundle_bind; encode_record / unbind_keys / nearest_in faculties. Tests (focused, per request):
+test_holographic_primitives.py (6). README counts, NOTES, tour.

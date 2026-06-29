@@ -161,6 +161,45 @@ def involution(a):
     return np.concatenate(([a[0]], a[:0:-1]))
 
 
+def involution_batch(K):
+    """involution() over a stack (k, dim) in one array op: involution_batch(K)[i] == involution(K[i])."""
+    K = np.asarray(K, float)
+    return np.concatenate([K[:, :1], K[:, :0:-1]], axis=1)
+
+
+def unbind_all(trace, keys):
+    """Unbind ONE trace against MANY keys in a single batched FFT -- the vectorised form of the
+    [unbind(trace, k) for k in keys] loop that decoders/resonators run constantly. Returns (k, dim): row i
+    is the noisy estimate freed by key i. Built on bind_fixed (the trace spectrum is computed once and reused
+    across keys), so a Python FFT loop becomes one C call. Matches the scalar loop to FFT-batch epsilon."""
+    return bind_fixed(np.asarray(trace, float), involution_batch(keys))
+
+
+def bundle_bind(keys, values):
+    """Encode a record/structure -- bundle([bind(keys[i], values[i]) for i]) -- in ONE batched FFT instead
+    of a Python loop of per-pair binds. The vectorised form of the role/filler encode that VSA programs do
+    constantly (records, scenes, recipes). KEPT NEGATIVE: the batched FFT differs from the scalar bind loop
+    at ~1e-16 -- enough to flip a knife-edge tie-break -- so tie-sensitive encoders (the maze-rescue path)
+    keep the scalar/cached form, while wide-margin encoders (classification, recipes) adopt this. The same
+    trade bind_batch already documents."""
+    return bundle(bind_batch(np.asarray(keys, float), np.asarray(values, float)))
+
+
+def nearest(query, matrix):
+    """Nearest row of a codebook matrix (k, dim) to `query` -- argmax(matrix @ query), the reusable matmul
+    form of the [cosine(query, v) for v in codebook] loop. Rows are assumed ~unit length (as Vocabulary
+    atoms are), so the dot's argmax equals the cosine's argmax -- EXACT, no epsilon caveat. Returns
+    (index, score)."""
+    matrix = np.asarray(matrix, float)
+    if not len(matrix):
+        return -1, -1.0
+    q = np.asarray(query, float)
+    nq = np.linalg.norm(q) or 1.0
+    sims = (matrix @ q) / nq
+    j = int(sims.argmax())
+    return j, float(sims[j])
+
+
 def unbind(composite, a):
     """Recover b from a composite that contains bind(a, b).
 
@@ -549,11 +588,16 @@ class HolographicLearner:
 
         bind(feature, value) creates a 'feature IS value' token; bundling the
         tokens superposes them so the example vector is similar to any other
-        example sharing those tokens.
-        """
-        tokens = [bind(self.vocab.get(f), self.vocab.get(v))
-                  for f, v in sorted(example.items())]
-        return bundle(tokens)
+        example sharing those tokens. Runs as ONE batched FFT via bundle_bind (the
+        role/filler encode vectorised) rather than a Python loop of per-pair binds --
+        classification is wide-margin, so the batched-FFT ~1e-16 difference is harmless
+        here (unlike the tie-sensitive maze-rescue encoder, which keeps the scalar form)."""
+        items = sorted(example.items())
+        if not items:
+            return np.zeros(self.vocab.dim)
+        roles = np.stack([self.vocab.get(f) for f, _ in items])
+        values = np.stack([self.vocab.get(v) for _, v in items])
+        return bundle_bind(roles, values)
 
     @staticmethod
     def _signature(example):

@@ -109,3 +109,45 @@ def test_deterministic():
     a1 = harmonic_atom(ctx, senses, n_harmonics=2)
     a2 = harmonic_atom(ctx, senses, n_harmonics=2)
     assert np.array_equal(a1["coeffs"], a2["coeffs"])
+
+
+# --- Substrate Evolution: the harmonic atom as a self-organizing dynamical system (online RLS) ---
+
+def test_online_rls_converges_to_batch_fit():
+    from holographic_harmonic import harmonic_atom, OnlineHarmonicAtom
+    rng = np.random.default_rng(7); D = 16
+    th = rng.uniform(0, 2 * np.pi, 40)
+    coeff = {k: rng.normal(size=D) for k in range(5)}
+    def f(t):
+        return (coeff[0] + np.cos(t) * coeff[1] + np.cos(2 * t) * coeff[2]
+                + np.sin(t) * coeff[3] + np.sin(2 * t) * coeff[4])
+    means = [f(t) for t in th]
+    batch = harmonic_atom(th, means, n_harmonics=3)
+    online = OnlineHarmonicAtom(3, D, forgetting=1.0).observe_many(th, means)
+    assert np.max(np.abs(online.W - batch["coeffs"])) < 1e-6
+
+
+def test_online_evolution_is_deterministic():
+    from holographic_harmonic import OnlineHarmonicAtom
+    rng = np.random.default_rng(3); D = 12
+    th = rng.uniform(0, 2 * np.pi, 20); means = [rng.normal(size=D) for _ in th]
+    a = OnlineHarmonicAtom(3, D).observe_many(th, means)
+    b = OnlineHarmonicAtom(3, D).observe_many(th, means)
+    assert np.array_equal(a.W, b.W)
+
+
+def test_forgetting_tracks_a_drifting_meaning():
+    from holographic_harmonic import OnlineHarmonicAtom
+    rng = np.random.default_rng(5); D = 16
+    th = rng.uniform(0, 2 * np.pi, 80); shift = rng.normal(size=D)
+    base = {k: rng.normal(size=D) for k in range(5)}
+    def g(t, i):
+        return (base[0] + np.cos(t) * base[1] + np.sin(t) * base[3]) + (i / 80.0) * shift
+    track = OnlineHarmonicAtom(3, D, forgetting=0.85)
+    still = OnlineHarmonicAtom(3, D, forgetting=1.0)
+    for i, t in enumerate(th):
+        track.observe(t, g(t, i)); still.observe(t, g(t, i))
+    probe = rng.uniform(0, 2 * np.pi, 20)
+    track_err = np.mean([np.linalg.norm(track.decode(t) - g(t, 79)) for t in probe])
+    still_err = np.mean([np.linalg.norm(still.decode(t) - g(t, 79)) for t in probe])
+    assert track_err < still_err

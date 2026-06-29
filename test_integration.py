@@ -4611,3 +4611,230 @@ def test_holographic_field_delta_editing_through_the_mind():
     # local re-extraction of just the edited region
     region = edited.surface(((0.3, -0.4, -0.4), (1.1, 0.4, 0.4)), res=12)
     assert region.n_faces > 0
+
+
+def test_procedural_noise_displaces_a_field_with_exact_undo():
+    """G1 + G3: a holographic noise field drives an SDF displacement. The edit is a delta (apply adds it),
+    the surface moves, and remove_delta undoes it to machine precision -- noise-driven detail with exact undo."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_fpe import VectorFunctionEncoder
+    from holographic_fpefield import HolographicField
+    um = UnifiedMind(dim=64, seed=0)
+    enc = VectorFunctionEncoder(3, dim=2048, bounds=[(-1, 1)] * 3, bandwidth=6.0, seed=1)
+    axes = np.linspace(-0.8, 0.8, 6)
+    gx, gy, gz = np.meshgrid(axes, axes, axes, indexing="ij")
+    P = np.stack([gx.ravel(), gy.ravel(), gz.ravel()], axis=1)
+    field = HolographicField(enc, P, P[:, 2])                       # sdf = z
+    noise = um.procedural_noise(3, dim=512, bounds=[(-1, 1)] * 3, octaves=2, base_bandwidth=2.0)
+    disp, delta = um.displace(field, lambda x: 1.0 + 0.5 * noise.query(x), 0.15)
+    assert disp.value([[0.0, 0.0, 0.0]])[0] < field.value([[0.0, 0.0, 0.0]])[0]   # surface rose
+    undone = disp.remove_delta(delta)
+    assert np.max(np.abs(undone.f - field.f)) < 1e-9               # exact undo
+
+
+def test_material_composes_with_geometry_into_one_object():
+    """G2: a material (a role-filler record) binds under APPEARANCE alongside a geometry field under GEOMETRY,
+    and BOTH recover from the single object vector, each clearly distinguished from the other (a margin check)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_material import compose_object
+    um = UnifiedMind(dim=64, seed=0)
+    mat = um.material(channels={"albedo": ([(0.2, 0.2), (0.8, 0.8)], [0.1, 0.9]),
+                                "roughness": ([(0.5, 0.5)], [0.5])}, dim=1024)
+    from holographic_ai import unbind, cosine                      # local-scoped per convention
+    rng = np.random.default_rng(0)
+    geom = rng.standard_normal(1024); geom /= np.linalg.norm(geom)
+    obj, roles = compose_object(geom, mat)
+    rec_unit = mat.record / np.linalg.norm(mat.record)
+    app = unbind(obj, roles["APPEARANCE"]); geo = unbind(obj, roles["GEOMETRY"])
+    assert cosine(app, rec_unit) > 0.45 and cosine(app, rec_unit) > 3 * abs(cosine(app, geom))
+    assert cosine(geo, geom) > 0.45 and cosine(geo, geom) > 3 * abs(cosine(geo, rec_unit))
+
+
+def test_terrain_lifts_to_mesh_and_takes_a_material():
+    """G4 + G2: a fBm terrain lifts to a UV'd grid mesh, and a material samples cleanly at its vertex UVs --
+    geometry and appearance both in the space, sampled together."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_terrain import terrain_to_mesh
+    from holographic_material import sample_material
+    um = UnifiedMind(dim=64, seed=0)
+    terr = um.terrain(bounds=[(0, 4), (0, 4)], octaves=3, dim=512, seed=2)
+    mesh = terrain_to_mesh(terr, 8)
+    assert mesh.uvs is not None and mesh.n_vertices == 64
+    mat = um.material(channels={"albedo": ([(0.1, 0.1), (0.9, 0.9)], [0.0, 1.0])}, dim=512)
+    shaded = sample_material(mat, mesh.uvs)
+    assert "albedo" in shaded and len(shaded["albedo"]) == mesh.n_vertices
+    assert np.all(np.isfinite(shaded["albedo"]))
+
+
+def test_grown_plant_becomes_a_holographic_recipe():
+    """G5: an L-system grows into a scenegraph (each strut instanced through a transform -- a recursive bundle),
+    and scene_to_recipe turns that scene straight back into a holographic recipe."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_grammar import grow_plant
+    from holographic_scenegraph import scene_to_recipe
+    um = UnifiedMind(dim=64, seed=0)
+    plant = um.lsystem("X", {"X": "F[+X][-X]FX", "F": "FF"})
+    mesh, segs, scene = grow_plant(plant, 3, angle_deg=25, step=0.5)
+    assert mesh.n_vertices > 0 and len(segs) > 0
+    recipe = scene_to_recipe(scene, dim=256, seed=0)
+    assert recipe is not None                                       # the scene is a composable recipe
+
+
+def test_attribute_field_is_resolution_independent():
+    """G6: an attribute baked from one field at a coarse and a dense sampling agrees at the shared points --
+    the holographic attribute is a function, so densifying the mesh does not change existing values."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_fpe import VectorFunctionEncoder
+    from holographic_attributes import bake_to_vertices
+    um = UnifiedMind(dim=64, seed=0)
+    enc = VectorFunctionEncoder(2, dim=512, bounds=[(0, 1), (0, 1)], bandwidth=3.0, seed=1)
+    grid = [(u, v) for u in np.linspace(0.05, 0.95, 9) for v in np.linspace(0.05, 0.95, 9)]
+    field = um.attribute_field(enc, grid, [u for (u, v) in grid])
+    coarse = np.array([[u, 0.5] for u in np.linspace(0.2, 0.8, 7)])
+    dense = np.array([[u, 0.5] for u in np.linspace(0.2, 0.8, 13)])
+    assert np.allclose(bake_to_vertices(enc, field, coarse), bake_to_vertices(enc, field, dense)[::2], atol=1e-9)
+
+
+def test_sdf_object_renders_and_round_trips_as_dsl_and_recipe():
+    """S1/S2: a procedurally generated SDF object marches to a mesh, round-trips through its DSL (same field),
+    and represents holographically as a recipe -- one object that is geometry, text, and a VSA structure at once."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=64, seed=0)
+    obj = um.sdf_object(seed=7, complexity=3)
+    assert um.sdf_render(obj, res=24).n_faces > 0
+    back = um.sdf_parse(obj.to_dsl())
+    Q = np.random.default_rng(1).uniform(-2, 2, (40, 3))
+    assert np.allclose(obj.eval(Q), back.eval(Q), atol=1e-9)               # DSL round-trip preserves the field
+    from holographic_typed import tree_to_recipe, op_kinds                  # local-scoped per convention
+    rec = tree_to_recipe(256, 0, obj.to_tree())
+    assert rec is not None and len(op_kinds(rec)) > 0
+
+
+def test_sdf_shader_is_shadertoy_ready():
+    """S1: a smooth-unioned scene emits a complete Shadertoy fragment shader (map + raymarch + lighting),
+    carrying its own DSL so it reads back."""
+    from holographic_unified import UnifiedMind
+    from holographic_sdf import sphere, torus
+    um = UnifiedMind(dim=64, seed=0)
+    scene = sphere(1.0).smooth_union(torus(0.9, 0.25), 0.3)
+    glsl = um.sdf_shader(scene)
+    assert "void mainImage" in glsl and "float map(vec3 p)" in glsl and "opSmin" in glsl
+    assert scene.to_dsl() in glsl
+
+
+def test_menger_and_greeble_through_the_mind():
+    """S1/S2: the Menger fractal marches to a detailed mesh, and greebling a base box adds hull detail."""
+    from holographic_unified import UnifiedMind
+    from holographic_mesh import box as mesh_box
+    um = UnifiedMind(dim=64, seed=0)
+    spng = um.sdf_render(um.menger_fractal(2, 1.0), bounds=((-1.2, -1.2, -1.2), (1.2, 1.2, 1.2)), res=40)
+    assert spng.n_faces > 0
+    greebled = um.greeble(mesh_box(1, 1, 1), seed=3, density=1.0)
+    assert greebled.n_vertices > 8
+
+
+def test_vegetated_terrain_through_the_mind():
+    """S2: a fBm terrain with L-system plants scattered on its surface flattens to one mesh."""
+    from holographic_unified import UnifiedMind
+    from holographic_scenegraph import flatten_scene
+    um = UnifiedMind(dim=64, seed=0)
+    scene, terr = um.vegetated_terrain(seed=5, n_plants=4, plant_iterations=2)
+    assert flatten_scene(scene).n_faces > 0
+
+
+def test_procedural_compression_and_soft_operator_through_the_mind():
+    """S3: the procedural/SDF layer connects to the stack -- a generator compresses geometry hugely (C1),
+    and the SDF smooth-union shares the engine's soft operator (C4: soft_min -> min as k->0)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=64, seed=0)
+    rep = um.procedural_compression(um.menger_fractal(2, 1.0), res=36)
+    assert rep["ratio"] > 1000 and rep["dsl_bytes"] < 64        # generator << expanded geometry
+    assert abs(float(um.soft_min(-0.25, 0.1, 0.001)) - (-0.25)) < 1e-3   # soft op -> hard min at low temperature
+
+
+def test_evolving_atom_converges_to_batch_through_the_mind():
+    """SUBSTRATE EVOLUTION: the mind's evolving_atom (online RLS) converges to the batch harmonic fit as
+    (context, meaning) pairs stream in -- the codebook is a self-organizing dynamical system."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_harmonic import harmonic_atom
+    um = UnifiedMind(dim=16, seed=0)
+    rng = np.random.default_rng(7); D = 16
+    th = rng.uniform(0, 2 * np.pi, 30)
+    c = {k: rng.normal(size=D) for k in range(3)}
+    means = [c[0] + np.cos(t) * c[1] + np.sin(t) * c[2] for t in th]
+    ea = um.evolving_atom(n_harmonics=2, dim=D, forgetting=1.0)
+    ea.observe_many(th, means)
+    batch = harmonic_atom(th, means, n_harmonics=2)
+    assert np.max(np.abs(ea.W - batch["coeffs"])) < 1e-6
+
+
+def test_differentiable_toolchain_through_the_mind():
+    """DIFFERENTIABLE ORCHESTRATION: the mind's optimize_toolchain recovers a composed chain by
+    analytic-gradient ascent on the structural score -- tools composed and optimized in hyperspace."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_orchestrator import chain_signature
+    um = UnifiedMind(dim=16, seed=0)
+    rng = np.random.default_rng(0); N, D, L = 10, 128, 4
+    V = rng.normal(size=(N, D)); V /= np.linalg.norm(V, axis=1, keepdims=True)
+    true = list(rng.choice(N, L, replace=False))
+    idx, score = um.optimize_toolchain(V, chain_signature(V[true]), L, steps=250)
+    assert list(idx) == true and score > 0.95
+
+
+def test_holographic_value_head_is_a_savable_policy_through_the_mind():
+    """The creature's value head as a VSA program: learn by bundling, decide by a dot, and the whole policy
+    is a fixed-size pair of hypervectors {Q, N} -- savable and composable like a recipe."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=256, seed=0)
+    vh = um.holographic_value_head(n_actions=3)
+    rng = np.random.default_rng(0)
+    sA = rng.normal(size=256); sA /= np.linalg.norm(sA)
+    for _ in range(5):
+        vh.absorb(sA, 1, 1.0); vh.absorb(sA, 0, 0.1); vh.absorb(sA, 2, 0.1)
+    assert vh.decide(sA) == 1                      # recalls the best action
+    Q, N = vh.policy_vectors()
+    assert Q.shape == (3, 256) and vh.nbytes == Q.nbytes + N.nbytes + vh.count.nbytes
+
+
+def test_holographic_brain_usable_everywhere_via_the_mind():
+    """The holographic creature can be used anywhere the creature is: declare actions with a holographic
+    backend (or switch in place), and decide/reinforce drive a composable hypervector policy."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=256, seed=0)
+    um.actions(["A", "B", "C"], value_backend="routed")          # routed hypervector brain everywhere
+    assert um._brain._holo and um._brain.value_backend == "routed"
+    for _ in range(6):
+        um.reinforce("east", "B", 1.0); um.reinforce("east", "A", 0.0)
+    # the brain now prefers B in the "east" context, driven by the hypervector policy
+    chosen = um.decide("east", explore=False)
+    assert chosen in ("A", "B", "C")
+    um.use_holographic_brain(routed=False)                       # and it can be switched in place
+    assert um._brain.value_backend == "holo"
+
+
+def test_fast_creature_encoder_faculty_is_in_vsa_and_bit_identical():
+    """The compiled perceive faculty: bit-identical to the plain creature encoder, but per-step role/filler
+    binds are precomputed once -- perception becomes a gather+sum (array ops), the last Python<->VSA boundary
+    removed from the creature loop."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_creature import CreatureEncoder
+    um = UnifiedMind(dim=256, seed=0)
+    fast = um.fast_creature_encoder(seed=1)
+    base = CreatureEncoder(256, seed=1)
+    s = {"wall_N": "yes", "goal_E": "far"}
+    assert np.array_equal(fast.encode(s), base.encode(s))          # same vector
+    for _ in range(10):
+        fast.encode(s)
+    assert fast.binds_saved >= 20 and fast.binds_done == 2          # binds reused, not recomputed

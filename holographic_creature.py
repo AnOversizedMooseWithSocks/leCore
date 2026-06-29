@@ -96,7 +96,7 @@ class HolographicMind:
                  memory_cap=6000, seed=0, merge=0.92, ret_alpha=0.1,
                  maintain=False, reorg_duplicate=0.85, redundancy_floor=0.35,
                  surprise_floor=0.4, maintain_gap=400, buffer_cap=1200, check_every=400,
-                 capacity=0, robust_returns=False):
+                 capacity=0, robust_returns=False, value_backend="table"):
         self.dim = dim
         self.actions = list(actions)        # e.g. ["N", "S", "E", "W"]
         self.k = k                          # prototypes consulted per action
@@ -188,6 +188,19 @@ class HolographicMind:
         self.robust_returns = bool(robust_returns)
         self._ret_dev = None                # lazy: seeded from the first residual so the scale starts sensibly
         self.experiences = 0                # total raw experiences absorbed (compression stat)
+        # VSA VALUE BACKEND (opt-in). Default 'table' = the prototype machinery above, BIT-IDENTICAL. 'holo'
+        # routes value()/_absorb() to a two-bundle HolographicValueHead, so the whole per-action policy is a
+        # FIXED-SIZE, savable hypervector program (Q_a, N_a) instead of a growing (vector, scalar) table, and
+        # learning is one bundling step. It is fixed-size so it needs no consolidation -- the projection /
+        # maintain machinery below is simply unused in this mode (value/_absorb return before reaching it).
+        self.value_backend = value_backend
+        self._holo = value_backend in ("holo", "routed")
+        if self._holo:
+            from holographic_valuehead import HolographicValueHead, RoutedValueHead
+            self._value_head = (RoutedValueHead(dim, n) if value_backend == "routed"
+                                else HolographicValueHead(dim, n))
+        else:
+            self._value_head = None
         # PROJECTION consolidation (see consolidate()): once set, every incoming
         # state is projected into this shared low-rank basis -- with a residual
         # guard that grows the basis when the world develops structure the
@@ -297,6 +310,8 @@ class HolographicMind:
         prototype directions are unit length, the matrix product below IS the
         cosine similarity to every prototype at once.
         """
+        if self._holo:                               # VSA backend: value is <s,Q_a>/<s,N_a>, a single dot
+            return self._value_head.value(state_vec, action_idx)
         U = self._unit[action_idx]
         if not len(U):
             return 0.0, 0.0
@@ -331,6 +346,8 @@ class HolographicMind:
         caller has already projected (or never consolidated), so it skips the branch. The numbers
         are BIT-IDENTICAL to value() on an already-projected (or raw, un-consolidated) state -- it
         only drops the conditional, never changes the math. Used by value_batch below."""
+        if self._holo:                               # VSA backend (hot path mirrors value())
+            return self._value_head.value(state_vec, action_idx)
         U = self._unit[action_idx]
         if not len(U):
             return 0.0, 0.0
@@ -619,6 +636,9 @@ class HolographicMind:
         """Classify one experience into a prototype (or start a new one), then
         layer it in: extend the bundle, update the mean return and support."""
         self.experiences += 1
+        if self._holo:                               # VSA backend: learning is one bundling step
+            self._value_head.absorb(state, a, ret)
+            return
         U = self._unit[a]
         if len(U):
             sims = U @ state
@@ -1013,6 +1033,52 @@ class CreatureEncoder:
                 return bundle([sense_vec, context])
             return context                                # fully blind: lean on memory
         return sense_vec
+
+
+class FastCreatureEncoder(CreatureEncoder):
+    """Compiled, fully in-VSA perception: the per-step role/filler BIND (an FFT convolution) is the last
+    Python<->VSA boundary cost in the perceive loop, and it recomputes the SAME bind every time a
+    (role, value) feature recurs. This caches each bound atom the first time it is seen, so after a brief
+    warm-up perception is a GATHER + bundle (a sum) -- pure array ops, no per-step FFT. build_state inherits
+    this `encode` unchanged, so the whole maze loop (perceive -> decide -> learn) runs without a per-step
+    convolution.
+
+    BIT-IDENTICAL to CreatureEncoder.encode: it caches the EXACT same scalar bind and bundles in the same
+    sorted order, so the output vector is unchanged -- only the redundant FFTs are skipped. (Kept as an
+    opt-in subclass anyway, so the tie-sensitive rescue canary keeps using the plain encoder by default.)
+    `perception_codebook()` exposes the cached atoms as one (n_features, dim) matrix -- the compiled codebook
+    that turns perception into a single gather/matmul, the in-VSA form of the senses dict.
+    """
+
+    def __init__(self, dim, seed=1):
+        super().__init__(dim, seed)
+        self._bind_cache = {}                            # (role, value) -> precomputed bound atom
+        self.binds_done = 0                              # FFT binds actually computed (warm-up cost)
+        self.binds_saved = 0                             # FFT binds avoided by the cache (the steady-state win)
+
+    def encode(self, senses):
+        if not senses:
+            return np.zeros(self.vocab.dim)
+        for role, value in senses.items():
+            self.seen.setdefault(role, set()).add(value)
+        tokens = []
+        for role, value in sorted(senses.items()):       # same sorted order as the base encoder
+            t = self._bind_cache.get((role, value))
+            if t is None:
+                t = bind(self.vocab.get(role), self.vocab.get(value))   # compute the convolution ONCE
+                self._bind_cache[(role, value)] = t
+                self.binds_done += 1
+            else:
+                self.binds_saved += 1
+            tokens.append(t)
+        return bundle(tokens)
+
+    def perception_codebook(self):
+        """The compiled codebook: (features, dim) matrix of cached bound atoms + the feature key list. With it,
+        perceiving a set of active features is one gather-and-sum (or an indicator @ matrix) -- perception as
+        a single array op, entirely inside the holographic space."""
+        keys = sorted(self._bind_cache.keys())
+        return np.stack([self._bind_cache[k] for k in keys]) if keys else np.zeros((0, self.vocab.dim)), keys
 
 
 # ---------------------------------------------------------------------------

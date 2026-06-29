@@ -84,6 +84,77 @@ def harmonic_dc(atom):
 
 
 # =====================================================================================================
+# SUBSTRATE EVOLUTION -- the harmonic atom as a SELF-ORGANIZING DYNAMICAL SYSTEM (online RLS).
+# =====================================================================================================
+
+def _harmonic_row(theta, K):
+    """The (2K-1,) circular-harmonic feature row at context angle theta -- the SAME basis harmonic_atom
+    stacks into its design matrix and harmonic_decode reads, factored out so the online fit matches the
+    batch fit bit-for-bit."""
+    return np.array([1.0] + [np.cos(k * theta) for k in range(1, K)]
+                    + [np.sin(k * theta) for k in range(1, K)])
+
+
+class OnlineHarmonicAtom:
+    """A context-conditioned atom that UPDATES ITS OWN harmonic coefficients as (context, meaning) pairs
+    stream in -- the batch least-squares fit (harmonic_atom) made autonomous via Recursive Least Squares.
+
+    WHY THIS IS THE EVOLUTION STEP. harmonic_atom fits the coefficients once, from a fixed sample set, by
+    np.linalg.lstsq. RLS is the EXACT online form of that same least-squares solution: each observation
+    updates the coefficient matrix W and the inverse-covariance P by the Sherman-Morrison rank-1 formula,
+    with NO refit and NO stored history. So the "codebook" stops being a frozen table and becomes a
+    dynamical system that organizes itself toward the meaning function it is shown.
+
+      * forgetting=1.0  -> standard RLS: after a full pass it CONVERGES to harmonic_atom's batch fit.
+      * forgetting<1.0  -> the system down-weights old evidence, so it TRACKS a meaning function that
+                           DRIFTS over time (the dynamical-system regime) -- at the cost of steady-state
+                           accuracy on a stationary function (the honest trade kept below).
+
+    No RNG, no autodiff, no learned-by-backprop weights: it is the engine's own least squares, run online
+    with a rank-1 linear-algebra update. Deterministic given the observation stream.
+    """
+
+    def __init__(self, n_harmonics, dim, forgetting=1.0, delta=1e-6):
+        self.K = int(n_harmonics)
+        self.dim = int(dim)
+        self.lam = float(forgetting)
+        m = 2 * self.K - 1
+        self.W = np.zeros((m, self.dim))                 # coefficient matrix (2K-1, D), like harmonic_atom['coeffs']
+        self.P = np.eye(m) / float(delta)                # inverse-covariance; small delta = near-flat prior
+        self.n_seen = 0
+
+    def observe(self, theta, meaning):
+        """Fold one (context angle, meaning vector) observation into the coefficients -- the RLS rank-1 step."""
+        a = _harmonic_row(float(theta), self.K)          # (2K-1,)
+        meaning = np.asarray(meaning, float)
+        Pa = self.P @ a                                  # (2K-1,)
+        denom = self.lam + float(a @ Pa)
+        gain = Pa / denom                                # Kalman gain (2K-1,)
+        err = meaning - a @ self.W                       # prediction residual (D,)
+        self.W = self.W + np.outer(gain, err)            # rank-1 coefficient update
+        self.P = (self.P - np.outer(gain, a @ self.P)) / self.lam
+        self.n_seen += 1
+        return self
+
+    def observe_many(self, thetas, meanings):
+        for th, m in zip(thetas, meanings):
+            self.observe(th, m)
+        return self
+
+    def decode(self, theta):
+        """The current meaning at context angle theta -- identical readout to harmonic_decode."""
+        return _harmonic_row(float(theta), self.K) @ self.W
+
+    def dc(self):
+        """The current context-free (DC) meaning."""
+        return self.W[0].copy()
+
+    def as_atom(self):
+        """A snapshot in harmonic_atom's dict form, so harmonic_decode / harmonic_dc work on it unchanged."""
+        return {"K": self.K, "coeffs": self.W.copy()}
+
+
+# =====================================================================================================
 # Self-test -- polysemy, the exact degree-0 fallback, the smooth win over per-context, the degenerate trap.
 # =====================================================================================================
 def _selftest():
@@ -147,10 +218,44 @@ def _selftest():
     a2 = harmonic_atom(ctx, senses, n_harmonics=2)
     assert np.array_equal(a1["coeffs"], a2["coeffs"])
 
+    # --- SUBSTRATE EVOLUTION: online RLS converges to the batch fit, and forgetting tracks drift ---
+    rng = np.random.default_rng(7)
+    D = 16
+    th_stream = rng.uniform(0, 2 * np.pi, 40)
+    # a fixed smooth meaning function (K=3 band-limited) to recover online
+    true = {k: rng.normal(size=D) for k in ("a0", "c1", "c2", "s1", "s2")}
+    def f(t):
+        return (true["a0"] + np.cos(t) * true["c1"] + np.cos(2 * t) * true["c2"]
+                + np.sin(t) * true["s1"] + np.sin(2 * t) * true["s2"])
+    meanings = [f(t) for t in th_stream]
+    batch = harmonic_atom(th_stream, meanings, n_harmonics=3)
+    online = OnlineHarmonicAtom(n_harmonics=3, dim=D, forgetting=1.0).observe_many(th_stream, meanings)
+    conv = float(np.max(np.abs(online.W - batch["coeffs"])))
+    assert conv < 1e-6, f"online RLS must converge to the batch lstsq fit, gap {conv:.2e}"
+    # determinism of the online stream
+    online2 = OnlineHarmonicAtom(3, D, forgetting=1.0).observe_many(th_stream, meanings)
+    assert np.array_equal(online.W, online2.W), "online evolution must be deterministic for a fixed stream"
+    # TRACKING: a meaning function that DRIFTS; a forgetting atom follows the CURRENT function better than
+    # a no-forgetting atom that still trusts the stale early data.
+    drift_th = rng.uniform(0, 2 * np.pi, 80)
+    shift = rng.normal(size=D)
+    def g(t, i):                       # the DC term ramps over the stream -> a drifting target
+        return f(t) + (i / 80.0) * shift
+    track = OnlineHarmonicAtom(3, D, forgetting=0.85)
+    still = OnlineHarmonicAtom(3, D, forgetting=1.0)
+    for i, t in enumerate(drift_th):
+        track.observe(t, g(t, i)); still.observe(t, g(t, i))
+    probe = rng.uniform(0, 2 * np.pi, 20)
+    track_err = np.mean([np.linalg.norm(track.decode(t) - g(t, 79)) for t in probe])
+    still_err = np.mean([np.linalg.norm(still.decode(t) - g(t, 79)) for t in probe])
+    assert track_err < still_err, f"forgetting should track drift better: {track_err:.3f} !< {still_err:.3f}"
+
     print(f"holographic_harmonic selftest: ok (POLYSEMY -- 3 senses recovered at their contexts (cos>0.999), a "
           f"between-context blends them (cos {c0:.2f}/{c1:.2f}); DEGREE-0 fallback exact (context-free atom decodes "
           f"to <1e-10 from DC alone); SMOOTH B=3 function EXACT at K=4 (err {h_err:.1e}) beating per-context NN at 24 "
-          f"vectors (err {pc_err:.2f}); DEGENERATE non-smooth not captured (err {ns_err:.1f}); deterministic)")
+          f"vectors (err {pc_err:.2f}); DEGENERATE non-smooth not captured (err {ns_err:.1f}); deterministic; "
+          f"EVOLUTION -- online RLS converges to batch (gap {conv:.1e}), forgetting tracks drift "
+          f"({track_err:.2f} < {still_err:.2f}))")
 
 
 if __name__ == "__main__":

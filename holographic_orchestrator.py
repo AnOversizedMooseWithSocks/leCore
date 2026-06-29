@@ -264,6 +264,114 @@ class Planner:
             self.skeletons.store(goal_vec, chain)
         return True, value, trace
 
+    def plan_differentiable(self, goal_sig, length, out_type=None, steps=200, lr=0.5):
+        """DIFFERENTIABLE ORCHESTRATION. Optimize a whole tool-chain JOINTLY against a chain-level
+        structural score, instead of picking tools by an INDEPENDENT per-tool score (what plan/score do).
+
+        The registry already lives in hyperspace -- every Tool has a `.vec`. A chain's signature is the
+        order-encoded superposition of its tools' vecs (position s rotates tool_s.vec -- the engine's
+        permute), so a `goal_sig` is "what the composed chain should look like" (e.g. taken from a
+        demonstrated working chain). This optimizes a SOFT selection (a distribution over tools at each of
+        `length` steps) by gradient ASCENT on cosine(chain_signature, goal_sig) -- the gradient derived
+        analytically through cosine / superposition / permute / softmax, in numpy, NO autodiff (the same
+        gradient-without-a-framework approach as holographic_optimize). argmax of the converged soft
+        selection gives the discrete chain of real Tools.
+
+        Returns (chain, score) where chain is a list of Tools and score is the final composed cosine.
+        KEPT NEGATIVE: gradient ascent finds a LOCAL optimum of a non-convex landscape, and on an
+        ORTHOGONAL / easy tool set per-position greedy already recovers the chain (no gain) -- the win is
+        on CORRELATED tool sets where independent scoring is misled by cross-talk between positions.
+        """
+        pool = [t for t in self.registry.tools if out_type is None or t.out_type == out_type]
+        if not pool:
+            return [], 0.0
+        V = np.stack([t.vec for t in pool])             # (N, D)
+        idx, score = optimize_toolchain(V, goal_sig, length, steps=steps, lr=lr)
+        return [pool[i] for i in idx], score
+
+
+# ---------------------------------------------------------------------------
+# Differentiable tool-chain optimization (numpy analytic gradient, no autodiff).
+# ---------------------------------------------------------------------------
+
+def chain_signature(tool_vecs):
+    """The order-encoded signature of a chain: sum_s permute(tool_vecs[s], s) (position s rotates the vec).
+    Order-sensitive (a different order is a different signature) -- the VSA sequence encoding."""
+    return sum(np.roll(tool_vecs[s], s) for s in range(len(tool_vecs)))
+
+
+def _softmax_rows(Z):
+    Z = Z - Z.max(axis=1, keepdims=True)
+    E = np.exp(Z)
+    return E / E.sum(axis=1, keepdims=True)
+
+
+def optimize_toolchain(tool_vecs, goal_sig, length, steps=200, lr=0.5):
+    """Find the length-`length` chain over `tool_vecs` (N, D) whose composed signature best matches
+    `goal_sig` (D,), by gradient ascent on the cosine -- analytic gradient, numpy only.
+
+    Returns (indices, final_cosine): indices[s] is the chosen row of tool_vecs at step s.
+    """
+    tool_vecs = np.asarray(tool_vecs, float)
+    N, D = tool_vecs.shape
+    g = np.asarray(goal_sig, float)
+    gn = np.linalg.norm(g) or 1.0
+    theta = np.zeros((length, N))                       # logits over tools per step (uniform start)
+    for _ in range(steps):
+        p = _softmax_rows(theta)                        # (L, N) soft selection
+        U = p @ tool_vecs                               # (L, D) soft tool per step
+        sig = sum(np.roll(U[s], s) for s in range(length))   # composed signature (D,)
+        sn = np.linalg.norm(sig) or 1.0
+        cos = float(sig @ g) / (sn * gn)
+        # d cos / d sig = (g/gn - cos * sig/sn) / sn  (standard cosine gradient)
+        dsig = (g / gn - cos * sig / sn) / sn
+        # back through the permutation: d sig / d U[s] = roll(., s), so d cos / d U[s] = roll(dsig, -s)
+        dU = np.stack([np.roll(dsig, -s) for s in range(length)])   # (L, D)
+        G = dU @ tool_vecs.T                            # (L, N): d cos / d p[s, t] = <tool_t, dU[s]>
+        # back through softmax: d cos / d theta[s] = p[s] * (G[s] - sum_t p[s,t] G[s,t])
+        dtheta = p * (G - (p * G).sum(axis=1, keepdims=True))
+        theta = theta + lr * dtheta
+    idx = list(np.argmax(theta, axis=1))
+    # report the DISCRETE chain's score (the soft optimum decoded to real tools)
+    disc_sig = chain_signature(tool_vecs[idx])
+    disc_cos = float(disc_sig @ g) / ((np.linalg.norm(disc_sig) or 1.0) * gn)
+    return idx, disc_cos
+
+
+def _optimize_selftest():
+    """Substantive checks for the differentiable planner: it RECOVERS a known composed chain that
+    independent per-tool greedy gets wrong, on a CORRELATED tool set; ties greedy when tools are easy."""
+    rng = np.random.default_rng(0)
+    N, D, L = 12, 256, 4
+
+    def run(corr):
+        base = rng.normal(size=(N, D))
+        if corr:                                        # make tools share a big common component (correlated)
+            base = base + 2.0 * rng.normal(size=(1, D))
+        V = base / np.linalg.norm(base, axis=1, keepdims=True)
+        true = list(rng.choice(N, L, replace=False))
+        goal = chain_signature(V[true])
+        # independent greedy (the existing per-tool style): pick by cosine(goal, tool.vec), position-blind
+        scores = V @ goal
+        greedy = list(np.argsort(scores)[::-1][:L])
+        g_sig = chain_signature(V[greedy])
+        g_cos = float(g_sig @ goal) / ((np.linalg.norm(g_sig)) * np.linalg.norm(goal))
+        idx, d_cos = optimize_toolchain(V, goal, L, steps=300, lr=0.5)
+        recovered = sum(1 for a, b in zip(idx, true) if a == b)
+        return d_cos, g_cos, recovered
+
+    # CORRELATED tools: the differentiable optimizer should clearly beat independent greedy
+    d_cos, g_cos, rec = run(corr=True)
+    assert d_cos > g_cos + 0.05, f"differentiable should beat independent greedy on correlated tools: {d_cos:.3f} vs {g_cos:.3f}"
+    assert rec >= L - 1, f"differentiable should recover ~the true chain ({rec}/{L})"
+    # determinism: the same tools + goal give the same chain
+    Vd = rng.normal(size=(N, D)); gd = rng.normal(size=D)
+    i1, _ = optimize_toolchain(Vd, gd, L, steps=50)
+    i2, _ = optimize_toolchain(Vd, gd, L, steps=50)
+    assert i1 == i2, "differentiable planning must be deterministic for a fixed problem"
+    print(f"orchestrator differentiable planner: ok (CORRELATED tools -- composed cosine {d_cos:.3f} vs "
+          f"greedy {g_cos:.3f}, recovered {rec}/{L} of the true chain; analytic-gradient, no autodiff)")
+
 
 # ---------------------------------------------------------------------------
 # DEMO
@@ -406,3 +514,4 @@ def demo_execution():
 if __name__ == "__main__":
     demo_orchestrator()
     demo_execution()
+    _optimize_selftest()
