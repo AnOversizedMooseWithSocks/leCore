@@ -42,6 +42,7 @@ int main(void)
     holo_match matches[2];
     double noisy[DIM];
     double weights[2] = {0.25, 0.75};
+    double raw_sum[DIM];
     double bundle[DIM];
     double norms[4];
     size_t i;
@@ -105,8 +106,15 @@ int main(void)
                "cleanup with norms");
     require(matches[0].label == 12, "cleanup with norms top label");
 
+    require_ok(holo_weighted_sum(DIM, matrix, weights, 2, raw_sum), "weighted raw sum");
+    for (i = 0; i < DIM; ++i) {
+        require(fabs(raw_sum[i] - (weights[0] * matrix[i] + weights[1] * matrix[DIM + i])) < 1e-12,
+                "weighted raw sum matches manual accumulation");
+    }
     require_ok(holo_bundle(DIM, matrix, weights, 2, bundle), "weighted bundle");
     require(fabs(holo_norm(DIM, bundle) - 1.0) < 1e-12, "bundle normalized");
+    require(fabs(holo_cosine(DIM, raw_sum, bundle) - 1.0) < 1e-12,
+            "bundle preserves weighted sum direction");
 
     require_ok(holo_permute(DIM, matrix, 3, noisy), "permute");
     require(fabs(noisy[3] - matrix[0]) < 1e-12, "permute shift");

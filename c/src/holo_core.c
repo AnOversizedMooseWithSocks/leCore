@@ -686,15 +686,15 @@ int holo_unbind_spectrum(holo_engine *engine,
     return HOLO_OK;
 }
 
-int holo_bundle(size_t dim,
-                const double *vectors,
-                const double *weights,
-                size_t count,
-                double *out)
+int holo_weighted_sum(size_t dim,
+                      const double *vectors,
+                      const double *weights,
+                      size_t count,
+                      double *out)
 {
     size_t i;
     size_t j;
-    if (!vectors || !out || dim == 0 || count == 0) {
+    if (!out || dim == 0 || (count > 0 && !vectors)) {
         return HOLO_EINVAL;
     }
     for (j = 0; j < dim; ++j) {
@@ -706,6 +706,23 @@ int holo_bundle(size_t dim,
         for (j = 0; j < dim; ++j) {
             out[j] += w * row[j];
         }
+    }
+    return HOLO_OK;
+}
+
+int holo_bundle(size_t dim,
+                const double *vectors,
+                const double *weights,
+                size_t count,
+                double *out)
+{
+    int rc;
+    if (count == 0) {
+        return HOLO_EINVAL;
+    }
+    rc = holo_weighted_sum(dim, vectors, weights, count, out);
+    if (rc != HOLO_OK) {
+        return rc;
     }
     return holo_normalize(dim, out);
 }

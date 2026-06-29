@@ -1,9 +1,10 @@
 """Optional ctypes bridge to the C holographic kernel.
 
 The public surface mirrors the small part of ``holographic_ai`` that benefits
-most from the C core: bind/unbind, fixed-vector batch binding, and single-trace
-key-value memory. If the shared library is not built, or a vector dimension is
-not a power of two, this module falls back to the NumPy semantics.
+most from the C core: bind/unbind, weighted accumulation, fixed-vector batch
+binding, and single-trace key-value memory. If the shared library is not built,
+or a vector dimension is not a power of two, this module falls back to the NumPy
+semantics.
 """
 
 from __future__ import annotations
@@ -47,6 +48,14 @@ def _fallback_bind_fixed(role: np.ndarray, rows: np.ndarray) -> np.ndarray:
     )
 
 
+def _fallback_weighted_sum(rows: np.ndarray, weights: np.ndarray | None = None) -> np.ndarray:
+    if rows.shape[0] == 0:
+        return np.zeros(rows.shape[1], dtype=np.float64)
+    if weights is None:
+        return np.sum(rows, axis=0)
+    return np.sum(rows * weights[:, None], axis=0)
+
+
 def _fallback_involution(a: np.ndarray) -> np.ndarray:
     return np.concatenate(([a[0]], a[:0:-1]))
 
@@ -66,6 +75,15 @@ def _matrix(x) -> np.ndarray:
     arr = np.ascontiguousarray(x, dtype=np.float64)
     if arr.ndim != 2:
         raise ValueError("holographic row stacks must be two-dimensional")
+    return arr
+
+
+def _weights(x, count: int) -> np.ndarray | None:
+    if x is None:
+        return None
+    arr = np.ascontiguousarray(x, dtype=np.float64).ravel()
+    if arr.size != count:
+        raise ValueError("weights must match the number of vectors")
     return arr
 
 
@@ -106,6 +124,16 @@ class _Backend:
 
         lib.holo_bind.argtypes = [ctypes.c_void_p, _DOUBLE_P, _DOUBLE_P, _DOUBLE_P]
         lib.holo_bind.restype = ctypes.c_int
+        self.holo_weighted_sum = getattr(lib, "holo_weighted_sum", None)
+        if self.holo_weighted_sum:
+            self.holo_weighted_sum.argtypes = [
+                ctypes.c_size_t,
+                _DOUBLE_P,
+                _DOUBLE_P,
+                ctypes.c_size_t,
+                _DOUBLE_P,
+            ]
+            self.holo_weighted_sum.restype = ctypes.c_int
         self.holo_bind_fixed_many = getattr(lib, "holo_bind_fixed_many", None)
         if self.holo_bind_fixed_many:
             self.holo_bind_fixed_many.argtypes = [
@@ -203,6 +231,7 @@ def install(target_globals: dict | None = None, *, strict: bool = False) -> bool
         target_globals = holographic_ai.__dict__
     target_globals["bind"] = bind
     target_globals["bind_fixed"] = bind_fixed
+    target_globals["weighted_sum"] = weighted_sum
     target_globals["unbind"] = unbind
     target_globals["HolographicMemory"] = HolographicMemory
     return True
@@ -235,6 +264,23 @@ def unbind(composite, key) -> np.ndarray:
     out = np.empty(dim, dtype=np.float64)
     with _BACKEND.lock:
         _BACKEND.check(_BACKEND.lib.holo_unbind(engine, _ptr(comp), _ptr(key_arr), _ptr(out)))
+    return out
+
+
+def weighted_sum(vectors, weights=None) -> np.ndarray:
+    arr = np.ascontiguousarray(vectors, dtype=np.float64)
+    if arr.ndim == 1 and arr.size == 0:
+        weight_arr = _weights(weights, 0)
+        return np.asarray(0.0) if weight_arr is None else np.zeros(0, dtype=np.float64)
+    rows = _matrix(arr)
+    weight_arr = _weights(weights, rows.shape[0])
+    fn = _BACKEND.holo_weighted_sum if _BACKEND else None
+    if not fn:
+        return _fallback_weighted_sum(rows, weight_arr)
+    out = np.empty(rows.shape[1], dtype=np.float64)
+    weight_ptr = _ptr(weight_arr) if weight_arr is not None else None
+    with _BACKEND.lock:
+        _BACKEND.check(fn(rows.shape[1], _ptr(rows), weight_ptr, rows.shape[0], _ptr(out)))
     return out
 
 

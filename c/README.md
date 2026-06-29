@@ -41,10 +41,11 @@ Implemented:
 
 The current kernel provides deterministic key generation, unitary key
 generation, FFT-backed circular-convolution bind/unbind, fixed-vector batch
-binding, bundle, permute, cleanup/top-k, additive holographic trace memory,
-binary trace save/load, and tests for algebraic roundtrip, cleanup, vectorized
-fixed binding, trace recall, spectrum-native trace storage, lazy real-trace
-materialization, reusable C-owned action dictionaries, and snapshot parity.
+binding, raw weighted accumulation, normalized bundle, permute, cleanup/top-k,
+additive holographic trace memory, binary trace save/load, and tests for
+algebraic roundtrip, cleanup, vectorized fixed binding, trace recall,
+spectrum-native trace storage, lazy real-trace materialization, reusable C-owned
+action dictionaries, and snapshot parity.
 Trace memory stores its canonical state as an accumulated bound-pair spectrum,
 so `learn()` updates
 `sum(FFT(state) * FFT(action))` directly and `recall()` can unbind without first
@@ -71,10 +72,13 @@ make c-test
 ```
 
 Existing Python experiments can opt into the C-backed `bind`, `bind_fixed`,
-`unbind`, and `HolographicMemory` replacements without changing their imports.
-The `bind_fixed` replacement uses the C path for small row stacks, where the
-fixed spectrum reuse wins, and leaves wider stacks on NumPy's batched real FFT
-by default. Tune that cutoff with `HOLOSTUFF_C_BIND_FIXED_MAX_ROWS`:
+`weighted_sum`, `unbind`, and `HolographicMemory` replacements without changing
+their imports. The `weighted_sum` primitive is the unnormalized accumulation
+used by function-valued FPE bundles; ordinary symbolic `bundle()` still
+renormalizes after accumulation. The `bind_fixed` replacement uses the C path
+for small row stacks, where the fixed spectrum reuse wins, and leaves wider
+stacks on NumPy's batched real FFT by default. Tune that cutoff with
+`HOLOSTUFF_C_BIND_FIXED_MAX_ROWS`:
 
 ```sh
 HOLOSTUFF_USE_C=1 python benchmark_holographic.py

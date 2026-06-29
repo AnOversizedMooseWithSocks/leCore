@@ -49,6 +49,17 @@ def test_function_localises_at_its_points():
     assert min(enc.query(f, p) for p in pts) > 3 * enc.query(f, (9.5, 9.5))
 
 
+def test_encode_many_matches_encode_and_bundle_keeps_raw_weights():
+    enc = VectorFunctionEncoder(3, dim=1024, bounds=[(-1, 1)] * 3, bandwidth=7.0, seed=4)
+    rng = np.random.default_rng(4)
+    pts = rng.uniform(-0.8, 0.8, (12, 3))
+    weights = rng.normal(size=len(pts))
+    rowwise = np.stack([enc.encode(p) for p in pts])
+    batched = enc.encode_many(pts)
+    assert np.allclose(batched, rowwise, atol=1e-12)
+    assert np.allclose(enc.bundle(pts, weights), np.sum(rowwise * weights[:, None], axis=0), atol=1e-12)
+
+
 def test_function_translates_under_one_binding():
     enc = VectorFunctionEncoder(2, dim=1024, bounds=[(0, 10), (0, 10)], seed=2)
     # a single atom shifts exactly...

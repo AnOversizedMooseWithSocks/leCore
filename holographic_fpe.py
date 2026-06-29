@@ -37,12 +37,14 @@ KEPT NEGATIVES (measured, in the selftest)
   * Where a scalar suffices, the n-D machinery buys nothing: 1-D FPE IS the ScalarEncoder, so reach for this
     only when the domain is genuinely multi-dimensional or you need the function algebra.
 
-Only NumPy, the engine's bind/cosine, and the existing ScalarEncoder -- no new dependency, nothing learned.
+Only NumPy, the engine's bind/cosine/weighted_sum, and the existing ScalarEncoder -- no new dependency, nothing learned.
 """
 import numpy as np
 
-from holographic_ai import bind, cosine
+from holographic_ai import bind, cosine, weighted_sum
 from holographic_encoders import ScalarEncoder
+
+_BUNDLE_ENCODE_BATCH_ROWS = 2048
 
 
 class VectorFunctionEncoder:
@@ -96,6 +98,37 @@ class VectorFunctionEncoder:
             v = bind(v, self.axes[k].encode(point[k]))
         return v
 
+    def encode_many(self, points):
+        """Vectorised n-D FPE encoding for a row stack of points.
+
+        This is algebraically the same as calling encode() for each row: it
+        multiplies the per-axis FPE spectra directly, which is exactly what the
+        bind loop would do after FFTing each axis code.
+        """
+        pts = np.asarray(points, float)
+        if self.n_dims == 1:
+            if pts.ndim == 0:
+                pts = pts.reshape(1, 1)
+            elif pts.ndim == 1:
+                pts = pts.reshape(-1, 1)
+        else:
+            pts = np.atleast_2d(pts)
+        if pts.ndim != 2 or pts.shape[1] != self.n_dims:
+            raise ValueError(f"points must have shape (count, {self.n_dims})")
+
+        spectrum = np.ones((pts.shape[0], self.dim), dtype=np.complex128)
+        for k, ax in enumerate(self.axes):
+            values = pts[:, k]
+            warp_x = getattr(ax, "_warp_x", None)
+            if warp_x is not None:
+                values = np.interp(values, warp_x, ax._warp_u)
+            spectrum *= np.exp(1j * ax.scale * values[:, None] * ax.phases[None, :])
+        out = np.real(np.fft.ifft(spectrum, axis=1))
+        norms = np.linalg.norm(out, axis=1)
+        nz = norms > 0
+        out[nz] /= norms[nz, None]
+        return np.ascontiguousarray(out)
+
     def kernel_at(self, delta):
         """The similarity this encoder realises between two points `delta` apart: the PRODUCT of the per-axis
         Bochner kernels. For RBF axes that is a product of Gaussians -- the n-D squared-exponential kernel --
@@ -113,12 +146,17 @@ class VectorFunctionEncoder:
         if not points:
             raise ValueError("need at least one point")
         if weights is None:
-            weights = [1.0] * len(points)
-        f = None
-        for w, p in zip(weights, points):
-            term = float(w) * self.encode(p)
-            f = term if f is None else f + term
-        return f
+            weights_arr = None
+        else:
+            weights_arr = np.asarray(weights, float).ravel()
+            if weights_arr.shape[0] != len(points):
+                raise ValueError("weights must match the number of points")
+        total = np.zeros(self.dim, dtype=float)
+        for start in range(0, len(points), _BUNDLE_ENCODE_BATCH_ROWS):
+            end = min(start + _BUNDLE_ENCODE_BATCH_ROWS, len(points))
+            chunk_weights = None if weights_arr is None else weights_arr[start:end]
+            total += weighted_sum(self.encode_many(points[start:end]), chunk_weights)
+        return total
 
     def query(self, function, point):
         """Evaluate the represented function at `point`: cosine(function, encode(point)) reads

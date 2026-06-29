@@ -68,6 +68,11 @@ int holo_unbind_spectrum(holo_engine *engine,
                          const double *pair_freq_imag,
                          const double *key,
                          double *out);
+int holo_weighted_sum(size_t dim,
+                      const double *vectors,
+                      const double *weights,
+                      size_t count,
+                      double *out);
 int holo_bundle(size_t dim,
                 const double *vectors,
                 const double *weights,

@@ -218,9 +218,35 @@ def bundle(vectors):
     a single fixed-width vector can stand for a whole set. Think 'add'. The more
     you pile in, the noisier it gets, so keep bundles modest.
     """
-    total = np.sum(vectors, axis=0)
+    total = weighted_sum(vectors)
     norm = np.linalg.norm(total)
     return total / norm if norm > 0 else total
+
+
+def weighted_sum(vectors, weights=None):
+    """Raw weighted superposition without normalization.
+
+    Function-valued FPE bundles need their amplitudes preserved, while ordinary
+    bundle() normalizes for symbolic recall. This helper is the shared
+    accumulation primitive under both forms.
+    """
+    if not isinstance(vectors, np.ndarray):
+        vectors = list(vectors)
+    rows = np.asarray(vectors, dtype=float)
+    if rows.ndim == 1:
+        if rows.size == 0:
+            return np.asarray(0.0)
+        raise ValueError("weighted_sum expects a stack of vectors")
+    if rows.ndim != 2:
+        raise ValueError("weighted_sum expects a two-dimensional row stack")
+    if rows.shape[0] == 0:
+        return np.zeros(rows.shape[1], dtype=float)
+    if weights is None:
+        return np.sum(rows, axis=0)
+    w = np.asarray(weights, dtype=float).ravel()
+    if w.shape[0] != rows.shape[0]:
+        raise ValueError("weights must match the number of vectors")
+    return np.sum(rows * w[:, None], axis=0)
 
 
 def cosine(a, b):
