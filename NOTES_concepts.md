@@ -12186,3 +12186,21 @@ hypervector field (FS-5) stays the compact/transmittable/exact-undo representati
 Tests +1 (1623 -> 1624): sparsefield (extract_dirty cold=all / warm=dirty / per-brick correctness /
 brush-bounded on two models). Also covered in the sparsefield selftest. Files: holographic_sparsefield.py
 (extract_dirty), test_holographic_sparsefield.py, README, NOTES, tour.
+
+================================================================================
+CI robustness fix: a generation "setup is real" check was numpy-build-sensitive
+================================================================================
+
+test_holographic_misgen (the B1 MIS no-op probe) failed in CI but passed locally. The probe's REAL
+assertion -- the no-op, abs(d_bal - d_verif) < 0.05 (the balance heuristic == verifier-only, a
+STRUCTURAL fact) -- holds everywhere. What failed was the auxiliary "setup is real" check, which had
+demanded the verifier be 1.3x more diverse than greedy. Dev numpy (2.4.4) gives ~3x; a CI numpy gave
+~1.17x. ROOT CAUSE: _generate's per-step argmax is over a 512-dim structure score (a quadratic form),
+and last-bit BLAS differences across numpy builds flip an early pick, which cascades the whole
+generation into or out of the loop trap -- the same tie-sensitivity the bind_batch lesson is about,
+now across numpy BUILDS rather than within a run. The engine's determinism rule is "deterministic
+given a fixed environment (PYTHONHASHSEED=0)"; cross-BLAS bit-identity of a 512-dim quadratic-form
+argmax is a guarantee numerical code does not make. FIX: assert the robust DIRECTION (d_verif >
+d_greedy -- the verifier escapes the loop more than greedy, true in both environments) instead of a
+brittle magnitude; the structural no-op stays strict. No behavior change, just a magnitude assertion
+relaxed to the qualitative claim it was really standing in for. Files: holographic_misgen.py.
