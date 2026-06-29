@@ -20,6 +20,8 @@ import numpy as np
 
 
 _DOUBLE_P = ctypes.POINTER(ctypes.c_double)
+_SIZE_T_P = ctypes.POINTER(ctypes.c_size_t)
+_INT_P = ctypes.POINTER(ctypes.c_int)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -89,6 +91,10 @@ def _weights(x, count: int) -> np.ndarray | None:
 
 def _ptr(arr: np.ndarray):
     return arr.ctypes.data_as(_DOUBLE_P)
+
+
+def _size_ptr(arr: np.ndarray):
+    return arr.ctypes.data_as(_SIZE_T_P)
 
 
 def _candidate_paths() -> list[Path]:
@@ -171,6 +177,33 @@ class _Backend:
         lib.holo_trace_store.restype = ctypes.c_int
         lib.holo_trace_recall.argtypes = [ctypes.c_void_p, _DOUBLE_P, _DOUBLE_P]
         lib.holo_trace_recall.restype = ctypes.c_int
+        self.holo_program_run_basic = getattr(lib, "holo_program_run_basic", None)
+        if self.holo_program_run_basic:
+            self.holo_program_run_basic.argtypes = [
+                ctypes.c_void_p,
+                _DOUBLE_P,
+                _DOUBLE_P,
+                ctypes.c_size_t,
+                _DOUBLE_P,
+                _DOUBLE_P,
+                _DOUBLE_P,
+                _DOUBLE_P,
+                ctypes.c_size_t,
+                _DOUBLE_P,
+                _DOUBLE_P,
+                ctypes.c_size_t,
+                _DOUBLE_P,
+                ctypes.c_int,
+                ctypes.c_size_t,
+                ctypes.c_double,
+                _DOUBLE_P,
+                _INT_P,
+                _SIZE_T_P,
+                _SIZE_T_P,
+                ctypes.c_size_t,
+                _SIZE_T_P,
+            ]
+            self.holo_program_run_basic.restype = ctypes.c_int
 
     def engine(self, dim: int) -> ctypes.c_void_p | None:
         if not _is_power_of_two(dim):
@@ -300,6 +333,103 @@ def bind_fixed(role, B) -> np.ndarray:
     with _BACKEND.lock:
         _BACKEND.check(fn(engine, _ptr(role_arr), _ptr(rows), rows.shape[0], _ptr(out)))
     return out
+
+
+def program_run_basic(
+    program,
+    positions,
+    op_role,
+    arg_role,
+    op_vectors,
+    data_vectors,
+    *,
+    op_norms=None,
+    data_norms=None,
+    init_acc=None,
+    max_steps: int | None = None,
+    branch_tol: float = 0.5,
+) -> tuple[np.ndarray | None, list[tuple[int, int]]]:
+    """Run the core HoloMachine instruction subset in the C program VM.
+
+    This covers LOAD/BIND/BUNDLE/PERMUTE/IFMATCH/HALT. Rich host-bound
+    operations such as CALL/APPLY/registers/stacks stay on the Python VM.
+    """
+    program_arr = _vector(program)
+    positions_arr = _matrix(positions)
+    op_role_arr = _vector(op_role)
+    arg_role_arr = _vector(arg_role)
+    op_arr = _matrix(op_vectors)
+    data_arr = _matrix(data_vectors)
+    dim = int(program_arr.size)
+    if positions_arr.shape[1] != dim or op_role_arr.size != dim or arg_role_arr.size != dim:
+        raise ValueError("program, positions, and roles must share a dimension")
+    if op_arr.shape[1] != dim or data_arr.shape[1] != dim:
+        raise ValueError("opcode/data matrices must share the program dimension")
+    if max_steps is None:
+        max_steps = int(positions_arr.shape[0])
+    max_steps = max(0, int(max_steps))
+    if max_steps == 0:
+        return None, []
+
+    op_norm_arr = (
+        np.ascontiguousarray(op_norms, dtype=np.float64).ravel()
+        if op_norms is not None
+        else np.ascontiguousarray(np.linalg.norm(op_arr, axis=1), dtype=np.float64)
+    )
+    data_norm_arr = (
+        np.ascontiguousarray(data_norms, dtype=np.float64).ravel()
+        if data_norms is not None
+        else np.ascontiguousarray(np.linalg.norm(data_arr, axis=1), dtype=np.float64)
+    )
+    if op_norm_arr.size != op_arr.shape[0] or data_norm_arr.size != data_arr.shape[0]:
+        raise ValueError("norm tables must match opcode/data rows")
+
+    init_arr = None if init_acc is None else _vector(init_acc)
+    if init_arr is not None and init_arr.size != dim:
+        raise ValueError("initial accumulator has the wrong dimension")
+
+    engine = _BACKEND.engine(dim) if _BACKEND else None
+    fn = _BACKEND.holo_program_run_basic if _BACKEND else None
+    if not engine or not fn:
+        raise RuntimeError("C holographic program runner is not available")
+
+    out = np.empty(dim, dtype=np.float64)
+    out_has = ctypes.c_int(0)
+    trace_capacity = min(max_steps, int(positions_arr.shape[0]))
+    op_indices = np.empty(trace_capacity, dtype=np.uintp)
+    arg_indices = np.empty(trace_capacity, dtype=np.uintp)
+    trace_count = np.empty(1, dtype=np.uintp)
+    init_ptr = _ptr(init_arr) if init_arr is not None else None
+    with _BACKEND.lock:
+        _BACKEND.check(
+            fn(
+                engine,
+                _ptr(program_arr),
+                _ptr(positions_arr),
+                positions_arr.shape[0],
+                _ptr(op_role_arr),
+                _ptr(arg_role_arr),
+                _ptr(op_arr),
+                _ptr(op_norm_arr),
+                op_arr.shape[0],
+                _ptr(data_arr),
+                _ptr(data_norm_arr),
+                data_arr.shape[0],
+                init_ptr,
+                1 if init_arr is not None else 0,
+                max_steps,
+                float(branch_tol),
+                _ptr(out),
+                ctypes.byref(out_has),
+                _size_ptr(op_indices),
+                _size_ptr(arg_indices),
+                trace_capacity,
+                _size_ptr(trace_count),
+            )
+        )
+    n = int(trace_count[0])
+    trace = [(int(op_indices[i]), int(arg_indices[i])) for i in range(n)]
+    return (out if out_has.value else None), trace
 
 
 class HolographicMemory:

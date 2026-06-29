@@ -18,7 +18,7 @@ help:
 	  'Targets:' \
 	  '  make c              build the C kernel shared/static library' \
 	  '  make c-test         run C kernel tests' \
-	  '  make c-bench        compare NumPy vs C trace and bind_fixed kernels' \
+	  '  make c-bench        compare Python/NumPy vs C trace, bind_fixed, and VSA program kernels' \
 	  '  make c-ci-evidence  compile CI evidence that scalar C trace beats NumPy' \
 	  '  make deps           install base + experiment Python dependencies' \
 	  '  make test           build C kernel, then run pytest' \

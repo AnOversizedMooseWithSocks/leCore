@@ -45,7 +45,8 @@ binding, raw weighted accumulation, normalized bundle, permute, cleanup/top-k,
 additive holographic trace memory, binary trace save/load, and tests for
 algebraic roundtrip, cleanup, vectorized fixed binding, trace recall,
 spectrum-native trace storage, lazy real-trace materialization, reusable C-owned
-action dictionaries, and snapshot parity.
+action dictionaries, a core stored-program runner for `HoloMachine`'s
+LOAD/BIND/BUNDLE/PERMUTE/IFMATCH/HALT subset, and snapshot parity.
 Trace memory stores its canonical state as an accumulated bound-pair spectrum,
 so `learn()` updates
 `sum(FFT(state) * FFT(action))` directly and `recall()` can unbind without first
@@ -96,6 +97,12 @@ holographic_c.install(strict=True)
 Set `HOLOSTUFF_C_STRICT=1` to fail loudly if the shared C library is missing.
 Without the environment switch, `holographic_ai.py` stays NumPy-only.
 
+`HoloMachine.run_c_basic(...)` exposes the C stored-program path for straight
+VSA programs whose instructions stay inside the core algebra. Host-bound VM
+features such as CALL, APPLY, ITERATE, registers, and stack operations still run
+through the Python VM because they invoke Python handlers, function libraries,
+or exact host state.
+
 ## Benefit Experiment
 
 The proof experiments compare trace-store/action-recall throughput and the
@@ -145,6 +152,11 @@ That proves the right lever: the C core pays off when it owns the architectural
 loop and maps the algebra to the platform FFT. The biggest query win is not just
 "C instead of Python"; it is representing trace memory in the form the algebra
 actually consumes.
+
+The same ownership boundary now exists one layer up for short stored programs:
+`benchmarks/bench_program.py` compares Python `HoloMachine.run()` with the C
+core runner on the same encoded program vectors and reports exact accumulator
+parity plus runs/second speedups.
 
 ## Why This Kernel
 

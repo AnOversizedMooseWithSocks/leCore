@@ -32,11 +32,11 @@ endif
 
 LIB := $(BUILD_DIR)/libholoc.a
 SHLIB := $(BUILD_DIR)/libholoc$(SHLIB_EXT)
-OBJS := $(BUILD_DIR)/holo_core.o $(BUILD_DIR)/holo_trace.o
-TESTS := $(BUILD_DIR)/test_core $(BUILD_DIR)/test_trace
+OBJS := $(BUILD_DIR)/holo_core.o $(BUILD_DIR)/holo_trace.o $(BUILD_DIR)/holo_program.o
+TESTS := $(BUILD_DIR)/test_core $(BUILD_DIR)/test_trace $(BUILD_DIR)/test_program
 BENCHES := $(BUILD_DIR)/bench_trace
 
-.PHONY: all shared test bench bench-fixed bench-compare clean
+.PHONY: all shared test bench bench-fixed bench-program bench-compare clean
 
 all: $(LIB) $(SHLIB)
 
@@ -60,12 +60,16 @@ $(BUILD_DIR)/test_core: $(TEST_DIR)/test_core.c $(LIB)
 $(BUILD_DIR)/test_trace: $(TEST_DIR)/test_trace.c $(LIB)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) $(LDLIBS) -o $@
 
+$(BUILD_DIR)/test_program: $(TEST_DIR)/test_program.c $(LIB)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) $(LDLIBS) -o $@
+
 $(BUILD_DIR)/bench_trace: $(BENCH_DIR)/bench_trace.c $(LIB)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) $(LDLIBS) -o $@
 
 test: $(TESTS)
 	./$(BUILD_DIR)/test_core
 	./$(BUILD_DIR)/test_trace
+	./$(BUILD_DIR)/test_program
 
 bench: $(BENCHES)
 	./$(BUILD_DIR)/bench_trace
@@ -73,9 +77,13 @@ bench: $(BENCHES)
 bench-fixed: $(SHLIB)
 	HOLOSTUFF_C_LIB=$(abspath $(SHLIB)) $(PYTHON) benchmarks/bench_bind_fixed.py --summary
 
+bench-program: $(SHLIB)
+	HOLOSTUFF_C_LIB=$(abspath $(SHLIB)) $(PYTHON) benchmarks/bench_program.py --summary
+
 bench-compare: $(BENCHES) $(SHLIB)
 	$(PYTHON) benchmarks/bench_trace.py --summary --binary ./$(BUILD_DIR)/bench_trace
 	HOLOSTUFF_C_LIB=$(abspath $(SHLIB)) $(PYTHON) benchmarks/bench_bind_fixed.py --summary
+	HOLOSTUFF_C_LIB=$(abspath $(SHLIB)) $(PYTHON) benchmarks/bench_program.py --summary
 
 clean:
 	rm -rf build
