@@ -71,3 +71,31 @@ def test_deterministic():
     assert [l.n_faces for l in chain2] == [l.n_faces for l in _CHAIN]
     assert [l.max_error for l in chain2] == [l.max_error for l in _CHAIN]
     assert select_lod(_CHAIN, 37.0, 1.5) == select_lod(chain2, 37.0, 1.5)
+
+
+def test_build_cluster_lod_chain_parallel_imported_mesh():
+    """build_cluster_lod_chain is the PARALLEL imported-mesh LOD: cluster-decimate at decreasing grids, deviation from
+    the original. Levels must coarsen monotonically in FACE COUNT, and selection must pick coarser far away. Small
+    mesh so the brute-deviation error metric stays quick (the decimation itself is O(n)). KEPT NEGATIVE asserted: the
+    per-level ERROR is NOT monotonic in grid resolution -- cell alignment with the surface matters, so a coarser grid
+    can land representatives closer; we record that, and do not require monotone error."""
+    import numpy as np
+    from holographic_meshbridge import sample_field, marching_tetrahedra_vec
+    from holographic_lod import build_cluster_lod_chain, select_lod
+
+    def sphere(P):
+        return np.linalg.norm(P, axis=1) - 0.6
+
+    v, a = sample_field(sphere, ((-1, -1, -1), (1, 1, 1)), 18)
+    m = marching_tetrahedra_vec(v, a, 0.0)
+    chain = build_cluster_lod_chain(m, grids=(16, 10, 6))
+
+    assert len(chain) >= 3
+    faces = [lvl.n_faces for lvl in chain]
+    assert all(faces[i] > faces[i + 1] for i in range(len(faces) - 1))         # strictly coarser in face count
+    assert chain[0].max_error == 0.0                                           # level 0 is the original (zero error)
+    assert all(lvl.max_error >= 0.0 for lvl in chain)                          # errors are distances (non-negative)
+
+    near = select_lod(chain, 0.3, 2.0)
+    far = select_lod(chain, 500.0, 2.0)
+    assert chain[far].n_faces <= chain[near].n_faces                           # coarser (or equal) far away

@@ -143,3 +143,39 @@ def test_edges_listing_is_sorted_and_deterministic():
     e2 = box(1, 1, 1).edges()
     assert e1 == e2                              # same mesh -> same edge list, same order
     assert e1 == sorted(e1)                      # returned in sorted order
+
+
+def test_vertex_normals_vectorized_matches_loop_and_points_outward():
+    """vertex_normals has a vectorized triangle fast-path (Newell's method over all faces at once, face-order
+    scatter-add). It must be BIT-IDENTICAL to the per-face loop, and on a sphere the normals point radially outward."""
+    import numpy as np
+    from holographic_meshbridge import sample_field, marching_tetrahedra_vec
+
+    def sphere(P):
+        return np.linalg.norm(P, axis=1) - 0.6
+
+    v, a = sample_field(sphere, ((-1, -1, -1), (1, 1, 1)), 14)
+    m = marching_tetrahedra_vec(v, a, 0.0)
+
+    def ref(mesh):
+        V = mesh.vertices
+        acc = np.zeros((len(V), 3))
+        for f in mesh.faces:
+            n = len(f)
+            nx = ny = nz = 0.0
+            for k in range(n):
+                cu = V[f[k]]; nx_ = V[f[(k + 1) % n]]
+                nx += (cu[1] - nx_[1]) * (cu[2] + nx_[2])
+                ny += (cu[2] - nx_[2]) * (cu[0] + nx_[0])
+                nz += (cu[0] - nx_[0]) * (cu[1] + nx_[1])
+            fn = np.array([nx, ny, nz])
+            for vi in f:
+                acc[vi] += fn
+        nrm = np.linalg.norm(acc, axis=1, keepdims=True)
+        return np.where(nrm > 1e-12, acc / np.where(nrm > 1e-12, nrm, 1.0), np.array([0.0, 0.0, 1.0]))
+
+    vn = m.vertex_normals(store=False)
+    assert np.array_equal(vn, ref(m))                          # vectorized == loop, bit for bit
+    # on a sphere, the outward normal at a vertex aligns with its radial direction
+    radial = m.vertices / np.linalg.norm(m.vertices, axis=1, keepdims=True)
+    assert np.mean(np.sum(vn * radial, axis=1)) > 0.95         # strongly outward on average

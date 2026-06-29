@@ -4005,6 +4005,25 @@ _svals, _saxes = _sf4(_sinf, _sbounds, 26); _smesh = _mt4(_svals, _saxes, level=
 print(f"  inflate brush: surface grows {_sbase} -> {int((_sinf(_sgrid) > 0.5).sum())} cells, field changes by {_sloc:.0e} OUTSIDE the ball (local), re-mesh stays manifold ({len(_smesh.faces)} faces, watertight: {_smesh.is_manifold()}).")
 print("  the same brush reshapes the creature's value landscape -- reward shaping, one falloff-weighted operator on any field.  *** FS-1: sculpt the field, re-mesh ***")
 
+title("FS-2: narrow-band sparse field -- store/edit/re-mesh only the thin shell around the surface (O(brush) strokes)")
+# A surface carried as a field, but only the voxels near the surface are stored; a brush touches O(brush) cells, not
+# the whole res^3 volume -- the level-set move (narrow band / VDB) that makes sculpting interactive.
+def _sphere_sdf(_P):
+    return _np_fwd4.linalg.norm(_P, axis=1) - 0.6
+_svox = 2.0 / 36
+_sband = 4 * _svox
+_sf = _meshm.sparse_field(_sphere_sdf, ((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)), _svox, _sband, tile=6)
+_sfull = int(_np_fwd4.prod(_sf.ncorner))
+_smesh = _sf.extract_local()
+print(f"  seeded a sphere: stored {len(_sf.values)} band voxels = {100.0*len(_sf.values)/_sfull:.0f}% of the {_sfull}-voxel grid; extract is watertight ({_smesh.is_manifold()}, {_smesh.n_faces} faces).")
+import numpy as _np_fs2
+def _inflate_brush(_pts):
+    _d = _np_fs2.linalg.norm(_pts - _np_fs2.array([0.6, 0.0, 0.0]), axis=1)
+    _t = _np_fs2.clip(_d / 0.25, 0.0, 1.0)
+    return -0.5 * _sband * (1.0 - (3 * _t * _t - 2 * _t * _t * _t))
+_dirty, _touched = _sf.apply_local(_inflate_brush, _np_fs2.array([0.6, 0.0, 0.0]), 0.25)
+print(f"  an inflate brush touched {_touched} voxels ({100.0*_touched/_sfull:.1f}% of the grid) and dirtied {len(_dirty)} bricks -- O(brush), not O(res^3).  *** FS-2: a stroke costs O(brush) ***")
+
 title("FS-3: splat export -- write the field's Gaussians as a standard 3DGS .ply a browser renderer can display")
 # The splat params are already in hand; this is a format adapter. The one real bit of math: L (Cholesky of the
 # inverse covariance) -> scale + rotation quaternion, by eigen-decomposing the precision (principal_axes).
@@ -4017,6 +4036,94 @@ _recs3 = _sfp3(_plypath); _os3.remove(_plypath)
 _std3 = float(_np_fwd4.array(_recs3[0]["scale"])[0])
 print(f"  pulled {_nply} Gaussians from a metaball field (no fit) and wrote a 3DGS .ply; re-import recovers the isotropic std {_std3:.2f} (= the metaball radius).")
 print("  L -> scale + rotation by eigen-decomposing the precision; base colour only (SH colour noted, not faked); a flat covariance raises, not garbage.  *** FS-3: a field, displayable as splats ***")
+
+title("FS-4: the sculpt loop -- edit the field, RE-PROJECT to a drawable mesh (an iterate-a-projection)")
+# The field is the source of truth; surface_mesh turns ANY field rep into the mesh to draw, at the right detail for
+# the view. Re-using _sf (the sparse field already brushed in FS-2) closes the loop: edit -> re-extract.
+_loopmesh = _meshm.surface_mesh(_sf)                       # the EDITED sparse field, re-projected to a mesh
+print(f"  surface_mesh(edited sparse field) -> {_loopmesh.n_faces} faces, watertight={_loopmesh.is_manifold()} -- the brush's effect, re-extracted.")
+def _budsph(_P):
+    return _np_fwd4.linalg.norm(_P, axis=1) - 0.6
+_mfull = _meshm.surface_mesh(_budsph, ((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)), resolution=10)
+_mfar = _meshm.surface_mesh(_budsph, ((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)), resolution=10, pixel_budget=1.0, distance=100.0, lod_targets=(0.5,))
+print(f"  same field at a screen-space budget: full {_mfull.n_faces} faces up close -> {_mfar.n_faces} faces far away (LOD by distance).")
+print("  edit the field -> re-project (mesh OR splats): the same iterate-a-projection shape as the resonator, the denoiser, the dynamics operator.  *** FS-4: the loop closes ***")
+from holographic_meshbridge import sample_field as _sf_fwd, marching_tetrahedra as _mt_py, marching_tetrahedra_vec as _mt_vec
+import time as _time_fwd
+_vv, _va = _sf_fwd(_budsph, ((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)), 48)
+_t0 = _time_fwd.time(); _mp = _mt_py(_vv, _va, 0.0); _tp = _time_fwd.time() - _t0
+_t0 = _time_fwd.time(); _mv = _mt_vec(_vv, _va, 0.0); _tv = _time_fwd.time() - _t0
+print(f"  vectorized marching (the case-table RAM, all cells at once): {_mp.n_faces} faces in {_tv*1000:.0f}ms vs {_tp*1000:.0f}ms per-cell Python -- {_tp/_tv:.0f}x faster, geometrically identical.")
+from holographic_meshqem import surface_deviation as _sd_fwd
+_smv4, _sma4 = _sf_fwd(_budsph, ((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)), 16)
+_sm4 = _mt_vec(_smv4, _sma4, 0.0)
+_t0 = _time_fwd.time(); _ = _sd_fwd(_sm4, _sm4); _sdt = _time_fwd.time() - _t0
+print(f"  the LOD quality metric (surface_deviation) and vertex_normals are vectorized too -- point-to-surface over {len(_sm4.vertices)} verts x {_sm4.n_faces} faces in {_sdt*1000:.0f}ms (was a ~16s scalar double loop). vertex_quadrics stays scalar: its vectorization flips QEM tie-breaks (bind_batch lesson).")
+_lodvox = 2.0 / 40
+_lodsf = _meshm.sparse_field(_budsph, ((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)), _lodvox, 4 * _lodvox, tile=6)
+_t0 = _time_fwd.time(); _lodchain = _lodsf.lod_chain(); _lodt = _time_fwd.time() - _t0
+print(f"  FIELD-NATIVE LOD -- coarsen the SOURCE field and re-project, not decimate the mesh: chain "
+      f"{[lvl.n_faces for lvl in _lodchain]} faces (error read from the field: "
+      f"{[round(lvl.max_error, 3) for lvl in _lodchain]}) built in {_lodt*1000:.0f}ms of re-marching. QEM-decimating "
+      f"the fine mesh to those counts would take MINUTES. The mesh is a projection of the field.")
+
+_t0 = _time_fwd.time(); _clu = _meshm.mesh_cluster_decimate(_sm4, 12); _clut = _time_fwd.time() - _t0
+print(f"  PARALLEL imported-mesh decimation (cluster_decimate -- vertex clustering, the per-cell quadric is a BUNDLE "
+      f"of plane tensors, no greedy search): F{_sm4.n_faces} -> F{_clu.n_faces} in {_clut*1000:.0f}ms. Greedy QEM to "
+      f"that count is ~1000x slower (measured 998x on a bigger mesh) -- the fast path for a mesh with no field behind it.")
+_mlo = _sm4.vertices.min(0) - 0.05; _mhi = _sm4.vertices.max(0) + 0.05
+_t0 = _time_fwd.time(); _mfield, _maxes = _meshm.mesh_to_field(_sm4, (_mlo, _mhi), res=48); _mft = _time_fwd.time() - _t0
+_mdev = _np_fwd4.abs(_meshm.mesh_sample_field(_mfield, _maxes, _clu.vertices))
+print(f"  mesh -> FIELD by TILING (mesh_to_field, a SIGNED banded SDF -- each triangle scatter-mins only its local "
+      f"voxel block): built in {_mft*1000:.0f}ms; the decimated mesh's distance to the original then reads straight "
+      f"off the field (max {float(_mdev.max()):.4f}, sub-voxel -- the signed field crosses zero linearly, dodging the "
+      f"unsigned kink). Build once, query any points O(V) -- the gateway to treating an imported mesh as a field.")
+from holographic_meshbridge import _closest_point_on_triangle as _cpt1, _closest_points_on_triangles as _cptN, point_set_to_mesh as _p2m
+_qpts = _sm4.vertices * 1.02
+_t0 = _time_fwd.time()
+_bb = _np_fwd4.full(len(_qpts), _np_fwd4.inf)
+for _f in _sm4.faces:
+    _bb = _np_fwd4.minimum(_bb, _np_fwd4.linalg.norm(_qpts - _cpt1(_qpts, _sm4.vertices[_f[0]], _sm4.vertices[_f[1]], _sm4.vertices[_f[2]]), axis=1))
+_tbrute = _time_fwd.time() - _t0
+_t0 = _time_fwd.time(); _db = _p2m(_qpts, _sm4.vertices, _sm4.faces); _tbat = _time_fwd.time() - _t0
+print(f"  the batched closest-point kernel (one vectorized region test over F triangles x N points) is EXACT "
+      f"(matches the per-triangle loop to {float(_np_fwd4.abs(_db - _bb).max()):.0e}) -- but MEASURED slower here "
+      f"({_tbat*1000:.0f}ms vs {_tbrute*1000:.0f}ms): all-pairs point-to-mesh is memory-bandwidth-bound, so the "
+      f"brute loop's tiny per-triangle working set (cache-resident) WINS. The cache-aware structure was already the "
+      f"loop; the real speedup is algorithmic culling, not batching. A negative kept loud.")
+from holographic_meshbridge import mesh_to_sdf_grid as _m2sdf, marching_tetrahedra_vec as _mtv2
+_fullsdf, _fsax = _m2sdf(_sm4, (_sm4.vertices.min(0) - 0.1, _sm4.vertices.max(0) + 0.1), res=48)
+_mid2 = _fullsdf.shape[0] // 2
+_remar = _mtv2(_fullsdf, _fsax, 0.0)
+_lodfaces = [_mtv2(_fullsdf[::_s, ::_s, ::_s], (_fsax[0][::_s], _fsax[1][::_s], _fsax[2][::_s]), 0.0).n_faces for _s in (1, 2, 4)]
+print(f"  the CLOSURE -- flood-fill the banded SDF's sign so the interior is negative (centre {float(_fullsdf[_mid2,_mid2,_mid2]):+.2f}), "
+      f"giving a FULL re-marchable field: the imported mesh re-marches back to a closed surface ({_remar.n_faces} faces) and now "
+      f"coarsens by RE-STRIDING the field {_lodfaces} -- field-native LOD for a mesh that arrived with no field. A field projects to "
+      f"a mesh; a mesh lifts back to a field. The decomposition loop is closed.")
+from holographic_meshbridge import point_set_to_mesh_grid as _p2mg
+_qn = _sm4.vertices * 1.02
+_t0 = _time_fwd.time()
+_bn = _np_fwd4.full(len(_qn), _np_fwd4.inf)
+for _f in _sm4.faces:
+    _bn = _np_fwd4.minimum(_bn, _np_fwd4.linalg.norm(_qn - _cpt1(_qn, _sm4.vertices[_f[0]], _sm4.vertices[_f[1]], _sm4.vertices[_f[2]]), axis=1))
+_tbn = _time_fwd.time() - _t0
+_t0 = _time_fwd.time(); _gn = _p2mg(_qn, _sm4.vertices, _sm4.faces, radius=2); _tgn = _time_fwd.time() - _t0
+print(f"  and the POSITIVE result that batching could not give -- CULL the work with a vectorized spatial grid "
+      f"(sort-based binning + the ranges trick, no Python dicts): the same point-to-mesh distance in {_tgn*1000:.0f}ms "
+      f"vs {_tbn*1000:.0f}ms brute ({_tbn/_tgn:.0f}x), EXACT near the surface (max err {float(_np_fwd4.abs(_gn-_bn).max()):.0e}, "
+      f"0 misses). It now drives the cluster LOD error (~110x there). Batching was memory-bound; doing LESS work wins.")
+
+# FS-5: the surface carried as ONE hypervector, edit = bind (the most literal "move geometry to holographic space").
+_hfield = _meshm.mesh_to_field_vector(_sm4, ((-1.3, -1.3, -1.3), (1.3, 1.3, 1.3)), dim=2048, bandwidth=18.0, grid=12)
+_hd = _np_fwd4.array([0.25, 0.0, 0.0])
+_hmoved = _hfield.translate(_hd)                                   # the whole surface moves with ONE bind
+_hcg = _np_fwd4.linspace(-0.5, 0.5, 6)
+_hX = _np_fwd4.array([(a, b, c) for a in _hcg for b in _hcg for c in _hcg])
+_herr = float(_np_fwd4.abs(_hmoved.value(_hX) - _hfield.value(_hX - _hd)).max())
+print(f"  and the surface itself can BE a hypervector (FS-5): {_sm4.n_faces} faces sampled into ONE dim-2048 vector; "
+      f"value(x) is a cosine query, and translate is a SINGLE bind -- exact, value_shifted(x)=value_orig(x-d) to "
+      f"{_herr:.0e}. Moving the whole surface is now algebra. (Kept honest: the re-marched extract is a smoothed, "
+      f"~15%-biased estimate, bandwidth the bias knob, dim the noise floor -- a representation, not the fast path.)")
 
 title("One routing fabric: the chunkers/tilers/stores converge -- pick the pivot, get the regime (StructuredIndex keying)")
 # The capacity-cliff cure ("route each item to a bounded-load bucket") had been re-grown five times. It is

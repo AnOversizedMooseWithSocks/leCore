@@ -3187,6 +3187,105 @@ class UnifiedMind:
         return select_lod(chain, distance, pixel_threshold, screen_height_px=screen_height_px,
                           fov_rad=math.radians(fov_deg))
 
+    def mesh_cluster_decimate(self, mesh, grid=16):
+        """PARALLEL decimation by vertex clustering (holographic_meshqem, Rossignac-Borrel / Lindstrom) -- the O(n)
+        counterpart of the greedy mesh_qem_decimate, for an IMPORTED mesh with no field behind it. Bins vertices into
+        a grid^3 spatial lattice (the engine's floor-divide tiling), collapses each cell to ONE representative, remaps
+        faces, drops degenerate ones. Every step is a vectorized array op -- no greedy edge-collapse search -- so it
+        runs hundreds-to-thousands x faster than QEM (a 22k-face mesh in tens of ms vs minutes). The representative is
+        VSA-native: a cell's quadric is the SUM (a bundle, superposition) of its faces' plane tensors, and the
+        representative is that bundle's minimizer, clamped to the cell. Returns a new Mesh. KEPT NEGATIVE: clustering
+        trades quality and manifoldness for parallel speed (a coarse grid can go non-manifold) -- mesh_qem_decimate
+        stays the quality option, this is the fast one. Higher `grid` = finer = more faces kept."""
+        from holographic_meshqem import cluster_decimate
+        return cluster_decimate(mesh, grid)
+
+    def mesh_cluster_lod_chain(self, mesh, grids=(48, 24, 12)):
+        """A fast PARALLEL level-of-detail chain (holographic_lod) for an IMPORTED mesh: vertex-cluster
+        (mesh_cluster_decimate) at decreasing grid resolutions, measuring each level's deviation from the original.
+        The O(n)-per-level counterpart of mesh_lod_chain (greedy QEM), for large meshes where the QEM chain is too
+        slow. Returns a fine->coarse list of LODLevel(mesh, n_faces, mean_error, max_error); pair with
+        mesh_select_lod. For a field-backed surface, prefer surface_mesh's FIELD-NATIVE LOD (re-march the source
+        coarser) -- this is the path for a mesh that arrives with no field. Kept negative: inherits cluster_decimate's
+        quality/manifoldness trade."""
+        from holographic_lod import build_cluster_lod_chain
+        return build_cluster_lod_chain(mesh, grids=grids)
+
+    def mesh_to_field(self, mesh, bounds, res=48, band=None):
+        """The mesh -> FIELD direction (holographic_meshbridge.mesh_distance_grid): decompose a mesh into a SIGNED
+        banded distance field (a banded SDF) by TILING -- each triangle updates only the local block of grid voxels
+        within `band` of it (a vectorized sub-array scatter-min by magnitude, the apply_local pattern), so the cost is
+        O(F * block) not O(F * res^3). Signed (negative inside, by nearest face normal) so that |sample| near the
+        surface is accurate to WELL UNDER a voxel -- an unsigned field's kink cannot resolve sub-voxel distances.
+        Returns (grid res^3, (xs,ys,zs)). This is the gateway that lets an imported mesh be queried like a field:
+        build once, then any number of points are O(V) samples (mesh_sample_field) -- e.g. a fast point-to-surface
+        distance for decimation/LOD error.
+
+        KEPT HONEST: the build is currently an F-triangle Python loop (~1ms/triangle) -- a batched closest-point would
+        vectorize it (backlog); the nearest-normal sign can mis-sign deep concavities / non-watertight meshes
+        (magnitude is always right); far interior voxels default to +band (no flood-fill sign yet), so this is a
+        sample-near-the-surface field, not yet a re-marchable full SDF."""
+        from holographic_meshbridge import mesh_distance_grid
+        return mesh_distance_grid(mesh, bounds, res=res, band=band)
+
+    def mesh_sample_field(self, grid, axes, points):
+        """Trilinearly sample a banded SDF (from mesh_to_field) at query points (N,3) -> (N,) SIGNED distances; take
+        abs for unsigned surface distance (holographic_meshbridge.sample_distance_grid). The O(V) read that turns a
+        once-built field into a point-to-surface distance for any points -- the cheap query the brute O(Va*Fb) scan
+        could not give once the field exists."""
+        from holographic_meshbridge import sample_distance_grid
+        return sample_distance_grid(grid, axes, points)
+
+    def mesh_to_sdf_grid(self, mesh, bounds, res=48, band=None):
+        """Convert an imported mesh into a FULL, re-marchable signed distance field
+        (holographic_meshbridge.mesh_to_sdf_grid): the banded SDF by tiling (mesh_to_field) followed by a flood fill
+        that fills the interior negative. Unlike mesh_to_field (a sample-near-the-surface band), this is a complete
+        SDF with the surface as a true zero level set -- so the mesh can be re-marched at any resolution, sampled, or
+        composited like any other field. Returns (grid res^3, (xs,ys,zs)). This is the gateway that lets an imported
+        mesh JOIN the field-native world. KEPT HONEST: nearest-normal sign + needs a watertight band (>= ~2 voxels)."""
+        from holographic_meshbridge import mesh_to_sdf_grid
+        return mesh_to_sdf_grid(mesh, bounds, res=res, band=band)
+
+    def mesh_to_field_vector(self, mesh, bounds, dim=2048, bandwidth=18.0, grid=12, seed=0):
+        """FS-5: carry a surface as a SINGLE hypervector (edit = bind). Samples the mesh's signed distance on a
+        coarse `grid`^3 lattice over `bounds` and bundles it into one FPE vector (HolographicField). On the result:
+        `.value(points)` reads the (smoothed) signed field, `.translate(delta)` moves the WHOLE surface with one
+        binding (exact -- value_shifted(x)=value_orig(x-delta)), `.union(other)` merges two surfaces by bundling, and
+        `.surface(bounds, res)` re-extracts a mesh from the 0-level. This is the array-domain mesh_to_field's
+        hypervector cousin -- moving and merging become VSA algebra. KEPT HONEST: a demonstration representation, not
+        the fast path (FFT-bound build/extract); the marched extract is a smoothed, ~15%-biased, not-guaranteed-
+        watertight estimate (bandwidth is the bias knob, dim the noise floor); the encoder bounds must exceed
+        |sample|+|shift| or the FPE wraps; valid only within the sampled cloud. See holographic_fpefield."""
+        from holographic_fpefield import HolographicField
+        return HolographicField.from_mesh(mesh, bounds, dim=dim, bandwidth=bandwidth, grid=grid, seed=seed)
+
+    def mesh_point_distance(self, mesh, points, radius=2, signed=False):
+        """Distance from query points (N,3) to a mesh, ACCELERATED by a vectorized spatial grid that culls the work
+        (holographic_meshbridge.point_set_to_mesh_grid) -- ~20-110x faster than the brute O(N*F) scan and exact for
+        near-surface queries (the regime that matters: decimation/LOD error, contact, snapping). Returns (N,) unsigned
+        distance, or signed (negative inside) if `signed`. KEPT HONEST: APPROXIMATE by construction -- a query whose
+        nearest triangle lies beyond `radius` cells returns +inf (raise `radius`, or use the exact brute path for
+        far-field queries); see point_set_to_mesh_grid."""
+        from holographic_meshbridge import point_set_to_mesh_grid
+        return point_set_to_mesh_grid(points, mesh.vertices, mesh.faces, radius=radius, signed=signed)
+
+    def mesh_field_lod(self, mesh, bounds, res=64, strides=(1, 2, 4)):
+        """FIELD-NATIVE level-of-detail for an IMPORTED mesh (the decomposition closure): convert it to a full SDF
+        once (mesh_to_sdf_grid), then RE-MARCH that field at coarser strides -- so the imported mesh coarsens exactly
+        like a field-backed surface, no mesh decimation in the loop. Returns a fine->coarse list of meshes. This is
+        the same field-native LOD that surface_mesh gives a native field, now reached by a mesh that arrived with no
+        field. KEPT HONEST: quality is bounded by the SDF grid resolution and the nearest-normal sign; for a mesh that
+        is already field-backed, use surface_mesh directly (no conversion needed)."""
+        from holographic_meshbridge import mesh_to_sdf_grid, marching_tetrahedra_vec
+        grid, axes = mesh_to_sdf_grid(mesh, bounds, res=res)
+        out = []
+        for s in strides:
+            s = int(s)
+            sub = grid[::s, ::s, ::s]
+            subax = (axes[0][::s], axes[1][::s], axes[2][::s])
+            out.append(marching_tetrahedra_vec(sub, subax, 0.0))
+        return out
+
     def oct_encode_normals(self, normals, bits=8):
         """OCTAHEDRAL-encode unit normals to compact integer codes (holographic_octnormal, Cigolle et al. 2014):
         map each S^2 unit vector to 2 numbers (project onto the octahedron, unfold the lower hemisphere) and
@@ -3399,17 +3498,20 @@ class UnifiedMind:
         from holographic_blendpose import solve_pose
         return solve_pose(targets, goal, iters=iters)
 
-    def mesh_from_sdf(self, sdf, bounds, res=24, level=0.0):
+    def mesh_from_sdf(self, sdf, bounds, res=24, level=0.0, vectorized=False):
         """Extract a MESH from an implicit field (holographic_meshbridge, FWD-11; SDF -> mesh): sample the scalar
         field `sdf` (a callable points(N,3)->values, e.g. `sphere_sdf` or a `metaball_field` of Gaussian splats) on
         a res^3 grid over `bounds`=((x0,y0,z0),(x1,y1,z1)) and extract its `level` isosurface by MARCHING
         TETRAHEDRA -- the isosurface extractor the mesh kernel deliberately lacked, and the bridge that lets the
         engine's implicit/splat representations enter the mesh world. The result is a watertight, outward-oriented
-        triangle Mesh (a closed genus-0 field gives chi=2). Kept negative: resolution is the grid's -- features
-        below the cell size are rounded. Returns a Mesh."""
-        from holographic_meshbridge import sample_field, marching_tetrahedra
+        triangle Mesh (a closed genus-0 field gives chi=2). vectorized=True uses the parallel array-op marcher
+        (marching_tetrahedra_vec, the case-table-RAM path) -- geometrically identical, ~6-14x faster at working grid
+        sizes (default False keeps the per-cell marcher's exact vertex ordering for backward compatibility). Kept
+        negative: resolution is the grid's -- features below the cell size are rounded. Returns a Mesh."""
+        from holographic_meshbridge import sample_field, marching_tetrahedra, marching_tetrahedra_vec
         values, axes = sample_field(sdf, bounds, res)
-        return marching_tetrahedra(values, axes, level=level)
+        march = marching_tetrahedra_vec if vectorized else marching_tetrahedra
+        return march(values, axes, level=level)
 
     def mesh_to_sdf(self, mesh, points):
         """Signed distance from a MESH at query points (holographic_meshbridge, FWD-11; mesh -> implicit): the
@@ -3434,6 +3536,94 @@ class UnifiedMind:
         makes a stroke cost O(brush). Delegates to holographic_sculpt.apply_brush."""
         from holographic_sculpt import apply_brush
         return apply_brush(field_fn, kind, p, radius, s=strength, **kw)
+
+    def sparse_field(self, field_fn, bounds, voxel, band, tile=8):
+        """Build a NARROW-BAND SPARSE field from a dense field function (holographic_sparsefield, FS-2) -- store,
+        edit, and re-extract only the thin shell of voxels around the surface (|f| < band), so a brush stroke touches
+        O(brush) voxels instead of O(res^3) and only the dirtied bricks re-mesh. This is what turns FS-1 sculpting
+        from batchy into interactive. `field_fn(points (N,3)) -> values (N,)` is the SDF (negative inside), `bounds`
+        = (min_corner, max_corner), `voxel` the cell size, `band` the half-width to store, `tile` voxels per brick.
+        Returns a SparseField; call .apply_local(delta_fn, p, r) to edit (returns dirty bricks + touched count),
+        .reinitialize() to restore the signed-distance property after edits, and .extract_local(dirty_bricks) to
+        re-mesh only the dirty region (welded watertight). KEPT HONEST: the per-brick marching is pure Python and
+        belongs on the GPU past a few hundred active bricks (holostuff is the authoring brain -- the band bookkeeping
+        and SDF numerics -- the per-frame voxel grind is the GPU's muscle); the band must be reinitialized or
+        distances drift; topology growth into unseeded interior space needs a re-seed. Delegates to
+        holographic_sparsefield.SparseField.from_field."""
+        from holographic_sparsefield import SparseField
+        return SparseField.from_field(field_fn, bounds[0], bounds[1], voxel, band, tile=tile)
+
+    def surface_mesh(self, field, bounds=None, resolution=24, level=0.0, pixel_budget=None, distance=1.0,
+                     lod_targets=(0.5, 0.25, 0.125), screen_height_px=1080, fov_deg=60.0, cache=False):
+        """THE SCULPT LOOP'S RE-EXTRACT STEP (FS-4): turn ANY field representation into the drawable mesh, at the right
+        detail for the view -- one entry point composing the parts FS-1..FS-3 shipped. `field` is either a field
+        FUNCTION (points(N,3)->values; needs `bounds`=(min,max)) OR a SparseField from sparse_field().
+
+        Without a `pixel_budget`, the full-resolution surface is projected and returned.
+
+        With a `pixel_budget`, LOD is FIELD-NATIVE: rather than projecting the fine mesh and then QEM-DECIMATING it
+        (greedy edge collapse -- O(collapses*edges), seconds), the SOURCE FIELD is coarsened (re-marched at a coarser
+        grid stride / resolution) and re-projected, and the COARSEST level whose screen-space error at `distance`
+        stays under the budget is returned. This is the whole thesis made load-bearing: the mesh is a PROJECTION of
+        the field, so a coarser mesh is a coarser field projected -- measured ~thousands x faster than decimating the
+        projection, because re-marching is a vectorized pass and the per-level error is read straight from the field
+        (the full-res field value at a coarse vertex IS its distance to the true surface -- O(V) field samples, no
+        O(V*F) mesh-to-mesh distance, no greedy collapse). The legacy QEM LOD (mesh_lod_chain) remains a separate
+        faculty for an IMPORTED mesh that has no field behind it.
+
+        cache=True (SparseField, no budget) uses the brick-mesh WORKING-SET CACHE (the ReflexCache idea: re-mesh only
+        the bricks a stroke dirtied). The field's edits must go through apply_local; else call its cache_clear().
+
+        This NAMES THE LOOP as iterate-a-projection -- each sculpt step EDITS the field then RE-PROJECTS to the
+        surface, the same shape as the resonator/denoiser/dynamics. sculpt -> surface_mesh -> export_splats is the
+        authoring cycle; the field is the source of truth, the mesh and splats are two projections. KEPT HONEST: the
+        per-level error is the field-distance at the marched vertices (a true geometric deviation), not a
+        silhouette/perceptual metric; the function-field path is dense O(res^3) per level (use the SparseField path
+        for the interactive, O(brush) loop). `lod_targets` is retained for signature compatibility; the field-native
+        LOD coarsens by RESOLUTION STRIDE, not face fraction."""
+        from holographic_sparsefield import SparseField
+        is_sparse = isinstance(field, SparseField)
+        if not is_sparse and bounds is None:
+            raise ValueError("a field FUNCTION needs bounds=(min_corner, max_corner)")
+        # No budget: project the field once, at full resolution.
+        if pixel_budget is None:
+            if is_sparse:
+                return field.extract_cached() if cache else field.extract_local()
+            return self.mesh_from_sdf(field, bounds, res=resolution, level=level, vectorized=True)
+        # Budget: FIELD-NATIVE LOD -- coarsen the SOURCE and re-project, never decimate the projection.
+        if is_sparse:
+            chain = field.lod_chain()
+        else:
+            chain = self._function_lod_chain(field, bounds, resolution, level)
+        idx = self.mesh_select_lod(chain, distance, pixel_budget, screen_height_px=screen_height_px, fov_deg=fov_deg)
+        return chain[idx].mesh
+
+    def _function_lod_chain(self, field, bounds, resolution, level):
+        """Field-native LOD for a field FUNCTION: re-sample + march at decreasing resolutions (coarsen the source),
+        with each level's error read from the function at the coarse vertices (|f(vertex) - level| = the vertex's
+        distance to the true level set, for an SDF). Returns a fine->coarse list of LODLevel for select_lod -- the
+        same 'coarsen the source, project, read the error from the field' move as SparseField.lod_chain."""
+        from holographic_lod import LODLevel
+        from holographic_meshbridge import sample_field, marching_tetrahedra_vec
+        import numpy as _np
+        levels = []
+        res = int(resolution)
+        for r in (res, res // 2, res // 4):
+            if r < 2:
+                break
+            vals, axes = sample_field(field, bounds, r)
+            m = marching_tetrahedra_vec(vals, axes, level=level)
+            if m.n_faces == 0:
+                continue
+            if levels and m.n_faces >= levels[-1].n_faces:
+                continue
+            if not levels:
+                mean_e = max_e = 0.0
+            else:
+                d = _np.abs(_np.asarray(field(m.vertices), float) - level)    # field deviation at marched vertices
+                mean_e, max_e = float(d.mean()), float(d.max())
+            levels.append(LODLevel(m, m.n_faces, mean_e, max_e))
+        return levels
 
     def route_representation(self, operation):
         """The routing POLICY (holographic_route, ARCH-7): the representation whose capability set supports

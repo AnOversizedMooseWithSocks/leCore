@@ -11502,3 +11502,582 @@ field_to_splats faculties, by splat_field), test_integration.py, README, NOTES_c
 *** FS-3 from the Field-First Sculpting plan -- a field can now be exported as splats for a browser renderer, with the
 L->scale+rotation math built where it belongs and the plan's "three shared call sites" premise honestly corrected.
 Next: FS-2 the narrow-band sparse field (the hard one -- O(brush) strokes), then FS-4 the loop, FS-5 FPE. ***
+
+
+--------------------------------------------------------------------------------
+FS-2 -- THE NARROW-BAND SPARSE FIELD (the hard one: O(brush) strokes, local re-extraction). FS-1 sculpts a field but
+re-meshes the WHOLE res^3 volume per stroke -- batchy. The level-set field literature's fix (Adalsteinsson & Sethian's
+narrow band; Museth's VDB/OpenVDB) is to store, edit, and re-extract ONLY the thin shell of voxels around the surface
+(|f| < band). A brush then touches O(brush) voxels, and only the dirtied bricks re-mesh -- the thing that makes
+sculpting interactive.
+
+REPRESENTATION (holographic_sparsefield.py; +1 mind faculty sparse_field):
+  * Voxels grouped into BRICKS of `tile` cells/edge; a brick owns the (tile+1)^3 corner block and OVERLAPS its
+    neighbours by one voxel plane, so a shared seam has identical world coords AND identical values -> the seam
+    meshes weld watertight.
+  * A brick is ACTIVE iff the surface passes through it. Only active bricks exist (sparsity at the brick level).
+  * The field is held in ONE global dict {(i,j,k): clamped_sdf} over every voxel of every active brick -- true SDF in
+    the band, clamped +/-band (correct sign) outside. One value per global voxel keeps seams exactly consistent (the
+    reinit and extract both rely on this). Bricks are materialized into a small dense array on demand for marching.
+  * THE EXACTNESS FACT: marching only makes faces where the field crosses 0, which only happens in the band; filling
+    far voxels with +/-band (correct sign) makes the SPARSE extraction identical to a full dense extraction of the
+    SURFACE (the far values never cross 0, so never make a face).
+
+API: SparseField.from_field(field, bounds, voxel, band, tile) [one-time O(res^3) seed]; sample(points) [trilinear in
+the band, +band far -- the honest narrow-band limit]; apply_local(delta_fn, p, r) [edit only voxels in the ball;
+returns (dirty_bricks, touched_count); delta ADDED -- lower f to inflate an SDF, raise to carve];
+reinitialize(iters) [GODUNOV UPWIND reinit phi_t = sign(phi0)(1-|grad phi|) with a smeared sign -- THE GENUINELY NEW
+NUMERICS; central differences are unstable for this PDE]; extract_local(dirty_bricks) [marching_tetrahedra on the
+dirty/active bricks only, each in its own world axes, POSITION-WELDED into one watertight mesh].
+
+MEASURED (sphere SDF ground truth, res 48, tile 6): band SPARSE = 31610 stored / 117649 full voxels (27%); sample
+matches the true SDF in-band; sparse extract matches a full dense extract within a voxel (Hausdorff 0.0269 < 0.0417)
+and is WATERTIGHT/manifold across brick seams; a brush touched 888 voxels = 0.8% of the grid (the O(brush) win, vs
+re-meshing all of res^3); reinit moved |grad f| from 0.469 toward 1 (0.767 after 12 Godunov iters -- a clear
+improvement; a thin band + clamped edges limits how close, more band/iters -> closer). Deterministic (sorted-key dict
+iteration, no RNG).
+
+REUSE (as-above-so-below): brick addressing IS _tile_bucket (the floor-divide tiling StructuredIndex/TiledStore/the
+splat tiler share); the per-brick mesh IS marching_tetrahedra (the meshbridge weld); the bounded dirty-set is the same
+idea occlusion_recall and select_lod embody (work a small active set, not the whole).
+
+KEPT HONEST (the negatives the plan demanded up front): pure-Python per-brick marching is real -- past a few hundred
+active bricks the Python loop dominates and this belongs on the GPU (a compute shader over the dirty bricks). holostuff
+is the AUTHORING BRAIN (which voxels are dirty, band bookkeeping, the SDF reinit numerics); the per-frame voxel grind
+is the GPU's muscle -- the boundary the whole 3D plan draws. The band MUST be reinitialized or distances drift (shown
+via |grad| before/after). TOPOLOGY growth into far/unseeded INTERIOR space is seeded as outside (+band) -- correct for
+inflating into empty space (the common case), WRONG for growth into interior space or a merge/split, which need a
+from_field re-seed. Documented, not silently mis-handled.
+
+Tests: +7 (1586 -> 1593). test_holographic_sparsefield.py (+6): sparsity; sample-in-band; extract watertight & on the
+surface; stroke touches O(brush) not res^3; reinit moves |grad| toward 1; deterministic build. test_integration.py
+(+1): build sparse field -> local inflate -> re-mesh dirty bricks through the mind. Files: holographic_sparsefield.py,
+test_holographic_sparsefield.py, holographic_unified.py (sparse_field faculty, by sculpt), test_integration.py,
+README, NOTES_concepts.md, tour.py.
+
+*** FS-2 from the Field-First Sculpting plan -- the hard one: a stroke now costs O(brush), not O(res^3), with the band
+bookkeeping + Godunov reinit numerics done CPU-side and the per-frame voxel grind honestly handed to the GPU. Next:
+FS-4 the loop (surface_mesh wrapping marching+select_lod; assemble sculpt->surface_mesh->splats), then FS-5 FPE
+(research, probe only). ***
+
+
+--------------------------------------------------------------------------------
+FS-4 -- THE SCULPT LOOP (surface_mesh; the loop named as an iterate-a-projection). FS-1 sculpts, FS-2 stores/edits the
+band, FS-3 exports splats. FS-4 is the one drawable-mesh call that closes the cycle, composing parts already shipped.
+
+WHAT SHIPPED (+1 mind faculty surface_mesh; pure composition, no new module):
+  * UnifiedMind.surface_mesh(field, bounds, resolution, level, pixel_budget, distance, lod_targets, ...) -- turn ANY
+    field rep into the drawable mesh at the right detail: a field FUNCTION (via mesh_from_sdf) OR a SparseField (via
+    its local marching). With pixel_budget set, the mesh is run through mesh_lod_chain + mesh_select_lod and the
+    COARSEST level whose screen-space error at `distance` stays under the budget is returned (full detail near,
+    cheaper far). No new extraction -- it composes mesh_from_sdf / SparseField + the LOD faculties.
+  * NAMES THE LOOP as an iterate-a-projection (the resonator / denoiser / dynamics shape): each sculpt step EDITS the
+    field (apply_local) then RE-PROJECTS to the surface (re-extract). sculpt/sparse-edit -> surface_mesh ->
+    export_splats is the cycle; the field is the source of truth, mesh and splats are two re-projections of it.
+
+MEASURED: surface_mesh returns a watertight mesh from both a function field and a SparseField; with a far-distance
+pixel budget the returned mesh is COARSER than full detail (the LOD selection composed through); the loop re-projects
+the field to display splats too. KEPT HONEST: the LOD error is geometric surface deviation, not silhouette/perceptual;
+the function-field path is dense O(res^3) (use the SparseField path for the O(brush) interactive loop); QEM LOD
+decimation is pure-Python and slow (the lod module's own kept negative -- tests use a tiny mesh / one decimation).
+
+FS-2 CORRECTION (kept loud -- a real honest-measurement moment): while wiring FS-4 the sparse extract looked
+non-manifold at one resolution (a sphere with voxel=2/30 -> a 31^3 grid). PROBED: it was NOT a sparse-field bug -- a
+DENSE marching_tetrahedra at grid 31 is ALSO non-manifold (8928 faces), and the sparse extract reproduces it EXACTLY.
+marching_tetrahedra is itself non-manifold at grid sizes where a vertex lands on the isosurface (pre-existing,
+grid-dependent). So extract_local was refactored to materialize a CONTIGUOUS box and march it in ONE pass (a single
+pass is always consistent; the prior per-brick weld could crack at a seam-parity flip) -- now BIT-EXACT to dense on
+the same grid (verified: equal face counts, Hausdorff 0.0). A compact 1-byte/voxel SIGN grid (self.sign) is kept
+alongside the band so any box materializes exactly (the VDB split: sparse band VALUES + coarse topology); COMPUTE
+stays O(brush)/O(dirty). Lesson logged: "non-manifold" was a grid-size misattribution; the fix made the bound tighter
+(exact) and the watertightness claim honest (it is the extractor's, grid-dependent, not the band's).
+
+Tests: +2 (1593 -> 1595, both integration; surface_mesh is composition -> integration tests, no unit module).
+test_integration.py: surface_mesh extract paths (function field + SparseField, watertight); budget coarsens at
+distance + loop to splats. Files: holographic_unified.py (surface_mesh faculty, by sparse_field), holographic_sparsefield.py
+(extract_local single-march + sign grid + the grid-manifold note), test_integration.py, README, NOTES_concepts.md, tour.py.
+
+*** FS-4 from the Field-First Sculpting plan -- the loop closes: sculpt/sparse-edit -> surface_mesh (budget-aware) ->
+export_splats, named into the iterate-a-projection family. Field-First Sculpting FS-1..FS-4 are done; FS-5 (FPE
+function-field, surface-as-vector, edit-as-bind) remains -- research/probe-only, ship nothing on faith. ***
+
+
+--------------------------------------------------------------------------------
+FS-4 PERFORMANCE PASS -- push the sculpt loop past the Python bottleneck (array-backed field + a working-set cache).
+The thesis: do as much geometry as possible the PARALLEL way (vectorized NumPy / reused VSA machinery), because Python
+per-element loops -- not arithmetic -- are the cost, and the round trip from a representation to Python triangles is
+the expensive trip to stop paying for every frame. Probe-first found the solutions already in the codebase, the usual
+lesson.
+
+TWO REFRAMES (both reuse existing patterns):
+
+1. ARRAY-BACKED FIELD (holographic_sparsefield.py rewritten). FS-2 stored the field as a Python DICT of voxels -- the
+   traditional, loop-heavy choice, and exactly what made the loop slow. Now the field is a DENSE NumPy ARRAY, so every
+   op is a vectorized array op with NO per-voxel Python loop: sample = one fancy-indexed trilinear gather over all
+   points; apply_local = a boolean-masked sub-array add over the brush ball; reinitialize = the Godunov update written
+   with np.roll across the whole band at once; _materialize = a pure slice. The public API is unchanged; `.values` is
+   kept as a compat dict property (rebuilt from the array).
+
+2. BRICK-MESH WORKING-SET CACHE -- the ReflexCache idea (holographic_tree), applied to geometry. ReflexCache thickens
+   the veins it travels often and skips the expensive path for a FAMILIAR input. extract_cached caches each brick's
+   extracted sub-mesh and, on re-extract, REUSES the bricks a stroke did not touch -- only DIRTY (or newly-active)
+   bricks are re-marched, welded by position (bit-exact at seams). Per-frame re-extract is O(dirty), not O(all
+   active). apply_local marks touched bricks dirty; cache_clear() if you mutate self.field directly (GramCache
+   discipline). Wired as UnifiedMind.surface_mesh(field, cache=True) for a SparseField.
+
+MEASURED (sphere, res 48, tile 6): extract still BIT-EXACT to dense (23472 faces) and watertight; the CACHE -- cold
+marched 128 bricks, a brush touching 888 voxels dirtied 48 so the warm re-extract re-marched only 28 (~5x fewer
+bricks, 1499ms -> 609ms), SAME surface; reinit (vectorized Godunov) moved |grad| 0.71 -> 0.77 toward 1 while
+PRESERVING the 0-level set (so the surface -- and the mesh cache -- is unchanged by a reinit, a useful property). The
+cache win GROWS with scene size (more cold bricks, the same small warm count for a local brush).
+
+WHY THESE AND NOT A FULL VSA-NATIVE MARCHING: the field SAMPLING and EDIT are now parallel array ops; the
+working-set CACHE removes redundant marching from the per-frame path -- both grounded, low-risk, and reusing shipped
+patterns (the tiling is still _tile_bucket, the mesh is still marching_tetrahedra, the cache is ReflexCache's
+philosophy). Carrying the surface itself as a single hypervector (edit = bind) is the FPE research item (FS-5), kept
+separate and probe-only.
+
+KEPT HONEST: the dense field is O(res^3) MEMORY -- a deliberate speed-for-memory trade (Python time is the cost, not
+bytes; res 48 is < 0.5 MB); block-sparse allocation (only active bricks) reclaims memory-sparsity at large res, a
+documented next step. The marching itself is still pure-Python per cell -- the cache removes it from the per-FRAME
+path, but the COLD first extract still marches every active brick (a vectorized marching is the next step if cold
+start must be fast too). np.roll wraps at the grid edge, but the band is interior so the wrap never touches it.
+
+Tests: +2 (1595 -> 1597). test_holographic_sparsefield.py (+1): the cache skips unchanged bricks (cold vs warm
+marched count, same surface). test_integration.py (+1): cached sculpt loop re-marks only dirty bricks through the
+mind. Files: holographic_sparsefield.py (array-backed rewrite + extract_cached/cache_clear), holographic_unified.py
+(surface_mesh cache= param), test_holographic_sparsefield.py (reinit mutates the dense field now; cache test),
+test_integration.py, README, NOTES_concepts.md, tour.py.
+
+*** FS-4 performance: the loop's field ops are now vectorized parallel NumPy and the per-frame re-extract is O(dirty)
+via the ReflexCache-style brick cache -- the geometry fast path, built from patterns the codebase already had. ***
+
+
+--------------------------------------------------------------------------------
+FS-4 PERFORMANCE PASS II -- the marching itself goes parallel (the case-table RAM). After pass I (array-backed field +
+the ReflexCache-style brick cache), the bottleneck left was the MARCHING: a Python per-cell triple loop, and a cold
+extract that round-trips the whole surface through Python. The reframe (the recurring "geometry as VSA-style parallel
+ops" thesis): marching is a per-cell CASE LOOKUP -- each tetrahedron's triangles depend only on its 4 corners'
+sign-pattern, indexed into a fixed table. That table IS a content-addressable lookup (the RAM/reflex pattern,
+alongside ReflexCache/ReflexArc/HolographicMemory in the codebase), and it was the last thing trapped in a Python
+loop.
+
+WHAT SHIPPED: holographic_meshbridge.marching_tetrahedra_vec -- a VECTORIZED marcher. A precomputed 16-entry
+_TET_CASE_TABLE (sign-pattern -> triangle topology + the orient-toward point) is the RAM; the whole grid is processed
+as parallel NumPy: gather every cell's tet-corner values by strided slicing, bit-pack the case index, gather triangles
+from the table per case, dedupe crossings by a packed edge key (np.unique), interpolate all crossing positions at
+once, and orient with one batched normal test. The only Python loop is 6 tets x 14 active cases -- a fixed count,
+independent of grid size. marching_tetrahedra (per-cell) is kept as the reference.
+
+MEASURED -- geometrically IDENTICAL to the per-cell marcher (same vertex/face counts, same faces by position, same
+orientation where defined, same manifoldness INCLUDING the grid-31 non-manifold case), Hausdorff ~1e-16 (machine eps,
+a faithful parallelization not a different algorithm). SPEED: res 32 618ms->44ms (14x), res 48 1690ms->145ms (12x),
+res 64 3577ms->400ms (9x), res 80 6280ms->1010ms (6x). In the sparse field selftest the whole surface marches in
+163ms vs 1784ms per-cell Python (11x). Wired: the SparseField extracts (extract_local, extract_cached) now use the
+vectorized marcher; UnifiedMind.mesh_from_sdf(..., vectorized=True) and surface_mesh's function-field path use it too
+(default vectorized=False keeps the per-cell vertex ordering for exact backward compatibility) -- so the fast marcher
+is available to any caller, elevating it as shared geometry infrastructure.
+
+HONEST FINDING (kept loud): the vectorized marcher is so fast that it MOSTLY OBVIATES the brick-mesh cache at current
+scales -- a single vectorized march of the whole surface (~163ms) BEATS the cached per-brick path (~364ms warm),
+because once marching is cheap the per-brick Python WELD dominates extract_cached. The cache still wins in the regime
+where marching cost >> weld cost (very large surfaces); at small/medium scenes, extract_local with the vectorized
+marcher is the fast full extract. So: vectorizing the hot loop beat caching around it -- the parallel reframe was the
+bigger lever. Both are kept; the regimes are documented. Further work if needed: vectorize the cross-brick weld
+(the next Python residue), and block-sparse field allocation for memory at large res.
+
+KEPT (unchanged): the vectorized marcher allocates O(cells) temporaries (a memory-for-speed trade, fine at these
+sizes); like the per-cell marcher it is non-manifold at grid sizes where a vertex lands on the isosurface (it
+reproduces that exactly); the dense field is O(res^3) memory.
+
+Tests: +1 (1597 -> 1598). test_holographic_meshbridge.py: marching_tetrahedra_vec matches the per-cell marcher
+(sphere, two spheres, torus, and a non-manifold grid -- counts, faces-by-position, manifoldness, orientation).
+Files: holographic_meshbridge.py (marching_tetrahedra_vec + _TET_CASE_TABLE), holographic_sparsefield.py (extracts
+route through it; selftest reports the speedup), holographic_unified.py (mesh_from_sdf vectorized= param; surface_mesh
+uses it), test_holographic_meshbridge.py, README, NOTES_concepts.md, tour.py.
+
+*** FS-4 performance II: the marching is now massive-parallel array ops driven by a sign-pattern RAM lookup -- 6-14x
+faster, geometrically identical, available to every caller. The honest twist: parallelizing the marcher beat caching
+around it. ***
+
+
+--------------------------------------------------------------------------------
+GEOMETRY VECTORIZATION SWEEP -- move the recent geometry's Python loops to parallel NumPy (VSA-as-GPU). After the
+vectorized marcher, swept the rest of the recent geometry stack (mesh kernel, LOD/QEM path) for per-element Python
+loops and moved the genuinely-parallel ones to array ops, MEASURING each and keeping the one that can't move.
+
+SHIPPED (two clean wins, both verified identical to the loop):
+  * surface_deviation (holographic_meshqem) -- the LOD quality metric (mean/max point-to-surface distance from a's
+    vertices to b's faces), called on EVERY LOD level. Was an O(Va*Fb) scalar branchy Python double loop -- ~16000ms
+    on a 2160-face mesh. Vectorized: loop once over b's faces and compute each face's closest point to ALL of a's
+    vertices at once (_closest_point_on_triangle, already vectorized in meshbridge), running min -> O(Fb) array ops.
+    ~966ms now (~16x), results identical to 1e-16 (it feeds a reported metric, not a topology decision).
+  * Mesh.vertex_normals (holographic_mesh) -- Newell's method, run in the splat-export/render path. Was a per-face +
+    per-vertex-of-face double loop (~170ms @ 22k faces). Vectorized triangle fast-path: Newell cross-terms over all
+    faces at once, then a single FACE-ORDER np.add.at scatter (matches the loop's accumulation order EXACTLY ->
+    BIT-IDENTICAL); polygon meshes fall back to the loop. ~10x faster, bit-for-bit the same.
+
+MEASURED NEGATIVE (kept loud -- the bind_batch lesson again):
+  * vertex_quadrics (holographic_meshqem) CANNOT be vectorized in the obvious way. The plane offset uses a dot product
+    (n.dot(V[a])); its vectorized form (np.sum/einsum) sums in a different order and differs by ULPs. Those ULPs flip
+    QEM's collapse-order TIE-BREAKS and produce a DIFFERENT decimated mesh -- verified on three meshes (same face
+    count, different faces). A 1e-15 change in a tie-sensitive path is a real bug. So vertex_quadrics is kept in the
+    EXACT scalar form (it is called once per decimation and is not the bottleneck). A determinism test pins QEM's
+    output stable. The real QEM speedup (the 26s greedy collapse loop, which recomputes all edge costs every
+    iteration) needs a heap with incremental, ORDER-STABLE updates -- the documented 'delegate decimation to
+    meshoptimizer' negative stands; the naive vectorization is unsafe.
+
+THE PRINCIPLE CONFIRMED: vectorize the parallel, metric-like, decision-free loops (surface_deviation, vertex_normals)
+-- big wins, identical results. Do NOT vectorize a tie-sensitive ordering input (vertex_quadrics) unless the
+accumulation is bit-identical, which a dot product's summation order is not. "Use VSA/parallel where it's best at"
+includes knowing where it ISN'T safe.
+
+Tests: +3 (1598 -> 1601). test_holographic_meshqem.py: surface_deviation vectorized == scalar reference (1e-12); QEM
+decimation is deterministic (locks the vertex_quadrics-stays-scalar decision). test_holographic_mesh.py:
+vertex_normals vectorized == loop (bit-identical) and points outward on a sphere. Files: holographic_meshqem.py
+(surface_deviation vectorized; vertex_quadrics kept scalar with the negative documented), holographic_mesh.py
+(vertex_normals triangle fast-path), test_holographic_meshqem.py, test_holographic_mesh.py, README, NOTES_concepts.md,
+tour.py.
+
+*** Geometry vectorization sweep: surface_deviation 16x and vertex_normals 10x moved to parallel NumPy (identical
+results); vertex_quadrics kept scalar because its vectorization flips QEM's deterministic tie-breaks -- the bind_batch
+lesson, measured and respected. ***
+
+
+--------------------------------------------------------------------------------
+FIELD-NATIVE LOD -- operate in the field, project the result (the mesh is a projection). The thesis the whole
+geometry thread kept circling: the 3D mesh is a PROJECTION of the field, not the data itself. So the right way to get
+a coarser mesh is to coarsen the SOURCE (the field) and re-project -- not to decimate the projection (QEM on the
+mesh). Measured contrast that motivated this: QEM-decimating a 3480-face mesh to 1740 (greedy edge collapse) takes
+~70,000 ms; re-marching the SAME field at a coarser grid to a comparable face count takes ~8 ms -- ~8000x, with no
+edge collapse at all.
+
+WHAT SHIPPED:
+  * SparseField.extract_at_stride(stride) -- COARSEN THE SOURCE: subsample the dense field grid by `stride` and march
+    (one strided slice + one vectorized march). stride 1 = full field, 2 = half resolution per axis (1/8 the cells),
+    etc. The marched surface resolves to the coarse spacing, so coarser strides drop sub-cell detail -- LOD obtained
+    by re-projecting a coarser field.
+  * SparseField.lod_chain(strides=(1,2,4,8)) -- a field-native LOD chain. The elegant part: each level's error is
+    read AS A FIELD QUERY. A coarse marched vertex sits on the coarse 0-crossing; the FULL-resolution field value
+    there IS that vertex's signed distance to the true surface, so |sample(coarse_vertices)| is the level's deviation
+    -- O(V) field samples, NOT an O(V*F) mesh-to-mesh distance, and no greedy collapse. The error is also more HONEST
+    than QEM's: it's the distance to the TRUE surface (the field's 0-level), not the distance to the fine mesh.
+  * UnifiedMind.surface_mesh(field, pixel_budget=...) is now FIELD-NATIVE: it builds the LOD chain by re-marching the
+    source (SparseField.lod_chain, or _function_lod_chain for a field function) and picks the coarsest level under the
+    screen-space budget -- instead of QEM-decimating the fine mesh. The legacy QEM LOD (mesh_lod_chain) stays a
+    separate faculty for an IMPORTED mesh with no field behind it.
+
+MEASURED (sphere, SparseField at res ~40): the LOD chain (4 levels, 15840 -> 3960 -> 880 -> 144 faces, field-read
+errors 0 -> 0.0049 -> 0.0203 -> 0.0928) builds in ~100 ms -- all re-marches, vectorized. surface_mesh budget=4px
+returns 15840 faces at distance 0.5, 880 at distance 5, 144 at distance 50 (coarsens with distance), each in ~80-100
+ms. The old QEM budget path on the same 15840-face mesh would take MINUTES.
+
+WHY THIS IS THE RIGHT FRAME (and the honest boundary): the holographic spatial primitive already exists --
+VectorFunctionEncoder (FPE/VFA, holographic_fpe.py): a point is a hypervector, a whole field is a bundle, and a shift
+of the entire field is ONE bind (exact). But a bundle has finite SNR (the capacity cliff: placed-vs-empty separation
+0.39 at 2 atoms -> 0.02 at 32 -> 0.01 at 128), so you CANNOT cram a dense mesh into one hypervector and read vertices
+back -- the field representation is for operating-on-wholes and querying, and you TILE under the cliff for many
+distinguishable items (which the SparseField bricks already are). The lever is therefore not "make QEM one VSA op"
+(its greedy order is a real data dependency, and the mesh won't fit a bundle) but to STOP decimating the projection:
+keep the source field as the truth and re-project at the resolution the view needs. That re-projection IS one
+operation, measured ~thousands x faster.
+
+KEPT HONEST: subsampling the field by a stride is a nearest-grid coarsening (a smoothing prefilter would be the
+strict band-limit, but subsampling a clamped SDF preserves the bracketed 0-crossing while the surface stays larger
+than the coarse cell -- exactly the LOD regime); the per-level error treats the finest available level as the
+reference (error 0), with coarser levels' error read against the true field; `surface_mesh`'s `lod_targets` arg is
+retained for signature compatibility but the field-native LOD coarsens by resolution stride, not face fraction.
+
+Tests: +1 (1601 -> 1602). test_integration.py: the field-native LOD chain coarsens monotonically with a
+field-read error that only grows, builds fast, the budget coarsens with distance, and the chain's error EQUALS the
+field-sampled deviation at the marched vertices. Files: holographic_sparsefield.py (extract_at_stride, lod_chain),
+holographic_unified.py (surface_mesh field-native budget path, _function_lod_chain), test_integration.py, README,
+NOTES_concepts.md, tour.py.
+
+*** Field-native LOD: coarsen the source field and re-project (~thousands x faster than QEM-ing the mesh), with the
+per-level error read straight from the field. The mesh is a projection of the field -- now load-bearing in the
+pipeline, exactly the path the panel converged on. ***
+
+================================================================================
+PARALLEL imported-mesh decimation + mesh->FIELD by tiling (the two paths an
+imported mesh can take when there is no field behind it)
+================================================================================
+
+A field-backed surface uses the FIELD-NATIVE LOD (coarsen the source, re-march).
+But a mesh that ARRIVES as a mesh has no field. Two new paths for that case:
+
+*** cluster_decimate (holographic_meshqem) -- the PARALLEL decimation. Vertex
+clustering (Rossignac-Borrel / Lindstrom): bin vertices into a grid^3 lattice (the
+engine's floor-divide tiling), collapse each cell to ONE representative, remap
+faces, drop degenerate. Every step is a vectorized array op -- NO greedy
+edge-collapse search -- so it is ~998x faster than greedy QEM (F2048->F1748 in 9ms
+vs 8671ms). The representative is VSA-native: a cell's error quadric is the SUM
+(a bundle, superposition) of its faces' plane tensors, and the representative is
+that bundle's minimizer, clamped to the cell. "Sum of plane outer products = a
+bundle" is the same algebra as the rest of the engine, here merging geometry.
+
+  Vectorizing the quadric here is SAFE (unlike greedy QEM, where vertex_quadrics is
+  kept scalar): clustering has no collapse-order tie-break for a ULP to flip. Know
+  where parallel is safe -- the bind_batch lesson, read the right way.
+
+  KEPT NEGATIVES: a coarse grid can go non-manifold (clustering trades quality and
+  manifoldness for parallel speed -- greedy qem_decimate stays the quality option).
+  The cluster LOD error is NOT monotonic in grid resolution: cell ALIGNMENT with the
+  surface matters, so a coarser grid can land representatives closer (grid10 error
+  0.0019 < grid16 error 0.0108 on a sphere). The chain is monotone in FACE COUNT only.
+
+*** mesh_distance_grid (holographic_meshbridge) -- the mesh->FIELD direction by
+TILING. Each triangle updates ONLY the local block of grid voxels within `band` of
+it (a vectorized sub-array scatter-min by magnitude, the apply_local pattern), so
+the cost is O(F*block) not O(F*res^3). Build once, then any number of query points
+are O(V) trilinear samples (sample_distance_grid) -- the cheap point-to-surface
+distance the brute O(Va*Fb) scan could not give. This is the gateway that lets an
+imported mesh be queried like a field.
+
+  THE KINK, and why it is SIGNED: an UNSIGNED distance field has a V-shaped kink at
+  the surface, so trilinear sampling there OVERESTIMATES by ~half a voxel and cannot
+  resolve sub-voxel distances (measured: 0.0069 vs a true 0.00045, ~15x off -- a kept
+  negative on the unsigned version). A SIGNED field crosses zero LINEARLY through the
+  surface, so |sample| near it is accurate to WELL under a voxel (0.00056 vs 0.00045).
+  Signing only the band voxels by nearest-face-normal is enough for sampling near the
+  surface -- no flood fill needed for that use.
+
+  KEPT NEGATIVES: the build is currently an F-triangle Python loop (~1ms/triangle:
+  ~4.6s for 5352 faces, ~20s for 22k -- res barely changes it, confirming it is loop-
+  bound). The nearest-normal sign can mis-sign deep concavities / non-watertight meshes
+  (magnitude is always right). Far interior voxels default to +band (no flood-fill
+  sign), so this is a sample-NEAR-the-surface field, not yet a re-marchable full SDF.
+
+--------------------------------------------------------------------------------
+surface_deviation acceleration: TWO attempts, BOTH measured SLOWER, kept on record
+--------------------------------------------------------------------------------
+The cluster LOD chain is gated by surface_deviation (the decimation is ~10ms/level;
+measuring the error is the cost). Two tries to beat its O(Va*Fb) vectorized brute:
+  * Spatial-hashing b's triangles into a grid (the cluster binning) + a 3x3x3
+    neighbourhood search per query vertex: ~0.5x (SLOWER); the chain went 6.3s->52s.
+    The pure-Python per-cell bookkeeping (cell->triangle lists, set unions) fragments
+    the work into many tiny vectorized ops, which LOSE to brute force's few LARGE
+    ones. Not even bit-exact (different min order). REVERTED.
+  * The signed banded grid above, sampled at the level's vertices: accurate (sub-
+    voxel) and ~2x on a 3-level chain (build once, sample many), but the grid build
+    is the same F Python loop -- a real but modest win, kept as the mesh->FIELD
+    capability rather than wired as the default error metric.
+
+THE REAL NEXT STEP (toolkit: move the geometric kernel to PARALLEL space): a BATCHED
+closest-point-on-triangle (F triangles x B points, one vectorized op instead of an F
+loop). It would make mesh_distance_grid, mesh_to_sdf, AND surface_deviation all fast
+at once -- the single primitive under the whole point-to-mesh family. Then: add a
+flood-fill SIGN to mesh_distance_grid -> a re-marchable full SDF -> an imported mesh
+becomes a field -> it inherits the FIELD-NATIVE LOD (re-march coarser). That is the
+decomposition/composition closure: operate in field space, project as 3D.
+
+================================================================================
+The batched closest-point kernel, and the MEASURED truth about cache: point-to-mesh
+is MEMORY-BANDWIDTH-BOUND, and the per-triangle brute loop is already cache-optimal
+================================================================================
+
+GOAL was a batched closest-point-on-triangle to vectorize the per-triangle Python
+loop under mesh_distance_grid / mesh_to_sdf / surface_deviation. The kernel was built
+and is CORRECT: `_closest_points_on_triangles(P,A,B,C)` broadcasts Ericson's region
+test over any leading shape -- PAIRED (F triangles x their own blocks) or ALL-PAIRS
+(N points x F triangles) -- matching the single-triangle kernel to 2e-16.
+
+It did NOT make anything faster. Measured, and kept loud:
+
+  * ALL-PAIRS (surface_deviation / mesh_to_sdf): the batched form is SLOWER than the
+    brute F-loop at EVERY chunk size -- and the cache-blocking sweep shows exactly why:
+        chunk    2:  15.7s   (1.2MB working set)
+        chunk    8:  17.9s   (4.9MB)
+        chunk   32:  19.3s   (19.8MB)
+        chunk  128:  21.7s   (79MB)
+        chunk  512:  32.9s   (316MB)
+        brute F-loop: 11.5s
+    Smaller working set is faster (the memory-bound signature), but NO chunk beats
+    brute. Brute wins because it never materializes the (N,F) / (N,F,3) intermediates:
+    it streams ONE triangle at a time over a tiny (N,3) working set that stays
+    cache-resident, reusing the point array across triangles. That is the
+    cache-appropriate structure for this op.
+
+  * PAIRED (mesh_distance_grid): batching the small local blocks LOSES too (0.7x at
+    chunk 128, worse larger) -- same memory-bound wall once (chunk, block) intermediates
+    grow. The per-triangle loop's small block stays in cache; the batch does not.
+
+THE CACHE LESSON (the real answer to "use the L2/L3 cache"): you cannot vectorize out
+of a memory-bandwidth-bound reduction. The existing brute per-triangle loops ARE the
+cache-aware structure -- minimal working set, point-array reuse, streamed triangles.
+Batching into large vectorized intermediates DEFEATS cache residency and loses. So
+surface_deviation and mesh_to_sdf are KEPT on the brute loop; the batched kernel ships
+as correct infrastructure (and a convenience for moderate meshes), not as a hot path.
+
+THE CACHE MODULES do not rescue it either:
+  * holographic_cache.py (Ward gradient cache) interpolates a smooth field from sparse
+    value+gradient anchors -- but `interp_first_order` is PER-QUERY (O(anchors) per
+    point), so a dense gradient-cached SDF would be O(N_query x N_anchor) with a Python
+    loop over queries. No spatial structure -> same wall.
+  * holographic_adaptive_cache.py places anchors where a field bends -- about WHERE to
+    cache, not how to make a dense geometric reduction cache-fast.
+  * ReflexCache (holographic_tree.py) is a genuine fit for REPEATED queries against the
+    SAME mesh: memoize a built mesh_distance_grid keyed by (mesh, bounds, res) and reuse
+    it across calls (the cluster LOD chain already does this implicitly, build-once-
+    sample-many). That is a real but minor working-set win, not a kernel speedup.
+
+THE GENUINE SPEEDUP is ALGORITHMIC, not a vectorization or a cache trick: a VECTORIZED
+spatial index (sort-based binning + searchsorted, NO Python per-cell dicts -- those were
+also measured slower) that CULLS the O(N*F) work so each query only tests nearby
+triangles. Then the per-candidate distances are few and the brute kernel is cheap. That
+is the real next build. Everything tried so far -- Python spatial hash, full batching,
+the batched kernel, the gradient cache -- has confirmed by elimination that culling the
+work (vectorized) is the only lever left.
+
+================================================================================
+The decomposition CLOSURE: flood-fill the sign -> a full re-marchable SDF -> an
+imported mesh becomes a field and inherits field-native LOD
+================================================================================
+
+mesh_distance_grid gives a BANDED signed SDF: the band carries exact signed distance,
+but far-from-surface voxels default to +band, so the interior is wrongly positive --
+not re-marchable (marching it would find a spurious inner surface). flood_fill_sign
+fixes that without touching a single triangle:
+
+  * Flood the OUTSIDE inward from the grid boundary through {value >= 0}, a vectorized
+    iterative 6-neighbour dilation (array shifts). The NEGATIVE band shell around the
+    surface blocks the flood, so any far voxel the boundary cannot reach is ENCLOSED ->
+    interior -> set to -band. Converges in O(grid diameter) cheap passes.
+
+mesh_to_sdf_grid = mesh_distance_grid + flood_fill_sign = a FULL signed SDF with the
+surface as a true zero level set. Measured on a sphere mesh: the interior centre flips
+from +0.127 (banded, wrong) to -0.127 (filled); a far corner stays +; and re-marching
+the full SDF reconstructs the surface (closed, vertices back on the sphere to 3
+decimals). 
+
+THE PAYOFF (mesh_field_lod): an imported mesh -- one that arrived with NO field behind
+it -- is now convertible to a field ONCE, then RE-MARCHED at coarser strides to get a
+level-of-detail chain (40344 -> 10080 -> 2472 faces by striding). That is the SAME
+field-native LOD that surface_mesh gives a native field (coarsen the source, re-project,
+error read from the field), now reached by a mesh. The decomposition/composition loop is
+closed in both directions: a field projects to a mesh (marching), and a mesh lifts back
+to a field (tile the banded SDF, flood-fill the sign). Operate in field space, project
+as 3D.
+
+WHY THIS, AND NOT MORE CACHE WORK: the flood fill touches no triangles, so it sidesteps
+the memory-bandwidth wall that defeated the batched point-to-mesh kernel. It is the
+right kind of move once the cache angle is exhausted -- a structural capability, not a
+micro-optimization of a memory-bound reduction. The remaining slow step is still the
+mesh_distance_grid BUILD (the per-triangle scatter F-loop), which is memory-bound to
+batch; the genuine lever there remains a vectorized spatial index, unchanged. KEPT
+HONEST: the flood fill needs a watertight negative band shell -- a too-thin band or a
+non-watertight / nearest-normal-mis-signed mesh lets the flood leak (interior stays
+positive); the band distances are always correct regardless.
+
+================================================================================
+The POSITIVE result: a vectorized spatial-grid index that CULLS the point-to-mesh
+work -- 20-110x, exact near the surface (what batching could not give)
+================================================================================
+
+Every earlier attempt to speed point-to-mesh was a kept negative (Python spatial
+hash, full batching, the batched closest-point kernel, the gradient cache) -- all
+confirmed the same wall: the dense O(N*F) reduction is memory-bandwidth-bound and the
+brute per-triangle loop is already cache-optimal. By ELIMINATION, the only lever left
+was to do LESS WORK: a spatial index that culls the pairs. That is point_set_to_mesh_grid,
+and it is a clean WIN -- and it is all array ops, NO Python per-cell dicts (those were
+the original slow attempt):
+
+  BUILD (vectorized): bin each triangle into its CENTROID cell; argsort triangles by
+  cell id; build a CSR [start,count] per cell with bincount + cumsum.
+  QUERY (vectorized): each query reads only the (2r+1)^3 cells around its own; the
+  ragged 'gather the triangles in those cells' is the vectorized RANGES trick -- build an
+  increment array whose cumsum IS the concatenated [start,start+count) index ranges --
+  giving a flat (query, candidate-triangle) edge list; compute the exact closest-point
+  distance for those FEW edges (the batched kernel, paired) and reduce per query with
+  np.minimum.at. Signed picks the nearest triangle per query by lexsort(distance within
+  query) and signs by its face normal.
+
+This turns O(N*F) into O(N * candidates), candidates ~ (2r+1)^3 * (triangles per cell),
+which is small for a surface mesh (most cells empty). MEASURED on a 22272-face mesh:
+
+  * 11138 near-surface queries: brute 60.4s -> GRID(r=2) 3.0s = 20x, ZERO misses, max
+    error 1e-16 (machine epsilon -- EXACT for what it finds). r=1 is 0.24s, still 0 misses.
+  * 3-level cluster LOD chain error: brute surface_deviation 27.1s -> GRID 0.25s = 110x,
+    error IDENTICAL to brute (mean 0.00026 / max 0.00197), 0 misses. Now WIRED into
+    build_cluster_lod_chain, with a transparent fallback to the exact surface_deviation
+    for any level that has an out-of-reach vertex.
+
+KEPT HONEST -- APPROXIMATE BY CONSTRUCTION: a triangle sits in its centroid cell only, and
+a query sees a finite radius, so the TRUE nearest is guaranteed only within `radius` cells.
+Correct for near-surface queries on a roughly uniform mesh (decimation/LOD error, contact,
+snapping -- the regime that matters); a large triangle whose centroid is far, or a far-field
+query, can be missed, and a query whose neighbourhood is empty returns +inf (raise radius, or
+use the exact brute path). This is the right tradeoff: exact where it is used, honest about
+where it is not. The remaining mesh_distance_grid BUILD cost (per-triangle scatter) is
+untouched -- a separate, still-memory-bound F-loop.
+
+THE ARC, end to end: batching loses (memory-bound) -> the cache modules are per-query
+(no dense win) -> so CULL the work with a vectorized index -> 20-110x, exact near surface.
+The negatives were not detours; they were the elimination that pointed straight here.
+
+================================================================================
+The work-culling lesson applied to the BUILD and to surface_deviation; and FS-5
+(the surface as a single hypervector, edit = bind)
+================================================================================
+
+Three pieces, two of them the spatial-index lesson reaching the rest of the stack, one the
+last Field-First Sculpting backlog item.
+
+1. mesh_distance_grid BUILD -- now O(SURFACE AREA), not O(triangle count). The mesh->field build
+used to SCATTER a signed distance from every triangle (a Python F-loop). The same "cull, don't
+loop over everything" move that fixed the query fixes the build: mark the near-surface SHELL voxels
+(voxels holding a vertex / centroid / edge-midpoint, dilated by the band width) and answer them with
+ONE vectorized grid-culled point_set_to_mesh_grid query. method="shell" is the new default;
+method="scatter" is kept as the bit-exact, large-triangle-robust fallback. MEASURED: 1.3x at 9.6k
+faces, 2.7x at 22k, and the cost stops growing with the triangle count (it tracks surface area), so
+the win widens on large meshes. VERIFIED EQUIVALENT for every use: near-surface samples match scatter
+to 5e-17, flood-fill gives the right interior sign, the re-marched surface is closed. (Band-EDGE
+voxels, clamped to +-band and never near the zero level, may differ in which get clamped -- benign.)
+Shell query radius is 2 to bound memory (radius 3 OOMs the test suite at res 56+).
+
+2. surface_deviation(fast=True) -- the spatial index fulfils this function's OWN backlogged note. Its
+docstring had said "the genuine fix is a fully VECTORIZED spatial index (one big gather, no Python
+per-cell loop) -- a real build, backlogged." That build now exists (point_set_to_mesh_grid), so
+fast=True routes through it: exact + ~84-110x faster for the case this metric is actually used in (a
+decimated mesh vs its original, vertices near the surface), with a transparent brute fallback when
+a's vertices fall outside the index's reach (two far-apart meshes). Every caller benefits -- the QEM
+build_lod_chain for free, and build_cluster_lod_chain was consolidated to call surface_deviation
+instead of its own inline grid. The greedy splat_merge (order-dependent used[] mask) and the QEM
+vertex_quadrics loop (not a nearest-neighbour) are documented NON-fits, kept on record.
+
+   THE WHOLE PERFORMANCE ARC, now complete: field->mesh (marching, parallel), mesh decimation
+   (cluster_decimate, ~1000x vs QEM), point-to-mesh QUERY (point_set_to_mesh_grid, 20-110x), the
+   mesh->field BUILD (shell, O(surface)), and the LOD deviation metric (surface_deviation fast) are all
+   either parallel or work-culled. The lesson held everywhere: batching the dense reduction is
+   memory-bound; culling the work with a vectorized index (no Python per-cell dicts) is the win.
+
+3. FS-5 -- THE SURFACE AS A SINGLE HYPERVECTOR (edit = bind). The last Field-First Sculpting item, and
+the most literal "move the geometry into holographic space." holographic_fpefield.HolographicField
+bundles a surface's SIGNED-distance samples into ONE FPE vector: f = sum_i sdf(p_i) encode(p_i)
+(VectorFunctionEncoder). value(x) is one cosine query (negative inside, positive outside, crossing
+zero at the surface); translate(delta) moves the WHOLE surface with a SINGLE bind; union merges two
+surfaces by bundling; surface() re-extracts by marching the 0-level. (The RBF kernel is a Gaussian
+bump in the hypervector domain -- this is Gaussian splatting carried in VSA space, the FS-3 splats'
+cousin; the bandwidth is the same band-limit knob flagged for the fractal-optics work.)
+
+   POSITIVE -- THE HEADLINE IS EXACT: translate gives value_shifted(x) == value_orig(x - delta) to
+   1e-16, and the surface's +x zero-crossing moves by EXACTLY the delta, via one O(dim) binding. The
+   surface is genuinely one vector and moving/merging it is genuinely algebra.
+
+   KEPT HONEST (all measured): (a) the FPE WRAPS at the encoder bounds, so bounds must exceed
+   |sample|+|shift| or a shifted sample aliases -- the early "shift did nothing" was exactly this plus a
+   noisy-mesh-centroid measurement; the value-field test is the clean one. (b) the marched 0-level is a
+   SMOOTHED, ~15%-biased (blur shrinks a convex SDF -- recovered sphere radius ~0.666 vs 0.6),
+   not-guaranteed-watertight estimate; bandwidth is the bias knob. (c) finite DIM is a roughness noise
+   floor (sphere-radius std ~0.13 at dim 1024 -> ~0.065 at dim 4096) -- the capacity trade of carrying a
+   continuous field in a fixed vector. (d) valid only WITHIN the sampled cloud (far outside, the kernel
+   sum decays into crosstalk, reading a spurious small negative). (e) FFT-bound build/extract -- a
+   DEMONSTRATION representation; the array-backed SparseField (FS-2/FS-4) stays the performance path.
+   The value is conceptual: the surface as one vector, edit = bind. Field-First Sculpting FS-1..FS-5 done.
+
+Faculties: mesh_to_field_vector (FS-5) wired into UnifiedMind. Tests +8 (1613 -> 1621): fpefield (5),
+integration (1, FS-5 through the mind), meshbridge (1, shell==scatter+remarch), meshqem (1,
+surface_deviation fast==brute+fallback). Files: holographic_meshbridge.py (shell build default),
+holographic_meshqem.py (surface_deviation fast path), holographic_lod.py (build_cluster_lod_chain
+consolidated), holographic_fpefield.py (NEW), holographic_unified.py (mesh_to_field_vector),
+the four test files, README, NOTES, tour.

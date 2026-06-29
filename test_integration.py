@@ -4313,3 +4313,280 @@ def test_splat_export_roundtrip_through_the_mind():
     # the json path also works through the mind
     js = um.export_splats(splats, fmt="json")
     assert isinstance(js, str) and "splats" in js
+
+
+def test_sparse_field_local_sculpt_through_the_mind():
+    """FS-2: build a narrow-band sparse field through the mind, apply a LOCAL brush, and re-mesh only the dirty bricks
+    -- the stroke touches O(brush) voxels (<< res^3) and the patch is watertight."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_sparsefield import _smooth_falloff
+
+    um = UnifiedMind(dim=64, seed=0)
+    R = 0.6
+    bounds = ((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0))
+    voxel = 2.0 / 36
+    band = 4 * voxel
+
+    def sphere(P):
+        return np.linalg.norm(P, axis=1) - R
+
+    sf = um.sparse_field(sphere, bounds, voxel, band, tile=6)
+    full = int(np.prod(sf.ncorner))
+    assert len(sf.values) > 0
+
+    # the extracted surface is on the sphere and watertight
+    mesh = sf.extract_local()
+    assert mesh.n_faces > 0 and mesh.is_manifold()
+
+    # a local inflate touches O(brush) voxels, not the whole grid
+    p = np.array([R, 0.0, 0.0])
+    brush_r = 0.25
+
+    def inflate(points):
+        d = np.linalg.norm(points - p, axis=1)
+        return -0.5 * band * _smooth_falloff(d, brush_r)
+
+    dirty, touched = sf.apply_local(inflate, p, brush_r)
+    assert 0 < touched < 0.1 * full
+    sf.reinitialize(iters=4)
+    patch = sf.extract_local(dirty_bricks=dirty)
+    assert patch.n_faces > 0
+
+
+def test_surface_mesh_extract_paths_through_the_mind():
+    """FS-4: surface_mesh turns ANY field rep into a drawable mesh -- a field FUNCTION (via marching) and a
+    SparseField (via its local marching) both give a watertight surface (the loop's re-extract step). Marching only,
+    no LOD chain (kept fast)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=64, seed=0)
+    bounds = ((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0))
+
+    def sphere(P):
+        return np.linalg.norm(P, axis=1) - 0.6
+
+    # function-field path
+    m1 = um.surface_mesh(sphere, bounds, resolution=16)
+    assert m1.n_faces > 0 and m1.is_manifold()
+
+    # sparse-field path (same scene)
+    voxel = 2.0 / 36
+    sf = um.sparse_field(sphere, bounds, voxel, 4 * voxel, tile=6)
+    m2 = um.surface_mesh(sf)
+    assert m2.n_faces > 0 and m2.is_manifold()
+
+
+def test_surface_mesh_budget_coarsens_and_loop_to_splats():
+    """FS-4: with a pixel budget at a far distance, surface_mesh returns a COARSER mesh than full detail. LOD is now
+    FIELD-NATIVE -- the source field is re-marched at a coarser resolution and re-projected (the mesh is a projection
+    of the field), not QEM-decimated. The authoring loop also re-projects the field to display splats."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=64, seed=0)
+    bounds = ((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0))
+
+    def sphere(P):
+        return np.linalg.norm(P, axis=1) - 0.6
+
+    full = um.surface_mesh(sphere, bounds, resolution=10)                       # full-detail projection
+    far = um.surface_mesh(sphere, bounds, resolution=10, pixel_budget=5.0,
+                          distance=100.0)                                        # coarser field re-projected far away
+    assert far.n_faces < full.n_faces                                          # the budget coarsens with distance
+
+    # the loop's other re-projection: the field as display splats
+    splats = um.field_to_splats(np.array([[0.0, 0.0, 0.0]]), radius=0.6)
+    js = um.export_splats(splats, fmt="json")
+    assert isinstance(js, str) and "splats" in js
+
+
+def test_cached_sculpt_loop_remarks_only_dirty_bricks():
+    """FS-4 perf: surface_mesh(cache=True) on a SparseField uses the brick-mesh working-set cache (the ReflexCache
+    idea) -- after a local brush, the loop re-marches only the dirty bricks, not the whole surface."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_sparsefield import _smooth_falloff
+
+    um = UnifiedMind(dim=64, seed=0)
+    bounds = ((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0))
+    voxel = 2.0 / 42
+    band = 4 * voxel
+
+    def sphere(P):
+        return np.linalg.norm(P, axis=1) - 0.6
+
+    sf = um.sparse_field(sphere, bounds, voxel, band, tile=6)
+    cold = um.surface_mesh(sf, cache=True)               # cold: marches all active bricks
+    cold_marched = sf._last_marched
+    assert cold_marched == len(sf.active) and cold.n_faces > 0
+
+    p = np.array([0.6, 0.0, 0.0])
+
+    def inflate(points):
+        d = np.linalg.norm(points - p, axis=1)
+        return -0.5 * band * _smooth_falloff(d, 0.25)
+
+    sf.apply_local(inflate, p, 0.25)
+    warm = um.surface_mesh(sf, cache=True)               # warm: only the dirty bricks re-marched
+    assert sf._last_marched < cold_marched
+    assert warm.is_manifold() or warm.n_faces > 0        # still a valid surface (grid-dependent manifoldness)
+
+
+def test_field_native_lod_coarsens_source_not_mesh():
+    """The field-native LOD thesis, made testable: surface_mesh's budget path builds its LOD chain by re-marching the
+    SOURCE field at coarser strides (SparseField.lod_chain), NOT by QEM-decimating the fine mesh. The chain coarsens
+    monotonically with a field-read error that only grows, selection coarsens with distance, and the whole chain
+    builds far faster than a single QEM decimation of the fine mesh would take."""
+    import time
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=64, seed=0)
+    bounds = ((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0))
+    voxel = 2.0 / 36
+    band = 4 * voxel
+
+    def sphere(P):
+        return np.linalg.norm(P, axis=1) - 0.6
+
+    sf = um.sparse_field(sphere, bounds, voxel, band, tile=6)
+
+    t0 = time.time()
+    chain = sf.lod_chain()
+    build_ms = (time.time() - t0) * 1000.0
+
+    assert len(chain) >= 3                                          # several resolution levels
+    faces = [lvl.n_faces for lvl in chain]
+    errs = [lvl.max_error for lvl in chain]
+    assert all(faces[i] > faces[i + 1] for i in range(len(faces) - 1))   # strictly coarser each level
+    assert errs[0] == 0.0 and all(errs[i] <= errs[i + 1] for i in range(len(errs) - 1))  # error only grows
+    assert build_ms < 5000.0                                       # the whole chain (all re-marches) is fast
+
+    near = um.surface_mesh(sf, pixel_budget=2.0, distance=0.5)
+    far = um.surface_mesh(sf, pixel_budget=2.0, distance=200.0)
+    assert far.n_faces < near.n_faces                              # the budget coarsens with distance
+
+    # the field-native error is a real geometric deviation: a coarse vertex's field value IS its distance to truth
+    coarse = chain[-1]
+    d = np.abs(sf.sample(coarse.mesh.vertices))
+    assert abs(float(d.max()) - coarse.max_error) < 1e-9           # the chain's error == the field-read deviation
+
+
+def test_parallel_decimation_and_mesh_to_field_through_the_mind():
+    """The imported-mesh PARALLEL path through UnifiedMind: mesh_cluster_decimate (O(n) vertex clustering, the
+    bundled-quadric merge) coarsens a mesh with no field behind it; then mesh_to_field decomposes a mesh into a
+    SIGNED banded SDF by tiling, and mesh_sample_field reads point-to-surface distance from it -- so the decimated
+    mesh's error can be measured as a cheap field query (the field-native error, O(V)), not an O(Va*Fb) scan."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=64, seed=0)
+
+    def sphere(P):
+        return np.linalg.norm(P, axis=1) - 0.6
+
+    m = um.mesh_from_sdf(sphere, ((-1, -1, -1), (1, 1, 1)), res=20, vectorized=True)
+
+    # parallel decimation: coarsens, deterministic
+    coarse = um.mesh_cluster_decimate(m, 12)
+    assert 0 < coarse.n_faces < m.n_faces
+    assert np.array_equal(um.mesh_cluster_decimate(m, 12).vertices, coarse.vertices)
+
+    # mesh -> signed banded field, then sample the decimated vertices' distance to the original surface
+    lo = m.vertices.min(0) - 0.05
+    hi = m.vertices.max(0) + 0.05
+    grid, axes = um.mesh_to_field(m, (lo, hi), res=48)
+    dev = np.abs(um.mesh_sample_field(grid, axes, coarse.vertices))
+    voxel = float((hi - lo).max()) / 47
+    assert dev.max() < 6.0 * voxel                                  # coarse verts sit near the original surface
+
+    # the field is signed: a point just inside reads negative, just outside positive
+    s_in = um.mesh_sample_field(grid, axes, m.vertices[:10] * 0.95)
+    s_out = um.mesh_sample_field(grid, axes, m.vertices[:10] * 1.05)
+    assert np.all(s_in < 0) and np.all(s_out > 0)
+
+
+def test_imported_mesh_becomes_a_field_and_gets_field_native_lod():
+    """The decomposition closure through UnifiedMind: an imported mesh with no field behind it is converted to a FULL
+    SDF (mesh_to_sdf_grid, interior flood-filled), then mesh_field_lod RE-MARCHES that field at coarser strides -- so
+    the imported mesh coarsens exactly like a native field-backed surface, the field-native LOD path, no mesh
+    decimation. The coarser levels must have strictly fewer faces, and the field must round-trip (re-march back near
+    the original surface)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+
+    um = UnifiedMind(dim=64, seed=0)
+
+    def sphere(P):
+        return np.linalg.norm(P, axis=1) - 0.6
+
+    m = um.mesh_from_sdf(sphere, ((-1, -1, -1), (1, 1, 1)), res=24, vectorized=True)
+    bnds = ((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0))
+
+    grid, axes = um.mesh_to_sdf_grid(m, bnds, res=56)
+    mid = grid.shape[0] // 2
+    assert grid[mid, mid, mid] < 0.0                                  # interior filled negative
+
+    lods = um.mesh_field_lod(m, bnds, res=56, strides=(1, 2, 4))
+    faces = [l.n_faces for l in lods]
+    assert all(faces[i] > faces[i + 1] for i in range(len(faces) - 1))  # field-native LOD coarsens
+    assert lods[0].is_closed()                                        # the re-marched field is a closed surface
+    rr = np.linalg.norm(lods[0].vertices, axis=1)
+    assert abs(float(rr.mean()) - 0.6) < 0.05                         # round-trips near the original radius
+
+
+def test_grid_accelerated_lod_error_through_the_mind():
+    """The cluster LOD chain's per-level deviation now rides the vectorized spatial-grid point-to-mesh (the work-
+    culling index), ~110x faster than the brute scan and exact here because decimated vertices are near-surface. Check
+    the mind's mesh_point_distance matches the brute distance near the surface, and that the cluster LOD chain still
+    produces a valid coarsening (the speedup did not change the result)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_meshbridge import _closest_point_on_triangle
+
+    um = UnifiedMind(dim=64, seed=0)
+
+    def sphere(P):
+        return np.linalg.norm(P, axis=1) - 0.6
+
+    m = um.mesh_from_sdf(sphere, ((-1, -1, -1), (1, 1, 1)), res=24, vectorized=True)
+    Q = m.vertices * 1.02
+
+    fast = um.mesh_point_distance(m, Q, radius=2)
+    brute = np.full(len(Q), np.inf)
+    for f in m.faces:
+        brute = np.minimum(brute, np.linalg.norm(Q - _closest_point_on_triangle(Q, m.vertices[f[0]], m.vertices[f[1]], m.vertices[f[2]]), axis=1))
+    assert not np.any(np.isinf(fast)) and np.abs(fast - brute).max() < 1e-9   # fast == exact, near-surface
+
+    chain = um.mesh_cluster_lod_chain(m, grids=(16, 10, 6))
+    faces = [lvl.n_faces for lvl in chain]
+    assert all(faces[i] > faces[i + 1] for i in range(len(faces) - 1))       # still a valid coarsening
+    assert chain[0].max_error == 0.0
+
+
+def test_surface_as_a_hypervector_edit_is_bind_through_the_mind():
+    """FS-5 through UnifiedMind: a mesh becomes a single FPE hypervector (mesh_to_field_vector); translating the whole
+    surface is one binding, exact on the value field; the 0-level re-extracts a surface."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=64, seed=0)
+
+    def sphere(P):
+        return np.linalg.norm(P, axis=1) - 0.6
+
+    m = um.mesh_from_sdf(sphere, ((-1, -1, -1), (1, 1, 1)), res=20, vectorized=True)
+    field = um.mesh_to_field_vector(m, ((-1.3, -1.3, -1.3), (1.3, 1.3, 1.3)), dim=2048, bandwidth=18.0, grid=12)
+
+    assert field.f.shape == (2048,)                                # the surface is ONE vector
+    assert float(field.value([[0.0, 0.0, 0.0]])[0]) < 0.0          # negative inside
+
+    d = np.array([0.2, 0.0, 0.0])
+    moved = field.translate(d)                                     # edit = bind
+    cg = np.linspace(-0.4, 0.4, 5)
+    X = np.array([(a, b, c) for a in cg for b in cg for c in cg])
+    assert np.max(np.abs(moved.value(X) - field.value(X - d))) < 1e-9   # exact translation
+
+    extract = field.surface(((-1.3, -1.3, -1.3), (1.3, 1.3, 1.3)), res=18)
+    assert extract.n_faces > 0

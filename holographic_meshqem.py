@@ -63,7 +63,16 @@ from holographic_eulerops import collapse_edge
 
 def vertex_quadrics(mesh):
     """The per-vertex 4x4 error quadrics: Q_v = sum over incident faces of (plane plane^T), plane = [n, -n.p] with
-    unit normal n. v^T Q_v v is the summed squared distance from v to its incident planes."""
+    unit normal n. v^T Q_v v is the summed squared distance from v to its incident planes.
+
+    KEPT SCALAR ON PURPOSE (a measured negative): the obvious vectorization -- batch the planes and scatter-add the
+    outer products -- is NOT bit-identical, because the plane offset uses a dot product (n.dot(V[a])) whose vectorized
+    form (np.sum or einsum) sums in a different order and differs by ULPs. Those ULPs flip QEM's collapse-order
+    TIE-BREAKS and produce a DIFFERENT decimated mesh (verified on several meshes -- same face count, different
+    faces). This is the bind_batch lesson: a 1e-15 change in a tie-sensitive path is a real bug. The quadric build is
+    called once per decimation and is not the bottleneck (the greedy collapse loop is), so it stays in the exact
+    scalar form. Vectorizing the QEM cost loop would require a heap with incremental, order-stable updates -- the real
+    fix, deferred (the documented 'delegate decimation to meshoptimizer' negative stands)."""
     Q = [np.zeros((4, 4)) for _ in range(mesh.n_vertices)]
     V = mesh.vertices
     for f in mesh.faces:
@@ -174,15 +183,39 @@ def _point_to_triangle(p, a, b, c):
     return np.linalg.norm(ap - (vb * denom * ab + vc * denom * ac))
 
 
-def surface_deviation(mesh_a, mesh_b):
+def surface_deviation(mesh_a, mesh_b, fast=True):
     """A decimation quality metric: (mean, max) point-to-surface distance from mesh_a's vertices to mesh_b's
-    triangles -- how far b's surface sits from a's points."""
-    errs = []
-    for p in mesh_a.vertices:
-        errs.append(min(_point_to_triangle(p, mesh_b.vertices[f[0]], mesh_b.vertices[f[1]], mesh_b.vertices[f[2]])
-                        for f in mesh_b.faces))
-    errs = np.asarray(errs)
-    return float(errs.mean()), float(errs.max())
+    triangles -- how far b's surface sits from a's points.
+
+    fast=True (default): use the VECTORIZED SPATIAL INDEX (point_set_to_mesh_grid) -- the "real build" this docstring
+    used to back-log. It culls the O(Va*Fb) scan to O(Va * nearby triangles) and is exact + ~100x faster for the case
+    this metric is actually used in: a DECIMATED mesh measured against its original, whose vertices are near the
+    original surface. If any of a's vertices fall outside the grid's near-surface reach (two far-apart meshes), it
+    transparently FALLS BACK to the exact brute scan below, so the answer is always correct -- fast when it can be.
+
+    fast=False: the tight vectorized brute force -- loop once over b's faces, each face's closest point to ALL of a's
+    vertices at once, running min. The exact reference (and what the fast path falls back to).
+
+    KEPT HONEST -- the spatial index is the third acceleration attempt; the first two were MEASURED SLOWER and are
+    kept on record: (1) fully batching point-vs-all-triangles into one (Va,Fb) tensor was slower (136s on a 22k case;
+    no early exit, memory-bound); (2) a PYTHON spatial hash (per-cell triangle lists, per-query set unions) was ~0.5x
+    (the cluster LOD chain went 6.3s -> 52s) and not even bit-exact -- many tiny vectorized ops lose to brute force's
+    few large ones. Only a FULLY vectorized index (one big gather via the ranges trick, no Python per-cell loop) wins;
+    that is point_set_to_mesh_grid, and it does (the cluster LOD chain error: 27s -> 0.25s)."""
+    P = np.asarray(mesh_a.vertices, float)
+    if fast:
+        from holographic_meshbridge import point_set_to_mesh_grid
+        d = point_set_to_mesh_grid(P, mesh_b.vertices, mesh_b.faces, radius=2)
+        if not np.any(np.isinf(d)):                          # every vertex found its nearest triangle -> exact, fast
+            return float(d.mean()), float(d.max())
+        # else: some vertex is out of the index's near-surface reach -- fall through to the exact brute scan
+    from holographic_meshbridge import _closest_point_on_triangle
+    Vb = np.asarray(mesh_b.vertices, float)
+    best = np.full(len(P), np.inf)
+    for f in mesh_b.faces:
+        cp = _closest_point_on_triangle(P, Vb[f[0]], Vb[f[1]], Vb[f[2]])
+        best = np.minimum(best, np.linalg.norm(P - cp, axis=1))
+    return float(best.mean()), float(best.max())
 
 
 # =====================================================================================================
@@ -237,10 +270,92 @@ def _selftest():
     # --- determinism ---
     assert np.array_equal(qem_decimate(ico, 64).vertices, qem_decimate(ico, 64).vertices)
 
+    # --- cluster_decimate: the PARALLEL path. Coarsens, deterministic, and far faster than greedy QEM ---
+    import time as _time
+    clu = cluster_decimate(ico, 6)
+    assert 0 < clu.n_faces < ico.n_faces, "clustering must coarsen"
+    assert np.array_equal(cluster_decimate(ico, 6).vertices, clu.vertices), "clustering must be deterministic"
+    _big = _icosphere(4)                                   # V2562 F5120, enough to time the gap
+    _t = _time.time(); _c = cluster_decimate(_big, 20); _tc = _time.time() - _t
+    _t = _time.time(); _q = qem_decimate(_big, _c.n_faces); _tq = _time.time() - _t
+    assert _tc < _tq, f"clustering ({_tc*1000:.0f}ms) must beat greedy QEM ({_tq*1000:.0f}ms) on speed"
+
     print(f"holographic_meshqem selftest: ok (icosphere V{ico.n_vertices} F{ico.n_faces} -> QEM F{qem.n_faces}, "
           f"closed manifold, chi 2 preserved; surface error QEM mean {q_mean:.4f}/max {q_max:.4f} BEATS naive mean "
           f"{n_mean:.4f}/max {n_max:.4f} ({n_mean / q_mean:.2f}x mean, {n_max / q_max:.2f}x max); the quadric "
-          f"vanishes at its vertex; deterministic)")
+          f"vanishes at its vertex; deterministic. PARALLEL cluster_decimate: F{_big.n_faces} -> F{_c.n_faces} in "
+          f"{_tc*1000:.0f}ms vs greedy QEM {_tq*1000:.0f}ms ({_tq/_tc:.0f}x faster -- the bundled-quadric vertex merge))")
+
+
+def cluster_decimate(mesh, grid=16):
+    """PARALLEL decimation by vertex clustering (Rossignac-Borrel / Lindstrom) -- the O(n) counterpart of the greedy
+    qem_decimate, for an IMPORTED mesh that has no field behind it. Partition the bounding box into a grid^3 lattice
+    (the same floor-divide spatial binning the engine's tilers use), collapse every vertex in a cell to ONE
+    representative, remap faces, drop the faces that degenerate. NO greedy edge-collapse search -- every step is a
+    vectorized array op, so it is hundreds-to-thousands x faster than greedy QEM at the cost of some quality.
+
+    The representative is VSA-native: a cell's error quadric is the SUM (a bundle, superposition) of its vertices'
+    plane tensors, and the representative is that bundled quadric's minimizer (solve A x = -b), clamped to the cell so
+    the optimum cannot overshoot, falling back to the centroid where the quadric is singular (a flat cell). 'Sum of
+    plane outer products = a bundle' is the same algebra as the rest of the engine, here merging geometry.
+
+    KEPT HONEST: clustering trades quality and manifoldness for parallel speed -- a coarse grid can produce
+    non-manifold edges or merge across thin gaps (greedy qem_decimate stays the quality option; this is the fast
+    one). Determinism: pure array ops + a fixed grid, bit-stable run to run. Returns a new Mesh."""
+    V = np.asarray(mesh.vertices, float)
+    if mesh.n_faces == 0 or len(V) == 0:
+        return Mesh(np.zeros((0, 3)), [])
+    grid = int(grid)
+    lo = V.min(axis=0)
+    hi = V.max(axis=0)
+    span = np.maximum(hi - lo, 1e-12)
+    cell = np.clip(np.floor((V - lo) / span * grid).astype(int), 0, grid - 1)    # spatial bin (vectorized)
+    cell_id = (cell[:, 0] * grid + cell[:, 1]) * grid + cell[:, 2]
+    uniq, inv = np.unique(cell_id, return_inverse=True)                          # inv[v] = representative index
+    n_rep = len(uniq)
+
+    centroid = np.zeros((n_rep, 3))
+    cnt = np.zeros(n_rep)
+    np.add.at(centroid, inv, V)
+    np.add.at(cnt, inv, 1.0)
+    centroid = centroid / cnt[:, None]                                           # per-cell centroid (the fallback)
+
+    Fa = np.array([f[:3] for f in mesh.faces], dtype=int)                        # triangles carry the planes
+    a3, b3, c3 = V[Fa[:, 0]], V[Fa[:, 1]], V[Fa[:, 2]]
+    fn = np.cross(b3 - a3, c3 - a3)
+    fln = np.linalg.norm(fn, axis=1)
+    fvalid = fln > 1e-12
+    fnrm = np.zeros_like(fn)
+    fnrm[fvalid] = fn[fvalid] / fln[fvalid, None]
+    plane = np.concatenate([fnrm, -np.sum(fnrm * a3, axis=1)[:, None]], axis=1)   # (nf,4) each face's plane [n, -n.a]
+    K = plane[:, :, None] * plane[:, None, :]                                     # (nf,4,4) plane outer plane
+    K[~fvalid] = 0.0
+    faces_cells = inv[Fa]                                                         # the representative cell of each face vertex
+    Qc = np.zeros((n_rep, 4, 4))
+    for k in range(3):
+        np.add.at(Qc, faces_cells[:, k], K)                                      # per-cell quadric = BUNDLE of plane tensors
+    # (this vectorized quadric is safe here -- unlike greedy QEM, clustering has no collapse-order tie-breaks for
+    #  a ULP difference to flip, so the bind_batch caveat does not apply.)
+    A = Qc[:, :3, :3]
+    bvec = Qc[:, :3, 3]
+    rep = centroid.copy()
+    dets = np.linalg.det(A)
+    ok = np.abs(dets) > 1e-10
+    if ok.any():
+        rep[ok] = np.linalg.solve(A[ok], -bvec[ok][..., None])[..., 0]          # minimizer of the bundled quadric
+
+    cz = uniq % grid                                                            # decode each cell's lattice index
+    cy = (uniq // grid) % grid
+    cx = uniq // (grid * grid)
+    cell_lo = lo + np.stack([cx, cy, cz], axis=1) * (span / grid)
+    rep = np.clip(rep, cell_lo, cell_lo + span / grid)                          # keep the optimum inside its cell
+
+    mapped = faces_cells                                                        # faces already remapped to representatives
+    keep = (mapped[:, 0] != mapped[:, 1]) & (mapped[:, 1] != mapped[:, 2]) & (mapped[:, 0] != mapped[:, 2])
+    mapped = mapped[keep]                                                       # drop collapsed (degenerate) faces
+    if len(mapped):
+        mapped = np.unique(mapped, axis=0)                                      # drop exact duplicate faces
+    return Mesh(rep, [tuple(int(x) for x in row) for row in mapped])
 
 
 if __name__ == "__main__":

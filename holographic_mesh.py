@@ -204,24 +204,37 @@ class Mesh:
         proportional to the face area (so big faces weigh more), accumulated at each of the face's vertices,
         then normalised per vertex. Newell's method is robust for non-planar polygons (a slightly bent quad),
         which is why it is preferred over a single cross product. Deterministic: faces are summed in face
-        order. A continuous (TOL) value that feeds no decision."""
+        order. A continuous (TOL) value that feeds no decision. VECTORIZED for all-triangle meshes (the common
+        case -- every marched/subdivided mesh): Newell's cross-terms over all faces at once, then a scatter-add to
+        vertices in face order (bit-identical to the loop); falls back to the per-face loop for polygon meshes."""
         V = self.vertices
         acc = np.zeros((len(V), 3), dtype=float)
-        for f in self.faces:
-            n = len(f)
-            # Newell's normal: sum over edges of the cross-term; magnitude ~ 2 * area.
-            nx = ny = nz = 0.0
-            for k in range(n):
-                cur = V[f[k]]
-                nxt = V[f[(k + 1) % n]]
-                nx += (cur[1] - nxt[1]) * (cur[2] + nxt[2])
-                ny += (cur[2] - nxt[2]) * (cur[0] + nxt[0])
-                nz += (cur[0] - nxt[0]) * (cur[1] + nxt[1])
-            fn = np.array([nx, ny, nz])
-            for vi in f:
-                acc[vi] += fn
+        faces = self.faces
+        if faces and all(len(f) == 3 for f in faces):
+            F = np.asarray(faces, dtype=int)                  # (nf, 3)
+            P = V[F]                                          # (nf, 3, 3): per-face vertex positions
+            cur = P
+            nxt = P[:, [1, 2, 0], :]                          # the next vertex around each triangle
+            cx, cy, cz = cur[:, :, 0], cur[:, :, 1], cur[:, :, 2]
+            nxx, nyy, nzz = nxt[:, :, 0], nxt[:, :, 1], nxt[:, :, 2]
+            fnx = np.sum((cy - nyy) * (cz + nzz), axis=1)      # Newell's normal, summed over the 3 edges
+            fny = np.sum((cz - nzz) * (cx + nxx), axis=1)
+            fnz = np.sum((cx - nxx) * (cy + nyy), axis=1)
+            fn = np.stack([fnx, fny, fnz], axis=1)            # (nf, 3)
+            np.add.at(acc, F.ravel(), np.repeat(fn, 3, axis=0))   # face-order accumulation (matches the loop)
+        else:
+            for f in faces:
+                n = len(f)
+                nx = ny = nz = 0.0
+                for k in range(n):
+                    cur = V[f[k]]; nxt = V[f[(k + 1) % n]]
+                    nx += (cur[1] - nxt[1]) * (cur[2] + nxt[2])
+                    ny += (cur[2] - nxt[2]) * (cur[0] + nxt[0])
+                    nz += (cur[0] - nxt[0]) * (cur[1] + nxt[1])
+                fn = np.array([nx, ny, nz])
+                for vi in f:
+                    acc[vi] += fn
         norms = np.linalg.norm(acc, axis=1, keepdims=True)
-        # a vertex with zero accumulated normal (degenerate) gets a default up-normal rather than nan
         out = np.where(norms > 1e-12, acc / np.where(norms > 1e-12, norms, 1.0), np.array([0.0, 0.0, 1.0]))
         if store:
             self.normals = out

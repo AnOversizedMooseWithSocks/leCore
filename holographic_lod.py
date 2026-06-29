@@ -49,7 +49,7 @@ import math
 
 import numpy as np
 
-from holographic_meshqem import qem_decimate, surface_deviation
+from holographic_meshqem import qem_decimate, surface_deviation, cluster_decimate
 
 # one level of the chain: the mesh, its face count, and how far it strayed from the original (mean, max)
 LODLevel = namedtuple("LODLevel", ["mesh", "n_faces", "mean_error", "max_error"])
@@ -67,6 +67,31 @@ def build_lod_chain(mesh, targets=(0.5, 0.25, 0.125)):
             continue                                       # no coarsening achieved; skip degenerate level
         coarse = qem_decimate(mesh, tf)
         mean_e, max_e = surface_deviation(coarse, mesh)
+        chain.append(LODLevel(coarse, coarse.n_faces, float(mean_e), float(max_e)))
+    return chain
+
+
+def build_cluster_lod_chain(mesh, grids=(48, 24, 12)):
+    """The PARALLEL counterpart of build_lod_chain, for an IMPORTED mesh with no field behind it: vertex-cluster the
+    mesh (cluster_decimate) at decreasing grid resolutions, measuring each level's surface deviation from the
+    ORIGINAL. Each level is O(n) vectorized array ops (no greedy edge-collapse search), so the whole chain builds in
+    a fraction of the time the QEM chain takes -- the trade is quality and possibly manifoldness (see
+    cluster_decimate). Returns a fine->coarse list of LODLevel; the first level is the original (zero error).
+
+    Use build_lod_chain (QEM) when quality matters and the mesh is small; build_cluster_lod_chain when the mesh is
+    large and speed matters; or convert the mesh to a field (mesh_to_sdf) and use the FIELD-NATIVE LOD (re-march
+    coarser) when you want to leave mesh-land entirely. KEPT NEGATIVE: a level's error is NOT monotonic in grid
+    resolution -- cell alignment with the surface matters, so a coarser grid can land representatives closer; the
+    chain is monotone in FACE COUNT, not in error. SPEED: the per-level error uses surface_deviation's fast path (the
+    vectorized spatial index) -- ~110x faster than the brute scan and exact here, because a decimated mesh's vertices
+    are near the original surface; surface_deviation falls back to the exact scan for any out-of-reach vertex."""
+    base_faces = mesh.n_faces
+    chain = [LODLevel(mesh, base_faces, 0.0, 0.0)]
+    for g in grids:
+        coarse = cluster_decimate(mesh, g)
+        if coarse.n_faces == 0 or coarse.n_faces >= chain[-1].n_faces:
+            continue                                       # this grid bought no coarsening; skip
+        mean_e, max_e = surface_deviation(coarse, mesh)    # fast=True: grid-culled, near-surface-exact, brute fallback
         chain.append(LODLevel(coarse, coarse.n_faces, float(mean_e), float(max_e)))
     return chain
 
