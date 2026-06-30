@@ -84,6 +84,13 @@ class VectorFunctionEncoder:
             ScalarEncoder(self.dim, lo=lo, hi=hi, seed=seed * 97 + k + 1, kernel=kernel, bandwidth=self.bandwidth[k])
             for k, (lo, hi) in enumerate(self.bounds)
         ]
+        self._half_len = self.dim // 2 + 1
+        self._axis_half_phases = [ax.phases[:self._half_len] for ax in self.axes]
+        self._rfft_weights = np.ones(self._half_len)
+        if self._half_len > 1:
+            self._rfft_weights[1:] = 2.0
+            if self.dim % 2 == 0:
+                self._rfft_weights[-1] = 1.0
 
     def encode(self, point):
         """The n-D FPE vector for `point` = (x_0, ..., x_{n-1}): bind the per-axis FPE encodings.
@@ -112,13 +119,13 @@ class VectorFunctionEncoder:
         return pts
 
     def _point_spectra(self, pts):
-        spectrum = np.ones((pts.shape[0], self.dim), dtype=np.complex128)
+        spectrum = np.ones((pts.shape[0], self._half_len), dtype=np.complex128)
         for k, ax in enumerate(self.axes):
             values = pts[:, k]
             warp_x = getattr(ax, "_warp_x", None)
             if warp_x is not None:
                 values = np.interp(values, warp_x, ax._warp_u)
-            spectrum *= np.exp(1j * ax.scale * values[:, None] * ax.phases[None, :])
+            spectrum *= np.exp(1j * ax.scale * values[:, None] * self._axis_half_phases[k][None, :])
         return spectrum
 
     def encode_many(self, points):
@@ -129,7 +136,7 @@ class VectorFunctionEncoder:
         bind loop would do after FFTing each axis code.
         """
         spectrum = self._point_spectra(self._coerce_points(points))
-        out = np.real(np.fft.ifft(spectrum, axis=1))
+        out = np.fft.irfft(spectrum, n=self.dim, axis=1)
         norms = np.linalg.norm(out, axis=1)
         nz = norms > 0
         out[nz] /= norms[nz, None]
@@ -157,7 +164,7 @@ class VectorFunctionEncoder:
             weights_arr = np.asarray(weights, float).ravel()
             if weights_arr.shape[0] != len(pts):
                 raise ValueError("weights must match the number of points")
-        spectrum = np.zeros(self.dim, dtype=np.complex128)
+        spectrum = np.zeros(self._half_len, dtype=np.complex128)
         for start in range(0, len(pts), _BUNDLE_ENCODE_BATCH_ROWS):
             end = min(start + _BUNDLE_ENCODE_BATCH_ROWS, len(pts))
             chunk = self._point_spectra(pts[start:end])
@@ -166,7 +173,7 @@ class VectorFunctionEncoder:
                 spectrum += chunk.sum(axis=0)
             else:
                 spectrum += chunk_weights @ chunk
-        return np.real(np.fft.ifft(spectrum))
+        return np.fft.irfft(spectrum, n=self.dim)
 
     def query(self, function, point):
         """Evaluate the represented function at `point`: cosine(function, encode(point)) reads
@@ -186,7 +193,7 @@ class VectorFunctionEncoder:
         fnorm = np.linalg.norm(fn)
         if fnorm == 0:
             return np.zeros(pts.shape[0], dtype=float)
-        fn_spectrum = np.conj(np.fft.fft(fn))
+        fn_spectrum = np.conj(np.fft.rfft(fn)) * self._rfft_weights
         out = np.empty(pts.shape[0], dtype=float)
         step = max(1, int(chunk_size))
         for start in range(0, pts.shape[0], step):
