@@ -5363,3 +5363,106 @@ def test_solidify_through_unified_mind():
     um = UnifiedMind(dim=256, seed=0)
     solid = um.solidify_mesh(grid(5, 5), 0.1)
     assert solid.validate_topology()["watertight"]
+
+
+def test_nystrom_scalable_embedding_through_unified_mind():
+    """The scalable Nystrom embedding composes through the mind and matches the dense spectral basis on
+    separable data while only forming an N x m block (SCALE-1)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_nystrom import dense_embedding, subspace_alignment
+    um = UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+    P = np.vstack([rng.normal(c, 0.25, (140, 3)) for c in ([0, 0, 0], [5, 0, 0], [0, 5, 0])])
+    val, Phi = um.nystrom_embedding(P, n_basis=3, m=48, sigma=1.0)
+    assert Phi.shape == (len(P), 3)
+    _, Pd = dense_embedding(P, n_basis=3, sigma=1.0)
+    assert subspace_alignment(Pd, Phi) > 0.9
+    lm = um.spectral_landmarks(P, 12)
+    assert len(np.unique(lm)) == 12                           # distinct coverage landmarks
+
+
+def test_holo_octree_through_unified_mind():
+    """The capacity-adaptive 3D octree composes through the mind: splits on capacity, bidirectional lookup,
+    and beats a single overloaded wave at scale (TILE3D-1)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_octree import single_wave_recall
+    um = UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+    b = (np.array([-1., -1, -1]), np.array([1., 1, 1]))
+    pts = rng.uniform(-1, 1, (800, 3))
+    tree = um.holo_octree(b, points=pts, capacity=48, dim=1024, bandwidth=8.0)
+    assert tree.n_vectors() > 1 and len(tree.all_points()) == 800
+    # forward/backward lookup
+    p = tree.all_points()[0]
+    leaf = tree._leaf_for(p)
+    assert np.all(p >= leaf.lo - 1e-9) and np.all(p <= leaf.hi + 1e-9)
+    # the octree separates stored from empty where a single wave at this N cannot
+    ps = pts[rng.choice(800, 30, replace=False)]; pe = rng.uniform(-1, 1, (30, 3))
+    t_auc = np.mean(np.array([tree.query(q) for q in ps])[:, None] > np.array([tree.query(q) for q in pe])[None, :])
+    sw_s = single_wave_recall(pts, ps, dim=1024, bandwidth=8.0)
+    sw_e = single_wave_recall(pts, pe, dim=1024, bandwidth=8.0)
+    s_auc = np.mean(sw_s[:, None] > sw_e[None, :])
+    assert t_auc > s_auc
+
+
+def test_void_synthesis_through_unified_mind():
+    """Void-gap program synthesis composes through the mind: synthesize a reachable goal, abstain on an
+    unreachable one, and blend two programs across domains (SYNTH-1)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_orchestrator import chain_signature
+    um = UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+    L = rng.standard_normal((10, 256)); L /= np.linalg.norm(L, axis=1, keepdims=True)
+    goal = chain_signature(L[[2, 5, 7]])
+    res = um.synthesize_program(L, goal, threshold=0.85)
+    assert res["status"] == "synthesized" and res["coherence"] >= 0.85
+    junk = rng.standard_normal(256); junk /= np.linalg.norm(junk)
+    assert um.synthesize_program(L, junk, threshold=0.85)["status"] == "abstain"
+    # registry hit short-circuits synthesis
+    assert um.fill_capability_gap(L, goal, registry_hit=0.95)["status"] == "registry"
+    # blend two programs -> coherent to both
+    gA = chain_signature(L[[1, 3]]); gB = chain_signature(L[[6, 8]])
+    blend = um.blend_programs(gA, gB)
+    assert float(blend @ gA) / (np.linalg.norm(blend) * np.linalg.norm(gA)) > 0.4
+    assert float(blend @ gB) / (np.linalg.norm(blend) * np.linalg.norm(gB)) > 0.4
+
+
+def test_agent_through_unified_mind():
+    """The upgraded agent composes through the mind: reward/pain affect, pain reflex, and void-gap action
+    synthesis that abstains on an unreachable goal (AGENT-1)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_ai import random_vector
+    um = UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(123)                          # independent of the agent's internal seed=0
+    ag = um.agent(["N", "S", "E", "W"], dim=512, seed=0)
+    s = random_vector(512, rng)
+    ag.reward(s, "E", 1.0).pain(s, "N", 1.0)
+    d = ag.decide(s)
+    assert d["source"] == "value" and d["action"] == "E" and "N" in d["avoided"]
+    # void gap: reachable goal -> plan; unreachable -> abstain
+    goal = ag.program_signature(["E", "W"])
+    assert ag.decide(random_vector(512, rng), goal_vec=goal)["source"] == "synthesized"
+    assert ag.decide(random_vector(512, rng), goal_vec=random_vector(512, rng))["source"] == "abstain"
+
+
+def test_drives_through_unified_mind():
+    """Homeostatic drives schedule faculties through a nested process via the mind: the drive policy matches the
+    best fixed priority without being told it and beats random scheduling (DRIVE-1)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_drives import make_nested_process
+    um = UnifiedMind(dim=256, seed=0)
+    ds = um.drive_system()
+    assert set(ds.levels) == {"clarity", "understanding", "coverage", "energy"}
+    drive_bal, random_bal = [], []
+    for s in range(8):
+        noise = 1.6 + 1.2 * ((s % 3) / 2); pr = 0.3 + 0.5 * ((s % 5) / 4)
+        root, cb = make_nested_process(depth=4, branching=2, dim=80, noise=noise, p_recognizable=pr, seed=s)
+        drive_bal.append(um.drive_process(root, cb, energy=22, policy="drive", seed=s)["balance"])
+        root2, cb2 = make_nested_process(depth=4, branching=2, dim=80, noise=noise, p_recognizable=pr, seed=s)
+        random_bal.append(um.drive_process(root2, cb2, energy=22, policy="random", seed=s)["balance"])
+    assert np.mean(drive_bal) >= np.mean(random_bal) + 0.05   # adaptive scheduling beats naive on average

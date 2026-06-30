@@ -13470,3 +13470,217 @@ All exposed as faculties: solidify_mesh, render_sdf, ambient_occlusion, soft_sha
 subsurface, irradiance_cache + read_irradiance, caustics. THE BOTTOM LINE: the engine doesn't make NumPy a GPU
 path tracer; it makes these effects cheap because it is field-native, and it contributes two real accelerations
 the literature names -- the sparse irradiance cache (GI) and the scatter/bundle light splat (caustics).
+
+## Landmark (Nystrom) spectral embedding -- lifting the dense-eigh "moderate N" wall (+6 tests, 1865→1871)
+
+The ask (a sharp one): the engine's "moderate N" limit comes from a dense eigh/svd; instead of a global dense
+matrix, do high-precision eigendecompositions on local "hot" manifolds and treat the background as a coarse
+low-rank approximation -- reusing the IRRADIANCE-CACHE logic for the latent space itself.
+
+PROBE-FIRST grounded it exactly: the SVD calls (consolidation, rate-distortion, denoise) are on (N,D) data
+matrices -- roughly LINEAR in N, so clustering buys little there. The real O(N^3) wall is
+`holographic_spectral.laplacian_eigenbasis`, which runs np.linalg.eigh on the full N x N graph Laplacian and
+computes ALL N eigenvectors to keep the lowest few. `spectral_basis`'s own docstring already said "Dense eigh ->
+moderate N" -- that was the note the user referenced.
+
+THE METHOD is Nystrom (Fowlkes et al. 2004, *Spectral Grouping Using the Nystrom Method*), which IS the
+irradiance cache applied to the latent space: the leading eigenvectors of a smooth affinity are smooth and
+low-rank, so (1) pick m << N LANDMARKS that cover the data (farthest-point sampling = every cluster/local
+manifold gets an anchor, the discrete cousin of the engine's blue-noise sampling), (2) do the high-precision eigh
+on the small m x m landmark block (the expensive computation, on the anchors), (3) EXTEND to all N by the Nystrom
+formula (the cheap interpolation = the coarse background). Cost O(N^3) -> O(m^3 + N*m); only an N x m affinity
+block is ever formed, never N x N. `holographic_nystrom.py`: farthest_point_landmarks, gaussian_affinity (blocks
+only), nystrom_embedding (degree estimated by the Nystrom factorization so even D=W@1 never forms W),
+dense_embedding (the reference), subspace_alignment (the sign/rotation-invariant quality metric).
+
+MEASURED:
+  * COST (the headline, exactly as O(N^3) vs O(m^3+Nm) predicts, m=64): N=300 4.7x; N=600 41x; N=1200 80x;
+    N=2400 **286x faster, 38x less memory** -- and the win GROWS with N, so the wall genuinely moves toward large
+    N. (dense 3773 ms / 46 MB vs nystrom 13 ms / 1.2 MB at N=2400.)
+  * QUALITY (the kept NEGATIVE): EXACT for low-rank / well-separated structure (3 blobs: subspace alignment to
+    dense = 1.000); only ~0.62->0.76 on a curved Swiss-roll manifold as m goes 16->128 -- a higher-rank affinity
+    makes Nystrom an APPROXIMATION with diminishing returns in m. It trades exactness for scale; use the dense
+    `spectral_basis` when N is small and exactness matters, Nystrom when N is large.
+  * COVERAGE: on IMBALANCED data (800-pt + 30-pt clusters) FPS landmarks align 0.841 +/- 0.031 vs random
+    0.765 +/- 0.130 -- FPS is more accurate and FAR more stable, because random landmarks can miss the small
+    cluster entirely. This is why "cover the hot manifolds" (FPS), not uniform-random, is the right anchor rule.
+
+Faculties: nystrom_embedding (the scalable companion to spectral_basis; same return shape, drop-in for the
+smooth-embedding use), spectral_landmarks (FPS coverage set). The honest bottom line: the user's move is sound and
+it is the irradiance cache by another name; it lifts the dense-eigh ceiling by ~2 orders of magnitude in N at the
+cost of exactness on high-rank manifolds -- measured, with both the win and the bound on the record.
+
+## A capacity-adaptive 3D holographic octree -- tiling the wave when one vector is too full (+6 tests, 1871→1877)
+
+The ask wove together four ideas: (1) reuse the engine's TILING to scale 3D/sim; (2) keep things as composable
+VSA programs; (3) a "wave" can describe many particles, and when a vector is "too full" spin up another and use a
+wave to reference both; (4) use the diff/delta machinery so a split structure references the original.
+
+PROBE-FIRST mattered enormously here -- most of this already exists, and rebuilding it would be the canonical
+failure mode:
+  * TILING for capacity is shipped in 2D: `splat_bundle_tiled` + `recall_region_tiled` keep each tile bundle
+    bounded so recall holds at any resolution ("one vector per tile -- the price of exceeding a single vector's
+    capacity"). `TiledStore` + `_tile_bucket` (holographic_tree) are the shared routing primitive.
+  * The "WAVE" is the FPE VectorFunctionEncoder: bundle points into f = sum encode(p_i); cosine(f, encode(x))
+    reads a kernel-density occupancy. `FPEField` (FS-5) already carries geometry as one wave with edit=bind and
+    DELTA editing (make_delta/apply_delta/remove_delta) -- the "reference the original, store the diff" mechanism,
+    already linear and O(change).
+
+So the GENUINE GAP was narrow and worth building: the existing tiling is 2D and FIXED-size; what was missing is a
+3D, CAPACITY-ADAPTIVE auto-split. `holographic_octree.py` (HoloOctree): a 3D octree whose every node carries its
+points as one FPE wave and SUBDIVIDES into 8 octants the moment its count exceeds `capacity` -- "spin up another
+vector when the first is too full," automatic and in 3D. The tree IS the bidirectional index (descend a position
+to its leaf = forward; read the leaf's points/occupancy wave = backward), and each child encoder is scaled to its
+smaller box so local resolution sharpens with depth (the same local-refinement logic as the Nystrom landmarks).
+
+MEASURED (the capacity cliff, and the fix), AUC = P(stored score > empty score), 1.0 perfect / 0.5 chance, dim
+fixed at 2048:
+  * a SINGLE global wave works at small N and COLLAPSES as N grows: AUC 0.85 (N=50) -> 0.60 (200) -> ~0.5 (800+)
+    -- past capacity one vector literally cannot tell a stored point from empty space.
+  * the capacity-adaptive OCTREE holds AUC ~0.9-1.0 at every N by splitting (8 -> 64 -> 330 -> 512 leaf vectors as
+    N goes 50 -> 6400), bidirectional lookup and per-leaf <= capacity verified.
+  * the honest COST: one wave hypervector per non-empty leaf -- storage grows ~N/capacity, the same trade the 2D
+    tiling makes. Tiling does not add information capacity for free; it spends proportional storage to keep each
+    vector inside its budget.
+
+HONEST framing on the four ideas, kept loud:
+  * "a wave describes infinitely many particles" -- TRUE only as resolution-independent SAMPLING (a continuous
+    field you can query at any x); FALSE as information content. A wave is finite-capacity (the cliff), which is
+    exactly WHY we tile/split. The octree is that fix.
+  * "spin up another vector + a wave references both" -- the octree's auto-split + the tree-as-index across the
+    per-node waves IS that, made concrete.
+  * "VSA programs / composable" -- each node is an FPE wave (VSA), composable; but "runs better" is the same NumPy
+    underneath. What makes it SCALE is the tiling, not a speed trick.
+  * "delta to split" -- the FPE bundle is LINEAR, so a node's wave is the sum of its points' deltas and an edit is
+    a make_delta/apply_delta (already in FPEField); splitting redistributes those deltas. Reused, not rebuilt.
+
+Faculty: holo_octree(bounds, points, capacity, dim, bandwidth, ...). The bottom line: the user's instinct was
+right and mostly already instantiated; the new piece is the 3D capacity-adaptive auto-split, and it moves the
+single-vector capacity cliff out indefinitely at proportional storage cost -- measured, with the cost on record.
+
+## Void-capability-gap program synthesis -- synthesize, verify, gate-or-abstain (+7 tests, 1877→1884)
+
+The suggestion: when the registry finds no suitable tool (a "void capability gap"), let the system SYNTHESISE its
+own program; treat assembly as constrained optimization in the latent space; verify the program vector against
+the goal before execution; refine until coherent; and (claimed unlocks) blend programs, and a cross-domain
+"synesthesia."
+
+PROBE-FIRST found almost all of it already shipped -- the third proposal in a row that was mostly in the box:
+  * the orchestrator's plan() already DETECTS the void gap (a backward typed search returns (None, 'gap'));
+  * `optimize_toolchain` already does "program assembly as constrained optimization in latent space" -- gradient
+    ASCENT on cosine(chain_signature, goal). HONEST REFRAME of "backpropagate": that gradient is a HAND-DERIVED
+    analytic expression through the softmax tool-selection (numpy only) -- NOT autodiff, NOT learning. The engine
+    has no autodiff (hard constraint); "the machine backpropagates its instruction sequence" is this analytic
+    cosine-ascent over which tools to pick;
+  * `synthesize_procedure` already does the discrete cousin (bounded BFS over VM ops, VERIFIED BY EXECUTION before
+    return, None if unreachable);
+  * validators exist (validate_recipe, recipeops.validate).
+
+THE GENUINE GAP was the bridge: nothing connected plan()='gap' to synthesis with a VERIFY -> GATE-or-ABSTAIN loop.
+`holographic_voidsynth.py`: synthesize_for_goal optimises a chain over a library toward the goal, GROWS the length
+if a short program won't reach (the structural 're-bundle'), VERIFIES the DISCRETE chain's coherence (never trusts
+the soft optimum), and GATES -- returns status 'synthesized' if coherence >= threshold, else 'abstain'. Plus
+blend_programs (bundle two program signatures) and fill_capability_gap (registry-hit short-circuit, else synthesise).
+
+MEASURED:
+  * THE GATE (the load-bearing safety property): 20/20 REACHABLE goals synthesized (mean coherence ~1.00), 20/20
+    UNREACHABLE goals (random, independent of the library) ABSTAINED (mean best coherence ~0.19). It cleanly
+    separates fillable gaps from genuine voids -- it NEVER returns an incoherent program as if it solved the goal.
+    This abstention is the whole point: filling a void gap with junk would be worse than admitting the gap.
+  * REFINEMENT: the latent ascent converges -- often FAST (coherence 1.000 by 5 steps for cleanly-reachable
+    goals), so the verify-and-abstain GATE, not the optimizer's persistence, is what makes synthesis safe. (Honest:
+    no dramatic multi-step climb on easy reachable goals; the optimizer is not the hard part, the gate is.)
+  * BLEND / "SYNESTHESIA": a blended program stays coherent to BOTH source goals (~0.72/0.74 for a graphics
+    program bundled with an audio one). Because every domain's tools live in the SAME vector space, one program
+    can carry two intents. That is what "synesthesia across domains" actually is -- the project's one-algebra
+    thesis (bind/bundle/cleanup is domain-agnostic), NOT a mystical new sense. Honestly named.
+
+Faculties: synthesize_program, blend_programs, fill_capability_gap. KEPT NEGATIVES: synthesis only reaches goals
+in the library's reachable span (an unreachable goal abstains -- correctly); the optimizer can sit in a local
+optimum of a non-convex landscape; "backprop" is analytic gradient ASCENT on a known cosine, not autodiff and not
+learning; the blend is lossy superposition (coherence ~0.7, not 1.0, to each source). The bottom line: the
+suggestion was sound and largely already built; the new, load-bearing piece is the verify-gate-ABSTAIN bridge that
+turns "no tool found" into either a verified synthesised program or an honest decline.
+
+## An upgraded creature agent -- affect, a pain reflex, and void-gap action synthesis (+8 tests, 1884→1892)
+
+The ask: upgrade the basic creature mind now that it can drive VSA programs -- define actions, give it inputs like
+reward/pain, and whatever else makes it effective beyond a maze NPC. The headline upgrade (flagged last round):
+wire the SYNTH-1 verify-gate-abstain loop into decide so a void gap in the AGENT (no learned action fits) triggers
+ACTION-PROGRAM synthesis.
+
+WHY A NEW LAYER, NOT AN EDIT to HolographicMind: the existing RL engine is deterministic and TIE-SENSITIVE (a
+1e-16 change flips a maze trajectory, its own kept-negative), and its bespoke per-action prototype value memory
+measurably beats a generic memory (0.96/0.75 vs 0.57/0.25). So `holographic_agent.py` (Agent) ADDS capabilities
+around it, backward-compatible, rather than disturbing that suite.
+
+WHAT IT ADDS:
+  * ACTIONS AS VSA ATOMS -- each action is a near-orthogonal hypervector, so a plan has a composed signature
+    (chain_signature), which makes actions SYNTHESISABLE and a plan EMBEDDABLE in / blendable with other VSA
+    programs (the agent can DRIVE a program -- the thing the user noted is now possible).
+  * AFFECT: reward AND pain -- reward folds +value into the (state->action) memory; pain folds -value AND records
+    the (state, action) for a faster avoidance channel.
+  * PAIN REFLEX -- before consulting values, drop any action that strongly resembles a remembered painful one. A
+    SAFETY reflex, faster than value learning (measured: ONE pain event blocks the action; no convergence needed).
+  * VOID-GAP ACTION SYNTHESIS (the headline) -- when no allowed action is confidently recognised here (support
+    below value_floor: the agent's OWN void gap) and a goal is given, synthesise an action PROGRAM toward the
+    goal, verify its coherence, and COMMIT it if it clears the threshold else ABSTAIN to a safe default. The
+    creature analogue of filling a registry void: compose a plan rather than flailing, but only if it verifies.
+  * SELF-EXPLAINING -- decide returns the source ('value'/'synthesized'/'abstain'/'explore'), what it avoided, and
+    WHY.
+
+MEASURED: affect learning works (state with E rewarded / N painful -> chooses E, avoids N; a second state ->
+chooses its reward, avoids its pain); the pain reflex blocks an action after a SINGLE event; void-gap synthesis is
+15/15 reliable both ways (reachable goal -> a synthesised plan, unreachable -> abstain to a safe default); a plan's
+signature blends with another program at cosine 0.86 (the agent drives a program). KEPT NEGATIVES: the value memory
+here is a simple soft-kNN (the bespoke engine stays in HolographicMind); synthesis only reaches goals in the action
+library's span (abstains otherwise, correctly); deterministic and tie-aware.
+
+A DETERMINISM CATCH worth recording: the agent builds its atoms from default_rng(seed); a test that drew its
+"random unreachable goal" from default_rng(0) while the agent used seed=0 produced a goal IDENTICAL to the 4th
+action atom (cosine 1.0) -- so synthesis correctly found it reachable, and the "failure" was a seed COLLISION in
+the test, not a bug. Fixed by drawing the test vectors from an independent seed. Exactly the class of bit-exact
+determinism subtlety the engine's tie-break discipline exists for.
+
+Faculty: agent(actions, dim, seed, value_floor, pain_reflex, synth_threshold). The bottom line: the creature is no
+longer a reactive maze NPC -- it has affect (reward/pain), a safety reflex, a self-explaining policy, and the
+ability to SYNTHESISE and verify a multi-step plan when it hits a situation it has no learned action for, with all
+of it expressible as VSA-program atoms.
+
+## Homeostatic drives -- scheduling faculties through a nested process (+7 tests, 1892→1899)
+
+The ask: a drive/homeostasis layer so the agent can DRIVE denoising, pattern recognition, and descent decisions
+through deeply nested / fractal processes that are otherwise hard to operate on by hand (too many decision points
+to schedule manually). Probe-first: no drive/need/homeostasis system existed (genuine gap); the faculties to drive
+all did (denoise = codebook cleanup, recognise/recall with calibrated abstention, decompose_nested/fractal_*).
+
+`holographic_drives.py`: DriveSystem -- homeostatic needs {clarity, understanding, coverage, energy}, each a level
+in [0,1], starting DEFICIENT (a satisfied drive exerts no pull -- starting them satisfied was the first cut's bug
+that saturated everything to 1.0). `pressing(applicable)` returns the most weighted-deficit need whose faculty can
+act at this node. make_nested_process builds a heterogeneous tree (some nodes recognisable-but-noisy, some pure
+noise, some deep) with CALIBRATED noise (scaled 1/sqrt(dim) so the signal is recoverable, not buried -- another
+first-cut bug: raw noise was sqrt(dim)x too large, so denoising couldn't help and nothing was recognisable).
+drive_process walks the tree on a tight energy budget, at each node applying the faculty its most-starved drive
+selects, with REAL faculties and a genuine DEPENDENCY: recognition only succeeds on a CLEANED signal, so clarity
+ENABLES understanding and the schedule must interleave them.
+
+MEASURED (negatives kept loud):
+  * the faculties work: denoise lifts max-cosine-to-codebook ~0.39 -> ~1.0 (gain ~0.6) per node; cleaned nodes
+    then recognise; pure-noise nodes never do (correctly).
+  * THE HONEST RESULT: across heterogeneous trees and budgets, the drive schedule MATCHES the best fixed-priority
+    schedule WITHOUT being told which order is right (drive balance ~0.46 vs best fixed ~0.45; best-or-tied on
+    ~23/24 trees), and BEATS naive scheduling 2-4x on the worst-served need (random ~0.17, descend-first ~0.04).
+    It does NOT beat a well-chosen fixed priority, because the denoise->recognise dependency plus applicability
+    already force most of the good ordering. So the value is ROBUSTNESS / an adaptive default: you do not have to
+    hand-pick the schedule for a process too nested to script, and the drives self-tune to whatever is starved.
+  * the metric is `balance` = the WORST-served task drive (min over clarity/understanding/coverage) -- the honest
+    homeostatic objective (keep every need above water), which a policy that maxes one need and starves another
+    scores low on even if its mean looks fine.
+
+KEPT NEGATIVES: drives are a SCHEDULER over existing faculties, not a faculty improver; on a uniform process or one
+with an obvious fixed order a fixed priority ties them; they need setpoints/weights (a tuning knob); random has high
+variance and can occasionally beat drives on an easy single tree (the win is on AVERAGE over heterogeneous trees).
+Two first-cut measurement bugs found and fixed loudly: drives starting satisfied (no pull -> saturation), and noise
+scaled sqrt(dim) too large (signal buried -> denoise gain 0, nothing recognised). Faculties: drive_system,
+drive_process. The bottom line: an adaptive, self-explaining default scheduler for denoising/recognition/descent
+through nested processes -- matching the best hand-picked schedule without knowing it, and well clear of naive ones.
