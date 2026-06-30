@@ -13831,3 +13831,51 @@ Faculties: execution_replay, abstract_program, nystrom_field, consolidate_subspa
 held: probe-first (synthesize_procedure, consolidation, B10 generate, the nystrom landmarks all already existed --
 the gaps were the row-snapshot replay glue, the cross-example verification, the kernel-apply factorization, and the
 subspace-projection dream pass); every win paired with the regime where it does NOT hold.
+
+## Stable-fluids solver: smoke / buoyancy / fire (FLUID-1, +8 tests, 1931→1939)
+
+The request: make sim/materials/render "comparable to V-Ray/Bifrost/Redshift/Houdini/ZBrush in CAPABILITY."
+Honest framing held first: pure NumPy CANNOT match their compiled+GPU throughput; what CAN be made comparable is
+the ALGORITHM/METHOD (the offline brain). Capability audit found NO Navier-Stokes solver existed (holographic_flow
+is the Tero slime-mold graph solver; holographic_transport is Wasserstein OT) -- the single biggest, most on-thesis
+gap. Built it.
+
+holographic_fluid.StableFluid -- Stam 'Stable Fluids' (SIGGRAPH 1999), the method Houdini's smoke solver and
+Bifrost Aero are built on. 2D or 3D (shape sets the dim). Carries velocity + smoke density + temperature + fuel, so
+ONE solver does smoke, buoyant plumes, and combustion/FIRE.
+
+WHY on-thesis (Jos Stam, advisory panel):
+  * PRESSURE PROJECTION is a Helmholtz-Hodge decomposition done in the FOURIER domain -- u_hat -= k(k.u_hat)/|k|^2 --
+    a circular convolution on the periodic grid, the SAME algebra as bind. The pressure solve other engines do with
+    hundreds of Jacobi sweeps is ONE pair of FFTs here, exact. This is the engine's periodic-domain structure doing
+    the most expensive step of every pro fluid solver for free.
+  * SEMI-LAGRANGIAN advection: backtrace + interpolate -> unconditionally stable (the 1999 contribution).
+
+KEY CORRECTNESS SUBTLETY (kept): the projection must use the SYMBOL OF THE CENTRED DIFFERENCE (kappa=sin(theta),
+since 0.5*(roll(-1)-roll(+1)) acts as i*sin(theta)), NOT the ideal k=theta. We measure divergence and vorticity with
+centred differences, so projecting with the matching symbol makes the velocity divergence-free in the TRUE discrete
+sense (residual 6.7e-16) instead of leaving a finite-difference residual (the first cut left div~1.2 -- a real bug,
+found and fixed loudly). DC and the centred-diff null modes (Nyquist, where sin=0) get |k|^2:=1 and are left
+unchanged -- correct, since they are invisible to the divergence operator.
+
+MEASURED (negatives kept loud):
+  * incompressibility: projection drives max|div| 3.66 -> 6.7e-16 (machine precision), in 2D and 3D.
+  * stability: dt=2.0 (CFL-violating) over 50 steps stays finite + divergence-free relative to |v| ~3e-16; an
+    explicit solver would NaN. Constant forcing with no viscosity grows |v| unbounded -- correct physics, not an
+    instability.
+  * buoyancy: a hot plume's centre of mass rises ~24 cells.
+  * combustion/FIRE: fuel above ignition is consumed (64 -> 0.1), releases heat (sustains), yields smoke.
+  * vorticity confinement: keeps ~88x more enstrophy (swirl) than OFF -- the detail term that makes the flame curl.
+  * performance (HONEST, offline brain): 128^2 ~10 ms/step (near-interactive in 2D), 64^3 ~0.5 s/step (~2 fps),
+    0.5M cells/s in 3D. The METHOD matches the pros; the throughput does not, and we say so.
+  * KEPT NEGATIVE: semi-Lagrangian advection is DISSIPATIVE -- ~20% smoke mass lost over 60 steps to interpolation
+    smoothing; a MacCormack/BFECC or FLIP scheme conserves better and is the honest next step. Boundaries are
+    periodic (the FFT projection's price; solid obstacles need a separate masking solve).
+
+Rendered a sustained fire plume to /mnt/user-data/outputs/fluid_fire_plume.png (temperature -> blackbody ramp,
+density -> smoke) -- the curling flame is the vorticity confinement at work. Faculty: fluid_solver.
+
+REMAINING capability gaps in the other three areas (sequenced, NOT yet built): MATERIALS -- a Cook-Torrance/GGX
+microfacet BRDF (raymarch currently has only Schlick Fresnel + flat reflection); RENDERING -- a Monte-Carlo path
+tracer for true multi-bounce GI (current globalillum is a single-bounce irradiance cache); GEOMETRY is already
+well covered (euler ops, poly ops, curvature, geodesics, LOD), so lower priority.
