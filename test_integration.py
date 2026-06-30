@@ -5466,3 +5466,92 @@ def test_drives_through_unified_mind():
         root2, cb2 = make_nested_process(depth=4, branching=2, dim=80, noise=noise, p_recognizable=pr, seed=s)
         random_bal.append(um.drive_process(root2, cb2, energy=22, policy="random", seed=s)["balance"])
     assert np.mean(drive_bal) >= np.mean(random_bal) + 0.05   # adaptive scheduling beats naive on average
+
+
+def test_apply_handler_registration_through_mind():
+    """A registered faculty (here a Nystrom-style projection) is callable from a HoloMachine program as
+    APPLY <name>, and produces the same result as calling it directly (WIRE-1)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_ai import cosine
+    from holographic_nystrom import farthest_point_landmarks
+    um = UnifiedMind(dim=512, seed=0); M = um._machine(); d0 = M.data_names[0]
+    pts = np.random.default_rng(0).standard_normal((200, 512))
+    B = pts[farthest_point_landmarks(pts, 16, seed=0)]; B /= np.linalg.norm(B, axis=1, keepdims=True)
+
+    def nystrom_approx(acc):
+        r = (B @ acc) @ B
+        return r / (np.linalg.norm(r) + 1e-12)
+    um.register_apply_handler("nystrom_approx", nystrom_approx)
+    x = M.data_atoms[d0]
+    out, _ = um.run_procedure([("APPLY", "nystrom_approx"), ("HALT", d0)], init_acc=x)
+    assert cosine(out, nystrom_approx(x)) > 0.999
+
+
+def test_machine_state_threading_and_continuation():
+    """A long program threads its register file and stack across chunk seams, and the whole machine state
+    round-trips through a single composable continuation vector (WIRE-2)."""
+    from holographic_machine import HoloMachine
+    from holographic_ai import cosine
+    import numpy as np
+    M = HoloMachine(dim=1024, seed=7, data=["a", "b", "c", "d", "e", "f"])
+    # register survives a chunk boundary
+    prog = [("LOAD", "a"), ("STORE", "R0")] + [("LOAD", "b"), ("PERMUTE", "")] * 6 + [("RECALL", "R0"), ("HALT", "")]
+    out, _ = M.run_chunked(prog, chunk=4)
+    assert cosine(out, M.data_atoms["a"]) > 0.999
+    # state as one vector, restored exact-after-cleanup
+    snap = M.state_to_vector(M.data_atoms["a"], {"R0": M.data_atoms["b"]})
+    racc, rregs, _ = M.state_from_vector(snap, reg_names=["R0"], codebook=list(M.data_atoms.values()))
+    assert cosine(racc, M.data_atoms["a"]) > 0.999 and np.allclose(rregs["R0"], M.data_atoms["b"])
+
+
+def test_delta_chain_through_unified_mind():
+    """A chunked delta chain stores a drifting sequence O(change), reconstructs bit-exact, proves integrity, and
+    detects tampering -- all via the mind faculty (DELTA-1)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_deltachain import IntegrityError
+    um = UnifiedMind(dim=256, seed=0); rng = np.random.default_rng(0)
+    base = rng.standard_normal((80, 12)); chain = um.delta_chain(base)
+    cur = base.copy(); originals = [base.copy()]
+    for _ in range(8):
+        cur = cur.copy(); cur[rng.choice(80, 3, replace=False)] = rng.standard_normal((3, 12))
+        chain.append(cur); originals.append(cur.copy())
+    assert all(np.array_equal(chain.get(i), originals[i + 1]) for i in range(8))
+    assert chain.verify() and chain.memory_bytes() < chain.full_bytes()
+    chain._deltas[1]["lit"][0, 0] += 1.0
+    try:
+        chain.get(1); ok = False
+    except IntegrityError:
+        ok = True
+    assert ok
+
+
+def test_execution_replay_and_recent_builds():
+    """The replay log (run_chunked -> DeltaChain), trace->program abstraction, nystrom field, and dreaming all
+    compose through the mind (REPLAY/ABS/SIM/DREAM-1)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_ai import bind, cosine
+    from holographic_deltachain import IntegrityError
+    um = UnifiedMind(dim=1024, seed=0); M = um._machine()
+    # replay log: long program, verifiable O(change) execution trace
+    prog = [("LOAD", "a"), ("STORE", "R0")] + [("LOAD", "b"), ("PERMUTE", ""), ("BIND", "c")] * 6 + [("RECALL", "R0"), ("HALT", "")]
+    acc, trace, replay = um.execution_replay(prog, chunk=4)
+    assert replay.verify() and replay.memory_bytes() < replay.full_bytes()
+    # abstract a transform from a trace -> transfers to held-out
+    KEY = M.data_atoms[M.data_names[0]]; xs = [M.data_atoms[d] for d in M.data_names[1:6]]
+    res = um.abstract_program([(x, bind(x, KEY)) for x in xs[:3]], name="ak")
+    out, _ = um.run_procedure("ak", init_acc=xs[3])
+    assert res["generalizes"] and cosine(out, bind(xs[3], KEY)) > 0.9
+    # nystrom field
+    rng = np.random.default_rng(0); pts = rng.standard_normal((400, 3)); w = rng.standard_normal(400)
+    from holographic_nystrom import exact_kernel_apply
+    ap = um.nystrom_field(pts, pts, w, 1.0, m=48)
+    assert np.corrcoef(exact_kernel_apply(pts, pts, w, 1.0), ap)[0, 1] > 0.98
+    # dream over the consolidated subspace
+    B = rng.standard_normal((8, 1024)); mem = rng.standard_normal((300, 8)) @ B; mem /= np.linalg.norm(mem, axis=1, keepdims=True)
+    basis, mean = um.consolidate_subspace(mem, k=8, landmarks=48)
+    from holographic_dream import on_manifold
+    s = um.dream(basis, mean, n=4, seed=1)
+    assert np.mean([on_manifold(x, basis, mean) for x in s]) > 0.9

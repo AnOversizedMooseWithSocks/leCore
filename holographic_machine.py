@@ -91,6 +91,8 @@ class HoloMachine:
         self.OP = self._atom("role:OP", unitary=True)     # roles are unitary -> unbind is exact
         self.ARG = self._atom("role:ARG", unitary=True)
         self.SLOT = self._atom("role:SLOT", unitary=True)  # the role a nested 'file' lives under
+        self.ACC = self._atom("role:ACC", unitary=True)    # the accumulator's role in a STATE snapshot (continuation)
+        self.STK = self._atom("role:STK", unitary=True)    # the permute-stack's role in a state snapshot
         self.op_atoms = {o: self._atom(f"op:{o}") for o in OPCODES}
         self.data_atoms = {d: self._atom(f"dat:{d}") for d in self.data_names}
         self.fac_atoms = {f: self._atom(f"fac:{f}") for f in self.faculty_names}  # APPLY's operand codebook
@@ -168,7 +170,8 @@ class HoloMachine:
 
     # ---- executing a program -----------------------------------------------------------------
     def run(self, program_vec, init_acc=None, max_steps=512, _depth=0, handlers=None,
-            stop=None, max_loop=64, converge_tol=0.999, branch_tol=0.5):
+            stop=None, max_loop=64, converge_tol=0.999, branch_tol=0.5,
+            init_regs=None, init_stack=None, return_state=False):
         """Execute the program vector; return (accumulator, trace_of_decoded_instructions).
 
         `init_acc` lets a program start from a given accumulator -- which is what makes a function an
@@ -188,8 +191,8 @@ class HoloMachine:
           'goal' / 'maxloop'."""
         handlers = handlers or {}
         acc = init_acc
-        regs = {}                                    # the register file: named slots held SEPARATELY -> exact reads
-        stack = None                                 # the permute-stack: a LIFO of cleanup-able items (ISA-5)
+        regs = dict(init_regs) if init_regs else {}  # seed from incoming state (chunk threading) or start fresh;
+        stack = init_stack                           # exact carry -> no crosstalk added at a seam (ISA-4/5)
         trace = []
         pc = 0
         for _step in range(max_steps):              # cap on TOTAL instructions executed (the safety net)
@@ -290,6 +293,8 @@ class HoloMachine:
             elif op == "PERMUTE":
                 acc = permute(acc, 1)
             pc += 1
+        if return_state:                             # chunk threading wants the register file + stack carried out
+            return acc, trace, regs, stack
         return acc, trace
 
     # ---- running a program too long for one structure (the chunk_route lesson, applied to instructions) ----
@@ -297,8 +302,21 @@ class HoloMachine:
     # target would break the construct, so a chunk is never allowed to END on one of these.
     _SPANS_NEXT = ("IFMATCH", "REPEAT")
 
+    def state_rows(self, acc, regs=None, stack=None):
+        """The machine state as an (n_slots, D) array of ROWS -- ACC, then each register R0..R7, then the stack --
+        zeros for an empty slot. Unlike state_to_vector (one bundled, lossy vector), this keeps each slot as a
+        SEPARATE ROW, so a SEQUENCE of states delta-compresses well in a DeltaChain (a register that didn't change
+        between seams is an unchanged row, costing nothing). The right shape for an execution replay log."""
+        regs = regs or {}
+        rows = [acc if acc is not None else np.zeros(self.dim)]
+        for r in REGISTERS:
+            v = regs.get(r)
+            rows.append(v if v is not None else np.zeros(self.dim))
+        rows.append(stack if stack is not None else np.zeros(self.dim))
+        return np.array(rows, float)
+
     def run_chunked(self, program, chunk=14, init_acc=None, handlers=None,
-                    stop=None, max_loop=64, converge_tol=0.999, branch_tol=0.5):
+                    stop=None, max_loop=64, converge_tol=0.999, branch_tol=0.5, record=False):
         """Run a program TOO LONG for one structure, by splitting it into <=chunk-instruction pieces -- each
         its OWN clean program vector -- and THREADING the accumulator across them. This is the way past the
         single-program capacity cap (~20-32 instructions at dim 1024), and it is the chunk_route lesson applied
@@ -325,20 +343,70 @@ class HoloMachine:
         instrs = list(program)
         if instrs and instrs[-1][0] == "HALT":               # we add per-chunk HALTs; drop a trailing one
             instrs = instrs[:-1]
-        acc, full_trace = init_acc, []
+        acc, regs, stack, full_trace = init_acc, {}, None, []
+        seam_states = []                                     # per-seam state rows, for a replay log (record=True)
         i, n = 0, len(instrs)
         while i < n:
             end = min(i + chunk, n)
             while end < n and instrs[end - 1][0] in self._SPANS_NEXT:
                 end += 1                                     # never split a gate/repeat from the instruction it targets
             seg = instrs[i:end] + [("HALT", "")]             # one clean, independent program vector per chunk
-            acc, tr = self.run(self.assemble(seg), init_acc=acc, handlers=handlers, stop=stop,
-                               max_loop=max_loop, converge_tol=converge_tol, branch_tol=branch_tol)
+            # carry the FULL machine state across the seam: accumulator AND the register file AND the stack,
+            # each in its EXACT representation (a dict / the stack vector), so STORE in one chunk is readable by
+            # RECALL in a later one and crosstalk never accumulates at a boundary (the exact-carry choice -- see
+            # state_to_vector for the composable bundled alternative and why it is NOT used per-seam).
+            acc, tr, regs, stack = self.run(self.assemble(seg), init_acc=acc, handlers=handlers,
+                                            init_regs=regs, init_stack=stack, return_state=True, stop=stop,
+                                            max_loop=max_loop, converge_tol=converge_tol, branch_tol=branch_tol)
             full_trace += tr
+            if record:
+                seam_states.append(self.state_rows(acc, regs, stack))   # snapshot the state at this seam
             if len(tr) < len(seg) - 1:                       # a HALT (or stop) fired mid-chunk -> stop the whole run
                 break
             i = end
+        if record:
+            return acc, full_trace, seam_states
         return acc, full_trace
+
+    # ---- the machine state AS A COMPOSABLE VECTOR (a continuation) -- the VSA-native win ------------------
+    def state_to_vector(self, acc, regs=None, stack=None):
+        """Bundle the whole machine STATE -- accumulator + register file + stack -- into ONE composable
+        hypervector (a 'continuation'): bind each part to its role and superpose. This is the VSA-native payoff
+        the chunk-threading sets up: a paused computation becomes a first-class VALUE you can STORE in memory,
+        recall, compose with other states, or resume later -- the same 'a program/state is just a vector'
+        composability the inception layer already uses for programs.
+
+        HONEST COST (measured in the tests): a bundle has finite capacity, so reading a part back is a NOISY
+        unbind that must be CLEANED against a codebook -- exact-after-cleanup for cleanup-able (atom-valued)
+        slots, lossy for arbitrary continuous values, and the fidelity falls as more slots are packed (the
+        capacity cliff, ~1/sqrt(#slots)). This is WHY run_chunked threads the EXACT register dict across each
+        seam instead of bundling: bundling per-seam would compound that crosstalk over a long program. So the
+        bundled state is for SNAPSHOT / store / compose / resume -- where carrying one vector is the point -- and
+        the exact dict is for the hot per-seam carry. VSA-native where it is beneficial, exact where it is."""
+        parts = []
+        if acc is not None:
+            parts.append(bind(self.ACC, acc))
+        for r, v in (regs or {}).items():
+            if v is not None:
+                parts.append(bind(self.reg_atoms[r], v))     # each register under its own name role
+        if stack is not None:
+            parts.append(bind(self.STK, stack))
+        return bundle(parts) if parts else np.zeros(self.dim)
+
+    def state_from_vector(self, vec, reg_names=(), codebook=None):
+        """Inverse of state_to_vector: unbind each role and CLEAN against `codebook` (a list of candidate value
+        vectors, e.g. the data atoms) to recover (acc, regs, stack). With no codebook the raw (noisy) unbinds are
+        returned for the caller to clean. The stack is returned as its raw bundle for stack_pop to clean on the
+        way out. Atom-valued slots come back exact after cleanup; see the tests for the measured fidelity."""
+        def _read(role):
+            raw = unbind(vec, role)
+            if not codebook:
+                return raw
+            return max(codebook, key=lambda c: cosine(raw, c))   # snap to the nearest known value (cleanup)
+        acc = _read(self.ACC)
+        regs = {r: _read(self.reg_atoms[r]) for r in reg_names}
+        stack = unbind(vec, self.STK)
+        return acc, regs, stack
 
     # ---- nesting (the inception layer): a program is just another value to store --------------
     def as_file(self, content_vec):

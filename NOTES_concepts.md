@@ -13684,3 +13684,150 @@ Two first-cut measurement bugs found and fixed loudly: drives starting satisfied
 scaled sqrt(dim) too large (signal buried -> denoise gain 0, nothing recognised). Faculties: drive_system,
 drive_process. The bottom line: an adaptive, self-explaining default scheduler for denoising/recognition/descent
 through nested processes -- matching the best hand-picked schedule without knowing it, and well clear of naive ones.
+
+## register_apply_handler -- faculties (incl. octree/nystrom/agent) callable from VSA programs (+7 tests, 1899→1906)
+
+A backlog of 8 items arrived ("most of it is wiring up what exists"). Probe-first triage against the live code:
+ALREADY/PARTIAL -- recall/compose programs (recall_procedure + learn_procedure + fingerprint recall exist),
+verification (verify_chain/validated/validate_recipe exist; self-correction = a thin wrapper); GENUINE GAPS --
+exposing faculties as APPLY handlers (only cleanup/denoise/matmul wired), run_chunked threads ONLY the accumulator
+(registers + permute-stack do not cross a chunk boundary), trace->program abstraction, dreaming-synthesis,
+approximation demos; DOC -- writing_vsa_programs.md exists, needs the new capabilities. The KEYSTONE (cheapest,
+highest-value, the intended extension point) was item #1.
+
+The APPLY mechanism already existed: `APPLY <faculty>` means ACC := faculty(ACC), run by a HOST that supplies a
+handler dict; the bare VM has none. The mind exposed only cleanup/denoise/matmul/datafit/diffuse, and the
+docstring literally said "extend this dict." `register_apply_handler(name, fn)` is that extension point generalised:
+any unary acc->acc closure -- INCLUDING stateful spatial ops (an octree query, a Nystrom approximation) and agent
+behaviours, since the closure captures the built octree / fitted embedding / Agent -- becomes a programmable
+`APPLY <name>` step. It registers a faculty atom on the VM so APPLY's operand cleans to the name, and merges the
+handler into the live set (consistent with the existing set_matmul / set_inverse_problem / generator pattern).
+
+MEASURED: a registered handler run as `APPLY <name>` inside a program produces cosine 1.0 vs calling the faculty
+directly; demonstrated with a Nystrom landmark projection (fast approximation), an Agent behaviour (acc=state ->
+the agent's learned action vector -- chose the rewarded action at cosine 1.0), and an octree-style spatial recall;
+handlers CHAIN in order; a registered name overrides a built-in; non-callables are rejected. This is the bridge
+from "the agent drives a program" (AGENT-1) to "a program drives the engine": a synthesised or hand-written VSA
+program can now denoise, recall, query space, approximate, or act, all inline.
+
+KEPT HONEST: APPLY's contract is UNARY acc->acc, so faculties that are not vector->vector (the DriveSystem
+scheduler, multi-arg ops) do not fit as bare handlers -- they belong in the host loop, or wrapped behind a closure
+that fixes their extra arguments (as the agent_act closure does). The demo's first cut had two TEST bugs, found and
+fixed loudly: a leading LOAD overwrote the seeded accumulator, and a trailing APPLY cleanup snapped an octree-
+recalled vector back to a codebook atom -- the dispatch was correct, the test programs were wrong. Faculty:
+register_apply_handler. Remaining backlog for next sessions: run_chunked register/stack threading (#5), the doc
+refresh (#7, partially started here), and the research-y items (trace->program #3, dreaming-synthesis #4,
+approximation-in-large-sims #8).
+
+## run_chunked threads the FULL state across seams + a composable state continuation (+6 tests, 1906→1912)
+
+Backlog #5. Probe confirmed the gap: `run` created fresh `regs={}` / `stack=None` each call and returned only
+(acc, trace), so `run_chunked` (which calls run() per chunk) threaded ONLY the accumulator -- a register STOREd in
+one chunk was gone by the next, and PUSH/POP could not span a seam. Guided by "VSA native WHEN beneficial," this
+was built in two honest halves:
+
+THE EXACT HALF (the correctness fix). `run(..., init_regs, init_stack, return_state=False)` -- additive,
+backward-compatible (default still returns the 2-tuple; recursive CALL/ITERATE sub-runs keep their local register
+scope). `run_chunked` now carries the accumulator AND the register dict AND the stack across each seam, each in its
+EXACT representation. MEASURED: a register stashed in chunk 1 and recalled in chunk 4 comes back cosine 1.0; PUSH in
+one chunk / POP in a later one restores the value 1.0. Deliberately NOT bundled per-seam: bundling the register file
+into one vector at every boundary would inject crosstalk that COMPOUNDS over a long program -- the exact dict adds
+none. This is the "VSA-native is NOT beneficial here" call, made explicitly.
+
+THE VSA-NATIVE HALF (the composability win). `state_to_vector(acc, regs, stack)` bundles the whole machine state --
+accumulator + register file + stack, each bound to its role (new unitary ACC/STK roles + the existing reg-name
+codebook) -- into ONE composable hypervector: a CONTINUATION. A paused computation becomes a first-class VALUE you
+can STORE in memory, recall, compose, or resume -- the same "a program/state is just a vector" composability the
+inception layer uses, now for execution state. `state_from_vector` unbinds each role and cleans against a codebook.
+MEASURED: acc + 3 atom-valued registers round-trip EXACT-after-cleanup (1.0, registers bit-identical). KEPT NEGATIVE
+(loud): the RAW pre-cleanup readback degrades as slots are packed -- 0.49 (2 regs) -> 0.41 (4) -> 0.32 (8), the
+~1/sqrt(#slots) capacity cliff -- so the bundled continuation is exact only for cleanup-able (atom) slots, lossy for
+arbitrary continuous values, and is for SNAPSHOT/compose, not the hot per-seam carry (which is why that stays exact).
+
+So the principle "composable VSA-native programs give compounding benefits" is honored precisely: VSA-native for the
+continuation (state as one storable/composable vector -- the compounding win), exact for the per-seam thread (where
+bundling would compound crosstalk instead). Both measured. No new top-level faculty (these are HoloMachine methods
+the procedure faculty already exposes via run/run_chunked); 312 tests across the touched ISA/machine modules green.
+Remaining backlog: doc refresh (#7, extended here), trace->program (#3), dreaming-synthesis (#4), approximation in
+large sims (#8).
+
+## Chunked delta chain with a hash-chain + Merkle integrity proof (+9 tests, 1912→1921)
+
+The request: for chunked DATA, store deltas from the first chunk (base) or the prior chunk (or both), not full
+data, with a proof/fractal thing for integrity + propagation; use the tiered cache + codebooks; stay optimized and
+VSA-native/exposed; avoid VSA<->Python hot spots; and make sure recent improvements are wired.
+
+WIRING AUDIT (done first): synthesize_program / blend_programs / fill_capability_gap / agent / drive_system /
+drive_process / register_apply_handler are all referenced in UnifiedMind; state-threading lives in the machine;
+voidsynth/agent/drives referenced 12x. Nothing siloed.
+
+PROBE-FIRST: FrameCache (anim) already stores frames as deltas vs a BASE with a hot/warm/cold tier (the HONEST
+L1-L4 analogy -- Python cannot touch real CPU caches); scenedelta content-hashes COMPONENTS for dedup. Neither does
+delta-vs-PRIOR, auto base/prior selection, or a CHAINED integrity proof over a sequence -- the genuine gaps.
+
+`holographic_deltachain.py` (DeltaChain): append a sequence of (N,D) chunks; each stored as a delta vs the BASE or
+the PRIOR, whichever has fewer changed rows (auto). A SHA-256 HASH CHAIN folds each chunk into the prior's hash
+(propagation), and a binary MERKLE ROOT over all chunk hashes is the single 'fractal' proof of the whole sequence.
+get(i) reconstructs AND verifies -- a tampered delta / wrong base / broken upstream propagation raises
+IntegrityError instead of silently returning garbage.
+
+MEASURED (negatives kept): bit-exact reconstruction; a DRIFTING sequence auto-chooses prior-deltas 9/10 (small
+incremental edits), a NEAR-BASE sequence chooses base-deltas 10/10 -- the auto-selection adapts; ~9.7x smaller than
+storing every chunk full on a 12-chunk drift; tamper DETECTED by the hash chain; the Merkle root is deterministic
+(same sequence -> same root) and change-sensitive (any edit -> different root). CODEBOOK compression is LOSSLESS
+(changed rows that EXACTLY equal an atom store an 8-byte index, not a D*8 float row) -- but its TOTAL win is base-
+capped on short sequences (~1.3x, the base dominates) and only materialises when deltas dominate: on a 150-chunk
+D=256 sequence it is 5.2x total, 86x on the DELTA portion, 144x vs storing full. KEPT NEGATIVES: codebook win is
+base-capped for short sequences; an atom-row is exact only if it EQUALS the atom (near-atom rows fall back to full,
+no silent loss); and -- the recurring discipline -- EXACT INTEGRITY IS hashlib, NOT a VSA bundle: a bundled checksum
+is lossy and cannot give bit-exact tamper detection, so this is a case where VSA-native is NOT beneficial and the
+exact hash is the right tool. VECTORIZED throughout (changed-row detection = np.where over a max-abs reduction,
+codebook match = a broadcast compare, reconstruct = fancy indexing, hash = one call per chunk on .tobytes()): the
+only Python loop is over CHUNKS, so there is no hot VSA<->Python seam on the data. Faculty: delta_chain. A natural
+next step the request points at: have run_chunked RECORD its per-seam states
+into a DeltaChain, giving a verifiable, O(change) replay log of a long program's execution.
+
+## Replay log + trace->program + nystrom-field + dreaming (four builds, +10 tests, 1921→1931)
+
+A batch of four, each probe-first, measured, negatives kept.
+
+### REPLAY LOG (run_chunked -> DeltaChain) -- the connector the last two builds set up.
+run_chunked gained record=True: after each seam it snapshots the FULL state as ROWS (state_rows: acc + R0..R7 +
+stack, one row each, zeros for empty) and returns the sequence. Faculty execution_replay wraps that sequence in a
+DeltaChain -> a verifiable, O(change) execution log. WHY rows not the bundled state vector: consecutive seams share
+most rows (registers that didn't change), so the row-delta is small; the bundled (1,D) state would be one ever-
+changing row and delta-compress to nothing. MEASURED: bit-exact reconstruction of every seam; ~4.7x smaller than
+storing all states full; resumable (the acc row recovers); tampering with the log is DETECTED by the hash chain.
+
+### TRACE -> ABSTRACT PROGRAM (#3) -- abstract_program (a mind method over synthesize_procedure).
+From a TRACE = a set of (input, output) examples, synthesise a procedure on the first and VERIFY it on ALL the rest;
+the abstraction is the program CONSISTENT across examples, stored by name. MEASURED: an abstracted [BIND key]
+transfers to a HELD-OUT input at cosine 1.0, vs a prototype-nearest-neighbour at -0.01 -- the program captures the
+TRANSFORM (transfers), the prototype only matches near-identical states (returns a stale output). KEPT NEGATIVE:
+abstracts only transforms expressible in the VM's ops within max_depth, and returns generalizes=False (not a wrong
+program) when the examples share no such transform (tested).
+
+### NYSTROM FIELD APPROXIMATION (#8) -- nystrom_kernel_apply / faculty nystrom_field.
+Approximate a kernel-weighted field f(p)=sum_j w_j K(p, src_j) (Gaussian RBF) via m LANDMARK sources --
+K(points,sources) ~ C pinv(W) B, never forming the full kernel -- O((Np+Ns)m) not O(Np Ns). ONE tool for a PHYSICS
+field (particles+charges) and LARGE MEMORY (items+payload, queries). MEASURED on a smooth potential: corr 0.998
+(N=800) / 0.995 (N=2000), speedup 4x->13.5x (grows with N). KEPT NEGATIVE: exact only for a LOW-RANK (smooth) field;
+a high-frequency field (tiny sigma -> near-identity kernel, full rank) drops to corr 0.22 -- use the exact sum or
+more landmarks there. HONEST on the grouping: voidsynth is a PROGRAM-synthesis tool, not a field approximator, so it
+was NOT shoehorned into #8; the approximation win is Nystrom's.
+
+### CONSOLIDATION + DREAMING (#4) -- holographic_dream.py / faculties consolidate_subspace, dream.
+Ties consolidation (the low-rank subspace real states live on) to B10's denoise-from-noise generation, plus the two
+asks: NYSTROM approximates the consolidation subspace from m farthest-point LANDMARK memories (O(mDk) not O(NDk)) for
+a large store; DREAMING = generative replay over the CONSOLIDATED subspace (draw noise -> project onto the subspace
+-> optional cleanup), producing samples ON the manifold (valid) yet NOVEL (not stored atoms) -- novel COMPOSITIONS,
+the regime B10 flagged as interesting (bare-codebook generation just returns atoms). MEASURED: landmark subspace
+aligns 1.000 to the full subspace on low-rank memory; dreamed samples on-manifold ~1.0, novelty ~0.12. KEPT NEGATIVE:
+the Nystrom subspace is exact only when the memory is genuinely LOW-RANK -- on full-rank noise a landmark subset
+misses directions (alignment < 0.8, tested); dreaming recombines within the consolidated span, it does not invent
+outside the manifold.
+
+Faculties: execution_replay, abstract_program, nystrom_field, consolidate_subspace, dream. The recurring discipline
+held: probe-first (synthesize_procedure, consolidation, B10 generate, the nystrom landmarks all already existed --
+the gaps were the row-snapshot replay glue, the cross-example verification, the kernel-apply factorization, and the
+subspace-projection dream pass); every win paired with the regime where it does NOT hold.

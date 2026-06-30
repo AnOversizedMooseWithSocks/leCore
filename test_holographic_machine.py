@@ -159,3 +159,71 @@ def test_call_library_does_NOT_chunk_a_long_program_kept_negative():
     assert cosine(via_call, expected) < 0.5                  # the library bundle corrupts -> CALL is the wrong tool
     assert cosine(m.run_chunked(names and [("LOAD", names[0])] + [("BIND", names[i]) for i in range(1, 60)] + [("HALT", "")])[0],
                   expected) > 0.999                          # run_chunked, on the same program, succeeds
+
+
+# --- WIRE-2: cross-chunk register/stack threading + the composable state continuation -------------
+def _state_machine():
+    from holographic_machine import HoloMachine
+    return HoloMachine(dim=1024, seed=7, data=["a", "b", "c", "d", "e", "f", "g", "h"])
+
+
+def test_run_chunked_threads_registers_across_a_seam():
+    from holographic_ai import cosine
+    M = _state_machine()
+    # STORE R0 lands in chunk 1; RECALL R0 lands in a later chunk (chunk=4 forces the seam between them)
+    prog = [("LOAD", "a"), ("STORE", "R0")] + [("LOAD", "b"), ("PERMUTE", "")] * 6 + [("RECALL", "R0"), ("HALT", "")]
+    out, _ = M.run_chunked(prog, chunk=4)
+    assert cosine(out, M.data_atoms["a"]) > 0.999            # the register survived the chunk boundary
+
+
+def test_run_chunked_threads_stack_across_a_seam():
+    from holographic_ai import cosine
+    M = _state_machine()
+    prog = [("LOAD", "a"), ("PUSH", "")] + [("LOAD", "c"), ("BIND", "d")] * 5 + [("POP", ""), ("HALT", "")]
+    out, _ = M.run_chunked(prog, chunk=4)
+    assert cosine(out, M.data_atoms["a"]) > 0.999            # PUSH in one chunk, POP in a later one restores a
+
+
+def test_run_return_state_is_backward_compatible():
+    M = _state_machine()
+    pv = M.assemble([("LOAD", "a"), ("STORE", "R0"), ("HALT", "")])
+    two = M.run(pv)                                          # default: the original 2-tuple
+    assert len(two) == 2
+    four = M.run(pv, return_state=True)                      # opt-in: full state
+    assert len(four) == 4 and "R0" in four[2]
+
+
+def test_state_continuation_roundtrips_exact_for_atoms():
+    import numpy as np
+    M = _state_machine()
+    acc = M.data_atoms["a"]
+    regs = {"R0": M.data_atoms["b"], "R1": M.data_atoms["c"], "R2": M.data_atoms["d"]}
+    snap = M.state_to_vector(acc, regs)                     # one composable vector
+    cb = list(M.data_atoms.values())
+    racc, rregs, _ = M.state_from_vector(snap, reg_names=["R0", "R1", "R2"], codebook=cb)
+    from holographic_ai import cosine
+    assert cosine(racc, acc) > 0.999
+    assert all(np.allclose(rregs[r], regs[r]) for r in ("R0", "R1", "R2"))
+
+
+def test_state_continuation_crosstalk_grows_with_slots():
+    # honest negative: raw (pre-cleanup) readback degrades as more slots are bundled (the capacity cliff)
+    import numpy as np
+    from holographic_ai import unbind, cosine
+    M = _state_machine()
+    raws = []
+    for k in (2, 8):
+        rr = {f"R{i}": M.data_atoms[M.data_names[i]] for i in range(k)}
+        sv = M.state_to_vector(M.data_atoms["a"], rr)
+        raws.append(np.mean([float(cosine(unbind(sv, M.reg_atoms[r]), rr[r])) for r in rr]))
+    assert raws[0] > raws[1]                                 # more slots -> noisier raw read (why per-seam is exact)
+
+
+def test_run_chunked_records_a_replay_log():
+    from holographic_ai import cosine
+    M = _state_machine()
+    prog = [("LOAD", "a"), ("STORE", "R0")] + [("LOAD", "b"), ("PERMUTE", "")] * 6 + [("RECALL", "R0"), ("HALT", "")]
+    acc, trace, states = M.run_chunked(prog, chunk=4, record=True)
+    assert len(states) >= 2                                        # one state per seam
+    assert states[0].shape == (10, M.dim)                         # acc + 8 registers + stack as rows
+    assert cosine(acc, M.data_atoms["a"]) > 0.999                # final acc still correct

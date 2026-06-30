@@ -145,3 +145,35 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+def nystrom_kernel_apply(points, sources, weights, sigma, m=None, seed=0):
+    """Approximate the kernel-weighted field f(p) = sum_j weights[j] * K(p, sources[j]) at every row of `points`,
+    K the Gaussian RBF, via m landmark sources -- O((Np+Ns)*m + m^3) instead of the exact O(Np*Ns). The Nystrom
+    low-rank factorisation: K(points, sources) ~ C @ pinv(W) @ B with C=K(points, landmarks), W=K(landmarks,
+    landmarks), B=K(landmarks, sources); the field is then C @ (pinv(W) @ (B @ weights)), never forming the full
+    Np x Ns kernel. ONE tool for two large-sim bottlenecks: a PHYSICS field (sources=particles, weights=charges/
+    masses, points=where you sample the potential) and LARGE MEMORY (sources=stored items, weights=a payload,
+    points=queries -- an O(Nm) approximate gather). Landmarks are farthest-point-sampled for coverage.
+
+    HONEST (the kept negative): this is exact only when the kernel field is LOW-RANK -- a smooth field, sigma not
+    tiny relative to the point spacing. A high-frequency field (tiny sigma -> a near-identity kernel, full rank)
+    is NOT low-rank and the landmark approximation degrades; use the exact O(N^2) sum there, or more landmarks.
+    Returns the approximate field (Np,)."""
+    points = np.asarray(points, float); sources = np.asarray(sources, float)
+    weights = np.asarray(weights, float)
+    Ns = len(sources)
+    if m is None:
+        m = min(Ns, max(16, int(np.sqrt(Ns)) * 2))
+    lm = sources[farthest_point_landmarks(sources, m, seed=seed)]      # landmark sources, covering the set
+    C = gaussian_affinity(points, lm, sigma)                          # (Np, m) -- never the full kernel
+    W = gaussian_affinity(lm, lm, sigma)                              # (m, m)
+    B = gaussian_affinity(lm, sources, sigma)                         # (m, Ns)
+    inner = np.linalg.pinv(W) @ (B @ weights)                        # (m,) -- the small solve
+    return C @ inner                                                  # (Np,) -- the cheap extension
+
+
+def exact_kernel_apply(points, sources, weights, sigma):
+    """The exact O(Np*Ns) field, for the baseline / the small-N case. Forms the full kernel -- do not use at scale."""
+    K = gaussian_affinity(np.asarray(points, float), np.asarray(sources, float), sigma)
+    return K @ np.asarray(weights, float)

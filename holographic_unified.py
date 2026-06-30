@@ -4765,6 +4765,90 @@ class UnifiedMind:
         return drive_process(root, codebook, drives=drives, energy=energy, recog_thresh=recog_thresh,
                              policy=policy, seed=seed)
 
+    def abstract_program(self, examples, name=None, max_depth=2, threshold=0.9):
+        """Abstract a reusable PROGRAM from a TRACE -- a set of (input_vec, output_vec) examples demonstrating one
+        transform (a recorded behaviour, a demonstration, the in/out of a creature's moves). Synthesise a
+        procedure that reproduces the FIRST example, then VERIFY it reproduces ALL the others: the abstraction is
+        the program CONSISTENT ACROSS examples, not a fit to one. If it generalises, optionally store it by `name`
+        (callable later). Returns dict{program, generalizes, fit (mean cosine over examples), worst}. WHY this
+        beats raw prototypes (the 'transfers better' claim): a stored prototype only matches near-identical
+        states; an abstracted program captures the TRANSFORM itself, so it transfers to inputs never seen --
+        measured in the tests against a prototype-nearest-neighbour baseline. HONEST: it only abstracts transforms
+        expressible in the VM's ops within max_depth (BIND/BUNDLE/PERMUTE), and returns generalizes=False (rather
+        than a wrong program) when the examples don't share one such transform."""
+        import numpy as _np
+        from holographic_ai import cosine as _cos
+        examples = list(examples)
+        prog = self.synthesize_procedure(examples[0][0], examples[0][1], max_depth=max_depth, threshold=threshold)
+        if prog is None:
+            return {"program": None, "generalizes": False, "fit": 0.0, "worst": 0.0}
+        fits = []
+        for inp, outp in examples:                           # VERIFY the synthesised program on EVERY example
+            out, _ = self.run_procedure(prog, init_acc=inp)
+            fits.append(float(_cos(out, outp)))
+        worst = float(min(fits))
+        generalizes = worst >= threshold                     # consistent across all examples -> a real abstraction
+        if generalizes and name is not None:
+            self.learn_procedure(name, prog)
+        return {"program": prog, "generalizes": generalizes, "fit": float(_np.mean(fits)), "worst": worst}
+
+    def delta_chain(self, base, tol=0.0, codebook=None):
+        """A chunked DELTA CHAIN (DELTA-1): store a SEQUENCE of (N, D) chunks as a base + per-chunk deltas, each
+        delta taken against the BASE or the PRIOR chunk -- whichever is smaller -- so memory is O(actual change).
+        A SHA-256 hash chain + Merkle root make integrity PROVABLE: append() folds each chunk into the chain,
+        get(i) reconstructs AND verifies (a corrupted delta / wrong base / broken propagation raises
+        IntegrityError), root() is the one 'fractal' proof of the whole sequence. Bit-exact, deterministic,
+        vectorized (no per-element Python on the data). With `codebook` set, changed rows that EXACTLY equal an
+        atom store an index, not a float row -- lossless, and its size win scales with D and sequence length
+        (measured 86x on the delta portion at D=256). HONEST: exact integrity is hashlib, not a (lossy) VSA
+        bundle -- the case where VSA-native is NOT beneficial. See holographic_deltachain.DeltaChain."""
+        from holographic_deltachain import DeltaChain
+        return DeltaChain(base, tol=tol, codebook=codebook)
+
+    def execution_replay(self, program, chunk=14, init_acc=None):
+        """Run a long program CHUNKED and record a verifiable, O(change) REPLAY LOG (DELTA-1 x WIRE-2): each
+        chunk's full machine state (acc + registers + stack, as rows) is appended to a DeltaChain, so the
+        execution can be audited, RESUMED from any seam, and integrity-checked. This is where the run_chunked
+        state-threading and the delta chain meet: consecutive seam states share most rows (registers that didn't
+        change), so the log is O(actual change), and the hash chain proves it wasn't tampered with. Returns
+        (acc, trace, replay) -- replay a DeltaChain whose chunk i is the state after seam i+1 (its base is the
+        first seam's state), or None if the program produced no seams."""
+        M = self._machine()
+        acc, trace, states = M.run_chunked(program, chunk=chunk, init_acc=init_acc,
+                                           handlers=self._procedure_handlers(), record=True)
+        if not states:
+            return acc, trace, None
+        from holographic_deltachain import DeltaChain
+        replay = DeltaChain(states[0])
+        for s in states[1:]:
+            replay.append(s)
+        return acc, trace, replay
+
+    def nystrom_field(self, points, sources, weights, sigma, m=None):
+        """Approximate a kernel-weighted field f(p) = sum_j weights[j]*K(p, sources[j]) (Gaussian RBF) via m
+        LANDMARK sources -- O((Np+Ns)*m) instead of the exact O(Np*Ns), for LARGE memory or physics sims
+        (sources=particles+charges, or stored items+payload; points=where you sample). MEASURED ~13x at N=2000
+        on a smooth field, the win growing with N. KEPT NEGATIVE: exact only for a LOW-RANK (smooth) field; a
+        high-frequency field is full-rank and the landmark approximation degrades (corr ~0.2). See
+        holographic_nystrom.nystrom_kernel_apply."""
+        from holographic_nystrom import nystrom_kernel_apply
+        return nystrom_kernel_apply(points, sources, weights, sigma, m=m)
+
+    def consolidate_subspace(self, memories, k=8, landmarks=None):
+        """The consolidated low-rank SUBSPACE of stored memories (top-k principal directions) + mean. With
+        `landmarks`=m, approximate it from m farthest-point memories instead of all N (the Nystrom sketch for a
+        LARGE store). Returns (basis, mean). See holographic_dream.dream_subspace."""
+        from holographic_dream import dream_subspace
+        return dream_subspace(memories, k=k, landmarks=landmarks)
+
+    def dream(self, basis, mean, n=8, seed=0, noise=1.0, codebook=None):
+        """DREAM = generative replay over the consolidated subspace: draw noise, project onto the subspace (the
+        manifold denoiser run from noise), optionally clean -> samples ON the manifold (valid) yet NOVEL (not a
+        stored item). Over the consolidated (composed) subspace this yields novel COMPOSITIONS, the interesting
+        regime B10 flagged. Returns an (n, D) array. See holographic_dream.dream."""
+        from holographic_dream import dream
+        return dream(basis, mean, n=n, seed=seed, noise=noise, codebook=codebook)
+
     def holographic_value_head(self, n_actions, dim=None, routed=False, n_buckets=64):
         """The creature's value/policy AS a pure-VSA program. Returns a HolographicValueHead (or, with
         routed=True, a RoutedValueHead whose routing fabric pushes the capacity cliff back ~n_buckets-fold):
@@ -6092,7 +6176,31 @@ class UnifiedMind:
         pipe = getattr(self, "_pipe", None)
         if pipe is not None:                            # PIPE-1: the data-analysis pipeline's faculties.
             handlers.update(self._pipeline_handlers(pipe))   # (its 'denoise' overrides the generic one,
+        user = getattr(self, "_apply_handlers", None)   # user-registered faculties (octree/nystrom/agent/...)
+        if user:                                        # a registered name overrides a built-in of the same name
+            handlers.update(user)
         return handlers                                 # because a raw signal needs a signal-shaped prior.)
+
+    def register_apply_handler(self, name, fn):
+        """Make any unary acc->acc faculty callable from a HoloMachine program as `APPLY <name>` -- INCLUDING
+        stateful spatial ops (an octree query, a Nystrom approximation) and agent behaviours, since `fn` is a
+        closure that may capture a built octree, a fitted embedding, an Agent, a DriveSystem, etc. The name is
+        registered as a faculty atom on the VM so APPLY's operand cleans to it, and the handler is merged into
+        the live handler set. This is the general extension point the APPLY docstring invites: the engine's
+        faculties (and your own) become PROGRAMMABLE STEPS, so a synthesised or hand-written VSA program can
+        denoise, recall, query space, approximate, or act, all inline -- the bridge from 'the agent drives a
+        program' to 'a program drives the engine'. Backward-compatible: built-ins are untouched; a registered
+        name overrides a built-in of the same name. `fn` must be callable acc->acc."""
+        if not callable(fn):
+            raise TypeError("an APPLY handler must be callable as acc -> acc")
+        if getattr(self, "_apply_handlers", None) is None:
+            self._apply_handlers = {}
+        self._apply_handlers[name] = fn
+        M = self._machine()
+        if name not in M.faculty_names:                 # register the faculty atom so APPLY <name> cleans
+            M.faculty_names.append(name)
+            M.fac_atoms[name] = M._atom(f"fac:{name}")
+        return self
 
     def set_matmul(self, W):
         """Configure the matrix used by APPLY matmul: that opcode then does ACC := W @ ACC, carried by the

@@ -50,3 +50,24 @@ def test_fps_more_stable_than_random_on_imbalanced_data():
     fps = [subspace_alignment(Pd, nystrom_embedding(imb, 3, m=14, sigma=1.0, landmarks="fps", seed=s)[1])
            for s in range(6)]
     assert np.std(fps) <= np.std(rand) + 1e-6                 # FPS coverage -> lower variance (random can miss the small cluster)
+
+
+# --- SIM-1: nystrom kernel-field approximation for large smooth fields -----------------------------
+def test_nystrom_field_matches_exact_on_smooth_field():
+    import numpy as np
+    from holographic_nystrom import nystrom_kernel_apply, exact_kernel_apply
+    rng = np.random.default_rng(0)
+    pts = rng.standard_normal((600, 3)); w = rng.standard_normal(600)
+    ex = exact_kernel_apply(pts, pts, w, sigma=1.0)
+    ap = nystrom_kernel_apply(pts, pts, w, sigma=1.0, m=64)
+    assert np.corrcoef(ex, ap)[0, 1] > 0.99                        # smooth (low-rank) field: faithful
+
+
+def test_nystrom_field_degrades_on_high_frequency():
+    import numpy as np
+    from holographic_nystrom import nystrom_kernel_apply, exact_kernel_apply
+    rng = np.random.default_rng(0)
+    pts = rng.standard_normal((600, 3)); w = rng.standard_normal(600)
+    ex = exact_kernel_apply(pts, pts, w, sigma=0.08)
+    ap = nystrom_kernel_apply(pts, pts, w, sigma=0.08, m=64)
+    assert np.corrcoef(ex, ap)[0, 1] < 0.8                         # kept negative: high-freq field is full-rank

@@ -154,6 +154,22 @@ acc, _ = vm.run(vm.assemble(prog))
 # ACC == a, popped back -> cosine 1.0000
 ```
 
+**Registers and the stack survive `run_chunked` seams.** A program too long for one structure is split into
+chunks (see below), and the *full* machine state — the accumulator **and** the register file **and** the
+stack — is threaded across each chunk boundary in its exact representation. So a `STORE R0` in an early chunk
+is readable by a `RECALL R0` many chunks later (cosine 1.0), and `PUSH`/`POP` span seams too. The exact carry
+is deliberate: it adds no crosstalk at a boundary, where bundling the register file into one vector *would*
+(and would compound over a long program).
+
+**The whole state as one composable vector — `state_to_vector` / `state_from_vector`.** When you *do* want
+the state as a single value — to snapshot a paused computation, store it in memory, compose it, or resume it
+later — bundle it: `snap = vm.state_to_vector(acc, regs, stack)` packs ACC + the register file + the stack
+into one continuation hypervector, and `vm.state_from_vector(snap, reg_names=[...], codebook=[...])` reads it
+back. Atom-valued slots round-trip exact after cleanup; arbitrary continuous values are lossy and the raw
+readback degrades as more slots are packed (~1/√slots — the capacity cliff). So the continuation is for
+snapshot/compose/resume; the per-seam carry above stays exact. VSA-native where composability is the point,
+exact where exactness is.
+
 ## Calling the mind's faculties: `APPLY` + handlers
 
 `APPLY g` runs a real holostuff faculty on ACC — but the *bare* VM has no faculties, so the host (your
@@ -174,6 +190,35 @@ acc, _ = fm.run(fm.assemble([("APPLY", "cleanup"), ("HALT", "")]),
 
 This is the seam between a VSA program and the engine: wire `handlers={"denoise": mind.denoise, "cleanup":
 mind.cleanup, ...}` and your program can invoke the mind's measured faculties on its accumulator.
+
+### Registering faculties on the mind: `register_apply_handler`
+
+When you run programs *through the mind* (`mind.run_procedure(...)`), you don't pass a `handlers` dict each
+time — you **register** them once and they are available to every program. `mind.register_apply_handler(name,
+fn)` takes any unary `acc -> acc` closure and makes it callable as `APPLY <name>`. The closure may *capture
+state*, which is what lets stateful faculties — an octree query, a Nystrom approximation over a fitted
+landmark set, an `Agent`'s decision — become programmable steps:
+
+```python
+# a Nystrom landmark projection (fast approximation in a large scene), captured in a closure
+B = landmarks / np.linalg.norm(landmarks, axis=1, keepdims=True)
+mind.register_apply_handler("nystrom_approx", lambda acc: (lambda r: r/np.linalg.norm(r))((B @ acc) @ B))
+
+# an agent behaviour: ACC is a state, the faculty returns the agent's learned action vector
+ag = mind.agent(["grab", "lift", "place"]); ag.reward(some_state, "lift", 1.0)
+mind.register_apply_handler("agent_act", lambda acc: ag.action_vec[ag.decide(acc)["action"]])
+
+# now a VSA program can call them inline, and they CHAIN with the built-ins:
+out, _ = mind.run_procedure([("APPLY", "nystrom_approx"), ("APPLY", "cleanup"), ("HALT", "")], init_acc=x)
+# APPLY <name> inside a program == calling the faculty directly (measured cosine 1.0); APPLY agent_act
+# picks the learned action 'lift'. This is the bridge from "the agent drives a program" to "a program
+# drives the engine".
+```
+
+Honest constraint: `APPLY` is **unary** `acc -> acc`. A faculty that isn't vector-to-vector (the
+`DriveSystem` *scheduler*, or a multi-argument op) can't be a bare handler — wrap it behind a closure that
+fixes the extra arguments (as `agent_act` fixes the goal/allowed set), or keep it in the host loop. A
+registered name overrides a built-in of the same name; non-callables are rejected.
 
 ## The faculty catalogue a program can compose (recent additions)
 

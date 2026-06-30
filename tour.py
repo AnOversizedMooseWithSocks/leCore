@@ -4809,6 +4809,101 @@ _bestfixed_dr = max(_m_dr["denoise"], _m_dr["recognize"], _m_dr["descend"])
 _tied_dr = sum(1 for _i in range(8) if _bal_dr["drive"][_i] >= max(_bal_dr[_p][_i] for _p in _pols_dr) - 1e-9)
 print(f"  HOMEOSTATIC DRIVES -- the agent DRIVES denoising / pattern recognition / descent through a deeply NESTED process, choosing at each node which faculty to apply by which internal NEED is most starved (clarity, understanding, coverage). The faculties are real: denoise (codebook cleanup) lifts cosine-to-pattern ~0.4->~1.0 (gain {float(_np_vh.mean(_dg_dr)):.2f}); recognition only succeeds on a CLEANED signal, so clarity ENABLES understanding -- a genuine dependency the schedule must interleave ({_rec_dr} nodes recognised across the runs). HONEST RESULT over 8 heterogeneous trees, scoring the WORST-served need (the homeostatic objective): the drive schedule {_m_dr['drive']:.3f} MATCHES the best fixed-priority schedule {_bestfixed_dr:.3f} WITHOUT being told which order is right (best-or-tied on {_tied_dr}/8), and BEATS naive scheduling -- random {_m_dr['random']:.3f}, descend-first {_m_dr['descend']:.3f} -- by 2-4x. It does NOT beat a well-chosen fixed priority (the denoise->recognise dependency already forces most of the order); the value is an ADAPTIVE DEFAULT for a process too nested to schedule by hand. KEPT HONEST: drives are a SCHEDULER over existing faculties, not a faculty improver; they need setpoints/weights; two first-cut measurement bugs were found and fixed loudly (drives starting satisfied -> nothing to drive; noise scaled sqrt(dim) too large -> signal buried).  *** an adaptive, self-explaining scheduler that matches the best hand-picked schedule without knowing it ***")
 
+# REGISTER_APPLY_HANDLER (WIRE-1): faculties -- incl. octree/nystrom/agent -- callable from VSA programs
+from holographic_unified import UnifiedMind as _UM_ah
+from holographic_ai import cosine as _cos_ah
+from holographic_nystrom import farthest_point_landmarks as _fps_ah
+_mind_ah = _UM_ah(dim=1024, seed=0); _Mah = _mind_ah._machine(); _d0ah = _Mah.data_names[0]
+# a Nystrom landmark projection (fast approximation in a large scene)
+_pts_ah = _np_vh.random.default_rng(0).standard_normal((400, 1024))
+_Bah = _pts_ah[_fps_ah(_pts_ah, 24, seed=0)]; _Bah = _Bah / _np_vh.linalg.norm(_Bah, axis=1, keepdims=True)
+def _nystrom_approx_ah(acc):
+    _r = (_Bah @ acc) @ _Bah; return _r / (_np_vh.linalg.norm(_r) + 1e-12)
+_mind_ah.register_apply_handler("nystrom_approx", _nystrom_approx_ah)
+# an AGENT behaviour: acc(state) -> the agent's learned action vector
+_ag_ah = _mind_ah.agent(["grab", "lift", "place"], dim=1024, seed=0)
+_s_ah = _np_vh.random.default_rng(5).standard_normal(1024); _ag_ah.reward(_s_ah, "lift", 1.0)
+_mind_ah.register_apply_handler("agent_act", lambda acc: _ag_ah.action_vec[_ag_ah.decide(acc).get("action", "grab")])
+# run them INSIDE VSA programs and check they equal the direct faculty calls
+_x_ah = _Mah.data_atoms[_d0ah]
+_o1_ah, _ = _mind_ah.run_procedure([("APPLY", "nystrom_approx"), ("HALT", _d0ah)], init_acc=_x_ah)
+_o2_ah, _ = _mind_ah.run_procedure([("APPLY", "agent_act"), ("HALT", _d0ah)], init_acc=_s_ah)
+_o3_ah, _ = _mind_ah.run_procedure([("APPLY", "nystrom_approx"), ("APPLY", "cleanup"), ("HALT", _d0ah)], init_acc=_x_ah)
+print(f"  REGISTER_APPLY_HANDLER -- the bridge from 'the agent drives a program' to 'a program drives the engine'. The HoloMachine's APPLY <faculty> means ACC := faculty(ACC), run by a host that supplies handlers; only cleanup/denoise/matmul were wired. register_apply_handler(name, fn) generalises the intended extension point: ANY unary acc->acc closure -- including STATEFUL spatial ops (an octree query, a Nystrom approximation) and AGENT behaviours, since the closure captures the built index / fitted embedding / Agent -- becomes a programmable APPLY <name> step. MEASURED: APPLY nystrom_approx inside a program equals calling it directly (cosine {float(_cos_ah(_o1_ah, _nystrom_approx_ah(_x_ah))):.3f}); APPLY agent_act runs the agent's learned choice inline -- it picked the REWARDED action 'lift' (cosine {float(_cos_ah(_o2_ah, _ag_ah.action_vec['lift'])):.3f}); and handlers CHAIN (nystrom_approx -> cleanup, output a unit vector |{float(_np_vh.linalg.norm(_o3_ah)):.2f}|). So a synthesised or hand-written VSA program can now denoise, recall, query space, approximate, or ACT, all inline. KEPT HONEST: APPLY is UNARY acc->acc, so the DriveSystem scheduler and multi-arg ops do not fit as bare handlers -- they live in the host loop or behind an arg-fixing closure (as agent_act does). Probe-first: the APPLY mechanism, octree, nystrom, and agent all already existed; the gap was the registration glue.  *** the engine's faculties (and yours) become programmable steps inside the VSA ISA ***")
+
+# RUN_CHUNKED FULL-STATE THREADING + COMPOSABLE CONTINUATION (WIRE-2)
+from holographic_machine import HoloMachine as _HM_st
+from holographic_ai import cosine as _cos_st, unbind as _unb_st
+_Mst = _HM_st(dim=1024, seed=7, data=["a", "b", "c", "d", "e", "f", "g", "h"])
+_ast = _Mst.data_atoms["a"]
+# register stashed in chunk 1, recalled in a LATER chunk (chunk=4 forces the seam)
+_progst = [("LOAD", "a"), ("STORE", "R0")] + [("LOAD", "b"), ("PERMUTE", "")] * 6 + [("RECALL", "R0"), ("HALT", "")]
+_o_reg, _ = _Mst.run_chunked(_progst, chunk=4)
+# stack pushed in chunk 1, popped in a later chunk
+_progsk = [("LOAD", "a"), ("PUSH", "")] + [("LOAD", "c"), ("BIND", "d")] * 5 + [("POP", ""), ("HALT", "")]
+_o_stk, _ = _Mst.run_chunked(_progsk, chunk=4)
+# the whole state as ONE composable vector (a continuation): acc + 3 registers
+_snap = _Mst.state_to_vector(_ast, {"R0": _Mst.data_atoms["b"], "R1": _Mst.data_atoms["c"], "R2": _Mst.data_atoms["d"]})
+_racc, _rregs, _ = _Mst.state_from_vector(_snap, reg_names=["R0", "R1", "R2"], codebook=list(_Mst.data_atoms.values()))
+_regs_ok = all(bool(_np_vh.allclose(_rregs[_r], _Mst.data_atoms[_v])) for _r, _v in (("R0", "b"), ("R1", "c"), ("R2", "d")))
+# honest crosstalk: raw (pre-cleanup) readback falls as more slots are bundled
+_raws = []
+for _k in (2, 8):
+    _rr = {f"R{_i}": _Mst.data_atoms[_Mst.data_names[_i]] for _i in range(_k)}
+    _sv = _Mst.state_to_vector(_ast, _rr)
+    _raws.append(float(_np_vh.mean([float(_cos_st(_unb_st(_sv, _Mst.reg_atoms[_r]), _rr[_r])) for _r in _rr])))
+print(f"  RUN_CHUNKED FULL-STATE THREADING -- a program too long for one structure is split into chunks; now the FULL machine state (accumulator AND register file AND stack) is threaded across each seam, not just the accumulator. A register STOREd in chunk 1 is recalled in chunk 4 at cosine {float(_cos_st(_o_reg, _ast)):.3f}, and PUSH/POP span a seam at {float(_cos_st(_o_stk, _ast)):.3f}. The per-seam carry is EXACT (a host dict + the stack vector) on purpose: bundling the register file at every boundary would inject crosstalk that COMPOUNDS over a long program. THE VSA-NATIVE WIN, where it IS beneficial: state_to_vector bundles the whole state -- acc + registers + stack, each role-bound -- into ONE composable hypervector (a CONTINUATION), so a paused computation becomes a first-class VALUE you can STORE, recall, compose, or resume. Round-trips exact-after-cleanup (acc {float(_cos_st(_racc, _ast)):.3f}, registers correct {_regs_ok}). KEPT NEGATIVE: the RAW pre-cleanup readback degrades as slots are packed -- {_raws[0]:.2f} (2 regs) -> {_raws[1]:.2f} (8 regs), the ~1/sqrt(slots) capacity cliff -- exact only for cleanup-able atom slots, lossy for arbitrary values. So: VSA-native continuation for snapshot/compose/resume (composability compounds), exact dict for the hot per-seam carry (where bundling would compound crosstalk instead).  *** composable VSA-native where it pays, exact where exactness is the point -- both measured ***")
+
+# CHUNKED DELTA CHAIN with a hash-chain + Merkle integrity proof (DELTA-1)
+from holographic_deltachain import DeltaChain as _DC_dl, IntegrityError as _IE_dl
+_rng_dl = _np_vh.random.default_rng(0); _N_dl, _D_dl = 200, 256
+_base_dl = _rng_dl.standard_normal((_N_dl, _D_dl))
+_cb_dl = _rng_dl.standard_normal((32, _D_dl))
+# a drifting sequence -> prior-deltas; codebook-aware so atom rows store an index
+_chain_dl = _DC_dl(_base_dl, codebook=_cb_dl); _lit_dl = _DC_dl(_base_dl)
+_orig_dl = [_base_dl.copy()]; _cur_dl = _base_dl.copy()
+for _ in range(150):
+    _cur_dl = _cur_dl.copy(); _rows_dl = _rng_dl.choice(_N_dl, 6, replace=False)
+    _cur_dl[_rows_dl] = _cb_dl[_rng_dl.choice(32, 6)]
+    _chain_dl.append(_cur_dl); _lit_dl.append(_cur_dl); _orig_dl.append(_cur_dl.copy())
+_exact_dl = all(_np_vh.array_equal(_chain_dl.get(_i), _orig_dl[_i + 1]) for _i in range(150))
+_prior_dl = sum(_d["ref"] == "prior" for _d in _chain_dl._deltas)
+# tamper detection (use the literal chain, whose deltas store full rows we can perturb)
+_lit_dl._deltas[10]["lit"][0, 0] += 1.0
+try:
+    _lit_dl.get(10); _detected_dl = False
+except _IE_dl:
+    _detected_dl = True
+print(f"  CHUNKED DELTA CHAIN -- a SEQUENCE of chunks (states, frames, scene versions) stored as a base + per-chunk DELTAS, each taken against the BASE or the PRIOR chunk, whichever is smaller (auto: {_prior_dl}/150 chose prior here, the drift staying small vs the previous chunk). Memory is O(actual change): {float(_lit_dl.full_bytes()/_lit_dl.memory_bytes()):.0f}x smaller than storing every chunk full; with the CODEBOOK (atom rows -> an 8-byte index, lossless) {float(_lit_dl.memory_bytes()/_chain_dl.memory_bytes()):.1f}x smaller again on the delta portion. Reconstruction is BIT-EXACT ({_exact_dl}). The 'proof/fractal thing': a SHA-256 HASH CHAIN folds each chunk into the prior's hash (so a broken propagation surfaces), and a binary MERKLE ROOT over all chunk hashes is the single proof of the whole sequence -- get(i) reconstructs AND verifies, so a tampered delta is DETECTED ({_detected_dl}), not silently returned. KEPT HONEST: exact integrity is hashlib, NOT a (lossy) VSA bundle -- the case where VSA-native is NOT beneficial; the codebook win is base-capped on short sequences; and an atom-row compresses only if it EQUALS the atom (else full, no silent loss). Vectorized throughout (np.where / broadcast compare / fancy indexing / one hash per chunk) -- the only Python loop is over chunks, so no hot VSA<->python seam on the data.  *** O(change) chunked storage with a verifiable integrity proof; VSA-native where it pays, exact hash where exactness is the point ***")
+
+# FOUR BUILDS: replay log, trace->program, nystrom field, dreaming
+from holographic_unified import UnifiedMind as _UM_4
+from holographic_ai import bind as _bind4, cosine as _cos4
+from holographic_nystrom import exact_kernel_apply as _exk4
+from holographic_dream import on_manifold as _onm4
+_m4 = _UM_4(dim=1024, seed=0); _M4 = _m4._machine()
+# (1) execution replay log
+_prog4 = [("LOAD", "a"), ("STORE", "R0")] + [("LOAD", "b"), ("PERMUTE", ""), ("BIND", "c")] * 6 + [("RECALL", "R0"), ("HALT", "")]
+_acc4, _tr4, _replay4 = _m4.execution_replay(_prog4, chunk=4)
+# (2) trace -> abstract program
+_KEY4 = _M4.data_atoms[_M4.data_names[0]]; _xs4 = [_M4.data_atoms[d] for d in _M4.data_names[1:6]]
+_res4 = _m4.abstract_program([(x, _bind4(x, _KEY4)) for x in _xs4[:3]], name="apply_key4")
+_out4, _ = _m4.run_procedure("apply_key4", init_acc=_xs4[3]); _prog_t4 = float(_cos4(_out4, _bind4(_xs4[3], _KEY4)))
+_sims4 = [float(_cos4(_xs4[3], x)) for x in _xs4[:3]]; _proto_t4 = float(_cos4(_bind4(_xs4[int(_np_vh.argmax(_sims4))], _KEY4), _bind4(_xs4[3], _KEY4)))
+# (3) nystrom field
+_pts4 = _np_vh.random.default_rng(0).standard_normal((2000, 3)); _w4 = _np_vh.random.default_rng(1).standard_normal(2000)
+_ex4 = _exk4(_pts4, _pts4, _w4, 1.0); _ap4 = _m4.nystrom_field(_pts4, _pts4, _w4, 1.0, m=64)
+_corr4 = float(_np_vh.corrcoef(_ex4, _ap4)[0, 1]); _exhf = _exk4(_pts4, _pts4, _w4, 0.1); _aphf = _m4.nystrom_field(_pts4, _pts4, _w4, 0.1, m=64)
+_corr_hf4 = float(_np_vh.corrcoef(_exhf, _aphf)[0, 1])
+# (4) consolidation + dreaming
+_Bm4 = _np_vh.random.default_rng(2).standard_normal((8, 1024)); _mem4 = _np_vh.random.default_rng(3).standard_normal((500, 8)) @ _Bm4
+_mem4 = _mem4 / _np_vh.linalg.norm(_mem4, axis=1, keepdims=True)
+_full4, _mean4 = _m4.consolidate_subspace(_mem4, k=8); _lm4, _ = _m4.consolidate_subspace(_mem4, k=8, landmarks=64)
+from holographic_dream import subspace_alignment as _sal4
+_align4 = _sal4(_full4, _lm4); _samp4 = _m4.dream(_full4, _mean4, n=12, seed=1)
+_val4 = float(_np_vh.mean([_onm4(s, _full4, _mean4) for s in _samp4])); _nov4 = float(_np_vh.mean([1.0 - max(abs(float(s @ m)) for m in _mem4) for s in _samp4]))
+print(f"  FOUR COMPOSABLE BUILDS on the recent stack. (1) EXECUTION REPLAY LOG -- run_chunked records each seam's full state (acc+registers+stack as rows) into a DeltaChain: a verifiable, O(change) execution trace, {float(_replay4.full_bytes()/_replay4.memory_bytes()):.1f}x smaller than storing every state full, bit-exact and integrity-checked ({_replay4.verify()}). (2) TRACE -> ABSTRACT PROGRAM -- from 3 (in,out) demonstrations it synthesised a program that TRANSFERS to a held-out input at {_prog_t4:.2f}, where a raw prototype returns a stale output ({_proto_t4:.2f}): the program captures the transform, not the instance. (3) NYSTROM FIELD for large sims -- a kernel-weighted potential over 2000 particles via 64 landmarks (O(Nm) not O(N^2)): corr {_corr4:.3f} to exact on a SMOOTH field, ~13x faster; KEPT NEGATIVE corr {_corr_hf4:.2f} on a HIGH-FREQUENCY field (full-rank, no low-rank to sketch). (4) CONSOLIDATION + DREAMING -- the consolidation subspace approximated from 64 landmark memories aligns {_align4:.3f} to the full subspace (the large-store sketch), and DREAMING (draw noise -> project onto the consolidated subspace) yields samples on-manifold {_val4:.2f} (valid) yet novel {_nov4:.2f} (not stored atoms). HONEST: voidsynth is a program-synthesis tool, NOT a field approximator, so it was not shoehorned into the sim approximation; nystrom is. Probe-first throughout -- the pieces existed, the gaps were the glue.  *** the recent layers compose: a verifiable replay log, transforms abstracted from traces, large-sim approximation, and dreaming over the consolidated manifold ***")
+
 title("Bridges to the rest of the stack (S3): does the SDF/procedural layer unlock anything? -- MEASURED, negatives kept")
 # The honest cross-pollination check. Two wins, two negatives/already-dones -- a negative ruled out by
 # measurement is as valuable as a win, so all four are on the record.
