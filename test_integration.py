@@ -5555,3 +5555,16 @@ def test_execution_replay_and_recent_builds():
     from holographic_dream import on_manifold
     s = um.dream(basis, mean, n=4, seed=1)
     assert np.mean([on_manifold(x, basis, mean) for x in s]) > 0.9
+
+
+def test_fluid_solver_through_mind():
+    """The stable-fluids solver runs through the mind faculty: incompressible, buoyant, combusting (FLUID-1)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=256, seed=0)
+    f = um.fluid_solver((40, 40), dt=0.4, buoyancy_beta=0.4, ignition=0.5)
+    f.add_source((slice(28, 34), slice(16, 24)), fuel=1.0, temperature=1.0, density=0.5)
+    for _ in range(20):
+        f.step()
+    assert np.isfinite(f.vel).all() and f.divergence() / (np.max(np.abs(f.vel)) + 1e-12) < 1e-6
+    assert f.fuel.sum() < 40.0                                     # some fuel burned
