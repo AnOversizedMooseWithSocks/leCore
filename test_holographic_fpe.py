@@ -60,6 +60,22 @@ def test_encode_many_matches_encode_and_bundle_keeps_raw_weights():
     assert np.allclose(enc.bundle(pts, weights), np.sum(rowwise * weights[:, None], axis=0), atol=1e-12)
 
 
+def test_query_many_matches_query_loop():
+    enc = VectorFunctionEncoder(2, dim=1024, bounds=[(0, 10), (0, 10)], seed=5)
+    rng = np.random.default_rng(5)
+    pts = rng.uniform(0, 10, (40, 2))
+    f = enc.bundle(pts[:12], rng.normal(size=12))
+    loop = np.array([enc.query(f, p) for p in pts])
+    assert np.allclose(enc.query_many(f, pts), loop, atol=1e-12)
+
+
+def test_query_many_handles_1d_point_stacks():
+    enc = VectorFunctionEncoder(1, dim=512, bounds=[(0, 10)], seed=6)
+    xs = np.linspace(0, 10, 20)
+    f = enc.bundle(xs[:8], np.linspace(0.2, 1.0, 8))
+    assert np.allclose(enc.query_many(f, xs), [enc.query(f, x) for x in xs], atol=1e-12)
+
+
 def test_function_translates_under_one_binding():
     enc = VectorFunctionEncoder(2, dim=1024, bounds=[(0, 10), (0, 10)], seed=2)
     # a single atom shifts exactly...

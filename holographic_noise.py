@@ -123,6 +123,11 @@ def sample(encoder, field, point):
     return float(encoder.query(field, point))
 
 
+def sample_many(encoder, field, points):
+    """Read the noise field at many points via the encoder's batched FPE query path."""
+    return encoder.query_many(field, points)
+
+
 # ---------------------------------------------------------------------------
 # fBm: a weighted superposition of band fields (the octave bundle).
 # ---------------------------------------------------------------------------
@@ -165,10 +170,25 @@ class FractalNoise:
 
     def query(self, point):
         """Evaluate fBm at a point: the amplitude-weighted sum of the octave reads (the bundle)."""
-        total = 0.0
+        return float(self.query_many([point])[0])
+
+    def query_many(self, points):
+        """Evaluate fBm at many points with one batched read per octave."""
+        pts = np.asarray(points, float)
+        if self.n_dims == 1:
+            if pts.ndim == 0:
+                pts = pts.reshape(1, 1)
+            elif pts.ndim == 1:
+                pts = pts.reshape(-1, 1)
+        else:
+            pts = np.atleast_2d(pts)
+        if pts.ndim != 2 or pts.shape[1] != self.n_dims:
+            raise ValueError(f"points must have shape (count, {self.n_dims})")
+
+        total = np.zeros(pts.shape[0], dtype=float)
         for amp, enc, fld in zip(self.amplitudes, self.encoders, self.fields):
-            total += amp * enc.query(fld, point)
-        return float(total / self._norm)
+            total += amp * enc.query_many(fld, pts)
+        return total / self._norm
 
     def sample_grid(self, res):
         """Evaluate fBm on a res^n_dims lattice over `bounds` (n_dims==2 -> a res x res array).
@@ -178,7 +198,7 @@ class FractalNoise:
         axes = [np.linspace(lo, hi, res) for (lo, hi) in self.bounds]
         grids = np.meshgrid(*axes, indexing="ij")
         pts = np.stack([g.ravel() for g in grids], axis=1)
-        vals = np.array([self.query(p) for p in pts])
+        vals = self.query_many(pts)
         return vals.reshape([res] * self.n_dims)
 
 

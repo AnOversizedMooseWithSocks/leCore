@@ -105,9 +105,9 @@ class HolographicField:
 
     def value(self, points):
         """The (kernel-smoothed) signed field at the query point(s): cosine(f, encode(x)) for each -- negative inside,
-        positive outside, ~0 on the surface. One FPE query per point."""
+        positive outside, ~0 on the surface. Uses batched FPE reads for row stacks."""
         pts = np.atleast_2d(np.asarray(points, float))
-        return np.array([self.enc.query(self.f, pts[i]) for i in range(len(pts))])
+        return self.enc.query_many(self.f, pts)
 
     def translate(self, delta):
         """THE HEADLINE -- edit = bind. Translate the ENTIRE surface by `delta` with a SINGLE binding:

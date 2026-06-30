@@ -37,11 +37,11 @@ KEPT NEGATIVES (measured, in the selftest)
   * Where a scalar suffices, the n-D machinery buys nothing: 1-D FPE IS the ScalarEncoder, so reach for this
     only when the domain is genuinely multi-dimensional or you need the function algebra.
 
-Only NumPy, the engine's bind/cosine/weighted_sum, and the existing ScalarEncoder -- no new dependency, nothing learned.
+Only NumPy, the engine's bind/cosine, and the existing ScalarEncoder -- no new dependency, nothing learned.
 """
 import numpy as np
 
-from holographic_ai import bind, cosine, weighted_sum
+from holographic_ai import bind, cosine
 from holographic_encoders import ScalarEncoder
 
 _BUNDLE_ENCODE_BATCH_ROWS = 2048
@@ -98,13 +98,7 @@ class VectorFunctionEncoder:
             v = bind(v, self.axes[k].encode(point[k]))
         return v
 
-    def encode_many(self, points):
-        """Vectorised n-D FPE encoding for a row stack of points.
-
-        This is algebraically the same as calling encode() for each row: it
-        multiplies the per-axis FPE spectra directly, which is exactly what the
-        bind loop would do after FFTing each axis code.
-        """
+    def _coerce_points(self, points):
         pts = np.asarray(points, float)
         if self.n_dims == 1:
             if pts.ndim == 0:
@@ -115,7 +109,9 @@ class VectorFunctionEncoder:
             pts = np.atleast_2d(pts)
         if pts.ndim != 2 or pts.shape[1] != self.n_dims:
             raise ValueError(f"points must have shape (count, {self.n_dims})")
+        return pts
 
+    def _point_spectra(self, pts):
         spectrum = np.ones((pts.shape[0], self.dim), dtype=np.complex128)
         for k, ax in enumerate(self.axes):
             values = pts[:, k]
@@ -123,6 +119,16 @@ class VectorFunctionEncoder:
             if warp_x is not None:
                 values = np.interp(values, warp_x, ax._warp_u)
             spectrum *= np.exp(1j * ax.scale * values[:, None] * ax.phases[None, :])
+        return spectrum
+
+    def encode_many(self, points):
+        """Vectorised n-D FPE encoding for a row stack of points.
+
+        This is algebraically the same as calling encode() for each row: it
+        multiplies the per-axis FPE spectra directly, which is exactly what the
+        bind loop would do after FFTing each axis code.
+        """
+        spectrum = self._point_spectra(self._coerce_points(points))
         out = np.real(np.fft.ifft(spectrum, axis=1))
         norms = np.linalg.norm(out, axis=1)
         nz = norms > 0
@@ -142,26 +148,52 @@ class VectorFunctionEncoder:
     def bundle(self, points, weights=None):
         """Represent a function f: R^n -> R as a weighted superposition of encoded points,
         f = sum_i w_i encode(p_i). With RBF axes, querying f is a holographic kernel-density estimate."""
-        points = list(points)
-        if not points:
+        pts = self._coerce_points(points)
+        if len(pts) == 0:
             raise ValueError("need at least one point")
         if weights is None:
             weights_arr = None
         else:
             weights_arr = np.asarray(weights, float).ravel()
-            if weights_arr.shape[0] != len(points):
+            if weights_arr.shape[0] != len(pts):
                 raise ValueError("weights must match the number of points")
-        total = np.zeros(self.dim, dtype=float)
-        for start in range(0, len(points), _BUNDLE_ENCODE_BATCH_ROWS):
-            end = min(start + _BUNDLE_ENCODE_BATCH_ROWS, len(points))
+        spectrum = np.zeros(self.dim, dtype=np.complex128)
+        for start in range(0, len(pts), _BUNDLE_ENCODE_BATCH_ROWS):
+            end = min(start + _BUNDLE_ENCODE_BATCH_ROWS, len(pts))
+            chunk = self._point_spectra(pts[start:end])
             chunk_weights = None if weights_arr is None else weights_arr[start:end]
-            total += weighted_sum(self.encode_many(points[start:end]), chunk_weights)
-        return total
+            if chunk_weights is None:
+                spectrum += chunk.sum(axis=0)
+            else:
+                spectrum += chunk_weights @ chunk
+        return np.real(np.fft.ifft(spectrum))
 
     def query(self, function, point):
         """Evaluate the represented function at `point`: cosine(function, encode(point)) reads
         sum_i w_i kernel(point, p_i), up to the bundle's norm -- the function's value, holographically."""
         return float(cosine(function, self.encode(point)))
+
+    def query_many(self, function, points, chunk_size=_BUNDLE_ENCODE_BATCH_ROWS):
+        """Evaluate a represented function at many points in batched FPE blocks.
+
+        This is the read-side twin of ``bundle``: encode a row stack once, then
+        use one matrix-vector multiply per chunk instead of a Python loop of
+        ``query(function, point)`` calls. It preserves query() semantics exactly
+        up to batched-FFT roundoff.
+        """
+        pts = self._coerce_points(points)
+        fn = np.asarray(function, float)
+        fnorm = np.linalg.norm(fn)
+        if fnorm == 0:
+            return np.zeros(pts.shape[0], dtype=float)
+        fn_spectrum = np.conj(np.fft.fft(fn))
+        out = np.empty(pts.shape[0], dtype=float)
+        step = max(1, int(chunk_size))
+        for start in range(0, pts.shape[0], step):
+            end = min(start + step, pts.shape[0])
+            spectra = self._point_spectra(pts[start:end])
+            out[start:end] = np.real(spectra @ fn_spectrum) / (self.dim * fnorm)
+        return out
 
     def shift(self, function, delta):
         """Translate the WHOLE function by `delta` with a single binding:
