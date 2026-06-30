@@ -193,6 +193,21 @@ def splats_from_ply(path):
     return recs
 
 
+def splats_2d_to_records(splats2d, z=0.0, pixel_scale=1.0):
+    """Lift 2-D splats (splat_fit's (cy, cx, amp, sigma) image splats) to the 3-D export records (center, amp, L)
+    that splats_to_ply / export_splats consume, placing them on the z=`z` plane. center = (cx, cy, z) (x=column,
+    y=row) scaled by `pixel_scale`; L = (1/sigma) I is the isotropic inverse-covariance Cholesky. So a 2-D
+    Gaussian-splat image (matching pursuit, a density fit) exports as a flat 3-D splat scene any 3DGS viewer
+    opens -- '2-D splats' and '3-D splats' through one path."""
+    recs = []
+    for (cy, cx, amp, sigma) in splats2d:
+        center = (float(cx) * pixel_scale, float(cy) * pixel_scale, float(z))
+        s = max(float(sigma) * pixel_scale, 1e-6)
+        L = np.eye(3) / s                                      # isotropic precision Cholesky (std = sigma)
+        recs.append((center, float(amp), L))
+    return recs
+
+
 def field_to_splats(centers, radius=0.5, amp=1.0):
     """Pull a metaball FIELD's Gaussians directly as splats -- no fit needed, the centres ARE the splat positions and
     the metaball's `radius` IS the isotropic standard deviation. Returns a list of (center, amp, L) with

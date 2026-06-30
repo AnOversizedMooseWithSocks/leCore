@@ -198,6 +198,79 @@ class Mesh:
             return None
         return (2 - self.euler_characteristic()) // 2
 
+    def validate_topology(self):
+        """The full well-formedness report for a 3-D modeling app: does this mesh have the clean,
+        2-manifold topology a user expects, or are there elements that will surprise them? Returns a dict:
+
+            ok                  -- True iff manifold AND no degenerate faces (the one flag to gate on)
+            manifold_edges      -- True iff every undirected edge is shared by <= 2 faces, consistently oriented
+            manifold_vertices   -- True iff every vertex's face-fan is a single connected disk/half-disk (no
+                                   BOWTIE: two cones meeting at one point pass the edge test but are non-manifold)
+            watertight          -- True iff closed (every edge has exactly two faces; no boundary/holes)
+            non_manifold_edges  -- list of (lo,hi) undirected edges shared by >2 faces (or mis-oriented)
+            non_manifold_verts  -- list of vertex indices whose link splits into >1 component (bowties)
+            boundary_edges      -- count of edges on a boundary (shared by exactly one face)
+            degenerate_faces    -- count of faces with a repeated vertex index (zero-area / collapsed)
+            euler, genus        -- the combinatorial invariants (chi = V-E+F; genus for a closed surface)
+
+        Edge-manifoldness and orientation are decided by the half-edge build (a directed edge appearing twice
+        is non-manifold). Vertex-manifoldness is the extra check is_manifold cannot give: for each vertex, the
+        incident triangles link its 1-ring neighbours (face (v,a,b) -> link edge a-b); a clean fan is ONE
+        connected component, a bowtie is two or more."""
+        report = {"manifold_edges": True, "manifold_vertices": True, "watertight": False,
+                  "non_manifold_edges": [], "non_manifold_verts": [], "boundary_edges": 0,
+                  "degenerate_faces": 0, "euler": None, "genus": None, "ok": False}
+
+        # degenerate faces: a repeated vertex index collapses the face to zero area
+        report["degenerate_faces"] = sum(1 for f in self.faces if len(set(f)) < len(f))
+
+        # edge manifoldness: count faces per undirected edge directly (independent of orientation)
+        edge_face_count = {}
+        for f in self.faces:
+            n = len(f)
+            for k in range(n):
+                e = (min(f[k], f[(k + 1) % n]), max(f[k], f[(k + 1) % n]))
+                edge_face_count[e] = edge_face_count.get(e, 0) + 1
+        report["non_manifold_edges"] = sorted(e for e, c in edge_face_count.items() if c > 2)
+        report["boundary_edges"] = sum(1 for c in edge_face_count.values() if c == 1)
+        report["manifold_edges"] = (len(report["non_manifold_edges"]) == 0)
+        report["watertight"] = report["manifold_edges"] and report["boundary_edges"] == 0
+
+        # vertex manifoldness (bowtie): each triangle (v,a,b) links a-b in v's "link graph"; one component = clean
+        if self.faces and all(len(f) == 3 for f in self.faces):
+            F = np.asarray(self.faces, dtype=np.int64)
+            link = {}                                          # vertex -> list of (a,b) neighbour pairs
+            for p in range(3):
+                v = F[:, p]; a = F[:, (p + 1) % 3]; b = F[:, (p + 2) % 3]
+                for vv, aa, bb in zip(v.tolist(), a.tolist(), b.tolist()):
+                    link.setdefault(vv, []).append((aa, bb))
+            bad = []
+            for vv, pairs in link.items():
+                parent = {}                                    # tiny union-find over this vertex's 1-ring
+                def find(x):
+                    parent.setdefault(x, x)
+                    while parent[x] != x:
+                        parent[x] = parent[parent[x]]; x = parent[x]
+                    return x
+                for aa, bb in pairs:
+                    ra, rb = find(aa), find(bb)
+                    if ra != rb:
+                        parent[rb] = ra
+                roots = {find(x) for pr in pairs for x in pr}
+                if len(roots) > 1:                             # the fan split into >1 piece -> bowtie
+                    bad.append(int(vv))
+            report["non_manifold_verts"] = sorted(bad)
+            report["manifold_vertices"] = (len(bad) == 0)
+
+        try:
+            report["euler"] = self.euler_characteristic()
+            report["genus"] = self.genus()
+        except Exception:
+            pass
+        report["ok"] = (report["manifold_edges"] and report["manifold_vertices"]
+                        and report["degenerate_faces"] == 0)
+        return report
+
     # ----- normals -----------------------------------------------------------------------------------
     def vertex_normals(self, store=True):
         """Per-vertex shading normals by Newell's method: each face contributes a normal whose magnitude is

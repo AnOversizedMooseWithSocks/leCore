@@ -541,7 +541,10 @@ class PartitionedMemory:
 
     def route(self, key):
         """Return the index of the region a key belongs to (nearest anchor)."""
-        return int(np.argmax([cosine(key, a) for a in self.anchors]))
+        mat = getattr(self, "_anchor_mat", None)
+        if mat is None or len(mat) != len(self.anchors):
+            mat = self._anchor_mat = np.stack(self.anchors)   # cache the stacked anchors for matmul routing
+        return nearest(key, mat)[0]                            # argmax(anchors @ key) -- exact, one matmul
 
     def learn(self, key, value):
         """Store a pair in the region its key routes to."""

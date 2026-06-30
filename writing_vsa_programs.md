@@ -55,11 +55,16 @@ your own names, pass `data=[...]` to the constructor (below).
 | `IFMATCH x` | data name | run the NEXT instruction only if `cosine(ACC, x) >= branch_tol` (default 0.5), else skip it |
 | `REPEAT n` | count 1..8 | run the FOLLOWING `CALL` n times |
 | `ITERATE f` | function name | re-apply function `f` to ACC until it converges (fixed point) or a host `stop(acc)` is met |
+| `STORE r` | register name | copy ACC into named register `r` (R0..R7) — exact, no crosstalk with ACC |
+| `RECALL r` | register name | load register `r` back into ACC — exact (the value returns verbatim) |
+| `PUSH` | `""` | push ACC onto the permute-stack (for nesting / save-and-restore) |
+| `POP` | `""` | pop the stack's top back into ACC (cleaned against the data atoms) |
 | `HALT` | `""` | stop |
 
 Operand codebooks are kept separate, which is why cleanup is reliable: `LOAD/BIND/BUNDLE/IFMATCH` operands
 clean against the **data** atoms, `CALL/ITERATE` against **function names**, `APPLY` against **faculty
-names**, `REPEAT` against the small-integer **counts**.
+names**, `STORE/RECALL` against the **register names** (R0..R7), and `REPEAT` against the small-integer
+**counts**.
 
 ## Functions: name a sub-program, call it by name
 
@@ -119,6 +124,36 @@ acc, _ = vm.run(vm.assemble([("LOAD", "a"), ("REPEAT", 3), ("CALL", "shift"), ("
 converge_tol`) or a host `stop(acc)` predicate says the desired output is reached. That's the
 input→process→feed-back loop behind cleanup / resonator / denoise, now expressible as a program.
 
+## Registers and a stack: `STORE`/`RECALL` and `PUSH`/`POP`
+
+ACC is the only working register, but two extra stores let a program hold more than one value at a time
+without bundling them together (which would cost capacity and crosstalk).
+
+**A register file — `STORE r` / `RECALL r`.** Eight named slots (R0..R7) beside ACC. `STORE` copies ACC
+into a slot and `RECALL` reads it back *verbatim* — the slots are separate codebook entries, so there is no
+crosstalk between them or with ACC, and the read is exact (not a noisy unbind). Use it to stash a partial
+result, build something else, then bring the stashed value back.
+
+```python
+prog = [("LOAD", "a"), ("BIND", "b"), ("STORE", "R0"),   # R0 = bind(a, b), set aside
+        ("LOAD", "c"), ("BIND", "d"),                     # ACC = bind(c, d)
+        ("RECALL", "R0"), ("HALT", "")]                   # ACC = bind(a, b) again
+acc, _ = vm.run(vm.assemble(prog))
+# ACC == bind(a, b), recalled exactly -> cosine 1.0000
+```
+
+**A stack — `PUSH` / `POP`.** A permute-stack for save-and-restore and nesting: `PUSH` saves ACC, `POP`
+brings the most recent saved value back (cleaned against the data atoms on the way out). Handy for nested
+sub-computations where you want to preserve the outer value while the inner one runs.
+
+```python
+prog = [("LOAD", "a"), ("PUSH", ""),        # save a
+        ("LOAD", "b"), ("BIND", "c"),        # do other work in ACC
+        ("POP", ""), ("HALT", "")]           # restore a
+acc, _ = vm.run(vm.assemble(prog))
+# ACC == a, popped back -> cosine 1.0000
+```
+
 ## Calling the mind's faculties: `APPLY` + handlers
 
 `APPLY g` runs a real holostuff faculty on ACC — but the *bare* VM has no faculties, so the host (your
@@ -139,6 +174,50 @@ acc, _ = fm.run(fm.assemble([("APPLY", "cleanup"), ("HALT", "")]),
 
 This is the seam between a VSA program and the engine: wire `handlers={"denoise": mind.denoise, "cleanup":
 mind.cleanup, ...}` and your program can invoke the mind's measured faculties on its accumulator.
+
+## The faculty catalogue a program can compose (recent additions)
+
+A program reaches the mind's faculties two ways. **(1) As an `APPLY` handler** — any faculty shaped
+`acc -> acc` (cleanup, denoise, recognize, the energy/resonator steps) can be wired into `handlers` and
+called inline on ACC. **(2) As host orchestration** — faculties that work on grids, positions, or encoders
+(the fluid/particle/fractal layer) are called directly on the mind in your host code, with the program
+handling the symbolic/decision part. Both stay on the one bind/bundle/cleanup substrate, so a faculty's
+*output is a vector* you can feed straight back in as `init_acc`, a `data` atom, or a `STORE`d register.
+
+The capabilities added recently, grouped by what they do:
+
+**Structure encode/decode** — `encode_record(fields)` / `decode_record(vec, schema)` bundle and read back a
+flat `{field: value}` record; **`encode_pairs(keys, values)`** is the batched primitive (one FFT bundle of
+`bind(key_i, value_i)` over parallel arrays — *renamed from a former `encode_record(keys, values)` overload
+that shadowed the record encoder*, so update any call that used the two-argument form).
+
+**Fractal / inception (a whole self-similar volume as one vector)** — `fractal_volume(enc, period, counts,
+levels, motif=…)` tiles ANY VSA object self-similarly: a synthesized fractal grain (default), a field
+(`motif_grid=…`), or any hypervector (`motif=…`) — including another `fractal_volume`'s output, i.e.
+inception over the engine itself. **`inception(enc, period, counts, depth)`** is that as a one-parameter
+depth knob and returns `(volume, profile)`, the profile a measured table of how per-copy read falls as depth
+grows (the honest capacity ceiling).
+
+**3-D fields & immersed boundary** — `fluid_step_3d` / `smoke_step_3d` (the FFT Stable-Fluids solver in 3-D)
+now take `solid=` for an obstacle the flow goes around; build the obstacle with **`sphere_mask`** and enforce
+it with **`enforce_solid_3d`** (the 2-D immersed boundary, lifted).
+
+**Particle ↔ 3-D-field coupling** — **`sample_field_3d`** reads a 3-D field at continuous positions and
+**`scatter_to_field_3d`** is its exact adjoint (imprint values back onto the grid); **`drag_force_3d`** is the
+fluid→body force, so a softbody couples to the 3-D fluid exactly as in 2-D (`external_force=drag_force_3d(…)`).
+
+**Particles & the cull primitive** — **`spatial_hash_pairs(positions, radius)`** returns every close pair via
+a vectorised cell list (sort + searchsorted, O(N log N + pairs), ~18× faster than the old loop and matching
+brute force exactly); **`pairwise_repulsion(positions, radius, strength)`** uses it for a short-range n-body
+force accumulated as a scatter, passed to `particle_system.step(force=…)` like `attractor_force`/`drag_force`.
+
+**Softbody self-collision** — a cloth/solid from `cloth3d`/`soft_box` can call `add_self_collision(radius)` so
+its non-bonded nodes repel within the radius (the same spatial-hash cull, accumulated as a scatter), keeping
+the sheet from passing through itself.
+
+Each is VSA-native — FFT *is* bind, scatter *is* the adjoint of sample, a splat scene *is* a bundle — and
+composable: the output of any of them is a vector or field you can route into the next, or into a
+`HoloMachine` program.
 
 ## Ephemeral by design (the scientist's use case)
 

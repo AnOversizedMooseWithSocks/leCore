@@ -174,7 +174,7 @@ def _build_tet_case_table():
 _TET_CASE_TABLE = _build_tet_case_table()
 
 
-def marching_tetrahedra_vec(values, axes, level=0.0):
+def marching_tetrahedra_vec(values, axes, level=0.0, return_keys=False):
     """VECTORIZED marching tetrahedra -- identical result to marching_tetrahedra (same vertices, same faces, same
     orientation, to machine epsilon) but the whole grid is processed as parallel NumPy ARRAY operations instead of a
     Python per-cell loop. Each tetrahedron's triangle topology is read from _TET_CASE_TABLE (the sign-pattern RAM),
@@ -184,13 +184,20 @@ def marching_tetrahedra_vec(values, axes, level=0.0):
     `values` is (nx,ny,nz), `axes`=(xs,ys,zs). Returns a watertight triangle Mesh oriented toward INCREASING field
     (outward for an SDF where inside is negative). KEPT HONEST: like the per-cell version it is non-manifold at grid
     sizes where a vertex lands exactly on the isosurface (it reproduces that case identically -- it is a faithful
-    parallelization, not a different algorithm)."""
+    parallelization, not a different algorithm).
+
+    return_keys=True ALSO returns a STABLE per-vertex identity array: each marched vertex sits on one grid edge, and
+    its key = pack(lo_corner, hi_corner) is canonical and deterministic -- the SAME physical edge gets the SAME key
+    in any extraction at this (resolution, bounds), regardless of which other crossings exist. So after a LOCAL field
+    edit + re-march, a frontend can track vertices by KEY (persistent identity) instead of by array index (which
+    renumbers whenever a crossing is added/removed). Returns (mesh, keys) with keys[v] the int identity of vertex v.
+    (Keys are tied to the grid; they are stable across EDITS at a fixed resolution, not across resolution changes.)"""
     values = np.asarray(values, float)
     xs, ys, zs = axes
     nx, ny, nz = values.shape
     cnx, cny, cnz = nx - 1, ny - 1, nz - 1
     if cnx <= 0 or cny <= 0 or cnz <= 0:
-        return Mesh(np.zeros((0, 3)), [])
+        return (Mesh(np.zeros((0, 3)), []), np.zeros(0, np.int64)) if return_keys else Mesh(np.zeros((0, 3)), [])
     NYZ = ny * nz
     BIG = nx * ny * nz                                          # packs an unordered edge (lo,hi corner codes) into 1 int
 
@@ -251,7 +258,10 @@ def marching_tetrahedra_vec(values, axes, level=0.0):
     centroid = (v0 + v1 + v2) / 3.0
     flip = np.sum(normal * (all_toward - centroid), axis=1) < 0.0
     faces_idx[flip] = faces_idx[flip][:, [0, 2, 1]]
-    return Mesh(P, [(int(a), int(b), int(c)) for a, b, c in faces_idx])
+    mesh = Mesh(P, [(int(a), int(b), int(c)) for a, b, c in faces_idx])
+    if return_keys:
+        return mesh, uniq.astype(np.int64)                     # uniq[v] = vertex v's canonical edge identity
+    return mesh
 
 
 def _closest_point_on_triangle(P, a, b, c):

@@ -72,7 +72,7 @@ def _pad4(b, fill=b"\x00"):
     return b + fill * rem
 
 
-def mesh_to_glb(mesh, base_colour=(0.8, 0.8, 0.8, 1.0), generator="holostuff"):
+def mesh_to_glb(mesh, base_colour=(0.8, 0.8, 0.8, 1.0), generator="holostuff", material=None):
     """Serialise a `Mesh` to a single-file binary glTF (`.glb`) and return the bytes.
 
     Lays out one BIN buffer in a fixed attribute order, gives each attribute its own (4-byte aligned)
@@ -143,9 +143,10 @@ def mesh_to_glb(mesh, base_colour=(0.8, 0.8, 0.8, 1.0), generator="holostuff"):
                                     "indices": idx_accessor,
                                     "material": 0,
                                     "mode": _MODE_TRIANGLES}]}],
-        "materials": [{"pbrMetallicRoughness": {"baseColorFactor": list(base_colour),
-                                                "metallicFactor": 0.0,
-                                                "roughnessFactor": 0.8}}],
+        "materials": [material.to_gltf_dict() if material is not None
+                      else {"pbrMetallicRoughness": {"baseColorFactor": list(base_colour),
+                                                     "metallicFactor": 0.0,
+                                                     "roughnessFactor": 0.8}}],
         "accessors": accessors,
         "bufferViews": [{"buffer": 0, **v} for v in views],
         "buffers": [{"byteLength": len(blob)}],

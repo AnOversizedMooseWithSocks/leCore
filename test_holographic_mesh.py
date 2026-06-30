@@ -179,3 +179,63 @@ def test_vertex_normals_vectorized_matches_loop_and_points_outward():
     # on a sphere, the outward normal at a vertex aligns with its radial direction
     radial = m.vertices / np.linalg.norm(m.vertices, axis=1, keepdims=True)
     assert np.mean(np.sum(vn * radial, axis=1)) > 0.95         # strongly outward on average
+
+
+def test_validate_topology_clean_bowtie_degenerate():
+    """The full topology report: a clean sphere passes; a bowtie (non-manifold VERTEX that the edge test misses)
+    and a degenerate face are caught."""
+    import numpy as np
+    from holographic_mesh import Mesh
+    from holographic_meshbridge import sample_field, marching_tetrahedra_vec
+    def sphere(P): P = np.asarray(P, float); return np.linalg.norm(P, axis=1) - 0.6
+    v, ax = sample_field(sphere, (np.array([-1., -1, -1]), np.array([1., 1, 1])), 32)
+    M = marching_tetrahedra_vec(v, ax)
+    r = M.validate_topology()
+    assert r["ok"] and r["manifold_edges"] and r["manifold_vertices"] and r["watertight"]
+    assert r["euler"] == 2 and r["genus"] == 0
+
+    bow = Mesh(np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [-1, 0, 0], [0, -1, 0.]]), [(0, 1, 2), (0, 3, 4)])
+    rb = bow.validate_topology()
+    assert rb["manifold_edges"] and not rb["manifold_vertices"] and rb["non_manifold_verts"] == [0] and not rb["ok"]
+
+    deg = Mesh(np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0.]]), [(0, 1, 1)])
+    assert deg.validate_topology()["degenerate_faces"] == 1
+
+
+def test_marching_keys_are_stable_identity_across_local_edit():
+    """A vertex's edge-key is a STABLE identity: across a local field edit, the array INDEX of an unchanged
+    vertex can change, but its KEY does not -- and its position is unchanged where the field is."""
+    import numpy as np
+    from holographic_meshbridge import sample_field, marching_tetrahedra_vec
+    def base(P): P = np.asarray(P, float); return np.linalg.norm(P, axis=1) - 0.6
+    def edited(P):
+        P = np.asarray(P, float)
+        return base(P) - 0.15 * np.exp(-(((P - np.array([0., 0, 0.6])) ** 2).sum(1)) / (2 * 0.08 ** 2))
+    b = (np.array([-1., -1, -1]), np.array([1., 1, 1]))
+    v, ax = sample_field(base, b, 36); M1, k1 = marching_tetrahedra_vec(v, ax, return_keys=True)
+    v2, _ = sample_field(edited, b, 36); M2, k2 = marching_tetrahedra_vec(v2, ax, return_keys=True)
+    assert len(k1) == M1.n_vertices and len(set(k1.tolist())) == len(k1)   # one unique key per vertex
+    p1 = {int(k): M1.vertices[i] for i, k in enumerate(k1.tolist())}
+    p2 = {int(k): M2.vertices[i] for i, k in enumerate(k2.tolist())}
+    far = [k for k in np.intersect1d(k1, k2).tolist() if p1[k][2] < 0.2]
+    assert far and all(np.allclose(p1[k], p2[k], atol=1e-9) for k in far)   # key tracks the vertex, position stable
+
+
+def test_stable_uv_is_edit_invariant():
+    """Position-deterministic UVs don't move under a local edit (unlike the global unwrap, which re-solves)."""
+    import numpy as np
+    from holographic_meshbridge import sample_field, marching_tetrahedra_vec
+    from holographic_meshuv import stable_uv
+    def base(P): P = np.asarray(P, float); return np.linalg.norm(P, axis=1) - 0.6
+    def edited(P):
+        P = np.asarray(P, float)
+        return base(P) - 0.15 * np.exp(-(((P - np.array([0., 0, 0.6])) ** 2).sum(1)) / (2 * 0.08 ** 2))
+    b = (np.array([-1., -1, -1]), np.array([1., 1, 1]))
+    v, ax = sample_field(base, b, 36); M1, k1 = marching_tetrahedra_vec(v, ax, return_keys=True)
+    v2, _ = sample_field(edited, b, 36); M2, k2 = marching_tetrahedra_vec(v2, ax, return_keys=True)
+    uv1 = stable_uv(M1, bounds=b); uv2 = stable_uv(M2, bounds=b)
+    u1 = {int(k): uv1[i] for i, k in enumerate(k1.tolist())}
+    u2 = {int(k): uv2[i] for i, k in enumerate(k2.tolist())}
+    p1 = {int(k): M1.vertices[i] for i, k in enumerate(k1.tolist())}
+    far = [k for k in np.intersect1d(k1, k2).tolist() if p1[k][2] < 0.2]
+    assert far and all(np.allclose(u1[k], u2[k], atol=1e-9) for k in far)

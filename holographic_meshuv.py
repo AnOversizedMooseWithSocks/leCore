@@ -84,6 +84,45 @@ def uv_unwrap(mesh, method="isomap"):
     return (uv - lo) / span                                   # uniform scale -> ~[0,1]^2, aspect preserved
 
 
+def stable_uv(mesh, bounds=None, mode="triplanar", axis=2):
+    """UVs that are a deterministic function of WORLD POSITION, so they DON'T move under local edits -- the
+    stable counterpart to uv_unwrap. The global unwraps (isomap/planar-PCA/spectral) solve an MDS / eigenmap
+    over the WHOLE mesh, so a local edit shifts every UV, and the solution carries a sign/rotation ambiguity
+    (the chart can flip on re-run). A position-projection UV has neither problem: a vertex at a given position
+    always gets the same UV, whatever was edited elsewhere. The trade-off is honest -- this is stable texturing,
+    not a single seam-cut chart; for a faithful low-distortion unwrap use uv_unwrap and accept that it re-solves.
+
+    Normalised by `bounds` (the FIXED field domain, (min_corner, max_corner)) rather than the mesh's current
+    extent, so the UV scale is itself invariant to edits that change the bounding box. Falls back to the mesh's
+    own extent if bounds is None.
+
+    mode='planar'    -- drop `axis` (default z); UV = the other two normalised coords. Exact on a flat-ish face,
+                        folds on a curved surface.
+    mode='triplanar' -- each vertex projects onto the axis-plane its NORMAL most faces (so curves don't fold);
+                        still purely position+normal-determined, hence stable. Returns (V,2) in ~[0,1]^2."""
+    V = np.asarray(mesh.vertices, float)
+    if bounds is None:
+        lo = V.min(axis=0); hi = V.max(axis=0)
+    else:
+        lo = np.asarray(bounds[0], float); hi = np.asarray(bounds[1], float)
+    span = np.where((hi - lo) > 1e-12, hi - lo, 1.0)
+    Vn = (V - lo) / span                                       # normalised to ~[0,1]^3 by the FIXED domain
+    if mode == "planar":
+        others = [k for k in range(3) if k != int(axis)]
+        return Vn[:, others].copy()
+    # triplanar: pick the projection plane per vertex by its dominant normal component
+    N = mesh.vertex_normals(store=False)
+    dom = np.argmax(np.abs(N), axis=1)                         # 0/1/2 = the axis the normal most aligns with
+    uv = np.zeros((len(V), 2))
+    for ax in range(3):
+        m = dom == ax
+        if not np.any(m):
+            continue
+        others = [k for k in range(3) if k != ax]
+        uv[m] = Vn[m][:, others]
+    return uv
+
+
 def uv_distortion(mesh, uv):
     """Per-edge STRETCH distortion: the spread of the ratio (UV edge length / 3-D edge length), normalised by the
     median ratio and measured as the standard deviation of its log. 0 = isometric (every edge scaled equally, a

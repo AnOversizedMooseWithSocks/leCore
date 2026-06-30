@@ -2098,6 +2098,57 @@ class UnifiedMind:
         return VectorFunctionEncoder(n_dims, dim=min(self.dim, 1024), bounds=bounds,
                                      kernel=kernel, bandwidth=bandwidth, seed=self.seed)
 
+    def tile_field(self, enc, function, period, counts):
+        """Tile an FPE field hypervector over an n-D lattice -- domain repetition as bind+bundle, so the result
+        is itself a composable hypervector (works in 2-D and 3-D). See holographic_tiling.tile."""
+        from holographic_tiling import tile
+        return tile(enc, function, period, counts)
+
+    def tile_field_recursive(self, enc, function, period, counts, levels):
+        """Recursive tiling (inception): tile the tiling `levels` deep -- count^levels copies per axis from
+        linear binds, in one fixed-size vector. See holographic_tiling.tile_recursive."""
+        from holographic_tiling import tile_recursive
+        return tile_recursive(enc, function, period, counts, levels)
+
+    def fractal_field(self, enc, function, base_period, levels, count=3, decay=1.0):
+        """A multi-scale (fBm-like) tiling: the motif tiled at base_period, /2, /4, ... summed -- richness at
+        many scales from one motif and a few binds. See holographic_tiling.fractal_bands."""
+        from holographic_tiling import fractal_bands
+        return fractal_bands(enc, function, base_period, levels, count=count, decay=decay)
+
+    def fractal_volume(self, enc, period, counts, levels, motif=None, beta=2.0, seed=0, motif_size=5,
+                       motif_grid=None, motif_coords=None):
+        """ONE call: inception over ANY VSA object -> one hypervector. The seed can be a precomputed motif
+        hypervector (a smoke puff, an SDF surface, an archive image, or ANOTHER fractal_volume's output --
+        inception over the engine itself), a NumPy grid (motif_grid, crossed into VSA once), or, by default, a
+        synthesised localized fractal grain. tile_recursive replicates it count^levels deep in one fixed-size
+        vector, composable as any VSA object. See holographic_tiling.fractal_volume."""
+        from holographic_tiling import fractal_volume
+        return fractal_volume(enc, period, counts, levels, motif=motif, beta=beta, seed=seed,
+                              motif_size=motif_size, motif_grid=motif_grid, motif_coords=motif_coords)
+
+    def inception(self, enc, period, counts, depth, motif=None, beta=2.0, seed=0, motif_size=5):
+        """One-parameter recursion DEPTH over fractal_volume + an honest capacity-ceiling measurement. Returns
+        (volume, profile): the volume is the recursive tiling carried `depth` levels (composable as any VSA
+        object); the profile reports, at each depth, copies-per-axis, mean per-copy read, and round-trip
+        recovery -- so the SNR fall as counts**depth instances share one fixed dim is a measured table. See
+        holographic_tiling.inception."""
+        from holographic_tiling import inception
+        return inception(enc, period, counts, depth, motif=motif, beta=beta, seed=seed, motif_size=motif_size)
+
+    def grid_to_hypervector(self, enc, grid, coords, threshold=1e-3):
+        """Encode a NumPy field (a fluid density, an SDF slice) as an FPE hypervector so it can be tiled /
+        bound / bundled / stored like any VSA object -- the one crossing from grid into VSA. See
+        holographic_tiling.grid_to_function."""
+        from holographic_tiling import grid_to_function
+        return grid_to_function(enc, grid, coords, threshold=threshold)
+
+    def hypervector_to_grid(self, enc, function, coords):
+        """Read an FPE field hypervector back onto a grid (the inverse of grid_to_hypervector). See
+        holographic_tiling.function_to_grid."""
+        from holographic_tiling import function_to_grid
+        return function_to_grid(enc, function, coords)
+
     def harmonic_atom(self, thetas, meanings, n_harmonics):
         """CONTEXT-CONDITIONED ATOM (holographic_harmonic, RT-VI) -- a polysemous atom whose decoded MEANING is a
         function of a context angle, represented in a CIRCULAR-harmonic (Fourier) basis on this engine's own FHRR/FPE
@@ -3124,13 +3175,46 @@ class UnifiedMind:
             "genus": mesh.genus(),
         }
 
-    def mesh_to_gltf(self, mesh, base_colour=(0.8, 0.8, 0.8, 1.0)):
+    def mesh_to_gltf(self, mesh, base_colour=(0.8, 0.8, 0.8, 1.0), material=None):
         """Serialise a Mesh to single-file binary glTF (.glb) bytes (holographic_gltf, FWD-2): the boundary
         a three.js GLTFLoader consumes. POSITION/NORMAL/TEXCOORD_0/COLOR_0 attributes plus a triangle index
-        buffer, with the glTF-required position bounds and a default PBR material. Deterministic -- the same
-        mesh yields byte-identical output."""
+        buffer, with the glTF-required position bounds. `material` is an optional PBRMaterial (full
+        metallic-roughness + emissive factors); without it, a default base-colour PBR material is written.
+        Deterministic -- the same mesh yields byte-identical output."""
         from holographic_gltf import mesh_to_glb
-        return mesh_to_glb(mesh, base_colour=base_colour)
+        return mesh_to_glb(mesh, base_colour=base_colour, material=material)
+
+    def pbr_material(self, name="material", base_color=(0.8, 0.8, 0.8, 1.0), metallic=0.0, roughness=0.8,
+                     emissive=(0.0, 0.0, 0.0)):
+        """A standard glTF 2.0 metallic-roughness PBR material (the ISO factor model: base colour RGBA, metallic,
+        roughness, emissive RGB) -- the representation every export/import maps through. See
+        holographic_materialio.PBRMaterial."""
+        from holographic_materialio import PBRMaterial
+        return PBRMaterial(name=name, base_color=base_color, metallic=metallic, roughness=roughness,
+                           emissive=emissive)
+
+    def material_to_mtl(self, material):
+        """A PBRMaterial as an MTL block (the OBJ companion): modern PBR keywords (Pr/Pm/Ke) + legacy Kd/d/Ns so
+        it round-trips with PBR-aware tools and still opens in old viewers. See holographic_materialio."""
+        return material.to_mtl()
+
+    def materials_from_mtl(self, text):
+        """Parse an MTL file's text into a list of PBRMaterial. See holographic_materialio.materials_from_mtl."""
+        from holographic_materialio import materials_from_mtl
+        return materials_from_mtl(text)
+
+    def material_to_vsa_record(self, material, scalar_encoder):
+        """Carry a PBRMaterial as ONE hypervector (each factor scalar-encoded, bound to its channel role, then
+        bundled) -- so a material transmits, composes, and BLENDS with the engine's bind/bundle algebra, like a
+        splat scene or a typed record. Round-trips to the encoder's resolution (crosstalk-limited; use the exact
+        MTL/glTF path for lossless). See holographic_materialio.PBRMaterial.to_vsa_record."""
+        return material.to_vsa_record(scalar_encoder)
+
+    def material_from_vsa_record(self, record, scalar_encoder, name="material"):
+        """Recover a PBRMaterial from its hypervector record (unbind each channel role, decode the scalar).
+        See holographic_materialio.PBRMaterial.from_vsa_record."""
+        from holographic_materialio import PBRMaterial
+        return PBRMaterial.from_vsa_record(record, scalar_encoder, name=name)
 
     def mesh_from_gltf(self, data):
         """Parse binary glTF (.glb) bytes back into a Mesh (holographic_gltf, FWD-2): the inverse of
@@ -3392,6 +3476,33 @@ class UnifiedMind:
         from holographic_meshuv import uv_unwrap
         return uv_unwrap(mesh, method=method)
 
+    def mesh_stable_uv(self, mesh, bounds=None, mode="triplanar", axis=2):
+        """UVs that are a deterministic function of WORLD POSITION, so they DON'T move under local edits -- the
+        stable counterpart to mesh_uv_unwrap (whose global MDS/eigenmap re-solves and can flip on any edit).
+        Normalised by the FIXED `bounds` (field domain) so the scale is edit-invariant. mode='triplanar' picks
+        each vertex's projection plane by its normal (curves don't fold); 'planar' drops `axis`. Stable texturing,
+        not a seam-cut chart. See holographic_meshuv.stable_uv."""
+        from holographic_meshuv import stable_uv
+        return stable_uv(mesh, bounds=bounds, mode=mode, axis=axis)
+
+    def mesh_face_type(self, mesh, face_type="quad", planarity=0.90, normal_tol=0.999):
+        """Convert ANY triangle mesh's face standard (holographic_meshpoly) WITHOUT moving vertices (so stable
+        keys survive): 'quad' merges coplanar triangle pairs into quad-dominant output; 'ngon' merges connected
+        coplanar regions into single n-gons where the boundary is a clean loop (a flat wall -> one face);
+        'triangle' returns it unchanged. Use after surface_mesh / on an imported mesh. See holographic_meshpoly."""
+        if face_type == "quad":
+            from holographic_meshpoly import triangles_to_quads
+            return triangles_to_quads(mesh, planarity=planarity)
+        if face_type == "ngon":
+            from holographic_meshpoly import merge_coplanar
+            return merge_coplanar(mesh, normal_tol=normal_tol)
+        return mesh
+
+    def mesh_face_counts(self, mesh):
+        """{3: triangles, 4: quads, 5: n-gons} -- the face-standard summary. See holographic_meshpoly."""
+        from holographic_meshpoly import face_type_counts
+        return face_type_counts(mesh)
+
     def mesh_uv_distortion(self, mesh, uv):
         """The per-edge STRETCH distortion of a UV map (holographic_meshuv, FWD-3): spread of (UV edge length /
         3-D edge length), 0 = isometric, growing with Gaussian curvature (Gauss: a curved surface cannot flatten
@@ -3528,6 +3639,55 @@ class UnifiedMind:
         values, axes = sample_field(sdf, bounds, res)
         march = marching_tetrahedra_vec if vectorized else marching_tetrahedra
         return march(values, axes, level=level)
+
+    def surface_mesh_stable(self, field, bounds, resolution=40, level=0.0, validate=True, face_type="triangle"):
+        """Project a field to a mesh with STABLE vertex identity and a topology guarantee -- the entry point for
+        a 3-D modeling app that needs faces/edges/verts that DON'T move on their own. Returns a dict:
+          'mesh'     -- the watertight, 2-manifold Mesh.
+          'keys'     -- a STABLE per-vertex identity array: keys[v] is the grid edge the vertex sits on, the SAME
+                        integer in any extraction at this (resolution, bounds). Track vertices by KEY across
+                        edits, NOT by array index -- a local edit renumbers indices (a crossing added/removed
+                        shifts everything after it in sorted-key order) but never changes keys, so unchanged
+                        geometry keeps its identity and the user sees no phantom movement of distant faces.
+          'topology' -- (when validate) the validate_topology() report (manifold edges+verts, watertight, genus).
+        `face_type` chooses the face standard projected out (marching tetrahedra emits triangles; quads/ngons are
+        a deterministic merge ON TOP, leaving vertices -- and their keys -- untouched):
+          'triangle' -- the raw marched triangles (default).
+          'quad'     -- quad-DOMINANT: adjacent coplanar triangle pairs merged into convex quads, leftovers stay
+                        triangles (triangles_to_quads).
+          'ngon'     -- connected coplanar faces merged into single n-gons where the region's boundary is a clean
+                        loop (merge_coplanar) -- a flat wall becomes one face, curved areas keep triangles.
+        GUARANTEE: exact-corner field samples (the one case that makes marching tetrahedra non-manifold, where a
+        vertex would land on a shared grid corner) are nudged a deterministic epsilon off the level so the
+        crossing lands on the edge interior instead -- yielding clean 2-manifold output. Keys are tied to the
+        grid, so they are stable across EDITS at a fixed resolution, not across resolution changes (a different
+        resolution is a different mesh by definition). KEPT HONEST: the face GROUPING (which tris became a quad)
+        is itself NOT edit-stable -- faces are a derived view; the vertices are the stable identity."""
+        from holographic_meshbridge import sample_field, marching_tetrahedra_vec
+        import numpy as _np
+        values, axes = sample_field(field, bounds, resolution)
+        scale = float(_np.abs(values).mean()) or 1.0
+        exact = (values == level)
+        if exact.any():
+            values = values.copy()
+            values[exact] = level - 1e-9 * scale               # push exact-corner hits just inside -> no bowtie
+        mesh, keys = marching_tetrahedra_vec(values, axes, level=level, return_keys=True)
+        if face_type == "quad":
+            from holographic_meshpoly import triangles_to_quads
+            mesh = triangles_to_quads(mesh)                    # vertices unchanged -> keys still valid
+        elif face_type == "ngon":
+            from holographic_meshpoly import merge_coplanar
+            mesh = merge_coplanar(mesh)
+        out = {"mesh": mesh, "keys": keys}
+        if validate:
+            out["topology"] = mesh.validate_topology()
+        return out
+
+    def validate_topology(self, mesh):
+        """The full well-formedness report for a mesh (manifold edges AND vertices/bowties, watertight,
+        degenerate faces, euler/genus) -- the guarantee a 3-D modeling app gates on before handing a mesh to a
+        user. See Mesh.validate_topology."""
+        return mesh.validate_topology()
 
     def mesh_to_sdf(self, mesh, points):
         """Signed distance from a MESH at query points (holographic_meshbridge, FWD-11; mesh -> implicit): the
@@ -4021,6 +4181,19 @@ class UnifiedMind:
         field, pass aniso_fit's (center, amp, L) to export_splats directly."""
         from holographic_splatexport import field_to_splats
         return field_to_splats(centers, radius=radius, amp=amp)
+
+    def export_splats_2d(self, splats2d, path=None, fmt="ply", colors=None, z=0.0, pixel_scale=1.0):
+        """Export 2-D image splats (splat_fit's (cy, cx, amp, sigma)) to the standard 3DGS .ply by lifting them
+        to the z=`z` plane (splats_2d_to_records: center=(cx,cy,z), isotropic L=1/sigma), so 2-D and 3-D splats
+        export through one path. fmt='ply' writes to `path`; fmt='json' returns the three.js string. See
+        holographic_splatexport.splats_2d_to_records."""
+        from holographic_splatexport import splats_2d_to_records, splats_to_ply, splats_to_json
+        recs = splats_2d_to_records(splats2d, z=z, pixel_scale=pixel_scale)
+        if fmt == "json":
+            return splats_to_json(recs, colors=colors)
+        if path is None:
+            raise ValueError("fmt='ply' needs a path to write to")
+        return splats_to_ply(recs, path, colors=colors)
 
     def distributed_forward(self, layers, x, K=1, cleanup_books=None, relu=True):
         """A federated (and optionally deep, cleanup-gated) forward pass in the holographic space -- Path D's
@@ -4521,10 +4694,286 @@ class UnifiedMind:
         from holographic_creature import FastCreatureEncoder
         return FastCreatureEncoder(self.dim if dim is None else dim, seed=seed)
 
-    def encode_record(self, keys, values):
-        """Encode a record/structure -- bundle of bind(key_i, value_i) -- in ONE batched FFT (bundle_bind),
-        the vectorised form of the role/filler encode loop VSA programs run constantly. Keeps the operation
-        inside the holographic space (one array op) instead of a Python loop of per-pair binds."""
+    def soft_body(self, positions, inv_mass=None, velocities=None):
+        """A PBD/XPBD softbody: particles + distance constraints, time-stepped under gravity/forces. Inverse
+        mass 0 pins a particle. The constraint sweep is the same iterate-a-projection engine as the resonator/
+        denoiser/IK; XPBD adds time-step-independent stiffness. See holographic_softbody.SoftBody."""
+        from holographic_softbody import SoftBody
+        return SoftBody(positions, inv_mass=inv_mass, velocities=velocities)
+
+    def mesh_to_softbody(self, mesh, compliance=0.0, pin=None):
+        """Turn ANY mesh into a simulatable SoftBody (vertices -> particles, edges -> distance constraints) so a
+        PROJECTED surface mesh can be driven by the whole physics layer: gravity, fluid drag (drag_force_3d as
+        external_force), self-collision (add_self_collision), the constraint solver. The bridge that lets the
+        mesh pipeline take advantage of the physics -- sculpt -> surface_mesh -> mesh_to_softbody -> simulate.
+        A surface mesh is a shell (behaves like cloth); `pin` anchors vertices. See SoftBody.from_mesh."""
+        from holographic_softbody import SoftBody
+        return SoftBody.from_mesh(mesh, compliance=compliance, pin=pin)
+
+    def dynamics_to_mesh(self, source, bounds=None, radius=0.5, level=0.5, resolution=48,
+                         axes=None, face_type="triangle"):
+        """Export ANY dynamics state as a watertight mesh -- the unified surfacing entry point. `source` is one of:
+          * a SoftBody or RigidBody built via from_mesh -> its current (deformed/moved) positions + faces
+            (source.to_mesh()); the soft/rigid case.
+          * a point cloud (N,3 array) -- particles or a LIQUID/SPH front -> surfaced by wrapping the points in a
+            metaball field (sum of Gaussians, `radius`) and marching its `level` isosurface over `bounds`
+            (= surface_mesh_stable); the particle/liquid case.
+          * a (density_grid, axes) pair OR a grid with `axes=` given -- a SMOKE/volume density field -> its
+            `level` isosurface marched directly. The smoke case.
+        `face_type` ('triangle'|'quad'|'ngon') applies the meshpoly merge to the result. Returns a Mesh (or, for
+        a point cloud / field, the surface_mesh_stable dict via the field path). This keeps everything on the
+        engine's own field<->mesh bridge -- particles are a metaball field, smoke is a field, a soft body is the
+        mesh it was built from, all surfaced by the same marching tetrahedra."""
+        from holographic_softbody import SoftBody, RigidBody
+        from holographic_meshbridge import metaball_field, marching_tetrahedra_vec
+        import numpy as _np
+        if isinstance(source, (SoftBody, RigidBody)):          # soft / rigid: re-export the carried faces
+            mesh = source.to_mesh()
+            return self.mesh_face_type(mesh, face_type) if face_type != "triangle" else mesh
+        if isinstance(source, tuple) and len(source) == 2:     # (density_grid, axes): smoke/volume isosurface
+            values, ax = source
+            mesh = marching_tetrahedra_vec(_np.asarray(values, float), ax, level=level)
+            return self.mesh_face_type(mesh, face_type) if face_type != "triangle" else mesh
+        arr = _np.asarray(source, float)
+        if axes is not None:                                   # a bare density grid + axes: smoke
+            mesh = marching_tetrahedra_vec(arr, axes, level=level)
+            return self.mesh_face_type(mesh, face_type) if face_type != "triangle" else mesh
+        if arr.ndim == 2 and arr.shape[1] in (2, 3):           # a point cloud: particles / liquid -> metaball surface
+            if bounds is None:
+                lo = arr.min(0) - 3 * radius; hi = arr.max(0) + 3 * radius
+                bounds = (lo, hi)
+            field = metaball_field(arr, radius=radius)
+            return self.surface_mesh_stable(field, bounds, resolution=resolution, level=level, face_type=face_type)
+        raise ValueError("source must be a SoftBody/RigidBody, a point cloud (N,3), or (density_grid, axes)")
+
+    def cloth(self, rows, cols, spacing=1.0, compliance=0.0):
+        """A rectangular cloth softbody (structural + shear distance constraints, top row pinned)."""
+        from holographic_softbody import SoftBody
+        return SoftBody.cloth(rows, cols, spacing=spacing, compliance=compliance)
+
+    def cloth3d(self, rows, cols, spacing=1.0, compliance=0.0, bending=None):
+        """A 3-D cloth that drapes under gravity; pass `bending` (a compliance) to add bend springs that
+        resist folding so the sheet stays flatter. See holographic_softbody.SoftBody.cloth3d."""
+        from holographic_softbody import SoftBody
+        return SoftBody.cloth3d(rows, cols, spacing=spacing, compliance=compliance, bending=bending)
+
+    def soft_box(self, nx, ny, nz, spacing=1.0, compliance=0.0, volume_compliance=0.0):
+        """A soft 3-D solid (a lattice of tetrahedra with volume constraints) that resists being squashed and
+        springs back. See holographic_softbody.SoftBody.soft_box."""
+        from holographic_softbody import SoftBody
+        return SoftBody.soft_box(nx, ny, nz, spacing=spacing, compliance=compliance,
+                                 volume_compliance=volume_compliance)
+
+    def rope(self, n, spacing=1.0, compliance=0.0, start=(0.0, 0.0)):
+        """A hanging rope softbody of n particles (particle 0 pinned)."""
+        from holographic_softbody import SoftBody
+        return SoftBody.rope(n, spacing=spacing, compliance=compliance, start=start)
+
+    def rigid_body(self, positions, inv_mass=None, velocities=None):
+        """A hardbody via shape matching (polar decomposition): falls and rotates under forces but never
+        deforms. See holographic_softbody.RigidBody."""
+        from holographic_softbody import RigidBody
+        return RigidBody(positions, inv_mass=inv_mass, velocities=velocities)
+
+    def diffuse_field(self, field, amount):
+        """Diffuse a scalar/component grid field by the heat kernel via the FFT -- a Gaussian bind on the
+        torus (the engine's own operator). Conserves mass. See holographic_fields."""
+        from holographic_fields import diffuse
+        return diffuse(field, amount)
+
+    def make_incompressible(self, vx, vy):
+        """Pressure-project a velocity field to divergence-free (the fluid solver's Helmholtz step, an FFT
+        solve). Returns (vx, vy) with divergence ~0. See holographic_fields.project_divergence_free."""
+        from holographic_fields import project_divergence_free
+        return project_divergence_free(vx, vy)
+
+    def field_divergence(self, vx, vy):
+        """The divergence field of a velocity grid (compression/expansion), computed spectrally."""
+        from holographic_fields import divergence
+        return divergence(vx, vy)
+
+    def advect_field(self, field, vx, vy, dt=0.1):
+        """Transport a scalar field (density/temperature) along a velocity field (semi-Lagrangian)."""
+        from holographic_fields import advect
+        return advect(field, vx, vy, dt)
+
+    def fluid_step(self, vx, vy, density, dt=0.1, viscosity=0.0, fx=None, fy=None, source=None, solid=None):
+        """One Stable-Fluids step on the torus (add force -> diffuse -> project -> advect), built on the FFT.
+        Returns (vx, vy, density). Pass `solid` (a 0/1 mask) for an obstacle the flow goes around. See
+        holographic_fields.fluid_step."""
+        from holographic_fields import fluid_step
+        return fluid_step(vx, vy, density, dt=dt, viscosity=viscosity, fx=fx, fy=fy, source=source, solid=solid)
+
+    def smoke_step(self, vx, vy, density, temperature, dt=0.1, viscosity=0.0, ambient=0.0,
+                   buoyancy=1.0, gravity=0.0, confinement=0.0, dens_source=None, temp_source=None, solid=None):
+        """One smoke step: temperature drives velocity by buoyancy (hot rises), vorticity confinement keeps it
+        curly, density + temperature advect with the flow. Pass `solid` for an obstacle smoke flows around.
+        Returns (vx, vy, density, temperature). See holographic_fields.smoke_step."""
+        from holographic_fields import smoke_step
+        return smoke_step(vx, vy, density, temperature, dt=dt, viscosity=viscosity, ambient=ambient,
+                          buoyancy=buoyancy, gravity=gravity, confinement=confinement,
+                          dens_source=dens_source, temp_source=temp_source, solid=solid)
+
+    def fluid_step_3d(self, vx, vy, vz, density, dt=0.1, viscosity=0.0, fx=None, fy=None, fz=None, source=None,
+                      solid=None):
+        """One 3-D Stable-Fluids step on a 3-D periodic grid (the same FFT solver, generalised via the n-D real
+        FFT). Pass `solid` (a 3-D mask, e.g. from sphere_mask) for an obstacle the flow goes around. Returns
+        (vx, vy, vz, density). See holographic_fields.fluid_step_3d."""
+        from holographic_fields import fluid_step_3d
+        return fluid_step_3d(vx, vy, vz, density, dt=dt, viscosity=viscosity, fx=fx, fy=fy, fz=fz,
+                             source=source, solid=solid)
+
+    def smoke_step_3d(self, vx, vy, vz, density, temperature, dt=0.1, viscosity=0.0, ambient=0.0,
+                      buoyancy=1.0, gravity=0.0, confinement=0.0, dens_source=None, temp_source=None,
+                      solid=None):
+        """One 3-D smoke step: buoyancy lifts hot fluid along +y, 3-D vorticity confinement keeps it curly,
+        density + temperature advect. Pass `solid` for a 3-D obstacle smoke rises and curls around. Returns
+        (vx, vy, vz, density, temperature). See holographic_fields.smoke_step_3d."""
+        from holographic_fields import smoke_step_3d
+        return smoke_step_3d(vx, vy, vz, density, temperature, dt=dt, viscosity=viscosity, ambient=ambient,
+                             buoyancy=buoyancy, gravity=gravity, confinement=confinement,
+                             dens_source=dens_source, temp_source=temp_source, solid=solid)
+
+    def make_incompressible_3d(self, vx, vy, vz):
+        """Pressure-project a 3-D velocity field to divergence-free (the 3-D FFT Helmholtz solve). Returns
+        (vx, vy, vz). See holographic_fields.project_divergence_free_3d."""
+        from holographic_fields import project_divergence_free_3d
+        return project_divergence_free_3d(vx, vy, vz)
+
+    def field_divergence_3d(self, vx, vy, vz):
+        """The 3-D divergence field of a velocity grid, computed spectrally."""
+        from holographic_fields import divergence_3d
+        return divergence_3d(vx, vy, vz)
+
+    def spectral_field(self, shape, beta=2.0, seed=0):
+        """Synthesise a SEAMLESS FRACTAL volume (2-D or 3-D) in the Fourier domain -- a 1/f^beta procedural
+        field that tiles with no seam (periodic by construction) and is reproducible from just (shape, beta,
+        seed). The demoscene 'rich volume from a tiny seed' move on the engine's FFT; composes with tile_field
+        / the fluid solver / the archive. See holographic_fields.spectral_field."""
+        from holographic_fields import spectral_field
+        return spectral_field(shape, beta=beta, seed=seed)
+
+    def seam_continuity(self, field, axis=0):
+        """How seamlessly a field tiles along `axis` (~1.0 = seamless, >>1 = visible seam). See
+        holographic_fields.seam_continuity."""
+        from holographic_fields import seam_continuity
+        return seam_continuity(field, axis=axis)
+
+    def disc_mask(self, shape, center, radius):
+        """A circular solid-obstacle mask (1 inside the disc) for fluid_step/smoke_step `solid`. See
+        holographic_fields.disc_mask."""
+        from holographic_fields import disc_mask
+        return disc_mask(shape, center, radius)
+
+    def enforce_solid(self, vx, vy, solid_mask, solid_vx=0.0, solid_vy=0.0, iters=2):
+        """Force the flow to respect a solid obstacle (velocity -> solid velocity inside the mask, then
+        re-project so the flow diverts around). See holographic_fields.enforce_solid."""
+        from holographic_fields import enforce_solid
+        return enforce_solid(vx, vy, solid_mask, solid_vx=solid_vx, solid_vy=solid_vy, iters=iters)
+
+    def sphere_mask(self, shape, center, radius):
+        """A spherical solid-obstacle mask (1 inside the ball) for fluid_step_3d/smoke_step_3d `solid` -- the
+        3-D lift of disc_mask. See holographic_fields.sphere_mask."""
+        from holographic_fields import sphere_mask
+        return sphere_mask(shape, center, radius)
+
+    def enforce_solid_3d(self, vx, vy, vz, solid_mask, solid_vx=0.0, solid_vy=0.0, solid_vz=0.0, iters=2):
+        """The 3-D immersed boundary: force flow to the solid's velocity inside the mask, then re-project so it
+        diverts around the ball. See holographic_fields.enforce_solid_3d."""
+        from holographic_fields import enforce_solid_3d
+        return enforce_solid_3d(vx, vy, vz, solid_mask, solid_vx=solid_vx, solid_vy=solid_vy,
+                                solid_vz=solid_vz, iters=iters)
+
+    def spatial_hash_pairs(self, positions, radius):
+        """Find all index pairs within `radius` via a uniform-grid cull -- O(N) expected vs O(N^2), the
+        'cull, don't batch' primitive (any dimension). Reusable for collision, particle interaction, patch
+        matching. See holographic_fields.spatial_hash_pairs."""
+        from holographic_fields import spatial_hash_pairs
+        return spatial_hash_pairs(positions, radius)
+
+    def buoyancy_force(self, temperature, density=None, alpha=0.0, beta=1.0, ambient=0.0):
+        """Boussinesq buoyancy force from a temperature (and optional density) field -- hot rises, heavy sinks.
+        Returns (fx, fy). See holographic_fields.buoyancy_force."""
+        from holographic_fields import buoyancy_force
+        return buoyancy_force(temperature, density=density, alpha=alpha, beta=beta, ambient=ambient)
+
+    def vorticity_confinement(self, vx, vy, epsilon=0.5):
+        """Vorticity confinement force (Fedkiw 2001) -- restores the small vortices semi-Lagrangian advection
+        damps, keeping smoke curly. Returns (fx, fy). See holographic_fields.vorticity_confinement."""
+        from holographic_fields import vorticity_confinement
+        return vorticity_confinement(vx, vy, epsilon=epsilon)
+
+    def particle_system(self, positions, velocities=None):
+        """A ParticleSystem on the grid: particles feel forces (gravity, attractors, any (N,2) force a VSA
+        program supplies) and can ride a solved velocity field. See holographic_fields.ParticleSystem."""
+        from holographic_fields import ParticleSystem
+        return ParticleSystem(positions, velocities)
+
+    def attractor_force(self, positions, center, strength=1.0, softening=1.0):
+        """A force pulling particles toward a point (negative strength repels). See holographic_fields."""
+        from holographic_fields import attractor_force
+        return attractor_force(positions, center, strength=strength, softening=softening)
+
+    def pairwise_repulsion(self, positions, radius, strength=1.0):
+        """Short-range particle-particle repulsion (the n-body short-range force), CULLED by spatial_hash_pairs
+        so it is O(N + pairs) not O(N^2). Returns an (N, D) force array to pass to particle_system.step(force=)
+        -- granular piles, collision avoidance, flocking separation. See holographic_fields.pairwise_repulsion."""
+        from holographic_fields import pairwise_repulsion
+        return pairwise_repulsion(positions, radius, strength=strength)
+
+    def blue_noise_sample(self, radius, bounds, k=30, seed=0):
+        """Poisson-disk (blue-noise) point sampling by Bridson dart-throwing: a maximal point set with every
+        pair >= `radius` apart and the blue-noise spectrum (suppressed low frequencies, a ring at the spacing).
+        The exclusion principle done right -- nearly matches adaptive matching-pursuit placement and beats random
+        by ~3 dB on a fixed-budget splat fit, and is the gold standard for stippling / particle init / Monte
+        Carlo. `bounds`=(min,max), any dimension. See holographic_sampling.poisson_disk_sample."""
+        from holographic_sampling import poisson_disk_sample
+        return poisson_disk_sample(radius, bounds, k=k, seed=seed)
+
+    def sample_field(self, field, positions):
+        """Read a grid field at continuous particle positions (bilinear, periodic) -- how particles feel a
+        VSA-encoded or solved field. See holographic_fields.sample_field."""
+        from holographic_fields import sample_field
+        return sample_field(field, positions)
+
+    def scatter_to_field(self, shape, positions, values):
+        """The adjoint of sample_field: imprint per-particle values onto a grid (bilinear, periodic) -- e.g. a
+        moving body depositing momentum into the fluid velocity grid (cloth->fluid coupling)."""
+        from holographic_fields import scatter_to_field
+        return scatter_to_field(shape, positions, values)
+
+    def drag_force(self, positions, velocities, vx, vy, k=1.0):
+        """Drag force on particles from a fluid, F = k*(v_fluid - v_particle) (fluid->cloth coupling). See
+        holographic_fields.drag_force."""
+        from holographic_fields import drag_force
+        return drag_force(positions, velocities, vx, vy, k=k)
+
+    def sample_field_3d(self, field, positions):
+        """Read a 3-D grid field at continuous positions (N,3), trilinear+periodic -- how a softbody/particle
+        feels a 3-D solved or VSA-encoded field. See holographic_fields.sample_field_3d."""
+        from holographic_fields import sample_field_3d
+        return sample_field_3d(field, positions)
+
+    def scatter_to_field_3d(self, shape, positions, values):
+        """The exact adjoint of sample_field_3d: imprint per-node values onto a 3-D grid (trilinear, periodic)
+        -- the body->fluid half of 3-D two-way coupling. See holographic_fields.scatter_to_field_3d."""
+        from holographic_fields import scatter_to_field_3d
+        return scatter_to_field_3d(shape, positions, values)
+
+    def drag_force_3d(self, positions, velocities, vx, vy, vz, k=1.0):
+        """Drag on nodes from a 3-D fluid: k*(v_fluid - v_node), sampled trilinearly -- so a softbody couples to
+        fluid_step_3d exactly as it does to the 2-D solver (pass as external_force). See
+        holographic_fields.drag_force_3d."""
+        from holographic_fields import drag_force_3d
+        return drag_force_3d(positions, velocities, vx, vy, vz, k=k)
+
+    def encode_pairs(self, keys, values):
+        """Encode parallel arrays of keys and values -- bundle of bind(key_i, value_i) -- in ONE batched FFT
+        (bundle_bind), the vectorised form of the role/filler encode loop VSA programs run constantly. Keeps
+        the operation inside the holographic space (one array op) instead of a Python loop of per-pair binds.
+        (Distinct from encode_record(fields): that takes a {field: value} record and pairs with decode_record;
+        this takes two parallel arrays. Renamed from a former encode_record overload that shadowed the record
+        encoder -- one name, one faculty.)"""
         from holographic_ai import bundle_bind
         return bundle_bind(keys, values)
 
@@ -4746,6 +5195,218 @@ class UnifiedMind:
         """Render composed attribute tags to an actual RGB image via the scene renderer."""
         from holographic_scene import make_scene
         return make_scene([(t["shape"], t["colour"]) for t in tag_list], S=S, seed=seed)
+
+    def camera(self, eye=(0.0, 0.0, 3.0), target=(0.0, 0.0, 0.0), up=(0.0, 1.0, 0.0),
+               fov_deg=50.0, aspect=1.0, near=0.05, far=100.0):
+        """A pinhole Camera (eye looks at target, vertical fov) -- view+projection matrices and per-pixel rays.
+        The viewpoint for rasterised and volumetric renders. See holographic_render.Camera."""
+        from holographic_render import Camera
+        return Camera(eye=eye, target=target, up=up, fov_deg=fov_deg, aspect=aspect, near=near, far=far)
+
+    def light(self, kind="directional", direction=(-0.4, -0.8, -0.5), position=(2.0, 3.0, 2.0),
+              color=(1.0, 1.0, 1.0), intensity=1.0):
+        """A Light: 'directional' (sun), 'point', or 'ambient' (fill). See holographic_render.Light."""
+        from holographic_render import Light
+        return Light(kind=kind, direction=direction, position=position, color=color, intensity=intensity)
+
+    def render_mesh(self, mesh, camera, width=512, height=512, lights=None, base_color=(0.8, 0.8, 0.8),
+                    background=(0.05, 0.06, 0.08), ambient=0.15, vectorized=True):
+        """Rasterise a mesh to an (H,W,3) RGB image with a z-buffer and Lambert shading (frustum + back-face
+        culled). `base_color` may be a PBRMaterial's base_color. vectorized=True (default) uses the batched
+        fragment-scatter path (the per-triangle Python loop ported to one array op -- ~8-15x faster, image
+        identical); vectorized=False is the readable reference loop. CPU renderer -- the authoring brain's
+        offline / preview frame; the GPU stays the muscle for a heavy interactive viewport. See holographic_render."""
+        from holographic_render import rasterize_mesh
+        if hasattr(base_color, "base_color"):
+            base_color = base_color.base_color
+        return rasterize_mesh(mesh, camera, width=width, height=height, lights=lights,
+                              base_color=base_color, background=background, ambient=ambient, vectorized=vectorized)
+
+    def render_volume(self, field, camera, bounds, width=256, height=256, steps=96, mode="smoke",
+                      sigma=12.0, emission_color=None, albedo=(0.9, 0.9, 0.95), lights=None,
+                      background=(0.0, 0.0, 0.0)):
+        """Volumetrically render a density FIELD (smoke/fire/water/particles) by marching camera rays and
+        accumulating the volume integral -- vectorised over all pixels (the field IS the volume, so this is
+        field-native). mode='smoke' (absorption), 'fire' (emission/blackbody ramp), 'density' (raw). Returns
+        (RGB image, alpha). See holographic_render.volume_render."""
+        from holographic_render import volume_render
+        return volume_render(field, camera, bounds, width=width, height=height, steps=steps, mode=mode,
+                             sigma=sigma, emission_color=emission_color, albedo=albedo, lights=lights,
+                             background=background)
+
+    def save_render(self, path, rgb01):
+        """Write a render (an (H,W,3) image in [0,1]) to a PNG via the stdlib encoder. See holographic_render."""
+        from holographic_render import save_png
+        return save_png(path, rgb01)
+
+    def render_frame_delta(self, prev, curr, tile=32, thresh=1e-3):
+        """The pixel-streaming primitive: return only the `tile`x`tile` image blocks that CHANGED between two
+        frames, as (row, col, pixels), plus the fraction changed -- so a viewport pushes just the dirty tiles
+        after a local edit / small camera move, the rendering analogue of the engine's O(change) delta protocol.
+        See holographic_render.frame_delta_tiles."""
+        from holographic_render import frame_delta_tiles
+        return frame_delta_tiles(prev, curr, tile=tile, thresh=thresh)
+
+    def deform(self, geometry, kind="bend", angle=0.0, factor=0.0, axis=2, up=None, center=None):
+        """Apply a classic vectorised deformer to ANY point set -- a Mesh (returns a deformed Mesh, faces kept)
+        OR an (N,3) array (a particle cloud / point set, returns the deformed array). kind: 'bend' (arc in the
+        (axis,up) plane by `angle` rad), 'twist' (screw by `angle` rad along `axis`), 'taper' (cone by `factor`
+        along `axis`). One array op per deformer -- no Python per-point loop, so a mesh and a particle cloud run
+        the same path. See holographic_deform."""
+        from holographic_deform import bend, twist, taper
+        from holographic_mesh import Mesh
+        is_mesh = hasattr(geometry, "vertices")
+        P = geometry.vertices if is_mesh else np.asarray(geometry, float)
+        if kind == "bend":
+            Q = bend(P, angle, axis=(0 if axis == 2 else axis), up=(2 if up is None else up), center=center)
+        elif kind == "twist":
+            Q = twist(P, angle, axis=axis)
+        elif kind == "taper":
+            Q = taper(P, factor, axis=axis)
+        else:
+            raise ValueError("kind must be 'bend', 'twist' or 'taper'")
+        return Mesh(Q, [tuple(f) for f in geometry.faces]) if is_mesh else Q
+
+    def lattice_deform(self, geometry, bounds, control_offsets):
+        """Free-form (FFD) deformation through a control lattice: each point moves by the TRILINEAR interpolation
+        of the lattice's per-control displacements `control_offsets` (nx,ny,nz,3) over `bounds`. Works on a Mesh
+        (returns a Mesh) or an (N,3) array. The sculpt-by-cage deformer, vectorised (8 gathers, no point loop).
+        See holographic_deform."""
+        from holographic_deform import lattice_deform as _ld
+        from holographic_mesh import Mesh
+        is_mesh = hasattr(geometry, "vertices")
+        P = geometry.vertices if is_mesh else np.asarray(geometry, float)
+        Q = _ld(P, bounds, control_offsets)
+        return Mesh(Q, [tuple(f) for f in geometry.faces]) if is_mesh else Q
+
+    def blend_shapes(self, base, targets, weights):
+        """Morph-target / blendshape mix as a WEIGHTED BUNDLE: base + sum_i w_i (target_i - base). `base` and each
+        target are (N,3) (mesh vertices or particles); `weights` length K. Vectorised (`weights @ deltas`) -- this
+        is the engine's superposition primitive on geometry, so animating the weights over time IS the blendshape
+        animation. Pass a base Mesh to get a Mesh back. See holographic_deform."""
+        from holographic_deform import blendshapes
+        from holographic_mesh import Mesh
+        is_mesh = hasattr(base, "vertices")
+        B = base.vertices if is_mesh else np.asarray(base, float)
+        T = [t.vertices if hasattr(t, "vertices") else np.asarray(t, float) for t in targets]
+        Q = blendshapes(B, T, weights)
+        return Mesh(Q, [tuple(f) for f in base.faces]) if is_mesh else Q
+
+    def timeline(self):
+        """A keyframe Timeline: `.key(channel, t, value)` then `.sample(channel, t)` for the lerp-interpolated
+        value at time t (t may be an array -- vectorised). Key blendshape weights, deform params, or transforms
+        and drive the animation from it. See holographic_anim.Timeline."""
+        from holographic_anim import Timeline
+        return Timeline()
+
+    def frame_cache(self, base, hot=8, tol=1e-9):
+        """A tiered delta FrameCache for playback: `.put(frame, state)` stores each frame as a sparse DELTA vs
+        `base` (O(change) memory -- the engine's patch idea on the time axis), `.get(frame)` reconstructs it
+        exactly, and the `hot` most-recent frames stay full in RAM for instant scrubbing. `.full_bytes()` /
+        `.memory_bytes()` report the saving (big when frames change locally, ~full when a deformation is global).
+        See holographic_anim.FrameCache."""
+        from holographic_anim import FrameCache
+        return FrameCache(base, hot=hot, tol=tol)
+
+    def bake_deformation(self, base, n_frames, frame_fn):
+        """Evaluate an animation into a FrameCache: for each frame f, cache frame_fn(base, f) as a delta. Returns
+        the FrameCache, ready to scrub. `frame_fn` is any vectorised deformer with a time-varying parameter; the
+        bake never loops in Python over vertices, only over frames. See holographic_anim.bake_deformation."""
+        from holographic_anim import bake_deformation
+        return bake_deformation(base, n_frames, frame_fn)
+
+    def mirror_mesh(self, mesh, axis=0, plane=0.0, weld=True, tol=1e-5):
+        """Mirror a mesh across the `axis`=const `plane`: append a reflected copy with reversed winding (normals
+        stay consistent) and optionally WELD the seam -- the standard way to model a symmetric object from one
+        half. Vectorised. See holographic_meshtools.mirror."""
+        from holographic_meshtools import mirror
+        return mirror(mesh, axis=axis, plane=plane, weld=weld, tol=tol)
+
+    def weld_mesh(self, mesh, tol=1e-5):
+        """Merge-by-distance: weld vertices within `tol` into one (mean position), remap faces, drop the faces
+        that collapse -- the cleanup after a mirror / import / boolean. Vectorised for triangle meshes. See
+        holographic_meshtools.merge_by_distance."""
+        from holographic_meshtools import merge_by_distance
+        return merge_by_distance(mesh, tol=tol)
+
+    def solidify_mesh(self, mesh, thickness, flip=False):
+        """Give a surface thickness (the shell / solidify modifier): offset an inner copy along the vertex
+        normals by `thickness`, reverse its winding, and BRIDGE the boundary so an open sheet becomes a
+        watertight solid (a closed mesh becomes a hollow double wall). Vectorised offset; the bridge loops over
+        boundary edges only. See holographic_meshtools.solidify."""
+        from holographic_meshtools import solidify
+        return solidify(mesh, thickness, flip=flip)
+
+    def render_sdf(self, sdf, camera, width=256, height=256, light_dir=(-0.4, 0.7, -0.3),
+                   base_color=(0.85, 0.5, 0.35), sky=None, ao=True, shadows=True, reflect=0.25,
+                   refract=0.0, ior=1.5, sss=0.0, sss_color=(1.0, 0.4, 0.3), ambient=0.25):
+        """Field-native SDF renderer: sphere-trace primary rays, then shade hits with Lambert direct light gated
+        by a SOFT SHADOW, ambient gated by AMBIENT OCCLUSION, an HDRI-sky environment REFLECTION (Schlick
+        fresnel), optional REFRACTION (the sky bent through the surface) and SUBSURFACE glow; misses show the sky
+        dome. `sky` may be an equirectangular HDRI (H,W,3) array. These are light-transport effects that fall out
+        cheaply because the engine is SDF-native (the field answers nearest-surface / occlusion / normal). All
+        vectorised over pixels. See holographic_raymarch.render_sdf."""
+        from holographic_raymarch import render_sdf
+        if hasattr(base_color, "base_color"):
+            base_color = base_color.base_color[:3]
+        return render_sdf(sdf, camera, width=width, height=height, light_dir=light_dir, base_color=base_color,
+                          sky=sky, ao=ao, shadows=shadows, reflect=reflect, refract=refract, ior=ior, sss=sss,
+                          sss_color=sss_color, ambient=ambient)
+
+    def ambient_occlusion(self, sdf, points, normals, samples=6, step=0.06, k=1.6):
+        """SDF ambient occlusion at `points` with `normals`: march the normal and read the field -- a near
+        surface darkens the point. Field-native, no hemisphere rays. See holographic_raymarch.ambient_occlusion."""
+        from holographic_raymarch import ambient_occlusion
+        return ambient_occlusion(sdf, points, normals, samples=samples, step=step, k=k)
+
+    def soft_shadow(self, sdf, points, light_dir, k=12.0):
+        """SDF soft shadow: march each point toward the light; the closest approach to any surface is the
+        penumbra (0 blocked .. 1 clear). Field-native. See holographic_raymarch.soft_shadow."""
+        from holographic_raymarch import soft_shadow
+        return soft_shadow(sdf, points, light_dir, k=k)
+
+    def sky_dome(self, directions, sun_dir=(-0.4, 0.7, -0.3), env=None):
+        """HDRI sky dome: the environment radiance from `directions`. With `env` (an equirectangular (H,W,3)
+        image) it samples a real HDRI by lon/lat; otherwise a procedural sky+sun+ground. The incoming light is a
+        superposition (bundle) of directional radiance. See holographic_raymarch.sky_dome."""
+        from holographic_raymarch import sky_dome
+        return sky_dome(directions, sun_dir=sun_dir, env=env)
+
+    def refract(self, directions, normals, ior=1.5):
+        """Snell's-law refraction of rays at a surface (total-internal-reflection falls back to reflection).
+        This is optics -- plain vector math -- exposed as a composable helper. See holographic_raymarch.refract_dir."""
+        from holographic_raymarch import refract_dir
+        return refract_dir(directions, normals, ior=ior)
+
+    def subsurface(self, sdf, points, normals, light_dir, depth=0.6, sigma=4.0):
+        """Field-native subsurface translucency: measure how much SOLID the light crosses inside the object to
+        reach each point (the SDF interior); thin regions transmit more and glow. See holographic_raymarch.subsurface."""
+        from holographic_raymarch import subsurface
+        return subsurface(sdf, points, normals, light_dir, depth=depth, sigma=sigma)
+
+    def irradiance_cache(self, sdf, points, normals, light_dir, base_color=(0.8, 0.6, 0.5),
+                         n_cache=64, n_dirs=16, seed=0):
+        """Global illumination via a sparse IRRADIANCE CACHE (Ward = the engine's adaptive-anchor idea): compute
+        one-bounce indirect light at `n_cache` surface points (the slow integral, paid sparsely), returning a
+        cache to read with `read_irradiance`. Indirect light is smooth, so a sparse cache reconstructs it cheaply.
+        See holographic_globalillum.irradiance_cache."""
+        from holographic_globalillum import irradiance_cache
+        return irradiance_cache(sdf, points, normals, light_dir, base_color=base_color,
+                                n_cache=n_cache, n_dirs=n_dirs, seed=seed)
+
+    def read_irradiance(self, cache, query_points, k=4):
+        """Read an irradiance cache at query points by inverse-distance interpolation of the k nearest cached
+        samples (the GI cache read). See holographic_globalillum.read_cache."""
+        from holographic_globalillum import read_cache
+        return read_cache(cache, query_points, k=k)
+
+    def caustics(self, sdf, light_dir=(0, -1, 0), receiver_y=-0.9, extent=2.0, res=128, ior=1.5, n_side=200):
+        """Caustics by forward light tracing: shoot parallel light rays, refract them through the object, and
+        SPLAT where they land on the receiver plane with np.add.at -- the scatter that is the engine's bundle.
+        Where refracted rays converge the bundle piles up: the caustic. Returns a (res,res) intensity map.
+        See holographic_globalillum.caustics."""
+        from holographic_globalillum import caustics
+        return caustics(sdf, light_dir=light_dir, receiver_y=receiver_y, extent=extent, res=res, ior=ior, n_side=n_side)
 
     def morph_scene(self, img_a, img_b, steps=9, method="dct"):
         """Morph between two images. method='dct' (default) blends in the DCT-coefficient domain (structure

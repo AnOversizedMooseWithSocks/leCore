@@ -56,6 +56,18 @@ def test_faculties_delegate():
     um = UnifiedMind(dim=256, seed=0)
     rng = np.random.default_rng(0)
     roles = np.stack([_rv(rng, 256) for _ in range(4)]); vals = np.stack([_rv(rng, 256) for _ in range(4)])
-    assert np.allclose(um.encode_record(roles, vals), bundle_bind(roles, vals))
+    assert np.allclose(um.encode_pairs(roles, vals), bundle_bind(roles, vals))
     trace = _rv(rng, 256); keys = np.stack([_rv(rng, 256) for _ in range(4)])
     assert np.allclose(um.unbind_keys(trace, keys), unbind_all(trace, keys))
+
+
+def test_partitioned_route_matches_cosine_loop():
+    """The nearest pass: PartitionedMemory.route now uses nearest() (argmax of a matmul) instead of a Python
+    cosine loop over the anchors -- exact, since the anchors are unit random_vectors."""
+    from holographic_ai import PartitionedMemory, cosine
+    pm = PartitionedMemory(256, num_partitions=8, seed=0)
+    rng = np.random.default_rng(0)
+    for _ in range(100):
+        k = rng.normal(size=256)
+        loop = int(np.argmax([cosine(k, a) for a in pm.anchors]))
+        assert pm.route(k) == loop

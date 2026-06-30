@@ -4838,3 +4838,528 @@ def test_fast_creature_encoder_faculty_is_in_vsa_and_bit_identical():
     for _ in range(10):
         fast.encode(s)
     assert fast.binds_saved >= 20 and fast.binds_done == 2          # binds reused, not recomputed
+
+
+def test_fluid_and_particles_exposed_through_unified_mind():
+    """The grid fluid/particle layer reached via UnifiedMind faculties: a velocity field is made
+    divergence-free by the FFT pressure projection (the same FFT-on-a-torus the bind operator runs), and
+    particles seeded in that field ride it. Fluid sim, exposed to VSA."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=256, seed=0)
+    H = W = 32
+    rng = np.random.default_rng(0)
+
+    # an arbitrary velocity field, then made incompressible -> divergence ~0
+    vx = rng.normal(size=(H, W)); vy = rng.normal(size=(H, W))
+    assert np.abs(um.field_divergence(vx, vy)).max() > 1.0
+    vx, vy = um.make_incompressible(vx, vy)
+    assert np.abs(um.field_divergence(vx, vy)).max() < 1e-9
+
+    # a few fluid steps with an injected force keep the flow incompressible and transport density
+    density = np.zeros((H, W)); density[16, 16] = 1.0
+    fx = np.zeros((H, W)); fx[16, 8] = 5.0
+    for _ in range(4):
+        vx, vy, density = um.fluid_step(vx, vy, density, dt=0.2, viscosity=0.05, fx=fx)
+    assert np.abs(um.field_divergence(vx, vy)).max() < 1e-2
+
+    # particles ride the solved field (they advect by sampling it)
+    ps = um.particle_system(rng.uniform(4, 28, size=(40, 2)))
+    p0 = ps.pos.copy()
+    for _ in range(5):
+        ps.advect_by(vx, vy, dt=0.5)
+    assert np.max(np.abs(ps.pos - p0)) > 0.0                       # the flow moved them
+
+
+def test_softbody_and_rigidbody_through_unified_mind():
+    """The PBD/XPBD dynamics layer reached via UnifiedMind faculties, coupled to the fields layer: a cloth
+    settles under gravity (its constraint sweep is the same iterate-a-projection the resonator/denoiser run),
+    a rigid body falls without deforming, and a soft body is pushed by an attractor force from the field
+    layer -- fluid/field forces driving a softbody, all on one substrate."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=256, seed=0)
+
+    # a cloth reaches equilibrium under gravity (faculty path)
+    cloth = um.cloth(4, 4, spacing=1.0, compliance=0.0)
+    for _ in range(120):
+        cloth.step(dt=1 / 60, gravity=(0.0, -9.8), iterations=20)
+    assert cloth.constraint_residual() < 0.05
+
+    # a rigid body falls but never deforms
+    rb = um.rigid_body(np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]))
+    for _ in range(60):
+        rb.step(dt=1 / 60, gravity=(0.0, -9.8))
+    assert rb.max_distance_drift() < 1e-6 and rb.x[:, 1].mean() < 0.0
+
+    # a soft body driven by a field-layer attractor force moves toward the attractor
+    body = um.soft_body(np.array([[8.0, 0.0], [9.0, 0.0]]))
+    body.add_distance(0, 1, rest=1.0)
+    d0 = np.linalg.norm(body.x.mean(axis=0))
+    for _ in range(50):
+        f = um.attractor_force(body.x, (0.0, 0.0), strength=20.0)
+        body.step(dt=1 / 60, gravity=(0.0, 0.0), external_force=f, iterations=10, damping=0.02)
+    assert np.linalg.norm(body.x.mean(axis=0)) < d0
+
+
+def test_two_way_fluid_cloth_coupling_through_unified_mind():
+    """Two-way coupling on one substrate, via UnifiedMind faculties: a moving body imprints its momentum into
+    the fluid velocity grid (scatter_to_field) AND the fluid drags the body (drag_force). Bending and volume
+    constraints are reachable too. Fluid <-> softbody, both directions."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=256, seed=0)
+    H = W = 32
+
+    # cloth -> fluid: a clump moving in +x deposits momentum; the fluid gains velocity
+    pos = np.array([[16.0, 16.0], [16.5, 16.0], [16.0, 16.5], [16.5, 16.5]])
+    vel = np.tile(np.array([5.0, 0.0]), (4, 1))
+    fx = um.scatter_to_field((H, W), pos, vel[:, 0]); fy = um.scatter_to_field((H, W), pos, vel[:, 1])
+    vx = np.zeros((H, W)); vy = np.zeros((H, W)); dens = np.zeros((H, W))
+    for _ in range(3):
+        vx, vy, dens = um.fluid_step(vx, vy, dens, dt=0.2, viscosity=0.05, fx=fx, fy=fy)
+    assert np.abs(vx).max() > 0.5                      # the body stirred the fluid
+
+    # fluid -> cloth: a uniform flow drags free particles up toward the flow speed
+    flow = np.full((H, W), 4.0); still = np.zeros((H, W))
+    pp = np.array([[8.0, 8.0], [10.0, 12.0]]); pv = np.zeros((2, 2))
+    for _ in range(20):
+        f = um.drag_force(pp, pv, flow, still, k=0.5)
+        pv = pv + (1 / 60) * f; pp = pp + (1 / 60) * pv
+    assert pv[:, 0].mean() > 0.3
+
+    # bending + volume faculties are live
+    c3 = um.cloth3d(4, 4, spacing=1.0, compliance=0.0, bending=0.0)
+    assert len(c3.bending) > 0
+    box = um.soft_box(2, 2, 2, spacing=1.0, volume_compliance=0.0)
+    assert len(box.volumes) > 0 and box.total_volume() > 0
+
+
+def test_smoke_rises_from_a_heat_source_through_unified_mind():
+    """Temperature-driven smoke via UnifiedMind faculties: a hot+dense source at the bottom builds a rising,
+    curling plume on the same FFT fluid solver the bind operator runs -- the temperature field from the
+    original capability question, now coupled to velocity by buoyancy."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=256, seed=0)
+    H = W = 32
+    Y, X = np.meshgrid(np.arange(H), np.arange(W), indexing="ij")
+    src = np.exp(-(((X - 16) ** 2 + (Y - 4) ** 2) / (2 * 2.5 ** 2)))     # heat at the bottom
+    vx = np.zeros((H, W)); vy = np.zeros((H, W)); dens = np.zeros((H, W)); temp = np.zeros((H, W))
+    for _ in range(50):
+        vx, vy, dens, temp = um.smoke_step(vx, vy, dens, temp, dt=0.2, viscosity=0.02,
+                                           buoyancy=4.0, confinement=1.0, dens_source=src, temp_source=src)
+    rows = np.arange(H)[:, None]
+    centroid = float((rows * dens).sum() / dens.sum())
+    assert dens.sum() > 0 and centroid > 6.0                # smoke accumulated and rose above the source row
+
+
+def test_obstacle_in_flow_through_unified_mind():
+    """Immersed boundary via UnifiedMind faculties: a disc obstacle blocks a driven flow and the fluid goes
+    around it (velocity inside the solid drops to a small fraction of ambient) -- solids as real obstacles in
+    the flow, on the same FFT solver."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=256, seed=0)
+    H = W = 32
+    solid = um.disc_mask((H, W), center=(16, 16), radius=5)
+    vx = np.zeros((H, W)); vy = np.zeros((H, W)); dens = np.zeros((H, W))
+    fx = np.ones((H, W)) * 2.0
+    for _ in range(60):
+        vx, vy, dens = um.fluid_step(vx, vy, dens, dt=0.15, viscosity=0.05, fx=fx, solid=solid)
+    speed = np.sqrt(vx ** 2 + vy ** 2)
+    Y, X = np.meshgrid(np.arange(H), np.arange(W), indexing="ij")
+    ambient = speed[np.sqrt((X - 16) ** 2 + (Y - 16) ** 2) > 11].mean()
+    assert speed[solid > 0].mean() < 0.2 * ambient
+
+
+def test_3d_fluid_and_smoke_through_unified_mind():
+    """The 3-D fluid solver via UnifiedMind faculties: a 3-D velocity field is made divergence-free by the
+    n-D FFT pressure projection, and 3-D smoke rises -- the whole fluid layer generalised from 2-D to 3-D on
+    the same dimension-agnostic FFT the bind operator uses."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=256, seed=0)
+    N = 16
+    rng = np.random.default_rng(0)
+    vx = rng.normal(size=(N, N, N)); vy = rng.normal(size=(N, N, N)); vz = rng.normal(size=(N, N, N))
+    assert np.abs(um.field_divergence_3d(vx, vy, vz)).max() > 1.0
+    vx, vy, vz = um.make_incompressible_3d(vx, vy, vz)
+    assert np.abs(um.field_divergence_3d(vx, vy, vz)).max() < 1e-9
+
+    X, Y, Z = np.meshgrid(np.arange(N), np.arange(N), np.arange(N), indexing="ij")
+    src = np.exp(-(((X - 8) ** 2 + (Y - 3) ** 2 + (Z - 8) ** 2) / (2 * 2.5 ** 2)))
+    vx = np.zeros((N, N, N)); vy = np.zeros((N, N, N)); vz = np.zeros((N, N, N))
+    d = np.zeros((N, N, N)); t = np.zeros((N, N, N))
+    ay = np.arange(N)[None, :, None]
+    for _ in range(30):
+        vx, vy, vz, d, t = um.smoke_step_3d(vx, vy, vz, d, t, dt=0.2, viscosity=0.02,
+                                            buoyancy=4.0, dens_source=src, temp_source=src)
+    assert d.sum() > 0 and float((ay * d).sum() / d.sum()) > 4.0      # 3-D smoke accumulated and rose
+
+
+def test_physics_field_becomes_a_tileable_hypervector():
+    """The bridge that makes the physics VSA-native and composable: simulate a density on the grid (fast
+    NumPy/FFT), cross ONCE into VSA via grid_to_hypervector, then TILE it with bind+bundle and read it back --
+    a fluid puff repeated across space, all through UnifiedMind faculties. Simulate on the grid, compose in
+    VSA."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=1024, seed=0)
+
+    # a small density blob (stands in for a fluid puff; could come from fluid_step)
+    n = 9; xs = np.linspace(0, 8, n)
+    X, Y = np.meshgrid(xs, xs, indexing="ij")
+    density = np.exp(-(((X - 4) ** 2 + (Y - 4) ** 2) / (2 * 1.2 ** 2)))
+
+    # cross into VSA: the field is now a hypervector (composable)
+    enc = um.vector_function_encoder(2, bounds=[(0, 40), (0, 40)], bandwidth=20.0)
+    fv = um.grid_to_hypervector(enc, density, [xs, xs], threshold=0.2)
+
+    # tile it 2x2 with period 10 -- pure bind+bundle, still a hypervector
+    tiled = um.tile_field(enc, fv, period=10.0, counts=2)
+
+    # the puff now reads at all four cell centres, ~equally
+    centres = [enc.query(tiled, [4 + 10 * a, 4 + 10 * b]) for a in (0, 1) for b in (0, 1)]
+    assert min(centres) > 0.1                                   # a copy in every cell
+    assert enc.query(tiled, [9, 9]) < min(centres)              # the gap between cells is weaker
+
+
+def test_seamless_fractal_volume_tiled_in_vsa_through_unified_mind():
+    """The compounding the 3-D grid unlocks for tiling: a SEAMLESS FRACTAL volume synthesised on the torus
+    (spectral_field) is the source; a localized motif drawn from that world crosses into VSA ONCE
+    (grid_to_function) and is then tiled in 3-D as binds+sum (tile) -- 8 copies in one fixed-size hypervector,
+    each reading identically. Fractal source x VSA tiling x one-time grid->VSA crossing, all composable."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_fpe import VectorFunctionEncoder
+    from holographic_tiling import grid_to_function, tile
+    um = UnifiedMind(dim=256, seed=0)
+
+    # the 3-D torus gives a seamless fractal volume from a tiny seed
+    vol = um.spectral_field((24, 24, 24), beta=2.0, seed=1)
+    assert um.seam_continuity(vol) < 2.0                          # tiles with no seam
+
+    # a localized motif -> VSA hypervector -> tiled in 3-D (the existing VSA-native tiler)
+    enc = VectorFunctionEncoder(3, dim=4096, bounds=[(0, 30)] * 3, bandwidth=12.0, seed=0)
+    g = np.zeros((7, 7, 7)); g[3, 3, 3] = 1.0
+    motif = grid_to_function(enc, g, [np.arange(7) + 1.5] * 3)
+    tiled = tile(enc, motif, period=10.0, counts=2)               # 2x2x2 copies, binds + sum
+    q0 = enc.query(tiled, [5, 5, 5]); q1 = enc.query(tiled, [15, 15, 15])
+    assert q0 > 0.2 and abs(q0 - q1) < 0.05                       # the far 3-D-tiled copy reads the same
+
+
+def test_fractal_initial_condition_enriches_3d_smoke():
+    """Physics composes with the fractal source: a turbulent (fractal) initial temperature yields a more
+    vortical 3-D plume than a smooth start -- spectral_field driving the 3-D smoke solver."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_fields import curl_3d
+    um = UnifiedMind(dim=256, seed=0)
+    N = 18
+    X, Y, Z = np.meshgrid(np.arange(N), np.arange(N), np.arange(N), indexing="ij")
+    src = np.exp(-(((X - 9) ** 2 + (Y - 4) ** 2 + (Z - 9) ** 2) / (2 * 2.5 ** 2)))
+
+    def total_vorticity(turbulent):
+        vx = np.zeros((N, N, N)); vy = np.zeros((N, N, N)); vz = np.zeros((N, N, N))
+        t = (0.5 * um.spectral_field((N, N, N), beta=1.5, seed=3)) if turbulent else np.zeros((N, N, N))
+        d = np.zeros((N, N, N)); t = t + src
+        for _ in range(20):
+            vx, vy, vz, d, t = um.smoke_step_3d(vx, vy, vz, d, t, dt=0.2, viscosity=0.02,
+                                                buoyancy=4.0, confinement=0.6, dens_source=src, temp_source=src)
+        wx, wy, wz = curl_3d(vx, vy, vz)
+        return float(np.sqrt(wx ** 2 + wy ** 2 + wz ** 2).sum())
+
+    assert total_vorticity(True) > total_vorticity(False)
+
+
+def test_fractal_volume_one_call_through_unified_mind():
+    """The single composable entry point: um.fractal_volume runs spectral_field -> grid_to_function ->
+    tile_recursive in one call, returning one hypervector with count^levels self-similar copies -- fractal
+    source, inception, demoscene compression, all behind one faculty and composable downstream (bind it to a
+    role, bundle it, store it)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_fpe import VectorFunctionEncoder
+    um = UnifiedMind(dim=256, seed=0)
+    enc = VectorFunctionEncoder(2, dim=8192, bounds=[(0, 50), (0, 50)], bandwidth=20.0, seed=0)
+    fv = um.fractal_volume(enc, period=10.0, counts=2, levels=2, beta=2.0, seed=1)
+    assert fv.shape == (8192,)
+    reads = [enc.query(fv, [2 + 10 * k, 2 + 10 * k]) for k in range(4)]
+    assert all(r > 0.1 for r in reads)                          # 4 self-similar copies, one vector
+
+    # it is composable: bind the whole fractal volume to a role; it recovers well enough to be IDENTIFIED
+    # (binding a structured hypervector recovers it with moderate, not perfect, fidelity -- an honest HRR fact)
+    from holographic_ai import bind, unbind, cosine, random_vector
+    role = random_vector(8192, np.random.default_rng(0))
+    recovered = unbind(bind(role, fv), role)
+    unrelated = random_vector(8192, np.random.default_rng(123))
+    assert cosine(recovered, fv) > 0.5                          # round-trips through the VSA algebra
+    assert cosine(recovered, fv) > cosine(recovered, unrelated) + 0.3   # clearly not noise
+
+
+def test_fractal_volume_inception_over_engine_through_unified_mind():
+    """The generalized seed, through the faculty: um.fractal_volume's OUTPUT is a hypervector, so it feeds back
+    in as the `motif` of another um.fractal_volume -- inception over the engine itself, copies-of-copies in one
+    fixed-size vector. Also exercises the motif_grid path (a field crossed into VSA once, then tiled)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_fpe import VectorFunctionEncoder
+    um = UnifiedMind(dim=256, seed=0)
+    enc = VectorFunctionEncoder(2, dim=8192, bounds=[(0, 50), (0, 50)], bandwidth=20.0, seed=0)
+
+    inner = um.fractal_volume(enc, period=10.0, counts=2, levels=1, beta=2.0, seed=1)
+    nested = um.fractal_volume(enc, period=20.0, counts=2, levels=1, motif=inner)   # tile the engine's output
+    reads = [enc.query(nested, [2 + 10 * k, 2 + 10 * k]) for k in range(4)]
+    assert sum(r > 0.05 for r in reads) >= 3 and nested.shape == (8192,)
+
+    # motif_grid path: a localized field crossed into VSA once, then tiled self-similarly
+    puff = np.zeros((5, 5)); puff[2, 2] = 1.0; puff[1, 2] = puff[3, 2] = 0.5
+    coords = [np.arange(5, dtype=float), np.arange(5, dtype=float)]
+    fvg = um.fractal_volume(enc, period=10.0, counts=2, levels=2, motif_grid=puff, motif_coords=coords)
+    assert all(enc.query(fvg, [2 + 10 * k, 2 + 10 * k]) > 0.1 for k in range(4))
+
+
+def test_inception_profile_through_unified_mind():
+    """inception faculty: one depth knob returns a composable volume + the capacity-ceiling table."""
+    from holographic_unified import UnifiedMind
+    from holographic_fpe import VectorFunctionEncoder
+    um = UnifiedMind(dim=256, seed=0)
+    enc = VectorFunctionEncoder(2, dim=8192, bounds=[(0, 200), (0, 200)], bandwidth=20.0, seed=0)
+    vol, profile = um.inception(enc, 10.0, 2, 3, beta=2.0, seed=1)
+    assert vol.shape == (8192,) and len(profile) == 3
+    reads = [r["mean_read"] for r in profile]
+    assert reads[0] > reads[1] > reads[2]                      # per-copy read falls with depth (measured)
+
+
+def test_3d_fluid_obstacle_and_softbody_coupling_through_mind():
+    """The 3-D physics gaps, end to end through UnifiedMind: a ball obstacle diverts a 3-D flow, and a softbody
+    dropped in that flow is pushed downstream by drag_force_3d -- particle<->3-D-field coupling with an
+    immersed boundary, the 3-D lift of the 2-D coupling."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=256, seed=0)
+    N = 20
+    vx = np.ones((N, N, N)); vy = np.zeros((N, N, N)); vz = np.zeros((N, N, N)); dens = np.zeros((N, N, N))
+    ball = um.sphere_mask((N, N, N), (10, 10, 10), 4)
+    body = um.soft_body(np.array([[3., 10., 10.], [4., 10., 10.]]))
+    body.add_distance(0, 1)
+    x0 = body.x[:, 0].mean()
+    for _ in range(20):
+        vx, vy, vz, dens = um.fluid_step_3d(vx, vy, vz, dens, dt=0.2, solid=ball)
+        drag = um.drag_force_3d(body.x, body.v, vx, vy, vz, k=2.0)
+        body.step(dt=1 / 60, gravity=(0, 0, 0), external_force=drag)
+    assert float(np.abs(vx[ball > 0]).mean()) < 0.1 * float(np.abs(vx[ball == 0]).mean())   # ball diverts flow
+    assert body.x[:, 0].mean() > x0                            # softbody carried downstream by the 3-D flow
+
+
+def test_self_collision_on_mind_built_cloth():
+    """A cloth built by the mind can switch on self-collision (the spatial-hash cull) so its layers don't
+    interpenetrate -- opt-in and composable on the returned SoftBody."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=256, seed=0)
+    cloth = um.cloth3d(rows=4, cols=4, spacing=1.0)
+    cloth.add_self_collision(radius=0.5)                       # method on the returned body
+    assert cloth.collision_radius == 0.5
+    pts = np.array([[0., 0., 0.], [0.1, 0., 0.], [0., 0.1, 0.]])
+    clump = um.soft_body(pts); clump.add_self_collision(radius=1.0)
+    for _ in range(30):
+        clump.step(dt=1 / 60, gravity=(0, 0, 0))
+    gmin = min(float(np.linalg.norm(clump.x[i] - clump.x[j])) for i in range(3) for j in range(i + 1, 3))
+    assert gmin > 0.9                                          # the clump spread to the collision radius
+
+
+def test_pairwise_repulsion_through_unified_mind():
+    """The culled short-range force as a faculty: particles from the mind's particle_system disperse under
+    pairwise_repulsion, and the faculty's force equals the standalone one."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(2)
+    pts = rng.uniform(0, 1, size=(15, 2))
+    ps = um.particle_system(pts.copy())
+    def min_gap(P):
+        return min(float(np.linalg.norm(P[i] - P[j])) for i in range(len(P)) for j in range(i + 1, len(P)))
+    g0 = min_gap(ps.pos)
+    for _ in range(25):
+        ps.step(force=um.pairwise_repulsion(ps.pos, radius=1.5, strength=1.0), dt=0.1, damping=0.3)
+    assert min_gap(ps.pos) > g0
+
+    from holographic_fields import pairwise_repulsion as f_rep
+    assert np.allclose(um.pairwise_repulsion(pts, 1.5, strength=1.0), f_rep(pts, 1.5, strength=1.0))
+
+
+def test_stable_mesh_pipeline_through_unified_mind():
+    """The 3-D modeling-app contract end to end: surface_mesh_stable gives a watertight, 2-manifold mesh with
+    stable per-vertex keys and a validated topology report; validate_topology and mesh_stable_uv and
+    mesh_to_softbody are all reachable on the mind."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=256, seed=0)
+    def sphere(P): P = np.asarray(P, float); return np.linalg.norm(P, axis=1) - 0.6
+    b = (np.array([-1., -1, -1]), np.array([1., 1, 1]))
+    out = um.surface_mesh_stable(sphere, b, resolution=32)
+    assert out["topology"]["ok"] and out["topology"]["watertight"]
+    assert len(out["keys"]) == out["mesh"].n_vertices
+    assert um.validate_topology(out["mesh"])["genus"] == 0
+    uv = um.mesh_stable_uv(out["mesh"], bounds=b)
+    assert uv.shape == (out["mesh"].n_vertices, 2)
+    body = um.mesh_to_softbody(out["mesh"])
+    assert body.N == out["mesh"].n_vertices
+
+
+def test_blue_noise_sample_through_unified_mind():
+    """The blue-noise sampler as a faculty: hard min-distance, more uniform than random (larger min center gap)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=256, seed=0)
+    b = (np.array([0., 0]), np.array([1., 1.]))
+    pts = um.blue_noise_sample(0.05, b, seed=0)
+    d = pts[:, None, :] - pts[None, :, :]
+    dd = np.sqrt((d ** 2).sum(-1)); np.fill_diagonal(dd, np.inf)
+    assert dd.min() >= 0.05 - 1e-9
+    rand = np.random.default_rng(0).uniform(0, 1, (len(pts), 2))
+    dr = rand[:, None, :] - rand[None, :, :]; ddr = np.sqrt((dr ** 2).sum(-1)); np.fill_diagonal(ddr, np.inf)
+    assert dd.min() > ddr.min()                                # blue noise: no clumps, larger min gap than random
+
+
+def test_face_type_and_material_export_through_unified_mind():
+    """Project a field with a chosen face type, and export the mesh WITH a PBR material via the mind."""
+    import numpy as np, json, struct
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=256, seed=0)
+    def sphere(P): P = np.asarray(P, float); return np.linalg.norm(P, axis=1) - 0.6
+    b = (np.array([-1., -1, -1]), np.array([1., 1, 1]))
+    out = um.surface_mesh_stable(sphere, b, resolution=28, face_type="quad")
+    cnt = um.mesh_face_counts(out["mesh"])
+    assert cnt[4] > cnt[3] and out["topology"]["watertight"]   # quad-dominant, still watertight
+    mat = um.pbr_material("gold", base_color=(1.0, 0.84, 0.0, 1.0), metallic=1.0, roughness=0.2)
+    glb = um.mesh_to_gltf(out["mesh"], material=mat)
+    jlen = struct.unpack("<I", glb[12:16])[0]
+    gj = json.loads(glb[20:20 + jlen].decode("utf-8"))
+    assert gj["materials"][0]["pbrMetallicRoughness"]["metallicFactor"] == 1.0
+
+
+def test_dynamics_to_mesh_unified_export():
+    """Soft / rigid / particle / smoke states all surface to a mesh through one faculty."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_softbody import SoftBody, RigidBody
+    from holographic_mesh import box
+    from holographic_meshbridge import sample_field
+    um = UnifiedMind(dim=256, seed=0)
+    assert um.dynamics_to_mesh(SoftBody.from_mesh(box())).n_faces == box().n_faces            # soft
+    assert um.dynamics_to_mesh(RigidBody.from_mesh(box())).n_faces == box().n_faces           # rigid
+    pts = np.random.default_rng(0).uniform(-0.4, 0.4, (50, 3))
+    assert um.dynamics_to_mesh(pts, radius=0.25, level=0.5, resolution=32)["topology"]["watertight"]  # particles
+    def blob(P): P = np.asarray(P, float); return 1.0 - np.linalg.norm(P, axis=1) / 0.6
+    dens, ax = sample_field(blob, (np.array([-1., -1, -1]), np.array([1., 1, 1])), 28)
+    assert um.dynamics_to_mesh((dens, ax), level=0.0).n_faces > 0                             # smoke
+
+
+def test_render_subsystem_through_unified_mind():
+    """Camera + lights + rasterised mesh + volumetric field + tile-delta, all reachable on the mind."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_meshbridge import sample_field, marching_tetrahedra_vec
+    um = UnifiedMind(dim=256, seed=0)
+    b = (np.array([-1., -1, -1]), np.array([1., 1, 1]))
+    def sphere(P): P = np.asarray(P, float); return np.linalg.norm(P, axis=1) - 0.7
+    v, ax = sample_field(sphere, b, 24); M = marching_tetrahedra_vec(v, ax)
+    cam = um.camera(eye=(0, 0, 3), target=(0, 0, 0), fov_deg=45)
+    lights = [um.light("directional", direction=(-1, -1, -1)), um.light("ambient", intensity=0.1)]
+    img = um.render_mesh(M, cam, 64, 64, lights=lights, base_color=(0.8, 0.5, 0.3))
+    assert img.shape == (64, 64, 3) and img.sum() > 0
+    def blob(P): P = np.asarray(P, float); return np.clip(1.0 - np.linalg.norm(P, axis=1) / 0.6, 0, 1)
+    vimg, alpha = um.render_volume(blob, cam, b, 48, 48, steps=48, mode="fire")
+    assert vimg.shape == (48, 48, 3) and alpha.max() > 0.3
+    tiles, frac = um.render_frame_delta(img, img, tile=16)
+    assert frac == 0.0                                         # identical -> nothing to stream
+
+
+def test_animation_deform_pipeline_through_unified_mind():
+    """Deformers + blendshapes + frame cache compose through the mind on a mesh and a particle cloud (ANIM)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_mesh import box
+    um = UnifiedMind(dim=256, seed=0)
+    b = box()
+    # deformers return a Mesh for a Mesh, an array for a point cloud -- same path
+    assert um.deform(b, "twist", angle=np.pi / 4, axis=2).n_vertices == b.n_vertices
+    P = np.random.default_rng(0).uniform(-1, 1, (40, 3))
+    assert um.deform(P, "bend", angle=0.5).shape == (40, 3)
+    # blendshape = weighted bundle: half-way is half the delta
+    tgt = b.vertices + np.array([0.0, 0.6, 0.0])
+    mid = um.blend_shapes(b, [tgt], [0.5])
+    assert np.allclose(mid.vertices, b.vertices + np.array([0.0, 0.3, 0.0]))
+    # bake a deformation into the frame cache and scrub it back exactly
+    base = np.zeros((60, 3))
+    def fr(bb, f):
+        s = bb.copy(); s[f:f + 4, 2] = 1.0; return s
+    cache = um.bake_deformation(base, 12, fr)
+    assert np.allclose(cache.get(7), fr(base, 7))
+    assert cache.full_bytes() >= cache.memory_bytes()
+
+
+def test_mirror_and_weld_through_unified_mind():
+    """Mirror builds a symmetric mesh and welds the seam; weld fuses duplicates (ANIM mesh tools)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_mesh import Mesh, grid
+    um = UnifiedMind(dim=256, seed=0)
+    g = grid(4, 4)
+    g.vertices[:, 0] = np.abs(g.vertices[:, 0])
+    m = um.mirror_mesh(g, axis=0, plane=0.0)
+    assert np.allclose(m.vertices[:, 0].min(), -m.vertices[:, 0].max(), atol=1e-6)
+    clean = grid(4, 4)                                         # an unfolded grid has no coincident verts
+    dup = Mesh(np.vstack([clean.vertices, clean.vertices]), [tuple(f) for f in clean.faces])
+    assert um.weld_mesh(dup, tol=1e-5).n_vertices == clean.n_vertices
+
+
+def test_sdf_lighting_through_unified_mind():
+    """Field-native SDF lighting composes through the mind: render, AO, soft shadow, refraction, SSS (LIGHT-1)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_sdf import sphere, plane
+    from holographic_render import Camera
+    um = UnifiedMind(dim=256, seed=0)
+    scene = sphere(0.7).union(plane(-0.8))
+    cam = Camera(eye=(1.6, 1.0, 2.4), target=(0, 0, 0), fov_deg=45)
+    img = um.render_sdf(scene, cam, 48, 48, reflect=0.25, refract=0.3, sss=0.2)
+    assert img.shape == (48, 48, 3) and img.min() >= 0 and img.max() <= 1
+    # AO darkens a crease vs open floor, soft shadow blocks under the sphere
+    P = np.array([[0.0, -0.78, 0.7]])
+    crease = um.ambient_occlusion(scene, P, np.array([[0., 1, 0]]))[0]
+    openf = um.ambient_occlusion(scene, np.array([[3.0, -0.8, 0.0]]), np.array([[0., 1, 0]]))[0]
+    assert crease < openf
+    assert um.soft_shadow(scene, np.array([[0.0, -0.79, 0.0]]), np.array([0., 1, 0]))[0] < 0.3
+    # HDRI sky brightest toward the sun
+    sun = (-0.4, 0.7, -0.3)
+    assert um.sky_dome(np.array([sun]) / np.linalg.norm(sun), sun_dir=sun)[0].sum() > \
+           um.sky_dome(np.array([[0.4, -0.7, 0.3]]), sun_dir=sun)[0].sum()
+
+
+def test_gi_and_caustics_through_unified_mind():
+    """GI irradiance cache and forward-splat caustics compose through the mind (LIGHT-2)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_sdf import sphere, plane
+    um = UnifiedMind(dim=256, seed=0)
+    scene = sphere(0.7).union(plane(-0.85))
+    P = np.array([[x, -0.85, z] for x in np.linspace(-1, 1, 8) for z in np.linspace(-1, 1, 8)])
+    N = np.broadcast_to(np.array([0., 1, 0]), P.shape).copy()
+    cache = um.irradiance_cache(scene, P, N, (-0.4, 0.7, -0.3), n_cache=16, n_dirs=10)
+    gi = um.read_irradiance(cache, P)
+    assert gi.shape == (64, 3) and (gi >= 0).all()
+    c = um.caustics(scene, ior=1.5, n_side=120, res=96, receiver_y=-1.2)
+    assert c.max() > 5.0                                      # refraction focuses light (the splat peaks)
+
+
+def test_solidify_through_unified_mind():
+    """Solidify closes an open sheet into a watertight solid (mesh tool)."""
+    from holographic_unified import UnifiedMind
+    from holographic_mesh import grid
+    um = UnifiedMind(dim=256, seed=0)
+    solid = um.solidify_mesh(grid(5, 5), 0.1)
+    assert solid.validate_topology()["watertight"]
