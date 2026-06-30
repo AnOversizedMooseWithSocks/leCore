@@ -52,7 +52,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
-from holographic_fpe import VectorFunctionEncoder, _fpe_parallel_workers
+from holographic_fpe import VectorFunctionEncoder, _BUNDLE_ENCODE_BATCH_ROWS, _fpe_parallel_workers
 from holographic_ai import cosine
 
 
@@ -188,18 +188,24 @@ class FractalNoise:
             raise ValueError(f"points must have shape (count, {self.n_dims})")
 
         total = np.zeros(pts.shape[0], dtype=float)
+        octave_items = list(zip(self.amplitudes, self.encoders, self.fields))
+        if not octave_items:
+            return total / self._norm
+
         rows_per_octave = pts.shape[0] * max(1, self.octaves)
-        worker_count = _fpe_parallel_workers(self.octaves, rows_per_octave, workers)
+        chunk_count = max(1, (pts.shape[0] + _BUNDLE_ENCODE_BATCH_ROWS - 1) // _BUNDLE_ENCODE_BATCH_ROWS)
+        worker_budget = _fpe_parallel_workers(self.octaves * chunk_count, rows_per_octave, workers)
+        outer_workers = min(self.octaves, worker_budget)
+        inner_workers = max(1, min(chunk_count, (worker_budget + outer_workers - 1) // outer_workers))
 
         def octave_read(item):
             amp, enc, fld = item
-            return amp * enc.query_many(fld, pts, workers=1)
+            return amp * enc.query_many(fld, pts, workers=inner_workers)
 
-        octave_items = list(zip(self.amplitudes, self.encoders, self.fields))
-        if worker_count == 1:
+        if outer_workers == 1:
             parts = [octave_read(item) for item in octave_items]
         else:
-            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            with ThreadPoolExecutor(max_workers=outer_workers) as executor:
                 parts = list(executor.map(octave_read, octave_items))
         for part in parts:
             total += part
