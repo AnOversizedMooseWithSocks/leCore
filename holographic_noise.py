@@ -48,9 +48,11 @@ HONEST SCOPE (kept negatives)
 Deterministic given a seed (every random draw goes through default_rng(seed)).
 """
 
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 
-from holographic_fpe import VectorFunctionEncoder
+from holographic_fpe import VectorFunctionEncoder, _fpe_parallel_workers
 from holographic_ai import cosine
 
 
@@ -123,9 +125,9 @@ def sample(encoder, field, point):
     return float(encoder.query(field, point))
 
 
-def sample_many(encoder, field, points):
+def sample_many(encoder, field, points, workers=None):
     """Read the noise field at many points via the encoder's batched FPE query path."""
-    return encoder.query_many(field, points)
+    return encoder.query_many(field, points, workers=workers)
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +174,7 @@ class FractalNoise:
         """Evaluate fBm at a point: the amplitude-weighted sum of the octave reads (the bundle)."""
         return float(self.query_many([point])[0])
 
-    def query_many(self, points):
+    def query_many(self, points, workers=None):
         """Evaluate fBm at many points with one batched read per octave."""
         pts = np.asarray(points, float)
         if self.n_dims == 1:
@@ -186,8 +188,21 @@ class FractalNoise:
             raise ValueError(f"points must have shape (count, {self.n_dims})")
 
         total = np.zeros(pts.shape[0], dtype=float)
-        for amp, enc, fld in zip(self.amplitudes, self.encoders, self.fields):
-            total += amp * enc.query_many(fld, pts)
+        rows_per_octave = pts.shape[0] * max(1, self.octaves)
+        worker_count = _fpe_parallel_workers(self.octaves, rows_per_octave, workers)
+
+        def octave_read(item):
+            amp, enc, fld = item
+            return amp * enc.query_many(fld, pts, workers=1)
+
+        octave_items = list(zip(self.amplitudes, self.encoders, self.fields))
+        if worker_count == 1:
+            parts = [octave_read(item) for item in octave_items]
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                parts = list(executor.map(octave_read, octave_items))
+        for part in parts:
+            total += part
         return total / self._norm
 
     def sample_grid(self, res):

@@ -69,6 +69,21 @@ def test_query_many_matches_query_loop():
     assert np.allclose(enc.query_many(f, pts), loop, atol=1e-12)
 
 
+def test_parallel_bundle_and_query_many_match_serial():
+    enc = VectorFunctionEncoder(2, dim=1024, bounds=[(-1, 1), (-1, 1)], seed=8, bandwidth=5.0)
+    rng = np.random.default_rng(8)
+    pts = rng.uniform(-1, 1, (192, 2))
+    weights = rng.normal(size=len(pts))
+    serial_bundle = enc.bundle(pts, weights, chunk_size=32, workers=1)
+    parallel_bundle = enc.bundle(pts, weights, chunk_size=32, workers=4)
+    assert np.allclose(parallel_bundle, serial_bundle, atol=1e-12)
+
+    queries = rng.uniform(-1, 1, (160, 2))
+    serial = enc.query_many(serial_bundle, queries, chunk_size=32, workers=1)
+    parallel = enc.query_many(serial_bundle, queries, chunk_size=32, workers=4)
+    assert np.allclose(parallel, serial, atol=1e-12)
+
+
 def test_query_many_handles_1d_point_stacks():
     enc = VectorFunctionEncoder(1, dim=512, bounds=[(0, 10)], seed=6)
     xs = np.linspace(0, 10, 20)

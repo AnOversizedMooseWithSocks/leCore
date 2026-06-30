@@ -39,12 +39,36 @@ KEPT NEGATIVES (measured, in the selftest)
 
 Only NumPy, the engine's bind/cosine, and the existing ScalarEncoder -- no new dependency, nothing learned.
 """
+import os
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 
 from holographic_ai import bind, cosine
 from holographic_encoders import ScalarEncoder
 
-_BUNDLE_ENCODE_BATCH_ROWS = 2048
+_BUNDLE_ENCODE_BATCH_ROWS = 512
+_FPE_PARALLEL_MIN_ROWS = 1024
+
+
+def _env_int(name, default):
+    try:
+        return int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _fpe_parallel_workers(task_count, item_count=0, workers=None, min_items=_FPE_PARALLEL_MIN_ROWS):
+    if task_count <= 1:
+        return 1
+    if workers is not None:
+        return max(1, min(int(workers), task_count))
+    requested = _env_int("HOLOSTUFF_FPE_THREADS", 0)
+    if requested > 0:
+        return min(requested, task_count)
+    if requested < 0 or item_count < min_items:
+        return 1
+    return max(1, min(os.cpu_count() or 1, task_count))
 
 
 class VectorFunctionEncoder:
@@ -152,7 +176,7 @@ class VectorFunctionEncoder:
             k *= ax.kernel_at(float(d))
         return float(k)
 
-    def bundle(self, points, weights=None):
+    def bundle(self, points, weights=None, chunk_size=_BUNDLE_ENCODE_BATCH_ROWS, workers=None):
         """Represent a function f: R^n -> R as a weighted superposition of encoded points,
         f = sum_i w_i encode(p_i). With RBF axes, querying f is a holographic kernel-density estimate."""
         pts = self._coerce_points(points)
@@ -164,15 +188,26 @@ class VectorFunctionEncoder:
             weights_arr = np.asarray(weights, float).ravel()
             if weights_arr.shape[0] != len(pts):
                 raise ValueError("weights must match the number of points")
-        spectrum = np.zeros(self._half_len, dtype=np.complex128)
-        for start in range(0, len(pts), _BUNDLE_ENCODE_BATCH_ROWS):
-            end = min(start + _BUNDLE_ENCODE_BATCH_ROWS, len(pts))
+        step = max(1, int(chunk_size))
+        spans = [(start, min(start + step, len(pts))) for start in range(0, len(pts), step)]
+
+        def chunk_spectrum(span):
+            start, end = span
             chunk = self._point_spectra(pts[start:end])
             chunk_weights = None if weights_arr is None else weights_arr[start:end]
             if chunk_weights is None:
-                spectrum += chunk.sum(axis=0)
-            else:
-                spectrum += chunk_weights @ chunk
+                return chunk.sum(axis=0)
+            return chunk_weights @ chunk
+
+        worker_count = _fpe_parallel_workers(len(spans), len(pts), workers)
+        if worker_count == 1:
+            parts = [chunk_spectrum(span) for span in spans]
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                parts = list(executor.map(chunk_spectrum, spans))
+        spectrum = np.zeros(self._half_len, dtype=np.complex128)
+        for part in parts:
+            spectrum += part
         return np.fft.irfft(spectrum, n=self.dim)
 
     def query(self, function, point):
@@ -180,7 +215,7 @@ class VectorFunctionEncoder:
         sum_i w_i kernel(point, p_i), up to the bundle's norm -- the function's value, holographically."""
         return float(cosine(function, self.encode(point)))
 
-    def query_many(self, function, points, chunk_size=_BUNDLE_ENCODE_BATCH_ROWS):
+    def query_many(self, function, points, chunk_size=_BUNDLE_ENCODE_BATCH_ROWS, workers=None):
         """Evaluate a represented function at many points in batched FPE blocks.
 
         This is the read-side twin of ``bundle``: encode a row stack once, then
@@ -194,12 +229,23 @@ class VectorFunctionEncoder:
         if fnorm == 0:
             return np.zeros(pts.shape[0], dtype=float)
         fn_spectrum = np.conj(np.fft.rfft(fn)) * self._rfft_weights
-        out = np.empty(pts.shape[0], dtype=float)
         step = max(1, int(chunk_size))
-        for start in range(0, pts.shape[0], step):
-            end = min(start + step, pts.shape[0])
+        spans = [(start, min(start + step, pts.shape[0])) for start in range(0, pts.shape[0], step)]
+
+        def chunk_query(span):
+            start, end = span
             spectra = self._point_spectra(pts[start:end])
-            out[start:end] = np.real(spectra @ fn_spectrum) / (self.dim * fnorm)
+            return np.real(spectra @ fn_spectrum) / (self.dim * fnorm)
+
+        worker_count = _fpe_parallel_workers(len(spans), pts.shape[0], workers)
+        out = np.empty(pts.shape[0], dtype=float)
+        if worker_count == 1:
+            parts = [chunk_query(span) for span in spans]
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                parts = list(executor.map(chunk_query, spans))
+        for (start, end), values in zip(spans, parts):
+            out[start:end] = values
         return out
 
     def shift(self, function, delta):
