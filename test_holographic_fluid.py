@@ -71,3 +71,14 @@ def test_semi_lagrangian_mass_dissipation_kept_negative():
     for _ in range(50):
         f.step()
     assert f.density.sum() < m0                                    # documents the known dissipation (mass drifts down)
+
+
+def test_device_cpu_is_numpy_and_runs():
+    import numpy as np
+    f = StableFluid((32, 32), dt=0.5, vorticity=3.0, buoyancy_beta=0.4, device="cpu")
+    assert f.xp is np                                              # cpu device == NumPy (byte-identical path)
+    f.add_source((slice(20, 26), slice(12, 20)), density=1.0, temperature=2.0)
+    for _ in range(15):
+        f.step()
+    assert np.isfinite(f.vel).all()
+    assert isinstance(f.to_numpy("density"), np.ndarray)

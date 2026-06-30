@@ -4,3 +4,5 @@ pillow
 pytest
 matplotlib
 nltk
+
+# optional GPU/JIT accelerators live in requirements-accel.txt -- the core needs none of them

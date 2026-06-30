@@ -13879,3 +13879,861 @@ REMAINING capability gaps in the other three areas (sequenced, NOT yet built): M
 microfacet BRDF (raymarch currently has only Schlick Fresnel + flat reflection); RENDERING -- a Monte-Carlo path
 tracer for true multi-bounce GI (current globalillum is a single-bounce irradiance cache); GEOMETRY is already
 well covered (euler ops, poly ops, curvature, geodesics, LOD), so lower priority.
+
+## Materials + rendering: Cook-Torrance/GGX BRDF and a Monte-Carlo path tracer (BRDF-1 + PATHTRACE-1, +10 tests, 1939→1949)
+
+Finishing the sim/materials/render parity push. After the fluid solver, the two remaining genuine gaps were
+MATERIALS (raymarch had only Schlick fresnel + flat reflection) and RENDERING (globalillum was single-bounce only).
+Honest framing unchanged: method-parity in NumPy, NOT GPU speed-parity.
+
+### COOK-TORRANCE / GGX BRDF (holographic_brdf.py) -- the V-Ray/Redshift/Arnold reflectance model.
+f_r = diffuse + D*G*F/(4 NdotV NdotL): GGX/Trowbridge-Reitz normal distribution (D), Smith/Schlick-GGX geometry
+(G), Schlick Fresnel (F, F0=0.04 dielectric / base_color metal). Diffuse is Lambert scaled by (1-F)(1-metallic) so
+specular+diffuse never exceed incoming (energy split; metals have no diffuse). Plus an importance sampler
+sample_ggx (H ~ D(H)NdotH, reflect -> pdf = D NdotH/(4 VdotH), so brdf/pdf cancels D and the 1/4NdotV NdotL) and a
+one-sample-MIS sample_brdf (mix a cosine-diffuse and a GGX-specular lobe, evaluate the COMBINED mixture pdf at the
+chosen L -> unbiased regardless of which lobe drew the sample). Wired into render_sdf as an opt-in pbr=(metallic,
+roughness) path (backward-compatible; default keeps the legacy shade). MEASURED: white-furnace reflectance ~0.98
+(energy-conserving), GGX importance sampler unbiased (estimator matches brute-force integration). KEPT NEGATIVE:
+single-scatter GGX loses energy at high roughness (white-furnace dips below 1); Kulla-Conty multiscatter
+compensation is the next step. Rendered pbr_material_sweep.png: rough dielectric / smooth dielectric (tight
+highlight + Fresnel rim) / gold metal (tinted reflection, no diffuse).
+
+### MONTE-CARLO PATH TRACER (holographic_pathtrace.py) -- true multi-bounce GI, the core of V-Ray/Redshift/Arnold.
+Solves the full rendering equation over an SDF scene: follow random light paths, at each hit sample a bounce from
+the BRDF (sample_brdf), multiply throughput by f_r*cos/pdf, continue until a ray escapes to the emissive
+environment or RUSSIAN ROULETTE ends it (terminate weak paths with prob tied to throughput, divide survivors by it
+-- unbiased). VECTORISED over rays: all H*W rays march together each bounce, the Python loop is only over the few
+bounces. Indirect light (color bleeding, soft GI) falls out for free -- the thing single-bounce irradiance caching
+can't do. MEASURED: white-furnace convex sphere converges to its ALBEDO (0.590 vs 0.6 -- unbiased, single-scatter
+slack); noise falls as 1/sqrt(spp) (0.064@8spp -> 0.026@64spp); color bleed reproduced (red floor -> sphere
+underside red/green 1.56 -> 2.46 going from direct to 5-bounce). PERF (HONEST): 128^2/96spp ~13-16s -- the OFFLINE
+renderer, NOT Redshift RT's interactive GPU path tracing. KEPT NEGATIVE: no next-event estimation -- light is
+gathered only when a bounce hits the emissive ENVIRONMENT, so a big sky converges well but a small bright emitter
+would be very noisy; NEE/MIS-with-lights is the honest next step. Inherits the GGX single-scatter energy loss.
+Rendered pathtrace_gi.png (left direct, right full multi-bounce GI with the floor's red bleeding onto the sphere).
+
+Faculties: path_trace (+ render_sdf gained the pbr= material path). With the fluid solver, this closes the
+sim/materials/render capability-parity push: a Navier-Stokes smoke/fire solver, a physically-based BRDF, and a
+multi-bounce path tracer -- method-parity with the pros, honest throughout that pure NumPy is the offline brain and
+the GPU stays the realtime muscle. GEOMETRY was already well-covered (euler/poly ops, curvature, geodesics, LOD),
+so it was correctly NOT rebuilt.
+
+## GPU backend (optional CuPy) + architecture above/below sweep (BACKEND-1 + SWEEP-1, +9 tests, 1949→1958)
+
+Two asks: (1) let the user enable a GPU (CuPy) backend, ideally GPU for the parts that benefit and NumPy for the
+rest; (2) an above/below sweep for hot spots where VSA programs call Python and a VSA-native/vectorised version
+would be better.
+
+### THE SWEEP'S HEADLINE: batched VM execution (run_batch) -- a real Python-loop hot spot, fixed.
+The VM decodes each instruction once (unbind + nearest-atom lookup -- the expensive per-instruction work) and the
+value ops (bind/bundle/permute) are elementwise/FFT over the last axis. So running ONE program over N data items
+meant N full Python interpret passes, re-decoding every instruction N times. HoloMachine.run_batch threads an
+(N, D) accumulator and decodes ONCE, applying each op to all rows with the batch-correct primitives. MEASURED:
+N=2000, 9-instruction straight-line program -> per-item run() loop 7537ms vs run_batch 709ms = **10.6x**, matching
+the scalar VM to max|diff| 8.5e-17. Faculty run_procedure_batch. ROOT CAUSE worth recording: bind() hardcodes
+n=a.shape[0] and permute() uses np.roll with no axis -- both silently corrupt a 2-D batch (bind returned (5,5)),
+i.e. they were written 1-D-only; bind_batch and roll(axis=-1) are the batch-correct forms, which is what run_batch
+uses. SCOPE (kept honest): straight-line value+register programs only; control/host ops (IFMATCH/CALL/APPLY/...)
+diverge per item and raise a clear error rather than return a silently-wrong batch.
+
+### THE REST OF THE SWEEP (honest, humbling): the architecture is ALREADY vectorised.
+A scan of the hot modules (unified, resonator, sbc, archive, forest, creature) found almost NO per-iteration
+bind/cosine inside Python loops -- bind_batch, involution_batch, recognize_batch, step_vec etc. already exist. The
+'replace Python loops with vectorised scatter' lesson has already been applied across the stack. So the sweep's
+honest output is ONE genuine remaining hot spot (the VM, now batched), not a long list -- the codebase was already
+disciplined. Reported plainly rather than inventing work.
+
+### GPU BACKEND (holographic_backend.py) -- optional CuPy, NumPy fallback, follow-the-data.
+get_array_module(x) returns cupy if x lives on the GPU else numpy (mirrors cupy's helper); a kernel writes
+`xp = array_module(self.device)` once and uses plain xp.fft/xp.zeros/...; to_device/asnumpy move data at the
+boundary; on_gpu_island wraps a heavy kernel so the caller passes/receives NumPy while the compute runs on the
+device. enable_gpu/use_gpu toggles it (env HOLOSTUFF_GPU=1 too). WHY selective, not 'import cupy as np everywhere':
+GPU only wins where host<->device transfer is amortised over a lot of compute (big FFT/matmul kernels); a tiny
+per-call op on one (D,) vector LOSES to transfer cost -- so heavy kernels opt in, the rest stays NumPy (exactly the
+'GPU-friendly parts on CuPy, rest on NumPy' split the request asked for). Wired into the FLUID SOLVER as the
+flagship: StableFluid(device='gpu') runs the whole FFT-heavy sim on the device; device='cpu' (default) is
+byte-identical to before (verified). Faculties: use_gpu, backend_status.
+
+KEPT NEGATIVE (loud): (1) DETERMINISM -- GPU FFTs/reductions match NumPy only to a tolerance and can vary
+run-to-run, so the bit-exact guarantees are a CPU property; GPU mode is for throughput, the tie-sensitive paths
+stay on CPU. (2) UNMEASURED HERE -- this sandbox has no GPU and cupy isn't importable, so the GPU path is wired and
+code-reviewed but the speedup is NOT measured here; it's measured in a CUDA environment via HOLOSTUFF_GPU=1.
+Everything is verified on the NumPy fallback (what runs with no device). The run_batch 10.6x, by contrast, is a
+real CPU measurement and needs no GPU.
+
+## Extraction from leOS: the Riemannian geometry layer (SPHERE-1, +6 tests, 1958→1964)
+
+holostuff is the extracted core of leOS (github.com/AnOversizedMooseWithSocks/leOS) and will fold back in. Surveyed
+leOS for dependency-light (NumPy/Flask/stdlib/hashlib-only), genuinely-missing, on-thesis capabilities across the
+asked areas (kernel/learning/text/orchestration/planning). PROBE-FIRST as always -- most candidates turned out to
+be already ported or already covered:
+  * vsa/superposed_compute (speculative multi-hypothesis) -- holostuff already has holographic_superposed
+    (pack/recover_all/score_all/evaluate_candidates); the speculate/curriculum parts are agent-coupled. COVERED.
+  * lvm/reflex_engine + the displacement codec -- holographic_ai already credits and ports "leOS's displacement
+    codec" (log_map/exp_map reflex arc). COVERED.
+  * science/fractal_detector -- holostuff already has holographic_fractal (box_counting_dimension,
+    image_fractal_dimension, fractal_dimension faculty); the cross-scale IFS-rule part is coupled to leOS's
+    displacement log. MOSTLY COVERED / app-specific.
+  * vsa/residue_arithmetic, vsa/program_algebra -- overlap holostuff's RNS matmul and voidsynth blend_programs;
+    partial, lower-value.
+  * lvm/imagebind_* , embeddings -- depend on torch/models. NOT portable (banned deps).
+
+THE GENUINE GAP: leOS's lvm/spherical_geometry had two operations holostuff lacked despite having the basic maps
+(geodesic/log_map/exp_map/slerp already in holographic_ai). Extracted into holographic_sphere.py:
+  * frechet_mean (Karcher mean) -- the geometrically-correct average: the point minimizing the sum of squared
+    GEODESIC distances, via Riemannian gradient descent (normalized Euclidean mean -> step along the averaged
+    log-maps via exp_map). The Euclidean centroid of sphere points isn't on the sphere, and re-normalizing it
+    (what bundle does) is biased on the curved surface. This is the right op for a class PROTOTYPE / cluster centre
+    / consolidation anchor -- DISTINCT from bundle (superposition, stays similar to every part, for binding).
+  * parallel_transport -- carry a tangent vector (a displacement/move) from one base point to another along the
+    geodesic, so it lives in the destination's tangent plane; lets displacements be composed/compared across the
+    space correctly. + geodesic_variance (the dispersion the Frechet mean minimizes).
+  This is the project's "VSA is geometry / as above, so below" thesis made rigorous. Pure NumPy, reusing
+  holostuff's own log_map/exp_map so the algebra is identical to the rest of the engine.
+
+MEASURED (negatives kept LOUD): the Frechet mean provably has lower geodesic variance than the re-normalized
+Euclidean mean (its defining optimality), differs from bundle by ~0.16 rad for a SPREAD set vs ~0.0004 for a TIGHT
+one (so the geometry only "pays" when vectors are genuinely spread), and parallel transport preserves length and
+lands in the target tangent plane (verified). KEPT NEGATIVE: the downstream-task edge is MARGINAL -- on
+nearest-prototype classification of spread-but-overlapping classes the Frechet prototype was ~tied-to-slightly-
+behind the Euclidean one (both near chance when classes overlap), so the reliable value is the provable geometric
+optimality + transport correctness, NOT a free accuracy win. We did not oversell a classification benefit that
+isn't reliably there. Faculties: frechet_mean, parallel_transport.
+
+## Extraction from leOS (deep dig): local structure classification / cosmic web (COSMIC-1, +6 tests, 1964→1970)
+
+Asked to dig DEEPER into leOS -- gems may hide under unassuming names. Mapped every pure-NumPy/stdlib module
+(filtering out torch/scipy/sklearn-dependent ones) and read the algorithm files, not just the obvious ones. The
+kernel mixins (kernel_vsa/kernel_core_instructions/kernel_advanced/kernel_reflex) turned out to be thin wrappers
+over libraries holostuff already has (bind/bundle/resonate/residue/superpose/program-algebra/displacement-codec).
+The genuine gem was hiding in science/cosmic_web.py.
+
+THE GAP: holostuff had GLOBAL dimension estimates (box_counting_dimension, spectral_dimension, manifold_topology)
+but no PER-POINT LOCAL structure classification. Extracted into holographic_cosmic.py (decoupled from leOS's agent
+displacement-log so it works on any (N,D) cloud): the 'cosmic web' method -- classify each point by the eigenvalue
+spectrum of a LOCAL PCA of its k nearest neighbours into VOID / FILAMENT (1-D thread) / WALL (2-D sheet) / NODE
+(dense cluster), the same structure-tensor classification cosmologists use on the matter distribution. ON-THESIS:
+"structure across scales / as above, so below." Useful before denoising (project a filament point along its ONE
+direction, not all), before sampling (avoid voids), or as a compact geometric fingerprint of a cloud.
+
+IMPROVEMENT over the extracted version: a continuous PARTICIPATION RATIO intrinsic dimension PR = (sum lambda)^2 /
+sum(lambda^2) (1.0 = filament, ~2 = sheet, ~d = isotropic) alongside the discrete type -- both a crisp label and a
+graded measure.
+
+MEASURED (negatives kept LOUD): on structures of KNOWN dimensionality embedded in 32-D, the intrinsic dim recovers
+MONOTONICALLY -- filament 1.00 < sheet 1.75 < blob 2.52 -- and a 1-D cloud reads 85% filament, a 2-D cloud 78%
+wall/node. KEPT NEGATIVE: high-dimensional NOISE inflates the apparent local dimension (the 1-D line jumps to PR
+3.20 at noise 0.01), and the estimate depends on k and the cloud's density -- a local estimate, honestly bounded,
+not a magic dimensionality oracle. The 3-D blob reads ~2.5 not 3.0 (finite-sample under-estimate of k points in
+3-D). Faculties: local_structure, classify_cloud.
+
+Other leOS candidates noted for later (not extracted this pass): lvm/gravitational_lens (force-directed gradient
+navigation + caustic detection in embedding space, pure NumPy -- a plausible next extraction); kernel_reflex's
+conformal_calibrate (conformal prediction -- holostuff's RecallNull/calibration_report already covers the coverage
+guarantee, so lower marginal value). The embedding/baseline-calibrator/drift-detector stacks depend on torch and
+stay out by the dependency rule.
+
+## Extraction from leOS (deep dig cont.): gravitational-lens navigation + caustic detection (LENS-1, +6 tests, 1970→1976)
+
+Second extraction from the deep leOS dig (lvm/gravitational_lens.py), decoupled from its nutrient-field so it
+works on any set of weighted attractor points. Built holographic_lens.py.
+
+WHAT IT ADDS: treat stored points as MASSES on the hypersphere; a query feels a force toward them (each pulls along
+the geodesic / log_map direction with strength mass * Gaussian(geodesic^2/2sigma^2)). field_force sums them;
+deflect slides the query along the force via exp_map -- a SOFT continuous cousin of cleanup (drift toward the
+weighted local centre of mass, vs cleanup's hard snap to one atom); navigate iterates a decaying-step climb to an
+attractor. The genuine gem is CAUSTIC DETECTION: a caustic (optics: a fold where rays focus and the map goes
+singular) here is a query point where the two strongest attractors pull in OPPOSITE directions with similar
+magnitude -- a routing fold / decision boundary where a tiny move flips the winner. Complementary to RecallNull
+('is this a match at all?'); caustic asks 'is this AMBIGUOUS between matches?'.
+
+MEASURED (negatives kept LOUD): deflection moves a query nearer its closest attractor (1.34 -> 1.24 rad in one
+step). CAUSTIC is the crisp win: the MIDPOINT between two attractors scores 1.000 (perfect tie pulling apart),
+a query near a single attractor scores 0.000 -- a clean ambiguity detector. KEPT NEGATIVES: (1) navigate is a
+HEURISTIC DRIFT, not an exact nearest-cluster solver -- a fixed step overshoots the well (strength 2.0 diverged to
+1.83 rad), so it needs a decaying step (strength/(1+0.1t)) to settle, and even then it APPROACHES (~0.02-0.15 rad)
+rather than converging crisply below tol; (2) sigma is the scale knob with no free lunch -- wide sigma over-smooths
+(pulls toward the global centroid), narrow sigma barely moves. (3) The force is a DIRECT O(N) sum, not the
+Barnes-Hut O(N log N) tree leOS used -- exact and clear, but the large-N acceleration (which HoloForest could
+supply) is deliberately omitted. Faculties: field_deflect, detect_caustic, navigate_field.
+
+leOS deep-dig status: the two clean pure-NumPy gems (cosmic_web local structure, gravitational_lens navigation)
+are now extracted. Remaining leOS modules are either already covered (kernel mixins over existing libs), app-glue
+(agent/bots/infra/knowledge orchestration, LLM-coupled), or torch/scipy-dependent (embeddings, baseline_calibrator,
+drift_detector, math_engine). No further clean extractions identified.
+
+## Numba integration: optional JIT + fast-sweeping eikonal SDF (JIT-1, +6 tests, 1976→1982)
+
+Moose approved adding Numba. Integrated it the SAME way as the CuPy backend -- as an OPT-IN accelerator with a pure
+fallback, so the constitution's portability + determinism guarantees survive. Built holographic_jit.py.
+
+THE PATTERN: try/except import; if numba is absent, `njit` becomes an IDENTITY decorator and the same kernel source
+runs as ordinary (slow) Python -- the core never hard-depends on numba. DETERMINISM: plain @njit only, NEVER
+parallel=/fastmath= (those two are the only Numba features that break bit-exactness), and the selftest PROVES the
+JIT output equals the pure-Python output (allclose 1e-9).
+
+WHY ONLY HERE: re-confirmed by probing live code that holostuff's hot paths are already vectorized (sphere_trace
+loops over steps but vectorizes over rays and calls a Python SDF closure numba can't cross; _sample_periodic is a
+vectorized multilinear gather). Numba's measured elementwise gain is only ~1.4x -- not worth a dep. The exception
+is a SEQUENTIAL recurrence with a data-dependent branch (measured ~33x earlier). The showcase kernel is exactly
+that shape and genuinely on-thesis: the FAST-SWEEPING EIKONAL SOLVER (occupancy mask -> signed distance field).
+It is inherently sequential (Gauss-Seidel sweeps read neighbours updated earlier in the same pass -- that is what
+makes it O(N) not O(N^2)), so it does NOT vectorize, and an SDF is the heart of the modelling/raymarch/sculpt
+vision. Pure NumPy had no fast occupancy->SDF path; now it does.
+
+MEASURED: disk SDF max error 0.96 cells vs the analytic (r-R) signed distance (correct); JIT == pure-Python
+(bit-faithful, deterministic); SPEED pure 602 ms -> JIT 2.2 ms = 273x on a 256^2 grid. Faculties:
+signed_distance_field, distance_transform. requirements-accel.txt added (numba; cupy noted) and referenced from
+requirements.txt, keeping the base install at NumPy/Flask/stdlib. KEPT NEGATIVE / scope: 2-D only (3-D fast
+sweeping is the natural extension, 8 sweep directions); first-call JIT warmup ~30ms per signature per process
+(amortized over a run, a real tax on very short runs); fast sweeping gives the exact grid distance in the round
+limit -- a couple of rounds suffice for typical fields but a thin seed set may want more.
+
+## SymPy design-time codegen: exact SDF normals / forces (CODEGEN-1) + optional pyFFTW backend (FFT-1) -- +8 tests, 1982→1990
+
+Both panel follow-ons from the dependency discussion. Built holographic_codegen.py and holographic_fft.py.
+
+### CODEGEN-1 (the panel's "unlock", Quilez + Baker seats)
+holographic_codegen.py: a DESIGN-TIME SymPy helper that derives an exact gradient symbolically and lambdifies it to
+a PURE-NUMPY function -- runtime stays pure and autodiff-free, only the one-time derivation touches sympy. (Named
+codegen, NOT symbolic: probe-first caught that holographic_symbolic.py is already the MDL symbolic-REGRESSION module
+-- the opposite direction, discovering a law FROM data. Different capability, different name.) compile_field(expr,
+vars) -> value/gradient fns + the symbolic partials; sdf_normal_fn(expr) -> exact unit normal (Quilez: replaces the
+finite-difference sdf_normal, no step knob); gradient_fn (Baker: force = -gradient(energy), analytic, autodiff-free).
+MEASURED: sphere exact-normal error 1.0e-12 (machine precision) vs finite-difference 5.7e-05 at step 1e-2 -- ~7 orders
+better and no step-size knob; torus normal matches numeric to 2.2e-10; force=-grad(quadratic well) exact. Gated:
+HAS_SYMPY; helpers raise a clear message without sympy; the OUTPUT is pure numpy and ships without it. Faculties:
+exact_sdf_normal, symbolic_gradient.
+
+### FFT-1 (the panel's pyFFTW suggestion -- MEASURED, kept off)
+holographic_fft.py: an FFT backend seam (numpy default, pyFFTW opt-in) wired into bind/bind_batch/bind_fixed. The
+DEFAULT numpy path is BYTE-IDENTICAL (np.array_equal verified; 328 core bind-exercising tests pass unchanged). The
+HONEST MEASURED RESULT and the reason it is OFF by default: pyFFTW REGRESSES at holostuff's operating dimensions --
+single binds ~0.65x at D=512, ~0.75x at D=1024, break-even ~D=2048, winning only at D>=4096 (~1.6x); and the BATCHED
+bind path (which the engine relies on) is often WORSE (~0.5x at M=4000, D=2048) because numpy's batched pocketfft is
+already well tuned and FFTW threading/planning adds overhead. It is also tolerance-not-bit-exact (~3e-14). This is
+EXACTLY the C-kernel-PR lesson (an external compiled backend regressing at the operating point) -- kept on the record,
+not discovered twice. The seam still earns its place: future-proofs for D>=4096 workloads and makes the measurement
+reproducible (holographic_fft.benchmark / faculty fft_benchmark). numpy stays the deterministic default; switching is
+an explicit opt-in (use_pyfftw / faculty fft_backend). KEPT NEGATIVE: pyFFTW is a net regression at our dims -- wired
+as an honest off-by-default option, not an endorsement.
+
+requirements-accel.txt updated: sympy (design-time codegen), pyfftw (commented, off-by-default). Core install stays
+NumPy/Flask/stdlib.
+
+## Runtime compile cache: compile once, cache by content hash, reuse everywhere (COMPILE-1, +7 tests, 1990→1997)
+
+Moose's idea: use sympy (and compilation generally) at RUNTIME, not just dev time -- a system that compiles a thing,
+caches the compiled version for reuse all over, and recompiles only when the underlying thing changes. Probe-first
+confirmed holostuff has tiered STORAGE caches (FrameCache, DeltaChain -- the hot/warm/cold "L1-L4" analogy) but NO
+general COMPILE cache. Built holographic_compile.py.
+
+THE JUSTIFICATION (measured): compiling a symbolic SDF to a numpy normal (sympy diff + lambdify) costs ~140-390 ms;
+EVALUATING the result on 1000 points costs ~200 us -- the compile is ~1900x an evaluation. Anything that compiles a
+spec per-use (an SDF re-lambdified every frame, a VSA program re-assembled every run, a recipe rebuilt each time)
+pays that cliff repeatedly. The cache turns N compiles into 1.
+
+THE PRIMITIVE: CompileCache -- an LRU cache of compiled artifacts keyed by a DETERMINISTIC sha256 (hashlib, never
+salted hash()) of a CANONICAL representation of the source. Content-addressing IS the invalidation: a changed source
+canonicalises differently -> misses -> recompiles automatically; "if the underlying thing changes, we compile it
+again" falls out for free. get_or_compile(source, compiler, tag); a global DEFAULT_CACHE so subsystems share
+artifacts; compiled() as the general entry point structures/programs/encoders/SDFs can all call. Application wired:
+compiled_sdf_normal (compile a symbolic SDF normal once, reuse instantly). Faculties: compiled_sdf_normal,
+compile_cache_stats.
+
+MEASURED: 50 uses of one spec -> 1 compile + 49 hits (not 50x the compile); recompiles on change; LRU bound holds
+(maxsize evicts coldest); the ~140 ms SDF compile paid ONCE then 20 reuses in 0.1 ms (would have been ~2.8 s of
+recompiles). KEPT NEGATIVES (the hard part of any cache is invalidation, stated honestly): correctness depends on the
+KEY capturing every dependency the artifact has -- the compiler must be a pure function of `source`; a compiler that
+closes over external state not in the key would go stale (caller's contract, documented). Memory is bounded by
+maxsize (compiled artifacts, esp. Numba kernels, are not free). A hit returns the SAME object to all callers -- so it
+is for PURE compiled functions; sharing a stateful artifact this way would be a hazard. This is the runtime leg of
+the SymPy->NumPy/Numba pipeline: derive once, compile once, cache, reuse.
+
+## Two cache-backed compilers: SymPy->Numba SDF + VSA program assembler (COMPILE-2, +6 tests, 1997→NNNN)
+
+Both plug into the COMPILE-1 cache. Added sdf_numba_fn to holographic_codegen.py; compiled_sdf_numba +
+compiled_program to holographic_compile.py.
+
+### SymPy -> Numba SDF (the full pipeline leg)
+sdf_numba_fn(expr): compile a symbolic 3-D SDF to njit SCALAR value + exact-normal functions and njit grid
+evaluators. THE UNLOCK: the scalar njit SDF can be CALLED FROM ANOTHER njit loop -- the Python-closure barrier that
+earlier blocked Numba from sphere_trace (it called a Python SDF closure njit couldn't cross) is GONE. Demonstrated:
+a njit sphere-trace marching by calling the njit SDF hit a sphere R=1.3 at t=3.700 (exact). MEASURED: grid_normal
+matches analytic to 1e-10; the njit scalar loop (9.5 ms / 200k pts) BEATS numpy-vectorized (22.6 ms) AND a python
+scalar loop (~153 ms, ~16x) -- numba wins for scalar-heavy/sequential eval by avoiding numpy's temporaries. NOTE:
+njit of a lambdified function must NOT use cache=True (no source file -> "no locator" error); the compile cache
+handles reuse instead. 3-D only (SDFs are 3-D). Cached via compiled_sdf_numba: both the sympy lambdify AND the numba
+JIT (each costly) are paid once per distinct SDF. Faculty: compiled_sdf_numba.
+
+### VSA program assembler (cached)
+compiled_program(machine, program): assemble() encodes an L-instruction program into ONE vector via L binds + a
+bundle -- measured ~15-22 ms for 60 instructions. Running the SAME program repeatedly over different inputs/batches
+re-paid that each time; now it is cached by (program ops, machine seed/dim) and reused. MEASURED: 1 compile ~22 ms,
+50 reuses ~5 ms total (vs ~1.1 s uncached, ~240x less), cached == fresh assemble (byte-identical). Recompiles when
+the program or machine identity changes. Faculty: compile_program.
+
+BUG FOUND + FIXED during close-out: CompileCache.clear() reset the store but NOT the stats counters, so the shared
+DEFAULT_CACHE leaked `compiles` counts across tests (passed in isolation, failed in sequence). Made clear() a FULL
+reset (store + stats). A reminder that shared global caches need clean reset semantics for deterministic tests.
+
+## njit analytic-SDF renderer wired into render_sdf (SDFRENDER-1, +6 tests, 2003→NNNN)
+
+The end-to-end payoff of SymPy->Numba: a fully-JIT'd renderer for ANALYTIC SDFs. Built holographic_sdf_render.py.
+
+THE UNLOCK REALIZED: the numpy render marches rays calling sdf.eval(P) (a Python closure njit can't cross), which is
+why Numba could never touch it. With sdf_numba_fn the SDF + gradient are njit functions, so the WHOLE march --
+primary ray, exact normal, ambient occlusion (Quilez: march along the normal), soft shadow (Quilez: march toward the
+light) -- compiles into ONE njit kernel per pixel, closing over the njit SDF (inline call, faster than passing it as
+an arg). build_sdf_renderer(sdf_numba) -> njit render(O,D,L,base,ambient,do_ao,do_shadow); compiled_sdf_renderer(expr)
+caches it per SDF; render_analytic(expr, camera, ...) is the drop-in: njit shades hits, numpy composites the sky for
+misses, returns (H,W,3).
+
+WIRED EVERYWHERE USEFUL: render_sdf gained an opt-in jit_expr= param -- pass a symbolic SDF string and it routes to
+the njit renderer for the field-native shading (Lambert + soft shadow + AO + sky), falling back to numpy automatically
+if sympy/numba are absent or if advanced features (pbr/reflect/refract/sss) are requested (the jit path scopes to the
+basic set, documented). Faculty: render_sdf_fast.
+
+MEASURED: njit renderer matches the numpy sphere_trace hit geometry 100.0%; a 160x160 sphere with AO + soft shadows
+renders in ~17 ms vs ~148 ms for numpy render_sdf = ~9x (15x at 200x200 -- the gap grows with resolution since the
+numpy path scales worse). KEPT NEGATIVE / scope: covers the basic field-native shading only (no pbr/reflect/refract/
+sss -- those stay on the numpy path); 3-D SDFs; first-SDF compile pays the sympy lambdify + numba JIT once (cached
+thereafter).
+
+PRE-EXISTING BUG FOUND + FIXED: render_sdf's non-pbr branch crashed with ao=False or shadows=False (it did
+(ambient*occ)[:,None] assuming occ/sh were arrays, but they are scalar 1.0 when those effects are off). Fixed to
+handle the scalar case (occ_c = occ[:,None] if np.ndim(occ) else occ), byte-identical for the default array case.
+Found because the new test exercised that path -- tests earning their keep.
+
+## Optimization sweep: compound SDFs + exact gradient cache (SWEEP-1, +6 tests, 2009→NNNN)
+
+Asked to sweep the whole engine -- auto/harmonic, creature/agent, simulations, geometry, denoising -- for places the
+SymPy/Numba/compile-cache toolkit adds speed or accuracy. The DISCIPLINED finding (measured, not assumed): most named
+areas are ALREADY vectorized, so Numba buys nothing there -- forcing it would be cargo-culting. The genuine new wins
+are two specific niches, both shipped:
+
+1. COMPOUND SDFs (extends the njit renderer). Added SDF combinators to holographic_codegen.py: sphere, box,
+   op_union (Min), op_intersect (Max), op_subtract (Max(a,-b)), op_smooth_union (Quilez polynomial smin). These build
+   SymPy expressions that the EXISTING sdf_numba_fn + render_analytic compile and render -- no new machinery. The
+   refactor that made it robust: some compound gradients (nested Min/Max/Abs, e.g. the box) leave an unprintable
+   sympy Derivative, so sdf_numba_fn now tries the EXACT symbolic normal and FALLS BACK to a njit FINITE-DIFFERENCE
+   normal on the scalar SDF when the symbolic gradient won't compile (exposed as exact_normal: bool). MEASURED: a
+   compound scene (sphere union box, carved by a sphere) renders 200x200 in ~58 ms vs ~668 ms numpy = 11x, hit
+   geometry matching 100%; a plain sphere keeps its EXACT normal, the box scene uses the FD fallback (still njit-fast,
+   unit normals, invisible error for rendering). Faculty: render_sdf_fast already accepts compound expressions.
+
+2. EXACT GRADIENT CACHE (accuracy). gradient_cache_symbolic(expr, anchors): build the irradiance/GI-style
+   GradientCache with EXACT Jacobians from a symbolic field (SymPy) instead of central finite differences. MEASURED:
+   Jacobian error vs analytic -- finite-diff (eps=1e-3) 1.6e-7, symbolic-exact 0.0 -- so first-order interpolation is
+   more accurate at the same anchors. Faculty: gradient_cache_symbolic.
+
+HONEST SWEEP VERDICTS (kept, so the negative is on record):
+  * auto self-balancing harmonic (holographic_accumulate): ALREADY OPTIMAL -- harmonic 1/n weights converge by
+    design (the EMA flatlines); nothing to JIT, the accuracy is already the right one.
+  * creature / agent (decide/step/run_episode): object/dict-based, NOT numba-able without a rewrite; the hot path
+    (VSA recall) is already a vectorized matmul. No win.
+  * fluid: already vectorized + device-aware (CuPy backend). flow (Tero): already linear-algebra-based (~100x over
+    the ant). denoise: SVD + sublinear HoloForest recall, already vectorized. marching_tetrahedra_vec: already
+    vectorized. No numba win in any -- the earlier vectorization sweep already did this work.
+  * geometry SDF: covered by the eikonal njit SDF (JIT-1), the analytic-SDF renderer (SDFRENDER-1), and now compound
+    SDFs. This is where the toolkit genuinely pays.
+
+The meta-lesson, consistent with the whole project: the toolkit's gains live in the SEQUENTIAL/SYMBOLIC niches (SDF
+marching, eikonal sweeps, exact gradients), NOT in re-JITing code that NumPy already vectorizes. A sweep that honestly
+reports "already optimal" everywhere else is doing its job. See holostuff_optimization_sweep.md for the full findings.
+
+## 3-D eikonal SDF + composable post-processing pipeline (EIKONAL3D + POSTFX, +17 tests, 2015→2032)
+
+Two features: the 3-D twin of the eikonal SDF, and a post-processing "projection tail" for the rasterized frame.
+
+### 3-D fast-sweeping eikonal (EIKONAL3D)
+holographic_jit gained _fast_sweep_3d (8 diagonal sweeps; the 3-D Godunov upwind solve adds dimensions one at a time
+from the smaller neighbour on each axis -- sort a<=b<=c, try 1-D then 2-D then 3-D), distance_transform_3d, and
+signed_distance_3d (occupancy VOLUME -> signed distance, negative inside). The natural Numba target: inherently
+sequential, no vectorized form. MEASURED: 3-D ball SDF 0.96-cell error vs analytic; JIT == pure bit-exact; a 96^3
+volume -> SDF runs 14.8 s pure -> 65 ms JIT = 229x. This is the occupancy-volume -> SDF step mesh import and sculpt
+want in 3-D (signed_distance_2d was 2-D only). Faculty: signed_distance_field_3d.
+
+### Post-processing pipeline (POSTFX)
+holographic_postfx.py: an optional, ordered, named PROGRAM of effects (PostChain) composed onto the (H,W,3) frame as
+the last step of projection -- the same shape as a HoloMachine instruction sequence (.then() to build, + to compose,
+to_list/from_list to serialize, .apply(img, depth=) to run). The HONEST framing kept throughout:
+  * The CONVOLUTION FAMILY (gaussian blur, bloom, glare, DOF, denoise, sharpen) runs on the engine's OWN core
+    operator. bind(a,b)=irfft(rfft(a)*rfft(b)) is 1-D circular convolution; a 2-D blur is irfft2(rfft2(img)*G) -- the
+    SAME operator, one dimension up, with a frequency-domain Gaussian (no kernel truncation). Bloom/glare are a
+    SUPERPOSITION (bundle) of blurred bright layers. This is a genuine VSA connection, not a metaphor.
+  * The per-pixel curves (exposure, reinhard/ACES tonemap, gamma, color_grade, vignette, film_grain, chromatic
+    aberration, lens_flare) are plain vectorized NumPy. They live in the same pipeline because that is where a frame
+    gets graded -- but calling them "VSA" would be dishonest; they are the rest of the program. Said so in the docs.
+Effects: exposure, reinhard, aces, gamma, color_grade, vignette, bloom, glare, lens_flare, chromatic_aberration, dof
+(needs depth -- the renderer now returns a depth buffer), motion_blur, denoise, sharpen, film_grain (seeded
+deterministic), resample (bi-linear up/down), supersample (SSAA). Presets: default_chain, cinematic_chain.
+
+INTEGRATION: the njit render kernel now also returns a DEPTH buffer (ray distance t at the hit; 1e30 = miss), so
+render_analytic and render_sdf both gained post= and return_depth=. DOF reads that depth. MEASURED on a smooth-union
+scene 320x320: raw frame mean 0.388 / std 0.281 (dark linear, clipping) -> default_chain mean 0.640 / std 0.124
+(gamma-encoded, ACES-tonemapped, bloomed, vignetted) -- the grading visibly lifts and tames the raw buffer. The FFT
+blur is energy-preserving (DC conserved to 1e-6); film grain is bit-identical for a fixed seed. Faculties:
+post_process, postfx_chain.
+
+KEPT NEGATIVES (loud):
+  * Deeply NESTED compound SDFs are slow to njit-COMPILE. A smooth_union(sphere,box) carved by a subtract builds a
+    huge lambdified math expression; the first compile TIMED OUT (>300 s). A plain smooth-union of two spheres
+    compiles in ~2 s. Lesson: keep analytic-SDF scenes shallow, or accept a long one-time compile -- the cost is in
+    the SymPy->math->numba lowering of a giant expression, not the render. (The numpy render_sdf path has no such
+    compile cost.)
+  * DOF is a CHEAP two-level blend (sharp vs one blurred copy by circle-of-confusion), not a true scatter/gather
+    bokeh -- no shaped aperture, no per-depth blur radius beyond the blend weight. Honest game-grade DOF, not
+    reference.
+  * motion_blur / glare are LINEAR (single direction); no per-pixel velocity buffer, so no curved or
+    object-specific motion blur. Camera-style only.
+  * The convolution-family blur is CIRCULAR (FFT wraps at the frame edge); a very large bloom sigma can bleed a
+    bright edge to the opposite side. Fine at normal radii.
+
+The meta-point: the post-processing is genuinely composed as part of the projection (a program on the frame, the
+convolution family on the engine's own operator), and the parts that are just colour math are labelled as such.
+
+## Controlled semantic scene layer: text -> queryable VSA scene -> 3-D (SEMANTIC-1, +9 tests, 2032->2041)
+
+Moose's idea: the long-dormant text/learning stack should assign SEMANTIC VALUES that other parts of the engine can
+predict/generate/query bidirectionally -- e.g. a sentence -> a 3-D scene, query a scene for objects/materials, batch
+ops like "make all materials reflective", and UI control specs. PROBE-FIRST found the scaffolding already there:
+holographic_lang (S-expr structure language -> recipe IR), holographic_text (learn_word_vectors, n-grams),
+holographic_scenegraph (SceneNode/transforms -> recipe), and the encode_record/decode_record record codec. The gap
+was the SEMANTIC layer ABOVE lang's S-expressions: ground words, parse a description, realize to actual SDF geometry.
+
+holographic_semantic.py adds that, on the existing substrate:
+  * GROUNDING tables (word -> meaning): SHAPES (ball/sphere->sphere, cube->box), COLORS (->rgb), MATERIALS
+    (metallic->metal, glassy->glass), SIZES (elongated->stretch), RELATIONS (inside/on/leaning/diagonal).
+  * PARSER (controlled grammar, deterministic, one-token lookahead): articles a/an = introduce an object, the =
+    refer back ("the glass box" resolves to the existing glass box); pre-mods ("red ball") and post-mods ("box with
+    a glass MATERIAL"); first relation word wins ("leaning" over "on"). MEASURED on the exact example sentence: parses
+    to 3 objects (red sphere INSIDE box1; glass box1; metal elongated box2 LEANING on box1) + environment
+    {sun:bright, sky:partly} -- correct.
+  * VSA ENCODE/QUERY (the on-thesis win): each object is a bind/bundle RECORD (encode_record); the scene is ONE
+    composable hypervector = superpose bind(OBJ_i, record_i). MEASURED: every attribute of every object decodes back
+    out of the SINGLE bundled scene vector via unbind+codebook-cleanup -- 12/12 correct through the superposition
+    crosstalk. That is the bidirectional, content-addressable semantic memory Moose wanted, and it is composable (the
+    scene vector can be handed to the agent brain, recalled, or edited).
+  * BATCH ops: batch_set("material","mirror") = "make all materials reflective" in one call; find_objects(material=
+    "glass") locates by attribute.
+  * REALIZE + RENDER: objects -> positioned SDF primitives with per-object materials (glass->refract, metal->pbr,
+    mirror->reflect), z-composited; relations drive layout (inside -> at container centre, shrunk). Rendered the
+    example sentence text -> 3-D in ~3 s, plus a batch "make all mirror" variant.
+  * UI CONTROL SPECS: control_spec("control the ball size and how metallic it is") -> slider/select descriptors
+    scoped to a target ("ball"), ready for a front-end to draw. Engine emits the spec; the browser muscle draws the
+    widgets.
+
+Faculties: parse_scene_description, encode_scene, query_scene_slot, render_scene_description, scene_control_spec.
+
+SCOPE / KEPT NEGATIVES (loud, in the spirit of lang's "kept boundary"):
+  * This is a CONTROLLED vocabulary + keyword grammar, NOT general language. No learned model (the engine has no
+    torch/learned weights): "red" is an rgb because the table says so, synonyms are folded by the table, anything
+    outside the vocabulary is glue/ignored. The VSA part (bidirectional record query, composable scene vector) is the
+    genuine, hard-to-fake contribution; the language surface is honestly narrow. learn_word_vectors COULD later
+    ground synonyms by corpus relatedness instead of by hand -- a real next step, not claimed now.
+  * RENDER is per-object z-composite, so objects do NOT cast shadows on each other and a glass object does NOT
+    refract the object behind it (the red ball "inside" the glass box won't show through). A single-pass material-id
+    renderer would fix both -- the honest next step.
+  * ROTATION is not modelled (the SDF combinators are axis-aligned), so "diagonal"/"leaning" is faked by an offset +
+    stretch, not a true tilt.
+  * Layout from relations is heuristic (fixed offsets), not a constraint solve.
+
+## Synonym grounding + single-pass material-id renderer + gen-stack audit (SEMANTIC-2, +7 tests, 2041->2048)
+
+Two requested follow-ons to the semantic layer, plus an honest audit of the text-gen and image-gen subsystems.
+
+### #1 Corpus-relatedness synonyms (the dormant text module put to work)
+holographic_semantic gained a SynonymResolver so out-of-vocabulary words resolve to known vocabulary. Two paths,
+honestly separated:
+  * TABLE (default, reliable): a curated synonym table (SYNONYM_TABLE, from SYNONYM_SEEDS) -- deterministic. This is
+    what actually resolves crimson->red, spherical->sphere, giant->big, chrome->metal in practice.
+  * LEARNED (opt-in): nearest-known-by-distributional-similarity using learn_word_vectors (random indexing). MEASURED
+    KEPT NEGATIVE: on a TINY synthetic corpus this is weak/noisy -- ~2/14 argmax ranking, cosines ~0.05. Random
+    indexing needs a substantial REAL corpus (varied repeated co-occurrence) before it beats the table, as
+    holographic_text's own demo_text shows on Gutenberg/Brown. So the table leads; the learned path extends coverage
+    when real text is available. parse_description(text, resolver=) folds synonyms in; a resolved SHAPE adjective
+    that precedes a head shape noun ('spherical ball') is skipped so it does not spawn a second object.
+
+### #2 Single-pass material-id renderer (inter-object shadows + see-through glass)
+render_scene was rewritten from a per-object z-composite to a SINGLE pass over the UNION SDF (_UnionSDF: min over
+objects, with ids() = argmin for the per-pixel material id). Because one march sees the whole scene, objects now cast
+soft shadows and ambient occlusion on EACH OTHER (the composite could not). Per-pixel colour/material come from the
+material-id buffer; reflective materials pick up a sky reflection; GLASS is see-through via a secondary ray that
+continues past the glass surface through the non-glass union, so an object behind glass shows through (tinted, with a
+Fresnel rim). MEASURED: a red ball behind a glass panel shows red THROUGH the glass (centre patch R=0.15 dominates
+G,B). KEPT NEGATIVES (loud): glass see-through is a single straight-through layer (no refractive bending / Fresnel
+transmission); reflections sample only the sky dome (no inter-object mirror reflections); a small object fully
+enclosed in a large glass box is still a hard read (the demo scene). The 'inside' nest scale was bumped 0.42->0.55 so
+nested objects are more visible.
+
+### Generation-stack audit (text-gen + image-gen + call sites) -- full doc: holostuff_genstack_audit.md
+HONEST verdicts, no force-fitting:
+  * TEXT GEN (HolographicNGram char n-gram + nucleus decode): the recent geometry/render work does NOT apply, and
+    dense-Hopfield cleanup snaps to one atom so it cannot replace a full next-char DISTRIBUTION readback; calibrated
+    back-off was speculative and did not measure as a win, so it was NOT shipped. The text/learning stack's genuine
+    recent upgrade IS the semantic word-vector grounding (#1).
+  * IMAGE GEN (make_scene / morph_images / hopfield diffusion): the post-fx pipeline already polishes any generated
+    or morphed frame through the existing post_process faculty (MEASURED on a make_scene image and a DCT morph
+    frame) -- the polish 'upgrade' was already available. One convenience wired: morph_scene gained an optional
+    post= (generate-and-polish per frame, backward-compatible). The genuinely NEW image-gen capability is the
+    semantic text->3-D render (pixels from a sentence).
+  * CALL-SITE SWEEP: absorb (HolographicNGram), generate_words (ContextGenerator), _scene/render_scene(tag_list)
+    (make_scene), morph_scene (morph_images). None broken or improvable by the geometry work; morph_scene gained
+    post=.
+
+## Render quality: SSAA + ground plane + dither fix the grainy/low-res look (2048->2050)
+
+Moose flagged that rendered output looked grainy/low-resolution and "not post-processed." DIAGNOSIS (the honest
+root cause): the grain was ALIASING -- render_scene cast ONE ray per pixel, so silhouettes stair-stepped and the
+few-sample AO/soft-shadows speckled, and NO post-fx removes that. Bloom/tonemap/vignette are not denoisers; the
+postfx denoise() just blurs and supersample()/resample() only upscale an already-undersampled frame. The real fix is
+averaging more rays per output pixel.
+
+Three additive, backward-compatible knobs on render_scene:
+  * ss (default 2): SUPERSAMPLED ANTI-ALIASING. Render at ss x the target resolution and box-average ss x ss blocks
+    (postfx.supersample). ss=2 => 4 rays/output pixel, ss=3 => 9. MEASURED: ss=3 cuts whole-frame edge-grain ~11% on
+    a single sphere silhouette (more at the actual edges); the before/after is night-and-day (render_before.png vs
+    render_after.png). Cost is ss^2 more rays -- a knob, not always-max.
+  * ground (default True): a matte _PlaneSDF placed just beneath the lowest object, IN the union, so objects stop
+    floating and CATCH each other's soft shadows on the floor -- most of what makes a render read as real. (The union
+    soft_shadow already does inter-object shadows; the ground gives them somewhere to land.)
+  * dither (default 0.004): tiny sub-LSB noise to break 8-bit gradient BANDING in the sky -- removes the stepped-
+    gradient artifact without a visible grain (this is dithering, the opposite of film_grain).
+
+A good post chain for these scenes: denoise(0.6) -> bloom -> aces -> vignette -> gamma. KEPT NEGATIVE: SSAA is brute
+force (ss^2 rays); a real renderer would adaptively sample only edge pixels -- not done. Tests: ss>1 measurably
+reduces edge grain; ground=True changes the lower frame.
+
+## Edge-adaptive supersampling + incremental dirty re-render (RENDER-OPT, +2 tests, 2050->2052)
+
+Moose: "we probably already have trickery for adaptively supersampling only edge pixels; the compile pattern can
+speed raytracing; we aren't using the L1-L4/RAM cache stack; only re-render what changed." PROBE-FIRST confirmed all
+four exist as principles. Two became real renderer wins; two assessed honestly. Full doc:
+holostuff_render_optimization.md.
+
+* ADAPTIVE SUPERSAMPLING (built, 5x). The principle was already in holographic_adaptive_cache.adaptive_anchors
+  (sample density ~ |curvature|^power -- crowd where the field bends). The 2-D image analog of "bends" is EDGES
+  (material-id / silhouette / depth / luminance discontinuities). render_scene(adaptive=True, now default) renders
+  the base grid once, builds an edge mask (_edge_mask), and supersamples ss^2 rays ONLY on edge pixels. Refactor:
+  _scene_setup (immutable scene ctx) + _shade_rays (shade an ARBITRARY ray batch) enable tracing edge subrays in
+  isolation. MEASURED 300x300 ss=3: brute 810k rays/33.8s vs adaptive 157k rays/6.4s (8.4% edges) -- 5.1x fewer
+  rays, 5.3x faster, mean pixel diff 0.00007 (visually identical). KEPT NEGATIVE: adaptive refines edges found in
+  the BASE pass, so a sub-base-pixel feature can be missed -- raise base res if it bites.
+
+* INCREMENTAL DIRTY RE-RENDER (built). SceneRenderer caches the frame + the material-id buffer; set_attr(obj,field,
+  value) re-shades ONLY that object's directly-visible pixels (idbuf==obj), no re-tracing (geometry unchanged on a
+  material edit). MEASURED: a material->mirror edit re-rendered 3890/57600 px (6.8%) in 0.1s vs ~3.9s full (~38x),
+  pixels outside the object byte-identical. The scenedelta content-hash dedup + the id buffer are the mechanism.
+  KEPT SCOPE: updates directly-visible pixels exactly; appearance through glass / in reflections not incrementally
+  refreshed (call render()); a geometry/position edit falls back to full render (id buffer stale).
+
+* CACHE HIERARCHY (already exists). holographic_anim.FrameCache is the hot/warm/cold tier (full-in-RAM L1/L2 analog;
+  compact deltas-vs-base warm/L3; recompute-from-base cold) -- the TEMPORAL cache across animation frames, explicitly
+  the honest "L1-L4 analogy, Python cannot touch real CPU caches." SceneRenderer is its SPATIAL analog for one frame
+  under editing. Honest: analogies (full/fast vs compact/derived), not literal cache-line control.
+
+* COMPILE-THE-MARCH (assessed, not built). render_analytic already compiles a SINGLE analytic SDF to njit via
+  codegen+cache. But it renders ONE expr with ONE base colour -- it drops exactly the scene renderer's value
+  (material-id buffer, see-through glass, ground, dirty cache). Lowering a multi-material scene to one compiled union
+  that ALSO returns an id buffer + runs the glass pass is a real but non-trivial NEXT build (and the SWEEP negative
+  stands: deeply nested compound SDFs slow to njit-COMPILE). Logged, not half-done; adaptive AA already removed ~5x.
+
+## Hyperrealism: path-traced PBR, volumetrics, refractive glass, adaptive sampling (HYPERREAL, +9 tests, 2052->2061)
+
+Moose: want more rendering features + material properties for regular AND volumetric objects; hyperrealism is fine to
+be slow; treat slowness as the signal to find optimization/caching/novel approaches; auto-tune + the holo agent can
+choose per frame. PROBE-FIRST found the hyperrealism ENGINES already existed (holographic_brdf full Cook-Torrance/GGX,
+holographic_pathtrace Monte-Carlo path tracer w/ emissive, holographic_render.volume_render participating media,
+refract_dir + subsurface) -- the semantic renderer just ignored them. The work was WIRING + two real additions.
+Full docs: holostuff_hyperreal_materials.md, holostuff_render_optimization.md.
+
+* PBR PATH-TRACED RENDER (render_scene_pbr). Routes a described scene through the path tracer with a per-object
+  material(P) callback: nearest-object id -> (albedo, metallic, roughness, emission[, ior]) from PBR_PARAMS. True
+  multi-bounce GI, GGX highlights, colour bleeding, EMISSIVE objects that light the scene (measured: a glowing blue
+  ball bleeds blue onto the floor). Faculty render_scene_description(quality='hyperreal', spp, adaptive_spp). ACES
+  tonemap. ~57s at 200x200 spp=32 -- offline by design (brain side).
+
+* MATERIAL GROUNDING EXTENDED. PBR_PARAMS (metallic,roughness,emission) + METAL_TINT for gold/copper/steel/mirror.
+  New material words: gold/brass, copper/bronze, plastic/rubber/vinyl, ceramic/porcelain, emissive/glowing/neon/
+  luminous/lamp. So gold is a tinted GGX metal != chrome, plastic a glossy dielectric != matte.
+
+* VOLUMETRIC OBJECTS (fog/smoke/fire). New volumetric materials parse as their OWN blob objects (no shape noun --
+  "a fire", "a smoke cloud"); volumetric_field is a turbulence-modulated soft sphere; render_scene composites them
+  over the surface frame via volume_render (alpha-over). _VOLUMETRIC={fog,smoke,fire}. Env-clause detection refined
+  so 'cloud' next to a shape no longer misroutes the clause to environment; volumetric word with no shape still makes
+  an object. KEPT NEGATIVE: alpha-over composite is NOT depth-aware (a volume + surface that interpenetrate won't
+  sort); volume is single-scatter absorption/emission, not lit by scene emitters.
+
+* REFRACTIVE GLASS (path tracer). fresnel_dielectric (Schlick, R0=0.04 for glass) + a dielectric branch in path_trace:
+  per ray, REFLECT with Fresnel prob else REFRACT (refract_dir/Snell, TIR handled). The refracted ray can't be marched
+  by sphere_trace (it treats the interior as an immediate hit), so _march_through steps the ray by |sdf| THROUGH the
+  glass to the far face, then refracts OUT -> two-interface bending, see-through with a Fresnel rim (measured: a glass
+  ball refracts the floor through it). _pbr_props gives glass ior=1.5; material callback returns a 5-tuple; path_trace
+  _unpack_mat accepts 4- or 5-tuple (backward compatible). KEPT NEGATIVES: smooth glass only (no rough/frosted, no
+  dispersion); transmission albedo-tinted, not true Beer-Lambert over path length.
+
+* ADAPTIVE MONTE-CARLO SAMPLING (the "slowness as signal" optimization). path_trace gained return_variance (per-pixel
+  variance-of-the-mean map) and active (a pixel mask -- trace only those). render_scene_pbr(adaptive_spp>0): render
+  spp everywhere + variance, then spend adaptive_spp EXTRA samples only on the noisiest pixels (above noise_pct
+  percentile), sample-count-weighted combine. The sample-domain analog of the edge-adaptive AA (spend where it bends
+  / where it's noisy). MEASURED 160x160: uniform spp=64 65.7s vs adaptive 16+48 on noisiest 30% 35.4s -- 2.11x fewer
+  samples, 1.86x faster, PSNR 32.1 dB vs the uniform-64 reference (near-identical). Hook for the holo agent
+  (decide_confidence) + auto-tuners to set the budget per frame.
+
+* DENOISE OPTIMIZATION (measured). Low-spp + the engine's denoise: spp=8 + denoise vs spp=96 -- 12.3x faster, +2.65 dB
+  recovered by denoise (the OptiX/OIDN "render fewer samples, clean up" trick). FFT denoise over-smooths; albedo/
+  normal-guided NLM is the honest upgrade.
+
+CROSS-ARC: probe-first (engines already existed; gap was wiring); measure with negatives loud; the adaptive principle
+(sample where the field bends / where variance is high) recurs in BOTH the pixel domain (edge AA) and the sample
+domain (adaptive spp); glass interior transport needs |sdf| marching since sphere_trace can't go inside.
+
+## Holographic volumetrics: the closed-form line integral over an FPE density field (VOLINT, +5 tests, 2061->2066)
+
+Moose's push: we aren't using the holographic SPACE -- traditional renderers can't represent 4d let alone 4096d, and
+they have NO model of empty space (they discover it by marching). The whole density field, occupied AND empty, should
+be a property of one hypervector; fog/atmosphere should then be real-time "if done properly". PROBE-FIRST: the FPE
+substrate already existed -- holographic_fpe.VectorFunctionEncoder (N-d Fractional Power Encoding / VFA) and
+holographic_fpefield.HolographicField (an SDF carried as ONE hypervector, edit=bind, union=bundle). The missing piece
+was rendering FROM it. Full doc: holostuff_holographic_volumetrics.md.
+
+* THE MECHANISM (new module holographic_volint.py). A density field is F = sum_i w_i encode(p_i) -- one hypervector;
+  density(x) ~ <F, encode(x)> is the FPE Bochner/RBF kernel-density read. Because the FPE basis is a PHASE code,
+  encode(O+tD)_j = exp(i O.Theta_j) * exp(i t D.Theta_j), and the integral of a complex exponential is closed form. So
+  the LINE INTEGRAL of density along a ray is:
+      integral_0^L density(O+tD) dt = Re sum_j F_spec_j * exp(-i O.Theta_j) * (1 - exp(-i (D.Theta_j) L))/(i D.Theta_j)
+  -- ONE inner product per ray, NO marching, vectorised over all rays (chunked so the (chunk,dim) complex temporaries
+  stay small). Theta_k = scale_k * phases_k from each axis ScalarEncoder; F_spec = fft(F).
+
+* MEASURED. Closed-form vs a 160-step marched reference: correlation 1.0000, mean rel err 0.000 -- EXACT. At image
+  scale (200x200 = 40k rays, dim=2048): closed-form 8.8s vs marching-the-same-field ~800s (extrapolated) -- ~90x
+  faster (= ~steps-fold; closed form is O(R*dim) once vs O(R*steps*dim) marching the holographic field). EMPTY SPACE
+  reads tau~0 with NO marching -- a property of the field, the thing a marcher cannot have at the start of a render.
+
+* RENDERER. render_fog composites atmospheric fog over a frame using closed-form optical depth per camera ray (eye->
+  hit via the depth buffer; render_scene now exports stats['depth']): T=exp(-density_scale*tau), out=bg*T+fog*(1-T).
+  Distant objects fade into fog with no per-ray volume march (_fog_holographic.png). Faculty:
+  UnifiedMind.holographic_fog_volume(centers, weights, bounds, dim, bandwidth) -> HolographicVolume.
+
+* CALIBRATION. The raw spectral integral is in FFT units (~1e6); __init__ does a one-time cheap marched calibration
+  (6 probe rays x 24 steps) to fold the FFT/norm constant into self._cal so optical_depth is in integrated-density
+  units. The closed-form-vs-marched check found the same single global scale; baked in.
+
+* KEPT NEGATIVES (loud). (1) This is the OPTICAL DEPTH / extinction (absorption + atmosphere), exact and fast. The
+  FULL volume-rendering integral weights emission by the running transmittance T(t) INSIDE the integral, which is
+  nonlinear (exp of a partial integral) and is NOT closed-form this way -- self-shadowing emissive smoke still wants
+  marching (the documented next step). (2) "Real-time" is honest only in the sense ~steps-fold over marching the same
+  field and EXACT; the absolute 8.8s at dim=2048 is the per-ray inner-product cost -- true real-time would come from
+  the GPU muscle layer (this is the NumPy brain), a real-valued reformulation, or smaller dim. (3) density is an RBF
+  KDE of the bundled samples -> smooth; sharp edges need denser samples / smaller bandwidth. (4) Empty-space-is-known
+  holds WITHIN the encoder's working bounds (FPE aliases periodically outside).
+
+CROSS-ARC: this is the most literal "move the render into the holographic space" -- the field is one vector, the
+integral is one algebra op, empty space is known up front. The win that's unique to the representation is EXACTNESS +
+empty-space-awareness + composability (bundle to add fog, bind to move it), not raw NumPy speed; the speed is the
+muscle layer's job. Real published basis: Frady/Kleyko/Sommer VFA "Computing on Functions"; Komer/Eliasmith SSP; Plate.
+
+## Holographic radiance field + tiling that breaks the capacity wall (RAD, +6 tests, 2066->2072)
+
+Moose: finish the smooth-radiance/GI field, AND -- the key correction -- capacity is NOT a hard wall. The architecture
+overcomes it with DELTAS/DIFFS + DETERMINISTIC spatial data structures that MARK locations in the holographic space +
+tiling/chunking + superposition; "we don't build huge full representations, we use deltas and collapse on demand,
+composably." The "we know where/what everything is" idea spans lighting, shadows, normals, SSS, refraction, caustics,
+reflections, translucency, all physics, voids, gravity lensing, and BIDIRECTIONAL ray<->object lookup. This thread
+delivers the radiance instance + the capacity answer. Full doc: holostuff_holographic_radiance.md.
+
+* RADIANCE AS A FIELD (holographic_radiance.HolographicRadianceField). Carry the colour leaving each point as FPE
+  bundles: three channels weighted by colour + a COVERAGE field weighted by 1. Query = Nadaraya-Watson ratio
+  radiance(x) = <F_rgb,encode(x)> / <F_w,encode(x)> -- the kernel-weighted average colour, SELF-NORMALISING (the FFT/
+  bundle constants cancel in the ratio, so NO calibration, unlike the density integral). coverage~0 = empty space,
+  known from the field. NOTE: this query is MORE correct than the engine's cosine-based query, which leaves a spurious
+  per-field-norm factor that does not cancel in a ratio.
+
+* FAST SPECTRAL BAKE (no per-point loop, bounded memory). specs[:,c] = sum_i rgb_i^c exp(i p_i.Theta), built as a
+  CHUNKED MATMUL (cs.T @ rgb4 accumulated over point-chunks). Query = Re(exp(-i x.Theta) @ specs), also chunked. This
+  is the OOM lesson applied: never build the (N x dim) dense array -- chunk it. ~2.6s to bake 40k points at dim 2048.
+
+* TILING BREAKS THE CAPACITY WALL (holographic_radiance.TiledRadianceField). The single-vector capacity wall is REAL
+  (a D-dim vector holds ~D items; 40k pixel-samples in dim 2048 -> ~15.6 dB mush). The engine's HoloOctree already
+  solves this for occupancy ("tile 3D space so each node's wave stays inside one vector's capacity"); this does the
+  same for RADIANCE. Space -> deterministic grid of bricks; each occupied brick a small field over its OWN samples (+
+  a one-cell halo for border continuity); only occupied bricks stored (sparse dict -- no giant dense structure). A
+  query routes each point to its brick deterministically. MEASURED on a dense 200x200 frame reconstructed purely by
+  query: single vector 15.6 dB; tiled grid=8 20.9 dB; grid=14 24.2; grid=20 26.6; grid=28 28.9 -- the wall MOVES with
+  grid refinement, even at SMALLER per-brick dim (768). Capacity = per-brick capacity x #bricks.
+
+* DELTA / COMPOSABILITY (rebuild_cells). Bricks are independent, so a change to one region rebuilds ONLY its bricks --
+  an O(change) update, not a global redo. MEASURED: recolouring 1 of 327 bricks rebuilt 1 brick and changed 965/40000
+  pixels (only the touched region); the rest byte-identical. This is the delta/diff + spatial-marker pattern Moose
+  pointed at, for radiance.
+
+* THE TRIO. Geometry (FPEField SDF), density (volint closed-form integral), radiance (this) are all hypervector fields
+  over all space including empty space -> a render becomes a QUERY of fields. Faculty: holographic_radiance_field.
+
+* KEPT NEGATIVES (loud). (1) The field STORES radiance; a solver (path tracer) BAKES it first -- real-time is the
+  query/playback, not the bake (as light fields / PRT / NeRF baking work). (2) Radiance baked from one view's pixels
+  is VIEW-INDEPENDENT/diffuse-ish; full view dependence is the 5-D plenoptic field (add 2 direction axes + more
+  samples). (3) RBF KDE -> smooth; hard radiance edges band-limit (denser samples / smaller bandwidth). (4) The
+  single-vector capacity wall is real and was honestly reported BEFORE tiling moved it -- the negative that pointed at
+  the fix.
+
+CROSS-ARC: the capacity "wall" is per-vector; the system's answer is tile + delta + deterministic spatial index +
+superposition -- the same pattern across the whole "we know where/what everything is" scope (lighting, shadows,
+physics, reflections, voids...). Basis: Frady/Kleyko/Sommer VFA; Komer/Eliasmith SSP; Nadaraya-Watson; Levoy/Hanrahan
+light fields; the engine's own HoloOctree (TILE3D) and delta-chain work.
+
+## Bidirectional ray<->object index: edits as bounded, bit-exact deltas (RAYIDX, +5 tests, 2072->2077)
+
+Moose: the information solvers usually MARCH/gather is already known once things are exactly queryable -- so keep it and
+improve the pipeline across the board. Concretely: record which objects each ray TOUCHED along its path, so an edit
+re-shades only the rays that can change -- including through glass / in reflections (the bidirectional ray<->object
+lookup). PROBE-FIRST: the incremental SceneRenderer already exists but its docstring ADMITS the gap -- "through glass or
+in reflections is not incrementally refreshed". union.ids(P) gives the object at any hit. The new module closes that gap.
+Full doc: holostuff_ray_index.md.
+
+* THE INDEX (holographic_rayindex.RayPathIndex / build_ray_index). Trace the scene geometry the renderer already
+  traces -- primary sphere_trace + the glass-secondary ray (object seen THROUGH glass) -- and record touched[pixel,
+  object]=True. pixels_touching(ids) is the reverse map: object -> the exact pixels to re-shade when it changes.
+  indirect_pixels(obj) = pixels that touch obj only on a SECONDARY ray (the ones a primary-id-only renderer MISSES).
+
+* BOUNDED, BIT-EXACT DELTA (delta_reshade). On a colour/material/light edit, re-shade ONLY pixels_touching(changed) via
+  the deterministic _shade_rays and composite into the cached frame. MEASURED (recolour a ball seen through a glass
+  ball, 220x220): the index found 4508 through-glass pixels; delta re-shaded 9.3% of the frame in 0.08s vs 0.75s full
+  (~9x), max err 0.00e+00 (BIT-EXACT). The PRIMARY-ID-ONLY incremental path (old SceneRenderer) scored 28.2 dB -- WRONG,
+  because it misses 4442 of those through-glass pixels. The index catches every one (_idx_indirect.png: the through-glass
+  region highlighted is exactly where the primary hit is the GLASS, not the ball).
+
+* THE PRINCIPLE. The trace already discovers where every ray goes; traditionally that's discarded and re-gathered each
+  frame. Keeping it as a bidirectional index turns any localized edit into an O(touched pixels) update that is correct
+  on the INDIRECT pixels too. This is the "improve the pipeline across the board" lever -- the same index generalises to
+  specular-reflection bounces (record the reflected hit) and to spatial bricks (record bricks, for region edits), and
+  pairs with the radiance/density/SDF fields (query, don't march).
+
+* FACULTIES: ray_path_index(objects, camera, ...) -> RayPathIndex ; delta_reshade_scene(edited, index, changed_ids,
+  base_frame, camera) -> (updated_frame, mask).
+
+* KEPT NEGATIVES (loud). (1) A MATERIAL/colour/light edit leaves geometry unchanged, so the index stays valid and the
+  delta is exact; a MOVE changes geometry, so the index must be rebuilt for the affected region first (the dirty-region
+  story) -- the index makes the RE-SHADE cheap, not the geometry re-trace free. (2) Bit-exactness requires matched
+  sampling: delta_reshade shades 1 ray/pixel, so it is exact against an ss=1 render; an edge-supersampled (ss>1) full
+  render differs at edges unless the delta supersamples the same edge pixels (a follow-on). (3) Built for the primary +
+  glass-secondary segments render_scene actually traces; render_scene's mirror term reflects the SKY not objects, so a
+  mirror-object-reflection demo needs object reflection added to the shader (identical index pattern).
+
+CROSS-ARC: "the info solvers march for is already known" -> record it once, query it on every edit. Closes the exact gap
+the incremental renderer documented (glass/reflection), with a bit-exact, ~9x-bounded delta and the indirect pixels a
+primary-only path cannot see. Pairs with the field trio (geometry/density/radiance as queryable hypervectors).
+
+## Wiring the index across the pipeline: object reflection, region-keyed MOVES, fog in render_scene (+3 tests, 2077->2080)
+
+Moose: do both follow-ons (brick index for moves, object reflection) AND wire everything to the REAL pipeline, not just
+tests -- shadows, reflections, volumetrics, geometry all benefit from "record once, query on every edit". This span did
+that, all landing in render_scene / _shade_rays, with the index extended to the new secondary rays.
+
+* OBJECT REFLECTION IN THE REAL SHADER. _shade_rays previously reflected only the sky dome. Now reflective surfaces
+  (refl>0.05: mirror 0.85, metal 0.5) cast a ONE-BOUNCE reflection ray traced against the union; a hit object is shaded
+  (colour x (amb*ao + lambert*shadow*sun)) and blended by refl, else the sky. Wired automatically into render_scene
+  (every render now reflects objects). build_ray_index records the reflected-ray hit, so an edit to a reflected object
+  updates the mirror pixels. MEASURED (recolour a ball reflected in a mirror box, 200x200): 764 reflected pixels, delta
+  re-shade BIT-EXACT (0e+00), 10.7% of frame; a primary-id-only path misses them (_refl_indirect.png highlights them).
+
+* REGION-KEYED INDEX FOR MOVES (BrickRayIndex). A MOVE changes geometry, so the object index goes stale; key by REGION
+  instead. The index stores, per ray, the segment (origin, dir, hit-distance) AND the surface hit point + sun direction.
+  pixels_through_region(aabbs) flags, by EXACT vectorised ray-box (slab) tests: (a) camera rays that REACH the region
+  (occlusion) and (b) pixels whose SHADOW ray (hit point -> sun) crosses it (cast shadow -- moving an object moves its
+  shadow, far from the object's own pixels). delta_reshade_move(obj, delta) flags old-AABB u new-AABB (padded for AO),
+  re-shades only those, bit-exact. MEASURED (move a ball through a 3-object scene, 160x160, four different moves):
+  re-shaded 22.8-48.7%, covers EVERY changed pixel, max err 0.00e+00 across all moves.
+
+  KEPT NEGATIVES (loud, debugged honestly): (1) The first cut SAMPLED bricks along each ray (discrete points) -> it
+  could skip a thin brick and UNDER-cover; replaced with the exact ray-box slab test (no sampling, conservative). (2)
+  Occlusion alone missed the cast SHADOW (constant ~0.75 error on ground pixels far from the object) -> added the
+  shadow-ray box test. (3) Then background pixels the RAISED ball moved into were still missed: snap_to_bricks CLAMPED
+  the region to the original (old-scene) grid bounds, shrinking it when the object left them -> fixed to align to the
+  unbounded brick lattice without clamping. After all three, bit-exact. (4) Soft-shadow PENUMBRA / AO halo are bounded
+  by the AABB pad (ao_pad, default 0.6) -- a very wide penumbra would need a larger pad; the move-delta re-shades a
+  larger fraction than a material edit because it must cover old+new occlusion AND old+new shadow. (5) Reflections/GI of
+  a MOVED object (its reflection in a distant mirror) are not yet in the move set -- same pattern (test the reflected
+  segment), noted for the next pass.
+
+* FOG IN THE REAL RENDER PATH. render_scene gained fog=/fog_density/fog_color/fog_max_dist: if fog is a
+  HolographicVolume, the closed-form volint optical depth is composited along each camera ray using the depth buffer,
+  before post/dither. So the holographic (no-marching) fog is now a first-class render_scene option, not a separate call.
+
+* FACULTIES: ray_path_index (records primary + glass + reflection); delta_reshade_scene (material/colour/light edit);
+  brick_ray_index + delta_reshade_move (geometry MOVE, caches the scene ctx). All return real frames from the real shader.
+
+CROSS-ARC: the index now spans the secondary rays the renderer actually casts -- through-glass, reflection, and shadow --
+so material edits, light edits, AND moves all become bounded, bit-exact deltas keyed off information the trace already
+discovered. This is the "everything benefits" lever wired into render_scene/_shade_rays, not a side demo.
+
+## Reflection/GI of a MOVED object: the secondary-ray move case (+1 test, 2080->2081)
+
+Moose: do the flagged next step -- a moved object's image in a mirror or through glass must update too. Same pattern as
+the shadow ray: record the SECONDARY segments the shader already casts and test them against the moved region.
+
+* WHAT WAS ADDED. build_brick_index now also records, per pixel, the REFLECTION ray (off mirror/metal) and the GLASS
+  see-through ray -- their origin, direction, current hit-distance, AND the object id each currently hits (sec_id).
+  BrickRayIndex.pixels_for_move(obj, old, new) returns the bounded move set: occlusion (camera ray reaches old/new) U
+  cast shadow (shadow ray crosses old/new) U secondary (sec_id==obj -> it left the reflection/glass; OR the secondary
+  ray now reaches the new region -> it moved into view). delta_reshade_move uses pixels_for_move.
+
+* MEASURED. GLASS move (lift a ball seen through a glass ball, 170x170): bit-exact (0e+00), covers every changed pixel,
+  re-shaded 89.8% -- and WITHOUT the secondary test it would MISS 3729 through-glass pixels, so the secondary test is
+  REQUIRED and now correct. MIRROR move (mirror ball reflecting a moved ball): bit-exact, 67.3%.
+
+* HONEST NEGATIVES (loud). (1) Through-glass / in-mirror MOVES re-shade a LARGE fraction (67-90%) because secondary
+  rays sweep a wide solid angle -- a moved object behind a big glass ball or in a big mirror genuinely affects a large
+  region; the index is conservative-correct, but the saving shrinks as the refractor/reflector grows. (Material/colour
+  edits stay cheap; it is the geometry MOVE through a big secondary surface that is costly.) (2) The first cut tied the
+  secondary segment's reach to its OLD hit distance and left a 47-pixel silhouette fringe (not bit-exact); fixed by
+  recording sec_id and splitting into "currently shows it" (sec_id==obj) + "moves into it" (ray reaches new region at
+  full reach). (3) In some geometries the shadow ray already covers the reflection pixels (mirror case missed 0 without
+  the secondary test) -- the secondary test is what makes it correct REGARDLESS of geometry, not a per-scene luck.
+
+CROSS-ARC: the index now covers EVERY secondary ray the shader casts -- primary, shadow, reflection, glass-see-through --
+so colour/material/light edits AND geometry moves are bounded, bit-exact deltas, with the honest cost reported where a
+wide secondary surface makes the move set large.
+
+## SSS + translucency wired into the shader and the index (+2 tests, 2081->2083)
+
+Moose: bring subsurface scattering, translucency, and the rest of the list onto the record-once/query-on-edit approach
+where it fits. PROBE-FIRST paid off again: `subsurface()` (Beer-Lambert interior march toward the light, thin->glow)
+already existed in holographic_raymarch but was NEVER wired into the real shader `_shade_rays`; there were no SSS or
+translucent material names. So the work was wiring, not building.
+
+* MATERIALS. Added words: wax/jade/marble/skin/candle -> "wax" (SSS); translucent/frosted/milky -> "translucent"
+  (diffuse see-through). MATERIAL_RENDER gained sss/translucent flags; ctx gained is_sss, is_translucent.
+
+* SHADER (real pipeline). _shade_rays now: (a) for SSS pixels, adds a forward-scatter GLOW = colour * subsurface(union,
+  P, N, sun_dir) * sun_i -- thin parts transmit the sun and glow (wax look); (b) for translucent pixels, a diffuse
+  tinted see-through (like glass but blurred, no refraction) showing the object behind. render_scene gets both for free.
+
+* INDEX. SSS is a SURFACE term on the object's OWN pixels, so the object index (material edit) and brick occlusion
+  (move) already cover it -- the delta re-shade recomputes the SSS via _shade_rays. Translucency is a SEE-THROUGH
+  secondary ray, so build_ray_index and build_brick_index now treat see_through = is_glass | is_translucent: a frosted
+  object gets the same glass-style secondary recording, so an object BEHIND it updates via the index (edit or move).
+
+* MEASURED (bit-exact, deterministic). SSS material edit (recolour a wax ball): bit-exact, re-shades only the ball's
+  own pixels. SSS MOVE: re-shaded 27.4%, covers-all, bit-exact -- SSS recomputed at the new position. Translucent move
+  (lift a ball seen through a frosted ball, 2104 see-through pixels): bit-exact, covers-all, re-shaded ~91% (the same
+  wide-secondary honest cost as glass). All renders unchanged for non-SSS/non-translucent objects (no regression).
+
+* KEPT NEGATIVES. (1) SSS here is the Beer-Lambert thin-glow approximation (interior path toward the light), not full
+  multiple-scattering diffusion -- the field-native term, honest about being an approximation. (2) Translucency reuses
+  the single-layer see-through (no scatter blur kernel, no refraction) -- a diffuse tint, not a true rough-dielectric
+  BTDF. (3) Through-translucent/glass MOVES re-shade a large fraction (wide secondary solid angle) -- conservative and
+  bit-exact, but the saving shrinks as the see-through surface grows (same cost noted for glass/mirror moves).
+
+REST-OF-LIST MAP (honest, where the approach fits): shadows DONE (shadow ray in the move set); reflections DONE;
+glass/refraction-see-through DONE; SSS + translucency DONE (this entry). NATURAL NEXT, same pattern: bump/normal/
+displace and face-normals are pure SURFACE-shading edits -> the OBJECT index already covers them once they vary a
+material (re-shade the object's pixels); caustics + GI bounce are extra SECONDARY segments (record the bounce/caustic
+ray, test vs the moved region) -- the reflection/shadow pattern one level deeper. GENUINELY DIFFERENT (not a quick wire,
+flagged honestly): fluid/smoke/particle/rigid/soft-body PHYSICS and collisions change geometry every frame (the index
+must be rebuilt per step -- the delta helps the SHADE, not the sim); voids are just empty regions (already free via
+empty-space SDF/field queries); gravitational lensing bends the primary ray itself (the ray segments become curves --
+the slab tests would need arc/segment approximations). The lever applies cleanly to shading and discrete edits; it does
+not make a per-frame physics sim free, and that boundary is stated rather than papered over.

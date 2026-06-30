@@ -227,3 +227,26 @@ def test_run_chunked_records_a_replay_log():
     assert len(states) >= 2                                        # one state per seam
     assert states[0].shape == (10, M.dim)                         # acc + 8 registers + stack as rows
     assert cosine(acc, M.data_atoms["a"]) > 0.999                # final acc still correct
+
+
+def test_run_batch_matches_per_item_run():
+    import numpy as np
+    from holographic_ai import cosine
+    M = _state_machine()
+    prog = [("BIND", "a"), ("PERMUTE", ""), ("BUNDLE", "b"), ("BIND", "c"),
+            ("STORE", "R0"), ("PERMUTE", ""), ("BIND", "a"), ("RECALL", "R0"), ("HALT", "")]
+    pv = M.assemble(prog)
+    rng = np.random.default_rng(0)
+    X = rng.standard_normal((50, M.dim)); X /= np.linalg.norm(X, axis=1, keepdims=True)
+    batch = M.run_batch(pv, X)
+    per_item = np.stack([M.run(pv, init_acc=X[i])[0] for i in range(len(X))])
+    assert batch.shape == X.shape
+    assert np.allclose(batch, per_item, atol=1e-8)                 # matches scalar VM to machine epsilon
+
+
+def test_run_batch_rejects_control_ops():
+    import numpy as np, pytest
+    M = _state_machine()
+    pv = M.assemble([("IFMATCH", "a"), ("BIND", "b"), ("HALT", "")])
+    with pytest.raises(ValueError):
+        M.run_batch(pv, np.zeros((4, M.dim)))                      # control flow can't batch -> clear error

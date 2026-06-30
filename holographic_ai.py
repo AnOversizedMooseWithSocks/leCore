@@ -51,6 +51,7 @@ import hashlib
 import json
 
 import numpy as np
+from holographic_fft import rfft as _rfft, irfft as _irfft  # optional FFT backend (numpy default, bit-exact)
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +131,7 @@ def bind(a, b):
     exact (not approximate) for real input, matching the old complex-fft bind to
     machine epsilon (~7e-17). involution-based unbind is unchanged.
     """
-    return np.fft.irfft(np.fft.rfft(a) * np.fft.rfft(b), n=a.shape[0])
+    return _irfft(_rfft(a) * _rfft(b), n=a.shape[0])
 
 
 def bind_batch(A, B):
@@ -138,16 +139,16 @@ def bind_batch(A, B):
     single-pair bind. Same circular convolution, done over every row in one call
     so the work happens in C rather than a Python loop. A and B must share shape;
     bind_batch(A, B)[i] == bind(A[i], B[i]) to machine epsilon."""
-    return np.fft.irfft(np.fft.rfft(A, axis=1) * np.fft.rfft(B, axis=1),
-                        n=A.shape[1], axis=1)
+    return _irfft(_rfft(A, axis=1) * _rfft(B, axis=1),
+                  n=A.shape[1], axis=1)
 
 
 def bind_fixed(role, B):
     """Bind one fixed role against every row of a stack B (k, dim) -- the common
     case when tagging many fillers with the same role. The role's spectrum is
     computed once and reused, so this is ~5x faster than a Python bind() loop."""
-    return np.fft.irfft(np.fft.rfft(role)[None, :] * np.fft.rfft(B, axis=1),
-                        n=B.shape[1], axis=1)
+    return _irfft(_rfft(role)[None, :] * _rfft(B, axis=1),
+                  n=B.shape[1], axis=1)
 
 
 def involution(a):

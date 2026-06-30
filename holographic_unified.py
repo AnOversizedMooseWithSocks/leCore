@@ -4792,6 +4792,19 @@ class UnifiedMind:
             self.learn_procedure(name, prog)
         return {"program": prog, "generalizes": generalizes, "fit": float(_np.mean(fits)), "worst": worst}
 
+    def path_trace(self, sdf, camera, width=96, height=96, spp=16, max_bounce=4, material=None, sky=None, seed=0):
+        """Monte-Carlo PATH TRACER for true multi-bounce global illumination -- the core of V-Ray/Redshift/Arnold.
+        Solves the full rendering equation over an SDF scene by following random light paths and averaging:
+        BRDF importance sampling (cosine + GGX), Russian roulette, vectorised over rays. Indirect light (color
+        bleeding, soft GI in concavities) falls out for free, unlike the engine's single-bounce irradiance cache.
+        Returns an (H,W,3) HDR image. MEASURED: unbiased (white-furnace -> albedo), noise ~1/sqrt(spp), color
+        bleed reproduced; 128^2/96spp ~13-16s (OFFLINE NumPy brain, NOT GPU-realtime). KEPT NEGATIVE: no
+        next-event estimation, so light is gathered only when a bounce hits the emissive environment -- great for
+        a big sky, very noisy for small emitters (NEE/MIS is the next step). See holographic_pathtrace.path_trace."""
+        from holographic_pathtrace import path_trace
+        return path_trace(sdf, camera, width=width, height=height, spp=spp, max_bounce=max_bounce,
+                          material=material, sky=sky, seed=seed)
+
     def fluid_solver(self, shape, **kwargs):
         """A grid-based STABLE-FLUIDS solver (Stam 1999) for smoke, buoyant plumes, and combustion/FIRE -- the
         method professional smoke engines (Houdini, Bifrost Aero) are built on. Incompressibility is enforced by
@@ -5418,6 +5431,90 @@ class UnifiedMind:
         return rasterize_mesh(mesh, camera, width=width, height=height, lights=lights,
                               base_color=base_color, background=background, ambient=ambient, vectorized=vectorized)
 
+    def ray_path_index(self, objects, camera, width=256, height=256, sun="bright", sky="clear"):
+        """Build a BIDIRECTIONAL ray<->object index for a scene: which objects each camera ray TOUCHED along its path
+        (primary hit + objects seen THROUGH glass). `index.pixels_touching(ids)` then returns the exact pixels to
+        re-shade when those objects change -- INCLUDING indirect pixels (an object seen through glass) that a
+        primary-id-only incremental renderer misses. Pair with `delta_reshade_scene` for a bounded, bit-exact update.
+        The trace already knows where every ray went; this keeps it instead of re-gathering it every frame.
+        See holographic_rayindex."""
+        from holographic_semantic import _scene_setup
+        from holographic_rayindex import build_ray_index
+        ctx = _scene_setup(objects, True, sky, sun, (0.75, 0.9, 0.85))
+        if ctx is None:
+            return None
+        return build_ray_index(ctx, camera, width, height)
+
+    def delta_reshade_scene(self, edited_objects, index, changed_ids, base_frame, camera, sun="bright", sky="clear"):
+        """Apply a material/colour/light EDIT as a bounded delta: re-shade ONLY the pixels whose ray touched a changed
+        object (from `ray_path_index`), composite into `base_frame`. Deterministic -> the updated pixels are bit-exact
+        vs a full re-render, at a fraction of the work, and the through-glass pixels update correctly. Geometry must be
+        unchanged (a colour/material/light edit); a MOVE needs the index rebuilt for the affected region first."""
+        from holographic_semantic import _scene_setup
+        from holographic_rayindex import delta_reshade
+        ctx_new = _scene_setup(edited_objects, True, sky, sun, (0.75, 0.9, 0.85))
+        return delta_reshade(ctx_new, index, changed_ids, base_frame, camera)
+
+    def brick_ray_index(self, objects, camera, width=256, height=256, grid=10, samples=12, sun="bright", sky="clear"):
+        """Build a REGION-keyed ray index: which spatial bricks each ray traversed (eye->hit). Where ray_path_index
+        keys edits by object, this keys them by REGION, so a MOVE (geometry change) gets the same bounded delta -- the
+        affected pixels are the rays that passed through the bricks the object vacated or now occupies. Pair with
+        delta_reshade_move. See holographic_rayindex.BrickRayIndex."""
+        from holographic_semantic import _scene_setup
+        from holographic_rayindex import build_brick_index
+        ctx = _scene_setup(objects, True, sky, sun, (0.75, 0.9, 0.85))
+        if ctx is None:
+            return None
+        self._last_brick_ctx = ctx
+        return build_brick_index(ctx, camera, width, height, grid=grid, samples=samples)
+
+    def delta_reshade_move(self, obj_id, delta, brick_index, base_frame, camera):
+        """Apply a MOVE of object `obj_id` by `delta` as a bounded, bit-exact delta: re-shade only the rays that
+        traversed the bricks the object vacated (old position) or now occupies (new position), from `brick_ray_index`
+        (which cached the scene ctx). Returns (updated_frame, mask, ctx_new). See holographic_rayindex."""
+        from holographic_rayindex import delta_reshade_move as _drm
+        ctx = getattr(self, "_last_brick_ctx", None)
+        if ctx is None:
+            raise ValueError("call brick_ray_index(...) first to build the index and cache the scene")
+        return _drm(ctx, obj_id, delta, brick_index, base_frame, camera)
+
+    def holographic_radiance_field(self, points, rgb, bounds=None, grid=14, dim=768, bandwidth=None, halo=1, seed=0):
+        """Bake scene RADIANCE (colour leaving each surface point) into a TILED holographic field: space is split into
+        a deterministic grid of bricks, each a small FPE radiance field within capacity, only occupied bricks stored
+        (holographic_radiance.TiledRadianceField). `query(points) -> (rgb, coverage)` reads the kernel-weighted colour
+        at any point (Nadaraya-Watson, self-normalising -- no calibration); coverage ~0 marks empty space, known from
+        the field. This is the capacity answer to the single-vector wall (the HoloOctree move, for radiance): refine
+        `grid` and the wall moves (measured 15.6 dB single -> 28.9 dB tiled). Changes to a region rebuild only its
+        bricks (rebuild_cells -- an O(change) delta). Pairs with holographic_fog_volume so a render becomes a QUERY of
+        geometry + density + radiance fields. HONEST: stores radiance (a solver bakes it), view-independent/diffuse-ish
+        from one view, RBF-smooth. See holographic_radiance."""
+        import numpy as _np
+        from holographic_radiance import TiledRadianceField as _TRF
+        P = _np.atleast_2d(_np.asarray(points, float))
+        if bounds is None:
+            lo = P.min(0) - 0.5; hi = P.max(0) + 0.5
+            bounds = list(zip(lo.tolist(), hi.tolist()))
+        bw = float(bandwidth) if bandwidth is not None else 2.2 * grid    # sharp kernel scales with grid resolution
+        return _TRF(bounds, grid=grid, dim=dim, bandwidth=bw, halo=halo, seed=seed).bake(P, rgb)
+
+    def holographic_fog_volume(self, centers, weights=None, bounds=None, dim=2048, bandwidth=1.1, seed=0):
+        """Encode a volumetric DENSITY field (fog/atmosphere) as ONE hypervector via Fractional Power Encoding, and
+        return a HolographicVolume whose `optical_depth(O, D, L)` integrates the density along any ray in CLOSED FORM
+        -- one inner product per ray, no marching (holographic_volint). Unlike a marcher, the field is a property of
+        ALL space: empty regions read ~0 optical depth without being discovered. `centers` are fog-blob positions in
+        R^3; `bounds` defaults to the centres' extent padded. Use render_fog (or the returned .optical_depth) to
+        composite atmospheric fog over a rendered frame using its depth buffer. Closed-form integral verified exact
+        vs a marched reference; ~steps-fold faster than marching the same field. See holographic_volint."""
+        import numpy as _np
+        from holographic_fpe import VectorFunctionEncoder as _VFE
+        from holographic_volint import HolographicVolume as _HV
+        C = _np.atleast_2d(_np.asarray(centers, float))
+        if bounds is None:
+            lo = C.min(0) - 2.0; hi = C.max(0) + 2.0
+            bounds = list(zip(lo.tolist(), hi.tolist()))
+        enc = _VFE(C.shape[1], dim=dim, bounds=bounds, kernel="rbf", bandwidth=bandwidth, seed=seed)
+        return _HV.from_blobs(enc, [tuple(c) for c in C], weights)
+
     def render_volume(self, field, camera, bounds, width=256, height=256, steps=96, mode="smoke",
                       sigma=12.0, emission_color=None, albedo=(0.9, 0.9, 0.95), lights=None,
                       background=(0.0, 0.0, 0.0)):
@@ -5604,7 +5701,7 @@ class UnifiedMind:
         from holographic_globalillum import caustics
         return caustics(sdf, light_dir=light_dir, receiver_y=receiver_y, extent=extent, res=res, ior=ior, n_side=n_side)
 
-    def morph_scene(self, img_a, img_b, steps=9, method="dct"):
+    def morph_scene(self, img_a, img_b, steps=9, method="dct", post=None):
         """Morph between two images. method='dct' (default) blends in the DCT-coefficient domain (structure
         slerp, not a ghosting crossfade). method='phase' (C2) blends in the 2-D FFT domain, interpolating each
         bin's magnitude and PHASE separately -- the phase-vocoder move (holographic_phasemorph.morph_image_phase):
@@ -5612,16 +5709,22 @@ class UnifiedMind:
         to its intermediate position (a compact moving blob) where the DCT slerp interpolates its SHAPE and smears
         it. Measured win for SMALL displacements; the kept BOUND is that a large translation wraps the phase ramp
         (bin phase differences exceed pi) and falls back to a crossfade -- so 'phase' is for small-motion morphs,
-        'dct' for arbitrary structure change. Part of this mind's generative repertoire."""
+        'dct' for arbitrary structure change. With `post` (a holographic_postfx.PostChain) each output frame is run
+        through the post-processing pipeline -- generate-and-polish in one call (the same polish post_process applies
+        to any image; here it is wired at the generation site). Part of this mind's generative repertoire."""
         if method == "phase":
             from holographic_phasemorph import morph_image_phase
-            return morph_image_phase(np.asarray(img_a, float), np.asarray(img_b, float), steps=steps)
-        from holographic_archive import HolographicArchive
-        from holographic_generate import morph_images
-        S = img_a.shape[0]
-        arch = HolographicArchive(shape=img_a.shape, capacity=2,
-                                  keep=min(900, (S * S) // 2), dim=32768, seed=self.seed)
-        return morph_images(arch.M, img_a, img_b, steps=steps)
+            frames = morph_image_phase(np.asarray(img_a, float), np.asarray(img_b, float), steps=steps)
+        else:
+            from holographic_archive import HolographicArchive
+            from holographic_generate import morph_images
+            S = img_a.shape[0]
+            arch = HolographicArchive(shape=img_a.shape, capacity=2,
+                                      keep=min(900, (S * S) // 2), dim=32768, seed=self.seed)
+            frames = morph_images(arch.M, img_a, img_b, steps=steps)
+        if post is not None:                                  # polish each generated frame (post-fx pipeline)
+            frames = [post.apply(np.clip(np.asarray(f, float), 0.0, 1.0)) for f in frames]
+        return frames
 
     def discover_units(self, stream, order=4, percentile=70):
         """Self-discovery of structure: find the units in a raw symbol stream with
@@ -6122,6 +6225,257 @@ class UnifiedMind:
         procedure before any program that CALLs it."""
         self._machine().define(name, program)
         return self
+
+    def gradient_cache_symbolic(self, expr, anchors, variables=("x", "y", "z")):
+        """Build an irradiance/GI-style GradientCache with EXACT Jacobians from a symbolic field (SymPy) instead of
+        finite differences -- no truncation error in the cached gradients, so first-order interpolation is more
+        accurate at the same anchors. Needs sympy. See holographic_cache.gradient_cache_symbolic."""
+        from holographic_cache import gradient_cache_symbolic
+        return gradient_cache_symbolic(expr, anchors, variables)
+
+    def render_sdf_fast(self, expr, camera, width=256, height=256, light_dir=(-0.4, 0.7, -0.3),
+                        base_color=(0.85, 0.5, 0.35), ao=True, shadows=True, ambient=0.25, sky=None):
+        """Render an analytic SDF (given as a symbolic expression) with the fully-JIT'd renderer: the whole march --
+        primary ray, exact normal, AO, soft shadow -- compiles into one njit kernel (the closure barrier is gone),
+        ~9-15x the numpy renderer for the field-native shading. Compiled renderer cached per SDF. Needs sympy+numba;
+        falls back is the caller's (use render_sdf without jit_expr). See holographic_sdf_render.render_analytic."""
+        from holographic_sdf_render import render_analytic
+        return render_analytic(expr, camera, width=width, height=height, light_dir=light_dir,
+                               base_color=base_color, ao=ao, shadows=shadows, ambient=ambient, sky=sky)
+
+    def compiled_sdf_numba(self, expr, variables=("x", "y", "z")):
+        """SymPy -> Numba, cached: compile a symbolic 3-D SDF to njit scalar+grid value/normal kernels ONCE and
+        reuse them. The scalar njit SDF composes into other njit loops (a sphere-trace march) -- the closure barrier
+        that blocked Numba from the raymarch is gone. Needs sympy + numba. See holographic_compile.compiled_sdf_numba."""
+        from holographic_compile import compiled_sdf_numba
+        return compiled_sdf_numba(expr, variables)
+
+    def compile_program(self, program):
+        """Assemble a HoloMachine program (list of (opcode, operand)) into its program vector ONCE via the compile
+        cache and reuse it -- re-running the SAME program skips the ~L-bind assembly (measured ~15 ms / 60 instr).
+        Returns the cached program vector. See holographic_compile.compiled_program."""
+        from holographic_compile import compiled_program
+        return compiled_program(self._machine(), program)
+
+    def compiled_sdf_normal(self, expr, variables=("x", "y", "z")):
+        """Compile a symbolic SDF's exact normal ONCE and reuse it via the content-addressed compile cache: the
+        same expr returns the cached (value_fn, normal_fn) instantly instead of re-running the ~140-390 ms sympy
+        lambdify, and recompiles only when the expr changes. The runtime use of the codegen pipeline -- compile a
+        spec, cache the compiled version, hand it out everywhere. See holographic_compile.compiled_sdf_normal."""
+        from holographic_compile import compiled_sdf_normal
+        return compiled_sdf_normal(expr, variables)
+
+    def compile_cache_stats(self):
+        """Stats for the process-wide compile cache: hits/misses/compiles/evictions, size, hit_rate. See
+        holographic_compile.DEFAULT_CACHE."""
+        from holographic_compile import DEFAULT_CACHE
+        return dict(DEFAULT_CACHE.stats, size=len(DEFAULT_CACHE), hit_rate=round(DEFAULT_CACHE.hit_rate(), 3))
+
+    def exact_sdf_normal(self, expr, variables=("x", "y", "z")):
+        """Derive an EXACT SDF surface normal from a symbolic SDF expression (SymPy, design-time) and return
+        (value_fn, normal_fn) of pure NumPy -- no finite-difference step-size error, no autodiff. The Quilez-seat
+        path: e.g. exact_sdf_normal('sqrt(x**2+y**2+z**2)-1.0'). Needs sympy (requirements-accel.txt); the returned
+        functions are pure NumPy. See holographic_codegen.sdf_normal_fn."""
+        from holographic_codegen import sdf_normal_fn
+        return sdf_normal_fn(expr, variables)
+
+    def symbolic_gradient(self, expr, variables):
+        """Exact gradient of a symbolic scalar field as a pure-NumPy function (force = -symbolic_gradient(energy)).
+        The Baker-seat analytic-force path, autodiff-free. See holographic_codegen.gradient_fn."""
+        from holographic_codegen import gradient_fn
+        return gradient_fn(expr, variables)
+
+    def fft_backend(self, use_pyfftw=None):
+        """Report or switch the FFT backend behind bind/bundle. Default 'numpy' is bit-exact and deterministic;
+        pass use_pyfftw=True to opt into pyFFTW (MEASURED to regress at typical dims -- see fft_benchmark; off by
+        default for good reason). Returns the active backend name."""
+        from holographic_fft import use_pyfftw as _u, fft_backend as _b
+        if use_pyfftw is not None:
+            return _u(bool(use_pyfftw))
+        return _b()
+
+    def fft_benchmark(self):
+        """Reproduce the numpy-vs-pyFFTW comparison (ratios <1 mean pyFFTW is slower). Documents why numpy stays
+        the default. See holographic_fft.benchmark."""
+        from holographic_fft import benchmark
+        return benchmark()
+
+    def signed_distance_field(self, inside_mask, h=1.0):
+        """Occupancy/inside mask -> signed distance field (negative inside, positive outside) via the fast-sweeping
+        eikonal solver, Numba-accelerated when numba is installed (measured ~270x on a 256^2 grid, bit-identical to
+        the pure path) and pure-Python otherwise. The occupancy->SDF step the modelling/raymarch pipeline wants.
+        See holographic_jit.signed_distance_2d."""
+        from holographic_jit import signed_distance_2d
+        return signed_distance_2d(inside_mask, h=h)
+
+    def parse_scene_description(self, text):
+        """Parse a controlled 3-D scene DESCRIPTION into objects + environment (holographic_semantic). Each object is
+        {shape, color, material, size, relation}. Controlled vocabulary + keyword grammar, deterministic -- NOT a
+        general language model (see the module SCOPE note)."""
+        from holographic_semantic import parse_description
+        return parse_description(text)
+
+    def encode_scene(self, objects):
+        """Encode parsed objects into ONE composable scene hypervector: superpose bind(OBJ_i, record_i). Returns
+        (scene_vector, [record_vectors], [role_atoms]). Query it back by slot with query_scene_slot -- the scene is
+        content-addressable, every attribute recoverable through the superposition by cleanup."""
+        from holographic_semantic import encode_scene
+        return encode_scene(objects, self)
+
+    def query_scene_slot(self, scene_vector, roles, slot):
+        """Read object `slot` back OUT of the bundled scene hypervector (unbind its role, then decode each attribute
+        against its codebook). The bidirectional semantic read."""
+        from holographic_semantic import query_scene
+        return query_scene(scene_vector, roles, self, slot)
+
+    def render_scene_description(self, text, camera, width=256, height=256, post=None, quality="fast", spp=24,
+                                 adaptive_spp=0):
+        """The full text -> 3-D pipeline in one call: parse the description and render. quality='fast' uses the
+        single-pass adaptive-AA renderer (seconds; inter-object shadows, see-through glass, volumetric fog/smoke/
+        fire). quality='hyperreal' routes through the Monte-Carlo PATH TRACER with real Cook-Torrance/GGX materials
+        (true global illumination, colour bleeding, emissive objects that light the scene, REFRACTIVE glass) --
+        offline, spp-controlled. `adaptive_spp`>0 enables variance-driven adaptive sampling (extra samples only on
+        noisy pixels). `post` is an optional holographic_postfx.PostChain."""
+        from holographic_semantic import parse_description, render_scene, render_scene_pbr
+        scene = parse_description(text)
+        env = scene["environment"]
+        sun = env.get("sun") or "bright"; sky = env.get("sky") or "clear"
+        if quality == "hyperreal":
+            return render_scene_pbr(scene["objects"], camera, width=width, height=height, spp=spp,
+                                    post=post, sun=sun, sky=sky, adaptive_spp=adaptive_spp)
+        return render_scene(scene["objects"], camera, width=width, height=height, post=post,
+                            sun=env.get("sun") or "bright", sky=env.get("sky") or "clear")
+
+    def scene_control_spec(self, command):
+        """Turn a control phrase ('control the ball size and how metallic it is') into UI control descriptors
+        (sliders / selects) a front-end can render directly -- the engine emits the spec, the browser draws the
+        widgets. See holographic_semantic.control_spec."""
+        from holographic_semantic import control_spec
+        return control_spec(command)
+
+    def post_process(self, image, chain=None, depth=None):
+        """Apply a post-processing PROGRAM (a holographic_postfx.PostChain -- an ordered, named chain of effects) to a
+        rasterized (H,W,3) frame. `chain` defaults to postfx.default_chain(). The convolution family (bloom, glare,
+        DOF, blur) rides the engine's FFT-convolution primitive (the same operator as bind, one dimension up); the
+        tone/colour curves are plain NumPy in the same pipeline. Pass `depth` (the renderer's depth buffer) for DOF.
+        See holographic_postfx."""
+        from holographic_postfx import default_chain
+        if chain is None:
+            chain = default_chain()
+        return chain.apply(image, depth=depth)
+
+    def postfx_chain(self, *steps):
+        """Build a post-processing PostChain program from (name, params) steps, e.g.
+        postfx_chain(("exposure", {"ev": 0.3}), ("aces", {}), ("vignette", {"strength": 0.4})). With no steps,
+        returns the default preset. See holographic_postfx.PostChain / default_chain / cinematic_chain."""
+        from holographic_postfx import PostChain, default_chain
+        if not steps:
+            return default_chain()
+        return PostChain(list(steps))
+
+    def signed_distance_field_3d(self, inside_mask, h=1.0):
+        """Occupancy VOLUME -> signed distance field via 3-D fast-sweeping eikonal (Numba ~230x on 96^3, bit-exact
+        vs pure; pure-Python fallback). The 3-D twin of signed_distance_field for mesh import / sculpt volumes. See
+        holographic_jit.signed_distance_3d."""
+        from holographic_jit import signed_distance_3d
+        return signed_distance_3d(inside_mask, h=h)
+
+    def distance_transform(self, seed_mask, h=1.0):
+        """Distance from every cell to the nearest True seed cell, via fast sweeping (same optional-Numba path).
+        See holographic_jit.distance_transform."""
+        from holographic_jit import distance_transform
+        return distance_transform(seed_mask, h=h)
+
+    def field_deflect(self, query, attractors, masses=None, sigma=0.5, strength=0.1):
+        """Slide a query toward a local mass concentration in a field of attractors -- a soft, continuous cousin of
+        cleanup (drift toward the weighted local centre of mass rather than hard-snapping to one atom). Extracted
+        from leOS's gravitational lens. Returns (lensed_vector, deflection_radians, force_magnitude). See
+        holographic_lens.deflect."""
+        from holographic_lens import deflect
+        return deflect(query, attractors, masses=masses, sigma=sigma, strength=strength)
+
+    def detect_caustic(self, query, attractors, masses=None, sigma=0.5):
+        """Routing-ambiguity (caustic) score at a query: high when the two strongest attractors pull in opposite
+        directions with similar strength -- a fold/decision-boundary where a tiny move flips the winner.
+        Complementary to RecallNull ('is this a match?') -- this asks 'is this AMBIGUOUS between matches?'. Returns
+        (caustic_score in [0,1], n_significant_attractors). See holographic_lens.detect_caustic."""
+        from holographic_lens import detect_caustic
+        return detect_caustic(query, attractors, masses=masses, sigma=sigma)
+
+    def navigate_field(self, query, attractors, masses=None, sigma=0.5, strength=0.6):
+        """Climb the attractor field from a query toward an attractor (iterated, decaying-step deflection),
+        reporting the strongest caustic met en route. A heuristic drift that APPROACHES an attractor, not an exact
+        nearest-cluster solver. See holographic_lens.navigate."""
+        from holographic_lens import navigate
+        return navigate(query, attractors, masses=masses, sigma=sigma, strength=strength)
+
+    def local_structure(self, point, cloud, k=12):
+        """Classify a point by the shape of its local neighbourhood (the 'cosmic web' method extracted from leOS):
+        VOID / FILAMENT (1-D thread) / WALL (2-D sheet) / NODE (dense cluster), from a local PCA of its k nearest
+        neighbours, plus a continuous intrinsic_dim (participation ratio of the eigenvalues). Tells you what kind
+        of structure a point lives in -- useful before denoising (project a filament point along its one
+        direction), sampling (avoid voids), or summarising a cloud's geometry. holostuff already had GLOBAL
+        dimension estimates (box-counting, spectral); this is the PER-POINT local type. KEPT NEGATIVE:
+        high-dimensional noise inflates the apparent dimension. See holographic_cosmic.local_structure."""
+        from holographic_cosmic import local_structure
+        return local_structure(point, cloud, k=k)
+
+    def classify_cloud(self, cloud, k=12):
+        """Classify every point of a cloud into void/filament/wall/node and return (labels, info, summary) -- the
+        summary giving the fraction of each structure type and the mean intrinsic dimension, a compact geometric
+        fingerprint of the cloud. See holographic_cosmic.classify_cloud."""
+        from holographic_cosmic import classify_cloud
+        return classify_cloud(cloud, k=k)
+
+    def frechet_mean(self, vectors, weights=None, max_iters=12):
+        """The Frechet (Karcher) mean of unit vectors -- the geometrically-correct average on the sphere, the
+        point minimizing the sum of squared geodesic distances (extracted from leOS's spherical geometry). This is
+        the right operation for a class PROTOTYPE, a cluster centre, or a consolidation anchor -- distinct from
+        `bundle`, which is a SUPERPOSITION (stays similar to every part) for binding records. Provably lower
+        geodesic variance than a re-normalized Euclidean mean. HONEST: for well-separated/tight clusters its
+        downstream edge over Euclidean-normalize is marginal; the geometry pays when distributions are genuinely
+        spread or skewed. See holographic_sphere.frechet_mean."""
+        from holographic_sphere import frechet_mean
+        return frechet_mean(vectors, weights=weights, max_iters=max_iters)
+
+    def parallel_transport(self, v, p, q):
+        """Transport a tangent vector `v` (a 'displacement', a move from one state to another) from the tangent
+        plane at `p` to the tangent plane at `q`, along the geodesic -- preserving its length and surface
+        relationship (extracted from leOS). This is how a displacement measured at one point is correctly reused
+        at another, which is what lets displacements be composed/compared across distant regions of the space.
+        See holographic_sphere.parallel_transport."""
+        from holographic_sphere import parallel_transport
+        return parallel_transport(v, p, q)
+
+    def use_gpu(self, enable=True):
+        """User setting: turn the optional CuPy GPU backend on/off for the heavy array-parallel kernels (fluid
+        solver, and any kernel that allocates via the backend). Returns whether the GPU is now ACTIVE (requested
+        AND a CUDA device is present). HONEST: GPU is for throughput, not for the deterministic/tie-sensitive
+        paths -- it matches NumPy only to a tolerance and can vary run-to-run, so the bit-exact guarantees are a
+        CPU property. Falls back to NumPy silently when no GPU is available."""
+        from holographic_backend import enable_gpu
+        return enable_gpu(enable)
+
+    def backend_status(self):
+        """A human-readable line describing the current compute backend (GPU enabled/available/unavailable)."""
+        from holographic_backend import device_report
+        return device_report()
+
+    def run_procedure_batch(self, name_or_program, init_accs, max_steps=512):
+        """Run a straight-line procedure over a BATCH of accumulators (N, D) in ONE interpret pass -- the
+        data-parallel form of run_procedure (the architecture sweep's vectorisation of a Python-loop hot spot).
+        Decodes each instruction once and applies it to all N rows at once; ~10x faster than looping
+        run_procedure per item at N=2000, matching it to machine epsilon. SCOPE: value+register programs only
+        (LOAD/BIND/BUNDLE/PERMUTE/STORE/RECALL/HALT); control/host ops (IFMATCH/CALL/APPLY/...) raise -- loop
+        run_procedure for those. Returns the (N, D) accumulator batch. See HoloMachine.run_batch."""
+        M = self._machine()
+        if isinstance(name_or_program, str):
+            if name_or_program not in M.functions:
+                raise KeyError(f"no procedure named {name_or_program!r} -- learn_procedure it first")
+            pv = M.functions[name_or_program]
+        else:
+            pv = M.assemble(name_or_program)
+        return M.run_batch(pv, init_accs, max_steps=max_steps)
 
     def run_procedure(self, name_or_program, init_acc=None, max_steps=512,
                       stop=None, max_loop=64, converge_tol=0.999, branch_tol=0.5):

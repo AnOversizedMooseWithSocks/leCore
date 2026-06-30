@@ -5568,3 +5568,314 @@ def test_fluid_solver_through_mind():
         f.step()
     assert np.isfinite(f.vel).all() and f.divergence() / (np.max(np.abs(f.vel)) + 1e-12) < 1e-6
     assert f.fuel.sum() < 40.0                                     # some fuel burned
+
+
+def test_pbr_and_pathtrace_through_mind():
+    """Cook-Torrance PBR shading and the Monte-Carlo path tracer both run through the mind (BRDF/PATHTRACE-1)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_raymarch import render_sdf
+    um = UnifiedMind(dim=256, seed=0)
+
+    class S:
+        def eval(self, P): return np.linalg.norm(P, axis=-1) - 1.0
+    class C:
+        eye = np.array([0.0, 0.0, 3.0])
+        def ray_dirs(self, w, h):
+            ys, xs = np.mgrid[0:h, 0:w]; u = (xs / (w - 1) - 0.5) * 1.4; v = -(ys / (h - 1) - 0.5) * 1.4
+            d = np.stack([u, v, -np.ones_like(u)], -1)
+            return self.eye, d / np.linalg.norm(d, axis=-1, keepdims=True)
+    # PBR shading path
+    img = render_sdf(S(), C(), width=48, height=48, base_color=(0.8, 0.4, 0.3), pbr=(0.0, 0.3))
+    assert img.shape == (48, 48, 3) and np.isfinite(img).all()
+    # path tracer faculty
+    white = lambda D: np.ones((len(D), 3))
+    from holographic_pathtrace import constant_material
+    pt = um.path_trace(S(), C(), width=32, height=32, spp=12, max_bounce=3,
+                       material=constant_material(albedo=(0.6, 0.6, 0.6), roughness=1.0), sky=white, seed=0)
+    assert pt.shape == (32, 32, 3) and np.isfinite(pt).all()
+
+
+def test_run_procedure_batch_and_gpu_toggle():
+    """Batched procedure execution matches per-item, and the GPU toggle is safe when no device exists (SWEEP/BACKEND)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=512, seed=0); M = um._machine()
+    prog = [("BIND", M.data_names[0]), ("PERMUTE", ""), ("BUNDLE", M.data_names[1]), ("HALT", "")]
+    rng = np.random.default_rng(0); X = rng.standard_normal((30, 512)); X /= np.linalg.norm(X, axis=1, keepdims=True)
+    batch = um.run_procedure_batch(prog, X)
+    per_item = np.stack([um.run_procedure(prog, init_acc=X[i])[0] for i in range(len(X))])
+    assert np.allclose(batch, per_item, atol=1e-8)
+    # GPU toggle: never claims active without a device; status is a string
+    assert um.use_gpu(True) in (True, False)
+    um.use_gpu(False)
+    assert isinstance(um.backend_status(), str)
+
+
+def test_frechet_mean_and_transport_through_mind():
+    """The Riemannian geometry layer (Frechet mean + parallel transport) runs through the mind (SPHERE-1)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_ai import geodesic, exp_map
+    um = UnifiedMind(dim=256, seed=0)
+    norm = lambda v: v / np.linalg.norm(v)
+    r = np.random.default_rng(0); base = norm(r.standard_normal(256))
+    pts = []
+    for _ in range(20):
+        t = 0.5 * r.standard_normal(256); t = t - np.dot(t, base) * base
+        pts.append(exp_map(base, t))
+    fm = um.frechet_mean(pts)
+    assert abs(np.linalg.norm(fm) - 1.0) < 1e-6
+    from holographic_sphere import geodesic_variance
+    assert geodesic_variance(pts, fm) <= geodesic_variance(pts, norm(sum(pts))) + 1e-9
+    p = norm(r.standard_normal(256)); q = norm(r.standard_normal(256))
+    v = r.standard_normal(256); v = v - np.dot(v, p) * p
+    tq = um.parallel_transport(v, p, q)
+    assert abs(float(np.dot(tq, q))) < 1e-9
+
+
+def test_cosmic_structure_through_mind():
+    """Local structure classification runs through the mind (COSMIC-1)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0); D = 32
+    Q = np.linalg.qr(rng.standard_normal((D, D)))[0][:, :1]
+    fil = np.linspace(0, 4, 200)[:, None] @ Q.T + 0.0005 * rng.standard_normal((200, D))
+    info = um.local_structure(fil[100], fil, k=12)
+    assert info["type"] in ("void", "filament", "wall", "node")
+    _, _, summary = um.classify_cloud(fil, k=12)
+    assert summary["filament"] > 0.5 and summary["mean_intrinsic_dim"] < 1.6
+
+
+def test_field_navigation_through_mind():
+    """Gradient-field deflection + caustic detection run through the mind (LENS-1)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_lens import _normalize
+    from holographic_ai import geodesic
+    um = UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0); D = 32
+    a1 = _normalize(rng.standard_normal(D)); a2 = _normalize(rng.standard_normal(D))
+    while abs(np.dot(a1, a2)) > 0.3:
+        a2 = _normalize(rng.standard_normal(D))
+    A = np.stack([a1, a2])
+    q = _normalize(a1 + 0.5 * rng.standard_normal(D))
+    lensed, dmag, _ = um.field_deflect(q, A, sigma=0.8, strength=0.5)
+    assert geodesic(lensed, a1) < geodesic(q, a1)
+    mid = _normalize(a1 + a2)
+    assert um.detect_caustic(mid, A, sigma=0.8)[0] > um.detect_caustic(q, A, sigma=0.8)[0]
+
+
+def test_signed_distance_through_mind():
+    """Fast-sweeping SDF (optional-Numba kernel) runs through the mind (JIT-1)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=128, seed=0)
+    yy, xx = np.mgrid[0:64, 0:64]
+    inside = np.sqrt((yy - 31.5) ** 2 + (xx - 31.5) ** 2) <= 20
+    sdf = um.signed_distance_field(inside, h=1.0)
+    assert sdf[inside].max() <= 0 and sdf[~inside].min() >= 0  # signed correctly
+    assert abs(sdf[31, 31] - (-20)) < 2.0                      # centre ~ -R
+
+
+def test_codegen_and_fft_through_mind():
+    """Exact SDF normal (sympy codegen) + FFT-backend control run through the mind (CODEGEN-1 / FFT-1)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_codegen import HAS_SYMPY
+    um = UnifiedMind(dim=256, seed=0)
+    assert um.fft_backend() == "numpy"                       # default deterministic backend
+    if HAS_SYMPY:
+        val, nrm = um.exact_sdf_normal("sqrt(x**2+y**2+z**2) - 1.0")
+        P = np.random.default_rng(0).standard_normal((20, 3)) * 1.4
+        analytic = P / np.linalg.norm(P, axis=1, keepdims=True)
+        assert np.max(np.abs(nrm(P) - analytic)) < 1e-12
+
+
+def test_compile_cache_through_mind():
+    """The runtime compile cache (compile-once/reuse) runs through the mind (COMPILE-1)."""
+    from holographic_unified import UnifiedMind
+    from holographic_codegen import HAS_SYMPY
+    from holographic_compile import DEFAULT_CACHE
+    um = UnifiedMind(dim=128, seed=0)
+    if not HAS_SYMPY:
+        return
+    DEFAULT_CACHE.clear()
+    _, n1 = um.compiled_sdf_normal("sqrt(x**2+y**2+z**2) - 1.0")
+    _, n2 = um.compiled_sdf_normal("sqrt(x**2+y**2+z**2) - 1.0")
+    assert n1 is n2                                             # reused, not recompiled
+    assert um.compile_cache_stats()["hits"] >= 1
+
+
+def test_compile_kernels_through_mind():
+    """Cache-backed SymPy->Numba SDF + VSA program assembler run through the mind (COMPILE-2)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_codegen import HAS_SYMPY
+    from holographic_jit import HAS_NUMBA
+    from holographic_compile import DEFAULT_CACHE
+    um = UnifiedMind(dim=512, seed=0)
+    # program assembler is always available
+    prog = [("BIND", "a"), ("BIND", "b"), ("BUNDLE", None)]
+    DEFAULT_CACHE.clear()
+    pv1 = um.compile_program(prog); pv2 = um.compile_program(prog)
+    assert pv1 is pv2
+    if HAS_SYMPY and HAS_NUMBA:
+        d = um.compiled_sdf_numba("sqrt(x**2+y**2+z**2) - 1.0")
+        P = np.random.default_rng(0).standard_normal((10, 3)) * 1.3
+        analytic = P / np.linalg.norm(P, axis=1, keepdims=True)
+        assert np.allclose(d["grid_normal"](P), analytic, atol=1e-10)
+
+
+def test_sdf_fast_render_through_mind():
+    """The njit analytic-SDF renderer runs through the mind (SDFRENDER-1)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_codegen import HAS_SYMPY
+    from holographic_jit import HAS_NUMBA
+    from holographic_render import Camera
+    um = UnifiedMind(dim=128, seed=0)
+    if not (HAS_SYMPY and HAS_NUMBA):
+        return
+    img = um.render_sdf_fast("sqrt(x**2+y**2+z**2) - 1.0", Camera(eye=(0, 0, 3.0)), width=48, height=48)
+    assert img.shape == (48, 48, 3) and 0.0 <= img.min() and img.max() <= 1.0
+
+
+def test_compound_sdf_and_gradcache_through_mind():
+    """Compound-SDF render + exact gradient cache run through the mind (SWEEP-1)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_codegen import HAS_SYMPY, sphere, op_union
+    from holographic_jit import HAS_NUMBA
+    from holographic_render import Camera
+    um = UnifiedMind(dim=128, seed=0)
+    if HAS_SYMPY:
+        anchors = np.random.default_rng(0).uniform(-1, 1, (8, 2))
+        c = um.gradient_cache_symbolic("sin(x)*cos(y)", anchors, ("x", "y"))
+        assert c.jacobians.shape == (8, 2)
+    if HAS_SYMPY and HAS_NUMBA:
+        scene = op_union(sphere((-0.5, 0, 0), 0.7), sphere((0.5, 0, 0), 0.7))
+        img = um.render_sdf_fast(scene, Camera(eye=(0, 0, 3.0)), width=48, height=48)
+        assert img.shape == (48, 48, 3)
+
+
+def test_eikonal_3d_and_postfx_through_mind():
+    """3-D occupancy->SDF + post-processing program, both run through the mind."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=128, seed=0)
+    # 3-D signed distance of a ball
+    N = 20
+    zz, yy, xx = np.mgrid[0:N, 0:N, 0:N]; c = (N - 1) / 2.0
+    sdf = um.signed_distance_field_3d(np.sqrt((zz - c) ** 2 + (yy - c) ** 2 + (xx - c) ** 2) <= 6.0)
+    assert sdf.shape == (N, N, N) and sdf[int(c), int(c), int(c)] < 0
+    # post-processing a frame
+    rng = np.random.default_rng(0)
+    frame = rng.uniform(0, 1, (32, 32, 3))
+    out = um.post_process(frame, um.postfx_chain(("exposure", {"ev": 0.3}), ("aces", {}), ("vignette", {"strength": 0.4})))
+    assert out.shape == (32, 32, 3) and out.max() <= 1.0
+
+
+def test_semantic_text_to_scene_through_mind():
+    """Parse a description, encode to a scene vector, query it back, get a control spec -- all through the mind."""
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=1024, seed=0)
+    scene = mind.parse_scene_description("a red ball inside a glass box")
+    objs = scene["objects"]
+    assert len(objs) == 2 and objs[0]["color"] == "red"
+    sv, recs, roles = mind.encode_scene(objs)
+    q = mind.query_scene_slot(sv, roles, 1)
+    assert q["shape"] == "box" and q["material"] == "glass"
+    spec = mind.scene_control_spec("control the ball size")
+    assert any(c["param"] == "size" for c in spec["controls"])
+
+
+def test_semantic_synonyms_and_single_pass_through_mind():
+    """Synonym-resolved description -> bidirectional query through the mind; single-pass render runs."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_semantic import SynonymResolver, render_scene
+    from holographic_render import Camera
+    mind = UnifiedMind(dim=1024, seed=0)
+    r = SynonymResolver()
+    scene = mind.parse_scene_description("a crimson spherical ball beside a giant chrome cube") \
+        if False else __import__("holographic_semantic").parse_description(
+            "a crimson spherical ball beside a giant chrome cube", resolver=r)
+    objs = scene["objects"]
+    assert len(objs) == 2 and objs[0]["color"] == "red" and objs[1]["material"] == "metal"
+    sv, recs, roles = mind.encode_scene(objs)
+    assert mind.query_scene_slot(sv, roles, 0)["color"] == "red"
+    frame = render_scene(objs, Camera(eye=(2, 1.4, 4.0), target=(0, 0, 0)), width=48, height=48)
+    assert frame.shape == (48, 48, 3)
+
+
+def test_morph_scene_post_polish_optional():
+    """morph_scene gains an optional post= that polishes each frame; default is unchanged."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_postfx import default_chain
+    mind = UnifiedMind(dim=256, seed=0)
+    a = np.zeros((48, 48, 3)); a[10:30, 10:30] = 0.8
+    b = np.flip(a, 1).copy()
+    plain = mind.morph_scene(a, b, steps=4)
+    polished = mind.morph_scene(a, b, steps=4, post=default_chain())
+    assert len(plain) == len(polished)
+    assert not np.allclose(np.asarray(polished[2]), np.clip(np.asarray(plain[2]), 0, 1))
+
+
+def test_hyperreal_and_volumetric_through_mind():
+    """The mind renders a described scene fast (with a volumetric) and hyperreal (path-traced PBR)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_render import Camera
+    mind = UnifiedMind(dim=512, seed=0)
+    cam = Camera(eye=(0.3, 1.6, 5.2), target=(0, 0.1, 0), fov_deg=46.0)
+    fast = mind.render_scene_description("a red ball beside a smoke cloud", cam, width=48, height=48, quality="fast")
+    assert fast.shape == (48, 48, 3) and fast.std() > 0.02
+    hyper = mind.render_scene_description("a gold ball beside a matte blue box", cam, width=40, height=40,
+                                          quality="hyperreal", spp=4)
+    assert hyper.shape == (40, 40, 3) and hyper.std() > 0.02
+
+
+def test_holographic_fog_volume_through_mind():
+    """The mind builds a closed-form holographic fog volume and integrates density along rays with no marching."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=512, seed=0)
+    vol = mind.holographic_fog_volume([(-0.5, 0, 0), (0.5, 0.2, 0.0)], weights=[1.0, 0.8], dim=1024,
+                                      bandwidth=2.2, bounds=[(-2, 2)] * 3)
+    O = np.array([[-2.0, 0.0, 0.0], [5.0, 5.0, 5.0]])         # ray 0 passes through the fog; ray 1 is far empty space
+    D = np.array([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    tau = vol.optical_depth(O, D, 3.0)
+    assert tau[0] > 0.05 and tau[1] < 0.05    # occupied accumulates depth; empty space reads ~0 (known, unmarched)
+
+
+def test_holographic_radiance_field_through_mind():
+    """The mind bakes a tiled radiance field and reconstructs colour by query; tiling stores >1 brick."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=512, seed=0)
+    rng = np.random.default_rng(0)
+    pts = rng.uniform(-1, 1, (800, 3)); cols = np.clip(0.5 + 0.4 * np.sin(pts * 1.5), 0, 1)
+    field = mind.holographic_radiance_field(pts, cols, grid=6, dim=512)
+    rgb, cov = field.query(pts)
+    assert np.abs(rgb - cols).mean() < 0.18 and field.n_bricks() > 1
+
+
+def test_ray_path_index_delta_through_mind():
+    """The mind builds a ray<->object index and applies a colour edit as a bit-exact bounded delta (through glass)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_semantic import parse_description, render_scene
+    from holographic_render import Camera
+    mind = UnifiedMind(dim=512, seed=0)
+    objs = parse_description("a glass ball beside a red ball")["objects"]
+    cam = Camera(eye=(5.6, 0.7, 0.0), target=(0, 0.0, 0), fov_deg=40.0)
+    W = H = 80
+    base = render_scene(objs, cam, width=W, height=H, ss=1, dither=0.0)
+    index = mind.ray_path_index(objs, cam, W, H)
+    objs2 = [dict(o) for o in objs]; objs2[1] = dict(objs2[1]); objs2[1]["color"] = "blue"
+    updated, mask = mind.delta_reshade_scene(objs2, index, [1], base, cam)
+    full = render_scene(objs2, cam, width=W, height=H, ss=1, dither=0.0)
+    assert np.abs(updated - full).max() < 1e-9 and 0.0 < mask.mean() < 0.9

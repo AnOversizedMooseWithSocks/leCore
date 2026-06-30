@@ -1,0 +1,15 @@
+# Optional accelerators. holostuff runs FULLY on the base requirements.txt (NumPy/Flask/stdlib/hashlib);
+# everything here is an OPT-IN fast path that the code falls back away from cleanly when it is absent.
+numba>=0.59    # JIT for the few genuinely sequential, non-vectorizable hot loops (the fast-sweeping eikonal SDF
+               # in holographic_jit, measured ~270x). Plain @njit ONLY -- never parallel=/fastmath=, which are the
+               # only Numba features that break holostuff's bit-exact determinism guarantee.
+# cupy-cuda12x # GPU backend (holographic_backend). Pick the wheel matching your CUDA toolkit; optional, follow-the-
+               # data so CPU stays byte-identical. Left commented because the right wheel is machine-specific.
+
+sympy>=1.12     # DESIGN-TIME symbolic codegen (holographic_codegen): derive exact gradients / SDF normals / forces,
+                # emit pure-NumPy functions. Never in a hot path; the generated code is plain numpy and ships without
+                # sympy. Pure Python (rides on mpmath), so not a nightmare dep.
+# pyfftw        # Optional FFT backend (holographic_fft). MEASURED to REGRESS at holostuff's operating dimensions
+                # (slower for typical/batched binds; wins only at D>=4096), and tolerance-not-bit-exact, so it is
+                # OFF by default and numpy stays the deterministic core. Commented: enable only for large-transform
+                # workloads after running holographic_fft.benchmark().

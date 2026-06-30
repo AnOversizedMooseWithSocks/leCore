@@ -139,12 +139,20 @@ def subsurface(sdf, P, N, Ldir, depth=0.6, steps=10, sigma=4.0):
 
 def render_sdf(sdf, camera, width=256, height=256, light_dir=(-0.4, 0.7, -0.3), base_color=(0.85, 0.5, 0.35),
                sky=None, ao=True, shadows=True, reflect=0.25, refract=0.0, ior=1.5, sss=0.0,
-               sss_color=(1.0, 0.4, 0.3), ambient=0.25):
+               sss_color=(1.0, 0.4, 0.3), ambient=0.25, pbr=None, sun_intensity=3.14159, jit_expr=None,
+               post=None, return_depth=False):
     """Compose the field-native effects into one image. Primary rays are sphere-traced; hits get Lambert direct
     light gated by a SOFT SHADOW, ambient gated by AMBIENT OCCLUSION, an environment REFLECTION sampled from the
     HDRI sky, optional REFRACTION (the sky seen bent through the surface), and optional SUBSURFACE glow; misses
     show the sky dome. Returns (H,W,3) in [0,1]. `sky` may be an equirectangular HDRI array. Vectorised over all
     pixels."""
+    if jit_expr is not None and pbr is None and refract == 0.0 and sss == 0.0:
+        try:                                                 # OPT-IN: fully-JIT'd analytic-SDF renderer (~9-15x)
+            from holographic_sdf_render import render_analytic
+            return render_analytic(jit_expr, camera, width=width, height=height, light_dir=light_dir,
+                                    base_color=base_color, ao=ao, shadows=shadows, ambient=ambient, sky=sky)
+        except Exception:
+            pass                                             # sympy/numba missing -> fall through to the numpy path
     eye, dirs = camera.ray_dirs(width, height)
     D = dirs.reshape(-1, 3); O = np.broadcast_to(eye, D.shape)
     L = np.asarray(light_dir, float); L = L / (np.linalg.norm(L) + 1e-12)
@@ -159,11 +167,28 @@ def render_sdf(sdf, camera, width=256, height=256, light_dir=(-0.4, 0.7, -0.3), 
         sh = soft_shadow(sdf, Ph + Nh * 2e-3, L) if shadows else 1.0
         occ = ambient_occlusion(sdf, Ph, Nh) if ao else 1.0
         base = np.asarray(base_color, float)
-        shade = (ambient * occ)[:, None] * base + (ndl * sh)[:, None] * base   # ambient(AO) + direct(shadow)
-        if reflect > 0:                                      # environment reflection off the surface
-            R = Dh - 2 * np.sum(Dh * Nh, axis=1)[:, None] * Nh
-            fres = reflect * (0.04 + 0.96 * (1 - np.clip(-np.sum(Dh * Nh, axis=1), 0, 1)) ** 5)  # Schlick fresnel
-            shade = (1 - fres)[:, None] * shade + fres[:, None] * skyfn(R)
+        if pbr is not None:                                      # physically-based (Cook-Torrance/GGX) shading
+            from holographic_brdf import cook_torrance, fresnel_schlick
+            metallic, roughness = float(pbr[0]), float(pbr[1])
+            Vv = -Dh                                             # view direction: surface -> eye
+            Lb = np.broadcast_to(L, Nh.shape)
+            direct = cook_torrance(Nh, Vv, Lb, base, metallic, roughness) * sun_intensity
+            sh_col = sh[:, None] if np.ndim(sh) else sh          # soft shadow (array) or 1.0 (scalar)
+            occ_col = occ[:, None] if np.ndim(occ) else occ      # AO (array) or 1.0 (scalar)
+            shade = sh_col * direct + (ambient * occ_col) * base * (1.0 - metallic)   # direct + diffuse ambient
+            R = Dh - 2 * np.sum(Dh * Nh, axis=1)[:, None] * Nh                        # environment specular (IBL approx)
+            ndv = np.clip(-np.sum(Dh * Nh, axis=1), 1e-4, 1.0)
+            F0 = 0.04 * (1.0 - metallic) + base * metallic
+            Fenv = fresnel_schlick(ndv, F0)                                           # (M,3) grazing-aware Fresnel
+            shade = shade + Fenv * (1.0 - 0.5 * roughness) * skyfn(R) * occ_col
+        else:
+            occ_c = occ[:, None] if np.ndim(occ) else occ    # AO array, or 1.0 when ao=False (scalar)
+            sh_c = sh[:, None] if np.ndim(sh) else sh         # soft-shadow array, or 1.0 when shadows=False
+            shade = (ambient * occ_c) * base + (ndl[:, None] * sh_c) * base   # ambient(AO) + direct(shadow)
+            if reflect > 0:                                      # environment reflection off the surface
+                R = Dh - 2 * np.sum(Dh * Nh, axis=1)[:, None] * Nh
+                fres = reflect * (0.04 + 0.96 * (1 - np.clip(-np.sum(Dh * Nh, axis=1), 0, 1)) ** 5)  # Schlick fresnel
+                shade = (1 - fres)[:, None] * shade + fres[:, None] * skyfn(R)
         if refract > 0:                                      # the sky seen bent through the surface (optics)
             Rt = refract_dir(Dh, Nh, ior)
             shade = (1 - refract) * shade + refract * skyfn(Rt)
@@ -171,7 +196,13 @@ def render_sdf(sdf, camera, width=256, height=256, light_dir=(-0.4, 0.7, -0.3), 
             trans = subsurface(sdf, Ph, Nh, L)
             shade = shade + sss * trans[:, None] * np.asarray(sss_color)
         col[hit] = np.clip(shade, 0, 1)
-    return np.clip(col.reshape(height, width, 3), 0, 1)
+    frame = np.clip(col.reshape(height, width, 3), 0, 1)
+    depth_img = np.where(hit, t, 1e30).reshape(height, width)     # ray distance at the hit; 1e30 = miss (for DOF)
+    if post is not None:                                          # compose the post-processing PROGRAM onto the frame
+        frame = post.apply(frame, depth=depth_img)
+    if return_depth:
+        return frame, depth_img
+    return frame
 
 
 def _selftest():

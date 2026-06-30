@@ -45,7 +45,7 @@ Pure NumPy, deterministic, no new dependencies.
 """
 
 import numpy as np
-from holographic_ai import bind, unbind, bundle, cosine, permute, derived_atom
+from holographic_ai import bind, unbind, bundle, cosine, permute, derived_atom, bind_batch
 
 OPCODES = ["LOAD", "BIND", "BUNDLE", "PERMUTE", "CALL", "APPLY", "IFMATCH", "ITERATE", "REPEAT", "HALT",
            "STORE", "RECALL",                                  # STORE r / RECALL r: a small register file (ISA-4)
@@ -296,6 +296,63 @@ class HoloMachine:
         if return_state:                             # chunk threading wants the register file + stack carried out
             return acc, trace, regs, stack
         return acc, trace
+
+    def run_batch(self, program_vec, init_accs, max_steps=512):
+        """Run ONE straight-line program over a BATCH of accumulators (N, D) in a SINGLE interpret pass -- the
+        data-parallel ('as below') form of run(). The architecture sweep found the hot spot: the VM decodes each
+        instruction once (an unbind + a nearest-atom lookup -- the expensive per-instruction work), then applies
+        the value op to the accumulator; running the SAME program over N data items therefore meant N full Python
+        interpret passes, re-decoding every instruction N times. Here the decode happens ONCE and the value op hits
+        all N rows at once with the batch-aware primitives (bind_batch, roll axis=-1, broadcast-bundle). N items
+        cost one decode loop, not N -- the amortisation measured in the tests.
+
+        Why the plain ops couldn't already do this: bind() hardcodes n=a.shape[0] and permute() uses np.roll with
+        no axis, so both silently corrupt a 2-D batch -- they were written 1-D-only. bind_batch and roll(axis=-1)
+        are the batch-correct forms (matching the scalar ops to machine epsilon), which is what this uses.
+
+        SCOPE (kept honest): straight-line VALUE + REGISTER programs (LOAD/BIND/BUNDLE/PERMUTE/STORE/RECALL/HALT).
+        Data-dependent control (IFMATCH) and host/library ops (CALL/ITERATE/REPEAT/APPLY/PUSH/POP) are NOT
+        batchable -- their control flow or per-item cleanup diverges across the batch -- so they raise a clear
+        error naming the op rather than return a silently-wrong result; loop run() per item for those. Matches the
+        scalar run() to ~1e-12 (the bind_batch tie already on record), so tie-sensitive paths keep run(). Returns
+        the final (N, D) accumulator batch."""
+        acc = np.asarray(init_accs, float)
+        if acc.ndim != 2:
+            raise ValueError("run_batch expects init_accs of shape (N, D)")
+        N, D = acc.shape
+        regs = {}
+        _unbatchable = {"CALL", "ITERATE", "REPEAT", "APPLY", "IFMATCH", "PUSH", "POP"}
+        pc = 0
+        for _step in range(max_steps):
+            raw = unbind(program_vec, self.pos(pc))
+            op = self._nearest(self.op_atoms, unbind(raw, self.OP))        # decoded ONCE for the whole batch
+            if op == "HALT":
+                break
+            if op in _unbatchable:
+                raise ValueError(f"run_batch does not support the control/host op {op!r} -- straight-line "
+                                 f"value+register programs only; loop run() per item for control-flow programs")
+            if op == "STORE":
+                regs[self._nearest(self.reg_atoms, unbind(raw, self.ARG))] = acc
+                pc += 1; continue
+            if op == "RECALL":
+                reg = self._nearest(self.reg_atoms, unbind(raw, self.ARG))
+                if reg in regs:
+                    acc = regs[reg]
+                pc += 1; continue
+            arg = self._nearest(self.data_atoms, unbind(raw, self.ARG))
+            d = self.data_atoms[arg]
+            if op == "LOAD":
+                acc = np.broadcast_to(d, (N, D)).copy()                   # a program constant -> same for all rows
+            elif op == "BIND":
+                acc = bind_batch(acc, np.broadcast_to(d, (N, D)))         # the batch-correct bind (axis=-1)
+            elif op == "BUNDLE":
+                total = acc + d
+                norm = np.linalg.norm(total, axis=1, keepdims=True)
+                acc = np.where(norm > 0, total / norm, total)
+            elif op == "PERMUTE":
+                acc = np.roll(acc, 1, axis=-1)                            # per-row cyclic shift
+            pc += 1
+        return acc
 
     # ---- running a program too long for one structure (the chunk_route lesson, applied to instructions) ----
     # Control ops that GATE or CONSUME the instruction after them -- splitting a chunk between them and their

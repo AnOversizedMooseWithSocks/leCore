@@ -54,6 +54,19 @@ def gradient_cache_fd(field_fn, anchors, eps=1e-4):
     return GradientCache(anchors, values, np.array(jac))
 
 
+def gradient_cache_symbolic(expr, anchors, variables=("x", "y", "z")):
+    """Build a GradientCache with EXACT Jacobians derived symbolically (SymPy) instead of finite differences -- for
+    when you HAVE the field as a symbolic expression. The cached gradients carry NO finite-difference truncation
+    error, so the first-order interpolation is more accurate at the same anchors. Needs sympy (design-time);
+    the cache it returns is plain NumPy. `expr` is a scalar field in `variables`."""
+    from holographic_codegen import compile_field
+    c = compile_field(expr, variables)
+    anchors = np.asarray(anchors, float)
+    values = c["value"](anchors)                             # (N,)
+    jac = c["gradient"](anchors)                             # (N, d) exact gradient
+    return GradientCache(anchors, values, jac)
+
+
 def interp_first_order(cache, q, validity_radius, global_weights=False):
     """Read the cached field at query `q` by Ward's first-order (irradiance-gradient) interpolation: each anchor
     within the validity radius extrapolates its linear model v_i + J_i.(q - a_i), blended by a 1/distance weight.

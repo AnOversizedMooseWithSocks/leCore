@@ -29,18 +29,18 @@ import itertools
 import numpy as np
 
 
-def _sample_periodic(field, coords):
+def _sample_periodic(field, coords, xp=np):
     """n-linear interpolation of `field` at fractional `coords` (shape (d, *grid)), with PERIODIC wrap -- the
     sampler behind semi-Lagrangian advection. Gathers the 2^d surrounding corners and weights them by the
     fractional offset; wrap (modulo) matches the periodic FFT projection so the whole solver lives on one torus."""
     shape = field.shape
     d = len(shape)
-    base = np.floor(coords).astype(np.int64)
+    base = xp.floor(coords).astype(xp.int64)
     frac = coords - base
-    out = np.zeros(coords.shape[1:], float)
+    out = xp.zeros(coords.shape[1:], float)
     for corner in itertools.product((0, 1), repeat=d):                  # 2^d corners of the containing cell
         idx = tuple((base[k] + corner[k]) % shape[k] for k in range(d))  # periodic wrap
-        w = np.ones(coords.shape[1:], float)
+        w = xp.ones(coords.shape[1:], float)
         for k in range(d):
             w = w * (frac[k] if corner[k] else (1.0 - frac[k]))         # multilinear weight
         out += w * field[idx]
@@ -53,7 +53,7 @@ class StableFluid:
 
     def __init__(self, shape, dt=0.1, viscosity=0.0, diffusion=0.0,
                  dissipation=0.01, cooling=0.05, buoyancy_alpha=0.15, buoyancy_beta=0.05,
-                 vorticity=2.0, up_axis=0, ignition=0.5, burn_rate=2.0, smoke_yield=0.4):
+                 vorticity=2.0, up_axis=0, ignition=0.5, burn_rate=2.0, smoke_yield=0.4, device="cpu"):
         self.shape = tuple(int(s) for s in shape)
         self.d = len(self.shape)
         self.dt = float(dt)
@@ -69,11 +69,17 @@ class StableFluid:
         self.burn_rate = float(burn_rate)
         self.smoke_yield = float(smoke_yield)        # smoke produced per unit fuel burned
 
-        self.vel = np.zeros((self.d,) + self.shape, float)
-        self.density = np.zeros(self.shape, float)
-        self.temperature = np.zeros(self.shape, float)
-        self.fuel = np.zeros(self.shape, float)
-        self._grids = np.indices(self.shape, dtype=float)  # (d, *shape) cell coordinates, reused every advect
+        # backend: device='cpu' -> NumPy (default, byte-identical); device='gpu' -> CuPy if available (the FFT
+        # projection + elementwise advection are ideal GPU work). All state lives on self.xp; render via to_numpy().
+        from holographic_backend import array_module
+        self.device = device
+        self.xp = array_module(device)
+        xp = self.xp
+        self.vel = xp.zeros((self.d,) + self.shape, float)
+        self.density = xp.zeros(self.shape, float)
+        self.temperature = xp.zeros(self.shape, float)
+        self.fuel = xp.zeros(self.shape, float)
+        self._grids = xp.indices(self.shape, dtype=float)  # (d, *shape) cell coordinates, reused every advect
         self._K, self._k2 = self._wavenumbers()
 
     # --- spectral helpers (the on-thesis core) -------------------------------------------------------
@@ -88,12 +94,12 @@ class StableFluid:
         those modes are invisible to the divergence operator and are already divergence-free to it."""
         K = []
         for ax, n in enumerate(self.shape):
-            theta = 2.0 * np.pi * np.fft.fftfreq(n)
-            kappa = np.sin(theta)                         # symbol of the centred difference = i*sin(theta)
+            theta = 2.0 * self.xp.pi * self.xp.fft.fftfreq(n)
+            kappa = self.xp.sin(theta)                         # symbol of the centred difference = i*sin(theta)
             sh = [1] * self.d; sh[ax] = n
             K.append(kappa.reshape(sh))
-        k2 = sum(k ** 2 for k in K) + np.zeros(self.shape)
-        k2 = np.where(np.abs(k2) < 1e-12, 1.0, k2)
+        k2 = sum(k ** 2 for k in K) + self.xp.zeros(self.shape)
+        k2 = self.xp.where(self.xp.abs(k2) < 1e-12, 1.0, k2)
         return K, k2
 
     def project(self, vel):
@@ -101,12 +107,12 @@ class StableFluid:
         u_hat <- u_hat - k (k.u_hat)/|k|^2. The Helmholtz-Hodge projection as a circular convolution -- the whole
         pressure solve in one pair of FFTs, exact, no iteration. This is the engine's periodic algebra doing the
         single most expensive step of every professional fluid solver for free."""
-        uhat = [np.fft.fftn(vel[k]) for k in range(self.d)]
+        uhat = [self.xp.fft.fftn(vel[k]) for k in range(self.d)]
         kdotu = sum(self._K[k] * uhat[k] for k in range(self.d))
-        out = np.empty_like(vel)
+        out = self.xp.empty_like(vel)
         for k in range(self.d):
             proj = uhat[k] - self._K[k] * kdotu / self._k2
-            out[k] = np.real(np.fft.ifftn(proj))
+            out[k] = self.xp.real(self.xp.fft.ifftn(proj))
         return out
 
     def diffuse(self, field, rate):
@@ -115,7 +121,7 @@ class StableFluid:
         if rate <= 0.0:
             return field
         decay = 1.0 / (1.0 + rate * self.dt * self._k2)
-        return np.real(np.fft.ifftn(np.fft.fftn(field) * decay))
+        return self.xp.real(self.xp.fft.ifftn(self.xp.fft.fftn(field) * decay))
 
     # --- transport -----------------------------------------------------------------------------------
     def _backtrace(self, vel):
@@ -124,12 +130,12 @@ class StableFluid:
 
     def advect(self, field, vel):
         """Move a SCALAR field with the flow, semi-Lagrangian (stable for any dt)."""
-        return _sample_periodic(field, self._backtrace(vel))
+        return _sample_periodic(field, self._backtrace(vel), self.xp)
 
     def advect_velocity(self, vel):
         """Self-advection of the VELOCITY field (each component sampled at the same backtraced feet)."""
         coords = self._backtrace(vel)
-        return np.array([_sample_periodic(vel[k], coords) for k in range(self.d)])
+        return self.xp.array([_sample_periodic(vel[k], coords, self.xp) for k in range(self.d)])
 
     # --- forces --------------------------------------------------------------------------------------
     def buoyancy(self, vel):
@@ -149,9 +155,9 @@ class StableFluid:
         eps = self.vorticity
         if self.d == 2:
             wz = self._d(vel[1], 0) - self._d(vel[0], 1)                # curl_z
-            mag = np.abs(wz)
+            mag = self.xp.abs(wz)
             gx, gy = self._d(mag, 0), self._d(mag, 1)
-            nrm = np.sqrt(gx ** 2 + gy ** 2) + 1e-12
+            nrm = self.xp.sqrt(gx ** 2 + gy ** 2) + 1e-12
             Nx, Ny = gx / nrm, gy / nrm
             f0 = eps * (Ny * wz)                                        # N x omega, with omega = wz * z_hat
             f1 = eps * (-Nx * wz)
@@ -161,9 +167,9 @@ class StableFluid:
         wx = self._d(vel[2], 1) - self._d(vel[1], 2)
         wy = self._d(vel[0], 2) - self._d(vel[2], 0)
         wz = self._d(vel[1], 0) - self._d(vel[0], 1)
-        mag = np.sqrt(wx ** 2 + wy ** 2 + wz ** 2)
+        mag = self.xp.sqrt(wx ** 2 + wy ** 2 + wz ** 2)
         gx, gy, gz = self._d(mag, 0), self._d(mag, 1), self._d(mag, 2)
-        nrm = np.sqrt(gx ** 2 + gy ** 2 + gz ** 2) + 1e-12
+        nrm = self.xp.sqrt(gx ** 2 + gy ** 2 + gz ** 2) + 1e-12
         Nx, Ny, Nz = gx / nrm, gy / nrm, gz / nrm
         out = vel.copy()
         out[0] += self.dt * eps * (Ny * wz - Nz * wy)                   # N x omega
@@ -172,8 +178,8 @@ class StableFluid:
         return out
 
     def _d(self, f, axis):
-        """Centred periodic derivative along one axis (np.roll = periodic shift)."""
-        return 0.5 * (np.roll(f, -1, axis=axis) - np.roll(f, 1, axis=axis))
+        """Centred periodic derivative along one axis (self.xp.roll = periodic shift)."""
+        return 0.5 * (self.xp.roll(f, -1, axis=axis) - self.xp.roll(f, 1, axis=axis))
 
     # --- combustion ----------------------------------------------------------------------------------
     def combust(self):
@@ -183,20 +189,23 @@ class StableFluid:
         burning = (self.temperature >= self.ignition) & (self.fuel > 0.0)
         if not burning.any():
             return
-        burned = np.where(burning, np.minimum(self.fuel, self.burn_rate * self.dt * self.fuel), 0.0)
+        burned = self.xp.where(burning, self.xp.minimum(self.fuel, self.burn_rate * self.dt * self.fuel), 0.0)
         self.fuel = self.fuel - burned
         self.temperature = self.temperature + burned                    # exothermic: fuel -> heat
         self.density = self.density + self.smoke_yield * burned         # and soot/smoke
 
     # --- emission ------------------------------------------------------------------------------------
     def add_source(self, region, density=0.0, temperature=0.0, fuel=0.0, vel=None):
-        """Inject smoke / heat / fuel / velocity into a boolean `region` mask -- a candle, a chimney, an emitter."""
+        """Inject smoke / heat / fuel / velocity into a `region` (a slice tuple or a boolean mask) -- a candle, a
+        chimney, an emitter. Array inputs are moved to the solver's device so a GPU solver stays on the GPU."""
+        if hasattr(region, "shape"):                 # a boolean mask -> match the solver's device
+            region = self.xp.asarray(region)
         if density:     self.density[region] += density
         if temperature: self.temperature[region] += temperature
         if fuel:        self.fuel[region] += fuel
         if vel is not None:
             for k in range(self.d):
-                self.vel[k][region] += vel[k]
+                self.vel[k][region] += float(vel[k]) if np.isscalar(vel[k]) else self.xp.asarray(vel[k])
 
     # --- the Stam update -----------------------------------------------------------------------------
     def step(self):
@@ -209,7 +218,7 @@ class StableFluid:
         self.vel = self.project(self.vel)                               # clean the force-injected divergence
         self.vel = self.advect_velocity(self.vel)
         if self.viscosity > 0.0:
-            self.vel = np.array([self.diffuse(self.vel[k], self.viscosity) for k in range(self.d)])
+            self.vel = self.xp.array([self.diffuse(self.vel[k], self.viscosity) for k in range(self.d)])
         self.vel = self.project(self.vel)                               # advection re-introduces divergence; clean it
         self.density = self.advect(self.density, self.vel)
         self.temperature = self.advect(self.temperature, self.vel)
@@ -220,11 +229,17 @@ class StableFluid:
         self.density *= (1.0 - self.dissipation * self.dt)
         self.temperature *= (1.0 - self.cooling * self.dt)
 
+    def to_numpy(self, name):
+        """Return a field ('vel'/'density'/'temperature'/'fuel') as a host NumPy array, for rendering/inspection
+        (no-op on CPU; device->host copy on GPU)."""
+        from holographic_backend import asnumpy
+        return asnumpy(getattr(self, name))
+
     def divergence(self, vel=None):
         """Max |div v| -- the incompressibility residual. After project() this is ~0 (the correctness check)."""
         vel = self.vel if vel is None else vel
         div = sum(self._d(vel[k], k) for k in range(self.d))
-        return float(np.max(np.abs(div)))
+        return float(self.xp.max(self.xp.abs(div)))
 
 
 def _selftest():
