@@ -12,6 +12,9 @@ LDLIBS += -framework Accelerate
 endif
 
 BUILD_DIR := build/$(BUILD_FLAVOR)
+SOKOL_DIR ?= ../vendor/sokol
+SOKOL_BUILD_DIR := build/sokol
+SOKOL_ASTEROIDS := $(SOKOL_BUILD_DIR)/holo_sokol_asteroids
 INCLUDE_DIR := include
 SRC_DIR := src
 TEST_DIR := tests
@@ -25,9 +28,13 @@ LDLIBS += -lm
 ifeq ($(UNAME_S),Darwin)
 SHLIB_EXT := .dylib
 SHLIB_FLAGS := -dynamiclib -install_name @rpath/libholoc$(SHLIB_EXT)
+SOKOL_SOURCE_MODE := -x objective-c
+SOKOL_LDLIBS := -framework Cocoa -framework QuartzCore -framework OpenGL
 else
 SHLIB_EXT := .so
 SHLIB_FLAGS := -shared
+SOKOL_SOURCE_MODE :=
+SOKOL_LDLIBS := -lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm
 endif
 
 LIB := $(BUILD_DIR)/libholoc.a
@@ -36,7 +43,7 @@ OBJS := $(BUILD_DIR)/holo_core.o $(BUILD_DIR)/holo_trace.o $(BUILD_DIR)/holo_pro
 TESTS := $(BUILD_DIR)/test_core $(BUILD_DIR)/test_trace $(BUILD_DIR)/test_program
 BENCHES := $(BUILD_DIR)/bench_trace
 
-.PHONY: all shared test bench bench-fixed bench-program bench-compare clean
+.PHONY: all shared test bench bench-fixed bench-program bench-compare sokol-asteroids sokol-run clean
 
 all: $(LIB) $(SHLIB)
 
@@ -44,6 +51,9 @@ shared: $(SHLIB)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
+
+$(SOKOL_BUILD_DIR):
+	mkdir -p $(SOKOL_BUILD_DIR)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(PICFLAGS) -c $< -o $@
@@ -84,6 +94,14 @@ bench-compare: $(BENCHES) $(SHLIB)
 	$(PYTHON) benchmarks/bench_trace.py --summary --binary ./$(BUILD_DIR)/bench_trace
 	HOLOSTUFF_C_LIB=$(abspath $(SHLIB)) $(PYTHON) benchmarks/bench_bind_fixed.py --summary
 	HOLOSTUFF_C_LIB=$(abspath $(SHLIB)) $(PYTHON) benchmarks/bench_program.py --summary
+
+sokol-asteroids: $(SOKOL_ASTEROIDS)
+
+sokol-run: $(SOKOL_ASTEROIDS)
+	./$(SOKOL_ASTEROIDS)
+
+$(SOKOL_ASTEROIDS): sokol/holo_sokol_asteroids.c $(SOKOL_DIR)/sokol_app.h $(SOKOL_DIR)/sokol_gfx.h $(SOKOL_DIR)/sokol_glue.h $(SOKOL_DIR)/sokol_log.h | $(SOKOL_BUILD_DIR)
+	$(CC) $(SOKOL_SOURCE_MODE) $(CPPFLAGS) -I$(SOKOL_DIR) $(CFLAGS) $< $(SOKOL_LDLIBS) -o $@
 
 clean:
 	rm -rf build
