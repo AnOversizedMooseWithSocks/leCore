@@ -145,12 +145,16 @@ class VectorFunctionEncoder:
     def _point_spectra(self, pts):
         spectrum = np.ones((pts.shape[0], self._half_len), dtype=np.complex128)
         for k, ax in enumerate(self.axes):
-            values = pts[:, k]
-            warp_x = getattr(ax, "_warp_x", None)
-            if warp_x is not None:
-                values = np.interp(values, warp_x, ax._warp_u)
-            spectrum *= np.exp(1j * ax.scale * values[:, None] * self._axis_half_phases[k][None, :])
+            spectrum *= self._axis_spectra(k, pts[:, k])
         return spectrum
+
+    def _axis_spectra(self, axis, values):
+        ax = self.axes[axis]
+        values = np.asarray(values, float).ravel()
+        warp_x = getattr(ax, "_warp_x", None)
+        if warp_x is not None:
+            values = np.interp(values, warp_x, ax._warp_u)
+        return np.exp(1j * ax.scale * values[:, None] * self._axis_half_phases[axis][None, :])
 
     def encode_many(self, points):
         """Vectorised n-D FPE encoding for a row stack of points.
@@ -247,6 +251,35 @@ class VectorFunctionEncoder:
         for (start, end), values in zip(spans, parts):
             out[start:end] = values
         return out
+
+    def query_grid(self, function, axes, workers=None):
+        """Evaluate a represented function on a Cartesian grid.
+
+        The common terrain/material case is 2-D and separable in the FPE spectrum:
+        spectrum(x, y) = spectrum_x(x) * spectrum_y(y). That lets a whole grid
+        read use O((nx + ny) * dim) exponentials plus one matrix multiply instead
+        of O(nx * ny * dim) point spectra.
+        """
+        axis_values = [np.asarray(axis, float).ravel() for axis in axes]
+        if len(axis_values) != self.n_dims:
+            raise ValueError(f"axes must have {self.n_dims} entries")
+        shape = tuple(len(axis) for axis in axis_values)
+        if any(length == 0 for length in shape):
+            return np.zeros(shape, dtype=float)
+        if self.n_dims != 2:
+            grids = np.meshgrid(*axis_values, indexing="ij")
+            pts = np.stack([g.ravel() for g in grids], axis=1)
+            return self.query_many(function, pts, workers=workers).reshape(shape)
+
+        fn = np.asarray(function, float)
+        fnorm = np.linalg.norm(fn)
+        if fnorm == 0:
+            return np.zeros(shape, dtype=float)
+        fn_spectrum = np.conj(np.fft.rfft(fn)) * self._rfft_weights
+        sx = self._axis_spectra(0, axis_values[0])
+        sy = self._axis_spectra(1, axis_values[1])
+        values = (sx * fn_spectrum[None, :]) @ sy.T
+        return np.real(values) / (self.dim * fnorm)
 
     def shift(self, function, delta):
         """Translate the WHOLE function by `delta` with a single binding:

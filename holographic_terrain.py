@@ -69,7 +69,7 @@ def terrain_to_mesh(terrain, res, z_scale=1.0):
     ys = np.linspace(y0, y1, res)
     gx, gy = np.meshgrid(xs, ys, indexing="ij")
     xy = np.stack([gx.ravel(), gy.ravel()], axis=1)
-    heights = terrain.heights(xy)
+    heights = terrain.heightmap(res).ravel()
     verts = np.column_stack([xy[:, 0], xy[:, 1], z_scale * heights])
     ui, vj = np.meshgrid(np.linspace(0, 1, res), np.linspace(0, 1, res), indexing="ij")
     uvs = np.stack([ui.ravel(), vj.ravel()], axis=1)
@@ -100,7 +100,7 @@ def terrain_to_sdf(terrain, z_bounds, res=10, dim=2048, bandwidth=10.0, seed=0):
     xs = np.linspace(x0, x1, res); ys = np.linspace(y0, y1, res); zs = np.linspace(z0, z1, res)
     gx, gy, gz = np.meshgrid(xs, ys, zs, indexing="ij")
     P = np.stack([gx.ravel(), gy.ravel(), gz.ravel()], axis=1)
-    H = terrain.heights(P[:, :2])
+    H = np.repeat(terrain.heightmap(res).ravel(), res)
     sdf = P[:, 2] - H                                  # z - height: + above the terrain, - below
     enc = VectorFunctionEncoder(3, dim=dim, bounds=[(x0, x1), (y0, y1), (z0, z1)],
                                 bandwidth=bandwidth, seed=seed)

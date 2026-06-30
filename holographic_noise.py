@@ -211,15 +211,33 @@ class FractalNoise:
             total += part
         return total / self._norm
 
-    def sample_grid(self, res):
+    def sample_grid(self, res, workers=None):
         """Evaluate fBm on a res^n_dims lattice over `bounds` (n_dims==2 -> a res x res array).
 
         For measuring (fractal dimension / Hurst / spectrum) and for feeding terrain/displacement.
         """
         axes = [np.linspace(lo, hi, res) for (lo, hi) in self.bounds]
+        if self.n_dims == 2:
+            total = np.zeros((res, res), dtype=float)
+            octave_items = list(zip(self.amplitudes, self.encoders, self.fields))
+            worker_count = _fpe_parallel_workers(self.octaves, res * res * max(1, self.octaves), workers)
+
+            def octave_grid(item):
+                amp, enc, fld = item
+                return amp * enc.query_grid(fld, axes)
+
+            if worker_count == 1:
+                parts = [octave_grid(item) for item in octave_items]
+            else:
+                with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                    parts = list(executor.map(octave_grid, octave_items))
+            for part in parts:
+                total += part
+            return total / self._norm
+
         grids = np.meshgrid(*axes, indexing="ij")
         pts = np.stack([g.ravel() for g in grids], axis=1)
-        vals = self.query_many(pts)
+        vals = self.query_many(pts, workers=workers)
         return vals.reshape([res] * self.n_dims)
 
 

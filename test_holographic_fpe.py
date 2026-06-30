@@ -84,6 +84,18 @@ def test_parallel_bundle_and_query_many_match_serial():
     assert np.allclose(parallel, serial, atol=1e-12)
 
 
+def test_query_grid_matches_query_many_on_cartesian_grid():
+    enc = VectorFunctionEncoder(2, dim=1024, bounds=[(-1, 1), (-2, 2)], seed=10, bandwidth=4.0)
+    rng = np.random.default_rng(10)
+    pts = rng.uniform([-1, -2], [1, 2], (32, 2))
+    f = enc.bundle(pts, rng.normal(size=len(pts)))
+    xs = np.linspace(-1, 1, 9)
+    ys = np.linspace(-2, 2, 7)
+    gx, gy = np.meshgrid(xs, ys, indexing="ij")
+    flat = np.stack([gx.ravel(), gy.ravel()], axis=1)
+    assert np.allclose(enc.query_grid(f, [xs, ys]), enc.query_many(f, flat).reshape(9, 7), atol=1e-12)
+
+
 def test_query_many_handles_1d_point_stacks():
     enc = VectorFunctionEncoder(1, dim=512, bounds=[(0, 10)], seed=6)
     xs = np.linspace(0, 10, 20)
