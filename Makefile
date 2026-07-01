@@ -11,7 +11,7 @@ HOLO_USE_ACCELERATE ?= $(DEFAULT_HOLO_USE_ACCELERATE)
 C_MAKE := $(MAKE) -C c HOLO_USE_ACCELERATE=$(HOLO_USE_ACCELERATE) PYTHON=$(PYTHON)
 C_ENV := HOLOSTUFF_USE_C=1 HOLOSTUFF_C_STRICT=1
 
-.PHONY: help all deps check-experiment-deps c c-test c-bench c-ci-evidence sokol-asteroids sokol-run test test-py benchmark benchmark-c ablations ablations-c stress stress-c experiments experiments-c demos clean
+.PHONY: help all deps check-experiment-deps c c-test c-bench c-ci-evidence sokol-asteroids sokol-run test test-py benchmark benchmark-c ablations ablations-c stress stress-c metrics metrics-path-d metrics-full experiments experiments-c demos clean
 
 help:
 	@printf '%s\n' \
@@ -26,6 +26,9 @@ help:
 	  '  make test           build C kernel, then run pytest' \
 	  '  make benchmark      run benchmark_holographic.py with NumPy core' \
 	  '  make benchmark-c    run benchmark_holographic.py with C core' \
+	  '  make metrics        write central JSON/Markdown metrics evidence' \
+	  '  make metrics-path-d regenerate core Path D caches, then write metrics evidence' \
+	  '  make metrics-full   run full ablations, stress, Path D, and strict metrics evidence' \
 	  '  make experiments    run benchmark, ablations, and stress with NumPy core' \
 	  '  make experiments-c  run benchmark, ablations, stress, and trace bench with C core' \
 	  '  make demos          run the guided tour'
@@ -80,6 +83,15 @@ stress:
 
 stress-c: c
 	$(C_ENV) $(PYTHON) stress_holographic.py
+
+metrics:
+	$(PYTHON) holographic_metrics.py --output-dir metrics
+
+metrics-path-d:
+	$(PYTHON) holographic_metrics.py --output-dir metrics --run-path-d
+
+metrics-full:
+	$(PYTHON) holographic_metrics.py --output-dir metrics --full-ablations --include-stress --run-path-d all --strict
 
 experiments: benchmark ablations stress
 
