@@ -20,10 +20,12 @@ SRC_DIR := src
 TEST_DIR := tests
 BENCH_DIR := benchmarks
 
+THREAD_FLAGS ?= -pthread
 CFLAGS ?= -std=c99 -O3 -Wall -Wextra -Wpedantic
+CFLAGS += $(THREAD_FLAGS)
 PICFLAGS ?= -fPIC
 CPPFLAGS += -I$(INCLUDE_DIR)
-LDLIBS += -lm
+LDLIBS += $(THREAD_FLAGS) -lm
 
 ifeq ($(UNAME_S),Darwin)
 SHLIB_EXT := .dylib

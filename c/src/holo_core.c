@@ -3,6 +3,8 @@
 #endif
 
 #include "holo_core.h"
+#include "holo_internal.h"
+#include "holo_mutex.h"
 
 #include <limits.h>
 #include <math.h>
@@ -39,6 +41,8 @@ struct holo_engine {
     size_t dim;
     size_t log2_dim;
     uint64_t seed;
+    holo_mutex mutex;
+    int mutex_ready;
 #if HOLO_USE_ACCELERATE
     FFTSetupD fft_setup;
     double *ar;
@@ -57,6 +61,8 @@ struct holo_engine {
 struct holo_action_index {
     size_t dim;
     size_t count;
+    holo_mutex mutex;
+    int mutex_ready;
     double *vectors;
     double *norms;
     uint64_t *labels;
@@ -131,6 +137,36 @@ static void free_aligned(void *ptr)
 #endif
 }
 
+int holo_engine_lock_internal(holo_engine *engine)
+{
+    if (!engine || !engine->mutex_ready) {
+        return HOLO_EINVAL;
+    }
+    return holo_mutex_lock(&engine->mutex) == 0 ? HOLO_OK : HOLO_EINVAL;
+}
+
+void holo_engine_unlock_internal(holo_engine *engine)
+{
+    if (engine && engine->mutex_ready) {
+        holo_mutex_unlock(&engine->mutex);
+    }
+}
+
+static int action_index_lock(const holo_action_index *index)
+{
+    if (!index || !index->mutex_ready) {
+        return HOLO_EINVAL;
+    }
+    return holo_mutex_lock((holo_mutex *)&index->mutex) == 0 ? HOLO_OK : HOLO_EINVAL;
+}
+
+static void action_index_unlock(const holo_action_index *index)
+{
+    if (index && index->mutex_ready) {
+        holo_mutex_unlock((holo_mutex *)&index->mutex);
+    }
+}
+
 int holo_is_power_of_two(size_t n)
 {
     return n != 0 && (n & (n - 1)) == 0;
@@ -161,6 +197,11 @@ holo_engine *holo_engine_create(size_t dim, uint64_t seed)
     if (!engine) {
         return NULL;
     }
+    if (holo_mutex_init_recursive(&engine->mutex) != 0) {
+        free(engine);
+        return NULL;
+    }
+    engine->mutex_ready = 1;
 #if HOLO_USE_ACCELERATE
     engine->log2_dim = log2_size(dim);
     engine->fft_setup = vDSP_create_fftsetupD((vDSP_Length)engine->log2_dim, FFT_RADIX2);
@@ -210,6 +251,9 @@ void holo_engine_destroy(holo_engine *engine)
     free_aligned(engine->b);
 #endif
     free_aligned(engine->real);
+    if (engine->mutex_ready) {
+        holo_mutex_destroy(&engine->mutex);
+    }
     free(engine);
 }
 
@@ -536,11 +580,16 @@ int holo_keygen(holo_engine *engine, uint64_t id, double *out)
 
 int holo_keygen_unitary(holo_engine *engine, uint64_t id, double *out)
 {
+    int rc;
     uint64_t state;
     size_t i;
     const size_t n = engine ? engine->dim : 0;
     if (!engine || !out) {
         return HOLO_EINVAL;
+    }
+    rc = holo_engine_lock_internal(engine);
+    if (rc != HOLO_OK) {
+        return rc;
     }
     state = mix_id(engine->seed ^ UINT64_C(0xa0761d6478bd642f), id);
 #if HOLO_USE_ACCELERATE
@@ -577,14 +626,21 @@ int holo_keygen_unitary(holo_engine *engine, uint64_t id, double *out)
         out[i] = engine->a[i].re;
     }
 #endif
-    return holo_normalize(n, out);
+    rc = holo_normalize(n, out);
+    holo_engine_unlock_internal(engine);
+    return rc;
 }
 
 int holo_bind(holo_engine *engine, const double *a, const double *b, double *out)
 {
+    int rc;
     const size_t n = engine ? engine->dim : 0;
     if (!engine || !a || !b || !out) {
         return HOLO_EINVAL;
+    }
+    rc = holo_engine_lock_internal(engine);
+    if (rc != HOLO_OK) {
+        return rc;
     }
 #if HOLO_USE_ACCELERATE
     memcpy(engine->ar, a, n * sizeof(engine->ar[0]));
@@ -617,6 +673,7 @@ int holo_bind(holo_engine *engine, const double *a, const double *b, double *out
         out[i] = engine->a[i].re;
     }
 #endif
+    holo_engine_unlock_internal(engine);
     return HOLO_OK;
 }
 
@@ -627,12 +684,17 @@ int holo_bind_spectrum_accumulate(holo_engine *engine,
                                   double *freq_real,
                                   double *freq_imag)
 {
+    int rc;
     const size_t n = engine ? engine->dim : 0;
     if (!engine || !a || !b || !freq_real || !freq_imag) {
         return HOLO_EINVAL;
     }
     if (weight == 0.0) {
         return HOLO_OK;
+    }
+    rc = holo_engine_lock_internal(engine);
+    if (rc != HOLO_OK) {
+        return rc;
     }
 #if HOLO_USE_ACCELERATE
     memcpy(engine->ar, a, n * sizeof(engine->ar[0]));
@@ -661,6 +723,7 @@ int holo_bind_spectrum_accumulate(holo_engine *engine,
         freq_imag[i] += weight * im;
     }
 #endif
+    holo_engine_unlock_internal(engine);
     return HOLO_OK;
 }
 
@@ -670,6 +733,7 @@ int holo_bind_fixed_many(holo_engine *engine,
                          size_t count,
                          double *out)
 {
+    int rc;
     size_t row;
     const size_t n = engine ? engine->dim : 0;
     if (!engine || !fixed || (!rows && count > 0) || (!out && count > 0)) {
@@ -677,6 +741,10 @@ int holo_bind_fixed_many(holo_engine *engine,
     }
     if (count == 0) {
         return HOLO_OK;
+    }
+    rc = holo_engine_lock_internal(engine);
+    if (rc != HOLO_OK) {
+        return rc;
     }
 #if HOLO_USE_ACCELERATE
     memcpy(engine->ar, fixed, n * sizeof(engine->ar[0]));
@@ -719,21 +787,29 @@ int holo_bind_fixed_many(holo_engine *engine,
         }
     }
 #endif
+    holo_engine_unlock_internal(engine);
     return HOLO_OK;
 }
 
 int holo_unbind(holo_engine *engine, const double *pair, const double *key, double *out)
 {
+    int rc;
     size_t i;
     const size_t n = engine ? engine->dim : 0;
     if (!engine || !pair || !key || !out) {
         return HOLO_EINVAL;
     }
+    rc = holo_engine_lock_internal(engine);
+    if (rc != HOLO_OK) {
+        return rc;
+    }
     engine->real[0] = key[0];
     for (i = 1; i < n; ++i) {
         engine->real[i] = key[n - i];
     }
-    return holo_bind(engine, pair, engine->real, out);
+    rc = holo_bind(engine, pair, engine->real, out);
+    holo_engine_unlock_internal(engine);
+    return rc;
 }
 
 int holo_spectrum_from_real(holo_engine *engine,
@@ -741,9 +817,14 @@ int holo_spectrum_from_real(holo_engine *engine,
                             double *freq_real,
                             double *freq_imag)
 {
+    int rc;
     const size_t n = engine ? engine->dim : 0;
     if (!engine || !in || !freq_real || !freq_imag) {
         return HOLO_EINVAL;
+    }
+    rc = holo_engine_lock_internal(engine);
+    if (rc != HOLO_OK) {
+        return rc;
     }
 #if HOLO_USE_ACCELERATE
     memcpy(engine->ar, in, n * sizeof(engine->ar[0]));
@@ -763,6 +844,7 @@ int holo_spectrum_from_real(holo_engine *engine,
         freq_imag[i] = engine->a[i].im;
     }
 #endif
+    holo_engine_unlock_internal(engine);
     return HOLO_OK;
 }
 
@@ -771,9 +853,14 @@ int holo_real_from_spectrum(holo_engine *engine,
                             const double *freq_imag,
                             double *out)
 {
+    int rc;
     const size_t n = engine ? engine->dim : 0;
     if (!engine || !freq_real || !freq_imag || !out) {
         return HOLO_EINVAL;
+    }
+    rc = holo_engine_lock_internal(engine);
+    if (rc != HOLO_OK) {
+        return rc;
     }
 #if HOLO_USE_ACCELERATE
     memcpy(engine->ar, freq_real, n * sizeof(engine->ar[0]));
@@ -791,6 +878,7 @@ int holo_real_from_spectrum(holo_engine *engine,
         out[i] = engine->a[i].re;
     }
 #endif
+    holo_engine_unlock_internal(engine);
     return HOLO_OK;
 }
 
@@ -800,9 +888,14 @@ int holo_unbind_spectrum(holo_engine *engine,
                          const double *key,
                          double *out)
 {
+    int rc;
     const size_t n = engine ? engine->dim : 0;
     if (!engine || !pair_freq_real || !pair_freq_imag || !key || !out) {
         return HOLO_EINVAL;
+    }
+    rc = holo_engine_lock_internal(engine);
+    if (rc != HOLO_OK) {
+        return rc;
     }
 #if HOLO_USE_ACCELERATE
     DSPDoubleSplitComplex pair_freq;
@@ -832,6 +925,7 @@ int holo_unbind_spectrum(holo_engine *engine,
         out[i] = engine->a[i].re;
     }
 #endif
+    holo_engine_unlock_internal(engine);
     return HOLO_OK;
 }
 
@@ -1035,6 +1129,11 @@ holo_action_index *holo_action_index_create(size_t dim, size_t count)
     if (!index) {
         return NULL;
     }
+    if (holo_mutex_init_recursive(&index->mutex) != 0) {
+        free(index);
+        return NULL;
+    }
+    index->mutex_ready = 1;
     index->vectors = (double *)alloc_zeroed(dim * count, sizeof(index->vectors[0]));
     index->norms = (double *)alloc_zeroed(count, sizeof(index->norms[0]));
     index->labels = (uint64_t *)alloc_zeroed(count, sizeof(index->labels[0]));
@@ -1055,6 +1154,9 @@ void holo_action_index_destroy(holo_action_index *index)
     free_aligned(index->vectors);
     free_aligned(index->norms);
     free_aligned(index->labels);
+    if (index->mutex_ready) {
+        holo_mutex_destroy(&index->mutex);
+    }
     free(index);
 }
 
@@ -1072,15 +1174,21 @@ int holo_action_index_set(holo_action_index *index,
                           const double *vectors,
                           const uint64_t *labels)
 {
+    int rc;
     size_t i;
     if (!index || !index->vectors || !index->norms || !index->labels || !vectors) {
         return HOLO_EINVAL;
+    }
+    rc = action_index_lock(index);
+    if (rc != HOLO_OK) {
+        return rc;
     }
     memcpy(index->vectors, vectors, index->dim * index->count * sizeof(index->vectors[0]));
     for (i = 0; i < index->count; ++i) {
         index->norms[i] = holo_norm(index->dim, index->vectors + i * index->dim);
         index->labels[i] = labels ? labels[i] : (uint64_t)i;
     }
+    action_index_unlock(index);
     return HOLO_OK;
 }
 
@@ -1089,15 +1197,22 @@ int holo_action_index_search(const holo_action_index *index,
                              size_t k,
                              holo_match *out)
 {
+    int rc;
     if (!index || !index->vectors || !index->norms || !index->labels) {
         return HOLO_EINVAL;
     }
-    return holo_cleanup_topk_with_norms(index->dim,
-                                        query,
-                                        index->vectors,
-                                        index->norms,
-                                        index->labels,
-                                        index->count,
-                                        k,
-                                        out);
+    rc = action_index_lock(index);
+    if (rc != HOLO_OK) {
+        return rc;
+    }
+    rc = holo_cleanup_topk_with_norms(index->dim,
+                                      query,
+                                      index->vectors,
+                                      index->norms,
+                                      index->labels,
+                                      index->count,
+                                      k,
+                                      out);
+    action_index_unlock(index);
+    return rc;
 }

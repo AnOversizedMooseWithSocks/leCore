@@ -1,11 +1,20 @@
 #include "holo_trace.h"
 
 #include <math.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #define DIM 512U
 #define ACTIONS 4U
+#define TRACE_THREAD_STORES 50U
+
+typedef struct trace_thread_case {
+    holo_trace *trace;
+    const double *state;
+    const double *action;
+    int failed;
+} trace_thread_case;
 
 static void require(int ok, const char *msg)
 {
@@ -23,6 +32,17 @@ static void require_ok(int rc, const char *msg)
     }
 }
 
+static void *trace_store_worker(void *opaque)
+{
+    trace_thread_case *tc = (trace_thread_case *)opaque;
+    for (size_t i = 0; i < TRACE_THREAD_STORES && !tc->failed; ++i) {
+        if (holo_trace_store(tc->trace, tc->state, tc->action, 1.0) != HOLO_OK) {
+            tc->failed = 1;
+        }
+    }
+    return NULL;
+}
+
 int main(void)
 {
     holo_engine *engine = holo_engine_create(DIM, 99);
@@ -30,9 +50,10 @@ int main(void)
     holo_action_index *action_index = NULL;
     holo_action_index *wrong_index = NULL;
     holo_trace *heap_trace = NULL;
-    holo_trace trace;
-    holo_trace loaded;
-    holo_trace rejected;
+    holo_trace trace = {0};
+    holo_trace loaded = {0};
+    holo_trace rejected = {0};
+    holo_trace threaded = {0};
     double states[ACTIONS * DIM];
     double actions[ACTIONS * DIM];
     double action_norms[ACTIONS];
@@ -41,6 +62,8 @@ int main(void)
     double copied[DIM];
     uint64_t labels[ACTIONS] = {1, 2, 3, 4};
     holo_match match[1];
+    pthread_t threads[ACTIONS];
+    trace_thread_case thread_cases[ACTIONS];
     size_t i;
 
     require(engine != NULL, "engine create");
@@ -48,11 +71,6 @@ int main(void)
     heap_trace = holo_trace_create(engine);
     require(heap_trace != NULL, "heap trace create");
     holo_trace_destroy(heap_trace);
-    rejected.engine = NULL;
-    rejected.trace = NULL;
-    rejected.work = NULL;
-    rejected.spectrum_real = NULL;
-    rejected.spectrum_imag = NULL;
 
     for (i = 0; i < ACTIONS; ++i) {
         require_ok(holo_keygen_unitary(engine, 100 + i, states + i * DIM), "state key");
@@ -115,6 +133,25 @@ int main(void)
     require(holo_trace_query_index(&trace, states, wrong_index, 1, match) == HOLO_EINVAL,
             "wrong-dim action index rejected");
 
+    require_ok(holo_trace_init(&threaded, engine), "threaded trace init");
+    for (i = 0; i < ACTIONS; ++i) {
+        thread_cases[i].trace = &threaded;
+        thread_cases[i].state = states + i * DIM;
+        thread_cases[i].action = actions + i * DIM;
+        thread_cases[i].failed = 0;
+        require(pthread_create(&threads[i], NULL, trace_store_worker, &thread_cases[i]) == 0,
+                "trace thread create");
+    }
+    for (i = 0; i < ACTIONS; ++i) {
+        require(pthread_join(threads[i], NULL) == 0, "trace thread join");
+        require(!thread_cases[i].failed, "shared trace concurrent store");
+    }
+    require(threaded.stored_count == ACTIONS * TRACE_THREAD_STORES,
+            "shared trace concurrent stored count");
+    require_ok(holo_trace_query_index(&threaded, states, action_index, 1, match),
+               "shared trace concurrent query");
+    require(match[0].label == labels[0], "shared trace concurrent recall");
+
     require_ok(holo_trace_save(&trace, "build/test_trace.htr"), "trace save");
     wrong_dim = holo_engine_create(DIM / 2U, 99);
     require(wrong_dim != NULL, "wrong-dim engine create");
@@ -127,6 +164,9 @@ int main(void)
     require_ok(holo_trace_load(&loaded, engine, "build/test_trace.htr"), "trace load");
     require(loaded.stored_count == trace.stored_count, "loaded count");
     require(fabs(loaded.total_weight - trace.total_weight) < 1e-12, "loaded weight");
+    require_ok(holo_trace_load(&loaded, engine, "build/test_trace.htr"),
+               "trace reload disposes previous buffers");
+    require(loaded.stored_count == trace.stored_count, "reloaded count");
 
     for (i = 0; i < ACTIONS; ++i) {
         holo_match m2[1];
@@ -155,6 +195,7 @@ int main(void)
     require(match[0].label == labels[0], "trace set keeps recall");
 
     remove("build/test_trace.htr");
+    holo_trace_dispose(&threaded);
     holo_action_index_destroy(wrong_index);
     holo_action_index_destroy(action_index);
     holo_trace_dispose(&loaded);

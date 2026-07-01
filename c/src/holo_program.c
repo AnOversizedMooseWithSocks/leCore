@@ -111,16 +111,17 @@ int holo_program_run_basic(holo_engine *engine,
                            size_t *out_trace_count)
 {
     const size_t dim = holo_engine_dim(engine);
-    double *program_real = NULL;
-    double *program_imag = NULL;
-    double *raw = NULL;
-    double *raw_real = NULL;
-    double *raw_imag = NULL;
-    double *op_query = NULL;
-    double *arg_query = NULL;
-    double *acc = NULL;
-    double *pair = NULL;
-    double *bundle_rows = NULL;
+    double *workspace = NULL;
+    double *program_real;
+    double *program_imag;
+    double *raw;
+    double *raw_real;
+    double *raw_imag;
+    double *op_query;
+    double *arg_query;
+    double *acc;
+    double *pair;
+    double *bundle_rows;
     size_t pc = 0;
     size_t trace_count = 0;
     int acc_valid = has_init_acc ? 1 : 0;
@@ -133,21 +134,24 @@ int holo_program_run_basic(holo_engine *engine,
         return HOLO_EINVAL;
     }
 
-    program_real = (double *)alloc_zeroed(dim, sizeof(*program_real));
-    program_imag = (double *)alloc_zeroed(dim, sizeof(*program_imag));
-    raw = (double *)alloc_zeroed(dim, sizeof(*raw));
-    raw_real = (double *)alloc_zeroed(dim, sizeof(*raw_real));
-    raw_imag = (double *)alloc_zeroed(dim, sizeof(*raw_imag));
-    op_query = (double *)alloc_zeroed(dim, sizeof(*op_query));
-    arg_query = (double *)alloc_zeroed(dim, sizeof(*arg_query));
-    acc = (double *)alloc_zeroed(dim, sizeof(*acc));
-    pair = (double *)alloc_zeroed(dim, sizeof(*pair));
-    bundle_rows = (double *)alloc_zeroed(2 * dim, sizeof(*bundle_rows));
-    if (!program_real || !program_imag || !raw || !raw_real || !raw_imag ||
-        !op_query || !arg_query || !acc || !pair || !bundle_rows) {
+    if (dim > ((size_t)-1) / 11U) {
+        return HOLO_ENOMEM;
+    }
+    workspace = (double *)alloc_zeroed(11U * dim, sizeof(*workspace));
+    if (!workspace) {
         rc = HOLO_ENOMEM;
         goto done;
     }
+    program_real = workspace;
+    program_imag = program_real + dim;
+    raw = program_imag + dim;
+    raw_real = raw + dim;
+    raw_imag = raw_real + dim;
+    op_query = raw_imag + dim;
+    arg_query = op_query + dim;
+    acc = arg_query + dim;
+    pair = acc + dim;
+    bundle_rows = pair + dim;
 
     if (init_acc && acc_valid) {
         memcpy(acc, init_acc, dim * sizeof(acc[0]));
@@ -255,15 +259,6 @@ int holo_program_run_basic(holo_engine *engine,
     *out_trace_count = trace_count;
 
 done:
-    free_aligned(program_real);
-    free_aligned(program_imag);
-    free_aligned(raw);
-    free_aligned(raw_real);
-    free_aligned(raw_imag);
-    free_aligned(op_query);
-    free_aligned(arg_query);
-    free_aligned(acc);
-    free_aligned(pair);
-    free_aligned(bundle_rows);
+    free_aligned(workspace);
     return rc;
 }

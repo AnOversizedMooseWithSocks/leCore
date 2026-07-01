@@ -34,10 +34,13 @@ Implemented:
 
 - `include/holo_core.h`
 - `include/holo_trace.h`
+- `include/holo_program.h`
 - `src/holo_core.c`
 - `src/holo_trace.c`
+- `src/holo_program.c`
 - `tests/test_core.c`
 - `tests/test_trace.c`
+- `tests/test_program.c`
 
 The current kernel provides deterministic key generation, unitary key
 generation, FFT-backed circular-convolution bind/unbind, fixed-vector batch
@@ -61,6 +64,15 @@ trace-recall contracts:
 ```sh
 make -C c test HOLO_USE_ACCELERATE=1
 ```
+
+Shared `holo_engine`, `holo_trace`, and `holo_action_index` objects are
+internally serialized for concurrent operations. The lock is per engine for VSA
+scratch buffers and trace state, and per action index for dictionary updates and
+searches. Lifecycle calls still follow ordinary ownership rules: do not destroy
+or dispose an object while another thread may be inside an API call on it.
+Trace APIs that can materialize lazy cached state take `holo_trace *` rather
+than `const holo_trace *`, and `holo_trace_load()` stages snapshots through a
+temporary trace before replacing an existing live trace.
 
 ## Python Replacement Path
 

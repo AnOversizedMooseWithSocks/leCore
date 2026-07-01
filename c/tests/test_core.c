@@ -1,10 +1,20 @@
 #include "holo_core.h"
 
 #include <math.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #define DIM 256U
+#define THREADS 4U
+#define THREAD_ITERS 250U
+
+typedef struct core_thread_case {
+    holo_engine *engine;
+    const double *key;
+    const double *value;
+    int failed;
+} core_thread_case;
 
 static void require(int ok, const char *msg)
 {
@@ -20,6 +30,21 @@ static void require_ok(int rc, const char *msg)
         fprintf(stderr, "test_core: %s: %s\n", msg, holo_strerror(rc));
         exit(1);
     }
+}
+
+static void *core_bind_worker(void *opaque)
+{
+    core_thread_case *tc = (core_thread_case *)opaque;
+    double pair[DIM];
+    double recovered[DIM];
+    for (size_t i = 0; i < THREAD_ITERS && !tc->failed; ++i) {
+        if (holo_bind(tc->engine, tc->key, tc->value, pair) != HOLO_OK ||
+            holo_unbind(tc->engine, pair, tc->key, recovered) != HOLO_OK ||
+            holo_cosine(DIM, tc->value, recovered) <= 0.999999) {
+            tc->failed = 1;
+        }
+    }
+    return NULL;
 }
 
 int main(void)
@@ -45,6 +70,8 @@ int main(void)
     double raw_sum[DIM];
     double bundle[DIM];
     double norms[4];
+    pthread_t threads[THREADS];
+    core_thread_case thread_cases[THREADS];
     size_t i;
 
     require(engine != NULL, "engine create");
@@ -64,6 +91,18 @@ int main(void)
     require_ok(holo_unbind_spectrum(engine, pair_freq_real, pair_freq_imag, a, recovered),
                "unbind spectrum");
     require(holo_cosine(DIM, b, recovered) > 0.999999, "spectrum unbind roundtrip");
+    for (i = 0; i < THREADS; ++i) {
+        thread_cases[i].engine = engine;
+        thread_cases[i].key = a;
+        thread_cases[i].value = b;
+        thread_cases[i].failed = 0;
+        require(pthread_create(&threads[i], NULL, core_bind_worker, &thread_cases[i]) == 0,
+                "thread create");
+    }
+    for (i = 0; i < THREADS; ++i) {
+        require(pthread_join(threads[i], NULL) == 0, "thread join");
+        require(!thread_cases[i].failed, "shared engine concurrent bind/unbind");
+    }
     require_ok(holo_bind_spectrum_accumulate(engine,
                                              a,
                                              b,

@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200112L
 #endif
 
+#include "holo_internal.h"
 #include "holo_trace.h"
 
 #include <math.h>
@@ -12,6 +13,7 @@
 #define HOLO_TRACE_MAGIC "HOLOTRC"
 #define HOLO_TRACE_VERSION 1U
 #define HOLO_TRACE_ENDIAN UINT32_C(0x01020304)
+#define HOLO_TRACE_STRUCT_MAGIC UINT64_C(0x4854524143453031)
 #define HOLO_ALIGN 64U
 
 typedef struct holo_trace_header {
@@ -71,10 +73,31 @@ static void free_aligned(void *ptr)
 #endif
 }
 
+static int trace_is_live(const holo_trace *trace)
+{
+    return trace && trace->magic == HOLO_TRACE_STRUCT_MAGIC;
+}
+
+static int trace_lock(holo_trace *trace)
+{
+    if (!trace_is_live(trace) || !trace->engine) {
+        return HOLO_EINVAL;
+    }
+    return holo_engine_lock_internal(trace->engine);
+}
+
+static void trace_unlock(holo_trace *trace)
+{
+    if (trace_is_live(trace) && trace->engine) {
+        holo_engine_unlock_internal(trace->engine);
+    }
+}
+
 static int trace_ensure_spectrum(holo_trace *trace)
 {
     int rc;
-    if (!trace || !trace->engine || !trace->trace || !trace->spectrum_real || !trace->spectrum_imag) {
+    if (!trace_is_live(trace) || !trace->engine || !trace->trace ||
+        !trace->spectrum_real || !trace->spectrum_imag) {
         return HOLO_EINVAL;
     }
     if (trace->spectrum_valid) {
@@ -97,7 +120,8 @@ static int trace_ensure_spectrum(holo_trace *trace)
 static int trace_ensure_real(holo_trace *trace)
 {
     int rc;
-    if (!trace || !trace->engine || !trace->trace || !trace->spectrum_real || !trace->spectrum_imag) {
+    if (!trace_is_live(trace) || !trace->engine || !trace->trace ||
+        !trace->spectrum_real || !trace->spectrum_imag) {
         return HOLO_EINVAL;
     }
     if (trace->real_valid) {
@@ -156,6 +180,7 @@ int holo_trace_init(holo_trace *trace, holo_engine *engine)
     }
     dim = holo_engine_dim(engine);
     memset(trace, 0, sizeof(*trace));
+    trace->magic = HOLO_TRACE_STRUCT_MAGIC;
     trace->trace = (double *)alloc_zeroed(dim, sizeof(*trace->trace));
     trace->work = (double *)alloc_zeroed(dim, sizeof(*trace->work));
     trace->spectrum_real = (double *)alloc_zeroed(dim, sizeof(*trace->spectrum_real));
@@ -176,6 +201,10 @@ void holo_trace_dispose(holo_trace *trace)
     if (!trace) {
         return;
     }
+    if (!trace_is_live(trace)) {
+        memset(trace, 0, sizeof(*trace));
+        return;
+    }
     free_aligned(trace->trace);
     free_aligned(trace->work);
     free_aligned(trace->spectrum_real);
@@ -185,7 +214,12 @@ void holo_trace_dispose(holo_trace *trace)
 
 int holo_trace_clear(holo_trace *trace)
 {
-    if (!trace || !trace->trace || !trace->spectrum_real || !trace->spectrum_imag) {
+    int rc = trace_lock(trace);
+    if (rc != HOLO_OK) {
+        return rc;
+    }
+    if (!trace->trace || !trace->spectrum_real || !trace->spectrum_imag) {
+        trace_unlock(trace);
         return HOLO_EINVAL;
     }
     memset(trace->trace, 0, trace->dim * sizeof(trace->trace[0]));
@@ -195,6 +229,7 @@ int holo_trace_clear(holo_trace *trace)
     trace->spectrum_valid = 1;
     trace->stored_count = 0;
     trace->total_weight = 0.0;
+    trace_unlock(trace);
     return HOLO_OK;
 }
 
@@ -203,7 +238,12 @@ int holo_trace_set(holo_trace *trace,
                    uint64_t stored_count,
                    double total_weight)
 {
-    if (!trace || !trace->trace || !trace->spectrum_real || !trace->spectrum_imag || !values) {
+    int rc = trace_lock(trace);
+    if (rc != HOLO_OK) {
+        return rc;
+    }
+    if (!trace->trace || !trace->spectrum_real || !trace->spectrum_imag || !values) {
+        trace_unlock(trace);
         return HOLO_EINVAL;
     }
     memcpy(trace->trace, values, trace->dim * sizeof(trace->trace[0]));
@@ -211,22 +251,27 @@ int holo_trace_set(holo_trace *trace,
     trace->spectrum_valid = 0;
     trace->stored_count = stored_count;
     trace->total_weight = total_weight;
+    trace_unlock(trace);
     return HOLO_OK;
 }
 
-int holo_trace_copy(const holo_trace *trace, double *out)
+int holo_trace_copy(holo_trace *trace, double *out)
 {
-    holo_trace *mutable_trace;
     int rc;
     if (!trace || !out) {
         return HOLO_EINVAL;
     }
-    mutable_trace = (holo_trace *)trace;
-    rc = trace_ensure_real(mutable_trace);
+    rc = trace_lock(trace);
     if (rc != HOLO_OK) {
         return rc;
     }
-    memcpy(out, mutable_trace->trace, mutable_trace->dim * sizeof(out[0]));
+    rc = trace_ensure_real(trace);
+    if (rc != HOLO_OK) {
+        trace_unlock(trace);
+        return rc;
+    }
+    memcpy(out, trace->trace, trace->dim * sizeof(out[0]));
+    trace_unlock(trace);
     return HOLO_OK;
 }
 
@@ -236,15 +281,23 @@ int holo_trace_store(holo_trace *trace,
                      double weight)
 {
     int rc;
-    if (!trace || !trace->engine || !trace->trace || !trace->spectrum_real || !trace->spectrum_imag ||
-        !state || !action) {
+    if (!trace_is_live(trace) || !trace->engine || !state || !action) {
         return HOLO_EINVAL;
     }
     if (weight == 0.0) {
         return HOLO_OK;
     }
+    rc = trace_lock(trace);
+    if (rc != HOLO_OK) {
+        return rc;
+    }
+    if (!trace->trace || !trace->spectrum_real || !trace->spectrum_imag) {
+        trace_unlock(trace);
+        return HOLO_EINVAL;
+    }
     rc = trace_ensure_spectrum(trace);
     if (rc != HOLO_OK) {
+        trace_unlock(trace);
         return rc;
     }
     rc = holo_bind_spectrum_accumulate(trace->engine,
@@ -254,41 +307,49 @@ int holo_trace_store(holo_trace *trace,
                                        trace->spectrum_real,
                                        trace->spectrum_imag);
     if (rc != HOLO_OK) {
+        trace_unlock(trace);
         return rc;
     }
     trace->real_valid = 0;
     trace->spectrum_valid = 1;
     trace->stored_count += 1;
     trace->total_weight += weight;
+    trace_unlock(trace);
     return HOLO_OK;
 }
 
-int holo_trace_recall(const holo_trace *trace,
+int holo_trace_recall(holo_trace *trace,
                       const double *query_state,
                       double *out_action_context)
 {
-    holo_trace *mutable_trace;
     int rc;
-    if (!trace || !trace->engine || !query_state || !out_action_context) {
+    if (!query_state || !out_action_context) {
         return HOLO_EINVAL;
     }
-    if (trace->stored_count == 0) {
-        memset(out_action_context, 0, trace->dim * sizeof(out_action_context[0]));
-        return HOLO_OK;
-    }
-    mutable_trace = (holo_trace *)trace;
-    rc = trace_ensure_spectrum(mutable_trace);
+    rc = trace_lock(trace);
     if (rc != HOLO_OK) {
         return rc;
     }
-    return holo_unbind_spectrum(mutable_trace->engine,
-                                mutable_trace->spectrum_real,
-                                mutable_trace->spectrum_imag,
-                                query_state,
-                                out_action_context);
+    if (trace->stored_count == 0) {
+        memset(out_action_context, 0, trace->dim * sizeof(out_action_context[0]));
+        trace_unlock(trace);
+        return HOLO_OK;
+    }
+    rc = trace_ensure_spectrum(trace);
+    if (rc != HOLO_OK) {
+        trace_unlock(trace);
+        return rc;
+    }
+    rc = holo_unbind_spectrum(trace->engine,
+                              trace->spectrum_real,
+                              trace->spectrum_imag,
+                              query_state,
+                              out_action_context);
+    trace_unlock(trace);
+    return rc;
 }
 
-int holo_trace_score_actions(const holo_trace *trace,
+int holo_trace_score_actions(holo_trace *trace,
                              const double *query_state,
                              const double *action_matrix,
                              const uint64_t *labels,
@@ -306,7 +367,7 @@ int holo_trace_score_actions(const holo_trace *trace,
                                                out);
 }
 
-int holo_trace_score_actions_with_norms(const holo_trace *trace,
+int holo_trace_score_actions_with_norms(holo_trace *trace,
                                         const double *query_state,
                                         const double *action_matrix,
                                         const double *action_norms,
@@ -316,64 +377,96 @@ int holo_trace_score_actions_with_norms(const holo_trace *trace,
                                         holo_match *out)
 {
     int rc;
-    if (!trace || !trace->work) {
+    rc = trace_lock(trace);
+    if (rc != HOLO_OK) {
+        return rc;
+    }
+    if (!trace->work) {
+        trace_unlock(trace);
         return HOLO_EINVAL;
     }
     rc = holo_trace_recall(trace, query_state, trace->work);
     if (rc != HOLO_OK) {
+        trace_unlock(trace);
         return rc;
     }
-    return holo_cleanup_topk_with_norms(trace->dim,
-                                        trace->work,
-                                        action_matrix,
-                                        action_norms,
-                                        labels,
-                                        action_count,
-                                        k,
-                                        out);
+    rc = holo_cleanup_topk_with_norms(trace->dim,
+                                      trace->work,
+                                      action_matrix,
+                                      action_norms,
+                                      labels,
+                                      action_count,
+                                      k,
+                                      out);
+    trace_unlock(trace);
+    return rc;
 }
 
-int holo_trace_query_index(const holo_trace *trace,
+int holo_trace_query_index(holo_trace *trace,
                            const double *query_state,
                            const holo_action_index *index,
                            size_t k,
                            holo_match *out)
 {
     int rc;
-    if (!trace || !trace->work || !index || holo_action_index_dim(index) != trace->dim) {
+    rc = trace_lock(trace);
+    if (rc != HOLO_OK) {
+        return rc;
+    }
+    if (!trace->work || !index || holo_action_index_dim(index) != trace->dim) {
+        trace_unlock(trace);
         return HOLO_EINVAL;
     }
     rc = holo_trace_recall(trace, query_state, trace->work);
     if (rc != HOLO_OK) {
+        trace_unlock(trace);
         return rc;
     }
-    return holo_action_index_search(index, trace->work, k, out);
+    rc = holo_action_index_search(index, trace->work, k, out);
+    trace_unlock(trace);
+    return rc;
 }
 
 double holo_trace_fidelity(const holo_trace *trace)
 {
-    if (!trace || trace->stored_count == 0) {
+    double fidelity;
+    int rc;
+    if (!trace_is_live(trace) || !trace->engine) {
         return 0.0;
     }
-    return 1.0 / sqrt((double)trace->stored_count);
+    rc = holo_engine_lock_internal(trace->engine);
+    if (rc != HOLO_OK) {
+        return 0.0;
+    }
+    if (trace->stored_count == 0) {
+        holo_engine_unlock_internal(trace->engine);
+        return 0.0;
+    }
+    fidelity = 1.0 / sqrt((double)trace->stored_count);
+    holo_engine_unlock_internal(trace->engine);
+    return fidelity;
 }
 
-int holo_trace_save(const holo_trace *trace, const char *path)
+int holo_trace_save(holo_trace *trace, const char *path)
 {
     FILE *fp;
     holo_trace_header header;
-    holo_trace *mutable_trace;
     uint64_t sum;
     int rc;
     if (!trace || !path) {
         return HOLO_EINVAL;
     }
-    mutable_trace = (holo_trace *)trace;
-    rc = trace_ensure_real(mutable_trace);
+    rc = trace_lock(trace);
     if (rc != HOLO_OK) {
         return rc;
     }
-    if (!mutable_trace->trace) {
+    rc = trace_ensure_real(trace);
+    if (rc != HOLO_OK) {
+        trace_unlock(trace);
+        return rc;
+    }
+    if (!trace->trace) {
+        trace_unlock(trace);
         return HOLO_EINVAL;
     }
     memset(&header, 0, sizeof(header));
@@ -386,18 +479,22 @@ int holo_trace_save(const holo_trace *trace, const char *path)
 
     fp = fopen(path, "wb");
     if (!fp) {
+        trace_unlock(trace);
         return HOLO_EIO;
     }
-    sum = checksum_trace(mutable_trace->trace, mutable_trace->dim);
+    sum = checksum_trace(trace->trace, trace->dim);
     if (fwrite(&header, sizeof(header), 1, fp) != 1 ||
-        fwrite(mutable_trace->trace, sizeof(double), mutable_trace->dim, fp) != mutable_trace->dim ||
+        fwrite(trace->trace, sizeof(double), trace->dim, fp) != trace->dim ||
         fwrite(&sum, sizeof(sum), 1, fp) != 1) {
         fclose(fp);
+        trace_unlock(trace);
         return HOLO_EIO;
     }
     if (fclose(fp) != 0) {
+        trace_unlock(trace);
         return HOLO_EIO;
     }
+    trace_unlock(trace);
     return HOLO_OK;
 }
 
@@ -405,6 +502,7 @@ int holo_trace_load(holo_trace *trace, holo_engine *engine, const char *path)
 {
     FILE *fp;
     holo_trace_header header;
+    holo_trace loaded;
     uint64_t expected;
     uint64_t actual;
     int rc;
@@ -426,30 +524,41 @@ int holo_trace_load(holo_trace *trace, holo_engine *engine, const char *path)
         fclose(fp);
         return HOLO_EVERSION;
     }
-    rc = holo_trace_init(trace, engine);
+    memset(&loaded, 0, sizeof(loaded));
+    rc = holo_trace_init(&loaded, engine);
     if (rc != HOLO_OK) {
         fclose(fp);
         return rc;
     }
-    trace->stored_count = header.stored_count;
-    trace->total_weight = header.total_weight;
-    trace->real_valid = 1;
-    trace->spectrum_valid = 0;
-    if (fread(trace->trace, sizeof(double), trace->dim, fp) != trace->dim ||
+    loaded.stored_count = header.stored_count;
+    loaded.total_weight = header.total_weight;
+    loaded.real_valid = 1;
+    loaded.spectrum_valid = 0;
+    if (fread(loaded.trace, sizeof(double), loaded.dim, fp) != loaded.dim ||
         fread(&expected, sizeof(expected), 1, fp) != 1) {
-        holo_trace_dispose(trace);
+        holo_trace_dispose(&loaded);
         fclose(fp);
         return HOLO_EIO;
     }
-    actual = checksum_trace(trace->trace, trace->dim);
+    actual = checksum_trace(loaded.trace, loaded.dim);
     if (actual != expected) {
-        holo_trace_dispose(trace);
+        holo_trace_dispose(&loaded);
         fclose(fp);
         return HOLO_EVERSION;
     }
     if (fclose(fp) != 0) {
-        holo_trace_dispose(trace);
+        holo_trace_dispose(&loaded);
         return HOLO_EIO;
     }
+    rc = holo_engine_lock_internal(engine);
+    if (rc != HOLO_OK) {
+        holo_trace_dispose(&loaded);
+        return rc;
+    }
+    if (trace_is_live(trace)) {
+        holo_trace_dispose(trace);
+    }
+    *trace = loaded;
+    holo_engine_unlock_internal(engine);
     return HOLO_OK;
 }
