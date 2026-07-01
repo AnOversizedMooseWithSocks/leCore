@@ -4,6 +4,7 @@
 
 #include "holo_core.h"
 
+#include <limits.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,11 +17,16 @@
 #if !defined(__APPLE__)
 #error "HOLO_USE_ACCELERATE requires Apple's Accelerate framework"
 #endif
+#ifndef ACCELERATE_NEW_LAPACK
+#define ACCELERATE_NEW_LAPACK 1
+#endif
 #include <Accelerate/Accelerate.h>
 #endif
 
 #define HOLO_PI 3.141592653589793238462643383279502884
 #define HOLO_ALIGN 64U
+#define HOLO_STACK_SCORES 64U
+#define HOLO_ACCELERATE_DGEMV_MIN_ROWS 64U
 
 #if !HOLO_USE_ACCELERATE
 typedef struct holo_complex {
@@ -784,6 +790,64 @@ int holo_cleanup_topk_with_norms(size_t dim,
     qnorm = holo_norm(dim, query);
     if (qnorm <= 0.0) {
         return HOLO_EINVAL;
+    }
+    if (k == 1 && matrix_norms && count > 0) {
+        size_t best = 0;
+        double best_score = -INFINITY;
+#if HOLO_USE_ACCELERATE
+        if (count >= HOLO_ACCELERATE_DGEMV_MIN_ROWS &&
+            count <= (size_t)INT_MAX &&
+            dim <= (size_t)INT_MAX) {
+            double stack_scores[HOLO_STACK_SCORES];
+            double *scores = stack_scores;
+            int heap_scores = 0;
+            if (count > HOLO_STACK_SCORES) {
+                scores = (double *)malloc(count * sizeof(scores[0]));
+                if (!scores) {
+                    return HOLO_ENOMEM;
+                }
+                heap_scores = 1;
+            }
+            cblas_dgemv(CblasRowMajor,
+                        CblasNoTrans,
+                        (int)count,
+                        (int)dim,
+                        1.0,
+                        matrix,
+                        (int)dim,
+                        query,
+                        1,
+                        0.0,
+                        scores,
+                        1);
+            for (i = 0; i < count; ++i) {
+                const double rnorm = matrix_norms[i];
+                const double score = rnorm > 0.0 ? scores[i] / (qnorm * rnorm) : -INFINITY;
+                if (score > best_score) {
+                    best = i;
+                    best_score = score;
+                }
+            }
+            if (heap_scores) {
+                free(scores);
+            }
+        } else
+#endif
+        {
+            for (i = 0; i < count; ++i) {
+                const double rnorm = matrix_norms[i];
+                const double dot = holo_dot(dim, query, matrix + i * dim);
+                const double score = rnorm > 0.0 ? dot / (qnorm * rnorm) : -INFINITY;
+                if (score > best_score) {
+                    best = i;
+                    best_score = score;
+                }
+            }
+        }
+        out[0].index = best;
+        out[0].label = labels ? labels[best] : (uint64_t)best;
+        out[0].score = best_score;
+        return HOLO_OK;
     }
     for (i = 0; i < count; ++i) {
         double dot = 0.0;
