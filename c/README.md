@@ -79,7 +79,11 @@ used by function-valued FPE bundles; ordinary symbolic `bundle()` still
 renormalizes after accumulation. The `bind_fixed` replacement uses the C path
 for small row stacks, where the fixed spectrum reuse wins, and leaves wider
 stacks on NumPy's batched real FFT by default. Tune that cutoff with
-`HOLOSTUFF_C_BIND_FIXED_MAX_ROWS`:
+`HOLOSTUFF_C_BIND_FIXED_MAX_ROWS`, `HOLOSTUFF_C_BIND_FIXED_MIN_CELLS`, and
+`HOLOSTUFF_C_BIND_FIXED_MAX_CELLS` (default: Accelerate builds only, at most
+8 rows and 256..4096 total row cells).
+Scalar builds leave `bind_fixed` on NumPy's batched real FFT unless
+`HOLOSTUFF_C_BIND_FIXED_ALLOW_SCALAR=1` is set:
 
 ```sh
 HOLOSTUFF_USE_C=1 python benchmark_holographic.py

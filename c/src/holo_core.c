@@ -136,6 +136,11 @@ int holo_is_power_of_two(size_t n)
     return n != 0 && (n & (n - 1)) == 0;
 }
 
+int holo_uses_accelerate(void)
+{
+    return HOLO_USE_ACCELERATE ? 1 : 0;
+}
+
 static size_t log2_size(size_t n)
 {
     size_t log2 = 0;
@@ -287,7 +292,7 @@ double holo_cosine(size_t dim, const double *a, const double *b)
 int holo_normalize(size_t dim, double *v)
 {
     double n;
-    size_t i;
+    double inv_n;
     if (!v || dim == 0) {
         return HOLO_EINVAL;
     }
@@ -295,10 +300,158 @@ int holo_normalize(size_t dim, double *v)
     if (n <= 0.0) {
         return HOLO_EINVAL;
     }
-    for (i = 0; i < dim; ++i) {
-        v[i] /= n;
+    inv_n = 1.0 / n;
+#if HOLO_USE_ACCELERATE
+    vDSP_vsmulD(v, 1, &inv_n, v, 1, (vDSP_Length)dim);
+#else
+    for (size_t i = 0; i < dim; ++i) {
+        v[i] *= inv_n;
     }
+#endif
     return HOLO_OK;
+}
+
+static void copy_real(size_t dim, const double *src, double *dst)
+{
+    memcpy(dst, src, dim * sizeof(dst[0]));
+}
+
+static void add_scaled(size_t dim, const double *src, double scale, double *dst)
+{
+#if HOLO_USE_ACCELERATE
+    vDSP_vsmaD(src, 1, &scale, dst, 1, dst, 1, (vDSP_Length)dim);
+#else
+    for (size_t i = 0; i < dim; ++i) {
+        dst[i] += scale * src[i];
+    }
+#endif
+}
+
+static void zero_real(size_t dim, double *dst)
+{
+#if HOLO_USE_ACCELERATE
+    vDSP_vclrD(dst, 1, (vDSP_Length)dim);
+#else
+    for (size_t i = 0; i < dim; ++i) {
+        dst[i] = 0.0;
+    }
+#endif
+}
+
+static void scale_copy(size_t dim, const double *src, double scale, double *dst)
+{
+#if HOLO_USE_ACCELERATE
+    vDSP_vsmulD(src, 1, &scale, dst, 1, (vDSP_Length)dim);
+#else
+    for (size_t i = 0; i < dim; ++i) {
+        dst[i] = scale * src[i];
+    }
+#endif
+}
+
+static void add_vectors(size_t dim, const double *a, const double *b, double *out)
+{
+#if HOLO_USE_ACCELERATE
+    vDSP_vaddD(a, 1, b, 1, out, 1, (vDSP_Length)dim);
+#else
+    for (size_t i = 0; i < dim; ++i) {
+        out[i] = a[i] + b[i];
+    }
+#endif
+}
+
+static void add_weighted_vectors(size_t dim,
+                                 const double *a,
+                                 double wa,
+                                 const double *b,
+                                 double wb,
+                                 double *out)
+{
+    scale_copy(dim, a, wa, out);
+    add_scaled(dim, b, wb, out);
+}
+
+static double score_dot_over_norm(size_t dim, const double *query, const double *row, double row_norm)
+{
+    if (row_norm <= 0.0) {
+        return -INFINITY;
+    }
+    return holo_dot(dim, query, row) / row_norm;
+}
+
+static void set_match(holo_match *match,
+                      size_t index,
+                      uint64_t label,
+                      double rank_score,
+                      double inv_query_norm)
+{
+    match->index = index;
+    match->label = label;
+    match->score = rank_score * inv_query_norm;
+}
+
+static int maybe_accelerate_cleanup_top1(size_t dim,
+                                         const double *query,
+                                         const double *matrix,
+                                         const double *matrix_norms,
+                                         const uint64_t *labels,
+                                         size_t count,
+                                         double inv_query_norm,
+                                         holo_match *out)
+{
+#if HOLO_USE_ACCELERATE
+    size_t best = 0;
+    double best_rank_score = -INFINITY;
+    if (count >= HOLO_ACCELERATE_DGEMV_MIN_ROWS &&
+        count <= (size_t)INT_MAX &&
+        dim <= (size_t)INT_MAX) {
+        double stack_scores[HOLO_STACK_SCORES];
+        double *scores = stack_scores;
+        int heap_scores = 0;
+        if (count > HOLO_STACK_SCORES) {
+            scores = (double *)malloc(count * sizeof(scores[0]));
+            if (!scores) {
+                return HOLO_ENOMEM;
+            }
+            heap_scores = 1;
+        }
+        cblas_dgemv(CblasRowMajor,
+                    CblasNoTrans,
+                    (int)count,
+                    (int)dim,
+                    1.0,
+                    matrix,
+                    (int)dim,
+                    query,
+                    1,
+                    0.0,
+                    scores,
+                    1);
+        for (size_t i = 0; i < count; ++i) {
+            const double rnorm = matrix_norms[i];
+            const double rank_score = rnorm > 0.0 ? scores[i] / rnorm : -INFINITY;
+            if (rank_score > best_rank_score) {
+                best = i;
+                best_rank_score = rank_score;
+            }
+        }
+        if (heap_scores) {
+            free(scores);
+        }
+        set_match(out, best, labels ? labels[best] : (uint64_t)best, best_rank_score, inv_query_norm);
+        return HOLO_OK;
+    }
+#else
+    (void)dim;
+    (void)query;
+    (void)matrix;
+    (void)matrix_norms;
+    (void)labels;
+    (void)count;
+    (void)inv_query_norm;
+    (void)out;
+#endif
+    return HOLO_EINVAL;
 }
 
 #if HOLO_USE_ACCELERATE
@@ -405,9 +558,7 @@ int holo_keygen_unitary(holo_engine *engine, uint64_t id, double *out)
         engine->ai[n - i] = -s;
     }
     fft_split(engine, &engine->za, 1);
-    for (i = 0; i < n; ++i) {
-        out[i] = engine->ar[i];
-    }
+    copy_real(n, engine->ar, out);
 #else
     memset(engine->a, 0, n * sizeof(engine->a[0]));
     engine->a[0].re = (splitmix64(&state) & 1U) ? 1.0 : -1.0;
@@ -431,7 +582,6 @@ int holo_keygen_unitary(holo_engine *engine, uint64_t id, double *out)
 
 int holo_bind(holo_engine *engine, const double *a, const double *b, double *out)
 {
-    size_t i;
     const size_t n = engine ? engine->dim : 0;
     if (!engine || !a || !b || !out) {
         return HOLO_EINVAL;
@@ -445,10 +595,9 @@ int holo_bind(holo_engine *engine, const double *a, const double *b, double *out
     fft_split(engine, &engine->zb, 0);
     vDSP_zvmulD(&engine->za, 1, &engine->zb, 1, &engine->za, 1, (vDSP_Length)n, 1);
     fft_split(engine, &engine->za, 1);
-    for (i = 0; i < n; ++i) {
-        out[i] = engine->ar[i];
-    }
+    copy_real(n, engine->ar, out);
 #else
+    size_t i;
     for (i = 0; i < n; ++i) {
         engine->a[i].re = a[i];
         engine->a[i].im = 0.0;
@@ -478,7 +627,6 @@ int holo_bind_spectrum_accumulate(holo_engine *engine,
                                   double *freq_real,
                                   double *freq_imag)
 {
-    size_t i;
     const size_t n = engine ? engine->dim : 0;
     if (!engine || !a || !b || !freq_real || !freq_imag) {
         return HOLO_EINVAL;
@@ -494,11 +642,10 @@ int holo_bind_spectrum_accumulate(holo_engine *engine,
     fft_split(engine, &engine->za, 0);
     fft_split(engine, &engine->zb, 0);
     vDSP_zvmulD(&engine->za, 1, &engine->zb, 1, &engine->za, 1, (vDSP_Length)n, 1);
-    for (i = 0; i < n; ++i) {
-        freq_real[i] += weight * engine->ar[i];
-        freq_imag[i] += weight * engine->ai[i];
-    }
+    add_scaled(n, engine->ar, weight, freq_real);
+    add_scaled(n, engine->ai, weight, freq_imag);
 #else
+    size_t i;
     for (i = 0; i < n; ++i) {
         engine->a[i].re = a[i];
         engine->a[i].im = 0.0;
@@ -624,7 +771,6 @@ int holo_real_from_spectrum(holo_engine *engine,
                             const double *freq_imag,
                             double *out)
 {
-    size_t i;
     const size_t n = engine ? engine->dim : 0;
     if (!engine || !freq_real || !freq_imag || !out) {
         return HOLO_EINVAL;
@@ -633,10 +779,9 @@ int holo_real_from_spectrum(holo_engine *engine,
     memcpy(engine->ar, freq_real, n * sizeof(engine->ar[0]));
     memcpy(engine->ai, freq_imag, n * sizeof(engine->ai[0]));
     fft_split(engine, &engine->za, 1);
-    for (i = 0; i < n; ++i) {
-        out[i] = engine->ar[i];
-    }
+    copy_real(n, engine->ar, out);
 #else
+    size_t i;
     for (i = 0; i < n; ++i) {
         engine->a[i].re = freq_real[i];
         engine->a[i].im = freq_imag[i];
@@ -655,7 +800,6 @@ int holo_unbind_spectrum(holo_engine *engine,
                          const double *key,
                          double *out)
 {
-    size_t i;
     const size_t n = engine ? engine->dim : 0;
     if (!engine || !pair_freq_real || !pair_freq_imag || !key || !out) {
         return HOLO_EINVAL;
@@ -669,10 +813,9 @@ int holo_unbind_spectrum(holo_engine *engine,
     fft_split(engine, &engine->zb, 0);
     vDSP_zvmulD(&engine->zb, 1, &pair_freq, 1, &engine->za, 1, (vDSP_Length)n, -1);
     fft_split(engine, &engine->za, 1);
-    for (i = 0; i < n; ++i) {
-        out[i] = engine->ar[i];
-    }
+    copy_real(n, engine->ar, out);
 #else
+    size_t i;
     for (i = 0; i < n; ++i) {
         engine->b[i].re = key[i];
         engine->b[i].im = 0.0;
@@ -699,19 +842,40 @@ int holo_weighted_sum(size_t dim,
                       double *out)
 {
     size_t i;
-    size_t j;
     if (!out || dim == 0 || (count > 0 && !vectors)) {
         return HOLO_EINVAL;
     }
-    for (j = 0; j < dim; ++j) {
-        out[j] = 0.0;
+    if (count == 0) {
+        zero_real(dim, out);
+        return HOLO_OK;
     }
+    if (!weights) {
+        if (count == 1) {
+            copy_real(dim, vectors, out);
+            return HOLO_OK;
+        }
+        if (count == 2) {
+            add_vectors(dim, vectors, vectors + dim, out);
+            return HOLO_OK;
+        }
+        zero_real(dim, out);
+        for (i = 0; i < count; ++i) {
+            add_scaled(dim, vectors + i * dim, 1.0, out);
+        }
+        return HOLO_OK;
+    }
+    if (count == 1) {
+        scale_copy(dim, vectors, weights[0], out);
+        return HOLO_OK;
+    }
+    if (count == 2) {
+        add_weighted_vectors(dim, vectors, weights[0], vectors + dim, weights[1], out);
+        return HOLO_OK;
+    }
+    zero_real(dim, out);
     for (i = 0; i < count; ++i) {
         const double w = weights ? weights[i] : 1.0;
-        const double *row = vectors + i * dim;
-        for (j = 0; j < dim; ++j) {
-            out[j] += w * row[j];
-        }
+        add_scaled(dim, vectors + i * dim, w, out);
     }
     return HOLO_OK;
 }
@@ -735,7 +899,6 @@ int holo_bundle(size_t dim,
 
 int holo_permute(size_t dim, const double *in, long shift, double *out)
 {
-    size_t i;
     long s;
     if (!in || !out || dim == 0) {
         return HOLO_EINVAL;
@@ -747,9 +910,14 @@ int holo_permute(size_t dim, const double *in, long shift, double *out)
     if (out == in && s != 0) {
         return HOLO_EINVAL;
     }
-    for (i = 0; i < dim; ++i) {
-        out[(i + (size_t)s) % dim] = in[i];
+    if (s == 0) {
+        if (out != in) {
+            copy_real(dim, in, out);
+        }
+        return HOLO_OK;
     }
+    memcpy(out + (size_t)s, in, (dim - (size_t)s) * sizeof(out[0]));
+    memcpy(out, in + dim - (size_t)s, (size_t)s * sizeof(out[0]));
     return HOLO_OK;
 }
 
@@ -774,6 +942,7 @@ int holo_cleanup_topk_with_norms(size_t dim,
                                  holo_match *out)
 {
     double qnorm;
+    double inv_qnorm;
     size_t i;
     size_t j;
     if (!query || !matrix || !out || dim == 0 || k == 0) {
@@ -791,62 +960,32 @@ int holo_cleanup_topk_with_norms(size_t dim,
     if (qnorm <= 0.0) {
         return HOLO_EINVAL;
     }
+    inv_qnorm = 1.0 / qnorm;
     if (k == 1 && matrix_norms && count > 0) {
         size_t best = 0;
-        double best_score = -INFINITY;
-#if HOLO_USE_ACCELERATE
-        if (count >= HOLO_ACCELERATE_DGEMV_MIN_ROWS &&
-            count <= (size_t)INT_MAX &&
-            dim <= (size_t)INT_MAX) {
-            double stack_scores[HOLO_STACK_SCORES];
-            double *scores = stack_scores;
-            int heap_scores = 0;
-            if (count > HOLO_STACK_SCORES) {
-                scores = (double *)malloc(count * sizeof(scores[0]));
-                if (!scores) {
-                    return HOLO_ENOMEM;
-                }
-                heap_scores = 1;
-            }
-            cblas_dgemv(CblasRowMajor,
-                        CblasNoTrans,
-                        (int)count,
-                        (int)dim,
-                        1.0,
-                        matrix,
-                        (int)dim,
-                        query,
-                        1,
-                        0.0,
-                        scores,
-                        1);
-            for (i = 0; i < count; ++i) {
-                const double rnorm = matrix_norms[i];
-                const double score = rnorm > 0.0 ? scores[i] / (qnorm * rnorm) : -INFINITY;
-                if (score > best_score) {
-                    best = i;
-                    best_score = score;
-                }
-            }
-            if (heap_scores) {
-                free(scores);
-            }
-        } else
-#endif
-        {
-            for (i = 0; i < count; ++i) {
-                const double rnorm = matrix_norms[i];
-                const double dot = holo_dot(dim, query, matrix + i * dim);
-                const double score = rnorm > 0.0 ? dot / (qnorm * rnorm) : -INFINITY;
-                if (score > best_score) {
-                    best = i;
-                    best_score = score;
-                }
+        double best_rank_score = -INFINITY;
+        const int accel_rc = maybe_accelerate_cleanup_top1(dim,
+                                                           query,
+                                                           matrix,
+                                                           matrix_norms,
+                                                           labels,
+                                                           count,
+                                                           inv_qnorm,
+                                                           out);
+        if (accel_rc == HOLO_OK) {
+            return HOLO_OK;
+        }
+        if (accel_rc == HOLO_ENOMEM) {
+            return accel_rc;
+        }
+        for (i = 0; i < count; ++i) {
+            const double rank_score = score_dot_over_norm(dim, query, matrix + i * dim, matrix_norms[i]);
+            if (rank_score > best_rank_score) {
+                best = i;
+                best_rank_score = rank_score;
             }
         }
-        out[0].index = best;
-        out[0].label = labels ? labels[best] : (uint64_t)best;
-        out[0].score = best_score;
+        set_match(out, best, labels ? labels[best] : (uint64_t)best, best_rank_score, inv_qnorm);
         return HOLO_OK;
     }
     for (i = 0; i < count; ++i) {
@@ -866,7 +1005,7 @@ int holo_cleanup_topk_with_norms(size_t dim,
             }
             rnorm = sqrt(row_norm_sq);
         }
-        score = rnorm > 0.0 ? dot / (qnorm * rnorm) : -INFINITY;
+        score = rnorm > 0.0 ? (dot / rnorm) * inv_qnorm : -INFINITY;
         for (j = 0; j < k; ++j) {
             if (score > out[j].score) {
                 size_t m;

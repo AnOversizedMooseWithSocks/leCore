@@ -32,6 +32,7 @@ void holo_engine_destroy(holo_engine *engine);
 size_t holo_engine_dim(const holo_engine *engine);
 uint64_t holo_engine_seed(const holo_engine *engine);
 int holo_is_power_of_two(size_t n);
+int holo_uses_accelerate(void);
 const char *holo_strerror(int status);
 
 double holo_dot(size_t dim, const double *a, const double *b);

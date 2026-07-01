@@ -32,10 +32,28 @@ def _env_int(name: str, default: int) -> int:
 
 
 _BIND_FIXED_MAX_C_ROWS = max(0, _env_int("HOLOSTUFF_C_BIND_FIXED_MAX_ROWS", 8))
+_BIND_FIXED_MIN_C_CELLS = max(0, _env_int("HOLOSTUFF_C_BIND_FIXED_MIN_CELLS", 256))
+_BIND_FIXED_MAX_C_CELLS = max(0, _env_int("HOLOSTUFF_C_BIND_FIXED_MAX_CELLS", 4096))
+_BIND_FIXED_ALLOW_SCALAR = _env_int("HOLOSTUFF_C_BIND_FIXED_ALLOW_SCALAR", 0) != 0
 
 
 def _is_power_of_two(n: int) -> bool:
     return n > 0 and (n & (n - 1)) == 0
+
+
+def _bind_fixed_uses_c(row_count: int, dim: int) -> bool:
+    if _BACKEND is None:
+        return False
+    if not _BACKEND.uses_accelerate() and not _BIND_FIXED_ALLOW_SCALAR:
+        return False
+    if row_count <= 0 or _BIND_FIXED_MAX_C_ROWS <= 0:
+        return False
+    if row_count > _BIND_FIXED_MAX_C_ROWS:
+        return False
+    cells = row_count * dim
+    if cells < _BIND_FIXED_MIN_C_CELLS:
+        return False
+    return _BIND_FIXED_MAX_C_CELLS <= 0 or cells <= _BIND_FIXED_MAX_C_CELLS
 
 
 def _fallback_bind(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -127,6 +145,10 @@ class _Backend:
         lib.holo_engine_create.restype = ctypes.c_void_p
         lib.holo_engine_destroy.argtypes = [ctypes.c_void_p]
         lib.holo_engine_destroy.restype = None
+        self.holo_uses_accelerate = getattr(lib, "holo_uses_accelerate", None)
+        if self.holo_uses_accelerate:
+            self.holo_uses_accelerate.argtypes = []
+            self.holo_uses_accelerate.restype = ctypes.c_int
 
         lib.holo_bind.argtypes = [ctypes.c_void_p, _DOUBLE_P, _DOUBLE_P, _DOUBLE_P]
         lib.holo_bind.restype = ctypes.c_int
@@ -217,6 +239,11 @@ class _Backend:
                 return None
             self._engines[dim] = engine
             return engine
+
+    def uses_accelerate(self) -> bool:
+        if self.holo_uses_accelerate:
+            return bool(self.holo_uses_accelerate())
+        return "accelerate" in self.path.parts
 
     def check(self, rc: int) -> None:
         if rc != 0:
@@ -327,7 +354,7 @@ def bind_fixed(role, B) -> np.ndarray:
     dim = int(role_arr.size)
     engine = _BACKEND.engine(dim) if _BACKEND else None
     fn = _BACKEND.holo_bind_fixed_many if _BACKEND else None
-    if not engine or not fn or rows.shape[0] > _BIND_FIXED_MAX_C_ROWS:
+    if not engine or not fn or not _bind_fixed_uses_c(int(rows.shape[0]), dim):
         return _fallback_bind_fixed(role_arr, rows)
     out = np.empty(rows.shape, dtype=np.float64)
     with _BACKEND.lock:

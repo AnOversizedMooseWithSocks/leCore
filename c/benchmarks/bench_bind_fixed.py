@@ -59,7 +59,7 @@ def bench_one(dim: int, row_count: int, loops: int, repeats: int) -> dict[str, f
         "loops": loops,
         "repeats": repeats,
         "max_abs": max_abs,
-        "c_path_expected": row_count <= getattr(holographic_c, "_BIND_FIXED_MAX_C_ROWS", 0),
+        "c_path_expected": holographic_c._bind_fixed_uses_c(row_count, dim),
         "python_calls_per_second_median": loops / py_median if py_median else 0.0,
         "c_calls_per_second_median": loops / c_median if c_median else 0.0,
         "speedup_c_over_python": py_median / c_median if c_median else 0.0,
