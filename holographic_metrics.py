@@ -38,6 +38,83 @@ PATH_D_SCRIPTS = {
 
 PATH_D_CORE = ("pivot_tree", "distributed_forward", "factor_wall", "batch234", "batchB")
 STATUS_ORDER = {"pass": 0, "skip": 1, "warn": 2, "fail": 3}
+C_MODE_TESTS = (
+    ("test_algebra_properties", "test_bind_batch_and_fixed_match_scalar_bind"),
+    ("test_algebra_properties", "test_rfft_bind_recovers_under_unbind"),
+    ("test_algebra_properties", "test_permute_inverse_is_identity_exactly"),
+    ("test_holographic_compute", "test_holographic_compute_selftest"),
+    ("test_holographic_forward", "test_holographic_forward_selftest"),
+)
+
+_C_MODE_TEST_RUNNER = r"""
+import importlib
+import json
+import os
+import sys
+import time
+import traceback
+import types
+
+
+class _PytestMark:
+    def skipif(self, *args, **kwargs):
+        def decorate(obj):
+            return obj
+        return decorate
+
+    def __getattr__(self, _name):
+        def marker(*args, **kwargs):
+            if len(args) == 1 and callable(args[0]) and not kwargs:
+                return args[0]
+
+            def decorate(obj):
+                return obj
+
+            return decorate
+
+        return marker
+
+
+def _pytest_skip(*args, **kwargs):
+    raise RuntimeError("pytest.skip is not supported by the metrics subprocess runner")
+
+
+sys.modules.setdefault("pytest", types.SimpleNamespace(mark=_PytestMark(), skip=_pytest_skip))
+
+module_name = os.environ["HOLOSTUFF_METRIC_TEST_MODULE"]
+function_name = os.environ["HOLOSTUFF_METRIC_TEST_FUNCTION"]
+started = time.perf_counter()
+try:
+    module = importlib.import_module(module_name)
+    getattr(module, function_name)()
+except BaseException as exc:
+    print(
+        json.dumps(
+            {
+                "status": "fail",
+                "module": module_name,
+                "function": function_name,
+                "seconds": time.perf_counter() - started,
+                "error": f"{type(exc).__name__}: {exc}",
+                "traceback": traceback.format_exc(),
+            },
+            sort_keys=True,
+        )
+    )
+    sys.exit(1)
+
+print(
+    json.dumps(
+        {
+            "status": "pass",
+            "module": module_name,
+            "function": function_name,
+            "seconds": time.perf_counter() - started,
+        },
+        sort_keys=True,
+    )
+)
+"""
 
 
 def _jsonable(value: Any) -> Any:
@@ -373,6 +450,171 @@ def collect_c_evidence(summary_path: Path | None = None) -> dict[str, Any]:
             )
         )
     return _section("c_kernel", metrics, findings=findings)
+
+
+def _c_shared_library_candidates() -> list[Path]:
+    suffix = ".dylib" if sys.platform == "darwin" else ".so"
+    return [
+        ROOT / "c" / "build" / "accelerate" / f"libholoc{suffix}",
+        ROOT / "c" / "build" / "scalar" / f"libholoc{suffix}",
+    ]
+
+
+def _c_shared_library() -> Path | None:
+    for path in _c_shared_library_candidates():
+        if path.exists():
+            return path
+    return None
+
+
+def _log_name(mode: str, module: str, function: str) -> str:
+    return f"{_slug(mode)}.{_slug(module)}.{_slug(function)}.log"
+
+
+def _parse_runner_json(output: str) -> dict[str, Any] | None:
+    for line in reversed(output.splitlines()):
+        try:
+            return json.loads(line)
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def _c_mode_env(mode: str, c_lib: Path | None, module: str, function: str) -> dict[str, str]:
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+    env.setdefault("MPLBACKEND", "Agg")
+    env["HOLOSTUFF_METRIC_TEST_MODULE"] = module
+    env["HOLOSTUFF_METRIC_TEST_FUNCTION"] = function
+    for key in ("HOLOSTUFF_USE_C", "HOLOSTUFF_C_STRICT", "HOLOSTUFF_C_LIB"):
+        env.pop(key, None)
+    if mode == "c_kernel":
+        env["HOLOSTUFF_USE_C"] = "1"
+        env["HOLOSTUFF_C_STRICT"] = "1"
+        if c_lib is not None:
+            env["HOLOSTUFF_C_LIB"] = str(c_lib)
+    return env
+
+
+def _run_c_mode_test(
+    mode: str,
+    module: str,
+    function: str,
+    log_dir: Path,
+    timeout: int,
+    c_lib: Path | None,
+) -> dict[str, Any]:
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / _log_name(mode, module, function)
+    env = _c_mode_env(mode, c_lib, module, function)
+    started = time.perf_counter()
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", _C_MODE_TEST_RUNNER],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=timeout,
+        )
+        log_path.write_text(proc.stdout, encoding="utf-8")
+        parsed = _parse_runner_json(proc.stdout) or {}
+        elapsed = float(parsed.get("seconds", time.perf_counter() - started))
+        passed = proc.returncode == 0 and parsed.get("status") == "pass"
+        details = f"{elapsed:.3f}s; log={log_path}"
+        if not passed and parsed.get("error"):
+            details = f"{parsed['error']}; {details}"
+        return _metric(
+            f"c_mode_tests.{mode}.{module}.{function}.passed",
+            passed,
+            status="pass" if passed else "fail",
+            threshold="repository test function must pass in this backend mode",
+            details=details,
+        )
+    except subprocess.TimeoutExpired as exc:
+        output = exc.stdout or ""
+        log_path.write_text(output, encoding="utf-8")
+        return _metric(
+            f"c_mode_tests.{mode}.{module}.{function}.passed",
+            False,
+            status="fail",
+            threshold="repository test function must finish before timeout",
+            details=f"timed out after {timeout}s; log={log_path}",
+        )
+
+
+def collect_c_mode_tests(
+    output_dir: Path,
+    *,
+    run: bool = False,
+    timeout: int = 120,
+    tests: tuple[tuple[str, str], ...] = C_MODE_TESTS,
+    modes: tuple[str, ...] = ("numpy", "c_kernel"),
+) -> dict[str, Any]:
+    metrics: list[dict[str, Any]] = []
+    findings: list[str] = []
+    notes: list[str] = []
+    if not run:
+        metrics.append(
+            _metric(
+                "c_mode_tests.requested",
+                False,
+                status="skip",
+                details="use --run-c-mode-tests to execute the selected repository tests in NumPy and C modes",
+            )
+        )
+        return _section("c_mode_tests", metrics, notes=["C-vs-NumPy test-mode slice not requested."])
+
+    c_lib = _c_shared_library()
+    log_dir = output_dir / "c-mode-tests"
+    if "c_kernel" in modes and c_lib is None:
+        candidates = ", ".join(str(path) for path in _c_shared_library_candidates())
+        notes.append(f"No C shared library found; expected one of: {candidates}")
+
+    for mode in modes:
+        mode_rows: list[dict[str, Any]] = []
+        if mode == "c_kernel" and c_lib is None:
+            for module, function in tests:
+                mode_rows.append(
+                    _metric(
+                        f"c_mode_tests.{mode}.{module}.{function}.passed",
+                        False,
+                        status="skip",
+                        details="run `make c` before collecting C-mode test evidence",
+                    )
+                )
+        else:
+            for module, function in tests:
+                mode_rows.append(_run_c_mode_test(mode, module, function, log_dir, timeout, c_lib))
+
+        passed = sum(1 for row in mode_rows if row["status"] == "pass")
+        failed = sum(1 for row in mode_rows if row["status"] == "fail")
+        skipped = sum(1 for row in mode_rows if row["status"] == "skip")
+        metrics.extend(mode_rows)
+        metrics.extend(
+            [
+                _metric(
+                    f"c_mode_tests.{mode}.passed_count",
+                    passed,
+                    status="pass" if failed == 0 and skipped == 0 else ("fail" if failed else "skip"),
+                    threshold=f"all {len(tests)} selected tests pass",
+                    details=f"failed={failed}; skipped={skipped}",
+                ),
+                _metric(
+                    f"c_mode_tests.{mode}.failed_count",
+                    failed,
+                    status="pass" if failed == 0 else "fail",
+                    threshold="0 failures",
+                    details=f"passed={passed}; skipped={skipped}",
+                ),
+            ]
+        )
+
+    if c_lib is not None:
+        findings.append(f"C-mode tests used {c_lib.relative_to(ROOT)}.")
+    findings.append("Selected repository tests ran in fresh subprocesses for NumPy and C-kernel modes.")
+    return _section("c_mode_tests", metrics, findings=findings, notes=notes)
 
 
 def _run_path_d_scripts(cache_dir: Path, mode: str, timeout: int) -> list[dict[str, Any]]:
@@ -829,6 +1071,14 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         collect_c_evidence(),
         collect_path_d(output_dir, run_mode=args.run_path_d, path_d_timeout=args.path_d_timeout),
     ]
+    if args.run_c_mode_tests:
+        sections.append(
+            collect_c_mode_tests(
+                output_dir,
+                run=True,
+                timeout=args.c_mode_test_timeout,
+            )
+        )
     if args.include_stress:
         sections.append(collect_stress(output_dir))
 
@@ -940,6 +1190,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="regenerate Path D cache JSON before collecting it",
     )
     parser.add_argument("--path-d-timeout", type=int, default=240)
+    parser.add_argument(
+        "--run-c-mode-tests",
+        action="store_true",
+        help="run selected repository tests once with NumPy mode and once with the C kernel enabled",
+    )
+    parser.add_argument("--c-mode-test-timeout", type=int, default=120)
     parser.add_argument(
         "--strict",
         action="store_true",

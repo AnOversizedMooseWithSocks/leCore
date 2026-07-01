@@ -1,7 +1,11 @@
 import argparse
 import json
 
-from holographic_metrics import _missing_optional_dependency, build_report, collect_path_d
+from holographic_metrics import _missing_optional_dependency, build_report, collect_c_mode_tests, collect_path_d
+
+
+def metrics_smoke_pass():
+    pass
 
 
 def test_path_d_cache_metrics_are_extracted(tmp_path):
@@ -64,6 +68,8 @@ def test_fast_metrics_report_writes_json_and_markdown(tmp_path):
         include_stress=False,
         run_path_d=None,
         path_d_timeout=1,
+        run_c_mode_tests=False,
+        c_mode_test_timeout=1,
         strict=False,
     )
     report = build_report(args)
@@ -77,3 +83,17 @@ def test_fast_metrics_report_writes_json_and_markdown(tmp_path):
 def test_optional_experiment_dependency_failures_are_skips():
     assert _missing_optional_dependency("ModuleNotFoundError: No module named 'sklearn'") == "sklearn"
     assert _missing_optional_dependency("RuntimeError: real bug") is None
+
+
+def test_c_mode_test_runner_records_selected_passes(tmp_path):
+    section = collect_c_mode_tests(
+        tmp_path,
+        run=True,
+        timeout=10,
+        tests=(("test_holographic_metrics", "metrics_smoke_pass"),),
+        modes=("numpy",),
+    )
+    metrics = {row["name"]: row for row in section["metrics"]}
+
+    assert metrics["c_mode_tests.numpy.test_holographic_metrics.metrics_smoke_pass.passed"]["value"] is True
+    assert metrics["c_mode_tests.numpy.passed_count"]["value"] == 1

@@ -162,6 +162,38 @@ The same ownership boundary now exists one layer up for short stored programs:
 core runner on the same encoded program vectors and reports exact accumulator
 parity plus runs/second speedups.
 
+## C Mode Test Evidence
+
+The metrics spine can now run a small repository test slice twice: once with the
+default NumPy backend and once with `HOLOSTUFF_USE_C=1` plus a strict C library
+load. This is parity evidence rather than a throughput benchmark; the benchmark
+rows above remain the speed evidence.
+
+Latest local run on July 1, 2026:
+
+```sh
+make metrics-c-tests PYTHON=python3
+```
+
+Environment: Python 3.14.5, macOS arm64, C backend
+`c/build/accelerate/libholoc.dylib`.
+
+| mode | selected tests | passed | failed | skipped |
+| --- | ---: | ---: | ---: | ---: |
+| NumPy/default | 5 | 5 | 0 | 0 |
+| C kernel | 5 | 5 | 0 | 0 |
+
+Selected tests:
+
+- `test_algebra_properties::test_bind_batch_and_fixed_match_scalar_bind`
+- `test_algebra_properties::test_rfft_bind_recovers_under_unbind`
+- `test_algebra_properties::test_permute_inverse_is_identity_exactly`
+- `test_holographic_compute::test_holographic_compute_selftest`
+- `test_holographic_forward::test_holographic_forward_selftest`
+
+The generated report recorded per-test elapsed times between 0.041s and 0.180s
+for NumPy/default mode and between 0.043s and 0.178s for C-kernel mode.
+
 ## Why This Kernel
 
 The local project learnings point to the same shape:

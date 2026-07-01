@@ -128,7 +128,8 @@ Like leOS, leCore is **free and open source**, and the work that keeps it free i
 - **`NOTES_concepts.md`** — the running design log: what was tried, what worked, what didn't.
 - **`ISA.md`** — the small instruction set the engine's programs are built from.
 - **`holographic_metrics.py`** — the central JSON/Markdown evidence rollup; run `make metrics` for fast
-  evidence or `make metrics-path-d` to refresh the core Path D caches first.
+  evidence, `make metrics-c-tests` for NumPy/C mode parity, or `make metrics-path-d` to refresh the core
+  Path D caches first.
 - The module docstrings — every `holographic_*.py` file opens with a plain-language "why this exists" (and
   those are exactly what `REFERENCE.md` gathers up for you).
 
