@@ -28,6 +28,17 @@ def test_terrain_to_mesh_shape_and_height():
     assert abs(v[2] - t.height([v[0], v[1]])) < 1e-9
 
 
+def test_heightmap_matches_direct_point_stack_readout():
+    t = Terrain(bounds=[(0, 4), (0, 4)], octaves=3, dim=512, seed=4)
+    res = 14
+    xs = np.linspace(0, 4, res)
+    ys = np.linspace(0, 4, res)
+    gx, gy = np.meshgrid(xs, ys, indexing="ij")
+    pts = np.stack([gx.ravel(), gy.ravel()], axis=1)
+    direct = t.heights(pts).reshape(res, res)
+    assert np.allclose(t.heightmap(res), direct, atol=1e-12)
+
+
 def test_heightfield_sdf_sign():
     t = Terrain(bounds=[(0, 4), (0, 4)], octaves=4, dim=512, seed=7)
     fld = terrain_to_sdf(t, z_bounds=(-2, 2), res=8, dim=1024, bandwidth=8.0, seed=1)

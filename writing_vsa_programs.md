@@ -332,6 +332,8 @@ acc, trace = vm.run(program_vec,         # execute; returns (accumulator, decode
                     max_steps=512)        #   safety cap on total instructions executed
 acc, trace = vm.run_chunked(program,     # run a program TOO LONG for one structure: thread the accumulator
                     chunk=14)             #   across clean <=chunk-instruction pieces (default 14; raise at higher dim)
+acc, trace = vm.run_c_basic(program_vec, # optional C runner for LOAD/BIND/BUNDLE/PERMUTE/IFMATCH/HALT
+                    max_steps=len(program))
 ```
 
 `HoloMachine` lives in `holographic_machine.py`. It is intentionally *adjacent* to the mind, not a faculty

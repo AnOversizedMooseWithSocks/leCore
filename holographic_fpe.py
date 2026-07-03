@@ -39,10 +39,36 @@ KEPT NEGATIVES (measured, in the selftest)
 
 Only NumPy, the engine's bind/cosine, and the existing ScalarEncoder -- no new dependency, nothing learned.
 """
+import os
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 
 from holographic_ai import bind, cosine
 from holographic_encoders import ScalarEncoder
+
+_BUNDLE_ENCODE_BATCH_ROWS = 512
+_FPE_PARALLEL_MIN_ROWS = 1024
+
+
+def _env_int(name, default):
+    try:
+        return int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _fpe_parallel_workers(task_count, item_count=0, workers=None, min_items=_FPE_PARALLEL_MIN_ROWS):
+    if task_count <= 1:
+        return 1
+    if workers is not None:
+        return max(1, min(int(workers), task_count))
+    requested = _env_int("HOLOSTUFF_FPE_THREADS", 0)
+    if requested > 0:
+        return min(requested, task_count)
+    if requested < 0 or item_count < min_items:
+        return 1
+    return max(1, min(os.cpu_count() or 1, task_count))
 
 
 class VectorFunctionEncoder:
@@ -82,6 +108,13 @@ class VectorFunctionEncoder:
             ScalarEncoder(self.dim, lo=lo, hi=hi, seed=seed * 97 + k + 1, kernel=kernel, bandwidth=self.bandwidth[k])
             for k, (lo, hi) in enumerate(self.bounds)
         ]
+        self._half_len = self.dim // 2 + 1
+        self._axis_half_phases = [ax.phases[:self._half_len] for ax in self.axes]
+        self._rfft_weights = np.ones(self._half_len)
+        if self._half_len > 1:
+            self._rfft_weights[1:] = 2.0
+            if self.dim % 2 == 0:
+                self._rfft_weights[-1] = 1.0
 
     def encode(self, point):
         """The n-D FPE vector for `point` = (x_0, ..., x_{n-1}): bind the per-axis FPE encodings.
@@ -96,6 +129,47 @@ class VectorFunctionEncoder:
             v = bind(v, self.axes[k].encode(point[k]))
         return v
 
+    def _coerce_points(self, points):
+        pts = np.asarray(points, float)
+        if self.n_dims == 1:
+            if pts.ndim == 0:
+                pts = pts.reshape(1, 1)
+            elif pts.ndim == 1:
+                pts = pts.reshape(-1, 1)
+        else:
+            pts = np.atleast_2d(pts)
+        if pts.ndim != 2 or pts.shape[1] != self.n_dims:
+            raise ValueError(f"points must have shape (count, {self.n_dims})")
+        return pts
+
+    def _point_spectra(self, pts):
+        spectrum = np.ones((pts.shape[0], self._half_len), dtype=np.complex128)
+        for k, ax in enumerate(self.axes):
+            spectrum *= self._axis_spectra(k, pts[:, k])
+        return spectrum
+
+    def _axis_spectra(self, axis, values):
+        ax = self.axes[axis]
+        values = np.asarray(values, float).ravel()
+        warp_x = getattr(ax, "_warp_x", None)
+        if warp_x is not None:
+            values = np.interp(values, warp_x, ax._warp_u)
+        return np.exp(1j * ax.scale * values[:, None] * self._axis_half_phases[axis][None, :])
+
+    def encode_many(self, points):
+        """Vectorised n-D FPE encoding for a row stack of points.
+
+        This is algebraically the same as calling encode() for each row: it
+        multiplies the per-axis FPE spectra directly, which is exactly what the
+        bind loop would do after FFTing each axis code.
+        """
+        spectrum = self._point_spectra(self._coerce_points(points))
+        out = np.fft.irfft(spectrum, n=self.dim, axis=1)
+        norms = np.linalg.norm(out, axis=1)
+        nz = norms > 0
+        out[nz] /= norms[nz, None]
+        return np.ascontiguousarray(out)
+
     def kernel_at(self, delta):
         """The similarity this encoder realises between two points `delta` apart: the PRODUCT of the per-axis
         Bochner kernels. For RBF axes that is a product of Gaussians -- the n-D squared-exponential kernel --
@@ -106,24 +180,106 @@ class VectorFunctionEncoder:
             k *= ax.kernel_at(float(d))
         return float(k)
 
-    def bundle(self, points, weights=None):
+    def bundle(self, points, weights=None, chunk_size=_BUNDLE_ENCODE_BATCH_ROWS, workers=None):
         """Represent a function f: R^n -> R as a weighted superposition of encoded points,
         f = sum_i w_i encode(p_i). With RBF axes, querying f is a holographic kernel-density estimate."""
-        points = list(points)
-        if not points:
+        pts = self._coerce_points(points)
+        if len(pts) == 0:
             raise ValueError("need at least one point")
         if weights is None:
-            weights = [1.0] * len(points)
-        f = None
-        for w, p in zip(weights, points):
-            term = float(w) * self.encode(p)
-            f = term if f is None else f + term
-        return f
+            weights_arr = None
+        else:
+            weights_arr = np.asarray(weights, float).ravel()
+            if weights_arr.shape[0] != len(pts):
+                raise ValueError("weights must match the number of points")
+        step = max(1, int(chunk_size))
+        spans = [(start, min(start + step, len(pts))) for start in range(0, len(pts), step)]
+
+        def chunk_spectrum(span):
+            start, end = span
+            chunk = self._point_spectra(pts[start:end])
+            chunk_weights = None if weights_arr is None else weights_arr[start:end]
+            if chunk_weights is None:
+                return chunk.sum(axis=0)
+            return chunk_weights @ chunk
+
+        worker_count = _fpe_parallel_workers(len(spans), len(pts), workers)
+        if worker_count == 1:
+            parts = [chunk_spectrum(span) for span in spans]
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                parts = list(executor.map(chunk_spectrum, spans))
+        spectrum = np.zeros(self._half_len, dtype=np.complex128)
+        for part in parts:
+            spectrum += part
+        return np.fft.irfft(spectrum, n=self.dim)
 
     def query(self, function, point):
         """Evaluate the represented function at `point`: cosine(function, encode(point)) reads
         sum_i w_i kernel(point, p_i), up to the bundle's norm -- the function's value, holographically."""
         return float(cosine(function, self.encode(point)))
+
+    def query_many(self, function, points, chunk_size=_BUNDLE_ENCODE_BATCH_ROWS, workers=None):
+        """Evaluate a represented function at many points in batched FPE blocks.
+
+        This is the read-side twin of ``bundle``: encode a row stack once, then
+        use one matrix-vector multiply per chunk instead of a Python loop of
+        ``query(function, point)`` calls. It preserves query() semantics exactly
+        up to batched-FFT roundoff.
+        """
+        pts = self._coerce_points(points)
+        fn = np.asarray(function, float)
+        fnorm = np.linalg.norm(fn)
+        if fnorm == 0:
+            return np.zeros(pts.shape[0], dtype=float)
+        fn_spectrum = np.conj(np.fft.rfft(fn)) * self._rfft_weights
+        step = max(1, int(chunk_size))
+        spans = [(start, min(start + step, pts.shape[0])) for start in range(0, pts.shape[0], step)]
+
+        def chunk_query(span):
+            start, end = span
+            spectra = self._point_spectra(pts[start:end])
+            return np.real(spectra @ fn_spectrum) / (self.dim * fnorm)
+
+        worker_count = _fpe_parallel_workers(len(spans), pts.shape[0], workers)
+        out = np.empty(pts.shape[0], dtype=float)
+        if worker_count == 1:
+            parts = [chunk_query(span) for span in spans]
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                parts = list(executor.map(chunk_query, spans))
+        for (start, end), values in zip(spans, parts):
+            out[start:end] = values
+        return out
+
+    def query_grid(self, function, axes, workers=None):
+        """Evaluate a represented function on a Cartesian grid.
+
+        The common terrain/material case is 2-D and separable in the FPE spectrum:
+        spectrum(x, y) = spectrum_x(x) * spectrum_y(y). That lets a whole grid
+        read use O((nx + ny) * dim) exponentials plus one matrix multiply instead
+        of O(nx * ny * dim) point spectra.
+        """
+        axis_values = [np.asarray(axis, float).ravel() for axis in axes]
+        if len(axis_values) != self.n_dims:
+            raise ValueError(f"axes must have {self.n_dims} entries")
+        shape = tuple(len(axis) for axis in axis_values)
+        if any(length == 0 for length in shape):
+            return np.zeros(shape, dtype=float)
+        if self.n_dims != 2:
+            grids = np.meshgrid(*axis_values, indexing="ij")
+            pts = np.stack([g.ravel() for g in grids], axis=1)
+            return self.query_many(function, pts, workers=workers).reshape(shape)
+
+        fn = np.asarray(function, float)
+        fnorm = np.linalg.norm(fn)
+        if fnorm == 0:
+            return np.zeros(shape, dtype=float)
+        fn_spectrum = np.conj(np.fft.rfft(fn)) * self._rfft_weights
+        sx = self._axis_spectra(0, axis_values[0])
+        sy = self._axis_spectra(1, axis_values[1])
+        values = (sx * fn_spectrum[None, :]) @ sy.T
+        return np.real(values) / (self.dim * fnorm)
 
     def shift(self, function, delta):
         """Translate the WHOLE function by `delta` with a single binding:

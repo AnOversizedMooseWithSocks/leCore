@@ -178,6 +178,58 @@ class HoloMachine:
         from holographic_fft import rfft as _rfft, irfft as _irfft
         return _irfft(prog_spec * _rfft(involution(self.pos(i))), n=n)
 
+    def _c_program_tables(self, max_steps):
+        """Build/cache contiguous tables used by the C core-program runner."""
+        cache = getattr(self, "_c_program_cache", None)
+        if cache is None:
+            cache = self._c_program_cache = {}
+        key = int(max_steps)
+        if key not in cache:
+            op_matrix = np.ascontiguousarray(np.stack([self.op_atoms[o] for o in OPCODES]), dtype=np.float64)
+            data_matrix = np.ascontiguousarray(
+                np.stack([self.data_atoms[name] for name in self.data_names]), dtype=np.float64
+            )
+            cache[key] = {
+                "positions": np.ascontiguousarray(
+                    np.stack([self.pos(i) for i in range(key)]), dtype=np.float64
+                ),
+                "op_matrix": op_matrix,
+                "op_norms": np.ascontiguousarray(np.linalg.norm(op_matrix, axis=1), dtype=np.float64),
+                "data_matrix": data_matrix,
+                "data_norms": np.ascontiguousarray(np.linalg.norm(data_matrix, axis=1), dtype=np.float64),
+            }
+        return cache[key]
+
+    def run_c_basic(self, program_vec, init_acc=None, max_steps=512, branch_tol=0.5):
+        """Execute the core stored-program subset in C.
+
+        This is the C VSA program path for the small, hot instruction subset:
+        LOAD, BIND, BUNDLE, PERMUTE, IFMATCH, and HALT. Host-bound features
+        (CALL/APPLY/ITERATE/REPEAT/registers/stack) remain on run(), because
+        they invoke Python handlers, function libraries, or exact host state.
+        """
+        import holographic_c
+
+        max_steps = int(max_steps)
+        if max_steps <= 0:
+            return init_acc, []
+        tables = self._c_program_tables(max_steps)
+        acc, raw_trace = holographic_c.program_run_basic(
+            program_vec,
+            tables["positions"],
+            self.OP,
+            self.ARG,
+            tables["op_matrix"],
+            tables["data_matrix"],
+            op_norms=tables["op_norms"],
+            data_norms=tables["data_norms"],
+            init_acc=init_acc,
+            max_steps=max_steps,
+            branch_tol=branch_tol,
+        )
+        trace = [(OPCODES[op], self.data_names[arg]) for op, arg in raw_trace]
+        return acc, trace
+
     # ---- executing a program -----------------------------------------------------------------
     def run(self, program_vec, init_acc=None, max_steps=512, _depth=0, handlers=None,
             stop=None, max_loop=64, converge_tol=0.999, branch_tol=0.5,

@@ -192,7 +192,7 @@ def sample_material(material, uv_coords):
     out = {}
     for name in material.channels:
         field = material.channels[name]          # EXACT stored field (no crosstalk); query all UVs
-        out[name] = np.array([material.encoder.query(field, uv) for uv in uv_coords])
+        out[name] = material.encoder.query_many(field, uv_coords)
     return out
 
 

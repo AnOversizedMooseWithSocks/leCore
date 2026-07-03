@@ -13,11 +13,10 @@
 
 name: tests
 
-# Direct pushes to the default branch (covers both common names), plus all PRs.
-# If your default branch is named something else, add it to the push list.
+# Direct pushes to any branch, plus all PRs. Branch pushes let fork/feature
+# branches produce CI evidence even while an upstream PR waits for approval.
 on:
   push:
-    branches: [main, master]
   pull_request:
 
 jobs:
@@ -58,3 +57,43 @@ jobs:
             echo "API_QUICKREF.md is out of date -- run 'python apiquickref.py' and commit the result.";
             exit 1;
           }
+
+  c-kernel-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      MPLBACKEND: Agg
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile, test, and benchmark the C kernel
+        run: |
+          python c/benchmarks/ci_evidence.py --output-dir c/build/ci-evidence
+
+      - name: Publish C kernel evidence summary
+        if: always()
+        run: |
+          if [ -f c/build/ci-evidence/report.md ]; then
+            cat c/build/ci-evidence/report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload C kernel evidence artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c-kernel-evidence
+          path: c/build/ci-evidence/

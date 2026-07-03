@@ -48,9 +48,11 @@ HONEST SCOPE (kept negatives)
 Deterministic given a seed (every random draw goes through default_rng(seed)).
 """
 
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 
-from holographic_fpe import VectorFunctionEncoder
+from holographic_fpe import VectorFunctionEncoder, _BUNDLE_ENCODE_BATCH_ROWS, _fpe_parallel_workers
 from holographic_ai import cosine
 
 
@@ -123,6 +125,11 @@ def sample(encoder, field, point):
     return float(encoder.query(field, point))
 
 
+def sample_many(encoder, field, points, workers=None):
+    """Read the noise field at many points via the encoder's batched FPE query path."""
+    return encoder.query_many(field, points, workers=workers)
+
+
 # ---------------------------------------------------------------------------
 # fBm: a weighted superposition of band fields (the octave bundle).
 # ---------------------------------------------------------------------------
@@ -165,20 +172,72 @@ class FractalNoise:
 
     def query(self, point):
         """Evaluate fBm at a point: the amplitude-weighted sum of the octave reads (the bundle)."""
-        total = 0.0
-        for amp, enc, fld in zip(self.amplitudes, self.encoders, self.fields):
-            total += amp * enc.query(fld, point)
-        return float(total / self._norm)
+        return float(self.query_many([point])[0])
 
-    def sample_grid(self, res):
+    def query_many(self, points, workers=None):
+        """Evaluate fBm at many points with one batched read per octave."""
+        pts = np.asarray(points, float)
+        if self.n_dims == 1:
+            if pts.ndim == 0:
+                pts = pts.reshape(1, 1)
+            elif pts.ndim == 1:
+                pts = pts.reshape(-1, 1)
+        else:
+            pts = np.atleast_2d(pts)
+        if pts.ndim != 2 or pts.shape[1] != self.n_dims:
+            raise ValueError(f"points must have shape (count, {self.n_dims})")
+
+        total = np.zeros(pts.shape[0], dtype=float)
+        octave_items = list(zip(self.amplitudes, self.encoders, self.fields))
+        if not octave_items:
+            return total / self._norm
+
+        rows_per_octave = pts.shape[0] * max(1, self.octaves)
+        chunk_count = max(1, (pts.shape[0] + _BUNDLE_ENCODE_BATCH_ROWS - 1) // _BUNDLE_ENCODE_BATCH_ROWS)
+        worker_budget = _fpe_parallel_workers(self.octaves * chunk_count, rows_per_octave, workers)
+        outer_workers = min(self.octaves, worker_budget)
+        inner_workers = max(1, min(chunk_count, (worker_budget + outer_workers - 1) // outer_workers))
+
+        def octave_read(item):
+            amp, enc, fld = item
+            return amp * enc.query_many(fld, pts, workers=inner_workers)
+
+        if outer_workers == 1:
+            parts = [octave_read(item) for item in octave_items]
+        else:
+            with ThreadPoolExecutor(max_workers=outer_workers) as executor:
+                parts = list(executor.map(octave_read, octave_items))
+        for part in parts:
+            total += part
+        return total / self._norm
+
+    def sample_grid(self, res, workers=None):
         """Evaluate fBm on a res^n_dims lattice over `bounds` (n_dims==2 -> a res x res array).
 
         For measuring (fractal dimension / Hurst / spectrum) and for feeding terrain/displacement.
         """
         axes = [np.linspace(lo, hi, res) for (lo, hi) in self.bounds]
+        if self.n_dims == 2:
+            total = np.zeros((res, res), dtype=float)
+            octave_items = list(zip(self.amplitudes, self.encoders, self.fields))
+            worker_count = _fpe_parallel_workers(self.octaves, res * res * max(1, self.octaves), workers)
+
+            def octave_grid(item):
+                amp, enc, fld = item
+                return amp * enc.query_grid(fld, axes)
+
+            if worker_count == 1:
+                parts = [octave_grid(item) for item in octave_items]
+            else:
+                with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                    parts = list(executor.map(octave_grid, octave_items))
+            for part in parts:
+                total += part
+            return total / self._norm
+
         grids = np.meshgrid(*axes, indexing="ij")
         pts = np.stack([g.ravel() for g in grids], axis=1)
-        vals = np.array([self.query(p) for p in pts])
+        vals = self.query_many(pts, workers=workers)
         return vals.reshape([res] * self.n_dims)
 
 
