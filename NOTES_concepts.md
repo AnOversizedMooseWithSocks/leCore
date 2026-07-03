@@ -18286,3 +18286,48 @@ pipeline compile, PW3 bake-vs-compute per stage, PW4 iterate sim readout. One ad
 dials (smoke->dye/milk->salt fingering->oil&water) + a compile/bake/lookup flattening from material to whole pipeline,
 all reusing wired faculties, every kept negative loud. Real bugs caught by measuring vs baselines: alpha density-
 buoyancy coupling, double-well well positions + inverted tension, empty-CompileCache-falsy, MC3 estimator variance.
+
+## CI fix (facade H rebuild) + the build-ergonomics batch (six items) + a stable sigmoid (+13 tests)
+
+Two things this session: fix the red CI, then work the build-ergonomics backlog.
+
+**CI fix -- facade H was lost to a filesystem rollback.** test_lecore.py failed 3 ways: `hasattr(lecore,'scene')`
+False, and `lecore.scene` / `lecore.areas` missing. The NOTES already record F+G+H as done, but the live
+`lecore.py` was back to the bare 22-line stub (UnifiedMind + raw ops only) -- a snapshot rollback ate the facade
+code while the NOTES entry survived. PROBED first (the failing test + which module owns each expected symbol),
+then rebuilt `lecore.py` faithfully to the recorded H spec: five curated areas as SimpleNamespaces, re-exporting
+EXISTING names only --
+  scene (Scene, SceneObject <- scene_doc), model (ModifierStack, describe_object <- modifier; sphere, box <- sdf;
+  extrude_face/inset_face/dissolve_vertex <- meshverbs), render (RenderSession <- session, path_trace <-
+  pathtrace, CancelToken <- cancel, PipelineConfig <- pipeline), sim (plan_waves/solve_waves <- waveadaptive,
+  FreeSurface <- freesurface, MPMSnow <- mpm, StableFluid <- fluid, scatter/gather <- transfer), transform (the
+  whole G kit <- transform). `areas()` derives its map straight off the namespaces (one source of truth, can't
+  drift). All 3 test_lecore tests green.
+
+**Build-ergonomics batch (the six requests):**
+1. `png_bytes(rgb01, level=6)` in holographic_render.py [core] -- factored the existing save_png encoder body to
+   RETURN bytes (what every web/demo backend needs); save_png is now a thin wrapper. Pixel output bit-identical
+   (kept the `*255` truncation, not a +0.5 round). level: 1=fast preview, 6=still.
+2. `holographic_sdfscene.py` [core] -- an SDFScene base class: subclass, implement parts() -> [(sdf_fn, mat)],
+   get .eval (min), .part_ids (argmin), .ids (the alias to_splats expects), material_at for free. Optional
+   SpatialGrid-backed parts_near() for many-part culling. KEPT NEGATIVE (loud): automatic broadphase for an SDF
+   *min* needs per-part bounds + an upper-bound pass to prune safely, so the base eval stays naive-and-correct
+   and culling is opt-in via bounds()+parts_near() -- no silent pruning on the argmin path.
+3. `tools/new_demo.py <name>` [demo-side] -- scaffold generator: stamps backend.py (Blueprint `bp` + /api/draft),
+   index.html (viewport+slider), demo.json; the generated demo already RENDERS a placeholder and passes smoke.
+4. `tools/demo_kit.py` [demo-side] -- png_response/json_response (no-cache) + a self-contained smoke_test that
+   mounts a demo's `bp` on a throwaway Flask app and checks each GET is 200 / PNG magic. Importing the backend
+   IS step one, so the module-load NameError pattern surfaces instantly.
+5. `apiquickref.py` -> API_QUICKREF.md [core] -- a CURATED, scannable one-line-per-symbol reference for the
+   app-building surface (scene/model/geometry/transform/camera/render/export), ast-only like docgen. Distinct
+   from docgen's exhaustive REFERENCE.md. Wired a drift-check step into ci.yml (regenerate + git diff --exit-code).
+6. `CONVENTIONS.md` [docs] -- the four load-bearing gotchas in one page: SDF sign (negative inside), colour space
+   (shade linear, tonemap+gamma last), camera handedness (right = forward x up), determinism trio
+   (PYTHONHASHSEED=0, hashlib not hash(), stable sorts). Grounded in the live camera/postfx/transform code.
+
+**Also:** made holographic_deliberate.py's coherence sigmoid numerically stable (branch on sign of z; only exp()
+a value <= 0) -- kills the `overflow encountered in exp` RuntimeWarning the CI log showed. Mathematically
+identical to 1/(1+exp(-z)) on non-overflowing inputs; ~0 (not a warning) on extreme-negative margins.
+
+Tests 2998 -> 3011 collected (+13: png_bytes 1, sdfscene 7, build-ergonomics 5). The 3 facade tests now pass.
+Demo-side tools live under tools/ here (drop them into the gallery bundle); core items are in the engine repo.

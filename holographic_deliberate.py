@@ -119,7 +119,14 @@ class Deliberator:
                      when a draft loops or repeats
         Returns a list of (name, fn(draft, gist) -> [0,1])."""
         def coherence(draft, gist):
-            return float(1.0 / (1.0 + np.exp(-(self.v.structure_score(draft) - self.v.threshold) * 1.5)))
+            # Logistic sigmoid of the (score - threshold) margin. Written the numerically-stable way: taking
+            # exp() of a large POSITIVE argument overflows (the RuntimeWarning this used to emit), so we branch
+            # on the sign of z and only ever exp() a value <= 0. Mathematically identical to 1/(1+exp(-z)).
+            z = (self.v.structure_score(draft) - self.v.threshold) * 1.5
+            if z >= 0.0:
+                return float(1.0 / (1.0 + np.exp(-z)))
+            ez = np.exp(z)                                    # z < 0 here, so ez is in (0, 1) -- no overflow
+            return float(ez / (1.0 + ez))
 
         def relevance_j(draft, gist):
             return float(max(0.0, min(1.0, relevance(draft, gist, self.mp.idx, self.mp.M))))

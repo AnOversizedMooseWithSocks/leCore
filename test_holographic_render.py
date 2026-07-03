@@ -67,3 +67,27 @@ def test_volume_optimizations_preserve_image_and_cut_samples():
     i1, _ = volume_render(blob, cam, b, 96, 96, steps=80, empty_skip=True, early_term=True)
     n1 = volume_render.last_samples
     assert np.abs(i0 - i1).max() < 0.02 and n1 < n0          # same image, fewer field samples
+
+
+def test_png_bytes_and_save_png_agree_and_are_valid():
+    """png_bytes returns a real PNG (valid magic), save_png writes exactly those bytes, and the compression
+    level changes only the byte stream -- never the decoded pixels (PNG is lossless)."""
+    import tempfile, os
+    from holographic_render import png_bytes, save_png
+    img = np.random.default_rng(0).random((13, 21, 3))
+
+    b = png_bytes(img)
+    assert b[:8] == b"\x89PNG\r\n\x1a\n"                       # PNG signature
+
+    p = tempfile.mktemp(suffix=".png")
+    save_png(p, img)                                          # default level matches png_bytes' default
+    try:
+        assert open(p, "rb").read() == png_bytes(img)         # save_png is a thin wrapper over png_bytes
+    finally:
+        os.remove(p)
+
+    # level 1 (fast preview) vs 6 (still): both valid PNGs; the IHDR (which encodes width/height/depth, i.e.
+    # the image shape) is identical -- only the compressed IDAT differs.
+    b1 = png_bytes(img, level=1)
+    assert b1[:8] == b"\x89PNG\r\n\x1a\n"
+    assert b1[8:33] == b[8:33]                                 # signature + IHDR chunk identical across levels

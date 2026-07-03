@@ -47,3 +47,14 @@ jobs:
 
       - name: Run the test suite
         run: pytest -q --durations=10
+
+      # Keep API_QUICKREF.md current on its own: regenerate it and fail if the committed copy is stale.
+      # This is a drift check (no write-back needed) -- if it fails, run `python apiquickref.py` locally and
+      # commit the result. The generator only reads source with `ast`, so this step is fast and side-effect-free.
+      - name: Check API_QUICKREF.md is up to date
+        run: |
+          python apiquickref.py
+          git diff --exit-code API_QUICKREF.md || {
+            echo "API_QUICKREF.md is out of date -- run 'python apiquickref.py' and commit the result.";
+            exit 1;
+          }

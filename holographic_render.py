@@ -346,10 +346,19 @@ def _blackbody_ramp(d):
     return np.stack([r, g, b], axis=1)
 
 
-def save_png(path, rgb01):
-    """Write an (H,W,3) image in [0,1] to a PNG -- a minimal, pure-stdlib encoder (zlib + struct), so the render
-    module carries no image-library dependency. 8-bit RGB."""
+def png_bytes(rgb01, level=6):
+    """Encode an (H,W,3) image in [0,1] to PNG *bytes* -- a minimal, pure-stdlib encoder (zlib + struct), so the
+    render module carries no image-library dependency. 8-bit RGB.
+
+    Returning bytes (not writing a file) is what every web/demo backend actually needs: it can send the result
+    straight over HTTP without re-implementing this encoder. `save_png` below just wraps this and writes to disk.
+
+    `level` is the zlib compression level: use 1 for fast streamed preview frames (smaller CPU cost per frame),
+    6 for stills (the default -- a good size/speed balance). The decoded PIXELS are identical at every level
+    (PNG is lossless); only the size of the compressed byte stream changes."""
     import struct, zlib
+    # NOTE: `* 255` truncates rather than rounds. Kept deliberately -- it matches this encoder's long-standing
+    # output exactly, so existing images stay bit-identical. (A +0.5 round would shift some pixels by one LSB.)
     a = (np.clip(np.asarray(rgb01, float), 0, 1) * 255).astype(np.uint8)
     h, w = a.shape[:2]
     raw = b"".join(b"\x00" + a[y, :, :3].tobytes() for y in range(h))   # filter byte 0 per scanline
@@ -359,8 +368,14 @@ def save_png(path, rgb01):
 
     sig = b"\x89PNG\r\n\x1a\n"
     ihdr = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)        # 8-bit, colour type 2 (RGB)
+    return sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(raw, level)) + chunk(b"IEND", b"")
+
+
+def save_png(path, rgb01, level=6):
+    """Write an (H,W,3) image in [0,1] to a PNG file. Thin wrapper over `png_bytes` -- see it for the encoder
+    details and the `level` argument (1 = fast preview, 6 = still, the default)."""
     with open(path, "wb") as f:
-        f.write(sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+        f.write(png_bytes(rgb01, level))
 
 
 def frame_delta_tiles(prev, curr, tile=32, thresh=1e-3):
