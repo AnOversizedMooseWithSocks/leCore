@@ -5145,6 +5145,117 @@ class UnifiedMind:
         from holographic_fields import sample_field
         return sample_field(field, positions)
 
+    def plan_stage_execution(self, stages, frames):
+        """Decide bake-vs-compute PER pipeline stage (PW3), extending adaptive.plan_render's break-even to the
+        stage level: static stages bake once reused across enough frames, dynamic (and unannotated) stages compute.
+        Returns a per-stage plan with reasons. See holographic_stageplan."""
+        from holographic_stageplan import plan_stages
+        return plan_stages(stages, frames)
+
+    def plan_pipeline_bakes(self, cfg, frames, registry=None, options=None, cache=None):
+        """Compile a pipeline (PW2) then decide which of its stages to BAKE vs COMPUTE over `frames` frames (PW3) --
+        the decision layer that tells PW1's bake_pipeline which stages are worth baking. Returns (pipeline, plan).
+        See holographic_stageplan / holographic_pipecompile."""
+        from holographic_stageplan import plan_stages
+        pipe = self.compile_pipeline(cfg, registry=registry, options=options, cache=cache)
+        return pipe, plan_stages(pipe.stages, frames)
+
+    def diffuse_readout(self, field, amount, k):
+        """Read out the matter model's LINEAR diffusion sub-step at any time k in ONE evaluation (PW4): diagonalise
+        the diffusion bind in the Fourier basis and raise its transfer to the k-th power, instead of marching k
+        steps (k may be fractional). Matches k marched diffusions exactly. See holographic_simreadout. Nonlinear
+        advection/buoyancy/tension still march."""
+        from holographic_simreadout import diffuse_at
+        return diffuse_at(field, amount, k)
+
+    def diffuse_steady_state(self, field):
+        """The closed-form limit of unbounded diffusion (PW4): the flat mean field -- every non-DC mode decays, the
+        mean is preserved -- without marching to it. See holographic_simreadout."""
+        from holographic_simreadout import diffuse_limit
+        return diffuse_limit(field)
+
+    def compile_pipeline(self, cfg, registry=None, options=None, cache=None):
+        """Compile a render/sim pipeline's plan ONCE per config (PW2): select+auto-include+toposort the stages,
+        keyed by the config's content, so repeated frames reuse the ordered Pipeline with no re-planning. Reuses the
+        content-addressed compile cache. See holographic_pipecompile."""
+        from holographic_pipecompile import compiled_pipeline
+        return compiled_pipeline(cfg, registry=registry, options=options, cache=cache)
+
+    def run_pipeline(self, cfg, scene=None, seed=0, prev_frame=None, renderer=None, registry=None, options=None, cache=None):
+        """Run a pipeline for `cfg`, compiling its plan on the first frame and reusing it thereafter (PW1/PW2) -- the
+        everyday frame-loop entry point. Returns the final FrameState. See holographic_pipecompile."""
+        from holographic_pipecompile import run_compiled
+        return run_compiled(cfg, scene=scene, seed=seed, prev_frame=prev_frame, renderer=renderer,
+                            registry=registry, options=options, cache=cache)
+
+    def bake_view_lut(self, metallic=1.0, base_color=(1.0, 1.0, 1.0), res_view=16, res_rough=16, samples=8192, seed=0):
+        """Pre-integrate the view-DEPENDENT specular (MC3): bake directional_albedo over a (view_cos, roughness)
+        grid ONCE, so per-pixel specular reflectance is a bilinear LUT lookup instead of a hemisphere integral --
+        the 'add a dimension' move that turns the last view-dependent axis into a query. Returns a ViewLUT with
+        .sample(view_cos, roughness). See holographic_viewlut."""
+        from holographic_viewlut import bake_view_lut
+        return bake_view_lut(metallic=metallic, base_color=base_color, res_view=res_view,
+                             res_rough=res_rough, samples=samples, seed=seed)
+
+    def bake_material(self, material, lo, hi, res=24):
+        """Bake a material's VIEW-INDEPENDENT channels into field lookups (MC2): a procedural texture becomes a
+        trilinear grid sample (O(1) per hit, no field re-evaluation), constants stay folded (MC1). `lo,hi` are the
+        object bounds to bake over. Returns a shade(points)->channels kernel of folds + lookups. See
+        holographic_matbake. The remaining view-DEPENDENT channels (specular) are MC3's LUT."""
+        from holographic_matbake import bake_material
+        return bake_material(material, lo, hi, res=res)
+
+    def compile_material(self, material, cache=None):
+        """Compile a material's socket graph into ONE cached shade(points)->channels kernel (MC1): built once, keyed
+        by the material's content spec, reused for every hit/instance/frame; constant channels are folded so only the
+        procedural sockets re-resolve per hit. Reuses the content-addressed compile cache. See holographic_matcompile."""
+        from holographic_matcompile import compiled_shader
+        return compiled_shader(material, cache=cache)
+
+    def scatter_surface(self, instance, sdf, bounds, count, scale=1.0, density=None, cell_size=0.25, seed=0):
+        """Scatter instances (grass, rocks, barnacles...) onto ANY surface -- a scatter LAYER that emits geometry
+        instead of colour, weighted by an optional density map, reusing emit_from_surface. Returns the placements
+        (points, normals, per-placement bound vectors) + the bundled, region-queryable layer vector. See
+        holographic_scatterlayer."""
+        from holographic_scatterlayer import ScatterLayer
+        layer = ScatterLayer(instance, count, scale=scale, density=density, cell_size=cell_size, seed=seed)
+        return layer.apply(sdf, bounds)
+
+    def scale_node(self, scene, lod_px=8.0):
+        """A cosmic-scale summariser over a scene hierarchy: a parent carries the monoid-accumulated value of its
+        children (mass SUMs, appearance BUNDLES) via the wired distribute_compute; zoom out reads the summary, zoom
+        in descends. Same accumulation at every scale (atom -> ... -> galaxy). See holographic_scalenode."""
+        from holographic_scalenode import ScaleNode
+        return ScaleNode(scene, mind=self, lod_px=lod_px)
+
+    def make_mixture(self, shape, solvent_density=1.0, buoyancy=1.0, tension=0.0):
+        """Create a Mixture -- the multi-channel matter model (smoke/dye/milk/oil-water are this with different
+        dials). Add components with .add(name, field, density, diffusivity), then advance with matter_step. See
+        holographic_mixture."""
+        from holographic_mixture import Mixture
+        return Mixture(shape, solvent_density=solvent_density, buoyancy=buoyancy, tension=tension)
+
+    def matter_step(self, mix, vx, vy, dt=0.1, drift_strength=0.0):
+        """Advance a Mixture one step on ONE shared incompressible flow: blend density -> buoyancy -> a single
+        fluid_step -> per-channel advect + diffuse (+ optional double-well tension and drift) -> renormalise. This
+        delegates to the wired advect/diffuse/buoyancy_force/fluid_step; it is NOT a second solver. Returns the
+        updated (vx, vy); the mixture is mutated in place. See holographic_mixture."""
+        from holographic_mixture import matter_step
+        return matter_step(mix, vx, vy, dt=dt, drift_strength=drift_strength)
+
+    def smoke_preset(self, name="rising", nx=48, ny=48, steps=40, dt=0.1, seed=0):
+        """Run one of the six named SMOKE PRESETS on the wired FFT smoke solver and return its fields
+        (density/temperature/vx/vy). The presets (rising, wispy, billow, heavy, still_room, stratified) are just
+        dial settings -- smoke is the 1-channel, tension-0 corner of the matter model -- so this delegates to
+        smoke_step, it does not add a solver. Use smoke_preset_names() for the list. See holographic_smokepresets."""
+        from holographic_smokepresets import simulate
+        return simulate(name, nx=nx, ny=ny, steps=steps, dt=dt, seed=seed)
+
+    def smoke_preset_names(self):
+        """The available smoke preset names."""
+        from holographic_smokepresets import preset_names
+        return preset_names()
+
     def scatter_to_field(self, shape, positions, values):
         """The adjoint of sample_field: imprint per-particle values onto a grid (bilinear, periodic) -- e.g. a
         moving body depositing momentum into the fluid velocity grid (cloth->fluid coupling)."""
@@ -5477,6 +5588,1510 @@ class UnifiedMind:
         if ctx is None:
             raise ValueError("call brick_ray_index(...) first to build the index and cache the scene")
         return _drm(ctx, obj_id, delta, brick_index, base_frame, camera)
+
+    def incremental_renderer(self, camera, width=256, height=256, sun="bright", sky="clear", ground=True, ss=1):
+        """A render SESSION: render the first frame, then re-render the SAME scene for FREE (cached), apply colour/
+        material/light edits and geometry moves as bounded bit-exact DELTAS, and stream only the changed pixels. This
+        is the path for repeated rendering / live editing / pixel streaming -- calling render_scene every frame re-does
+        the whole trace even when nothing changed; the session pays only for what changed. Default ss=1 (delta-exact,
+        for streaming); use a one-shot render_scene(ss=2) for a final still. See holographic_rayindex.IncrementalRenderer.
+
+        Usage:
+            r = mind.incremental_renderer(camera, 256, 256)
+            frame, mask = r.render(objects)        # first frame (full); mask = whole frame
+            frame, mask = r.render(objects)        # SAME scene -> free, mask empty
+            frame, mask = r.edit(0, 'color', 'gold')   # delta; mask = changed pixels
+            frame, mask = r.move(1, (0.3, 0, 0))       # delta; mask = changed pixels
+            ys, xs, rgb = r.stream_delta(mask)     # the wire payload: only changed pixels
+        """
+        from holographic_rayindex import IncrementalRenderer
+        return IncrementalRenderer(camera, width, height, sun=sun, sky=sky, ground=ground, ss=ss)
+
+    def region_field(self, regions):
+        """Compose a LABELLED REGION FIELD: a set of boundaries (SDFs), each tagging the points inside it with how to
+        REGARD them -- a material, or a behaviour (cloth / fire / smoke / fluid), or a biome -- resolved by priority.
+        One `classify(points)` call then drives material lookup, behaviour (which SIM) lookup, and precise culling
+        (points outside every region are known-empty, skipped with no marching). `slice(origin, u, v)` cuts the volume
+        open to reveal the material LAYERS. This is the composable substrate for treating anything as mesh / particle /
+        smoke / fluid / light over one field. `regions` is a list of holographic_regionfield.Region. See
+        holographic_regionfield.
+
+        Example:
+            from holographic_regionfield import Region
+            from holographic_semantic import _SphereSDF
+            rf = mind.region_field([
+                Region(_SphereSDF((0,0,0), 1.0), 'crust',  priority=1, material=(0.4,0.3,0.2)),
+                Region(_SphereSDF((0,0,0), 0.4), 'core',   priority=2, material=(1.0,0.85,0.3)),
+            ])
+            img, labels = rf.slice((0,0,0), (1,0,0), (0,1,0))   # cut it open -> see the layers
+            keep = rf.cull(points)                              # precise culling for free
+        """
+        from holographic_regionfield import RegionField
+        return RegionField(list(regions))
+
+    def reflect_transform(self, O, D, P_hit, N, bounce=None):
+        """A secondary (bounce) ray as a TRANSFORM of its parent: origin -> hit point, direction -> reflected about the
+        normal, bounce counter -> +1. N bounces are N applications of this one transform. See holographic_raycoherence."""
+        from holographic_raycoherence import reflect_transform as _rt
+        return _rt(O, D, P_hit, N, bounce=bounce)
+
+    def coherent_reflection(self, ctx, P, N, D, ids, mirror, width, height, stride=4, var_tol=0.03):
+        """Reconstruct the reflection over reflective pixels from a SPARSE trace + gated bilinear interpolation of the
+        perpendicular neighbours, with an exact-trace fallback on reflection edges -- because neighbouring reflection
+        rays off a smooth surface are coherent, this traces far fewer rays than per-pixel for a close result. Returns
+        (reflected (H*W,3), n_traced, n_mirror). Honest limit: sharp reflected-CONTENT edges blur (the coherence is in
+        the reflector geometry, not the reflected image). See holographic_raycoherence."""
+        from holographic_raycoherence import coherent_reflection as _cr
+        return _cr(ctx, P, N, D, ids, mirror, width, height, stride=stride, var_tol=var_tol)
+
+    def ray_pencil(self, O, D, C, R, eps=0.03):
+        """Emit a ray's PERPENDICULAR FRAME (centre + 4 marginal rays offset +-eps) and transport it through a
+        reflection off a sphere: the reflected pencil converges (concave far wall -> caustic) or diverges (convex cap).
+        Returns (P (5,3), D2 (5,3), hit). The pencil's cross-section IS the Gaussian of secondary rays. See
+        holographic_raydiff."""
+        from holographic_raydiff import transport_pencil
+        return transport_pencil(O, D, C, R, eps)
+
+    def caustic_focus(self, O, D, C, R, eps=0.03, s_max=6.0):
+        """Where a reflected pencil is tightest -- the focus / caustic point -- and the pencil radius there. A 5-ray
+        frame predicts the focus a dense bundle would show. Returns (s_focus, radius). See holographic_raydiff."""
+        from holographic_raydiff import transport_pencil, find_focus
+        P, D2, hit = transport_pencil(O, D, C, R, eps)
+        return find_focus(P, D2, s_max=s_max)
+
+    def lobe_sigma(self, O, D, C, R, s, eps=0.03, roughness=0.0, light_half_angle=0.0):
+        """The Gaussian lobe half-width of the whole secondary bundle at distance s: geometric pencil spread combined
+        with surface roughness (micro-imperfections -> glossy) and a soft light's angular size (penumbra). One number
+        standing in for the entire bundle of secondary rays. See holographic_raydiff."""
+        from holographic_raydiff import transport_pencil, lobe_sigma as _ls
+        P, D2, hit = transport_pencil(O, D, C, R, eps)
+        return _ls(P, D2, s, roughness=roughness, light_half_angle=light_half_angle)
+
+    def dispersion_spread(self, D, N, iors):
+        """The chromatic angular fan from refracting one ray at several wavelength IORs (eta = n_in/n_out per colour) --
+        the same pencil split by wavelength, which IS dispersion. See holographic_raydiff."""
+        from holographic_raydiff import dispersion_spread as _ds
+        return _ds(D, N, iors)
+
+    def grid_graph(self, shape, blocked=None):
+        """Adjacency dict {cell: [neighbours]} for an N-D grid (a 2D/3D/.../ND maze is the same object). Feed to any
+        graph solver. See holographic_ndfield."""
+        from holographic_ndfield import grid_graph
+        return grid_graph(shape, blocked)
+
+    def solve_grid_maze(self, shape, blocked, start, goal, steps=200, mu=1.5, dt=0.2):
+        """Solve an N-D grid maze with the Tero slime-mould flow solver -- the SAME solver the 2D maze used, unchanged,
+        because it operates on the graph not the coordinates. 3D (or 7D) is trivial. See holographic_ndfield."""
+        from holographic_ndfield import solve_grid_maze
+        return solve_grid_maze(shape, blocked, start, goal, steps=steps, mu=mu, dt=dt)
+
+    def sparse_reconstruct(self, oracle, lo, hi, n_seed=96, n_refine=96, bandwidth=None, seed=0):
+        """The reusable sparse-probe-interpolate-refine pattern: reconstruct a known deterministic field (oracle) over
+        an N-D box from a sparse ADAPTIVE sample (Nadaraya-Watson kernel + refine where uncertain). The pattern under
+        coherent reflection, ray differentials, and the radiance field, named once. Returns (points, values,
+        reconstruct_fn). See holographic_ndfield."""
+        from holographic_ndfield import sparse_reconstruct
+        return sparse_reconstruct(oracle, lo, hi, n_seed=n_seed, n_refine=n_refine, bandwidth=bandwidth, seed=seed)
+
+    def navigate_cost_field(self, cost, shape, start, goal, blocked=None, lo=None, hi=None):
+        """NAVIGATE a known N-D COST FIELD: discretize it to a grid, weight edges by the field, and return the
+        LEAST-COST path start->goal. The one primitive for routing through smoke density (volumetrics), a potential
+        (physics), or any resistance/terrain (particles); the uniform maze is the special case. `cost` is a callable
+        f(points)->cost or an array of shape `shape`. See holographic_ndfield. (Distinct from navigate_field, which is
+        the gravity/attractor field navigator.)"""
+        from holographic_ndfield import navigate_field
+        return navigate_field(cost, shape, start, goal, blocked=blocked, lo=lo, hi=hi)
+
+    def path_cost(self, path, cost, shape, lo=None, hi=None):
+        """Total field cost accumulated along a path -- for comparing a navigated route to a naive straight shot."""
+        from holographic_ndfield import path_cost
+        return path_cost(path, cost, shape, lo=lo, hi=hi)
+
+    def cost_to_go_field(self, cost, shape, goal, blocked=None, lo=None, hi=None):
+        """SOLVE THE WHOLE VALUE FIELD ONCE, then route from ANYWHERE for free. One Dijkstra sweep from the goal yields
+        V (cost-to-go at every cell) and a next-step field; after that, routing from any start is an O(path) descent, no
+        re-search -- the 'precompute once, read out anywhere' pattern (the SDF bake, PRT) carried into navigation. The
+        win grows with the number of agents/queries to that goal (measured ~5x at 8 starts, and each extra route is
+        ~free). V is also a POTENTIAL / VALUE FUNCTION: its negative gradient is a physics force, and descent on it is an
+        optimal policy -- the same object as a distance field, a physics potential, and an RL value. Returns
+        (V, nxt, route) where route(start) -> the cell path to the goal. See holographic_ndfield."""
+        from holographic_ndfield import field_weighted_graph, cost_to_go, route_from
+        nbr, edge_cost = field_weighted_graph(shape, cost, blocked=blocked, lo=lo, hi=hi)
+        V, nxt = cost_to_go(nbr, edge_cost, goal)
+        return V, nxt, (lambda start: route_from(nxt, start, goal))
+
+    def straight_line_cells(self, start, goal):
+        """The grid cells a straight line start->goal crosses -- the tie-break-independent baseline a naive shot pays."""
+        from holographic_ndfield import straight_line_cells
+        return straight_line_cells(start, goal)
+
+    def navigate_scene(self, sdf_eval, lo, hi, shape, start_world, goal_world, clearance=0.25):
+        """Route an agent through a LIVE SCENE using its own SDF as the cost field: inside geometry is impassable,
+        near a surface is costly, so the path threads free space around objects. One structure for drawing AND moving.
+        `sdf_eval` is a callable P->signed distance. Returns world-space waypoints. See holographic_ndfield."""
+        from holographic_ndfield import navigate_scene
+        return navigate_scene(sdf_eval, lo, hi, shape, start_world, goal_world, clearance=clearance)
+
+    def encode_path(self, path, dim=2048, seed=0):
+        """A navigated path -> ONE hypervector, COMPOSABLE in a VSA program (bind to a label, bundle several routes,
+        query order). Returns (vector, SequenceMemory, keys). See holographic_ndfield."""
+        from holographic_ndfield import encode_path
+        return encode_path(path, dim=dim, seed=seed)
+
+    def decode_path_step(self, vec, sm, keys, i):
+        """Read waypoint i back out of a path hypervector -- the route survives as composable VSA data."""
+        from holographic_ndfield import decode_path_step
+        return decode_path_step(vec, sm, keys, i)
+
+    def emit_from_surface(self, sdf_eval, n, bounds, speed=1.0, weight=None, seed=0):
+        """Spawn particles ON a surface to DRIVE a particle system: samples the zero level-set of `sdf_eval`, returns
+        (positions, normals, velocities) with velocity along the outward normal. `speed` and `weight` (emission
+        density on the surface) each take a constant OR a map / field / wired output. See holographic_emitter."""
+        from holographic_emitter import emit_from_surface
+        return emit_from_surface(sdf_eval, n, bounds, speed=speed, weight=weight, seed=seed)
+
+    def advance_particles(self, pos, vel, force=None, dt=0.05, damping=0.0, wrap_to=None):
+        """One integration step for an N-D particle set (gravity / attractor / sampled-field force). See holographic_emitter."""
+        from holographic_emitter import advance
+        return advance(pos, vel, force=force, dt=dt, damping=damping, wrap_to=wrap_to)
+
+    def param(self, value=None, field=None, map=None, domain=None, source=None, default=0.0):
+        """Make a connectable parameter SOCKET: a value that is a constant OR wired to a map / field / named output --
+        the 'choose a map instead of a number' affordance. Pass the result anywhere a faculty resolves parameters
+        (region reflect/roughness, emit speed/weight, a field cost). See holographic_param."""
+        from holographic_param import Param
+        return Param(value=value, field=field, map=map, domain=domain, source=source, default=default)
+
+    def resolve_param(self, p, points=None, ctx=None, n=None):
+        """Resolve any parameter (constant / map / field / socket) to concrete values at `points`. See holographic_param."""
+        from holographic_param import resolve_param
+        return resolve_param(p, points=points, ctx=ctx, n=n)
+
+    def collide_sdf(self, X, sdf_eval, radius=0.0):
+        """ENVIRONMENT collision: push every point inside `sdf_eval` (signed distance < radius) out to the surface --
+        keep particles / cloth outside scene geometry. The positional contact resolve behind SoftBody.step(collider=...).
+        See holographic_collide."""
+        from holographic_collide import resolve_sdf_collision
+        return resolve_sdf_collision(X, sdf_eval, radius=radius)
+
+    def sdf_collision_projection(self, sdf_eval, N, D, radius=0.0):
+        """A collision PROJECTION callable for project_onto_constraints -- so 'stay outside this surface' is just one
+        more constraint in the SAME unified sweep as distance/bend/denoise/resonator (Macklin's one-solver-many-uses).
+        See holographic_collide."""
+        from holographic_collide import sdf_collision_projection
+        return sdf_collision_projection(sdf_eval, N, D, radius=radius)
+
+    def dirty_field(self, shape, lo=None, hi=None, base=0.0):
+        """A navigation / physics cost field with DIRTY-FLAG deltas: add movable colliders, then `move` one and only
+        its footprint is re-evaluated (O(footprint), grid-size-independent), staying bit-identical to a full rebuild.
+        The 'recompute only what changed' render discipline, carried into physics/nav. Returns a DirtyField whose
+        `cost_grid()` feeds navigate_field. See holographic_dirtyfield."""
+        from holographic_dirtyfield import DirtyField
+        return DirtyField(shape, lo=lo, hi=hi, base=base)
+
+    def bake_sdf(self, sdf, lo, hi, res):
+        """PRECOMPUTE a scene SDF (anything with `.eval`, and optionally `.ids`) onto a grid, then sample it O(1) --
+        the realtime distance-field shortcut. Cost of a sample is independent of the number of primitives, so the ONE
+        baked grid speeds every SDF consumer at once (the shader's trace/shadows/AO/reflections, navigation, collision,
+        emission). Amortises over many rays/frames/queries. Returns a GridSDF (a drop-in union). See holographic_sdfbake."""
+        from holographic_sdfbake import GridSDF
+        return GridSDF.bake(sdf, lo, hi, res)
+
+    def dispatch_methods(self, x, tags, ops, default=None):
+        """COMPOSABILITY OF CALCULATION METHODS -- apply a DIFFERENT operator to different elements of one structure,
+        chosen per-element by `tags`, and recombine. The same "part fluid, part static, by a field" idea the engine
+        uses for DATA, now applied to WHICH COMPUTATION runs where: trace the first hit, then per bounce dispatch to
+        collapse (a PRT dot product) on diffuse, trace on a mirror, a glossy bundle on a rough patch -- switching on the
+        fly. It is the per-element generalization of the whole-signal method selection `denoise(method='auto')` and
+        `decompose_signal` already do. `ops` is {label: fn(sub_x)->sub_y}. See holographic_dispatch."""
+        from holographic_dispatch import dispatch_field
+        return dispatch_field(x, tags, ops, default=default)
+
+    def render_dispatch(self, sdf, camera, width, height, methods, colors, light, order=3, n=400):
+        """RENDER by dispatching each hit to its best method and get a RELIGHT handle -- the pipeline form of "collapse
+        on diffuse, trace on a mirror, switch on the fly". `methods` maps object id -> 'collapse' (PRT dot product) or
+        'trace' (a mirror bounce whose diffuse hits themselves collapse). Returns (frame, relight, info): `relight(new
+        light)` re-shades the collapsed parts for free, and `info` reports the dispatch counts. This is how PRT and the
+        method dispatch are USED in a real render, not just measured. See holographic_dispatch.render_dispatch."""
+        from holographic_dispatch import render_dispatch
+        return render_dispatch(sdf, camera, width, height, methods, colors, light, order=order, n=n)
+
+    def bake_scene(self, sdf, camera, width, height, methods, colors, order=3, n=400):
+        """PRECOMPUTE / BAKE a scene BEFORE any render, so the first render is already a relight, not a cold trace. Call
+        this once at scene-load: it traces primary visibility, dispatches each hit to its method, and precomputes the
+        PRT transfer for every diffuse hit and every diffuse surface behind a mirror bounce. Returns a BakedScene to hand
+        to `render_baked(scene, light)` -- interactive relighting is then a dot product from frame one. See
+        holographic_dispatch.bake_scene."""
+        from holographic_dispatch import bake_scene
+        return bake_scene(sdf, camera, width, height, methods, colors, order=order, n=n)
+
+    def render_baked(self, scene, light):
+        """Relight a BakedScene (from bake_scene) -- shade every pixel from its precomputed transfer, no tracing. Every
+        frame, including the first, is this cheap dot-product relight. Returns a (H,W,3) frame. See
+        holographic_dispatch.render_baked."""
+        from holographic_dispatch import render_baked
+        return render_baked(scene, light)
+
+    def render_adaptive(self, objects, camera, width=256, height=256, frames=1, relight=False, light=None,
+                        sun="bright", sky="clear", post=None, **kw):
+        """ONE render call that ADAPTS -- it looks at the scene and the workload and picks the methods itself instead of
+        you choosing bake/relax/collapse/trace by hand. Grounded in the MEASURED break-evens: it bakes the SDF only when
+        primitives or frames make it pay, keeps the exact active-only marcher (over-relaxation stays a manual opt-in),
+        and -- when relighting -- COLLAPSES diffuse surfaces (PRT, free relight) while TRACING reflective ones, deriving
+        the per-surface method from each material's reflectivity. Returns (frame, relight, plan); `plan['reasons']`
+        explains every choice so the automation stays legible. The separate options (render_scene bake=/relax=,
+        render_dispatch, radiance_transfer) remain for manual control. See holographic_adaptive.render_adaptive."""
+        from holographic_adaptive import render_adaptive
+        return render_adaptive(objects, camera, width=width, height=height, frames=frames, relight=relight,
+                               light=light, sun=sun, sky=sky, post=post, **kw)
+
+    def plan_render(self, objects, frames=1, relight=False):
+        """The DECISION LAYER of the adaptive pipeline, on its own: given a scene and workload, return the plan (bake
+        resolution, relax factor, path, per-surface methods) with a human-readable reason for each choice -- so you can
+        see what render_adaptive WOULD do, and why, without rendering. See holographic_adaptive.plan_render."""
+        from holographic_adaptive import plan_render
+        return plan_render(objects, frames=frames, relight=relight)
+
+    def distribute_compute(self, buckets, worker, reduce="sum", cache=None):
+        """DISTRIBUTED COMPUTATION the holostuff way -- decompose a job into buckets, hand every bucket the same shared
+        read-only `cache` (the "GI cache on the main node"), run `worker(bucket, cache)` on each, and reassemble with a
+        COMMUTATIVE monoid so the result is independent of bucket order (=> the buckets could run on separate machines /
+        VMs with no stitch pass). `reduce` selects the reassembly operator that matches the computation: 'sum' (linear
+        superposition -- forces, fields, radiance, densities), 'min' (SDF union), 'max' (occupancy), 'bundle' (VSA
+        scene/memory), or a callable. Runs in-process here (no speedup claimed); it builds the STRUCTURE that makes
+        distribution correct. Returns (result, info). See holographic_distribute."""
+        from holographic_distribute import distribute, reduce_sum, reduce_min, reduce_max, reduce_bundle, reduce_sum_exact
+        table = {"sum": reduce_sum, "min": reduce_min, "max": reduce_max, "bundle": reduce_bundle, "exact": reduce_sum_exact}
+        red = table.get(reduce, reduce) if isinstance(reduce, str) else reduce
+        return distribute(buckets, worker, reduce=red, cache=cache)
+
+    def partition_domain(self, n, k, costs=None):
+        """Decompose a domain of n items into k disjoint buckets for distribution. With `costs` (a per-item work
+        estimate) it LOAD-BALANCES -- heaviest-first onto the lightest bucket -- so the slowest bucket, which bounds a
+        farm's wall-time, is minimised (adaptive bucket sizing). Returns a list of index arrays. See
+        holographic_distribute.partition / adaptive_partition."""
+        from holographic_distribute import partition, adaptive_partition
+        import numpy as np
+        return adaptive_partition(np.asarray(costs, float), k) if costs is not None else partition(n, k)
+
+    def partition_grid(self, shape, blocks):
+        """Decompose a 2D image/field (shape=(H,W)) into TILES or a 3D volume/grid (shape=(X,Y,Z)) into BRICKS -- the
+        render-farm bucket layout generalised to 2D and 3D. `blocks` is an int or a per-axis tuple. Returns a list of
+        slice-tuples covering the domain disjointly; each is an independent bucket (a separate VM/node), and a 3D brick
+        with no surface can be skipped (sparse volumes). Also the cache-blocking layout -- a tile/brick sized to a
+        working budget streams through a fast cache level. See holographic_distribute.partition_2d / partition_3d."""
+        from holographic_distribute import partition_2d, partition_3d
+        return partition_3d(shape, blocks) if len(shape) == 3 else partition_2d(shape, blocks)
+
+    def distribute_bricks(self, out_shape, regions, worker, cache=None, fill=0.0, skip=None):
+        """Run `worker(region, cache)` on each tile/brick and PLACE its result at that region -- disjoint, so
+        order-independent and seamless (the shared read-only cache makes borders agree). `skip(region)->bool` drops
+        EMPTY bricks (sparse volumes: most of a volume is empty space -- the real speed win of bricking 3D, beyond
+        parallelism). Returns (out, info) with the ran/skipped counts. See holographic_distribute.distribute_bricks."""
+        from holographic_distribute import distribute_bricks
+        return distribute_bricks(out_shape, regions, worker, cache=cache, fill=fill, skip=skip)
+
+    def surface_material(self, name=None, color=(0.7, 0.7, 0.7), **channels):
+        """The FIRST-CLASS render material: every channel (color, roughness, reflect, emission, opacity) is a Param
+        SOCKET -- a constant, a `Param`, a callable field (e.g. a `pattern_field`), or a map array -- resolved PER HIT
+        by `render_surface`. With `name`, channels start from the ONE canonical MATERIAL_RENDER table (no more
+        per-demo copies) and your overrides apply on top. This is the object that ties param -> pattern -> material ->
+        render together. See holographic_surface.SurfaceMaterial."""
+        from holographic_surface import SurfaceMaterial
+        m = SurfaceMaterial.from_name(name, color=color) if name is not None else SurfaceMaterial(color=color)
+        for k, v in channels.items():
+            setattr(m, k, v)
+        return m
+
+    def realize_recipe_fused(self, recipe, spectrum_cache=None):
+        """Fill 4 integration at Layer 4: realize a StructureRecipe's outputs through the SCHEDULER, fusing its
+        straight-line bind/bundle/permute runs so a long structure build does fewer FFTs than the op-by-op
+        `recipe.build()`. Returns (outputs, stats). THROUGHPUT path -- fusion is ~1e-15, so this does NOT keep the
+        recipe's bit-exact-replay guarantee; `recipe.build()`/`realize` stay the exact default. See
+        holographic_schedule.run_recipe."""
+        from holographic_schedule import run_recipe
+        return run_recipe(recipe, fused=True, spectrum_cache=spectrum_cache)
+
+    def spectrum_cache(self, max_items=4096):
+        """Fill 1 (residency): a content-addressed cache of atom -> rfft(atom), so binds/unbinds against KNOWN
+        atoms skip the forward transform. Bit-identical to recompute. Pass it to `fuse`/`run_scheduled` to make
+        their leaf transforms free for known atoms. See holographic_residency.SpectrumCache."""
+        from holographic_residency import SpectrumCache
+        return SpectrumCache(max_items=max_items)
+
+    def fuse_record(self, keys, values, spectrum_cache=None):
+        """Fill 2 (spectral fusion): build a role/filler record -- bundle([bind(k_i, v_i)]) -- in ONE fused FFT
+        pass (leaves+1 transforms instead of ~3*len), equal to the op-by-op result to ~1e-15. THROUGHPUT path:
+        tie-sensitive encoders (the maze-rescue path) must NOT use this. See holographic_fuse."""
+        from holographic_fuse import fuse_record
+        return fuse_record(keys, values, spectrum_cache=spectrum_cache)
+
+    def fuse_expression(self, expr, spectrum_cache=None):
+        """Fill 2: evaluate a five-op (bind/unbind/bundle/permute) expression tree in the FFT domain -- one
+        transform per leaf, one out. Build `expr` with holographic_fuse.{leaf,fbind,funbind,fbundle,fpermute}."""
+        from holographic_fuse import fuse
+        return fuse(expr, spectrum_cache=spectrum_cache)
+
+    def superpose_batch(self, keys, items, gated=True):
+        """Fill 3 (auto-superposition + spill): pack N independent keyed items into the FEWEST superposed vectors
+        that keep each bucket under the capacity dial -- one vector if it fits, else SPILL across buckets (not
+        abstain). Returns (packed_vectors, buckets). `apply_in_superposition` does one op on each bundle at once.
+        See holographic_superschedule."""
+        from holographic_superschedule import superpose_batch
+        return superpose_batch(keys, items, gated=gated)
+
+    def apply_in_superposition(self, keys, items, op, gated=True):
+        """Fill 3: the latency-hiding move -- hold items in superposition and apply ONE bind by `op` to each
+        bucket's whole bundle at once (transforming every item in flight), then recover. Spills past the dial."""
+        from holographic_superschedule import apply_in_superposition
+        return apply_in_superposition(keys, items, op, gated=gated)
+
+    def schedule_program(self, ops, min_run=2, spectrum_cache=None, sequential=False):
+        """Fill 4 (the scheduler capstone): run a VSA program DAG (built with holographic_schedule.{leaf,op_bind,
+        op_unbind,op_bundle,op_permute,op_cleanup}) with the linear runs FUSED, tie-sensitive runs kept op-by-op
+        and bit-exact, and Python crossings only at the cleanups. Returns (values, stats) where stats reports the
+        FFT count, kernel-op calls, and crossings. `sequential=True` runs the op-by-op baseline for comparison.
+        See holographic_schedule."""
+        from holographic_schedule import run_scheduled, run_sequential
+        if sequential:
+            return run_sequential(ops)
+        return run_scheduled(ops, min_run=min_run, spectrum_cache=spectrum_cache)
+
+    def measure_area(self, mesh):
+        """Modeling-app backlog (measurement + units): total surface area of a mesh, as a dimensioned [m^2]
+        Quantity measured from the geometry. See holographic_metrology.surface_area."""
+        from holographic_metrology import surface_area
+        return surface_area(mesh)
+
+    def measure_volume(self, mesh):
+        """Modeling-app backlog: enclosed volume of a CLOSED mesh (divergence theorem), a [m^3] Quantity. See
+        holographic_metrology.volume."""
+        from holographic_metrology import volume
+        return volume(mesh)
+
+    def measure_bbox(self, mesh):
+        """Modeling-app backlog: the axis-aligned bounding box of a mesh (extents + diagonal as [m] Quantities).
+        See holographic_metrology.bounding_box."""
+        from holographic_metrology import bounding_box
+        return bounding_box(mesh)
+
+    def measure_distance(self, p, q):
+        """Modeling-app backlog: the length between two points, as a dimensioned [m] Quantity (convert with
+        .to('ft') etc). See holographic_metrology.distance."""
+        from holographic_metrology import distance
+        return distance(p, q)
+
+    def guided_upsample(self, low_color, guide_normal, guide_albedo=None, guide_depth=None, levels=4, sigma_color=2.0):
+        """Inverse-rendering ST3: guided (joint-bilateral) super-resolution -- render colour SMALL, then upscale it
+        steered by the full-res G-buffer (normal/depth/albedo, which render_channels exposes), so colour edges snap to
+        the geometry the cheap render already knows at full res. Reuses the shipped SVGF bilateral. Invents plausible,
+        not true, detail (below learned SR). See holographic_superres.guided_upsample."""
+        from holographic_superres import guided_upsample
+        return guided_upsample(low_color, guide_normal, guide_albedo=guide_albedo, guide_depth=guide_depth,
+                               levels=levels, sigma_color=sigma_color)
+
+    def synthesize_texture(self, sample, out_h, out_w, psize=24, overlap=6, seed=0, seam="mincut"):
+        """Inverse-rendering ST2: grow a larger texture from a small sample by Image Quilting -- lay overlapping
+        patches chosen by a patch search (HoloForest recall_k), stitched along min-cut seams. For material synthesis
+        and feeding IR1 auto-bump with tileable maps. Patch-copying (can repeat/seam), best for texture/material, not
+        free-form restyle. See holographic_texturesynth.synthesize_texture."""
+        from holographic_texturesynth import synthesize_texture
+        return synthesize_texture(sample, out_h, out_w, psize=psize, overlap=overlap, seed=seed, seam=seam)
+
+    def complete_object(self, archive, front, match_floor=0.85):
+        """Inverse-rendering IR11: given a partial FRONT view of an object and an ObjectArchive of complete objects,
+        recall the nearest stored WHOLE object (including the unobserved back) by its view fingerprint, or ABSTAIN
+        when nothing in the library matches. Retrieval, not hallucination -- the archive's 'recover the whole from a
+        partial measurement' move, one dimension up. See holographic_objectarchive.ObjectArchive."""
+        return archive.complete_from_front(front, match_floor=match_floor)
+
+    def render_checkerboard(self, sdf, camera, width, height, parity=0, **kw):
+        """Inverse-rendering IR13: checkerboard/sparse render -- shade only ~50% of the pixels (a 2x2 pattern) and
+        reconstruct the rest as masked recovery (the unshaded pixels are 'damage'; their four cross-neighbours are
+        all shaded). Roughly halves the shading cost for a near-full-resolution result. Flip `parity` per frame to
+        fill the other half over time. Returns (image, mask). See holographic_checkerboard.render_checkerboard."""
+        from holographic_checkerboard import render_checkerboard
+        return render_checkerboard(sdf, camera, width, height, parity=parity, **kw)
+
+    def upscale(self, image, scale=2.0, sharpness=0.4):
+        """Inverse-rendering IR12: FSR1-style spatial upscale -- EASU (edge-adaptive Lanczos with anti-ringing) then
+        RCAS (the shipped noise-aware sharpen). Take a low-res render up to display resolution edge-adaptively; beats
+        plain bilinear on PSNR and edge sharpness. Reconstructs, cannot invent absent detail. See holographic_fsr."""
+        from holographic_fsr import fsr_upscale
+        return fsr_upscale(image, scale=scale, sharpness=sharpness)
+
+    def render_channels(self, sdf, camera, want=None, width=32, height=32, objects=None, **render_kw):
+        """Inverse-rendering IR14: render selectable, separate AOV channels (depth/normal/position/mask G-buffer,
+        per-object Cryptomatte mattes), each with its own alpha, for compositing/science/debug. A channel is an
+        UNBIND; the scene is a bundle at every level. Default (no selection) = the beauty pass, bit-identical to
+        render_sdf. Lighting passes need trace-time accumulation (not in v1). See holographic_renderchannels."""
+        from holographic_renderchannels import render_channels
+        return render_channels(sdf, camera, want=want, width=width, height=height, objects=objects, **render_kw)
+
+    def scene_hypothesis(self, image, k=4):
+        """Inverse-rendering IR3: an archetype-level scene READING of an image -- dominant palette, the horizon row
+        (sky/ground split), and a coarse sun direction. The perception seed that warm-starts the IR4 loop. A gist,
+        not a segmentation (abstain-worthy outside its vocabulary). See holographic_perception.scene_hypothesis."""
+        from holographic_perception import scene_hypothesis
+        return scene_hypothesis(image, k=k)
+
+    def estimate_light_direction(self, image, power=2.0):
+        """Inverse-rendering IR3: a COARSE sun-direction estimate (azimuth, elevation) from an image's brightest
+        region -- a warm-start cue for IR4 to refine, not a measurement. See holographic_perception."""
+        from holographic_perception import estimate_light_direction
+        return estimate_light_direction(image, power=power)
+
+    def recover_scene(self, sdf, target_img, init_params, accept_threshold=None, **kw):
+        """Inverse-rendering IR4 (the headline): analysis-by-synthesis. Given a TARGET image, gradient-free-search
+        the camera + sun-direction parameters whose render best matches it (perceptual distance, not MSE), from a
+        warm-start guess, with an optional conformal accept/abstain gate. The measurable milestone is self-recovery:
+        render a known scene, recover its camera + light within tolerance. See holographic_inverserender."""
+        from holographic_inverserender import recover_scene
+        return recover_scene(sdf, target_img, init_params, accept_threshold=accept_threshold, **kw)
+
+    def compare_images(self, x, y, w_struct=0.5, w_color=0.3, w_edge=0.2):
+        """Inverse-rendering IR4: a PERCEPTUAL render-vs-target similarity in [0,1] (1 = identical) -- multi-scale
+        SSIM + colour-histogram agreement + edge alignment. Shift/lighting-tolerant, unlike raw pixel MSE. This is
+        the compare step of the analysis-by-synthesis loop. See holographic_imagecompare.perceptual_similarity."""
+        from holographic_imagecompare import perceptual_similarity
+        return perceptual_similarity(x, y, w_struct=w_struct, w_color=w_color, w_edge=w_edge)
+
+    def image_distance(self, x, y, **kw):
+        """Inverse-rendering IR4: 1 - compare_images -- the objective the analysis-by-synthesis loop MINIMIZES
+        (0 = a perfect match). See holographic_imagecompare.perceptual_distance."""
+        from holographic_imagecompare import perceptual_distance
+        return perceptual_distance(x, y, **kw)
+
+    def auto_displace(self, mesh, rgb, amount=0.1, sigma=4.0, min_confidence=0.02):
+        """Inverse-rendering IR5: promote an auto-bump height (IR1) from a shading bump to REAL geometry -- move a
+        mesh's vertices along their normals by the derived height, but ONLY if the bump-confidence clears a
+        (stricter) geometry threshold; otherwise ABSTAIN and return the mesh unchanged. Returns (mesh, info). See
+        holographic_autodisplace.auto_displace."""
+        from holographic_autodisplace import auto_displace
+        return auto_displace(mesh, rgb, amount=amount, sigma=sigma, min_confidence=min_confidence)
+
+    def color_transfer(self, img, reference, mode="covariance", strength=1.0, clip=True):
+        """Inverse-rendering ST1: grade an image toward a REFERENCE image's colour statistics (Reinhard 2001) --
+        the 'match the sunset's mood' knob. mode='meanstd' (per-channel) or 'covariance' (full mean+covariance,
+        whitening/colouring). Moves colour, not content. See holographic_colortransfer.color_transfer."""
+        from holographic_colortransfer import color_transfer
+        return color_transfer(img, reference, mode=mode, strength=strength, clip=clip)
+
+    def integrate_normals(self, nmap):
+        """Inverse-rendering IR7: integrate a tangent-space normal map into a single-valued, CONSISTENT height
+        field by FFT (Frankot-Chellappa) -- the inverse of auto_bump's normal-from-height. Drift-free and
+        seamlessly TILEABLE (periodic boundary). See holographic_surfaceint.height_from_normals."""
+        from holographic_surfaceint import height_from_normals
+        return height_from_normals(nmap)
+
+    def auto_bump(self, rgb, strength=2.0, sigma=4.0, abstain_below=0.005):
+        """Inverse-rendering IR1: derive a plausible tangent-space normal map (and height) from an albedo image
+        alone -- 'auto bump' when no bump/normal map is supplied. Grayscale -> high-pass -> normal, with an honest
+        confidence gate that ABSTAINS to flat when there is too little fine detail. Returns a dict with the normal
+        map, height, confidence, and whether it abstained. See holographic_autobump.auto_bump."""
+        from holographic_autobump import auto_bump
+        return auto_bump(rgb, strength=strength, sigma=sigma, abstain_below=abstain_below)
+
+    def sampler(self, shape, target, mode="point", radius=1.0, falloff="smooth", weight=None):
+        """Modeling-app backlog (capstone): a placeable read-probe -- the read-dual of a FieldEffect. Reads a
+        field/material at a point, surface patch, or volume region with a falloff weighting, and handles overlap
+        with a labeled bundle. See holographic_sampler.Sampler."""
+        from holographic_sampler import Sampler
+        return Sampler(shape, target, mode=mode, radius=radius, falloff=falloff, weight=weight)
+
+    def place_sampler(self, scene, sampler, transform=None, name="Sampler"):
+        """Modeling-app backlog (capstone): drop a Sampler into the Scene as an object (handle + transform), so it
+        is placed/moved/animated like anything else. See holographic_sampler.place_sampler."""
+        from holographic_sampler import place_sampler
+        return place_sampler(scene, sampler, transform=transform, name=name)
+
+    def resolve_override(self, scene, handle, prop, defaults=None, default=None):
+        """Modeling-app feature layer: resolve a render property for an object -- its own override, else its
+        material's, else the scene defaults, else a bare default (a bound role with fallback). See
+        holographic_overrides.resolve."""
+        from holographic_overrides import resolve
+        return resolve(scene, handle, prop, defaults=defaults, default=default)
+
+    def set_override(self, scene, handle, prop, value):
+        """Modeling-app feature layer: bind a render override on an object (undoable). See
+        holographic_overrides.set_override."""
+        from holographic_overrides import set_override
+        set_override(scene, handle, prop, value)
+
+    def snapper(self, grid=None, vertices=None, tol=0.25):
+        """Modeling-app feature layer: a Snapper that snaps a dragged point to the nearest grid node or vertex
+        within a tolerance (snapping = cleanup). See holographic_snap.Snapper."""
+        from holographic_snap import Snapper
+        return Snapper(grid=grid, vertices=vertices, tol=tol)
+
+    def group_objects(self, scene, handles, name="Group"):
+        """Modeling-app feature layer: group objects under a null parent (grouping = a bundle); one undo step.
+        See holographic_grouping.group_objects."""
+        from holographic_grouping import group_objects
+        return group_objects(scene, handles, name=name)
+
+    def instance(self, scene, source, transform=None, name=None):
+        """Modeling-app feature layer: create an instance sharing a source's geometry with its own transform
+        (instancing = a bind); editing the source updates all instances. See holographic_grouping.instance."""
+        from holographic_grouping import instance
+        return instance(scene, source, transform=transform, name=name)
+
+    def camera_controller(self, eye=(0.0, 0.0, 5.0), target=(0.0, 0.0, 0.0), up=(0.0, 1.0, 0.0)):
+        """Modeling-app feature layer: a viewport camera controller -- orbit/pan/dolly/zoom/frame around a target.
+        See holographic_camera.CameraController."""
+        from holographic_camera import CameraController
+        return CameraController(eye=eye, target=target, up=up)
+
+    def selection(self, scene):
+        """Modeling-app feature layer: a Selection helper bound to a Scene -- query objects into a set of handles,
+        save named sets, do set algebra (union/intersect/minus/invert), and push the current selection. See
+        holographic_scene_query.Selection."""
+        from holographic_scene_query import Selection
+        return Selection(scene)
+
+    def select_objects(self, scene, **predicates):
+        """Modeling-app feature layer: select object handles from a Scene by exact predicates (name/material/tag/
+        substring/where). For semantic 'select the metal-ish parts' with confidence, use
+        holographic_scene_query.select_fuzzy. See holographic_scene_query.select."""
+        from holographic_scene_query import select
+        return select(scene, **predicates)
+
+    def look_at(self, eye, target, up=(0.0, 1.0, 0.0)):
+        """Modeling-app backlog (item G): an OpenGL view matrix for a camera at `eye` looking at `target`. See
+        holographic_transform.look_at."""
+        from holographic_transform import look_at
+        return look_at(eye, target, up)
+
+    def decompose_transform(self, M):
+        """Modeling-app backlog (item G): split a 4x4 transform into (translate, rotation quaternion, scale) --
+        what a move/rotate/scale gizmo reads off a matrix. See holographic_transform.decompose."""
+        from holographic_transform import decompose
+        return decompose(M)
+
+    def cancel_token(self):
+        """Modeling-app backlog (item F): a cooperative CancelToken to pass as should_stop= to a long render/sim,
+        so it can be stopped mid-run and return a partial result. See holographic_cancel.CancelToken."""
+        from holographic_cancel import CancelToken
+        return CancelToken()
+
+    def modifier_stack(self, base):
+        """Modeling-app backlog (item C): a per-object MODIFIER STACK + dependency graph over any payload (mesh /
+        field / vector) -- an ordered, non-destructive op chain with stable handles that re-evaluates O(change)
+        (only downstream of a changed parameter). See holographic_modifier.ModifierStack."""
+        from holographic_modifier import ModifierStack
+        return ModifierStack(base)
+
+    def new_scene(self, dim=None, seed=0):
+        """Modeling-app backlog (item 0): a fresh canonical Scene document -- the single source of truth a modeling
+        app is built around (a table of object records + hierarchy, owning selection and undo history, firing
+        change events, with STABLE identity handles that survive edits). See holographic_scene_doc.Scene."""
+        from holographic_scene_doc import Scene
+        return Scene(dim=dim if dim is not None else self.dim, seed=seed)
+
+    def scatter_to_grid(self, points, values, shape, kernel="bilinear", periodic=False):
+        """The shared kernel SCATTER = a BUNDLE: deposit each point's value onto a grid through a kernel (bilinear
+        or B-spline) -- the superposition that MPM's P2G, a fluid deposit, and a splat all are. `points` (N,D) in
+        grid-cell units, `values` (N,) or (N,C). See holographic_transfer.scatter."""
+        from holographic_transfer import scatter
+        return scatter(points, values, shape, kernel=kernel, periodic=periodic)
+
+    def gather_from_grid(self, field, points, kernel="bilinear", periodic=False):
+        """The shared kernel GATHER = the READOUT: read a grid back at each point through the same kernel -- the
+        adjoint of scatter, and what MPM's G2P, field sampling, and a texture lookup all are. See
+        holographic_transfer.gather."""
+        from holographic_transfer import gather
+        return gather(field, points, kernel=kernel, periodic=periodic)
+
+    def snow_mpm(self, grid=48, dx=1.0, E=140.0, nu=0.2, gravity=9.81, seed=0):
+        """Physics backlog (#8B, rung 4): a SNOW solver by the Material Point Method (Stomakhin 2013). Seed it
+        (.seed_block) and .run(). Thinking holographically: its P2G scatter IS bundling (the grid is a
+        superposition of kernel-weighted particle contributions -- verified equal to a bundle of splats) and G2P is
+        the readout; only the elasto-plastic grid update is grid-native. See holographic_mpm.MPMSnow."""
+        from holographic_mpm import MPMSnow
+        return MPMSnow(grid=grid, dx=dx, E=E, nu=nu, gravity=gravity, seed=seed)
+
+    def simulate_snow(self, cx=24, cy=12, w=10, h=8, n=400, grid=48, gravity=9.81, dt=2e-3, steps=600, seed=0):
+        """Physics backlog (#8B): seed a snow block and run it -- it falls, piles, and compresses plastically.
+        Returns the settled MPMSnow. See holographic_mpm.MPMSnow."""
+        from holographic_mpm import MPMSnow
+        snow = MPMSnow(grid=grid, gravity=gravity, seed=seed).seed_block(cx=cx, cy=cy, w=w, h=h, n=n)
+        return snow.run(dt=dt, steps=steps)
+
+    def free_surface(self, g=9.81, ground=0.0, damping=0.3):
+        """Physics backlog (#8, rung 4): the OVERTURNING free-surface solver -- particles that can fold the water
+        surface over itself (a breaking wave), which a height field fundamentally cannot. Seed it and call
+        .advance(). See holographic_freesurface.FreeSurface."""
+        from holographic_freesurface import FreeSurface
+        return FreeSurface(g=g, ground=ground, damping=damping)
+
+    def break_wave(self, length=10.0, n=40, crest_speed=8.0, phase_speed=3.0, height=4.0, dt=0.05, steps=20):
+        """Physics backlog (#8): set up and run a PLUNGING BREAKER -- a crest whose tip outruns the wave, throwing
+        it forward until the surface folds (overturns) into a multi-valued sheet. Returns the FreeSurface mid-plunge
+        (query .is_overturning() / .is_multivalued()). See holographic_freesurface.seed_breaking_crest."""
+        from holographic_freesurface import FreeSurface, seed_breaking_crest
+        fs = FreeSurface()
+        seed_breaking_crest(fs, length=length, n=n, crest_speed=crest_speed, phase_speed=phase_speed, height=height)
+        fs.advance(dt, steps=steps)
+        return fs
+
+    def grow_ice(self, shape=(81, 81), eta=1.0, steps=200, seed=0):
+        """Physics backlog (#7): grow an ICE / frost dendrite by diffusion-limited branching (the dielectric-
+        breakdown model) -- a cluster racing into the steepest gradient of a Laplace field, branching. Returns a
+        DielectricBreakdown; read its .cluster mask. See holographic_dendrite.ice_dendrite."""
+        from holographic_dendrite import ice_dendrite
+        return ice_dendrite(shape=shape, eta=eta, steps=steps, seed=seed)
+
+    def grow_lightning(self, shape=(81, 81), eta=3.0, steps=120, seed=0):
+        """Physics backlog (#7): grow a LIGHTNING bolt -- the SAME diffusion-limited branching engine as the ice
+        dendrite (N11: build once, get frost and bolts), only the seed (the cloud) and the source (the ground it
+        reaches toward) differ. See holographic_dendrite.lightning."""
+        from holographic_dendrite import lightning
+        return lightning(shape=shape, eta=eta, steps=steps, seed=seed)
+
+    def dielectric_breakdown(self, shape, eta=1.0, seed=0):
+        """Physics backlog (#7): the raw diffusion-limited branching engine (Niemeyer-Pietronero-Wiesmann). Seed
+        it (seed_point / seed_line), set a source boundary (set_source_border), and grow(). eta tunes the shape
+        (bushy -> fractal -> stringy). See holographic_dendrite.DielectricBreakdown."""
+        from holographic_dendrite import DielectricBreakdown
+        return DielectricBreakdown(shape, eta=eta, seed=seed)
+
+    def lorentz_force(self, q, E, v, B):
+        """Physics backlog (#6): the Lorentz force F = q(E + v x B) on a charge q moving at v through fields E, B.
+        See holographic_em.lorentz_force."""
+        from holographic_em import lorentz_force
+        return lorentz_force(q, E, v, B)
+
+    def push_charge(self, pos, vel, q, m, E, B, dt, steps):
+        """Physics backlog (#6): integrate a charged particle through uniform fields E, B with the Boris pusher
+        (energy-conserving) -- a cyclotron orbit in a magnetic field, an E-cross-B drift in crossed fields.
+        Returns (trajectory, final_velocity). See holographic_em.push_particle."""
+        from holographic_em import push_particle
+        return push_particle(pos, vel, q, m, E, B, dt, steps)
+
+    def maxwell_field(self, n, dx=1.0, eps=1.0, mu=1.0):
+        """Physics backlog (#6): a 1-D coupled Maxwell field (Yee/FDTD) -- Ez and Hy feed each other so a pulse
+        propagates at c = 1/sqrt(mu*eps). Set .Ez, call .step(). This is the genuine E<->B coupling the spectral
+        backbone's single-component em_field doesn't have. See holographic_em.Maxwell1D."""
+        from holographic_em import Maxwell1D
+        return Maxwell1D(n, dx=dx, eps=eps, mu=mu)
+
+    def plan_waves(self, height, depth=None, obstacles=None, dx=1.0, tile=8):
+        """Physics backlog (#5, the AdaptiveSolver): the DECISION LAYER for the ocean stack -- per tile, pick the
+        wave method (fft_ocean / wave_packets / shallow_water / free_surface) from the local regime and say WHY,
+        exactly as plan_render picks bake/analytic/trace. No solving; the plan is inspectable before running, and
+        deterministic (breaking > shallow > obstacle > open). Pair with solve_waves. See
+        holographic_waveadaptive.plan_waves / plan_cost."""
+        from holographic_waveadaptive import plan_waves
+        return plan_waves(height, depth=depth, obstacles=obstacles, dx=dx, tile=tile)
+
+    def solve_waves(self, plan, field, dt=1.0, methods=None, halo=2):
+        """Physics backlog (#5): EXECUTE a wave plan -- run each tile's chosen method on the shared surface field
+        and blend the tile borders (overlap-add, no seam). The dear grid solver runs only where the plan marked a
+        breaking tile; the cheap spectral path runs everywhere else. See holographic_waveadaptive.solve_waves."""
+        from holographic_waveadaptive import solve_waves
+        return solve_waves(plan, field, dt=dt, methods=methods, halo=halo)
+
+    def wave_packets(self, size=64.0, g=9.81, envelope=6.0, seed=0):
+        """Physics backlog (N8): a water surface as localized WAVE PACKETS -- each a Gaussian-enveloped wave train
+        that lives at a place, so unlike the global FFT ocean it can REFLECT off walls, SHOAL over depth changes,
+        and diffract. A packet is a role-bound record and the surface is a bundle (content-addressable). Add
+        packets with .add_packet, advance with .advance, read the surface with .render. See
+        holographic_wavepacket.WavePacketField."""
+        from holographic_wavepacket import WavePacketField
+        return WavePacketField(size=size, g=g, envelope=envelope, seed=seed)
+
+    def spectral_pde(self, field, velocity=None, order="parabolic", rate=None, omega=None, dx=1.0):
+        """Physics backbone (Part 3 #1): a linear field advanced in FOURIER space by a per-frequency transfer --
+        (named spectral_pde to avoid colliding with the fractal-volume spectral_field synthesizer above.)
+        'advancing time is one bind, any t in closed form.' order='parabolic' (diffusion, decay rate(|k|)) or
+        'hyperbolic' (waves, oscillation omega(|k|), carries velocity). Superposition is add_source (bundle); a
+        calibrated trigger_mask fires where a potential crosses threshold. See holographic_spectralfield."""
+        from holographic_spectralfield import SpectralField
+        return SpectralField(field, velocity=velocity, order=order, rate=rate, omega=omega, dx=dx)
+
+    def spectral_diffusion(self, field, D, dx=1.0):
+        """A diffusion/heat/gas field as a SpectralField: rate(|k|) = -D|k|^2, closed-form any t. Beats the grid
+        diffuse_heat baseline (machine-precision exact in one eval vs accumulated step error). See
+        holographic_spectralfield.diffusion_field."""
+        from holographic_spectralfield import diffusion_field
+        return diffusion_field(field, D, dx=dx)
+
+    def spectral_wave(self, field, velocity=None, c=1.0, dx=1.0):
+        """A wave/acoustic/EM(vacuum) field as a SpectralField: omega(|k|) = c|k|, a pulse propagates at speed c;
+        closed-form any t. See holographic_spectralfield.wave_field."""
+        from holographic_spectralfield import wave_field
+        return wave_field(field, velocity=velocity, c=c, dx=dx)
+
+    def spectral_ocean(self, height, velocity=None, g=9.81, dx=1.0):
+        """A deep-water ocean surface as a SpectralField: the dispersive omega(|k|) = sqrt(g|k|) (long swells
+        outrun short chop). Seed the height with phillips_spectrum for a real sea state. See
+        holographic_spectralfield.ocean_field / phillips_spectrum."""
+        from holographic_spectralfield import ocean_field
+        return ocean_field(height, velocity=velocity, g=g, dx=dx)
+
+    def electrostatic_potential(self, source, dx=1.0, eps0=1.0):
+        """The electrostatic potential of a charge distribution in ONE spectral step: phi_hat = source_hat /
+        (eps0|k|^2) -- the closed-form steady (t->inf) limit of the diffusion field (Thesis A: electrostatics is
+        the limit). See holographic_spectralfield.poisson_solve."""
+        from holographic_spectralfield import poisson_solve
+        return poisson_solve(source, dx=dx, eps0=eps0)
+
+    def photo_to_3d(self, depth, colour, fx, fy, cx, cy, confidence_floor=0.3):
+        """Forecasting sweep (sec.5, depth delegation) / photo-to-3D: lift a depth map + image into per-pixel 3D
+        Gaussians, but ONLY where the reconstruction is observed -- unproject the CONFIDENT front-facing,
+        continuous pixels and ABSTAIN on invalid depth, occlusion edges (where unprojecting stretches fake
+        geometry), grazing surfaces, and -- loudest -- the unobserved BACK of every object. A single view
+        reconstructs the visible front, not a watertight guess. Returns positions/colours/radii/confidences + an
+        abstain mask + coverage. See holographic_photo3d."""
+        from holographic_photo3d import photo_to_gaussians
+        return photo_to_gaussians(depth, colour, fx, fy, cx, cy, confidence_floor=confidence_floor)
+
+    def unproject_depth(self, depth, fx, fy, cx, cy):
+        """Turn a depth map into 3D points in camera space (the pinhole unprojection). Returns (H, W, 3). See
+        holographic_photo3d.unproject."""
+        from holographic_photo3d import unproject
+        return unproject(depth, fx, fy, cx, cy)
+
+    def make_scene(self, objects, dim=2048, seed=0):
+        """Query Interface (Phase 4): build a SCENE from a list of nested objects -- each object is encoded as a
+        nested VSA record (a nested field is bind(role, sub_record)). Pair with `query_scene`. See
+        holographic_graphql.Scene."""
+        from holographic_graphql import Scene
+        return Scene(objects, dim=dim, seed=seed)
+
+    def query_scene(self, graphql, scene):
+        """Query Interface (Phase 4): run a GraphQL query over a scene -- 'ask for exactly the nested fields you
+        want,' which maps onto unbinding exactly those roles. Filters objects by a `where` arg and returns only
+        the requested (possibly nested) fields per object. GraphQL is the natural fit for the nested scene where
+        SQL fits the flat tables. See holographic_graphql.resolve."""
+        from holographic_graphql import resolve
+        return resolve(scene, graphql)
+
+    def database(self, dim=2048, seed=0):
+        """Query Interface (Phases 9-13): a DATABASE you OWN -- user namespaces over a read-only 'system'
+        namespace. The mind's capability registry is published as `system.actions` out of the box, so you can
+        SELECT from it, CREATE your own databases/tables beside it, INSERT rows, bookmark system rows
+        (`insert_select`), define live views (`create_view`), and persist by replay (`to_state`/`from_state`) --
+        but never write to system.* (the wall). See holographic_query.Database."""
+        from holographic_query import Database, capability_registry
+        db = Database()
+        db.register_system("actions", capability_registry(self, dim=dim, seed=seed))
+        return db
+
+    def db_query(self, sql, db):
+        """Run a SQL statement over a Database: CREATE DATABASE, CREATE TABLE ns.t (cols), INSERT INTO ns.t (cols)
+        VALUES (...), or SELECT ... FROM ns.table. Writes to system.* are refused by the wall. Bookmarks and views
+        use the object API (db.insert_select / db.create_view). See holographic_query.run_db_sql."""
+        from holographic_query import run_db_sql
+        return run_db_sql(sql, db)
+
+    def capabilities(self, dim=2048, seed=0):
+        """Query Interface (Phase 6): introspect this mind into a capability REGISTRY -- a VSA table with one row
+        per public faculty (name, a heuristic domain, its one-line doc). 'What can this mind do?' then becomes an
+        ordinary data query: `mind.query("SELECT name FROM actions WHERE domain = 'render'", mind.capabilities())`
+        or a GROUP BY domain census. See holographic_query.capability_registry."""
+        from holographic_query import capability_registry
+        return capability_registry(self, dim=dim, seed=seed)
+
+    def explain_program(self, machine, program_vec, init_acc=None):
+        """Query Interface (Phase 7): EXPLAIN a program WITHOUT running it. A DRY RUN with no handlers -- every
+        APPLY is a no-op so the heavy work is skipped, but the machine walks the whole program, so the trace names
+        which faculties it WOULD call and how many steps it takes. The program-level twin of the pipeline's
+        plan()->EXPLAIN. See holographic_query.explain_program."""
+        from holographic_query import explain_program
+        return explain_program(machine, program_vec, init_acc=init_acc)
+
+    def make_table(self, rows, roles, dim=1024, seed=0):
+        """Query Interface (Phase 1): ingest tabular data (a list of {column: value} dicts) into a VSA Table --
+        each row becomes a role-bound record, with the exact values kept beside the vectors. Pair with `query`.
+        See holographic_query.from_rows."""
+        from holographic_query import from_rows
+        return from_rows(rows, roles, dim=dim, seed=seed)
+
+    def query(self, sql, table):
+        """Query Interface (Phases 2-3): run a small SQL subset (SELECT/FROM/WHERE/ORDER BY/LIMIT) over a VSA
+        Table. Exact predicates (=, >, <) run on the stored props; the FUZZY predicate (~) ranks rows by semantic
+        cosine and returns a per-row `_confidence` -- the two things a plain database can't do natively. See
+        holographic_query.run_sql."""
+        from holographic_query import run_sql
+        return run_sql(sql, table)
+
+    def svgf_denoise(self, image, normal, albedo, depth, levels=5, **kw):
+        """Interactive Render Speed (technique E): edge-aware denoise a noisy (1-spp-style) image the engine's
+        way -- a holographic bilateral filter whose edge-stopping is a cosine in the bound (normal, albedo, depth)
+        feature space, run coarse-to-fine over the a-trous hierarchy. Similar surfaces blend, edges don't; it
+        beats a plain blur measurably (kept negative: it denoises, it can't add detail). The sibling render pieces
+        already exist -- robust_accumulate (firefly clamp), SPRTRecall (adaptive sampling), TemporalReuse
+        (reproject). See holographic_svgf."""
+        from holographic_svgf import atrous_bilateral
+        return atrous_bilateral(image, normal, albedo, depth, levels=levels, **kw)
+
+    def forecast(self, series, d=20, alpha=0.1, abstain_width=None, seed=0):
+        """Forecasting backlog (F3): the "forecast any data" door. Routes a 1-D series to the producer that
+        calibrates tightest (linear AR vs analog recall), wraps it in a calibrated conformal interval, and
+        abstains when uncertain. Returns a RoutedForecaster -- `.predict(last_window)` gives {point, interval,
+        coverage, abstain, producer}. A misroute fails SAFE (wide interval), never a confident wrong answer. See
+        holographic_forecast."""
+        from holographic_forecast import route_and_forecast
+        rf, info = route_and_forecast(series, d=d, alpha=alpha, abstain_width=abstain_width, seed=seed)
+        return rf
+
+    def analog_forecaster(self, contexts, successors, sim_floor=0.5, seed=0):
+        """Forecasting backlog (F4): analog forecasting -- "find the past that looks like now, return what
+        followed." Pure VSA recall (sublinear via HoloForest); yields a DISTRIBUTION over outcomes natively and
+        ABSTAINS when no near analog exists. Use holographic_analog.delay_embed to build (context, successor)
+        pairs from a series. See holographic_analog.AnalogForecaster."""
+        from holographic_analog import AnalogForecaster
+        return AnalogForecaster(sim_floor=sim_floor, seed=seed).fit(contexts, successors)
+
+    def multi_horizon_forecaster(self, rollout_fn, alpha=0.1, kind="scalar"):
+        """Forecasting backlog (F6): multi-horizon forecast with a TRUSTED-HORIZON gate -- calibrate a per-step
+        interval that widens with the horizon, and report how far ahead a closed-loop `rollout_fn(state, H)` can
+        be trusted so a sim/renderer substitutes a cheap forecast up to there and recomputes beyond it. Kept loud:
+        chaotic systems have a short trusted horizon by nature (Lyapunov time). See holographic_horizon."""
+        from holographic_horizon import MultiHorizonForecaster
+        return MultiHorizonForecaster(rollout_fn, alpha=alpha, kind=kind)
+
+    def generate_gated(self, codebook, confidence_floor=0.6, steps=12, seed=None, **kw):
+        """Forecasting backlog (F5): confidence-gated generation -- generate a vector, then score how VALID it is
+        (cosine to the nearest codebook atom) and ACCEPT or flag it. Turns open-ended generation into calibrated
+        generation: a low-confidence sample is flagged so a caller can resample or abstain. Kept scoped: for
+        open-ended generation this is a filter/abstention aid, not a correctness guarantee."""
+        import numpy as _np
+        from holographic_ai import cosine as _cos
+        v = self.generate_vector(codebook, steps=steps, seed=seed, **kw)
+        if isinstance(v, tuple):
+            v = v[0]
+        cb = _np.asarray(codebook, float)
+        vv = _np.asarray(v, float)
+        sims = cb @ vv / (_np.linalg.norm(cb, axis=1) * (_np.linalg.norm(vv) + 1e-12) + 1e-12)
+        conf = float(sims.max())
+        return {"vector": vv, "confidence": conf, "accepted": conf >= confidence_floor,
+                "nearest": int(sims.argmax())}
+
+    def recurrent_forecaster(self, kind="esn", n_in=1, n_res=600, dim=1024, seed=0):
+        """Forecasting backlog (F7, de-silo): a gradient-free sequence producer, now reachable through the mind.
+        `kind='esn'` -> EchoStateNetwork (nonlinear-lift readout); `kind='vsa'` -> VSAReservoir (permute IS the
+        recurrence). `.fit(inputs, targets)` then `.predict(inputs)`. Pairs with `forecast`/conformal for a
+        calibrated interval. See holographic_recurrent."""
+        from holographic_recurrent import EchoStateNetwork, VSAReservoir
+        return EchoStateNetwork(n_in, n_res=n_res, seed=seed) if kind == "esn" else VSAReservoir(dim=dim, seed=seed)
+
+    def market_projector(self, dim=512, K=5, H=3, R=80, seed=1):
+        """Forecasting backlog (F7, de-silo): the RayProjector time-series study -- casts rays into a data field
+        and reads held-out quantiles -- now reachable through the mind. `.fit(moves, burst)` then `.project(row)`.
+        See holographic_market.RayProjector."""
+        from holographic_market import RayProjector
+        return RayProjector(dim=dim, K=K, H=H, R=R, seed=seed)
+
+    def adaptive_sample_budget(self, variance_of_mean, current_n, target_half_width, z=1.959963984540054):
+        """Forecasting sweep (sec.5, renderer delegation): a CALIBRATED adaptive-sampling stop. Given a renderer's
+        per-pixel variance-of-the-mean at `current_n` samples, return the EXTRA samples each pixel needs to reach
+        `target_half_width` at confidence z (0 where already converged) -- "sample where the estimate is still
+        uncertain, stop where it is confident," replacing a hand-set threshold. Honest: a pixel mean's interval is
+        Gaussian/CLT (var falls as sigma^2/n; halving the interval costs 4x samples), NOT conformal -- a single
+        pixel has no calibration set. See holographic_adaptive_sample."""
+        from holographic_adaptive_sample import sample_budget
+        return sample_budget(variance_of_mean, current_n, target_half_width, z=z)
+
+    def scheduler_capacity(self, dim=None, gated=True, target_recall=0.9, seed=0):
+        """Forecasting sweep (sec.5.5): the scheduler's cost model IS a forecaster. Instead of assuming the
+        theoretical packing wall (~0.10*D), MEASURE it -- probe growing superposition loads, measure gated cleanup
+        recall, and return the largest load whose recall stays >= target_recall (a CALIBRATED capacity) plus the
+        recall curve, so the scheduler packs as many as it is confident it can. `should_superpose` (in
+        holographic_superschedule) gates a batch on the measured wall. Honest finding: the measured wall is often
+        BELOW the theoretical dial at a strict target -- assuming overpacks. See holographic_superschedule."""
+        from holographic_superschedule import calibrated_capacity, pack_capacity
+        d = dim if dim is not None else self.dim
+        cap, curve = calibrated_capacity(d, gated=gated, target_recall=target_recall, seed=seed)
+        return {"capacity": cap, "curve": curve, "theoretical": pack_capacity(d, gated=gated),
+                "target_recall": target_recall, "gated": gated}
+
+    def calibrate_forecast(self, preds, actuals, alpha=0.1, kind="scalar", abstain_width=None):
+        """Forecasting backlog (F1): wrap ANY producer's forecasts in a CALIBRATED prediction interval that
+        abstains when too wide to trust. Fit on a held-out set of (prediction, truth) pairs -- scalar (scored by
+        |error|) or vector (scored by 1 - cosine, the engine's own metric) -- and get a ConformalForecaster whose
+        `.predict(point)` returns {point, interval/cosine_radius, coverage, abstain}. Distribution-free, no learned
+        weights -- the forecasting twin of RecallNull. See holographic_conformal."""
+        from holographic_conformal import ConformalForecaster
+        cf = ConformalForecaster(alpha=alpha, kind=kind, abstain_width=abstain_width)
+        cf.calibrate(list(preds), list(actuals))
+        return cf
+
+    def adaptive_conformal(self, alpha=0.1, gamma=0.05, window=200):
+        """Forecasting backlog (F2): temporal conformal for time series (which break exchangeability). Adaptive
+        Conformal Inference holds LONG-RUN coverage at 1-alpha under drift by widening after a miss / narrowing
+        after a hit -- `.step(residual)` per observation, `.realized_coverage()` reads the held rate. Kept loud:
+        under a fundamental regime change (~0% overlap) no feedback rule recovers coverage -- abstain and flag
+        drift. See holographic_conformal.AdaptiveConformal."""
+        from holographic_conformal import AdaptiveConformal
+        return AdaptiveConformal(alpha=alpha, gamma=gamma, window=window)
+
+    def forecast_coverage_report(self, residuals_calib, residuals_test, alphas=(0.01, 0.05, 0.1, 0.2)):
+        """Forecasting backlog (F8): the coverage instrument -- for each alpha, confirm the empirical coverage on
+        held-out residuals tracks the nominal 1-alpha. The forecasting twin of calibration_report; an interval you
+        cannot verify is one you cannot trust. See holographic_conformal.coverage_report."""
+        from holographic_conformal import coverage_report
+        return coverage_report(residuals_calib, residuals_test, alphas=alphas)
+
+    def forecast_crps(self, samples, actual):
+        """Forecasting backlog (F8): CRPS -- the proper score for a probabilistic (sample) forecast; coverage says
+        the interval is wide enough, CRPS says the forecast is GOOD (rewards accuracy AND sharpness). Lower is
+        better; a sharp-and-accurate forecast scores strictly below a vague one. See holographic_conformal."""
+        from holographic_conformal import crps_sample
+        return crps_sample(samples, actual)
+
+    def render_pipeline(self, preset="preview", **overrides):
+        """Render/Sim Pipeline (Phases 1-2): build a configured, validated render+sim pipeline. `preset` is
+        'preview' / 'final' / 'interactive', or a holographic_pipeline.PipelineConfig; `**overrides` tweak
+        individual flags. Returns a Pipeline -- call `.plan()` to see exactly which stages will run and WHY
+        (without rendering), or `.run(scene, seed, renderer=...)` to execute a frame. The builder auto-includes
+        prerequisites (ask for SVGF, get the G-buffer) and rejects impossible combos up front with a clear
+        message. See holographic_pipeline."""
+        from holographic_pipeline import PipelineConfig, build_pipeline
+        if isinstance(preset, str):
+            cfg = {"preview": PipelineConfig.preview, "final": PipelineConfig.final,
+                   "interactive": PipelineConfig.interactive}[preset]()
+        else:
+            cfg = preset
+        for k, v in overrides.items():
+            setattr(cfg, k, v)
+        return build_pipeline(cfg)
+
+    def field_effect(self, sdf, effect, radius=1.0, falloff="smooth", strength=1.0, texture=None):
+        """Render/Sim Pipeline (Part 4): a shaped zone of influence -- the SDF is the shape, its distance is the
+        falloff, `effect(points, weight)` is what it does (attractor/wind/drag/density). Compose several with
+        holographic_fieldeffect.FieldGroup (they add); attach one to a moving node with AttachedFieldEffect.
+        Ready effects: attract_to / repel_from / uniform_force. See holographic_fieldeffect."""
+        from holographic_fieldeffect import FieldEffect
+        return FieldEffect(sdf, effect, radius=radius, falloff=falloff, strength=strength, texture=texture)
+
+    def particle_sim(self, pos, vel, force_fn, integrator="symplectic"):
+        """Render/Sim Pipeline (Phase 0 / G2): a point-mass sim advanced by the shared, energy-stable symplectic
+        integrator -- exactly what a FieldEffect's summed forces drive. `force_fn(pos, vel) -> accelerations`.
+        `.advance(dt)` steps it. See holographic_integrate.ParticleSim / SimStep."""
+        from holographic_integrate import ParticleSim
+        return ParticleSim(pos, vel, force_fn, integrator=integrator)
+
+    def near_surface_to_sdf(self, near_surface, h=1.0, threshold=0.0):
+        """Sweep 3 local completion (photo-to-3D): turn a NEAR-SURFACE signed field (accurate only in a thin band
+        around the surface -- e.g. from depth unprojection) into a FULL, globally-consistent signed distance
+        field. The band's sign is all we trust away from the surface, so we threshold it to an inside/outside
+        occupancy and run the existing fast-sweeping eikonal (`signed_distance_field`) to redistance everywhere.
+        Honest reuse: the eikonal solver already does the extension; this just prepares its input from a band."""
+        import numpy as _np
+        inside = _np.asarray(near_surface, float) < threshold        # sign is the reliable part away from the surface
+        return self.signed_distance_field_3d(inside, h=h) if inside.ndim == 3 else self.signed_distance_field(inside, h=h)
+
+    def texture_map(self, image, wrap="repeat"):
+        """Sweep 3 local completion: an image-based TEXTURE MAP sampled by UV with bilinear interpolation -- the
+        per-texel detail a factor-level PBRMaterial couldn't carry. Pass one to a PBRMaterial's `*_map` argument
+        (base_color_map/metallic_map/roughness_map/emissive_map) and call material.sample(u, v) for the effective
+        shaded values. See holographic_materialio.TextureMap."""
+        from holographic_materialio import TextureMap
+        return TextureMap(image, wrap=wrap)
+
+    def graph_namespace(self, branching=6, beam=1, seed=0):
+        """Sweep 3 local completion (fit-correct): a hierarchical namespace/navigation tree over labelled vectors
+        (GraphMemory) -- observe_vector(v, label) grows the tree, classify_vector(v) routes a query to its region.
+        Use it for HIERARCHY / NAMESPACE / NAVIGATION (a DB namespace tree, a region index), NOT for exact recall
+        -- its recall accuracy is a documented negative that collapses at scale, which is why the sweep re-homed
+        it here. See holographic_graph_memory.GraphMemory."""
+        from holographic_graph_memory import GraphMemory
+        return GraphMemory(self.dim, branching=branching, beam=beam, seed=seed)
+
+    def directional_field(self, dirs, values, order=3):
+        """Sweep 3 item 8: project a DIRECTIONAL function (sampled `values` at unit directions `dirs`) onto
+        spherical-harmonic coefficients -- the SAME primitive for directional LIGHT (PRT radiance transfer, splat
+        view-dependent colour) and directional SOUND (ambisonic encoding). `sample_directional` reconstructs.
+        Reuses prt's SH basis (no fork). See holographic_spharm."""
+        from holographic_spharm import sh_project
+        return sh_project(dirs, values, order=order)
+
+    def sample_directional(self, coeffs, dirs, order=3):
+        """Sweep 3 item 8: reconstruct a directional function from its spherical-harmonic coefficients at `dirs`
+        (radiance toward a view direction, or ambisonic gain toward a listening direction). Inverse of
+        directional_field. See holographic_spharm."""
+        from holographic_spharm import sh_reconstruct
+        return sh_reconstruct(coeffs, dirs, order=order)
+
+    def conditional_propagator(self, transitions, ridge=1e-3):
+        """Sweep 3 item 9: a CONDITIONAL Propagator -- one learned dynamics operator per ACTION, so predict is a
+        bind of that action's transform onto the state (dynamics' 'predict = bind a transform to a state', made
+        action-conditional). Unifies lookahead's per-action forward model with the dynamics module and gives
+        model-based planning (`.plan(state, actions, codebook)` re-anchors each hop). `transitions` maps each
+        action to its (state, next_state) pairs. See holographic_condprop.ConditionalPropagator."""
+        from holographic_condprop import ConditionalPropagator
+        return ConditionalPropagator.learn(transitions, ridge=ridge)
+
+    def storage_spine(self, block_size=32):
+        """Sweep 3 item 7: one content-addressed, deduplicated, erasure-robust byte store -- uri KEYS a record,
+        a content hash DEDUPS identical payloads, a fountain code makes retrieval robust to lost droplets. The
+        shared spine for the query DBs, texture atlases, scene deltas, and the compile cache. `.put(tags, bytes)`
+        / `.get(key, loss=...)`. See holographic_storage.StorageSpine."""
+        from holographic_storage import StorageSpine
+        return StorageSpine(block_size=block_size)
+
+    def faculties(self):
+        """The capability table (Sweep 3 item 1): the sorted names of every faculty currently callable from a VSA
+        program as `APPLY <name>` -- built-ins (cleanup/denoise/...) plus anything `register_apply_handler` added
+        (an octree query, an agent behaviour, a fitted embedding). This is the SAME live handler set the machine's
+        APPLY uses, so introspection, a drives scheduler, or an moe gate all read one registry -- the convergence
+        point the sweep flagged. Registration is `register_apply_handler(name, fn)`; this is the read side."""
+        return sorted(self._procedure_handlers().keys())
+
+    def spatial_index(self, points, cell_size):
+        """Sweep 3 item 2: ONE shared uniform-grid spatial index over a point set -- radius / knn / closest-point
+        queries in O(1)-ish (nearby cells only), byte-identical to a brute-force scan. The widest-fanout mechanism
+        (cull, navigation, collision broadphase, sampling, Walk-on-Spheres closest-point all ask the same query).
+        See holographic_spatial.SpatialGrid."""
+        from holographic_spatial import SpatialGrid
+        return SpatialGrid(points, cell_size)
+
+    def reaction_diffusion(self, size=64, dim=48, steps=40, seed=0, **kw):
+        """Sweep 3 item 3: a reaction-diffusion cellular automaton (HyperCA) -- a local update rule over a
+        hypervector field from which global patterns emerge (spots/stripes/fronts). One solver, many domains
+        (patina/weathering, procedural texture, fur/skin patterns, crystal growth, erosion). Runs `steps` and
+        returns the stepped HyperCA (read `.grid`). See holographic_automaton.HyperCA."""
+        from holographic_automaton import HyperCA
+        ca = HyperCA(size=size, dim=dim, seed=seed, **kw)
+        for _ in range(int(steps)):
+            ca.step()
+        return ca
+
+    def emergent_concepts(self, vigilance=0.45, commit=3.0, prune=0.5, seed=0, **kw):
+        """Sweep 3 item 4: online, label-free concept growth -- watch a stream, grow concepts with no fixed
+        category count, and COMMIT one (via the double-diffusion staircase, which pulls in the diffusion
+        mechanism) when its slowly-integrating support survives. An online GROUP BY / clustering reusable across
+        agent situations, vision classes, market regimes, or the knowledge registry. Feed it with `.perceive(x)`.
+        See holographic_emergence.EmergentConcepts."""
+        from holographic_emergence import EmergentConcepts
+        return EmergentConcepts(vigilance=vigilance, commit=commit, prune=prune, seed=seed, **kw)
+
+    def temporal_reuse(self):
+        """Sweep 3 item 5: the temporal-reuse loop -- reuse last frame's per-cell result, reproject it
+        (backward-warp), and re-solve ONLY the dirty region, optionally accumulating (running average) for noisy
+        estimators. The render/solve SPEED discipline (path tracer, Walk-on-Spheres, fluid/wave). Call
+        `.solve(solve_fn, n, dirty=..., reproject=..., accumulate=...)`. See holographic_temporal.TemporalReuse."""
+        from holographic_temporal import TemporalReuse
+        return TemporalReuse()
+
+    def cosserat_strand(self, points_or_strand, bend_stiffness=0.5, shape_stiffness=0.6):
+        """A hair as a COSSERAT ROD (H2b): each segment carries an orientation frame, so the strand HOLDS its
+        curl under gravity and can carry a TWIST -- the quality upgrade over plain bend springs. Accepts an
+        (n,3) point array or a groom Strand. `.step()/.settle()` simulate it; `.set_root_twist(a)` twists it;
+        `.curl_amount()`/`.twist_of(i)` read it out. See holographic_cosserat.CosseratStrand."""
+        from holographic_cosserat import CosseratStrand, from_strand
+        if hasattr(points_or_strand, "points"):
+            return from_strand(points_or_strand, bend_stiffness=bend_stiffness, shape_stiffness=shape_stiffness)
+        return CosseratStrand(points_or_strand, bend_stiffness=bend_stiffness, shape_stiffness=shape_stiffness)
+
+    def groom_hair(self, surface_sdf, n_strands, bounds, length=1.0, n_pts=8, curl=0.0, lean=0.0,
+                   width=0.02, seed=0, length_jitter=0.0):
+        """HAIR GROOM (H1): grow `n_strands` rooted on an SDF surface, each along its outward normal (+ optional
+        lean), straight or curly, smoothed for rendering. `bounds`=(lo_vec,hi_vec). Returns a list of Strand.
+        See holographic_groom.groom."""
+        from holographic_groom import groom
+        return groom(surface_sdf, n_strands, bounds, length=length, n_pts=n_pts, curl=curl, lean=lean,
+                     width=width, seed=seed, length_jitter=length_jitter)
+
+    def simulate_hair(self, strands, steps=60, dt=1.0 / 60.0, gravity=(0.0, -9.8, 0.0), wind=None,
+                      body_sdf=None, collide_radius=0.0, bend_compliance=1e-3):
+        """HAIR DYNAMICS (H2): simulate strands as PBD chains (root pinned, inextensible with Follow-The-Leader,
+        bend springs for stiffness) under gravity, optional wind force, and body collision. Returns new strands.
+        See holographic_groom.simulate_strands."""
+        from holographic_groom import simulate_strands
+        return simulate_strands(strands, steps=steps, dt=dt, gravity=gravity, wind=wind, body_sdf=body_sdf,
+                                collide_radius=collide_radius, bend_compliance=bend_compliance)
+
+    def interpolate_hair(self, guides, render_roots, k=3, clump=0.4):
+        """GUIDE INTERPOLATION (H3): make many render strands from a few simulated guide strands by blending the
+        k nearest guides and clumping toward one -- what makes full fur affordable. See holographic_groom."""
+        from holographic_groom import interpolate_strands
+        return interpolate_strands(guides, render_roots, k=k, clump=clump)
+
+    def hair_wind(self, strength=2.0, res=24, bounds=((-2, 2), (-2, 2), (-2, 2)), octaves=3, seed=0, base=(1.0, 0.0, 0.0)):
+        """CURL-NOISE WIND (H7): a divergence-free (volume-preserving) turbulent wind field; call `.force(strand)`
+        for the per-point force to pass to simulate_hair. Fur ripples without ballooning. See holographic_groom.CurlWind."""
+        from holographic_groom import CurlWind
+        return CurlWind(strength=strength, res=res, bounds=bounds, octaves=octaves, seed=seed, base=base)
+
+    def render_hair(self, strands, camera, light_dir=(0.3, 0.6, 0.6), width=400, height=400,
+                    shader="kajiya", hair_color=(0.55, 0.35, 0.15), smooth_levels=2, lod_stride=1):
+        """RENDER HAIR (H4/H5/H6): project each strand's smoothed centerline and shade its segments by their
+        TANGENT -- `shader`='kajiya' (anisotropic sheen) or 'marschner' (physical R/TT/TRT with a colored
+        secondary highlight). Returns an (H,W,3) image. See holographic_hairshade.render_hair."""
+        from holographic_hairshade import render_hair
+        return render_hair(strands, camera, light_dir=light_dir, width=width, height=height, shader=shader,
+                           hair_color=hair_color, smooth_levels=smooth_levels, lod_stride=lod_stride)
+
+    def solve_pde(self, sdf, boundary_value, points, source=None, n_walks=256, eps=1e-3, seed=0):
+        """WALK ON SPHERES: solve Laplace (Delta u = 0) or Poisson (-Delta u = source) on the interior of an SDF,
+        with NO meshing, by random walks that step by the distance-to-boundary (one SDF eval) until they hit the
+        boundary and read `boundary_value` there. Returns (solution, standard_error) at each query point. Works on
+        any shape you can write an SDF for. SIGGRAPH list #7. See holographic_wos.solve_on_sdf."""
+        from holographic_wos import solve_on_sdf
+        return solve_on_sdf(sdf, boundary_value, points, source=source, n_walks=n_walks, eps=eps, seed=seed)
+
+    def steady_heat(self, sdf, boundary_temperature, points, n_walks=256, eps=1e-3, seed=0):
+        """STEADY-STATE heat on any SDF shape: hold the boundary at `boundary_temperature(point)` and find the
+        equilibrium temperature at interior `points`. This is Laplace's equation via Walk on Spheres -- the
+        grid-free, mesh-free steady complement to the transient `holographic_heat` diffusion and the `wave`
+        field. Returns (temperature, standard_error). See holographic_wos."""
+        from holographic_wos import solve_on_sdf
+        return solve_on_sdf(sdf, boundary_temperature, points, n_walks=n_walks, eps=eps, seed=seed)
+
+    def curl_noise(self, res=64, bounds=((0.0, 8.0), (0.0, 8.0)), octaves=4, seed=0, obstacle_sdf=None, ramp=1.0):
+        """CURL NOISE: divergence-free procedural turbulence (u, v) on a grid -- the curl of an fBm streamfunction,
+        so it never compresses (no sources/sinks). Optional `obstacle_sdf` makes the flow go AROUND a shape. Cheap
+        wind/smoke detail with no fluid solve. SIGGRAPH list #1. See holographic_curlnoise.curl_noise."""
+        from holographic_curlnoise import curl_noise
+        return curl_noise(res, bounds=bounds, octaves=octaves, seed=seed, obstacle_sdf=obstacle_sdf, ramp=ramp)
+
+    def tearable_cloth(self, rows=12, cols=12, spacing=1.0, compliance=2e-3, material="paper",
+                       tear_strain=None, pin="top"):
+        """A TEARABLE thin sheet: a PBD cloth whose links SNAP when stretched past the material's tear strength,
+        so it rips and separates into pieces when yanked. `.step(pull=..., gravity=...)` advances and tears;
+        `.connected_components()` / `.piece_sizes()` report the split. SIGGRAPH list #2 (fracture -- a new
+        capability). See holographic_tear.TearableCloth."""
+        from holographic_tear import TearableCloth
+        return TearableCloth(rows=rows, cols=cols, spacing=spacing, compliance=compliance, material=material,
+                             tear_strain=tear_strain, pin=pin)
+
+    def levitation_chamber(self, height=0.10, wavelength=0.0086, amplitude=4000.0, n_beads=40,
+                           gravity=9.81, bead_radius=1e-3, bead_density=25.0, seed=0):
+        """ACOUSTIC LEVITATION: beads in a vertical standing wave feel the Gor'kov radiation force and are trapped
+        at the pressure NODES (spaced lambda/2) against gravity. `.settle(field_on=True)` holds them aloft;
+        `field_on=False` lets them fall. The 'sound moves objects' showpiece. Acoustics A7 -- reuses the standing
+        field idea (A3), the particle system, and gravity. See holographic_levitate.LevitationChamber."""
+        from holographic_levitate import LevitationChamber
+        return LevitationChamber(height=height, wavelength=wavelength, amplitude=amplitude, n_beads=n_beads,
+                                 gravity=gravity, bead_radius=bead_radius, bead_density=bead_density, seed=seed)
+
+    def room_acoustics(self, size=(5.0, 4.0, 3.0), material="plaster", absorption=None, c=343.0):
+        """GEOMETRIC ROOM ACOUSTICS: how a room echoes. `.rt60()` is the reverberation time (Sabine), `.reflections
+        (source, listener)` the early echoes via the image-source method (arrival = path/c, level from the wall
+        reflectance), `.impulse_response(...)` the sampled room response. Hard rooms ring, soft rooms are dead.
+        Acoustics A6 -- the acoustic twin of the path tracer, reusing A2's reflectance. See
+        holographic_roomacoustic.ShoeboxRoom."""
+        from holographic_roomacoustic import ShoeboxRoom
+        return ShoeboxRoom(size=size, material=material, absorption=absorption, c=c)
+
+    def power_law_viscosity(self, shear_rate, K=1.0, n=1.8, eta_min=1e-4, eta_max=1e4):
+        """The non-Newtonian power-law viscosity eta = K * shear_rate^(n-1): a viscosity that DEPENDS on how fast
+        the fluid is sheared. n>1 thickens under shear (cornstarch/oobleck), n<1 thins (ketchup, paint), n=1 is
+        Newtonian. Returns a per-cell viscosity field. See holographic_nonnewtonian.power_law_viscosity."""
+        from holographic_nonnewtonian import power_law_viscosity
+        return power_law_viscosity(shear_rate, K, n, eta_min=eta_min, eta_max=eta_max)
+
+    def nonnewtonian_fluid(self, shape, power_law_n=1.8, consistency_K=1.0, **kwargs):
+        """A fluid solver with NON-NEWTONIAN rheology: its viscosity is the shear-rate-dependent power law, so it
+        can carry cornstarch (n>1, shear-thickening -- stiffens where you shear it hard) or a shear-thinning fluid
+        (n<1). A StableFluid in its power-law mode; n=1 would be ordinary Newtonian. See holographic_fluid.StableFluid
+        (power_law_n / consistency_K) and holographic_nonnewtonian."""
+        from holographic_fluid import StableFluid
+        return StableFluid(shape, power_law_n=power_law_n, consistency_K=consistency_K, **kwargs)
+
+    def wave_field(self, shape, c=343.0, dx=1.0, damping=0.0, absorb_border=0):
+        """A scalar acoustic PRESSURE field that PROPAGATES (the compressible wave the incompressible fluid can't
+        carry): d2p/dt2 = c^2 grad^2 p by leapfrog. `.pulse(center)` taps it, `.step(dt)` advances it (auto-
+        subdivided to stay CFL-stable), an `absorb_border` sponge stops edge reflections. `c` may be a per-cell
+        field from material sound_speed. Acoustics A3 -- the low-frequency wave complement to ray acoustics, and
+        the standing field levitation (A7) will use. See holographic_wave.WaveField."""
+        from holographic_wave import WaveField
+        return WaveField(shape, c=c, dx=dx, damping=damping, absorb_border=absorb_border)
+
+    def read_wav(self, path):
+        """Read a PCM WAV file -> (samples in [-1,1] mono, sample_rate). The front door for driving acoustics/
+        cymatics from a real sound. Acoustics A1. See holographic_audio.read_wav."""
+        from holographic_audio import read_wav
+        return read_wav(path)
+
+    def audio_spectrum(self, samples, rate, k=6):
+        """The `k` dominant frequencies (Hz) and their amplitudes in a signal -- the tones that drive a plate or
+        fluid. Acoustics A1. See holographic_audio.dominant_frequencies (and `spectrum`, `frames` there)."""
+        from holographic_audio import dominant_frequencies
+        return dominant_frequencies(samples, rate, k=k)
+
+    def acoustic_impedance(self, material):
+        """Characteristic acoustic impedance Z = rho * c (rayl) of a material, reused from its density x speed of
+        sound -- the acoustic twin of a refractive index. Acoustics A2. See holographic_acoustic.impedance."""
+        from holographic_acoustic import impedance
+        return impedance(material)
+
+    def acoustic_interface(self, mat_a, mat_b):
+        """Sound crossing from material A into B: (R, T) = fractions of energy reflected and transmitted, from the
+        impedance mismatch (a big mismatch like air/steel reflects nearly all). Energy conserved. Acoustics A2. See
+        holographic_acoustic.interface; `wall_absorption` for a surface's absorbed fraction."""
+        from holographic_acoustic import interface
+        return interface(mat_a, mat_b)
+
+    def chladni_plate(self, shape="square", grid=40, medium="sand", n_modes=48, base_hz=200.0,
+                      n_grains=6000, seed=0):
+        """A vibrating plate whose CYMATIC figures are its Laplacian eigenmodes: `.drive(freqs, amps)` (or
+        `.drive_mode(k)`) sets the displacement from a sound's spectrum, `.step_medium(dt)`/`.settle()` drift sand
+        to the nodes, `.render()` shows the figure. The headline acoustics demo, reusing the spectral eigenmodes.
+        Acoustics A4. See holographic_cymatics.ChladniPlate."""
+        from holographic_cymatics import ChladniPlate
+        return ChladniPlate(shape=shape, grid=grid, medium=medium, n_modes=n_modes, base_hz=base_hz,
+                            n_grains=n_grains, seed=seed)
+
+    def oxidation_field(self, shape, exposure=None, moisture=1.0, seed=None):
+        """A CORROSION front over a surface grid: rust/patina that NUCLEATES at exposed/wet faces (default: the
+        border) and SPREADS inward as a reaction-diffusion front. `.step(material, dt)` advances it, `.albedo(
+        material)` gives the per-cell base->oxide colour blend (steel->rust, copper->patina). Process M4. See
+        holographic_oxidation.OxidationField; `oxide_color` for a single whole-object sample."""
+        from holographic_oxidation import OxidationField
+        return OxidationField(shape, exposure=exposure, moisture=moisture, seed=seed)
+
+    def oxide_color(self, material, ox_fraction):
+        """The blended colour of a material at oxidation fraction 0..1 -- pristine base to full oxide (rust orange,
+        patina green). The weathering interpolation for a single sample. See holographic_oxidation.oxide_color."""
+        from holographic_oxidation import oxide_color
+        return oxide_color(material, ox_fraction)
+
+    def burn_object(self, material, mass_kg, temp_K=293.15):
+        """An object BEING CONSUMED by fire: `.light()` ignites it, `.step(dt)` advances the burn -- it loses mass
+        (drives an M6 Fire), its appearance marches base->char->ash, and it emits that material's smoke, ending as
+        ash. Process M7, tying M6 (combustion) and, via `evaporate`, M5 (a puddle drying up). See
+        holographic_burn.BurningObject; `char_color` for the appearance blend at a burn fraction."""
+        from holographic_burn import BurningObject
+        return BurningObject(material, mass_kg, temp_K=temp_K)
+
+    def char_color(self, material, burn_fraction):
+        """The surface colour at burn fraction 0..1: pristine base -> char (blackened) -> ash (grey). The burning
+        interpolation. See holographic_burn.char_color."""
+        from holographic_burn import char_color
+        return char_color(material, burn_fraction)
+
+    def element(self, symbol):
+        """A chemical ELEMENT's engine-relevant properties by symbol: name, atomic number, atomic mass, density,
+        melt/boil points, flame-test colour (or None), category. The atomic ingredients materials are made of. See
+        holographic_elements.element."""
+        from holographic_elements import element
+        return element(symbol)
+
+    def material_elemental(self, name):
+        """A material's ELEMENTAL makeup and everything derived from it: {composition (element:count/ratio),
+        molar_mass, flame_color, mass_fractions}. molar_mass feeds the gas law (T1); flame_color is the
+        ratio-weighted BLEND of the constituents' flame-test colours (the emission-line colour a copper compound
+        burns green, which the blackbody continuum alone can't give -- feeds M6). None if no composition on file.
+        This is a material referencing its elements + ratio, feeding simulation. See holographic_elements."""
+        from holographic_elements import material_elemental
+        return material_elemental(name)
+
+    def fire(self, material, fuel_kg, temp_K=293.15):
+        """A material-aware BURNING body: `.step(dt)` checks ignition against the material's autoignition point,
+        consumes fuel at its burn rate once lit (a fire latches and sustains until the fuel runs out), and reports
+        the smoke it makes (that material's colour + soot) and the flame colour (blackbody at its temperature) --
+        so wood smoke and plastic smoke genuinely differ. Process M6, standing on the heat model (T4) and blackbody
+        (T3). See holographic_combustion.Fire; `ignites` gates it; couplings configure_fluid / emit_smoke feed the
+        fluid solver and surface emitter."""
+        from holographic_combustion import Fire
+        return Fire(material, fuel_kg, temp_K=temp_K)
+
+    def ignites(self, material, temperature_K):
+        """True if `material` is at or above its autoignition temperature (hot enough to catch fire); False below
+        it, or if the material is not flammable. The honest ignition gate. See holographic_combustion.ignites."""
+        from holographic_combustion import ignites
+        return ignites(material, temperature_K)
+
+    def phase_state(self, material, mass_kg, temp_K=293.15, pressure_Pa=101325.0):
+        """A parcel of `material` with mass across solid/liquid/gas at one temperature: `.add_heat(Q)` warms it and
+        drives melt/boil/freeze/condense, HOLDING temperature flat during a transition while the latent heat is
+        paid (the boiling plateau). Boiling point tracks pressure (from the gas model T1). Process M5, standing on
+        the heat model (T4). See holographic_phase.PhaseState / boiling_point_at."""
+        from holographic_phase import PhaseState
+        return PhaseState(material, mass_kg, temp_K=temp_K, pressure_Pa=pressure_Pa)
+
+    def blackbody_color(self, temp_K, normalize="hue"):
+        """The sRGB colour a blackbody GLOWS at temperature `temp_K` -- red ember (~900 K), orange flame, white
+        filament (~2800 K), blue-white star (~12000 K) -- from Planck's law integrated against the CIE curves.
+        Thermodynamics T3; the ember/flame/glowing-char colour the combustion & burn processes (M6/M7) will paint
+        by temperature. `normalize='hue'` gives the pure hue at full value; 'none' keeps the luminance ratio. See
+        holographic_blackbody.blackbody_rgb."""
+        from holographic_blackbody import blackbody_rgb
+        return blackbody_rgb(temp_K, normalize=normalize)
+
+    def diffuse_heat(self, temp_field, alpha, dx=1.0, dt=None, steps=1):
+        """Spread heat through a temperature FIELD by Fourier conduction (dT/dt = alpha*laplacian(T)) for `steps`
+        steps, auto-substepped to stay stable at any dt, insulated boundaries (total heat conserved). `alpha` =
+        thermal diffusivity k/(rho c) (see thermal_diffusivity / material_thermal). Thermodynamics T4 -- the
+        temperature source the phase-change / combustion / decay processes read. See holographic_heat.diffuse_heat."""
+        from holographic_heat import diffuse_heat
+        return diffuse_heat(temp_field, alpha, dx=dx, dt=dt, steps=steps)
+
+    def heat_body(self, material, mass_kg, temp_K=293.15):
+        """A lumped body of a named `material` at a uniform temperature: `.add_energy(Q)` raises it by Q/(m c),
+        `.newton_cool(ambient, hA, dt)` relaxes it toward ambient. Specific heat is pulled from the material
+        definition. Thermodynamics T4. See holographic_heat.HeatBody / material_thermal."""
+        from holographic_heat import HeatBody, material_thermal
+        c = material_thermal(material)["specific_heat"]
+        return HeatBody(mass_kg, c, temp_K=temp_K)
+
+    def material_thermal(self, material):
+        """Thermal properties of a named material -- {'density','specific_heat','thermal_conductivity'} in SI,
+        reusing the definition library and the enrichment data (conductivity), with thermal_diffusivity easily
+        derived. See holographic_heat.material_thermal."""
+        from holographic_heat import material_thermal
+        return material_thermal(material)
+
+    def ideal_gas(self, name="air", temp_K=293.15, pressure_Pa=101325.0):
+        """A parcel of gas in a definite state: `.density()`, `.sound_speed()`, `.adiabatic_change(V2/V1)`. The
+        ideal gas law P V = m R_specific T. Thermodynamics T1 -- and its speed of sound cross-checks the
+        definitions' tabulated value. See holographic_gas.IdealGas."""
+        from holographic_gas import IdealGas
+        return IdealGas(name=name, temp_K=temp_K, pressure_Pa=pressure_Pa)
+
+    def boiling_point(self, pressure_Pa, material="water"):
+        """The boiling temperature (K) at a given pressure, from Clausius-Clapeyron (lower pressure -> boils
+        cooler, the mountain effect). Defaults to water. Thermodynamics T1 -- the fact phase change (M5) consumes
+        to know WHEN a liquid turns to vapour. See holographic_gas.boiling_point."""
+        from holographic_gas import boiling_point
+        return boiling_point(pressure_Pa)
+
+    def grain_material(self, axis=(0, 1, 0), light=(0.72, 0.52, 0.32), dark=(0.40, 0.26, 0.14),
+                       ring_scale=8.0, fibre=0.35, warp=0.6, seed=0, center=(0.0, 0.0, 0.0)):
+        """A WOOD-GRAIN colour socket f(points)->(M,3): concentric rings along an axis + lengthwise fibre streaks +
+        an fBm domain-warp that bends rings into knots. Volumetric in object space, so a cut board shows the rings
+        continue. Drop it into a channel: `surface_material(color=Param(field=mind.grain_material(...)))`. Structure
+        primitive M1. See holographic_grainmat.wood_albedo (also `substrate_layers` there for plywood/strata)."""
+        from holographic_grainmat import wood_albedo
+        return wood_albedo(axis=axis, light=light, dark=dark, ring_scale=ring_scale, fibre=fibre, warp=warp,
+                           seed=seed, center=center)
+
+    def material_inclusions(self, base, inclusions, seed=0):
+        """An IMPURITY/INCLUSION colour socket f(points)->(M,3): the `base` material everywhere except in
+        noise-blob pockets where each inclusion shows (carbon in steel, bubbles in glass, veins in stone).
+        `inclusions` is [(material, fraction, scale), ...] with fraction the CALIBRATED covered fraction. base and
+        materials are matlib preset names or rgb triples. Volumetric, deterministic. Structure primitive M3 (the
+        planet's ore-deposit noise-threshold pattern, scoped to a material). See holographic_inclusions."""
+        from holographic_inclusions import with_inclusions
+        return with_inclusions(base, inclusions, seed=seed)
+
+    def crystal_material(self, n_seeds=32, bounds=((-1.5, -1.5, -1.5), (1.5, 1.5, 1.5)), seed=0, jitter=1.0,
+                         base=(0.55, 0.57, 0.62), spread=0.18, crack=(0.05, 0.05, 0.06), crack_width=0.03):
+        """A POLYCRYSTALLINE colour socket f(points)->(M,3): a Worley/Voronoi partition where each grain is a
+        slightly different facet colour, darkened along the cell boundaries (cracks). Volumetric, deterministic.
+        Structure primitive M2. Returns (cells, socket) so you can also query cells.ids / cells.edge_distance (e.g.
+        for a crack roughness channel via holographic_cellular.crack_mask). See holographic_cellular."""
+        from holographic_cellular import VoronoiCells, cell_albedo
+        cells = VoronoiCells(n_seeds=n_seeds, bounds=bounds, seed=seed, jitter=jitter)
+        return cells, cell_albedo(cells, base=base, spread=spread, crack=crack, crack_width=crack_width, seed=seed)
+
+    def render_material(self, name, color=None):
+        """A PHYSICALLY-PLAUSIBLE render material from the library (holographic_matlib) as a first-class
+        SurfaceMaterial -- so any of its ~130 glTF-PBR presets (metals, woods, stones, gems, biomes, planetary layers,
+        ore deposits) drives preview / path_trace / RenderSession directly. This is the fork's physical definitions
+        plugged into our render pipeline: data-driven materials, not hand-set demo colours. See
+        SurfaceMaterial.from_matlib and holographic_matlib.material."""
+        from holographic_surface import SurfaceMaterial
+        return SurfaceMaterial.from_matlib(name, color=color)
+
+    def material_catalog(self):
+        """The whole render-material library grouped by class (diffuse/metal/wood/stone/glass/gem/emissive/biome/
+        layer/deposit/liquid/fabric/organic) -- for a UI picker. See holographic_matlib.catalog."""
+        import holographic_matlib as _ml
+        return _ml.catalog()
+
+    def fractal_planet(self, radius=1.0, seed=0, dim=256, octaves=4, relief=0.10, **kw):
+        """A data-driven, physically-plausible PLANET as one region field: a fBm-displaced sphere painted by a
+        Whittaker biome classifier (elevation/temperature/moisture -> ocean/desert/forest/ice), wrapped around
+        interior shells (crust/mantle/core) with ore-deposit pockets. `.cross_section()` slices it; `.material_at()`
+        colours any point; `.biome_histogram()` reports the surface mix. 'As above, so below' -- a planet is region
+        composition all the way down. See holographic_matlib.fractal_planet."""
+        import holographic_matlib as _ml
+        return _ml.fractal_planet(radius=radius, seed=seed, dim=dim, octaves=octaves, relief=relief, **kw)
+
+    def physical_material(self, name):
+        """The PHYSICAL properties of a named material (density kg/m3, viscosity, Young's modulus, refractive index,
+        sound speed, specific heat, phase) from the definition library -- the numbers a SOLVER needs, so a simulation
+        can be data-driven by real materials instead of raw parameters. Raises KeyError with near matches if unknown.
+        See holographic_definitions.MATERIALS."""
+        from holographic_definitions import MATERIALS
+        if name not in MATERIALS:
+            near = [n for n in MATERIALS if name.split("_")[0] in n][:6]
+            raise KeyError("unknown material %r%s" % (name, (" -- did you mean: %s" % near) if near else ""))
+        return dict(MATERIALS[name])
+
+    def resolve_scenario(self, description):
+        """Turn a physical description ('a block of wood floating in water', 'a steel ball sinking in oil') into a
+        VALIDATED, parameterised Scenario: it grounds each named thing to its physical properties, checks the physics
+        (wood floats, steel sinks -- `.consistent`), and emits `.build_spec()` -- the phenomenon + solver family +
+        per-body masses/volumes a shipped solver consumes. This is how a description becomes a physically-accurate
+        simulation. See holographic_definitions.resolve_scenario."""
+        from holographic_definitions import resolve_scenario
+        return resolve_scenario(description, dim=self.dim, seed=self.seed)
+
+    def quantity(self, value, unit, uncertainty=0.0, source=None):
+        """A physical QUANTITY = value + unit + uncertainty + source, in the dimensional GRAMMAR (holographic_
+        quantities): multiplication composes dimensions (density * volume -> mass), addition requires matching
+        dimensions (a length plus a mass is refused as the grammar error it is), conversion is one call (`.to('ft')`),
+        and uncertainty propagates. Extensible via register_unit. See holographic_quantities.Quantity."""
+        from holographic_quantities import Quantity
+        return Quantity(value, unit, uncertainty=uncertainty, source=source)
+
+    def estimate_bill(self, bill, price_per_kg=None, carbon_factor=None):
+        """'Render' the mass, cost, and embodied carbon of a bill of materials [(material, volume_m3), ...] by
+        composing recipes over the definition library's densities (reused, never duplicated): mass = Sigma density*vol,
+        cost = Sigma mass*price, carbon = Sigma mass*carbon_factor -- each dimensionally checked by the grammar.
+        Returns {'mass','cost','carbon','missing'}; SAMPLE price/carbon tables are used if none supplied (flagged,
+        pending a real USGS/ICE ingest). See holographic_quantities.bill_mass/bill_cost/bill_embodied_carbon."""
+        from holographic_quantities import (bill_mass, bill_cost, bill_embodied_carbon,
+                                            SAMPLE_PRICE_USD_PER_KG, SAMPLE_CARBON_KG_PER_KG)
+        from holographic_definitions import build_standard_library
+        lib = build_standard_library(dim=256, seed=0)              # small dim: only the density table is used
+        price = price_per_kg if price_per_kg is not None else SAMPLE_PRICE_USD_PER_KG
+        carbon = carbon_factor if carbon_factor is not None else SAMPLE_CARBON_KG_PER_KG
+        mass, miss_m = bill_mass(lib, bill)
+        cost, miss_c = bill_cost(lib, bill, price)
+        co2, miss_k = bill_embodied_carbon(lib, bill, carbon)
+        return {"mass": mass, "cost": cost, "carbon": co2,
+                "missing": sorted(set(miss_m) | set(miss_c) | set(miss_k))}
+
+    def render_session(self, sdf, materials, camera, width=256, height=256, bounds=None):
+        """Open a RENDER SESSION over one scene -- the object that ties the renderers together so a preview and a
+        photoreal final can't drift apart. Holds an SDF + a SurfaceMaterial per object id (or one for the whole SDF) +
+        a camera, and derives every output from that SINGLE scene: `.preview()` (fast render_surface), `.render_final(
+        spp, on_progress=)` (progressive path_trace), `.to_splats()` (a browser splat proxy), and `.edit_channel(id,
+        channel, value)` (a live material edit that shows in both). This is what a demo page drives instead of
+        re-wiring render_surface / path_trace / splat export by hand. See holographic_session.RenderSession."""
+        from holographic_session import RenderSession
+        return RenderSession(sdf, materials, camera, width=width, height=height, bounds=bounds)
+
+    def sdf_surface_points(self, sdf, bounds, n=2000, seed=0, eps=0.02):
+        """Sample points that lie ON an SDF's surface (random points + one Newton step onto the zero level, kept where
+        |sdf|<eps) -- the front half of the SDF->splat bridge, so any SDF scene becomes splat-viewable via
+        field_to_splats. Deterministic. See holographic_session.sdf_surface_points."""
+        from holographic_session import sdf_surface_points
+        return sdf_surface_points(sdf, bounds, n=n, seed=seed, eps=eps)
+
+    def render_surface(self, sdf, camera, width, height, materials, **kw):
+        """Render an SDF scene resolving every material channel PER HIT from its socket -- so a procedural pattern on
+        any channel is a solid 3-D texture (wraps curved surfaces, no UV unwrap), and opacity alpha-composites one
+        transparency layer. `materials` maps object id -> SurfaceMaterial (or one material for the whole SDF). Honest
+        scope: environment reflection only (use render_dispatch / render_scene for object-object mirrors). See
+        holographic_surface.render_surface."""
+        from holographic_surface import render_surface
+        return render_surface(sdf, camera, width, height, materials, **kw)
+
+    def pattern_field(self, name, **params):
+        """A named deterministic procedural pattern FIELD f(points)->[0,1] (checker, stripes, gradient, dots, noise,
+        fbm) that plugs into ANY Param socket -- a material channel, a region field, an emitter rate. Deterministic by
+        integer-lattice hash (PYTHONHASHSEED-independent). Use holographic_pattern.field_lerp to drive a channel
+        lo..hi by the pattern. See holographic_pattern."""
+        from holographic_pattern import make_pattern
+        return make_pattern(name, **params)
+
+    def radiance_transfer(self, sdf, points, normals, order=3, n=512):
+        """PRECOMPUTED RADIANCE TRANSFER -- collapse the light-transport integral into a per-point transfer vector once,
+        then RELIGHT with a dot product (no rays). For a STATIC scene the way a surface point turns incident lighting
+        into outgoing radiance (including its own soft self-shadowing) depends only on geometry, so it is precomputed in
+        a spherical-harmonic basis; runtime shading is `shade_prt(transfer, project_env_to_sh(light))`. The 'don't
+        path-trace, just read out' idea: expensive to precompute, ~free to relight -- wins when the light changes often
+        over fixed geometry. Returns the transfer matrix (len(points), order^2). See holographic_prt."""
+        from holographic_prt import precompute_transfer
+        return precompute_transfer(sdf, points, normals, order=order, n=n)
 
     def holographic_radiance_field(self, points, rgb, bounds=None, grid=14, dim=768, bandwidth=None, halo=1, seed=0):
         """Bake scene RADIANCE (colour leaving each surface point) into a TILED holographic field: space is split into
@@ -6329,13 +7944,16 @@ class UnifiedMind:
         return query_scene(scene_vector, roles, self, slot)
 
     def render_scene_description(self, text, camera, width=256, height=256, post=None, quality="fast", spp=24,
-                                 adaptive_spp=0):
+                                 adaptive_spp=0, bake=None, relax=1.0):
         """The full text -> 3-D pipeline in one call: parse the description and render. quality='fast' uses the
         single-pass adaptive-AA renderer (seconds; inter-object shadows, see-through glass, volumetric fog/smoke/
         fire). quality='hyperreal' routes through the Monte-Carlo PATH TRACER with real Cook-Torrance/GGX materials
         (true global illumination, colour bleeding, emissive objects that light the scene, REFRACTIVE glass) --
         offline, spp-controlled. `adaptive_spp`>0 enables variance-driven adaptive sampling (extra samples only on
-        noisy pixels). `post` is an optional holographic_postfx.PostChain."""
+        noisy pixels). `post` is an optional holographic_postfx.PostChain. `bake`=grid-resolution precomputes the SDF to
+        a grid so the shader samples it O(1) (fast on complex/animated scenes; see bake_sdf); `relax`>1 turns on opt-in
+        over-relaxed marching (faster on grazing scenes, a small quality trade). The fast path always uses the free,
+        bit-exact active-only marcher."""
         from holographic_semantic import parse_description, render_scene, render_scene_pbr
         scene = parse_description(text)
         env = scene["environment"]
@@ -6344,7 +7962,7 @@ class UnifiedMind:
             return render_scene_pbr(scene["objects"], camera, width=width, height=height, spp=spp,
                                     post=post, sun=sun, sky=sky, adaptive_spp=adaptive_spp)
         return render_scene(scene["objects"], camera, width=width, height=height, post=post,
-                            sun=env.get("sun") or "bright", sky=env.get("sky") or "clear")
+                            sun=sun, sky=sky, bake=bake, relax=relax)
 
     def scene_control_spec(self, command):
         """Turn a control phrase ('control the ball size and how metallic it is') into UI control descriptors

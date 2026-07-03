@@ -45,7 +45,7 @@ Pure NumPy, deterministic, no new dependencies.
 """
 
 import numpy as np
-from holographic_ai import bind, unbind, bundle, cosine, permute, derived_atom, bind_batch
+from holographic_ai import bind, unbind, bundle, cosine, permute, derived_atom, bind_batch, involution
 
 OPCODES = ["LOAD", "BIND", "BUNDLE", "PERMUTE", "CALL", "APPLY", "IFMATCH", "ITERATE", "REPEAT", "HALT",
            "STORE", "RECALL",                                  # STORE r / RECALL r: a small register file (ISA-4)
@@ -168,6 +168,16 @@ class HoloMachine:
             arg = self._nearest(self.data_atoms, unbind(raw, self.ARG))
         return op, arg
 
+    def _read_addr(self, prog_spec, i, n):
+        """Read instruction address i from a PRE-TRANSFORMED program spectrum. BIT-IDENTICAL to
+        unbind(program_vec, pos(i)) -- same rfft(program_vec), same involution, same irfft -- but the program's
+        spectrum is transformed ONCE per run() and reused across every instruction, instead of being recomputed
+        on each one. This is Fill 1 (spectrum residency) applied to the hottest loop in the VM: the plan's
+        observation that `run()` recomputes rfft(program_vec) on every opcode decode. Safe for the cleanup-gated
+        decode precisely BECAUSE it is bit-exact -- it cannot flip a _nearest winner (the bind_batch discipline)."""
+        from holographic_fft import rfft as _rfft, irfft as _irfft
+        return _irfft(prog_spec * _rfft(involution(self.pos(i))), n=n)
+
     # ---- executing a program -----------------------------------------------------------------
     def run(self, program_vec, init_acc=None, max_steps=512, _depth=0, handlers=None,
             stop=None, max_loop=64, converge_tol=0.999, branch_tol=0.5,
@@ -190,13 +200,18 @@ class HoloMachine:
           Its trace entry is the 4-tuple (op, f, iterations, reason) where reason is 'converged' /
           'goal' / 'maxloop'."""
         handlers = handlers or {}
+        # RESIDENCY (Fill 1): transform the CONSTANT program vector ONCE and reuse its spectrum for every
+        # instruction's address read, instead of recomputing rfft(program_vec) on each decode. Bit-identical.
+        from holographic_fft import rfft as _rfft
+        prog_spec = _rfft(program_vec)
+        n = program_vec.shape[0]
         acc = init_acc
         regs = dict(init_regs) if init_regs else {}  # seed from incoming state (chunk threading) or start fresh;
         stack = init_stack                           # exact carry -> no crosstalk added at a seam (ISA-4/5)
         trace = []
         pc = 0
         for _step in range(max_steps):              # cap on TOTAL instructions executed (the safety net)
-            raw = unbind(program_vec, self.pos(pc))
+            raw = self._read_addr(prog_spec, pc, n)          # residency: reuse the program's spectrum
             op = self._nearest(self.op_atoms, unbind(raw, self.OP))
             if op == "HALT":
                 break
@@ -237,7 +252,7 @@ class HoloMachine:
             if op == "REPEAT":                                         # counted loop: run the next CALL n times
                 cnt = self._nearest(self.cnt_atoms, unbind(raw, self.ARG))
                 trace.append(("REPEAT", cnt))
-                nraw = unbind(program_vec, self.pos(pc + 1))           # the instruction to repeat (expects a CALL)
+                nraw = self._read_addr(prog_spec, pc + 1, n)             # the instruction to repeat (expects a CALL)
                 if self._nearest(self.op_atoms, unbind(nraw, self.OP)) == "CALL":
                     fn = self._nearest(self.fn_atoms, unbind(nraw, self.ARG))
                     trace.append(("CALL", fn))
@@ -320,11 +335,15 @@ class HoloMachine:
         if acc.ndim != 2:
             raise ValueError("run_batch expects init_accs of shape (N, D)")
         N, D = acc.shape
+        # RESIDENCY (Fill 1): transform the constant program once, reuse across the decode loop. Bit-identical.
+        from holographic_fft import rfft as _rfft
+        prog_spec = _rfft(program_vec)
+        n = program_vec.shape[0]
         regs = {}
         _unbatchable = {"CALL", "ITERATE", "REPEAT", "APPLY", "IFMATCH", "PUSH", "POP"}
         pc = 0
         for _step in range(max_steps):
-            raw = unbind(program_vec, self.pos(pc))
+            raw = self._read_addr(prog_spec, pc, n)
             op = self._nearest(self.op_atoms, unbind(raw, self.OP))        # decoded ONCE for the whole batch
             if op == "HALT":
                 break

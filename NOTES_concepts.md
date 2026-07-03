@@ -14737,3 +14737,3552 @@ must be rebuilt per step -- the delta helps the SHADE, not the sim); voids are j
 empty-space SDF/field queries); gravitational lensing bends the primary ray itself (the ray segments become curves --
 the slab tests would need arc/segment approximations). The lever applies cleanly to shading and discrete edits; it does
 not make a per-frame physics sim free, and that boundary is stated rather than papered over.
+
+## The missing piece: a render SESSION so unchanged re-renders are FREE and edits stream as deltas (+1 test, 2083->2084)
+
+Moose reported real slowness re-rendering an UNCHANGED scene (same camera, no edits) and expected the bidirectional
+index to make that ~free / realtime, especially for pixel streaming. PROBE-FIRST found the gap: the existing
+`SceneRenderer` cache (a) always calls the full render_scene on render(), with NO "nothing changed -> return cached"
+path; (b) uses the OLD primary-only idbuf incremental, not the new bidirectional index (so glass/reflection/SSS edits
+and moves weren't covered); (c) has no delta pixel-STREAM. And render_scene defaults to ss=2 (4x supersample) -- wrong
+for streaming. So calling render_scene each frame re-traced + re-shaded the whole frame every time, even with no changes.
+
+* NEW `IncrementalRenderer` (holographic_rayindex) -- a render SESSION on the bidirectional index:
+  - `render(objects)` -> (frame, mask). If the scene KEY (per-object shape/colour/material/size) is unchanged, returns
+    the CACHED frame with an empty mask -- ZERO work. Else full render (ss=1 default, delta-exact) + build ray & brick
+    indices, cache.
+  - `edit(obj, field, value)` -> re-shade only pixels_touching(obj) via the ray index (through-glass / reflection / SSS
+    / translucency all covered); bit-exact, bounded.
+  - `move(obj, delta)` -> brick-index delta (occlusion + shadow + secondary); bit-exact; indices rebuilt (geometry
+    changed).
+  - `stream_delta(mask)` -> (ys, xs, rgb) of ONLY the changed pixels -- the wire payload is O(changed), not O(frame).
+
+* MEASURED (256x256, 2-object scene, ss=1): first render 3.57s (full, unavoidable -- the authoritative frame); SAME
+  scene again 0.00014s (FREE, 0 px); colour edit 0.038s, 1653 px = 2.5% of frame, BIT-EXACT vs a full re-render, stream
+  payload 1653 px vs 65536 = ~40x less data, ~61x faster than a full render_scene(ss=2). The unchanged case went from a
+  full re-trace to nothing.
+
+* GUIDANCE (the actual fix for the reported slowness): use `mind.incremental_renderer(cam, w, h)` for repeated
+  rendering / live editing / streaming instead of calling render_scene every frame; render_scene is a ONE-SHOT. Use
+  ss=1 for the stream (ss=2 is ~1.5-2x slower, for a final still only). Export the .glb ONCE (or only after a move) --
+  colour/material/light edits and unchanged frames don't change geometry, so the glb is stable; stream pixel deltas per
+  frame.
+
+* KEPT NEGATIVES. (1) The FIRST frame is inherently full-cost -- the brain does one authoritative render (per-pixel AO +
+  soft-shadow marches dominate); the session's win is not REPEATING it, and the GPU muscle layer is for absolute
+  first-frame speed. (2) A camera MOVE invalidates every ray -> full re-render (the index is camera-space; reprojection
+  is a future item). (3) Edits are ss=1 delta-exact; a final ss=2 still is a separate full render.
+
+* SEPARATE BUG FLAGGED (not the session): the parser's CHAINED "A beside B beside C" layout puts objects 0 and 1 at the
+  SAME centre (they overlap) -- 2-object "beside" is fine, 3+ collides. Surfaced while testing; worth a realizer fix.
+
+CROSS-ARC: the index made per-edit work bounded; the SESSION is what turns that into "pay only for what changed" ACROSS
+FRAMES -- unchanged = free, edit/move = a small delta stream. That is the realtime-streaming path the index was built to
+enable, now wired end to end.
+
+## Camera move != full re-trace: temporal REPROJECTION (the 3DGS / DLSS / V-Ray-realtime idea) (+1 test, 2084->2085)
+
+Moose (correct pushback): a camera move should NOT invalidate everything -- 3D Gaussian splats, V-Ray/Redshift realtime,
+and Intel's OIDN+XeSS all reuse the previous frame under a moved camera. The reason: DIFFUSE shade (Lambert + AO + soft
+shadow) is VIEW-INDEPENDENT -- a world point's colour doesn't change with the camera, only WHICH PIXEL it lands on. Only
+reflections / glass / specular are view-dependent, plus newly-disoccluded pixels.
+
+* NEW IncrementalRenderer.reproject(new_camera). Uses the per-pixel WORLD hit point the index already stores (a
+  G-buffer: _P, _hit, _viewdep). Forward-project every cached hit into the new view (_project_points = the exact inverse
+  of Camera.ray_dirs), z-buffer so the nearest wins, and re-shade ONLY (a) holes -- disocclusions + sky (sky is
+  view-dependent but cheap), and (b) view-dependent pixels (refl>0.05 | glass | translucent). Reused diffuse pixels
+  carry over without re-tracing the expensive AO/soft-shadow marches. Camera-space indices are marked stale and rebuilt
+  LAZILY (_ensure_fresh) only when a later edit/move needs them -- pure navigation pays nothing extra.
+
+* MEASURED (200x200, orbit 5 deg, ss=1): FRAME-FILLING scene (11% sky) -> reproject 0.17s vs full 1.24s = 7.2x, only
+  17.8% re-shaded, PSNR 32.7 dB. SPARSE scene (32% sky) -> 3.5x, 38% re-shaded (mostly cheap sky), 31.4 dB. The win
+  GROWS with how much reusable geometry fills the frame; re-shaded (hole + view-dependent) pixels are EXACT.
+
+* KEPT NEGATIVES (loud, the honest muscle-layer trade every realtime renderer makes). (1) Reprojection is APPROXIMATE,
+  not bit-exact: round-to-nearest resampling shifts colours up to half a pixel, so PSNR ~31-33 dB (edges/silhouettes
+  carry the error; smooth diffuse regions are near-exact). TAA/DLSS/XeSS accumulate sub-pixel jitter over frames to fix
+  this -- a future item; for now call render() for a bit-exact still. (2) A 2x2 splat to close sub-pixel gaps was tried
+  and made it WORSE (blur, 27 dB) -- reverted to nearest; the "holes" are mostly SKY (no world point, genuinely
+  view-dependent) not sub-pixel gaps, and sky re-shades cheaply. (3) Fast-moving / large camera jumps disocclude more ->
+  more re-shade -> less win (bounded by a full render at the limit). (4) view-dependent = whole object flagged
+  (reflective/glass/frosted) -> those objects' pixels always re-shade on a camera move (correct, since their look
+  changes with view).
+
+CROSS-ARC: this closes the last "camera move is a full render" gap -- the same record-once idea (the trace's world hit
+points) now serves camera MOTION too, reused where the shade is view-independent and re-shaded only where it genuinely
+changes. Editing, moving, AND navigating are all now "pay for what changed."
+
+## The composable substrate: labelled REGION FIELDS -- a boundary says how to regard what's inside (+5 tests, 2085->2090)
+
+Moose's unification: treat anything as mesh/particle/smoke/fluid/light -- it's all vectors being transformed and
+accumulating data by collapsing higher dimensions; the missing piece is composing a multi-body system by specifying a
+3D boundary that defines how the information inside it is REGARDED, with combined processing and precise culling.
+PROBE-FIRST: attribute_field/sample_attribute (per-point value fields) and the SDF DSL (union/intersect/subtract/ONION
+shells) already exist; the missing primitive was the LABELLED-REGION algebra that ties a boundary to an interpretation.
+
+* NEW holographic_regionfield. `Region(sdf, label, priority, material, behavior, data)` = a boundary (SDF, negative
+  inside) + how to regard its interior. `RegionField.classify(points)` -> per-point winning region by priority (-1 =
+  empty), vectorised, O(regions). That one classification drives THREE things from ONE field:
+  - MATERIAL: `material_at(points)` -> rgb by region; and because regions LAYER by priority, `slice(origin,u,v)` cuts
+    the volume open and returns the material image -> SLICE IT OPEN, SEE THE LAYERS (no special case).
+  - BEHAVIOUR: the label can be 'cloth'/'fire'/'smoke'/'fluid' instead of a colour, so `behavior_at(points)` picks the
+    SIMULATION per point -- cloth-on-fire-to-smoke is three region labels over one field with moving boundaries, not
+    three bolted-on engines.
+  - CULLING: `cull(points)` = classify>=0; a point outside every region is KNOWN-empty (the SDFs say so up front) and
+    skipped with no marching -- the same "empty space known, not discovered" property the density/radiance fields have.
+
+* MEASURED. Layered planet (atmosphere/crust/ocean-band/mantle/offset-core): the cut shows 5 distinct materials
+  (_region_slice.png -- concentric rings, core off-centre). Culling 216,000 grid points in 0.076s: 84.7% known-empty
+  and skipped, 15.3% inside a region. Behaviour-by-region: one classify returns ['cloth','fire','smoke',None] over a
+  stacked scene -- one field picking the sim.
+
+* HONEST SCOPE (loud). This is the composable SUBSTRATE -- the labelled-region algebra (classify/slice/cull/material/
+  behaviour). It is NOT the simulations: a real cloth solver, a combustion model, a fluid step, fractal biome
+  generation, instanced grass, auto-LOD are the APPLICATION layer that READS a region's behaviour label and runs. What
+  the substrate earns is that they compose over ONE field with ONE classification and free precise culling, instead of
+  each being a siloed pipeline -- which is exactly Moose's point ("it's all mashed together at the superposition
+  anyway"). The hard, genuinely-unbuilt parts are the solvers and the time-evolution of the boundaries (a region
+  shrinking as cloth burns, fragments detaching when disconnected) -- flagged as real work, not claimed.
+
+REST-OF-VISION MAP: material-by-boundary + slice-layers DONE; behaviour-by-boundary (sim selection) DONE as the
+label; precise culling DONE (free from the SDFs). NEXT, same primitive: drive the RENDERER's material from
+material_at(hit_points) (a biome planet shaded by region); connectivity/fragment detection (label a region, flood-fill
+its inside-mask, split when a component disconnects -- the cloth-falls-off case); time-varying boundaries (region SDFs
+that move/shrink per step). GENUINELY SEPARATE (solvers, not this substrate): the cloth/fire/fluid numerics and LOD --
+they plug into the behaviour label but are their own work.
+
+## Region material in the real shader (biome planet) + coherent secondary rays (bounce = transform) (+4 tests, 2090->2094)
+
+Two threads from Moose's ray/region vision, both wired to the real pipeline and measured.
+
+### (a) Region material drives the shader -- a biome planet from ONE sphere
+The region field now feeds the actual renderer. `render_scene(..., region_field=rf)` sets `ctx['region_field']`, and
+`_shade_rays` takes each hit point's albedo from `rf.material_at(P_hit)` where a region covers it (falling back to the
+object colour elsewhere). MEASURED: one plain grey sphere renders as a biome planet -- ocean base, green/forest
+continents, a desert strip, white ice cap -- material entirely from region membership at the hit point
+(_planet_biome.png). No per-object colours, no texture map: the boundary says what the surface IS. This is the planned
+"drive the renderer from material_at(hit_points)" step, done. (Reflection-of-region and SSS-of-region still read the
+object colour -- a small honest follow-on.)
+
+### (b) Coherent secondary rays -- a bounce is a TRANSFORM of its parent (holographic_raycoherence)
+Moose's reframe of the flagged secondary-ray weakness: a bounce ray is not new work, it's a transform of the parent
+(origin -> hit, direction -> reflect about N, bounce += 1 -- the only new information). `reflect_transform` is that
+transform; N bounces are N applications. And neighbouring reflection rays off a SMOOTH surface are coherent, so trace
+a SPARSE stride-grid of reflective pixels and reconstruct the perpendicular neighbours by gated bilinear interpolation
+(continuity gate: same object id + aligned normal so we never blend across the reflector's own edge), with an
+exact-trace FALLBACK where the reconstruction is uncertain. `coherent_reflection` returns (reflected, n_traced,
+n_mirror).
+
+* MEASURED (huge mirror ball, smooth reflection = sky/ground): stride 4 traces **22% of reflection rays** and
+  reconstructs the rest at reflection PSNR ~28 dB (MSE 1.6e-3) -- a 4.6x cut in secondary-ray work. On a 200^2 frame,
+  ~2.1x wall-clock on the reflection pass.
+
+* KEPT NEGATIVE (loud, and instructive). With a sharp reflected-CONTENT edge (a red box visible in the mirror),
+  reflection PSNR caps at ~20 dB and tightening `var_tol` (0.06 -> 0.004) barely moves it (19.7 -> 20.8 dB) while
+  spending more rays. WHY: the continuity gate sees the REFLECTOR's geometry (a smooth ball -> everywhere "coherent"),
+  but the reflected IMAGE has an edge the geometry doesn't predict; the only thing catching it is the coarse 4-corner
+  colour variance, which a thin high-contrast edge slips through. So the method is a clean win on coherent reflection
+  CONTENT (sky, ground, gradients) and blurs sharp content edges. The honest next step is a reflected-content edge
+  detector (refine where neighbouring SAMPLES disagree, not just corners) -- a second pass, deferred. High-curvature
+  reflectors (a small mirror ball) also reduce the win: reflection changes fast, so more fallback (58% traced on the
+  tiny ball) -- correct behaviour, smaller saving.
+
+CROSS-ARC: this is the VSA thesis on the render side -- a secondary ray is `bind(parent, reflect_op)` with a depth
+increment, and the reflected field is reconstructed by the same kernel/Nadaraya-Watson interpolation the radiance
+field uses. The coherence we exploit is exactly why the ray G-buffer (record once, reuse) pays: adjacent rays are
+diffs of each other.
+
+## Ray differential FRAMES: a perpendicular pencil transported through a bounce reconstructs the bundle (+5 tests, 2094->2099)
+
+Moose's idea, understood correctly this time (the earlier build was the WRONG thing -- screen-space interpolation of
+finished reflections; this is the RIGHT thing): a ray carries a small local frame of PERPENDICULAR rays (centre + 4
+marginal, offset +u/-u/+v/-v). The frame is the same LOCALLY but, when the centre ray bounces off a surface, the
+marginal rays hit slightly different points with slightly different normals, so the reflected pencil CONVERGES or
+DIVERGES -- reoriented globally. That convergence/divergence IS the physics: flat -> parallel (sharp mirror), convex
+-> spread (blurred), concave -> focus (a CAUSTIC), + a base spread from roughness / soft-light size (a glossy lobe /
+penumbra), + a per-wavelength split (DISPERSION). Each ray carries a Gaussian (the pencil cross-section / a
+covariance), transported through interactions -- so ~5 rays reconstruct a bundle Monte Carlo would sample with
+hundreds. Published lineage named for grounding: ray differentials (Igehy 1999), cone/beam tracing (Amanatides 1984,
+Heckbert 1984), covariance tracing (Belcour et al. 2013). NEW holographic_raydiff.
+
+* MEASURED. (1) The 5-ray frame PREDICTS the 100-ray dense bundle: concave mirror (rays inside the sphere -> far
+  concave wall) focus at s=1.002 vs bundle s=1.003 vs analytic f=R/2=1.000; convex cap both diverge (focus at s~0).
+  20x fewer rays for the same answer. (2) CAUSTIC: intensity ~ 1/pencil-area rises 1.4x -> 5.6x -> 90x -> 16000x
+  approaching the focus, symmetric around it. (3) GLOSSY/SOFT: one lobe sigma folds geometric spread (+) roughness (+)
+  light-angular-size in quadrature (0.020 -> 0.054 with roughness -> 0.062 with both) -- one Gaussian for the whole
+  secondary bundle. (4) DISPERSION: refracting the pencil at per-wavelength IOR fans red vs blue by 0.375 deg in crown
+  glass -- the chromatic split IS the frame diverging by colour.
+
+* KEY BUG FOUND (kept as a lesson). Reflection D2 = D - 2(D.N)N is INVARIANT to the sign of N, so a "concave flag" that
+  merely flips the normal does NOTHING -- whether a pencil focuses or spreads is decided by WHERE it hits (the outer
+  cap is convex/diverging like a mirror ball's fisheye; the inner far wall is concave/focusing), i.e. by geometry, not
+  a normal sign. The demo focuses by placing the ray origin INSIDE the sphere.
+
+* KEPT NEGATIVES (loud). (a) The caustic is a SINGULARITY: at the focus the pencil area -> 0 so geometric intensity ->
+  infinity; real caustics are finite (wave optics / finite aperture) -- the first-order model cannot bound the peak.
+  (b) This is FIRST-ORDER (linear) transport: exact for a thin pencil; it correctly EXHIBITS real spherical aberration
+  when traced against true normals (marginal rays don't all focus at the paraxial point -- a feature, validated by the
+  frame agreeing with the dense bundle which has the same aberration), but a fat pencil's higher-order spread is not
+  captured. (c) The glossy lobe is a Gaussian stand-in, not the true microfacet BRDF; good for the lobe WIDTH, not its
+  exact shape.
+
+CROSS-ARC: this is the VSA "we're in superposition, we already know the state, we just read the local neighbourhood
+to augment it" on the optics side -- the frame is a cheap local probe whose transformed spread reconstructs an
+analytic Gaussian instead of brute-force sampling. Complements the screen-space coherent-reflection module (that
+reuses finished neighbours; this predicts the lobe a single ray stands for).
+
+## Glossy reflection in the shader + the reusable N-D pattern (deterministic-known -> sparse -> interpolate) (+6 tests, 2099->2105)
+
+Two things from Moose: (a) wire the ray-differential FRAME into the real shader; (b) generalise the recurring pattern
+-- deterministic system, all information known, sparse probe + interpolate, dimension-agnostic -- into a reusable
+primitive, with the 3D slime-mould maze as the motivating case ("3 dimensions is trivial when we have thousands").
+
+### (a) Glossy reflection via the 5-ray frame (holographic_semantic)
+NEW materials brushed/satin/glossy (reflective + ROUGH). `_roughness(mat_name)` gives a lobe half-angle; ctx carries
+`rough`. In `_shade_rays`, a reflective pixel with roughness>0 no longer traces one sharp mirror ray -- it traces the
+FRAME (centre + 4 marginal rays tilted by the roughness angle) and averages: a 5-tap reconstruction of the glossy lobe
+(the pencil, wired in). Factored `_shade_reflection_rays` so the sharp and glossy paths shade identically.
+* MEASURED: a brushed ball renders with a visibly BLURRED reflection (vs a sharp mirror ball). The 5-ray frame vs a
+  64-ray Monte-Carlo glossy reference: PSNR 24.5 dB at 12.8x fewer rays, in a real 200^2 render. KEPT NEGATIVE: 5 taps
+  capture the lobe WIDTH (the blur) but not its full smoothness -- 24.5 dB, not 40; more taps close the gap. Caustics
+  and dispersion in the full SDF path are a heavier forward-transport job, deliberately not attempted here (the frame
+  module measures them analytically; only glossy is wired into the surface shader).
+
+### (b) The reusable N-D pattern (holographic_ndfield)
+The recognition that several shipped things are ONE pattern -- a known deterministic field, probed sparsely,
+interpolated, refined -- and that dimension is irrelevant once the operation is abstracted from coordinates.
+* SEARCH: `grid_graph(shape, blocked)` builds an N-D grid adjacency dict; `solve_grid_maze` feeds it to the Tero flow
+  solver UNCHANGED (it only ever saw the graph). MEASURED: the SAME solver solves 2D (10x10), 3D (6^3), and 4D (4^4)
+  mazes with no new code; a 3D maze with an interior wall is solved corner-to-corner, unit steps, never through a wall.
+  The 2D maze the ant/flow shipped on is just D=2.
+* RECONSTRUCT: `sparse_reconstruct(oracle, lo, hi)` samples a known field, reconstructs by Nadaraya-Watson (the
+  radiance field's own kernel), and REFINES where the reconstruction disagrees with the oracle (we can check -- the
+  field is known). MEASURED (3D field): adaptive sampling beats uniform at equal budget by 33% (120 samples) and 38%
+  (240 samples). This is the pattern under coherent reflection, ray differentials, radiance, and culling -- named once.
+
+CROSS-ARC: this is the thesis stated as a reusable tool -- "deterministic patterns within a system where we know all
+information instantly give results, and we can interpolate them." The maze and the field reconstruction are the SEARCH
+and INTERPOLATE faces of it; both are dimension-agnostic because the operation abstracts away the coordinates. 3D is
+trivial with thousands of dimensions in hand.
+
+## Field-weighted navigation spread across domains + region-driven multi-material objects (+5 tests, 2105->2110)
+
+Moose: integrate the pathfinding/N-D pattern everywhere (physics, volumetrics, particles, navigating fields) and use a
+COMPLEX multi-material test object to exercise several things at once.
+
+### Field-weighted navigation (holographic_ndfield) -- one primitive, many domains
+The maze generalised: `field_weighted_graph(shape, cost)` builds an N-D grid whose EDGE COSTS come from a sampled
+scalar field (base distance + the field crossed), and `least_cost_path` (deterministic Dijkstra) / `navigate_field`
+find the least-cost route. The uniform maze is the constant-cost special case. `straight_line_cells` gives a
+tie-break-independent baseline (a naive straight shot) to compare against.
+* VOLUMETRICS: navigate a 3D smoke DENSITY blob -- straight-line crosses 2.75 density, navigated 0.00 (routes AROUND
+  the smoke). A dense wall with a gap: 5.50 -> 0.00 (finds the gap the naive path plows through).
+* PHYSICS: navigate a POTENTIAL hill -- straight climbs 20.26, navigated 0.04 (routes around the peak).
+* PARTICLES: the navigated route is world-space waypoints a particle follows (smooth, max step bounded).
+* KEPT NEGATIVE: the route is GRID-CONSTRAINED (L1/Manhattan), so its raw cell count is larger than a Euclidean
+  straight line (40 vs 14 corner-to-corner) -- the honest quantity is the FIELD cost crossed (near-zero), not the cell
+  count; the diagonal-vs-Manhattan length gap is a discretisation artefact, not a routing loss. Also: the comparison is
+  vs a straight geometric shot, not vs the zeros-Dijkstra (which shares the router's tie-break and dodges obstacles for
+  free -- a subtlety that first hid the win).
+
+### Region field drives MATERIAL TYPE, not just colour (holographic_regionfield + shader)
+`Region` now carries optional `reflect` and `roughness`; `RegionField.reflect_at` / `roughness_at` read them per point;
+`_shade_rays` uses them so ONE body can be mirror in one region, brushed in another, matte elsewhere. MEASURED: a
+single sphere renders as a genuine multi-material SHOWCASE -- matte body + a mirror cap (reflect 0.85) + a brushed patch
+(reflect 0.55, roughness 0.16) + an ember + a glossy ice cap (5 reflectivity levels, 3 roughness levels on one surface,
+_showcase.png). This is the complex test object Moose asked for: it exercises the region field, per-region materials,
+the glossy frame, and reflection all in one render. HONEST SCOPE: regions drive reflect/roughness/albedo; making a
+region GLASS (see-through refraction) would need the see-through path to be region-aware too -- deferred.
+
+CROSS-ARC: the navigation is the SEARCH face of the reusable N-D pattern applied to real fields (density, potential),
+and the multi-material object is the region-field substrate carrying more than colour. Together they show the pattern
+threading through volumetrics, physics, particles, and materials -- deterministic known field, probed, weighted,
+routed; boundary says how to regard what's inside. Same primitives, many places.
+
+## Navigate a live scene, navigate raw market data, compose the route as a hypervector; game-engine panel consult (+4 tests, 2110->2114)
+
+Moose: do the two flagged follow-ons; ask the panel what game-engine lessons apply unconventionally; make navigation
+work on RAW DATA (market) and be COMPOSABLE in VSA programs.
+
+### navigate_scene -- the SDF the renderer traces IS the cost field (holographic_ndfield)
+`navigate_scene(sdf_eval, lo, hi, shape, start_world, goal_world, clearance)`: cells inside geometry (sdf<0) are
+impassable; within `clearance` of a surface is costly; so the agent threads free space around objects. MEASURED: an
+agent routed between two boxes takes 43 waypoints, min signed distance 1.93 (never inside geometry), and _scene_nav.png
+shows the amber trail curving around the boxes with correct depth occlusion (projected waypoints depth-tested against
+the union). This is the "one structure for drawing AND moving" lesson realized -- the nav cost field is the shader's own
+SDF, not a separate representation.
+
+### Navigate RAW MARKET DATA -- same primitive, a data manifold instead of a scene
+Real SOL 5-min prices -> a 2D (log-return, rolling-vol) state space -> an occupancy grid -> cost = -log(density), so
+COMMON states are cheap and RARE states costly. navigate_field then finds the most-probable transition path between two
+regimes. MEASURED: calm->stressed routes ~6-8% more probably than a straight shot through the state space. KEPT
+NEGATIVE (loud): SOL's return/vol occupancy is essentially a vertical BAND (returns cluster near zero at every vol
+level), so there is little manifold structure to exploit and the routing gain is modest -- on a curved/multi-modal
+occupancy the win would be larger. The deliverable is the CAPABILITY: the identical navigator runs on raw data.
+
+### Composable in VSA programs -- a route is a hypervector (holographic_ndfield)
+`encode_path(path)` binds each waypoint to its step index and bundles them (the engine's sequence encoding) -> ONE
+hypervector; `decode_path_step` reads any waypoint back. MEASURED: a 35-waypoint scene path and a 28-state market path
+each decode 100% of their waypoints back from the single vector. So a navigated route is composable VSA data -- bind it
+to a label, bundle several routes, query order -- not just a Python list. This is the ECS->VSA-program idea: the route
+is a role-filler structure over the shared field.
+
+### Panel consult (holostuff_game_engine_lessons.md) -- real published methods only
+Verdict, highest impact first: (1) DATA-ORIENTED/ECS COMPOSABILITY -- treat scene, simulation, and dataset as ONE VSA
+program over a shared field (Plate's HRR is literally this; grounds why navigate_scene + market-nav + encode_path are
+the same move); (2) ONE shared spatial/graph structure for cull AND nav (Pharr's BVH-reuse) -- partly realized, the
+field-weighted grid is the culling grid; (3) a UNIFIED constraint-projection solver (Macklin's XPBD/FleX) folding nav +
+collision + physics into one iterate-to-feasible loop -- the biggest future build; (4) dirty-flag physics/nav deltas
+(Milanfar/temporal coherence) extending the render delta discipline. Through-line: one representation, many consumers,
+recompute only the delta -- holostuff's version is a composable VSA program over a shared field.
+
+### DEFERRED, honest: region-driven GLASS (see-through refraction)
+The other flagged follow-on -- a region making a patch see-through (not just reflective) -- still needs the refraction
+path to be region-aware, and it is the least aligned with this turn's raw-data/VSA/game-engine asks. Reflect/roughness
+per region shipped last turn; per-region glass is deferred with this note kept loud.
+
+## Connectable parameters (a value can be a MAP/field, not just a number) + surface particle emitter (+8 tests, 2114->2122)
+
+Moose: (1) add a check that we can emit particles FROM a surface to drive particle systems; (2) parameters should take
+MORE than a numerical input -- like every DCC app where a parameter can be a map / another node's output.
+
+### Connectable parameters -- the socket (holographic_param.py)
+`Param(value=|field=|map=|source=)` is a parameter SOCKET, exactly the Blender/Houdini/Nuke affordance: type a number OR
+plug in a texture MAP (ndarray sampled over a domain), a procedural FIELD (callable f(points)->values), or a wire to
+another node's named OUTPUT (`source`, looked up in a ctx dict). `resolve_param(p, points, ctx)` is the ONE resolver:
+scalar -> itself; callable -> evaluated; ndarray -> per-point values or a sampled map; Param -> dispatched on its live
+channel (source wires are followed, dangling wires fall back to `default`). Backward-compatible: bare numbers still work
+everywhere (a scalar resolves to itself), so existing call sites are untouched; a faculty opts in by calling
+resolve_param. This is the panel's #1 (data-oriented composability) made concrete -- a parameter is just another edge in
+the VSA program.
+PROVEN in a real material path: `RegionField._scalar_at` now resolves reflect/roughness through the socket, so a
+region's ROUGHNESS can be a field/map that varies across the surface (measured: roughness 0.05 low -> 0.275 high on one
+region) while a constant param still returns a flat value -- "roughness = a texture", like any DCC material.
+
+### Emit particles from a surface (holographic_emitter.py)
+Probe-first: there WAS a 2D `ParticleSystem` (force/advect) and a Poisson box sampler, but NO surface emission -- a
+system had nowhere principled to spawn from. `emit_from_surface(sdf_eval, n, bounds, speed, weight, seed)` samples the
+zero level-set of ANY callable SDF (project random candidates with a few Newton steps p -= sdf(p)*normal(p);
+finite-difference normals; keep the converged ones), returns (positions, outward normals, velocities = normal*speed).
+`advance(pos,vel,force,dt)` is the 3-D sibling of ParticleSystem.step. MEASURED (selftest + render): 240 particles land
+ON a sphere (|sdf|<0.05), normals are radial, and BOTH emit params are sockets -- a WEIGHT map emits only from the top
+hemisphere, a SPEED field makes crown particles faster; stepped under gravity they form a fountain (_emitter.png). This
+is the "check we can emit from a surface to drive particle systems" Moose asked for, and it doubles as the emitter's
+proof that parameters take maps/fields.
+
+### Order / panel note
+Did these two explicit asks first (they were also the panel's #1 composability theme -- a parameter socket IS a
+node-graph edge). Still outstanding from the panel's ranked list: the unified constraint-projection solver (Macklin's
+XPBD/FleX, the biggest future build) and dirty-flag physics/nav deltas (temporal coherence) -- next in line.
+
+## Unified constraint solver was ALREADY shipped; the real gap was SDF/environment collision (+4 tests, 2122->2126)
+
+Panel next-item: the unified constraint-projection solver (Macklin XPBD/FleX + "everything is iterate-a-projection").
+PROBE-FIRST (the engine's own rule) found it ALREADY EXISTS and is already unified: `UnifiedMind.project_onto_constraints`
+sweeps a list of projection callables (POCS/PBD), and it is explicitly the one engine under THREE faculties -- the SBC
+resonator (alternating projection onto factor codebooks), `denoise(method='pnp')` (data-fidelity + manifold), and PBD
+(the softbody delegates its `pbd` solve to it). Rebuilding it would have duplicated shipped work. So, honestly, the
+panel's headline ask was done; the genuine gap the probe surfaced was narrower and real:
+
+### SDF / environment collision (holographic_collide.py) -- the missing constraint
+The softbody resolved distance/bend/volume + node-node SELF-collision, but had NO collision with the ENVIRONMENT (an
+arbitrary scene SDF) -- so cloth couldn't drape over a scene object and emitted particles couldn't pile on one.
+`resolve_sdf_collision(X, sdf, radius)` pushes any point inside the collider (sdf<radius) out to the surface along the
+normal (positional PBD contact, unconditionally stable, no stiffness tuning). `sdf_collision_projection(sdf,N,D,radius)`
+wraps it as a PROJECTION callable so 'stay outside this surface' is just one more constraint in the SAME unified sweep as
+distance/bend/denoise/resonator -- Macklin's one-solver-many-uses, now including the environment. Wired into
+`SoftBody.step(collider=, collide_radius=)` (additive, backward-compatible: default None).
+MEASURED: (a) points scattered inside a sphere all resolve to sdf>=0; (b) a distance link + collision co-satisfy in one
+project_onto_constraints sweep (60 sweeps, link residual <0.15, min sdf>=-0.02); (c) a corner-pinned cloth dropped on a
+sphere DRAPES over the crown with min signed distance 0.02 (rests exactly at the collide_radius offset, NO penetration),
+~14 nodes in contact, constraint residual 0.015 (_cloth_drape.png). This ties together the last three turns: the emitter
+spawns particles from a surface, navigation reads the scene SDF as a cost field, and now collision keeps bodies OUTSIDE
+that same SDF -- one geometry, three consumers, one projection engine.
+KEPT NEGATIVE: the "outside a sphere" feasible set is NON-CONVEX, so POCS from a degenerate (near-coincident) start can
+stall (two linked nodes settled 1.0 apart instead of 1.5); a non-degenerate start co-satisfies. Frictionless collision
+also lets an unpinned cloth slide off a sphere (physically correct) -- the drape demo pins corners.
+
+### Panel status
+Unified solver: shipped (confirmed by audit, not rebuilt). SDF collision: NEW, done. Still outstanding, next: dirty-flag
+physics/nav deltas (temporal coherence -- recompute only the region of a field a moved object touched).
+
+## Dirty-flag physics/nav deltas + an above/below cross-pollination audit (+6 tests, 2126->2132)
+
+### Dirty-flag deltas (holographic_dirtyfield.py) -- the last panel item
+The render discipline "recompute only what changed" (reprojection, the delta protocol) carried into the OTHER half of
+a realtime engine: the navigation/physics COST FIELD. `DirtyField` holds an ADDITIVE field (base + sum of per-collider
+penalties). When ONE collider moves, only the cells in its old ∪ new footprint change, so `move` subtracts the old
+penalty array and re-evaluates the penalty ONLY in the new footprint -- O(footprint), and BIT-IDENTICAL to a full
+rebuild. Additivity is what makes the delta exact (a min/union field's change isn't local -- documented in the module).
+MEASURED: moving one collider re-evaluates ~208 cells regardless of grid size, while a full rebuild scales with area:
+8.7x fewer evals at 30x30, 34.6x at 60x60, 138.5x at 120x120 -- the update cost is tied to the object's footprint, not
+the grid. `cost_grid()` feeds navigate_field; re-routing on the updated field is correct. Faculty: `dirty_field`.
+KEPT NEGATIVE: on an L1 grid a route can dodge a moved obstacle for free (edge-hugging), so "the path changed" is a
+fragile assertion -- the test asserts the FIELD moved (old cell dropped, new cell rose) and the route stays valid.
+
+### Above/below audit -- applying the last 24h of changes elsewhere (holostuff_above_below_audit.md)
+Probed each recent primitive (nav, navigate_scene, encode_path, Param sockets, emitter, SDF collision, dirty deltas)
+for other application sites. Two genuine, high-value applications found and APPLIED:
+* **Region ALBEDO through the parameter socket** -- last turn I gave reflect/roughness the socket but LEFT albedo a
+  bare constant (an inconsistency I introduced). `material_at` now resolves colour through `_resolve_color`, so a
+  region's albedo can be a field/texture (a colour gradient across the surface), consistent with reflect/roughness;
+  constant colours still work (backward compatible, shader unaffected -- 289 semantic tests green).
+* **SDF collision in the 2D ParticleSystem** -- it could be force-driven and field-advected but couldn't avoid
+  obstacles. `ParticleSystem.step(collider=, collide_radius=)` now uses the same `resolve_sdf_collision` the softbody
+  uses; MEASURED: 2D particles raining onto a circular obstacle never penetrate it (worst penetration +0.05 over the
+  whole sim). The SDF-collision primitive now serves cloth (3D), the unified projection sweep, AND 2D particles.
+Findings NOT applied (honest): fog_density as a Param (a fog map) -- plausible but the fog path is a separate render;
+noted for later. DirtyField is itself the generalisation of the render deltas, so no other full-rebuild needed wrapping
+(verify.py's Merkle rebuild is a different shape). The audit's lesson matched the engine's usual one: the highest-value
+"new" work was making an existing primitive reach the places it already should have (albedo socket, particle collision).
+
+## Realtime rendering shortcuts: active-only ray marching (bit-exact 2.2x) + baked SDF grid (O(1) in complexity) (+5 tests, 2132->2137)
+
+Moose: chase realtime rendering speed -- shortcuts we aren't taking; cache/precompute; consider premade codebooks; make
+changes with the LARGEST system-wide impact so cool tech doesn't get buried. PROFILED first (the engine's rule): a
+200x200 trace did 3.84M SDF evals (96/pixel = the full step budget), each an O(n-primitives) union min, and the SAME
+eval is paid again by shadows/AO/reflections/normals AND by navigation/collision/emission. The SDF eval is the shared
+bottleneck. Two shortcuts found and applied, one bit-exact-and-universal, one complexity-scaling:
+
+### 1. Active-only ray marching (holographic_raymarch: sphere_trace + soft_shadow) -- the shortcut we weren't taking
+The vectorised trace evaluated the SDF at EVERY ray every step, even rays that had already hit a surface or escaped past
+max_dist. Now it evaluates ONLY the still-marching rays (drop a ray the step it converges/escapes). Since background
+rays escape in a few steps and surface rays converge fast, the working set collapses quickly. MEASURED, BIT-IDENTICAL
+(hit array identical, t max-diff 0.0): primary trace 5.7x faster; full render 2.1-2.3x faster (PSNR 99 at 200^2; 68 at
+320^2 is adaptive-AA edge-selection float sensitivity, visually identical). This is a pure speed change with NO quality
+tradeoff and it helps EVERY scene and EVERY traced pass. soft_shadow got the same treatment (bit-identical) but only
+~1.02x -- shadow rays start from hit points and don't have the big escape-early population, so its active set barely
+shrinks (kept anyway: correct, can only help). 31 render tests green; a regression guard test pins the bit-identity.
+
+### 2. Baked SDF grid (holographic_sdfbake.GridSDF) -- the realtime distance-field precompute
+Bake the union onto a grid once, then TRILINEARLY sample it: a sample is O(1) regardless of #primitives (Unreal Global
+Distance Fields / Redshift). `GridSDF` is a drop-in for the analytic union (.eval + .ids), so ONE bake speeds the
+shader's trace/shadows/AO/reflections AND navigation/collision/emission. `render_scene(bake=res)` bakes (or reuses a
+prebuilt GridSDF across frames). MEASURED: baked trace time is FLAT as primitives grow (analytic 0.16->5.9s from 1->64
+prims; baked ~0.9s throughout -> 6.4x at 64 prims), hit-agreement 0.998, depth-err 0.002. Amortised: a 24-object
+8-frame orbit is 1.78x with one bake reused every frame.
+KEPT NEGATIVES (loud): the bake is APPROXIMATE (surface detail below cell size blurs; PSNR 46/54/59 dB at 48/80/128^3)
+and has an UP-FRONT cost, so for FEW-primitive single-frame renders it LOSES (5 balls, one frame: 0.3-0.7x -- slower).
+It wins on COMPLEX scenes, MULTI-frame, or when one bake is shared across render+nav+collide. Navigation alone barely
+benefits (1.0x) -- too few evals to amortise the trilinear overhead. Honest bottom line: pure NumPy/CPU won't hit true
+realtime (that's the GPU/WebGPU muscle layer); active-only marching is the free, universal, bit-exact win that should be
+on always, and the bake is the precompute for complex/animated scenes and the shared brain-layer distance field.
+
+### Faculties: `bake_sdf` (returns a GridSDF). render_scene gained `bake=`.
+
+## Over-relaxed (enhanced) sphere tracing -- opt-in, CONDITIONAL win with a kept negative (+1 test, 2137->2138)
+
+Continuing the realtime thrust: the textbook next shortcut after active-only marching is OVER-RELAXATION (Keinert et al.
+2014, "Enhanced Sphere Tracing") -- step by relax*distance instead of distance, detect an overstep one step late (the
+current sphere + the previous sphere no longer cover the step taken), back up to the safe edge and drop to normal steps.
+Added as an OPT-IN `relax` param to `sphere_trace` (default 1.0 = the exact, bit-identical active-only path, untouched)
+and threaded through `render_scene(relax=)` via ctx.
+
+MEASURED, honestly -- it is CONDITIONAL:
+* OPEN scenes (few objects in space): NO win, sometimes slightly WORSE (relax 1.4 = 0.94x evals) -- active-only
+  compaction already captured the easy gain, and sphere tracing's natural large empty-space steps leave little for
+  over-relaxation while the overstep-backtracking adds evals. Hit-agreement 1.0 (safe), just no speedup. KEPT NEGATIVE.
+* GRAZING scenes (a ground plane at a shallow angle -> rays skim the surface taking many tiny steps -- the technique's
+  designed-for case): 1.23-1.29x fewer trace evals, 1.36-1.41x faster full render. But hit-agreement drops to ~0.98 and
+  render PSNR is ~27-28 dB -- the classic over-relaxation artifact: a feature thinner than a grazing step gets skipped.
+  That quality cost is exactly why it is OPT-IN and default-off.
+Compounds with the always-on active-only marching (2.2x), so a grazing scene reaches ~3x vs the original at a small,
+opt-in quality cost. Correctly implemented (never misses catastrophically: the overstep test is provably safe, only the
+surf_eps tolerance band is at risk on grazing hits). 300 render tests green (default path bit-exact).
+
+Honest bottom line: unlike active-only marching (free, universal, bit-exact, always on), over-relaxation is a
+NARROW, opt-in speed/quality knob for grazing-heavy scenes -- kept because it's correct and measured, defaulted off
+because it doesn't help most scenes and costs quality where it does. The measurement, not the intuition, decided the
+default.
+
+## Precomputed Radiance Transfer -- "collapse, don't trace": relight via a dot product (+5 tests, 2138->2143)
+
+Moose: learn from quantum computing -- path tracing shouldn't be needed if we can "collapse wave functions"; search for
+speedups / superpowers / capacity; more game-engine tricks; we aren't limited to 3-4 dimensions. Searched the web
+(real methods, panel-attributed, honest hype filter -- see holostuff_quantum_gameengine_research.md). The concrete
+answer to "collapse not trace" is PRECOMPUTED RADIANCE TRANSFER (Sloan/Kautz/Snyder 2002; Ramamoorthi 9-coeff
+irradiance): the expensive part of GI is the per-point VISIBILITY INTEGRAL, which for a STATIC scene depends only on
+geometry -- so precompute it once as a transfer vector in a spherical-harmonic basis, and runtime shading COLLAPSES to a
+dot product of two ~9-element vectors. PROBE-FIRST first: holographic_harmonic is CIRCULAR (1D Fourier) harmonics for
+VSA meaning, holographic_sphere is Riemannian geometry, holographic_radiance is a radiance FIELD -- true 3D-SH PRT was
+absent. Built holographic_prt.py.
+
+WHAT IT IS: real spherical harmonics (sh_eval, bands 0-3, orthonormal to MC tolerance -- checked); project an
+environment light onto SH (project_env_to_sh); precompute_transfer shoots hemisphere visibility rays per surface point
+(spherical-Fibonacci low-discrepancy dirs) weighted by cosine, projected onto SH = the shadowed-diffuse transfer;
+shade_prt(transfer, light_sh, albedo) = transfer @ light_sh (the collapse, no rays). VSA framing: the transfer vector is
+a per-point codebook entry, relight is a projection/readout. HIGH-D angle: each point carries a 9/16/25-D TRANSPORT
+vector -- more bands = more dimensions = more angular detail; the scene's light response doesn't live in 3D.
+
+MEASURED (self-shadowing cluster, 3914 surface points): precompute 3.82s ONCE; relight via PRT 0.0004s each (dot
+product); relight via re-traced shadows 0.024s each -> 57x per relight (conservative -- PRT integrates the WHOLE
+environment's visibility per relight vs one shadow direction). Rendered two lightings from ONE transfer
+(_prt_lightA/B.png): warm-from-right vs cool-from-left, soft self-shadowing in the crevices, the second lighting a pure
+dot product. KEPT NEGATIVES (loud): break-even ~160 relights, so PRT is for INTERACTIVE relighting / moving-light
+animation over fixed geometry, NOT a single still frame (direct shading is cheaper there); LOW-FREQUENCY (SH truncation
+-> soft ambient shadows, not crisp contact shadows); STATIC geometry (transfer tied to fixed points); DIFFUSE only
+(glossy = per-point matrix + higher order, noted not built). Faculty: `radiance_transfer`.
+
+GAME-ENGINE tricks from the search: Lumen's software ray tracing merges meshes into a GLOBAL DISTANCE FIELD -- which
+VALIDATES last session's SDF bake (a shipping AAA engine made the same choice). Next adjacent idea named: Lumen's
+SURFACE CACHE (cache irradiance per surface patch, reuse across rays/frames -- PRT transfer vectors are a natural home).
+Nanite = visibility-first deferred shading (the engine already shades hit points only) + cluster LOD (mesh-fork feature).
+CAPACITY direction (documented, not built): tensor networks / MPS (Stoudenmire seat) -- quantum-inspired classical, and
+non-unitary factorizations are strictly MORE expressive than unitary (Glasser 2019); a candidate for the next capacity-
+cliff experiment via numpy.linalg SVD contraction, measured against chunk-and-re-anchor. HYPE FILTER: quantum HARDWARE
+gives no speedup here; the value is entirely the quantum-INSPIRED classical structure (transport as a precomputed
+operator; capacity as a tensor factorization). One measured build at a time -- PRT was the higher-certainty win.
+
+## Cost-to-go value field: "solve once in one place, read out anywhere" -- 3D nav = substrate value function (+6 tests, 2143->2149)
+
+Moose: build the highest-impact next thing, and remember that a 3D optimization applies to the STRUCTURE of holostuff in
+general -- more accurate / faster / better bidirectional-context in ONE place should apply to EVERYTHING. PROBE-FIRST:
+the tensor-network/MPS capacity direction is ALREADY built (holographic_tensor: tensor-product bind + tensor-train
+truncation, Stoudenmire's comparison, with the honest negative that HRR gives up nothing per stored number) -- so that's
+explored. The real through-line of the recent 3D wins (SDF bake, PRT) is "precompute/solve ONCE in one place, then every
+query is a cheap read-out." The piece that generalizes it BEYOND 3D is a precomputed COST-TO-GO (value) field.
+
+BUILT in holographic_ndfield: `cost_to_go(nbr, edge_cost, goal)` runs ONE Dijkstra sweep FROM the goal over the whole
+graph -> V (cost-to-go at every cell) + nxt (next step toward goal). `route_from(nxt, start, goal)` then routes from ANY
+start by descent -- O(path), no re-search. `value_grid(V, shape)` materializes the potential. Undirected edges make
+cost-to-go-from-y == cost-from-y-to-goal, which is what lets one goal-rooted solve serve every start. Faculty:
+`cost_to_go_field` (returns V, nxt, and a route(start) closure).
+
+MEASURED (28x28x20 = 15680-cell field with an expensive ridge): ONE solve 0.107s + 8 descents 0.0002s = 0.107s vs 8
+per-start Dijkstra 0.541s -> 5.07x, and routes are PROVABLY OPTIMAL (identical field-cost to per-start Dijkstra). Each
+descent is 3553x cheaper than a fresh Dijkstra search, so the win GROWS without bound as more agents route to the same
+goal (break-even ~2 queries). Rendered _costtogo_field.png: the value field radiating from the goal, an L-barrier
+avoided, 6 optimal descent routes from 6 starts -- one solve, six routes.
+
+THE GENERALIZATION (the point Moose asked for): the value field V is not a nav-only object. It IS a distance field (the
+SDF is cost-to-go with unit cost + obstacles), a physics POTENTIAL (its negative gradient is a force), and an RL VALUE
+FUNCTION (descent on it is the optimal policy). One precomputed field, many consumers -- the same "as above, so below"
+shape as the SDF bake (one field: render+nav+collide+emit) and PRT (one transfer: every relight). DEMONSTRATED the
+identical solver on a NON-3D 2D VSA cost manifold (a market occupancy grid): one solve routes every query state. So the
+3D optimization is literally a substrate optimization.
+
+KEPT NEGATIVES (loud): the field is PER-GOAL (goal changes -> re-solve, exactly as PRT is per-geometry and the SDF bake
+per-scene); for a SINGLE route to a unique goal, plain per-query Dijkstra is fine (break-even ~2 queries); grid/L1
+discretization inherits the earlier nav negative (the honest metric is field-cost-crossed, not cell count).
+
+## Composability of CALCULATION METHODS: dispatch the solver per-element, switch on the fly (+6 tests, 2149->2155)
+
+Moose: the engine already treats DATA as one substrate projected to whatever view is needed (a field is mesh OR fluid OR
+point-cloud OR static collider, part-and-part by a map). Apply that SAME composability to WHICH METHOD computes a value:
+trace to first hit (best for finding a surface), then at the bounce dispatch to whatever is best THERE -- collapse (PRT
+dot product) on diffuse, trace on a mirror, glossy bundle on rough -- and SWITCH on the fly (a traced reflection landing
+on diffuse collapses for the rest of the trip). PROBE-FIRST: the shader ALREADY dispatches by material (matte skips
+reflection, mirror traces sharp, glossy traces a bundle -- via the `refl`/`rough` arrays), and the SUBSTRATE already
+dispatches method by structure (`denoise(method='auto')` picks codebook/manifold/NLM; `decompose_signal` picks a basis
+by topology). GENUINELY NEW: (1) collapse-vs-trace as dispatchable methods, (2) PER-ELEMENT selection by a field with
+(3) on-the-fly switching mid-computation.
+
+BUILT holographic_dispatch.py: `dispatch_field(x, tags, ops)` -- the general primitive: gather each method's elements,
+apply its op to the group (vectorised), scatter back; deterministic label order. `resolve_methods(ids, table,
+region_field)` -- per-hit method tags from an object table with optional per-region override (part of ONE surface can be
+mirror and part diffuse, by a map -- method composability at sub-object resolution). This is the per-ELEMENT
+generalization of the whole-signal method='auto' the engine already had. Faculty: `dispatch_methods`.
+
+MEASURED (mirror sphere among diffuse spheres, 170x170): 4496 primary diffuse hits COLLAPSE (PRT), 1944 mirror hits
+TRACE a reflection; of those, 276 reflection rays landed on a diffuse surface and SWITCHED to collapse for the rest (the
+on-the-fly switch, counted). Precompute transfer at all collapse points once (4.32s); then per-relight DISPATCH 0.0036s
+(all dot products) vs ALL-TRACE 0.0545s (re-shadow every frame) = 15.2x. CORRECTNESS gap the dispatch closes: pure-
+collapse (PRT everywhere) CANNOT produce the mirror reflection; all-trace can but re-shadows every relight. Dispatch is
+BOTH correct (mirror traced once) AND cheap to relight (diffuse + reflection-shading collapse) -- each method used where
+it is best. Rendered _dispatch_lightA/B.png: a mirror reflecting the PRT-shaded diffuse spheres, two lights, the second a
+near-free relight.
+
+KEPT NEGATIVES (loud): the collapse win is a RELIGHTING win (precompute transfer once ~4.3s; break-even is many relights
+-- for a single still frame, direct shading is cheaper, same as PRT's own negative); the method field must be authored
+or derived; bounded to one reflection bounce here; PRT's low-frequency limit still applies to the collapsed parts. THE
+GENERALIZATION (Moose's mandate): `dispatch_field` is substrate-level -- the same primitive that dispatches shading
+methods per hit can dispatch denoise/decompose/factor methods per element of any structure, which is what the engine's
+whole-signal method='auto' already gestures at; this makes it per-element and composable, "part fluid, part static" for
+COMPUTATION.
+
+## Wiring pass: recent work reachable through the mind AND the real pipeline, not hiding in tests/benchmarks (+1 test, 2155->2156)
+
+Moose: make sure everything is actually WIRED and usable to build ON TOP of holostuff -- not siloed in tests/benchmarks.
+AUDITED the live code (grounded, not memory). Finding: the FACULTIES existed, but two things were siloed --
+`render_scene` (the shading pipeline) used NEITHER PRT nor dispatch (grep empty), and the hybrid collapse/trace renderer
+lived ONLY in the measurement script (no reusable function). So PRT and method-dispatch were callable primitives with no
+real render path, and `dispatch_field` was used only in tests.
+
+CLOSED THE GAPS:
+- `holographic_dispatch.render_dispatch(sdf, camera, w, h, methods, colors, light)` -- the pipeline form of "collapse on
+  diffuse, trace on a mirror, switch on the fly": traces primary hits, dispatches per-hit via `dispatch_field` (so the
+  primitive is USED in the pipeline, not just tested), precomputes PRT transfer once for the collapse hits, and returns
+  (frame, relight, info) where relight(new_light) re-shades the collapsed parts for free. Wired as faculty
+  `mind.render_dispatch`. This is how PRT AND dispatch are now used in a real render.
+- `render_scene_description` (the mind's text->render faculty) now passes `bake=` and `relax=` through to the module
+  render_scene, so the SDF-bake O(1) sampling and the opt-in over-relaxed marcher are reachable via the mind's render
+  path, not only the raw function.
+
+WIRING AUDIT (all YES now): active-only marching (in sphere_trace, every trace), SDF bake (bake_sdf + render_scene(bake=)
++ render_scene_description(bake=)), over-relaxation (render_scene(relax=) + render_scene_description(relax=)), PRT
+(radiance_transfer + render_dispatch), cost-to-go field (cost_to_go_field returns V,nxt,route), method dispatch
+(dispatch_methods + USED inside render_dispatch), hybrid renderer (render_dispatch faculty + module function).
+`dispatch_field` and `render_dispatch` both now appear in holographic_dispatch.py + holographic_unified.py (not just
+test_*). A single end-to-end integration test (`test_recent_faculties_are_wired_end_to_end`) exercises every one through
+`UnifiedMind` with real calls and real outputs (a rendered frame, a route, a relight) -- the "build on top of holostuff"
+contract, proven, not asserted. 282 touched-module tests green.
+
+## Adaptive render pipeline: ONE call that auto-selects methods, grounded in measured break-evens (+7 tests, 2156->2163)
+
+Moose: separate options are useful, but I want everything integrated into ONE pipeline that automatically adapts. Built
+the top of the composability stack: holographic_adaptive.py DERIVES the dispatch decisions from the scene + workload
+instead of the caller choosing bake/relax/collapse/trace by hand. Grounded in the break-evens already MEASURED, not
+guessed, and returns a PLAN with a reason for each choice so the automation stays legible.
+
+`plan_render(objects, frames, relight)` -- the pure, testable decision layer:
+- BAKE the SDF (O(1) sampling) iff primitives >= 16 OR frames >= 4 (measured: bake loses <~16 prims single-frame, wins
+  6.4x at 64 prims and 1.78x at 24 prims x 8 frames). Else analytic SDF (cheaper).
+- RELAX stays 1.0 (exact active-only marcher) -- over-relaxation is a grazing-only, quality-costing manual opt-in; the
+  measurement set its default off, so adaptive never turns it on by itself.
+- COLLAPSE vs TRACE per surface AND workload: single frame -> 'trace' path = render_scene, which already dispatches
+  matte/mirror/glossy per hit (direct shading is cheaper than a PRT precompute for one frame); relighting -> 'dispatch'
+  path where each surface's method is DERIVED from its material reflectivity (matte 0.0 / plastic 0.12 / ceramic 0.18 /
+  default 0.2 -> COLLAPSE as diffuse, free relight; glossy 0.35 / metal 0.45 / mirror 0.85 -> TRACE). Threshold 0.3
+  (set after finding MATERIAL_RENDER[None] carries a 0.2 default sheen -- probe-first caught it).
+
+`render_adaptive(objects, camera, ..., frames, relight, light)` EXECUTES the plan: single frame -> render_scene with the
+auto-bake/relax; relight -> builds the object-only union + colors, derives methods, calls render_dispatch, returns a
+relight handle. Returns (frame, relight_or_None, plan). Faculties: `render_adaptive`, `plan_render`. Verified end to end:
+a mirror+diffuse scene auto-plans {mirror:trace, diffuse:collapse}, renders both, relights free (_adaptive_A/B.png).
+
+KEPT NEGATIVES (loud): thresholds are heuristics at the measured break-evens (named constants, easy to audit/tune, not
+learned); collapse treats a slightly-reflective surface (e.g. the 0.2 default) as pure diffuse, losing its faint sheen
+when relighting (the diffuse approximation, PRT's own low-freq limit); the relight-vs-single decision is the caller's
+`relight` flag (the pipeline can't see the future -- if you'll relight many times, say so and diffuse precomputes once).
+The SEPARATE options remain for manual control; this is the automatic default on top of them. Also a pre-existing
+parse_description quirk surfaced (chained "A beside B beside C" can overlap two objects) -- noted, not fixed here.
+
+## Distributed computation: reassembly IS the computation's commutative monoid (+7 tests, 2163->2170)
+
+Moose: learn from distributed computation (SETI@home, Folding@home, distributed rendering). His rendering experience:
+break a job into BUCKETS, precompute caches (GI/irradiance) on the MAIN machine, ship to nodes to crunch rays,
+REASSEMBLE. holostuff can make many (even nested) HoloMachine VMs -- so distribute to VMs like DR, EXCEPT buckets could
+SHARE overlapping results and we can SHORTCUT the reassembly. Extrapolate to the whole architecture; apply to
+particle/fluid/fire/soft+rigid/attractors/fields/everything, adaptively.
+
+Web-searched the DR literature: V-Ray precomputes Light Cache/Irradiance Map on ONE machine -> shared storage -> DR
+final pass (avoids re-solving GI per node); bucket SEAMS come from mismatched colour management between nodes; the
+irradiance cache is a SHARED MUTABLE structure "notoriously difficult to parallelise" (Warwick, EGPGV 2006) because
+nodes must exchange samples.
+
+THE VSA-NATIVE INSIGHT (what makes holostuff sidestep both the seam problem and the shared-cache-communication problem):
+most holostuff computations are COMMUTATIVE MONOIDS, so the "shortcut reassembly" Moose intuited is literally the
+monoid's operator -- no separate stitch pass to get wrong.
+  * force / attractor / potential / radiance / density fields ADD   -> reassemble by SUM (linear superposition)
+  * an SDF union is a MIN over primitives                            -> reassemble by MIN
+  * occupancy / coverage is a MAX                                    -> reassemble by MAX
+  * a VSA scene / memory is a BUNDLE of its parts                    -> reassemble by BUNDLE
+Every reduce is associative + commutative => the result is INDEPENDENT OF BUCKET ORDER, which is exactly the property
+that lets buckets run on separate machines/VMs and combine with no stitching, no seams. The shared cache here is
+READ-ONLY (an SDF bake, a cost-to-go field, a codebook, a PRT transfer): compute once on the main node, hand the same
+immutable object to every bucket -- so none of the irradiance-cache inter-node sample-exchange overhead.
+
+BUILT holographic_distribute.py: partition(n,k), adaptive_partition(costs,k) (LPT load balance -- isolate heavy items so
+the slowest bucket, which bounds farm wall-time, is minimised), reducers reduce_sum/min/max/bundle, distribute(buckets,
+worker,reduce,cache) (commutative-monoid fold), distribute_scatter(...) (disjoint tiles/subsets). Faculties
+distribute_compute, partition_domain.
+
+MEASURED (correctness against the monolithic result, kept loud):
+  * FORCE FIELD (sum): partitioning the SOURCES and summing == monolithic, exact to 1e-12; shuffle bucket order ->
+    identical to 1e-12 => distributable.
+  * SDF UNION (min): partitioning primitives and taking min == monolithic, BIT-EXACT; shuffle -> bit-identical.
+  * SHARED-CACHE TILED RENDER (scatter): bake the SDF ONCE (the main-node GI cache), tile the frame, every tile reads
+    the SAME immutable GridSDF, scatter-reassemble -> BIT-EXACT to the monolithic render, shuffle tiles -> identical, NO
+    SEAMS (the shared deterministic cache is why borders agree -- the DR seam failure mode can't occur). _distribute_tiled.png.
+  * DISTRIBUTED VSA MEMORY (bundle): build a key->value memory in buckets, reassemble by bundle == monolithic memory
+    direction (cos > 0.99), unbind still recovers every value.
+  * adaptive_partition isolates the heavy item; never worse than an even split.
+
+KEPT NEGATIVES (loud): (1) in-process SEQUENTIAL -- the sandbox has no cluster, so NO multi-node speedup is claimed or
+measured (the tiled render is actually slower in-process from Python per-bucket overhead); what is built and proven is
+the ARCHITECTURE that makes distribution correct -- bucket independence (order-invariance), read-only shared cache
+reused once, reassembly = the monoid op. (2) SUM reassembly is order-independent only to FLOAT ROUNDING (~1e-12), not
+bit-exact -- float addition isn't associative, which is why render farms pin accumulation order for bit-identical
+frames; MIN/MAX/scatter ARE bit-exact order-independent. (3) exact superposition holds only for the LINEAR/monoid part
+of a computation -- a nonlinear step with feedback (an implicit solve, a collision resolve) does NOT superpose and must
+be distributed differently (disjoint scatter, or a shared-cache pass then a local solve). The generalisation to
+particles/fluid/fields is precisely: distribute the LINEAR field/force accumulation by superposition (exact), keep the
+nonlinear integrate/solve local per bucket over a shared field.
+
+## Bit-exact reassembly via more accumulator bits + explicit bake_scene (first render = relight) (+2 tests, 2170->2172)
+
+Moose pushed on two things. (1) The bit-exactness negative can be REMOVED by carrying the accumulated value in more
+dimensions/bits ("additional dimensions that carry accumulative values"). Tested honestly and CONFIRMED: float sum
+reorders at ~1e-13 (not associative), but quantizing each contribution to fixed-point at a data-independent scale (peak
+is order-independent) and summing in INT64 -- where addition is exact + commutative -- is BIT-EXACT regardless of bucket
+order, agreeing with the float sum to ~1e-9. Built `reduce_sum_exact(parts, bits=40)` in holographic_distribute and
+wired `reduce='exact'` into distribute_compute. TRADE (kept honest): a uniform quantization set by `bits` (finer with
+more bits, bounded by int64 range, guarded against overflow) and a bounded dynamic range; use it when bit-identical
+frames across nodes matter, plain reduce_sum when ~1e-12 is fine. This is the engine's usual move -- spend extra
+dimensions/bits to buy an exact property -- applied to accumulation, so Moose's claim holds. (NOTE: this fixes the
+PRECISION/reproducibility limit; it does NOT make a NONLINEAR operator linear -- collisions/implicit solves still don't
+superpose, that's maths not rounding. The holographic handling there is distribute the linear field by superposition,
+reconcile the nonlinear part locally / by denoise-and-auto-select over a shared field.)
+
+(2) A BAKE step callable BEFORE the first render so a builder's first frame is a RELIGHT, not a cold calculation.
+Factored render_dispatch's precompute into an explicit two-step API: `bake_scene(sdf,camera,w,h,methods,colors)` ->
+`BakedScene` (traces primary visibility ONCE, dispatches per hit, precomputes PRT transfer for every diffuse hit and the
+diffuse surfaces behind each mirror bounce), and `render_baked(scene, light)` (pure dot-product relight, no tracing).
+render_dispatch is now a thin wrapper = bake_scene + render_baked (behavior byte-identical, all prior tests green).
+Faculties `bake_scene`, `render_baked`. A builder calls bake_scene at scene-load; every frame after -- including the
+first -- is the cheap relight. Verified: explicit bake+render_baked == render_dispatch's first frame; relighting a second
+light changes only shading. This is "collapse not trace" taken to its conclusion: bake once, all renders are relights.
+
+## Audit: dimension-bound limits + 2D tiles / 3D bricks (parallelism to 2D/3D) + the L-cache/RAM hierarchy (+4 tests, 2172->2176)
+
+Moose asked for an AUDIT: (a) which other limits fall to "just use more dimensions", (b) extend render-bucket parallelism
+to 2D tiles and 3D bricks, (c) where more dimensions buys SPEED, (d) how our L1-L4/RAM cache analogues interact.
+
+AUDIT -- limits that ARE dimension-bound (more dimensions genuinely relaxes them):
+  * bit-exact reassembly -- DONE (reduce_sum_exact: more accumulator bits -> exact). The template for the rest.
+  * bundle/superposition capacity cliff -- HRR SNR ~ sqrt(D), so more D = more items before noise wins.
+  * resonator factorization ceiling -- more D or SBC blocks = more factors x alphabet before the combinatorial cliff.
+  * index/hash collisions (RouteIndex RAM-regime, HoloForest) -- more hash bits = fewer collisions = fewer O(n) fallback
+    scans -> also a SPEED win.
+  * int8 quantization geometry distortion -- more bits (the 'rd' code) = less distortion (same lesson as exact-sum).
+  * SDF-bake resolution / PRT SH order / splat count -- more grid cells / coefficients / splats = more accuracy.
+AUDIT -- limits that are NOT dimension-bound (honest; more dimensions does not help or hurts):
+  * nonlinearity (collision resolve, implicit solve don't superpose) -- maths, not precision; handle locally per bucket.
+  * non-convex POCS stall from a degenerate start -- geometry/optimisation.
+  * the bake break-even / up-front cost -- more dimensions (finer bake) makes the up-front WORSE, not better.
+  * CPU/NumPy realtime ceiling -- hardware/language; more dimensions cost more compute.
+  * missing signal (propagator prediction near-tie on returns) -- no structure to exploit; dimensions can't invent it.
+AUDIT -- more dimensions for SPEED (yes, in three shapes): (1) precompute more channels -> O(1) query (SDF bake, PRT,
+cost-to-go -- the "bake" pattern); (2) more hash/index dimensions -> fewer collisions -> fewer fallback scans; (3)
+capacity headroom (higher D -> higher SNR) -> fewer cleanup/resonator ITERATIONS to converge.
+
+BUILT -- render-bucket parallelism extended to 2D and 3D (holographic_distribute):
+  * partition_2d((H,W),tiles) -> disjoint (row,col) TILES (images/2D fields); partition_3d((X,Y,Z),bricks) -> disjoint
+    (x,y,z) BRICKS (SDF grids, volumes, fluid grids); distribute_bricks(out_shape,regions,worker,cache,skip) places each
+    region's result (disjoint => order-independent, seamless), with an optional skip() for EMPTY bricks.
+  * Faculties partition_grid (2D or 3D by shape), distribute_bricks.
+MEASURED: 3D brick bake == monolithic dense bake BIT-EXACT; shuffle brick order -> identical (=> bricks distributable to
+separate VMs). 2D tiles == monolithic.
+  * SPARSE-BRICK SKIP is the real 3D-brick speed win (beyond parallelism): a brick with no surface (|sdf(center)| >
+    brick half-diagonal) is dropped. LARGE volume + one small ball -> 89% of bricks skipped, surface cells identical,
+    1.39x. KEPT NEGATIVE: at HIGH occupancy (3 balls near the centre of a modest volume) only ~16% skip and the
+    skip-test overhead cancels the saving (~1.0x) -- sparse-skip wins only when occupancy is LOW (the common
+    small-object-in-big-volume case), the same conditional-amortisation shape as the SDF bake and PRT.
+
+L-CACHE / RAM HIERARCHY (audit of what we have + how bricks tie in): the L1-L4/RAM names in the engine are an honest
+ANALOGY (Python can't touch real CPU caches) -- holographic_anim/deltachain use L1/L2=hot-full, L3=delta, L4=recompute
+for FRAME storage; holographic_tree has the RAM-regime router (floor-divide a coordinate -> its tile, O(1), no search);
+meshbridge does cache-blocking to a ~6MB working budget. The tile/brick decomposition connects to all three: a brick IS
+a cache-block (size it to the working budget so it streams), a brick's address is the RAM-regime floor-divide (O(1)
+lookup, no search), and baked bricks can live in the tiered store (hot bricks resident L1/L2, cold as deltas L3 /
+recompute L4). Not separately rebuilt this pass -- flagged as the honest next wiring (a baked-brick cache with tiered
+eviction) rather than claimed as done.
+
+## Above/below audit + the material tie-together: pattern (Moose's module) + SurfaceMaterial/render_surface (+9 tests, 2176->2185)
+
+Moose called the above/below audit: silos in tests/demos/benchmarks, duplicates, and MISSING FIRST-CLASS OBJECTS that
+tie functionality together. Grounded in greps of the live code + his two docs (the demo-gallery handoff CORE_NOTES and
+the modeling-gaps doc).
+
+AUDIT FINDINGS (honest):
+* The arc's earlier passes already killed the worst silos (render_dispatch was benchmark-only, dispatch_field
+  test-only -- both fixed previously). Test-file helper defs are scaffolding, not capabilities. One Camera, one
+  save_png (no duplicates).
+* `noise_field` vs `pattern.value_noise` is NOT a duplicate: hypervector-native noise (field IS one vector, queried
+  through an encoder) vs a plain spatial callable for Param sockets -- same concept at two levels, as above so below.
+  Cross-linked in the noise docstring so no future session "deduplicates" them wrongly.
+* THE REAL GAP (CORE_NOTES 2.1, "the biggest"): the render-channel material was a DICT (MATERIAL_RENDER) with no
+  object resolving channels per hit -- demo backends kept re-implementing exactly that.
+
+LANDED:
+1. `holographic_pattern.py` -- Moose's module, VERBATIM, demo-gallery -> core. Named deterministic pattern FIELDS
+   (checker/stripes/gradient/dots/value-noise/fbm) as plain callables f(P)->[0,1]; integer-lattice hash (pure int64
+   arithmetic, PYTHONHASHSEED-independent, seed-perturbed); PATTERNS registry + make_pattern (serialized specs) +
+   field_lerp (drive a channel lo..hi). Faculty `pattern_field`.
+2. `holographic_surface.py` -- the first-class citizen: `SurfaceMaterial` with EVERY channel a Param socket (color,
+   roughness, reflect, emission, opacity; each a const / Param / callable field / map), `from_name` consuming the ONE
+   canonical MATERIAL_RENDER table (dedup: single source, no per-demo copies), `.resolve(points)` = THE per-hit
+   channel resolution demos hand-rolled, and `render_surface(sdf,camera,w,h,materials)` shading per hit: Lambert +
+   Blinn (roughness -> highlight width) + environment reflection by `reflect` + emission + opacity alpha-composited
+   over ONE continuation ray. The tie-together: pattern -> Param(field=) -> channel -> per-hit resolve -> pixel.
+   Faculties `surface_material` (name + overrides), `render_surface`. Verified visually: checker albedo wraps a
+   sphere as a true SOLID texture (no UV unwrap), fbm drives metal roughness, transparency composites
+   (_surface_material.png).
+KEPT NEGATIVES (loud): render_surface reflections sample the ENVIRONMENT only (object-object mirrors live in
+render_dispatch / render_scene -- use those for a mirror that shows the scene); opacity is ONE transparency layer
+(stacked glass needs the full renderer); resolve_param flattens (M,3) colour fields to (3M,) -- _rgb detects by size
+and reshapes (a param-API wart worth fixing at the source someday, noted not fixed).
+
+REMAINING THREADS from the two docs -> appended to WIRING_BACKLOG.md ranked by their own build order (progressive
+path_trace, SDF->splat bridge, RenderSession, pick()+AOVs, TRS state + incremental rotate/scale, vectorised PBD (the
+measured 83 ms bottleneck), SimulationSession, predicate RegionField, dual contouring, per-vertex normals). Recorded,
+not silently dropped; each is a build, not a wire, and lands with its own close-out.
+
+## Above/below audit, part 2: the RenderSession keystone + progressive path_trace (+7 tests, 2185->2192)
+
+(Same audit request re-sent; probe-first confirmed NO rollback -- last session's pattern.py + SurfaceMaterial/
+render_surface were intact on disk and in the zip. So this pass ADVANCES the audit to the next tie-together instead of
+redoing it.)
+
+AUDIT (CORE_NOTES section 3): the rendering threads were DISCONNECTED -- render_surface (fast preview, landed last
+session), path_trace (photoreal final, but run-all-then-return, no progress), field_to_splats (browser proxy, but
+wanted pre-sampled points not an SDF), and no object holding a scene so a demo hand-wired them and preview/final could
+silently drift. The doc's ranked keystone -- a first-class RenderSession -- did not exist (probe: 0 matches).
+
+BUILT:
+1. Progressive path_trace (the one real gap, prereq #1). Added backward-compatible `on_progress(running_image, done,
+   spp)` + `progress_every` to the EXISTING path_trace (no duplicate) -- default off is BYTE-IDENTICAL to before
+   (test pins it); on, it hands back the running mean every k samples (the refine stream). Final image unchanged.
+2. `holographic_session.py` -- the keystone. `RenderSession(sdf, materials, camera)` owns ONE scene (SDF + a
+   SurfaceMaterial per object id + camera) and derives every output from it so they can't diverge:
+     * `.preview()`      = render_surface (fast material preview)
+     * `.render_final(spp, on_progress=)` = path_trace with the progress hook, using the SAME SurfaceMaterials via a
+       material adapter (_pathtrace_material: color->albedo, reflect->metallic, roughness->roughness,
+       emission*color->emission, opacity<0.5->ior 1.5 = real refractive glass in the tracer)
+     * `.to_splats()`    = sdf_surface_points + field_to_splats -> a coloured splat proxy for a browser billboard
+       shader (the "everything-moves preview" answer: surfaces ARE splats)
+     * `.edit_channel(id, channel, value)` / `.set_material` = a live edit that shows in BOTH preview and final
+       because they read the same materials (the modeling-loop live-material ask)
+   Also `sdf_surface_points(sdf, bounds, n)` -- the missing FRONT HALF of the SDF->splat bridge (random points + one
+   Newton step onto the zero level, kept where |sdf|<eps). Faculties `render_session`, `sdf_surface_points`.
+   Verified visually: _session_preview.png (fast) vs _session_final_early.png (8 spp, noisy) vs _session_final.png (48
+   spp, converged, the emissive ball lighting the scene) -- one scene, same materials, preview and final agree.
+
+KEPT NEGATIVES (loud): preview (render_surface) is env-reflection only while the final (path_trace) has full GI, so
+they AGREE in materials/geometry but the final is more photoreal by design (that's the point of two paths, not a bug);
+the material adapter's reflect->metallic and opacity->glass mappings are pragmatic approximations (a reflective plastic
+reads slightly metallic in the final); sdf_surface_points is rejection-sampled so very thin features may need a bigger
+oversample. The progressive final is a VALID refine (same seed/spp -> same final as a one-shot path_trace, test-pinned).
+
+REMAINING from the docs (still in WIRING_BACKLOG.md, unchanged): pick()+id/depth AOVs, per-object TRS + incremental
+rotate/scale, vectorised PBD (the measured 83ms bottleneck), SimulationSession, field-predicate RegionField, dual
+contouring, per-vertex normals. The RenderSession is the render half of the "session" idea; SimulationSession is its
+stepped-sim twin and the next natural build.
+
+## Physical-definitions fork integrated: matlib + quantities + definitions (+57 tests, 2192->2249)
+
+Moose brought a fork with a grammar and definitions of physical things. FIRST, an honest correction to my own record:
+I initially reported the fork's modules as "missing from the zip" -- that was WRONG. My first extraction was partial
+and I claimed absence without checking the archive listing; the zip in fact held 1375 files including all three new
+modules. Re-extracted clean, verified against the archive. (Lesson pinned: verify against `unzip -l`, never infer
+absence from a partial extract.)
+
+THE THREE NEW MODULES (dropped in verbatim; their 55 shipped tests pass unchanged in our tree):
+* `holographic_matlib.py` -- a ~130-preset RENDER material library (glTF metallic-roughness): diffuse/metal/wood/
+  stone/glass/gem/emissive/biome/layer/deposit/liquid/fabric/organic. `material(name)`->PBRMaterial, `by_class`,
+  `biome_at` (Whittaker elevation/temperature/moisture classifier), and `fractal_planet` (a fBm-displaced sphere
+  painted by biomes, wrapped around crust/mantle/core shells with ore-deposit pockets -- region composition all the
+  way down).
+* `holographic_quantities.py` -- the dimensional GRAMMAR: `Quantity` = value+unit+uncertainty+source, multiply
+  composes dimensions (density*volume->mass), add requires matching dimensions (length+mass refused at the '+'),
+  conversion is one call, uncertainty propagates; recipes `bill_mass/bill_cost/bill_embodied_carbon`. Extensible via
+  `register_unit`. QUDT/UCUM/astropy boiled down to an exponent vector + SI multiplier, NumPy+stdlib only.
+* `holographic_definitions.py` -- a DEFINITION LIBRARY: `MATERIALS` (real density/viscosity/Young's/refractive/sound-
+  speed/specific-heat per named material), physical relations (float/sink/suspend/flow), and `resolve_scenario(desc)`
+  -> a validated Scenario that grounds named things, checks the physics, and emits `build_spec()` (phenomenon + solver
+  family + per-body masses/volumes) for the shipped solvers. Plus `data/definitions/` (native material json + a
+  minerals sample + README) -- the extensible, people-can-add-more definition data.
+
+INTEGRATED INTO OUR SYSTEM (the "plug directly in" ask):
+* RENDER: `SurfaceMaterial.from_matlib(name)` bridges a glTF PBRMaterial into our first-class render material
+  (base_color->color, alpha->opacity, metallic->reflect, roughness->roughness, emissive->emission), so ALL ~130
+  physical presets + planet biome materials drive render_surface / path_trace / RenderSession. Faculties
+  `render_material`, `material_catalog`, `fractal_planet`. Verified visually: gold/ruby/marble path-traced through the
+  RenderSession (_matlib_final.png); a fractal-planet cross-section with interior shells + ore pockets + biome crust
+  (_planet_section.png). This is "renders data-driven with physically accurate things" and it also completes the
+  render arc -- the session is now fed by physical definitions, not hand-set colours.
+* SIM: `physical_material(name)` (solver-ready property dict) and `resolve_scenario(desc)` (a physically-validated sim
+  spec: wood floats consistent=True; a steel ball "floating" is consistent=False with the density reason, and still
+  emits a buoyancy solver spec). "Simulations data-driven with physically accurate things."
+* GRAMMAR: `quantity(value, unit)` and `estimate_bill(bill)` -- the house bill composes to the documented 56.7 t /
+  $14,430 / 17,276 kgCO2e, densities REUSED from the definition library (not duplicated), sample cost/carbon factors
+  flagged pending a real USGS/ICE ingest.
+
+KEPT NEGATIVES (from the fork, kept loud): matlib presets are hand-authored plausible PBR values, not measured spectra;
+the planet is fBm relief, not plate-tectonics/climate sim; deposits are noise-threshold pockets; fBm queries are
+per-point Python loops so cross-sections are coarse. quantities: currency has no FX; sample price/carbon are
+placeholders. definitions: sources disagree in reality, so provenance/uncertainty fields exist but the offline tables
+are single-source. The sandbox CANNOT reach the external science APIs (allowlist is github/pypi/npm) -- live ingest is
+designed as an adapter interface, only the offline composition machinery is exercised (the constructed-vs-measured
+boundary the project always keeps).
+
+STILL ON THE BACKLOG (unchanged): SimulationSession (now has physically-accurate params to consume via resolve_scenario
+/ physical_material -- the natural next build), RenderSession.preview via IncrementalRenderer, vectorised PBD, pick()+
+AOVs, ingest adapters (network-gated). WIRING_BACKLOG.md updated.
+
+## Material structure primitives M1/M2/M3 (grain, cells, inclusions) -- the cheap, thermo-independent ones (+11 tests, 2249->2260)
+
+From the Material Structure & Process backlog. PROBE-FIRST split the seven items cleanly: M4-M7 (oxidization
+process, phase change, material-specific fire, burn/decay) all chain onto a thermodynamics heat model (T1/T3/T4)
+that is NOT built yet -- so they are NOT cheap now. M1-M3 are independent structure/appearance primitives that
+"ship anytime": pure sockets f(points)->value that plug into SurfaceMaterial(color=Param(field=...)) and render
+through render_surface / RenderSession. Knocked out all three.
+
+PROBE FINDING (why probe-first matters, again): M1 `holographic_grainmat.py` ALREADY EXISTED and passed its own
+selftest -- but was SILOED (0 references in the mind, no test file). So M1 was a WIRING job, not a build.
+
+LANDED:
+* M1 grain -- WIRED the existing grainmat: faculty `grain_material` (wood_albedo socket: concentric rings + fibre
+  streaks + fBm domain-warp knots, volumetric in object space so a cut board shows continuous rings), plus a test
+  file pinning the volumetric property (varying ALONG the axis barely changes the ring value; varying the radius
+  sweeps rings). `substrate_layers` (plywood/strata) exposed via the same module.
+* M3 inclusions -- NEW `holographic_inclusions.py`: `with_inclusions(base, [(material, fraction, scale), ...])` ->
+  a socket that paints base except in noise-blob pockets (carbon in steel, veins in stone). The honest bit:
+  coverage is CALIBRATED -- the threshold is the (1-fraction) quantile of the noise over a fixed calibration
+  sample, so measured coverage hits the target (bar met: 0.1/0.25/0.4 within 0.05). Reuses the planet's ore-deposit
+  noise-threshold pattern, scoped to a material. Faculty `material_inclusions`.
+* M2 cells -- NEW `holographic_cellular.py`: Worley/Voronoi `VoronoiCells` (nearest-seed id + F2-F1 edge metric),
+  `cell_albedo` (per-grain facet colour by deterministic id-hash, darkened to a crack colour on boundaries),
+  `crack_mask`, and `lattice(motif, period)` (Bravais-style object-space modulo packing, tiles BIT-EXACTLY).
+  Faculty `crystal_material` (returns (cells, socket)). Bar met: socket ids == brute-force nearest seed; crack
+  metric ~0 on a bisector; lattice motif(P)==motif(P+period).
+All three verified rendering through the pipeline together (_structmat.png: wood grain | gold+quartz in slate |
+cracked polycrystal).
+
+KEPT NEGATIVES (loud, from the backlog): these are APPEARANCE/structure models, not first-principles -- grain is
+procedural noise (not xylem growth); Voronoi cells are a facet/crack LOOK (not atomic unit cells with real lattice
+constants or diffraction); inclusions are spatial+statistical placement (not a metallurgical solidification model),
+and the alloy fraction is a placement statistic, not a thermodynamic composition. All deterministic, NumPy+stdlib,
+additive.
+
+NOT DONE (correctly deferred): M4-M7 need the thermodynamics heat model first (temperature/pressure source) --
+oxidization front (reaction-diffusion on HyperCA), phase change (latent heat), material-specific combustion
+(autoignition/soot data + ignite->emitter coupling), object burn/decay (mass loss over time). Those are the
+"process" layer; build the thermo backlog (T1/T3/T4) before them. Recorded in the backlog ordering.
+
+## Thermodynamics foundation T1/T3/T4 (gas state, blackbody, heat) -- the trigger layer the material processes need (+13 tests, 2260->2273)
+
+Moose greenlit building the thermo foundation FIRST, so the material-process layer (M4-M7) has a temperature/
+pressure source to trigger on. PROBE-FIRST: no thermo doc, no thermo modules existed (clean build); definitions
+already carry `specific_heat` (T4 ready) but NOT `thermal_conductivity` (it lives in data/definitions/.../enrich.json,
+which build_standard_library does NOT auto-load) nor gamma/molar_mass. Units K/Pa/J/W exist in the quantities
+grammar; mol absent (avoided via the specific-gas-constant form).
+
+BUILT (three self-contained physics solvers, NumPy+stdlib, readable with the physics commented per Moose's pref):
+* T3 `holographic_blackbody.py` -- temperature -> the colour it GLOWS, first-principles: Planck's law integrated
+  against ANALYTIC CIE colour-matching curves (Wyman 2013 multi-Gaussian fit, no data tables) -> XYZ -> sRGB.
+  Verified: 1000K ember red (1,0.19,0), 6500K daylight near-white, 12000K blue-white; Wien peak correct (Sun ~500nm,
+  ember in IR). Faculty `blackbody_color`. This is the ember/flame/glowing-char colour M6/M7 will paint by temperature
+  (_blackbody_strip.png).
+* T4 `holographic_heat.py` -- Q = m c dT (specific heat REUSED from definitions), Fourier conduction
+  dT/dt=alpha*laplacian(T) (alpha=k/(rho c)) with AUTO-SUBSTEPPING so any dt stays stable, insulated boundaries
+  (total heat conserved), and Newton cooling (dT/dt=-(hA/mc)(T-ambient)). `material_thermal(name)` reuses
+  definitions density+specific_heat and reads thermal_conductivity from enrich.json (steel 50, water 0.6 -- NOT
+  restated). Faculties `diffuse_heat`, `heat_body`, `material_thermal`. This is the keystone: M5/M6/M7 all trigger on
+  temperature from here.
+* T1 `holographic_gas.py` -- ideal gas law PV=m R_specific T (R_specific=R/M, avoids mol), adiabatic PV^gamma /
+  TV^(gamma-1) (compression heats), speed of sound a=sqrt(gamma R_specific T), and boiling point vs pressure
+  (Clausius-Clapeyron). CROSS-CHECK win: derived speed of sound in air = 343 m/s, which independently matches the
+  definitions' tabulated air sound_speed of 343 -- two roads, one number. Boiling point 100C@1atm, 90C@70kPa
+  (mountain), >100C in a pressure cooker -- the fact M5 consumes. gamma/molar_mass are the new gas data columns
+  (GAS_PROPERTIES table, real values). Faculties `ideal_gas`, `boiling_point`.
+
+Also found + noted (not yet wired): build_standard_library does NOT ingest enrich.json, so lib.get('steel').props
+lacks thermal_conductivity even though the data file has it. The heat module reads enrich.json directly
+(non-duplicating); wiring a general enrichment loader into the library is a small additive follow-up (the extensible
+"drop a json, gain a column" path).
+
+KEPT NEGATIVES (loud): blackbody is an ideal emitter to sRGB (no spectral flame lines, emissivity 1); heat model has
+constant properties, explicit-scheme (auto-substepped), insulated default boundaries, no radiation/convection here;
+gas is IDEAL (no Van der Waals), constant gamma and constant latent heat (Clausius-Clapeyron approximation), no
+humidity/mixtures. Correct and sufficient to DRIVE the processes; not spectroscopy / real-gas EoS / CFD.
+
+NEXT (now unblocked): the material PROCESS layer in the documented order -- M6 material-specific combustion
+(autoignition + soot/smoke data, ignite->emitter coupling, ember colour via T3), M5 phase change (latent-heat data +
+rule, boil point from T1), M4 oxidization front (reaction-diffusion on HyperCA), M7 burn/decay (mass loss over time,
+tying M5+M6). Each is a data layer + coupling onto the fluid/emitter and this heat model -- no new solver.
+
+## Material processes M6 + M5 (material-specific fire, phase change) -- first two process items, on the thermo foundation (+12 tests, 2273->2285)
+
+With the thermo trigger layer (T1/T3/T4) in place, built the first two PROCESS items in the documented order. Both
+are DATA + COUPLING on the shipped solvers/foundation -- no new solver. PROBE-FIRST: neither existed; the fluid
+solver already has GLOBAL combustion (one ignition/burn_rate/smoke_yield), the emitter is generic -- M6's job is to
+make them MATERIAL-specific.
+
+M6 `holographic_combustion.py` -- material-specific combustion, the "wood smoke != plastic smoke" ask.
+  * COMBUSTION data columns per material: autoignition_K, heat_of_combustion, smoke_color, soot_yield, burn_rate,
+    flame_temp_K (wood/paper/pvc/abs/gasoline/ethanol/coal/methane -- plausible fire-safety values).
+  * `ignites(material, T)` -- the honest gate (wood lights at 300C, PVC needs ~450C, nothing at room temp,
+    non-flammable never). `Fire` object with an IGNITION LATCH: once hot enough it stays lit and consumes fuel at
+    the material's burn rate until spent, then goes cold (self-sustaining flame; temperature climbs toward
+    flame_temp_K). `flame_color` = blackbody (T3) at the flame temperature. COUPLINGS: `configure_fluid(fluid, mat)`
+    sets the StableFluid's global combustion params from the material; `emit_smoke(sdf, mat, ...)` spawns surface
+    particles coloured by the material's smoke colour + soot. Faculties `fire`, `ignites`.
+  * Verified: wood/paper smoke pale grey, ethanol near-white (clean), gasoline/pvc/coal dark+sooty
+    (_combustion_swatch.png -- flame top, smoke bottom). Fixed during build: (a) the fire extinguished itself
+    (cooling nuked T below autoignition every step) -> added an ignition LATCH + flame temperature so a lit fire
+    self-sustains, matching real fire; (b) emit_from_surface returns (pos, normals, vel) not (pos, vel).
+
+M5 `holographic_phase.py` -- phase change with latent heat (water<->steam<->ice), the boiling PLATEAU.
+  * PHASE_DATA columns: melt_point_K, boil_point_K, latent_fusion, latent_vapor, and per-phase specific heats
+    (water fully populated; iron/aluminum show it generalises).
+  * `PhaseState(material, mass, T, pressure)` holds mass across solid/liquid/gas; `.add_heat(Q)` walks energy
+    through sensible warming (dT=Q/(mc)) and latent transitions, HOLDING temperature flat during melt/boil while
+    the latent heat is paid -- the textbook plateau. Cooling reverses (condense, freeze). Boiling point tracks
+    pressure via the gas model (T1 Clausius-Clapeyron) -- boils cooler up a mountain. Faculty `phase_state`.
+  * Verified: 1 kg water at 99C fed 100 kJ steps HOLDS at 100C for ~2.2 MJ (matching water's 2.257 MJ/kg latent
+    heat of vaporization) while liquid->steam; melt/freeze hold at 0C; mass conserved across transitions.
+
+KEPT NEGATIVES (loud): combustion is data-driven PRODUCTS (heat/smoke/soot/rate), not reaction kinetics; flame
+spread is left to the fluid solver, not modelled here; numbers are plausible/art-directable, not a combustion-lab
+dataset. Phase change is lumped latent-heat BOOKKEEPING with a moving-fraction rule, constant specific/latent heats,
+boiling point pressure-dependent but no nucleation/superheating; not molecular dynamics or two-phase CFD.
+
+REMAINING processes (documented order): M4 oxidization front (reaction-diffusion on the shipped HyperCA -- corrosion
+spreads from exposed/wet faces, base->oxide), then M7 burn/decay (object-level consumption over time -- mass loss,
+char/ash, tying M5+M6, driven by the heat model). Both still data+coupling, no new solver.
+
+## Backlog finished (M4 oxidization + M7 burn/decay) + the periodic table of elements (+14 tests, 2285->2299)
+
+Finished the material-process backlog and added the elemental foundation Moose asked about.
+
+M4 `holographic_oxidation.py` -- corrosion FRONT (rust/patina). A scalar reaction-diffusion field (the same family
+as the shipped HyperCA, kept as a readable oxidation fraction): d_ox/dt = rate*moisture*(seed_rate*exposure +
+spread*neighbour_ox)*(1-ox). Corrosion NUCLEATES at exposed/wet faces (default: the grid border) and SPREADS inward
+as a front (autocatalytic -- rust feeds rust), monotonic (never un-rusts), saturating. Per-material rate + oxide
+colour: steel->rust (orange), copper->patina (green), silver->tarnish, aluminum self-limiting (low rate). `.albedo()`
+is the base->oxide BLEND per cell. Faculties `oxidation_field`, `oxide_color`. Verified: front ahead at edges vs
+centre, steel>copper, wet>dry, monotonic (_rust_front.png: rust creeping inward over 4 timesteps).
+
+M7 `holographic_burn.py` -- object BURN/DECAY over time, tying M6. A `BurningObject` drives an M6 Fire, tracks mass
+loss (remaining mass = remaining fuel), and marches appearance base->char->ash via a two-stage blend as burn_fraction
+climbs; emits the material's smoke; ends as ash; monotonic. `evaporate()` is the M5 analog (a puddle boiling away).
+Faculties `burn_object`, `char_color`. Verified: lit wood loses mass to ~0, appearance darkens to char then pales to
+ash, emits smoke, ends is_ash; PVC emits black smoke; deterministic. Fix during build: PhaseState init at exactly the
+boil point classifies all mass as gas -> start the evaporation puddle just below boiling.
+
+`holographic_elements.py` -- the PERIODIC TABLE as engine ingredients (Moose's idea; answer to "do we have this?" was
+NO, now yes). ~43 curated engine-relevant elements with: atomic mass (real standard atomic weights), density,
+melt/boil points, FLAME-TEST colour (Li crimson, Na yellow, K lilac, Ca orange, Sr crimson, Ba/Cu/B green, ...),
+category. The COMPOSITION grammar is the point: a material declares elemental makeup + ratio {symbol: count}, and
+derived facts fall out by composition, not restatement:
+  * molar_mass = sum(count*atomic_mass) -- feeds the gas law (T1)
+  * flame_color_of = the ratio-weighted BLEND of the constituents' flame colours -- feeds combustion (M6); this is
+    the emission-LINE colour (copper burns green) that the blackbody CONTINUUM alone can't give, closing the honest
+    gap noted in the blackbody module.
+  * mass_fractions -- steel is "98% iron by mass" derived from mole counts.
+MATERIAL_COMPOSITION links materials down to elements (water H2O, salt NaCl, rust Fe2O3, brass/bronze/steel alloys,
+...). Faculties `element`, `material_elemental`. Extensible (add a row / carry on the definition). Verified:
+H2O molar mass 18.015, NaCl 58.44; Na flame yellow, Cu green, a 50/50 mix exactly between them, ratio shifts the
+blend; salt burns sodium-yellow (_flame_test.png). This is "as above, so below": a material decomposes into elements
+the way a VSA record decomposes into role-fillers, and blend is how composites/interpolations are formed.
+
+KEPT NEGATIVES (loud): oxidation is a phenomenological front (no electrochemistry/galvanic/passivation); burn is
+object-level bookkeeping (no resolved char-layer pyrolysis or shrinking geometry -- appearance+mass change, the
+SDF/mesh does not physically shrink); elements are a curated ~43-subset (not all 118) with reference values, flame
+colours where characteristic ones exist, not a quantum-chemistry engine. All deterministic, NumPy+stdlib, additive.
+
+The full M1-M7 material backlog is now DONE. Elemental composition opens a follow-up: wire material_elemental's
+molar_mass into the gas GAS_PROPERTIES (so T1 derives it from makeup) and its flame_color into the combustion flame
+tint (blackbody continuum + element emission lines) -- both small, both now possible.
+
+## Wrap-up (elements->gas, elements->combustion) + ACOUSTICS A1/A2/A4 (+13 tests, 2299->2312)
+
+WRAP-UP of the elements work (the two follow-ups):
+* Gas molar mass FROM composition: `holographic_gas.molar_mass_of(name)` prefers GAS_PROPERTIES but DERIVES molar
+  mass from the elemental composition (holographic_elements) for gases not in the table (methane 0.01604 kg/mol
+  from CH4); specific_gas_constant uses it. Table gases cross-check against composition (CO2 both 0.04401).
+* Combustion flame TINT from elements: `flame_color(temp, material=)` blends the blackbody continuum with the
+  material's elemental emission-LINE colour (copper -> greener flame) -- the line colour the continuum alone can't
+  give. Fire.step passes its material. Default (material=None) unchanged/backward-compatible.
+
+ACOUSTICS (new subsystem, from the Acoustics & Cymatics backlog; grounded in the doc's probe -- the key reuse is
+that Chladni modes ARE the Laplacian eigenmodes holographic_spectral already computes). Built the first three items:
+* A1 `holographic_audio.py` -- read a WAV (stdlib wave; 8/16/32-bit, stereo->mono) -> float samples+rate;
+  `spectrum`/`dominant_frequencies` (rfft peak-pick: a 440 tone -> single 440 peak, a chord -> its notes);
+  `frames` (STFT so a changing sound animates a changing pattern). Faculties `read_wav`, `audio_spectrum`.
+  Kept negative: WAV/PCM only; rectangular window (leakage).
+* A2 `holographic_acoustic.py` -- acoustic impedance Z=rho*c (reused density x sound_speed: air ~420, water ~1.48e6,
+  steel ~4.7e7 rayl); `interface(a,b)` -> (R,T) energy split from the mismatch (air/steel reflects >99.9%, energy
+  conserved R+T=1); `wall_absorption`/`reflect_absorb` from a new ABSORPTION data column (concrete 0.02 .. acoustic
+  foam 0.85). The acoustic twin of the light BRDF. Faculties `acoustic_impedance`, `acoustic_interface`. Kept
+  negative: normal-incidence single-frequency to start.
+* A4 `holographic_cymatics.py` -- THE HEADLINE. `ChladniPlate(shape,grid,medium)` builds the Dirichlet 5-point
+  Laplacian over a square/disk domain, takes its eigenmodes via holographic_spectral.laplacian_eigenbasis (the key
+  reuse -- eigensolver + sign_fix), tunes mode frequencies to base_hz. `drive(freqs,amps)` resonantly excites modes
+  near the sound's tones (Lorentzian kernel) -> displacement field; `drive_mode(k)` picks one. Sand (particles)
+  drifts DOWN grad|u|^2 to the NODES and settles, tracing the figure. Verified: sand |u| (0.117) << plate avg
+  (0.314) -- sand really sits on the nodal set; square vs circle give different figures; deterministic
+  (_chladni.png: classic square grids/crosses + circular rings). Faculty `chladni_plate`. Integration test:
+  a synthesized tone -> audio_spectrum -> plate.drive -> sand settles on nodes, end to end through the mind.
+  Kept negative: membrane-mode model (Laplacian eigenmodes + node-drift), not the full biharmonic free-edge plate;
+  dense eigensolver -> modest grid; sand is over-damped drift, not granular collision.
+
+REMAINING acoustics (documented order): A5 water Faraday + cornstarch media (same ChladniPlate, medium= switch over
+the fluid/softbody), A3 scalar wave-equation field (leapfrog + FFT laplacian -- the propagation the incompressible
+fluid can't give), A7 acoustic levitation (Gor'kov force on particles in a standing field), A6 geometric room
+acoustics (ray tracer + A2 reflectance -> impulse response/reverb). All additive, no new solver category. The doc
+notes there is no acoustics seat on the panel -- methods attributed to d'Alembert/Chladni/Faraday/Gor'kov/image-
+source + Puckette (audio) + Stam (fluid); an acoustician would be the honest seat to add.
+
+## Acoustics A5 (water Faraday + cornstarch) + A3 (wave-equation field) (+9 tests, 2312->2321)
+
+A5 -- the water & cornstarch cymatic media, completing the sand/water/cornstarch trio (added to ChladniPlate as
+medium-specific responses over the SAME driving field, no new solver; the incompressible fluid can't do free-
+surface so this is the honest phenomenological route the doc allows):
+* WATER (Faraday 1831): the standing surface forms at the ANTINODES -- height relaxes toward |u| (crests where the
+  plate moves most, the opposite of sand-at-nodes). Verified: surface correlates with |u| at ~1.0; cell size
+  tracks drive frequency (4 antinode cells at a low mode -> 16 at a high one). Rendered as a blue standing surface.
+* CORNSTARCH: shear-thickening -- local shear rate ~ drive_hz * |u|; above a threshold it thickens and HOLDS a
+  peak, below it relaxes to flat. Verified: peaks held under fast drive (base_hz 1400) but slumped under slow
+  (base_hz 40). Rendered as pale standing fingers. `step_medium` branches on medium; `render` too. (_cymatics_media
+  .png: sand | water | cornstarch on one mode.) Kept negative: standing-pattern phenomenology (crests at antinodes,
+  Faraday half-frequency noted), not a free-surface two-phase solve; cornstarch is a shear-thickening term, not
+  suspension mechanics.
+
+A3 `holographic_wave.py` -- the scalar acoustic WAVE field (the propagation the incompressible fluid cannot carry).
+d2p/dt2 = c^2 grad^2 p by explicit LEAPFROG with a finite-difference Laplacian (readable, per preference): the whole
+solver is p_next = 2p - p_prev + (c*dt/dx)^2 * lap(p). `c` scalar or per-cell field (from material sound_speed).
+`pulse`/`source`, a sponge `absorb_border`, and CFL AUTO-SUBSTEP (dt <= dx/(c*sqrt(ndim)); a big dt is split into
+stable inner steps -- stated loud, not hidden). Verified: a 1-D pulse splits into two movers each at c (d'Alembert);
+energy stays bounded even for a huge requested dt (the CFL guard); front distance scales with c; an absorbing border
+soaks the wave a hard wall keeps; deterministic. Faculty `wave_field`. Kept negative: scalar linear acoustics (no
+elastic/vector waves, no shocks); sponge is a crude PML.
+
+Acoustics now: A1 (audio) + A2 (impedance) + A4 (Chladni sand) + A5 (water/cornstarch) + A3 (wave field) done.
+REMAINING: A7 acoustic levitation (Gor'kov radiation force on particles in a standing wave -- now buildable, since
+A3 gives the standing field; beads to pressure nodes against gravity), then A6 geometric room acoustics (ray tracer
++ A2 reflectance/absorption -> impulse response / reverb). Both additive, no new solver category.
+
+## Non-Newtonian fluid: real cornstarch (power-law viscosity) (+7 tests, 2321->2328)
+
+Moose flagged that the A5 cymatics cornstarch is a plate-SURFACE phenomenology, and asked whether we can actually
+SIMULATE cornstarch -- i.e. give the FLUID solver non-Newtonian rheology. Built it from Moose's power-law snippet.
+
+`holographic_nonnewtonian.py` -- the Ostwald-de Waele power law: eta = K * shear_rate^(n-1), clamped [eta_min,
+eta_max]. n>1 = DILATANT/shear-thickening (cornstarch/oobleck: stiffens the harder you shear); n<1 = shear-thinning
+(ketchup/paint/blood); n=1 = Newtonian constant. The viscosity is now a FIELD, one value per cell. Provides:
+* `power_law_viscosity(shear, K, n)` -- the law (Moose's snippet).
+* `strain_rate_tensor` / `strain_rate_magnitude(vel, dx)` -- gamma_dot = sqrt(2 e:e), the shear rate the law reads
+  (0 for a uniform flow, constant for a simple shear).
+* `viscous_step(vel, K, n, dt, dx)` -- one variable-viscosity update dv = dt*(1/rho)*div(eta*(grad v + grad v^T)),
+  tau_ij=2 eta e_ij, finite-difference div; AUTO-SUBSTEPS for stability when eta spikes. Returns (vel, eta field).
+Verified: eta rises ~19x from slow to fast shear at n=1.8 (thickens), falls for n<1, flat for n=1, clamped; a
+curved (sinusoidal) shear is damped MORE by cornstarch than by water (a linear shear has no curvature to diffuse --
+that was a kept gotcha); eta is a field, not a constant; deterministic.
+
+Wired into `holographic_fluid.StableFluid` as an OPT-IN mode: new `power_law_n`/`consistency_K` params; when
+power_law_n != 1 (and 2-D) the step replaces the constant-viscosity Fourier diffuse with the power-law viscous_step.
+n=1 (default) is BYTE-IDENTICAL to the old solver (verified: same density+vel after steps). Fluid-level signature:
+a cornstarch fluid keeps less sheared-flow energy after a step than a Newtonian one (0.978 vs 0.999) -- it resists
+the shear more. Faculties `power_law_viscosity`, `nonnewtonian_fluid`. Injecting a div-free shear needs the velocity
+component ALONG one axis varying ACROSS the other (else the projection zeroes it -- a kept gotcha from the solver's
+incompressibility).
+
+KEPT NEGATIVES (loud): power-law (Ostwald-de Waele) model -- no yield stress (Herschel-Bulkley) and no time-
+dependence (thixotropy); clamp keeps eta finite (real oobleck stress can run away); 2-D, unit density; the
+non-Newtonian branch runs on host arrays (CPU). The deep rheology is cleanest at the viscous_step level; inside the
+full incompressible solver the projection/advection partly mask it (measured at one step before they wash it out).
+
+Acoustics remaining: A7 levitation (Gor'kov force in a standing wave), A6 geometric room acoustics (ray tracer +
+A2). Also lightened the A4/A5/A3 tour demo blocks (grid 40->24, fewer modes/steps) after a tour run was resource-
+killed mid-way -- tour demos are illustrations; the real verification is the pytest suite.
+
+## Acoustics A7 (levitation) + A6 (room acoustics) -- the acoustics backlog is DONE (+8 tests, 2328->2336)
+
+A7 `holographic_levitate.py` -- ACOUSTIC LEVITATION, the "sound moves objects" showpiece. In a vertical standing
+wave p=A*cos(k*y), the Gor'kov (1962) radiation force F = -grad(Gorkov potential) pushes small dense particles to
+the pressure NODES (spaced lambda/2) and holds them against gravity. `gorkov_potential`/`gorkov_force_y` (force via
+central difference of U -- readable, no hand-differentiated trig), `_scattering_factors` (f1 monopole, f2 dipole
+from density/compressibility contrast), `pressure_nodes`, and `LevitationChamber` (beads = ParticleSystem, force =
+Gor'kov + gravity, air-drag damping). Verified: force ~0 at a node and points toward it from either side (stable
+trap); FIELD ON holds 100% of dense beads aloft near the nodes; FIELD OFF they fall to the floor; node spacing
+lambda/2; deterministic (_levitation.png). Faculty `levitation_chamber`. Fix during build: initial per-step damping
+was unphysically heavy so beads fell at a crawl -> lightened so the field-off fall completes. Kept negative: Gor'kov
+holds for particles << wavelength (Rayleigh limit); 1-D vertical wave; inviscid; no acoustic streaming.
+
+A6 `holographic_roomacoustic.py` -- GEOMETRIC ROOM ACOUSTICS, the last item. `ShoeboxRoom`: early reflections via
+the IMAGE-SOURCE method (Allen & Berkley 1979 -- mirror the source across each wall; each image is a tap at delay =
+path/c, amplitude = product(wall reflectance)/path), and reverberation time via SABINE (RT60 = 0.161 V / (alpha*
+area)). Reuses A2 for wall reflectance = sqrt(1-alpha) and named-material absorption. Verified: direct sound at
+|s-r|/c; reflections arrive later at geometrically-correct delays (floor bounce 14.6 ms); RT60 live 3.58s >> dead
+0.24s (drops as absorption rises); a livelier room reflects more energy back; concrete rings longer than carpet;
+deterministic (_reverb.png). Faculty `room_acoustics`. Fix during build: the RIR-tail energy metric was confounded
+by the two rooms having different RIR array lengths (longer RT60 -> longer array) -> compare reflected-energy from
+the taps directly instead. Kept negative: geometric acoustics is a HIGH-frequency approximation (no diffraction/
+interference -- the A3 wave field is the low-frequency complement); early reflections to a low image-source order
+(exact for a shoebox), the late tail summarised by Sabine; rectangular room.
+
+THE ACOUSTICS & CYMATICS BACKLOG IS COMPLETE: A1 audio, A2 impedance, A3 wave field, A4 Chladni sand, A5 water/
+cornstarch, A6 room acoustics, A7 levitation -- plus the real non-Newtonian cornstarch rheology. All additive, no
+new solver category, each reusing what was already in the engine (spectral eigenmodes, sound_speed/density data,
+WAV I/O, particle system, ray/impedance). The doc's note stands: there is no acoustics SEAT on the panel -- work
+attributed to d'Alembert/Chladni/Faraday/Gor'kov/Allen-Berkley/Sabine + Puckette (audio) + Stam (fluid); adding an
+acoustician would be the honest next seat.
+
+## SIGGRAPH list #1 curl noise + #2 tearing -- starting down the scouting list (+10 tests, 2336->2346)
+
+Two new SIGGRAPH-scouting-list items, the ones the report said to pick up first.
+
+#1 `holographic_curlnoise.py` -- CURL NOISE, the cheapest real win. Divergence-free procedural turbulence =
+curl of an fBm streamfunction: velocity (u,v) = (dpsi/dy, -dpsi/dx), divergence-free because mixed partials
+commute (DISCRETELY too for matching central differences -> divergence-free to MACHINE precision, measured
+max|div|=0.0). Reuses holographic_noise.FractalNoise for the potential; np.gradient for the curl. Boundary
+improvement (Bridson): ramp the streamfunction to 0 at an obstacle (smoothstep of its SDF) so the surface is a
+streamline and the flow goes AROUND it -- measured inside-obstacle speed 0% of outside, still divergence-free.
+Also curl_noise_3d (curl of a vector potential). Faculty `curl_noise`. Cheap wind/smoke detail with no fluid
+solve; seeds the fluid solver, the acoustics wind. Kept negative: 2-D streamfunction (3-D takes a vector
+potential); pins streamfunction = no-penetration but not no-slip (tangential flow unconstrained -- the standard
+curl-noise trade-off). Visual _curlnoise.png (flow streaking around a disk).
+
+#2 `holographic_tear.py` -- TEARING a thin sheet, a genuine NEW capability (the engine had no fracture). A
+breakable-constraint cloth on the PBD softbody: each distance link has a tear strength (max strain); after each
+step, links stretched past it SNAP (dropped from the constraint list); the crack propagates because a broken
+link's neighbours then carry more load and reach their own tear strain -- the reference method's physics
+(Pfaff/Narain/O'Brien) expressed on the constraint graph instead of by remeshing. `TearableCloth` wraps
+SoftBody.cloth; `_tear()` snaps links; `connected_components()`/`piece_sizes()` (union-find over surviving
+links) report how many PIECES the sheet split into. New material data column TEAR_STRENGTH {paper 0.06,
+wet_paper 0.03, foil, cotton, denim, leather, knit, rubber 0.80} = strain tolerated before snapping. Measured:
+a yanked paper sheet snapped ~90 links and split into 3 pieces; rubber (high tear strain) tore ~34 under the
+same pull; a gentle load tore nothing; deterministic. Faculty `tearable_cloth`. Visual _tearing.png (intact vs
+ripped). Kept negative: a mass-spring/breakable-constraint tear (readable baseline), NOT adaptive remeshing --
+the crack follows existing grid links so it is as sharp as the mesh resolution and torn edges are not
+re-triangulated; sits on XPBD compliance so the sheet can stretch to reach the tear strain. Why not half-edge
+surgery: the mesh kernel exposes no split-and-separate/vertex-duplication op, and the constraint-graph tear is
+the readable on-substrate route.
+
+Scouting-list status: #1, #2 done. The report's headline unlock is #7/M1 WALK-ON-SPHERES (grid-free Monte
+Carlo PDE solver on the SDF) -- the audit's #1 "act on this," and the missing steady/elliptic solver under the
+thermo heat model + acoustics (the steady complement to the A3 wave field). That is the natural next big one;
+curl noise (#1) was the cheap win, tearing (#2) the asked-for capability. Tests are compute-heavy for tearing
+(many PBD steps x constraint loops ~58s) -- kept the tour demo LIGHT accordingly.
+
+## SIGGRAPH list #7 -- Walk on Spheres: grid-free Monte-Carlo PDE solver (+7 tests, 2346->2353)
+
+The scouting list's headline unlock and the audit's #1 "act on this". `holographic_wos.py` -- Walk on Spheres
+(Sawhney & Crane 2020): solve Laplace (Delta u=0, Dirichlet) or Poisson (-Delta u=f) at a point by random walks
+that, each step, jump to a uniform random point on the largest empty sphere -- whose radius is the distance to
+the boundary, i.e. ONE SDF EVALUATION -- until they reach the boundary and read the boundary value there;
+average many walks. Mesh-free, pointwise (solve only where you look), embarrassingly parallel. The random-walk-
+and-average pattern is the path tracer pointed at a PDE instead of light.
+
+Functions: `walk_on_spheres(points, dist_to_boundary, boundary_value, source=None, n_walks, eps, max_steps,
+seed)` (the vectorized core -- all query points x all walkers stepped together, masked as they hit the
+boundary); `solve_on_sdf(sdf, boundary_value, points, source=None, ...)` (distance = -sdf.eval, the whole reason
+it fits an SDF engine). Poisson uses a single-sample source estimator with the ball's harmonic Green's function
+(2D (1/2pi)ln(R/s); 3D (1/4pi)(1/s-1/R)) and ball volume. Reports (mean, standard_error) -- the MC noise is on
+the record (the `measure` discipline).
+
+Verified against closed forms: constant boundary -> constant (exact); a harmonic (linear) boundary g=x ->
+interior u=x within MC error; the ANNULUS Laplace log-profile u(r)=ln(r/r_in)/ln(r_out/r_in) = 0.585 at r=1.5
+(matched); Poisson -Delta u=1 on a disk, u=0 on boundary -> u(0)=R^2/4 (2D) matched, and R^2/6 in 3D (dimension
+matters -- caught in the integration test); standard error shrinks ~1/sqrt(N) (16x walks -> ~4x tighter);
+deterministic given seed. Faculties `solve_pde` (general Laplace/Poisson on an SDF) and `steady_heat` (named for
+the heat use: hold the boundary temperature, find the equilibrium interior temperature). Visual _wos_heat.png:
+steady heat from a hot disk out to cold square walls, solved grid-free at ~2000 interior points.
+
+This is the STEADY/elliptic complement to the transient `holographic_heat` diffusion and the `holographic_wave`
+acoustic field -- the missing solver under the thermo heat model and the acoustics backlog, now mesh-free on any
+SDF (sidesteps the Python-loop-bound mesh kernel for this whole class). KEPT NEGATIVES (loud): Monte Carlo, so
+noisy, converges as 1/sqrt(N) (the error bars cut both ways); pure Dirichlet (reflecting/Neumann needs Walk on
+Stars); elliptic/parabolic problems (Laplace/Poisson/steady heat), not everything; the source estimator is
+single-sample per step (variance-reduction e.g. gradient-domain reconstruction is the polish, not built).
+
+Scouting-list status: #1 curl noise, #2 tearing, #7 Walk on Spheres done. Per the audit, the reusable extensions
+(distribute for parallel walks, dirtyfield for incremental re-solve near edits, measure for CIs, tree/pivot as
+closest-point accelerators) are the natural follow-ups but each is a separate measured build. Next: the Hair &
+Fur backlog (grooming + PBD strands + a fiber shader; curl noise already feeds its H7 wind).
+
+## Hair & Fur backlog: H1-H7 (groom + PBD strands + guide interpolation + curl-noise wind + fiber shading) (+11 tests, 2353->2364)
+
+Knocked out the Hair & Fur backlog. The audit's finding held: the dynamics substrate was already here, so this
+is a groom LAYER plus a fiber shader, reusing emitter/subdivcurve/softbody/collide/curlnoise -- "add a data
+layer and a coupling" once more. Two new modules.
+
+`holographic_groom.py` (H1/H2/H3/H7):
+* H1 -- `Strand` (points root->tip, root normal, width, attrs; .length/.tangents/.smoothed via subdivcurve) and
+  `groom(surface_sdf, n, bounds, length, curl, lean, ...)`: roots placed by emit_from_surface (with outward
+  normals), each strand grown along its normal (+optional lean), straight or a tapered HELIX for curls. NOTE the
+  bounds are (lo_vec, hi_vec) -- emit_from_surface reads D from lo.shape, so a per-axis [(-a,a)]*3 list is
+  misread as 2-D (a gotcha, fixed).
+* H2 -- a strand IS a rope with a pinned root: `build_strand_body` = SoftBody with w[0]=0 (pinned root),
+  distance constraints (inextensible) + bend springs (i,i+2, Provot). `follow_the_leader` (Muller 2012) pass for
+  stiff inextensibility. `simulate_strands(...)` steps under gravity + optional wind force + body-SDF collision.
+  Verified: a pinned strand falls under gravity, keeps its length (FTL), root stays put.
+* H3 -- `interpolate_strands(guides, render_roots, k, clump)`: blend the k nearest guides' root-relative shapes
+  by inverse distance, then clump toward the nearest -- many render strands from few guides. Brute nearest
+  (readable; tree is the sublinear accelerator if it grows).
+* H7 -- `CurlWind`: a divergence-free 3-D curl-noise wind (reuses holographic_curlnoise) sampled per strand
+  point as a force; verified it moves hair WITHOUT ballooning (curl noise can't compress).
+
+`holographic_hairshade.py` (H4/H5/H6):
+* H4 -- `kajiya_kay(tangent, light, view, ...)`: diffuse = sin(T,L), specular = cos(theta_L - theta_V)^n along
+  the tangent -- the lengthwise sheen a normal-based shader can't make. Verified anisotropic.
+* H5 -- `marschner(...)`: compact single-scattering R/TT/TRT fiber BSDF -- longitudinal Gaussians of the
+  half-angle at the canonical shifts/widths, simple azimuthal lobes, absorption from hair color
+  (`absorption_from_color` = -ln color). Verified: blonde brighter than black; the TRT secondary highlight is
+  present and COLORED (R is white); energy loosely bounded. `marschner_lobes` returns R/TT/TRT separately.
+* H6 -- `render_hair(strands, camera, shader, lod_stride, ...)`: project the smoothed centerline (camera
+  view+projection), shade each segment by its tangent, draw far->near. Verified a 200-strand groom renders to a
+  PNG and a coarser LOD keeps the silhouette (overlap ~100%). Visual _fur.png (Kajiya-Kay brown vs Marschner
+  blonde furred sphere, drooped under gravity + curl-noise breeze).
+
+Faculties: groom_hair, simulate_hair, interpolate_hair, hair_wind, render_hair.
+
+KEPT NEGATIVES (loud): H1 is the REST groom, procedural attributes not a scan. H2 gives bend, not TWIST --
+curls hold via bend-spring rest curvature, but true torsion needs the Cosserat/orientation-frame upgrade (H2b),
+DELIBERATELY DEFERRED as the heavy optional rung (the doc defers it too). H3 interpolation is a believable
+approximation, not per-strand physics; full strand counts + hair-hair collision are Python-loop-bound (guide
+interpolation is the mitigation). H5 Marschner is an approximation (no full Bravais/Fresnel/caustics), single
+scattering only -- multiple scattering / dual scattering (the soft glow of blonde) is the harder further rung.
+Rendering is opaque, depth-ordered; order-independent transparency for dense overlap is left for later.
+
+SIGGRAPH scouting list so far: #1 curl noise, #2 tearing, #7 Walk-on-Spheres. Hair & Fur backlog: H1-H7 done,
+H2b (twist) deferred. Moose has another backlog queued next.
+
+## Hair H2b (Cosserat twist) + Mesh kernel performance fix (+11 tests, 2364->2375)
+
+Two things: finished the deferred hair rung, then took the mesh performance backlog.
+
+### H2b -- twist via a Cosserat rod (`holographic_cosserat.py`)
+The quality upgrade over plain bend springs (H2): each segment carries an ORIENTATION FRAME (a quaternion), so
+the strand HOLDS its curl under gravity and can carry a TWIST (Kugelstadt-Schomer 2016, the PBD route to
+Discrete Elastic Rods). Small readable quaternion helpers (qmul/qconj/quat_rotate/quat_between/axis_angle) since
+the engine had none. `CosseratStrand`: rest frames built by parallel transport, rest Darboux = relative rotation
+between consecutive rest frames (stores curl+twist); each step = predict -> FTL inextensibility -> align frames
+to edges (preserving roll) -> relax bend-twist toward rest -> reconstruct centerline from frames (curl feedback)
+-> final FTL. The curl memory is TENSION-AWARE: reconstruction weight fades to 0 as the strand nears full
+extension, so pulling it taut UN-CURLS it (physical). Verified: frames hold the curl under gravity (0.29 vs
+rest 0.30; a plain chain drifts to 0.34); stretching taut drops curl to <0.5*rest; a root twist propagates down
+the frames (twist DOF a bend model lacks); inextensible to 1e-6; deterministic. Faculty `cosserat_strand`.
+KEPT NEGATIVE: the roll/twist is carried and coupled but the visible CENTERLINE follows the tangent (roll matters
+for an oriented cross-section, e.g. a ribbon, not a round fibre); positions reconstructed from frames each step
+(FTL-with-orientations) is the simplified coupling, not the full simultaneous stretch-shear solve; opt-in
+(frames cost more + a sign/tie convention). The Hair & Fur backlog is now COMPLETE (H1-H7 + H2b).
+
+### Mesh kernel performance fix (`holographic_mesh.py`) -- the Python-loop-bound negative, addressed
+From the implementation spec. The mesh was slow because the REGULAR parts (adjacency build, neighbourhood
+queries) were Python loops; they vectorize to integer NumPy that is bit-for-bit identical.
+* CHANGE 1 (headline): `half_edges()` now dispatches -- TRIANGLE meshes take `_half_edges_tri` (vectorized:
+  h=3*face+corner; twins matched by sorting a packed (min,max) undirected-edge key, no dict), polygon meshes
+  fall back to `_half_edges_loop` (the original, kept as the reference). Both produce BYTE-IDENTICAL tables
+  (origin/face/nxt/twin). Non-manifold (a repeated DIRECTED edge) raises the SAME error in both paths; boundary
+  twins stay -1. Measured: ~4x on a small grid, and per the spec it WIDENS with size (3x @ 40x40 -> 35x @
+  120x120) because the dict loop is O(H) Python and the sort is one vectorized pass. int64 edge key with an
+  overflow assert (vertex_count^2 < 2^62).
+* CHANGE 2: `_adjacency()` builds a one-time CSR index (half-edges grouped by origin via one stable argsort);
+  `vertex_faces`/`vertex_neighbours` are now O(deg v) slices instead of O(V*H) scans, with IDENTICAL sorted
+  output. `_adj` cache invalidated wherever `_he` is.
+Pinned byte-for-byte: test_holographic_mesh asserts the tri build == loop build element-for-element on box/grid/
+tetra, boundary twins reciprocal, non-manifold raises in both paths, and CSR queries == the old full scan for
+every vertex. Broad regression: 409 tests across the whole mesh family (verbs/subdiv/ik/qem/curvature/geodesic/
+uv/gltf/bridge) + integration all green -- no downstream decision shifted (the bind_batch discipline).
+KEPT NEGATIVES (loud, per the spec): n-gon (polygon) meshes still use the loop (only triangles are vectorized);
+the ORDER-DEPENDENT operators (greedy QEM, one-at-a-time Euler edits) are deliberately LEFT scalar -- naive
+vectorization there was measured slower and not bit-exact; the honest tool for those is the opt-in numba path
+(Change 4), not vectorization. Change 3 (loop-subdivision-as-matmul) not done this pass -- the two bit-exact
+wins (build + queries) are the headline; subdivision-as-matmul and the numba path remain as noted follow-ups.
+
+Backlog status: SIGGRAPH list #1/#2/#7 done; Hair & Fur H1-H7 + H2b done; mesh perf fix Changes 1-2 done
+(3-4 noted).
+
+## Mesh perf fix Changes 3 & 4 -- finishing the backlog (+2 tests)
+
+Finished the remaining two changes from the mesh performance spec.
+
+CHANGE 3 -- loop subdivision as a MATRIX (`holographic_meshsubdiv.py`). Subdivision is REGULAR, so the new
+positions are a fixed linear map of the old ones: new_V = S @ V. `_subdivision_operator` builds S once from the
+connectivity as scipy-free (rows, cols, weights) index/weight arrays (row layout matching _one_level exactly:
+rows 0..nV-1 repositioned old vertices, rows nV.. new edge vertices in sorted-edge order), plus the refined face
+list. `_one_level_matrix` applies it with ONE weighted scatter-add (np.add.at) -- the per-vertex/per-edge Python
+arithmetic (esp. `sum(V[u] for u in ring)`) becomes a single vectorized matvec. `loop_subdivide` now uses it;
+`_one_level` stays as the readable reference. BIT-EXACT: box/tetra positions match the loop to 0.0, grid to one
+ULP (5.6e-17); topology EXACT; multi-level + Euler chi preserved. Pinned in test_holographic_meshsubdiv. Kept
+negative: same TOL caveat as any reordered float sum (weights identical, summation order differs by ULPs).
+
+CHANGE 4 -- the order-dependent operators, resolved per the spec (NOT vectorized -- that would be slower and not
+bit-exact). The vectorized alternative already exists: `meshqem.cluster_decimate(mesh, grid)` (vertex clustering,
+one vectorized pass) is the fast route when exact greedy collapse-order is not required. Greedy `qem_decimate`
+stays SCALAR and bit-exact (order-dependent: a priority heap where each collapse depends on the last; ULPs in the
+quadric sums flip collapse order, so vertex_quadrics stays exact-scalar too). The numba route is available opt-in
+via holographic_jit for the profiled case, but is NOT force-applied: the greedy loop mutates the mesh through the
+guarded collapse_edge (link-condition refusal), so it is not a clean njit target, and the honest default is to
+leave it scalar. So Change 4 is complete as a POLICY: clustering = the vectorized decimator (shipped), greedy QEM
+= scalar + bit-exact (correct), numba = opt-in where a profile demands it.
+
+Mesh performance backlog COMPLETE: Change 1 (vectorized triangle half-edge build, 3-35x, bit-exact), Change 2
+(CSR adjacency -> O(deg) queries), Change 3 (subdivision-as-matmul, bit-exact), Change 4 (clustering exists;
+greedy stays scalar; numba opt-in). The regular parts are no longer Python-loop bound; the irreducibly-sequential
+parts stay scalar by design, with clustering + numba as the honest escape hatches.
+
+## Compute Architecture backlog -- the GPU-shaped gaps NumPy leaves, filled VSA-natively (+18 tests, 2377->2395)
+
+Built the whole Compute Architecture plan: the scheduler rung between the program layer and the kernel, plus the
+three primitives it orchestrates. Built in the plan's Step-0-re-ordered sequence (fusion first, it's the win).
+
+FILL 2 -- SPECTRAL FUSION (`holographic_fuse.py`), the keystone. bind=multiply, bundle=add, permute=phase-ramp,
+unbind=multiply-by-conjugate are ALL linear in spectral coordinates, so a straight-line chain is ONE expression
+in Fourier space: one rfft per distinct leaf, all algebra on spectra, one irfft out -- instead of op-by-op
+irfft->rfft round-trips between every link. A tiny five-op expression tree (Leaf/Bind/Unbind/Bundle/Permute,
+NOT a general autograd graph -- deliberate readable scope). bundle's normalization handled by one irfft-for-norm
+per bundle node (the summed vector's L2 norm), so it stays correct mid-chain. MEASURED: a K-bind accumulation
+chain does <=K+2 FFTs vs 3K op-by-op, ~2.2x wall on a 16-bind chain (the plan's 2.0-2.6x). Matches op-by-op to
+<1e-10 across all five ops + the keystone chain + the record pattern (== bundle_bind). KEPT NEGATIVE: tolerance-
+not-bit-exact (~1e-15, reordered float adds) so it stays OFF the tie-sensitive paths (the bind_batch maze lesson);
+cleanup/cosine/argmax are boundaries fusion can't cross; a no-op on compute-bound (~0% FFT) work.
+
+FILL 1 -- SPECTRUM RESIDENCY (`holographic_residency.py`), the cheap bit-exact companion. SpectrumCache: content-
+hashed (sha256, not python hash()) LRU cache of rfft(atom), so binds/unbinds against KNOWN atoms skip the forward
+transform. `bind_cached`/`unbind_cached` BIT-IDENTICAL to the kernel (<1e-12 -- it IS the same rfft). Honest per
+the plan's own tempering: ~1.4x standalone and overlaps bind_fixed; its real value is INSIDE fusion (makes a
+fused chain's leaf-transforms free for known atoms). Changed atom hashes differently -> invalidation is free.
+
+FILL 3 -- AUTO-SUPERPOSITION + SPILL (`holographic_superschedule.py`), the latency-hiding move. pack_capacity is
+the bucket-sizing DIAL (0.10*D gated / 0.02*D continuous), NOT a wall (the rev-3 stance correction). superpose_batch
+packs up to the dial into one vector and SPILLS the overflow across buckets rather than abstaining; apply_in_
+superposition binds each bucket's whole bundle by one op at once (N transforms in flight from a handful of packed
+ops). MEASURED @ D=512: gated recall 1.00 under the dial (cap=51); over it, SPILL beats cram 0.69 vs 0.41 -- the
+whole point of not abstaining; one bind transforms all items (fid 0.42). KEPT NEGATIVE: the dial is PRICED
+(widening D is sublinear-gain/linear-cost); the continuous dial is much smaller (made visible); nonlinear-feedback
+batches genuinely don't superpose (distribute's negative).
+
+FILL 4 -- THE PROGRAM SCHEDULER / cost model (`holographic_schedule.py`), the capstone, built on 1-3. A VSA program
+is a DAG of Ops (leaf/bind/unbind/bundle/permute/cleanup, tie_sensitive flag). `plan` marks FUSE-ROOTS -- the top
+of a maximal linear, single-consumer, non-tie-sensitive run at least min_run long (the roofline cost gate) that
+heads an output/cleanup/shared node. `run_scheduled` fuses each such run via Fill 2, keeps tie-sensitive runs
+op-by-op & BIT-EXACT, and crosses to Python ONLY at cleanups; `run_sequential` is the op-by-op baseline. MEASURED
+on a compose+recall pipeline (3 binds + bundle + unbind + cleanup): scheduled 8 FFTs / 1 kernel-call vs sequential
+12 / 5, same cleanup winner, pre-cleanup vector matches to <1e-9. Tie-sensitive run stays bit-exact & unfused
+(plan makes no fuse-root of it). `plan_signature` is a deterministic sha256 of DAG-shape+plan -> a recurring shape
+reuses its schedule (the amortization). KEPT NEGATIVE: reduces the COUNT of crossings, doesn't zero them (the final
+commit is a real collapse); no-op speed-wise on compute-bound runs (just avoids materialization).
+
+Six faculties wired default-off & delegating: spectrum_cache, fuse_record, fuse_expression, superpose_batch,
+apply_in_superposition, schedule_program. NON-GOALS kept loud (NOT built): async thread scheduler; CuPy-by-default;
+general trace-JIT/autograd; pyFFTW at operating dims; the SER-native scheduler variant as DEFAULT (it's a fork to
+be measured against the plain scheduler -- its coherence-key-is-a-hypervector / grouping-is-a-cleanup idea is
+noted, but the reorder cost only pays above some DAG size, so the plain scheduler ships first).
+
+## Scheduler integration -- wiring Fill 2/4 into the real Layer-4 program representation (+3 tests, 2395->2398)
+
+The four compute-architecture modules shipped with faculties + integration tests last pass, but the scheduler
+was only proven on SYNTHETIC programs. This pass integrates it into the real program layer so it isn't a siloed
+drawer -- the development-guide rule that a faculty which only imports is still a silo.
+
+THE INTEGRATION -- the recipe->scheduler bridge (`holographic_schedule.from_recipe` / `run_recipe`; faculty
+`realize_recipe_fused`). A StructureRecipe (Layer 4) is ALREADY a DAG of atom/raw/bind/bundle/superpose/permute/
+normalize ops over handles -- exactly the shape the scheduler consumes -- and it has NO cleanups, so it is the
+long straight-line bind/bundle run the plan named as the prime fusion target. `from_recipe` lowers a recipe 1:1
+into scheduler Ops (atoms materialized from the seed exactly as build() does); `run_recipe` fuses the linear runs.
+Extended the fuser + scheduler with the two recipe ops they lacked: a plain `Sum` node (superpose = spectral add
+with NO renormalization, still linear/fusable) and `NORMALIZE` (a boundary -- materialize + divide by norm, no
+FFT). Also FIXED the fuse-root detector: a linear node now heads a run whenever any consumer is non-linear
+(cleanup OR normalize OR any boundary) or tie-sensitive or shared -- previously it only triggered on cleanups, so
+a record feeding a normalize never fused. MEASURED: a role/filler record recipe (4 binds + bundle + permute +
+normalize) fuses to 10 FFTs / 2 kernel-calls vs 12 / 7 op-by-op, matching the exact build() to 6e-17.
+
+KEPT NEGATIVE / boundary, loud: `recipe.build()` advertises BIT-EXACT replay; fusion is ~1e-15 (reordered float
+adds), so `run_recipe`/`realize_recipe_fused` is an OPT-IN THROUGHPUT path that does NOT preserve bit-exactness --
+build()/realize stay the exact default. Recipes using `repeat` templates are NOT lowered (their template ops use
+local indices); run_recipe falls back to the exact op-by-op build for those (stats['fused']=False), so it is
+always correct, just not always fused.
+
+MACHINE (Layer 3) -- deliberately NOT fused, and this is the honest call, not an omission. `machine._read`/decode
+is `unbind(program, pos)` then a CLEANUP for the opcode then a second CLEANUP for the operand -- a chain of
+DECISIONS (argmax) that must be exact and are inherently sequential (you must decode the opcode to know which
+codebook to clean the operand against). Fusion cannot cross a cleanup, so the decode stays op-by-op on the frozen
+kernel (correct). The safe future speed-up there is spectrum RESIDENCY (Fill 1, bit-exact) on the fixed decode
+atoms (self.OP/ARG/pos, program_vec) -- noted, not forced (a modest ~1.4x change to a core module, earns its
+place only if the machine profiles as hot). So: scheduler integrated where fusion is SAFE (Layer 4 recipes,
+wide-margin, no cleanups); left op-by-op where the path is decision-bounded (the machine decode). That is the
+plan's own tie-sensitive discipline applied to integration.
+
+## Scheduler work: integrated where needed -- machine decode residency (+1 test)
+
+Audited whether the Compute Architecture work is fully implemented and USED, not just callable. Findings:
+* Fills 1-4 + the Layer-4 recipe integration (`run_recipe` / `realize_recipe_fused`) were already built and pass
+  (verified: 23 tests green). The recipe path fuses a real StructureRecipe's straight-line runs vs op-by-op build.
+* The one NAMED integration point still raw was `holographic_machine.run` -- the plan's own observation that the
+  VM "recomputes rfft(program_vec) on every opcode decode." Now fixed: `run()` and `run_batch()` transform the
+  CONSTANT program vector ONCE per call (`prog_spec = rfft(program_vec)`) and read every instruction address via
+  `_read_addr(prog_spec, i, n)`, which is BIT-IDENTICAL to `unbind(program_vec, pos(i))` (same rfft(program_vec),
+  same involution, same irfft). Bit-exactness is the safety argument: the decode is cleanup-gated (a _nearest
+  winner), and only a bit-exact change is guaranteed not to flip it (the bind_batch discipline). Pinned by
+  test_residency_decode_bit_exact (exact array-equality, not tolerance); all 22 machine tests + 76 machine-
+  dependent tests (typed/isa_callstack/isa_registers/protocol/procedure/lexicon) stay green, proving no decode
+  decision shifted. This is Fill 1 (residency) applied to the hottest loop in the VM: one program transform per
+  run instead of one per instruction.
+HONEST remaining step (kept loud, NOT done): converting run()'s interleaved decode-then-apply loop into a fully
+FUSED scheduled executor (fuse the straight-line VALUE run between decodes) needs decode-ahead, because the
+per-instruction decode cleanups are genuine fusion boundaries -- that is the capstone-level rewrite. The scheduler
+mechanism for it already ships as `schedule_program` (DAG form) and `run_recipe` (Layer 4); the VM's own loop uses
+the bit-exact residency win today and stays op-by-op-safe on its tie-sensitive decode.
+
+## Above/Below Sweep 3 -- the wide-reach five wired (+14 tests)
+
+Ran the sweep's re-prioritized plan: do the five wide-fanout mechanisms first (each pays off in several places),
+probe-first (four of five already EXISTED; the job was wiring the orphans + building the two genuinely missing).
+
+ITEM 1 -- FACULTY->HANDLER BRIDGE (capability table). The registration side already shipped
+(`register_apply_handler(name, fn)` makes any acc->acc faculty callable as `APPLY <name>`). Added the READ side
+the sweep flagged: `faculties()` returns the sorted names of every APPLY-able faculty (built-ins + registered),
+reading the SAME live handler set the machine's APPLY uses -- so introspection / a drives scheduler / an moe gate
+all read one registry (the convergence point). Verified: base table lists cleanup/denoise; a registered `negate`
+appears; a program can APPLY it.
+
+ITEM 2 -- ONE SHARED SPATIAL INDEX (`holographic_spatial.py`, NEW). A uniform-grid index: radius / knn / closest
+by scanning only nearby cells, BYTE-IDENTICAL to a brute-force scan (same set, same order; ties by index). The
+widest-fanout item (cull/nav/collision/sampling/WoS all ask "what's near here?"). Pinned bit-exact vs brute force
+in 2-D and 3-D, uniform and clustered, empty-safe, deterministic. Faculty `spatial_index`. HONEST: uniform grid
+is best for evenly-spread points (clustered -> prefer octree, the hierarchical sibling); the 14-consumer MIGRATION
+is deferred per the sweep's own hook (prove against the brute-force query first, migrate later).
+
+ITEM 3 -- `automaton` WIRED (was orphaned, 0 refs). Faculty `reaction_diffusion(size,dim,steps,seed)` runs the
+HyperCA (a local rule over a hypervector field -> emergent spots/stripes/fronts) -- one solver, six content
+domains (patina, texture, fur/skin, crystal, erosion). Tests: stays finite & unit-normalized, a pattern emerges
+(moves off the initial state), deterministic.
+
+ITEM 4 -- `emergence` WIRED (was orphaned). Faculty `emergent_concepts(...)` -- online, label-free concept growth
+(an online GROUP BY); commits a concept via the double-diffusion staircase, which naturally pulls the diffusion
+mechanism in with it. Tests: a tight cluster forms a concept, two separated clusters form two (discovered, not
+labelled), deterministic.
+
+ITEM 5 -- TEMPORAL-REUSE LOOP (`holographic_temporal.py`, NEW, on top of backwardwarp). The sweep's point: the
+LOOP is the work, not the primitive. `TemporalReuse.solve` reuses last frame, reprojects it (backward_gather),
+re-solves ONLY the dirty region, optionally accumulates (running average for noisy estimators). Tests: dirty-only
+re-solve costs |dirty| calls not n AND matches a full re-solve exactly (clean cells verbatim); reproject is
+hole-free; accumulation converges a noisy estimator; deterministic. Faculty `temporal_reuse`. The render/solve
+SPEED discipline (path tracer / WoS / fluid). HONEST: reuse is correct only where the caller's dirty mask is
+right -- a wrong mask reuses stale values (the owned failure mode).
+
+Five faculties wired default-off & delegating: faculties, spatial_index, reaction_diffusion, emergent_concepts,
+temporal_reuse. The sweep's MEDIUM items (compose, pack/fountain/uri storage spine, directional SH audio+light,
+lookahead->conditional Propagator) and LOCAL completions (materialio textures, sculpt fast-rep, near-surface SDF,
+occlusion-speed) remain at their honest weight for a later pass.
+
+## Above/Below Sweep 3 -- the medium unifications (ranks 6-9) (+11 tests)
+
+The three "quiet unifications" the sweep said were the real prize -- places where separate backlog items are the
+SAME mechanism and should share code. Probe-first: item 6 was already done, three were genuine builds that REUSE
+existing modules (the unification only counts if the code is one).
+
+ITEM 6 -- `compose` (forward composition): ALREADY WIRED (compose_scene / compose_nested / realize present). No
+new work; noted so a future pass doesn't re-propose it.
+
+ITEM 8 -- DIRECTIONAL SH, one primitive for SOUND *and* LIGHT (`holographic_spharm.py`, NEW). The sweep's catch:
+real spherical harmonics were already in the tree for light (`prt.sh_eval`, l=0..3), and directional sound uses
+the SAME basis (first-order ambisonics IS the l=0,1 SH of a sound field). So `sh_project`/`sh_reconstruct` are
+built ONCE on prt's basis (no fork) and serve both: a directional LIGHT lobe reconstructs at err 0.03, a
+directional SOUND gain at err 0.11, from the identical code path; higher order sharpens; scalar+RGB both work.
+Faculties `directional_field` / `sample_directional`. HONEST: band-limited to prt's order (sharp features past
+l=3 smooth; raise order at a coefficient cost).
+
+ITEM 9 -- CONDITIONAL PROPAGATOR (`holographic_condprop.py`, NEW). "Predict = bind a transform to a state"
+unifies dynamics.Propagator, lookahead (per-action model), video (motion-as-bind), and backwardwarp (unbind
+reproject). So lookahead's per-action forward model just IS a Propagator, conditioned on the action -- a dict of
+`dynamics.Propagator`s, one per action, REUSING the dynamics module. Added `Propagator.learn_pairs` (additive;
+learns the transfer from (state->next) PAIRS, the action-conditioned case). Fixes lookahead's kept negative: a
+single averaged delta per action was too coarse; a full per-frequency transfer per action is the rich form, with
+a regularised INVERSE for free (content-addressable planning). Measured on a state-graph (places=codebook atoms,
+actions=permutations): every place transition lands EXACTLY (reanchor index correct); re-anchored planning
+composes 7 hops exactly (anchored cos 1.00 vs naive 0.10 -- the cleanup-every-hop RAY-1 lesson); the inverse
+recovers the prior place. Faculty `conditional_propagator`. HONEST: linear-in-Fourier per action (chaotic action
+dynamics need the reservoir lift, dynamics' own boundary); raw per-action cosine is modest (~0.33 fitting 8
+permutation mappings with one operator) but the cleanup-gated argmax is exact -- planning rides on the reanchor.
+
+ITEM 7 -- STORAGE SPINE (`holographic_storage.py`, NEW). pack (dedup) + fountain (erasure) + uri (addressing)
+are one LAYER: how a record-set is stored, deduped, made robust. `StorageSpine.put(tags, bytes)` keys by uri,
+DEDUPS identical content by sha256 (stored once, many keys point to it), and codes it with a fountain; `.get(key,
+loss=...)` recovers even under droplet loss, returning an honest None past the code's limit (never wrong bytes).
+Measured: 3 payloads across 4 keys (dedup), recovery at 30% droplet loss. Faculty `storage_spine`. REUSES uri +
+fountain (no reimplementation). HONEST: exact-content dedup only (near-dup delta packing stays pack's job); LT
+code needs a small droplet overhead.
+
+Five faculties wired default-off & delegating: directional_field, sample_directional, conditional_propagator,
+storage_spine (+ compose already present). REMAINING (honest): the sweep's LOCAL completions at their own weight
+-- materialio texture maps, sculpt fast-rep, near-surface->full SDF, occlusion-recall speed (Batch-OMP) -- each
+improves one thing (not a fanout mechanism), a smaller follow-up pass.
+
+## Above/Below Sweep 3 -- the local completions (backlog finished) (+5 tests)
+
+The last tier: the sweep's LOCAL completions (each improves one thing, not a fanout mechanism). Probe-first
+shortened this the usual way -- TWO of the five were already built:
+
+ALREADY DONE (probed, not rebuilt):
+* OCCLUSION-RECALL SPEED (Batch-OMP): `occlusion.build_gram(codebook)` + `occlusion_recall(..., gram=G)` (the
+  Rubinstein-Zibulevsky-Elad Gram-cached fast path, D out of the inner loop) AND `occlusion_recall_forest`
+  (sub-linear via HoloForest) are already implemented, wired (15 refs), and tested (22 tests). No work needed.
+* SCULPT FAST REPRESENTATION: `holographic_sparsefield.py` IS FS-2 (the Adalsteinsson-Sethian / OpenVDB narrow
+  band) -- store/edit/re-extract only the thin shell around the surface, so a stroke costs O(brush). Built,
+  wired (4 refs), tested (8 tests). The "fast representation" the sculpt kept-negative pointed at already exists.
+
+BUILT / WIRED THIS PASS:
+* MATERIALIO TEXTURE MAPS (`holographic_materialio.py`): the one genuine gap (the module flagged it "the natural
+  next step, not faked"). New `TextureMap` -- an (H,W,C) image sampled by UV with BILINEAR interpolation
+  (pixel-center convention; 'repeat'/'clamp' wrap). PBRMaterial now carries optional base_color/metallic/
+  roughness/emissive maps and a `sample(u,v)` returning the effective glTF factor x texture values -- fully
+  backward compatible (no map -> the old factor-level behaviour, bit-identical). Faculty `texture_map`. Tested:
+  bilinear corner/centre exact, repeat-wrap, map x factor, backward-compat, deterministic.
+* GRAPH_MEMORY -> NAV/HIERARCHY (fit-correct wiring, was 0 refs): faculty `graph_namespace` exposes GraphMemory
+  as a hierarchical namespace/navigation tree (observe_vector/classify_vector routes a query to its region).
+  KEPT NEGATIVE loud: this is for HIERARCHY/NAMESPACE/NAV, NOT exact recall -- graph_memory's recall accuracy
+  collapses at scale (a documented negative), which is exactly why the sweep re-homed it to navigation. Tested:
+  routes a query to the right region.
+* NEAR-SURFACE -> FULL SDF (photo-to-3D, honest reuse): faculty `near_surface_to_sdf` thresholds a near-surface
+  signed band to inside/outside occupancy and runs the EXISTING fast-sweeping eikonal (signed_distance_field /
+  _3d, dispatched by dimension) to redistance everywhere. The extension mechanism already existed; this just
+  prepares its input from a band. Tested: a sphere band redistances to a full field, sign preserved.
+
+SWEEP 3 COMPLETE: the wide-reach five (bridge, spatial, automaton, emergence, temporal), the three medium
+unifications (SH sound+light, conditional Propagator, storage spine), and the local completions (texture maps,
+graph namespace, near-surface SDF) -- with occlusion-speed, sculpt fast-rep, compose, and diffusion found already
+present by probe-first. The whole audit backlog is now cleared.
+
+## Render/Sim Pipeline -- usability: one configurable pipeline, primitives, field effects (+23 tests)
+
+The ask was blunt: "make sure the render/simulation pipeline is easy to use." Delivered the coherent usability
+arc -- Phase 0 primitives (the foundation), Phases 1-2 the pipeline (the headline), Part 4 FieldEffect (a stage
+that plugs in). Probe-first confirmed MT5 image-textures and G4 spatial index were already built (prior sessions).
+
+PHASE 0 -- PRIMITIVES PROMOTED (the shared building blocks):
+* G1 sdf_normal: the surface normal is a property of the FIELD, not the renderer, so it now lives ONCE in
+  holographic_sdf.sdf_normal; holographic_raymarch.sdf_normal DELEGATES to it, verified BIT-IDENTICAL (same
+  central-difference evals). One normal for emission/collision/displacement/sculpt/field-effect falloff -- no
+  drift, no private copies.
+* G2 holographic_integrate.py: the time-step in ONE place. semi_implicit_euler (symplectic -- velocity first,
+  then move: energy drift 0.0003 on an orbit vs 146 for explicit Euler, MEASURED), explicit_euler (the honest
+  baseline only), verlet (2nd-order, matches analytic free-fall). And SimStep -- the ONE interface (advance(dt,
+  ctx)) that every solver is WRAPPED behind (SolverAdapter), fixing the "fluid.step() vs softbody.step(dt,...) vs
+  physics.step(S_x,S_v)" signature mess. ParticleSim is a concrete SimStep on the shared integrator.
+
+PHASES 1-2 -- THE PIPELINE (holographic_pipeline.py, the usability win):
+* PipelineConfig + presets (preview/final/interactive): the ONE opt-in surface, replacing scattered kwargs.
+* build_pipeline(cfg): config -> ordered, validated Pipeline in three readable moves -- SELECT enabled stages,
+  AUTO-INCLUDE prerequisites (ask for SVGF -> the G-buffer stage is pulled in even though its own enabled() is
+  False, because svgf_denoise NEEDS "gbuffer" and it PRODUCES it), REJECT impossible combos at BUILD time with a
+  clear message (dirty_only without temporal_reuse; splat_proxy with quality=final; bad denoise value).
+* Stable topological sort: order by data dependency (Kahn), tie-broken by (phase, name) so sim(0) < render(1) <
+  present(2) even where no data edge forces it, and the SAME config always yields the SAME order (deterministic).
+* Pipeline.plan(): the DRY RUN -- lists every active stage + WHY, WITHOUT rendering (the "did the right
+  components get used?" answer). Pipeline.run(scene, seed, renderer=): threads a FrameState through the stages.
+* Stage declares needs/produces and DELEGATES its work; manual assembly still works (config is sugar over a
+  stage list). KEPT LOUD: this is a stage-LIST + dep-dict + toposort, deliberately NOT a general DAG engine
+  (branching/loops are the machine's job -- the VSA-native endgame); the built-in demo renderer/sim are light
+  stand-ins so it runs end-to-end, a real app injects RenderSession / its solvers via the stage run closures.
+
+PART 4 -- FIELDEFFECT (holographic_fieldeffect.py, a stage that plugs in):
+* A shaped zone of influence: the SDF is the shape, its signed distance IS the falloff coordinate (weight = 0
+  outside/at surface, ->1 a radius deep in, edge shaped by sculpt.falloff), effect(points, weight) is what it
+  does. FieldGroup ADDS effects (force superposition is a commutative monoid -> order-independent).
+  AttachedFieldEffect rides a moving node (world points -> the node's frame via the inverse transform: "a rigid
+  transform is a single bind"). Ready effects attract_to/repel_from/uniform_force. KEPT LOUD: a soft weighted
+  force, NOT a hard constraint (sticky = strong short-range attractor, not a positional lock); mesh_to_sdf shape
+  inherits its sign caveat.
+
+FACULTIES: render_pipeline(preset, **overrides), field_effect(sdf, effect, ...), particle_sim(pos, vel,
+force_fn, integrator). Integration: an interactive pipeline plans+runs a frame (sim before render, tonemapped
+out) while a FieldEffect drives a ParticleSim inward and the G1 normal stays bit-exact.
+
+HONESTLY DEFERRED (own passes, NOT rushed -- rushing a bit-exact refactor is how you flip a downstream tie):
+* Phase 3 materials/textures convergence (MT1 unify 4 material types on one Material, MT2 one BRDF from ~5
+  copies, MT3 data layer, MT4 TextureSource over ~20 modules) -- a large risky bit-exact refactor.
+* Phase 6 VSA-native endgame (lower PipelineConfig to a recipe, plan()->EXPLAIN, run on the machine via the
+  faculty->handler bridge, which already exists).
+* Full Phase 0 delete-and-delegate of the OTHER normal/march copies beyond G1's (same bit-exact pin pattern).
+
+## Calibrated forecast confidence -- conformal keystone (F1 + F2 + F8) (+9 tests)
+
+The Forecasting backlog's ask: "forecast any data, use it IF we have a certain level of confidence." The engine
+already PRODUCES the next vector four ways (Propagator/reservoir/predictive/generate); the missing piece was
+CALIBRATED confidence on a forecast + a way to score it. Built the keystone cluster. Also: the project was
+renamed to leCore -- the old README (research log with tour results + count markers) became researchLog.md, a new
+user-facing README landed; modules keep the holographic_ prefix, canonical zip name unchanged.
+
+PROBE-FIRST: the backlog's own audit said "no conformal machinery anywhere" -- but holographic_reasoning.py
+already had a SCALAR split-conformal ConformalPredictor (leOS's reflex gate). So F1 was NOT from scratch. Built
+holographic_conformal.py to GENERALIZE that same finite-sample quantile (the (n+1)(1-alpha) order statistic --
+pinned identical, test_finite_sample_quantile_matches_reasoning_rule) with the four things it lacked:
+
+* F1 VSA-NATIVE + WRAP + ABSTAIN: nonconformity_vector = 1 - cosine(pred, actual) so a VECTOR forecast is scored
+  in the engine's own metric (the interval becomes a cosine-RADIUS = a prediction SET). ConformalForecaster
+  (scalar or vector) calibrates on held-out (pred, truth) pairs; wrap(producer, calib) makes ANY producer emit
+  (point, interval, abstain); abstain_width gates on trust. MEASURED: scalar coverage tracks nominal within 3
+  pct across alphas; vector conformal covers 0.91 at the 90% target.
+* F2 TEMPORAL (time series break exchangeability): AdaptiveConformal (Gibbs-Candes ACI) -- widen after a miss,
+  narrow after a hit -- holds LONG-RUN coverage under drift; weighted_conformal_quantile decays old residuals
+  toward recent. MEASURED: on a drifting stream ACI holds 0.90 coverage where FIXED split conformal drifts to
+  0.41. Kept negative loud: ACI reacts after errors and only widens/narrows (can't fix a biased center); under a
+  ~0%-overlap regime change NO conformal variant holds -> abstain + flag drift (the honest earthquake boundary).
+* F8 INSTRUMENT: coverage_report (the forecasting twin of calibration_report -- empirical vs nominal per alpha),
+  plus proper scores pinball_loss and crps_sample (coverage says the interval is WIDE ENOUGH; CRPS says the
+  forecast is GOOD -- rewards accuracy AND sharpness). MEASURED: CRPS ranks a sharp forecast (0.06) strictly
+  below a vague one (0.70). sharpness() reports mean half-width alongside coverage so neither is gamed alone.
+
+FACULTIES (general -> UnifiedMind per the backlog's §3): calibrate_forecast, adaptive_conformal,
+forecast_coverage_report, forecast_crps. Integration: a producer's forecasts get a calibrated 90% interval that
+abstains on tight tolerance, a drifting stream keeps ~0.90 via ACI, and CRPS ranks producers.
+
+KEPT NEGATIVES (loud): calibrated != correct (a useless predictor gets honest-but-WIDE intervals -- width is the
+signal); coverage is MARGINAL not conditional (Barber 2021 -- holds on average over inputs, never for one
+specific input); vanilla split CP is constant-width (CQR is the noted follow-on); the bit-exact/tie-sensitive
+paths take no probabilistic wrapper.
+
+REMAINING F-SERIES (not built this pass -- own passes): F3 forecast(data) router; F4 forecasting-as-recall
+(analog forecasting via HoloForest -- yields a distribution natively, pairs with F8's CRPS); F5 confidence-gated
+generation; F6 multi-horizon trusted-horizon gate; F7 wire recurrent+market. And the §5 sweep (delegate the five
+improvised confidences -- pathtrace variance, sbc validated, recall_calibrated, decide_confidence, raycoherence
+-- to this one engine; the scheduler cost model IS a forecaster) is the high-leverage follow-on.
+
+## Backlog sweep: forecasting F3-F7, render-speed E (SVGF), query interface core (+20 tests)
+
+Three backlogs in one pass. Probe-first shortened all three -- the recurring lesson held.
+
+### Forecasting F3-F7 (completes the F-series, F1-F8 all in)
+* F4 holographic_analog.py -- ANALOG forecasting ("find the past that looks like now, return what followed"):
+  pure HoloForest recall pointed at time, yields a DISTRIBUTION natively (pairs with F8 CRPS), ABSTAINS when no
+  analog. MEASURED: analog MAE 0.033 beats persistence 0.35 and mean 0.68 on a FAST quasi-periodic signal.
+  Kept negative loud: persistence is a strong baseline on SLOW signals (used a fast one so it's fair, not a
+  strawman); low-dim raw-window cosine abstention is unreliable (random vectors hit moderate max-cosine by
+  chance) -- the confidence ORDERING is robust, a hard floor needs high value or hypervector-encoded contexts.
+* F6 holographic_horizon.py -- MULTI-HORIZON with a TRUSTED-HORIZON gate: per-step conformal quantile (reuses
+  holographic_conformal) that widens with horizon; trusted_horizon = leading steps within tolerance. MEASURED:
+  smooth system width 0.0016->0.036 trusted 15 steps; chaotic (logistic r=3.9) width blows to 0.77 -- Lyapunov
+  boundary made mechanical (predict-a-little-recompute-often). The "drive sim/render if confident" use case.
+* F3 holographic_forecast.py -- the forecast(data) ROUTER: fit linear-AR AND analog on a train split, pick the
+  one with lower calibration MAE, wrap the winner in conformal. MEASURED: AR(1) routes 'linear' (0.079<0.091);
+  logistic map routes 'analog' (0.002<0.203 -- analog nails a deterministic map a linear window can't). Honest:
+  a linear window fits sums of sinusoids well, so quasi-periodic routes 'linear' -- used the logistic map for the
+  analog-wins case. Misroute fails SAFE (wide interval), never a confident wrong answer.
+* F5 generate_gated -- confidence-gated generation: generate, score validity (cosine to nearest codebook atom),
+  accept/flag. Scoped: a filter/abstention aid for open-ended generation, not a correctness guarantee.
+* F7 de-silo: recurrent (EchoStateNetwork/VSAReservoir) + market (RayProjector) were 0-ref; now reachable as
+  faculties recurrent_forecaster / market_projector.
+FACULTIES: forecast, analog_forecaster, multi_horizon_forecaster, generate_gated, recurrent_forecaster,
+market_projector. Integration: router->analog calibrated; analog abstains strict; horizon trusts a ramp fully.
+
+### Render-speed VSA-native cluster (technique E; A/C/D already existed)
+PROBE-FIRST: robust/firefly accumulate (C) = holographic_accumulate.robust_accumulate ALREADY; SPRT adaptive
+sampling (D) = holographic_honesty.SPRTRecall ALREADY; temporal reproject (A) = holographic_temporal.TemporalReuse
+ALREADY; multires pyramid ALREADY. Only E was missing.
+* E holographic_svgf.py -- edge-aware a-trous BILATERAL denoise: edge-stopping = product of RBF bumps on
+  normal/albedo/depth/colour (the bound-feature cosine, the ScalarEncoder's falloff), coarse-to-fine over the
+  pyramid. MEASURED against the plain-blur baseline: noisy 17.1 dB -> feature-aware 41.2 dB, beating edge-blind
+  blur 19.0 dB; edge MSE 0.0001 vs blur 0.0572. Kept negative: "a shared kernel is not a shared manifold" (the
+  edge-stop is measured, not assumed); it denoises, it can't add detail. Faculty svgf_denoise.
+
+### Query interface core (Phases 1-3; Phases 4-13 are follow-ons)
+holographic_query.py -- a query IS a projection over the VSA store (a role-bound record IS a row). Phase 1
+projection core (from_rows binds categorical values to role vectors + bundles; project = unbind+cleanup). Phase 2
+a small documented SQL subset (SELECT/FROM/WHERE/ORDER BY/LIMIT, hand-rolled regex). Phase 3 the two things a
+plain DB can't do natively: FUZZY WHERE (colour ~ 'grey' ranks by cosine) and per-row CONFIDENCE. MEASURED:
+round-trip recovers gold/yellow; exact density>9000 ORDER BY LIMIT -> [gold, lead]; fuzzy 'colour ~ grey' ranks
+{silver, iron, lead} at confidence 0.59. Kept negative loud: EXACT vs FUZZY is a real fork -- exact predicates
+run on the STORED props (a decoded float has readback error), fuzzy on the VECTORS; the two modes are labelled,
+never silently mixed (Table keeps both). Sparse schema = natural NULL (absent bind). Faculties: make_table, query.
+DEFERRED (own passes): GraphQL resolver, aggregation/GROUP BY, the capability registry + EXECUTE (a "program" is
+a queryable hypervector -- ties to holographic_machine), namespaces + user databases, saved views, persistence.
+
+## Render pipeline: wire the stand-in stages to REAL measured implementations + Phase 6 inspection (+2 tests)
+
+The render/sim pipeline shipped with light stand-in stages so it ran end-to-end; the deferred item was to wire
+the real engine pieces in now that they exist (and SVGF was built this session). Done, backward-compatible, each
+stage measured. PROBE-FIRST confirmed the sibling pieces were already in the tree (robust_accumulate, SPRTRecall,
+TemporalReuse); only the wiring + SVGF were the work.
+
+* _render_run: now renders a two-surface demo scene with 8 noisy sample PASSES and ACCUMULATES them through
+  holographic_accumulate.robust_accumulate (firefly clamp). IMPORTANT API-GRANULARITY LESSON (kept): the winsorize
+  measures each WHOLE sample's deviation (norm of the full flattened array), so it rejects a corrupted sample PASS,
+  NOT per-pixel fireflies -- using it at the wrong granularity was a silent no-op (robust==naive). Used correctly
+  (one bad pass among 8): RMSE 0.06 vs naive 0.38. Per-pixel firefly clamp would need a per-pixel winsorize (noted).
+* _gbuffer_run: real per-pixel (normal, albedo, depth) for the demo scene (shared _demo_scene helper so gbuffer and
+  render agree on the edge), replacing the random 8x8x4 stand-in.
+* _svgf_run: calls the real holographic_svgf.atrous_bilateral using the gbuffer, MEASURED PSNR noisy->denoised
+  (~24.5 -> 28.3 dB on the already-accumulated frame). Falls back to the legacy blur if no real features (back-compat).
+* _adaptive_run: self-contained (it runs independent of render -- both only need 'scene', so it cannot read
+  render's variance; ORDERING LESSON kept). Makes its own 3-sample variance probe + edge signal -> a real bool
+  "sample more" mask, and demonstrates the Wald SPRT stop (SPRTRecall needs null+match score distributions -- my
+  first call omitted them and was swallowed by try/except, a silent no-op; fixed to fit both distributions).
+* _reproject_run: routes through TemporalReuse for the reuse bookkeeping (identity reproject -- the demo has no
+  camera motion; a real app warps by the camera delta, one bind, and re-solves only dirty cells).
+* Pipeline.plan() is now a full EXPLAIN (stage, why, NEEDS, PRODUCES) -- Phase 6's inspection half, the pipeline
+  twin of the query interface's EXPLAIN. Backward-compatible (added keys).
+Tests: test_wired_stages_are_real_and_measured (robust<0.5*naive, svgf denoised>noisy, real bool mask + SPRT
+decision) + test_pipeline_deterministic. 10 -> 12 pipeline tests.
+
+HONESTLY STILL DEFERRED (own careful passes -- rushing a bit-exact refactor flips a downstream tie):
+* Phase 3 materials/BRDF/texture convergence (MT1-4, ~20 modules, bit-exact) -- large risky refactor.
+* Phase 6 EXECUTION half: run the lowered pipeline ON the machine VM. The blocker is real, not laziness -- the VM's
+  APPLY is acc->acc over a hypervector, but these stages transform a FrameState (buffers, images), so it needs the
+  frame represented as a hypervector accumulator first. The inspection half (plan->EXPLAIN) is done.
+
+STANDING HIGH-LEVERAGE FOLLOW-ON (not this pass): the forecasting §5 sweep -- delegate the five improvised
+confidences (pathtrace variance, sbc validated, recall_calibrated, decide_confidence, raycoherence) to the one
+conformal engine, and build the scheduler cost model (which IS a forecaster) on it.
+
+## Forecasting sec.5 sweep: delegate the improvised confidences to one calibrated engine (+9 tests)
+
+The sweep's reframe: conformal/calibrated confidence is a UNIVERSAL "estimate + confidence + abstain" wrapper,
+and the codebase improvises it in ~5 places. PROBE-FIRST found THREE of the five already calibrated -- so the
+job got shorter, the usual way:
+* Resonator soft confidence (Olshausen x Cranmer, the panel's flagged "real remainder"): ALREADY BUILT.
+  decompose_structure(confidence=True) returns {agreement, pvalue} -- a null-calibrated soft confidence for
+  APPROXIMATE inputs (where the exact `validated` boolean is uselessly False), via _resonator_noise_null. Wired
+  through factor_composite. Not rebuilt.
+* recall_calibrated (RecallNull) and decide_confidence (agent): already calibrated (recognition/agent side).
+
+Two sites were genuinely missing and built:
+* SCHEDULER COST MODEL as a forecaster (sec.5.5, the highest-leverage item). holographic_superschedule packed to
+  the THEORETICAL wall (pack_capacity = 0.10*D, assumed). Added calibrated_capacity(dim, gated, target_recall):
+  probe growing superposition loads, measure GATED cleanup recall (recovered vector cleans up to its own atom),
+  return the largest load whose recall stays >= target -- a MEASURED capacity, the cost model as a forecaster
+  ("will this packing recall well?"). should_superpose(n, ...) gates a batch on the measured wall. MEASURED
+  (honest, useful): at D=512 the measured capacity is 34 @ target 0.90 and 24 @ 0.99, BELOW the theoretical dial
+  of 51 -- assuming 0.10*D OVERPACKS at a strict recall target. Kept negative: costs a probe; target/data-
+  dependent; assumes monotone crosstalk in load (true for random superposition). Faculty scheduler_capacity.
+* RENDERER ADAPTIVE STOP (sec.5, renderer delegation). holographic_adaptive_sample.py: given a renderer's
+  per-pixel variance-of-the-mean, converged_mask (CI half-width within tolerance -> stop) and sample_budget
+  (extra samples to reach a target interval; 0 where converged). IMPORTANT HONEST CORRECTION kept loud: a
+  per-pixel MC estimate is a SAMPLE MEAN, so its interval is GAUSSIAN/CLT (half-width = z*sqrt(var-of-mean)), NOT
+  conformal -- conformal needs a per-pixel calibration set of residuals a single pixel doesn't have. The sweep's
+  "conformal everywhere" framing is corrected here to the estimator that actually fits. MEASURED: halving the
+  target interval quadruples the samples (the sigma^2/n MC law). Faculty adaptive_sample_budget.
+
+Integration: scheduler measured-capacity <= theoretical and stricter-target-smaller; adaptive budget 0 for
+converged / >0 for noisy; resonator soft confidence reachable (already built).
+
+STILL OPEN in the sweep (own passes): raycoherence's bespoke fallback -> calibrated; abstaining depth/photo-to-3D
+(the honest boundary as a mechanical abstention); per-peel/per-splat/store-drift delegations. And the big
+remaining arc: query interface Phases 4-13 (GraphQL, aggregation, capability registry + EXECUTE, namespaces,
+user DBs, views, persistence).
+
+## Query interface Phases 5-7: aggregation, the capability registry, EXPLAIN (+7 tests)
+
+Continuing the query-interface arc (Phases 1-3 shipped last pass). Probe-first shortened Part 2 again.
+
+* PHASE 5 -- AGGREGATION & GROUP BY (holographic_query). Query.group_by + Query.aggregate; run() collapses the
+  filtered rows into one row per group. COUNT/SUM/AVG/MIN/MAX are EXACT because they run on the STORED props (not
+  decoded vectors -- exactly why Table keeps both), plus a per-group _centroid = bundle of the group's records
+  (the VSA aggregate = the group's prototype). parse_sql extended: SELECT items classify as aggregate FUNC(col)
+  vs plain column, and a GROUP BY clause. MEASURED: GROUP BY colour -> grey(count 3, avg 9900) + centroid;
+  global MIN/MAX/SUM exact. Kept negative: COUNT/centroid clean, numeric aggregates exact ON STORED PROPS only.
+
+* PHASE 6 -- CAPABILITY REGISTRY (Part 2, "query the mind"). capability_registry(mind) introspects every public
+  faculty into a VSA table {name, domain, doc}, so "what can this mind do?" is an ordinary Part-1 query:
+  SELECT name FROM actions WHERE domain='forecasting' returns the forecasting faculties; GROUP BY domain is a
+  capability CENSUS (measured on the live mind: 601 faculties -> general 386, geometry 61, render 47, physics 39,
+  agent 20, kernel 14). Introspection = a data query over the registry -- the unification the backlog pointed at.
+  Kept negative loud: domain is a keyword HEURISTIC over the method name, not a curated taxonomy; doc is the first
+  docstring line. Faculty capabilities().
+
+* PHASE 7 -- EXPLAIN = a DRY RUN (Part 2). explain_program(machine, program_vec): run with NO handlers, so every
+  APPLY is a no-op and the heavy work is skipped, but the machine walks the whole program -- the trace names which
+  faculties it WOULD call and how many steps, without executing them. MEASURED: [APPLY denoise, APPLY recall] ->
+  faculties_called ['denoise','recall'], n_steps 2. The program-level twin of the pipeline's plan()->EXPLAIN.
+  Faculty explain(machine, program_vec).
+
+PHASE 8 (EXECUTE) PROBE: the mind ALREADY runs programs with its handler bridge -- run_procedure(name_or_program,
+init_acc) via _machine() + _procedure_handlers(). So "execute a VSA program" exists; "with QUERIED arguments" is
+a thin composition (a SELECT yields a vector -> bind into init_acc -> run_procedure), not a new engine. Noted, not
+rebuilt.
+
+STILL OPEN (own passes): Phase 4 GraphQL resolver for the nested scene; Phases 9-13 -- namespaces + the read-only
+`system` wall, CREATE DATABASE/TABLE/INSERT for user databases, cross-namespace INSERT...SELECT (bookmarks), views
+as saved program vectors, persistence via core.save/load. These are the "own your own database" half (Part 3).
+
+## Query interface Phases 9-13: own your own database over a read-only system wall (+9 tests)
+
+Finished the "own your data" half of the query arc (Part 3), all on the projection core.
+
+* PHASE 9 -- NAMESPACES + the read-only SYSTEM WALL. Database holds namespaces, each {writable, tables, views}.
+  'system' is writable=False -- where the mind publishes its OWN tables (scene, the capability registry, recall);
+  user namespaces are writable. The ONE rule that makes opening the door this wide safe: SELECT from ANY namespace,
+  write only your OWN. Enforced at a single chokepoint (_require_writable) -- reads from system.* work, every write
+  is refused with a clear message.
+* PHASE 10 -- CREATE DATABASE/TABLE/INSERT. UserTable(Table) adds insert (encode one more row -> a record via the
+  SHARED _encode_row helper, so there is ONE encoding, not two; from_rows refactored to use it too). create_database
+  (a writable namespace), create_table, insert.
+* PHASE 11 -- BOOKMARKS (cross-namespace INSERT ... SELECT). insert_select runs a SELECT on a source (often system)
+  and inserts into a user table. Two honest flavours kept: mode='snapshot' copies the VALUES (never dangles, goes
+  stale) vs mode='reference' stores the source id and resolve_reference reads LIVE (always current, resolve-or-null
+  when the row is gone). Measured: snapshot copies the gold objects; reference resolves live and dangles to None.
+* PHASE 12 -- VIEWS. create_view stores a SELECT; run_view re-runs it against the CURRENT source (a LIVE view =
+  a saved query = a saved plan). A materialised snapshot is just a UserTable filled by insert_select.
+* PHASE 13 -- PERSISTENCE BY REPLAY. to_state saves each user table's (columns, dim, seed, rows) + view specs;
+  from_state REBUILDS by re-inserting -- deterministic and byte-identical because the seed fixes every atom, and
+  no vocab vectors need serialising. Only the user's writable namespaces are saved (system is the mind's live
+  state). Measured: reloaded rows/view identical; reloaded records np.array_equal to the originals.
+* catalog() = SHOW DATABASES/TABLES as plain rows. run_db_sql = a small SQL skin (CREATE DATABASE/TABLE, INSERT ...
+  VALUES, SELECT ... FROM ns.table) with the wall refusing writes to system.*; bookmarks/views stay on the clearer
+  object API.
+
+FACULTIES: database() (ships with system.actions = the capability registry, so 'your db over a shared system' is
+real out of the box), db_query(sql, db). Integration: read the mind's own capabilities through the db, the wall
+refuses a system write, bookmark forecasting faculties into a user table, reload by replay identically.
+
+KEPT NEGATIVES (loud): snapshot-vs-reference is a real trade (stale vs dangle); a live view costs a re-run, a
+materialised one goes stale; sparse schema = natural NULL (absent bind); the SQL here is a documented SUBSET (the
+object API is the full surface). The whole query interface (Phases 1-13) is now complete EXCEPT Phase 4 (the
+GraphQL resolver for the nested scene), which stays its own pass.
+
+## Query interface Phase 4: GraphQL resolver for the nested scene -- the arc is now complete (+6 tests)
+
+The last piece of the query interface. SQL fits flat tables; a SCENE is a nested graph (an object has a name, a
+material, a transform; the transform has a position, a kind), and GraphQL -- "ask for exactly the nested fields
+you want" -- is the right shape for it. The VSA mapping is clean and is the whole point: a nested field is
+bind(role, sub_record), so a nested selection `transform { kind }` == unbind(record, transform) -> the sub-record
+-> unbind(sub, kind) -> cleanup. "Ask for the nested field" == "unbind exactly that chain of roles."
+
+holographic_graphql.py: Scene encodes each object as a NESTED VSA record (categorical fields bind(role, atom),
+nested dicts bind(role, sub_record) recursively); a small readable GraphQL parser (selection set with () args and
+{} children, recursive descent); resolve() filters objects by a `where` arg and projects EXACTLY the requested
+(possibly nested) fields per object. project_via_unbind demonstrates the VSA claim: a categorical leaf is
+recovered by unbinding the role chain. MEASURED: '{ objects(where:{material:"gold"}) { name transform { position
+} } }' returns [ring, coin] with ONLY name+transform.position (not id, not kind); transform->kind unbinds to
+'rigid'.
+
+Kept negative (the honest exact/fuzzy fork, same as SQL): NUMERIC/LIST fields (a position [x,y,z]) are read from
+the stored object, not decoded -- a float has readback error, so we keep it exact rather than pretend to decode
+it. The GraphQL here is a documented SUBSET (selection sets, one where arg), not the full spec.
+
+FACULTIES: make_scene(objects), query_scene(graphql, scene). Integration: a gold-filtered nested query returns
+exactly the requested shape through the mind; the nested field resolves via the unbind chain.
+
+THE WHOLE QUERY INTERFACE (Phases 1-13) IS NOW COMPLETE: projection core + fuzzy WHERE + confidence (1-3),
+aggregation/GROUP BY (5), GraphQL for the scene (4), the capability registry + EXPLAIN (6-7) with EXECUTE already
+present (run_procedure, 8), and user databases over a read-only system wall with bookmarks, views, and persistence
+(9-13). One projection core, reached by SQL, GraphQL, introspection, and an owned database.
+
+## Forecasting sweep: abstaining photo-to-3D -- observe the front, abstain on the rest (+5 tests)
+
+The sweep's depth/photo-to-3D delegation, and the photo-to-3D backlog's honest core. Lifting a single photo to 3D
+is an ESTIMATE, so it should carry a confidence and abstain where it does not know. Built holographic_photo3d.py:
+* unproject(depth, fx,fy,cx,cy): the standard pinhole depth->3D-points lift, (H,W,3).
+* depth_confidence: a geometric support score in [0,1] = valid (finite, >0) AND continuous (small relative depth
+  step -- NOT an occlusion edge) AND front-facing (|n_z| of the estimated normal -- not grazing). Abstain where
+  any support fails.
+* photo_to_gaussians: unproject the CONFIDENT pixels into per-pixel 3D Gaussians (Splatter-Image/Flash3D shape:
+  one splat per pixel -- position, colour, radius from local spacing, confidence weight), abstain on the rest.
+MEASURED: a two-plane depth (near z=1 | far z=3, meeting at an occlusion edge, plus one invalid hole) unprojects
+to two flat front planes at z=1 and z=3; abstention fires exactly at the edge (avoiding the stretched sheet of
+fake geometry naive unprojection makes) and on the hole; ~90% coverage, the rest abstained.
+
+KEPT NEGATIVES (loud): the deepest one -- a single view NEVER observes the BACK of an object, so this emits the
+visible front surface and abstains on the back rather than guessing a watertight mesh ("we don't know the back"
+made mechanical). And the honest-tool correction (same as the renderer stop): confidence here is a GEOMETRIC
+SUPPORT score, not a calibrated probability -- one depth map gives no per-pixel calibration set, so support +
+abstention is the estimator that fits, not conformal. FIXED a real bug found while writing: the radius used
+np.gradient(points, axis=2-1) which is axis=1 (column spacing) TWICE instead of column + row -> corrected to
+axis=1 and axis=0.
+
+FACULTIES: photo_to_3d(depth, colour, fx,fy,cx,cy), unproject_depth. Integration: a near/far edge lifts to front
+surfaces at both depths and abstains at the edge, coverage high but < 1.
+
+REMAINING sweep tail: raycoherence already HAS a variance-fallback (var_tol) -- a reasonable bespoke uncertainty
+test, not a glaring gap. The big deferred render items stand: Phase 3 materials/BRDF convergence (~20 modules,
+bit-exact) and Phase 6 run-the-pipeline-on-the-VM (needs the frame as a hypervector).
+
+## Render pipeline Phase 6 complete: RUN the pipeline on the VM (+3 tests)
+
+The deferred Phase 6 execution half -- and the blocker I had flagged ("needs the frame as a hypervector") turned
+out NOT to be real, which is why probing the VM before assuming beat guessing. The machine's APPLY does exactly
+`acc = handlers[fac](acc)` -- it only does vector math on the PROGRAM (the instruction decode), NEVER on the
+accumulator. So the FrameState can ride as the accumulator and the VM sequences the stages; no frame-as-vector
+needed.
+
+* Pipeline.lower_to_program(machine): assemble APPLY(stage) for each stage in order + HALT -> ONE program vector
+  (the config-to-recipe step). The stage names are the program's faculty operands.
+* Pipeline.run_on_vm(machine=None, ...): build a HoloMachine that knows the stage names, lower the pipeline,
+  hand it {stage_name: stage.run} handlers, and machine.run(program, init_acc=FrameState, handlers=...). The
+  same holographic machine that runs every other program now DRIVES the render pipeline. Returns (FrameState,
+  applied_stage_names).
+MEASURED: run_on_vm produces a frame BIT-IDENTICAL to the direct for-loop run() (np.array_equal on the image);
+the VM APPLY-ed all 7 preview stages in order; SVGF PSNR 28.3 either way. explain_program over the lowered
+program names the stage sequence -- so plan()->EXPLAIN (inspection, done earlier) + lower_to_program + run_on_vm
+(execution, now) close Phase 6 end to end.
+
+Kept honest: run_on_vm is not faster than the loop (it is the same stages plus a decode per instruction) -- the
+value is UNIFICATION (the pipeline is a program like any other, inspectable/EXPLAIN-able/composable), not speed.
+The APPLY decode is a cleanup-gated nearest-atom read, reliable here because ~9 stage atoms are near-orthogonal
+in 1024-d.
+
+Tests: run_on_vm bit-identical to run; lower_to_program is one vector whose EXPLAIN names the stages. Integration:
+the pipeline built from the render_pipeline faculty runs on the VM with the same result.
+
+RENDER PIPELINE STATUS: Phase 6 now complete (inspection + execution). The ONLY remaining deferred render item is
+Phase 3 -- materials/BRDF/texture convergence (MT1-4, ~20 modules, bit-exact) -- a large risky refactor that
+stays its own careful pass (rushing a bit-exact refactor across 20 modules is how a downstream tie flips).
+
+## Render Phase 3 (materials/BRDF convergence): probe-first audit + pinning harness + one real bit-exact merge (+10 tests)
+
+The last deferred render item. I did NOT rush the imagined 20-module refactor -- I probed first, and the probe
+changed the plan (the usual outcome):
+
+AUDIT (kept honest, and mostly a set of NON-findings):
+* BRDF is ALREADY canonical in holographic_brdf.py; raymarch DELEGATES to it (imports cook_torrance/fresnel), not
+  a copy. The other "shading refs" a grep flagged were FALSE POSITIVES -- a 'specular' word in a rayindex comment,
+  and FFT variables F0/F1 in dynamics (Fourier coefficients, not Fresnel F0). No rival inline BRDF to merge.
+* The 3 material classes serve DIFFERENT layers -- Material (core PBR sockets), PBRMaterial (asset I/O),
+  SurfaceMaterial (render: a Lambert+Blinn model, with adapters FROM the PBR side). SurfaceMaterial uses a
+  DIFFERENT shading model on purpose, so folding it into the GGX Cook-Torrance BRDF would CHANGE behaviour -- a
+  behaviour change, not a bit-exact refactor, and forcing it would be WRONG. Adapters (from_matlib/from_name)
+  already converge the types at the boundaries. So "unify the 4 material types" is largely not-a-refactor.
+So the honest outcome: the big risky refactor the backlog imagined mostly does not exist / should not be forced.
+
+DELIVERED INSTEAD (the disciplined groundwork + the one genuine merge):
+* BIT-EXACT PINNING HARNESS (test_material_pinning.py): locks the canonical BRDF's exact outputs (fresnel_schlick
+  scalar 0.07 + vector metal branch; fresnel_dielectric; cook_torrance dielectric AND metal, pinned to their full
+  float tuples) and the delegation STRUCTURE (raymarch imports the canonical BRDF and defines no rival; exactly
+  one def of each canonical function; SurfaceMaterial does NOT import cook_torrance -- the different-model audit,
+  mechanical). If a copy ever drifts back or a value changes, a pin fails loudly.
+* ONE GENUINE bit-exact merge: the metallic->F0 formula 0.04*(1-metallic)+base*metallic was inlined in THREE
+  places (cook_torrance, the sampler variant, and an inline COPY in raymarch:222). Extracted to one named helper
+  brdf.metallic_f0(base_color, metallic) -- readable (names the 0.04 dielectric constant, one home) -- and pointed
+  all three sites at it. VERIFIED BIT-EXACT: the cook_torrance value pins (0.20796842402070315..., 0.0627...) are
+  UNCHANGED, so every downstream shade is byte-identical; 66 shading/render tests green. metallic_f0 pinned:
+  metallic=0 -> 0.04 dielectric, =1 -> base metal, 0.6 -> [0.496,0.136,0.136].
+
+This is the bit-exact pinning discipline the project uses everywhere (the G1 SDF-normal pin, the reasoning-quantile
+pin) applied to shading. No tour block -- a bit-exact refactor is invisible to capabilities by design; the tour
+still runs green because the render path is byte-identical.
+
+RENDER PIPELINE: with Phase 6 done last pass and Phase 3 resolved here (audit + harness + the one real merge),
+there is no remaining risky materials refactor pending -- what the backlog imagined was mostly already done or not
+safe to force, and what WAS a real copy is now merged and pinned.
+
+## Physics backlog Part 3 #1: the SpectralField backbone -- advance is one bind, any t closed form (+10 tests)
+
+The keystone of the physics/FX backlog (Thesis A made concrete). A linear field IS a hypervector and advancing it
+is ONE bind -- a circular convolution, diagonal in the Fourier basis -- so we diagonalise once (the FFT) and any
+time t is a closed-form multiply by a per-frequency transfer. Every linear domain is then a DISPERSION RELATION
+on one backbone. holographic_spectralfield.py:
+
+* wavenumbers(shape, dx): the angular-|k| grids (N-D) via 2*pi*fftfreq.
+* SpectralField(field, velocity, order, rate|omega, dx). TWO regimes because the physics has two shapes:
+  - PARABOLIC (diffusion/heat/gas): u_t=-D|k|^2 u -> u_hat(t)=u_hat(0)*exp(rate*t). One complex multiply/freq.
+  - HYPERBOLIC (wave/EM/ocean): u_tt=-omega^2 u -> state (field,velocity), exact per-mode rotation
+    u(t)=u0 cos(wt)+v0 sin(wt)/w (sin(wt)/w via t*sinc(wt/pi), valid at w=0). Still one bind, still any-t.
+  advanced(t) closed-form jump; step(dt,steps); add_source=BUNDLE (sources add, no re-sim); steady_state = the
+  t->inf mean; trigger_mask(potential,threshold) = the calibrated emission/breaking-onset trigger.
+* poisson_solve: electrostatics as the CLOSED-FORM LIMIT -- phi_hat=source_hat/(eps0|k|^2), one spectral step.
+* factories, one dispersion each: diffusion_field (-D|k|^2), wave_field / em_field (c|k|), ocean_field
+  (sqrt(g|k|), Tessendorf dispersion) + phillips_spectrum (seeded, Hermitian-real sea state).
+
+MEASURED (the standing rule -- BEAT the grid baseline, keep the negative if it loses):
+* diffuse a Gaussian to t=20: SPECTRAL matches the analytic heat kernel to 1.1e-16 (machine precision) in ONE
+  eval; the grid diffuse_heat baseline (400 steps of dt=0.05) matches analytic to 1.1e-3. Spectral is exact and
+  cheaper -- a clean win.
+* closed-form advanced(t) == stepped step(dt)*N to <1e-8 for BOTH regimes (the 'any t in closed form' property).
+* a wave mode returns to itself after exactly T=2pi/(c|k|); superposition additive; ocean real+deterministic+
+  dispersive; Poisson extremum at the charge.
+
+KEPT NEGATIVES (loud): ONLY LINEAR operators diagonalise -- nonlinear (overturning wave, shock) stays a grid
+solver (Part 4 top rung, later). The spectral field assumes PERIODIC boundaries (the FFT world wraps); a hard
+wall needs the grid path or a reflection trick. Hyperbolic needs a (field, velocity) pair, not just a field.
+
+FACULTIES (default-off): spectral_field, spectral_diffusion, spectral_wave, spectral_ocean,
+electrostatic_potential. Integration: one backbone serves diffusion+wave+ocean+electrostatics through the mind.
+
+NEXT (Part 6 sequencing): wire remaining HAVE/PROMOTE dispersions; the FFT-ocean showpiece (ocean_field+phillips
+are already here -- add the tour showpiece + foam/spray triggers); wave-packet field (N8, a bundle of role-bound
+packets); the AdaptiveSolver (plan_waves, mirrors plan_render) -- the efficiency keystone; EM module; ice growth
+(= lightning branching); rung-4 grid solvers (barrel, snow-MPM) LAST and honestly.
+
+## Physics backlog N8/#4: the wave-packet field -- tricky waves as a bundle of role-bound packets (+9 tests)
+
+The plain FFT ocean is GLOBAL (every wave spans the domain), so it cannot reflect off a wall or bend around a
+rock. The wave-packet method (Jeschke & Wojtan) LOCALIZES the spectrum: the surface is many little Gaussian-
+enveloped wave trains, each living at a PLACE, so each can reflect / shoal / diffract. holographic_wavepacket.py:
+
+* WavePacketField(size, g, envelope, seed): packets as readable parallel arrays (pos, k, amp, phase).
+  - _omega(|k|, depth): deep water sqrt(g|k|), finite depth *tanh(|k|h) (shoaling).
+  - _group_speed = d omega/d|k| by central difference -- the ENERGY speed (half the phase speed for deep water),
+    which is what we advect (a packet's energy, not its crests).
+  - advance(dt, depth, obstacles): phase += omega*dt; pos += group_velocity along k-hat; SPECULAR reflection off
+    the domain walls and axis-aligned obstacle boxes (k' = k - 2(k.n)n).
+  - render(res): surface = sum of amp * gaussian_envelope * cos(k.(x-pos)+phase) -- the localized-spectrum height.
+* THE VSA FORM (N8): a packet IS a role-bound record -- bind(POS_X..PHASE, encode(value)) bundled; the surface IS
+  a bundle of those records, a content-addressable index (member cosine > stranger). packet_record / surface_bundle.
+
+MEASURED: a packet aimed at the far wall reflects (k mirrors, heads back); it moves at the group speed = exactly
+half the phase speed (deep water, to 1e-3); shallow water slows it (shoaling, cg_shallow < cg_deep); an obstacle
+box keeps packets out; the rendered surface is localized near the packet; the surface bundle is content-
+addressable (a member outscores a stranger); deterministic (seeded).
+
+KEPT NEGATIVES / honest scope (loud): the PHYSICS runs on plain NumPy arrays -- clearer and faster than
+unbinding/rebinding a record every step (the gratuitous-VSA-round-trip warning), so the record/bundle layer is
+the REPRESENTATION (content-addressable index), not the simulation loop. Reflection is specular off axis-aligned
+walls/boxes; a curved obstacle or full diffraction is an extension. This is the localized-spectrum RUNG; it does
+not overturn (that is the grid solver, Part-4 top rung).
+
+FACULTY (default-off): wave_packets. Integration: a packet reflects off a wall through the mind + the surface is
+a content-addressable bundle.
+
+Physics sequencing now: backbone (done) + wave packets (done, this) unblock the AdaptiveSolver (plan_waves,
+mirrors plan_render) -- the next item, the efficiency keystone that dispatches fft_ocean / wave_packets /
+shallow / free_surface per tile. Then EM module, ice growth (= lightning branching), rung-4 grid solvers last.
+
+## Physics backlog #5: the AdaptiveSolver (plan_waves) -- the ocean stack dispatched like the renderer (+7 tests)
+
+The efficiency keystone the backlog calls "what unlocks the full ocean stack, correctly." It mirrors plan_render
+EXACTLY: named break-evens at the top, a pure DECISION LAYER that returns a plan with a reason per choice, then a
+separate executor. holographic_waveadaptive.py:
+
+* plan_waves(height, depth, obstacles, tile): per tile, pick the wave method from the LOCAL regime and say WHY --
+  free_surface (breaking: local steepness > threshold), shallow_water (depth < threshold: shoaling/run-up),
+  wave_packets (obstacle within radius: reflection/diffraction), else fft_ocean (open water, cheapest). No
+  solving; inspectable before running (like plan_render/EXPLAIN). Tie-break FIXED & documented (breaking >
+  shallow > obstacle > open) so the plan is DETERMINISTIC -- the backlog's determinism rule.
+* plan_cost / method_counts / all_one_method_cost: the efficiency measurement (relative method cost weights).
+* solve_waves(plan, field, dt, methods, halo): execute -- run each tile's stepper on the tile+halo and OVERLAP-ADD
+  with a Hann partition-of-unity weight, so tile borders have NO seam. Steppers are pluggable.
+
+MEASURED: on an open sea with one breaking crest + a shallow shore strip + a rock, plan_waves assigns fft_ocean to
+the majority of tiles; the adaptive plan costs 181 vs 3200 to run the grid solver everywhere -- 94% CHEAPER. The
+tie-break is deterministic and breaking wins over shallow. solve_waves dispatches per tile (verified with tagging
+steppers) and blends a smooth field with a border jump < 0.2 (no hard seam).
+
+KEPT NEGATIVES (loud): the win is REAL BUT BOUNDED -- a sea breaking EVERYWHERE gets NO discount (measured:
+plan_cost == all-free_surface cost); adaptive dispatch makes the dear rung LOCAL, not free. And the free_surface
+(overturning-barrel GRID solver) is the deferred rung-4 item: plan_waves correctly IDENTIFIES where it's needed
+and runs the cheap methods everywhere else, but the actual breaking solver is NOT built -- the default
+free_surface stepper is an HONEST placeholder (steepness clamp), flagged loudly. The dispatch (the thing that
+"unlocks the stack") is complete and measured now; the grid solver itself is item 8.
+
+FACULTIES (default-off): plan_waves, solve_waves. Integration: the plan dispatches per tile through the mind, is
+far cheaper than all-grid, and solve_waves runs + blends it.
+
+Physics sequencing: backbone + wave packets + AdaptiveSolver now done (items 1,4,5). Remaining: EM module (#6,
+a SpectralField with c|k| + Lorentz), ice growth (#7, = lightning's diffusion-limited branching), and the rung-4
+GRID solvers (#8: the overturning barrel free-surface + snow-MPM) -- LAST and honestly, invoked THROUGH this
+AdaptiveSolver so they stay local.
+
+## Physics backlog #6: the EM module -- Maxwell FDTD + the Lorentz force (+8 tests)
+
+The spectral backbone already gave EM two thirds for free: em_field (wave propagation, omega=c|k|) and
+poisson_solve (the Coulomb/electrostatic limit). What was missing -- and what makes it electro-MAGNETISM -- is
+the E<->B COUPLING and the force on charges. holographic_em.py adds both, with the two classic readable schemes:
+
+* THE COUPLED MAXWELL SOLVER: Maxwell1D, a Yee-grid FDTD. Ez and Hy live on interleaved half-grids and update
+  each other (Faraday: dH from curl E; Ampere: dE from curl H). That mutual feedback IS electromagnetism: a pulse
+  propagates at c = 1/sqrt(mu*eps). default_dt = 0.5*dx/c (Courant 0.5); the CFL hard limit is dx/c.
+* THE LORENTZ FORCE F = q(E + v x B) + the BORIS pusher (boris_push / push_particle). Boris splits the step into
+  half-E-kick / EXACT-B-rotation / half-E-kick, so the magnetic rotation preserves |v| -- the integrator conserves
+  energy in a magnetic field, unlike naive Euler which spirals. exb_drift = (E x B)/|B|^2.
+
+MEASURED against known physics: F=q(E+vxB) exact; a charge in uniform B traces a CYCLOTRON circle (radius
+m v/(qB), omega_c=qB/m) with speed conserved to 1e-9 and returning after one period; crossed fields give the
+E x B DRIFT (avg vx 0.95 ~ E/B, charge-independent); the FDTD pulse front moves at c (verified for c=0.5 too);
+energy is BOUNDED below CFL and BLOWS UP (>100x) above it -- the classic FDTD stability rule, kept as a test.
+
+KEPT NEGATIVES (loud): the Maxwell FDTD is a genuine GRID solver -- the coupled first-order curl equations do NOT
+diagonalise into one bind the way a single wave component does, so it lives BESIDE the spectral backbone, not on
+it (the standing single-field-is-spectral / coupled-is-grid line). It is 1-D here (Ez, Hy); 2-D/3-D add the other
+components but no new ideas. The leapfrog energy oscillates ~few% at a single instant (E and H are staggered in
+TIME) -- so the honest test is STABILITY (bounded) + propagation-at-c + CFL, not machine-exact conservation.
+
+FACULTIES (default-off): lorentz_force, push_charge, maxwell_field. Integration: Lorentz force + a cyclotron
+orbit + a coupled Maxwell pulse through the mind.
+
+Physics sequencing: backbone + wave packets + AdaptiveSolver + EM now done (items 1,4,5,6). Remaining: ice growth
+(#7 = lightning's diffusion-limited branching, reuse grammar/flow/diffusion) and the rung-4 GRID solvers (#8: the
+overturning barrel free-surface + snow-MPM) -- last and honestly, invoked through the AdaptiveSolver.
+
+## Physics backlog #7: diffusion-limited branching -- ice dendrites AND lightning from one engine (+7 tests)
+
+N11's insight made real: ice/frost dendrites and lightning bolts are the SAME physics -- a cluster growing into
+the steepest gradient of a Laplace (diffusion) field, branching stochastically. The classic dielectric-breakdown
+model (Niemeyer-Pietronero-Wiesmann 1984; = diffusion-limited aggregation, Witten-Sander 1981).
+holographic_dendrite.py:
+
+* _relax_potential: solve Laplace's equation by Jacobi relaxation -- phi=0 on the cluster, phi=1 on the source
+  (the far boundary / ground it reaches toward), smooth average between. This IS the diffusion field's steady
+  state -- the same Laplace/Poisson the spectral backbone solves; for lightning phi is literally the electric
+  potential. Warm-started between growth steps.
+* DielectricBreakdown(shape, eta, seed): seed_point (a snowflake) / seed_line (frost on a window, or a cloud) +
+  set_source_border (radial, or 'bottom' for a bolt pulled to ground). grow(steps): the empty cells touching the
+  cluster grow with probability proportional to phi^eta -- growth RACES toward the steepest field. eta is THE
+  knob: ~0 bushy (Eden blob), 1 fractal dendrite, large stringy (a bolt). fractal_dimension via box counting.
+* ice_dendrite() and lightning() are the SAME engine -- only the seed and the source boundary differ (N11: build
+  once, get frost and bolts).
+
+MEASURED: phi obeys Laplace (0 on cluster, 1 on source, monotone between, steeper near the border); an ice
+dendrite grows a connected SPARSE FRACTAL (251 cells, box-dimension ~1.10, far more cells than a single line but
+nowhere near a filled disk); lightning (same code, seed the cloud + attract the ground) reaches depth 63; higher
+eta reaches deeper per cell (stringier); deterministic given the seed.
+
+KEPT NEGATIVES (loud): this is a LATTICE model on a plain NumPy grid -- it earns NO holographic form (growth is a
+discrete stochastic choice, not a bind; the memory's don't-over-holograph-a-grid rule). The fractal dimension is
+STOCHASTIC and eta/size-dependent, and with a border source at eta=1 the growth FINGERS (dimension ~1.1, like a
+real Lichtenberg figure) rather than the idealized isotropic-DLA ~1.7 -- so the test checks a fractal RANGE
+(sparse branching, not a line or a disk), not a fixed number. Anisotropy (six-fold snowflake symmetry) and surface
+tension are extensions. The Laplace solve is simple Jacobi (readable over fast).
+
+FACULTIES (default-off): grow_ice, grow_lightning, dielectric_breakdown. Integration: one engine makes both the
+ice dendrite and the lightning bolt through the mind.
+
+Physics sequencing: items 1,4,5,6,7 done (backbone, wave packets, AdaptiveSolver, EM, ice/lightning). ONLY the
+rung-4 GRID solvers remain (#8: the overturning-barrel free surface + snow-MPM) -- the research-heaviest, done
+last and honestly, invoked THROUGH the AdaptiveSolver so they stay local.
+
+## Physics backlog #8 (rung 4, part A): the OVERTURNING free surface -- the barrel a height field can't hold (+7 tests)
+
+The top rung of the adaptive ladder, and the honest reason it exists: every method below it stores the water as a
+HEIGHT FIELD h(x) -- one height per position, single-valued. A breaking wave's crest curls FORWARD over its own
+base, so above one x there are two surfaces (the falling jet, the wave face). A height field literally cannot
+express that; neither can a grid velocity field. Overturning needs PARTICLES. holographic_freesurface.py:
+
+* FreeSurface(g, ground, damping): surface particles (pos, vel) under gravity. advance() flies them ballistically
+  and rests them on the ground. is_overturning() = the surface FOLDED (a particle that started behind another
+  ended up ahead -- an order inversion). is_multivalued() = two sheets at one x. settle_height(bins) = collapse
+  the fold back to a single-valued height (the handoff back to the spectral field).
+* seed_breaking_crest(fs, crest_speed, phase_speed, ...): a PLUNGING BREAKER -- the crest tip thrown forward
+  faster than the wave travels (crest_speed > phase_speed IS the breaking condition: orbital velocity beats phase
+  velocity), so it outruns the base and plunges.
+* free_surface_step(region, dt): the AdaptiveSolver's REAL free_surface stepper -- seed particles from a steep
+  tile, fly one step, settle back to a height. This REPLACES the old steepness-clamp placeholder, closing the
+  loop between item #5 (the dispatch decides WHERE breaking happens) and item #8 (the grid rung that does it).
+
+MEASURED: a steep crest (orbital speed 8 > phase speed 3) OVERTURNS -- mid-plunge the surface folds into a
+multi-valued sheet (9 order inversions, 14 particles airborne over the wave face) that no height field can hold; a
+gentle crest (3.2 vs 3.0) stays single-valued; the jet settles back to a single-valued height for the handoff;
+free_surface_step runs on a tile; deterministic. The AdaptiveSolver's 6 tests stay green with the real solver
+wired in.
+
+KEPT NEGATIVES (loud, the VFX-vs-physics line): this is a BALLISTIC-particle model of the plunging crest -- the
+standard visual-effects approach -- NOT incompressible Navier-Stokes. Once airborne the jet IS in free fall, so
+ballistics is right for the throw and plunge; what it does NOT model is pressure/incompressibility and the
+turbulent whitewater AFTER impact. It captures the OVERTURNING TOPOLOGY (the multi-valued surface, the whole
+reason for this rung) and leaves post-impact mixing as the documented gap. A production FLIP/PIC/SPH/MPM with a
+pressure projection is the research-heavy extension; the AdaptiveSolver localizes WHEN this runs, not how hard the
+full version is to write.
+
+FACULTIES (default-off): free_surface, break_wave. Integration: the barrel overturns through the mind, a gentle
+wave doesn't, and the AdaptiveSolver's free_surface method is the real solver now.
+
+Physics sequencing: items 1,4,5,6,7 and 8A done. ONLY snow-MPM (8B) remains -- the Material Point Method
+(Stomakhin 2013), the last item: P2G -> grid update (gravity + elasto-plastic stress) -> G2P -> advect, with the
+same VFX-vs-physics honesty.
+
+## Physics backlog #8B (rung 4, part B, THE LAST ITEM): snow via MLS-MPM -- P2G/G2P ARE bundle/readout (+7 tests)
+
+The Material Point Method (Stomakhin 2013; compact MLS transfer, Hu 2018). Snow is elasto-PLASTIC: elastic up to a
+yield, then permanent (a snowball packs, a footprint stays). MPM carries a deformation gradient F per particle and
+clamps its singular values when it yields. holographic_mpm.py, MPMSnow: seed_block -> step (P2G -> grid update ->
+G2P -> advect + SVD plastic clamp).
+
+THINKING HOLOGRAPHICALLY (the ask, and it turned out to be REAL, not forced): MPM looks like a pure grid solver,
+but its transfer IS the engine's bundle/readout in a physics costume --
+* P2G (scatter each particle onto the grid through a kernel) is a SUPERPOSITION: grid_node = SUM_particles
+  weight*value. That is a BUNDLE of kernel-weighted, position-bound contributions -- the SAME operation as
+  splat_render ("a splat scene IS a bundle") and the RBF encoder (a bundle of encoded points = a KDE, Bochner).
+  VERIFIED, not asserted: the P2G mass grid EQUALS an independent bundle of kernel splats to 1e-9.
+* The quadratic B-spline weights are that kernel -- a partition of unity (sum to 1 = a normalized bundle), so the
+  bundle preserves total mass (verified).
+* G2P (gather back) is the READOUT -- query the bundle at the particle position. The P2G->G2P round-trip conserves
+  total momentum (verified) -- bundle->readout fidelity, "as above so below".
+* The node accumulation is a COMMUTATIVE MONOID (mass/momentum ADD) -- exactly what holographic_distribute
+  partitions and reassembles; P2G is RAID-style width.
+The GRID UPDATE (per-node corotated stress + SVD plastic clamp) is genuinely NOT holographic -- nonlinear local
+physics, plain NumPy, no bind (the don't-over-holograph-a-grid rule). So MPM is a HYBRID: a holographic transfer
+around a grid-native constitutive update -- and that hybrid is the honest picture.
+
+MEASURED: P2G == bundle of splats (1e-9) and conserves mass; P2G->G2P conserves momentum; a snow block FALLS under
+gravity (CoM 11.9 -> 1.3) then PILES and COMPRESSES plastically (top 16.0 -> 3.3, vertical extent 8.0 -> 2.3, no
+rebound) with mass conserved; deterministic.
+
+KEPT NEGATIVES (loud, VFX-vs-physics): readable 2-D demonstration. Constant Lame params (Stomakhin's
+hardening-by-compression exp(xi(1-Jp)) omitted for readability); explicit integration (CFL cap, no implicit
+solve); PIC-flavoured transfer (dissipative -- APIC/FLIP reduce that); 2-D. Production snow (hardening, implicit,
+3-D, sand/mud) is the research-heavy extension.
+
+FACULTIES (default-off): snow_mpm, simulate_snow. Integration: snow falls/compresses through the mind, and P2G is
+verified to be a bundle.
+
+*** THE PHYSICS & FX BACKLOG IS COMPLETE *** -- items 1 (SpectralField backbone), 4 (wave packets), 5
+(AdaptiveSolver dispatch), 6 (EM: Maxwell FDTD + Lorentz), 7 (ice/lightning diffusion-limited branching), 8A (the
+overturning free surface), 8B (snow-MPM). The through-line the whole backlog proved: LINEAR field physics IS VSA
+algebra (advance = a bind, superposition = a bundle) and even the hard GRID rungs are holographic where it counts
+(MPM's transfer is bundle/readout) and honestly grid-native where it isn't (the constitutive/coupled updates).
+
+## Generalize-on-contact: the shared SCATTER/GATHER primitive (the bundle/readout under every transfer) + pipeline update (+8 tests)
+
+Asked to apply the MPM insight (P2G is bundling, G2P is the readout) elsewhere. Probed the stack: the SAME
+local-kernel scatter/gather is written out by hand in >=3 modules, each with its own kernel --
+* holographic_fields.scatter_to_field / sample_field (BILINEAR, cloth<->fluid coupling; its docstring already
+  called scatter_to_field "the ADJOINT of sample_field"),
+* holographic_mpm P2G / G2P (quadratic B-SPLINE),
+* holographic_splat / holographic_kde (the same bundle with a GLOBAL Gaussian kernel).
+So it is the classic §5.1 case: extract ONCE, make the call sites thin. holographic_transfer.py:
+* scatter(points, values, shape, kernel, periodic) = the BUNDLE: grid_node = SUM_points weight*value (a
+  superposition of kernel-weighted, position-bound contributions). Deposit == bundle.
+* gather(field, points, kernel, periodic) = the READOUT: value = SUM_nodes weight*grid_node. Sample == readout.
+* Kernels: bilinear (2-node) and B-spline (3-node); general-D via itertools.product over the stencil; scalar or
+  vector (N,C) values.
+VERIFIED (not asserted): scatter/gather are ADJOINT (<scatter(v),f>=<v,gather(f)>) for both kernels; a
+partition-of-unity kernel preserves the total (a normalized bundle -> mass/momentum conservation); and this ONE
+primitive reproduces fields' bilinear scatter/gather to 1e-12 AND MPM's B-spline P2G to 1e-10 -- proof the fluid
+coupling and the material-point transfer are the SAME bundle/readout operation.
+
+MADE THE CALL SITES THIN: holographic_fields.scatter_to_field / sample_field now DELEGATE to the shared primitive
+(thin wrappers; the (x=col,y=row)->grid[y,x] convention handled by a coord swap). Regression: 70 fluid/cloth/
+softbody/MPM/transfer tests green -- no behavior change. MPM's P2G/G2P stay inline (their transfer is woven with
+the affine/stress term) but are verified identical; splat/kde are the same bundle with a GLOBAL kernel (documented,
+left in place -- a global kernel has a different cost structure than a 3-node stencil, the kept scope line).
+FACULTIES (default-off): scatter_to_grid, gather_from_grid.
+
+RENDER PIPELINE + DEFAULTS updated to reflect the new physics/FX (holographic_pipeline.py): the per-frame FX sims
+we built are now opt-in capabilities in the centralized PipelineConfig -- waves (the adaptive ocean/wave dispatch:
+fft ocean / packets / shallow / breaking) and granular (the MPM snow/sand/mud solver), each a flag + a phase-0
+sim stage, plus an ocean() preset (preview + waves). Defaults are CONSERVATIVE (waves/granular default False --
+backward-compatible, no existing pipeline changes), matching fluid/softbody. RenderSession defaults
+(256x256, spp 64, max_bounce 4) audited and left as-is (sensible). Pinned: defaults off + stages gate on their
+flags + build_pipeline selects sim_waves under ocean().
+
+KEPT NEGATIVES (loud): the shared primitive unifies the LOCAL compact-support transfers (bilinear, B-spline); the
+Gaussian splat/KDE are the same bundle at the GLOBAL end of the support spectrum, recognized but left in their own
+modules by design (different cost structure). EM and dendrite are NOT wired as pipeline sim stages (they are not
+per-frame scene FX the way waves/granular are) -- available as faculties, honestly out of the render pipeline.
+
+## Modeling-app backlog item 0: the canonical Scene document + stable handles + change notification (A+B+E) (+9 tests)
+
+Starting the modeling-app support backlog at its keystone (the backlog's own sequencing: do this before the
+feature layer or the features have nothing coherent to attach to). holographic_scene_doc.py, class Scene:
+
+* A. ONE mutable document owning the cross-cutting state -- objects (handle -> SceneObject record: name, transform,
+  geometry, material, tags, params), a hierarchy (handle -> parent map), cameras, lights, the current selection,
+  and the undo history. Every tool edits and every output reads this one document instead of the fragmented
+  RenderSession / scenegraph / anim / solver state.
+* B. STABLE handles -- THE fix. Object ids elsewhere are CONTENT hashes (great for dedup) but they CHANGE every
+  edit, so they dangle as handles (a selection/material/anim target pointing at the object breaks the moment you
+  move a vertex). Scene mints a PERMANENT random hypervector atom as the identity at creation (content-independent,
+  survives every edit) and keeps the content hash SEPARATELY, used only for dedup. Verified: editing geometry
+  changes _content_key but NOT the handle or handle_vector, so the selection still resolves.
+* E. Change NOTIFICATION -- on_change(callback) fired on every add/edit/remove/select/undo/redo, so a viewport or
+  property panel stays in sync for free.
+
+Because every mutation goes through add/edit/remove, UNDO is automatic: a thin snapshot-swap stack records a cheap
+before/after copy of the ONE affected record (O(one record), not the whole scene) and undo/redo swap between them.
+The snapshot copies the mutable fields (transform array + tags/params dicts) but keeps geometry/material by
+reference (replaced wholesale on edit) -- so big meshes aren't deep-copied. Identity atoms are never touched by
+restore, so a handle stays valid across undo/redo.
+
+MEASURED (selftest + 8 pytests + integration): add returns a stable handle and fires an event; an edit changes the
+content hash but not the handle/identity/selection (the B guarantee); all mutations fire change events; undo/redo
+restore state and preserve identity (edit reverts/re-applies, add-undo removes then redo re-adds with the same
+handle, remove-undo restores); hierarchy parenting works; content hash is deterministic and geometry-sensitive;
+identity atoms are deterministic by seed. FACULTY (default-off): new_scene.
+
+KEPT NEGATIVES (loud): the document-level undo snapshots the RECORD (transform + small dicts + geometry-by-
+reference); a geometry-heavy in-place edit would want holographic_scenedelta's O(change) geometry delta and
+holographic_history.VersionedStore for VSA-row versioning -- this snapshot stack composes with those but doesn't
+replace them. The hierarchy is a plain parent map (world-transform flattening still goes through
+scenegraph.flatten_scene). Selection is a plain set of handles here; a NAMED saved set of thousands should store an
+id list, not one giant bundle (the backlog's capacity ceiling) -- that's the feature-layer item, not this one.
+
+Next in the modeling-app backlog (per its sequencing): promote the recipe as the modifier stack + dep graph (C) +
+parameter introspection (D); then cancellation (F) + transform utilities (G) + the API facade (H); then the
+feature layer (selection/search/tagging riding the query layer, undo/redo stack, measurement/units, overrides,
+snapping, grouping/instancing, camera controller) and finally the Sampler.
+
+## Modeling-app backlog C+D: the modifier stack + dependency graph (O(change) re-eval) + parameter introspection (+9 tests)
+
+Promotion, not a build (the backlog's "biggest underused win"). recipe.StructureRecipe is already an ordered,
+non-destructive op sequence with stable handles; recipeops gives validate/reorder/substitute; dirtyfield is the
+O(change) idea. holographic_modifier.py carries that pattern to a modeling app's per-object modifier stack over
+ANY payload (mesh/field/vector) and adds the one thing a DEPENDENCY GRAPH needs that a plain recipe doesn't:
+O(change) re-evaluation.
+
+* ModifierStack(base): base + an ordered list of Modifier(handle, name, op, params, specs, muted). evaluate()
+  folds the ops over the base non-destructively (base never mutated). The op contract: op(payload, **params) ->
+  NEW payload (must not mutate its input) -- the non-destructive modifier convention.
+* O(CHANGE) RE-EVAL (the dependency graph): a `_dirty_from` frontier. Any change (set_param / set_muted / insert /
+  remove / move) moves the frontier to that index; evaluate() recomputes ONLY from the frontier down, reusing the
+  cached results above. Measured: on a 4-modifier stack, changing the 3rd modifier's param re-runs only 2 ops (not
+  4); changing the base modifier re-runs all 4. "Each modifier depends on the one before, recompute only
+  downstream" IS the dep graph -- dirtyfield's O(change) on a linear op chain.
+* Stable handles across reorder/insert/remove/mute (a panel or animation targets one modifier); mute skips a
+  modifier without removing it (no op call); validate() (well-formedness + declared param min/max).
+* Item D -- describe(handle) lists a modifier's params as a schema {name,type,value,default,min,max}; the standalone
+  describe_object(obj) does the same for a SceneObject's roles (name/material/tags/params). Introspection = list a
+  record's roles, the property panel's data.
+
+FACULTY (default-off): modifier_stack. Integration: a Scene object's geometry is produced by a stack; tweaking a
+modifier param re-evaluates O(change) (only 1 op) and writes back through scene.edit (firing a change event) with
+the object's stable handle unchanged -- C composed onto item 0.
+
+KEPT NEGATIVES (loud): the op contract requires PURE ops (return new, don't mutate) so the cache stays valid --
+stated, not enforced (a mutating op would corrupt the reuse; that's the standard modifier contract). The stack is
+a LINEAR chain (each modifier consumes the previous result), which is the common modifier-stack case; a general
+DAG of dependencies (one modifier feeding several) is the recipe's bind-tree, not this linear promotion. The base
+is shared by reference into the first cached stage; a base-mutating caller would break non-destructiveness (same
+pure-input contract).
+
+Modeling-app backlog progress: item 0 (canonical Scene + handles + events) and C+D (modifier stack + dep graph +
+introspection) done. Next per sequencing: cancellation (F) + transform utilities (G) + API facade (H), then the
+feature layer (selection/search/tagging on the query layer, undo/redo stack, measurement/units, overrides,
+snapping, grouping/instancing, camera controller) and the Sampler.
+
+## Modeling-app backlog F+G+H: cancellation + transform utilities + the API facade (the responsiveness & front-door tier) (+16 tests)
+
+Three small, high-leverage pieces that make leCore something you can BUILD AN APP ON.
+
+**G -- transform utilities (holographic_transform.py).** The engine had scattered transform bits (scenegraph,
+cosserat, splatexport) but not the full gizmo/property-panel kit in one place. Gathered the standard math, readable
+and well-commented: decompose(M) -> (translate, rotation-quaternion, scale) and compose_trs (the inverse) -- what a
+move/rotate/scale gizmo reads off a matrix; a quaternion kit (from/to matrix via Shepperd, from/to euler
+(R=Rz@Ry@Rx), from/to axis-angle, multiply, SLERP with shortest-path + lerp-fallback, rotate-a-vector); look_at
+(OpenGL view matrix, -z forward, matching the engine Camera). Conventions stated ONCE (column vectors, quat=(w,x,y,z)
+unit, euler XYZ, OpenGL look_at). Verified: decompose<->compose round-trips a T/R/S matrix; quats round-trip through
+matrix/euler/axis-angle; slerp hits endpoints, stays unit, halfway-in-angle at t=0.5, and takes the short arc even
+when a sign is flipped; look_at sends eye->origin and target->-z. NOT holographic -- plain linear algebra, kept a
+small utility (not dressed as a bind).
+
+**F -- cooperative cancellation (holographic_cancel.py).** Progress hooks existed but nothing could STOP a running
+render/sim. CancelToken: a minimal boolean flag with a cooperative check (should_stop() / callable / bool), reset for
+reuse; run_cancellable(iterable, token) wraps any step loop. Threaded should_stop into path_trace (checked BETWEEN
+passes -> returns the partial image; costs nothing per sample) and RenderSession.render_final (passthrough).
+Verified: a token cancels path_trace early with a valid partial image, and should_stop=None is BIT-IDENTICAL to
+omitting it (backward-compatible; 10 pathtrace/session tests green).
+
+**H -- the API facade (lecore.py).** One curated front door so a builder needn't know which of ~280 holographic_*
+modules to import: lecore.scene (Scene, SceneObject), lecore.model (ModifierStack, describe_object, SDF primitives,
+key mesh verbs), lecore.render (RenderSession, path_trace, CancelToken, PipelineConfig), lecore.sim (plan_waves,
+solve_waves, FreeSurface, MPMSnow, StableFluid, scatter/gather), lecore.transform (the whole G kit). Re-exports
+EXISTING names only (no new engine code); each module's docstring stays authoritative. areas() maps the surface.
+
+FACULTIES (default-off): look_at, decompose_transform, cancel_token. Integration: decompose a Scene object's T*R*S
+transform for a gizmo (recompose round-trips), a mind cancel_token stops cooperatively, look_at aims at the object
+-- G+F riding item 0.
+
+KEPT NEGATIVES (loud): decompose assumes NO shear (the T*R*S modeling-app case); a sheared matrix would need a
+polar/QR decomposition (noted, not handled). quat_to_euler pins roll to 0 at gimbal lock (pitch ~ +/-90) -- the
+standard ambiguity, made explicit. Cancellation is COOPERATIVE (checked between chunks), not preemptive -- a single
+uninterruptible chunk still runs to completion; the cadence is the chunk size. The facade is curation, not a
+sandbox -- it re-exports the real objects, so misuse of an underlying API still reaches the real code.
+
+Modeling-app backlog progress: item 0 (Scene+handles+events), C+D (modifier stack+dep graph+introspection), and
+F+G+H (cancellation+transforms+facade) done -- the whole FOUNDATION + responsiveness/front-door tiers. Next per
+sequencing: the FEATURE layer -- selection/search/tagging on the query layer, the undo/redo stack, measurement/units,
+render overrides, snapping, grouping/instancing, the camera controller -- and finally the Sampler.
+
+## Modeling-app feature layer (first tier): selection + search + tagging on the query layer (+8 tests)
+
+The backlog's "biggest organizational win per line," and the clearest demonstration of the reframe: the scene is a
+VSA table of object records, so the whole organizational layer is query/bundle/cleanup in a DCC costume, no new
+machinery. holographic_scene_query.py, on the canonical Scene document (item 0):
+
+* SELECTION = a query result (a set of handles). select(scene, name/name_contains/material/tag/has_tag/where) is
+  plain, readable, EXACT filtering over the stored records (fast, lossless). select_by_tag is a tag query.
+* SEARCH can be FUZZY: select_fuzzy(scene, role, value) rides holographic_query's Table -- ranks objects by how
+  well a property MEANS the value (cosine of the unbound filler to the probe) and returns [(handle, confidence)]
+  with the confidence SURFACED (a silent near-miss is a footgun). KEPT NEGATIVE: with random-atom fillers this is
+  exact-match-with-confidence; true 'metal'~'steel' nearness needs a meaning-bearing value encoder (separate).
+* SET ALGEBRA (Selection.union/intersect/minus/invert) is the algebra of selections -- "everything metal, minus
+  the front wheel" is one line. NAMED sets save membership as an ID LIST (exact, no capacity limit) -- NOT one
+  giant bundle (the decode ceiling). as_bundle() offers the holographic "selection as a hypervector" for the
+  vector-algebra case, with that ceiling noted (a member reads as present by high cosine).
+* TAGGING = a bound role written through scene.edit / the new scene.remove_tag, so tags are queryable AND get undo
+  + change events for free.
+
+MEASURED (selftest + 7 pytests + integration): exact select by material/tag/substring/predicate; set algebra
+composes (metal minus front-wheel = rear-wheel); named sets save + apply to the document's selection; fuzzy select
+ranks the metal parts with calibrated confidence in [0,1]; tag/untag write through the document (undo removes a
+tag, edit event fires); a member reads as present in the selection bundle; deterministic.
+
+FACULTIES (default-off): selection, select_objects. Also added Scene.remove_tag (edit only MERGES tags; this is the
+delete, with undo+notify). Integration: query metal -> save named set -> apply to selection -> fuzzy select with
+confidence -> tag + undo, one flow through the mind.
+
+Modeling-app backlog progress: foundation (item 0, C+D, F+G+H) + the first feature tier (selection/search/tagging)
+done. Next per sequencing: the undo/redo stack (a thin wrapper on the deltas the Scene already records), then
+measurement/units (quantities), render overrides (bound role with fallback), snapping (cleanup), grouping/
+instancing, the camera controller, and finally the Sampler.
+
+## Modeling-app feature layer: the undo/redo STACK -- grouped transactions, labels, history (+7 tests)
+
+The thin item the foundation set up: item 0's Scene already recorded a reversible before/after snapshot on every
+mutation, so undo was already there. This adds the user-facing STACK on top, entirely inside holographic_scene_doc.py
+(owned by the Scene, backward-compatible -- basic undo/redo behaviour unchanged, verified by the existing tests):
+
+* _UndoStep(label, changes): a step is now a LABEL + a batch of (handle, before, after) snapshots, applied together.
+  A single mutation is a one-change step; a transaction coalesces many mutations into ONE step.
+* TRANSACTIONS: begin_group(label)/end_group() and a `with scene.group(label):` context manager -- everything inside
+  becomes one undo step, so a drag or a multi-object tool is a SINGLE undo (not a hundred). Nesting commits once
+  (outermost label); an empty group records nothing.
+* LABELS + HISTORY: each mutation auto-labels ("Add wheel", "Edit body", "Remove ...", "Untag ..."); history() /
+  redo_history() give the Edit-menu / history-panel content; can_undo()/can_redo().
+* Depth cap (_max_undo, default 200): drop the oldest step past the cap. Redo invalidated by a fresh edit.
+
+undo()/redo() now apply a whole step (restore all before/after snapshots; reverse order on undo). Identity atoms are
+never touched, so handles stay valid across grouped undo/redo.
+
+MEASURED (selftest + 6 new pytests + integration): a group of 3 edits is one labelled step and one undo reverts all
+three (redo re-applies); history() lists the labels; nested groups commit once and one undo reverts both; the depth
+cap keeps only the most recent N; can_undo/can_redo track state and a fresh edit clears redo; an empty group adds
+nothing. Integration: select the metal parts, re-material the whole selection inside one transaction, a SINGLE undo
+reverts the batch (the untouched object unaffected) -- the stack riding the document + selection.
+
+KEPT NEGATIVES (loud): still a RECORD-level snapshot swap (transform + small dicts + geometry-by-reference), O(one
+record) per change -- a geometry-heavy in-place edit wants scenedelta's O(change) geometry delta; this composes with
+it, doesn't replace it. No automatic coalescing of separate consecutive edits (slider drag) -- use an explicit
+transaction, which is the robust, readable mechanism. The depth cap drops old steps silently (standard for an undo
+history).
+
+Modeling-app backlog progress: foundation (item 0, C+D, F+G+H) + feature layer so far (selection/search/tagging, the
+undo/redo stack). Next per sequencing: measurement + units (quantities), render overrides (bound role with
+fallback), snapping (cleanup), grouping/instancing, the camera controller, and finally the Sampler.
+
+## Modeling-app feature layer: measurement + units, from geometry (+8 tests)
+
+The measuring tool. holographic_metrology.py (named "metrology" because holographic_measure.py is already the
+statistical variance harness -- a name collision, unrelated). Two disciplines the backlog insists on, both honoured:
+measure from the ACTUAL geometry (never a lossy VSA readback), and return a DIMENSIONED quantity.
+
+* Every function walks the mesh vertices/faces directly and wraps the result in holographic_quantities.Quantity,
+  which carries the unit AND the 8-D dimension exponent vector: surface_area -> [m^2] (sum of triangle areas,
+  winding-independent), volume -> [m^3] (divergence theorem, (1/6)|sum v0.(v1 x v2)|), bounding_box (a BBox with
+  extents + diagonal as [m]), centroid (area-weighted), distance/edge_length -> [m], angle_at / dihedral_angle /
+  angle_between (radians, dimensionless), degrees() helper.
+* CONVERSION is one multiply (q.to("ft"), q.to("L")) -- from the Quantity type, no factor to fumble.
+* The DIMENSIONAL ALGEBRA refuses nonsense: adding a length to an area, or expressing a volume as an area, raises a
+  grammar error loudly -- so a measurement bug can't produce a silent meaningless number.
+
+MEASURED (selftest + 7 pytests + integration): a unit cube measures area 6 m^2, volume 1 m^3, bbox diagonal sqrt(3)
+m, centroid at the centre; 1 m^3 = 1000 L and a 1 m edge = 3.2808 ft by one multiply; area+area = 12 m^2 but
+area+length and volume.to("m2") both RAISE; a cube corner is a 90-degree right angle (angle_at and dihedral);
+deterministic.
+
+FACULTIES (default-off): measure_area, measure_volume, measure_bbox, measure_distance. Integration: a Scene object
+carries a real cube mesh; measuring it through the mind returns dimensioned area/volume/diagonal (convertible) and
+the dimensional algebra refuses area+length -- the measuring tool riding the Scene document.
+
+KEPT NEGATIVES (loud): areas and lengths are exact for the mesh as given (no assumptions); VOLUME assumes a CLOSED,
+consistently-wound surface -- on an open or inconsistently-wound mesh it is meaningless, flagged in the docstring
+not hidden. Angles are dimensionless radians (a radian is a ratio), returned as plain floats. The centroid is the
+SURFACE (area-weighted) centroid, not the solid centroid -- a deliberate, documented choice.
+
+Modeling-app backlog progress: foundation (item 0, C+D, F+G+H) + feature layer so far (selection/search/tagging, the
+undo/redo stack, measurement/units). Next per sequencing: render overrides (a bound role with fallback), snapping
+(cleanup), grouping/instancing, the camera controller, and finally the Sampler.
+
+## Modeling-app feature layer FINISHED: overrides, snapping, grouping/instancing, camera controller (+25 tests)
+
+The rest of the feature layer, each feature falling out of the VSA reframe, all riding the canonical Scene document.
+
+**Render overrides = a bound role with fallback (holographic_overrides.py).** A per-object render setting is a bound
+role on the record; resolving is bind-with-fallback: object override -> material override (if the material is a
+dict) -> scene default -> bare default. Only DELTAS are stored (a scene of thousands with two special objects costs
+two entries), everything else inherits. Added a first-class `overrides` dict to SceneObject (parallel to tags/params,
+merged by edit, snapshotted for undo) + Scene.clear_override (like remove_tag). resolve/set_override/clear_override/
+effective_settings/overridden_props. Faculties: resolve_override, set_override.
+
+**Snapping = cleanup (holographic_snap.py).** Snapping projects a dragged continuous position onto the nearest
+ALLOWED place -- grid node, vertex, edge point, angle increment -- exactly as cleanup projects a noisy vector onto
+the nearest atom, and with the same confidence gate: a TOLERANCE, so if nothing is close enough the point is left
+alone (index -1). snap_to_grid/snap_to_points(=cleanup)/snap_to_segment/snap_value/snap_angle + a Snapper (grid +
+vertices, vertex beats grid). Reads raw coordinates (honest, exact). Faculty: snapper.
+
+**Grouping = a bundle, instancing = a bind (holographic_grouping.py).** A group is a null parent owning its members
+(hierarchy), identity = a BUNDLE of member atoms (a member reads as present); ONE undo step; ungroup re-parents +
+drops the null. An instance SHARES one source geometry (read through the source handle) with its OWN transform -- the
+geometry is the shared filler, the transform the bound placement -- so editing the source updates all instances
+(nothing copied). group_objects/ungroup/group_members/group_bundle/instance/resolve_geometry/instances_of.
+Faculties: group_objects, instance.
+
+**Camera controller (holographic_camera.py).** Viewport navigation on the item-G transform utilities: orbit
+(turntable, distance-preserving, pole-clamped), pan (eye+target together), dolly (no target overshoot), zoom (scale
+radius), frame (fit a box's bounding sphere, distance = radius/sin(fov/2)), view_matrix (look_at) + to_camera.
+Faculty: camera_controller.
+
+MEASURED (4 selftests + 22 pytests + 3 integration): override fallback + delta-only storage + undoable clear +
+material tier; grid/point/segment/value/angle snap + tolerance-gated refusal + vertex-beats-grid; group-is-one-undo
++ bundle recognizes a member + instance shares+follows the source; orbit preserves distance & wraps at 360 +
+elevation clamp + pan/dolly/zoom/frame + view looks at target. Integration: override+snap, group+instance+source-edit,
+and camera-frames-a-measured-bbox, all through the mind.
+
+HIERARCHY REFACTOR (needed for undoable grouping): moved the parent from a separate scene.parent map ONTO the record
+(SceneObject.parent), so re-parenting is an ordinary snapshot-undoable edit; set_parent now records undo; added
+Scene.parent_of; children_of iterates objects. Backward-compatible (full suite green).
+
+BUG FIXED (caught only by running the FULL suite, per the run-the-whole-suite discipline): my physics-backbone
+`spectral_field` faculty (added in the physics backlog) COLLIDED with the pre-existing fractal-volume
+`spectral_field(shape, beta, seed)` -- the later def shadowed the earlier, breaking a fractal-volume integration
+test that I'd never re-run. Renamed the physics faculty to `spectral_pde` (no test/tour used it via the mind); the
+established fractal API keeps its name. Full suite now green.
+
+KEPT NEGATIVES (loud): overrides -- the material tier only applies when the material is a dict carrying overrides
+(a named-material registry would generalize it). Snapping reads raw coords (no VSA encoding) -- exact, the honest
+choice for something this precise. Instancing shares geometry only; per-instance material/transform are independent
+but a per-instance geometry TWEAK would break the share (by design -- that's a real copy). Camera orbit clamps
+elevation at +/-89 degrees (a turntable, not a free-fly 6-DOF camera -- a deliberate scope).
+
+Modeling-app backlog: the FOUNDATION (item 0, C+D, F+G+H) and the FEATURE LAYER (selection/search/tagging, undo/redo
+stack, measurement/units, render overrides, snapping, grouping/instancing, camera controller) are DONE. The only
+remaining item is the Sampler -- and the modeling-app backlog file has rotated out of uploads, so its exact spec
+needs re-confirming before building it (flagged to the user rather than guessed).
+
+## Modeling-app backlog CAPSTONE: the Sampler -- a placeable read-probe (+8 tests) -- BACKLOG COMPLETE
+
+The last item, and the clearest single example of the "think holographically" payoff: a brand-new, genuinely useful
+object that costs almost nothing because it's the READ-DUAL of a FieldEffect. holographic_sampler.py.
+
+A FieldEffect is a shaped, falloff-weighted WRITE to a field; a Sampler is the SAME shape + _falloff + attach
+pointed the other way -- a shaped, falloff-weighted READ from the scene. It's a Scene object (handle + transform +
+shape + mode + target), placed/moved/animated like anything else. Three modes, each reusing a piece already in the
+box: POINT (read the value at one spot), SURFACE (emit_from_surface points on a patch, read + weight each), VOLUME
+(fill the shape interior where sdf<0, read + weight + aggregate -- weighted mean = a bundle, sum = a MC integral).
+
+OVERLAP is the holographic move: when several objects cover the region, tag each sample by its owning object's
+STABLE HANDLE atom (near-orthonormal), scale the handle by that sample's contribution, and bundle -> ONE superposed
+readout that is SEPARABLE (an object's share = dot with its handle) and COLLAPSIBLE (total = sum of shares), with
+the dominant contributor a cleanup (argmax over the handle codebook). owners_from_sdfs builds the per-point owner
+labels (nearest object's SDF). place_sampler drops it into the Scene; sampler_triggers gives the threshold trigger.
+
+MEASURED (selftest + 7 pytests + integration): point reads the field at its spot; volume averages the interior (~0
+over a symmetric region, >0 shifted to the upper half); the labeled bundle separates two objects' shares by handle,
+names the dominant, and collapses to the total; placeable in the Scene; a trigger crosses a threshold; deterministic.
+Integration: two objects with SDF geometry, a volume sampler labeled by the Scene's OWN stable handle atoms
+(handle_vector, item 0/B) -- each contribution recovered by its handle, dominant a cleanup, plus a placed point probe.
+
+FACULTIES (default-off): sampler, place_sampler.
+
+KEPT NEGATIVES (loud): the labeled bundle here is the SCALAR-contribution form (contribution x handle, summed) --
+exact for near-orthonormal handles; a VECTOR-valued field read generalizes via bind(handle, value_vec) + unbind (the
+backlog's general form), not built. Volume fill is uniform random rejection-sampled inside the shape (Monte-Carlo),
+so the integral has MC variance ~1/sqrt(n) -- Poisson-disk / blue-noise (lowdiscrepancy) would lower it; the honest
+baseline is plain MC. owners_from_sdfs uses nearest-SDF ownership (argmin distance), which is the surface/inside
+heuristic, not a watertight CSG membership test.
+
+=== MODELING-APP SUPPORT BACKLOG COMPLETE ===
+The whole backlog is done: the ARCHITECTURE layer (item 0 canonical Scene + stable handles + change notification;
+C+D recipe = modifier stack + dependency graph + property introspection) and the FEATURE layer (cancellation,
+transform utilities, the API facade; selection/search/tagging; the undo/redo stack; measurement/units; render
+overrides; snapping; grouping/instancing; the camera controller) and the CAPSTONE Sampler. The compounding the
+backlog predicted held: the query layer gave selection+search+tag; the delta/snapshot store gave undo/redo; quantities
+gave units+measurement; bound-role-with-fallback gave overrides; cleanup gave snapping; the transform controller gave
+the camera; bundle/bind gave grouping/instancing; and the Sampler fell out as FieldEffect's read-dual. The app's spine
+is the VSA table + the recipe, not a dozen bespoke systems. Also this span: fixed the spectral_field faculty collision
+(-> spectral_pde), moved the hierarchy onto the record (undoable parenting), and added pyproject.toml so the README's
+pip extras work.
+
+## Inverse-rendering backlog STARTED: IR1 auto-bump -- image -> height -> normal map -> material channel (+9 tests)
+
+First item of the new inverse-rendering & auto-material backlog (saved into the tree as
+holostuff_inverse_rendering_backlog.md so it can't rotate out again). Re-audited the backlog's "already built"
+claims against CURRENT live code (probe-first): vision.to_gray/sobel/gradient, displace.bump_normals (the MESH
+path), the Material role-filler channel record (texture_field encodes a scalar UV channel), octnormal quantization,
+and fluid's FFT-Poisson project() (for IR7) all confirmed present. The genuinely-new code was small, as the audit
+said: an image->height ESTIMATOR (high-pass) + the 2D normal-from-height map + an honest confidence/abstain gate.
+
+holographic_autobump.py: grayscale -> HIGH-PASS (image minus a separable Gaussian blur, so a slow lighting/albedo
+ramp does NOT become a fake slope) = the height; normal_from_height = normalize(-s*dh/dx, -s*dh/dy, 1) (the standard
+grayscale-to-normal) -> a unit (H,W,3) tangent-space normal map; bump_confidence = std of the INTERIOR high-pass
+(border cropped to skip reflect-padding edge artifacts); auto_bump gates on it (abstain -> flat when too little
+detail); quantize_normals reuses octnormal; add_height_channel encodes the height into a Material height channel
+(which displace consumes for IR5). Faculty: auto_bump.
+
+MEASURED (selftest + 8 pytests + integration): a slow ramp's interior high-pass std ~0.002 (removed) vs a bumpy
+pattern ~0.18 (~16x) -> the ramp ABSTAINS, the bump gives unit normals that vary (relief) at confidence 0.18; flat
+height -> flat normals; packed RGB in [0,1]; octnormal round-trips to unit normals; the height wires into a Material
+and samples back; deterministic. Integration: auto-bump a bumpy albedo through the mind -> unit normal map, abstain
+on a flat image, wire the height into a Material carried by a Scene object.
+
+KEPT NEGATIVES (loud): luminance-as-height is a HEURISTIC, not a measurement -- baked directional light becomes fake
+grooves (a cast shadow = a crevice), albedo that isn't height becomes fake relief (a painted stripe = a ridge), a
+fundamental albedo/relief ambiguity no arithmetic resolves (that's IR2 light-aware + IR8 photometric stereo, both
+bounded). bump_confidence measures DETAIL PRESENCE, not relief-vs-albedo: it stops us inventing relief from a
+featureless image, it does NOT verify the detail is relief -- a busy printed poster WILL read as relief. A plausible
+perceptual bump, not a depth map; `strength` is a user knob, not an inferred scale. High-pass has reflect-padding
+border artifacts (why the confidence gate crops the border).
+
+Next per the backlog's §5 sequencing: IR7 (FFT height<->normal integration via fluid's FFT-Poisson solve --
+consistent + seamless-tileable, "do with IR1"), then ST1 (colour transfer, tiny), IR5 (displacement from a confident
+height), then the IR4 render->compare->adjust loop (the headline; needs a render-vs-target metric + a gradient-free
+loop on pipeline.py).
+
+## Inverse-rendering IR7: surface-from-gradient by FFT (Frankot-Chellappa) -- consistent, tileable height (+7 tests)
+
+The inverse of IR1's height->normal, done "with IR1" per the sequencing. holographic_surfaceint.py. Recover a
+single-valued CONSISTENT height from a (generally non-integrable) normal/gradient field. Frankot & Chellappa (1988):
+the least-squares integrable height is pure FFT -- one forward transform of the gradients, a per-frequency divide,
+one inverse (Z_hat = (-j*wx*P_hat - j*wy*Q_hat)/(wx^2+wy^2), DC=0) -- the same FFT-on-a-periodic-domain operator a
+bind and the fluid solver use. gradient_from_normals (p=-nx/nz, q=-ny/nz), height_from_gradient (the FC solve),
+height_from_normals (compose), consistent_normals (project a non-integrable map onto the nearest integrable one).
+Faculty: integrate_normals.
+
+MEASURED (selftest + 6 pytests + integration): recovers a known periodic height from its ANALYTIC gradient at
+correlation 1.0000 (<2% RMS) and from a NORMAL map at 0.99+ (finite-diff derivative, looser); gradient_from_normals
+matches np.gradient; the result is periodic so it TILES seamlessly (seam ~ interior scale); re-deriving normals from
+the integrated height reproduces the height (integrable); deterministic. Integration: auto-bump (IR1) -> normal map
+-> integrate (IR7) -> consistent tileable height, round-trips through the mind.
+
+KEPT NEGATIVE (loud): the periodic boundary is a SYSTEMATIC BIAS on a NON-periodic surface (opposite borders forced
+to agree -- the textbook FC artifact). For a tileable MATERIAL that periodicity is a FEATURE; for a bounded scene
+surface, prefer a DCT/DST variant (Simchony 1990) or a Poisson solve with the real boundary -- state the regime.
+The normal-map round-trip is slightly looser than the analytic one because IR1 uses a FINITE-DIFFERENCE derivative
+while the FC solver inverts the SPECTRAL derivative (a small operator mismatch, exact only for band-limited signals).
+
+Inverse-rendering progress: IR1 (auto-bump) + IR7 (FFT integration) done -- the auto-material front is consistent and
+tileable. Next per §5: ST1 (colour transfer, tiny -- match a reference image's mean/covariance, a postfx add), then
+IR5 (real displacement from a confident height via displace), then the headline IR4 render->compare->adjust loop
+(the real gaps: a render-vs-target metric + a gradient-free loop as Stages on pipeline.py).
+
+## Inverse-rendering ST1: colour transfer -- grade toward a reference's statistics (Reinhard 2001) (+7 tests)
+
+The easy, powerful grading win. holographic_colortransfer.py. Match a reference image's colour STATISTICS onto
+another image -- the "make this render feel like that sunset photo" knob. Pure statistics, no learned weights. Two
+modes: 'meanstd' (match each channel's mean+std -- simplest Reinhard, ignores cross-channel correlation) and
+'covariance' (match the full mean + 3x3 covariance by WHITENING the source and COLOURING by the reference -- the
+Monge-Kantorovich linear transfer, handles correlated grades like teal-orange). Matrix square roots via eigh of the
+(SPD) covariances, eigenvalue-clamped so a grayscale/degenerate covariance stays stable. strength in [0,1] blends
+original->transfer. Faculty: color_transfer.
+
+NAMING (the audit's §B collision, avoided): postfx.reinhard is the TONEMAP (HDR->LDR, x/(1+x)); this reference-based
+statistical transfer is a DIFFERENT function -- kept in its own module, slots into the postfx grade stage.
+
+MEASURED (selftest + 6 pytests + integration): covariance mode makes the output's mean AND full covariance match the
+reference (atol 1e-3 on cov); meanstd matches per-channel mean/std; strength=0 is the identity, 0.5 sits exactly
+between original and full; shape preserved; clips to [0,1]; a degenerate grayscale covariance stays finite;
+deterministic. Integration: grade a cool bluish render toward a warm reference through the mind -> takes the
+reference's mean/mood; no-op at strength 0.
+
+KEPT NEGATIVE (loud): GLOBAL statistics only -- it moves COLOUR, not content, and WASHES OUT when the palettes are
+very different (a linear map can't turn a green field into a red desert without destroying detail). Local /
+histogram-matching variants fix this at more cost.
+
+Inverse-rendering progress: IR1 (auto-bump) + IR7 (FFT integration) + ST1 (colour transfer) done. Next per §5: IR5
+(real displacement from a confident height -- small reuse of displace.displace_mesh, rides on IR1's height), then the
+headline IR4 render->compare->adjust loop (the real gaps: a render-vs-target metric -- SSIM-ish, vision has only the
+ingredients -- and a gradient-free optimise loop as Stages on pipeline.py).
+
+## Inverse-rendering IR5: displacement from a confident height -- bump -> real geometry, gated (+7 tests)
+
+Pure reuse of the shipped displace operator, gated on IR1's confidence. holographic_autodisplace.py. A bump map
+(IR1) only tilts SHADING normals -- the silhouette/grazing profile stay flat; IR5 promotes a HIGH-confidence height
+to REAL geometry by moving each vertex along its normal by amount*height(uv), via displace_mesh. Only genuinely-new
+code: the WIRING (a bilinear uv->height sampler; planar uvs for a mesh without any) + the CONFIDENCE GATE.
+displace_from_height (gated; abstain -> mesh unchanged), auto_displace (auto_bump -> displace if confident enough
+for geometry, a stricter threshold than a shading bump). Faculty: auto_displace.
+
+MEASURED (selftest + 6 pytests + integration): a confident bumpy height moves a flat grid's vertices into real
+relief (max z 0.30), the centre (high height) rising more than a corner (low) -- relief follows the height; a
+low-confidence height ABSTAINS and leaves the mesh flat (z all 0); bilinear samples the four corners + centre-mean
+correctly; auto_displace applies on a bumpy image, abstains on a flat one; deterministic. Integration: a Scene
+object's flat grid mesh auto-displaced from a bumpy albedo gains relief (stored back on the object), a flat albedo
+leaves it flat.
+
+KEPT NEGATIVE (loud): displacement is only as good as the height estimate -- it inherits ALL of IR1's ambiguities
+(a cast shadow becomes a REAL groove, a painted stripe a REAL ridge), and adds real geometry cost. It is gated
+HARDER than a shading bump precisely because the failure is worse when it moves vertices than when it only tilts a
+normal.
+
+Inverse-rendering progress: IR1 (auto-bump) + IR7 (FFT integration) + ST1 (colour transfer) + IR5 (displacement) done
+-- the whole auto-material track (bump, integrate, grade, displace) is up. Next per §5 is the HEADLINE: IR3 (the
+perception->scene-hypothesis bridge) -> IR4 (the analysis-by-synthesis render->compare->adjust loop). The real IR4
+gaps the audit named: a render-vs-target COMPARE METRIC (vision has histograms/edges but no SSIM-style image compare
+-- the ingredients, not the metric) + a GRADIENT-FREE optimise loop built as Stages on the shipped pipeline.py.
+
+## Inverse-rendering IR4 (part 1): perceptual render-vs-target compare metric (+8 tests)
+
+The first of IR4's two real gaps (the audit: vision has histograms/edges -- the ingredients -- but no image-compare
+metric). holographic_imagecompare.py. The analysis-by-synthesis loop needs a render-vs-target objective that is NOT
+raw pixel MSE (a one-pixel shift or a tiny exposure change wrecks MSE while the images look identical). So it is
+PERCEPTUAL, built from three shift/lighting-tolerant pieces: multi-scale SSIM (Wang 2004 -- local luminance/contrast/
+structure over Gaussian windows, reusing autobump.gaussian_blur), per-channel colour-histogram intersection (shift-
+invariant palette match), and normalized correlation of gradient-magnitude maps (edge alignment). Combined into
+perceptual_similarity in [0,1] and perceptual_distance = 1 - it (the loop's objective). Faculties: compare_images,
+image_distance.
+
+MEASURED (selftest + 7 pytests + integration): identical scenes score 1.000 (distance 0); a 2px shift of a scene
+stays perceptually similar (0.90) and ranks clearly above a different scene (0.81); on TEXTURED content a shift's MSE
+is ~88% of a different image's, so MSE is nearly blind to the shift-vs-different distinction the perceptual metric
+makes; a brightness offset barely moves SSIM (0.98, structure preserved); symmetric; components in range;
+deterministic. Integration: through the mind, a nudged scene ranks closer to the target than a clearly-different
+scene, and is a confident match (>0.85) -- the render-and-compare ranking the loop needs.
+
+KEPT NEGATIVE (loud): the ceiling is roughly SSIM-quality STRUCTURAL comparison, NOT a learned LPIPS-style perceptual
+loss (that needs trained weights the constitution bans). A good, deterministic render-and-compare objective, not
+human perception. Also: random scenes with the same sky gradient can be genuinely similar -- the metric was RIGHT to
+rank a too-similar "different" scene near a small shift (caught in the integration test; fixed by using a
+deterministically-different reddish scene). SSIM with a Gaussian window still degrades under a large shift; the
+colour term (fully shift-invariant) carries most of the small-shift robustness.
+
+Inverse-rendering progress: auto-material track done (IR1/IR7/ST1/IR5); IR4 part 1 (the compare metric) done. Next:
+IR4 part 2 -- the GRADIENT-FREE optimise loop (coordinate descent / sampled population) that adjusts camera + sun
+direction to MINIMIZE image_distance, gated by conformal accept/abstain, built as Stages on pipeline.py -- plus IR3
+(the perception->hypothesis warm-start). The measurable milestone is the SELF-RECOVERY test: render a known scene,
+recover its Camera + Light.direction within tolerance.
+
+## Inverse-rendering IR4 (part 2, THE HEADLINE): analysis-by-synthesis loop -- self-recovery (+7 tests)
+
+The auto-calibration loop, the backlog's headline. holographic_inverserender.py. Given a TARGET image, recover the
+scene parameters that reproduce it -- the CAMERA (turntable az/el/radius) and the SUN direction (az/el) -- by
+render -> compare -> adjust: render a hypothesis (shipped render_sdf, ao/shadows off = ~4ms/frame), compare with the
+IR4-part-1 perceptual distance (NOT MSE), adjust GRADIENT-FREE. Autodiff is banned (exactly why differentiable
+renderers can't be borrowed), so the optimizer is a readable COMPASS/PATTERN SEARCH (try each param +/- a step, move
+to the first improving neighbour, shrink the step when stuck). A conformal-style accept/abstain gate calibrates "what
+a good match looks like" on tiny perturbations of the truth and gates the recovered distance. Faculty: recover_scene.
+
+MEASURED (selftest + 6 pytests + integration): SELF-RECOVERY milestone -- render a known box, recover from a
+perturbed warm start: perceptual distance 0.412 -> 0.003 (99% down, ~97 evals, ~0.7s), camera az/el/radius recovered
+to |err| (0.00, 0.01, 0.00) and sun to (0.01, 0.00) -- essentially exact; the gate ACCEPTS the good match (threshold
+0.192) and ABSTAINS on an unmatchable target (a sphere the box hypothesis can't become, dist 0.227 > 0.192);
+deterministic. Integration: self-recovery through the mind, gate accepts, camera+sun within tolerance.
+
+KEPT NEGATIVES (loud): (1) gradient-free is COARSER and SLOWER than differentiable inverse rendering and leans on a
+decent WARM START (IR3's perception seed / analog recall) to land in the right basin -- from a wild init it can stall
+in a local minimum. (2) The objective ceiling is the perceptual metric's (SSIM-structural, not learned LPIPS). (3) It
+matches the VISIBLE FRAME; occluded geometry and absolute metric depth are not recoverable (IR6) -- it recovers the
+viewpoint and light, not the unseen back of the object.
+
+NOTE on pipeline.py: the backlog suggested building the loop as Stages on pipeline.py, but that Stage system orders a
+SINGLE render pass's G-buffer (needs/produces) -- an iterative optimize LOOP naturally wraps render passes rather than
+being one. Built the loop as a clean readable optimizer that drives the shipped renderer each step (the honest fit);
+render_params is effectively the "render stage" it calls. Kept the design note rather than forcing the loop into the
+Stage/G-buffer frame.
+
+Inverse-rendering progress: auto-material track (IR1/IR7/ST1/IR5) + IR4 (compare metric + the analysis-by-synthesis
+loop, self-recovery milestone MET) done. Remaining per §5: IR3 (perception->hypothesis warm-start: vision features ->
+semantic scene seeds + analog recall -- would replace the hand-perturbed init with a real warm start), IR12 (FSR1
+upscaler), IR10/IR13 (SVGF audit says already built; checkerboard), ST2/ST3 (example-based texture/super-res), IR11
+(3D splat-bundle archive), IR14 (render channels/AOVs = expose unbind), IR2/IR8/IR9 (light-aware/photometric/intrinsic,
+opt-in), IR6 (a boundary, not a build).
+
+## Full-suite run caught a PRE-EXISTING faculty collision: UnifiedMind.explain shadowed (fixed)
+
+Running the FULL suite (in shards, to fit the wall clock) after the inverse-rendering work surfaced ONE failure --
+not from this span's code, but a latent collision the per-turn testing never hit: UnifiedMind had TWO `def explain(`
+methods -- the established record-compare `explain(x1, x2)` (line 856, used by relations + unified tests to explain
+the difference between two records/entities) and a newer program dry-run `explain(machine, program_vec)` (line 6225,
+Query Interface Phase 7). Python keeps the LAST definition, so the program-explain SHADOWED the record-explain, and
+`m.explain("france","belgium")` was dispatching into the program path -> AttributeError ('dict'/'str' has no .run()).
+Three tests were silently red (relations + two in unified) and only turned up under the full suite -- exactly the
+spectral_field lesson again: per-turn new-code testing misses a shadow of an OLD faculty.
+
+FIX (backward-compatible): renamed the newer program dry-run to `explain_program` (matching its underlying
+holographic_query.explain_program), updated its 2 call sites (test_integration + tour). The established `explain(x1,x2)`
+is no longer shadowed. All three previously-red tests pass; the program-explain integration test passes with the new
+name. Not this span's regression, but found and fixed here.
+
+FULL SUITE after the fix: 2712 passed, 17 skipped, 0 failed (reconciles to the 2729 collected). Lesson reinforced:
+run the full suite when adding faculties -- a new (or newly-noticed) method can shadow an old one and only the whole
+suite reveals it.
+
+## Inverse-rendering IR3: perception -> hypothesis bridge -- analog-recall warm start for IR4 (+9 tests)
+
+The front-end that seeds the IR4 loop, closing analysis-by-synthesis end to end. holographic_perception.py. IR4 is
+gradient-free so it needs a decent warm start; IR3 reads it off the target image (probe-first confirmed the vision
+features exist: dominant_colours, hough_lines, to_gray; HoloForest.recall with_agreement for the sublinear recall).
+Pieces: scene_descriptor (unit-norm coarse luminance-layout grid + mean RGB -> HoloForest-indexable), 
+estimate_light_direction (COARSE sun from the brightness-weighted centroid -- bright region's x->azimuth, y->
+elevation), scene_hypothesis (archetype gist: palette + horizon row + sun), SceneLibrary (analog recall over a small
+exemplar library; warm_start returns the nearest scene's params + the forest's cross-tree AGREEMENT as an abstain
+signal). Faculties: scene_hypothesis, estimate_light_direction.
+
+MEASURED (selftest + 8 pytests + integration): descriptor unit-norm + deterministic; sun estimate points to the
+bright side (az 0.93 for a right blob; left<-0.2; top>bottom in elevation); horizon split found near the sky/ground
+boundary; analog recall finds the nearest library scene (agreement 1.00) and its params warm-start IR4 to distance
+0.002, recovering camera/light err (0.01, 0.03) FROM A PERCEIVED START -- no hand-perturbation; abstains on low
+agreement. Integration: full IR3->IR4 through the mind -- perceive (sun + analog warm start) then refine to recover
+the camera + sun from the image alone.
+
+KEPT NEGATIVES (loud): ARCHETYPE-level recall, not semantic segmentation -- works inside the library's vocabulary,
+ABSTAINS (low cross-tree agreement) rather than hallucinating outside it. The sun-from-luminance cue is COARSE (a
+bright albedo patch reads as 'sun this way'), a start for IR4 to refine, not a measurement.
+
+INVERSE-RENDERING BACKLOG -- scene-matching headline COMPLETE: IR3 (perception/warm-start) -> IR4 (compare metric +
+gradient-free loop, self-recovery). Auto-material track also complete (IR1/IR7/ST1/IR5). Remaining are the
+lower-priority / assembly items: IR14 (render channels = expose unbind), IR12 (FSR upscaler), IR13 (checkerboard),
+IR10 (SVGF -- audit says already built, verify), ST2/ST3 (example-based texture/super-res), IR11 (3D splat-bundle
+archive), IR2/IR8/IR9 (light-aware/photometric/intrinsic, opt-in), IR6 (a boundary, not a build).
+
+## Inverse-rendering IR14: render channels / AOVs -- a channel is an unbind (+7 tests)
+
+Mostly exposure, as the audit said. holographic_renderchannels.py. Selectable, separate render passes each with its
+own alpha, for compositing/science/debug; default (no selection) = the beauty pass, BIT-IDENTICAL to render_sdf. The
+holographic reading: a render channel IS AN UNBIND, the scene a bundle at every level -- so the data/object/material
+passes are a view over decompose the engine already runs. render_channels: DATA/G-buffer (depth/normal/position/mask
+from one shipped sphere_trace), OBJECT (Cryptomatte-style per-object coverage matte = nearest-object argmin at each
+hit). material_channels = material.channel() per name (the literal unbind). composites_to_beauty checks the
+compositor invariant. Faculty: render_channels.
+
+MEASURED (selftest + 6 pytests + integration): default is beauty-only, bit-identical to render_sdf; G-buffer passes
+valid (unit normals + positive depth at hits); per-object mattes composite back to the coverage EXACTLY (err 0.0) and
+are DISJOINT (no gaps, no double-count -- the Cryptomatte "passes must add up" invariant); material channels recover
+by unbind (cosine >0.4, crosstalk-carrying); selecting a subset returns only what's asked (opt-in per channel);
+deterministic. Integration: through the mind, beauty default bit-identical + two-object mattes composite back.
+
+KEPT NEGATIVES (loud): the LIGHTING passes (direct/indirect/diffuse/specular/GI/shadow) are the ONE genuinely-new bit
+and are NOT in v1 -- the path tracer averages over ALL paths, so splitting them needs trace-time accumulation of a
+labelled buffer per contribution, and summing them exactly to beauty needs care at the MIS/Russian-roulette
+boundaries (scoped out, named). material.channel() carries capacity CROSSTALK (fine for matte/debug, use
+material.sample for exact re-lighting values). N channels = N buffers -> opt-in per channel, never all-on. DEEP
+compositing (many depth samples/pixel) is out of scope for v1.
+
+Inverse-rendering progress: auto-material (IR1/IR7/ST1/IR5) + scene-matching headline (IR3->IR4) + IR14 (render
+channels) done. Remaining: IR12 (FSR upscaler), IR13 (checkerboard), IR10 (SVGF -- audit says already built as
+holographic_svgf.py, VERIFY), ST2/ST3 (example-based texture/super-res), IR11 (3D splat-bundle archive), IR2/IR8/IR9
+(opt-in), IR6 (a boundary, not a build).
+
+## Inverse-rendering IR10 (SVGF): VERIFIED ALREADY COMPLETE (probe-first, no new code)
+
+Probe-first audit per the backlog: IR10's SVGF 1-spp denoiser is holographic_svgf.py and is FULLY closed out --
+atrous_bilateral (feature-cosine edge-stopping bilateral over the a-trous hierarchy, the engine's-way SVGF: bind
+(normal, albedo, depth) per pixel, blend by cosine, RBF falloff = ScalarEncoder bump, dilation = multires pyramid),
+a test file (test_holographic_svgf.py, green), the svgf_denoise faculty on UnifiedMind (line 6269), and tour coverage.
+Selftest MEASURED: noisy 17.1 dB -> 41.2 dB, beating the edge-blind blur (19.0 dB); edge MSE 0.0001 vs blur 0.0572;
+deterministic. Its docstring already carries the probe-first note (siblings robust_accumulate/SPRTRecall/TemporalReuse/
+multires are shipped) and kept negatives (denoises, doesn't add detail; the bound-feature cosine must be MEASURED not
+assumed). No work needed -- documented as done, count unchanged. The audit's claim confirmed.
+
+## Inverse-rendering IR12: FSR1-style upscaler -- EASU + RCAS (+8 tests)
+
+Half already shipped, as the audit said. holographic_fsr.py. FSR1 = EASU (edge-adaptive upsampling) + RCAS (noise-
+aware sharpen). RCAS IS holographic_postfx.sharpen already (Van Cittert, kept-negative "stop at the noise floor" =
+RCAS's design goal) -- wired as the second pass, not rebuilt. The genuinely-new piece is EASU: a separable Lanczos-2
+upscale (Duchon 1979, FSR1's EASU base -- sharper than the plain bilinear postfx.resample it exists to beat) with an
+ANTI-RINGING clamp (each output bounded to its low-res 3x3 neighbourhood min/max, killing Lanczos overshoot exactly
+where gradients reverse = edges). lanczos_upscale, easu_upscale, fsr_upscale (easu -> sharpen). Faculty: upscale.
+
+MEASURED (selftest + 7 pytests + integration): on a 2x downscale->upscale round-trip, EASU beats bilinear on
+PSNR-to-native (20.52 vs 18.82 dB on a stripe/block image; 28.79 vs 28.70 on a smoother render) and on edge sharpness;
+anti-ringing holds it in [~0,1] (no overshoot); RCAS adds crispness over EASU; a flat image is preserved (partition of
+unity); deterministic. Integration: upscale a low-res render through the mind, EASU reconstructs the native render
+better than bilinear.
+
+KEPT NEGATIVES (loud): classical spatial upscaling is BELOW learned (DLSS/XeSS) -- it reconstructs, it cannot invent
+detail absent from the low-res input. EASU's artifacts get MULTIPLIED by the RCAS sharpen: on a SMOOTH render the
+sharpen OVERSHOOTS (fsr edge energy 0.0119 > native 0.0107, PSNR drops), so sharpness is a KNOB, not a free win --
+which is why the PSNR win is measured on EASU alone. This EASU is an honest Lanczos-with-anti-ringing in FSR1's class,
+not a byte-for-byte port of its 12-tap gradient-reversal kernel.
+
+Inverse-rendering progress: auto-material (IR1/IR7/ST1/IR5) + scene-matching (IR3->IR4) + IR14 (channels) + IR10 (SVGF,
+verified) + IR12 (FSR upscale) done. Remaining: IR13 (checkerboard render -- reconstruction = image masked-recovery,
+the "shade half" mode is the new bit), ST2/ST3 (example-based texture/super-res), IR11 (3D splat-bundle archive),
+IR2/IR8/IR9 (opt-in), IR6 (a boundary, not a build).
+
+## Inverse-rendering IR13: checkerboard/sparse rendering -- shade half, recover the rest (+8 tests)
+
+holographic_checkerboard.py. Shade only ~50% of pixels (a 2x2 checkerboard, parity flips per frame) and RECONSTRUCT
+the rest -- roughly halving shading cost for near-full-resolution. The holographic reading (Ozcan's seat): the
+unshaded pixels are "damage", reconstruction is recovery from a partial/masked measurement -- the archive's job in the
+pixel domain. Probe-first correction: holographic_image.reconstruct(mask=) is PLATE-specific (masks WHT/DCT
+measurements, not spatial pixels), so the checkerboard needs a SPATIAL fill -- and the 2x2 gem is that every unshaded
+pixel's four cross-neighbours are all shaded, so recovery is a clean cross-neighbour average (no iteration, no learned
+prior). checkerboard_mask, reconstruct_checkerboard (cross-neighbour fill, shaded pixels kept exact), render_checkerboard
+(traces ONLY the masked rays via the shared _shade_rays Lambert+sky -> real cost saving, then reconstructs). Faculty:
+render_checkerboard.
+
+MEASURED (selftest + 7 pytests + integration): mask shades 50%, parity flips it (m1 == ~m0); reconstructing from the
+checkerboard matches a full shade at 36.1 dB (>30), beating no-fill (15.5 dB) AND a matched-cost row-halved render
+(33.4 dB) -- the documented CBR advantage: spreading 50% of samples in 2D beats collapsing them in 1D; shaded pixels
+kept exact; render_checkerboard traces only the masked half and reconstructs to 36.1 dB; deterministic. Integration:
+through the mind, ~half the pixels shaded, reconstruction ~ full quality, shaded pixels exact.
+
+KEPT NEGATIVES (loud): reconstruction is a TRADE (better accuracy per render cost), NOT free -- it costs more than a
+plain lower-res render but reconstructs more accurately at matched cost. Under MOTION it can shimmer unless the
+temporal reprojection rejects disoccluded pixels by depth/motion (out of scope for this single-frame v1). Colour/
+visibility exist only at render-target resolution -> a reconstruction, not true supersampling.
+
+Inverse-rendering progress: auto-material (IR1/IR7/ST1/IR5) + scene-matching (IR3->IR4) + IR14 (channels) + IR10 (SVGF,
+verified) + IR12 (FSR) + IR13 (checkerboard) done. Remaining: ST2/ST3 (example-based texture/super-res), IR11 (3D
+splat-bundle archive), IR2/IR8/IR9 (opt-in light-aware/photometric/intrinsic), IR6 (a boundary, not a build).
+
+## Inverse-rendering IR11: 3D object archive -- recall the whole from a partial view (+8 tests)
+
+The honest answer to the back-of-the-object boundary. holographic_objectarchive.py. Store a library of COMPLETE 3D
+objects; from only a partial FRONT view, recall the nearest stored complete object by a view fingerprint and return
+the WHOLE thing (incl. the unobserved back), or ABSTAIN when nothing matches. Retrieval, not hallucination -- the
+engine's OLDEST move (cleanup/consolidation/resonator/analog), pointed at geometry: a scene is a bundle of splats as
+a memory is a bundle of role-bound vectors. object_fingerprint (coarse front-silhouette occupancy+depth grid, unit-
+norm -> HoloForest-indexable), front_points (camera-facing half), ObjectArchive (add/build/complete_from_front with a
+similarity-floor abstain), _chamfer. Faculty: complete_object.
+
+Probe-first note: the 2D splat/photo3d ship, but their WHT-plate masked recovery is for dense image plates, not point
+sets; the honest 3D completion is analog-recall retrieval (recall the stored whole whose front matches), which IS the
+"recover the whole from a partial measurement" move for geometry.
+
+MEASURED (selftest + 7 pytests + integration): from a NEW sphere instance's front half, recalled the whole sphere BY
+SHAPE (similarity 0.99, not memorized points -- a different instance), recovering the unobserved back to Chamfer 0.078
+vs the front-only baseline's 0.685 (9x closer); box/cylinder recall their own shape; abstained on a cone not in the
+library (similarity 0.73 < floor 0.85). Fingerprint unit-norm + stable with ~500 points (same-shape 0.99 vs
+different-shape 0.73, margin 0.26); deterministic. Integration: through the mind, recall + back-recovery + abstain.
+
+KEPT NEGATIVES (loud): COVERAGE-LIMITED -- completes only STORED objects; outside the library it ABSTAINS (honest
+output on an unseen shape is "front only", never an invented back); the win scales with library coverage -- retrieval,
+not hallucination. REGISTRATION is coarse (fingerprint gives the match + abstain gate; the IR4 loop refines pose); a
+wrong match must surface as LOW similarity and abstain, never a confident-wrong completion. Capacity is a dial not a
+wall (disjoint slots / tiling / importance-order escapes); inherits the splat archive's lossy/isotropic trade.
+
+Inverse-rendering: auto-material (IR1/IR7/ST1/IR5) + scene-matching (IR3->IR4) + IR14 (channels) + render-speed
+(IR10 SVGF verified, IR12 FSR, IR13 checkerboard) + IR11 (3D object archive) done. Remaining: ST2/ST3 (example-based
+texture/super-res -- patch search = HoloForest recall), IR2/IR8/IR9 (opt-in light-aware/photometric/intrinsic), IR6
+(a boundary, not a build).
+
+## Inverse-rendering ST2: example-based texture synthesis (Image Quilting) -- patch search = HoloForest recall (+7 tests)
+
+holographic_texturesynth.py. Grow a larger (optionally seamless) texture from a small sample -- material synthesis,
+feeding IR1 auto-bump with tileable maps. NO learned weights. Image Quilting (Efros & Freeman 2001): lay overlapping
+patches copied from the sample, choose each so its overlap with the placed patches MATCHES, then stitch along the
+least-error MIN-CUT seam so the joins vanish. Two pieces map onto shipped primitives: the patch search 'find a sample
+patch whose border matches this context' IS HoloForest.recall_k (the same 'find patches like this one' NLM uses -- used
+here to narrow candidates sublinearly, then exact overlap-SSD picks the winner), and the min-cut is a small DP.
+synthesize_texture (seam='mincut'|'hard'), find_similar_patches (the native patch search), min-cut vertical/horizontal.
+Faculty: synthesize_texture.
+
+MEASURED (selftest + 6 pytests + integration): quilted a 48x48 sample into 96x96 whose mean/std match (0.46/0.21 vs
+0.46/0.22); the min-cut seams LESS than a hard cut on the SAME patches (0.1131 vs 0.1137 -- small margin because it
+only reroutes the seams, but consistent, isolating the min-cut benefit); the native HoloForest patch search finds
+similar patches (top cosine 1.00); grayscale in -> grayscale out; deterministic. Integration: ST2 -> IR1 -- synthesize
+a larger texture, then auto-bump it into a valid normal map (the two threads compose).
+
+KEPT NEGATIVES (loud): patch-COPYING -- can repeat or seam (min-cut mitigates the seam; variety comes from picking
+among the near-best, not just the best). BELOW neural for arbitrary artistic styles (Image Analogies "gave poor
+synthesis" next to Gatys); best for TEXTURE/colour/material on a roughly-stationary sample, NOT a structured scene or
+free-form painterly restyle. The seam-energy metric measures TOTAL gradient (a varied quilt naturally has more than a
+single repeated patch) -- so the honest min-cut test is min-cut vs hard-cut on the SAME patch choices, not vs a naive
+single-patch tiling.
+
+Inverse-rendering: auto-material (IR1/IR7/ST1/IR5) + scene-matching (IR3->IR4) + IR14 (channels) + render-speed (IR10/
+IR12/IR13) + IR11 (object archive) + ST2 (texture synth) done. Remaining: ST3 (example-based super-res -- an image
+analogy / self-similar upsample, patch search again), IR2/IR8/IR9 (opt-in light-aware/photometric/intrinsic), IR6 (a
+boundary, not a build).
+
+## Inverse-rendering ST3: guided (joint-bilateral) super-resolution -- render small, upscale by the G-buffer (+5 tests)
+
+The render-speedup, reusing the shipped SVGF bilateral. holographic_superres.py. A cheap render shades COLOUR at low
+resolution, but the GEOMETRY (normal/depth G-buffer, which IR14 render_channels exposes) is available at FULL
+resolution because tracing it is cheap -- so coarsely upscale the low-res colour (easu), then edge-aware-filter it
+GUIDED by the full-res G-buffer via holographic_svgf.atrous_bilateral (with sigma_color set HIGH so the blurry colour
+doesn't drive the edges -- the GUIDE does). Colour edges snap to the geometry. guided_upsample. Faculty: guided_upsample.
+
+MEASURED (selftest + 4 pytests + integration): guided upsample of a 32x32 render, steered by the 64x64 G-buffer,
+reaches 38.28 dB to native vs a plain easu upscale's 30.46 dB (+7.8 dB) -- the geometry pulls the blurry colour edges
+back into place; normal-only guide works (albedo/depth default to it); in range; deterministic. Integration: through
+the mind, render channels (IR14) -> guided upsample (ST3) beats plain upscale.
+
+SCOPE DECISION (honest): the audit named two ST3 routes -- guided upsampling (built, the strong win) and self-similar/
+example SR. A first self-similar impl was SLOW (rebuilt a HoloForest per patch position, 61s) and its patch search was
+DECORATIVE (it borrowed each patch's own residual, not a matched patch's) -- so it was REMOVED rather than shipped
+muddled. The guide-free route composes ST2's shipped find_similar_patches (the same HoloForest patch search) rather
+than duplicating it; guided upsampling is this module's deliverable.
+
+KEPT NEGATIVES (loud): classical upsampling INVENTS PLAUSIBLE, NOT TRUE, detail and tops out BELOW learned SR -- it
+snaps/borrows structure, it does not recover information never sampled. Guided upsampling needs a CLEAN full-res guide
+(a noisy guide leaks into the colour); the G-buffer supplies a clean one.
+
+INVERSE-RENDERING BACKLOG -- genuinely-new items COMPLETE: auto-material (IR1/IR7/ST1/IR5), scene-matching (IR3->IR4),
+render channels (IR14), render-speed (IR10 SVGF verified, IR12 FSR, IR13 checkerboard), 3D object archive (IR11),
+style/texture (ST1/ST2/ST3). Remaining are the honestly-scoped OPT-IN items (IR2 light-aware height, IR8 photometric
+stereo, IR9 intrinsic/Retinex -- all lower priority, need multi-light or are ill-posed) and IR6 (a boundary, not a
+build). Good point to do the end-of-backlog full tour run.
+
+## Query layer Tier FIX (F1-F3): three measured bugs corrected (+7 tests)
+
+Query backlog Tier FIX -- the bugs an evaluator hits first. All three REPRODUCED before fixing (honest measurement),
+then fixed in holographic_query.py, then pinned. No new module/faculty -- internal engine correctness.
+
+- F1 unknown-column error: SELECT/WHERE/GROUP/aggregate/ORDER on a column the table never declared returned a
+  confident null ({'nope': None, '_confidence': 1.0}); now Query.run validates every referenced column against
+  table.roles and raises QueryError "column does not exist". Careful cases kept working: a DECLARED-but-absent column
+  (sparse row) still reads as None (not an error), and ORDER BY an AGGREGATE LABEL (e.g. COUNT(*)) is allowed (the
+  first fix was too strict and broke test_capability_registry_is_queryable -- caught by the existing suite, fixed).
+- F2 clean multi-predicate rejection: a WHERE with AND/OR let the single-predicate regex swallow "5 AND ..." into the
+  value and leaked a TypeError on the compare; now parse_sql detects AND/OR OUTSIDE quotes and raises a clear
+  "only one WHERE predicate is supported" (a legit value like 'black and white' is NOT misread -- quotes stripped
+  before the check). Superseded later by B3 (real predicate tree).
+- F3 LIMIT 0: run_sql did `if plan["limit"]:` so 0 (falsy) dropped the limit and returned all rows; now
+  `if plan["limit"] is not None:` -- LIMIT 0 returns no rows. (Query.run's own idx[:0] was already correct.)
+
+MEASURED: all three reproduced then fixed; 7 pinning tests; existing query/query_db/graphql suites green (31 passed).
+KEPT NEGATIVE: F2 is a clean REJECTION, not multi-predicate support -- that is B3. This is the FIRST item of the query
+backlog (FIX -> PROMOTE -> BUILD -> programs -> workspaces). Running BOTH the query and fluids backlogs before the
+next full tour (per the current instruction).
+
+## Query layer PROMOTE P1-P3: shipped faculties as query verbs (+8 tests)
+
+Query backlog PROMOTE tier -- the differentiated half is already built as faculties; the query layer just hadn't
+reached out and wired them in (query.py imported only the kernel -- confirmed). Three verbs added to
+holographic_query.py, operating on a Table (and proven through the Database front door):
+
+- P1 similar_to(table, target_row, k): whole-row "more like this" -- cosine of the WHOLE record vector (every column
+  at once, not per-column like pgvector), ranked with a per-row confidence. MEASURED: from a table of 3 cats/3 birds/
+  1 snake, similar_to a cat returns the 3 cats at confidence 1.00.
+- P2 cluster(table, into, seed): semantic GROUP BY -- cosine k-means (reuses organizer._cosine_kmeans) with per-
+  cluster COHERENCE (mean cosine to centroid) so a tight group is distinguishable from a loose one; empty clusters
+  dropped. MEASURED: the 3 identical meows form a coherence-1.00 cluster; the snake joins the looser one.
+- P3 anomalies(table, seed): calibrated "how weird" -- per row, RecallNull.pvalue that its NEAREST OTHER row is only
+  a noise-level match; high => no real neighbour => anomalous, and it can ABSTAIN (all scores tiny) instead of always
+  naming N outliers. MEASURED: the lone snake scores 0.78 (nn_sim 0.01 = noise), duplicated rows score 0.000; a
+  table where every row has a duplicate yields max score < 0.2 (nothing anomalous).
+
+Reuses cosine (P1), organizer._cosine_kmeans (P2), honesty.RecallNull (P3). No new module -- verbs on the query
+layer. 8 tests incl. a Database-front-door integration. KEPT NEGATIVE: P2 clustering is unsupervised (a suggestion,
+not a decree; `into` is a hint). Query backlog progress: FIX (F1-F3) done; PROMOTE P1-P3 done. Next PROMOTE: the
+history enabling wire + P7 (time-travel) / P9 (diff), then P4-P6.
+
+## Query layer PROMOTE P4-P6: fuzzy dedup, match explanation, recommendation (+7 tests)
+
+Rest of the "a row is a vector" promote family in holographic_query.py:
+- P4 near_duplicates(table, threshold): fuzzy dedup/entity resolution -- union-find over the >=threshold cosine pairs
+  of whole record vectors, returns duplicate GROUPS (size>1) with mean intra-similarity, tightest first. MEASURED:
+  the meow-trio and tweet-pair found (sim 1.00), the lone hiss excluded; all-distinct -> []. PROPOSES candidates, a
+  human/threshold confirms (kept negative).
+- P5 explain_match(table, a, b): WHY similar -- respects the EXACT/FUZZY FORK. A categorical (string) column is
+  compared on the vector side (unbind the role from both records, cosine the fillers -- the resonator's decompose as
+  interpretability); a NUMERIC column is compared on the exact stored side (numerics deliberately never enter the
+  record vector). PROBE-FIRST CATCH: first version unbound EVERY column and gave nonsense for numerics (legs=4 vs 4
+  read as noise, 0.0) -- fixed to honor the fork. MEASURED: cat vs 4-legged-tweeter -> drives=[legs] against=[sound]
+  (shares the numeric, differs on the categorical), distinct from cat-vs-bird (shares nothing).
+- P6 recommend(table, example_rows, k, exclude): "more like these" -- bundle the examples into one taste vector,
+  recall nearest by cosine, exclude the examples by default. MEASURED: recommending from a cat excludes the cats.
+
+Reuses cosine (P4/P6), unbind (P5), bundle (P6). Query backlog: FIX done; PROMOTE P1-P6 (the row-is-a-vector half)
+done. Next: the history enabling wire + P7-P12 (time-travel/diff/branch/audit) which share it.
+
+## Query layer PROMOTE P7-P12: the versioned table -- time-travel/diff/branch/audit (+9 tests)
+
+holographic_query_history.py -- the enabling wire the backlog calls for (do once, P7-P12 are thin verbs). VersionedTable
+wraps a UserTable; commit() snapshots BOTH halves of the fork -- record VECTORS into a VersionedStore (shipped, delta-
+compressed, exactly recoverable) and the exact stored ROW-DICTS per version. Reuses holographic_history.VersionedStore
+(commit/checkout/rollback), holographic_deltachain.merkle_root (proof), hashlib (row hashes). No new versioning engine.
+
+- P7 select_as_of(sql, version): checkout-then-query; SQL:2011 temporal tables are painful, this is one call.
+- P8 history_of(key_value, key): one row's timeline (blame).
+- P9 diff(va, vb, key): with a key -> exact added/removed/CHANGED; keyless -> multiset content diff (added/removed).
+- P10 revert(version): restore live table to a past version, RECORDED as a new commit (history never erased).
+- P11 branch(): fork an independent timeline sharing the past; diff against main, keep or discard. MERGE deliberately
+  not built (needs an explicit conflict policy -- kept negative).
+- P12 prove(version)/find_tampering(claimed, version): Merkle root over hashlib row hashes; locate the altered row in
+  O(n); a single change flips the root.
+
+MEASURED (selftest + 9 pytests): committed versions time-travel (v0=2 rows, v1=3); diff-by-key finds carol added +
+bob's balance changed 50->75; blame tracks bob 50->75; a tampered row located at index 0 and flips the root; a branch
+diverges (adds dave) without touching main; revert restores v0 as a new version; deterministic.
+
+KEPT NEGATIVES: rows matched by KEY when given one (positions shift on add/remove); keyless diff is added/removed only
+(a change = one removed + one added). Query backlog: FIX + PROMOTE P1-P12 done (the whole differentiated PROMOTE tier
+except P13). Next: P13 (verify sparse/no-migration works), then BUILD tier (JOIN/UPDATE/DELETE/multi-WHERE/PK-index).
+
+## Query PROMOTE P13: add-a-column-no-migration + sparse rows (+3 tests)
+
+Confirmed + made real. UserTable.add_column(name) appends a role (allocates its codebook vector) with NO re-encoding
+of existing records -- old rows stay sparse (never bound it -> read None), new rows may set it, and it becomes
+queryable. MEASURED: existing records bit-identical after add_column; old rows read None, new row's value queryable
+(WHERE age > 25 exact on stored). This is what "a record only holds the roles you bind" buys -- ALTER TABLE ADD COLUMN
+is free where SQL locks/rewrites. Completes the query PROMOTE tier (P1-P13). Next: BUILD tier (JOIN, UPDATE/DELETE,
+multi-predicate WHERE, PK index).
+
+## Query BUILD B3: multi-predicate WHERE (AND/OR/parentheses) via a predicate tree (+9 tests net)
+
+holographic_query.py. The parser now builds a WHERE predicate TREE instead of a single (col,op,val). A small readable
+recursive-descent parser (_tokenize_where + parse_where/_parse_or/_parse_and/_parse_factor) with the usual precedence
+(OR lowest, AND higher, parens highest); a single predicate is just a leaf, so the old behaviour is a special case.
+Query.where_tree(tree) + _leaf_mask (one predicate -> a row keep-set; exact on stored props, ~ fuzzy) + _eval_where
+(intersect/union the per-leaf masks). Operators widened to = > < >= <= != ~. F1 validation now walks _where_columns;
+fuzzy-default ranking via _tree_has_fuzzy.
+
+MEASURED: AND (cat,ant), OR (cat,crab,ant), parens override precedence, AND binds tighter than OR, >=/<=/!= work,
+single predicate still works, malformed/unbalanced raises, unknown column in a multi-predicate errors. SUPERSEDES F2
+(clean rejection): AND/OR now actually work -- updated the F2 test from "raises" to "works", and test_sql_parser_subset
+to expect the tree leaf ('pred','c','~','x'). Existing query/query_db/promote/history/graphql suites green (55 passed).
+
+KEPT NEGATIVE: readable recursive-descent, not a full SQL grammar (no BETWEEN/IN yet -- those are B9). Query backlog:
+FIX + PROMOTE (P1-P13) + BUILD B3 done. Next BUILD: B1 (JOIN), B2 (UPDATE/DELETE), B4 (PK index).
+
+## Query BUILD B1: JOIN -- exact hash-join + fuzzy/semantic join (+7 tests)
+
+holographic_query.py. join(left, right, on, how) -- exact HASH-JOIN: build a dict on the RIGHT key once (the hash
+side), probe per LEFT row -> O(n+m) not O(n*m). inner + left (null-fills the right on a miss). `on` is a shared key
+name or a (left_key, right_key) pair. Shared non-key column names disambiguated with suffixes; the join key appears
+once. _joined_row does the merge. MEASURED: users x orders -> alice x2/bob x1 (inner), carol null-filled (left),
+collisions suffixed v_l/v_r, different key names work, bad key errors.
+
+fuzzy_join(left, right, on, threshold, key_encoder) -- the SEMANTIC join SQL can't do. PROBE-FIRST CATCH: first version
+unbound each table's key filler, but the two tables have INDEPENDENT value vocabularies (different seeds) so identical
+string keys were orthogonal -> matched nothing. Fixed to encode both keys in a SHARED space. Default categorical
+encoder -> identical keys match (reduces to exact, the honest baseline); scalar_key_encoder(lo,hi) -> NUMERIC keys
+that are merely CLOSE match (a proximity join). MEASURED: categorical identical keys match at 1.00; numeric ts=10
+matches ts=11 (conf 0.91) but NOT ts=50/80 -- a genuine timestamp-window join. KEPT NEGATIVE: fuzzy join is
+APPROXIMATE and O(n*m); use the exact hash-join when keys are exact.
+
+Query backlog BUILD: B3 (multi-WHERE) + B1 (JOIN) done. Next: B2 (UPDATE/DELETE append+tombstone+compaction),
+B4 (PK/hash index for the O(n) scan).
+
+## Query BUILD B2: UPDATE/DELETE via append-only tombstone + compaction (+6 tests)
+
+holographic_query.py. A record is a bundle (a sum) -- you can't cleanly subtract one -- so writes are LSM/event-
+sourced. delete(table, where) tombstones matching rows (_deleted flag in the stored dict, NOT a role -> invisible to
+SELECT/validation); update(table, where, changes) tombstones the old version and APPENDS a new one; compact(table)
+replays live rows into a fresh table (reclaims the retired vectors' crosstalk). Query.run now skips tombstoned rows
+in every scan (idx excludes _deleted). _matching_indices(table, where) reuses parse_where + Query._eval_where (so
+delete/update accept the same AND/OR/parens WHERE as SELECT).
+
+MEASURED: delete crab (legs>6) -> scans skip it; update bird legs 2->3 -> new value queryable, old (legs=2) gone;
+raw rows grow (5: 4 orig + 1 new bird, 2 tombstoned) then compact -> 3 live rows; can delete an updated version.
+Existing query/query_db suites green (no regression from the _deleted skip).
+
+KEPT NEGATIVE: tombstones GROW the table until compact(); the retired rows' vectors carry crosstalk until GC (fine
+for exact reads, mildly degrades fuzzy recall between compactions). Query BUILD: B1/B2/B3 done. Next: B4 (PK/hash
+index for the measured O(n) scan).
+
+## Query BUILD B4: primary-key hash index -- O(1) pk lookup + a latent perf-bug fix (+6 tests)
+
+holographic_query.py. UserTable.set_primary_key(col) builds a dict {value: [row indices]}, maintained on insert;
+pk_lookup(value) returns live indices (skips tombstones) O(1). Query.run has a fast path: a single `pk = value`
+predicate reads the index directly instead of the O(n) scan (the measured bug). Stays in sync through insert/update/
+delete (update appends a new version -> the index points at the live one; delete tombstones -> lookup skips it); the
+replay model rebuilds it on load so it never drifts.
+
+PROBE-FIRST / MEASURED-HONESTLY CATCH (a real find): the first cut only got ~2x because run still scanned. Diagnosing
+by component (pk_lookup flat, parse flat, q.run O(n)) exposed a LATENT PERFORMANCE BUG affecting EVERY query: the row
+projection used table.rows[i].get(c, project(...)) and Python evaluates that project(...) DEFAULT EAGERLY even when the
+stored value exists -- and project() runs a cleanup over the value codebook, which grows O(distinct values). Fixed to
+only decode from the vector when the column is truly absent. Result: indexed lookup is now genuinely FLAT (0.009ms at
+2k AND 10k rows) vs the O(n) scan (0.38ms -> 1.81ms) -> 41x at 2k, 194x at 10k; and the fix sped up ALL queries (the
+scan itself roughly halved). Made sims lazy too (no [1.0]*n per query).
+
+All 80 query tests green (behavior preserved). This COMPLETES the query BUILD B-1 tier (B1 JOIN, B2 UPDATE/DELETE,
+B3 multi-WHERE, B4 PK index) -- the day-one relational gaps. KEPT NEGATIVE: the index is exact-key only; large VECTOR
+lookups would wire the shipped sublinear indexes (pivot/HoloForest) -- deferred. Next: B5 constraints / B6 transactions,
+or the PR (VSA-programs-as-DB-objects) / WS (workspaces) waves, then the fluids backlog.
+
+## Query BUILD B5+B6: constraints + single-writer transactions -- make writes safe (+13 tests)
+
+holographic_query.py -- the "make writes safe" tier.
+
+B5 constraints (enforced on insert, BEFORE any state change -> a violating row is refused and the table left
+unchanged): UserTable.not_null(*cols), unique(*cols), foreign_key(col, ref_table, ref_col), check(predicate, name);
+set_primary_key now also implies NOT NULL + UNIQUE. _enforce_constraints raises ConstraintError (a QueryError
+subclass). FK allows a None value (resolve-or-null soft opt-out); a non-None value must resolve to a live row in the
+referenced table. MEASURED: PK dup/null, non-pk UNIQUE, FK dangling, CHECK all refused with clear messages; valid
+inserts unaffected; a table with no constraints declared enforces nothing.
+
+B6 transactions (single-writer atomicity): transaction(*tables) context manager snapshots each table (records + rows
++ pk index) on entry; on ANY exception it rolls every table back to that snapshot; on clean exit it commits. Rollback
+(exception) aborts cleanly and is swallowed. MEASURED: a constraint violation mid-batch undoes the whole batch;
+explicit Rollback aborts with no escape; clean exit commits; the PK index is restored on rollback (a later insert of
+the rolled-back key is allowed); a multi-table txn rolls back ALL tables. Broad query regression green (56 passed).
+
+KEPT NEGATIVES: B6 is SINGLE-WRITER atomicity + rollback -- isolation between CONCURRENT writers is deferred (B8),
+which covers many workloads honestly without over-promising serialisable isolation. UNIQUE/FK checks scan live rows
+(O(n)); same order as the vstack insert, acceptable, and the PK path stays O(1) via its index. Query BUILD: B1-B6 done
+(day-one gaps + safe writes). Next: B7 durability / B8-B10, or the PR (programs) & WS (workspaces) waves, then fluids.
+
+## Query BUILD B9: SQL-surface fill-ins -- DISTINCT / OFFSET / HAVING / UNION (+9 tests)
+
+holographic_query.py. parse_sql extended: SELECT [DISTINCT] ... [HAVING agg op v] ... [LIMIT n] [OFFSET m]. Query got
+_distinct/_offset/_having + setters; a module _compare() comparator. run: OFFSET+LIMIT trim the index directly without
+DISTINCT (cheap), but with DISTINCT they apply to the DEDUPED rows (correct ordering). _run_aggregate applies HAVING
+(filter groups by an aggregate result) + OFFSET. run_sql handles UNION / UNION ALL by splitting on the keyword,
+running each SELECT via _run_single_select, and combining (any plain UNION dedupes the whole result; ALL keeps dupes).
+
+MEASURED: DISTINCT habitat -> [land, water]; multi-col DISTINCT -> 5 distinct (legs,habitat) pairs; ORDER+LIMIT+OFFSET
+skips then takes; OFFSET past the end -> []; GROUP BY ... HAVING COUNT(*)>=2 keeps both 3-groups, HAVING >1 excludes a
+group of 1; UNION dedupes (crab + land trio), UNION ALL keeps 6 with overlaps; DISTINCT+LIMIT limits the deduped rows.
+
+PROBE/DEBUG CATCH: an earlier ordering-fix str_replace had dropped run's projection+return block (run returned None);
+restored it. Full query regression green (93 + b9). HAVING is a single predicate (readable; multi-predicate HAVING is
+a noted limit). Query BUILD now B1-B6 + B9. Remaining: B7 (durability), B8 (concurrency), B10 (graph), then PR (VSA
+programs as DB objects) + WS (workspaces), then the fluids backlog.
+
+## Query PR1-PR6: VSA programs as installable, runnable database objects (+10 tests)
+
+holographic_query_programs.py -- pg_proc-style stored procedures where the "procedure" is a hypervector the VSA
+machine executes. Mostly PROMOTE (listing/explaining/running ship); only install + the execute bridge are new.
+ProgramCatalog(dim, seed, faculties): install(name, program, doc, inputs, outputs, allowed_handlers, tier) assembles
+the instruction list to a program vector (machine.assemble) and stores a bag-of-words DESCRIPTOR (shared word atoms)
++ the sandbox whitelist; uninstall refuses system programs. Verbs: catalog_table(mind) [PR1, a query Table of user
+programs + the mind's faculties via capability_registry, with a tier column], find(query_text) [PR4, bag-of-words
+cosine over docs -- semantic recall a SQL catalog can't do], explain(name) [PR3, handler-less dry run via
+explain_program], execute(name, accumulator, handlers, max_steps) [PR2/PR6, runs the program IN THE VECTOR DOMAIN
+over an accumulator; SANDBOX = only whitelisted handlers callable, APPLY to anything else is a safe no-op; step limit].
+encode_rows_accumulator bundles rows into the accumulator.
+
+MEASURED (selftest + 10 pytests): programs catalogued + tier-tagged; find('group a signal over time') -> cluster_series
+(not tagger), find('label this record') -> tagger; EXPLAIN names ['tag'] in 1 step; execute runs the tagger (output
+cosine 0.036 to input, unbinds back to input at >0.9 with a unitary tag); the sandbox refuses a non-whitelisted 'wipe'
+handler (accumulator unchanged, cosine >0.99); step limit bounds the trace; user programs uninstall, system refused;
+integration: the mind's catalog lists >50 system faculties. PROBE CATCH: first execute test used a non-unitary tag
+atom (unbind recovered only 0.70) -> switched to machine._atom(unitary=True) for a near-exact round-trip.
+
+KEPT NEGATIVES: results are on the FUZZY side (a program on decoded vectors carries readback error -> a confidence,
+can abstain); find-by-meaning is bag-of-words (keyword-semantic), not a learned embedding; system programs read-only.
+Query backlog: FIX + PROMOTE (P1-P13) + BUILD (B1-B6,B9) + PR (PR1-PR6) done. Remaining: WS (workspaces), B7/B8/B10,
+then the fluids backlog.
+
+## Query WS1-WS6: workspaces -- durable DB coexists with transient sessions (+9 tests)
+
+Three tiers so a persistent database and per-session 3D/sim scratch never wipe each other.
+WS1/WS2 in holographic_query.py (Database): each namespace carries a TIER (system read-only / persistent durable /
+workspace transient); add_namespace infers tier from writable (backward compatible), create_namespace(tier),
+drop_namespace (system protected), tier_of; to_state(tiers=[...]) saves only chosen tiers (persistent for the durable
+DB, workspace for one session).
+WS3-WS6 in holographic_workspace.py: Workspace (a ws:<name> namespace + scene/sim/render handles) and WorkspaceManager
+over a Database. new/switch/clear workspaces (clear drops only that namespace); reset_to_default drops ALL workspaces
+but KEEPS the persistent tier (the 'new session' button that does not destroy user data); export/import one workspace
+by replay (deterministic); combine_workspaces unions two workspaces with an EXPLICIT collision policy
+(error/suffix/left/right -- a merge needs a decision, not a guess).
+
+MEASURED (selftest + 9 pytests): persistent 'notes' survives reset_to_default and workspace clears; clearing
+workspace A leaves sibling B and the persistent DB intact (isolation); export->clear->import round-trips a workspace's
+rows; to_state tier-scoping returns exactly the requested tier's namespaces; combine refuses a clash by default,
+'suffix' keeps both (t_a/t_b), 'left' picks the left winner; system tier cannot be dropped or created into. No
+regression in query_db/query suites.
+
+KEPT NEGATIVE: reset keeps persistent + drops workspaces, but the SYSTEM tier is the mind's to re-publish (not
+fabricated here); combine defaults to 'error' so a merge is a deliberate choice.
+
+QUERY BACKLOG now: FIX + PROMOTE (P1-P13) + BUILD (B1-B6,B9) + PR (programs) + WS (workspaces) all done. Remaining
+query: B7 durability, B8 concurrency, B10 graph traversal (has the graph-memory recall-collapse caveat). Then the
+FLUIDS/MATTER/SCALE backlog. Full tour still parked until both backlogs are complete (user instruction this span).
+
+## Query BUILD B7+B8+B10: durability, concurrency, graph traversal -- QUERY BACKLOG COMPLETE (+17 tests)
+
+B7 durability (holographic_query_durable.py): snapshot + append-only redo journal on the replay spine. save_snapshot
+(to_state -> JSON, atomic write-then-rename + fsync, persistent tier by default), load_snapshot (from_state), Journal
+(log_insert/update/delete, each flushed+fsynced; entries/replay/truncate), recover(snapshot, journal) = load + replay.
+Also made from_state TIER-AWARE (restores workspace vs persistent per the saved tier). MEASURED: recover after a
+simulated crash yields snapshot rows + journalled insert + journalled update (apple qty 9, pear, plum); delete
+journalled + recovered; re-snapshot folds the log, truncate safe; no stray .tmp. KEPT NEGATIVE: a write must be
+journalled+flushed BEFORE the crash to survive (WAL durability bound); in-process, JSON not pickle.
+
+B8 concurrency (holographic_query_concurrency.py): single-writer / multi-reader. write_lock(table, blocking) = a
+threading.Lock per table (id-keyed), mutually exclusive (second non-blocking acquire refused while held). 
+snapshot_reader(table) = a cheap point-in-time COPY (rows+records+pk index) that run_sql queries unchanged, isolated
+from later writes. MEASURED: lock exclusive + frees on release; snapshot froze at 1 row while live grew to 2; two
+threaded writers under the lock landed all 10 inserts, none lost (test miscount fixed 12->11). KEPT NEGATIVE:
+SINGLE-writer serialised (not multi-writer serialisable); snapshot is a copy (memory, stable read); in-process lock.
+
+B10 graph traversal (holographic_query_graph.py): descendants/ancestors/shortest_path/reachable over EXACT adjacency
+built from an edge table (build_adjacency, BFS). DELIBERATE: exact adjacency NOT holographic graph memory, because the
+holographic graph recall COLLAPSES at scale (kept negative) -- the store owns the edge DATA, traversal is a correct
+plain walk. Skips tombstoned edges. MEASURED: org-chart descendants/ancestors, shortest ceo->eng3=[ceo,vp2,eng3],
+cross-branch None, directional reachability, deleting ceo->vp2 unhooks eng3, cycle terminates (excludes start).
+
+QUERY BACKLOG COMPLETE: FIX (F1-F3) + PROMOTE (P1-P13) + BUILD (B1-B10) + PR (programs) + WS (workspaces). Next: the
+FLUIDS/MATTER/SCALE backlog (mind faculties + tour blocks), THEN the full suite + full tour (user's deferred
+end-of-both-backlogs checkpoint).
+
+## Fluids/matter item 1: SMOKE PRESETS -- six named looks over the wired solver (+9 tests)
+
+FLUIDS/MATTER/SCALE BACKLOG STARTED. Probe-first confirmed the substrate is live: advect_field/diffuse_field/
+buoyancy_force/fluid_step/smoke_step/scatter_to_field on UnifiedMind; fluid/fields/automaton/emitter/volint/iterate/
+compile/fuse/prt/sdfbake/surface/procgen/scene_doc/distribute modules all present. So smoke needs NO solver -- only
+looks. holographic_smokepresets.py: SMOKE_PRESETS (rising/wispy/billow/heavy/still_room/stratified) = dial bundles
+(buoyancy/confinement/viscosity/gravity/ambient + source kind) over fields.smoke_step; simulate() runs it (brief
+source injection then evolve); plume_center_of_mass, render (volint is the full volumetric path). Faculty: smoke_preset
+/ smoke_preset_names on UnifiedMind (delegates).
+
+PROBE/MEASURE CATCH: buoyancy convention is +row = up (a hot central puff COM 0.5->0.57, a heavy one ->0.46); base
+sources with continuous injection pinned COM at the source, hiding dynamics -> switched to brief injection + a
+controlled central-puff physics check (_buoyant_vs_heavy) so the dial is validated independent of source placement.
+MEASURED: six presets give distinct COMs (rising 0.10, wispy 0.08, billow 0.11, heavy 0.23, still_room 0.50,
+stratified 0.06 -- 4+ distinct); still puff hangs mid; buoyancy rises above centre, gravity sinks below. Integration
+test (test_integration.py): smoke_preset -> sample_field reads the plume density > an empty corner (matter proved
+through the sampler). Tour block added (verified isolation; tour parses/compiles; NOT run per user's both-backlogs-
+first instruction).
+
+KEPT NEGATIVE: 2-D looks on a modest grid; any solver limitation (coarse grid smears fine curl) is INHERITED not
+introduced; presets add zero physics, only dials. Next fluids items: Mixture + matter_step (dye/milk), then drift
+(salt fingering), double_well (oil&water), ScatterLayer/ScaleNode, then the compile/bake performance half.
+
+## Fluids/matter item 2: Mixture + matter_step -- the multi-channel matter model (+8 tests)
+
+holographic_mixture.py. The thesis made concrete: smoke/dye-milk/salt-fingering/oil-water are ONE advected-field model
+with three dials, not four solvers. Mixture(shape, solvent_density, buoyancy, tension): channels (name->concentration
+field, a volume fraction) + comp (name->Component(density, diffusivity)) + temperature. density() = solvent + sum
+phi*(comp.density-solvent) = the fraction-weighted BUNDLE. renormalise() keeps a valid partition (clamp >=0, scale
+back where sum>1). matter_step(mix, vx, vy, dt, drift_strength): blend density -> buoyancy_force -> ONE fluid_step ->
+per-channel advect + diffuse (+ optional _double_well when tension>0, + optional _drift) -> renormalise. DELEGATES to
+wired advect/diffuse/buoyancy_force/fluid_step -- NO second solver. drift (item 3) + double_well (item 4) wired as
+OPTIONAL hooks in the loop so they slot in with no rewrite. Faculties: make_mixture, matter_step on UnifiedMind.
+
+MEASURED: two dye channels advect + diffuse on one shared flow (red spread 5.66->5.77), mass conserved within 15%
+(diffusion conserves on the torus), density blend reads heavy-dye 1.19 vs light-dye 0.81 (solvent 1.0); per-channel
+diffusivity differs (fast spreads more than slow -- the salt-fingering precondition); renormalise caps overfilled
+cells; deterministic. Integration test: make_mixture -> matter_step -> sample_field reads heavy region denser than
+light (matter through the same sampler as smoke). Tour block added (verified isolation; tour parses/compiles; not run).
+
+KEPT NEGATIVE: miscible mixing is native/cheap; the SHARP immiscible interface is item 4's diffuse-interface trade
+(finite width). Next: drift (salt fingering + settling, item 3), then double_well tension (oil & water, item 4).
+
+## Fluids/matter item 3: drift -- settling/separation, and the density-buoyancy fix (+8 tests)
+
+holographic_mixture.py. drift (first of the two new physics terms): a channel heavier than the LOCAL blend sinks
+relative to it (lighter rises), applied as an extra VERTICAL advection by a settling velocity ~ (comp_density - rho).
+matter_step's drift hook (shipped off in item 2) now real, exposed via matter_step(drift_strength=...) on the mind.
+MEASURED vs a proper drift-OFF baseline: heavy dye (rho 3.0) sinks COM 24.0->22.1 with drift, 24.0->24.0 without;
+light dye (rho 0.2) rises 24.0->24.8; stronger drift settles more; two co-located channels separate (heavy below
+light -- the immiscible precursor).
+
+REAL BUG FIXED (probe/measure discipline): buoyancy_force couples DENSITY through alpha, TEMPERATURE through beta;
+matter_step passed only beta, so the blended density had NEVER driven convection (vertical KE was 0). Fixed to pass
+alpha=mix.buoyancy -> a heavy band now creates flow (KE 0 -> 125). Item 2 tests unaffected (they used buoyancy=0).
+
+KEPT NEGATIVE (loud): settling + density-buoyancy are clean wins with baselines; resolving DISTINCT salt FINGERS is
+NOT -- it is dominated by bulk overturning at this grid/time. The fingering ingredients (differential diffusion +
+drift + density buoyancy) are all present and run finite, but the fine-scale instability needs a finer grid and
+Rayleigh tuning a fast interactive demo doesn't give. Not claimed as a win. Next: double_well tension (oil & water,
+item 4, the miscible<->immiscible dial), then ScatterLayer + ScaleNode, then the performance half.
+
+## Fluids/matter item 4: double_well tension -- oil & water, the miscible<->immiscible dial (+8 tests)
+
+holographic_mixture.py. The SECOND new term, closing the dial table. _double_well(phi)=phi(1-phi)(1-2phi) -- FIXED
+the shipped phi^3-phi (wells at +/-1) to wells at 0 and 1 for [0,1] volume fractions. matter_step's tension term
+rewritten as clean Allen-Cahn sharpening: phi += dt*tension*(-W'(phi) + 0.5*laplacian) -- the double-well pulls each
+cell toward a phase, the diffusion sets interface width, tension scales separation strength. FIXED the shipped form
+(dw/tension - tension*diffuse) which had HIGH tension -> MORE blending (inverted from the dial). Now high tension ->
+sharp. Tension is a Mixture ctor param (already wired); no new faculty.
+
+MEASURED: a fully-blended 0->1 ramp (committed fraction 0.65) sharpens to 0.94 committed under tension 2.0 but stays
+0.65 under tension 0 (the miscible<->immiscible switch); more tension sharpens more; W'(0.3)>0 / W'(0.7)<0 / wells at
+0,1 fixed; oil-in-water separates (>0.7 committed) and stays finite. Integration test: oil/water separate with tension,
+blend without, through the mind. Items 2/3 regression green (tension path only active when tension>0).
+
+DIAL TABLE NOW COMPLETE: one advected-field model spans smoke (1ch, tension 0), dye/milk (Nch, tension 0), settling/
+fingering (drift), oil&water (tension high) -- no new solver, just knobs. KEPT NEGATIVE (loud, from Cahn-Hilliard/
+Allen-Cahn literature): diffuse-interface model -> interface is a few cells wide, never a perfect step; plain CH
+shrinks tiny droplets (a conservative variant needed when oil volume must stay put). Next fluids items: ScatterLayer
+(surface geometry emission) + ScaleNode (cosmic recursive rollup), then the performance half (MC1-3, PW1-4).
+
+## Fluids/matter item 5: ScatterLayer + ScaleNode -- surface scatter & cosmic rollup (+14 tests)
+
+Two reuse-first faculties completing the CONTENT half of the fluids backlog.
+
+holographic_scatterlayer.py: ScatterLayer(instance, count, scale, density, cell_size, seed) emits GEOMETRY onto ANY
+surface (not just terrain) by reusing emit_from_surface -- points projected onto the SDF zero-set, importance-sampled
+by an optional density map. Each placement = bind(instance, cell_code) (deterministic hashlib cell hash), the whole
+layer = a bundle -> region-queryable via recall_region (unbind the cell code). Faculty: scatter_surface on the mind.
+MEASURED: 60 grass instances land ON a sphere AND a box (|sdf|<0.05), unit normals; a top-hemisphere density map puts
+>90% up top; near cell reads above far. PROBE CATCH: SDF objects aren't callable -> use .eval; region query is
+crosstalk-limited (~1/sqrt(N)) so threshold set honestly (near>far, not near>0.1) -- KEPT NEGATIVE: dense scatter
+needs the bake+LOD path.
+
+holographic_scalenode.py: ScaleNode(scene, lod_px) -- 'a parent carries the accumulated value of its children' = the
+MONOID. summary(handle) rolls a subtree up (mass SUM, look BUNDLE, leaf count) -- the same reducers
+distribute_compute(reduce='sum'/'bundle') uses; draw(handle, apparent_px) returns the summary when small (below LOD)
+or descends when big. Faculty: scale_node on the mind. PROBE CATCH: distribute_compute buckets must be iterables with
+a worker(bucket, cache) -- it parallelises heavy work, not a scalar reduce; forcing every sum through it was contrived
++ unreadable, so ScaleNode uses plain sum/bundle (the monoid) and the integration test shows distribute_compute gives
+the same total. MEASURED: galaxy->systems->planets mass rolls up exactly (42.0 / 12 leaves), look bundles to 256-d,
+adding a planet updates the summary by exactly its mass (associative), draw collapses at orbit / descends when big.
+Integration test: scatter grass on a planet -> scene of blades -> scale rollup == count -> orbit draws one summary
+blob; distribute_compute matches.
+
+KEPT NEGATIVE: rollup exact only for additive props + bundled look (no exact weather from orbit); atom->galaxy range
+needs relative-transform discipline. CONTENT HALF of the fluids backlog now DONE (items 1-5: smoke presets, matter
+model, drift, tension, scatter+scale). Remaining: the PERFORMANCE half -- MC1 compile+fuse materials, MC2/MC3 bake
+channels, PW1/PW2 pipeline compile, PW3/PW4 iterate sim readout.
+
+## Fluids performance MC1: compile+fuse materials -- one cached kernel, constants folded (+8 tests)
+
+PERFORMANCE HALF of the fluids backlog started. holographic_matcompile.py: compiled_shader(material, cache) builds a
+material's socket resolution ONCE, keyed by material_spec (constants by value, sockets by stable id), reused for every
+hit/instance/frame via the content-addressed compile cache. Constant channels are FOLDED (resolved once, broadcast
+per hit) so only procedural sockets re-resolve. _is_const probes a channel at two point sets (position independence);
+color routes through surface._rgb, scalars through resolve_param. Faculty: compile_material on UnifiedMind.
+
+MEASURED: compiled shade matches mat.resolve exactly; a mostly-flat material folds color/reflect/emission/opacity and
+only re-resolves 'roughness'; same material -> 1 compile + N cache hits (6 frames = 1 compile, 5 hits); changed color
+const -> fresh content-addressed compile; all-constant material has zero per-hit sockets.
+
+REAL LATENT BUG FIXED: holographic_compile.compiled used `cache or DEFAULT_CACHE`, but an EMPTY CompileCache is falsy
+(__len__==0), so a freshly-passed cache was silently ignored and everything went to DEFAULT_CACHE. Fixed to
+`cache if cache is not None else DEFAULT_CACHE` (both in compiled() and my compiled_shader). compile regression green.
+Also fixed a 1-point resolve_param edge case (resolve const values with 2 points).
+
+KEPT NEGATIVE: folds constants + caches the BUILD; a fully-procedural material still evaluates every field per hit --
+turning fields into a LOOKUP is MC2 (sdfbake/prt). Next: MC2 bake view-independent channels, MC3 view LUT, then PW1/2
+pipeline compile, PW3/4 iterate sim readout.
+
+## Fluids performance MC2: bake view-independent material channels -> lookups (+7 tests)
+
+holographic_matbake.py. MC1 folded constants; MC2 BAKES the position-dependent (view-independent) channels: sample a
+material's procedural field over the object bounds ONCE onto a res^3 grid, then per hit trilinearly LOOK IT UP (O(1),
+no field re-eval) -- reusing the sdfbake grid idea, pointed at a material channel. BakedField (trilinear 8-corner
+sample, scalar or (,3) colour grid); bake_field(field, name, lo, hi, res); bake_material(material, lo, hi, res) ->
+shade() of folds + lookups. Faculty: bake_material on UnifiedMind.
+
+MEASURED: a sin-based procedural roughness + colour ramp baked at res 48 matches the true field to <0.02 (linear
+fields reproduce EXACTLY -- trilinear is exact for linear data); constants folded (reflect/emission/opacity), fields
+baked (color/roughness); finer grid more accurate (err 0.008 @res8 -> 0.0001 @res64 -- the memory/accuracy trade);
+across 5 frames of lookups the field is evaluated ZERO more times (proved by a call counter). Integration test:
+baked-vs-direct equal output + zero field evals across frames (fixed a test bug where the per-frame reference resolve
+itself called the field, inflating the count).
+
+KEPT NEGATIVE: bake trades MEMORY for speed + blurs sub-cell detail; pays off in REPEATED sampling not one-shot (the
+bake costs one full grid eval up front); only VIEW-INDEPENDENT channels bake -- view-dependent specular is MC3's
+(position,view) LUT. Next: MC3 view LUT, then PW1/PW2 pipeline compile, PW3/PW4 iterate sim readout.
+
+## Fluids performance MC3: pre-integrated view LUT -- specular becomes a table read (+7 tests)
+
+holographic_viewlut.py. MC2 baked view-INDEPENDENT channels; MC3 handles the view-DEPENDENT specular via 'add a
+dimension': bake directional_albedo (a 4096+-sample hemisphere integral) over a (view_cos, roughness) grid ONCE, then
+per pixel BILINEARLY look it up -- the classic pre-integrated BRDF / split-sum LUT. ViewLUT(grid, rough_min,
+rough_max).sample(view_cos, roughness) bilinear; bake_view_lut(metallic, base_color, res_view, res_rough, samples,
+seed). Faculty: bake_view_lut on UnifiedMind. With MC1+MC2+MC3 a material shades as folds + position lookups + a view
+table read -- no per-hit field eval, no per-pixel integral.
+
+MEASURED: lookup matches a fresh 32-65k-sample directional_albedo to <0.058 across roughness>=0.3; reflectance falls
+with roughness (0.91>0.41, GGX energy loss); ~11000x cheaper than the integral (2000 lookups vs 2000 integrals);
+bilinear exact at nodes; clamps out-of-range.
+
+PROBE CATCH / KEPT NEGATIVE (honest): finer grid did NOT reduce error -- the cause is that directional_albedo uses
+UNIFORM hemisphere sampling, a HIGH-VARIANCE estimator for smooth (low-roughness) surfaces where the BRDF concentrates
+near the mirror direction. Both the LUT and a fresh integral are noisy at roughness<0.2 (~0.2). The LUT faithfully
+stores directional_albedo; importance sampling would fix the ESTIMATOR, not the table. Also: the table is per
+(metallic, base_color) -- a different metalness needs its own bake or a third axis. Next: PW1/PW2 pipeline compile
+(per-stage bake + whole-pipeline compile/fuse), PW3/PW4 iterate sim readout (diagonalize linear sub-steps).
+
+## Fluids performance PW1/PW2: compile the pipeline plan once per config (+9 tests)
+
+holographic_pipecompile.py. The material compile (MC1-3) one level UP, on the whole pipeline. build_pipeline does real
+planning EVERY call (SELECT enabled stages, AUTO-INCLUDE prerequisites, TOPOSORT); across frames of the same config
+that plan is invariant, so PW2 compiles it once keyed by the config's content (dataclasses.asdict spec + options),
+reusing the content-addressed compile cache. config_spec(cfg, options); compiled_pipeline(cfg, registry, options,
+cache); run_compiled(...) the frame-loop entry point. PW1: bake_pipeline(pipeline, scene) runs each stage's optional
+bake(scene, seed) ONCE (static view-independent buffers), skipping stages without one. Faculties: compile_pipeline,
+run_pipeline on UnifiedMind.
+
+MEASURED: compiled plan matches build_pipeline exactly; 10 frames of a preview config = 1 plan compile + 9 reuses;
+different config or options -> fresh compile; two identical configs share one plan (content-addressed, not identity);
+per-stage bake hook runs exactly once; stages without a bake skipped.
+
+KEPT NEGATIVE: saves the SELECT/TOPOSORT, not per-frame stage work; win scales with frames-per-config (one frame gains
+nothing); a stage whose output changes every frame (the render) correctly can't bake. Bit-for-bit same frame as a
+direct build_pipeline().run(). Next: PW3 bake-vs-compute per stage (extend adaptive.plan_render), PW4 iterate sim
+readout (diagonalize the matter model's LINEAR sub-steps -- diffusion/buoyancy-smoothing -- so any t is a direct
+evaluation; nonlinear advection still marches).
+
+## Fluids performance PW4: iterate sim readout -- diagonalize the linear diffusion sub-step (+9 tests)
+
+holographic_simreadout.py. iterate is PRT-for-TIME. The matter model's per-channel step is advect(nonlinear) ->
+diffuse(LINEAR) -> tension(nonlinear) -> drift(nonlinear). fields.diffuse multiplies by exp(-amount*k^2) in Fourier
+space = DIAGONAL bind (eigendecomp is FREE = the rfft). So diffusing for any k steps is ONE transform pair (transfer
+to the k-th power), not k marched steps; limit is closed form (non-DC modes decay, mean survives -> flat steady state).
+diffusion_transfer(shape, amount); diffuse_at(field, amount, k) [k fractional ok]; diffuse_limit(field). Faculties:
+diffuse_readout, diffuse_steady_state on UnifiedMind.
+
+MEASURED: readout at k=1..20 matches k marched fields.diffuse to 1e-9 (heat semigroup: k diffuse(amount) ==
+diffuse(k*amount)); fractional steps interpolate; long diffusion -> closed-form mean to 1e-6; mass conserved (DC
+transfer=1); k=0 is identity. err 4.4e-16 at k=20.
+
+KEPT NEGATIVE (the honesty of the item): ONLY the linear time-invariant sub-step diagonalises -- nonlinear advection,
+buoyancy coupling, double-well tension still march (adaptive dispatch localises the marching). Same boundary the
+dynamics propagator drew (linear-in-Fourier exact; nonlinear needs the reservoir lift). Remaining fluids item: PW3
+bake-vs-compute per stage (extend adaptive.plan_render to decide bake vs march per stage from the workload).
+
+## Fluids performance PW3: bake-vs-compute per stage -- FLUIDS BACKLOG COMPLETE (+10 tests)
+
+holographic_stageplan.py. adaptive.plan_render decides bake-vs-analytic for the WHOLE render; PW3 pushes that
+break-even down to each pipeline STAGE. Rule (reusing plan_render's _BAKE_MIN_FRAMES): STATIC stage -> bake once
+reused across enough frames; static but too few frames -> compute; DYNAMIC stage -> always compute. stage_is_static
+reads an explicit .static flag, else a name heuristic (_STATIC_HINTS/_DYNAMIC_HINTS), else CONSERVATIVE dynamic (never
+bake blindly -- baking a dynamic stage is a correctness bug). plan_stage / plan_stages / stages_to_bake (feeds PW1).
+Faculties: plan_stage_execution, plan_pipeline_bakes on UnifiedMind (compiles the pipeline then plans its stages).
+
+MEASURED: preview pipeline over 30 frames -> gbuffer BAKES, render/reproject/denoise/present COMPUTE; over 1 frame
+nothing bakes; explicit static=False overrides the name heuristic; break-even is exactly plan_render's constant;
+reasons human-readable. It's the decision layer over PW1 (bake mechanism) + PW2 (compile mechanism).
+
+KEPT NEGATIVE: unannotated stage -> conservatively dynamic -> never baked (correctness over speed); a stage opts in
+with static=True.
+
+=== FLUIDS/MATTER/SCALE BACKLOG COMPLETE ===
+Content half: (1) smoke presets, (2) Mixture+matter_step, (3) drift, (4) double_well tension, (5) ScatterLayer+
+ScaleNode. Performance half: MC1 compile+fuse materials, MC2 bake view-independent channels, MC3 view LUT, PW1/PW2
+pipeline compile, PW3 bake-vs-compute per stage, PW4 iterate sim readout. One advected-field matter model with 3
+dials (smoke->dye/milk->salt fingering->oil&water) + a compile/bake/lookup flattening from material to whole pipeline,
+all reusing wired faculties, every kept negative loud. Real bugs caught by measuring vs baselines: alpha density-
+buoyancy coupling, double-well well positions + inverted tension, empty-CompileCache-falsy, MC3 estimator variance.

@@ -1,14 +1,16 @@
-# Writing VSA Programs in holostuff
+# Writing VSA Programs in leCore
 
 *A guide to `HoloMachine` — the small stored-program machine that lets you express custom logic as a
 holographic program: a sequence of instructions encoded into ONE hypervector, executed on the same
 bind/bundle/cleanup algebra as the rest of the engine. Every example below was run and its result is shown.*
 
+> **See also:** the [code reference](REFERENCE.md) for a map of every module, and the [README](README.md) for the big picture. This guide covers `HoloMachine` specifically -- writing your own programs on the vector algebra.
+
 ## What this is for
 
 Sometimes you don't want a permanent faculty of the mind — you want to run *your own* logic over the
 vector algebra: a scientist with a dataset who wants to try several experiments, none of which needs to
-become a fixture of holostuff; or a game with NPCs whose behaviour should live at the VSA level so it
+become a fixture of leCore; or a game with NPCs whose behaviour should live at the VSA level so it
 reacts to game data automatically when a trigger fires. `HoloMachine` is that: you write a short program,
 `assemble()` it into a single vector, and `run()` it. A program is *data* — content-addressable, storable,
 and composable in the same space as everything else — so it's cheap to make, throw away, and remake.
@@ -172,7 +174,7 @@ exact where exactness is.
 
 ## Calling the mind's faculties: `APPLY` + handlers
 
-`APPLY g` runs a real holostuff faculty on ACC — but the *bare* VM has no faculties, so the host (your
+`APPLY g` runs a real leCore faculty on ACC — but the *bare* VM has no faculties, so the host (your
 code, or the mind) supplies them as a `handlers` dict mapping a faculty name to a unary `acc -> acc`
 function. An `APPLY` whose faculty has no handler is a **safe no-op**, so a program always runs.
 
@@ -267,7 +269,7 @@ composable: the output of any of them is a vector or field you can route into th
 ## Ephemeral by design (the scientist's use case)
 
 Because a program is just a vector, you make one, run it, and discard it — none of it has to become part of
-holostuff. A scientist can hold a dataset's items as `data=[...]` atoms, then assemble and run a different
+leCore. A scientist can hold a dataset's items as `data=[...]` atoms, then assemble and run a different
 program per experiment, reusing the same machine. Nothing is registered globally; nothing persists unless
 you choose to store the program vector (which you can — it's content-addressable like any other vector).
 

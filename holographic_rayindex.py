@@ -326,6 +326,152 @@ def delta_reshade_move(ctx_old, obj_id, delta, brick_index, base_frame, camera, 
     return out.reshape(H, W, 3), mask.reshape(H, W), ctx_new
 
 
+class IncrementalRenderer:
+    """A render SESSION built on the bidirectional index, so a mostly-static scene is cheap to re-render and edits
+    STREAM as deltas. The first render() is a full render; after that:
+      * re-rendering the SAME scene is FREE -- nothing changed, so the cached frame is returned with an empty mask
+        (this is the case that was silently doing a full re-trace every frame);
+      * a colour / material / light EDIT re-shades ONLY the affected pixels via the ray index (through-glass, in
+        reflection, SSS, translucency all handled) -- bit-exact, bounded;
+      * a geometry MOVE re-shades only the pixels the object vacated / now occupies (+ its shadow / reflection) via
+        the brick index -- bit-exact, bounded.
+    Every call returns (frame, changed_mask); `stream_delta(mask)` turns the mask into just the changed pixels to send
+    over the wire -- so the pixel stream carries O(changed), not O(frame). Default ss=1: deterministic and delta-exact
+    (supersampling is for a one-shot final frame, not a stream). This is the "only pay for what changed" path end to end."""
+
+    def __init__(self, camera, width=256, height=256, sun="bright", sky="clear", ground=True, ss=1,
+                 glass_tint=(0.75, 0.9, 0.85)):
+        self.cam = camera; self.w = int(width); self.h = int(height)
+        self.sun = sun; self.sky = sky; self.ground = ground; self.ss = int(ss); self.glass_tint = glass_tint
+        self.frame = None; self.ctx = None; self.ray_index = None; self.brick_index = None
+        self._key = None                                        # canonical snapshot of the cached scene
+
+    @staticmethod
+    def _scene_key(objects):
+        """A cheap canonical signature of the scene's appearance -- so an identical re-render is detected and skipped."""
+        return tuple((o.get("shape"), o.get("color"), o.get("material"), o.get("size")) for o in objects)
+
+    def render(self, objects, force=False):
+        """Return (frame, changed_mask). If the scene is unchanged since the last render, this is FREE: the cached frame
+        is returned and changed_mask is all-False. Otherwise a full render runs and the indices are (re)built."""
+        from holographic_semantic import render_scene
+        key = self._scene_key(objects)
+        if not force and self.frame is not None and key == self._key:
+            return self.frame, np.zeros((self.h, self.w), bool)        # nothing changed -> no work, no delta
+        st = {}
+        self.frame = render_scene(objects, self.cam, self.w, self.h, sun=self.sun, sky=self.sky,
+                                  ground=self.ground, ss=self.ss, dither=0.0, adaptive=(self.ss > 1), stats=st)
+        self.ctx = st["ctx"]; self._key = key
+        self._objects = [dict(o) for o in objects]
+        self.ray_index = build_ray_index(self.ctx, self.cam, self.w, self.h)
+        self.brick_index = build_brick_index(self.ctx, self.cam, self.w, self.h)
+        self._capture_gbuffer()
+        return self.frame, np.ones((self.h, self.w), bool)            # first render: whole frame is "new"
+
+    def edit(self, obj_index, field, value):
+        """Apply a colour / material / light EDIT (geometry unchanged) and re-shade only the affected pixels. Returns
+        (frame, changed_mask). The ray index stays valid, so this is a bounded, bit-exact delta."""
+        from holographic_semantic import _scene_setup
+        if self.frame is None:
+            raise RuntimeError("call render() before edit()")
+        self._ensure_fresh()                                   # if a camera move left the index stale, rebuild it once
+        self._objects[obj_index][field] = value
+        ctx2 = _scene_setup(self._objects, self.ground, self.sky, self.sun, self.glass_tint)
+        self.frame, mask = delta_reshade(ctx2, self.ray_index, [obj_index], self.frame, self.cam)
+        self.ctx = ctx2; self._key = self._scene_key(self._objects)
+        return self.frame, mask
+
+    def move(self, obj_index, delta):
+        """Apply a geometry MOVE and re-shade only the affected pixels via the brick index. Returns (frame, mask).
+        Geometry changed, so the indices are rebuilt for subsequent edits/moves (a trace, still far cheaper than a full
+        shade with SSS / reflections / shadows)."""
+        if self.frame is None:
+            raise RuntimeError("call render() before move()")
+        self._ensure_fresh()                                   # if a camera move left the index stale, rebuild it once
+        self.frame, mask, ctxn = delta_reshade_move(self.ctx, obj_index, delta, self.brick_index, self.frame, self.cam)
+        self.ctx = ctxn
+        self.ray_index = build_ray_index(ctxn, self.cam, self.w, self.h)      # geometry moved -> refresh the indices
+        self.brick_index = build_brick_index(ctxn, self.cam, self.w, self.h)
+        return self.frame, mask
+
+    def stream_delta(self, mask):
+        """Turn a changed-pixel mask into the wire payload: (ys, xs, rgb) of exactly the pixels that changed -- so the
+        pixel stream is O(changed), not O(frame). An unchanged frame streams nothing."""
+        m = np.asarray(mask, bool).reshape(self.h, self.w)
+        ys, xs = np.where(m)
+        return ys, xs, (self.frame[ys, xs] if len(ys) else np.zeros((0, 3)))
+
+    def _capture_gbuffer(self):
+        """Record the per-pixel WORLD hit point, a hit mask, and a view-DEPENDENT flag (reflective / glass / frosted --
+        whose look changes with the camera). This is the G-buffer that lets a camera move REPROJECT instead of re-trace:
+        a world point's diffuse shade doesn't change with view, only which pixel it lands on."""
+        self._P = self.brick_index.P.reshape(self.h, self.w, 3).copy()   # world hit point per pixel (eye + tmax*dir)
+        self._hit = self.brick_index.hit.reshape(self.h, self.w).copy()
+        vd = np.zeros(self.h * self.w, bool)
+        prim = self.ray_index.primary; hm = prim >= 0
+        refl = self.ctx["refl"]; isg = self.ctx["is_glass"]
+        ist = self.ctx.get("is_translucent", np.zeros(len(refl), bool))
+        viewdep_obj = (refl > 0.05) | isg | ist                # these secondary/specular terms depend on the view
+        vd[hm] = viewdep_obj[prim[hm]]
+        self._viewdep = vd.reshape(self.h, self.w)
+        self._stale = False                                    # indices/g-buffer are valid for the current camera
+
+    def reproject(self, new_camera, reshade_viewdep=True):
+        """A CAMERA MOVE without re-tracing the whole scene (the 3DGS / DLSS / V-Ray-realtime idea): forward-project the
+        cached frame's WORLD hit points into the new view (diffuse shade is view-independent, so it carries over), keep
+        the nearest via a z-buffer, and re-shade ONLY the holes (disocclusions -- newly revealed geometry) and the
+        view-DEPENDENT pixels (reflections / glass / frosted, whose look changes with the camera). Returns (frame,
+        reshaded_mask). Approximate (resampling), not bit-exact -- the muscle-layer trade every realtime renderer makes;
+        re-shaded and disoccluded pixels ARE exact. Call render() again for a bit-exact still."""
+        if self.frame is None:
+            raise RuntimeError("call render() before reproject()")
+        from holographic_semantic import _shade_rays
+        H, W = self.h, self.w
+        P = self._P.reshape(-1, 3); hitmask = self._hit.reshape(-1)
+        prevcol = self.frame.reshape(-1, 3); vdep = self._viewdep.reshape(-1)
+        src = np.where(hitmask)[0]
+        x, y, depth = _project_points(new_camera, P[src], W, H)
+        xi = np.round(x).astype(int); yi = np.round(y).astype(int)
+        keep = (depth > 1e-4) & (xi >= 0) & (xi < W) & (yi >= 0) & (yi < H)
+        src = src[keep]; dst = yi[keep] * W + xi[keep]; depth = depth[keep]
+        order = np.argsort(-depth)                              # far -> near, so the NEAREST wins the z-buffer (last write)
+        out = np.zeros((H * W, 3)); filled = np.zeros(H * W, bool); vdep_new = np.zeros(H * W, bool)
+        out[dst[order]] = prevcol[src[order]]                  # reproject diffuse shade (view-independent) to new pixels
+        filled[dst[order]] = True
+        vdep_new[dst[order]] = vdep[src[order]]
+        reshade = (~filled) | (vdep_new & reshade_viewdep)     # holes (disocclusion / sky) + view-dependent -> re-shade
+        if np.any(reshade):
+            eye, dirs = new_camera.ray_dirs(W, H)
+            D = dirs.reshape(-1, 3)[reshade]
+            O = np.broadcast_to(eye, (int(reshade.sum()), 3)).astype(float).copy()
+            col, _, _, _ = _shade_rays(self.ctx, O, D)
+            out[reshade] = np.clip(col, 0, 1)
+        self.frame = out.reshape(H, W, 3); self.cam = new_camera
+        self._stale = True                                     # camera changed: ray/brick indices now need a rebuild
+        return self.frame, reshade.reshape(H, W)
+
+    def _ensure_fresh(self):
+        """Rebuild the camera-space indices + g-buffer if a camera move left them stale (done lazily -- pure navigation
+        pays nothing; the cost is only taken when an EDIT/MOVE at the new camera actually needs the index)."""
+        if getattr(self, "_stale", False) or self.ray_index is None:
+            self.ray_index = build_ray_index(self.ctx, self.cam, self.w, self.h)
+            self.brick_index = build_brick_index(self.ctx, self.cam, self.w, self.h)
+            self._capture_gbuffer()
+
+
+def _project_points(cam, P, width, height):
+    """World points P (N,3) -> (x, y, forward_depth) in `cam`'s image, the exact inverse of Camera.ray_dirs."""
+    r, u, f = cam._basis()
+    t = np.tan(np.radians(cam.fov_deg) / 2.0)
+    d = np.asarray(P, float) - cam.eye
+    fwd = d @ f
+    safe = np.where(np.abs(fwd) < 1e-9, 1e-9, fwd)
+    ndc_x = (d @ r) / safe; ndc_y = (d @ u) / safe
+    x = ((ndc_x / (cam.aspect * t) + 1.0) / 2.0) * width - 0.5
+    y = ((1.0 - ndc_y / t) / 2.0) * height - 0.5
+    return x, y, fwd
+
+
 def _selftest():
     """The index must flag through-glass pixels, and a delta re-shade must match a full re-render exactly."""
     from holographic_semantic import parse_description, render_scene, _scene_setup

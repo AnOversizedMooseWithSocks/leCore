@@ -113,14 +113,97 @@ def _one_level(mesh):
     return Mesh(positions, faces)
 
 
+# =====================================================================================================
+# The vectorized path: Loop subdivision as a MATRIX. Subdivision is REGULAR, so the new positions are just a
+# fixed linear map of the old ones -- new_V = S @ V. We build S once from the connectivity (as scipy-free
+# index/weight arrays) and apply it with ONE weighted scatter-add (np.add.at), instead of the per-vertex and
+# per-edge Python arithmetic in _one_level. Same Loop masks, same topology, so the result is bit-identical to
+# TOL (only the float summation ORDER differs) and the topology is EXACT. _one_level stays as the reference.
+# =====================================================================================================
+
+def _subdivision_operator(mesh):
+    """Build the Loop subdivision operator for a triangle mesh as (rows, cols, weights) -- a sparse matrix S with
+    new_positions[row] = sum_j S[row,j] * V[j] -- together with the refined face list. Row layout matches
+    _one_level exactly: rows 0..nV-1 are the repositioned old vertices, rows nV.. are the new edge vertices (in
+    the same sorted-edge order), so S @ V reproduces _one_level's positions."""
+    V = mesh.vertices
+    tris = _triangles(mesh)
+    nV = len(V)
+
+    # adjacency (O(F)): opposite vertices per edge, and each vertex's 1-ring -- same as _one_level
+    edge_opp = {}
+    nbr = {v: set() for v in range(nV)}
+    for (a, b, c) in tris:
+        for (x, y, o) in ((a, b, c), (b, c, a), (c, a, b)):
+            edge_opp.setdefault(frozenset((x, y)), []).append(o)
+        nbr[a].update((b, c)); nbr[b].update((a, c)); nbr[c].update((a, b))
+
+    rows, cols, wts = [], [], []
+
+    # NEW EDGE VERTICES (rows nV..), visited in the SAME sorted order as _one_level so indices line up exactly
+    edge_vertex = {}
+    row = nV
+    for e in sorted(edge_opp.keys(), key=lambda s: tuple(sorted(s))):
+        a, b = sorted(e)
+        opp = edge_opp[e]
+        edge_vertex[e] = row
+        if len(opp) == 2:                                   # interior edge: 3/8 endpoints + 1/8 opposites
+            c, d = opp
+            for idx, w in ((a, 3.0 / 8.0), (b, 3.0 / 8.0), (c, 1.0 / 8.0), (d, 1.0 / 8.0)):
+                rows.append(row); cols.append(idx); wts.append(w)
+        else:                                               # boundary edge: midpoint
+            for idx in (a, b):
+                rows.append(row); cols.append(idx); wts.append(0.5)
+        row += 1
+    n_new = row
+
+    # REPOSITIONED OLD VERTICES (rows 0..nV-1). Append v's self-weight first, then its ring, so np.add.at
+    # accumulates in the SAME order as _one_level's (1 - n*beta)*V[v] + beta*sum(ring) -> matches to ULP.
+    for v in range(nV):
+        ring = nbr[v]
+        boundary = [u for u in ring if len(edge_opp[frozenset((v, u))]) == 1]
+        if len(boundary) >= 2:                              # boundary vertex: 3/4 v + 1/8 (prev + next)
+            rows += [v, v, v]; cols += [v, boundary[0], boundary[1]]; wts += [0.75, 0.125, 0.125]
+        else:                                               # interior vertex: Warren's beta mask
+            n = len(ring)
+            beta = (1.0 / n) * (5.0 / 8.0 - (3.0 / 8.0 + 0.25 * np.cos(2.0 * np.pi / n)) ** 2)
+            rows.append(v); cols.append(v); wts.append(1.0 - n * beta)
+            for u in ring:
+                rows.append(v); cols.append(u); wts.append(beta)
+
+    # RETRIANGULATE: each triangle -> 4 (identical to _one_level -> topology is EXACT)
+    faces = []
+    for (a, b, c) in tris:
+        ab = edge_vertex[frozenset((a, b))]
+        bc = edge_vertex[frozenset((b, c))]
+        ca = edge_vertex[frozenset((c, a))]
+        faces += [(a, ab, ca), (ab, b, bc), (ca, bc, c), (ab, bc, ca)]
+
+    return (np.asarray(rows, dtype=np.int64), np.asarray(cols, dtype=np.int64),
+            np.asarray(wts, dtype=float), faces, n_new)
+
+
+def _one_level_matrix(mesh):
+    """One Loop level via the subdivision matrix: new_V = S @ V as a single scatter-add. Bit-identical to
+    _one_level up to float summation order (TOL); topology EXACT."""
+    V = mesh.vertices
+    rows, cols, wts, faces, n_new = _subdivision_operator(mesh)
+    new_V = np.zeros((n_new, V.shape[1]), dtype=float)
+    np.add.at(new_V, rows, wts[:, None] * V[cols])          # the one sparse matvec S @ V (scatter-add)
+    return Mesh(new_V, faces)
+
+
 def loop_subdivide(mesh, levels=1):
     """Loop-subdivide a triangle mesh `levels` times: refine each triangle into four and low-pass smooth with the
     Loop masks (C2 limit surface). A non-triangle input is triangulated first. Returns a new triangle Mesh. Each
     level multiplies faces by 4, adds one vertex per edge, preserves chi, and keeps a closed mesh a closed
-    manifold; a flat mesh stays flat exactly, while a curved one is smoothed toward the Loop limit surface."""
+    manifold; a flat mesh stays flat exactly, while a curved one is smoothed toward the Loop limit surface.
+
+    Uses the vectorized subdivision-matrix path (`_one_level_matrix`); `_one_level` remains as the readable
+    reference and the bit-exactness pin."""
     out = mesh
     for _ in range(int(levels)):
-        out = _one_level(out)
+        out = _one_level_matrix(out)
     return out
 
 

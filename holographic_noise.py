@@ -100,6 +100,10 @@ def _kernels_for_bandwidth(bounds, bandwidth, fill=1.2, cap=1600):
 def noise_field(encoder, per_axis=None, seed=0, fill=1.2):
     """A single-band band-limited noise field as ONE hypervector (an FPE bundle of random kernels).
 
+    NOT a duplicate of holographic_pattern.value_noise: this is the HYPERVECTOR-native noise (the field IS one
+    vector, queried through an encoder); pattern.value_noise is the plain spatial callable for Param sockets.
+    Same concept, two levels -- as above, so below.
+
     `encoder` is a VectorFunctionEncoder (its bandwidth sets the noise frequency / feature size).
     Returns the field vector; evaluate it with `encoder.query(field, point)` (or `sample` below).
     """

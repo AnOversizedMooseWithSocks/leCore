@@ -56,6 +56,21 @@ ARITY = {
 INEXACT = {"twist", "displace"}
 
 
+def sdf_normal(sdf, P, eps=1e-3):
+    """The surface normal at points P:(M,3) = the normalised gradient of the SDF, by central differences (6
+    vectorised evals). WHY THIS LIVES HERE (backlog G1): the gradient is a property of the FIELD, not the
+    renderer -- emission, collision, displacement, sculpting, field-effect falloff, and Walk-on-Spheres all need
+    the SAME normal, so it is defined ONCE here and delegated everywhere (no drift, no six private copies). `sdf`
+    is anything with an `.eval(P)`."""
+    P = np.asarray(P, float)
+    ex = np.array([eps, 0, 0]); ey = np.array([0, eps, 0]); ez = np.array([0, 0, eps])
+    nx = sdf.eval(P + ex) - sdf.eval(P - ex)
+    ny = sdf.eval(P + ey) - sdf.eval(P - ey)
+    nz = sdf.eval(P + ez) - sdf.eval(P - ez)
+    N = np.stack([nx, ny, nz], axis=1)
+    return N / (np.linalg.norm(N, axis=1, keepdims=True) + 1e-12)
+
+
 class SDF:
     """A node in a signed-distance expression tree: `kind`, scalar `params`, and child SDFs."""
 

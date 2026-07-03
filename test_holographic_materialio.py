@@ -40,3 +40,39 @@ def test_mesh_to_gltf_embeds_material():
     pbr = gj["materials"][0]["pbrMetallicRoughness"]
     assert pbr["metallicFactor"] == 1.0 and pbr["roughnessFactor"] == 0.2
     assert abs(pbr["baseColorFactor"][1] - 0.84) < 1e-6
+
+
+# --- Sweep 3 local completion: texture maps (bilinear UV sampling) ---
+import numpy as _np_tex
+from holographic_materialio import TextureMap, PBRMaterial as _PBR
+
+
+def test_texture_bilinear():
+    img = _np_tex.array([[[1.0], [0.0]], [[0.0], [1.0]]])            # 2x2 checker
+    t = TextureMap(img, wrap="clamp")
+    assert abs(float(t.sample(0.0, 0.0)[0]) - 1.0) < 1e-9            # corner clamps to texel (0,0)
+    assert abs(float(t.sample(0.5, 0.5)[0]) - 0.5) < 1e-9           # centre = bilinear average of all four
+
+
+def test_texture_repeat_wrap():
+    img = _np_tex.array([[[0.2], [0.8]]])                           # 1x2 row
+    t = TextureMap(img, wrap="repeat")
+    a = t.sample(0.25, 0.5); b = t.sample(1.25, 0.5)               # u and u+1 wrap to the same texel
+    assert abs(float(a[0]) - float(b[0])) < 1e-9
+
+
+def test_material_uses_map_and_backward_compatible():
+    red = _np_tex.zeros((4, 4, 3)); red[:, :, 0] = 1.0
+    m = _PBR(base_color=(1, 1, 1, 1), base_color_map=TextureMap(red))
+    s = m.sample(0.3, 0.7)
+    assert tuple(round(x, 2) for x in s["base_color"]) == (1.0, 0.0, 0.0, 1.0)     # sampled red x white factor
+    m0 = _PBR(base_color=(0.2, 0.4, 0.6, 1.0), metallic=0.5, roughness=0.7)        # no maps
+    s0 = m0.sample()
+    assert tuple(round(x, 2) for x in s0["base_color"]) == (0.2, 0.4, 0.6, 1.0)    # factors unchanged
+    assert s0["metallic"] == 0.5 and s0["roughness"] == 0.7
+
+
+def test_deterministic_sampling():
+    rng = _np_tex.random.default_rng(0); img = rng.random((8, 8, 3))
+    t = TextureMap(img)
+    assert _np_tex.array_equal(t.sample(0.37, 0.62), t.sample(0.37, 0.62))

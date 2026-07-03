@@ -41,6 +41,15 @@ def fresnel_dielectric(cos_theta, ior):
     return r0 + (1.0 - r0) * (1.0 - cos_theta) ** 5
 
 
+def metallic_f0(base_color, metallic):
+    """Normal-incidence reflectance F0 from the metallic workflow, in ONE place. A DIELECTRIC reflects a constant
+    ~4% at normal incidence (F0 = 0.04); a METAL reflects its base colour. The metallic channel linearly blends
+    between them. `base_color` is (...,3); `metallic` is broadcast-shaped by the caller (scalar, or e.g.
+    metallic[:, None] against an (M,3) base). This is the same formula three shading sites used inline -- naming
+    it puts the 0.04 dielectric constant in one home so a change can't drift across copies."""
+    return 0.04 * (1.0 - metallic) + base_color * metallic
+
+
 def d_ggx(n_dot_h, roughness):
     """GGX / Trowbridge-Reitz normal distribution. alpha = roughness^2 is the perceptually-linear remap."""
     a = np.asarray(roughness, float) ** 2
@@ -76,7 +85,7 @@ def cook_torrance(N, V, L, base_color, metallic, roughness):
     ndl = np.clip(np.sum(N * L, axis=-1), 0.0, 1.0)
     ndh = np.clip(np.sum(N * H, axis=-1), 0.0, 1.0)
     vdh = np.clip(np.sum(V * H, axis=-1), 0.0, 1.0)
-    F0 = 0.04 * (1.0 - metallic) + base * metallic                  # dielectric 0.04 / metal tinted
+    F0 = metallic_f0(base, metallic)                               # dielectric 0.04 / metal tinted (shared helper)
     F = fresnel_schlick(vdh, F0)                                    # (...,3)
     D = d_ggx(ndh, roughness)                                       # (...,)
     G = g_smith(ndv, ndl, roughness)                               # (...,)
@@ -155,7 +164,7 @@ def sample_brdf(N, V, base_color, metallic, roughness, rng):
     n = N.shape[0]
     met = np.broadcast_to(np.asarray(metallic, float), (n,))
     rough = np.broadcast_to(np.asarray(roughness, float), (n,))
-    F0 = 0.04 * (1.0 - met)[:, None] + base * met[:, None]
+    F0 = metallic_f0(base, met[:, None])
     lum = lambda c: 0.299 * c[..., 0] + 0.587 * c[..., 1] + 0.114 * c[..., 2]
     p_spec = np.clip(0.5 * met + 0.5 * lum(F0) / (lum(F0) + lum(base) * (1.0 - met) + 1e-4), 0.15, 0.9)
     choose_spec = rng.random(n) < p_spec

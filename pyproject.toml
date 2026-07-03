@@ -1,0 +1,6 @@
+# pyproject.toml -- tells `python -m build` which backend to use.
+# The metadata and the (globbed) module list live in setup.py, classic-style, so there is nothing to
+# hand-maintain here as modules are added.
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"

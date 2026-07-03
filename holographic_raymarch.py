@@ -22,34 +22,69 @@ import numpy as np
 
 
 def sdf_normal(sdf, P, eps=1e-3):
-    """The surface normal at points P:(M,3) = the normalised gradient of the SDF, by central differences
-    (6 vectorised evals). The field tells the geometry which way it faces."""
-    P = np.asarray(P, float)
-    ex = np.array([eps, 0, 0]); ey = np.array([0, eps, 0]); ez = np.array([0, 0, eps])
-    nx = sdf.eval(P + ex) - sdf.eval(P - ex)
-    ny = sdf.eval(P + ey) - sdf.eval(P - ey)
-    nz = sdf.eval(P + ez) - sdf.eval(P - ez)
-    N = np.stack([nx, ny, nz], axis=1)
-    return N / (np.linalg.norm(N, axis=1, keepdims=True) + 1e-12)
+    """DELEGATES to holographic_sdf.sdf_normal (backlog G1: one canonical normal, promoted to the field module).
+    Kept here as a re-export so existing renderer call sites are unchanged and BIT-IDENTICAL."""
+    from holographic_sdf import sdf_normal as _canonical
+    return _canonical(sdf, P, eps=eps)
 
 
-def sphere_trace(sdf, O, D, max_steps=96, max_dist=20.0, surf_eps=1e-3):
+def sphere_trace(sdf, O, D, max_steps=96, max_dist=20.0, surf_eps=1e-3, relax=1.0):
     """Sphere-trace rays (O, D both (M,3), D unit) through an SDF: at each step the SDF value is a SAFE distance to
     advance (the largest step that cannot overshoot a surface). Vectorised over all rays; the loop is over steps.
-    Returns (hit mask (M,), t (M,), pos (M,3))."""
+    Returns (hit mask (M,), t (M,), pos (M,3)).
+
+    SPEED: the SDF is evaluated ONLY at the rays still marching (a ray that has hit a surface or escaped past max_dist
+    is dropped from the working set), so once the background rays escape and the surface rays converge, each remaining
+    step costs a fraction of a full-frame eval. Result is identical to evaluating every ray every step -- inactive rays
+    were never advanced anyway.
+
+    `relax` > 1 turns on OVER-RELAXATION (Keinert et al. 2014, 'Enhanced Sphere Tracing'): step by relax*distance
+    instead of distance, and detect an overstep one step late (when the current sphere plus the previous sphere no
+    longer cover the step that was taken) -- back up to the safe edge and drop to normal steps. This reaches the surface
+    in fewer, larger steps on open scenes. relax=1.0 (default) is the exact, bit-identical marcher above; the
+    over-relaxed path is opt-in because it can miss a feature thinner than a grazing step (the classic trade)."""
     O = np.asarray(O, float); D = np.asarray(D, float)
     M = len(D)
-    t = np.zeros(M); hit = np.zeros(M, bool); active = np.ones(M, bool)
+    t = np.zeros(M); hit = np.zeros(M, bool)
+    if relax <= 1.0:
+        active = np.arange(M)                                     # indices of the rays still marching
+        for _ in range(max_steps):
+            if active.size == 0:
+                break
+            P = O[active] + t[active, None] * D[active]
+            d = sdf.eval(P)                                      # evaluate ONLY the still-marching rays
+            conv = d < surf_eps
+            hit[active[conv]] = True                            # a surface hit: record and drop the ray
+            t[active] = t[active] + np.where(conv, 0.0, np.clip(d, 0.0, None))   # advance the non-converged ones
+            keep = (~conv) & (t[active] < max_dist)             # drop converged AND escaped rays
+            active = active[keep]
+        return hit, t, O + t[:, None] * D
+    # -- over-relaxed (enhanced sphere tracing), opt-in -----------------------------------------------------------
+    prev_r = np.zeros(M)                                          # radius of the previous safe sphere (per ray)
+    step_len = np.zeros(M)                                       # the step just taken (per ray)
+    omega = np.full(M, float(relax))                            # per-ray relaxation; drops to 1 after an overstep
+    active = np.arange(M)
     for _ in range(max_steps):
-        P = O + t[:, None] * D
-        d = sdf.eval(P)
-        newhit = active & (d < surf_eps)
-        hit |= newhit
-        active &= ~newhit
-        active &= (t < max_dist)
-        if not active.any():
+        if active.size == 0:
             break
-        t = t + np.where(active, np.clip(d, 0.0, None), 0.0)  # advance only the still-marching rays
+        a = active
+        d = sdf.eval(O[a] + t[a, None] * D[a])                  # signed distance (outside > 0); still-marching only
+        radius = np.abs(d)
+        # OVERSTEP: the last step was longer than the two spheres overlap -> we may have skipped a surface
+        sorfail = (omega[a] > 1.0) & ((radius + prev_r[a]) < step_len[a])
+        # back the overstepping rays up to the far edge of the previous safe sphere, and disable their relaxation
+        back_t = t[a] - step_len[a] + prev_r[a]
+        t[a] = np.where(sorfail, back_t, t[a])
+        omega[a] = np.where(sorfail, 1.0, omega[a])
+        # for non-overstep rays: record hits, then take the (relaxed) step
+        conv = (~sorfail) & (radius < surf_eps)
+        hit[a[conv]] = True
+        step = np.where(sorfail, 0.0, np.clip(d, 0.0, None) * omega[a])   # backed-up rays re-evaluate in place
+        prev_r[a] = np.where(sorfail, 0.0, radius)              # reset the sphere history for backed-up rays
+        step_len[a] = step
+        t[a] = t[a] + np.where(conv, 0.0, step)
+        keep = (~conv) & (t[a] < max_dist)
+        active = a[keep]
     return hit, t, O + t[:, None] * D
 
 
@@ -70,16 +105,22 @@ def ambient_occlusion(sdf, P, N, samples=6, step=0.06, k=1.6):
 def soft_shadow(sdf, P, Ldir, k=12.0, mint=0.02, maxt=12.0, steps=48):
     """SDF soft shadow (Quilez): march from P toward the light; the closest the ray passes to any surface,
     scaled by distance, is the penumbra. A hard occluder -> 0, clear path -> 1, a grazing miss -> a soft edge.
-    Field-native (one SDF read per step), vectorised over points."""
+    Field-native (one SDF read per step), vectorised over points. Evaluates ONLY the rays still marching (a shadow
+    ray that has hit an occluder or reached the light is dropped) -- identical result, a fraction of the evals."""
     P = np.asarray(P, float); Ldir = np.asarray(Ldir, float)
-    res = np.ones(len(P)); t = np.full(len(P), mint); alive = np.ones(len(P), bool)
+    M = len(P)
+    res = np.ones(M); t = np.full(M, mint)
+    per_point_dir = (Ldir.ndim == 2)
+    active = np.arange(M)
     for _ in range(steps):
-        h = sdf.eval(P + Ldir * t[:, None])
-        res = np.where(alive, np.minimum(res, k * np.clip(h, 0, None) / np.maximum(t, 1e-6)), res)
-        t = t + np.clip(h, 0.01, 0.25)
-        alive &= (h > 1e-3) & (t < maxt)                     # stop on a hit (shadowed) or past the light
-        if not alive.any():
+        if active.size == 0:
             break
+        L = Ldir[active] if per_point_dir else Ldir
+        h = sdf.eval(P[active] + L * t[active, None])
+        res[active] = np.minimum(res[active], k * np.clip(h, 0, None) / np.maximum(t[active], 1e-6))
+        t[active] = t[active] + np.clip(h, 0.01, 0.25)
+        keep = (h > 1e-3) & (t[active] < maxt)                   # drop rays that hit an occluder or passed the light
+        active = active[keep]
     return np.clip(res, 0.0, 1.0)
 
 
@@ -168,7 +209,7 @@ def render_sdf(sdf, camera, width=256, height=256, light_dir=(-0.4, 0.7, -0.3), 
         occ = ambient_occlusion(sdf, Ph, Nh) if ao else 1.0
         base = np.asarray(base_color, float)
         if pbr is not None:                                      # physically-based (Cook-Torrance/GGX) shading
-            from holographic_brdf import cook_torrance, fresnel_schlick
+            from holographic_brdf import cook_torrance, fresnel_schlick, metallic_f0
             metallic, roughness = float(pbr[0]), float(pbr[1])
             Vv = -Dh                                             # view direction: surface -> eye
             Lb = np.broadcast_to(L, Nh.shape)
@@ -178,7 +219,7 @@ def render_sdf(sdf, camera, width=256, height=256, light_dir=(-0.4, 0.7, -0.3), 
             shade = sh_col * direct + (ambient * occ_col) * base * (1.0 - metallic)   # direct + diffuse ambient
             R = Dh - 2 * np.sum(Dh * Nh, axis=1)[:, None] * Nh                        # environment specular (IBL approx)
             ndv = np.clip(-np.sum(Dh * Nh, axis=1), 1e-4, 1.0)
-            F0 = 0.04 * (1.0 - metallic) + base * metallic
+            F0 = metallic_f0(base, metallic)
             Fenv = fresnel_schlick(ndv, F0)                                           # (M,3) grazing-aware Fresnel
             shade = shade + Fenv * (1.0 - 0.5 * roughness) * skyfn(R) * occ_col
         else:

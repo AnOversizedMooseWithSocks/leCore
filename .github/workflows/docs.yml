@@ -1,0 +1,39 @@
+# .github/workflows/docs.yml
+# Keep REFERENCE.md in sync with the code automatically. On every push to main, regenerate the code reference
+# from the module docstrings and commit it back if anything changed. (No third-party deps -- docgen.py is pure
+# standard library.)
+name: docs
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:            # lets you run it by hand from the Actions tab
+
+permissions:
+  contents: write               # needed so the job can commit the refreshed REFERENCE.md back to the repo
+
+jobs:
+  reference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Generate the code reference
+        run: python docgen.py          # writes REFERENCE.md from every module's docstring + public API
+
+      - name: Commit REFERENCE.md if it changed
+        run: |
+          git config user.name  "docs-bot"
+          git config user.email "docs-bot@users.noreply.github.com"
+          if ! git diff --quiet REFERENCE.md; then
+            git add REFERENCE.md
+            git commit -m "docs: refresh REFERENCE.md [skip ci]"   # [skip ci] so this commit doesn't re-trigger CI
+            git push
+          else
+            echo "REFERENCE.md already up to date -- nothing to commit."
+          fi

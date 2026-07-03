@@ -5879,3 +5879,2156 @@ def test_ray_path_index_delta_through_mind():
     updated, mask = mind.delta_reshade_scene(objs2, index, [1], base, cam)
     full = render_scene(objs2, cam, width=W, height=H, ss=1, dither=0.0)
     assert np.abs(updated - full).max() < 1e-9 and 0.0 < mask.mean() < 0.9
+
+
+def test_region_field_through_mind():
+    """The mind composes a labelled region field and slices it open to reveal material layers."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_regionfield import Region
+    from holographic_semantic import _SphereSDF
+    mind = UnifiedMind(dim=512, seed=0)
+    rf = mind.region_field([
+        Region(_SphereSDF((0, 0, 0), 1.0), "crust", priority=1, material=(0.4, 0.3, 0.2)),
+        Region(_SphereSDF((0, 0, 0), 0.4), "core", priority=2, material=(1.0, 0.85, 0.3)),
+    ])
+    img, labels = rf.slice((0, 0, 0), (1, 0, 0), (0, 1, 0), extent=1.5, res=48)
+    assert len(set(labels[labels >= 0].tolist())) == 2         # both layers visible in the cut
+    assert rf.cull(np.array([[0, 0, 0], [3, 0, 0]])).tolist() == [True, False]
+
+
+def test_region_material_in_shader():
+    """A plain sphere shaded by a region field takes its albedo from region membership (the biome-planet wiring)."""
+    import numpy as np
+    from holographic_semantic import parse_description, render_scene
+    from holographic_regionfield import RegionField, Region
+    from holographic_semantic import _SphereSDF
+    from holographic_render import Camera
+    objs = parse_description("a grey ball")["objects"]
+    planet = RegionField([
+        Region(_SphereSDF((0, 0, 0), 2.0), "ocean", 0, material=(0.1, 0.3, 0.6)),
+        Region(_SphereSDF((0, 1.0, 0), 0.6), "ice", 2, material=(0.95, 0.97, 1.0)),
+    ])
+    cam = Camera(eye=(2.2, 1.2, 2.8), target=(0, 0, 0), fov_deg=42)
+    plain = render_scene(objs, cam, width=64, height=64, ss=1, region_field=None)
+    biome = render_scene(objs, cam, width=64, height=64, ss=1, region_field=planet)
+    assert np.abs(plain - biome).mean() > 0.02                 # region material visibly changed the shading
+
+
+def test_coherent_reflection_through_mind():
+    """The mind exposes the bounce-as-transform and the sparse coherent reflection, tracing fewer rays."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_semantic import _scene_setup, parse_description, realize_scene
+    from holographic_render import Camera
+    from holographic_raymarch import sphere_trace, sdf_normal
+    mind = UnifiedMind(dim=512, seed=0)
+    O2, D2, b2 = mind.reflect_transform(np.zeros((1, 3)), np.array([[0, -1.0, 0]]),
+                                        np.array([[0, 0, 0.0]]), np.array([[0, 1.0, 0]]), bounce=np.array([0]))
+    assert D2[0, 1] > 0.99 and b2[0] == 1
+    W = H = 80
+    objs = parse_description("a huge mirror ball")["objects"]; rs = realize_scene(objs)
+    ctx = _scene_setup(None, True, "clear", "bright", (0.75, 0.9, 0.85), rs=rs)
+    cam = Camera(eye=(0, 0.4, 3.4), target=(0, 0.1, 0), fov_deg=48)
+    e, dirs = cam.ray_dirs(W, H); O = np.broadcast_to(e, (W * H, 3)).astype(float); D = dirs.reshape(-1, 3)
+    union = ctx["union"]; hit, t, Pp = sphere_trace(union, O, D)
+    P = np.zeros((W * H, 3)); N = np.zeros((W * H, 3)); ids = -np.ones(W * H, int)
+    P[hit] = Pp[hit]; N[hit] = sdf_normal(union, Pp[hit]); ids[hit] = union.ids(Pp[hit])
+    mirror = np.zeros(W * H, bool); mirror[hit] = ctx["refl"][ids[hit]] > 0.05
+    _, n_traced, n_mirror = mind.coherent_reflection(ctx, P, N, D, ids, mirror, W, H, stride=4)
+    assert n_traced < n_mirror                                 # coherence saved reflection rays
+
+
+def test_ray_pencil_caustic_through_mind():
+    """The mind emits a ray's perpendicular frame, transports it through a bounce, and reads off the caustic focus
+    and a glossy lobe width -- 5 rays standing in for the whole secondary bundle."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=512, seed=0)
+    C = np.array([0, 0, 0.0]); R = 2.0; O = np.array([0.0, 0, 1.9]); D = np.array([0, 0, -1.0])
+    s_focus, r_focus = mind.caustic_focus(O, D, C, R)
+    assert abs(s_focus - R / 2) < 0.15 * (R / 2)               # focus at f = R/2 (the caustic)
+    sig = mind.lobe_sigma(O, D, C, R, 0.6, roughness=0.05)
+    assert sig > 0                                             # a finite glossy lobe width
+    disp = mind.dispersion_spread(np.array([0.7, 0, -0.7]), np.array([0, 0, 1.0]), [1 / 1.513, 1 / 1.532])
+    assert disp > 1e-3                                         # dispersion fan through the mind
+
+
+def test_nd_solve_and_reconstruct_through_mind():
+    """The mind solves a 3D maze with the same flow solver as 2D, and reconstructs a known field from sparse samples."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=512, seed=0)
+    path = mind.solve_grid_maze((5, 5, 5), {(2, y, z) for y in range(4) for z in range(5)}, (0, 0, 0), (4, 4, 4))
+    assert path[0] == (0, 0, 0) and path[-1] == (4, 4, 4)      # 3D maze solved, dimension-agnostic
+    def oracle(P):
+        return np.sin(1.7 * P[:, 0]) + 0.5 * P[:, 1] - 0.3 * P[:, 2]
+    pts, vals, recon = mind.sparse_reconstruct(oracle, np.zeros(3), np.full(3, 2.0), n_seed=64, n_refine=64)
+    test = np.random.default_rng(3).random((200, 3)) * 2.0
+    assert np.abs(recon(test) - oracle(test)).mean() < 0.15    # sparse reconstruction is accurate
+
+
+def test_glossy_material_blurs_reflection():
+    """A brushed (glossy) material reflects via the 5-ray frame -- a blurred reflection distinct from a sharp mirror."""
+    import numpy as np
+    from holographic_semantic import parse_description, render_scene
+    from holographic_render import Camera
+    cam = Camera(eye=(0, 0.4, 3.4), target=(0, 0.1, 0), fov_deg=48)
+    glossy = render_scene(parse_description("a huge brushed ball")["objects"], cam, width=64, height=64, ss=1)
+    mirror = render_scene(parse_description("a huge mirror ball")["objects"], cam, width=64, height=64, ss=1)
+    assert np.abs(glossy - mirror).mean() > 0.01               # the glossy reflection differs from the sharp mirror
+
+
+def test_navigate_field_through_mind():
+    """The mind navigates a 3D cost field (volumetrics/physics), routing around an obstacle."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=512, seed=0)
+    shape = (12, 12, 12); lo = np.zeros(3); hi = np.full(3, 3.0)
+    def blob(P):
+        return 6.0 * np.exp(-(((P[:, 0] - 1.5) ** 2 + (P[:, 1] - 1.5) ** 2 + (P[:, 2] - 1.5) ** 2)) / 0.4)
+    straight = mind.straight_line_cells((0, 0, 0), (11, 11, 11))
+    routed = mind.navigate_cost_field(blob, shape, (0, 0, 0), (11, 11, 11), lo=lo, hi=hi)
+    assert mind.path_cost(routed, blob, shape, lo=lo, hi=hi) < mind.path_cost(straight, blob, shape, lo=lo, hi=hi) * 0.5
+
+
+def test_multi_material_object_via_region_field():
+    """One sphere renders with several materials at once -- the region field drives per-point reflectivity/roughness."""
+    import numpy as np
+    from holographic_semantic import parse_description, realize_scene, render_scene, _SphereSDF
+    from holographic_regionfield import RegionField, Region
+    from holographic_render import Camera
+    objs = parse_description("a huge grey ball")["objects"]
+    C = realize_scene(objs)[0]["sdf"].c; R = float(realize_scene(objs)[0]["sdf"].r)
+    def patch(dirv, rp, **kw):
+        d = np.asarray(dirv, float); d = d / np.linalg.norm(d)
+        return Region(_SphereSDF(C + d * R, rp), priority=2, **kw)
+    rf = RegionField([
+        Region(_SphereSDF(C, R + 0.5), "body", 0, material=(0.3, 0.33, 0.38), reflect=0.05),
+        patch((0.7, 0.5, 0.6), 0.9 * R, label="mirror", material=(0.9, 0.9, 0.95), reflect=0.85, roughness=0.0),
+        patch((-0.7, 0.1, 0.7), 0.8 * R, label="brushed", material=(0.75, 0.6, 0.4), reflect=0.55, roughness=0.16),
+    ])
+    cam = Camera(eye=(1.1, 0.9, 3.0 * R + 0.5), target=tuple(C), fov_deg=44)
+    plain = render_scene(objs, cam, width=64, height=64, ss=1)
+    multi = render_scene(objs, cam, width=64, height=64, ss=1, region_field=rf)
+    assert np.abs(plain - multi).mean() > 0.02                 # the multi-material regions visibly changed the render
+
+
+def test_navigate_scene_and_compose_through_mind():
+    """The mind routes an agent through a live scene's SDF and hands back a composable path hypervector."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_semantic import parse_description, realize_scene, _scene_setup
+    mind = UnifiedMind(dim=512, seed=0)
+    objs = parse_description("a red box beside a blue box")["objects"]; rs = realize_scene(objs)
+    un = _scene_setup(None, False, "clear", "bright", (0.75, 0.9, 0.85), rs=rs)["union"]
+    lo = np.array([-3, -1.5, -3.0]); hi = np.array([3, 1.5, 3.0])
+    path = mind.navigate_scene(lambda P: un.eval(P), lo, hi, (18, 8, 18), (-2.5, 0, -2.5), (2.5, 0, 2.5), clearance=0.3)
+    assert float(un.eval(np.array(path)).min()) >= 0.0
+    cells = [tuple(int(round((np.array(p) - lo)[k] / (hi - lo)[k] * (18 if k != 1 else 8))) for k in range(3)) for p in path]
+    vec, sm, keys = mind.encode_path(cells)
+    assert mind.decode_path_step(vec, sm, keys, 0) == keys[0]
+
+
+def test_emit_from_surface_through_mind():
+    """The mind emits particles from a surface with a param-driven weight, and steps them."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=512, seed=0)
+    sphere = lambda P: np.linalg.norm(P, axis=1) - 1.5
+    bounds = (np.full(3, -2.2), np.full(3, 2.2))
+    top = mind.param(field=lambda P: (P[:, 2] > 0).astype(float))
+    pos, nrm, vel = mind.emit_from_surface(sphere, 150, bounds, speed=2.0, weight=top, seed=0)
+    assert len(pos) > 20 and (pos[:, 2] >= -0.1).all()
+    assert np.abs(np.linalg.norm(pos, axis=1) - 1.5).max() < 0.05
+    p2, v2 = mind.advance_particles(pos, vel, force=np.broadcast_to([0, 0, -3.0], pos.shape), dt=0.1)
+    assert p2.shape == pos.shape
+
+
+def test_sdf_collision_through_mind():
+    """The mind's SDF-collision keeps particles outside geometry, and slots into the unified projection sweep."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=512, seed=0)
+    R = 1.0; sphere = lambda P: np.linalg.norm(P, axis=1) - R
+    X = np.array([[0.2, 0.0, 0.0], [0.0, -0.3, 0.0], [3.0, 0.0, 0.0]])
+    Xc = mind.collide_sdf(X, sphere, radius=0.0)
+    assert (sphere(Xc) >= -1e-6).all()
+    # and as a projection inside the unified engine, co-satisfied with a partial-observation constraint
+    proj = mind.sdf_collision_projection(sphere, 3, 3)
+    out, _, _ = mind.project_onto_constraints(X.ravel(), [proj], iters=20)
+    assert (sphere(out.reshape(3, 3)) >= -0.02).all()
+
+
+def test_dirty_field_through_mind():
+    """The mind builds a dirty-flag cost field, moves a collider with a local delta, and navigates the result."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=512, seed=0)
+    def blob(P, c):
+        d = np.linalg.norm(P - c, axis=1); return 8.0 * np.exp(-(d ** 2) / 8.0)
+    df = mind.dirty_field((40, 40), np.zeros(2), np.full(2, 40.0))
+    df.place("obs", lambda P, c: blob(P, c), (10.0, 20.0), 8.0)
+    df.evals = 0; df.move("obs", (28.0, 28.0)); delta = df.evals
+    df.evals = 0; df.full_rebuild(); full = df.evals
+    assert delta < full                                            # the delta re-evaluated fewer cells
+    route = mind.navigate_cost_field(df.cost_grid(), (40, 40), (0, 0), (39, 39), lo=np.zeros(2), hi=np.full(2, 40.0))
+    assert route[0] == (0, 0) and route[-1] == (39, 39)
+
+
+def test_bake_sdf_through_mind_and_render():
+    """The mind bakes a scene SDF; the baked grid renders the same image and drives navigation from one precompute."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_semantic import parse_description, render_scene
+    from holographic_render import Camera
+    mind = UnifiedMind(dim=512, seed=0)
+    objs = parse_description("a red ball beside a blue ball beside a green ball")["objects"]
+    cam = Camera(eye=(0, 1, 6), target=(0, 0, 0), fov_deg=52)
+    ref = render_scene(objs, cam, width=80, height=80, ss=1, ground=False)
+    baked = render_scene(objs, cam, width=80, height=80, ss=1, ground=False, bake=80)
+    mse = float(np.mean((ref - baked) ** 2))
+    assert mse < 1e-3                                              # baked render matches analytic closely (PSNR > 30)
+
+
+def test_radiance_transfer_through_mind():
+    """The mind precomputes radiance transfer for a scene; relighting the same transfer under two lights differs."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_prt import project_env_to_sh, shade_prt
+    class Ball:
+        def eval(s, P): return np.linalg.norm(P, axis=1) - 1.0
+    mind = UnifiedMind(dim=512, seed=0)
+    pts = np.array([[0, 1.0, 0], [1.0, 0, 0]]); nrm = pts.copy()
+    T = mind.radiance_transfer(Ball(), pts, nrm, order=3, n=400)
+    assert T.shape == (2, 9)
+    L1 = project_env_to_sh(lambda d: np.clip(d @ np.array([0, 1.0, 0]), 0, 1)[:, None] * np.ones(3), order=3, n=1000)
+    L2 = project_env_to_sh(lambda d: np.clip(d @ np.array([1.0, 0, 0]), 0, 1)[:, None] * np.ones(3), order=3, n=1000)
+    assert not np.allclose(shade_prt(T, L1), shade_prt(T, L2))
+
+
+def test_cost_to_go_field_through_mind():
+    """The mind solves a value field once and routes from several starts, each optimal, via cheap descent."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_ndfield import least_cost_path, field_weighted_graph, path_cost
+    mind = UnifiedMind(dim=512, seed=0)
+    shape = (18, 18); rng = np.random.default_rng(0)
+    cost = rng.random(shape); cost[9, :] += 4.0
+    goal = (17, 17)
+    V, nxt, route = mind.cost_to_go_field(cost, shape, goal)
+    nbr, ec = field_weighted_graph(shape, cost)
+    for s in [(0, 0), (0, 17), (5, 12)]:
+        r = route(s); d = least_cost_path(nbr, ec, s, goal)
+        assert r is not None and abs(path_cost(r, cost, shape) - path_cost(d, cost, shape)) < 1e-9
+
+
+def test_dispatch_methods_through_mind():
+    """The mind dispatches per-element to collapse-vs-trace-style methods and recombines correctly."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=512, seed=0)
+    x = np.arange(10.0)
+    tags = np.where(x % 2 == 0, "collapse", "trace")
+    out = mind.dispatch_methods(x, tags, {"collapse": lambda v: v * 0.5, "trace": lambda v: v + 100})
+    assert np.allclose(out[tags == "collapse"], x[tags == "collapse"] * 0.5)
+    assert np.allclose(out[tags == "trace"], x[tags == "trace"] + 100)
+
+
+def test_recent_faculties_are_wired_end_to_end():
+    """Every recent capability is reachable and USABLE through UnifiedMind / the real render pipeline -- not siloed in
+    tests or benchmarks. This is the 'build on top of holostuff' contract: one mind, real calls, real outputs."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_render import Camera
+    from holographic_prt import project_env_to_sh, shade_prt
+    mind = UnifiedMind(dim=512, seed=0)
+    cam = Camera(eye=(0, 1, 6), target=(0, 0, 0), fov_deg=52)
+
+    # 1. bake reachable through the mind's text render faculty (SDF baked, O(1) samples)
+    img_bake = mind.render_scene_description("a red ball beside a blue ball", cam, width=64, height=64, bake=48)
+    assert img_bake.shape == (64, 64, 3) and np.isfinite(img_bake).all()
+
+    # 2. over-relaxation reachable through the same faculty (opt-in; default path stays exact)
+    img_relax = mind.render_scene_description("a red ball beside a blue ball", cam, width=64, height=64, relax=1.4)
+    assert img_relax.shape == (64, 64, 3)
+
+    # 3. bake_sdf faculty returns a usable drop-in GridSDF
+    class Ball:
+        def eval(s, P): return np.linalg.norm(P, axis=1) - 1.0
+        def ids(s, P): return np.zeros(len(P), int)
+    g = mind.bake_sdf(Ball(), np.full(3, -2.0), np.full(3, 2.0), 32)
+    assert abs(float(g.eval(np.array([[1.5, 0, 0]]))[0]) - 0.5) < 0.1     # samples the baked field
+
+    # 4. PRT: transfer + relight as a dot product, through the mind
+    pts = np.array([[0, 1.0, 0], [1.0, 0, 0]])
+    T = mind.radiance_transfer(Ball(), pts, pts, order=3, n=300)
+    L = project_env_to_sh(lambda d: np.ones((len(d), 3)), order=3, n=800)
+    assert shade_prt(T, L).shape == (2, 3)
+
+    # 5. cost-to-go value field: solve once, route from anywhere
+    V, nxt, route = mind.cost_to_go_field(np.random.default_rng(0).random((16, 16)), (16, 16), (15, 15))
+    assert route((0, 0)) is not None
+
+    # 6. render_dispatch: a real hybrid render with a working relight handle
+    class Scene:
+        cs = np.array([[0, 0, 0], [-1.6, 0, 0]]); cols = np.array([[0.7, 0.7, 0.7], [0.8, 0.3, 0.3]])
+        def eval(s, P): return np.min(np.stack([np.linalg.norm(P - c, axis=1) - 0.8 for c in s.cs]), axis=0)
+        def ids(s, P): return np.argmin(np.stack([np.linalg.norm(P - c, axis=1) for c in s.cs]), axis=0)
+    warm = lambda w: np.clip(w @ np.array([0.4, 0.7, 0.3]), 0, 1)[:, None] * np.ones(3) + 0.05
+    cool = lambda w: np.clip(w @ np.array([-0.5, 0.4, 0.2]), 0, 1)[:, None] * np.ones(3) + 0.05
+    frame, relight, info = mind.render_dispatch(Scene(), cam, 56, 56, {0: "trace", 1: "collapse"},
+                                                Scene.cols, warm, order=3, n=200)
+    assert frame.shape == (56, 56, 3) and info["collapse"] > 0
+    assert not np.allclose(frame, relight(cool))                          # relight works through the API
+
+
+def test_render_adaptive_through_mind():
+    """The adaptive pipeline is one mind call that plans and renders, exposing the plan so the automation is legible."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_semantic import parse_description
+    from holographic_render import Camera
+    mind = UnifiedMind(dim=512, seed=0)
+    cam = Camera(eye=(0, 1, 5), target=(0.6, 0, 0), fov_deg=55)
+    objs = parse_description("a mirror ball beside a red ball")["objects"]
+    plan = mind.plan_render(objs, relight=True)
+    assert plan["methods"][0] == "trace"                         # mirror
+    frame, relight, plan2 = mind.render_adaptive(objs, cam, 48, 48, relight=True)
+    assert frame.shape == (48, 48, 3) and callable(relight) and "reasons" in plan2
+
+
+def test_distribute_compute_through_mind():
+    """Distributed computation is reachable through the mind: decompose a domain, run a worker per bucket against a
+    shared cache, reassemble by a commutative monoid -- order-independent, so the buckets are distributable."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_fields import attractor_force
+    mind = UnifiedMind(dim=512, seed=0)
+    P = np.random.default_rng(0).standard_normal((80, 2))
+    centers = np.random.default_rng(1).standard_normal((15, 2)) * 3
+    mono = sum(attractor_force(P, c) for c in centers)
+    buckets = mind.partition_domain(len(centers), 5)
+    worker = lambda b, cache: sum(attractor_force(P, centers[i]) for i in b)
+    dist, info = mind.distribute_compute(buckets, worker, reduce="sum")
+    assert np.allclose(mono, dist, atol=1e-12) and info["buckets"] == len(buckets)
+    # adaptive (load-balanced) partition also reachable
+    ad = mind.partition_domain(8, 4, costs=[10, 1, 1, 1, 1, 1, 1, 1])
+    assert max(sum([10, 1, 1, 1, 1, 1, 1, 1][i] for i in b) for b in ad) <= 10 + 1e-9
+
+
+def test_partition_grid_and_bricks_through_mind():
+    """2D tiles and 3D bricks are reachable through the mind, with the sparse-brick skip."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=512, seed=0)
+    # 2D tiles
+    H, W = 24, 24; field = np.random.default_rng(0).standard_normal((H, W))
+    tiles = mind.partition_grid((H, W), (3, 3))
+    out, info = mind.distribute_bricks((H, W), tiles, lambda r, c: field[r])
+    assert np.array_equal(field, out) and info["regions"] == 9
+    # 3D bricks
+    bricks = mind.partition_grid((16, 16, 16), 8)
+    assert len(bricks) >= 1 and len(bricks[0]) == 3              # slice-triples
+
+
+def test_pattern_material_render_through_mind():
+    """The tie-together the audit asked for, end to end through the mind: pattern_field -> Param socket ->
+    surface_material channel -> render_surface resolves it per hit."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_param import Param
+    from holographic_pattern import field_lerp
+    from holographic_render import Camera
+    mind = UnifiedMind(dim=512, seed=0)
+    class Ball:
+        def eval(s, P): return np.linalg.norm(P, axis=1) - 0.9
+        def ids(s, P): return np.zeros(len(P), int)
+    pat = mind.pattern_field("checker", scale=2.5)
+    mat = mind.surface_material(color=Param(field=field_lerp(pat, (0.9, 0.1, 0.1), (0.95, 0.9, 0.85))))
+    named = mind.surface_material(name="metal", color=(0.8, 0.8, 0.85), opacity=0.6)   # canonical table + override
+    cam = Camera(eye=(0, 0.8, 4), target=(0, 0, 0), fov_deg=50)
+    img = mind.render_surface(Ball(), cam, 48, 48, mat)
+    assert img.shape == (48, 48, 3) and np.isfinite(img).all()
+    flat = mind.render_surface(Ball(), cam, 48, 48, mind.surface_material(color=(0.9, 0.5, 0.5)))
+    assert img.std() > flat.std() * 1.02                             # the texture reached the pixels
+    assert float(np.mean(named.resolve(np.zeros((3, 3)))["opacity"])) == 0.6
+
+
+def test_render_session_ties_scene_through_mind():
+    """The keystone tie-together through the mind: one session -> preview, progressive final, and splat proxy from the
+    same scene, with a live material edit that shows in the preview."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_render import Camera
+    from holographic_param import Param
+    from holographic_pattern import make_pattern, field_lerp
+    mind = UnifiedMind(dim=512, seed=0)
+    class Ball:
+        def eval(s, P): return np.linalg.norm(P, axis=1) - 0.95
+        def ids(s, P): return np.zeros(len(P), int)
+    mat = mind.surface_material(color=Param(field=field_lerp(make_pattern("checker", scale=2.5), (0.9, 0.1, 0.1), (0.95, 0.9, 0.85))))
+    cam = Camera(eye=(0, 0.7, 4), target=(0, 0, 0), fov_deg=50)
+    sess = mind.render_session(Ball(), {0: mat}, cam, width=40, height=40)
+    prev = sess.preview()
+    assert prev.shape == (40, 40, 3)
+    fired = []
+    fin = sess.render_final(spp=6, on_progress=lambda im, d, t: fired.append(d), progress_every=2,
+                            width=32, height=32, sky=lambda D: np.ones((len(D), 3)) * 0.9)
+    assert fin.shape == (32, 32, 3) and len(fired) >= 1
+    splats, js = sess.to_splats(n=200)
+    assert len(splats) > 0
+    sess.edit_channel(0, "color", (0.2, 0.8, 0.3))
+    assert not np.allclose(prev, sess.preview())                    # edit shows in the preview
+
+
+def test_physical_material_drives_render_session():
+    """The fork's physical material library plugged into our render pipeline: a matlib preset -> SurfaceMaterial ->
+    RenderSession preview + progressive final, all through the mind."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_render import Camera
+    mind = UnifiedMind(dim=512, seed=0)
+    class Ball:
+        def eval(s, P): return np.linalg.norm(P, axis=1) - 0.95
+        def ids(s, P): return np.zeros(len(P), int)
+    gold = mind.render_material("gold")                              # physical catalog -> render material
+    assert float(np.mean(gold.resolve(np.zeros((3, 3)))["reflect"])) == 1.0   # gold is metallic
+    cam = Camera(eye=(0, 0.7, 4), target=(0, 0, 0), fov_deg=50)
+    sess = mind.render_session(Ball(), {0: gold}, cam, width=40, height=40)
+    assert sess.preview().shape == (40, 40, 3)
+    fin = sess.render_final(spp=4, width=28, height=28, sky=lambda D: np.ones((len(D), 3)) * 0.9)
+    assert fin.shape == (28, 28, 3) and np.isfinite(fin).all()
+
+
+def test_physical_scenario_and_bill_through_mind():
+    """Definitions + quantities plugged in: a description becomes a physically-validated sim spec, and a bill of
+    materials 'renders' its mass/cost/carbon by composing the dimensional grammar over reused densities."""
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=256, seed=0)
+    # physically-accurate simulation spec from a description
+    ok = mind.resolve_scenario("a block of wood floating in water")
+    assert ok.understood and ok.consistent                          # wood floats -> valid
+    bad = mind.resolve_scenario("a steel ball floating in water")
+    assert not bad.consistent                                       # steel sinks -> physics says no
+    assert bad.build_spec()["solver"] is not None                   # still emits a solver spec
+    # the dimensional grammar catches a nonsense sum, and composes a real one
+    import pytest
+    with pytest.raises(Exception):
+        mind.quantity(1.0, "kg") + mind.quantity(1.0, "m")          # length + mass is refused
+    # the house bill matches the documented composition (densities reused from the definition library)
+    est = mind.estimate_bill([("concrete", 18.0), ("wood", 12.0), ("steel", 0.6), ("glass", 0.4)])
+    assert abs(est["mass"].to("t") - 56.7) < 0.5 and est["missing"] == []
+    assert abs(est["cost"].to("USD") - 14430) < 50
+
+
+def test_structure_primitives_drive_render_through_mind():
+    """M1/M2/M3: grain, inclusions, and crystal sockets from the mind drive a SurfaceMaterial and render."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_param import Param
+    from holographic_render import Camera
+    mind = UnifiedMind(dim=256, seed=0)
+    class Ball:
+        def eval(s, P): return np.linalg.norm(P, axis=1) - 0.95
+        def ids(s, P): return np.zeros(len(P), int)
+    grain = mind.surface_material(color=Param(field=mind.grain_material(ring_scale=6.0)))
+    alloy = mind.surface_material(color=Param(field=mind.material_inclusions("slate", [("gold_ore", 0.2, 5.0)])))
+    cells, crystal_sock = mind.crystal_material(n_seeds=30, seed=1)
+    crystal = mind.surface_material(color=Param(field=crystal_sock))
+    cam = Camera(eye=(0, 0.6, 4), target=(0, 0, 0), fov_deg=50)
+    for mat in (grain, alloy, crystal):
+        img = mind.render_surface(Ball(), cam, 40, 40, mat)
+        assert img.shape == (40, 40, 3) and np.isfinite(img).all()
+    # the grain/inclusion textures actually vary the surface vs a flat colour
+    flat = mind.render_surface(Ball(), cam, 40, 40, mind.surface_material(color=(0.6, 0.45, 0.3)))
+    assert mind.render_surface(Ball(), cam, 40, 40, grain).std() > flat.std() * 1.02
+
+
+def test_thermodynamics_foundation_through_mind():
+    """T1/T3/T4 through the mind: blackbody glow colour, conduction on a field, a cooling body, a gas state, and
+    the boiling-point-vs-pressure curve the phase-change process will consume."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=256, seed=0)
+    # T3: ember red, daylight ~neutral
+    ember = mind.blackbody_color(1000.0); day = mind.blackbody_color(6500.0)
+    assert ember[0] > ember[2] and (day.max() - day.min()) < 0.35
+    # T4: conduction conserves heat; a steel body cools toward ambient
+    T = np.full((13, 13), 300.0); T[6, 6] = 900.0
+    T2 = mind.diffuse_heat(T, alpha=1e-4, dx=0.01, dt=0.5, steps=10)
+    assert abs(T2.sum() - T.sum()) < 1e-6 and T2.max() < 900.0
+    body = mind.heat_body("steel", 1.0, 800.0)
+    assert body.newton_cool(300.0, 2.0, 10.0) < 800.0
+    # T1: air state cross-checks the tabulated sound speed; boiling point falls with pressure
+    g = mind.ideal_gas("air", 293.15)
+    assert abs(g.sound_speed() - 343.0) < 3.0
+    assert mind.boiling_point(70000.0) < mind.boiling_point(101325.0)
+
+
+def test_material_processes_through_mind():
+    """M6 + M5 through the mind: a wood fire lights and makes pale smoke, PVC needs more heat and makes black
+    smoke; water boils with a temperature plateau. Both stand on the thermo foundation."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=256, seed=0)
+    # M6: ignition gate + material-specific smoke
+    assert mind.ignites("wood", 600.0) and not mind.ignites("pvc_plastic", 600.0)
+    wood_fire = mind.fire("wood", 1.0, temp_K=900.0)
+    s = wood_fire.step(0.5)
+    assert s["burning"] and s["smoke_color"].mean() > 0.4          # lit, pale-grey woodsmoke
+    pvc_fire = mind.fire("pvc_plastic", 1.0, temp_K=900.0)
+    assert pvc_fire.step(0.5)["smoke_color"].mean() < 0.2          # black plastic smoke
+    # M5: the boiling plateau through the mind
+    ps = mind.phase_state("water", 1.0, temp_K=372.15)
+    temps = [ps.add_heat(1e5).T for _ in range(30)]
+    assert (np.abs(np.array(temps) - 373.15) < 0.2).sum() >= 15    # holds at 100 C while boiling
+    assert ps.gas > 0.0
+
+
+def test_backlog_finish_and_elements_through_mind():
+    """M4 corrosion front + M7 burn/decay + the periodic table, through the mind, tying to the material system."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=256, seed=0)
+    # M4: rust spreads from exposed faces
+    f = mind.oxidation_field((15, 15))
+    for _ in range(20):
+        f.step("steel")
+    assert f.ox[0, 7] > f.ox[7, 7] and f.fraction() > 0            # front ahead at the edge
+    assert mind.oxide_color("steel", 1.0)[0] > mind.oxide_color("steel", 1.0)[2]   # rust orange
+    # M7: a lit object burns to ash
+    obj = mind.burn_object("wood", 1.0).light()
+    for _ in range(80):
+        obj.step(0.5)
+    assert obj.is_ash()
+    # elements: material references its elemental makeup, deriving molar mass + flame colour
+    assert abs(mind.element("Fe")["atomic_mass"] - 55.845) < 1e-3
+    salt = mind.material_elemental("table_salt")
+    assert abs(salt["molar_mass"] - 58.44) < 0.01 and salt["flame_color"][0] > 0.7   # sodium yellow
+
+
+def test_acoustics_sound_to_cymatics_through_mind():
+    """The headline pipeline through the mind: a synthesized tone -> its spectrum -> drives a Chladni plate ->
+    sand settles on the nodes. Plus acoustic impedance/reflection from material data."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=256, seed=0)
+    # A2: air/steel reflects almost all sound, energy conserved
+    R, T = mind.acoustic_interface("air", "steel")
+    assert R > 0.999 and abs(R + T - 1.0) < 1e-12
+    assert mind.acoustic_impedance("water") > mind.acoustic_impedance("air")
+    # A1 + A4: a tone at a plate mode frequency drives that plate; sand settles on nodes
+    plate = mind.chladni_plate("square", grid=32, n_modes=24, n_grains=3000, seed=0)
+    rate = 22050; t = np.arange(rate) / rate
+    tone = np.sin(2 * np.pi * float(plate.mode_hz[5]) * t)         # a tone at mode 5's frequency
+    freqs, amps = mind.audio_spectrum(tone, rate, k=3)
+    plate.drive(freqs, amps); plate.settle(steps=70, dt=0.1, strength=8.0)
+    sand_u, plate_u = plate.nodal_fraction_on_sand()
+    assert sand_u < 0.7 * plate_u                                  # the sound shaped the sand onto nodes
+
+
+def test_wave_and_cymatics_media_through_mind():
+    """A3 wave propagation + A5 water/cornstarch media through the mind."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=256, seed=0)
+    # A3: a pulse propagates at c and stays stable
+    w = mind.wave_field((200,), c=1.0, dx=1.0)
+    w.pulse((100,), amp=1.0, radius=4.0); w.step(dt=60.0)
+    assert np.isfinite(w.p).all() and abs((100 + int(np.argmax(w.p[100:]))) - 100 - 60) < 10
+    # A5: water stands at antinodes, cornstarch thickens under fast drive
+    water = mind.chladni_plate("square", grid=32, medium="water", n_modes=24, seed=0)
+    water.drive_mode(6); water.settle(30)
+    au = np.abs(water.u)[water.mask]
+    assert np.corrcoef(au, water.surface[water.mask])[0, 1] > 0.7
+    fast = mind.chladni_plate("square", grid=32, medium="cornstarch", n_modes=24, base_hz=1400.0, seed=0)
+    fast.drive_mode(8); fast.settle(30)
+    assert fast.peaks.max() > 0.0
+
+
+def test_nonnewtonian_cornstarch_through_mind():
+    """Cornstarch as a real fluid through the mind: the power-law viscosity thickens under shear, and a
+    cornstarch fluid resists a sheared flow more than a Newtonian one."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=256, seed=0)
+    # the power law: much thicker under fast shear (cornstarch)
+    eta_fast = float(mind.power_law_viscosity(50.0, K=1.0, n=1.8))
+    eta_slow = float(mind.power_law_viscosity(0.5, K=1.0, n=1.8))
+    assert eta_fast > eta_slow * 5
+    # a non-Newtonian fluid resists a sheared flow more than Newtonian
+    def kept(n):
+        f = mind.nonnewtonian_fluid((36, 36), power_law_n=n, consistency_K=0.06, dt=0.1, viscosity=0.02,
+                                    vorticity=0.0, dissipation=0.0, cooling=0.0)
+        rows = np.arange(36)[:, None] * np.ones((1, 36))
+        f.vel = f.xp.asarray(np.stack([np.zeros((36, 36)), 12.0 * np.sin(2 * np.pi * 3 * rows / 36)]))
+        E0 = float((np.asarray(f.vel) ** 2).sum()); f.step()
+        return float((np.asarray(f.vel) ** 2).sum()) / E0
+    assert kept(1.8) < kept(1.0)                                   # cornstarch damps the shear more than water
+
+
+def test_levitation_and_room_acoustics_through_mind():
+    """A7 levitation + A6 room acoustics through the mind (finishing the acoustics arc)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=256, seed=0)
+    # A7: field on holds beads aloft; off they fall
+    lam = 0.0086
+    on = mind.levitation_chamber(height=0.05, wavelength=lam, amplitude=5000.0, n_beads=20, seed=0)
+    on.settle(steps=5000, field_on=True)
+    assert (on.heights() > 0.002).mean() > 0.7
+    off = mind.levitation_chamber(height=0.05, wavelength=lam, amplitude=5000.0, n_beads=20, seed=0)
+    off.settle(steps=8000, field_on=False)
+    assert off.heights().mean() < on.heights().mean() * 0.6
+    # A6: a live room rings longer than a dead one; direct sound arrives at d/c
+    live = mind.room_acoustics((6, 4, 3), absorption=0.03); dead = mind.room_acoustics((6, 4, 3), absorption=0.4)
+    assert live.rt60() > dead.rt60() * 3
+    assert abs(live.reflections((1, 2, 1.5), (5, 2, 1.5))[0]["delay"] - 4.0 / 343.0) < 1e-9
+
+
+def test_curlnoise_and_tearing_through_mind():
+    """SIGGRAPH #1 curl noise + #2 tearing through the mind: divergence-free turbulence, and a sheet that rips."""
+    import numpy as np
+    from holographic_curlnoise import divergence
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=256, seed=0)
+    # #1: the flow the mind hands back is divergence-free
+    u, v = mind.curl_noise(48, octaves=4, seed=0)
+    assert np.abs(divergence(u, v)).max() < 1e-6
+    assert np.sqrt(u ** 2 + v ** 2).mean() > 0.0
+    # #2: a yanked paper sheet tears and separates
+    cloth = mind.tearable_cloth(rows=10, cols=10, material="paper", compliance=3e-3)
+    for _ in range(90):
+        cloth.step(pull=(0.0, -1200.0), gravity=(0.0, -9.8))
+    assert cloth.torn > 0 and cloth.connected_components() > 1
+
+
+def test_walk_on_spheres_through_mind():
+    """SIGGRAPH #7 Walk on Spheres through the mind: steady heat on an SDF matches a known harmonic solution,
+    with an honest Monte-Carlo error bar."""
+    import numpy as np
+    from holographic_sdf import sphere
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=256, seed=0)
+    s = sphere(2.0)
+    # a linear (harmonic) boundary temperature g(x)=x -> interior steady temperature equals x
+    pts = np.array([[0.5, 0.0, 0.0], [-0.8, 0.3, 0.2]])
+    T, se = mind.steady_heat(s, lambda P: P[:, 0], pts, n_walks=3000, seed=1)
+    assert np.all(np.abs(T - pts[:, 0]) < 4 * se + 0.05)
+    assert np.all(se > 0)                                          # honest Monte-Carlo error bar
+    # Poisson via solve_pde: -Delta u = 1 on a 3-D ball radius 2, u=0 on boundary -> u(0)=R^2/(2*dim)=4/6
+    disk = sphere(2.0)
+    u, se2 = mind.solve_pde(disk, lambda P: np.zeros(len(P)), np.array([[0.0, 0.0, 0.0]]),
+                            source=lambda P: np.ones(len(P)), n_walks=4000, seed=2)
+    assert abs(u[0] - 4.0 / 6.0) < 5 * se2[0] + 0.1
+
+
+def test_hair_groom_simulate_render_through_mind():
+    """Hair & fur through the mind (H1-H7): groom on a sphere, simulate under gravity+wind, interpolate, render."""
+    import numpy as np
+    from holographic_sdf import sphere
+    from holographic_render import Camera
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=256, seed=0)
+    s = sphere(1.0); bounds = ([-1.6] * 3, [1.6] * 3)
+    # H1 groom
+    guides = mind.groom_hair(s.eval, 50, bounds, length=0.7, n_pts=8, curl=0.8, seed=0)
+    assert len(guides) > 0 and abs(np.linalg.norm(guides[0].root) - 1.0) < 0.05
+    # H7 wind + H2 dynamics: hair moves under gravity and wind without stretching
+    wind = mind.hair_wind(strength=2.0, seed=1)
+    L0 = guides[0].length()
+    moved = mind.simulate_hair(guides[:10], steps=40, gravity=(0.0, -6.0, 0.0), wind=wind.force)
+    assert abs(moved[0].length() - L0) < 0.08 * L0
+    # H3 interpolation: many render strands from the guides
+    render_roots = np.array([g.root for g in guides]) * 1.001
+    rendered_strands = mind.interpolate_hair(guides, render_roots, k=3, clump=0.5)
+    assert len(rendered_strands) == len(render_roots)
+    # H4/H6 render to an image
+    cam = Camera(eye=(0.0, 0.0, 3.0), target=(0.0, 0.0, 0.0), fov_deg=45.0)
+    img = mind.render_hair(guides, cam, width=80, height=80, shader="marschner", smooth_levels=1)
+    assert img.shape == (80, 80, 3) and img.std() > 0.0
+
+
+def test_cosserat_twist_through_mind():
+    """H2b Cosserat rod through the mind: a groomed curly strand holds its curl under gravity via orientation
+    frames, better than a plain chain."""
+    import numpy as np
+    from holographic_sdf import sphere
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=256, seed=0)
+    s = sphere(1.0)
+    curly = mind.groom_hair(s.eval, 1, ([-1.6] * 3, [1.6] * 3), length=0.8, n_pts=14, curl=2.0, seed=0)[0]
+    rest = 1.0 - np.linalg.norm(curly.points[-1] - curly.points[0]) / curly.length()
+    rod = mind.cosserat_strand(curly, bend_stiffness=0.6, shape_stiffness=0.7)
+    rod.settle(steps=100, gravity=(0.0, -9.8, 0.0))
+    plain = mind.cosserat_strand(curly, bend_stiffness=0.0, shape_stiffness=0.0)
+    plain.settle(steps=100, gravity=(0.0, -9.8, 0.0))
+    assert abs(rod.curl_amount() - rest) < abs(plain.curl_amount() - rest)   # frames hold the curl better
+
+
+def test_fusion_through_mind_matches_and_saves_ffts():
+    """Fill 2 through the mind: a fused role/filler record matches the op-by-op bundle_bind to tolerance, and a
+    fused chain reports fewer FFTs than op-by-op."""
+    import numpy as np
+    from holographic_ai import bundle_bind
+    from holographic_fuse import leaf, fbind, fuse, reset_fft_counts, fft_counts
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=512, seed=0)
+    rng = np.random.default_rng(0)
+    keys = [k / np.linalg.norm(k) for k in rng.standard_normal((6, 512))]
+    vals = [v / np.linalg.norm(v) for v in rng.standard_normal((6, 512))]
+    assert np.abs(mind.fuse_record(keys, vals) - bundle_bind(keys, vals)).max() < 1e-10
+    # a 6-bind accumulation chain uses fewer than 3K FFTs
+    e = leaf(keys[0])
+    for x in keys[1:]:
+        e = fbind(e, x)
+    reset_fft_counts(); fuse(e); c = fft_counts()
+    assert c["rfft"] + c["irfft"] < 3 * 5
+
+
+def test_scheduler_through_mind_fewer_ffts():
+    """Fill 4 through the mind: the scheduled run of a compose+recall pipeline does fewer FFTs and kernel-calls
+    than the sequential baseline and recovers the same cleanup winner."""
+    import numpy as np
+    from holographic_schedule import leaf, op_bind, op_bundle, op_unbind, op_cleanup
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=512, seed=0)
+    rng = np.random.default_rng(1)
+    atoms = [a / np.linalg.norm(a) for a in rng.standard_normal((6, 512))]
+    r0, r1, r2, f0, f1, f2 = atoms
+    cb = np.stack([f0, f1, f2])
+    ops = [leaf(r0), leaf(r1), leaf(r2), leaf(f0), leaf(f1), leaf(f2),
+           op_bind(0, 3), op_bind(1, 4), op_bind(2, 5),
+           op_bundle([6, 7, 8]), op_unbind(9, 0), op_cleanup(10, cb)]
+    _, seq = mind.schedule_program(ops, sequential=True)
+    vals, sch = mind.schedule_program(ops)
+    assert sch["fft"] < seq["fft"] and sch["kernel_calls"] < seq["kernel_calls"]
+    assert np.array_equal(vals[11], f0)                # recovered the right filler as the cleanup winner
+
+
+def test_recipe_fusion_through_mind():
+    """Fill 4 integration through the mind: realize_recipe_fused fuses a real recipe and matches the exact
+    build() outputs to tolerance."""
+    import numpy as np
+    from holographic_recipe import StructureRecipe
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=512, seed=0)
+    r = StructureRecipe(dim=512, seed=0)
+    roles = [r.atom("r%d" % i, unitary=True) for i in range(3)]
+    fills = [r.atom("f%d" % i) for i in range(3)]
+    r.mark_output(r.normalize(r.bundle([r.bind(roles[i], fills[i]) for i in range(3)])))
+    exact = r.outputs()
+    fused, stats = mind.realize_recipe_fused(r)
+    assert np.abs(exact[0] - fused[0]).max() < 1e-9
+    assert stats["fft"] < 3 * 3                             # fewer FFTs than op-by-op (3 binds x 3)
+
+
+def test_sweep3_faculties_through_mind():
+    """Sweep 3 wirings through the mind: the capability table lists APPLY faculties and reflects a registration;
+    the spatial index matches brute force; reaction-diffusion, emergent concepts, and temporal reuse all run."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_spatial import brute_knn
+    mind = UnifiedMind(dim=256, seed=0)
+    # 1. capability table + registration roundtrip (the bridge read side)
+    base = mind.faculties()
+    assert "cleanup" in base and "denoise" in base
+    mind.register_apply_handler("negate", lambda acc: -acc)
+    assert "negate" in mind.faculties()
+    # 2. spatial index matches brute force through the mind
+    pts = np.random.default_rng(0).uniform(0, 10, (120, 3))
+    g = mind.spatial_index(pts, 1.0)
+    assert g.knn([5, 5, 5], 4) == brute_knn(pts, [5, 5, 5], 4)
+    # 3. reaction-diffusion runs and stays finite
+    ca = mind.reaction_diffusion(size=24, dim=32, steps=8, seed=0)
+    assert ca.grid.shape[0] == 24 and np.isfinite(ca.grid).all()
+    # 4. emergent concepts: a tight cluster forms a concept
+    rng = np.random.default_rng(1); c = rng.standard_normal(256); c /= np.linalg.norm(c)
+    ec = mind.emergent_concepts(seed=0)
+    for _ in range(6):
+        ec.perceive(c + 0.03 * rng.standard_normal(256))
+    assert len(ec.concepts) >= 1
+    # 5. temporal reuse: dirty-only re-solve matches a full re-solve
+    tr = mind.temporal_reuse()
+    tr.solve(lambda i: float(i), 40)
+    f, cost = tr.solve(lambda i: float(i) + 1.0, 40, dirty=[5, 6])
+    assert cost == 2 and f[5] == 6.0 and f[0] == 0.0
+
+
+def test_sweep3_medium_through_mind():
+    """Sweep 3 medium unifications through the mind: the shared SH primitive reconstructs light AND sound; the
+    conditional propagator plans on a state graph; the storage spine dedups and recovers under loss."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_spharm import sphere_dirs
+    from holographic_ai import cosine
+    mind = UnifiedMind(dim=256, seed=0)
+
+    # item 8: one SH primitive, two domains
+    dirs = sphere_dirs(300)
+    ld = np.array([0.2, 0.4, 0.9]); ld /= np.linalg.norm(ld)
+    radiance = np.clip(dirs @ ld, 0, None) ** 2
+    rec = mind.sample_directional(mind.directional_field(dirs, radiance, 4), dirs, 4)
+    assert np.sqrt(np.mean((rec - radiance) ** 2)) / (radiance.std() + 1e-9) < 0.3
+
+    # item 9: conditional propagator plans on a state graph
+    rng = np.random.default_rng(0); D = 256; K = 6
+    places = rng.standard_normal((K, D)); places /= np.linalg.norm(places, axis=1, keepdims=True)
+    perms = [np.roll(np.arange(K), a + 1) for a in range(2)]
+    transitions = [[(places[i], places[perms[a][i]]) for i in range(K)] for a in range(2)]
+    cp = mind.conditional_propagator(transitions)
+    end = cp.plan(places[0], [0, 1, 0, 1], codebook=places)
+    tgt = 0
+    for a in [0, 1, 0, 1]:
+        tgt = perms[a][tgt]
+    assert int((places @ (end / np.linalg.norm(end))).argmax()) == tgt
+
+    # item 7: storage spine dedups + recovers under loss
+    spine = mind.storage_spine(block_size=16)
+    p = b"a record that must survive" * 4
+    spine.put(("db", "x"), p); spine.put(("cache", "x2"), p)
+    assert spine.distinct_payloads() == 1                 # deduped
+    assert spine.get(("db", "x"), loss=0.3) == p          # recovered under loss
+
+
+def test_sweep3_local_completions_through_mind():
+    """Sweep 3 local completions through the mind: texture maps sample per-texel; the graph namespace routes a
+    query to its region (hierarchy, not recall); near-surface->SDF redistances a band to a full signed field."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_materialio import PBRMaterial
+    mind = UnifiedMind(dim=256, seed=0)
+
+    # texture map on a material
+    checker = np.indices((4, 4)).sum(0) % 2
+    tex = mind.texture_map(checker.astype(float)[:, :, None], wrap="repeat")
+    mat = PBRMaterial(base_color=(1, 1, 1, 1), base_color_map=tex)
+    assert 0.0 <= mat.sample(0.5, 0.5)["base_color"][0] <= 1.0
+
+    # graph namespace: observe labelled vectors, classify routes to the right label
+    rng = np.random.default_rng(0)
+    centres = {lbl: (lambda v: v / np.linalg.norm(v))(rng.standard_normal(256)) for lbl in ("a", "b", "c")}
+    ns = mind.graph_namespace()
+    for lbl, c in centres.items():
+        for _ in range(5):
+            ns.observe_vector(c + 0.02 * rng.standard_normal(256), lbl)
+    q = centres["b"] + 0.02 * rng.standard_normal(256)
+    result = ns.classify_vector(q)
+    label = result[0] if isinstance(result, tuple) else result
+    assert label == "b"                                            # routed to the right region
+
+    # near-surface -> full SDF: a band around a sphere redistances to a full signed field
+    n = 24; xs = np.linspace(-1, 1, n)
+    X, Y, Z = np.meshgrid(xs, xs, xs, indexing="ij")
+    band = np.sqrt(X**2 + Y**2 + Z**2) - 0.5                       # a signed near-surface band (sphere r=0.5)
+    sdf = mind.near_surface_to_sdf(band, h=2.0 / (n - 1))
+    assert sdf.shape == band.shape
+    assert (sdf[band < 0] <= 0).mean() > 0.9                       # inside stays negative (sign preserved)
+
+
+def test_render_sim_pipeline_through_mind():
+    """Render/Sim Pipeline end to end through the mind: an interactive pipeline plans + runs a frame (sim stages
+    before render, tonemapped image out); a FieldEffect drives a ParticleSim via the shared integrator; the G1
+    normal is bit-identical between the field module and the renderer."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_sdf import sphere, sdf_normal as sdf_normal_canon
+    from holographic_fieldeffect import attract_to
+    import holographic_raymarch as rm
+    mind = UnifiedMind(dim=256, seed=0)
+
+    # (1) the pipeline: interactive preset -> sim stages before render, produces a tonemapped image
+    pipe = mind.render_pipeline("interactive")
+    names = pipe.stage_names()
+    assert names.index("sim_collide") < names.index("render")     # sim before render
+    plan = pipe.plan()
+    assert any(p["stage"] == "svgf_denoise" for p in plan)        # svgf present, gbuffer auto-included
+    ctx = pipe.run(scene="scene", seed=0)
+    assert ctx.image.min() >= 0.0 and ctx.image.max() <= 1.0
+    assert "fluid" in ctx.buffers.get("sim", [])                  # a sim stage actually ran
+
+    # (2) a FieldEffect drives a ParticleSim: particles inside a gravity well fall toward the centre
+    well = mind.field_effect(sphere(3.0), attract_to([0, 0, 0]), radius=3.0, strength=5.0)
+    pos = np.array([[1.0, 0.0, 0.0], [0.0, 1.5, 0.0]])
+    vel = np.zeros_like(pos)
+    sim = mind.particle_sim(pos, vel, lambda p, v: well.apply(p), integrator="symplectic")
+    r0 = np.linalg.norm(sim.pos, axis=1).copy()
+    for _ in range(60):
+        sim.advance(0.02)
+    r1 = np.linalg.norm(sim.pos, axis=1)
+    assert (r1 < r0).all()                                        # the field pulled them inward
+
+    # (3) G1: the promoted normal matches the renderer's delegated one bit-for-bit
+    P = np.random.default_rng(0).standard_normal((30, 3))
+    assert np.array_equal(sdf_normal_canon(sphere(1.0), P), rm.sdf_normal(sphere(1.0), P))
+
+
+def test_forecast_confidence_through_mind():
+    """Forecasting F1/F2/F8 through the mind: a producer's forecasts get a calibrated interval that abstains when
+    too wide; a drifting stream keeps coverage via ACI; the coverage report tracks nominal; CRPS ranks producers."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+
+    # (1) F1: calibrate a noisy producer, get a 90% interval, and abstain when the tolerance is tight
+    truth = rng.standard_normal(1200); pred = truth + rng.standard_normal(1200) * 0.5
+    cf = mind.calibrate_forecast(pred[:600], truth[:600], alpha=0.1, kind="scalar", abstain_width=2.0)
+    out = cf.predict(3.0)
+    assert out["coverage"] == 0.9 and out["abstain"] is False
+    lo, hi = out["interval"]
+    assert lo < 3.0 < hi
+    # measured coverage on the held-out half tracks 90%
+    covered = [cf.covers(pred[i], truth[i]) for i in range(600, 1200)]
+    assert abs(float(np.mean(covered)) - 0.9) < 0.04
+
+    # (2) F2: ACI holds ~90% on a drifting residual stream
+    aci = mind.adaptive_conformal(alpha=0.1)
+    for r in np.abs(rng.standard_normal(1500) * np.linspace(0.5, 3.0, 1500)):
+        aci.step(r)
+    assert abs(aci.realized_coverage() - 0.9) < 0.06
+
+    # (3) F8: coverage report tracks nominal; CRPS ranks a sharp forecast below a vague one
+    resid = np.abs(pred - truth)
+    rep = mind.forecast_coverage_report(resid[:600], resid[600:], alphas=(0.1, 0.2))
+    assert all(abs(row["empirical"] - row["nominal"]) < 0.05 for row in rep)
+    assert mind.forecast_crps(rng.standard_normal(300) * 0.3 + 1.0, 1.0) < \
+           mind.forecast_crps(rng.standard_normal(300) * 3.0 + 1.0, 1.0)
+
+
+def test_forecast_router_and_producers_through_mind():
+    """Forecasting F3/F4/F6/F7 through the mind: the router picks a producer and returns a calibrated interval;
+    analog yields a successor distribution; the horizon gate reports a trusted lead; recurrent+market are wired."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_analog import delay_embed
+    mind = UnifiedMind(dim=256, seed=0)
+
+    # (1) F3 router on the logistic map -> analog, calibrated interval
+    lx = [0.37]
+    for _ in range(2500):
+        lx.append(3.9 * lx[-1] * (1 - lx[-1]))
+    rf = mind.forecast(np.array(lx), d=4, alpha=0.1)
+    out = rf.predict(np.array(lx[-4:]))
+    assert out["producer"] == "analog" and out["coverage"] == 0.9
+
+    # (2) F4 analog yields a distribution and abstains (strict floor) on a no-analog query
+    rng = np.random.default_rng(0); t = np.arange(3000)
+    s = np.sin(t * 0.55) + 0.5 * np.sin(t * 0.27) + 0.03 * rng.standard_normal(3000)
+    c, y = delay_embed(s, 20)
+    af = mind.analog_forecaster(c[:2000], y[:2000], sim_floor=0.95)
+    assert af.forecast(rng.standard_normal(20) * 10)["abstain"] is True
+    assert len(af.forecast(c[2000])["samples"]) > 1
+
+    # (3) F6 horizon gate: a smooth ramp is trusted several steps out
+    mh = mind.multi_horizon_forecaster(lambda st, H: np.arange(1, H + 1) * float(st), alpha=0.1)
+    states = [float(v) for v in rng.standard_normal(200)]
+    mh.calibrate(states, [np.arange(1, 11) * st for st in states], 10)
+    assert mh.forecast(1.0, tolerance=float("inf"))["trusted_horizon"] == 10
+
+    # (4) F7 de-silo: recurrent + market reachable
+    assert type(mind.recurrent_forecaster("esn", n_in=1)).__name__ == "EchoStateNetwork"
+    assert type(mind.market_projector()).__name__ == "RayProjector"
+
+
+def test_query_interface_through_mind():
+    """Query Interface Phases 1-3 through the mind: build a VSA table, run exact and fuzzy SQL, get confidences."""
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=2048, seed=0)
+    rows = [
+        {"name": "gold", "colour": "yellow", "density": 19300},
+        {"name": "silver", "colour": "grey", "density": 10490},
+        {"name": "iron", "colour": "grey", "density": 7870},
+        {"name": "lead", "colour": "grey", "density": 11340},
+    ]
+    t = mind.make_table(rows, ["name", "colour", "density"])
+    exact = mind.query("SELECT name FROM m WHERE density > 9000 ORDER BY density LIMIT 2", t)
+    assert [r["name"] for r in exact] == ["gold", "lead"]
+    fuzzy = mind.query("SELECT name FROM m WHERE colour ~ 'grey' ORDER BY similarity", t)
+    assert {"silver", "iron", "lead"} <= {r["name"] for r in fuzzy}
+    assert fuzzy[0]["_confidence"] > 0.5
+
+
+def test_forecasting_sweep_delegations_through_mind():
+    """Forecasting sec.5 sweep through the mind: the scheduler's cost model is a measured (calibrated) capacity,
+    and the renderer's adaptive stop is a calibrated variance-CI budget. (The resonator soft confidence and the
+    agent/recall confidences were already calibrated -- probe-first confirmed, not rebuilt.)"""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=512, seed=0)
+
+    # scheduler cost model as forecaster: measured capacity <= theoretical, and stricter target -> smaller
+    r90 = mind.scheduler_capacity(target_recall=0.9)
+    r99 = mind.scheduler_capacity(target_recall=0.99)
+    assert r90["capacity"] <= r90["theoretical"]
+    assert r99["capacity"] <= r90["capacity"]
+
+    # renderer adaptive stop: converged pixels get 0 extra samples, noisy pixels get more
+    v = np.array([1e-5, 4e-3])
+    budget = mind.adaptive_sample_budget(v, current_n=64, target_half_width=0.05)
+    assert budget[0] == 0 and budget[1] > 0
+
+    # the already-calibrated resonator soft confidence is reachable and graded (probe-first: not rebuilt)
+    from holographic_sbc import sbc_codebook, sbc_reconstruct, decompose_structure
+    B, L, F, N = 24, 7, 3, 8
+    cbs = [sbc_codebook(B, L, N, seed=f) for f in range(F)]
+    true = (1, 2, 3)
+    prod = sbc_reconstruct(true, cbs, L)
+    out = decompose_structure(prod, cbs, L, confidence=True, seed=0)
+    assert "agreement" in out and "pvalue" in out              # the null-calibrated soft confidence already exists
+
+
+def test_query_the_mind_through_registry_and_explain():
+    """Query Interface Part 2 through the mind: introspection is a data query over the capability registry
+    (Phase 6), and EXPLAIN dry-runs a program without executing it (Phase 7). Plus Phase 5 aggregation."""
+    from holographic_unified import UnifiedMind
+    from holographic_machine import HoloMachine
+    from holographic_query import explain_program
+    mind = UnifiedMind(dim=256, seed=0)
+
+    # Phase 6: introspection = SELECT over the registry; GROUP BY domain is a capability census
+    reg = mind.capabilities()
+    forecasting = {r["name"] for r in mind.query("SELECT name FROM actions WHERE domain = 'forecasting'", reg)}
+    assert "forecast" in forecasting and "scheduler_capacity" not in forecasting  # scheduler tags 'compute'
+    census = mind.query("SELECT domain, COUNT(*) FROM actions GROUP BY domain ORDER BY COUNT(*) DESC", reg)
+    assert census[0]["COUNT(*)"] >= census[1]["COUNT(*)"]      # census sorted by count
+
+    # Phase 7: EXPLAIN names the faculties a program WOULD call, without running them
+    mac = HoloMachine(dim=1024, seed=0, faculties=["denoise", "recall"])
+    prog = mac.assemble([("APPLY", "denoise"), ("APPLY", "recall"), ("HALT", None)])
+    info = mind.explain_program(mac, prog)
+    assert info["faculties_called"] == ["denoise", "recall"]
+
+
+def test_own_your_database_through_mind():
+    """Query Interface Phases 9-13 through the mind: a database with the capability registry as system.actions,
+    a user table you CREATE/INSERT, a bookmark from system, a live view, and persistence by replay."""
+    from holographic_unified import UnifiedMind
+    from holographic_query import Database, QueryError
+    mind = UnifiedMind(dim=256, seed=0)
+
+    db = mind.database()                                           # ships with system.actions = the registry
+    # read the mind's own capabilities through the database
+    fc = mind.db_query("SELECT name FROM system.actions WHERE domain = 'forecasting'", db)
+    assert any(r["name"] == "forecast" for r in fc)
+    # the wall: writing to system is refused
+    try:
+        mind.db_query("INSERT INTO system.actions (name) VALUES ('hack')", db)
+        assert False, "system wall should refuse writes"
+    except QueryError:
+        pass
+    # own your data: create a table, bookmark forecasting faculties into it, read them back
+    mind.db_query("CREATE DATABASE mine", db)
+    db.create_table("mine.faves", ["name"], dim=256)
+    db.insert_select("mine.faves", ["name"], "system.actions", where=("domain", "=", "forecasting"))
+    assert len(db.resolve("mine.faves").rows) >= 3
+    # persistence by replay reloads identically
+    db2 = Database.from_state(db.to_state())
+    assert db2.resolve("mine.faves").rows == db.resolve("mine.faves").rows
+
+
+def test_graphql_scene_through_mind():
+    """Query Interface Phase 4 through the mind: a GraphQL query over a nested scene returns exactly the requested
+    shape, and a nested field resolves via unbinding its role chain (the completing piece of the query arc)."""
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=256, seed=0)
+    scene = mind.make_scene([
+        {"name": "ring", "material": "gold", "transform": {"kind": "rigid", "position": [1, 0, 0]}},
+        {"name": "pipe", "material": "copper", "transform": {"kind": "rigid", "position": [0, 2, 0]}},
+        {"name": "coin", "material": "gold", "transform": {"kind": "static", "position": [3, 0, 0]}},
+    ])
+    res = mind.query_scene('{ objects(where: {material: "gold"}) { name transform { kind } } }', scene)
+    assert [o["name"] for o in res["objects"]] == ["ring", "coin"]
+    assert res["objects"][0] == {"name": "ring", "transform": {"kind": "rigid"}}   # only requested fields
+    # VSA-native: the nested field resolves by unbinding the role chain
+    assert scene.project_via_unbind(0, ["transform", "kind"]) == "rigid"
+
+
+def test_abstaining_photo_to_3d_through_mind():
+    """Forecasting sweep (depth delegation) through the mind: a photo-to-3D lift emits the observed front surface
+    as per-pixel Gaussians and abstains on the occlusion edge -- the 'we don't know the back' boundary, mechanical."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=128, seed=0)
+    depth = np.full((20, 20), 2.0)
+    depth[:, 10:] = 5.0                                           # a near/far occlusion edge
+    colour = np.zeros((20, 20, 3)); colour[..., 0] = 0.7
+    g = mind.photo_to_3d(depth, colour, 20.0, 20.0, 10.0, 10.0)
+    # front surfaces recovered at both depths
+    z = g["positions"][:, 2]
+    assert np.isclose(z, 2.0, atol=0.2).any() and np.isclose(z, 5.0, atol=0.2).any()
+    # abstention fired (the edge + any grazing), so coverage is high but honest (< 1)
+    assert g["n_abstained"] > 0 and 0.0 < g["coverage"] < 1.0
+    assert g["abstain_mask"].shape == (20, 20)
+
+
+def test_pipeline_runs_on_the_vm_through_mind():
+    """Phase 6 through the mind: the render pipeline built from a faculty runs ON the holographic VM (the same
+    machine that runs every other program), producing a frame bit-identical to the direct run."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=256, seed=0)
+    pipe = mind.render_pipeline("preview")
+    direct = pipe.run(scene="demo", seed=0)
+    vm_ctx, applied = pipe.run_on_vm(scene="demo", seed=0)
+    assert applied == pipe.stage_names()
+    assert np.array_equal(direct.image, vm_ctx.image)             # the VM drives the pipeline, same result
+    assert vm_ctx.buffers["svgf_psnr"]["denoised"] > vm_ctx.buffers["svgf_psnr"]["noisy"]
+
+
+def test_spectral_field_backbone_through_mind():
+    """Physics backbone through the mind: one SpectralField backbone serves diffusion, waves, ocean, and
+    electrostatics -- each a dispersion relation, each advancing in closed form (Thesis A: advance = one bind)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=128, seed=0)
+    N = 64; x = np.arange(N)
+
+    # diffusion: closed-form advance settles toward the mean
+    spot = np.exp(-((x - N / 2) ** 2) / 8.0)
+    hot = mind.spectral_diffusion(spot.copy(), D=0.5, dx=1.0)
+    assert hot.advanced(50.0).max() < spot.max()                 # it spread out
+
+    # wave: a mode returns after exactly one period (closed-form any t)
+    k = 2 * np.pi * 3 / N
+    f0 = np.cos(k * x)
+    wv = mind.spectral_wave(f0.copy(), c=2.0, dx=1.0)
+    back = wv.advanced(2 * np.pi / (2.0 * k))[0]
+    assert np.max(np.abs(back - f0)) < 1e-8
+
+    # ocean: a real, deterministic, dispersive surface
+    from holographic_spectralfield import phillips_spectrum
+    h = phillips_spectrum((32, 32), wind=(12.0, 0.0), seed=2)
+    surf = mind.spectral_ocean(h.copy(), g=9.81, dx=1.0).advanced(1.0)[0]
+    assert np.isrealobj(surf)
+
+    # electrostatics: the closed-form limit -- a point charge's potential extremum sits at the charge
+    src = np.zeros((32, 32)); src[16, 16] = 1.0; src -= src.mean()
+    phi = mind.electrostatic_potential(src, dx=1.0)
+    assert phi[16, 16] == phi.max() or phi[16, 16] == phi.min()
+
+
+def test_wave_packets_through_mind():
+    """Physics N8 through the mind: a wave packet reflects off a wall (the tricky-wave behaviour the global FFT
+    ocean can't do), and the surface is a content-addressable bundle of role-bound packet records."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_wavepacket import surface_bundle, packet_record, WavePacketField
+    from holographic_ai import cosine
+    mind = UnifiedMind(dim=128, seed=0)
+    sea = mind.wave_packets(size=64.0, g=9.81, seed=0)
+    sea.add_packet(pos=[60.0, 32.0], wavevector=[1.2, 0.0])
+    kx0 = sea.k[0, 0]
+    for _ in range(200):
+        sea.advance(0.1)
+    assert sea.k[0, 0] == -kx0                                  # reflected off the far wall
+    # surface as a bundle: a member packet outscores a stranger
+    sea.add_packet(pos=[10.0, 10.0], wavevector=[0.5, 0.9])
+    bv, records, roles, enc = surface_bundle(sea, dim=2048, seed=0)
+    stranger = WavePacketField(size=64.0, seed=7); stranger.add_packet([2.0, 60.0], [2.5, -2.0])
+    assert cosine(records[0], bv) > cosine(packet_record(stranger, 0, roles, enc), bv)
+
+
+def test_adaptive_wave_solver_through_mind():
+    """Physics #5 through the mind: plan_waves dispatches the ocean stack per tile (cheap almost everywhere, the
+    grid solver only where it breaks), the plan is far cheaper than all-grid, and solve_waves runs + blends it."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_waveadaptive import plan_cost, all_one_method_cost, method_counts
+    mind = UnifiedMind(dim=128, seed=0)
+    rng = np.random.default_rng(0); H = W = 64
+    height = 0.05 * rng.standard_normal((H, W))
+    height[8:16, 8:16] += np.linspace(0, 6, 8)[:, None]        # one breaking patch
+    depth = np.full((H, W), 10.0); depth[:, :12] = 1.0
+    plan = mind.plan_waves(height, depth=depth, obstacles=[(48, 48, 56, 56)], tile=8)
+    assert method_counts(plan)["fft_ocean"] == max(method_counts(plan).values())
+    assert plan_cost(plan) < 0.3 * all_one_method_cost(plan, "free_surface")   # the efficiency win
+    out = mind.solve_waves(plan, height, dt=1.0)
+    assert out.shape == (H, W) and np.isfinite(out).all()
+
+
+def test_electromagnetics_through_mind():
+    """Physics #6 through the mind: the Lorentz force, a cyclotron orbit via the Boris pusher, and a coupled
+    Maxwell FDTD pulse propagating at c."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=128, seed=0)
+    # Lorentz force
+    F = mind.lorentz_force(1.0, E=[0, 0, 0], v=[1, 0, 0], B=[0, 0, 1])
+    assert np.allclose(F, [0, -1, 0])                          # v x B
+    # cyclotron orbit conserves speed
+    traj, vfin = mind.push_charge([0, 0, 0], [1, 0, 0], 1.0, 1.0, [0, 0, 0], [0, 0, 1], 2 * np.pi / 1000, 1000)
+    assert abs(np.linalg.norm(vfin) - 1.0) < 1e-9
+    # coupled Maxwell pulse propagates at c
+    em = mind.maxwell_field(n=300, eps=1.0, mu=1.0)
+    xs = np.arange(300)
+    em.Ez = np.exp(-((xs - 60.0) ** 2) / 72.0)
+    f0 = np.max(np.where(np.abs(em.Ez) > 0.1 * em.Ez.max())[0])
+    em.step(steps=80)
+    f1 = np.max(np.where(np.abs(em.Ez) > 0.1 * np.max(np.abs(em.Ez)))[0])
+    assert f1 > f0                                             # propagated forward
+
+
+def test_dendrite_branching_through_mind():
+    """Physics #7 through the mind: one diffusion-limited branching engine makes both an ice dendrite (a sparse
+    fractal grown outward) and a lightning bolt (the same code, seeded at the cloud, reaching the ground)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=128, seed=0)
+    ice = mind.grow_ice(shape=(61, 61), eta=1.0, steps=150, seed=0)
+    assert ice.cluster.sum() >= 120 and 1.0 < ice.fractal_dimension() < 1.9
+    bolt = mind.grow_lightning(shape=(61, 61), eta=3.0, steps=90, seed=0)
+    assert np.where(bolt.cluster)[0].max() > 30                # the discharge reached down toward the ground
+    # same engine, different phenomenon: ice seeded at the centre, lightning along the top edge
+    assert ice.cluster[30, 30] and bolt.cluster[0, :].any()
+
+
+def test_overturning_free_surface_through_mind():
+    """Physics #8 (rung 4) through the mind: a plunging breaker OVERTURNS (a multi-valued surface no height field
+    can hold), and the AdaptiveSolver's free_surface method is now the REAL solver (item #5 -> item #8 loop closed)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_waveadaptive import default_methods
+    mind = UnifiedMind(dim=128, seed=0)
+    # the barrel overturns
+    fs = mind.break_wave(crest_speed=8.0, phase_speed=3.0, height=4.0, steps=20)
+    assert fs.is_overturning() and fs.is_multivalued()
+    # a gentle wave does not
+    calm = mind.break_wave(crest_speed=3.2, phase_speed=3.0, height=1.0, steps=20)
+    assert not calm.is_overturning()
+    # the AdaptiveSolver's free_surface stepper is the real overturning solver now, not the placeholder
+    step = default_methods()["free_surface"]
+    tile = np.zeros((8, 8)); tile[:, 4:] = np.linspace(0, 6, 4)[None, :]
+    out = step(tile, 0.1)
+    assert out.shape == (8, 8) and np.isfinite(out).all()
+
+
+def test_snow_mpm_through_mind():
+    """Physics #8B through the mind: snow falls and compresses plastically, and -- the holographic point -- its
+    P2G scatter IS a bundle (equals an independent superposition of kernel splats)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_mpm import _bundle_mass_grid
+    mind = UnifiedMind(dim=128, seed=0)
+    # P2G is bundling: the mass grid equals a bundle of splats
+    m = mind.snow_mpm(grid=48, seed=0)
+    m.seed_block(cx=24, cy=30, w=10, h=10, n=200)
+    assert np.allclose(m.p2g_mass_grid(), _bundle_mass_grid(m), atol=1e-9)
+    # a snow block falls and compresses
+    snow = mind.simulate_snow(cx=24, cy=12, w=10, h=8, n=300, steps=700, seed=1)
+    assert snow.x[:, 1].max() < 12.0 and np.isfinite(snow.x).all()   # settled onto the floor
+    assert abs(snow.total_mass() - 300.0) < 1e-9
+
+
+def test_shared_scatter_gather_unifies_transfers():
+    """The generalize-on-contact win: ONE scatter/gather primitive, through the mind, reproduces both the fluid
+    coupling's bilinear transfer and MPM's B-spline P2G -- proof they are the same bundle/readout."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_fields import scatter_to_field, sample_field
+    from holographic_mpm import MPMSnow
+    mind = UnifiedMind(dim=128, seed=0)
+    rng = np.random.default_rng(0)
+    # bilinear scatter/gather == fields' (adjoint pair used for cloth<->fluid coupling)
+    pos = rng.uniform(0, 20, (30, 2)); vals = rng.standard_normal(30)
+    assert np.allclose(mind.scatter_to_grid(pos[:, ::-1], vals, (20, 20), kernel="bilinear", periodic=True),
+                       scatter_to_field((20, 20), pos, vals), atol=1e-12)
+    fld = rng.standard_normal((20, 20))
+    assert np.allclose(mind.gather_from_grid(fld, pos[:, ::-1], kernel="bilinear", periodic=True),
+                       sample_field(fld, pos), atol=1e-12)
+    # B-spline scatter == MPM's P2G mass grid
+    m = MPMSnow(grid=32, seed=0).seed_block(cx=16, cy=16, w=8, h=8, n=200)
+    assert np.allclose(mind.scatter_to_grid(m.x * m.inv_dx, m.m, (32, 32), kernel="bspline"),
+                       m.p2g_mass_grid(), atol=1e-10)
+
+
+def test_scene_document_through_mind():
+    """Modeling-app item 0 through the mind: the canonical Scene owns objects/selection/history, its handles are
+    stable across edits (so a selection survives editing the object), and undo restores state + identity."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=128, seed=0)
+    scene = mind.new_scene(seed=0)
+    events = []; scene.on_change(lambda k, h: events.append(k))
+    a = scene.add(name="wheel", geometry=np.zeros((4, 3)), tags={"material": "metal"})
+    scene.select([a])
+    id0 = scene.handle_vector(a).copy()
+    scene.edit(a, geometry=np.ones((4, 3)), name="front-wheel")
+    assert a in scene.selection                         # stable handle: selection survived the edit
+    assert np.array_equal(scene.handle_vector(a), id0)  # identity unchanged
+    assert scene.undo() and scene.get(a).name == "wheel"
+    assert "add" in events and "edit" in events and "select" in events
+
+
+def test_modifier_stack_on_scene_object():
+    """Backlog C onto item 0: a Scene object's geometry is produced by a modifier stack; tweaking a modifier
+    param re-evaluates O(change) and the new geometry is written back through scene.edit (firing a change event),
+    while the object's stable handle is unchanged."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=128, seed=0)
+    scene = mind.new_scene(seed=0)
+
+    calls = {"n": 0}
+    def scale_op(v, factor=1.0):
+        calls["n"] += 1; return v * factor
+    def offset_op(v, amount=0.0):
+        calls["n"] += 1; return v + amount
+
+    base = np.ones(4)
+    stack = mind.modifier_stack(base)
+    stack.add("scale", scale_op, {"factor": 2.0})
+    h_off = stack.add("offset", offset_op, {"amount": 0.5})
+    geom = stack.evaluate()                                  # (1*2)+0.5 = 2.5 each
+    assert np.allclose(geom, 2.5)
+
+    handle = scene.add(name="part", geometry=geom)
+    events = []; scene.on_change(lambda k, h: events.append((k, h)))
+
+    # tweak the top modifier -> only 1 modifier re-runs (O(change)), write the result back to the object
+    calls["n"] = 0
+    stack.set_param(h_off, amount=1.0)
+    new_geom = stack.evaluate()
+    assert calls["n"] == 1                                   # only the offset modifier recomputed
+    scene.edit(handle, geometry=new_geom)
+    assert np.allclose(scene.get(handle).geometry, 3.0)      # (1*2)+1.0
+    assert ("edit", handle) in events                        # the write-back fired a change event
+
+
+def test_transform_and_cancel_on_scene_through_mind():
+    """Backlog G+F onto item 0: decompose a Scene object's transform for a gizmo (recompose round-trips), and a
+    CancelToken from the mind stops cooperatively -- the responsiveness + gizmo-math tier riding the document."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_transform import compose_trs, quat_from_euler, quat_to_matrix
+    mind = UnifiedMind(dim=128, seed=0)
+    scene = mind.new_scene(seed=0)
+
+    # give an object a real T*R*S transform, then decompose it the way a gizmo would
+    t = np.array([1.0, 2.0, 3.0]); q = quat_from_euler(0.2, 0.5, -0.3); s = np.array([2.0, 1.0, 0.5])
+    M = compose_trs(t, q, s)
+    h = scene.add(name="widget", transform=M)
+    tt, qq, ss = mind.decompose_transform(scene.get(h).transform)
+    assert np.allclose(tt, t) and np.allclose(ss, s)
+    assert np.allclose(quat_to_matrix(qq), quat_to_matrix(q), atol=1e-9)
+
+    # a cancel token from the mind is cooperative and reusable
+    tok = mind.cancel_token()
+    assert not tok.should_stop()
+    tok.cancel(); assert tok.should_stop()
+
+    # a view matrix aimed at the object's position
+    V = mind.look_at((0, 0, 10), t)
+    assert V.shape == (4, 4)
+
+
+def test_selection_search_tagging_through_mind():
+    """Modeling-app feature layer through the mind: query metal parts, save a named set, tag them (recorded +
+    event), select them into the document, then undo the tag -- selection/search/tagging riding the query layer
+    and the Scene document, all one flow."""
+    from holographic_unified import UnifiedMind
+    from holographic_scene_query import tag, select_by_tag, select_fuzzy
+    mind = UnifiedMind(dim=128, seed=0)
+    scene = mind.new_scene(seed=0)
+    w1 = scene.add(name="wheel_front", material="metal", tags={"kind": "wheel"})
+    w2 = scene.add(name="wheel_rear", material="metal", tags={"kind": "wheel"})
+    body = scene.add(name="body", material="paint")
+
+    metal = mind.select_objects(scene, material="metal")
+    assert metal == {w1, w2}
+    sel = mind.selection(scene)
+    sel.save("drivetrain", metal)
+    sel.apply(sel.get("drivetrain"))
+    assert scene.selection == {w1, w2}
+
+    # fuzzy select carries confidence
+    hits = select_fuzzy(scene, "material", "metal")
+    assert {w1, w2} <= {h for h, c in hits} and all(0 <= c <= 1 for _, c in hits)
+
+    # tag + undo through the document
+    events = []; scene.on_change(lambda k, h: events.append(k))
+    tag(scene, metal, "reviewed", True)
+    assert select_by_tag(scene, "reviewed") == {w1, w2} and "edit" in events
+    scene.undo(); scene.undo()                          # two tag edits recorded
+    assert select_by_tag(scene, "reviewed") == set()
+
+
+def test_undo_stack_grouped_edit_through_mind():
+    """The undo/redo stack through the mind: select several objects, edit them all inside ONE transaction (a drag),
+    and a single undo reverts the whole batch -- the stack riding the Scene document + selection."""
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=128, seed=0)
+    scene = mind.new_scene(seed=0)
+    a = scene.add(name="wheel_l", material="metal")
+    b = scene.add(name="wheel_r", material="metal")
+    c = scene.add(name="body", material="paint")
+
+    metal = mind.select_objects(scene, material="metal")
+    assert metal == {a, b}
+    # one transaction re-materials the whole selection -> a single undo step
+    with scene.group("Set metal -> chrome"):
+        for h in metal:
+            scene.edit(h, material="chrome")
+    assert scene.history()[-1] == "Set metal -> chrome"
+    assert all(scene.get(h).material == "chrome" for h in metal)
+    scene.undo()                                          # ONE undo reverts both wheels
+    assert all(scene.get(h).material == "metal" for h in metal)
+    assert scene.get(c).material == "paint"              # the untouched object is unaffected
+    scene.redo()
+    assert all(scene.get(h).material == "chrome" for h in metal)
+
+
+def test_measurement_of_scene_object_through_mind():
+    """Modeling-app measurement+units through the mind: a Scene object carries a mesh; measuring it returns
+    DIMENSIONED quantities from the geometry (area m^2, volume m^3, convertible), and the dimensional algebra
+    refuses nonsense -- the measuring tool riding the Scene document."""
+    from holographic_unified import UnifiedMind
+    from holographic_metrology import _unit_cube
+    mind = UnifiedMind(dim=128, seed=0)
+    scene = mind.new_scene(seed=0)
+    h = scene.add(name="block", geometry=_unit_cube())      # geometry is a real mesh
+    mesh = scene.get(h).geometry
+
+    A = mind.measure_area(mesh); V = mind.measure_volume(mesh)
+    assert abs(A.to("m2") - 6.0) < 1e-9 and abs(V.to("m3") - 1.0) < 1e-9
+    assert abs(V.to("L") - 1000.0) < 1e-6                    # one-multiply conversion
+    bb = mind.measure_bbox(mesh)
+    assert abs(bb.diagonal.to("m") - 3 ** 0.5) < 1e-9
+    d = mind.measure_distance([0, 0, 0], [3, 4, 0])
+    assert abs(d.to("m") - 5.0) < 1e-9
+    try:
+        _ = A + d; assert False                             # area + length is a grammar error
+    except ValueError:
+        pass
+
+
+def test_overrides_and_snapping_through_mind():
+    """Render overrides (bound role with fallback) + snapping (cleanup) through the mind, on the Scene document."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=128, seed=0)
+    scene = mind.new_scene(seed=0)
+    defaults = {"samples": 64}
+    a = scene.add(name="hero"); b = scene.add(name="prop")
+    mind.set_override(scene, b, "samples", 256)
+    assert mind.resolve_override(scene, b, "samples", defaults) == 256   # override wins
+    assert mind.resolve_override(scene, a, "samples", defaults) == 64    # inherits default
+
+    # snap a dragged point to object b's translation, via a Snapper
+    scene.edit(b, transform=np.array([[1, 0, 0, 2.0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], float))
+    bpos = scene.get(b).transform[:3, 3]
+    snp = mind.snapper(grid=1.0, vertices=[bpos], tol=0.3)
+    out, kind = snp.snap([2.05, 0.05, 0.0])
+    assert kind == "vertex" and np.allclose(out, bpos)
+
+
+def test_grouping_instancing_through_mind():
+    """Grouping (bundle) + instancing (bind) through the mind: group two objects, instance a third, and editing
+    the instance's source updates the instance."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_grouping import group_members, resolve_geometry, instance_source
+    mind = UnifiedMind(dim=128, seed=0)
+    scene = mind.new_scene(seed=0)
+    a = scene.add(name="wheel_l", geometry=np.zeros((4, 3)))
+    b = scene.add(name="wheel_r", geometry=np.ones((4, 3)))
+    c = scene.add(name="body", geometry=np.full((4, 3), 2.0))
+
+    g = mind.group_objects(scene, [a, b], name="wheels")
+    assert set(group_members(scene, g)) == {a, b}
+    inst = mind.instance(scene, c)
+    assert instance_source(scene, inst) == c
+    scene.edit(c, geometry=np.full((4, 3), 9.0))
+    assert np.allclose(resolve_geometry(scene, inst), 9.0)   # instance follows the source
+
+
+def test_camera_frames_scene_object_through_mind():
+    """The camera controller + measurement, on the Scene: measure an object's bounding box, frame it with the
+    camera, and the resulting view matrix looks straight at the object's centre -- camera + metrology + document."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_metrology import _unit_cube, bounding_box
+    mind = UnifiedMind(dim=128, seed=0)
+    scene = mind.new_scene(seed=0)
+    h = scene.add(name="block", geometry=_unit_cube())
+    bb = bounding_box(scene.get(h).geometry)
+
+    cam = mind.camera_controller(eye=(0, 0, 10), target=(0, 0, 0))
+    cam.frame(bb.min, bb.max, fov_deg=45.0)
+    assert np.allclose(cam.target, bb.center, atol=1e-9)     # aimed at the object's centre
+    V = cam.view_matrix()
+    ot = V @ np.array([bb.center[0], bb.center[1], bb.center[2], 1.0])
+    assert abs(ot[0]) < 1e-9 and abs(ot[1]) < 1e-9 and ot[2] < 0   # centre straight ahead, down -z
+
+
+def test_sampler_reads_scene_labeled_by_stable_handles():
+    """The Sampler capstone through the mind: two objects with SDF geometry overlap the sampled region; a volume
+    Sampler reads a field and returns a LABELED BUNDLE keyed by the Scene's OWN stable handle atoms -- so each
+    object's contribution is recovered by its handle (item 0/B), the dominant owner is a cleanup, and the sampler
+    places into the Scene like any object. The read-dual of FieldEffect, riding stable handles."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_sdf import sphere
+    from holographic_sampler import owners_from_sdfs, contribution_of, dominant_owner, total_contribution
+
+    class _Shift:
+        def __init__(self, base, off): self.base = base; self.off = np.asarray(off, float)
+        def eval(self, P): return self.base.eval(np.asarray(P, float) - self.off)
+
+    mind = UnifiedMind(dim=256, seed=0)
+    scene = mind.new_scene(seed=0)
+    a = scene.add(name="ball_a", geometry=sphere(1.0))
+    b = scene.add(name="ball_b", geometry=_Shift(sphere(1.0), [3, 0, 0]))
+    ha, hb = scene.handle_vector(a), scene.handle_vector(b)   # the STABLE identity atoms (item 0/B)
+
+    owners = owners_from_sdfs([(ha, scene.get(a).geometry), (hb, scene.get(b).geometry)])
+    s = mind.sampler(sphere(5.0), lambda P: np.ones(len(P)), mode="volume", radius=5.0)
+    lab = s.sample_labeled(owners, at=(1.5, 0, 0), bounds=([-2, -2, -2], [5, 2, 2]), n=600, seed=1)
+
+    cA = contribution_of(lab, ha); cB = contribution_of(lab, hb)
+    assert cA > 0 and cB > 0                                  # separable by each object's stable handle
+    assert dominant_owner(lab, [ha, hb]) in (0, 1)
+    assert abs(total_contribution(lab, [ha, hb]) - (cA + cB)) < 1e-6   # collapsible
+
+    # a point sampler reads a field at a spot, and places into the Scene as an object
+    probe = mind.sampler(sphere(0.1), lambda P: np.asarray(P, float)[:, 2], mode="point")
+    assert abs(probe.sample(at=(0, 0, 4.0)) - 4.0) < 1e-9
+    hp = mind.place_sampler(scene, probe, name="probe")
+    assert hp in scene.objects and scene.get(hp).params["is_sampler"]
+
+
+def test_auto_bump_through_mind_feeds_material_on_scene_object():
+    """Inverse-rendering IR1 through the mind: auto-bump a bumpy albedo image into a normal map + height (not
+    abstained), abstain on a flat image, and wire the derived height into a Material carried by a Scene object --
+    the auto-material front-end riding the vision stack, the material stack, and the canonical Scene."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_fpe import VectorFunctionEncoder
+    from holographic_material import Material, texture_field
+    from holographic_autobump import add_height_channel
+    mind = UnifiedMind(dim=128, seed=0)
+
+    N = 48
+    u = np.linspace(0, 6 * np.pi, N)
+    bump = 0.5 + 0.4 * np.outer(np.sin(u), np.cos(u))
+    bump_rgb = np.stack([bump, bump, bump], axis=-1)
+    flat_rgb = np.full((N, N, 3), 0.5)
+
+    res = mind.auto_bump(bump_rgb, strength=2.0)
+    assert not res["abstained"]
+    assert np.allclose(np.linalg.norm(res["normal"], axis=-1), 1.0, atol=1e-6)   # unit normals
+
+    assert mind.auto_bump(flat_rgb)["abstained"]            # flat -> abstain, no invented relief
+
+    # wire the derived height into a Material on a Scene object
+    scene = mind.new_scene(seed=0)
+    enc = VectorFunctionEncoder(2, dim=1024, bounds=[(0, 1), (0, 1)], bandwidth=3.0, seed=1)
+    grid = [(uu, vv) for uu in np.linspace(0.05, 0.95, 9) for vv in np.linspace(0.05, 0.95, 9)]
+    mat = Material(enc, {"albedo": texture_field(enc, grid, [0.5] * len(grid))})
+    add_height_channel(mat, enc, grid, bump_rgb)
+    h = scene.add(name="brick", material=mat)
+    assert "height" in scene.get(h).material.channels        # the auto-bump height rides on the object's material
+
+
+def test_autobump_then_integrate_through_mind():
+    """IR1 + IR7 through the mind: auto-bump an albedo image into a normal map, then integrate that map back into a
+    CONSISTENT, tileable height (Frankot-Chellappa FFT). The integrated height re-derives to the same normals
+    (integrable), and its seam is small (tileable) -- the auto-material round-trip made drift-free."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=128, seed=0)
+
+    N = 48
+    u = np.linspace(0, 6 * np.pi, N)
+    bump = 0.5 + 0.4 * np.outer(np.sin(u), np.cos(u))
+    bump_rgb = np.stack([bump, bump, bump], axis=-1)
+
+    res = mind.auto_bump(bump_rgb, strength=1.0)
+    assert not res["abstained"]
+    height = mind.integrate_normals(res["normal"])           # IR7: normals -> consistent height
+    assert height.shape == (N, N) and np.isfinite(height).all()
+
+    # the integrated height is periodic -> tiles with a small seam
+    seam = np.abs(height[:, 0] - height[:, -1]).mean()
+    interior = np.abs(np.diff(height, axis=1)).mean()
+    assert seam < 5.0 * interior
+
+    # re-deriving normals from the integrated height and integrating again reproduces the height (integrable)
+    from holographic_autobump import normal_from_height
+    h2 = mind.integrate_normals(normal_from_height(height, strength=1.0))
+    assert np.corrcoef((height - height.mean()).ravel(), (h2 - h2.mean()).ravel())[0, 1] > 0.98
+
+
+def test_color_transfer_through_mind():
+    """Inverse-rendering ST1 through the mind: grade a cool render toward a warm reference photo -- the graded
+    image takes on the reference's colour statistics (mean matched), strength=0 is a no-op, and it moves colour
+    not content (the render's structure/variance layout survives)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=64, seed=0)
+    rng = np.random.default_rng(0)
+    cool = np.clip(np.stack([0.3 + 0.1 * rng.standard_normal((48, 48)),
+                             0.4 + 0.1 * rng.standard_normal((48, 48)),
+                             0.6 + 0.1 * rng.standard_normal((48, 48))], axis=-1), 0, 1)   # bluish
+    warm = np.clip(np.stack([0.7 + 0.1 * rng.standard_normal((40, 40)),
+                             0.5 + 0.1 * rng.standard_normal((40, 40)),
+                             0.3 + 0.1 * rng.standard_normal((40, 40))], axis=-1), 0, 1)   # orange
+
+    graded = mind.color_transfer(cool, warm, mode="covariance", strength=1.0, clip=False)
+    assert np.allclose(graded.reshape(-1, 3).mean(0), warm.reshape(-1, 3).mean(0), atol=1e-6)  # took the mood
+    assert graded.shape == cool.shape
+
+    assert np.allclose(mind.color_transfer(cool, warm, strength=0.0, clip=False), cool)      # no-op at 0
+
+
+def test_auto_displace_scene_object_through_mind():
+    """Inverse-rendering IR5 through the mind: a Scene object carries a flat grid mesh; auto-displacing it from a
+    bumpy albedo gives it REAL relief (vertices move), while a flat albedo ABSTAINS and leaves the mesh flat --
+    the confident-height-to-geometry step riding auto-bump and the Scene."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_mesh import grid
+    mind = UnifiedMind(dim=128, seed=0)
+    scene = mind.new_scene(seed=0)
+    h = scene.add(name="panel", geometry=grid(nx=20, ny=20))
+    assert np.allclose(scene.get(h).geometry.vertices[:, 2], 0.0)   # starts flat
+
+    Ni = 48
+    u = np.linspace(0, 6 * np.pi, Ni)
+    bump = 0.5 + 0.4 * np.outer(np.sin(u), np.cos(u))
+    bump_rgb = np.stack([bump, bump, bump], axis=-1)
+
+    relief, info = mind.auto_displace(scene.get(h).geometry, bump_rgb, amount=0.15)
+    assert info["displaced"] and np.abs(relief.vertices[:, 2]).max() > 0.02   # gained real relief
+    scene.edit(h, geometry=relief)                                            # store the displaced mesh back
+    assert np.abs(scene.get(h).geometry.vertices[:, 2]).max() > 0.02
+
+    _, info_flat = mind.auto_displace(grid(nx=20, ny=20), np.full((Ni, Ni, 3), 0.5), amount=0.15)
+    assert not info_flat["displaced"]                                         # flat image -> no geometry change
+
+
+def test_perceptual_compare_is_render_and_compare_objective_through_mind():
+    """Inverse-rendering IR4 (part 1) through the mind: the perceptual compare is the render-vs-target objective
+    the analysis-by-synthesis loop will minimize. A small camera-like NUDGE of a scene (a shift) scores far closer
+    to the target than a different scene -- exactly the ranking the loop needs, and one raw MSE can't make."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_imagecompare import _shift
+    mind = UnifiedMind(dim=64, seed=0)
+
+    def scene(seed):
+        rng = np.random.default_rng(seed); H, W = 72, 72
+        yy, xx = np.mgrid[0:H, 0:W].astype(float); Y = yy / H
+        sky = np.stack([0.2 + 0.5 * Y, 0.4 + 0.4 * Y, 0.85 - 0.3 * Y], axis=-1)
+        sy, sx = rng.uniform(0.1, 0.4) * H, rng.uniform(0.2, 0.8) * W
+        sun = np.exp(-((xx - sx) ** 2 + (yy - sy) ** 2) / (2 * (0.08 * W) ** 2))[..., None] * [1.0, 0.9, 0.6]
+        return np.clip(sky + 0.8 * sun, 0, 1)
+
+    def different_scene():
+        H, W = 72, 72; yy, xx = np.mgrid[0:H, 0:W].astype(float); Y = yy / H
+        ground = np.stack([0.6 - 0.3 * Y, 0.2 + 0.1 * Y, 0.15 + 0.1 * Y], axis=-1)   # reddish, opposite palette
+        sun = np.exp(-((xx - 0.8 * W) ** 2 + (yy - 0.8 * H) ** 2) / (2 * (0.1 * W) ** 2))[..., None] * [0.9, 0.3, 0.2]
+        return np.clip(ground + 0.6 * sun, 0, 1)
+
+    target = scene(0)
+    nudged = _shift(target, 2, 2)        # a candidate render that's almost right (a small camera nudge)
+    wrong = different_scene()            # a candidate that's a clearly different scene (palette + layout)
+
+    assert abs(mind.compare_images(target, target) - 1.0) < 1e-6           # identical -> perfect
+    assert mind.image_distance(target, nudged) < mind.image_distance(target, wrong)   # nudge is closer
+    assert mind.compare_images(target, nudged) > 0.85                      # and confidently a good match
+
+
+def test_scene_self_recovery_through_mind():
+    """Inverse-rendering IR4 headline through the mind: the self-recovery milestone. Render a KNOWN box scene, hand
+    the pixels back, and recover the camera + sun direction from a perturbed warm start to within tolerance -- the
+    perceptual distance collapses and the conformal gate accepts the match. Ground truth is known, so the error is
+    exact. This is analysis-by-synthesis (render -> compare -> adjust), gradient-free, on the shipped renderer."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_inverserender import render_params, calibrate_accept_threshold
+    from holographic_sdf import box
+    mind = UnifiedMind(dim=64, seed=0)
+
+    sdf = box(1.0, 0.7, 0.5)
+    rkw = dict(width=32, height=32, fov_deg=50.0)
+    truth = np.array([0.6, 0.4, 4.0, -0.6, 0.5])
+    target = render_params(sdf, truth, **rkw)
+    init = truth + np.array([0.3, -0.25, 0.7, 0.35, -0.3])   # the warm start IR3 would supply
+
+    thr = calibrate_accept_threshold(sdf, truth, **rkw)
+    res = mind.recover_scene(sdf, target, init, accept_threshold=thr, **rkw, max_evals=500)
+
+    assert res["accepted"]                                   # confident match
+    assert res["distance"] < 0.05                            # good absolute match
+    err = np.abs(res["params"] - truth)
+    assert err[0] < 0.15 and err[1] < 0.15 and err[2] < 0.6  # camera recovered
+    assert err[3] < 0.4 and err[4] < 0.4                     # sun recovered
+
+
+def test_perception_warm_starts_self_recovery_end_to_end_through_mind():
+    """Inverse-rendering IR3 -> IR4 end to end through the mind: build a small library of exemplar scenes, then for a
+    NEW target image ANALOG-RECALL the nearest exemplar's parameters as a warm start (no hand-perturbation) and let
+    the analysis-by-synthesis loop refine it to recover the camera + sun. Perception seeds synthesis; synthesis
+    refines perception -- the whole inverse-rendering loop closed from the image alone."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_sdf import box
+    from holographic_inverserender import render_params
+    from holographic_perception import SceneLibrary
+    mind = UnifiedMind(dim=64, seed=0)
+
+    sdf = box(1.0, 0.7, 0.5)
+    rkw = dict(width=32, height=32, fov_deg=50.0)
+
+    lib = SceneLibrary(seed=0)
+    for az0 in (-0.4, 0.2, 0.8):
+        for laz0 in (-0.6, 0.0, 0.6):
+            p = [az0, 0.4, 4.0, laz0, 0.5]
+            lib.add(render_params(sdf, p, **rkw), p)
+    lib.build()
+
+    truth = np.array([0.25, 0.4, 4.0, 0.05, 0.5])
+    target = render_params(sdf, truth, **rkw)
+
+    # perceive: a coarse sun estimate + the analog-recall warm start
+    az, el = mind.estimate_light_direction(target)
+    assert np.isfinite(az) and np.isfinite(el)
+    ws = lib.warm_start(target)
+    assert not ws["abstained"]                               # the target is within the library vocabulary
+
+    # synthesize/refine: IR4 from the PERCEIVED start recovers the scene
+    res = mind.recover_scene(sdf, target, ws["params"], **rkw, max_evals=400)
+    assert res["distance"] < 0.05
+    err = np.abs(res["params"] - truth)
+    assert err[0] < 0.2 and err[3] < 0.4                     # camera + sun recovered from the image alone
+
+
+def test_render_channels_through_mind():
+    """Inverse-rendering IR14 through the mind: a render channel is an UNBIND. With no selection the mind returns the
+    beauty pass, bit-identical to render_sdf. Asked for G-buffer + per-object mattes on a two-object scene, the
+    mattes composite back to the coverage exactly (the compositor's 'the passes must add up' invariant) -- decompose
+    on the render, the same move the engine runs everywhere."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_render import Camera
+    from holographic_sdf import box, sphere
+    from holographic_raymarch import render_sdf
+    from holographic_renderchannels import composites_to_beauty
+    mind = UnifiedMind(dim=64, seed=0)
+
+    cam = Camera(eye=(2.5, 1.8, 2.5), target=(0, 0, 0), fov_deg=50.0)
+    rkw = dict(width=40, height=40, ao=False, shadows=False, reflect=0.0)
+
+    # default = beauty only, bit-identical
+    only = mind.render_channels(box(1, 0.7, 0.5), cam, **rkw)
+    assert set(only) == {"beauty"} and np.array_equal(only["beauty"], render_sdf(box(1, 0.7, 0.5), cam, **rkw))
+
+    # G-buffer + per-object mattes that composite back to the coverage exactly
+    objs = [box(0.6, 0.6, 0.6).translate((-0.9, 0, 0)), sphere(0.7).translate((0.9, 0, 0))]
+    union = objs[0].union(objs[1])
+    ch = mind.render_channels(union, cam, want=["mask", "normal"], objects=objs, **rkw)
+    assert composites_to_beauty(ch) == 0.0
+    assert np.all(ch["object:0"] * ch["object:1"] == 0.0)          # disjoint mattes
+
+
+def test_fsr_upscale_of_a_render_through_mind():
+    """Inverse-rendering IR12 through the mind: render a scene at LOW resolution, upscale to display resolution with
+    FSR1-style EASU+RCAS, and it reconstructs the native-res render better than plain bilinear -- the 'render at 1080p,
+    present at 4K' path, deterministic and learning-free."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_render import Camera
+    from holographic_sdf import box
+    from holographic_raymarch import render_sdf
+    from holographic_postfx import resample
+    from holographic_fsr import _psnr
+    mind = UnifiedMind(dim=64, seed=0)
+
+    sdf = box(1.0, 0.7, 0.5)
+    cam = Camera(eye=(2.5, 1.8, 2.5), target=(0, 0, 0), fov_deg=50.0)
+    native = render_sdf(sdf, cam, width=64, height=64, ao=False, shadows=False, reflect=0.0)
+    low = render_sdf(sdf, cam, width=32, height=32, ao=False, shadows=False, reflect=0.0)   # the cheap render
+
+    # EASU (no sharpen) reconstructs the native render better than bilinear on PSNR; the RCAS sharpen is a separate
+    # crispness knob that can overshoot a smooth render (its kept negative), so the PSNR win is measured on EASU
+    up = mind.upscale(low, scale=2.0, sharpness=0.0)[:64, :64]
+    bil = np.clip(resample(low, 2.0), 0, 1)[:64, :64]
+    assert up.shape == (64, 64, 3)
+    assert _psnr(up, native) > _psnr(bil, native)             # FSR/EASU reconstructs the render better than bilinear
+
+
+def test_checkerboard_render_through_mind():
+    """Inverse-rendering IR13 through the mind: shade only ~half the pixels (2x2 checkerboard) and reconstruct the
+    rest as masked recovery -- the reconstructed frame matches a full shade of the same scene at near-full quality,
+    for roughly half the rays traced. The archive's 'recover from a partial measurement' move, in the pixel domain."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_render import Camera
+    from holographic_sdf import box
+    from holographic_checkerboard import _shade_all, _psnr
+    mind = UnifiedMind(dim=64, seed=0)
+
+    sdf = box(1.0, 0.7, 0.5)
+    cam = Camera(eye=(2.5, 1.8, 2.5), target=(0, 0, 0), fov_deg=50.0)
+    full = _shade_all(sdf, cam, 80, 80)                          # the full-resolution reference (same shader)
+
+    ck, mask = mind.render_checkerboard(sdf, cam, 80, 80)
+    assert abs(mask.mean() - 0.5) < 0.02                        # ~half the pixels shaded (the cost saving)
+    assert _psnr(ck, full) > 30.0                               # reconstruction ~ full-resolution quality
+    assert np.allclose(ck[mask], full[mask])                    # the shaded pixels are exact
+
+
+def test_object_archive_complete_from_view_through_mind():
+    """Inverse-rendering IR11 through the mind: a library of complete 3D objects; from only a partial FRONT view the
+    mind recalls the whole object (including the unobserved back) by shape, recovering the back far closer to ground
+    truth than a front-only reconstruction, and ABSTAINS on a shape not in the library. The archive's 'recover the
+    whole from a partial measurement' move, one dimension up -- retrieval, not hallucination."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_objectarchive import ObjectArchive, front_points, _chamfer, _sphere, _box, _cylinder, _cone
+    mind = UnifiedMind(dim=64, seed=0)
+    view = (0, 0, 1)
+
+    arch = ObjectArchive(view_dir=view, grid=8, seed=0)
+    arch.add(_sphere(500, 1), "sphere").add(_box(500, 2), "box").add(_cylinder(500, 3), "cylinder").build()
+
+    true = _sphere(500, 5)                                    # a NEW sphere instance
+    front = front_points(true, view)
+    res = mind.complete_object(arch, front, match_floor=0.85)
+    assert not res["abstained"] and res["label"] == "sphere"  # recalled the whole sphere by shape
+
+    back = lambda p: p[p[:, 2] < -0.1]
+    assert _chamfer(back(res["whole"]), back(true)) < 0.3 * _chamfer(front, back(true))   # back recovered
+
+    odd = mind.complete_object(arch, front_points(_cone(500, 9), view), match_floor=0.85)
+    assert odd["abstained"] and odd["whole"] is None          # unseen shape -> honest abstain
+
+
+def test_texture_synthesis_feeds_autobump_through_mind():
+    """Inverse-rendering ST2 through the mind, feeding IR1: grow a larger texture from a small sample by Image
+    Quilting, then auto-bump the SYNTHESIZED texture into a normal map. Texture synthesis -> auto-material: the two
+    inverse-rendering threads compose (ST2 makes the tileable map, IR1 turns it into relief)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=64, seed=0)
+
+    # a small structured sample texture
+    rng = np.random.default_rng(0); yy, xx = np.mgrid[0:40, 0:40].astype(float)
+    base = 0.5 + 0.3 * np.sin((xx + yy) / 3.0) + 0.1 * rng.standard_normal((40, 40))
+    sample = np.clip(np.stack([base, base * 0.9 + 0.05, base * 0.8], axis=-1), 0, 1)
+
+    syn = mind.synthesize_texture(sample, 88, 88, psize=18, overlap=6, seed=0)
+    assert syn.shape == (88, 88, 3)                            # grown larger
+    assert abs(syn.mean() - sample.mean()) < 0.06             # statistics preserved
+
+    # feed the synthesized texture into auto-bump (ST2 -> IR1)
+    res = mind.auto_bump(syn, strength=2.0)
+    assert not res["abstained"]                               # the synthesized detail supports a bump
+    assert np.allclose(np.linalg.norm(res["normal"], axis=-1), 1.0, atol=1e-6)   # a valid normal map
+
+
+def test_guided_super_resolution_through_mind():
+    """Inverse-rendering ST3 through the mind, composing with IR14: render COLOUR at low resolution but get the
+    G-buffer at FULL resolution (render_channels), then guided-upsample the colour steered by the geometry -- the
+    colour edges snap to the geometry the cheap render already knows, beating a plain upscale. Render small, present
+    large; classical, no learned weights."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_render import Camera
+    from holographic_sdf import box
+    from holographic_raymarch import render_sdf
+    from holographic_fsr import easu_upscale, _box_downscale
+    from holographic_superres import _psnr
+    mind = UnifiedMind(dim=64, seed=0)
+
+    sdf = box(1.0, 0.7, 0.5)
+    cam = Camera(eye=(2.5, 1.8, 2.5), target=(0, 0, 0), fov_deg=50.0)
+    rkw = dict(ao=False, shadows=False, reflect=0.0)
+
+    native = render_sdf(sdf, cam, width=64, height=64, **rkw)                  # the full-res colour reference
+    gb = mind.render_channels(sdf, cam, want=["normal", "depth"], width=64, height=64, **rkw)   # full-res G-buffer
+    low = _box_downscale(native, 2)                                           # the cheap low-res colour render
+
+    guided = mind.guided_upsample(low, gb["normal"], guide_depth=gb["depth"])[:64, :64]
+    plain = easu_upscale(low, 2.0)[:64, :64]
+    assert guided.shape == (64, 64, 3)
+    assert _psnr(guided, native) > _psnr(plain, native)                       # guided beats plain (edges to geometry)
+
+
+def test_smoke_preset_then_sample_through_mind():
+    """Fluids/matter item 1 through the mind: run a named smoke PRESET on the wired solver (matter), then READ the
+    resulting density field at continuous positions with the sampler (the read-probe) -- content proved through the
+    same substrate, not a siloed demo. The sampled density near the plume exceeds the density in an empty corner."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=64, seed=0)
+
+    out = mind.smoke_preset("rising", nx=40, ny=40, steps=30, seed=0)
+    density = out["density"]
+    assert density.shape == (40, 40) and density.sum() > 0.0
+
+    # sample the field where the plume is (near the base-centre column) vs an empty top corner
+    plume = mind.sample_field(density, np.array([[20.0, 6.0]]))        # (x, y) near the source column
+    corner = mind.sample_field(density, np.array([[2.0, 38.0]]))       # far top corner, should be near-empty
+    assert float(plume[0]) > float(corner[0])                          # the sampler reads the matter the solver made
+
+
+def test_matter_mixture_then_sample_through_mind():
+    """Fluids/matter item 2 through the mind: build a two-dye MIXTURE, advance it with matter_step (one shared flow),
+    then READ the blended density field with the sampler. The heavy-dye region samples denser than the light-dye
+    region -- the multi-channel matter model proved through the same sampler as the smoke, no siloed demo."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_mixture import _blob
+    mind = UnifiedMind(dim=64, seed=0)
+
+    shape = (40, 40)
+    mix = mind.make_mixture(shape, solvent_density=1.0, buoyancy=0.0)
+    mix.add("heavy", _blob(shape, 20, 12, 4.0), density=1.3, diffusivity=0.03)
+    mix.add("light", _blob(shape, 20, 28, 4.0), density=0.7, diffusivity=0.03)
+
+    vx = np.zeros(shape); vy = np.zeros(shape)
+    for _ in range(10):
+        vx, vy = mind.matter_step(mix, vx, vy, dt=0.1)
+
+    rho = mix.density()
+    heavy = mind.sample_field(rho, np.array([[12.0, 20.0]]))       # (x, y) in the heavy-dye region
+    light = mind.sample_field(rho, np.array([[28.0, 20.0]]))       # in the light-dye region
+    assert float(heavy[0]) > 1.0 > float(light[0])                 # the sampler reads the blend the model made
+
+
+def test_matter_drift_settles_through_mind():
+    """Fluids/matter item 3 through the mind: a heavy dye channel, stepped with drift on, SETTLES (its density
+    centre of mass sinks) -- and with drift off it stays put. The settling is proved through matter_step on the
+    mind, with a proper drift-off baseline (no win without one)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_mixture import _blob
+    mind = UnifiedMind(dim=64, seed=0)
+    shape = (48, 48)
+
+    def settle(drift):
+        mix = mind.make_mixture(shape, solvent_density=1.0, buoyancy=0.0)
+        mix.add("heavy", _blob(shape, 24, 24, 4.0), density=3.0, diffusivity=0.001)
+        vx = np.zeros(shape); vy = np.zeros(shape)
+        ys = np.mgrid[0:shape[0], 0:shape[1]][0]
+        f0 = mix.channels["heavy"]; y0 = float((ys * f0).sum() / f0.sum())
+        for _ in range(25):
+            vx, vy = mind.matter_step(mix, vx, vy, dt=0.1, drift_strength=drift)
+        f1 = mix.channels["heavy"]; y1 = float((ys * f1).sum() / f1.sum())
+        return y0, y1
+
+    y0_on, y1_on = settle(0.5)
+    y0_off, y1_off = settle(0.0)
+    assert y1_on < y0_on - 0.5                                 # drift on: it sinks
+    assert abs(y1_off - y0_off) < 1e-6                         # drift off: it stays (baseline)
+
+
+def test_matter_oil_water_separate_through_mind():
+    """Fluids/matter item 4 through the mind: an oil phase in water with tension ON sharpens into a phase-separated
+    interface (most cells committed to a phase), while the SAME setup with tension OFF stays a graded blend -- the
+    miscible<->immiscible dial, proved through matter_step on the mind."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=64, seed=0)
+    shape = (48, 48)
+    xs = np.mgrid[0:shape[0], 0:shape[1]][1]
+    graded = np.clip((xs - 12) / 24.0, 0, 1)
+
+    def committed(tension):
+        mix = mind.make_mixture(shape, solvent_density=1.0, buoyancy=0.0, tension=tension)
+        mix.add("oil", graded.copy(), density=0.9, diffusivity=0.0)
+        vx = np.zeros(shape); vy = np.zeros(shape)
+        for _ in range(40):
+            vx, vy = mind.matter_step(mix, vx, vy, dt=0.1)
+        phi = mix.channels["oil"]
+        return float(((phi < 0.15) | (phi > 0.85)).mean())
+
+    assert committed(2.0) > committed(0.0) + 0.1              # tension separates; no tension stays blended
+
+
+def test_scatter_then_scale_through_mind():
+    """Fluids/matter item 5 through the mind: scatter grass on a planet (a sphere) with the scatter LAYER, put each
+    placement into a scene under the planet, then roll the placements up with the SCALE node -- from orbit (small
+    apparent size) the planet collapses to its summary (the accumulated count), and the wired distribute_compute
+    monoid gives the same total. Both faculties proved together, reusing emit_from_surface and distribute_compute."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_sdf import sphere
+    from holographic_scene_doc import Scene
+    from holographic_ai import Vocabulary
+    mind = UnifiedMind(dim=64, seed=0)
+
+    grass = Vocabulary(512, seed=0).get("grass")
+    res = mind.scatter_surface(grass, sphere(1.0), ((-1.5, -1.5, -1.5), (1.5, 1.5, 1.5)), count=40, seed=0)
+    assert res["count"] > 15
+
+    scene = Scene(dim=256, seed=0)
+    planet = scene.add(name="planet", params={"mass": 0.0})
+    for i, pl in enumerate(res["placements"]):
+        scene.add(name="blade%d" % i, params={"mass": 1.0}, parent=planet)     # each blade weighs 1
+
+    sn = mind.scale_node(scene, lod_px=8.0)
+    summary = sn.summary(planet)
+    assert summary["mass"] == float(res["count"])                              # rolled-up count == blades scattered
+
+    # from orbit (tiny apparent size) the planet draws as ONE summary blob, not a million blades
+    orbit = sn.draw(planet, apparent_px=2.0)
+    assert "summary" in orbit and "children" not in orbit
+
+    # the same total via the wired monoid (the reuse the ScaleNode's rollup mirrors)
+    total, _info = mind.distribute_compute([[1.0]] * res["count"], worker=lambda b, c=None: sum(b), reduce="sum")
+    assert total == float(res["count"])
+
+
+def test_compiled_material_through_mind():
+    """Performance MC1 through the mind: compile a material's socket graph into one cached kernel, then 'render'
+    several frames with it -- the kernel is BUILT ONCE (later frames are cache hits) and every frame's shading
+    matches the naive per-hit resolve exactly. A compiled shortcut that changes the pixels would be no shortcut."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_surface import SurfaceMaterial
+    from holographic_param import Param
+    from holographic_compile import CompileCache
+    mind = UnifiedMind(dim=64, seed=0)
+
+    rough = lambda P, **k: 0.2 + 0.3 * (np.asarray(P)[:, 0] > 0)
+    mat = SurfaceMaterial(color=(0.7, 0.4, 0.2), roughness=Param(field=rough), reflect=0.15)
+    cache = CompileCache()
+
+    rng = np.random.default_rng(0)
+    for _frame in range(5):                                       # five frames of the same material
+        pts = rng.uniform(-1, 1, size=(30, 3))
+        shade = mind.compile_material(mat, cache=cache)          # cached -> built once
+        got = shade(pts)
+        ref = mat.resolve(pts)
+        for name in ("color", "roughness", "reflect", "emission", "opacity"):
+            assert np.allclose(got[name], ref[name])
+    assert cache.stats["compiles"] == 1 and cache.stats["hits"] == 4   # one build, four reused frames
+
+
+def test_baked_material_vs_direct_through_mind():
+    """Performance MC2 through the mind: bake a procedural material's view-independent channels over the object
+    bounds, then shade many hits by trilinear LOOKUP. Baked output matches the direct per-hit resolve within
+    interpolation error, and after the bake NO further field evaluation happens (the field is queried, not re-run) --
+    the bake-vs-direct check the backlog asks for: equal output, reuse win."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_surface import SurfaceMaterial
+    from holographic_param import Param
+    mind = UnifiedMind(dim=64, seed=0)
+
+    calls = {"n": 0}
+    def rough(P, **k):
+        calls["n"] += 1
+        return 0.3 + 0.2 * np.sin(np.asarray(P)[:, 0] * 2.0)
+    mat = SurfaceMaterial(color=(0.7, 0.4, 0.2), roughness=Param(field=rough), reflect=0.1)
+
+    shade = mind.bake_material(mat, (-1.0, -1.0, -1.0), (1.0, 1.0, 1.0), res=48)
+
+    # correctness (uses the field via resolve -- checked once, not part of the reuse count)
+    rng = np.random.default_rng(0)
+    check = rng.uniform(-0.9, 0.9, size=(40, 3))
+    assert np.abs(shade(check)["roughness"] - mat.resolve(check)["roughness"]).max() < 0.02
+
+    # now the reuse win: five frames of LOOKUPS evaluate the field ZERO more times (it was baked, not re-run)
+    baseline = calls["n"]
+    for _frame in range(5):
+        shade(rng.uniform(-0.9, 0.9, size=(40, 3)))
+    assert calls["n"] == baseline
+
+
+def test_view_lut_through_mind():
+    """Performance MC3 through the mind: pre-integrate the view-dependent specular into a (view_cos, roughness) LUT,
+    then look it up per pixel. The lookup matches a fresh hemisphere integral across the stable roughness range and
+    is orders of magnitude cheaper -- the last view-dependent axis turned into a query (the 'add a dimension' move)."""
+    import time
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_brdf import directional_albedo
+    mind = UnifiedMind(dim=64, seed=0)
+
+    lut = mind.bake_view_lut(metallic=1.0, res_view=16, res_rough=16, samples=8192, seed=0)
+
+    # matches the integral where the estimator is well-behaved (roughness >= 0.3)
+    worst = 0.0
+    for vc in (0.4, 0.7):
+        for rg in (0.4, 0.6, 0.9):
+            ref = directional_albedo(1.0, rg, n=32768, view_cos=vc, seed=1)
+            worst = max(worst, abs(float(lut.sample(vc, rg)[0]) - ref))
+    assert worst < 0.08
+
+    # far cheaper: many lookups vs one integral each
+    vcs = np.random.default_rng(0).uniform(0.1, 1.0, 1000); rgs = np.random.default_rng(1).uniform(0.3, 1.0, 1000)
+    t0 = time.time(); lut.sample(vcs, rgs); t_lut = time.time() - t0
+    t0 = time.time(); directional_albedo(1.0, 0.5, n=8192, view_cos=0.7, seed=0); t_one = time.time() - t0
+    assert (t_one * 1000) / max(t_lut, 1e-9) > 50
+
+
+def test_compiled_pipeline_through_mind():
+    """Performance PW1/PW2 through the mind: compile a preview pipeline's plan once, run several frames, and confirm
+    the plan (select+auto-include+toposort) is built ONCE and reused -- and that the compiled plan matches a direct
+    build_pipeline. The pipeline twin of the compiled material: plan the work once, reuse it every frame."""
+    from holographic_unified import UnifiedMind
+    from holographic_pipeline import PipelineConfig, build_pipeline
+    from holographic_compile import CompileCache
+    mind = UnifiedMind(dim=64, seed=0)
+
+    cfg = PipelineConfig.preview()
+    cache = CompileCache()
+
+    # compiled plan matches the direct one
+    assert mind.compile_pipeline(cfg, cache=cache).stage_names() == build_pipeline(cfg).stage_names()
+
+    # six frames reuse the one plan (the first call above already compiled it)
+    for _frame in range(6):
+        fs = mind.run_pipeline(cfg, scene={"objs": 4}, cache=cache)
+        assert fs is not None
+    assert cache.stats["compiles"] == 1                              # planned once, reused across all frames
+
+
+def test_diffuse_readout_through_mind():
+    """Performance PW4 through the mind: read out the matter model's LINEAR diffusion sub-step at an arbitrary time k
+    in one evaluation, matching k marched diffusions of a real matter channel exactly, and confirm the closed-form
+    steady state is the channel's mean. Time becomes a query for the part of the sim that is genuinely linear."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_fields import diffuse
+    mind = UnifiedMind(dim=64, seed=0)
+
+    # a real matter channel (a blob of dye)
+    from holographic_mixture import _blob
+    channel = _blob((32, 32), 16, 16, 4.0)
+    amount = 0.12
+
+    # direct readout at k=8 == marching diffuse 8 times
+    marched = channel.copy()
+    for _ in range(8):
+        marched = diffuse(marched, amount)
+    assert np.allclose(mind.diffuse_readout(channel, amount, 8), marched, atol=1e-9)
+
+    # fractional time is meaningful; the steady state is the mean
+    assert mind.diffuse_readout(channel, amount, 3.5) is not None
+    assert np.allclose(mind.diffuse_steady_state(channel), channel.mean())
+
+
+def test_stage_bake_plan_through_mind():
+    """Performance PW3 through the mind: compile a preview pipeline (PW2) then plan bake-vs-compute per stage (PW3)
+    over many frames. The static gbuffer stage is chosen to BAKE (reused across frames) while the render and present
+    stages COMPUTE -- the decision layer that tells PW1's bake_pipeline which stages are worth baking."""
+    from holographic_unified import UnifiedMind
+    from holographic_pipeline import PipelineConfig
+    mind = UnifiedMind(dim=64, seed=0)
+
+    pipe, plan = mind.plan_pipeline_bakes(PipelineConfig.preview(), frames=30)
+    choice = {p["stage"]: p["choice"] for p in plan}
+
+    assert choice["gbuffer"] == "bake"                          # static g-buffer, many frames -> bake
+    assert choice["render"] == "compute"                        # the render itself is dynamic -> compute
+    assert choice["present"] == "compute"                       # tonemap/present is per-frame -> compute
+
+    # over a single frame nothing bakes (no amortisation)
+    _pipe, plan1 = mind.plan_pipeline_bakes(PipelineConfig.preview(), frames=1)
+    assert all(p["choice"] == "compute" for p in plan1)

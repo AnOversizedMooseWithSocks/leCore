@@ -1,0 +1,44 @@
+# .github/workflows/package.yml
+# Build an installable leCore wheel on every push to main and on version tags, smoke-test that it imports,
+# upload it as a build artifact, and attach it to a GitHub Release when you push a tag like v0.1.0.
+name: package
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:     [ 'v*' ]
+  workflow_dispatch:            # lets you run it by hand from the Actions tab
+
+jobs:
+  build-wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install the build tool
+        run: python -m pip install --upgrade pip build
+
+      - name: Build the package (copies essentials, strips tests, builds the wheel)
+        run: sh build_package.sh
+
+      - name: Smoke-test the wheel (install it clean, in isolation, and import it)
+        run: |
+          python -m pip install dist/*.whl
+          python -c "import lecore; assert hasattr(lecore, 'UnifiedMind'); print('leCore import OK')"
+
+      - name: Upload the wheel + sdist as build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lecore-dist
+          path: dist/*
+
+      - name: Attach to the GitHub Release (only when a version tag is pushed)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

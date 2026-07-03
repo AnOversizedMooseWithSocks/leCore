@@ -61,6 +61,22 @@ class Propagator:
         U_inv = np.fft.irfft(H_inv, n=n)
         return cls(U, U_inv)
 
+    @classmethod
+    def learn_pairs(cls, X0, X1, ridge=1e-3):
+        """Learn the transfer from explicit (state -> next_state) PAIRS (X0[i] -> X1[i]) instead of one running
+        sequence -- the action-conditioned case, where every successor comes from applying the SAME action. Same
+        per-frequency least-squares transfer as learn(), just fed paired rows; this is what lets one Propagator
+        model one action (see holographic_condprop.ConditionalPropagator)."""
+        X0 = np.asarray(X0, float); X1 = np.asarray(X1, float)
+        n = X0.shape[1]
+        F0 = np.fft.rfft(X0, axis=1); F1 = np.fft.rfft(X1, axis=1)
+        num = (F1 * np.conj(F0)).sum(0)
+        den = (np.abs(F0) ** 2).sum(0)
+        H = num / (den + ridge * (den.max() + 1e-12))
+        eps = ridge * (np.abs(H) ** 2).mean() + 1e-12
+        H_inv = np.conj(H) / (np.abs(H) ** 2 + eps)
+        return cls(np.fft.irfft(H, n=n), np.fft.irfft(H_inv, n=n))
+
     def step(self, state):
         """One-step prediction = a single bind with the learned operator."""
         return bind(self.U, np.asarray(state, float))

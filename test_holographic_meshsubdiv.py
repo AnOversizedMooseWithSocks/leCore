@@ -57,3 +57,29 @@ def test_subdivide_output_is_all_triangles():
 def test_subdivide_is_deterministic():
     s = _icosphere(1)
     assert np.array_equal(loop_subdivide(s, 1).vertices, loop_subdivide(s, 1).vertices)
+
+
+# --- Change 3: the vectorized subdivision-matrix path must be bit-identical to the reference loop
+#     (positions within TOL, topology EXACT) ---
+import numpy as _np_sd
+from holographic_meshsubdiv import _one_level as _ref_one_level, _one_level_matrix as _fast_one_level
+from holographic_mesh import box as _sd_box, grid as _sd_grid, tetrahedron as _sd_tet
+
+
+def test_subdivision_matrix_bit_identical_to_loop():
+    for m in (_sd_box(2, 2, 2), _sd_grid(5, 4), _sd_tet()):
+        ref = _ref_one_level(m); fast = _fast_one_level(m)
+        # topology EXACT
+        assert [tuple(f) for f in ref.faces] == [tuple(f) for f in fast.faces]
+        assert ref.vertices.shape == fast.vertices.shape
+        # positions within TOL (only float summation order differs)
+        assert _np_sd.abs(ref.vertices - fast.vertices).max() < 1e-9
+
+
+def test_subdivision_matrix_multilevel_and_euler():
+    from holographic_meshsubdiv import loop_subdivide
+    m = _sd_box(1, 1, 1)
+    sub = loop_subdivide(m, levels=2)
+    # each level: faces x4; a closed cube (chi=2) stays chi=2
+    assert len(sub.faces) == len(_sd_box(1, 1, 1).faces) * 2 * 16  # box has quads -> triangulated x2, then x4 x4
+    assert sub.euler_characteristic() == 2
