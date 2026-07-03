@@ -160,3 +160,46 @@ def test_translucent_object_behind_is_indexed():
     upd, mask = delta_reshade(ctx2, idx, [1], base, cam)
     full = render_scene(o2, cam, width=W, height=H, ss=1, dither=0.0)
     assert np.abs(upd - full).max() < 1e-9
+
+
+def test_incremental_renderer_unchanged_is_free_and_edit_is_delta():
+    """The session serves an unchanged re-render for free (empty mask) and an edit as a bit-exact bounded delta."""
+    import numpy as np
+    from holographic_rayindex import IncrementalRenderer
+    from holographic_semantic import render_scene
+    objs = parse_description("a red ball beside a blue box")["objects"]
+    cam = Camera(eye=(0.4, 1.5, 5.0), target=(0, 0.1, 0), fov_deg=46.0)
+    W = H = 96
+    r = IncrementalRenderer(cam, W, H, ss=1)
+    f0, m0 = r.render(objs)
+    assert m0.all()                                            # first render: whole frame is new
+    f1, m1 = r.render(objs)                                    # SAME scene
+    assert not m1.any()                                        # nothing changed -> free, empty delta
+    assert f1 is f0                                            # and the cached frame is returned as-is
+    f2, m2 = r.edit(0, "color", "yellow")                     # colour edit -> bounded delta
+    assert 0 < m2.sum() < W * H
+    full = render_scene([dict(objs[0], color="yellow"), objs[1]], cam, width=W, height=H, ss=1, dither=0.0)
+    assert np.abs(f2 - full).max() < 1e-9                      # bit-exact vs a full re-render
+    ys, xs, rgb = r.stream_delta(m2)
+    assert len(ys) == int(m2.sum()) and rgb.shape == (len(ys), 3)   # stream carries only the changed pixels
+
+
+def test_reproject_camera_move_reuses_most_pixels():
+    """A camera move reprojects the cached frame's world hits and re-shades only holes + view-dependent pixels --
+    faster than a full re-render, close to it in quality, and exact on the re-shaded pixels."""
+    import numpy as np, math
+    from holographic_rayindex import IncrementalRenderer
+    from holographic_semantic import render_scene
+    objs = parse_description("a big red ball beside a big blue box")["objects"]
+    base = Camera(eye=(0.2, 0.6, 3.2), target=(0, 0.1, 0), fov_deg=52.0)
+    W = H = 96
+    s = IncrementalRenderer(base, W, H, ss=1)
+    s.render(objs)
+    a = math.radians(5.0); ex = 0.2 * math.cos(a) + 3.2 * math.sin(a); ez = -0.2 * math.sin(a) + 3.2 * math.cos(a)
+    newcam = Camera(eye=(ex, 0.6, ez), target=(0, 0.1, 0), fov_deg=52.0)
+    fr, rmask = s.reproject(newcam)
+    full = render_scene(objs, newcam, width=W, height=H, ss=1, dither=0.0)
+    assert rmask.mean() < 0.6                                   # most of the frame was REUSED, not re-shaded
+    assert np.abs(fr[rmask] - full.reshape(H, W, 3)[rmask]).max() < 1e-9   # re-shaded pixels are exact
+    mse = np.mean((fr - full) ** 2)
+    assert mse < 5e-3                                           # reprojected frame is close to a full re-render

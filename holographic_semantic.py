@@ -41,6 +41,7 @@ MATERIALS = {                                                # word -> canonical
     "plastic": "plastic", "rubber": "plastic", "vinyl": "plastic",
     "ceramic": "ceramic", "porcelain": "ceramic",
     "mirror": "mirror", "reflective": "mirror", "shiny": "mirror", "polished": "mirror",
+    "brushed": "brushed", "satin": "brushed", "glossy": "glossy", "burnished": "brushed",
     "emissive": "emissive", "glowing": "emissive", "glow": "emissive", "neon": "emissive",
     "luminous": "emissive", "lamp": "emissive", "lit": "emissive",
     "fog": "fog", "foggy": "fog", "mist": "fog", "misty": "fog", "vapor": "fog", "haze": "fog",
@@ -78,6 +79,8 @@ MATERIAL_RENDER = {
     "plastic": dict(reflect=0.12),
     "ceramic": dict(reflect=0.18),
     "mirror": dict(reflect=0.85),
+    "brushed": dict(reflect=0.55),                              # reflective but ROUGH -> a glossy (blurred) reflection
+    "glossy": dict(reflect=0.35),
     "emissive": dict(reflect=0.0),
     "wax": dict(reflect=0.06, sss=1.0),                         # subsurface scattering (thin parts glow)
     "translucent": dict(reflect=0.08, translucent=1.0),        # diffuse see-through (frosted)
@@ -573,7 +576,37 @@ class _UnionSDF:
 
 
 def _reflectivity(mat_name):
-    return {"mirror": 0.85, "metal": 0.5, "glass": 0.12}.get(mat_name, 0.05)
+    return {"mirror": 0.85, "brushed": 0.55, "glossy": 0.35, "metal": 0.5, "glass": 0.12}.get(mat_name, 0.05)
+
+
+def _roughness(mat_name):
+    """Reflection-lobe half-angle (radians) per material: 0 = a sharp mirror; larger = a blurrier glossy reflection.
+    This is the width the ray-differential FRAME reconstructs -- surface micro-imperfections spread the reflection."""
+    return {"brushed": 0.16, "glossy": 0.09, "metal": 0.05}.get(mat_name, 0.0)
+
+
+def _perp_frames(D):
+    """Per-row orthonormal (u, v) perpendicular to each unit direction in D (M,3) -- the plane the glossy lobe's
+    marginal rays are tilted into. Vectorised."""
+    D = np.asarray(D, float)
+    a = np.where((np.abs(D[:, 0]) < 0.9)[:, None], np.array([1.0, 0, 0]), np.array([0, 1.0, 0]))
+    u = np.cross(D, a); u = u / (np.linalg.norm(u, axis=1, keepdims=True) + 1e-12)
+    v = np.cross(D, u)
+    return u, v
+
+
+def _shade_reflection_rays(union, O, D, colors, sun_dir, amb, sun_i):
+    """Trace + shade one bounce of reflection rays (sky where they miss). Factored so the sharp mirror ray AND the
+    glossy frame's tilted rays use identical shading."""
+    from holographic_raymarch import sphere_trace, sdf_normal, ambient_occlusion, soft_shadow, sky_dome
+    rc = sky_dome(D, sun_dir=tuple(sun_dir))
+    hm, tm, Pmh = sphere_trace(union, O, D)
+    if np.any(hm):
+        Nm = sdf_normal(union, Pmh[hm]); idm = union.ids(Pmh[hm])
+        lamm = np.clip((Nm * sun_dir).sum(1), 0, 1)
+        shm = soft_shadow(union, Pmh[hm] + Nm * 3e-3, sun_dir); aom = ambient_occlusion(union, Pmh[hm], Nm)
+        rc[hm] = np.clip(colors[idm] * (amb * aom + lamm * shm * sun_i)[:, None], 0, 1)
+    return rc
 
 
 def volumetric_field(center, radius, density=1.4, turbulence=0.7, seed=0):
@@ -620,6 +653,7 @@ def _scene_setup(objects, ground, sky, sun, glass_tint, rs=None):
     return {"sdfs": sdfs, "union": _UnionSDF(sdfs),
             "colors": np.array([r["color"] for r in rs]),
             "refl": np.array([_reflectivity(r["mat_name"]) for r in rs]),
+            "rough": np.array([_roughness(r["mat_name"]) for r in rs]),                # glossy reflection lobe width
             "is_glass": np.array([r["mat_name"] == "glass" for r in rs]),
             "is_sss": np.array([r["mat_name"] == "wax" for r in rs]),               # subsurface scattering
             "is_translucent": np.array([r["mat_name"] == "translucent" for r in rs]),   # diffuse see-through
@@ -634,7 +668,7 @@ def _shade_rays(ctx, O, D):
     from holographic_raymarch import sphere_trace, sdf_normal, ambient_occlusion, soft_shadow, sky_dome
     union = ctx["union"]; sdfs = ctx["sdfs"]; colors = ctx["colors"]; refl = ctx["refl"]; is_glass = ctx["is_glass"]
     sun_dir = ctx["sun_dir"]; amb = ctx["amb"]; sun_i = ctx["sun_i"]
-    hit, t, P = sphere_trace(union, O, D)
+    hit, t, P = sphere_trace(union, O, D, relax=ctx.get("relax", 1.0))
     col = sky_dome(D, sun_dir=tuple(sun_dir))
     ids_full = -np.ones(len(D), int)
     if np.any(hit):
@@ -644,22 +678,35 @@ def _shade_rays(ctx, O, D):
         sh = soft_shadow(union, P[hit] + N * 3e-3, sun_dir)     # marches the WHOLE union -> inter-object shadows
         ao = ambient_occlusion(union, P[hit], N)
         shade = amb * ao + lam * sh * sun_i
-        shaded = colors[ids] * shade[:, None]
+        albedo = colors[ids]                                    # default: the nearest object's colour
+        r_amt = refl[ids]                                       # reflectivity and roughness default to the object's
+        rough_all = ctx.get("rough", np.zeros(len(refl)))[ids]
+        rf = ctx.get("region_field")                           # OPTIONAL: shade by REGION -- a boundary's material wins
+        if rf is not None:                                      # (a biome planet, OR one body with many materials)
+            rmask = rf.classify(P[hit]) >= 0
+            if np.any(rmask):
+                albedo = albedo.copy(); albedo[rmask] = rf.material_at(P[hit])[rmask]
+                r_amt = r_amt.copy(); r_amt[rmask] = rf.reflect_at(P[hit], default=0.0)[rmask]      # per-region reflect
+                rough_all = rough_all.copy(); rough_all[rmask] = rf.roughness_at(P[hit])[rmask]     # per-region rough
+        shaded = albedo * shade[:, None]
         refl_dir = D[hit] - 2.0 * (D[hit] * N).sum(1)[:, None] * N
-        r_amt = refl[ids]
         reflected = sky_dome(refl_dir, sun_dir=tuple(sun_dir))   # default: a mirror reflects the sky dome
         mirror = r_amt > 0.05                                    # only trace a reflection ray for reflective surfaces
         if np.any(mirror):                                       # ONE-BOUNCE OBJECT REFLECTION: the mirror reflects
             Pm = P[hit][mirror] + N[mirror] * 3e-3              # other OBJECTS, not just the sky (wired into render_scene)
             Dm = refl_dir[mirror]
-            hm, tm, Pmh = sphere_trace(union, Pm, Dm)
-            rc = sky_dome(Dm, sun_dir=tuple(sun_dir))
-            if np.any(hm):
-                Nm = sdf_normal(union, Pmh[hm]); idm = union.ids(Pmh[hm])
-                lamm = np.clip((Nm * sun_dir).sum(1), 0, 1)
-                shm = soft_shadow(union, Pmh[hm] + Nm * 3e-3, sun_dir)
-                aom = ambient_occlusion(union, Pmh[hm], Nm)
-                rc[hm] = np.clip(colors[idm] * (amb * aom + lamm * shm * sun_i)[:, None], 0, 1)
+            rc = _shade_reflection_rays(union, Pm, Dm, colors, sun_dir, amb, sun_i)   # the sharp centre reflection
+            rough_m = rough_all[mirror]
+            glossy = rough_m > 1e-3
+            if np.any(glossy):                                  # GLOSSY: reconstruct the roughness LOBE with the frame
+                Pg = Pm[glossy]; Dg = Dm[glossy]; rg = rough_m[glossy]   # (Moose's pencil): 4 marginal rays tilted by
+                u, v = _perp_frames(Dg)                         # the roughness angle + the centre -> a 5-tap lobe average
+                acc = rc[glossy].copy()
+                for su, sv in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    Dt = Dg + rg[:, None] * (su * u + sv * v)
+                    Dt = Dt / (np.linalg.norm(Dt, axis=1, keepdims=True) + 1e-12)
+                    acc = acc + _shade_reflection_rays(union, Pg, Dt, colors, sun_dir, amb, sun_i)
+                rc[glossy] = acc / 5.0                          # 5-ray frame stands in for the whole glossy bundle
             reflected[mirror] = rc
         shaded = shaded + r_amt[:, None] * reflected
         sss_here = ctx["is_sss"][ids]                           # SUBSURFACE SCATTERING: thin parts transmit the sun
@@ -724,9 +771,30 @@ def _edge_mask(idbuf, depth, frame, depth_rel=0.06, lum_thr=0.06):
     return D
 
 
+def _scene_aabb(rs, margin=1.0):
+    """Axis-aligned bounding box of the realized primitives (+ margin) -- the volume to bake the SDF over. Spheres
+    contribute centre +/- radius; boxes centre +/- half-extent. Falls back to a default cube if extents are unknown."""
+    lows = []; highs = []
+    for r in rs:
+        s = r.get("sdf") if isinstance(r, dict) else r
+        c = np.asarray(getattr(s, "c", (0.0, 0.0, 0.0)), float)
+        if hasattr(s, "r"):
+            ext = np.full(3, float(s.r))
+        elif hasattr(s, "h"):
+            ext = np.asarray(s.h, float)
+        else:
+            ext = np.full(3, 1.0)
+        lows.append(c - ext); highs.append(c + ext)
+    if not lows:
+        return np.full(3, -3.0), np.full(3, 3.0)
+    lo = np.min(lows, axis=0) - margin; hi = np.max(highs, axis=0) + margin
+    return lo, hi
+
+
 def render_scene(objects, camera, width=256, height=256, post=None, sun="bright", sky="clear",
                  glass_tint=(0.75, 0.9, 0.85), ss=2, ground=True, dither=0.004, adaptive=True, stats=None,
-                 fog=None, fog_density=0.12, fog_color=(0.80, 0.85, 0.92), fog_max_dist=14.0):
+                 fog=None, fog_density=0.12, fog_color=(0.80, 0.85, 0.92), fog_max_dist=14.0, region_field=None,
+                 bake=None, relax=1.0):
     """Render a realized scene in a SINGLE pass over the UNION SDF, so objects cast shadows and ambient occlusion on
     EACH OTHER. Per-pixel material/colour comes from the nearest object (the material-id buffer); reflective
     materials pick up a sky reflection; GLASS is see-through. Optional `post` is a holographic_postfx.PostChain.
@@ -749,6 +817,15 @@ def render_scene(objects, camera, width=256, height=256, post=None, sun="bright"
     vol_idx = [i for i, o in enumerate(objects) if isinstance(o, dict) and o.get("material") in _VOLUMETRIC]
     surf_rs = [rs_all[i] for i in range(len(objects)) if i not in vol_idx]
     ctx = _scene_setup(None, ground, sky, sun, glass_tint, rs=surf_rs)
+    ctx["region_field"] = region_field                          # optional: shade hit points by region material
+    ctx["relax"] = relax                                        # >1 = opt-in over-relaxed marching (grazing scenes)
+    if bake is not None and ctx.get("union") is not None and len(surf_rs) > 0:
+        from holographic_sdfbake import GridSDF                   # PRECOMPUTE the SDF into a grid once, then sample
+        if isinstance(bake, GridSDF):
+            ctx["union"] = bake                                  # REUSE a grid baked once (amortise over many frames)
+        else:
+            _blo, _bhi = _scene_aabb(surf_rs, margin=1.5)       # O(1) per sample -> cost independent of #primitives;
+            ctx["union"] = GridSDF.bake(ctx["union"], _blo, _bhi, bake)   # shadows/AO/reflections/normals reuse it
     if ctx is None:
         if not vol_idx:
             return np.zeros((height, width, 3))

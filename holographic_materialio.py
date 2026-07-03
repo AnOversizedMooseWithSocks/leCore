@@ -47,16 +47,73 @@ def _role(name, dim):
     return random_vector(dim, np.random.default_rng(seed))
 
 
+class TextureMap:
+    """An image-based texture: an (H, W, C) array sampled by UV coordinates with BILINEAR interpolation -- the
+    per-texel detail a factor-level material can't carry. UVs are in [0,1] (glTF convention; v runs top-down).
+    `wrap` decides what happens outside [0,1]: 'repeat' tiles the image, 'clamp' holds the edge texel."""
+
+    def __init__(self, image, wrap="repeat"):
+        img = np.asarray(image, float)
+        if img.ndim == 2:
+            img = img[:, :, None]                            # (H,W) grayscale -> (H,W,1)
+        self.image = img
+        self.h, self.w, self.c = img.shape
+        self.wrap = wrap
+
+    def _wrap(self, x, n):
+        # 'clamp' holds the last texel; 'repeat' wraps around (the two conventions almost everything uses)
+        return int(np.clip(x, 0, n - 1)) if self.wrap == "clamp" else int(x % n)
+
+    def sample(self, u, v):
+        """Bilinear sample at UV (u,v). Returns a (C,) vector. Uses the pixel-CENTER convention: texel i covers
+        [i, i+1), so u*w-0.5 lands between the two nearest texel centres, and we blend the four that surround it."""
+        fx = u * self.w - 0.5
+        fy = v * self.h - 0.5
+        x0 = int(np.floor(fx)); y0 = int(np.floor(fy))
+        tx = fx - x0; ty = fy - y0                            # fractional position between texels (the blend weights)
+        x0w, x1w = self._wrap(x0, self.w), self._wrap(x0 + 1, self.w)
+        y0w, y1w = self._wrap(y0, self.h), self._wrap(y0 + 1, self.h)
+        top = self.image[y0w, x0w] * (1 - tx) + self.image[y0w, x1w] * tx      # blend the top two texels
+        bot = self.image[y1w, x0w] * (1 - tx) + self.image[y1w, x1w] * tx      # blend the bottom two
+        return top * (1 - ty) + bot * ty                     # blend top and bottom
+
+
 class PBRMaterial:
-    """A glTF 2.0 metallic-roughness PBR material (factor level). Values are in [0,1]."""
+    """A glTF 2.0 metallic-roughness PBR material. Factor level by default; optionally carries TEXTURE MAPS
+    (base colour / metallic / roughness / emissive) sampled by UV. Values are in [0,1]."""
 
     def __init__(self, name="material", base_color=(0.8, 0.8, 0.8, 1.0), metallic=0.0, roughness=0.8,
-                 emissive=(0.0, 0.0, 0.0)):
+                 emissive=(0.0, 0.0, 0.0), base_color_map=None, metallic_map=None, roughness_map=None,
+                 emissive_map=None):
         self.name = str(name)
         self.base_color = tuple(float(c) for c in base_color)        # RGBA
         self.metallic = float(metallic)
         self.roughness = float(roughness)
         self.emissive = tuple(float(c) for c in emissive)            # RGB
+        # optional TextureMaps -- glTF multiplies the factor by the sampled texture, so a None map leaves the
+        # factor unchanged (fully backward compatible: a material with no maps behaves exactly as before)
+        self.base_color_map = base_color_map
+        self.metallic_map = metallic_map
+        self.roughness_map = roughness_map
+        self.emissive_map = emissive_map
+
+    def sample(self, u=0.5, v=0.5):
+        """The effective PBR values at UV (u,v): each channel is its factor multiplied by its texture map where one
+        is set (glTF's factor x texture rule). With no maps this returns the factor-level values, so old callers
+        are unaffected. Returns a dict {base_color (RGBA), metallic, roughness, emissive (RGB)}."""
+        bc = np.array(self.base_color, float)
+        if self.base_color_map is not None:
+            s = np.asarray(self.base_color_map.sample(u, v), float)
+            s = np.concatenate([s, np.ones(4 - len(s))]) if len(s) < 4 else s[:4]   # pad to RGBA if grayscale/RGB
+            bc = bc * s
+        metallic = self.metallic * (float(self.metallic_map.sample(u, v)[0]) if self.metallic_map is not None else 1.0)
+        roughness = self.roughness * (float(self.roughness_map.sample(u, v)[0]) if self.roughness_map is not None else 1.0)
+        em = np.array(self.emissive, float)
+        if self.emissive_map is not None:
+            se = np.asarray(self.emissive_map.sample(u, v), float)[:3]
+            em = em * (se if len(se) == 3 else np.full(3, se[0]))
+        return {"base_color": tuple(float(x) for x in bc), "metallic": metallic,
+                "roughness": roughness, "emissive": tuple(float(x) for x in em)}
 
     def __repr__(self):
         return (f"PBRMaterial(name={self.name!r}, base_color={tuple(round(c,3) for c in self.base_color)}, "

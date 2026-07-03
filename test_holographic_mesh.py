@@ -239,3 +239,72 @@ def test_stable_uv_is_edit_invariant():
     p1 = {int(k): M1.vertices[i] for i, k in enumerate(k1.tolist())}
     far = [k for k in np.intersect1d(k1, k2).tolist() if p1[k][2] < 0.2]
     assert far and all(np.allclose(u1[k], u2[k], atol=1e-9) for k in far)
+
+
+# --- mesh performance fix: the vectorized triangle build must be BYTE-IDENTICAL to the loop, and the
+#     CSR-backed queries must match the old full-scan outputs exactly ---
+import numpy as _np_perf
+from holographic_mesh import _half_edges_tri, _half_edges_loop, box as _box, grid as _grid, tetrahedron as _tet
+
+
+def _triangulate(m):
+    tris = []
+    for f in m.faces:
+        for k in range(1, len(f) - 1):
+            tris.append([f[0], f[k], f[k + 1]])
+    m.faces = tris; m._he = None; m._adj = None
+    return m
+
+
+def _ref_vertex_faces(m, v):
+    return sorted({fi for fi, f in enumerate(m.faces) if v in f})
+
+
+def _ref_vertex_neighbours(m, v):
+    nb = set()
+    for f in m.faces:
+        if v in f:
+            n = len(f); i = f.index(v); nb.add(f[(i + 1) % n]); nb.add(f[(i - 1) % n])
+    nb.discard(v)
+    return sorted(nb)
+
+
+def test_tri_build_bit_identical_to_loop():
+    for m in (_triangulate(_box(2, 2, 2)), _triangulate(_grid(6, 5)), _triangulate(_tet())):
+        F = _np_perf.asarray(m.faces, dtype=_np_perf.int64)
+        fast = _half_edges_tri(F); ref = _half_edges_loop(m.faces)
+        for key in ("origin", "face", "nxt", "twin"):
+            assert _np_perf.array_equal(fast[key], ref[key]), (key, m.n_vertices)
+
+
+def test_boundary_twins_minus_one():
+    m = _triangulate(_grid(5, 5))                                    # an open sheet -> has boundary edges
+    he = m.half_edges()
+    assert (he["twin"] == -1).any()                                 # boundary half-edges exist
+    # every non-boundary twin is reciprocal
+    for h, t in enumerate(he["twin"]):
+        if t != -1:
+            assert he["twin"][t] == h
+
+
+def test_non_manifold_raises_in_both_paths():
+    import pytest
+    bad = [[0, 1, 2], [0, 1, 3]]                                    # directed edge (0,1) appears twice
+    with pytest.raises(ValueError):
+        _half_edges_tri(_np_perf.asarray(bad, dtype=_np_perf.int64))
+    with pytest.raises(ValueError):
+        _half_edges_loop(bad)
+
+
+def test_csr_queries_match_full_scan():
+    for m in (_triangulate(_box(2, 2, 2)), _triangulate(_grid(6, 5))):
+        for v in range(m.n_vertices):
+            assert m.vertex_faces(v) == _ref_vertex_faces(m, v)
+            assert m.vertex_neighbours(v) == _ref_vertex_neighbours(m, v)
+
+
+def test_cache_invalidation_adj_with_he():
+    m = _triangulate(_box(2, 2, 2))
+    _ = m.vertex_faces(0); assert m._adj is not None
+    m._he = None; m._adj = None                                     # simulate an edit invalidation
+    assert m.vertex_faces(0) == _ref_vertex_faces(m, 0)            # rebuilds correctly

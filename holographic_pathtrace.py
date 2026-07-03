@@ -64,11 +64,16 @@ def _march_through(sdf, O, D, max_steps=32, surf_eps=1e-3):
 
 
 def path_trace(sdf, camera, width=96, height=96, spp=16, max_bounce=4, rr_start=2,
-               material=None, sky=None, seed=0, return_variance=False, active=None):
+               material=None, sky=None, seed=0, return_variance=False, active=None,
+               on_progress=None, progress_every=0, should_stop=None):
     """Render an SDF scene by path tracing. `material(P)` -> (albedo(n,3), metallic(n,), roughness(n,),
     emission(n,3)[, ior(n,)]); `sky(D)` -> (n,3) environment radiance for escaped rays. Returns an (H,W,3) HDR image
     (un-tonemapped). spp = samples per pixel; max_bounce = path length; rr_start = bounce after which Russian
     roulette kicks in.
+
+    PROGRESSIVE PREVIEW: pass `on_progress(running_image, samples_done, spp)` and `progress_every=k` to get the
+    running mean image handed back every k samples -- the refine stream a RenderSession streams to a viewport while
+    the final render accumulates. Defaults (progress_every=0) mean NO callback and byte-identical behaviour to before.
 
     GLASS: if the material returns a 5th value IOR>1 at a hit, that surface is a smooth DIELECTRIC -- per ray, it
     REFLECTS with the Fresnel probability and otherwise REFRACTS (Snell via refract_dir, total-internal-reflection
@@ -89,7 +94,7 @@ def path_trace(sdf, camera, width=96, height=96, spp=16, max_bounce=4, rr_start=
     accum = np.zeros((npix, 3))
     accsq = np.zeros(npix)                                       # sum of per-sample luminance^2 -> variance
 
-    for _ in range(spp):
+    for s in range(spp):
         O = np.broadcast_to(eye, (npix, 3)).astype(float).copy()
         D = base_D.copy()
         throughput = np.ones((npix, 3))
@@ -145,6 +150,20 @@ def path_trace(sdf, camera, width=96, height=96, spp=16, max_bounce=4, rr_start=
                     active_s[ghit[~survive]] = False
         accum += radiance
         accsq += radiance.mean(axis=-1) ** 2
+        if progress_every and on_progress is not None and (s + 1) % progress_every == 0 and (s + 1) < spp:
+            # hand back the running mean so a viewport can show the image refining (the progressive preview)
+            on_progress(np.clip((accum / (s + 1)).reshape(height, width, 3), 0.0, None), s + 1, spp)
+        if should_stop is not None and should_stop():
+            # CANCELLED (item F): stop early and return the partial image accumulated so far -- a partial render
+            # beats a frozen UI. Checked only between passes, so it costs nothing per sample.
+            done = s + 1
+            mean = accum / done
+            img = np.clip(mean.reshape(height, width, 3), 0.0, None)
+            if return_variance:
+                lum = mean.mean(axis=-1)
+                var = np.maximum(accsq / done - lum ** 2, 0.0) / max(done, 1)
+                return img, var
+            return img
     mean = accum / spp
     img = np.clip(mean.reshape(height, width, 3), 0.0, None)
     if return_variance:

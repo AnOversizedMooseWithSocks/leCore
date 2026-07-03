@@ -360,3 +360,19 @@ def test_spatial_hash_pairs_vectorized_deterministic_and_sorted():
         assert np.array_equal(got, got[np.lexsort((got[:, 1], got[:, 0]))])   # (i,j)-sorted
         assert np.array_equal(got, spatial_hash_pairs(pts, r))                # deterministic
         assert np.all(got[:, 0] < got[:, 1])                                  # i<j canonical
+
+
+def test_particles_collide_with_obstacle():
+    """The 2D ParticleSystem now takes an SDF collider -- particles never enter the obstacle (cross-pollinated from the softbody)."""
+    import numpy as np
+    from holographic_fields import ParticleSystem
+    rng = np.random.default_rng(0)
+    pos = np.column_stack([rng.uniform(2.5, 7.5, 60), np.full(60, 9.0)])
+    ps = ParticleSystem(pos)
+    circle = lambda P: np.linalg.norm(P - np.array([5.0, 5.0]), axis=1) - 1.5
+    worst = 1e9
+    for _ in range(60):
+        ps.step(force=np.tile([0, -9.8], (60, 1)), dt=0.04, collider=circle, collide_radius=0.05)
+        ps.pos[:, 1] = np.maximum(ps.pos[:, 1], 0.2)
+        worst = min(worst, float(circle(ps.pos).min()))
+    assert worst >= -0.06                                            # never penetrated the obstacle

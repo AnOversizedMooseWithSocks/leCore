@@ -354,11 +354,13 @@ class SoftBody:
         return projs
 
     def step(self, dt=1.0 / 60.0, gravity=None, iterations=20, substeps=1, solver="xpbd",
-             external_force=None, floor=None, restitution=0.0, damping=0.0):
+             external_force=None, floor=None, restitution=0.0, damping=0.0, collider=None, collide_radius=0.0):
         """Advance the body one frame. solver='xpbd' (compliant, recommended) or 'pbd' (delegates the sweep to
         the shipped project_onto_constraints engine). `external_force` is an (N, D) force array (e.g. from a
         fluid field) -- it becomes acceleration via the inverse mass. `floor` (scalar) is a y=floor half-space
-        with `restitution`. Returns self."""
+        with `restitution`. `collider` (a callable P->signed distance) is an ENVIRONMENT collision surface: any
+        node inside it is pushed out to `collide_radius` -- so the body drapes over a scene SDF, using the same
+        positional (iterate-a-projection) contact resolve as self-collision. Returns self."""
         g = _as_gravity(gravity, self.D)
         movable = self.w > 0
         for _ in range(max(1, substeps)):
@@ -389,6 +391,14 @@ class SoftBody:
                 _x_pre_col = self.x.copy()
                 self._solve_collisions()
                 collision_dx = self.x - _x_pre_col
+            # 3c. environment (SDF) collision: keep nodes OUTSIDE the collider geometry -- cloth drapes over a scene
+            #     object. Positional like self-collision, so its displacement is subtracted from the velocity update.
+            if collider is not None:
+                from holographic_collide import resolve_sdf_collision
+                _x_pre_env = self.x.copy()
+                self.x = resolve_sdf_collision(self.x, collider, radius=collide_radius)
+                env_dx = self.x - _x_pre_env
+                collision_dx = env_dx if collision_dx is None else collision_dx + env_dx
             # 4. floor collision (a simple half-space on axis 1)
             if floor is not None:
                 below = self.x[:, 1] < floor

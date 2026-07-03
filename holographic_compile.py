@@ -111,7 +111,9 @@ def compiled(source, compiler, tag="", cache=None):
     """Convenience: get-or-compile `source` through the default (or a supplied) cache. The general entry point any
     subsystem can call -- structures, VSA programs, encoders, SDFs -- to never pay a compile twice for the same
     spec."""
-    return (cache or DEFAULT_CACHE).get_or_compile(source, compiler, tag=tag)
+    # NOTE: use `is not None`, not `or` -- an EMPTY CompileCache is falsy (__len__ == 0), so `cache or DEFAULT_CACHE`
+    # would silently ignore a freshly-passed cache and route everything to the default. `is not None` respects it.
+    return (cache if cache is not None else DEFAULT_CACHE).get_or_compile(source, compiler, tag=tag)
 
 
 def compiled_sdf_normal(expr, variables=("x", "y", "z"), cache=None):

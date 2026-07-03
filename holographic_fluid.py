@@ -53,7 +53,8 @@ class StableFluid:
 
     def __init__(self, shape, dt=0.1, viscosity=0.0, diffusion=0.0,
                  dissipation=0.01, cooling=0.05, buoyancy_alpha=0.15, buoyancy_beta=0.05,
-                 vorticity=2.0, up_axis=0, ignition=0.5, burn_rate=2.0, smoke_yield=0.4, device="cpu"):
+                 vorticity=2.0, up_axis=0, ignition=0.5, burn_rate=2.0, smoke_yield=0.4, device="cpu",
+                 power_law_n=1.0, consistency_K=1.0):
         self.shape = tuple(int(s) for s in shape)
         self.d = len(self.shape)
         self.dt = float(dt)
@@ -68,6 +69,11 @@ class StableFluid:
         self.ignition = float(ignition)              # temperature above which fuel burns
         self.burn_rate = float(burn_rate)
         self.smoke_yield = float(smoke_yield)        # smoke produced per unit fuel burned
+        # NON-NEWTONIAN viscosity (opt-in): n != 1 makes viscosity depend on shear rate via the power law
+        # eta = K * shear^(n-1). n>1 = cornstarch (shear-thickening), n<1 = ketchup (shear-thinning). n=1 (default)
+        # keeps the original constant-viscosity Fourier diffuse -> byte-identical for existing Newtonian callers.
+        self.power_law_n = float(power_law_n)
+        self.consistency_K = float(consistency_K)
 
         # backend: device='cpu' -> NumPy (default, byte-identical); device='gpu' -> CuPy if available (the FFT
         # projection + elementwise advection are ideal GPU work). All state lives on self.xp; render via to_numpy().
@@ -217,7 +223,14 @@ class StableFluid:
         self.vel = self.vorticity_confinement(self.vel)
         self.vel = self.project(self.vel)                               # clean the force-injected divergence
         self.vel = self.advect_velocity(self.vel)
-        if self.viscosity > 0.0:
+        if self.power_law_n != 1.0 and self.d == 2:
+            # NON-NEWTONIAN: replace the single constant viscosity with the shear-rate-dependent power law -- the
+            # viscosity is now a FIELD (thick where the fluid is sheared hard, for cornstarch). Runs on host arrays.
+            from holographic_nonnewtonian import viscous_step
+            from holographic_backend import asnumpy
+            v2, _eta = viscous_step(asnumpy(self.vel), self.consistency_K, self.power_law_n, self.dt, dx=1.0)
+            self.vel = self.xp.asarray(v2)
+        elif self.viscosity > 0.0:
             self.vel = self.xp.array([self.diffuse(self.vel[k], self.viscosity) for k in range(self.d)])
         self.vel = self.project(self.vel)                               # advection re-introduces divergence; clean it
         self.density = self.advect(self.density, self.vel)

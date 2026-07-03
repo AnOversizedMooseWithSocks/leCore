@@ -53,6 +53,77 @@ import numpy as np
 
 
 # =====================================================================================================
+# Half-edge build. Two implementations that produce BYTE-IDENTICAL tables (face order, corner order):
+#   _half_edges_tri  -- vectorized integer NumPy for triangle meshes (fast path, no Python loop / dict)
+#   _half_edges_loop -- the original per-corner loop for polygon (n-gon) meshes (the reference / fallback)
+# =====================================================================================================
+
+def _half_edges_tri(F):
+    """Vectorized half-edge build for an (nf, 3) triangle array. Half-edge h = 3*face + corner, matching the
+    loop's 'face order, corner order' numbering, so every index lines up with _half_edges_loop. Pure integer
+    NumPy with a STABLE sort -> deterministic and bit-identical to the loop build.
+
+    Twins are found without a dict: give each undirected edge a single integer id (min,max endpoints packed),
+    sort, and the two halves of an edge come to rest adjacent. A repeated DIRECTED edge (a->b twice) is
+    non-manifold / inconsistently oriented and raises the SAME error the loop build raises."""
+    nf = len(F)
+    corner = np.arange(3 * nf) % 3                       # 0,1,2, 0,1,2, ...  (corner within each face)
+    face = np.arange(3 * nf) // 3                        # 0,0,0, 1,1,1, ...  (which face)
+    origin = F.ravel().astype(np.int64)                  # a: the vertex each half-edge points OUT of
+    dest = F[:, [1, 2, 0]].ravel().astype(np.int64)      # b: the next corner around the triangle
+    nxt = (face * 3 + (corner + 1) % 3).astype(np.int64)  # next half-edge going around the same face
+    stride = int(F.max()) + 1                            # enough to pack two vertex ids into one int64
+
+    # non-manifold / inconsistent-orientation check: a DIRECTED edge (a->b) must not appear twice (same as loop)
+    dkey = origin * stride + dest
+    ds = np.sort(dkey)
+    dup = ds[:-1][ds[:-1] == ds[1:]]
+    if dup.size:
+        a, b = divmod(int(dup[0]), stride)
+        raise ValueError(f"non-manifold or inconsistently-oriented mesh: directed edge {(a, b)} appears twice")
+
+    # TWIN MATCHING WITHOUT A DICT: undirected edge id = min*stride+max; stable-sort; equal-adjacent = the pair.
+    ukey = np.minimum(origin, dest) * stride + np.maximum(origin, dest)
+    order = np.argsort(ukey, kind="stable")
+    ks = ukey[order]
+    twin = np.full(3 * nf, -1, dtype=np.int64)           # -1 = boundary (no twin), same convention as the loop
+    same = np.where(ks[:-1] == ks[1:])[0]                # adjacent equal keys = the two halves of one edge
+    i, j = order[same], order[same + 1]
+    twin[i] = j
+    twin[j] = i
+    return {"origin": origin, "face": face, "nxt": nxt, "twin": twin}
+
+
+def _half_edges_loop(faces):
+    """The original per-corner loop build (polygon meshes / the reference). Half-edge h assigned in face order,
+    corner order; twins matched by a directed-edge dict. Kept unchanged as the fallback and the bit-exact
+    reference the triangle fast path is pinned against."""
+    origin, face, nxt, twin = [], [], [], []
+    directed = {}                                        # (a, b) -> half-edge index, for twin matching
+    for fi, f in enumerate(faces):
+        n = len(f)
+        base = len(origin)                               # index of this face's first half-edge
+        for k in range(n):
+            a, b = f[k], f[(k + 1) % n]
+            origin.append(a)
+            face.append(fi)
+            nxt.append(base + (k + 1) % n)               # cyclic within the face
+            twin.append(-1)                              # filled below
+            if (a, b) in directed:
+                raise ValueError(
+                    f"non-manifold or inconsistently-oriented mesh: directed edge {(a, b)} appears twice")
+            directed[(a, b)] = len(origin) - 1
+    for (a, b), h in directed.items():                   # hook up twins now that every directed edge is registered
+        twin[h] = directed.get((b, a), -1)
+    return {
+        "origin": np.asarray(origin, dtype=np.int64),
+        "face": np.asarray(face, dtype=np.int64),
+        "nxt": np.asarray(nxt, dtype=np.int64),
+        "twin": np.asarray(twin, dtype=np.int64),
+    }
+
+
+# =====================================================================================================
 # The mesh container.
 # =====================================================================================================
 class Mesh:
@@ -84,6 +155,7 @@ class Mesh:
         self.uvs = None if uvs is None else np.asarray(uvs, float).reshape(-1, 2)
         self.colours = None if colours is None else np.asarray(colours, float).reshape(-1, 4)
         self._he = None        # cached half-edge structure
+        self._adj = None       # cached CSR adjacency (half-edges grouped by origin vertex); invalidated with _he
 
     # ----- basic counts ------------------------------------------------------------------------------
     @property
@@ -120,53 +192,56 @@ class Mesh:
         Built in face order, corner order: half-edge h = the directed edge (f[k] -> f[k+1]). The twin of a
         directed edge (a -> b) is the half-edge keyed (b -> a). If a directed edge (a -> b) appears twice the
         mesh is non-manifold / inconsistently oriented -- flagged, because every operator below assumes a
-        clean manifold. Pure Python loops: this is the per-element cost the module docstring keeps as a
-        negative.
+        clean manifold.
+
+        Triangle meshes take a VECTORIZED path (`_half_edges_tri`: pure integer NumPy, no Python loop, no dict);
+        polygon meshes fall back to the original per-corner loop (`_half_edges_loop`). Both produce byte-identical
+        tables (face order, corner order), so callers and the determinism contract see no change.
         """
         if self._he is not None:
             return self._he
-        origin, face, nxt, twin = [], [], [], []
-        directed = {}                      # (a, b) -> half-edge index, for twin matching
-        for fi, f in enumerate(self.faces):
-            n = len(f)
-            base = len(origin)             # index of this face's first half-edge
-            for k in range(n):
-                a, b = f[k], f[(k + 1) % n]
-                h = len(origin)
-                origin.append(a)
-                face.append(fi)
-                nxt.append(base + (k + 1) % n)     # cyclic within the face
-                twin.append(-1)                    # filled below
-                if (a, b) in directed:
-                    raise ValueError(
-                        f"non-manifold or inconsistently-oriented mesh: directed edge {(a, b)} appears twice")
-                directed[(a, b)] = h
-        # second pass: hook up twins now that every directed edge is registered
-        for (a, b), h in directed.items():
-            t = directed.get((b, a), -1)
-            twin[h] = t
-        self._he = {
-            "origin": np.asarray(origin, dtype=np.int64),
-            "face": np.asarray(face, dtype=np.int64),
-            "nxt": np.asarray(nxt, dtype=np.int64),
-            "twin": np.asarray(twin, dtype=np.int64),
-        }
+        F = self.faces
+        if F and all(len(f) == 3 for f in F):
+            Fa = np.asarray(F, dtype=np.int64)
+            # the twin key packs two vertex ids into one int64; guard the (very theoretical) overflow
+            assert (int(Fa.max()) + 1) ** 2 < 2 ** 62, "vertex count too large for the int64 edge key"
+            self._he = _half_edges_tri(Fa)                     # fast path (triangles)
+        else:
+            self._he = _half_edges_loop(self.faces)            # original loop (polygons) -- the reference
         return self._he
 
-    def vertex_faces(self, v):
-        """The faces incident to vertex `v`, as a sorted list of face indices (deterministic)."""
+    def _adjacency(self):
+        """One-time CSR index: for each vertex, the slice of half-edges that ORIGINATE at it (grouped by a single
+        stable argsort). Turns the per-vertex scans that used to be O(V*H) into an O(deg v) slice + gather. Cached
+        next to _he and invalidated with it."""
+        if self._adj is not None:
+            return self._adj
         he = self.half_edges()
-        return sorted({int(he["face"][h]) for h in range(len(he["origin"])) if he["origin"][h] == v})
+        origin = he["origin"]
+        order = np.argsort(origin, kind="stable")              # half-edges grouped by their origin vertex
+        counts = np.bincount(origin, minlength=self.n_vertices)
+        start = np.zeros(self.n_vertices + 1, dtype=np.int64)
+        start[1:] = np.cumsum(counts)                          # start[v]:start[v+1] = v's half-edges within `order`
+        self._adj = {"order": order, "start": start}
+        return self._adj
+
+    def vertex_faces(self, v):
+        """The faces incident to vertex `v`, as a sorted list of face indices (deterministic). Now O(deg v): each
+        incident face contributes exactly one half-edge that ORIGINATES at v, so v's half-edge slice names them.
+        Output is identical to the old full scan."""
+        adj, he = self._adjacency(), self.half_edges()
+        hs = adj["order"][adj["start"][v]:adj["start"][v + 1]]
+        return sorted({int(f) for f in he["face"][hs]})
 
     def vertex_neighbours(self, v):
-        """The 1-ring of vertex `v`: vertices sharing an edge with it, as a sorted list (deterministic)."""
+        """The 1-ring of vertex `v`: vertices sharing an edge with it, as a sorted list (deterministic). Now
+        O(deg v): walk only v's incident faces (from `vertex_faces`) and take each face's two corners adjacent to
+        v -- the same forward+backward neighbours the old per-face scan produced, so the output is identical
+        (correct at boundaries too)."""
         nb = set()
-        for f in self.faces:
-            if v in f:
-                n = len(f)
-                i = f.index(v)
-                nb.add(f[(i + 1) % n])
-                nb.add(f[(i - 1) % n])
+        for fi in self.vertex_faces(v):
+            f = self.faces[fi]; n = len(f); i = f.index(v)
+            nb.add(f[(i + 1) % n]); nb.add(f[(i - 1) % n])
         nb.discard(v)
         return sorted(nb)
 
@@ -524,15 +599,25 @@ def _selftest():
 
     # --- the kept negative, measured: the half-edge build is Python-loop bound ---
     big = grid(60, 60)                                                  # 3600 quads, 14400 half-edges
-    big._he = None
+    big._he = None; big._adj = None
     t0 = time.perf_counter()
     big.half_edges()
     dt = time.perf_counter() - t0
     rate = len(big.half_edges()["origin"]) / dt if dt > 0 else float("inf")
 
+    # --- the fix: TRIANGLE meshes take the vectorized path -- bit-identical to the loop, and much faster ---
+    tri = grid(60, 60)
+    tri.faces = [[f[0], f[1], f[2]] for f in tri.faces] + [[f[0], f[2], f[3]] for f in tri.faces]  # quads -> tris
+    tri._he = None; tri._adj = None
+    t0 = time.perf_counter(); he_fast = tri.half_edges(); dt_fast = time.perf_counter() - t0
+    he_ref = _half_edges_loop(tri.faces)                              # the reference loop build
+    assert all(np.array_equal(he_fast[k], he_ref[k]) for k in ("origin", "face", "nxt", "twin")), \
+        "vectorized triangle build must be byte-identical to the loop build"
+    rate_fast = len(he_fast["origin"]) / dt_fast if dt_fast > 0 else float("inf")
+
     print(f"holographic_mesh selftest: ok (cube V8/E12/F6 chi=2 g=0; 24 half-edges reciprocal; "
-          f"normals outward; OBJ+buffer round-trips; half-edge build ~{rate:,.0f} he/s "
-          f"-- Python-loop bound, the kept negative)")
+          f"normals outward; OBJ+buffer round-trips; polygon half-edge build ~{rate:,.0f} he/s; "
+          f"TRIANGLE fast path ~{rate_fast:,.0f} he/s, bit-identical to the loop)")
 
 
 if __name__ == "__main__":

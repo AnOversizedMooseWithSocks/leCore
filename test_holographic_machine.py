@@ -250,3 +250,17 @@ def test_run_batch_rejects_control_ops():
     pv = M.assemble([("IFMATCH", "a"), ("BIND", "b"), ("HALT", "")])
     with pytest.raises(ValueError):
         M.run_batch(pv, np.zeros((4, M.dim)))                      # control flow can't batch -> clear error
+
+
+def test_residency_decode_bit_exact():
+    """The machine's residency address-read (rfft(program_vec) computed once and reused) is BIT-IDENTICAL to
+    unbind(program_vec, pos(i)) -- so it cannot flip a cleanup-gated decode winner (the whole safety argument
+    for wiring Fill 1 into the VM's hottest loop)."""
+    import numpy as np
+    from holographic_fft import rfft
+    from holographic_ai import unbind
+    m = HoloMachine(dim=512, seed=0)
+    prog = m.assemble([("LOAD", "a"), ("BIND", "b"), ("BUNDLE", "c"), ("HALT", None)])
+    prog_spec = rfft(prog); n = prog.shape[0]
+    for i in range(4):
+        assert np.array_equal(m._read_addr(prog_spec, i, n), unbind(prog, m.pos(i)))   # exact, not tolerance

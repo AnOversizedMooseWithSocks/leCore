@@ -25,6 +25,8 @@ KEPT NEGATIVES (honest):
 """
 
 import numpy as np
+
+from holographic_transfer import scatter as _scatter, gather as _gather   # the shared bundle/readout primitive
 import itertools
 
 
@@ -231,13 +233,18 @@ class ParticleSystem:
         self.pos = np.asarray(positions, float)               # (N, 2): columns are (x, y)
         self.vel = (np.zeros_like(self.pos) if velocities is None else np.asarray(velocities, float))
 
-    def step(self, force=None, dt=0.1, damping=0.0, wrap_to=None):
-        """Integrate one step (semi-implicit Euler). `force` is an (N, 2) acceleration array."""
+    def step(self, force=None, dt=0.1, damping=0.0, wrap_to=None, collider=None, collide_radius=0.0):
+        """Integrate one step (semi-implicit Euler). `force` is an (N, 2) acceleration array. `collider` (a callable
+        P->signed distance) is an obstacle the particles cannot enter: any particle inside it is pushed back out to
+        `collide_radius` (the same SDF-collision resolve the softbody uses -- so 2-D particles avoid scene geometry)."""
         if force is not None:
             self.vel = self.vel + dt * np.asarray(force, float)
         if damping:
             self.vel *= (1.0 - damping)
         self.pos = self.pos + dt * self.vel
+        if collider is not None:                                  # environment collision: keep particles outside it
+            from holographic_collide import resolve_sdf_collision
+            self.pos = resolve_sdf_collision(self.pos, collider, radius=collide_radius)
         if wrap_to is not None:
             self.pos = np.mod(self.pos, np.asarray(wrap_to, float))
         return self
@@ -260,28 +267,22 @@ def attractor_force(positions, center, strength=1.0, softening=1.0):
 
 def sample_field(field, positions):
     """Read a scalar grid `field` (H, W) at continuous particle positions (N, 2) = (x, y), bilinear+periodic.
-    This is how particles feel a VSA-encoded or solved field (velocity component, density, temperature)."""
+    This is how particles feel a VSA-encoded or solved field (velocity component, density, temperature).
+    This is a GATHER = the readout of a bundle; it delegates to the shared holographic_transfer.gather (fields
+    uses (x=col, y=row) -> grid[y, x], so the coords are swapped to (row, col))."""
     p = np.asarray(positions, float)
-    return _bilinear_periodic(field, p[:, 0], p[:, 1])
+    return _gather(field, p[:, ::-1], kernel="bilinear", periodic=True)
 
 
 def scatter_to_field(shape, positions, values):
     """The ADJOINT of sample_field: accumulate per-particle `values` (N,) onto a grid of `shape` (H, W) at
     continuous positions (N, 2)=(x, y), spreading each value bilinearly over its four nearest cells (periodic).
     This is how particles IMPRINT onto a field -- e.g. a moving cloth depositing its momentum into the fluid
-    velocity grid (the cloth->fluid half of two-way coupling)."""
-    H, W = shape
-    out = np.zeros((H, W))
-    p = np.asarray(positions, float); vals = np.asarray(values, float)
-    x = p[:, 0]; y = p[:, 1]
-    x0 = np.floor(x).astype(int); y0 = np.floor(y).astype(int)
-    fx = x - x0; fy = y - y0
-    x0m = x0 % W; x1m = (x0 + 1) % W; y0m = y0 % H; y1m = (y0 + 1) % H
-    np.add.at(out, (y0m, x0m), vals * (1 - fx) * (1 - fy))      # the four bilinear weights, summed in
-    np.add.at(out, (y0m, x1m), vals * fx * (1 - fy))
-    np.add.at(out, (y1m, x0m), vals * (1 - fx) * fy)
-    np.add.at(out, (y1m, x1m), vals * fx * fy)
-    return out
+    velocity grid (the cloth->fluid half of two-way coupling).
+    This is a SCATTER = a bundle (superposition of kernel-weighted contributions); it delegates to the shared
+    holographic_transfer.scatter (coords swapped (x,y)->(row,col) to match grid[y, x])."""
+    p = np.asarray(positions, float)
+    return _scatter(p[:, ::-1], np.asarray(values, float), shape, kernel="bilinear", periodic=True)
 
 
 def drag_force(positions, velocities, vx, vy, k=1.0):
