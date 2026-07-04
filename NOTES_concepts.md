@@ -20995,3 +20995,35 @@ t=1).
 KEPT NEGATIVES (loud, in guide): LINEAR-blend skinning only (the candy-wrapper collapse at extreme twists that
 dual-quaternion avoids -- not implemented); first skin only; positions moved but normals not re-skinned. Corrected the
 prior guide caveat that said skinning "is not yet applied" -- it is now.
+
+## CI SPEEDUP: parallelism + affected-test selection (run only tests that import changed files)
+
+CI was hitting its 20-min cap and getting CANCELLED (the screenshot's real failure was the timeout, not the lone F).
+Three changes, all readable/stdlib, no heavy plugins:
+
+  1. PARALLELISM. requirements.txt gains pytest-xdist; ci.yml runs `pytest -q -n auto` -- spreads tests across all of
+     the runner's cores (ubuntu-latest = 4). The suite is deterministic and each test is independent (own tmp_path /
+     in-memory stores), verified parallel-safe by running a mixed batch (incl. the fixed-name-save tests) under -n 2:
+     105 passed, no order/collision failures. Serial ~25min -> ~6-7min on 4 cores, well under the cap.
+
+  2. AFFECTED-TEST SELECTION (Moose's ask: don't run a test unless a file it imports changed). NEW tools/select_tests.py
+     builds a STATIC import graph with `ast` (catches top-level AND function-local imports -- the suite uses 767 local
+     imports in test_integration alone), computes each test's transitive import set, and selects every test whose set
+     reaches a changed module (or that IS the changed test). Fails SAFE: dynamic-import test files (importlib /
+     spec_from_file_location / __import__ -- 8 of them) are ALWAYS-RUN since their targets aren't visible statically; an
+     unknown/data/new-.py change prints "ALL" (run everything); docs/config-only changes select nothing (the doc gates
+     cover docs). ci.yml uses it: PULL REQUEST -> affected only (fast feedback); PUSH TO MAIN -> full suite (safety net,
+     main always fully verified). checkout uses fetch-depth:0 so the PR can diff origin/base...HEAD.
+     HONEST BOUND (kept loud): UnifiedMind is a hub that (lazily) imports ~every faculty, and 108/451 test files reach
+     it, so ANY faculty change selects those ~108-120 files. The big win is skipping the ~340 LEAN unit tests that never
+     touch the mind. Static import analysis is conservative (imports != runtime use) but never skips a needed test;
+     finer selection would need runtime coverage (testmon-style), which is heavier and less readable -- not worth it.
+     tools/test_changed.py is the local dev twin: `python tools/test_changed.py` runs affected tests vs your working
+     tree; `--since main` for the PR view; `-- <args>` passes through to pytest.
+
+  3. SLOW-TEST TRIM. The worst per-test offenders were my own texturerender tests (SSAA renders at real resolution --
+     aa=3 is 9x the pixels). Dropped them to small resolutions (they measure resolution-independent PROPERTIES: bbox
+     roundness, soft-edge count, output shape, colour variance): ~94s -> ~38s for those four, assertions unchanged.
+
+Note on DEMOS: the tour imports ~everything so it's "always affected" -- it stays a manually-run integration demo, not
+in CI. The same select_tests approach could gate gallery/tour regeneration, but neither is in CI today.

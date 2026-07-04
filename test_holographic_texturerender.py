@@ -28,8 +28,8 @@ def test_texture_actually_wraps_the_sphere():
     from holographic_semantic import _UnionSDF
     from holographic_raymarch import sphere_trace
     from holographic_render import Camera
-    W = H = 96
-    img = render_textured(scene, {scene.names()[0]: tex}, width=W, height=H)
+    W = H = 64
+    img = render_textured(scene, {scene.names()[0]: tex}, width=W, height=H, aa=1)
     union = _UnionSDF([r["sdf"] for r in scene.realize()])
     span = max(3.0, 1.6)
     cam = Camera(eye=(span * 0.4, span * 0.28, span), target=(0, 0, 0), fov_deg=42.0)
@@ -92,8 +92,8 @@ def test_aspect_ratio_sphere_is_round_at_non_square_resolution():
         xs = np.where(red.any(axis=0))[0]
         return int(xs.max() - xs.min()) if len(xs) else 0
 
-    wide = np.asarray(render_textured(sc, {sc.names()[0]: tex}, width=240, height=180, aa=1))
-    square = np.asarray(render_textured(sc, {sc.names()[0]: tex}, width=180, height=180, aa=1))
+    wide = np.asarray(render_textured(sc, {sc.names()[0]: tex}, width=80, height=60, aa=1))
+    square = np.asarray(render_textured(sc, {sc.names()[0]: tex}, width=60, height=60, aa=1))
     w_wide, w_square = sphere_width(wide), sphere_width(square)
     # if the aspect were wrong (stretched by width), the wide frame's sphere would be ~1.33x wider; correct -> ~equal
     assert abs(w_wide - w_square) <= 3, (w_wide, w_square)
@@ -109,8 +109,8 @@ def test_anti_aliasing_smooths_the_silhouette():
         g = img.mean(-1); gx = np.abs(np.diff(g, axis=1))
         return int(((gx > 0.03) & (gx < 0.25)).sum())
 
-    off = np.asarray(render_textured(sc, {sc.names()[0]: tex}, width=120, height=90, aa=1))
-    on = np.asarray(render_textured(sc, {sc.names()[0]: tex}, width=120, height=90, aa=2))
+    off = np.asarray(render_textured(sc, {sc.names()[0]: tex}, width=60, height=45, aa=1))
+    on = np.asarray(render_textured(sc, {sc.names()[0]: tex}, width=60, height=45, aa=2))
     assert soft_edges(on) > soft_edges(off)
 
 
@@ -120,5 +120,5 @@ def test_render_textured_returns_requested_resolution():
     from holographic_texturerender import render_textured
     sc, tex = _sphere_scene()
     for aa in (1, 2, 3):
-        img = np.asarray(render_textured(sc, {sc.names()[0]: tex}, width=96, height=72, aa=aa))
-        assert img.shape == (72, 96, 3)
+        img = np.asarray(render_textured(sc, {sc.names()[0]: tex}, width=32, height=24, aa=aa))
+        assert img.shape == (24, 32, 3)

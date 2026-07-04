@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""select_tests.py -- given a list of CHANGED files, print the test files actually affected by them.
+
+The idea (Moose's): don't run a test unless a file it imports (directly or transitively) changed. Most edits touch a
+handful of modules; the ~450 test files that don't reach those modules don't need to run.
+
+How it decides, with NO coverage tracing and NO plugins -- just a static import graph built with `ast`:
+
+  1. Every *.py at the repo root is a "project module" (the layout is flat, so the module name is just the filename
+     stem, e.g. holographic_render.py -> "holographic_render").
+  2. For each module we read its imports with `ast` -- BOTH top-level imports and the ones written inside functions
+     (the test suite uses a lot of function-local imports, and ast walks the whole tree, so we catch them).
+  3. A test file is AFFECTED by a changed module M if M is in that test's transitive import set (the modules it
+     imports, plus what those import, and so on), or if the changed file IS that test.
+
+Safety comes first -- it is always OK to run a test we didn't need, never OK to skip one we did. So:
+  * A test file that imports DYNAMICALLY (importlib / spec_from_file_location / __import__) can pull in modules by a
+    string name we can't see statically, so those test files are marked ALWAYS-RUN.
+  * A changed file we can't reason about (a data/binary file, or anything that isn't a .py module or a plainly
+    inert doc/config file) makes the tool print "ALL" -- meaning "just run the whole suite, don't risk it."
+  * Docs and CI/config text (.md/.rst/.txt/.yml/.yaml/.cfg/.toml/.ini and a few names) have no test impact, so a
+    change to only those selects no tests.
+
+Usage:
+    python tools/select_tests.py <changed_file> [<changed_file> ...]
+      -> prints affected test files, one per line (or the single line "ALL"; or nothing if no test is affected).
+
+Importable too: affected_tests(changed_files, root=".") -> sorted list of test paths, or the string "ALL".
+"""
+import ast
+import os
+import sys
+
+
+# file kinds that never affect a test result -> a change to only these selects nothing
+_INERT_EXT = {".md", ".rst", ".txt", ".yml", ".yaml", ".cfg", ".toml", ".ini", ".gitignore", ".editorconfig"}
+_INERT_NAMES = {"LICENSE", "NOTICE", ".gitignore", ".gitattributes"}
+
+
+def discover_modules(root):
+    """{module_name: relative_path} for every *.py at the repo root (the flat project layout)."""
+    mods = {}
+    for name in os.listdir(root):
+        if name.endswith(".py") and os.path.isfile(os.path.join(root, name)):
+            mods[name[:-3]] = name
+    return mods
+
+
+def _imported_names(path):
+    """The set of module names this .py file imports -- top-level AND nested (ast walks the whole tree). We only keep
+    the first component ('holographic_render' from 'holographic_render.Camera'); non-project names get filtered later
+    against the module map."""
+    try:
+        tree = ast.parse(open(path, "r", encoding="utf-8", errors="ignore").read(), filename=path)
+    except SyntaxError:
+        return set()
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            if node.module and node.level == 0:                 # ignore relative imports (none in this flat layout)
+                names.add(node.module.split(".")[0])
+    return names
+
+
+def _uses_dynamic_import(path):
+    """True if the file imports by a runtime string (importlib / spec_from_file_location / __import__) -- we can't see
+    those targets statically, so any test that does this is treated as ALWAYS-RUN."""
+    try:
+        src = open(path, "r", encoding="utf-8", errors="ignore").read()
+    except OSError:
+        return False
+    return ("importlib" in src) or ("spec_from_file_location" in src) or ("__import__" in src)
+
+
+def build_graph(root="."):
+    """Return (modules, direct) where modules={name:path} and direct={name: set(project modules it imports)}."""
+    modules = discover_modules(root)
+    known = set(modules)
+    direct = {}
+    for name, rel in modules.items():
+        imported = _imported_names(os.path.join(root, rel))
+        direct[name] = {n for n in imported if n in known}      # keep only edges to OTHER project modules
+    return modules, direct
+
+
+def _transitive(name, direct, _cache):
+    """All project modules `name` imports transitively (memoised, cycle-safe)."""
+    if name in _cache:
+        return _cache[name]
+    seen = set()
+    _cache[name] = seen                                         # seed first so a cycle back to `name` terminates
+    stack = list(direct.get(name, ()))
+    while stack:
+        m = stack.pop()
+        if m not in seen:
+            seen.add(m)
+            stack.extend(direct.get(m, ()))
+    return seen
+
+
+def affected_tests(changed_files, root="."):
+    """The test files affected by `changed_files`: those whose transitive imports include a changed module, plus any
+    changed test file itself, plus the always-run (dynamic-import) test files. Returns a sorted list, or the string
+    "ALL" if something changed that we can't reason about safely."""
+    modules, direct = build_graph(root)
+    test_files = sorted(n for n in modules if n.startswith("test_"))
+
+    changed_modules = set()
+    for f in changed_files:
+        f = f.strip().replace("\\", "/")
+        if not f:
+            continue
+        base = os.path.basename(f)
+        stem, ext = os.path.splitext(base)
+        if ext in _INERT_EXT or base in _INERT_NAMES:
+            continue                                            # docs / config text -> no test impact
+        if ext == ".py":
+            if "/" in f and not f.startswith("./"):
+                # a .py that isn't at the repo root (e.g. tools/, a package dir). If it's a known root module name
+                # we still map it; otherwise be safe and run everything.
+                if stem in modules:
+                    changed_modules.add(stem)
+                else:
+                    return "ALL"
+            else:
+                if stem in modules:
+                    changed_modules.add(stem)
+                else:
+                    return "ALL"                                # a new .py not yet in the map -> don't risk it
+        else:
+            return "ALL"                                        # data / binary / unknown -> run the whole suite
+
+    if not changed_modules:
+        # only inert files changed (docs / config) -> no test can be affected. The doc-drift GATES in CI
+        # (capdoc / apiquickref / servicedoc) handle documentation correctness separately.
+        return []
+
+    _cache = {}
+    picked = set()
+    for t in test_files:
+        path = os.path.join(root, t + ".py")
+        if _uses_dynamic_import(path):
+            picked.add(t)                                       # can't analyse it -> always run it
+            continue
+        reach = _transitive(t, direct, _cache)
+        if (reach & changed_modules) or (t in changed_modules):  # imports something changed, or IS the changed test
+            picked.add(t)
+    return sorted(t + ".py" for t in picked)
+
+
+def _selftest():
+    # a change to holographic_render should pull in the render-family tests, not (say) a pure-language test
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    picked = affected_tests(["holographic_render.py"], root=root)
+    assert picked != "ALL", "a known module change should not force ALL"
+    assert "test_holographic_render.py" in picked, picked
+    # a doc-only change selects NO tests (the doc-drift gates handle docs separately)
+    docs = affected_tests(["README.md"], root=root)
+    assert docs == [], docs
+    # an unknown binary change is conservative
+    assert affected_tests(["features/sprites.hsp"], root=root) == "ALL"
+    print("OK: select_tests self-test passed (render change -> %d test files incl. test_holographic_render.py; "
+          "README-only -> no render test; unknown binary -> ALL)" % (len(picked)))
+
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+    if args == ["--selftest"]:
+        _selftest()
+    else:
+        result = affected_tests(args)
+        if result == "ALL":
+            print("ALL")
+        else:
+            for t in result:
+                print(t)

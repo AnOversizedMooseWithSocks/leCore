@@ -33,6 +33,10 @@ jobs:
     steps:
       - name: Check out the code
         uses: actions/checkout@v4
+        with:
+          # Full history so a pull_request can diff against its base branch's merge-base (origin/base...HEAD) to find
+          # exactly the files this PR changed. Cheap for this repo; needed by the affected-tests selection below.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -46,7 +50,34 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run the test suite
-        run: pytest -q --durations=10
+        # Two speed levers together:
+        #   1. -n auto spreads tests across ALL the runner's CPU cores (ubuntu-latest has 4). The suite is
+        #      deterministic and each test is independent (own tmp_path / in-memory stores), so it parallelises cleanly.
+        #   2. On a PULL REQUEST we run only the tests AFFECTED by the changed files -- tools/select_tests.py builds a
+        #      static import graph and picks every test whose imports (transitively) reach a changed module. A test that
+        #      can't reach any changed file doesn't run. On a PUSH TO MAIN we run the WHOLE suite, so main is always
+        #      fully verified -- the affected-only run is fast PR feedback, the full run is the safety net.
+        # It fails safe: if a change can't be scoped (a data file, a brand-new module) select_tests prints "ALL" and we
+        # run everything; if nothing is affected (docs only) we skip the run (the doc gates below still check docs).
+        run: |
+          set -e
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
+            echo "Changed files in this PR:"; echo "$CHANGED"
+            SELECTED=$(python tools/select_tests.py $CHANGED)
+            if [ "$SELECTED" = "ALL" ]; then
+              echo "== change can't be scoped -> running the FULL suite =="
+              pytest -q -n auto --durations=15
+            elif [ -z "$SELECTED" ]; then
+              echo "== no tests affected by these changes (docs/config only) -- skipping the test run =="
+            else
+              echo "== running only the affected tests =="; echo "$SELECTED"
+              pytest -q -n auto --durations=15 $SELECTED
+            fi
+          else
+            echo "== push to ${{ github.ref_name }} -> running the FULL suite =="
+            pytest -q -n auto --durations=15
+          fi
 
       # Keep API_QUICKREF.md current on its own: regenerate it and fail if the committed copy is stale.
       # This is a drift check (no write-back needed) -- if it fails, run `python apiquickref.py` locally and
