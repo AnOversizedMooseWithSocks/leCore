@@ -222,14 +222,112 @@ def default_catalog():
                           "builds it, then you ADJUST it by talking to named objects: mind.build_scene('a big red metal "
                           "sphere and a small blue glass box on a sunny day') returns a live SemanticScene; then "
                           "scene.adjust('make the sphere bigger'), scene.adjust('change the box to metal'), "
-                          "scene.set('the red sphere', material='glass'), scene.render(), scene.simulate(). When a command is unclear "
-                          "it SUGGESTS rather than fails -- scene.interpret(cmd) previews what it understood + 'did you mean?' hints, scene.options() lists what you can say, scene.feedback holds the last report. Or wrap an "
-                          "existing object list with mind.semantic_scene(objects). Controlled vocabulary, deterministic",
-                          example="scene = mind.build_scene('a red metal sphere and a blue glass box'); scene.adjust('make the box bigger'); scene.render()",
+                          "scene.set('the red sphere', material='glass'), scene.render(), scene.simulate(). NAME objects "
+                          "to reference them easily -- scene.name('the red sphere', 'hero') or scene.adjust('call the box "
+                          "crate'), then scene.adjust('make hero glass'); scene.rename('hero','champion'). PAINT a "
+                          "procedural TEXTURE by talking to it -- scene.adjust('give hero a rusty texture'), scene.paint("
+                          "'crate', 'marbled') (rusty/marbled/mossy/cloudy/lava/striped/noisy) -- and scene.render() "
+                          "paints it on. Attach an EXTERNAL image file as a texture -- scene.attach_texture_file('the "
+                          "sphere', 'project/textures/wave.png') -- and the scene tracks it in an AssetLibrary: if the "
+                          "files move, scene.set_asset_roots([...]) + scene.resolve_assets() (or scene.relink(one, new)) "
+                          "re-find them and render() reloads them, falling back to the object's colour if one is missing. "
+                          "When a command is unclear it SUGGESTS rather than fails -- scene.interpret(cmd) "
+                          "previews what it understood + 'did you mean?' hints, scene.options() lists what you can say, "
+                          "scene.feedback holds the last report. Or wrap an existing object list with "
+                          "mind.semantic_scene(objects). Controlled vocabulary, deterministic",
+                          example="scene = mind.build_scene('a red metal sphere and a blue box'); scene.name('the sphere','hero'); scene.adjust('give hero a rusty texture'); scene.render()",
                           native=True, aliases=("scene", "describe a scene", "build a scene", "make a scene", "create a scene",
                                                 "scene from text", "3d scene", "adjust the scene", "semantic scene",
                                                 "named objects", "make the sphere bigger", "change the material", "render a scene",
-                                                "text to 3d", "text to scene", "scene editor", "reference objects by name"))
+                                                "text to 3d", "text to scene", "scene editor", "reference objects by name",
+                                                "name an object", "rename object", "give it a texture", "rusty texture", "paint the scene"))
+    c.register_capability("Instancing (shared definition + type-safe binding)", "place ONE shared definition many "
+                          "times so editing it once updates every copy (edit-once): mind.shared_definition('chair', "
+                          "mesh, 'metal') then scene.place(defn, transform) in mind.instanced_scene(); repaint the "
+                          "definition and all instances change. The material<->geometry binding is TYPE-CHECKED at "
+                          "compose time -- a surface material only binds to a mesh, a volumetric one (fog/smoke/fire) "
+                          "only to a volume -- so a bad binding is refused, not rendered wrong. flatten_surface() "
+                          "materialises the surface instances into one mesh. CMP4",
+                          example="chair = mind.shared_definition('chair', box_mesh, 'metal'); s = mind.instanced_scene(); s.place(chair); chair.set_material('glass')",
+                          native=True, aliases=("instance", "instancing", "shared definition", "edit once", "duplicate",
+                                                "reuse geometry", "material binding", "surface volume", "place copies",
+                                                "instanced scene", "clone", "prototype"))
+    c.register_capability("Import artist file formats (OBJ/glTF/textures/volume)", "import the files artists hand you: "
+                          "mind.load_obj('model.obj') reads Wavefront geometry + its .mtl (UVs, normals, per-face "
+                          "material, map_* textures); mind.load_glb('model.glb') reads glTF/GLB geometry AND its full PBR "
+                          "channels (base colour / metallic-roughness / normal / occlusion / emissive) with embedded "
+                          "textures and per-vertex UVs/normals, AND for rigged models its ANIMATIONS (keyframed node "
+                          "transforms -- clip.sample(t), rotations slerped) and SKINS (joints + inverse-bind + weights); "
+                          "mind.load_texture_set(folder) turns a folder of Adobe Substance 3D Painter export maps "
+                          "(basecolor/roughness/metallic/normal/height/ao/emissive, matched by name) into one "
+                          "PBRMaterial; mind.load_volume('grid.npy') wraps a 3-D density grid as a field for "
+                          "render_volume. mind.import_asset(path) dispatches by extension. Once a rigged glTF is loaded, "
+                          "mind.deform_mesh(loaded, clip, t) actually MOVES it -- linear-blend skinning by the animated "
+                          "skeleton plus morph-target blending, returning the deformed mesh at time t. Stdlib+NumPy; PIL "
+                          "lazy for textures. HONEST: proprietary .sbsar/.spp and sparse OpenVDB .vdb need their vendor tools -- "
+                          "import the exported open forms.",
+                          example="lm = mind.load_obj('chair.obj'); glb = mind.load_glb('robot.glb'); mat = mind.load_texture_set('exports/brick'); vol, b = mind.load_volume('smoke.npy')",
+                          native=True, aliases=("import", "load obj", "load gltf", "load glb", "mtl", "wavefront",
+                                                "substance painter", "adobe painter", "texture set", "pbr material import",
+                                                "load model", "import mesh", "volumetric", "load volume", "vdb", "voxel",
+                                                "density grid", "import material", "3d file", "asset import",
+                                                "animation", "skin", "rigged", "keyframe", "skeleton", "uv", "channels",
+                                                "deform", "skinning", "linear blend skinning", "morph", "blend shape",
+                                                "pose a rig", "animate a model"))
+    c.register_capability("Cold storage (compress inactive data)", "shrink INACTIVE data to save memory and disk, and "
+                          "inflate it back on demand: store = mind.cold_store(keep_warm=8) keeps only the K most-recently-"
+                          "used values live and compresses the rest, warming any of them transparently on get(); "
+                          "mind.cool(big_table) wraps ONE value so c.cool() frees its RAM and c.get() brings it back "
+                          "bit-identical. Works on tables, whole databases, big arrays, any picklable structure; "
+                          "codec='lzma' packs smaller, spill_dir=... writes cold blobs to disk. Honest: high-entropy VSA "
+                          "vectors barely compress (the win there is freeing the live object / spilling to disk); "
+                          "redundant/text/structured data compresses a lot. The query Database can auto-cool its own "
+                          "idle tables: db.enable_cold_storage(keep_warm=K) then db.cool_idle() compresses tables you "
+                          "haven't queried lately and a query warms them back -- and a DB shipped to a distributed "
+                          "worker arrives warm + cooling-off, so a shared read-only cache is never mutated.",
+                          example="store = mind.cold_store(keep_warm=4); store.put('t1', big_table); store.get('t1')  # transparently warmed",
+                          native=True, aliases=("cold storage", "compress inactive", "evict", "spill to disk", "cool",
+                                                "warm", "fold up", "shrink memory", "free ram", "compress table",
+                                                "compress database", "lazy inflate", "lru cache eviction", "page out",
+                                                "auto cool tables", "idle table compression"))
+    c.register_capability("File map ingest (folder / zip -> queryable)", "point at a FOLDER, a .zip, or a file and "
+                          "digest it into a queryable FILE MAP: fm = mind.ingest_files('project/') (or 'bundle.zip'). "
+                          "Query it by NAME/glob (fm.find('*.png')), KIND (fm.by_kind('model'): image/text/model/data/"
+                          "code/archive), METADATA (larger_than/newer_than/by_ext), text CONTENT (fm.search_text('shader "
+                          "normal') -- an inverted index over the text files), and MEANING (fm.build_meaning_index() then "
+                          "fm.find_by_meaning('lighting')). fm.tree() is the folder hierarchy. Every file is also tracked "
+                          "for RELOCATION/CHANGE (fm.missing()/changed()/relink(one,new)/resolve_assets(roots)), so a "
+                          "moved/edited tree self-heals. Stdlib only; text indexing is size-capped.",
+                          example="fm = mind.ingest_files('my_project.zip'); fm.find('*.obj'); fm.search_text('normal map'); fm.tree()",
+                          native=True, aliases=("ingest", "ingest files", "index a folder", "digest a folder", "read a zip",
+                                                "scan folder", "file map", "make files queryable", "search my files",
+                                                "index files", "folder to database", "query a directory", "catalog files",
+                                                "import a folder", "unzip and index"))
+    c.register_capability("Asset relocation / relink (external files)", "track the EXTERNAL files a scene depends on "
+                          "(textures, models, ...) and repair their paths when they move -- the '3-D missing textures' "
+                          "problem. lib = mind.asset_library(); lib.add(path); then when a folder moves, lib.relink("
+                          "one_asset, its_new_path) re-finds every OTHER moved file automatically (it works out the "
+                          "moved parent and rewrites the rest, then structurally SEARCHES for anything reorganised). "
+                          "lib.changed() spots files edited on disk (size/mtime or content hash); lib.search_under("
+                          "folder) finds missing files under a folder; lib.resolve(asset, roots=) locates a file by "
+                          "CONTENT HASH across machines (the distributed fallback). Saves/loads a JSON manifest.",
+                          example="lib = mind.asset_library(); lib.add('project/textures/water/wave.png'); lib.relink(lib.assets[0], 'newroot/project/textures/water/wave.png')",
+                          native=True, aliases=("asset", "assets", "relink", "relocate", "missing textures", "broken path",
+                                                "fix paths", "external files", "find moved files", "asset paths",
+                                                "texture path", "reconnect assets", "repath", "file moved", "asset manifest"))
+    c.register_capability("Message bus + agent (LLM) bridge", "connect a person AND an agent to the running tool at "
+                          "once, and let the app PUSH to the agent instead of the agent polling: mind.bus() is a "
+                          "message bus (publish/subscribe by topic, mailboxes to pull an inbox, history); "
+                          "mind.run_task('render', fn, background=True) runs a job and publishes 'render.done' with a "
+                          "small summary when it finishes; mind.agent_bridge(llm=my_fn).notify_on('render.done', 'does "
+                          "it look right?') calls YOUR llm (any text->reply callable -- no LLM library is imported, so "
+                          "it's fully optional) and posts the reply on the bus. Over HTTP a remote agent uses "
+                          "/bus/publish + /bus/poll. The LLM is optional; leCore runs with no agent attached.",
+                          example="bridge = mind.agent_bridge(llm=my_llm); bridge.notify_on('render.done', 'does it look right?'); mind.run_task('render', lambda: scene.render(), background=True)",
+                          native=True, aliases=("message bus", "event bus", "pubsub", "publish subscribe", "agent bridge",
+                                                "llm bridge", "notify the agent", "push notification", "on render done",
+                                                "connect an agent", "send message to agent", "mailbox", "inbox",
+                                                "trigger the llm", "watch for events", "task done event"))
     # --- agent-friendly discovery: describe / suggest / route / autocomplete over the whole engine ---
     c.register_capability("Agent skills (discover & route)", "the AGENT-FRIENDLY layer: mind.skills() lists every "
                           "capability + method with how to CALL it (skill descriptions, real signatures); "
@@ -325,12 +423,27 @@ def default_catalog():
     c.register_capability("Dictionary + taxonomy (vendored)", "a comprehensive vendored English DICTIONARY (~144k "
                           "words: definition, part of speech, synonyms, example) AND an is_a TAXONOMY (encyclopedia "
                           "side: 'a dog is a kind of domestic animal...'), giving the engine real world-knowledge for "
-                          "contextual awareness beyond its internal machinery. Stdlib-only lazy load (gzip+json); the "
-                          "mind can also LEARN meaning from it. Princeton WordNet, free with attribution",
-                          example="mind.lookup('gravity'); mind.word_taxonomy('dog'); mind.learn_vocabulary(my_words)",
+                          "contextual awareness beyond its internal machinery. OPT-IN + lazy: it never loads from "
+                          "importing leCore or building a mind -- only the first language call decompresses it (lzma, "
+                          "~3.3 MB on disk) into a plain dict in RAM (~22 MB), after which lookups are instant. Control "
+                          "it explicitly with holographic_dictionary.is_loaded()/preload()/unload()/stats(). Stdlib-only "
+                          "(lzma+json); the mind can also LEARN meaning from it. Princeton WordNet, free with attribution",
+                          example="mind.lookup('gravity'); mind.word_taxonomy('dog'); import holographic_dictionary as hd; hd.stats()",
                           native=True, aliases=("dictionary", "define", "definition", "word meaning", "synonyms",
                                                 "encyclopedia", "taxonomy", "is a", "wordnet", "vocabulary",
-                                                "contextual awareness", "knowledge", "lexicon", "what does word mean"))
+                                                "contextual awareness", "knowledge", "lexicon", "what does word mean",
+                                                "preload dictionary", "unload dictionary", "optional language"))
+    c.register_capability("Semantic word index (find words by meaning)", "the fuzzy REVERSE of a dictionary: describe "
+                          "an idea and get the words whose definitions mean it. mind.build_semantic_index(words=...) "
+                          "places words in a meaning space by RANDOM INDEXING over their glosses, then idx.find('un"
+                          "expected good luck') -> 'serendipity' and idx.similar('puppy') -> 'dog','kitten'. OPT-IN and "
+                          "separate: nothing loads or builds until you call it. Approximate by design (this is where "
+                          "leCore's geometry-preserving/lossy side belongs) -- reliable for the top hit, noisy in the "
+                          "tail, and word-sense sensitive.",
+                          example="idx = mind.build_semantic_index(words=my_vocab); idx.find('a young dog'); idx.similar('ocean')",
+                          native=True, aliases=("semantic index", "find words by meaning", "reverse dictionary",
+                                                "words like", "similar words", "meaning search", "word similarity",
+                                                "describe a word", "what's the word for", "concept to word", "synonym search"))
     # --- material LIBRARIES: render appearance + physical properties, and the bridge between them ---
     c.register_capability("Material library (render + physical)", "the engine's material LIBRARIES, discoverable in "
                           "one place: ~141 RENDER presets (metals/gems/woods/stones/liquids/biomes -- PBR appearance) "
@@ -350,6 +463,26 @@ def default_catalog():
                           "roughness/normal/...) you sample per point; its position-dependent channels BAKE via the "
                           "Cache home and shade via the Shading home", example="from holographic_material import Material",
                           native=True, aliases=("material", "channels", "albedo", "roughness", "metallic", "shader"))
+    c.register_capability("Multi-material (mask-blended)", "combine N materials by per-point MASKS -- generalises the "
+                          "2-way Material.blend to a weighted mix where each material's weight is a mask (a texture "
+                          "graph, a field, or a constant) that varies over the surface: paint rust into metal, moss "
+                          "onto stone, a decal onto a surface. 'blend' = soft weighted sum (weights normalised so "
+                          "brightness stays put); 'select' = hard pick the dominant material (a material-ID / splat "
+                          "map). CMP3",
+                          example="mind.multi_material([metal, rust], [1.0, mind.texture_leaf('fbm', n_dims=2)]).sample('albedo', [0.3, 0.7])",
+                          native=True, aliases=("multi-material", "multimaterial", "blend materials", "material mask",
+                                                "material map", "splat map", "material id", "paint materials", "mix materials",
+                                                "layer materials by mask"))
+    c.register_capability("Layered material (order schema)", "an ORDERED stack of material layers -- base -> diffuse "
+                          "-> specular/reflection -> coat/clearcoat -- where the order is a SCHEMA checked at compose "
+                          "time, so you can't put a reflection under a diffuse (an out-of-order stack is refused up "
+                          "front). Each layer composites OVER the one below by a coverage alpha (a number, field, or "
+                          "texture graph). Honest: fixes the stacking, not the energy-conserving radiometry of a true "
+                          "layered BRDF. CMP2",
+                          example="mind.layered_material([mind.material_layer('base', paint), mind.material_layer('clearcoat', gloss, alpha=0.3)]).sample('albedo', [0.3, 0.7])",
+                          native=True, aliases=("layered material", "material layers", "clearcoat", "coat", "layer stack",
+                                                "material stack", "over compositing", "base diffuse specular coat",
+                                                "stacked material", "material order"))
     c.register_capability("Shading (BRDF)", "the shade model: cook_torrance (full specular+diffuse per light), "
                           "lambert (diffuse term), sample_brdf (importance-sampled bounce) -- call these instead of "
                           "re-deriving Fresnel/GGX/diffuse", example="from holographic_brdf import cook_torrance, lambert",
@@ -565,6 +698,14 @@ def default_catalog():
                           example="from holographic_texturehome import Texture; Param(field=Texture.voronoi(kind='edge'))",
                           native=True, aliases=("texture", "noise", "fbm", "voronoi", "curl", "procedural", "weathering",
                                                 "pattern", "detail", "cellular"))
+    c.register_capability("Texture graph (composable maps)", "build a texture as a TREE of maps: an op "
+                          "(mix/multiply/over/scale/remap/...) over TYPED inputs -- map | color | field | number -- each of "
+                          "which may be another map, so graphs nest to any depth. Sampling walks the tree; the input types "
+                          "are checked at COMPOSE time so a bad graph (a colour used as a weight, a missing input) is refused "
+                          "up front, not rendered wrong. Encode a graph to a hypervector to cache/search it. CMP1",
+                          example="mind.texture_op('mix', a=mind.texture_leaf(value=[1,0,0]), b=mind.texture_leaf(value=[0,0,1]), t=mind.texture_leaf('fbm', n_dims=2)); mind.sample_texture(g, [0.3,0.7])",
+                          native=True, aliases=("texture graph", "map graph", "shader graph", "compose texture",
+                                                "layered texture", "node graph", "blend maps", "mix textures", "procedural graph"))
     c.register_capability("Simulation (domain)", "a shared STEP LOOP over any solver (fluids/smoke, fire/combustion, "
                           "softbody/cloth, hair, MPM, collision, reaction-diffusion) -- each keeps its own math; the "
                           "scaffold gives them one step(dt) and exposes their field for the Pipeline to render",
@@ -591,6 +732,35 @@ def default_catalog():
                           "sampler that stops per-pixel when the confidence interval is tight, and the render-method "
                           "auto-picker", example="from holographic_gbuffer import render_auto, converge_samples",
                           native=True, aliases=("adaptive", "auto", "quality", "converge", "raytracing mode", "render mode"))
+    c.register_capability("Render graph (bake vs live)", "the PIPELINE composing the texture/material/scene graphs: "
+                          "mind.render_graph() registers texture graphs (static or dynamic) + a CMP4 instanced scene, "
+                          "then plan() shows what it will do and WHY and prepare() runs it. The adaptive decision it "
+                          "adds is BAKE a static texture graph to a grid (O(1) bilinear lookup, mind.bake_texture) vs "
+                          "SAMPLE it live -- baking amortises a deep graph over many hits, live avoids re-baking a "
+                          "changing map every frame. Trade: memory + interpolation error. CMP5",
+                          example="rg = mind.render_graph(); rg.add_texture('rust', graph, static=True).set_scene(scene); rg.plan(); prep = rg.prepare()",
+                          native=True, aliases=("render graph", "bake texture", "bake vs live", "prepare scene",
+                                                "resolve textures", "orchestrate render", "material lod", "precompute texture",
+                                                "static texture", "render pipeline graphs"))
+    c.register_capability("Preview (swatch & material ball)", "SEE what you composed: mind.preview_texture(graph) "
+                          "renders a CMP1 texture graph as a flat RGB swatch, and mind.preview_material(material) "
+                          "renders a material on the classic MATERIAL BALL sphere (Cook-Torrance shaded, using the "
+                          "material's roughness/metallic channels) -- works on a plain Material or a CMP2/CMP3 "
+                          "layered/multi material. Returns a float image in [0,1] to save/view. The missing step "
+                          "between composing a texture/material and looking at it.",
+                          example="img = mind.preview_texture(graph); ball = mind.preview_material(layered_material)",
+                          native=True, aliases=("preview", "swatch", "material ball", "material preview", "texture preview",
+                                                "see the texture", "render swatch", "thumbnail", "material sphere",
+                                                "visualize texture", "visualize material", "look at the material"))
+    c.register_capability("Textured object render (paint composed maps)", "paint a COMPOSED texture or material "
+                          "(CMP1 graph / CMP2-3 material) onto an object and render it: "
+                          "mind.render_textured(scene, {object_name: texture_graph}) marches the scene, UV-wraps each "
+                          "texture onto its object (spherical map on a sphere, planar on a box), and shades with the "
+                          "real Cook-Torrance BRDF + a light + a hard shadow. This is the composability stack driving "
+                          "a full 3-D render, not just a swatch. Honest: textbook UV (seams), single hard light.",
+                          example="tex = mind.texture_op('mix', a=mind.texture_leaf(value='orange'), b=mind.texture_leaf(value='purple'), t=mind.texture_leaf('fbm', n_dims=2)); mind.render_textured(scene, {scene.names()[0]: tex})",
+                          native=True, aliases=("textured render", "paint texture on object", "wrap texture", "uv render",
+                                                "texture the sphere", "composed texture render", "map onto object"))
     c.register_capability("Denoise (domain)", "clean a render or signal with one home: image SVGF (variance-guided "
                           "a-trous) or demodulated (divide albedo out), sharpen, and the signal manifold denoisers "
                           "(adaptive/manifold/codebook/trajectory)",

@@ -8186,6 +8186,242 @@ class UnifiedMind:
         from holographic_scene_semantic import SemanticScene
         return SemanticScene(objects, environment=environment, mind=self)
 
+    # ---- composable texture map graph (CMP1) --------------------------------------------------------------
+    def texture_leaf(self, source=None, value=None, **kw):
+        """Make a LEAF for a texture graph. Give `source=` a Texture name ('fbm','voronoi','synth',...) to wrap that
+        field, e.g. mind.texture_leaf('fbm', n_dims=2); or give `value=` a number or a length-3/4 colour for a
+        constant, e.g. mind.texture_leaf(value=[1,0,0]). Leaves are the inputs you feed to texture_op. See
+        holographic_texturegraph."""
+        from holographic_texturegraph import field_leaf, Const
+        if source is not None:
+            return field_leaf(source, **kw)
+        if value is not None:
+            return Const(value)
+        raise ValueError("texture_leaf needs source= (a Texture name) or value= (a number/colour)")
+
+    def texture_op(self, op, **inputs):
+        """Compose a texture-map NODE: an op ('mix','multiply','over','scale','add','remap','min','max','clamp',
+        'saturate') over TYPED inputs, each of which may be a leaf OR another texture_op -- so graphs nest to any
+        depth. The input types are checked HERE, at compose time, so a bad graph (a colour used as a weight, a missing
+        input, an unknown op) is refused up front with a clear message. Sample it with mind.sample_texture(node, uv);
+        wrap it in 'saturate' to keep colours in [0,1]. See holographic_texturegraph."""
+        from holographic_texturegraph import Map
+        return Map(op, **inputs)
+
+    def sample_texture(self, node, uv):
+        """Sample a texture graph at a UV/point -> a value (a scalar, or an rgb colour if the graph produces one).
+        Walks the tree: evaluate each child, then apply the op."""
+        return node.sample(uv)
+
+    def encode_texture(self, node):
+        """The texture graph as ONE hypervector (this mind's dim/seed), for CACHING a baked result by its graph
+        identity or SEARCHING a library of graphs -- structurally identical graphs encode identically. The readable
+        object tree stays the source of truth; this is the derived vector form."""
+        from holographic_texturegraph import encode
+        return encode(node, self.dim, self.seed)
+
+    # ---- multi-material blended/selected by masks (CMP3) --------------------------------------------------
+    def multi_material(self, materials, weights, mode="blend", normalize=True):
+        """Combine N Materials by per-point MASKS -- generalises Material.blend (2-way, one scalar) to N materials
+        each weighted by a mask that varies over the surface. Each weight is a CMP1 texture graph (mind.texture_op),
+        a field, or a constant; at a point a channel reads sum_i w_i(uv) * material_i.sample(channel, uv). mode='blend'
+        is a soft weighted sum (weights normalised to a partition of unity so brightness stays put -- the kept
+        negative); mode='select' hard-picks the dominant material (a material-ID / splat map). Returns a MultiMaterial
+        you sample with .sample(channel, uv) / .sample_all(uv). See holographic_multimaterial."""
+        from holographic_multimaterial import MultiMaterial
+        return MultiMaterial(materials, weights, mode=mode, normalize=normalize)
+
+    # ---- layered materials with an order schema (CMP2) ---------------------------------------------------
+    def material_layer(self, kind, material, alpha=1.0):
+        """Make one LAYER of a layered material: a `kind` ('base','diffuse','specular','reflection','coat','clearcoat')
+        that fixes its place in the order, the Material carrying its channels, and a coverage `alpha` (how much shows
+        through what's below -- a number, a field, or a CMP1 texture graph, so coverage can vary over the surface).
+        Feed these to mind.layered_material. See holographic_layeredmaterial."""
+        from holographic_layeredmaterial import Layer
+        return Layer(kind, material, alpha=alpha)
+
+    def layered_material(self, layers):
+        """Stack material LAYERS bottom-to-top with the ORDER enforced: base < diffuse < specular/reflection <
+        coat/clearcoat, so you cannot put a reflection under a diffuse -- an out-of-order stack is refused at COMPOSE
+        time with a clear message, not rendered wrong. Each layer composites OVER the one below by its coverage alpha.
+        Returns a LayeredMaterial you sample with .sample(channel, uv). Honest boundary: this fixes the STACKING, not
+        the radiometry -- a physically energy-conserving layered BRDF is a separate, harder thing. See
+        holographic_layeredmaterial."""
+        from holographic_layeredmaterial import LayeredMaterial
+        return LayeredMaterial(layers)
+
+    # ---- type-correct binding + shared-definition instancing (CMP4) --------------------------------------
+    def shared_definition(self, name, geometry, material, geometry_kind=None):
+        """A shared, editable scene DEFINITION -- geometry bound to a material, with the binding TYPE-CHECKED at
+        compose time: a surface material (paint/metal/glass) only binds to a mesh, a volumetric material (fog/smoke/
+        fire) only to a volume; a bad binding is refused with a clear message. Place it many times in an
+        instanced_scene and edit it ONCE (def.set_material / set_geometry) to update every instance. Returns a
+        Definition. See holographic_instancing."""
+        from holographic_instancing import Definition
+        return Definition(name, geometry, material, geometry_kind=geometry_kind)
+
+    def instanced_scene(self):
+        """An empty INSTANCED scene: place shared Definitions through transforms (scene.place(defn, transform)) so many
+        instances share one definition -- editing the definition updates them all (edit-once). flatten_surface()
+        materialises the surface instances into one mesh. Honest boundary: sharing is edit-once at the graph level;
+        flatten is where instances become concrete geometry. See holographic_instancing."""
+        from holographic_instancing import InstancedScene
+        return InstancedScene()
+
+    # ---- pipeline composes the graphs: bake vs live (CMP5) -----------------------------------------------
+    def render_graph(self, res=64):
+        """An ORCHESTRATOR that prepares the CMP1-CMP4 graphs into a render-ready scene as pipeline stages. Register
+        texture graphs (rg.add_texture(name, graph, static=True/False)) and a CMP4 instanced scene (rg.set_scene(...));
+        rg.plan() shows what it will do and WHY (bake each STATIC texture to a grid for O(1) lookup, keep dynamic ones
+        live, then bind+flatten the scene); rg.prepare() runs it and returns a PreparedScene. This is where 'adaptive'
+        reaches down to the maps. See holographic_rendergraph."""
+        from holographic_rendergraph import RenderGraph
+        return RenderGraph(res=res)
+
+    def bake_texture(self, graph, res=64, lo=0.0, hi=1.0):
+        """Bake a CMP1 texture graph to a res x res grid -> a BakedTexture you sample in O(1) (bilinear lookup),
+        instead of walking the graph every hit. Do this for a STATIC map sampled many times; the trade is memory +
+        interpolation error (blurs detail finer than a cell -- raise res, or keep sharp maps live). See
+        holographic_rendergraph."""
+        from holographic_rendergraph import bake_texture
+        return bake_texture(graph, res=res, lo=lo, hi=hi)
+
+    # ---- SEE what you composed: previews for the composability stack -------------------------------------
+    def preview_texture(self, graph, res=256):
+        """Render a CMP1 texture graph as a flat RGB SWATCH -- a (res,res,3) float image in [0,1] you can save/view.
+        Colour graph -> its rgb; scalar graph -> greyscale; out-of-range values are clamped for display. The missing
+        step between 'I composed a texture' and 'let me look at it'. See holographic_preview."""
+        from holographic_preview import texture_image
+        return texture_image(graph, res=res)
+
+    def preview_material(self, material, res=192, base_color=(0.82, 0.80, 0.78)):
+        """Render a material on a preview SPHERE -- the classic MATERIAL BALL. Works on a plain Material or a CMP2/CMP3
+        layered/multi material: uses its roughness/metallic channels (else defaults), modulates base_color by an albedo
+        channel if present, and shades with the same Cook-Torrance BRDF the real renderer uses. Returns a (res,res,3)
+        float image in [0,1]. See holographic_preview."""
+        from holographic_preview import material_ball
+        return material_ball(material, res=res, base_color=base_color)
+
+    def render_textured(self, scene, textures, width=256, height=192, **kw):
+        """Render a SemanticScene with COMPOSED textures/materials painted onto its objects -- the composability stack
+        driving a FULL 3-D render, not just a swatch. `textures` maps an object NAME (from scene.names()) to a CMP1
+        texture graph or a Material; the texture is UV-wrapped onto that object's surface (spherical map on a sphere,
+        planar on a box) and shaded with the real Cook-Torrance BRDF + a light + a hard shadow. Objects with no entry
+        keep their scene colour. Returns an (H,W,3) image in [0,1]. Honest limits: textbook UV mapping (seams/pole
+        pinch), single hard light (no GI). See holographic_texturerender."""
+        from holographic_texturerender import render_textured
+        return render_textured(scene, textures, width=width, height=height, **kw)
+
+    # ---- message bus + optional agent (LLM) bridge: person and agent both connected -----------------------
+    def bus(self):
+        """The mind's MessageBus -- one shared bus for this mind that the app, the person, and an agent all talk
+        through (publish/subscribe/mailboxes/history). Created on first use. See holographic_bus."""
+        if getattr(self, "_bus", None) is None:
+            from holographic_bus import MessageBus
+            self._bus = MessageBus()
+        return self._bus
+
+    def agent_bridge(self, llm=None, name="agent"):
+        """Connect an OPTIONAL agent to this mind's bus. `llm` is any callable text->reply (your wrapper around any
+        model -- nothing here depends on an LLM library, so it's fully optional and leCore runs with no agent). Use
+        bridge.notify_on('render.done', 'does it look right?') so the app REACHES the agent when a job finishes, and
+        bridge.ask('...') to ask it directly. See holographic_agent_bridge."""
+        from holographic_agent_bridge import AgentBridge
+        return AgentBridge(self.bus(), llm=llm, name=name)
+
+    def run_task(self, name, fn, *args, background=False, summarize=None, **kwargs):
+        """Run `fn(...)` as a named task on this mind's bus: publishes '<name>.start' then '<name>.done' (with a small
+        summary an agent can read) or '<name>.error'. background=True runs it off-thread and returns immediately -- the
+        bus's '<name>.done' is how everyone (including a watching agent) learns it finished, so nobody has to poll. See
+        holographic_agent_bridge.run_task."""
+        from holographic_agent_bridge import run_task
+        return run_task(self.bus(), name, fn, *args, background=background, summarize=summarize, **kwargs)
+
+    # ---- OPTIONAL semantic index over the dictionary: find words by meaning -------------------------------
+    def build_semantic_index(self, words=None, dim=256, seed=0, include_synonyms=True, max_words=None):
+        """Build an OPT-IN semantic index over the dictionary so you can find words by MEANING (idx.find('unexpected
+        good luck') -> 'serendipity'). Nothing loads until you call this -- a user who just wants the library pays
+        nothing for it. `words` scopes the vocabulary (default all ~144k, ~150 MB at dim=256 -- pass a list or
+        max_words to keep it small). Approximate (random indexing over glosses) -- great for the top hit, noisy in the
+        tail. See holographic_word_index."""
+        from holographic_word_index import build_semantic_index
+        return build_semantic_index(words=words, dim=dim, seed=seed,
+                                    include_synonyms=include_synonyms, max_words=max_words)
+
+    # ---- external asset paths: track files, repair them when they move --------------------------------------
+    def asset_library(self):
+        """A fresh AssetLibrary for tracking the EXTERNAL files a scene depends on (textures, models, ...) and repairing
+        their paths when they move: add() them, ask which are missing(), then relink(one, new_path) to re-find the rest
+        by the moved-parent + structural search, changed() to spot on-disk edits, and resolve(..., roots=) to find a
+        file by content hash across machines. See holographic_assets."""
+        from holographic_assets import AssetLibrary
+        return AssetLibrary()
+
+    def ingest_files(self, source, extract_to=None, with_hash=True, index_text=True, max_text_bytes=1_000_000):
+        """Digest a FOLDER, a .zip, or a single file into a queryable FILE MAP: mind.ingest_files('project/') or
+        mind.ingest_files('bundle.zip'). The returned FileMap lets you query by name (find('*.png')), kind
+        (by_kind('model')), metadata, text content (search_text('shader normal')), and -- after build_meaning_index() --
+        meaning (find_by_meaning('lighting')); inspect its tree(); and repair paths when files move via its built-in
+        AssetLibrary (missing/changed/relink/resolve_assets). See holographic_filemap."""
+        from holographic_filemap import ingest
+        return ingest(source, extract_to=extract_to, with_hash=with_hash, index_text=index_text,
+                      max_text_bytes=max_text_bytes)
+
+    # ---- cold storage: compress INACTIVE structures, inflate on demand -------------------------------------
+    def cold_store(self, keep_warm=8, codec="zlib", spill_dir=None):
+        """A keyed store that bounds memory: keeps at most `keep_warm` values live and compresses the rest, warming any
+        of them transparently on get(). Park inactive tables/arrays/databases here. codec='lzma' packs smaller (slower);
+        spill_dir writes cold blobs to disk to free RAM entirely. See holographic_coldstore."""
+        from holographic_coldstore import ColdStore
+        return ColdStore(keep_warm=keep_warm, codec=codec, spill_dir=spill_dir)
+
+    def cool(self, value, codec="zlib", spill_dir=None):
+        """Wrap ONE value so it can be folded up (compressed) when idle and inflated on demand: c = mind.cool(big_table);
+        c.cool() frees its RAM, c.get() brings it back bit-identical. See holographic_coldstore.Cold."""
+        from holographic_coldstore import Cold
+        return Cold(value, codec=codec, spill_dir=spill_dir)
+
+    # ---- import the file formats artists hand you: OBJ/MTL, glTF/GLB, texture sets, volumetric grids -------
+    def import_asset(self, path):
+        """Import an artist file by extension: .obj (+its .mtl) or .glb/.gltf -> a LoadedMesh (geometry + PBR
+        materials + textures); a volumetric .npy/.raw -> (GridField, bounds) for render_volume. For a Substance 3D
+        Painter export, point load_texture_set at the folder. See holographic_assetimport."""
+        from holographic_assetimport import import_asset
+        return import_asset(path)
+
+    def load_obj(self, path):
+        """Load a Wavefront .obj and its .mtl into a LoadedMesh (positions, UVs, normals, per-face material, and the
+        materials with their map_* textures)."""
+        from holographic_assetimport import load_obj
+        return load_obj(path)
+
+    def load_glb(self, path):
+        """Load a .glb/.gltf into a LoadedMesh with its PBR materials (base colour / metallic-roughness / normal /
+        emissive) and embedded textures."""
+        from holographic_assetimport import load_glb
+        return load_glb(path)
+
+    def load_texture_set(self, folder, name=None):
+        """Build one PBRMaterial from a folder of maps exported by Adobe Substance 3D Painter (or any tool):
+        basecolor/roughness/metallic/normal/height/ao/emissive matched by file name. Reads the exported maps (the
+        .spp/.sbsar project files are proprietary)."""
+        from holographic_assetimport import load_texture_set
+        return load_texture_set(folder, name=name)
+
+    def load_volume(self, path, dims=None, dtype="float32", bounds=((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0))):
+        """Load a 3-D density grid (.npy, or raw floats + dims) into (GridField, bounds) you can hand to
+        render_volume. OpenVDB .vdb is proprietary/sparse -- export a dense grid instead."""
+        from holographic_assetimport import load_volume
+        return load_volume(path, dims=dims, dtype=dtype, bounds=bounds)
+
+    def deform_mesh(self, loaded, clip=None, t=0.0):
+        """DEFORM an imported rig at time t: morph-blend the base shape (if it has blend shapes) then apply
+        linear-blend skinning (if it has a skeleton), returning a deformed Mesh with the vertices moved. Pass one of
+        loaded.animations as `clip` to pose it; clip=None gives the rest pose. This is what makes a loaded glTF
+        actually move. See holographic_skindeform."""
+        from holographic_skindeform import deform
+        return deform(loaded, clip=clip, t=t)
+
     def encode_scene(self, objects):
         """Encode parsed objects into ONE composable scene hypervector: superpose bind(OBJ_i, record_i). Returns
         (scene_vector, [record_vectors], [role_atoms]). Query it back by slot with query_scene_slot -- the scene is

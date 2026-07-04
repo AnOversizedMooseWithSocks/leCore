@@ -24,6 +24,8 @@ The rendering and geometry are the existing engine; simulate() is a deliberately
 per object, ground at y=0) so the "or simulate it" path is real end to end -- richer media (fluid/smoke/soft body) live
 behind the Simulation home and take a field, not these surface objects.
 """
+import os
+
 import numpy as np
 
 from holographic_semantic import (SHAPES, COLORS, MATERIALS, SIZES, RELATIONS, ARTICLES, _STOP, parse_description,
@@ -107,6 +109,7 @@ def interpret_command(scene, command, resolver=None):
 
     toks = command.lower().replace(",", " ").replace(".", " ").split()
     known = set(SHAPES) | set(COLORS) | set(MATERIALS) | set(SIZES) | set(_RELATIVE_SIZE) | _COMMAND_WORDS
+    known |= {o["label"].lower() for o in scene.objects if o.get("label")}   # user nicknames are valid references too
 
     # do our best: resolve out-of-vocabulary words to known ones via the synonym table (crimson->red, chrome->metal),
     # substituting them in so parse_adjust picks them up; remember what we read for the report.
@@ -129,14 +132,17 @@ def interpret_command(scene, command, resolver=None):
             new_toks.append(t)
 
     reference, changes, explicit_all = parse_adjust(" ".join(new_toks))
-    if explicit_all:
+    label_idx = scene._index_by_label(command)                  # a user nickname wins over attribute matching
+    if label_idx:
+        matched_idx = label_idx
+    elif explicit_all:
         matched_idx = list(range(len(scene.objects)))
     elif reference:
         matched_idx = find_objects(scene.objects, **reference)
     else:
         matched_idx = []
     matched = [scene.objects[i]["name"] for i in matched_idx]
-    applied = bool(changes) and (explicit_all or bool(matched_idx))
+    applied = bool(changes) and bool(matched_idx)
 
     questions, suggestions = [], []
     scene_objs = ", ".join(scene.names()) if scene.objects else "nothing yet"
@@ -170,8 +176,121 @@ def interpret_command(scene, command, resolver=None):
 
     return {"command": command,
             "understood": {"reference": reference, "changes": changes, "target_all": explicit_all},
-            "read_as": read_as, "matched": matched, "applied": applied,
+            "read_as": read_as, "matched": matched, "matched_idx": matched_idx, "applied": applied,
             "questions": questions, "suggestions": suggestions, "unknown": unknown}
+
+
+# ---- a small, readable library of NAMED procedural textures -------------------------------------------------
+# Each entry is ONE composed CMP1 texture graph. Add a texture by adding a line here; the words in the tuple are the
+# names a user can say ('a rusty texture', 'make it marbled'). Kept fbm-based so they are deterministic and cheap.
+def named_texture(name, seed=0):
+    """Build a named procedural texture -> a CMP1 texture graph you can paint on an object (scene.paint / adjust
+    'give the sphere a rusty texture'). Returns None for an unknown name so the caller can suggest the known ones;
+    the known names are listed by texture_names()."""
+    from holographic_texturegraph import Map, Const, field_leaf
+    import numpy as _np
+    n = name.lower()
+
+    def fbm(s=seed, octaves=4):
+        return field_leaf("fbm", n_dims=2, seed=s, octaves=octaves)
+
+    if n in ("rust", "rusty", "rusted", "corroded"):
+        return Map("mix", a=Const([0.50, 0.26, 0.12]), b=Const([0.88, 0.50, 0.22]), t=fbm())          # brown<->orange mottle
+    if n in ("marble", "marbled", "veined"):
+        veins = Map("saturate", x=Map("scale", x=fbm(octaves=6), k=Const(1.4)))
+        return Map("mix", a=Const([0.95, 0.95, 0.93]), b=Const([0.50, 0.50, 0.58]), t=veins)           # white with dark veins
+    if n in ("noise", "noisy", "grainy", "speckled"):
+        return Map("saturate", x=Map("scale", x=fbm(octaves=5), k=Const(1.3)))                         # greyscale noise
+    if n in ("cloud", "clouds", "cloudy"):
+        return Map("mix", a=Const([0.52, 0.62, 0.85]), b=Const([0.98, 0.99, 1.0]), t=fbm(octaves=5))   # sky<->white puffs
+    if n in ("moss", "mossy", "weathered"):
+        return Map("mix", a=Const([0.28, 0.42, 0.16]), b=Const([0.58, 0.72, 0.36]), t=fbm(octaves=5))  # green weathering
+    if n in ("lava", "molten", "fiery"):
+        return Map("mix", a=Const([0.30, 0.05, 0.0]), b=Const([1.0, 0.55, 0.10]), t=Map("saturate", x=Map("scale", x=fbm(octaves=5), k=Const(1.5))))
+    if n in ("stripe", "stripes", "striped"):
+        # a stripe pattern from a raw sine FIELD (a callable is coerced to a texture leaf) blended between two colours
+        stripes = (lambda pts: 0.5 + 0.5 * _np.sin(_np.asarray(pts, float)[:, 0] * 18.0))
+        return Map("mix", a=Const([0.95, 0.95, 0.95]), b=Const([0.20, 0.20, 0.28]), t=stripes)
+    return None
+
+
+def texture_names():
+    """The named textures you can ask for (one representative word each)."""
+    return ["rusty", "marbled", "noisy", "cloudy", "mossy", "lava", "striped"]
+
+
+# words that, in an adjust command, signal a TEXTURE request rather than an attribute change
+_TEXTURE_TRIGGER = {"texture", "textured", "pattern", "patterned", "finish", "paint", "painted", "coat"}
+
+
+def _texture_word_in(command):
+    """If an adjust command asks for a NAMED texture, return that texture's canonical name; else None. A texture word
+    on its own ('make the box rusty') or with a trigger ('give the sphere a marble texture') both count."""
+    low = command.lower().replace(",", " ").replace(".", " ")
+    toks = set(low.split())
+    for word in toks:
+        if named_texture(word) is not None:                     # the word names a texture we know how to build
+            return word
+    return None
+
+
+def _parse_name_command(command):
+    """Recognise a naming command. Returns one of:
+      ('rename', old, new)      for 'rename hero to champion'
+      ('name', reference, label) for 'call the red sphere hero' / 'name it hero'
+    or None if the command isn't about naming. Kept deliberately simple and readable."""
+    import re
+    low = command.strip().lower()
+    m = re.match(r"^\s*rename\s+(.+?)\s+to\s+(.+?)\s*$", low)
+    if m:
+        return ("rename", m.group(1).strip(), m.group(2).strip())
+    m = re.match(r"^\s*(?:call|name)\s+(.+)\s+(\w+)\s*$", low)   # 'call <reference...> <label>' -- label is the last word
+    if m:
+        return ("name", m.group(1).strip(), m.group(2).strip())
+    return None
+
+
+def _load_image_array(path):
+    """Load an image FILE into a float (H, W, 3) array in [0,1], or None if it isn't there or can't be decoded. PIL is
+    imported LAZILY here -- the core never needs it (importing leCore stays NumPy-only), and reading an external .png is
+    a boundary feature. A missing/undecodable file returns None so rendering falls back to the object's colour instead
+    of crashing."""
+    if not os.path.exists(path):
+        return None
+    try:
+        from PIL import Image                                 # lazy: only when someone actually renders an image file
+        import numpy as _np
+        return _np.asarray(Image.open(path).convert("RGB"), dtype=_np.float32) / 255.0
+    except Exception:
+        return None
+
+
+class ExternalTexture:
+    """A reference to an EXTERNAL image file used as a texture on a scene object. The scene's AssetLibrary tracks and
+    repairs its path when it moves; the pixels are loaded LAZILY (and cached) the first time the scene renders it. If
+    the file is missing or can't be decoded, load() returns None and the object simply renders with its flat colour --
+    the scene never crashes on a bad path."""
+
+    def __init__(self, path, role="diffuse", asset_id=None):
+        self.path = path
+        self.role = role
+        self.asset_id = asset_id
+        self._tex = None                                      # cached TextureMap once loaded
+        self._loaded_from = None                              # the path we loaded, so a relink re-loads
+
+    def load(self):
+        """Return a UV-sampleable TextureMap for the current path, or None if the file can't be loaded. Re-loads if the
+        path changed since last time (e.g. after a relink)."""
+        if self._tex is not None and self._loaded_from == self.path:
+            return self._tex
+        arr = _load_image_array(self.path)
+        if arr is None:
+            self._tex = None
+        else:
+            from holographic_materialio import TextureMap
+            self._tex = TextureMap(arr, wrap="repeat")
+        self._loaded_from = self.path
+        return self._tex
 
 
 class SemanticScene:
@@ -179,36 +298,64 @@ class SemanticScene:
     object dicts; then reference objects by how you'd describe them and change them in words, and render or simulate."""
 
     def __init__(self, objects, environment=None, mind=None):
-        # each object is a dict {shape,color,material,size,relation}; ensure every one carries a stable name
+        # each object is a dict {shape,color,material,size,relation}; ensure every one carries a stable descriptive
+        # name, an optional user LABEL (a nickname you can rename and reference), and an optional composed TEXTURE.
         self.objects = [dict(o) for o in objects]
         for o in self.objects:
             o.setdefault("relation", None)
+            o.setdefault("label", None)                         # a user-given nickname, e.g. 'hero' (None until named)
+            o.setdefault("texture", None)                       # a CMP1 texture graph / material painted on it (or None)
             o["name"] = _obj_name(o)
         self.environment = dict(environment or {"sun": None, "sky": None})
         self.mind = mind
         self.feedback = None                                    # the clarifying report from the last adjust()
+        self._assets = None                                     # lazy AssetLibrary for EXTERNAL texture/model files
+        self.asset_roots = []                                   # folders to auto-search when a file has moved
 
     # ---- inspect ------------------------------------------------------------------------------------------
     def names(self):
-        """The human name of each object (e.g. 'big red metal sphere') -- how you refer to them."""
-        return [o["name"] for o in self.objects]
+        """How you refer to each object: its user LABEL if it has one (e.g. 'hero'), otherwise its descriptive name
+        (e.g. 'big red metal sphere'). Either one works as a reference."""
+        return [(o["label"] or o["name"]) for o in self.objects]
+
+    def labels(self):
+        """The user-given nicknames currently in the scene, as {label: descriptive name}. Empty until you name things."""
+        return {o["label"]: o["name"] for o in self.objects if o["label"]}
 
     def describe(self):
-        """A one-line human summary of what the scene currently holds."""
+        """A one-line human summary of what the scene currently holds (showing a label as 'label = description')."""
         if not self.objects:
             return "an empty scene"
         env = self.environment
         weather = ", ".join(v for v in (env.get("sun") and env["sun"] + " sun",
                                         env.get("sky") and env["sky"] + " sky") if v)
-        body = "; ".join(o["name"] for o in self.objects)
+        body = "; ".join((o["label"] + " = " + o["name"]) if o["label"] else o["name"] for o in self.objects)
         return body + (" (%s)" % weather if weather else "")
 
     # ---- reference ----------------------------------------------------------------------------------------
+    def _index_by_label(self, text):
+        """If `text` mentions a user LABEL (as a whole word), return the matching object indices; else []. Checked
+        BEFORE attribute matching so a nickname like 'hero' beats trying to read it as a shape/colour."""
+        if not isinstance(text, str):
+            return []
+        import re
+        low = text.lower()
+        hits = []
+        for i, o in enumerate(self.objects):
+            lab = o.get("label")
+            if lab and re.search(r"\b" + re.escape(lab.lower()) + r"\b", low):
+                hits.append(i)
+        return hits
+
     def select(self, reference):
-        """Resolve a reference to object INDICES. `reference` may be a dict of attribute constraints, a plain phrase
-        ('the red sphere', 'everything'), or None/'' for all objects."""
+        """Resolve a reference to object INDICES. `reference` may be a user LABEL ('hero'), a dict of attribute
+        constraints, a plain phrase ('the red sphere', 'everything'), or None/'' for all objects. A label wins over
+        attribute matching, so once you name something you can always reach it by that name."""
         if reference in (None, "", "all", "everything"):
             return list(range(len(self.objects)))
+        by_label = self._index_by_label(reference)              # a nickname takes precedence
+        if by_label:
+            return by_label
         if isinstance(reference, str):
             ref_attrs, _, all_flag = parse_adjust(reference)     # read a phrase as a selector (ignore any change part)
             if all_flag:
@@ -217,6 +364,35 @@ class SemanticScene:
         if not reference:
             return list(range(len(self.objects)))
         return find_objects(self.objects, **reference)
+
+    def name(self, reference, label):
+        """Give an object a nickname you can reference and rename: scene.name('the red sphere', 'hero'). After this,
+        'hero' selects it in adjust/set/get. A label must be unique -- naming a second object 'hero' moves the name.
+        Returns self (chainable)."""
+        label = str(label).strip()
+        if not label:
+            raise ValueError("a label can't be empty")
+        where = self.select(reference)
+        if not where:
+            self.feedback = {"applied": False, "suggestions": ["Nothing matches %r to name. The scene has: %s."
+                             % (reference, ", ".join(self.names()) or "nothing")]}
+            return self
+        for o in self.objects:                                  # a label is unique: clear it wherever it was
+            if o.get("label") == label:
+                o["label"] = None
+        self.objects[where[0]]["label"] = label                 # name the first match (naming is singular)
+        return self
+
+    def rename(self, old, new):
+        """Rename an existing nickname: scene.rename('hero', 'champion'). Returns self."""
+        new = str(new).strip()
+        for o in self.objects:
+            if o.get("label") == old:
+                o["label"] = new
+                return self
+        self.feedback = {"applied": False, "suggestions": ["No object is named %r. Current names: %s."
+                         % (old, ", ".join(self.labels()) or "none")]}
+        return self
 
     def get(self, reference):
         """The object dict(s) matching a reference (a list; may be empty)."""
@@ -243,22 +419,129 @@ class SemanticScene:
     # some people will reach for suggest(); it's the same clarifying preview
     suggest = interpret
 
-    def adjust(self, command):
-        """Adjust the scene from a plain-English command: 'make the sphere bigger', 'change the red box to metal',
-        'make everything glass'. Does its best -- resolving known synonyms (crimson->red, chrome->metal) -- applies the
-        change, and returns self (chainable).
+    def paint(self, reference, texture):
+        """Attach a composed TEXTURE to the referenced object(s), so scene.render() paints it on. `texture` may be a
+        texture NAME string ('rusty', 'marbled', ...) to use the built-in library, or a CMP1 texture graph / Material
+        you built yourself. Returns self (chainable)."""
+        if isinstance(texture, str):
+            g = named_texture(texture)
+            if g is None:
+                self.feedback = {"applied": False, "suggestions": ["I don't know a %r texture. Try: %s."
+                                 % (texture, ", ".join(texture_names()))]}
+                return self
+            texture = g
+        for i in self.select(reference):
+            self.objects[i]["texture"] = texture
+        return self
 
-        Honest AND helpful: a change hits ALL objects only when the command says so ('everything'/'all'/'it'); a
-        command it can't fully place ('make the pyramid golden') changes nothing rather than guessing -- and instead of
-        failing silently it leaves a clarifying report in `self.feedback` (understood/matched/questions/suggestions), so
-        the caller can ask the user 'did you mean ...?'. Use interpret(command) to preview that report without applying."""
+    # ---- external asset files: track them, and repair paths when they move --------------------------------
+    @property
+    def assets(self):
+        """The scene's AssetLibrary -- tracks the EXTERNAL image/model files objects reference, and repairs their
+        paths when they move. Created on first use (a purely procedural scene never makes one)."""
+        if self._assets is None:
+            from holographic_assets import AssetLibrary
+            self._assets = AssetLibrary()
+        return self._assets
+
+    def set_asset_roots(self, roots):
+        """Folders the scene may SEARCH to auto-find external files that have moved (used by render() and resolve).
+        e.g. scene.set_asset_roots(['/Users/me/Projects']). Returns self."""
+        self.asset_roots = list(roots)
+        return self
+
+    def attach_texture_file(self, reference, path, role="diffuse", with_hash=False):
+        """Give the referenced object(s) an EXTERNAL image file as their texture. The file is registered in the scene's
+        AssetLibrary (so it can be relinked/checked later) and the object renders with those pixels. Returns self."""
+        ref = self.assets.add(path, role=role, with_hash=with_hash)
+        et = ExternalTexture(path, role=role, asset_id=ref.id)
+        for i in self.select(reference):
+            self.objects[i]["texture"] = et
+        return self
+
+    def missing_assets(self):
+        """The external files this scene references that are not where we last saw them (as AssetRefs)."""
+        return self.assets.missing() if self._assets else []
+
+    def check_assets(self, with_hash=False):
+        """A report of every external file's status (ok / missing / modified) -- what a UI/agent would show."""
+        return self.assets.report(with_hash=with_hash) if self._assets else {"counts": {}, "assets": []}
+
+    def relink(self, asset_or_path, new_path, **kw):
+        """Re-point ONE external asset to its new location and auto-find the rest (delegates to the AssetLibrary, then
+        updates any object ExternalTexture whose file moved so the render picks up the new path). Returns the report."""
+        rep = self.assets.relink(asset_or_path, new_path, **kw)
+        self._sync_external_paths()
+        return rep
+
+    def resolve_assets(self, roots=None, with_hash=False):
+        """Find missing external files by searching `roots` (defaults to the scene's asset_roots) -- by matching
+        trailing folder structure, or by CONTENT HASH across machines. Updates the objects. Returns the report."""
+        roots = roots if roots is not None else self.asset_roots
+        report = {"relinked": [], "still_missing": []}
+        for root in roots:
+            r = self.assets.search_under(root, with_hash=with_hash)
+            report["relinked"].extend(r["relinked"])
+        report["still_missing"] = [a.path for a in self.assets.missing()]
+        self._sync_external_paths()
+        return report
+
+    def _sync_external_paths(self):
+        """After the AssetLibrary repairs paths, copy the current path back onto each object's ExternalTexture (matched
+        by asset id) so the next render loads from the right place."""
+        if not self._assets:
+            return
+        by_id = {a.id: a.path for a in self._assets.assets}
+        for o in self.objects:
+            t = o.get("texture")
+            if isinstance(t, ExternalTexture) and t.asset_id in by_id:
+                t.path = by_id[t.asset_id]
+
+    def adjust(self, command):
+        """Adjust the scene from a plain-English command. Handles three kinds of request:
+          * NAMING:  'call the red sphere hero', 'rename hero to champion'  -> give/rename a nickname.
+          * TEXTURE: 'give the sphere a rusty texture', 'make the box marbled' -> paint a named procedural texture.
+          * CHANGE:  'make the sphere bigger', 'change hero to glass', 'make everything metal' -> set attributes.
+        Objects can be referenced by a nickname (once named) or by description ('the red sphere'). Does its best --
+        resolving synonyms (crimson->red, chrome->metal) -- and, when a command can't be placed, changes nothing and
+        leaves a clarifying report in `self.feedback` rather than guessing. Returns self (chainable)."""
+        # 1. a NAMING command?
+        named = _parse_name_command(command)
+        if named:
+            if named[0] == "rename":
+                self.rename(named[1], named[2])
+                if self.feedback is None or self.feedback.get("applied") is not False:
+                    self.feedback = {"applied": True, "did": "renamed %r to %r" % (named[1], named[2])}
+            else:
+                self.name(named[1], named[2])
+                if self.feedback is None or self.feedback.get("applied") is not False:
+                    self.feedback = {"applied": True, "did": "named that object %r" % named[2]}
+            return self
+
+        # 2. a TEXTURE request? ('rusty', 'marbled', ... optionally with 'texture'/'paint')
+        texword = _texture_word_in(command)
+        if texword:
+            report = interpret_command(self, command)            # reuse the clarifier to resolve WHICH object (label-aware)
+            where = report["matched_idx"]
+            if not where and len(self.objects) == 1:
+                where = [0]                                       # 'give it a rusty texture' with one object is unambiguous
+            if not where:
+                self.feedback = {"applied": False, "suggestions": ["Which object should get the %s texture? "
+                                 "The scene has: %s." % (texword, ", ".join(self.names()))]}
+                return self
+            tex = named_texture(texword)
+            for i in where:
+                self.objects[i]["texture"] = tex
+            self.feedback = {"applied": True, "did": "painted a %s texture on %s"
+                             % (texword, ", ".join(self.objects[i]["name"] for i in where))}
+            return self
+
+        # 3. the standard attribute CHANGE (target resolved label-aware inside interpret_command)
         report = interpret_command(self, command)
         self.feedback = report                                   # always available: what it read + any suggestions
-        u = report["understood"]
-        changes, reference, explicit_all = u["changes"], u["reference"], u["target_all"]
+        changes = report["understood"]["changes"]
         if changes and report["applied"]:
-            where = list(range(len(self.objects))) if explicit_all else find_objects(self.objects, **reference)
-            for i in where:
+            for i in report["matched_idx"]:                      # label- or attribute-matched indices
                 for k, v in changes.items():
                     self.objects[i][k] = v
                 self.objects[i]["name"] = _obj_name(self.objects[i])
@@ -289,6 +572,29 @@ class SemanticScene:
         if camera is None:                                      # a sensible default view of the whole scene
             span = max(3.0, 1.6 * len(objs))
             camera = Camera(eye=(span * 0.4, span * 0.28, span), target=(0, 0, 0), fov_deg=42.0)
+        # if any object carries a composed texture, use the TEXTURED renderer so those paints show (keyed by the
+        # object's descriptive name, which is exactly what render_textured matches on).
+        # if any object references EXTERNAL files, make sure their paths are current (auto-search the known roots for
+        # anything that moved) before we try to load pixels.
+        if self._assets is not None and self.asset_roots and self.assets.missing():
+            self.resolve_assets()
+        # build the {object name: texture} dict the textured renderer wants. An ExternalTexture is loaded to its pixels
+        # here; if its file is missing/undecodable, load() returns None and we DROP it -- that object renders with its
+        # flat colour rather than crashing on a bad path.
+        textured = {}
+        for o in objs:
+            t = o.get("texture")
+            if t is None:
+                continue
+            if isinstance(t, ExternalTexture):
+                loaded = t.load()
+                if loaded is not None:
+                    textured[o["name"]] = loaded
+            else:
+                textured[o["name"]] = t
+        if textured:
+            from holographic_texturerender import render_textured
+            return render_textured(self, textured, camera=camera, width=width, height=height, **kw)
         sun = self.environment.get("sun") or "bright"
         sky = self.environment.get("sky") or "clear"
         if quality == "hyperreal":
@@ -440,6 +746,30 @@ def _selftest():
     opt = sc.options()
     assert "sphere" in opt["shapes"] and "metal" in opt["materials"] and opt["objects"]
 
+    # NAMED OBJECTS: give a nickname, reference by it, rename it -----------------------------------------
+    sc.name("the sphere", "hero")
+    assert sc.labels().get("hero"), sc.labels()
+    assert "hero" in sc.names()                                 # names() shows the nickname
+    sc.adjust("make hero metal")                                # reference the object by its nickname
+    assert sc.get("hero")[0]["material"] == "metal"
+    sc.adjust("rename hero to champion")                        # rename via a plain command
+    assert "champion" in sc.labels() and "hero" not in sc.labels()
+    sc.adjust("call the box crate")                             # name a second object via a command
+    assert "crate" in sc.labels()
+
+    # TEXTURES: paint a named procedural texture by talking to the scene, and via the API -----------------
+    sc.adjust("give champion a rusty texture")
+    assert sc.get("champion")[0]["texture"] is not None, "the rusty texture should be attached"
+    sc.paint("crate", "marbled")                               # the direct API, with a name from the library
+    assert sc.get("crate")[0]["texture"] is not None
+    # an unknown texture name is refused with a helpful suggestion, nothing attached
+    sc.paint("crate", "zebra")
+    assert not sc.feedback["applied"] and sc.feedback["suggestions"]
+
+    # RENDER routes through the textured renderer when a texture is present (real image, in range)
+    img = sc.render(width=48, height=40)
+    assert np.asarray(img).shape == (40, 48, 3) and float(np.asarray(img).std()) > 0.02
+
     # simulate: a real gravity drop that settles on the ground
     frames = sc.simulate(steps=30)
     assert len(frames) == 30
@@ -448,7 +778,8 @@ def _selftest():
     assert last_y < first_y and last_y > 0.0, (first_y, last_y)   # fell, and rests above the ground
 
     print("OK: holographic_scene_semantic self-test passed (describe->build %d objects; adjust bigger/to-metal/"
-          "everything-glass; set by description; unknown ref = no-op; simulate settles %.2f->%.2f)"
+          "everything-glass; set by description; NAME/rename + reference by nickname; paint a rusty/marbled TEXTURE "
+          "and route render through it; unknown ref = no-op; simulate settles %.2f->%.2f)"
           % (len(sc.objects), float(first_y), float(last_y)))
 
 

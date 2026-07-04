@@ -82,7 +82,11 @@ class Camera:
         t = np.tan(np.radians(self.fov_deg) / 2.0)
         ys, xs = np.mgrid[0:height, 0:width]
         ox, oy = (0.5, 0.5) if jitter is None else (0.5 + jitter[0], 0.5 + jitter[1])
-        ndc_x = (2.0 * (xs + ox) / width - 1.0) * self.aspect * t
+        # The horizontal must be widened by the frame's OWN aspect (width/height) or a circle renders as an ellipse
+        # -- e.g. a sphere in a 240x180 (4:3) frame looks squished if we used a square aspect. Derive it from the
+        # actual pixel grid rather than a stored self.aspect that may not match the resolution being rendered.
+        aspect = width / height
+        ndc_x = (2.0 * (xs + ox) / width - 1.0) * aspect * t
         ndc_y = (1.0 - 2.0 * (ys + oy) / height) * t
         dirs = (ndc_x[..., None] * r + ndc_y[..., None] * u + f)   # f is forward
         dirs = dirs / (np.linalg.norm(dirs, axis=-1, keepdims=True) + 1e-12)

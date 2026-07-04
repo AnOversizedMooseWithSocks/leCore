@@ -48,6 +48,8 @@ class Service:
         self.documents = []                                 # nested-object store for the GraphQL front door
         self._routes = {}                                   # (method, path) -> handler(payload) -> dict
         self._jobs = self._make_job_manager()               # long-running job control (start/pause/resume/cancel)
+        from holographic_bus import MessageBus
+        self._bus = MessageBus()                            # the message bus: person + agent both connected (push, no poll)
         self._register()
         if persist_path:
             self._load_from_disk()                          # restore a previous session's data if the file exists
@@ -85,6 +87,10 @@ class Service:
         self._routes[("POST", "/jobs/cancel")] = self._jobs_cancel
         self._routes[("POST", "/jobs/status")] = self._jobs_status
         self._routes[("POST", "/jobs/result")] = self._jobs_result
+        # message bus: a remote person/agent publishes, polls its inbox, and reads history (see holographic_bus)
+        self._routes[("POST", "/bus/publish")] = self._bus_publish
+        self._routes[("POST", "/bus/poll")] = self._bus_poll
+        self._routes[("POST", "/bus/history")] = self._bus_history
         self._routes[("GET", "/skills")] = self._skills_manifest       # agent-friendly discovery + invocation
         self._routes[("POST", "/skills/suggest")] = self._skills_suggest
         self._routes[("POST", "/skills/route")] = self._skills_route
@@ -264,6 +270,37 @@ class Service:
         res = job.result()
         return {"ok": True, "id": jid, "status": job.status,
                 "result": res.tolist() if isinstance(res, np.ndarray) else res}
+
+    # ---- message bus: connect a remote person/agent ---------------------------------------------------------
+    def _bus_publish(self, payload):
+        """Publish a message onto the bus. Body: {topic, payload?, sender?, reply_to?}. Returns the stored message.
+        This is how a remote party (a person's UI or an agent) sends a command/event/reply into the running app."""
+        p = payload or {}
+        if "topic" not in p:
+            raise QueryError("POST /bus/publish needs {topic[, payload, sender, reply_to]}")
+        msg = self._bus.publish(p["topic"], p.get("payload"), sender=p.get("sender", "client"),
+                                reply_to=p.get("reply_to"))
+        return {"ok": True, "message": msg.as_dict()}
+
+    def _bus_poll(self, payload):
+        """Drain a mailbox (a remote party's INBOX). Body: {mailbox, patterns?, limit?}. On first call for a mailbox
+        the patterns register what it collects (default everything); later calls just pull what has arrived since. The
+        messages are PUSHED into the inbox the instant they happen, so a poll returns news immediately -- you are not
+        busy-polling a status flag. Returns {messages}."""
+        p = payload or {}
+        name = p.get("mailbox")
+        if not name:
+            raise QueryError("POST /bus/poll needs {mailbox[, patterns, limit]}")
+        if name not in self._bus._mailboxes:                # open it on first sight with the requested patterns
+            self._bus.open_mailbox(name, tuple(p.get("patterns", ("*",))))
+        msgs = self._bus.poll(name, limit=p.get("limit"))
+        return {"ok": True, "mailbox": name, "messages": [m.as_dict() for m in msgs]}
+
+    def _bus_history(self, payload):
+        """Recent messages for catch-up/replay. Body: {pattern?, limit?}. Returns {messages} oldest-first."""
+        p = payload or {}
+        msgs = self._bus.history(p.get("pattern", "*"), limit=p.get("limit"))
+        return {"ok": True, "messages": [m.as_dict() for m in msgs]}
 
     def _need_job_id(self, payload):
         jid = (payload or {}).get("id")

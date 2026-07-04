@@ -10,6 +10,8 @@
   },
   "source": "Princeton WordNet 3.0 via NLTK",
   "license": "WordNet License (free use with attribution)",
-  "file": "dictionary.json.gz",
-  "format": "gzip-compressed JSON, word -> entry"
+  "file": "dictionary.json.xz",
+  "format": "gzip-compressed JSON, word -> entry",
+  "compression": "lzma (xz), preset 9",
+  "size_bytes": 3256896
 }

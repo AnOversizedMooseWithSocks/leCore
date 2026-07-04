@@ -119,6 +119,17 @@ floats at its **Archimedes waterline** (submerged fraction = density ratio ≈ 0
 > is that this happens with *no per-scene tuning*: the same call calibrates spheres, glass, a fractal, and a
 > water tank alike.
 
+![A composed texture painted onto a described scene](gallery/render_composed_texture.png)
+
+*The **composability** stack, made visual — a different path from the tracer above. A texture is built as a small
+graph of operations (`mind.texture_op("mix", a=red, b=cyan, t=fbm_noise)`), a scene is described in words
+(`mind.build_scene("a big sphere and a small box")`), the graphs are painted on (`scene.paint(...)`), and
+`scene.render()` routes through `render_textured`: it marches the SDF, turns each surface hit into a UV
+coordinate (spherical on the sphere, planar on the box), samples the composed texture there, and shades it with
+the same Cook-Torrance BRDF plus a light and a hard shadow. The pattern genuinely **wraps** the geometry via UV
+mapping — it isn't a flat recolour. (Honest: textbook UV, so a seam and a pole pinch on the sphere; one hard
+light — the path tracer above is the tool for soft GI.)*
+
 ---
 
 ## Procedural & generative

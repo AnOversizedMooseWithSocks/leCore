@@ -88,26 +88,29 @@ If you'd rather not install leCore as a package at all, you can of course just `
 
 The **fastest way to get it** is the tour: it runs the whole engine end to end in about half a minute, and finishes by having the unified mind assemble its own concepts from a bare pile of examples.
 
-In code, the heart of it is one class, **`UnifiedMind`**, which carries every general capability on one shared space. The flavor (illustrative):
+In code, the heart of it is one class, **`UnifiedMind`**, which carries every general capability on one shared space:
 
 ```python
 from holographic_unified import UnifiedMind
 
 mind = UnifiedMind(dim=4096, seed=0)     # one high-dimensional space; seed -> fully deterministic
 
-# teach it a few things, then recall by content (not by exact key):
-mind.remember("apple",  "a red fruit")
-mind.remember("banana", "a yellow fruit")
-hit = mind.recall("something red you can eat")   # -> the closest stored item, WITH a confidence
+# teach it a few things by description, then recall by CONTENT (not by an exact key):
+mind.learn("a small red round fruit",  "apple")
+mind.learn("a long soft yellow fruit", "banana")
+(label, description), score = mind.recall("something red you can eat")   # -> ('apple', ...) with a score
 
-# the raw algebra everything is built on:
-a, b = mind.encode("role"), mind.encode("filler")
-bound   = mind.bind(a, b)                 # glue two vectors into one
-back    = mind.unbind(bound, a)           # recover the filler (bind is reversible)
-guess   = mind.cleanup(back)              # snap the noisy result to the nearest known vector
+# the raw algebra everything is built on (bind / unbind / cleanup):
+from holographic_ai import Vocabulary, bind, unbind
+
+vocab = Vocabulary(dim=4096, seed=0)
+role, filler = vocab.get("role"), vocab.get("filler")   # two named random vectors
+bound   = bind(role, filler)             # glue two vectors into one
+noisy   = unbind(bound, role)            # recover the filler -- approximately (bind is reversible, but lossy)
+name, _ = vocab.cleanup(noisy)           # snap the noisy result to the nearest known vector -> "filler"
 ```
 
-*(Method names above are illustrative of the shape — see the docs for exact signatures. The modules keep their `holographic_` prefix from the project's origins.)* From there, the same `mind` object is where you reach the geometry, rendering, simulation, and program-execution capabilities.
+*(Every line above actually runs — the README's Python examples are checked in CI. The modules keep their `holographic_` prefix from the project's origins.)* From there, the same `mind` object is where you reach the geometry, rendering, simulation, and program-execution capabilities.
 
 **Describe a scene and shape it in words.** You can hand the engine a description and it builds a scene of *named* objects you can then adjust by talking to it — and when it doesn't understand a word, it says so and suggests alternatives instead of failing silently:
 
@@ -144,6 +147,10 @@ Like leOS, leCore is **free and open source**, and the work that keeps it free i
 
 ## Learning more
 
+- **[`FEATURE_GUIDE.md`](FEATURE_GUIDE.md)** — a **hands-on how-to** for the most recently added features: composable
+  materials/textures, the describe-a-scene authoring flow (naming, texturing, external files), external-asset
+  relocation and the queryable file map, the message-bus + optional-agent harness, and the opt-in language layer. Every
+  example is a short, commented, runnable snippet. The best place to start if you want to *use* the new capabilities.
 - **[`CAPABILITIES.md`](CAPABILITIES.md)** — the **front-door menu**: a plain-language, grouped list of what leCore can
   do and the one call that starts each job. The friendliest place to begin if you're deciding whether the engine
   already does the thing you need. Generated from the live capability catalog by `capdoc.py` and kept in sync by CI.

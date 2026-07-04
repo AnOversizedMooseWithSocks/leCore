@@ -9897,3 +9897,536 @@ def test_describe_build_adjust_scene_through_mind():
     # discoverable + confidently routed
     assert any("scene from description" in c.name.lower() for c in m.find_capability("describe a scene and build it"))
     assert m.route("describe a scene and build it")["decision"] == "act"
+
+
+def test_texture_graph_through_mind():
+    """CMP1: build a composable texture map graph THROUGH the mind, sample it, encode it, and confirm the
+    compose-time schema and discoverability all work end to end on one UnifiedMind."""
+    from holographic_texturegraph import Map, Const          # locally scoped, per the house rule
+    import numpy as np
+    m = UnifiedMind(dim=1024, seed=0)
+
+    # leaves + a nested graph, all via the mind's faculties
+    red, blue = m.texture_leaf(value=[1.0, 0, 0]), m.texture_leaf(value=[0, 0, 1.0])
+    noise = m.texture_leaf("fbm", n_dims=2, seed=0)
+    base = m.texture_op("mix", a=red, b=blue, t=noise)      # child map
+    top = m.texture_op("multiply", a=base, b=m.texture_leaf(value=[1.0, 1.0, 1.0]))
+    assert isinstance(top, Map)
+
+    # sampling returns an rgb, deterministically
+    val = m.sample_texture(top, [0.3, 0.7])
+    assert np.asarray(val).shape == (3,)
+    assert np.allclose(m.sample_texture(top, [0.3, 0.7]), val)
+
+    # encode to a hypervector; the same structure encodes identically (content-addressable graph identity)
+    v = m.encode_texture(top)
+    assert v.shape[0] == m.dim
+    again = m.encode_texture(m.texture_op("multiply", a=m.texture_op("mix", a=m.texture_leaf(value=[1.0, 0, 0]),
+                            b=m.texture_leaf(value=[0, 0, 1.0]), t=m.texture_leaf("fbm", n_dims=2, seed=0)),
+                            b=m.texture_leaf(value=[1.0, 1.0, 1.0])))
+    cos = float(np.dot(v, again) / (np.linalg.norm(v) * np.linalg.norm(again)))
+    assert cos > 0.99
+
+    # the schema refuses a bad graph at compose time, through the mind
+    import pytest
+    with pytest.raises(TypeError):
+        m.texture_op("mix", a=red, b=blue, t=red)          # a colour cannot be the weight
+
+    # discoverable + routed
+    assert any("texture graph" in c.name.lower() for c in m.find_capability("compose a texture from noise and colors"))
+
+
+def test_multi_material_by_mask_through_mind():
+    """CMP3: build two materials, blend them by a CMP1 texture-graph MASK through the mind, and confirm the
+    per-point weighted-sum formula + normalisation hold end to end (CMP1 feeds CMP3, as the backlog intends)."""
+    import numpy as np
+    from holographic_fpe import VectorFunctionEncoder
+    from holographic_material import Material, texture_field
+    m = UnifiedMind(dim=512, seed=0)
+
+    enc = VectorFunctionEncoder(2, dim=512, bounds=[(0, 1), (0, 1)], kernel="rbf", bandwidth=3.0, seed=1)
+    grid = [(u, v) for u in np.linspace(0.05, 0.95, 6) for v in np.linspace(0.05, 0.95, 6)]
+    a = Material(enc, {"albedo": texture_field(enc, grid, [u for (u, v) in grid])})
+    b = Material(enc, {"albedo": texture_field(enc, grid, [1.0 - u for (u, v) in grid])})
+
+    # the mask is a CMP1 graph built through the mind -> proves CMP1 composes into CMP3
+    mask_a = m.texture_op("scale", x=m.texture_leaf("fbm", n_dims=2, seed=0), k=m.texture_leaf(value=1.0))
+    mm = m.multi_material([a, b], [mask_a, 0.5])
+
+    uv = [0.35, 0.6]
+    w = mm.weights_at(uv)
+    assert abs(w.sum() - 1.0) < 1e-9                              # partition of unity
+    expect = w[0] * a.sample("albedo", uv) + w[1] * b.sample("albedo", uv)
+    assert abs(mm.sample("albedo", uv) - expect) < 1e-9          # exact weighted sum
+
+    # select mode picks the dominant material
+    pick = m.multi_material([a, b], [0.2, 0.8], mode="select")
+    assert abs(pick.sample("albedo", uv) - b.sample("albedo", uv)) < 1e-9
+
+    # discoverable
+    assert any("multi-material" in c.name.lower() for c in m.find_capability("blend two materials by a mask"))
+
+
+def test_layered_material_order_schema_through_mind():
+    """CMP2: stack material layers through the mind, composite bottom-to-top, and confirm the ORDER schema refuses
+    an out-of-order stack at compose time -- with a CMP1 texture graph as the coverage alpha (CMP1 feeds CMP2)."""
+    import numpy as np, pytest
+    from holographic_fpe import VectorFunctionEncoder
+    from holographic_material import Material, texture_field
+    m = UnifiedMind(dim=512, seed=0)
+
+    enc = VectorFunctionEncoder(2, dim=512, bounds=[(0, 1), (0, 1)], kernel="rbf", bandwidth=3.0, seed=1)
+    grid = [(u, v) for u in np.linspace(0.05, 0.95, 6) for v in np.linspace(0.05, 0.95, 6)]
+    a = Material(enc, {"albedo": texture_field(enc, grid, [u for (u, v) in grid])})
+    b = Material(enc, {"albedo": texture_field(enc, grid, [1.0 - u for (u, v) in grid])})
+
+    cov = m.texture_op("scale", x=m.texture_leaf("fbm", n_dims=2, seed=0), k=m.texture_leaf(value=1.0))
+    stack = m.layered_material([m.material_layer("base", a), m.material_layer("coat", b, alpha=cov)])
+
+    uv = [0.35, 0.6]
+    alpha = stack.layers[1].alpha_at(uv)
+    expect = alpha * b.sample("albedo", uv) + (1.0 - alpha) * a.sample("albedo", uv)   # over(coat, base, alpha)
+    assert abs(stack.sample("albedo", uv) - expect) < 1e-9
+
+    # the order schema refuses base-above-coat at compose time
+    with pytest.raises(ValueError):
+        m.layered_material([m.material_layer("coat", b), m.material_layer("base", a)])
+
+    # discoverable
+    assert any("layered material" in c.name.lower() for c in m.find_capability("put a clearcoat on top of paint"))
+
+
+def test_shared_definition_instancing_through_mind():
+    """CMP4: place one shared definition several times through the mind, edit it ONCE and confirm every instance
+    changes, that a bad material<->geometry binding is refused at compose time, and that flatten materialises the
+    surface instances into one mesh."""
+    import pytest
+    from holographic_mesh import box
+    from holographic_scenegraph import translation
+    m = UnifiedMind(dim=512, seed=0)
+
+    chair = m.shared_definition("chair", box(1, 1, 1), "metal")
+    scene = m.instanced_scene()
+    a = scene.place(chair, translation([-2, 0, 0]))
+    b = scene.place(chair, translation([2, 0, 0]))
+    assert a.material == "metal" and b.material == "metal"
+
+    # edit-once: one change to the shared definition updates every instance
+    chair.set_material("glass")
+    assert a.material == "glass" and b.material == "glass"
+
+    # type-correct binding refused at compose time (a volumetric material on a mesh)
+    with pytest.raises(TypeError):
+        m.shared_definition("bad", box(1, 1, 1), "smoke")
+
+    # flatten materialises the two surface instances into one mesh
+    merged = scene.flatten_surface()
+    assert merged.n_vertices == 2 * box(1, 1, 1).n_vertices
+
+    # discoverable
+    assert any("instancing" in c.name.lower() for c in m.find_capability("place the same object many times, recolor all at once"))
+
+
+def test_render_graph_orchestrates_cmp1_to_cmp4_through_mind():
+    """CMP5: the whole composability stack through one mind -- a CMP1 texture graph + a CMP4 instanced scene, resolved
+    by the render graph, which BAKES the static texture, keeps the dynamic one live, and binds+flattens the scene."""
+    import numpy as np
+    from holographic_mesh import box
+    from holographic_scenegraph import translation
+    from holographic_rendergraph import BakedTexture
+    m = UnifiedMind(dim=512, seed=0)
+
+    # CMP1 texture graph
+    g = m.texture_op("mix", a=m.texture_leaf(value="red"), b=m.texture_leaf(value="blue"), t=m.texture_leaf("fbm", n_dims=2))
+    # CMP4 instanced scene
+    scene = m.instanced_scene()
+    chair = m.shared_definition("chair", box(1, 1, 1), "metal")
+    scene.place(chair, translation([-2, 0, 0])); scene.place(chair, translation([2, 0, 0]))
+
+    # CMP5 render graph orchestrates them
+    rg = m.render_graph(res=32)
+    rg.add_texture("rust", g, static=True).add_texture("ripples", g, static=False).set_scene(scene)
+
+    plan = rg.plan()
+    assert any("BAKE" in ln for ln in plan) and any("LIVE" in ln for ln in plan)
+
+    prep = rg.prepare()
+    assert isinstance(prep.texture("rust"), BakedTexture)          # static -> baked (O(1) lookup)
+    assert prep.texture("ripples") is g                            # dynamic -> live
+    assert prep.surface_mesh.n_vertices == 2 * box(1, 1, 1).n_vertices   # CMP4 bind flattened 2 instances
+
+    # a baked texture still samples like the live graph (within interpolation error)
+    live = np.asarray(g.sample([0.4, 0.6]))
+    got = np.asarray(prep.texture("rust").sample([0.4, 0.6]))
+    assert np.max(np.abs(live - got)) < 0.1
+
+    assert any("render graph" in c.name.lower() for c in m.find_capability("bake a static texture vs sample live"))
+
+
+def test_preview_the_composed_stack_through_mind():
+    """Compose a CMP1 texture and a CMP2 layered material through the mind, then PREVIEW both -- a swatch and a
+    material ball -- confirming the whole compose->see loop works on one UnifiedMind."""
+    import numpy as np
+    from holographic_fpe import VectorFunctionEncoder
+    from holographic_material import Material, texture_field
+    from holographic_layeredmaterial import Layer, LayeredMaterial
+    m = UnifiedMind(dim=512, seed=0)
+
+    # CMP1 texture -> swatch
+    g = m.texture_op("mix", a=m.texture_leaf(value="red"), b=m.texture_leaf(value="blue"), t=m.texture_leaf("fbm", n_dims=2))
+    swatch = m.preview_texture(g, res=48)
+    assert swatch.shape == (48, 48, 3) and 0.0 <= swatch.min() and swatch.max() <= 1.0
+
+    # CMP2 layered material -> material ball
+    enc = VectorFunctionEncoder(2, dim=512, bounds=[(0, 1), (0, 1)], kernel="rbf", bandwidth=3.0, seed=1)
+    grid = [(a, b) for a in np.linspace(0.05, 0.95, 6) for b in np.linspace(0.05, 0.95, 6)]
+    mat = Material(enc, {"roughness": texture_field(enc, grid, [a for (a, b) in grid])})
+    stack = m.layered_material([m.material_layer("base", mat), m.material_layer("coat", mat, alpha=0.3)])
+    ball = m.preview_material(stack, res=64)
+    assert ball.shape == (64, 64, 3) and not np.allclose(ball[32, 32], ball[0, 0])
+
+    assert any("preview" in c.name.lower() for c in m.find_capability("see what my material looks like"))
+
+
+def test_render_composed_texture_onto_scene_through_mind():
+    """The capstone: compose a CMP1 texture through the mind, paint it onto a semantic-scene object, and render the
+    full scene -- confirming the texture WRAPS onto the surface (per-UV colour varies) rather than a flat tint."""
+    import numpy as np
+    from holographic_semantic import _UnionSDF
+    from holographic_raymarch import sphere_trace
+    from holographic_render import Camera
+    m = UnifiedMind(dim=512, seed=0)
+
+    scene = m.build_scene("a big red metal sphere")
+    tex = m.texture_op("mix", a=m.texture_leaf(value="red"), b=m.texture_leaf(value="cyan"),
+                        t=m.texture_leaf("fbm", n_dims=2, seed=1, octaves=5))
+    W = H = 96
+    img = m.render_textured(scene, {scene.names()[0]: tex}, width=W, height=H)
+    assert img.shape == (H, W, 3) and 0.0 <= img.min() and img.max() <= 1.0
+
+    # isolate the sphere pixels and check the painted colour VARIES across the surface (UV wrap works end to end)
+    union = _UnionSDF([r["sdf"] for r in scene.realize()])
+    span = max(3.0, 1.6)
+    cam = Camera(eye=(span * 0.4, span * 0.28, span), target=(0, 0, 0), fov_deg=42.0)
+    eye, dirs = cam.ray_dirs(W, H)
+    D = dirs.reshape(-1, 3); O = np.broadcast_to(eye, D.shape).copy()
+    hit, _, _ = sphere_trace(union, O, D)
+    sph = img.reshape(-1, 3)[hit]
+    assert sph[:, 0].std() > 0.02 and sph[:, 2].std() > 0.02
+
+    assert any("textured" in c.name.lower() for c in m.find_capability("paint a texture onto the sphere and render"))
+
+
+def test_scene_naming_and_textures_through_mind():
+    """The describe-a-scene flow with NAMED objects + composed TEXTURES: build a scene, nickname an object, paint a
+    named texture by talking to it, and confirm render routes through the textured renderer -- all via the mind."""
+    import numpy as np
+    m = UnifiedMind(dim=512, seed=0)
+    sc = m.build_scene("a big metal sphere and a small green box")
+
+    # name an object and reference it by nickname
+    sc.name("the sphere", "hero")
+    assert "hero" in sc.names()
+    sc.adjust("make hero glass")
+    assert sc.get("hero")[0]["material"] == "glass"
+
+    # paint a texture by talking to the scene, then render (routes through render_textured)
+    sc.adjust("give hero a rusty texture")
+    assert sc.get("hero")[0]["texture"] is not None
+    img = np.asarray(sc.render(width=64, height=48))
+    assert img.shape == (48, 64, 3) and img.std() > 0.02
+
+    # a scene with NO textures still renders the normal way
+    plain = m.build_scene("a red sphere")
+    assert np.asarray(plain.render(width=48, height=40)).shape == (40, 48, 3)
+
+
+def test_agent_bus_render_done_notifies_agent_through_mind():
+    """The leOS-harness flow: a person and an agent both on the mind's bus. A render runs as a task; when it finishes
+    the app PUSHES 'render.done' to the agent (an llm callback), which replies on the bus -- no polling. And a remote
+    party can do the same over the HTTP service."""
+    import numpy as np
+    m = UnifiedMind(dim=256, seed=0)
+
+    # a stand-in agent: any text->reply callable (no LLM library needed)
+    told, replies = [], []
+    bridge = m.agent_bridge(llm=lambda text: told.append(text) or "looks centered and bright")
+    bridge.on_reply(lambda msg: replies.append(msg.payload["reply"]))
+    bridge.notify_on("render.done", "A render finished -- does it look right?")
+
+    scene = m.build_scene("a red metal sphere")
+    m.run_task("render", lambda: np.asarray(scene.render(width=48, height=40)),
+               summarize=lambda a: {"shape": list(a.shape), "mean": round(float(a.mean()), 3)})
+    assert told and "render.done" in told[0]                 # the agent was reached with the summary
+    assert replies == ["looks centered and bright"]          # its reply is on the bus
+    assert [msg.topic for msg in m.bus().history()][:2] == ["render.start", "render.done"]
+
+    # no agent attached -> everything still runs, just noted
+    m2 = UnifiedMind(dim=128, seed=0)
+    m2.agent_bridge(llm=None).notify_on("render.done")
+    m2.run_task("render", lambda: 1)
+    assert any(msg.topic == "agent.unattached" for msg in m2.bus().history())
+
+    # over the HTTP service: a remote agent opens an inbox and receives pushed events
+    from holographic_service import Service
+    svc = Service()
+    call = lambda path, payload: svc._routes[("POST", path)](payload)
+    call("/bus/poll", {"mailbox": "agent", "patterns": ["render.*"]})     # open the inbox
+    call("/bus/publish", {"topic": "render.done", "payload": {"shape": [40, 48, 3]}, "sender": "app"})
+    inbox = call("/bus/poll", {"mailbox": "agent"})
+    assert [msg["topic"] for msg in inbox["messages"]] == ["render.done"]
+
+    # discoverable
+    assert any("message bus" in c.name.lower() for c in m.find_capability("notify the agent when a render finishes"))
+
+
+def test_semantic_word_index_through_mind_is_opt_in():
+    """Find words by MEANING through the mind, and confirm the language layer stays OPT-IN: building a mind doesn't
+    load the dictionary; only building the index (or a lookup) does."""
+    import holographic_dictionary as hd
+    hd.unload()
+    m = UnifiedMind(dim=256, seed=0)
+    assert not hd.is_loaded()                                  # building a mind must NOT load the dictionary
+
+    idx = m.build_semantic_index(words=["dog", "puppy", "cat", "kitten", "serendipity", "luck", "river", "ocean"],
+                                 dim=256, seed=0)
+    assert hd.is_loaded()                                      # building the index needed the definitions
+    top = [w for w, _ in idx.find("a young dog", k=3)]
+    assert "puppy" in top or "dog" in top
+
+    # discoverable
+    assert any("semantic word index" in c.name.lower() for c in m.find_capability("find a word by its meaning"))
+    hd.unload()                                                # tidy up RAM for the rest of the suite
+
+
+def test_asset_relocation_through_mind(tmp_path):
+    """The 3-D 'missing textures' repair through the mind: track external files, move the project, fix them ALL by
+    relinking ONE, detect an edited file, and resolve a file by content hash across machines."""
+    import os
+    import shutil
+    m = UnifiedMind(dim=128, seed=0)
+    lib = m.asset_library()
+
+    old = tmp_path / "Documents" / "project"
+    rels = ["textures/water/wave.png", "textures/stone/wall.png", "models/boat.obj"]
+    for rel in rels:
+        p = old.joinpath(*rel.split("/"))
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(("data:" + rel).encode())
+        lib.add(str(p), role=rel, with_hash=True)
+    assert len(lib.missing()) == 0
+
+    # move the whole project -> all break -> relink ONE fixes the rest
+    new = tmp_path / "Projects" / "project"
+    new.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(old), str(new))
+    assert len(lib.missing()) == 3
+    lib.relink(lib.assets[0].path, str(new.joinpath("textures", "water", "wave.png")))
+    assert len(lib.missing()) == 0
+
+    # edit one on disk -> detected as changed
+    import time
+    time.sleep(0.01)
+    with open(lib.assets[1].path, "ab") as f:
+        f.write(b" edit")
+    os.utime(lib.assets[1].path, None)
+    assert lib.assets[1] in lib.changed()
+
+    # distributed: same bytes under a different path on "another machine" -> resolve by hash
+    other = tmp_path / "machineB" / "renamed.obj"
+    other.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(lib.assets[2].path, str(other))
+    os.remove(lib.assets[2].path)
+    assert lib.resolve(lib.assets[2].id, roots=[str(tmp_path / "machineB")]) == str(other)
+
+    assert any("asset relocation" in c.name.lower() for c in m.find_capability("relink my assets that moved"))
+
+
+def test_scene_external_texture_files_resolve_through_mind(tmp_path):
+    """A scene that references EXTERNAL texture files tracks them, survives a move (colour fallback, no crash), and
+    re-finds them via the scene's asset roots -- the AssetLibrary wired into the describe-a-scene flow."""
+    import os, shutil, numpy as np
+    from PIL import Image
+    m = UnifiedMind(dim=256, seed=0)
+
+    p = tmp_path / "Documents" / "project" / "tex" / "wave.png"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    arr = np.zeros((16, 16, 3), np.uint8); arr[::4] = [40, 90, 220]
+    Image.fromarray(arr).save(str(p))
+
+    sc = m.build_scene("a big sphere")
+    sc.attach_texture_file("the sphere", str(p), with_hash=True)
+    assert np.asarray(sc.render(width=48, height=40)).std() > 0.02      # external texture shows
+
+    shutil.move(str(tmp_path / "Documents" / "project"), str(tmp_path / "Moved"))
+    assert len(sc.missing_assets()) == 1
+    assert np.asarray(sc.render(width=32, height=28)).shape == (28, 32, 3)   # no crash on the missing file
+
+    sc.set_asset_roots([str(tmp_path / "Moved")])
+    sc.resolve_assets()
+    assert len(sc.missing_assets()) == 0
+    assert np.asarray(sc.render(width=48, height=40)).std() > 0.02      # texture back after re-find
+
+
+def test_ingest_folder_queryable_and_relocatable_through_mind(tmp_path):
+    """Give the mind a folder: it digests it into a queryable, asset-tracked FILE MAP -- query by name/kind/content,
+    read its tree, and self-heal when the tree moves."""
+    import shutil
+    m = UnifiedMind(dim=128, seed=0)
+    for rel, c in {"readme.md": "renders water with a caustic shader",
+                   "src/shader.glsl": "vec3 normal = computeNormal();",
+                   "textures/wave.png": "PNG", "models/boat.obj": "v 0 0 0"}.items():
+        p = tmp_path / "proj" / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(c)
+
+    fm = m.ingest_files(str(tmp_path / "proj"))
+    assert len(fm) == 4
+    assert [e.relpath.split("/")[-1] for e in fm.find("*.png")] == ["wave.png"]
+    assert len(fm.by_kind("model")) == 1
+    assert any("shader" in e.relpath for e, _ in fm.search_text("normal"))
+    assert "textures" in fm.tree()
+
+    # move the whole tree -> everything is missing -> relink ONE fixes the rest
+    shutil.move(str(tmp_path / "proj"), str(tmp_path / "moved"))
+    assert len(fm.missing()) == 4
+    fm.relink(fm.assets.assets[0].path, str(tmp_path / "moved" / fm.files[0].relpath))
+    assert len(fm.missing()) == 0
+
+    assert any("file map ingest" in c.name.lower() for c in m.find_capability("digest a folder and search it"))
+
+
+def test_cold_storage_through_mind():
+    """Compress inactive data through the mind: park tables in a bounded store, and fold up a whole database, then get
+    it all back intact."""
+    import numpy as np
+    from holographic_query import Database
+    m = UnifiedMind(dim=128, seed=0)
+
+    # a bounded store keeps only K warm, cools the rest, warms transparently
+    store = m.cold_store(keep_warm=2)
+    for i in range(6):
+        store.put("tbl%d" % i, np.tile(np.arange(200.), 20) + i)   # redundant -> compresses well
+    st = store.stats()
+    assert st["warm"] <= 2 and st["cold"] >= 4 and st["approx_saved_bytes"] > 0
+    assert np.isclose(store.get("tbl3")[0], 3.0)                    # cold -> warmed on access
+
+    # cool ONE big structure (a whole database) and bring it back
+    db = Database(); db.add_namespace("s"); db.create_table("s.widgets", ["id", "name"])
+    t = db.namespaces["s"]["tables"]["widgets"]
+    for i in range(30):
+        t.insert({"id": i, "name": "w%d" % i})
+    c = m.cool(db, codec="lzma")
+    c.cool()
+    assert c.is_cold()
+    db2 = c.get()
+    assert len(db2.namespaces["s"]["tables"]["widgets"].rows) == 30
+
+    assert any("cold storage" in cap.name.lower() for cap in m.find_capability("compress inactive tables to save memory"))
+
+
+def test_database_auto_cooling_is_distributed_safe():
+    """The cold-storage primitive wired into the Database: idle tables cool, resolve() warms them, and a copy shipped
+    to a distributed worker arrives warm + cooling-off so the shared read-only cache can't be mutated."""
+    import pickle
+    from holographic_query import Database
+    from holographic_coordinator import Coordinator, InProcessBackend
+    from holographic_distribute import reduce_sum
+
+    db = Database(); db.add_namespace("app")
+    for t in range(4):
+        db.create_table("app.t%d" % t, ["id", "amt"])
+        for i in range(50):
+            db.resolve("app.t%d" % t).insert({"id": i, "amt": i})
+
+    db.enable_cold_storage(keep_warm=1)
+    assert db.cool_idle() >= 1                              # idle tables compressed
+    assert db.resolve("app.t0").rows[7]["amt"] == 7        # warmed transparently, data intact
+
+    # ship it (as a distributed worker would receive it): warm + cooling off, reads don't mutate
+    shipped = pickle.loads(pickle.dumps(db))
+    assert shipped.cold_stats()["enabled"] is False and shipped.cold_stats()["cold"] == 0
+
+    # and it actually works as a shared cache in a distributed job
+    db.cool_idle()
+
+    def worker(bucket, cache):
+        return sum(cache.resolve("app.t0").rows[i]["amt"] for i in bucket)
+
+    with Coordinator(InProcessBackend()) as c:
+        total = c.run([list(range(25)), list(range(25, 50))], worker, cache=db, reduce=reduce_sum)
+    assert total == sum(range(50))
+
+
+def test_asset_import_through_mind(tmp_path):
+    """Import artist formats through the mind: an OBJ+MTL, a glTF/GLB round-trip with its material, and a volumetric
+    grid that actually renders through render_volume."""
+    import numpy as np
+    from holographic_render import Camera
+    m = UnifiedMind(dim=128, seed=0)
+
+    # OBJ + MTL
+    (tmp_path / "m.obj").write_text("mtllib m.mtl\nv 0 0 0\nv 1 0 0\nv 1 1 0\nusemtl c\nf 1 2 3\n")
+    (tmp_path / "m.mtl").write_text("newmtl c\nKd 0.1 0.7 0.2\n")
+    lm = m.load_obj(str(tmp_path / "m.obj"))
+    assert lm.faces.shape == (1, 3) and "c" in lm.materials
+
+    # glTF/GLB with a material, imported back
+    from holographic_mesh import box
+    from holographic_gltf import mesh_to_glb
+    from holographic_materialio import PBRMaterial
+    (tmp_path / "b.glb").write_bytes(mesh_to_glb(box(), material=PBRMaterial(name="gold", metallic=1.0, roughness=0.2)))
+    glm = m.load_glb(str(tmp_path / "b.glb"))
+    assert glm.materials and abs(list(glm.materials.values())[0].metallic - 1.0) < 1e-6
+
+    # a volume grid -> field -> actually renders
+    n = 32; g = np.zeros((n, n, n), np.float32); g[10:22, 10:22, 10:22] = 1.0
+    np.save(str(tmp_path / "v.npy"), g)
+    field, bounds = m.load_volume(str(tmp_path / "v.npy"))
+    img, alpha = m.render_volume(field, Camera(eye=(0, 0, 3), target=(0, 0, 0), fov_deg=40),
+                                 bounds, width=48, height=48, steps=48)
+    assert np.asarray(img).shape == (48, 48, 3) and (np.asarray(alpha) > 0.01).any()
+
+    assert any("import artist file" in c.name.lower() for c in m.find_capability("load an obj or glb model"))
+
+
+def test_gltf_animation_through_mind(tmp_path):
+    """A rigged glTF imported through the mind exposes its animation, and sampling the clip interpolates node
+    transforms over time."""
+    import struct, json, numpy as np
+    m = UnifiedMind(dim=128, seed=0)
+    # a minimal animated GLB: node 0 slides 0->2 on X across two keyframes
+    times = np.array([0.0, 1.0], np.float32).tobytes()
+    vals = np.array([[0, 0, 0], [2, 0, 0]], np.float32).tobytes()
+    blob = times + vals
+    gltf = {"asset": {"version": "2.0"}, "nodes": [{"name": "bone"}], "buffers": [{"byteLength": len(blob)}],
+            "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": 8},
+                            {"buffer": 0, "byteOffset": 8, "byteLength": 24}],
+            "accessors": [{"bufferView": 0, "componentType": 5126, "count": 2, "type": "SCALAR", "min": [0.0], "max": [1.0]},
+                          {"bufferView": 1, "componentType": 5126, "count": 2, "type": "VEC3"}],
+            "animations": [{"name": "slide", "samplers": [{"input": 0, "output": 1, "interpolation": "LINEAR"}],
+                            "channels": [{"sampler": 0, "target": {"node": 0, "path": "translation"}}]}]}
+    jb = json.dumps(gltf).encode(); jb += b" " * ((4 - len(jb) % 4) % 4)
+    bb = blob + b"\x00" * ((4 - len(blob) % 4) % 4)
+    out = struct.pack("<III", 0x46546C67, 2, 12 + 8 + len(jb) + 8 + len(bb))
+    out += struct.pack("<II", len(jb), 0x4E4F534A) + jb + struct.pack("<II", len(bb), 0x004E4942) + bb
+    (tmp_path / "a.glb").write_bytes(out)
+
+    lm = m.load_glb(str(tmp_path / "a.glb"))
+    assert len(lm.animations) == 1
+    assert np.allclose(lm.animations[0].sample(0.5)[0][:3, 3], [1, 0, 0])   # midpoint interpolation
+    assert any("import artist file" in c.name.lower() for c in m.find_capability("import an animated rigged model"))
+
+
+def test_deform_rig_through_mind(tmp_path):
+    """Import a skinned GLB through the mind and deform it: mind.deform_mesh poses the rig so the vertices follow the
+    animated bone."""
+    import numpy as np
+    from test_holographic_skindeform import _skinned_glb
+    m = UnifiedMind(dim=128, seed=0)
+    (tmp_path / "rig.glb").write_bytes(_skinned_glb())
+    lm = m.load_glb(str(tmp_path / "rig.glb"))
+    rest = m.deform_mesh(lm, clip=None)                        # rest pose
+    posed = m.deform_mesh(lm, clip=lm.animations[0], t=1.0)    # posed at t=1
+    assert np.allclose(posed.vertices - rest.vertices, [0, 2, 0], atol=1e-4)
+    assert any("import artist file" in c.name.lower() for c in m.find_capability("deform a rigged model with skinning"))

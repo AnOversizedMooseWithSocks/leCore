@@ -297,7 +297,110 @@ class Database:
         ns, name = self._split(qualified)
         if ns not in self.namespaces or name not in self.namespaces[ns]["tables"]:
             raise QueryError("no such table %r" % (qualified,))
-        return self.namespaces[ns]["tables"][name]
+        entry = self.namespaces[ns]["tables"][name]
+        if getattr(self, "_cold", None) is not None:          # cold storage on: warm-on-access + track recency
+            from holographic_coldstore import Cold
+            with self._cold["lock"]:
+                if isinstance(entry, Cold):
+                    entry = entry.warm()                      # inflate a cooled table transparently
+                    self.namespaces[ns]["tables"][name] = entry
+                self._touch(ns, name)
+        return entry
+
+    # -- cold storage: fold up INACTIVE user tables to save memory, unfurl on access (OPT-IN) ------------------
+    def enable_cold_storage(self, keep_warm=8, codec="zlib", spill_dir=None):
+        """Turn on OPT-IN auto-cooling for this database's USER tables. cool_idle() compresses the tables you haven't
+        touched lately (freeing their RAM); the next query that resolves one warms it back transparently. System
+        tables (the mind's live state) are never cooled. OFF by default, so nothing changes unless you ask.
+
+        Safe for DISTRIBUTED use by construction: if a cold-enabled database is pickled (e.g. shipped to a worker as a
+        shared read-only cache), it is WARMED first and arrives with cooling DISABLED -- a plain, immutable, warm copy.
+        So a worker's reads never mutate the shared cache, and no lock or spill-file path ever crosses a process
+        boundary. Re-enable it in the child only if you actually want cooling there."""
+        import threading
+        from collections import OrderedDict
+        self._cold = {"keep_warm": keep_warm, "codec": codec, "spill_dir": spill_dir,
+                      "lru": OrderedDict(), "lock": threading.RLock()}
+        return self
+
+    def disable_cold_storage(self):
+        """Warm everything back and turn cooling off."""
+        self.warm_all()
+        self._cold = None
+        return self
+
+    def _touch(self, ns, name):
+        """Mark (ns, name) most-recently-used in the LRU order (called from resolve while holding the lock)."""
+        lru = self._cold["lru"]
+        lru.pop((ns, name), None)
+        lru[(ns, name)] = True
+
+    def _user_tables(self):
+        """(namespace, table) for every WRITABLE (non-system) table -- the only ones we ever cool."""
+        return [(ns, nm) for ns, body in self.namespaces.items()
+                if body.get("writable") and ns != "system" for nm in list(body["tables"])]
+
+    def cool_idle(self):
+        """Compress every user table EXCEPT the `keep_warm` most-recently-resolved ones, freeing their RAM. Call this
+        when the database is IDLE -- no query or transaction in flight -- because cooling replaces a table object with
+        its compressed form, and warming later builds a fresh object; doing that mid-operation could strand a live
+        reference. Warming on the next resolve() is automatic. Returns how many tables were cooled."""
+        if getattr(self, "_cold", None) is None:
+            return 0
+        from holographic_coldstore import Cold
+        with self._cold["lock"]:
+            keep = self._cold["keep_warm"]
+            recent = set(list(self._cold["lru"])[-keep:]) if keep else set()
+            cooled = 0
+            for ns, nm in self._user_tables():
+                entry = self.namespaces[ns]["tables"][nm]
+                if isinstance(entry, Cold) or (ns, nm) in recent:
+                    continue                                   # already cold, or one of the hot ones we keep warm
+                c = Cold(entry, codec=self._cold["codec"], spill_dir=self._cold["spill_dir"])
+                c.cool()
+                self.namespaces[ns]["tables"][nm] = c
+                cooled += 1
+            return cooled
+
+    def warm_all(self):
+        """Inflate every cooled table back to a live Table (used before serialising or sharing). Safe anytime."""
+        if getattr(self, "_cold", None) is None:
+            return self
+        from holographic_coldstore import Cold
+        with self._cold["lock"]:
+            for body in self.namespaces.values():
+                for nm, entry in list(body["tables"].items()):
+                    if isinstance(entry, Cold):
+                        body["tables"][nm] = entry.warm()
+        return self
+
+    def cold_stats(self):
+        """Memory picture: how many user tables are warm vs cold, and the compressed footprint of the cold ones."""
+        from holographic_coldstore import Cold
+        warm = cold = cold_bytes = 0
+        for body in self.namespaces.values():
+            for entry in body["tables"].values():
+                if isinstance(entry, Cold):
+                    cold += 1
+                    cold_bytes += entry.cold_bytes()
+                else:
+                    warm += 1
+        return {"warm": warm, "cold": cold, "cold_bytes": cold_bytes,
+                "enabled": getattr(self, "_cold", None) is not None}
+
+    def __getstate__(self):
+        """Pickle in a DISTRIBUTED-SAFE form: warm every cooled table and drop the cold-storage machinery (its lock and
+        LRU state). A worker that receives this database gets a plain, immutable, warm copy with cooling OFF, so reads
+        can't mutate the shared cache and the (unpicklable) lock / spill paths never cross the process boundary."""
+        self.warm_all()
+        state = dict(self.__dict__)
+        state["_cold"] = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if "_cold" not in self.__dict__:
+            self._cold = None
 
     def _require_writable(self, ns):
         """The single write chokepoint -- the system wall lives here."""
@@ -398,6 +501,7 @@ class Database:
         read-only system tables are the mind's live state, not the user's data, so they are NEVER saved here. WS2:
         pass `tiers` (e.g. ['persistent']) to save only certain tiers -- persistent for the durable DB, 'workspace'
         for a single session's scratch."""
+        self.warm_all()                                       # cold storage: inflate any cooled tables so none are missed
         out = {"namespaces": {}}
         for ns, body in self.namespaces.items():
             if ns == "system" or not body["writable"]:

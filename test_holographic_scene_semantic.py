@@ -119,3 +119,149 @@ def test_build_does_its_best_with_synonyms():
     sc = scene_from_description("a shiny crimson orb")
     o = sc.objects[0]
     assert o["shape"] == "sphere" and o["color"] == "red" and o["material"] == "mirror"
+
+
+# ---- named objects + scene textures (naming / reference-by-nickname / paint / render routing) --------------
+def _scene():
+    from holographic_scene_semantic import scene_from_description
+    return scene_from_description("a big red metal sphere and a small blue box")
+
+
+def test_name_and_reference_by_nickname():
+    sc = _scene()
+    sc.name("the red sphere", "hero")
+    assert sc.labels()["hero"].endswith("sphere")
+    assert "hero" in sc.names()                       # names() shows the nickname
+    sc.adjust("make hero glass")                       # reference by nickname in a command
+    assert sc.get("hero")[0]["material"] == "glass"
+    # the nickname still resolves after the object's description changed
+    assert sc.select("hero") == sc.select({"shape": "sphere"})
+
+
+def test_rename_and_name_via_command():
+    sc = _scene()
+    sc.name("the sphere", "hero")
+    sc.adjust("rename hero to champion")
+    assert "champion" in sc.labels() and "hero" not in sc.labels()
+    sc.adjust("call the box crate")
+    assert "crate" in sc.labels()
+
+
+def test_label_is_unique():
+    sc = _scene()
+    sc.name("the sphere", "thing")
+    sc.name("the box", "thing")                        # reusing a label moves it
+    assert sc.labels() == {"thing": sc.get({"shape": "box"})[0]["name"]}
+
+
+def test_paint_named_texture_and_render_routes():
+    import numpy as np
+    sc = _scene()
+    sc.adjust("give the sphere a rusty texture")
+    assert sc.get({"shape": "sphere"})[0]["texture"] is not None
+    sc.paint("the box", "marbled")
+    assert sc.get({"shape": "box"})[0]["texture"] is not None
+    img = np.asarray(sc.render(width=48, height=40))
+    assert img.shape == (40, 48, 3) and img.std() > 0.02
+
+
+def test_unknown_texture_is_refused_helpfully():
+    sc = _scene()
+    sc.paint("the sphere", "zebra")
+    assert not sc.feedback["applied"] and sc.feedback["suggestions"]
+    assert sc.get({"shape": "sphere"})[0]["texture"] is None
+
+
+def test_named_texture_library():
+    from holographic_scene_semantic import named_texture, texture_names
+    for name in texture_names():
+        g = named_texture(name)
+        assert g is not None and hasattr(g, "sample")
+    assert named_texture("nonsense") is None
+
+
+def test_make_object_texture_word_only():
+    """'make the box mossy' (a texture word with no 'texture' trigger) still paints it."""
+    sc = _scene()
+    sc.adjust("make the box mossy")
+    assert sc.get({"shape": "box"})[0]["texture"] is not None
+
+
+# ---- external texture files on scene objects (asset library + resolve/relink through the scene) ------------
+def _make_png(path, tint=(220, 60, 60)):
+    import numpy as np
+    from PIL import Image
+    img = np.zeros((16, 16, 3), np.uint8)
+    img[::4] = tint
+    img[:, ::4] = tint[::-1]
+    import os
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    Image.fromarray(img).save(path)
+
+
+def test_attach_external_texture_renders(tmp_path):
+    import numpy as np
+    from holographic_scene_semantic import scene_from_description
+    p = str(tmp_path / "project" / "textures" / "checker.png")
+    _make_png(p)
+    sc = scene_from_description("a big sphere")
+    sc.attach_texture_file("the sphere", p)
+    assert len(sc.missing_assets()) == 0
+    img = np.asarray(sc.render(width=64, height=48))
+    assert img.shape == (48, 64, 3) and img.std() > 0.02        # the image texture shows
+
+
+def test_moved_file_falls_back_then_resolves(tmp_path):
+    import os, shutil, numpy as np
+    from holographic_scene_semantic import scene_from_description
+    p = str(tmp_path / "Documents" / "project" / "textures" / "checker.png")
+    _make_png(p)
+    sc = scene_from_description("a big sphere")
+    sc.attach_texture_file("the sphere", p, with_hash=True)
+
+    # move the project -> the file is missing, but render must NOT crash (falls back to colour)
+    shutil.move(str(tmp_path / "Documents" / "project"), str(tmp_path / "Projects_project"))
+    assert len(sc.missing_assets()) == 1
+    img = np.asarray(sc.render(width=48, height=40))            # graceful, no exception
+    assert img.shape == (40, 48, 3)
+
+    # point the scene at the new root and resolve -> the file is re-found and the texture returns
+    sc.set_asset_roots([str(tmp_path / "Projects_project")])
+    sc.resolve_assets()
+    assert len(sc.missing_assets()) == 0
+    assert np.asarray(sc.render(width=48, height=40)).std() > 0.02
+
+
+def test_relink_one_updates_the_scene(tmp_path):
+    import shutil
+    from holographic_scene_semantic import scene_from_description
+    a = str(tmp_path / "old" / "tex" / "a.png")
+    b = str(tmp_path / "old" / "tex" / "b.png")
+    _make_png(a); _make_png(b, tint=(60, 200, 60))
+    sc = scene_from_description("a big sphere and a small box")
+    sc.attach_texture_file("the sphere", a)
+    sc.attach_texture_file("the box", b)
+    shutil.move(str(tmp_path / "old"), str(tmp_path / "new"))
+    assert len(sc.missing_assets()) == 2
+    # relink ONE; the other is found by the shared moved-parent
+    sc.relink(sc.assets.assets[0].path, str(tmp_path / "new" / "tex" / "a.png"))
+    assert len(sc.missing_assets()) == 0
+
+
+def test_check_assets_report(tmp_path):
+    import os
+    from holographic_scene_semantic import scene_from_description
+    p = str(tmp_path / "t" / "x.png")
+    _make_png(p)
+    sc = scene_from_description("a sphere")
+    sc.attach_texture_file("the sphere", p)
+    assert sc.check_assets()["counts"].get("ok") == 1
+    os.remove(p)
+    assert sc.check_assets()["counts"].get("missing") == 1
+
+
+def test_procedural_scene_makes_no_asset_library():
+    from holographic_scene_semantic import scene_from_description
+    sc = scene_from_description("a red sphere")
+    sc.adjust("give the sphere a rusty texture")               # procedural, not a file
+    assert sc._assets is None                                  # no AssetLibrary created for a purely procedural scene

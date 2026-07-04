@@ -8,10 +8,11 @@ comprehensive one: ~144,000 English words, each with a definition, part of speec
 "is_a" parent (hypernym) -- so the engine has genuine world-knowledge to lean on, not just its internal machinery.
 
 The data is Princeton WordNet 3.0 (via NLTK), redistributed under the WordNet license (see LICENSE_WORDNET.txt).
-It is stored gzip-compressed (~5.8 MB) and loaded LAZILY with the standard library only (json + gzip) -- NLTK was used
+It is stored LZMA-compressed (~3.3 MB -- ~45% smaller than the old gzip, same exact round-trip) and loaded
+LAZILY with the standard library only (json + lzma/gzip) -- NLTK was used
 once at build time to extract it and is NOT a runtime dependency, honouring the NumPy/stdlib-only rule.
 
-  dictionary.json.gz : {word: {"d": definition, "p": pos, "s": [synonyms], "e": example, "h": is_a-parent}}
+  dictionary.json.xz : {word: {"d": definition, "p": pos, "s": [synonyms], "e": example, "h": is_a-parent}}
 
 TWO RESOURCES IN ONE FILE
   * DICTIONARY -- define(word), synonyms(word), part_of_speech(word), example(word).
@@ -22,20 +23,33 @@ Users can supply their own or a larger dictionary by replacing the vendored file
 Lexicon / learn_dictionary machinery -- this is just the batteries-included default.
 """
 import gzip
+import lzma
 import json
 import os
 
 # The vendored dictionary ships in the lecore_data PACKAGE, so it resolves the same from a source clone and from a
-# pip-installed wheel. We fall back to the old repo-relative data/ path too, so an older checkout still works.
+# pip-installed wheel. It is stored LZMA-compressed (.json.xz, ~3.3 MB) -- lzma is stdlib and packs this JSON ~45%
+# tighter than gzip did (5.9 -> 3.3 MB) with the same exact, lossless round-trip. We still accept the older gzip
+# (.json.gz) file, and the old repo-relative data/ path, so an older checkout keeps working.
+_CANDIDATES = ("dictionary.json.xz", "dictionary.json.gz")     # prefer lzma; fall back to gzip
+
+
 def _resolve_data_path():
+    # try the packaged location first (xz then gz), then the legacy repo-relative data/ dir (xz then gz)
     try:
         import lecore_data
-        p = lecore_data.file("knowledge", "dictionary.json.gz")
-        if os.path.exists(p):
-            return p
+        for name in _CANDIDATES:
+            p = lecore_data.file("knowledge", name)
+            if os.path.exists(p):
+                return p
     except Exception:
         pass
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "knowledge", "dictionary.json.gz")
+    here = os.path.dirname(os.path.abspath(__file__))
+    for name in _CANDIDATES:
+        p = os.path.join(here, "data", "knowledge", name)
+        if os.path.exists(p):
+            return p
+    return os.path.join(here, "data", "knowledge", _CANDIDATES[0])   # a sensible default for the error message
 
 
 _DATA_PATH = _resolve_data_path()
@@ -43,15 +57,58 @@ _DATA_PATH = _resolve_data_path()
 _DICT = None                                            # lazily-loaded {word: entry}; None until first use
 
 
+def _open_compressed(path):
+    """Open the vendored dictionary for text reading, picking the decompressor from the extension: lzma for .xz,
+    gzip for .gz. Both are stdlib and both are exactly lossless -- the choice is purely which packs smaller."""
+    if path.endswith(".xz"):
+        return lzma.open(path, "rt", encoding="utf-8")
+    return gzip.open(path, "rt", encoding="utf-8")
+
+
 def _load():
-    """Load the gzipped dictionary once, on first use (stdlib only). Cached for the process lifetime."""
+    """Load the compressed dictionary once, on first use (stdlib only). Cached for the process lifetime."""
     global _DICT
     if _DICT is None:
         if not os.path.exists(_DATA_PATH):
             raise FileNotFoundError("vendored dictionary not found at %s -- is data/knowledge/ present?" % _DATA_PATH)
-        with gzip.open(_DATA_PATH, "rt", encoding="utf-8") as f:
+        with _open_compressed(_DATA_PATH) as f:
             _DICT = json.load(f)
     return _DICT
+
+
+# -- lazy-load control (the language layer is OPT-IN) -------------------------------------------------------
+# The dictionary NEVER loads just from importing leCore or building a UnifiedMind -- it decompresses into a plain dict
+# in RAM the first time you actually call a language function (lookup/has/define/...), and only then. So a user who
+# imports the library to build on top pays nothing for the language layer unless they use it. These helpers make that
+# behaviour visible and controllable, instead of leaving it implicit.
+def is_loaded():
+    """True once the dictionary has been decompressed into RAM (i.e. after the first language call)."""
+    return _DICT is not None
+
+
+def preload():
+    """Force the one-time decompress+parse NOW (e.g. at app startup) so the FIRST lookup later isn't the slow one.
+    Returns the number of words. Optional -- lookups auto-load on first use anyway."""
+    return len(_load())
+
+
+def unload():
+    """Drop the dictionary from RAM (frees ~22 MB). The next language call will transparently reload it. Handy if you
+    used a language feature once and want the memory back."""
+    global _DICT
+    _DICT = None
+
+
+def stats():
+    """A small, honest picture of the language layer's state: whether it's loaded, how many words, which file backs it
+    and how it's compressed. Reading this does NOT trigger a load."""
+    import os
+    path = _DATA_PATH
+    return {"loaded": _DICT is not None,
+            "words": (len(_DICT) if _DICT is not None else None),   # None until loaded, so this stays load-free
+            "source": os.path.basename(path),
+            "compression": "lzma (xz)" if path.endswith(".xz") else ("gzip" if path.endswith(".gz") else "?"),
+            "on_disk_bytes": (os.path.getsize(path) if os.path.exists(path) else None)}
 
 
 # -- membership + size --------------------------------------------------------------------------------------

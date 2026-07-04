@@ -20287,3 +20287,711 @@ Taught reachability_audit.py to recognize "superseded by" as a declared marker (
 read as declared, not unexplained (import-only 55->51). Result, verified by an independent cross-reference: "still
 buried: NONE -- clean". +4 guard tests (the 2 unique modules stay discoverable; the 4 duplicates keep their banner; and
 a no-module-is-buried check so this can't silently regress).
+
+## WIRING RE-VERIFY + GALLERY/TEST TECH-STACK SWEEP (clean) + a permanent guard  [+3 tests]
+
+Two-part request: (1) confirm pipelines are fully wired / nothing buried, then (2) sweep gallery demos + tests for
+correct tech stack.
+
+(1) RE-VERIFIED the wiring audit end to end (the buried-module resolution from earlier this session was intact, not
+lost to a rollback -- I checked because a NOTES entry claimed it done while a scratch cross-ref of mine suggested
+otherwise; the scratch script was just wrong). Authoritative state: reachability_audit + test_buried_audit both green.
+312 modules reachable via a UnifiedMind faculty; 4 carry a SUPERSEDED-BY banner (query_concurrency/history/programs/
+graph -> querylock/querytime/queryprog/querygraph) and read as 'declared' in the audit; 7 declared negatives; 51
+import-only but all infra/home modules reached through facades; 0 undiscoverable; the 2 genuinely-unique buried
+modules (workspace, query_durable) already have curated homes. NOTHING is buried.
+
+(2) SWEEP of make_gallery.py + all test_*.py: the stack is correct, nothing to fix (measured, not assumed):
+  * No gallery demo or test (nor any other module) imports a superseded/buried module -- canonical twins used
+    everywhere; superseded modules appear ONLY in their own file + own test.
+  * No banned deps (torch/scipy/sklearn/tensorflow/keras/cv2) anywhere in tests or the gallery.
+  * CORE PURITY holds: import lecore + UnifiedMind + find_capability + build_scene all work with numpy ALONE
+    (PIL/matplotlib/nltk/scipy/sklearn/torch/cupy/numba all blocked) -- image_vault's PIL dep is isolated to the APP
+    layer (app.py/unified_app.py), not core.
+  * Determinism: every random/np.random use in tests is SEEDED. The one np.random.seed(424242) in test_integration is
+    DELIBERATE -- it scrambles the global RNG to PROVE the calibrated paths draw only from their own seeded RNG (the
+    bind_batch discipline). Read the context before 'fixing' it; left it alone.
+  * make_gallery.py drives only canonical render modules (gbuffer/raymarch/pathtrace/matlib/sdf/adaptive_sample, all
+    present); matplotlib is Agg-backend, plot-only. Optional-dep tests (8x nltk, 1x PIL) match house style (deps in
+    requirements.txt), consistent across the suite.
+
+Turned the sweep into a PERMANENT guard: test_techstack.py -- (a) core-purity check in a SUBPROCESS with every
+optional/banned dep blocked (catches a future PIL/scipy/etc. leak into a core-reachable import), (b) no non-test module
+imports a superseded twin (a duplicate can't creep back into a pipeline), (c) the 4 duplicates keep their banner. +3
+tests. The one-time sweep is now a regression gate, like catalog_gaps/skill_lint/servicedoc/buried_audit.
+
+## CMP1: composable TEXTURE MAP GRAPH (readable tree + compose-time type schema)  [+11 tests]
+
+First item of the render-composability backlog. The gap: the pipeline is composable and the scene half-composable,
+but textures/materials are flat -- a texture is an FPE-over-UV function, a material a 2-way blend. The backlog's
+insight (the engine's own): a texture map, a layered material, a scene node, and a pipeline stage are four costumes
+of ONE thing -- a typed tree of nodes where a node is a leaf or an op over typed child inputs, with a schema saying
+which types go where. CMP1 builds the first costume (textures) on that shape.
+
+NEW holographic_texturegraph.py: Node/Const/FieldLeaf/Map -- a texture is a readable OBJECT TREE. A Map is an op
+(mix/multiply/over/scale/add/remap/min/max) over TYPED inputs, each of which may be another Map, so graphs nest to
+any depth. sample(uv) walks the tree (evaluate children, apply op). THE DISCIPLINE IS THE SCHEMA: OP_SCHEMA declares
+each op's slots and the kinds each accepts {map|color|field|number}; Map.__init__ checks it at COMPOSE time, so a bad
+graph (colour as a weight, missing input, unknown op) is refused up front with a clear message -- 'composable
+CORRECTLY', not just composable. Leaves reuse the existing Texture sources (fbm/voronoi/synth via field_leaf) and
+fieldhome; nothing new. Encoding is OPTIONAL and only where it earns its keep: to_expr lowers the tree to typed's
+(op, child, ...) form and encode() -> one hypervector via typed.encode_tree, for caching a baked result by graph
+identity or searching a library (structurally identical graphs -> identical code, cosine 1.000). Kept the object tree
+as the source of truth -- do NOT force a deep tree into one vector (HRR capacity cliff), the backlog's loud boundary.
+
+Wired into UnifiedMind: texture_leaf (a const value or a named Texture field), texture_map (compose+validate a node),
+sample_texture, encode_texture (uses the mind's dim/seed). Catalog home "Texture graph (composable maps)" (catalog
+79->80); find_capability('compose a texture from noise and colors') reaches it; skill_lint clean (example resolves).
+Integration test builds a nested mix->multiply graph through the mind, samples an rgb, encodes it (identical structure
+-> cosine>0.99), and confirms the schema refuses a colour-as-weight at compose time. +11 tests (10 module + 1
+integration). Next in the backlog: CMP3 (multi-material by field), then CMP2 (layered materials + order schema).
+
+## RELEASE GUARD: tag-vs-setup.py version consistency check  [+5 tests]
+
+Closed the loop on the PyPI release path (offered earlier, now built). Releases are cut by pushing a git tag (v0.2.0),
+but the version actually published is whatever setup.py says -- so tagging v0.2.0 while setup.py still reads 0.1.0 would
+publish the wrong number, and PyPI never lets you re-upload a version. tools/check_version.py (stdlib, AST-only -- reads
+setup.py without executing it) prints the version, or with --expect X asserts a match (a leading 'v' from a git tag is
+accepted). Wired into package.yml as a fast-fail step on tag pushes, BEFORE the build:
+`python tools/check_version.py --expect "${{ github.ref_name }}"` -- a mismatch fails the release before anything is
+published. No-op on branch pushes. Runnable locally too (check before you tag). PACKAGING.md's Versioning section
+documents it. +5 tests (reads version, match passes, leading-v accepted, mismatch fails nonzero, bare prints).
+
+## CMP3: MULTI-MATERIAL blended/selected by per-point masks  [+9 tests]
+
+Second render-composability item (sequenced before CMP2 -- cheapest, reuses blend + CMP1). Material.blend mixes TWO
+materials by one scalar t (constant over the surface). CMP3 generalises to N materials each weighted by a MASK that
+VARIES over the surface -- a bundle weighted by a field, exactly the substrate's own move.
+
+NEW holographic_multimaterial.py: MultiMaterial(materials, weights, mode, normalize). Each weight/mask is coerced via
+CMP1's _coerce, so a mask IS a CMP1 texture graph (mind.texture_map), a raw field, or a constant -- CMP1 feeds CMP3 as
+the backlog intended. sample(name, uv) = sum_i w_i(uv) * material_i.sample(name, uv) over the materials that HAVE that
+channel (a missing channel contributes 0, like blend's 'present on one side blends toward zero'). Two modes: 'blend'
+(soft weighted sum) and 'select' (hard argmax pick -- a material-ID / splat map, crisp boundaries).
+
+KEPT NEGATIVE (loud, and demonstrated in the selftest + tour): masks must PARTITION or brightness drifts. Default
+normalizes weights to a partition of unity per point (w_i/sum_j w_j) with a uniform fallback where all masks ~0 (so a
+point never goes black); normalize=False sums raw (shown drifting ~2x too bright). Also clamps negative mask weights.
+
+IMPORTANT MEASUREMENT NOTE: Material.sample is a COSINE readout (VectorFunctionEncoder.query = cosine(field,
+encode(uv))) -- direction, scale-normalised. So two materials that differ only by a constant read IDENTICALLY; they
+must differ in PATTERN. The tests therefore verify the blend FORMULA (== w0*A+w1*B to 1e-9) against two OPPOSITE albedo
+ramps, which is encoder-agnostic and robust -- not an assumed absolute value.
+
+Wired into UnifiedMind: mind.multi_material(materials, weights, mode, normalize) -> MultiMaterial. Catalog home
+"Multi-material (mask-blended)" (catalog 80->81); find_capability('paint rust onto metal with a mask') reaches it;
+gates green (catalog_gaps + skill_lint). Integration test blends two materials by a CMP1 fbm mask through the mind and
+pins the exact weighted-sum + partition-of-unity + select-picks-dominant. +9 tests (8 module + 1 integration). Next:
+CMP2 (layered materials + a PlanShape order schema: base<diffuse<specular<coat, refused if violated; kept negative --
+ordering != energy conservation).
+
+## SERVICE.md LAUNCH-FLAGS DRIFT CHECK (extends servicedoc)  [+4 tests]
+
+Extended servicedoc.py from checking just the endpoint TABLE to also checking the Launch section's CLI FLAGS against
+the service's argparse. cli_flags() AST-reads holographic_service.py for add_argument("--x") calls (no execution, same
+read-the-code approach as routes()); doc_flags() pulls --flags from SERVICE.md; check_flags() -> (stale, undocumented):
+a documented flag that no longer exists, or a user-facing argparse flag SERVICE.md never mentions. _INTERNAL_FLAGS
+({--selftest}) are exempt (internal/test-only); _DOC_ONLY_FLAGS ({--print}) excludes the doc-tooling flag SERVICE.md
+mentions (servicedoc.py --print) so it isn't misread as a stale service flag. Wired into __main__ so the existing CI
+gate (python servicedoc.py) now covers endpoints AND flags -- no ci.yml step added, just its comment + the SERVICE.md
+note + the module docstring updated. Current state: 23 endpoints + 5 flags, all in sync. Proven to catch both
+directions (stale doc flag, undocumented argparse flag). +4 tests. Every hand-maintained public surface is now
+CI-guarded: module reference, capability menu, API quickref, and the service's endpoints AND launch flags.
+
+## CMP2: LAYERED MATERIALS with a layer-ORDER schema  [+10 tests]
+
+Third render-composability item. Real surfaces are STACKS (base under diffuse under specular/reflection under
+coat/clearcoat) and the ORDER matters -- a clearcoat sits ON the paint, never under it. CMP2 makes the order a SCHEMA
+checked at compose time.
+
+NEW holographic_layeredmaterial.py: LAYER_RANK maps each kind to a tier (base 0, diffuse 1, specular/reflection 2,
+coat/clearcoat 3) -- ONE readable table is the whole order schema. Layer(kind, Material, alpha) is one layer; its
+coverage alpha is a number, a field, or a CMP1 texture graph (coerced via CMP1), so a coat can cover only part of a
+surface. LayeredMaterial holds an ordered bottom-to-top list; add() REFUSES a layer whose tier is below the one under
+it (a diffuse above a reflection, a base above a coat) with a clear message -- composable CORRECTLY. sample(channel,
+uv) composites the layers that carry that channel from the bottom up: value = alpha*layer + (1-alpha)*below (the same
+"over" Material.blend seeds, lifted to a stack); a layer without the channel is skipped (doesn't occlude what it
+doesn't define). Optional encode() lowers the ordered stack (kinds + channels, in order) to a typed tree for
+cache/search -- reordering changes the code.
+
+Chose a plain readable rank-table check over bending planshape to this: probed planshape and it's a holographic
+plan ENCODER/DECODER (schema-as-decode-key), the wrong tool for a simple ordering rule. Readable-first; typed stays for
+the encode-where-it-earns-it path.
+
+KEPT NEGATIVE (loud, in docstring + tour): ORDERING IS NOT ENERGY CONSERVATION. This fixes the STACKING (which layer
+is above which + an over-composite of values); it does NOT do the radiometry of a true layered BRDF, where a coat
+physically darkens/tints what's under it (Fresnel + absorption). Correct ordering shipped; the energy-conserving BRDF
+is a separate, harder thing and is NOT claimed. Same cosine-readout measurement note as CMP3 (tests use opposite ramps
++ verify the over formula to 1e-9).
+
+Wired into UnifiedMind: mind.material_layer(kind, material, alpha) + mind.layered_material(layers). Catalog home
+"Layered material (order schema)" (catalog 81->82); find_capability('put a clearcoat on top of paint') reaches it;
+gates green. Integration test stacks base+coat with a CMP1 fbm coverage mask through the mind, pins the exact over
+formula, and confirms the order schema refuses base-above-coat. +10 tests (9 module + 1 integration). Backlog: CMP1,
+CMP3, CMP2 done; next CMP4 (type-correct scene binding surface<->mesh / volumetric<->volume + shared-definition
+instancing on scenegraph), then CMP5 (pipeline orchestrates the graphs -- makes 'adaptive' reach down to maps/materials).
+
+## README EXAMPLES NOW RUN (and are CI-guarded)  [+1 test]
+
+The README's headline code block was BROKEN -- it called mind.remember/encode/bind/unbind/cleanup, none of which exist
+on UnifiedMind (only recall did). Since README.md is setup.py's long_description, that broken snippet is the first
+thing a visitor to the PyPI page sees, and agents/users copy-paste it. Rewrote it against the REAL, measured API:
+mind.learn(x,label) + mind.recall(x) -> ((label, description), score) for content recall; and the raw algebra via the
+module functions (from holographic_ai import Vocabulary, bind, unbind; vocab.get(name); vocab.cleanup(noisy) ->
+(name, sim)). Verified every line runs and recalls 'apple' / cleans up to 'filler'. Dropped the "method names are
+illustrative" disclaimer -- they're real now. Guard: test_readme_examples.py extracts every ```python block,
+concatenates them in reading order, and runs the whole thing in a subprocess (bash blocks ignored) -- so a README
+example can never silently rot again. The scene block (build_scene/adjust/render/simulate/options) was already real and
+runs too. +1 test (2.7s).
+
+## POLISH SWEEP: UX fixes found by using the render/composability flows as a user  [+7 tests]
+
+Exercised the user-facing surfaces (build_scene->render, the CMP1-3 faculties, discovery, dictionary) looking for
+rough edges. The semantic render pipeline is SOLID: 'a big red metal sphere on a green box' parses shapes/colours/
+materials + the 'on' relation correctly and renders the sphere sitting on the box with ground+shadows+sky (verified by
+eye on server PNGs). Fixed the real UX issues found:
+
+- texture_leaf(value='red') used to throw a raw numpy 'could not convert string to float' -- now Const accepts a
+  COLOUR NAME (resolved via the scene system's COLORS, so the vocabulary matches everywhere), or gives a clear message
+  listing valid names. _coerce routes strings through Const, so named colours work anywhere a leaf does.
+- MultiMaterial / Layer used to fail with a cryptic AttributeError deep in sample() when handed a non-Material -- now
+  they validate at COMPOSE time ('material 0 is not a Material (needs .channels and .sample)'), which is the backlog's
+  own 'validate at compose time, not render time' principle.
+- field_leaf('perlin') now lists the available Texture sources (curl/fbm/synth/voronoi) instead of just naming the bad one.
+- Added 'saturate' (clamp to [0,1]) and 'clamp' (to [lo,hi]) ops to CMP1 -- composition can push colours out of range
+  (fbm > 1, mix extrapolates, honest by design); saturate is the one-op fix a texture author reaches for.
+
+Non-issues confirmed (measured, not assumed): 'purple'/'shiny' adjust correctly (real colour / shiny->mirror);
+suggest() returns a clean list of {name,does,call}; route('render a 3d scene') sensibly OFFERS both the semantic and
+path-trace paths; lookup(missing_word) returns None (a defensible contract). Core purity still holds -- the new lazy
+COLORS import is inside _named_color, so importing the mind stays NumPy-only. +7 tests pin all the fixes.
+
+## CMP4: type-correct scene BINDING + shared-definition INSTANCING (edit-once)  [+11 tests]
+
+Fourth render-composability item. Two things a flat object list lacks:
+
+(1) TYPE-CORRECT BINDING. A material has a KIND (surface: paint/metal/glass; volumetric: fog/smoke/fire = participating
+media) and geometry has a kind (surface mesh / volume). You may only bind like to like. Definition._bind checks it at
+COMPOSE time (and on every edit), so smoke-on-a-mesh or paint-on-a-volume is refused with a clear message, not rendered
+wrong. Reuses semantic._VOLUMETRIC as the single source of "what is volumetric".
+
+(2) SHARED-DEFINITION INSTANCING (edit-once). Definition = a named shared geometry+material unit; Instance = a
+placement of ONE Definition through a transform, holding a REFERENCE (properties read through to the definition).
+InstancedScene collects instances; set_material/set_geometry on the definition updates EVERY instance in one edit
+(measured: repaint 'chair' once -> all 3 instances read 'glass'). An invalid repaint is refused AND leaves the
+definition unchanged.
+
+Chose a plain readable rank/kind check over planshape again (same call as CMP2 -- planshape is a holographic plan
+encoder, wrong tool for a simple type-match rule). Reuses scenegraph (SceneNode + flatten_scene, translation) for the
+geometry view.
+
+KEPT NEGATIVE (loud, docstring + tour): sharing is edit-once at the GRAPH level; flatten_surface() is where instances
+become concrete geometry -- it materialises each surface instance's shared mesh through its transform and merges into
+ONE mesh (24 = 3x8 verts for 3 cube instances); volume instances are listed separately (not triangles). Edit-once
+lives on the graph you flattened FROM, not the flattened mesh.
+
+Wired into UnifiedMind: mind.shared_definition(name, geometry, material, geometry_kind=None) + mind.instanced_scene().
+Catalog home "Instancing (shared definition + type-safe binding)" (catalog 82->83); find_capability('place the same
+chair many times and recolor all at once') reaches it; gates green. Integration test places a shared def 3x through
+the mind, edits once (all change), refuses smoke-on-mesh, flattens 2 instances to one mesh. +11 tests (10 module + 1
+integration). Backlog: CMP1,3,2,4 done; LAST is CMP5 (pipeline orchestrates the graphs -- bake a static texture graph
+via the Cache home, resolve a layered material, bind the scene by schema, render; makes 'adaptive' reach down to
+maps/materials).
+
+## CMP5: the PIPELINE composes the graphs (bake vs live) -- composability backlog COMPLETE  [+8 tests]
+
+Last render-composability item. The pipeline already orders render/sim STAGES by needs/produces; CMP1-CMP4 gave the
+graphs BELOW a render (texture maps, multi/layered materials, a type-checked instanced scene). CMP5 joins them: an
+orchestrator that prepares those graphs into a render-ready scene as pipeline stages, adding the one decision
+'adaptive' is really about at this level -- BAKE a static texture graph to a grid (O(1) lookup) vs SAMPLE it live.
+
+NEW holographic_rendergraph.py: BakedTexture (a 2-D texture graph evaluated to a grid once via CMP1's sample_grid,
+read back by BILINEAR interpolation -- the 2-D twin of matbake's 3-D BakedField, same idea + same kept negative);
+bake_texture(graph, res); resolve_texture(graph, bake='auto', static) -- the adaptive decision in one place (bake a
+static map to amortise the tree walk over many hits; keep a changing map live so it isn't re-baked every frame; both
+share .sample(uv) so downstream doesn't care which it got). RenderGraph is the orchestrator: add_texture(name, graph,
+static) + set_scene(cmp4_scene); plan() reports bake-vs-live per texture + the scene bind WITH WHY (mirrors the render
+pipeline's plan() -- see before you run); prepare() runs the stages and returns a PreparedScene (resolved textures +
+one flattened surface mesh + volume instances aside). _stages() are real holographic_pipeline.Stage objects declaring
+needs/produces, so this genuinely IS 'the pipeline composing the graphs'.
+
+KEPT NEGATIVE (loud): baking trades MEMORY for speed + INTERPOLATION error (blurs detail finer than a grid cell --
+raise res or keep sharp maps live); measured baked-vs-live match to 0.000 on a smooth fbm blend at res=128. Reuses
+CMP1 (graph+sample_grid), CMP4 (bind+flatten), pipeline.Stage, and matbake for the 3-D material bake.
+
+Wired into UnifiedMind: mind.render_graph(res) + mind.bake_texture(graph, res). Catalog home "Render graph (bake vs
+live)" (catalog 83->84); find_capability('bake a static texture for speed vs sample it live') reaches it; gates green.
+Integration test runs the whole CMP1->CMP4->CMP5 chain through one mind (texture graph baked, dynamic kept live, scene
+bound+flattened). +8 tests (7 module + 1 integration).
+
+*** RENDER COMPOSABILITY BACKLOG COMPLETE: CMP1 (texture map graph) + CMP2 (layered materials + order schema) + CMP3
+(multi-material by mask) + CMP4 (type-correct binding + shared-definition instancing) + CMP5 (pipeline bakes/binds the
+graphs). One recursive, schema-checked composition -- a texture is a typed tree, a material is a typed ordered tree, a
+scene is typed instances with transforms, a pipeline is a typed tree of stages -- five costumes, each readable, each
+type-checked at compose time, each with its kept negative on the record. ***
+
+## PREVIEW: SEE what you composed -- texture swatch + material ball  [+8 tests]
+
+Follow-on to the composability backlog (CMP1-5). Those build things you .sample(uv); the missing step was LOOKING at
+them. holographic_preview.py: texture_image(graph) renders a CMP1 texture graph as a flat RGB swatch (colour graph ->
+rgb, scalar -> greyscale, clamped to [0,1] for display); material_ball(material) renders a material on the classic
+preview SPHERE, orthographic camera + one light, shaded with the SAME holographic_brdf.cook_torrance the real renderer
+uses (so a preview matches a render), reading roughness/metallic off the material's channels and modulating a base
+tint by an albedo channel if present. Works on a plain Material OR a CMP2/CMP3 layered/multi material (anything with
+.sample(channel, uv) -- a _channel_names helper handles both .channels and .channel_names()). Both return (res,res,3)
+float in [0,1]. The only per-pixel loop is sampling the material over the sphere's visible pixels; shading is
+vectorised. Verified by eye on server PNGs: an orange/purple fbm swatch and a gold metallic ball with a roughness ramp
+read correctly.
+
+Wired into UnifiedMind: mind.preview_texture(graph, res) + mind.preview_material(material, res, base_color). Catalog
+home "Preview (swatch & material ball)" (catalog 84->85); find_capability('see what my composed material looks like on
+a ball') reaches it; gates green. Integration test composes a CMP1 texture + a CMP2 layered material through the mind
+and previews both. +8 tests (7 module + 1 integration). Closes the compose->see loop for the whole CMP1-5 stack.
+
+## TEXTURED SCENE RENDER: a composed texture/material painted onto a scene object in a FULL render  [+6 tests]
+
+The capstone the preview work pointed at: take a CMP1 texture graph / CMP2-3 material and paint it onto an actual
+scene object, rendering the whole scene -- so the composability stack drives a real 3-D image, not just a swatch/ball.
+
+NEW holographic_texturerender.py, render_textured(scene, textures, ...): reuses the engine's own machinery rather than
+a new renderer -- realize the SemanticScene to SDFs, MARCH the union with sphere_trace (hit point + which object via
+_UnionSDF.ids), turn each hit's 3-D surface point into a UV (spherical map on a _SphereSDF, planar/dominant-face on a
+_BoxSDF), sample the texture the user attached to that object at its UV -> albedo, shade with the SAME
+holographic_brdf.cook_torrance the renderer uses + a directional light + a hard shadow (march toward the light) + a
+little ambient, sky gradient + ground behind. A CMP1 colour graph paints a DIFFUSE albedo (metal kills the diffuse
+term + reads dark under one light, so a colour texture is shaded diffuse on purpose); a Material contributes
+roughness/metallic + tints a base by an albedo channel. objects without an entry keep their scene colour.
+
+VERIFIED (viewer glitched on the marched PNGs, so verified by MEASUREMENT): 23,436 sphere pixels; within-sphere colour
+std [0.083, 0.067, 0.068] with R in 0.09-0.44 and B in 0.08-0.38 -- the red<->cyan texture VARIES across the surface,
+i.e. it genuinely WRAPS via UV mapping, not a flat recolour. Sky/ground/sphere regions all read correct colours.
+Needed a lighting fix: cook_torrance carries 1/pi (dim under a unit light) -> a light-intensity ~pi + ambient, and
+colour textures forced diffuse, so the pattern reads brightly.
+
+KEPT NEGATIVE (loud, docstring + tour): textbook UV mapping (a seam + pole pinch on a sphere, face seams on a box, no
+triplanar blend); a single hard light (no soft shadows / GI -- the path tracer is the tool for that). A faithful,
+readable BRIDGE, not a production shader.
+
+Wired into UnifiedMind: mind.render_textured(scene, textures, width, height). Catalog home "Textured scene render
+(composed maps on objects)" (catalog 85->86); find_capability('paint my composed texture onto the sphere and render
+it') reaches it; gates green. Integration test composes a texture through the mind, paints it on a scene sphere, renders,
+and asserts the per-UV colour variation (the wrap) holds end to end. +6 tests (5 module + 1 integration). Closes the
+loop: compose (CMP1-5) -> preview (swatch/ball) -> RENDER onto the scene.
+
+## SCENE FLOW: named objects + textures you attach by talking  [+8 tests]
+
+Two additions to the describe-a-scene flow so a user can name what they build and paint it in plain English, and the
+normal scene.render() shows the paint.
+
+NAMED OBJECTS. Each object dict gained a `label` (a user nickname) and a `texture` field. New SemanticScene methods:
+name(reference, label) (unique -- reusing a label moves it), rename(old, new), labels(). select() and
+interpret_command are now LABEL-AWARE: a nickname mentioned in a command is matched (whole-word) BEFORE attribute
+parsing and wins, and labels are added to the known vocabulary so 'hero' isn't flagged unknown. interpret_command now
+returns matched_idx, and adjust() applies changes to those indices (so 'make hero bigger' works). names() shows the
+label when set; describe() shows 'label = description'. adjust() also parses naming commands: 'call/name <ref> <label>'
+and 'rename <old> to <new>'.
+
+SCENE TEXTURES. A small readable named_texture(name) library builds one composed CMP1 graph per name
+(rusty/marbled/noisy/cloudy/mossy/lava/striped -- fbm-based, deterministic; stripes via a sine field callable).
+scene.paint(reference, texture) attaches a graph/material or a library name; adjust() detects a texture word (with or
+without a 'texture'/'paint' trigger -- 'give hero a rusty texture', 'make the box mossy') and paints the referenced
+object (falls back to the sole object when unambiguous, else asks which). scene.render() now ROUTES through
+holographic_texturerender.render_textured whenever any object carries a texture (keyed by the object's descriptive
+name, which render_textured matches on), else the normal render_scene path -- so nothing changed for untextured scenes.
+
+Verified (viewer glitched on the marched PNGs -> verified by MEASUREMENT, isolating each object's pixels via the union
+ids): 'give ball a rusty texture' + 'make the box mossy' -> the sphere's lit side reads rust-brown [0.23,0.13,0.07]
+(R>G>B) and the box reads moss-green [0.13,0.19,0.08] (G highest). Brightened the palettes so they read vividly (rust
+and moss are inherently dark). All the standard adjust/set/interpret paths still pass (label-awareness is additive).
+
+No new mind faculty needed (the methods live on the SemanticScene that mind.build_scene returns); the catalog "Scene
+from description" home + CAPABILITIES.md updated to document naming + texturing, and find_capability('name an object and
+give it a rusty texture') reaches it. +8 tests (7 module in test_holographic_scene_semantic + 1 integration). Closes
+the loop end to end: describe -> name -> paint -> render, all in plain English.
+
+## FIX: CMP1 mind.texture_map -> mind.texture_op (name collision with the pre-existing image-texture method)
+
+Running the FULL integration suite (first time since CMP1) surfaced a name collision I introduced back in CMP1:
+UnifiedMind already had texture_map(image, wrap='repeat') (an IMAGE texture map -- array in, sampleable texel out,
+used by test_sweep3_local_completions), and my CMP1 texture_map(op, **inputs) was defined later in the class so it
+SHADOWED the old one, breaking the image path. Fix: renamed the CMP1 builder to mind.texture_op(op, **inputs) -- which
+is also the more accurate name (it builds one texture-graph OP node; the image one is the real 'texture map'). Both now
+coexist. Updated all CMP1 call sites (catalog examples, texturerender, tour blocks, integration + module tests -- the
+old array method is only ever called with an array, never a quoted op, so the rename was mechanical and safe) and
+regenerated CAPABILITIES.md. mind.texture_leaf / mind.sample_texture unchanged. named_texture in scene_semantic uses the
+MODULE (Map/Const/field_leaf) directly, so it was unaffected.
+
+Also retuned the CMP5 textured-render catalog home name ("Textured scene render" -> "Textured object render (paint
+composed maps)") + dropped its generic scene aliases, because "scene" in the name diluted route('describe a scene and
+build it') and route('render a scene with global illumination') from a confident 'act' to 'choose'. Both route back to
+'act' now. LESSON for future sessions: run the FULL test_integration suite after adding faculties, and check new
+capability aliases don't collide with an existing method name or dilute a confident route.
+
+FULL suite green: 414 integration tests pass from a clean extract; all CMP1-5 + preview + textured + scene module
+tests pass; gates green.
+
+## MESSAGE BUS + OPTIONAL AGENT (LLM) BRIDGE -- the leOS harness plumbing  [+17 tests]
+
+Moose's goal: leCore is the core of an AI substrate harness (leOS) where a PERSON and an AGENT are both connected to
+the running tool. The app must PUSH to the agent (e.g. render finished -> tell the LLM) rather than the LLM polling
+progress, the app must be able to INVOKE the LLM, and the LLM must be OPTIONAL (leCore runs without it).
+
+NEW holographic_bus.py -- MessageBus: publish(topic, payload)/subscribe(pattern, handler) with topic wildcards
+('*', 'a.*', exact); open_mailbox(name, patterns)+poll(name) for a PULL inbox (a remote agent reads on its own
+schedule); send(to, payload) for directed person<->agent messages ('to:<name>' topic); a history() log for
+catch-up/replay. Deterministic: a monotonic seq gives every message a stable hashlib id + order (wall-clock ts is
+metadata only). Thread-safe (RLock); handlers run OUTSIDE the lock so a handler can publish without deadlock; a broken
+handler is logged as 'bus.handler_error', never fatal.
+
+NEW holographic_agent_bridge.py -- AgentBridge(bus, llm=None): the LLM is any callable text->reply that YOU supply;
+nothing imports an LLM library, so it's fully optional and dependency-free. notify_on(topic, prompt) subscribes so a
+firing topic formats the message + prompt, calls your llm, and posts the answer as 'agent.reply' (with no llm it posts
+'agent.unattached' -- the event still fires). ask(text) asks the agent directly. A failing agent posts 'agent.error',
+never breaks the app. run_task(bus, name, fn, background=?, summarize=?) runs a job and publishes '<name>.start' then
+'<name>.done' (carrying summarize(result) -- an LLM can't read a NumPy image, so it gets shape/stats/a path, never the
+array) or '<name>.error'; background=True runs off-thread and the bus's '.done' is how everyone (incl. the agent)
+learns it finished -- nobody polls.
+
+Wired into UnifiedMind: mind.bus() (one shared bus, lazy), mind.agent_bridge(llm=...), mind.run_task(name, fn, ...).
+Over HTTP (holographic_service.py) a REMOTE agent connects via POST /bus/publish (send), /bus/poll (drain its inbox --
+events are pushed into it the instant they happen, so it's not busy-polling a status flag), /bus/history (catch-up).
+SERVICE.md table + drift gate updated (26 endpoints). Catalog home "Message bus + agent (LLM) bridge" (catalog 86->87);
+find_capability('notify the agent when a render is done') reaches it; gates green. Integration test runs the full
+render-done->notify->reply flow through the mind AND over the service, plus the no-agent path. +17 tests (8 bus + 8
+bridge + 1 integration). Core purity holds -- both modules are stdlib only (threading/hashlib/collections), so importing
+the mind stays NumPy-only.
+
+## DICTIONARY COMPRESSION: measured honestly -> shipped lzma, NOT holographic (kept negative, loud)
+
+Question: use leCore's OWN holographic compression on the vendored English dictionary instead of a zip, on the belief
+we compress better. MEASURED it rather than assumed (bench_dictionary_compression.py, reproducible):
+
+- The dictionary needs EXACT verbatim recovery (word -> its precise definition). leCore's VSA/holographic compression
+  is geometry-preserving but LOSSY (the "10-63 bytes/record beats SQLite" figure is APPROXIMATE vector recall) -- it
+  would garble definitions. Wrong tool for exact text.
+- leCore's LOSSLESS coder (holographic_codec.PredictiveCodec) round-trips text EXACTLY (verified True), but it is a
+  SHARED-MODEL codec: the decoder needs the predictor's meaning matrix, built from the corpus and far larger than the
+  text -- measured ~6.8 MB model to compress ~78 KB of text (rank stream ~15 KB but excludes model+framing). It's for
+  streaming NEW text through an already-shared model, not a self-contained FILE compressor.
+- So the right tool for the FILE is a mature lossless BYTE coder. Measured on the real 144,478-entry dictionary
+  (20.7 MB compact JSON): gzip-9 5.90 MB (x3.52), bz2-9 4.68 MB (x4.43), lzma-9 3.26 MB (x6.37). lzma is ~45% under
+  gzip, exactly lossless, and STILL STDLIB (constitution-clean).
+
+SHIPPED: re-encoded dictionary.json.gz -> dictionary.json.xz (lzma preset 9), verified lossless round-trip, removed the
+.gz. holographic_dictionary.py loader now picks the decompressor by extension (lzma for .xz, gzip for .gz fallback so
+old checkouts still work) -- stdlib only, lazy, cached. Updated setup.py glob comment, manifest.json (file+size+
+compression), test_packaging.py (checks .xz), and the module docstring. The complete zip dropped 26.32 -> 23.68 MB (the
+2.6 MB dictionary saving). All 144,478 lookups exact; packaging + techstack (core purity holds -- lzma is stdlib) green.
+
+LESSON on record: leCore's compression genuinely wins for LOSSY vector/record recall; it is NOT a lossless file
+compressor. Don't force holographic compression onto exact-text data -- measure, and use the right lossless coder.
+
+## LANGUAGE LAYER: runtime access answered + made OPT-IN/controllable, plus a semantic index  [+8 tests]
+
+Two concerns from Moose about the dictionary: (1) if it's compressed, can we actually ACCESS it at runtime? (2) don't
+burden users who just build on top with a language layer they don't want. Plus: build the semantic index.
+
+(1) RUNTIME ACCESS -- measured + explained: the lzma file is decompressed into a plain Python dict {word: entry} in RAM
+exactly ONCE (first language call, ~0.47s), then every lookup is instant dict access with every field available. The
+compression is disk-only; it never sits between you and the data.
+
+(2) OPT-IN -- measured + made explicit: importing holographic_dictionary, importing UnifiedMind, and building a mind do
+NOT load the dictionary (_DICT stays None); only the first actual language call does. So a build-on-top user pays zero
+(no decompress, no ~22 MB RAM). Added visible controls to holographic_dictionary: is_loaded(), preload() (force the
+one-time load at startup), unload() (drop the ~22 MB; next call transparently reloads), stats() (loaded?/words/source/
+compression/on_disk_bytes -- reading it does NOT trigger a load). Catalog "Dictionary" home updated to say opt-in + lzma
++ the controls.
+
+(3) SEMANTIC INDEX -- NEW holographic_word_index.py, the fuzzy reverse of a dictionary: describe an idea, get the words
+whose glosses mean it. RANDOM INDEXING -- each token has a fixed hashlib-seeded vector, a definition's meaning vector is
+the bundle of its content words, a query is encoded the same way and matched by cosine. build_semantic_index(words=,
+dim=, ...) -> SemanticIndex with .find(description, k)/.similar(word, k)/.vector(word). This is where leCore's
+LOSSY/geometry-preserving side legitimately belongs (approximate meaning search, not exact lookup). OPT-IN: nothing
+runs until you build it; scale is honest ((N x dim) float32; pass words= / max_words / dim). Wired mind.build_semantic_
+index. KEPT NEGATIVE (loud, in docstring): reliable for the TOP hit ('a young dog'->puppy, 'good fortune'->serendipity,
+'a body of water'->river/ocean), noisy in the tail, and word-sense sensitive (dictionary stores one sense per word, so
+'sprint'~'run' misses because the primary 'run' gloss is the baseball one). For sharper meaning use the co-occurrence
+space (holographic_meaning_predict) on a real corpus.
+
+Catalog homes "Semantic word index (find words by meaning)" + updated "Dictionary" (catalog 87->88); both discoverable;
+gates green; core purity holds (all stdlib+NumPy, dictionary stays lazy). +8 tests (7 module incl. opt-in + lazy-control
+checks, 1 integration).
+
+## EXTERNAL ASSET RELOCATION / RELINK -- the 3-D "missing textures" fix  [+11 tests]
+
+NEW holographic_assets.py (stdlib only: os/hashlib/json/time). Tracks the EXTERNAL files a scene depends on and repairs
+their paths when folders move -- the reasoning a person would do, made mechanical.
+
+RELOCATE FROM ONE (the headline): AssetLibrary.relink(one_asset, its_new_path) compares the asset's old vs new path,
+finds the longest preserved TRAILING structure (the folders/name that stayed) and the parent that changed
+(relocation() -> old_prefix, new_prefix, preserved), then two passes fix the rest: (1) PREFIX-SWAP every other missing
+asset under old_prefix -> new_prefix; (2) for anything still missing, structurally SEARCH under the new parent for a
+file whose trailing folders/name match (find_by_relative_tail, deepest match wins). So: move Documents/project ->
+Projects/project, re-point ONE texture, all siblings are found.
+
+DETECT CHANGES: each AssetRef keeps a fingerprint (size+mtime cheap check, optional sha256 definitive check).
+status() -> 'ok'/'missing'/'modified'; changed() lists edited-on-disk files; refresh() acknowledges. refresh KEEPS a
+hash once one was recorded, so relinking a moved file doesn't drop the identity distributed resolve needs (fixed during
+build -- relink defaulted to no-hash and silently dropped it).
+
+DISTRIBUTED (Moose flagged this as tricky -- here's the approach): absolute paths are machine-specific, so lean on two
+PORTABLE ideas: (a) a CONTENT HASH identifies a file regardless of location -- find_by_hash / resolve(..., roots=)
+locate it by content wherever it landed on another machine; (b) a path relative to a project root travels with a synced
+project folder. resolve() tries stored path -> hash-under-roots -> structural-match-under-roots, so each machine gives
+its own roots and references resolve wherever the files actually are. Full content-addressed storage is the heavier
+future option; these primitives (hash identity, hash find, JSON manifest, relative structure) are the seam for it.
+
+Wired mind.asset_library(); catalog "Asset relocation / relink (external files)" (catalog 88->89), discoverable
+('relink my assets that moved', 'find moved files', 'missing textures'); saves/loads a JSON manifest. KEPT NEGATIVE
+(loud, in docstring): the path logic is POSIX-tested; Windows drive letters are handled simply (a 'C:' component), not
+exhaustively. +11 tests (10 module incl. pure relocation logic + real temp-dir move/search/change/hash scenarios, 1
+integration through the mind). Core purity holds (stdlib only).
+
+## SCENE CARRIES AN AssetLibrary: external texture files, resolved/relinked at render  [+6 tests]
+
+Wired holographic_assets into SemanticScene so a scene can reference EXTERNAL image files and repair their paths when
+they move -- the natural follow-on to the asset manager.
+
+NEW in holographic_scene_semantic.py: ExternalTexture (a path + a lazily-loaded, cached TextureMap; load() returns None
+if the file is missing/undecodable) and _load_image_array (LAZY PIL import -- only runs when an external image is
+actually drawn, so importing the mind stays NumPy-only; techstack green, PIL absent through procedural use). Scene gained
+a lazy `assets` AssetLibrary (a purely procedural scene never makes one -- verified) and `asset_roots`, plus:
+attach_texture_file(reference, path, role) (registers the file + sets the object's texture to an ExternalTexture),
+missing_assets(), check_assets(), relink(one, new) (delegates + syncs object paths), resolve_assets(roots=)
+(search/content-hash re-find + sync), set_asset_roots().
+
+render() now: (1) if any tracked file is missing and asset_roots are set, auto-resolve first; (2) load each
+ExternalTexture's pixels -> a TextureMap, and DROP any that won't load so that object renders with its flat COLOUR
+instead of crashing on a bad path. render_textures gained an image-texture branch (_is_image_texture -> sample a
+TextureMap's pixels per-uv as a diffuse albedo), beside the CMP1-graph and Material branches.
+
+MEASURED end to end: attach a checker PNG -> renders textured (std 0.26); move the project -> 1 missing, render still
+returns a frame (colour fallback, no crash); set_asset_roots + resolve_assets -> re-found, texture back (std 0.26);
+relink ONE finds siblings. Catalog "Scene from description" home updated to mention attach_texture_file + resolve/relink;
+gates green. +6 tests (5 module incl. move/fallback/resolve/relink + procedural-makes-no-library, 1 integration). Closes
+the loop: describe -> texture (procedural OR external file) -> survive the files moving -> render.
+
+## FILE MAP INGEST: folder / zip / file -> queryable, asset-tracked map  [+11 tests]
+
+Answered Moose's "can a user hand us a folder/zip and we make it queryable, with relocation/change?" -- the pieces
+existed (query layer + holographic_assets) but the INGEST glue did not. NEW holographic_filemap.py (stdlib only:
+os/zipfile/hashlib/fnmatch/json/time).
+
+ingest(source) digests a FOLDER (any depth via os.walk), a .ZIP (extractall to a temp (or given) dir, then walk), or a single
+FILE into a FileMap. Each file -> a FileEntry (relpath, path, size, mtime, sha256, KIND: image/text/model/data/code/
+archive/other by extension table). Queryable five ways: NAME/glob (find('*.png')), KIND (by_kind), METADATA
+(larger_than/newer_than/by_ext), CONTENT keywords (search_text -- an inverted index built over text/code kinds under a
+size cap), and MEANING (build_meaning_index + find_by_meaning -- opt-in random indexing over the text, reusing
+holographic_word_index; approximate, top-hit reliable). tree() returns the folder hierarchy as nested dicts (the file
+map). Every file is ALSO tracked in a built-in AssetLibrary, so the SAME map gives missing()/changed()/relink(one,new)/
+resolve_assets(roots) -- the relocation + change-detection applied to an ingested tree (files[] and assets stay index-
+aligned; _sync_paths copies repaired paths back). Wired mind.ingest_files; catalog "File map ingest" (catalog 89->90),
+discoverable ('digest a folder and search it'); saves a JSON manifest. +11 tests (10 module: folder/zip/file ingest,
+name/kind/metadata/keyword/meaning queries, tree, move-and-relink, change detection; 1 integration).
+
+## DISTRIBUTED COMPUTE IS GENERAL, NOT RENDER-ONLY (answered + measured; one honest gap)
+
+Confirmed by reading + running: holographic_distribute/_jobs/_coordinator is a general BUCKET -> worker -> monoid-reduce
+map-reduce (its own docstring cites SETI@home / Folding@home). JobManager.register_worker(name, fn) takes ARBITRARY
+workers; Coordinator.run(buckets, worker, cache, reduce) is domain-agnostic; reducers = sum/min/max/sum_exact/bundle
+(any commutative monoid). Backends: InProcessBackend (1 proc) and LocalPool (persistent ProcessPoolExecutor = real
+MULTI-CORE, shared_memory for the read-only cache, picklable top-level workers). Proven with a NON-render crunch: a
+SETI-style scan of 64 noisy channels in 8 buckets, reduce=MAX, found the planted 9.9 peak. Plus JobManager gives
+checkpoint/pause/resume/cancel that survive a restart. leCore also already has the DOMAIN primitives for these fields
+(SETI: SPRT streaming detection, bh_fdr look-elsewhere, RecallNull calibrated false-alarm; protein folding: fragment
+assembly + Tero flow search + energy landscapes -- see the panel/research docs). HONEST GAP (loud): the only backends
+are in-process and single-machine multi-core; there is NO network/multi-machine backend yet, so it's one box's cores,
+not a farm. The Coordinator is backend-agnostic, so a network backend would slot in -- that's the real next piece for
+true SETI/Folding scale.
+
+## SPRITE CLEANUP: removed 712 raw test GIFs, kept the pack  [disk saving]
+
+The features/sprites/ folder held 712 raw .gif sprites (~2.9 MB) used for early image-analysis testing. Removed them.
+Kept features/sprites.hsp (58 KB) -- the packed set the app actually loads at runtime (app.py SPRITES). Verified safe by
+checking every reference with our OWN file map + grep: the app and test_app_compare read the PACK (the .gif names are
+just dict keys), and every test that touches the raw FOLDER (test_image_vault, test_pack_sprites' real-folder case,
+test_unified_app_curriculum, tour.py) guards with `if not os.path.isdir(...): pytest.skip(...)`. After deletion the
+sprite-referencing suite ran 82 passed, 3 skipped, 0 FAILED. photo_sample/ left as-is (Moose only asked about sprites).
+
+## COLD STORAGE: compress inactive structures, inflate on demand  [+9 tests]
+
+NEW holographic_coldstore.py (stdlib: pickle/zlib/lzma/os). Answers "can we collapse/compress inactive tables/databases/
+data structures and unfurl when needed?" -- yes.
+
+Cold(value, codec, spill_dir): one value that lives WARM (live object) or COLD (compressed blob, in RAM or spilled to a
+file). cool() = _freeze (pickle) + compress + drop the live object (frees RAM; spill_dir writes the blob to disk and
+frees that too); get()/warm() inflate transparently, bit-identical. is_cold/cold_bytes/warm_bytes/ratio for inspection.
+ColdStore(keep_warm=K, codec, spill_dir): a keyed, dict-like store (OrderedDict = LRU) that keeps only the K most-
+recently-used values warm and cools the rest automatically, warming any on get(); stats() reports warm/cold counts +
+bytes + approx_saved. Codecs: zlib (default, fast) / lzma (smallest, slower) / none.
+
+Wired mind.cool(value) + mind.cold_store(...). Catalog "Cold storage (compress inactive data)" (catalog 90->91),
+discoverable ('compress inactive database tables to save memory'). Works on a real leCore Table AND a whole Database
+(both picklable -- verified) plus arrays/dicts. +9 tests (8 module: array round-trip, codecs, spill-to-disk, LRU keep-K,
+recency, cool a Table, cool a Database, remove/contains; 1 integration).
+
+KEPT NEGATIVE (loud, in docstring + guide): compression ratio is entirely data-dependent. Redundant/text/structured
+data compresses hugely (a tiled array -> ~0.1-1.5% of its size). But leCore's VSA RECORD VECTORS are near-random
+(high-entropy) -> they barely compress (whole-Database measured ~0.95); there the win is freeing the live Python object
+graph + spilling the blob to disk, not the ratio. Uses pickle, so only cool data the app itself produced (never thaw
+untrusted blobs). Documented in FEATURE_GUIDE.md section 6.
+
+## DATABASE AUTO-COOLING wired in (opt-in, thread-safe, DISTRIBUTED-SAFE)  [+7 tests]
+
+Wired the cold-storage primitive into the query Database (holographic_query.py) so it auto-cools its own idle tables.
+OPT-IN: db.enable_cold_storage(keep_warm=K, codec, spill_dir) installs a small manager (RLock + LRU OrderedDict);
+off by default, so nothing changes and the distributed path is untouched unless asked.
+
+MECHANISM: resolve() (the single read path all inserts/selects/queries go through) WARMS a cooled table transparently
+and records LRU recency. cool_idle() compresses every user table except the keep_warm most-recently-resolved ones
+(never system tables -- the mind's live state). warm_all()/cold_stats()/disable_cold_storage() round it out. to_state()
+warms-all first so cooled tables are never silently dropped by its isinstance(UserTable) filter.
+
+DISTRIBUTED SAFETY (Moose's explicit concern -- the thing that could have caused trouble): __getstate__ warms every
+table and sets _cold=None, so pickling a cold-enabled DB (i.e. shipping it to a worker as a shared read-only cache)
+yields a plain, immutable, WARM copy with cooling OFF. Result: a worker's reads never mutate the shared cache, and the
+unpicklable RLock / spill-file paths never cross the process boundary. Proven: pickle round-trip -> enabled=False,
+cold=0, and reads don't change cold_stats; and a real Coordinator(InProcessBackend) job with a cold-enabled DB as the
+cache reduced to the correct sum with the original cache intact. COOLING SAFETY: cool_idle() must run when idle (no
+query/transaction in flight) -- warming builds a fresh object, so mid-op cooling could strand a live ref; documented.
+Warm-on-access is always automatic; cooling is an explicit reclaim trigger (like a buffer-pool eviction / OS page-out).
+
+Catalog "Cold storage" home updated to mention DB auto-cooling + distributed safety (still 91). Core purity holds
+(stdlib pickle/zlib/lzma/threading). +7 tests (6 module: keep-recent-warm, transparent warm, off-by-default, to_state
+warms, pickle-is-distributed-safe, cold-through-coordinator; 1 integration). Documented in FEATURE_GUIDE.md section 6.
+
+## PIPELINE-CURRENCY AUDIT (tour / tests / gallery) + gallery showcase for the new features
+
+Audited whether the tour, tests, and demo gallery use the CURRENT pipelines (so we don't show off old/slow/wrong
+things). Findings -- essentially CLEAN, which is the close-out ritual working:
+  * SUPERSEDED query modules (query_concurrency/graph/history/programs -> querylock/querygraph/querytime/queryprog):
+    imported by NOTHING but their own module+test. Clean.
+  * factor_composite's LEGACY dense path: the only non-L call is test_holographic_resonator.py::test_brain_factor_
+    composite, which is INTENTIONAL backward-compat coverage -- it asserts the path still solves AND emits its
+    DeprecationWarning (pytest.warns). Correct as-is; left alone.
+  * Deprecation-as-error sweep (-W error::DeprecationWarning) across texture/scene/render/query/coldstore/lights tests:
+    119 passed, 0 unexpected deprecation warnings.
+  * Texture API: tour + tests use texture_OP (the current graph API), never the old image texture_map for graphs.
+  * Render paths: gallery uses render_auto (auto-calibrating adaptive path tracer) + render_scene_document + NEE lights
+    (holographic_lights is NEE, NOT deprecated -- earlier grep false-positive); path_trace only for the raw-vs-pipeline
+    BENCHMARK and the NEE light comparison. Tour uses render_auto / render_scene_document / render_textured /
+    scene.render(), and BAKES (Cache.bake, GridSDF.bake, MC2 view-independent field bake) where sampling repeats.
+  * The flagged modules automaton/generate/reasoning/schedule/nystrom/spectralfield are NOT deprecated (grep false
+    positives or honest KEPT-NEGATIVE docs); their tour use is legitimate.
+  * No TODO/FIXME/HACK/stale markers in tour/gallery; the "brute" references are honest benchmark baselines.
+
+ONE real gap found + fixed: the visual GALLERY.md had ZERO entries for the recent composability/textured-render/preview
+features (the tour demos them, the gallery didn't show them). Added make_gallery.py::render_composed_texture (registered
+in the visuals list) -- composes two texture_op graphs (red<->cyan fbm swirl, white<->blue fbm marble), paints them on a
+described scene (build_scene), and renders via scene.render() -> render_textured, saving gallery/render_composed_
+texture.png. Added a GALLERY.md entry under Rendering & 3-D, honest that it's the composability/UV-textured path (not the
+path tracer): textbook UV seam/pole pinch, one hard light. make_gallery.py is a standalone generator (no test imports
+it), so the suite is unaffected.
+
+## RENDER ASPECT-RATIO FIX + ANTI-ALIASING (textured render path)  [+3 tests]
+
+Bug (spotted by Moose on the composed-texture gallery image): a sphere rendered into a 4:3 frame looked squished/
+stretched horizontally. ROOT CAUSE: holographic_render.Camera.ray_dirs multiplied the horizontal by self.aspect, which
+defaults to 1.0 and was NEVER set to width/height by render_textured (or the SemanticScene default camera). So a 240x180
+render used a SQUARE angular field stretched across a landscape grid -> circles became ellipses (~1.33x wide). This was a
+LATENT bug in every caller of ray_dirs (checkerboard/dispatch/domecache/gbuffer/pathtrace/rayindex/render_textured); it
+just showed most on the single big sphere.
+
+FIX: ray_dirs now derives aspect = width/height from the actual pixel grid it is handed, not a stored self.aspect --
+definitionally correct, can never distort, fixes all callers uniformly. (projection_matrix still uses self.aspect for
+the rasteriser; unchanged.) Also fixed make_gallery._Cam.ray_dirs the same way (it wasn't aspect-correcting at all, so
+the path-traced gallery images were subtly stretched too). Measured: the composed-texture sphere bbox went ~1.33 wide ->
+1.07 (round).
+
+ANTI-ALIASING: render_textured now anti-aliases by DEFAULT via SSAA -- new `aa` param (default 2): render at aa x the
+resolution, box-average each aa x aa block down (aspect preserved since w*aa/h*aa == w/h). aa=1 turns it off. Measured:
+soft-edge silhouette pixels 83 (aa=1) -> 281 (aa=2). SemanticScene.render passes aa through via **kw; render_scene (the
+non-textured path) already supersampled via `ss` and uses the same now-fixed ray_dirs.
+
+Regenerated gallery/render_composed_texture.png with the fix. Render tests green (61 across render/texturerender/scene/
+pathtrace/gbuffer). +3 regression tests (sphere round at non-square res; aa smooths the silhouette; output matches the
+requested resolution at any aa).
+
+## ASSET IMPORT: OBJ/MTL, glTF/GLB (with materials), Substance texture sets, volumetric grids  [+11 tests]
+
+Answered Moose's "support materials from Adobe Painter + glb/mtl/obj + volumetric." NEW holographic_assetimport.py
+(stdlib os/json/struct/base64 + NumPy; PIL LAZY only when a texture is actually decoded, so importing the mind stays
+NumPy-only -- techstack green).
+
+  * load_obj(path) -> LoadedMesh: full v/vt/vn/f/usemtl/mtllib parse, polygons FAN-triangulated, NEGATIVE indices
+    resolved, per-corner UVs/normals kept, per-face material name, and the .mtl parsed via the engine's own
+    materials_from_mtl + map_Kd/Ke/Pr/Pm/bump texture FILES loaded onto the PBRMaterial. .mesh() hands back an engine
+    Mesh.
+  * load_glb(path) -> LoadedMesh: geometry via the engine's glb_to_mesh (existing), PLUS a NEW glTF JSON material parse
+    -- baseColor/metallic/roughness factors + textures, normal + emissive; textures embedded in the .glb BIN chunk are
+    decoded (bufferView), as are data: URIs and external files. glTF packs metallic+roughness in one texture -> carried
+    on both channels. (Extends glTF import, which was geometry-only before.)
+  * load_texture_set(folder) -> one PBRMaterial: a folder of Substance 3D Painter export maps matched by file name
+    (basecolor/albedo/diffuse, roughness, metallic, normal, height, ao, emissive; longest-keyword-match wins).
+  * load_volume(path) -> (GridField, bounds): .npy (direct) or raw floats+dims -> a GridField, a callable trilinear
+    density field that drops straight into the existing volume_render / mind.render_volume. Rendered a loaded blob
+    end-to-end (48x48, alpha coverage ~0.37).
+  * import_asset(path) dispatches by extension.
+
+Wired mind.import_asset/load_obj/load_glb/load_texture_set/load_volume. Catalog "Import artist file formats" (catalog
+91->92), discoverable. KEPT NEGATIVES (loud, in docstring + guide + code): we import the OPEN/EXPORTED forms -- the
+PROPRIETARY .sbsar/.spp (Substance project) and sparse OpenVDB .vdb need vendor tools; load_volume RAISES on .vdb rather
+than guessing. PBRMaterial has no normal_map field, so normal/height/ao are carried as ATTRIBUTES (lossless import) for
+downstream use (render_textured normal channel / auto_displace). +11 tests (10 module incl. fan-triangulation, negative
+indices, glb material round-trip, name classification, raw+npy volume, vdb-abstains, dispatch; 1 integration with a real
+volume render). Documented in FEATURE_GUIDE.md section 7.
+
+## ASSET IMPORT -- animation / UV / full-channel enhancement  [+5 tests, 15 total on the module]
+
+Moose: "fully support their texture maps, channels, uv stuff, animation." Enhanced holographic_assetimport.py:
+
+  * FULL glTF CHANNELS: added occlusionTexture (mat.ao_map) alongside base-colour/metallic/roughness/normal/emissive.
+  * UVs/NORMALS carried: load_glb now keeps the glTF mesh's per-vertex TEXCOORD_0 (lm.uv) and NORMAL (lm.normals),
+    which glb_to_mesh already read but load_glb was dropping. (OBJ already carried per-corner UVs/normals.)
+  * ANIMATION: new AnimationClip -- channels {node:{path:(times,values)}}; clip.sample(t) -> {node: 4x4 LOCAL matrix}
+    with translation/scale LINEAR and rotation SLERPed (reuses holographic_ai.slerp); clip.duration; sample_channel for
+    raw values incl. morph 'weights'. _gltf_animations groups samplers+channels by node. Verified: a 2-key translation
+    clip samples the midpoint exactly, a 90-deg-about-Z quaternion clip slerps x->y.
+  * SKINS: _gltf_skins -> [{joints, inverse_bind (J,4,4)}] (inverse-bind read column-major, transposed to row-major);
+    per-vertex JOINTS_0/WEIGHTS_0 carried on lm.joints/lm.weights.
+  * ROBUST accessor: new _accessor(gltf,idx,blob) honours the accessor's OWN byteOffset + all componentTypes (i8/u8/
+    i16/u16/u32/f32) + MAT4 (the emitter's _read_accessor assumed tight-packed no-offset; real anim/skin accessors have
+    offsets). load_glb now tolerates a GLB with no readable mesh (animation-only files) -- glb_to_mesh wrapped in
+    try/except, geometry-independent data still imports.
+  * LoadedMesh gained: uv, normals, animations, skins, joints, weights, nodes (node names, so channels target by index).
+
+KEPT NEGATIVES (loud, in docstring + guide): animation import SAMPLES a pose (node transforms) but does NOT yet APPLY
+skinning (deform verts by the pose) or morph-target blending -- the data is imported/carried, the deformer is a separate
+step. OBJ carries no animation. Catalog home text + aliases updated (animation/skin/rigged/keyframe/skeleton/uv/channels);
+still catalog #92, discoverable. +5 module tests (translation interp, rotation slerp, skin, uv/normals, all-channels) +1
+integration (animation through the mind). Tour block extended with a rigged-clip demo (sample at t=0.5 -> bone x=1.0).
+
+## SKINNING + MORPH DEFORMER -- imported rigs now actually MOVE  [+8 tests]
+
+Closed the loop Moose flagged: last enhancement IMPORTED animation/skin/morph data but stopped at sampling a pose; it
+did not DEFORM the mesh. NEW holographic_skindeform.py applies it.
+
+  * global_transforms(node_graph, overrides): walks the node hierarchy (roots -> children) composing global = parent @
+    local, with an animation clip's sample(t) overriding animated nodes' locals. Needed the node hierarchy + rest
+    transforms, so ADDED to the importer: _gltf_node_graph (per node: name, rest local 4x4 from matrix or TRS, children)
+    and _gltf_morph_targets (primitive 'targets' POSITION deltas + default weights). LoadedMesh gained node_graph,
+    morph_targets, morph_weights.
+  * skin_positions: builds each joint's transform = global_joint @ inverse_bind, expands the sparse per-vertex
+    JOINTS_0/WEIGHTS_0 (V,4) into the dense (V,J) weight matrix, and blends via the EXISTING
+    holographic_meshskin.linear_blend_skin (route, don't rewrite -- the LBS kernel + its candy-wrapper negative were
+    already shipped). glTF JOINTS_0 indexes the skin's joint list, so columns align with the transform list directly.
+  * apply_morph: base + sum_i w_i * delta_i; morph_weights_at pulls an animated 'weights' channel (clip.sample_channel)
+    or the default. deform(loaded, clip, t) = morph then skin -> a deformed Mesh (glTF's order). deformed_positions for
+    raw (V,3). clip=None = rest pose; unrigged mesh = identity.
+  * Wired mind.deform_mesh(loaded, clip, t). Extended the import catalog home text + aliases (deform/skinning/linear
+    blend skinning/morph/blend shape/pose a rig), still #92.
+
+VERIFIED: unit tests on constructed rigs (rest unchanged, +2 at t=1, +1 at t=0.5, child inherits parent, dense-weight
+expansion, morph blend, unrigged untouched) AND an END-TO-END: a hand-built complete skinned GLB (mesh + JOINTS_0/
+WEIGHTS_0 + skin + inverse-bind + node hierarchy + translation animation) imported via load_glb then deformed -> verts
+follow the bone +2 on Y at t=1. +1 integration (deform through the mind). Tour block extended (vertex rose 2.0 on Y at
+t=1).
+
+KEPT NEGATIVES (loud, in guide): LINEAR-blend skinning only (the candy-wrapper collapse at extreme twists that
+dual-quaternion avoids -- not implemented); first skin only; positions moved but normals not re-skinned. Corrected the
+prior guide caveat that said skinning "is not yet applied" -- it is now.

@@ -48,7 +48,7 @@ setup(
     include_package_data=True,
     package_data={
         "lecore_data": [
-            "knowledge/*",                                  # dictionary.json.gz, manifest.json, LICENSE_WORDNET.txt
+            "knowledge/*",                                  # dictionary.json.xz (lzma), manifest.json, LICENSE_WORDNET.txt
             "definitions/*.md",
             "definitions/native/materials/*.json",
             "definitions/standards/generic_table/*.json",

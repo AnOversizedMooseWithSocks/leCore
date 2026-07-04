@@ -5645,6 +5645,340 @@ _ss_sim=_sfd("a red sphere and a blue box").simulate(steps=20)
 _ss_y0=float(list(_ss_sim[0].values())[0][1]); _ss_y1=float(list(_ss_sim[-1].values())[0][1])
 print(f"  DESCRIBE -> BUILD -> ADJUST -> RENDER/SIMULATE: you can now TALK a 3-D scene into being and then adjust it by talking to its named objects. Describe 'a big red metal sphere and a small blue glass box on a sunny day' and the engine builds it: [{_ss_before}]. Then edit in plain words -- 'make the sphere bigger', 'change the box to metal', 'make everything glass' -- and it becomes [{_ss_after}]. It is honest about what it does NOT understand: 'make the pyramid golden' names no known object, so it changes NOTHING [{_ss_noop}] rather than guessing. From there scene.render() draws it (default camera, the scene sun/sky) and scene.simulate() drops the objects under gravity until they settle (a ball fell from y={_ss_y0:.1f} to rest at y={_ss_y1:.2f}). One mind.build_scene() call, or mind.semantic_scene(objects) to adjust a scene you already have. *** describe it, the engine builds it, and you shape it in words ***")
 
+# ---- CMP1: composable texture map graph ----
+import numpy as _np_rd
+_tg_mind = _mind_rd
+_tg_red = _tg_mind.texture_leaf(value=[1.0, 0.0, 0.0]); _tg_blue = _tg_mind.texture_leaf(value=[0.0, 0.0, 1.0])
+_tg_noise = _tg_mind.texture_leaf("fbm", n_dims=2, seed=0)
+_tg_base = _tg_mind.texture_op("mix", a=_tg_red, b=_tg_blue, t=_tg_noise)                 # blend two colours by a noise field
+_tg_top = _tg_mind.texture_op("multiply", a=_tg_base, b=_tg_mind.texture_leaf(value=[0.9, 0.9, 0.9]))   # a map whose input is another map
+_tg_val = _tg_mind.sample_texture(_tg_top, [0.3, 0.7])
+_tg_depth = "mix(color,color,field) -> multiply(that, color)"
+try:
+    _tg_mind.texture_op("mix", a=_tg_red, b=_tg_blue, t=_tg_red); _tg_refused = "allowed (BUG)"   # a colour as a weight
+except TypeError:
+    _tg_refused = "refused at compose time"
+_tg_v1 = _tg_mind.encode_texture(_tg_top)
+_tg_v2 = _tg_mind.encode_texture(_tg_mind.texture_op("multiply", a=_tg_mind.texture_op("mix", a=_tg_mind.texture_leaf(value=[1.0, 0.0, 0.0]), b=_tg_mind.texture_leaf(value=[0.0, 0.0, 1.0]), t=_tg_mind.texture_leaf("fbm", n_dims=2, seed=0)), b=_tg_mind.texture_leaf(value=[0.9, 0.9, 0.9])))
+_tg_cos = float(_np_rd.dot(_tg_v1, _tg_v2) / (_np_rd.linalg.norm(_tg_v1) * _np_rd.linalg.norm(_tg_v2)))
+print(f"  COMPOSABLE TEXTURE GRAPH (CMP1): a texture is a readable TREE -- an op over TYPED inputs (map | color | field | number), each of which may be another map, so graphs nest to any depth. Here '{_tg_depth}' samples at uv=(0.3,0.7) to rgb [{float(_tg_val[0]):.2f}, {float(_tg_val[1]):.2f}, {float(_tg_val[2]):.2f}]. The discipline is the SCHEMA, checked at COMPOSE time: feed a colour where a weight belongs and it is {_tg_refused} -- a bad graph is caught up front, not rendered wrong. The tree stays plain Python you can read; encode it to a hypervector only when it earns its keep (cache/search) -- two structurally identical graphs encode to the SAME code (cosine {_tg_cos:.3f}). Reuses the Texture leaf sources (fbm/voronoi/synth) and typed's tree encoder; no new machinery. *** textures compose like shaders, type-checked before they render ***")
+
+# ---- CMP3: multi-material blended by a mask ----
+import numpy as _np_mm
+from holographic_fpe import VectorFunctionEncoder as _VFE_mm
+from holographic_material import Material as _Mat_mm, texture_field as _tf_mm
+_mm_enc = _VFE_mm(2, dim=256, bounds=[(0, 1), (0, 1)], kernel="rbf", bandwidth=3.0, seed=1)
+_mm_grid = [(u, v) for u in _np_mm.linspace(0.05, 0.95, 6) for v in _np_mm.linspace(0.05, 0.95, 6)]
+_mm_A = _Mat_mm(_mm_enc, {"albedo": _tf_mm(_mm_enc, _mm_grid, [u for (u, v) in _mm_grid])})        # ramps up in u
+_mm_B = _Mat_mm(_mm_enc, {"albedo": _tf_mm(_mm_enc, _mm_grid, [1.0 - u for (u, v) in _mm_grid])})  # ramps down in u
+_mm_mask = _mind_rd.texture_op("scale", x=_mind_rd.texture_leaf("fbm", n_dims=2, seed=0), k=_mind_rd.texture_leaf(value=1.0))
+_mm_blend = _mind_rd.multi_material([_mm_A, _mm_B], [_mm_mask, 0.5], mode="blend")
+_mm_uv = [0.35, 0.6]
+_mm_w = _mm_blend.weights_at(_mm_uv)
+_mm_val = float(_mm_blend.sample("albedo", _mm_uv))
+_mm_expect = float(_mm_w[0] * _mm_A.sample("albedo", _mm_uv) + _mm_w[1] * _mm_B.sample("albedo", _mm_uv))
+_mm_drift = float(_mind_rd.multi_material([_mm_A, _mm_B], [1.0, 1.0], normalize=False).sample("albedo", _mm_uv))
+_mm_norm = float(_mind_rd.multi_material([_mm_A, _mm_B], [1.0, 1.0], normalize=True).sample("albedo", _mm_uv))
+_mm_pick = float(_mind_rd.multi_material([_mm_A, _mm_B], [0.2, 0.8], mode="select").sample("albedo", _mm_uv))
+print(f"  MULTI-MATERIAL BY MASK (CMP3): Material.blend mixes TWO materials by one scalar; this mixes N by per-point MASKS -- each material's weight is a mask that varies over the surface (a CMP1 texture graph, a field, or a constant), so you paint rust into metal or moss onto stone. At uv={_mm_uv} the fbm mask gives weights [{float(_mm_w[0]):.2f}, {float(_mm_w[1]):.2f}] and the albedo reads {_mm_val:.3f} -- exactly w0*A+w1*B ({_mm_expect:.3f}), a bundle weighted by a field. The weights NORMALISE to a partition of unity so brightness stays put ({_mm_norm:.3f}); leave them unnormalised and it drifts too bright ({_mm_drift:.3f}) -- the kept negative, shown. And 'select' mode hard-picks the dominant material for a crisp material-ID / splat map ({_mm_pick:.3f}). Reuses Material + CMP1; no new machinery. *** materials blend by a mask, the mask is just another texture graph ***")
+
+# ---- CMP2: layered material with an order schema ----
+import numpy as _np_lm
+from holographic_fpe import VectorFunctionEncoder as _VFE_lm
+from holographic_material import Material as _Mat_lm, texture_field as _tf_lm
+from holographic_layeredmaterial import LAYER_RANK as _LM_RANK
+_lm_enc = _VFE_lm(2, dim=256, bounds=[(0, 1), (0, 1)], kernel="rbf", bandwidth=3.0, seed=1)
+_lm_grid = [(u, v) for u in _np_lm.linspace(0.05, 0.95, 6) for v in _np_lm.linspace(0.05, 0.95, 6)]
+_lm_paint = _Mat_lm(_lm_enc, {"albedo": _tf_lm(_lm_enc, _lm_grid, [u for (u, v) in _lm_grid])})       # ramps up
+_lm_gloss = _Mat_lm(_lm_enc, {"albedo": _tf_lm(_lm_enc, _lm_grid, [1.0 - u for (u, v) in _lm_grid])}) # ramps down
+_lm_stack = _mind_rd.layered_material([_mind_rd.material_layer("base", _lm_paint), _mind_rd.material_layer("clearcoat", _lm_gloss, alpha=0.35)])
+_lm_uv = [0.4, 0.6]
+_lm_val = float(_lm_stack.sample("albedo", _lm_uv))
+_lm_expect = float(0.35 * _lm_gloss.sample("albedo", _lm_uv) + 0.65 * _lm_paint.sample("albedo", _lm_uv))
+try:
+    _mind_rd.layered_material([_mind_rd.material_layer("clearcoat", _lm_gloss), _mind_rd.material_layer("base", _lm_paint)])
+    _lm_order = "allowed (BUG)"
+except ValueError:
+    _lm_order = "refused at compose time"
+_lm_tiers = " < ".join(sorted(_LM_RANK, key=lambda k: _LM_RANK[k]))
+print(f"  LAYERED MATERIAL + ORDER SCHEMA (CMP2): real surfaces are STACKS -- base < diffuse < specular/reflection < coat/clearcoat -- and the ORDER is a schema checked when you build the stack, so a base placed above a clearcoat is {_lm_order}, not rendered wrong. Here a 35%-covering clearcoat over paint composites at uv={_lm_uv} to albedo {_lm_val:.3f} -- exactly over(coat,base,0.35) = 0.35*coat+0.65*base ({_lm_expect:.3f}); each upper layer sits OVER the one below by its coverage alpha (a number, a field, or a CMP1 texture graph, so a coat can cover only part of a surface). HONEST BOUNDARY (kept loud): this fixes the STACKING, not the RADIOMETRY -- a physically energy-conserving layered BRDF, where the coat darkens and tints what's under it, is a separate harder thing and is NOT claimed. Tiers: {_lm_tiers}. Reuses Material + CMP1 + typed. *** materials stack in the right order, checked before they render ***")
+
+# ---- CMP4: shared-definition instancing + type-safe binding ----
+from holographic_mesh import box as _box_in
+from holographic_scenegraph import translation as _tr_in
+_in_chair = _mind_rd.shared_definition("chair", _box_in(1.0, 1.0, 1.0), "metal")
+_in_scene = _mind_rd.instanced_scene()
+_in_a = _in_scene.place(_in_chair, _tr_in([-2.0, 0.0, 0.0]), name="left")
+_in_b = _in_scene.place(_in_chair, _tr_in([2.0, 0.0, 0.0]), name="right")
+_in_scene.place(_in_chair, _tr_in([0.0, 0.0, 2.0]), name="back")
+_in_before = _in_a.material
+_in_chair.set_material("glass")                                # ONE edit...
+_in_after = (_in_a.material, _in_b.material)                   # ...changes every instance
+try:
+    _mind_rd.shared_definition("bad", _box_in(1.0, 1.0, 1.0), "smoke")   # a volumetric material on a mesh
+    _in_bind = "allowed (BUG)"
+except TypeError:
+    _in_bind = "refused at compose time"
+_in_merged = _in_scene.flatten_surface()
+_in_per = _box_in(1.0, 1.0, 1.0).n_vertices
+print(f"  SHARED-DEFINITION INSTANCING + TYPE-SAFE BINDING (CMP4): place ONE shared definition many times and every copy is a REFERENCE, not a duplicate -- 3 chairs share one 'chair' definition, so repainting it once ({_in_before} -> the instances now read {_in_after[0]}/{_in_after[1]}) recolours ALL of them in a single edit. The material<->geometry binding is TYPE-CHECKED when you build the definition: a surface material needs a mesh and a volumetric one (fog/smoke/fire) needs a volume, so putting smoke on a solid mesh is {_in_bind}, not rendered wrong. HONEST BOUNDARY (kept loud): the sharing is edit-once at the GRAPH level; flatten_surface() is where instances become concrete geometry -- it merges the 3 surface instances into one mesh ({int(_in_merged.n_vertices)} = 3 x {int(_in_per)} verts). Reuses scenegraph + the surface/volumetric split. *** one definition, many placements, edit once -- and bad bindings caught before they render ***")
+
+# ---- CMP5: pipeline composes the graphs (bake vs live) ----
+import numpy as _np_rg
+from holographic_mesh import box as _box_rg
+from holographic_scenegraph import translation as _tr_rg
+from holographic_rendergraph import BakedTexture as _BT_rg
+_rg_tex = _mind_rd.texture_op("mix", a=_mind_rd.texture_leaf(value="red"), b=_mind_rd.texture_leaf(value="blue"), t=_mind_rd.texture_leaf("fbm", n_dims=2, seed=0))
+_rg_scene = _mind_rd.instanced_scene()
+_rg_chair = _mind_rd.shared_definition("chair", _box_rg(1.0, 1.0, 1.0), "metal")
+_rg_scene.place(_rg_chair, _tr_rg([-2.0, 0.0, 0.0])); _rg_scene.place(_rg_chair, _tr_rg([2.0, 0.0, 0.0]))
+_rg = _mind_rd.render_graph(res=32)
+_rg.add_texture("rust", _rg_tex, static=True).add_texture("ripples", _rg_tex, static=False).set_scene(_rg_scene)
+_rg_plan = _rg.plan()
+_rg_prep = _rg.prepare()
+_rg_rust_baked = isinstance(_rg_prep.texture("rust"), _BT_rg)
+_rg_ripples_live = _rg_prep.texture("ripples") is _rg_tex
+_rg_live = _np_rg.asarray(_rg_tex.sample([0.4, 0.6]))
+_rg_baked = _np_rg.asarray(_rg_prep.texture("rust").sample([0.4, 0.6]))
+_rg_interp = float(_np_rg.max(_np_rg.abs(_rg_live - _rg_baked)))
+print(f"  PIPELINE COMPOSES THE GRAPHS (CMP5): the render pipeline now reaches all the way DOWN to the maps and materials. Register the texture graphs + the instanced scene, call plan(), and it tells you what it will do and WHY before running: '{_rg_plan[0].split(': ',1)[1]}'; '{_rg_plan[1].split(': ',1)[1]}'. The adaptive decision is BAKE a STATIC map to a grid (O(1) bilinear lookup, pay the tree walk once) vs SAMPLE a changing map LIVE (baking it would be redone every frame). Here 'rust' baked = {_rg_rust_baked}, 'ripples' stayed live = {_rg_ripples_live}; the baked lookup still matches the live graph to {_rg_interp:.3f} (interpolation error -- the kept trade: memory for speed). prepare() also binds+flattens the CMP4 scene ({int(_rg_prep.surface_mesh.n_vertices)} verts). Reuses pipeline Stages (needs/produces) + matbake's bake trade + CMP1-CMP4. *** 'adaptive' now decides bake-vs-live per map, not just per render pass ***")
+
+# ---- SEE what you composed: swatch + material ball ----
+import numpy as _np_pv
+from holographic_fpe import VectorFunctionEncoder as _VFE_pv
+from holographic_material import Material as _Mat_pv, texture_field as _tf_pv
+_pv_g = _mind_rd.texture_op("mix", a=_mind_rd.texture_leaf(value="orange"), b=_mind_rd.texture_leaf(value="purple"), t=_mind_rd.texture_leaf("fbm", n_dims=2, seed=0))
+_pv_swatch = _mind_rd.preview_texture(_pv_g, res=64)
+_pv_enc = _VFE_pv(2, dim=256, bounds=[(0, 1), (0, 1)], kernel="rbf", bandwidth=3.0, seed=1)
+_pv_grid = [(a, b) for a in _np_pv.linspace(0.05, 0.95, 6) for b in _np_pv.linspace(0.05, 0.95, 6)]
+_pv_mat = _Mat_pv(_pv_enc, {"roughness": _tf_pv(_pv_enc, _pv_grid, [a for (a, b) in _pv_grid]), "metallic": _tf_pv(_pv_enc, _pv_grid, [0.9 for _ in _pv_grid])})
+_pv_ball = _mind_rd.preview_material(_pv_mat, res=64)
+_pv_sw_ok = (_pv_swatch.shape == (64, 64, 3) and 0.0 <= float(_pv_swatch.min()) and float(_pv_swatch.max()) <= 1.0)
+_pv_ball_shaded = not bool(_np_pv.allclose(_pv_ball[32, 32], _pv_ball[0, 0]))
+print(f"  SEE WHAT YOU COMPOSED (swatch + material ball): the composability stack builds things you .sample(uv); these render them to an image so you can LOOK. preview_texture(graph) makes a flat RGB SWATCH ({_pv_swatch.shape} in [0,1] = {_pv_sw_ok}); preview_material(material) shades it on the classic MATERIAL BALL with the SAME Cook-Torrance BRDF the renderer uses -- reading its roughness/metallic channels off a sphere (centre differs from the background = the ball was actually shaded = {_pv_ball_shaded}). Works on a plain Material or a CMP2/CMP3 layered/multi material. The missing step between composing a material and knowing if it looks right. *** compose it, then just look at it ***")
+
+# ---- composed texture painted onto a scene object, full render ----
+import numpy as _np_tr
+from holographic_semantic import _UnionSDF as _Union_tr
+from holographic_raymarch import sphere_trace as _st_tr
+from holographic_render import Camera as _Cam_tr
+_tr_scene = _mind_rd.build_scene("a big red metal sphere")
+_tr_tex = _mind_rd.texture_op("mix", a=_mind_rd.texture_leaf(value="red"), b=_mind_rd.texture_leaf(value="cyan"), t=_mind_rd.texture_leaf("fbm", n_dims=2, seed=1, octaves=5))
+_tr_W = _tr_H = 72
+_tr_img = _mind_rd.render_textured(_tr_scene, {_tr_scene.names()[0]: _tr_tex}, width=_tr_W, height=_tr_H)
+_tr_union = _Union_tr([r["sdf"] for r in _tr_scene.realize()])
+_tr_span = max(3.0, 1.6)
+_tr_cam = _Cam_tr(eye=(_tr_span * 0.4, _tr_span * 0.28, _tr_span), target=(0, 0, 0), fov_deg=42.0)
+_tr_eye, _tr_dirs = _tr_cam.ray_dirs(_tr_W, _tr_H)
+_tr_D = _tr_dirs.reshape(-1, 3); _tr_O = _np_tr.broadcast_to(_tr_eye, _tr_D.shape).copy()
+_tr_hit, _, _ = _st_tr(_tr_union, _tr_O, _tr_D)
+_tr_sph = _tr_img.reshape(-1, 3)[_tr_hit]
+_tr_rvar = float(_tr_sph[:, 0].std()); _tr_bvar = float(_tr_sph[:, 2].std())
+print(f"  COMPOSED TEXTURE PAINTED ONTO A SCENE OBJECT (full render): the composability stack now drives a REAL 3-D image. Build a texture with mind.texture_op(...), then mind.render_textured(scene, {{name: texture}}) marches the scene, turns each surface hit into a UV (spherical map on a sphere, planar on a box), samples the texture there, and shades it with the SAME Cook-Torrance BRDF the renderer uses -- plus a light and a hard shadow. Here a red<->cyan fbm wraps onto the sphere: across its {int(_tr_hit.sum())} surface pixels the painted red varies by std {_tr_rvar:.3f} and blue by {_tr_bvar:.3f} -- a FLAT tint would be ~0, so the texture genuinely WRAPS via UV mapping, it isn't just a recolour. Reuses the marcher (sphere_trace) + sdf_normal + the BRDF; the swatch/ball preview grown up into a scene. HONEST (kept): textbook UV (a seam + pole pinch on the sphere, face seams on a box), one hard light (the path tracer is the tool for GI). *** the texture you composed now wraps around the object in the render ***")
+
+# ---- named objects + textures in the describe-a-scene flow ----
+_ns_scene = _mind_rd.build_scene("a big metal sphere on a green box")
+_ns_scene.name("the sphere", "hero")                      # give it a nickname you can rename + reference
+_ns_names_after_naming = _ns_scene.names()
+_ns_scene.adjust("make hero glass")                       # reference the object by its nickname
+_ns_hero_mat = _ns_scene.get("hero")[0]["material"]
+_ns_scene.adjust("rename hero to champion")               # rename via plain command
+_ns_scene.adjust("give champion a rusty texture")         # paint a named procedural texture by talking to it
+_ns_scene.adjust("make the box mossy")
+_ns_has_tex = _ns_scene.get("champion")[0]["texture"] is not None
+_ns_img = _ns_scene.render(width=64, height=48)           # render() now ROUTES through the textured renderer
+import numpy as _np_ns
+_ns_std = float(_np_ns.asarray(_ns_img).std())
+print(f"  NAMED OBJECTS + TEXTURES IN THE SCENE FLOW: you can now nickname the things you build and paint them by talking. build_scene(...) then scene.name('the sphere','hero') -> names() shows {_ns_names_after_naming}; 'make hero glass' reaches it by that nickname (material now {_ns_hero_mat!r}); 'rename hero to champion' renames it; 'give champion a rusty texture' and 'make the box mossy' attach composed CMP1 textures (from a small named library: rusty/marbled/mossy/cloudy/lava/striped/noisy) -- champion carries a texture = {_ns_has_tex} -- and scene.render() automatically ROUTES through the textured renderer so the paint shows (image std {_ns_std:.3f}). A nickname wins over attribute-matching, so once named a thing is always reachable. *** name it, paint it, render it -- all by describing what you want ***")
+
+# ---- message bus + optional agent (LLM) bridge ----
+import numpy as _np_bus
+_bus_told = []
+_bus_bridge = _mind_rd.agent_bridge(llm=lambda text: (_bus_told.append(text), "looks good -- centered and bright")[1])
+_bus_replies = []
+_bus_bridge.on_reply(lambda msg: _bus_replies.append(msg.payload["reply"]))
+_bus_bridge.notify_on("render.done", "A render just finished -- does it look right?")   # PUSH to the agent, no polling
+_bus_scene = _mind_rd.build_scene("a red metal sphere")
+_mind_rd.run_task("render", lambda: _np_bus.asarray(_bus_scene.render(width=48, height=40)),
+                  summarize=lambda a: {"shape": list(a.shape), "mean": round(float(a.mean()), 3)})
+_bus_topics = [msg.topic for msg in _mind_rd.bus().history()]
+_bus_reached = bool(_bus_told) and "render.done" in _bus_told[0]
+print(f"  MESSAGE BUS + OPTIONAL AGENT (leOS harness): a person AND an agent can both be attached to the running tool, and the app REACHES OUT to the agent instead of the agent polling. mind.bus() is a topic message bus; mind.run_task('render', fn) runs a job and publishes 'render.done' with a small summary; mind.agent_bridge(llm=my_fn).notify_on('render.done', ...) calls YOUR callable (any text->reply -- no LLM library is imported, so it's fully optional) the instant the render finishes and posts the reply back. Here the render task fired {_bus_topics[:2]}, the agent was told with the summary = {_bus_reached}, and it replied {_bus_replies!r} -- all without anyone polling a status flag. With no agent attached it all still runs (an 'agent.unattached' note is posted). Over HTTP a remote agent uses /bus/publish + /bus/poll on its own inbox. *** the app can invoke the agent, and both can message each other -- optional, dependency-free ***")
+
+# ---- optional language layer: lazy dictionary + find words by meaning ----
+import holographic_dictionary as _hd_tour
+_hd_tour.unload()
+_lang_loaded_before = _hd_tour.is_loaded()                 # building the mind never loaded it
+_lang_idx = _mind_rd.build_semantic_index(words=["dog","puppy","cat","kitten","serendipity","luck","chance","river","stream","ocean","wealth","money","happy","joyful"], dim=256, seed=0)
+_lang_loaded_after = _hd_tour.is_loaded()                  # building the index did
+_lang_q1 = [w for w,_ in _lang_idx.find("unexpected good luck", k=3)]
+_lang_q2 = [w for w,_ in _lang_idx.find("a young dog", k=3)]
+_lang_q3 = [w for w,_ in _lang_idx.find("a body of water", k=3)]
+print(f"  OPTIONAL LANGUAGE LAYER (lazy dictionary + meaning search): the ~144k-word dictionary is stored as lzma (~3.3 MB on disk, was 5.9 MB gzip) and is OPT-IN -- importing leCore or building a mind loaded it? {_lang_loaded_before}. It only decompresses into a plain dict in RAM on the first language call, so a user building on top pays nothing for it (control it with holographic_dictionary.preload()/unload()/stats()). On top of it, mind.build_semantic_index() places words in a MEANING space by random indexing over their glosses so you can search by description: 'unexpected good luck' -> {_lang_q1}, 'a young dog' -> {_lang_q2}, 'a body of water' -> {_lang_q3} (loaded now? {_lang_loaded_after}). Approximate -- reliable for the top hit, noisy in the tail, word-sense sensitive -- which is exactly where leCore's geometry-preserving/lossy side belongs (NOT on exact lookup). *** the dictionary access is instant once loaded, the whole layer is opt-in, and you can find words by meaning ***")
+_hd_tour.unload()
+
+# ---- external asset relocation / relink ----
+import os as _os_as, tempfile as _tf_as, shutil as _sh_as
+_as_root = _tf_as.mkdtemp(prefix="lecore_tour_assets_")
+try:
+    _as_old = _os_as.path.join(_as_root, "Documents", "project")
+    for _rel in ("textures/water/wave.png", "textures/stone/wall.png", "models/boat.obj"):
+        _p = _os_as.path.join(_as_old, *_rel.split("/"))
+        _os_as.makedirs(_os_as.path.dirname(_p), exist_ok=True)
+        open(_p, "wb").write(("data:" + _rel).encode())
+    _as_lib = _mind_rd.asset_library()
+    for _rel in ("textures/water/wave.png", "textures/stone/wall.png", "models/boat.obj"):
+        _as_lib.add(_os_as.path.join(_as_old, *_rel.split("/")), role=_rel, with_hash=True)
+    _as_new = _os_as.path.join(_as_root, "Projects", "project")
+    _os_as.makedirs(_os_as.path.dirname(_as_new), exist_ok=True)
+    _sh_as.move(_as_old, _as_new)                                   # the whole project folder moved
+    _as_missing_before = len(_as_lib.missing())
+    _as_rep = _as_lib.relink(_as_lib.assets[0].path, _os_as.path.join(_as_new, "textures", "water", "wave.png"))
+    _as_missing_after = len(_as_lib.missing())
+    _as_hows = sorted(set(_r["how"].split("(")[0] for _r in _as_rep["relinked"]))
+    # change detection + content-hash resolve across "machines"
+    import time as _tm_as
+    _tm_as.sleep(0.01); open(_as_lib.assets[1].path, "ab").write(b" edit"); _os_as.utime(_as_lib.assets[1].path, None)
+    _as_changed = len(_as_lib.changed())
+    _as_other = _os_as.path.join(_as_root, "machineB", "renamed.obj")
+    _os_as.makedirs(_os_as.path.dirname(_as_other), exist_ok=True)
+    _sh_as.copy(_as_lib.assets[2].path, _as_other); _os_as.remove(_as_lib.assets[2].path)
+    _as_byhash = _as_lib.resolve(_as_lib.assets[2].id, roots=[_os_as.path.join(_as_root, "machineB")])
+    _as_found_by_hash = (_as_byhash == _as_other)
+    print(f"  EXTERNAL ASSET RELOCATION (the 3-D 'missing textures' fix): the scene's texture/model files live on disk and break when folders move. mind.asset_library() tracks them and repairs paths the way you'd reason about it. Moved the whole project folder -> {_as_missing_before} assets broke; re-pointed just ONE, and the rest were re-found automatically ({_as_hows}: it works out the moved parent, rewrites the siblings, then structurally searches for anything reorganised) -> {_as_missing_after} still missing. It also spots on-disk EDITS ({_as_changed} file flagged 'modified' via size/mtime or content hash) and, for a DISTRIBUTED setup where paths differ per machine, resolves a file by CONTENT HASH wherever it landed (found the renamed copy: {_as_found_by_hash}). Readable stdlib (os/hashlib/json); saves a JSON manifest. *** fix one path, find the rest; know when a file changed; locate by content across machines ***")
+finally:
+    _sh_as.rmtree(_as_root, ignore_errors=True)
+
+# ---- external texture files carried by a scene (asset tracking + relink) ----
+import os as _os_st, tempfile as _tf_st, shutil as _sh_st
+_st_root = _tf_st.mkdtemp(prefix="lecore_tour_scene_assets_")
+try:
+    _st_old = _os_st.path.join(_st_root, "Documents", "project", "textures")
+    _os_st.makedirs(_st_old, exist_ok=True)
+    for _n in ("wave.png", "wall.png"):
+        open(_os_st.path.join(_st_old, _n), "wb").write(b"(texture bytes)")
+    _st_scene = _mind_rd.build_scene("a big sphere and a small box")
+    _st_scene.attach_texture_file("the sphere", _os_st.path.join(_st_old, "wave.png"))
+    _st_scene.attach_texture_file("the box", _os_st.path.join(_st_old, "wall.png"))
+    _st_missing0 = len(_st_scene.missing_assets())
+    # move the whole project folder -> both texture files break
+    _st_new = _os_st.path.join(_st_root, "Projects", "project")
+    _os_st.makedirs(_os_st.path.dirname(_st_new), exist_ok=True)
+    _sh_st.move(_os_st.path.join(_st_root, "Documents", "project"), _st_new)
+    _st_missing1 = len(_st_scene.missing_assets())
+    # re-point ONE, the other is found automatically; render still works (falls back to colour for any missing file)
+    _st_scene.relink(_st_scene.assets.assets[0].path, _os_st.path.join(_st_new, "textures", "wave.png"))
+    _st_missing2 = len(_st_scene.missing_assets())
+    _st_counts = _st_scene.check_assets()["counts"]
+    import numpy as _np_st
+    _st_ok = _np_st.asarray(_st_scene.render(width=48, height=40)).shape == (40, 48, 3)
+    print(f"  EXTERNAL TEXTURE FILES CARRIED BY A SCENE: a scene can reference real files on disk (scene.attach_texture_file('the sphere', 'project/textures/wave.png')) and it tracks them in an AssetLibrary. Moved the project folder -> {_st_missing1} of 2 textures broke; re-pointed just ONE and the other was found by the shared moved-parent -> {_st_missing2} still missing (status {_st_counts}). scene.render() reloads the resolved files and, crucially, falls back to the object's flat COLOUR for any file it still can't find rather than crashing (render ok: {_st_ok}). scene.set_asset_roots([...]) lets render auto-search for moved files; relink/resolve delegate to the same relocation + content-hash machinery. The image pixels load lazily (PIL only when an external image is actually drawn), so the core stays NumPy-only. *** the describe-a-scene flow now survives its textures being moved around ***")
+finally:
+    _sh_st.rmtree(_st_root, ignore_errors=True)
+
+# ---- ingest a folder/zip into a queryable file map ----
+import os as _os_fm, tempfile as _tf_fm, shutil as _sh_fm
+_fm_root = _tf_fm.mkdtemp(prefix="lecore_tour_filemap_")
+try:
+    for _rel, _c in {"readme.md":"renders water with a caustic shader and normal maps", "src/shader.glsl":"vec3 normal = computeNormal(); float caustic = refractLight(normal);", "textures/water/wave.png":"PNG", "models/boat.obj":"v 0 0 0", "notes.txt":"todo: fix the lighting setup"}.items():
+        _p = _os_fm.path.join(_fm_root, *_rel.split("/")); _os_fm.makedirs(_os_fm.path.dirname(_p), exist_ok=True); open(_p,"w").write(_c)
+    _fm = _mind_rd.ingest_files(_fm_root)
+    _fm_kinds = _fm.kinds()
+    _fm_png = [ _e.relpath.split("/")[-1] for _e in _fm.find("*.png") ]
+    _fm_models = len(_fm.by_kind("model"))
+    _fm_kw = [ _e.relpath for _e,_h in _fm.search_text("normal caustic") ]
+    _fm_tree_keys = sorted(_fm.tree().keys())
+    _sh_fm.move(_fm_root, _fm_root + "_moved")
+    _fm_missing1 = len(_fm.missing())
+    _fm.relink(_fm.assets.assets[0].path, _os_fm.path.join(_fm_root + "_moved", _fm.files[0].relpath))
+    _fm_missing2 = len(_fm.missing())
+    print(f"  INGEST A FOLDER/ZIP INTO A QUERYABLE FILE MAP: point mind.ingest_files() at a folder, a .zip, or a file and it digests the whole tree into a map you can query. Here {len(_fm)} files -> kinds {_fm_kinds}; query by NAME (*.png -> {_fm_png}), by KIND (models -> {_fm_models}), by text CONTENT (inverted index: 'normal caustic' -> {[_p.split('/')[-1] for _p in _fm_kw]}), by MEANING (build_meaning_index + find_by_meaning), and read fm.tree() = the folder hierarchy ({_fm_tree_keys}). Every file is ALSO tracked for relocation/change: moved the whole tree -> {_fm_missing1} missing, re-pointed ONE -> {_fm_missing2} missing (the rest self-healed via the built-in AssetLibrary). Stdlib only; text indexing is size-capped so a pile of big binaries stays cheap. *** hand it a folder or zip; get a searchable, self-healing file map ***")
+finally:
+    _sh_fm.rmtree(_fm_root, ignore_errors=True); _sh_fm.rmtree(_fm_root + "_moved", ignore_errors=True)
+
+# ---- cold storage: compress inactive structures, inflate on demand ----
+import numpy as _np_cs
+_cs_store = _mind_rd.cold_store(keep_warm=2)
+for _i in range(6):
+    _cs_store.put("table%d" % _i, _np_cs.tile(_np_cs.arange(400.), 30) + _i)   # redundant rows -> compress well
+_cs_stats = _cs_store.stats()
+_cs_got = float(_cs_store.get("table3")[0])                                    # cold -> transparently warmed
+# fold up ONE big structure and measure the shrink
+_cs_big = _np_cs.tile(_np_cs.arange(2000.), 100)
+_cs_one = _mind_rd.cool(_cs_big, codec="lzma"); _cs_one.cool()
+_cs_ratio = _cs_one.ratio()
+_cs_back_ok = _np_cs.array_equal(_cs_one.get(), _cs_big)
+print(f"  COLD STORAGE (compress inactive data, inflate on demand): a long-running app holds a lot of idle data -- tables nobody queried lately, another session's database, caches built once. mind.cold_store(keep_warm=K) keeps only the K most-recently-used values live and COMPRESSES the rest, warming any of them transparently the instant you get() it. Here 6 tables -> {_cs_stats['warm']} warm, {_cs_stats['cold']} cold, ~{_cs_stats['approx_saved_bytes']//1000} KB saved, and get('table3') still returned {_cs_got} (it was cold, got warmed). mind.cool(x) folds up ONE structure: a redundant array shrank to {_cs_ratio:.1%} of its size and came back bit-identical ({_cs_back_ok}). Works on tables, whole databases, big arrays -- anything picklable; codec='lzma' packs smaller, spill_dir=... writes cold blobs to disk to free RAM entirely. HONEST: high-entropy VSA vectors barely compress (there the win is freeing the live object / spilling to disk); redundant/text/structured data compresses hugely. *** fold up what's idle, unfurl it the moment it's touched ***")
+
+# ---- database auto-cooling (opt-in, distributed-safe) ----
+import pickle as _pk_db
+from holographic_query import Database as _DB
+_db_cool = _DB(); _db_cool.add_namespace("app")
+for _t in range(5):
+    _db_cool.create_table("app.t%d" % _t, ["id", "amt"])
+    for _i in range(40):
+        _db_cool.resolve("app.t%d" % _t).insert({"id": _i, "amt": _i})
+_db_cool.enable_cold_storage(keep_warm=2)
+_db_cool.resolve("app.t3"); _db_cool.resolve("app.t4")            # touch two -> keep warm
+_db_cooled = _db_cool.cool_idle()
+_db_s = _db_cool.cold_stats()
+_db_val = _db_cool.resolve("app.t0").rows[5]["amt"]              # cooled -> warmed transparently
+_db_shipped = _pk_db.loads(_pk_db.dumps(_db_cool))              # what a distributed worker receives
+_db_ship_s = _db_shipped.cold_stats()
+_db_before = dict(_db_shipped.cold_stats()); _db_shipped.resolve("app.t0"); _db_after = dict(_db_shipped.cold_stats())
+print(f"  DATABASE AUTO-COOLING (opt-in, distributed-safe): a long-running query DB can compress the tables nobody has touched lately and inflate them on the next query. db.enable_cold_storage(keep_warm=K); db.cool_idle() folded up {_db_cooled} of 5 idle tables ({_db_s['warm']} warm, {_db_s['cold']} cold, {_db_s['cold_bytes']//1000} KB compressed) -- then resolving a cold table warmed it transparently (t0.amt[5] = {_db_val}, identical). THE DISTRIBUTED-SAFE part (the thing that could have caused trouble): a cold-enabled DB shipped to a worker arrives WARM with cooling OFF (enabled={_db_ship_s['enabled']}, cold={_db_ship_s['cold']}), and a worker's reads do NOT mutate that shared read-only cache (mutated? {_db_before != _db_after}) -- no lock or spill-path ever crosses the process boundary. Off by default, so nothing changes unless you ask. *** fold up idle tables for memory; ship a safe immutable copy to every worker ***")
+
+# ---- import artist file formats: OBJ/MTL, glTF/GLB, texture set, volume ----
+import os as _os_ai, tempfile as _tf_ai, shutil as _sh_ai, numpy as _np_ai
+_ai_root = _tf_ai.mkdtemp(prefix="lecore_tour_import_")
+try:
+    # OBJ + MTL
+    open(_os_ai.path.join(_ai_root, "m.obj"), "w").write("mtllib m.mtl\nv 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nusemtl red\nf 1/1 2/2 3/3 4/4\n")
+    open(_os_ai.path.join(_ai_root, "m.mtl"), "w").write("newmtl red\nKd 0.8 0.1 0.1\nPr 0.4\n")
+    _ai_obj = _mind_rd.load_obj(_os_ai.path.join(_ai_root, "m.obj"))
+    # glTF/GLB round trip WITH a material
+    from holographic_mesh import box as _box_ai
+    from holographic_gltf import mesh_to_glb as _m2g
+    from holographic_materialio import PBRMaterial as _PBR
+    open(_os_ai.path.join(_ai_root, "b.glb"), "wb").write(_m2g(_box_ai(), material=_PBR(name="steel", base_color=(0.2,0.3,0.9,1.0), metallic=1.0, roughness=0.3)))
+    _ai_glb = _mind_rd.load_glb(_os_ai.path.join(_ai_root, "b.glb"))
+    _ai_steel = list(_ai_glb.materials.values())[0]
+    # a volume grid that actually renders
+    _n=32; _g=_np_ai.zeros((_n,_n,_n),_np_ai.float32)
+    _zz,_yy,_xx=_np_ai.mgrid[0:_n,0:_n,0:_n]; _r=_np_ai.sqrt((_xx-_n/2)**2+(_yy-_n/2)**2+(_zz-_n/2)**2)
+    _g[_r<_n*0.32]=1.0
+    _np_ai.save(_os_ai.path.join(_ai_root,"blob.npy"), _g)
+    _ai_field,_ai_bounds = _mind_rd.load_volume(_os_ai.path.join(_ai_root,"blob.npy"))
+    from holographic_render import Camera as _CamAI
+    _ai_img,_ai_alpha = _mind_rd.render_volume(_ai_field, _CamAI(eye=(0,0,3), target=(0,0,0), fov_deg=40), _ai_bounds, width=48, height=48, steps=48)
+    _ai_cov = float((_np_ai.asarray(_ai_alpha)>0.01).mean())
+    # a rigged/animated glTF: build a tiny one (node slides 0->2 on X over 1s) and sample the clip
+    import struct as _st_ai, json as _js_ai
+    _ai_blob = _np_ai.array([0.0,1.0],_np_ai.float32).tobytes() + _np_ai.array([[0,0,0],[2,0,0]],_np_ai.float32).tobytes()
+    _ai_gltf = {"asset":{"version":"2.0"},"nodes":[{"name":"bone"}],"buffers":[{"byteLength":len(_ai_blob)}],
+        "bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":8},{"buffer":0,"byteOffset":8,"byteLength":24}],
+        "accessors":[{"bufferView":0,"componentType":5126,"count":2,"type":"SCALAR","min":[0.0],"max":[1.0]},{"bufferView":1,"componentType":5126,"count":2,"type":"VEC3"}],
+        "animations":[{"name":"slide","samplers":[{"input":0,"output":1,"interpolation":"LINEAR"}],"channels":[{"sampler":0,"target":{"node":0,"path":"translation"}}]}]}
+    _ai_jb = _js_ai.dumps(_ai_gltf).encode(); _ai_jb += b" "*((4-len(_ai_jb)%4)%4)
+    _ai_bb = _ai_blob + b"\x00"*((4-len(_ai_blob)%4)%4)
+    _ai_glbbytes = _st_ai.pack("<III",0x46546C67,2,12+8+len(_ai_jb)+8+len(_ai_bb)) + _st_ai.pack("<II",len(_ai_jb),0x4E4F534A)+_ai_jb + _st_ai.pack("<II",len(_ai_bb),0x004E4942)+_ai_bb
+    open(_os_ai.path.join(_ai_root,"anim.glb"),"wb").write(_ai_glbbytes)
+    _ai_rig = _mind_rd.load_glb(_os_ai.path.join(_ai_root,"anim.glb"))
+    _ai_clip = _ai_rig.animations[0]; _ai_mid = _ai_clip.sample(0.5)[0][:3,3]
+    # DEFORM a rig: a one-bone LoadedMesh whose vertex is bound to a bone that translates; skinning MOVES it
+    from holographic_assetimport import LoadedMesh as _LM_ai, AnimationClip as _AC_ai
+    _ai_ng = [{"name":"root","local":_np_ai.eye(4),"children":[1]}, {"name":"bone","local":_np_ai.eye(4),"children":[]}]
+    _ai_rigmesh = _LM_ai(_np_ai.array([[0.,0,0],[1,0,0]]), [(0,1,0)],
+                         joints=_np_ai.array([[0,0,0,0],[0,0,0,0]]), weights=_np_ai.array([[1.,0,0,0],[1.,0,0,0]]),
+                         skins=[{"joints":[1],"inverse_bind":_np_ai.eye(4)[None]}], node_graph=_ai_ng)
+    _ai_wave = _AC_ai("wave", {1:{"translation":(_np_ai.array([0.,1.]), _np_ai.array([[0.,0,0],[0,2,0]]))}})
+    _ai_rest = _mind_rd.deform_mesh(_ai_rigmesh, clip=None).vertices
+    _ai_posed = _mind_rd.deform_mesh(_ai_rigmesh, clip=_ai_wave, t=1.0).vertices
+    _ai_moved = float((_ai_posed - _ai_rest)[1][1])   # vertex 1 rose this much on Y
+    print(f"  IMPORT ARTIST FILE FORMATS (the interchange an artist actually needs): mind.load_obj / load_glb / load_texture_set / load_volume, dispatched by mind.import_asset(path). OBJ+MTL came in as {_ai_obj.positions.shape[0]} verts / {_ai_obj.faces.shape[0]} tris with per-corner UVs and its 'red' material (base {tuple(round(float(x),1) for x in _ai_obj.materials['red'].base_color[:3])}). A glTF/GLB round-tripped geometry AND its full PBR channels (base-colour/metallic/roughness/normal/occlusion/emissive) + per-vertex UVs/normals -- here metallic={_ai_steel.metallic:.1f}, roughness={_ai_steel.roughness:.1f}, base blue={_ai_steel.base_color[2]:.1f}; embedded textures decoded from the .glb. For RIGGED models it also imports ANIMATIONS + SKINS: clip '{_ai_clip.name}' ({_ai_clip.duration:.1f}s) sampled at t=0.5 puts the bone at x={_ai_mid[0]:.1f} (linear midpoint; rotations slerped). mind.deform_mesh(loaded, clip, t) then actually MOVES the rig -- linear-blend skinning by the posed skeleton (+ morph-target blending): a vertex bound to that bone rose {_ai_moved:.1f} on Y at t=1. A Substance 3D Painter export folder (basecolor/roughness/metallic/normal/height/ao by file name) folds into one PBRMaterial. And a .npy density grid loaded as a trilinear field the volume renderer marched -> a {_np_ai.asarray(_ai_img).shape[0]}x{_np_ai.asarray(_ai_img).shape[1]} image, blob coverage {_ai_cov:.2f}. Stdlib+NumPy (PIL lazy for textures). HONEST: proprietary .sbsar/.spp and sparse OpenVDB .vdb need their vendor tools -- we import the exported open forms. *** the formats artists hand you -- geometry, UVs, all PBR channels, textures, and animation -- come straight into the engine ***")
+finally:
+    _sh_ai.rmtree(_ai_root, ignore_errors=True)
+
 # OPTIMISATION: port the rasteriser's Python loop to a vectorised scatter (the "VSA-native" win) + V-Ray raymarch tricks
 _tl0 = _timerd.time(); _imloop = _mind_rd.render_mesh(_Mrd, _camrd, 256, 256, lights=_lrd, base_color=(0.8, 0.5, 0.3), vectorized=False); _tloop = _timerd.time() - _tl0
 _tv0 = _timerd.time(); _imvec = _mind_rd.render_mesh(_Mrd, _camrd, 256, 256, lights=_lrd, base_color=(0.8, 0.5, 0.3), vectorized=True); _tvec = _timerd.time() - _tv0

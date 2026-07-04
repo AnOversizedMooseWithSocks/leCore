@@ -43,6 +43,9 @@ By default it binds to **127.0.0.1** (local only). `--token X` requires `Authori
 | POST | `/jobs/cancel` | `{"id"}` | cancel a job |
 | POST | `/jobs/status` | `{"id"}` | one job's status + progress |
 | POST | `/jobs/result` | `{"id"}` | the reduced result (once `done`) |
+| POST | `/bus/publish` | `{"topic", "payload"?, "sender"?, "reply_to"?}` | publish a message onto the bus (person/agent send) |
+| POST | `/bus/poll` | `{"mailbox", "patterns"?, "limit"?}` | drain a mailbox (a remote party's inbox; events are pushed into it) |
+| POST | `/bus/history` | `{"pattern"?, "limit"?}` | recent messages for catch-up / replay |
 | GET | `/skills` | — | machine-readable manifest: every capability + method with how to call it |
 | POST | `/skills/suggest` | `{"task"[,"k"]}` | rank skills for a plain-English task, with a confidence + the call |
 | POST | `/skills/route` | `{"task"}` | a decision: `act` (with the call) when confident, else `choose` (options) |
@@ -51,9 +54,9 @@ By default it binds to **127.0.0.1** (local only). `--token X` requires `Authori
 
 Every response is JSON with an `ok` flag; a bad request returns HTTP 400, an unknown route 404, an unexpected error 500.
 
-*(This endpoint table is checked in CI by `servicedoc.py` against the service's actual route registry, so it can't
-quietly fall out of date. If you add or rename a route, CI names the endpoint to fix; `python servicedoc.py --print`
-prints a fresh table to paste here.)*
+*(This endpoint table — and the CLI flags in the Launch section above — are checked in CI by `servicedoc.py` against
+the service's actual routes and argparse, so they can't quietly fall out of date. If you add or rename a route or flag,
+CI names it to fix; `python servicedoc.py --print` prints a fresh endpoint table to paste here.)*
 
 ### Long-running jobs (start / pause / resume / cancel, survive a restart)
 

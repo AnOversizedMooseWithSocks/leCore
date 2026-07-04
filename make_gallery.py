@@ -33,7 +33,8 @@ class _Cam:
     def ray_dirs(self, w, h, jitter=None):
         ys, xs = np.mgrid[0:h, 0:w]
         jx, jy = (0.0, 0.0) if jitter is None else (jitter[0], jitter[1])   # sub-pixel offset for anti-aliasing
-        u = ((xs + jx) / (w - 1) - 0.5) * self.fov
+        aspect = w / h                                                       # widen x by the frame aspect so a
+        u = ((xs + jx) / (w - 1) - 0.5) * self.fov * aspect                  # circle stays a circle (no 4:3 squish)
         v = -((ys + jy) / (h - 1) - 0.5) * self.fov
         d = np.stack([u, v + self.tilt, -np.ones_like(u)], -1)
         return self.eye, d / np.linalg.norm(d, axis=-1, keepdims=True)
@@ -919,6 +920,24 @@ def render_reaction_diffusion():
     plt.imsave(f"{OUT}/reaction_diffusion.png", rgb); print("  reaction_diffusion.png")
 
 
+def render_composed_texture():
+    """The COMPOSABILITY stack made visual: a texture built from mind.texture_op(...) painted onto a scene described in
+    words, rendered through render_textured -- the newest authoring path (compose a texture graph -> paint it -> render
+    it), NOT the path tracer. Shows the composed pattern actually WRAPPING the geometry via UV mapping."""
+    from holographic_unified import UnifiedMind
+    mind = UnifiedMind(dim=1024, seed=0)
+    # two composed textures: a red<->cyan fbm for the sphere, a white<->blue fbm "marble" for the box
+    swirl = mind.texture_op("mix", a=mind.texture_leaf(value="red"), b=mind.texture_leaf(value="cyan"),
+                            t=mind.texture_leaf("fbm", n_dims=2, seed=1, octaves=5))
+    marble = mind.texture_op("mix", a=mind.texture_leaf(value="white"), b=mind.texture_leaf(value="blue"),
+                             t=mind.texture_leaf("fbm", n_dims=2, seed=3, octaves=6))
+    scene = mind.build_scene("a big sphere and a small box")             # describe -> build
+    names = scene.names()
+    scene.paint(names[0], swirl); scene.paint(names[1], marble)          # paint the composed graphs on
+    img = np.clip(np.asarray(scene.render(width=WIDTH, height=HEIGHT)), 0, 1)   # render() routes through render_textured
+    plt.imsave(f"{OUT}/render_composed_texture.png", img); print("  render_composed_texture.png")
+
+
 # =========================================================================== DATA-DRIVEN CHARTS
 def chart_core_ops():
     """Cost of the two core operations vs hypervector dimension -- the algebra is cheap and scales gently."""
@@ -1030,6 +1049,7 @@ if __name__ == "__main__":
                ("iridescence", render_iridescence), ("lit_scene", render_lit_scene),
                ("light_types", render_light_types),
                ("patterns", render_patterns), ("reaction_diffusion", render_reaction_diffusion),
+               ("composed_texture", render_composed_texture),
                ("core_ops", chart_core_ops), ("compression", chart_compression),
                ("capacity", chart_capacity), ("degradation", chart_degradation)]
     for name, fn in visuals:

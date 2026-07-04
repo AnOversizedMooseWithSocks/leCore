@@ -90,6 +90,22 @@ from holographic_cachehome import Cache; Cache.bake(fn, vary='position', lo=lo, 
 ```
 *Find it by:* bake, precompute, lookup, cache, memoise, irradiance, lut, grid
 
+### Cold storage (compress inactive data)
+shrink INACTIVE data to save memory and disk, and inflate it back on demand: store = mind.cold_store(keep_warm=8) keeps only the K most-recently-used values live and compresses the rest, warming any of them transparently on get(); mind.cool(big_table) wraps ONE value so c.cool() frees its RAM and c.get() brings it back bit-identical. Works on tables, whole databases, big arrays, any picklable structure; codec='lzma' packs smaller, spill_dir=... writes cold blobs to disk. Honest: high-entropy VSA vectors barely compress (the win there is freeing the live object / spilling to disk); redundant/text/structured data compresses a lot. The query Database can auto-cool its own idle tables: db.enable_cold_storage(keep_warm=K) then db.cool_idle() compresses tables you haven't queried lately and a query warms them back -- and a DB shipped to a distributed worker arrives warm + cooling-off, so a shared read-only cache is never mutated..
+
+```python
+store = mind.cold_store(keep_warm=4); store.put('t1', big_table); store.get('t1')  # transparently warmed
+```
+*Find it by:* cold storage, compress inactive, evict, spill to disk, cool, warm, fold up, shrink memory
+
+### File map ingest (folder / zip -> queryable)
+point at a FOLDER, a .zip, or a file and digest it into a queryable FILE MAP: fm = mind.ingest_files('project/') (or 'bundle.zip'). Query it by NAME/glob (fm.find('*.png')), KIND (fm.by_kind('model'): image/text/model/data/code/archive), METADATA (larger_than/newer_than/by_ext), text CONTENT (fm.search_text('shader normal') -- an inverted index over the text files), and MEANING (fm.build_meaning_index() then fm.find_by_meaning('lighting')). fm.tree() is the folder hierarchy. Every file is also tracked for RELOCATION/CHANGE (fm.missing()/changed()/relink(one,new)/resolve_assets(roots)), so a moved/edited tree self-heals. Stdlib only; text indexing is size-capped..
+
+```python
+fm = mind.ingest_files('my_project.zip'); fm.find('*.obj'); fm.search_text('normal map'); fm.tree()
+```
+*Find it by:* ingest, ingest files, index a folder, digest a folder, read a zip, scan folder, file map, make files queryable
+
 ### Index (search)
 nearest-neighbour / recall over a pile of vectors with ONE interface (Index.nearest(q,k)): exact cosine scan for small sets, sub-linear RP-forest for large, plus a calibrated abstain.
 
@@ -105,6 +121,14 @@ keep the hot working set where the CPU can reach it fast: FFT spectrum residency
 from holographic_memoryhome import Memory; Memory.bind_cached(a, b, cache)
 ```
 *Find it by:* memory, cache, residency, resident, spectrum cache, batch, bind_batch, backend
+
+### Semantic word index (find words by meaning)
+the fuzzy REVERSE of a dictionary: describe an idea and get the words whose definitions mean it. mind.build_semantic_index(words=...) places words in a meaning space by RANDOM INDEXING over their glosses, then idx.find('unexpected good luck') -> 'serendipity' and idx.similar('puppy') -> 'dog','kitten'. OPT-IN and separate: nothing loads or builds until you call it. Approximate by design (this is where leCore's geometry-preserving/lossy side belongs) -- reliable for the top hit, noisy in the tail, and word-sense sensitive..
+
+```python
+idx = mind.build_semantic_index(words=my_vocab); idx.find('a young dog'); idx.similar('ocean')
+```
+*Find it by:* semantic index, find words by meaning, reverse dictionary, words like, similar words, meaning search, word similarity, describe a word
 
 ## Geometry, modeling & rendering
 
@@ -126,6 +150,14 @@ from holographic_gbuffer import render_auto, converge_samples
 ```
 *Find it by:* adaptive, auto, quality, converge, raytracing mode, render mode
 
+### Asset relocation / relink (external files)
+track the EXTERNAL files a scene depends on (textures, models, ...) and repair their paths when they move -- the '3-D missing textures' problem. lib = mind.asset_library(); lib.add(path); then when a folder moves, lib.relink(one_asset, its_new_path) re-finds every OTHER moved file automatically (it works out the moved parent and rewrites the rest, then structurally SEARCHES for anything reorganised). lib.changed() spots files edited on disk (size/mtime or content hash); lib.search_under(folder) finds missing files under a folder; lib.resolve(asset, roots=) locates a file by CONTENT HASH across machines (the distributed fallback). Saves/loads a JSON manifest..
+
+```python
+lib = mind.asset_library(); lib.add('project/textures/water/wave.png'); lib.relink(lib.assets[0], 'newroot/project/textures/water/wave.png')
+```
+*Find it by:* asset, assets, relink, relocate, missing textures, broken path, fix paths, external files
+
 ### Field
 sample a scalar/vector field at points with ONE interface (field.sample(points)); the backend is chosen by cost: callable/oracle, dense grid, narrow-band sparse (spectral/FPE/region/dirty are backends too).
 
@@ -141,6 +173,30 @@ build and edit shapes three ways: explicit MESH (half-edge + verbs), implicit SD
 from holographic_mesh import Mesh; from holographic_sdf import box, sphere
 ```
 *Find it by:* geometry, mesh, sdf, splat, shape, model, csg, subdivide
+
+### Import artist file formats (OBJ/glTF/textures/volume)
+import the files artists hand you: mind.load_obj('model.obj') reads Wavefront geometry + its .mtl (UVs, normals, per-face material, map_* textures); mind.load_glb('model.glb') reads glTF/GLB geometry AND its full PBR channels (base colour / metallic-roughness / normal / occlusion / emissive) with embedded textures and per-vertex UVs/normals, AND for rigged models its ANIMATIONS (keyframed node transforms -- clip.sample(t), rotations slerped) and SKINS (joints + inverse-bind + weights); mind.load_texture_set(folder) turns a folder of Adobe Substance 3D Painter export maps (basecolor/roughness/metallic/normal/height/ao/emissive, matched by name) into one PBRMaterial; mind.load_volume('grid.npy') wraps a 3-D density grid as a field for render_volume. mind.import_asset(path) dispatches by extension. Once a rigged glTF is loaded, mind.deform_mesh(loaded, clip, t) actually MOVES it -- linear-blend skinning by the animated skeleton plus morph-target blending, returning the deformed mesh at time t. Stdlib+NumPy; PIL lazy for textures. HONEST: proprietary .sbsar/.spp and sparse OpenVDB .vdb need their vendor tools -- import the exported open forms..
+
+```python
+lm = mind.load_obj('chair.obj'); glb = mind.load_glb('robot.glb'); mat = mind.load_texture_set('exports/brick'); vol, b = mind.load_volume('smoke.npy')
+```
+*Find it by:* import, load obj, load gltf, load glb, mtl, wavefront, substance painter, adobe painter
+
+### Instancing (shared definition + type-safe binding)
+place ONE shared definition many times so editing it once updates every copy (edit-once): mind.shared_definition('chair', mesh, 'metal') then scene.place(defn, transform) in mind.instanced_scene(); repaint the definition and all instances change. The material<->geometry binding is TYPE-CHECKED at compose time -- a surface material only binds to a mesh, a volumetric one (fog/smoke/fire) only to a volume -- so a bad binding is refused, not rendered wrong. flatten_surface() materialises the surface instances into one mesh. CMP4.
+
+```python
+chair = mind.shared_definition('chair', box_mesh, 'metal'); s = mind.instanced_scene(); s.place(chair); chair.set_material('glass')
+```
+*Find it by:* instance, instancing, shared definition, edit once, duplicate, reuse geometry, material binding, surface volume
+
+### Layered material (order schema)
+an ORDERED stack of material layers -- base -> diffuse -> specular/reflection -> coat/clearcoat -- where the order is a SCHEMA checked at compose time, so you can't put a reflection under a diffuse (an out-of-order stack is refused up front). Each layer composites OVER the one below by a coverage alpha (a number, field, or texture graph). Honest: fixes the stacking, not the energy-conserving radiometry of a true layered BRDF. CMP2.
+
+```python
+mind.layered_material([mind.material_layer('base', paint), mind.material_layer('clearcoat', gloss, alpha=0.3)]).sample('albedo', [0.3, 0.7])
+```
+*Find it by:* layered material, material layers, clearcoat, coat, layer stack, material stack, over compositing, base diffuse specular coat
 
 ### Lighting (domain)
 one home for lighting: the light types (point/directional/spot/area/dome/IES) and the shade INTEGRAL in each mode -- direct NEE, PRT relight, environment SH; render methods call it.
@@ -174,6 +230,14 @@ mind.deform(mesh, ...); mind.mesh_to_sdf(mesh); from holographic_meshverbs impor
 ```
 *Find it by:* edit a mesh, extrude, bevel, inset, subdivide, smooth a mesh, decimate, reduce polygons
 
+### Multi-material (mask-blended)
+combine N materials by per-point MASKS -- generalises the 2-way Material.blend to a weighted mix where each material's weight is a mask (a texture graph, a field, or a constant) that varies over the surface: paint rust into metal, moss onto stone, a decal onto a surface. 'blend' = soft weighted sum (weights normalised so brightness stays put); 'select' = hard pick the dominant material (a material-ID / splat map). CMP3.
+
+```python
+mind.multi_material([metal, rust], [1.0, mind.texture_leaf('fbm', n_dims=2)]).sample('albedo', [0.3, 0.7])
+```
+*Find it by:* multi-material, multimaterial, blend materials, material mask, material map, splat map, material id, paint materials
+
 ### Multi-scatter BRDF (re-enable)
 energy-conserving GGX for rough metals: the Kulla-Conty multi-scatter term adds back the energy single-scatter GGX loses (white-furnace ~0.4 -> ~1.0 at high roughness), GATED by roughness so smooth surfaces skip it (the term overshoots at low roughness). Detector is the exact material roughness.
 
@@ -197,6 +261,22 @@ compose a render or sim run as ordered stages that declare what they need/produc
 from holographic_pipeline import build_pipeline, PipelineConfig, RenderSpec
 ```
 *Find it by:* pipeline, stage, compose, run, render, strategy, dispatch, route
+
+### Preview (swatch & material ball)
+SEE what you composed: mind.preview_texture(graph) renders a CMP1 texture graph as a flat RGB swatch, and mind.preview_material(material) renders a material on the classic MATERIAL BALL sphere (Cook-Torrance shaded, using the material's roughness/metallic channels) -- works on a plain Material or a CMP2/CMP3 layered/multi material. Returns a float image in [0,1] to save/view. The missing step between composing a texture/material and looking at it..
+
+```python
+img = mind.preview_texture(graph); ball = mind.preview_material(layered_material)
+```
+*Find it by:* preview, swatch, material ball, material preview, texture preview, see the texture, render swatch, thumbnail
+
+### Render graph (bake vs live)
+the PIPELINE composing the texture/material/scene graphs: mind.render_graph() registers texture graphs (static or dynamic) + a CMP4 instanced scene, then plan() shows what it will do and WHY and prepare() runs it. The adaptive decision it adds is BAKE a static texture graph to a grid (O(1) bilinear lookup, mind.bake_texture) vs SAMPLE it live -- baking amortises a deep graph over many hits, live avoids re-baking a changing map every frame. Trade: memory + interpolation error. CMP5.
+
+```python
+rg = mind.render_graph(); rg.add_texture('rust', graph, static=True).set_scene(scene); rg.plan(); prep = rg.prepare()
+```
+*Find it by:* render graph, bake texture, bake vs live, prepare scene, resolve textures, orchestrate render, material lod, precompute texture
 
 ### Rendering (path trace)
 render a scene to an image: path_trace (Monte-Carlo global illumination), a camera controller, indirect-light gather + irradiance cache (globalillum), precomputed radiance transfer (prt), volumetric integration, and lens/DOF + post-FX. The analysis-by-synthesis render path.
@@ -246,15 +326,31 @@ from holographic_texturehome import Texture; Param(field=Texture.voronoi(kind='e
 ```
 *Find it by:* texture, noise, fbm, voronoi, curl, procedural, weathering, pattern
 
+### Texture graph (composable maps)
+build a texture as a TREE of maps: an op (mix/multiply/over/scale/remap/...) over TYPED inputs -- map | color | field | number -- each of which may be another map, so graphs nest to any depth. Sampling walks the tree; the input types are checked at COMPOSE time so a bad graph (a colour used as a weight, a missing input) is refused up front, not rendered wrong. Encode a graph to a hypervector to cache/search it. CMP1.
+
+```python
+mind.texture_op('mix', a=mind.texture_leaf(value=[1,0,0]), b=mind.texture_leaf(value=[0,0,1]), t=mind.texture_leaf('fbm', n_dims=2)); mind.sample_texture(g, [0.3,0.7])
+```
+*Find it by:* texture graph, map graph, shader graph, compose texture, layered texture, node graph, blend maps, mix textures
+
+### Textured object render (paint composed maps)
+paint a COMPOSED texture or material (CMP1 graph / CMP2-3 material) onto an object and render it: mind.render_textured(scene, {object_name: texture_graph}) marches the scene, UV-wraps each texture onto its object (spherical map on a sphere, planar on a box), and shades with the real Cook-Torrance BRDF + a light + a hard shadow. This is the composability stack driving a full 3-D render, not just a swatch. Honest: textbook UV (seams), single hard light..
+
+```python
+tex = mind.texture_op('mix', a=mind.texture_leaf(value='orange'), b=mind.texture_leaf(value='purple'), t=mind.texture_leaf('fbm', n_dims=2)); mind.render_textured(scene, {scene.names()[0]: tex})
+```
+*Find it by:* textured render, paint texture on object, wrap texture, uv render, texture the sphere, composed texture render, map onto object
+
 ## Scenes you can describe & adjust
 
 *talk a 3-D scene into being, then adjust its named objects in words, and render or simulate it.*
 
 ### Scene from description (semantic)
-DESCRIBE a 3-D scene in plain words and the engine builds it, then you ADJUST it by talking to named objects: mind.build_scene('a big red metal sphere and a small blue glass box on a sunny day') returns a live SemanticScene; then scene.adjust('make the sphere bigger'), scene.adjust('change the box to metal'), scene.set('the red sphere', material='glass'), scene.render(), scene.simulate(). When a command is unclear it SUGGESTS rather than fails -- scene.interpret(cmd) previews what it understood + 'did you mean?' hints, scene.options() lists what you can say, scene.feedback holds the last report. Or wrap an existing object list with mind.semantic_scene(objects). Controlled vocabulary, deterministic.
+DESCRIBE a 3-D scene in plain words and the engine builds it, then you ADJUST it by talking to named objects: mind.build_scene('a big red metal sphere and a small blue glass box on a sunny day') returns a live SemanticScene; then scene.adjust('make the sphere bigger'), scene.adjust('change the box to metal'), scene.set('the red sphere', material='glass'), scene.render(), scene.simulate(). NAME objects to reference them easily -- scene.name('the red sphere', 'hero') or scene.adjust('call the box crate'), then scene.adjust('make hero glass'); scene.rename('hero','champion'). PAINT a procedural TEXTURE by talking to it -- scene.adjust('give hero a rusty texture'), scene.paint('crate', 'marbled') (rusty/marbled/mossy/cloudy/lava/striped/noisy) -- and scene.render() paints it on. Attach an EXTERNAL image file as a texture -- scene.attach_texture_file('the sphere', 'project/textures/wave.png') -- and the scene tracks it in an AssetLibrary: if the files move, scene.set_asset_roots([...]) + scene.resolve_assets() (or scene.relink(one, new)) re-find them and render() reloads them, falling back to the object's colour if one is missing. When a command is unclear it SUGGESTS rather than fails -- scene.interpret(cmd) previews what it understood + 'did you mean?' hints, scene.options() lists what you can say, scene.feedback holds the last report. Or wrap an existing object list with mind.semantic_scene(objects). Controlled vocabulary, deterministic.
 
 ```python
-scene = mind.build_scene('a red metal sphere and a blue glass box'); scene.adjust('make the box bigger'); scene.render()
+scene = mind.build_scene('a red metal sphere and a blue box'); scene.name('the sphere','hero'); scene.adjust('give hero a rusty texture'); scene.render()
 ```
 *Find it by:* scene, describe a scene, build a scene, make a scene, create a scene, scene from text, 3d scene, adjust the scene
 
@@ -283,10 +379,10 @@ from holographic_simulationhome import Simulation; Simulation.for_fluid(fluid).r
 *generate text, teach the engine language, and look words up in a real vendored dictionary.*
 
 ### Dictionary + taxonomy (vendored)
-a comprehensive vendored English DICTIONARY (~144k words: definition, part of speech, synonyms, example) AND an is_a TAXONOMY (encyclopedia side: 'a dog is a kind of domestic animal...'), giving the engine real world-knowledge for contextual awareness beyond its internal machinery. Stdlib-only lazy load (gzip+json); the mind can also LEARN meaning from it. Princeton WordNet, free with attribution.
+a comprehensive vendored English DICTIONARY (~144k words: definition, part of speech, synonyms, example) AND an is_a TAXONOMY (encyclopedia side: 'a dog is a kind of domestic animal...'), giving the engine real world-knowledge for contextual awareness beyond its internal machinery. OPT-IN + lazy: it never loads from importing leCore or building a mind -- only the first language call decompresses it (lzma, ~3.3 MB on disk) into a plain dict in RAM (~22 MB), after which lookups are instant. Control it explicitly with holographic_dictionary.is_loaded()/preload()/unload()/stats(). Stdlib-only (lzma+json); the mind can also LEARN meaning from it. Princeton WordNet, free with attribution.
 
 ```python
-mind.lookup('gravity'); mind.word_taxonomy('dog'); mind.learn_vocabulary(my_words)
+mind.lookup('gravity'); mind.word_taxonomy('dog'); import holographic_dictionary as hd; hd.stats()
 ```
 *Find it by:* dictionary, define, definition, word meaning, synonyms, encyclopedia, taxonomy, is a
 
@@ -317,6 +413,14 @@ gradient-free learning on the substrate: an RL agent with a value head + drives 
 mind.agent(...); mind.classify(x); mind.reservoir(...)
 ```
 *Find it by:* reinforcement learning, rl agent, train a classifier, classify, policy, npc brain, game ai, reservoir
+
+### Message bus + agent (LLM) bridge
+connect a person AND an agent to the running tool at once, and let the app PUSH to the agent instead of the agent polling: mind.bus() is a message bus (publish/subscribe by topic, mailboxes to pull an inbox, history); mind.run_task('render', fn, background=True) runs a job and publishes 'render.done' with a small summary when it finishes; mind.agent_bridge(llm=my_fn).notify_on('render.done', 'does it look right?') calls YOUR llm (any text->reply callable -- no LLM library is imported, so it's fully optional) and posts the reply on the bus. Over HTTP a remote agent uses /bus/publish + /bus/poll. The LLM is optional; leCore runs with no agent attached..
+
+```python
+bridge = mind.agent_bridge(llm=my_llm); bridge.notify_on('render.done', 'does it look right?'); mind.run_task('render', lambda: scene.render(), background=True)
+```
+*Find it by:* message bus, event bus, pubsub, publish subscribe, agent bridge, llm bridge, notify the agent, push notification
 
 ## Data analysis & signals
 
@@ -506,6 +610,14 @@ from holographic_queryfolder import FolderTree; ft.set_home('user.sales','report
 ```
 *Find it by:* folder, group tables, namespace tree, organize tables, home folder, association folder, scoped search, drill down
 
+### Workspaces (durable DB + transient sessions)
+WS3-WS6: run one persistent user database alongside many TRANSIENT per-session workspaces (loose scratch tables + the 3D/sim/render context) that stay isolated -- clearing or resetting one never touches the persistent DB or a sibling. Make / switch / clear / reset-keeping-data, export/import a workspace, and combine two with an EXPLICIT collision policy (a merge is a decision, not a guess).
+
+```python
+from holographic_workspace import WorkspaceManager; m=WorkspaceManager(); m.new_workspace('sessionA'); m.switch_workspace('sessionA')
+```
+*Find it by:* workspace, session, scratch tables, transient tables, isolate session, reset keep data, export workspace, combine workspaces
+
 ## More capabilities
 
 ### Blend (combine)
@@ -527,6 +639,13 @@ clean a render or signal with one home: image SVGF (variance-guided a-trous) or 
 
 ```python
 from holographic_denoisehome import Denoise; Denoise.image(img, N, A, D, method='svgf')
+```
+
+### Durability & crash recovery
+B7: make the query store survive a crash. Take a durable SNAPSHOT of the persistent tiers (replay-based, so it rebuilds byte-identically), keep a write-ahead JOURNAL of inserts/updates/deletes since the snapshot, and RECOVER to the last consistent point by loading the snapshot and replaying the journal. The snapshot+WAL discipline, on top of the plain save/load the service already exposes.
+
+```python
+from holographic_query_durable import save_snapshot, Journal, recover; recover(snap_path, journal_path)
 ```
 
 ### Regime gate (re-enable)
@@ -552,4 +671,4 @@ from holographic_uri import address_from_content, make_key; from holographic_ver
 
 ---
 
-*61 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*76 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

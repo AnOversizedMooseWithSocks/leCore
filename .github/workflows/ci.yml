@@ -85,9 +85,10 @@ jobs:
             exit 1;
           }
 
-      # ENDPOINT GATE. SERVICE.md is mostly hand-written prose (kept), but its endpoint table must list exactly the
-      # routes the service registers -- no more, no less. This checks the table against the live route registry and
-      # fails if a route was added/renamed/removed without updating the doc. It does NOT rewrite the prose; on failure
-      # it names the offending endpoints and `python servicedoc.py --print` gives you a fresh table to paste.
-      - name: Gate -- SERVICE.md documents every endpoint
+      # ENDPOINT + FLAG GATE. SERVICE.md is mostly hand-written prose (kept), but its endpoint table must list exactly
+      # the routes the service registers, and its Launch section must mention every user-facing CLI flag the argparse
+      # defines. This checks both against the live code and fails if a route or flag was added/renamed/removed without
+      # updating the doc. It does NOT rewrite the prose; on failure it names the offender, and `python servicedoc.py
+      # --print` gives a fresh endpoint table to paste.
+      - name: Gate -- SERVICE.md documents every endpoint and flag
         run: python servicedoc.py

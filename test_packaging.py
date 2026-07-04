@@ -9,7 +9,7 @@ import ast
 
 def test_lecore_data_package_resolves_dictionary():
     import lecore_data
-    assert lecore_data.exists("knowledge", "dictionary.json.gz")
+    assert lecore_data.exists("knowledge", "dictionary.json.xz")
     assert lecore_data.exists("knowledge", "LICENSE_WORDNET.txt")     # provenance ships too
 
 

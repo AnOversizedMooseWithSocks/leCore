@@ -27,6 +27,14 @@ jobs:
       - name: Install the build tool
         run: python -m pip install --upgrade pip build
 
+      # On a version tag, make sure the tag and setup.py agree BEFORE building/publishing. Catches the easy mistake
+      # of tagging v0.2.0 while setup.py still says 0.1.0 -- which would otherwise publish the wrong version (and PyPI
+      # never lets you re-upload a version). No-op on branch pushes (there's no version tag to check). Fix on failure:
+      # bump setup.py's version= to match the tag, or tag the version setup.py already has.
+      - name: Check the tag matches setup.py version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: python tools/check_version.py --expect "${{ github.ref_name }}"
+
       - name: Build the package (copies essentials, strips tests, builds the wheel)
         run: sh build_package.sh
 

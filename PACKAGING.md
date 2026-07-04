@@ -89,8 +89,17 @@ the parent name held too, upload a small placeholder release under `name="leos"`
 a one-off local `twine upload`), since PyPI only reserves the exact name you upload.
 
 ### Versioning
-The version lives in `setup.py` (`version="0.1.0"`); bump it per release. If you'd rather have the git tag
-drive it, add one line to the workflow before the build step:
+The version lives in `setup.py` (`version="0.1.0"`); bump it per release. To release, tag the matching version
+(`git tag v0.1.0 && git push origin v0.1.0`).
+
+CI guards the two staying in sync: on a tag push, the `package` workflow runs `python tools/check_version.py --expect
+"$GITHUB_REF_NAME"` **before** building, and fails the release if the tag and `setup.py` disagree — so you can't
+accidentally publish `0.1.0` under a `v0.2.0` tag (and PyPI never lets you re-upload a version, so catching it here
+matters). You can run the same check locally: `python tools/check_version.py` prints the current version, and
+`python tools/check_version.py --expect v0.2.0` tells you whether a tag you're about to push would match.
+
+If you'd rather have the git tag *drive* the version instead of hand-bumping, add one line to the workflow before the
+build step (this makes the check above always pass, since the tag becomes the source of truth):
 
 ```yaml
       - name: Set version from the tag (optional)

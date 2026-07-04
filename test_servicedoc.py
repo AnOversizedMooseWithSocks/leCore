@@ -52,3 +52,32 @@ def test_generated_table_covers_all_routes():
     table = sd.generated_table()
     for method, path, *_ in sd.routes():
         assert ("`%s`" % path) in table
+
+
+def test_cli_flags_read_from_argparse():
+    sd = _mod()
+    flags = sd.cli_flags()
+    assert "--host" in flags and "--port" in flags and "--token" in flags and "--persist" in flags
+
+
+def test_service_md_documents_every_user_facing_flag():
+    """The Launch docs must mention every argparse flag except the internal ones -- the gate CI runs."""
+    sd = _mod()
+    stale, undocumented = sd.check_flags()
+    assert undocumented == [], "flags the service accepts but SERVICE.md never mentions: %s" % undocumented
+    assert stale == [], "flags SERVICE.md documents that no longer exist: %s" % stale
+
+
+def test_flag_check_detects_a_new_undocumented_flag(monkeypatch):
+    sd = _mod()
+    orig = sd.cli_flags
+    monkeypatch.setattr(sd, "cli_flags", lambda service_path=None: orig() | {"--newflag"})
+    stale, undocumented = sd.check_flags()
+    assert "--newflag" in undocumented
+
+
+def test_flag_check_ignores_doc_tooling_flags():
+    """`servicedoc.py --print` is mentioned in SERVICE.md but isn't a service flag -- it must not read as stale."""
+    sd = _mod()
+    stale, _ = sd.check_flags()
+    assert "--print" not in stale
