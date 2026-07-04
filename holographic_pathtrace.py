@@ -40,13 +40,24 @@ def constant_material(albedo=(0.7, 0.7, 0.7), metallic=0.0, roughness=0.5, emiss
 
 
 def _unpack_mat(out, n):
-    """Material callbacks may return 4-tuple (albedo, metallic, roughness, emission) or 5-tuple with a trailing
-    per-point IOR (>1 = dielectric/glass, 0 = opaque). Normalise to 5 arrays."""
+    """Material callbacks may return a 4-tuple (albedo, metallic, roughness, emission), a 5-tuple with a trailing
+    per-point IOR (>1 = dielectric/glass, 0 = opaque), a 6-tuple that ALSO carries a per-point SUBSURFACE strength
+    (0 = opaque surface; >0 = translucent), or a 7-tuple that ALSO carries a per-point IRIDESCENCE film thickness
+    in nanometres (0 = not iridescent; >0 = thin-film sheen, soap/oil). Normalise to 7 arrays. Old 4/5/6-tuple
+    callbacks keep working unchanged -- the trailing channels default to 0 (off)."""
+    if len(out) == 7:
+        alb, met, rough, emis, ior, sss, irid = out
+        return (alb, met, rough, emis, np.asarray(ior, float) * np.ones(n),
+                np.asarray(sss, float) * np.ones(n), np.asarray(irid, float) * np.ones(n))
+    if len(out) == 6:
+        alb, met, rough, emis, ior, sss = out
+        return (alb, met, rough, emis, np.asarray(ior, float) * np.ones(n),
+                np.asarray(sss, float) * np.ones(n), np.zeros(n))
     if len(out) == 5:
         alb, met, rough, emis, ior = out
-        return alb, met, rough, emis, np.asarray(ior, float) * np.ones(n)
+        return alb, met, rough, emis, np.asarray(ior, float) * np.ones(n), np.zeros(n), np.zeros(n)
     alb, met, rough, emis = out
-    return alb, met, rough, emis, np.zeros(n)
+    return alb, met, rough, emis, np.zeros(n), np.zeros(n), np.zeros(n)
 
 
 def _march_through(sdf, O, D, max_steps=32, surf_eps=1e-3):
@@ -65,7 +76,8 @@ def _march_through(sdf, O, D, max_steps=32, surf_eps=1e-3):
 
 def path_trace(sdf, camera, width=96, height=96, spp=16, max_bounce=4, rr_start=2,
                material=None, sky=None, seed=0, return_variance=False, active=None,
-               on_progress=None, progress_every=0, should_stop=None):
+               on_progress=None, progress_every=0, should_stop=None, antialias=False,
+               sss_dir=None, sss_depth=0.6, sss_sigma=4.0, lights=None):
     """Render an SDF scene by path tracing. `material(P)` -> (albedo(n,3), metallic(n,), roughness(n,),
     emission(n,3)[, ior(n,)]); `sky(D)` -> (n,3) environment radiance for escaped rays. Returns an (H,W,3) HDR image
     (un-tonemapped). spp = samples per pixel; max_bounce = path length; rr_start = bounce after which Russian
@@ -74,6 +86,13 @@ def path_trace(sdf, camera, width=96, height=96, spp=16, max_bounce=4, rr_start=
     PROGRESSIVE PREVIEW: pass `on_progress(running_image, samples_done, spp)` and `progress_every=k` to get the
     running mean image handed back every k samples -- the refine stream a RenderSession streams to a viewport while
     the final render accumulates. Defaults (progress_every=0) mean NO callback and byte-identical behaviour to before.
+
+    ANTI-ALIASING (antialias=True, opt-in): by default every sample shoots the ray through the pixel CENTRE, so
+    more samples reduce noise but never smooth the jaggies on an edge. With antialias=True each sample jitters the
+    ray to a different sub-pixel position, drawn from a LOW-DISCREPANCY sequence (holographic_lowdiscrepancy --
+    Roberts' R-sequence, which spreads the offsets evenly instead of clumping the way plain random does), so the
+    edges anti-alias as the samples accumulate. Needs a camera whose ray_dirs accepts a `jitter=(dx,dy)` argument;
+    if it doesn't, we fall back to centre rays (still correct, just no AA). Default OFF = byte-identical to before.
 
     GLASS: if the material returns a 5th value IOR>1 at a hit, that surface is a smooth DIELECTRIC -- per ray, it
     REFLECTS with the Fresnel probability and otherwise REFRACTS (Snell via refract_dir, total-internal-reflection
@@ -87,6 +106,8 @@ def path_trace(sdf, camera, width=96, height=96, spp=16, max_bounce=4, rr_start=
     rng = np.random.default_rng(seed)
     material = material or constant_material()
     skyfn = sky if sky is not None else (lambda D: sky_dome(D))
+    if sss_dir is not None:
+        sss_dir = np.asarray(sss_dir, float); sss_dir = sss_dir / (np.linalg.norm(sss_dir) + 1e-12)
     eye, dirs = camera.ray_dirs(width, height)
     npix = height * width
     base_D = dirs.reshape(-1, 3)
@@ -94,7 +115,23 @@ def path_trace(sdf, camera, width=96, height=96, spp=16, max_bounce=4, rr_start=
     accum = np.zeros((npix, 3))
     accsq = np.zeros(npix)                                       # sum of per-sample luminance^2 -> variance
 
+    # anti-alias sub-pixel offsets: one well-distributed (dx,dy) in [-0.5,0.5) per sample (backlog H1). Computed
+    # once up front; a camera that can't jitter just ignores them. seed-rotated so different passes don't align.
+    aa_offsets = None
+    if antialias:
+        try:
+            from holographic_samplinghome import Sampling
+            aa_offsets = Sampling.low_discrepancy(spp, d=2, seed=seed) - 0.5      # (spp,2) in [-0.5, 0.5)
+        except Exception:
+            aa_offsets = None
+
     for s in range(spp):
+        if aa_offsets is not None:
+            try:
+                eye, dirs = camera.ray_dirs(width, height, jitter=(aa_offsets[s, 0], aa_offsets[s, 1]))
+                base_D = dirs.reshape(-1, 3)                     # this sample's jittered ray directions
+            except TypeError:
+                aa_offsets = None                                # camera doesn't support jitter -> centre rays
         O = np.broadcast_to(eye, (npix, 3)).astype(float).copy()
         D = base_D.copy()
         throughput = np.ones((npix, 3))
@@ -117,12 +154,48 @@ def path_trace(sdf, camera, width=96, height=96, spp=16, max_bounce=4, rr_start=
                 Nf = Ng.copy()
                 flip = np.sum(Nf * Dh, axis=-1) > 0             # faced normal: against the incoming ray
                 Nf[flip] = -Nf[flip]
-                alb, met, rough, emis, ior = _unpack_mat(material(Ph), len(Ph))
+                alb, met, rough, emis, ior, sss, irid = _unpack_mat(material(Ph), len(Ph))
                 radiance[ghit] += throughput[ghit] * emis       # emissive surfaces add light
+                if (irid > 0).any():
+                    # IRIDESCENCE (thin-film): a soap/oil film on the surface reflects a rainbow tint that depends
+                    # on the film thickness AND the view angle (holographic_thinfilm). We compute the tint from the
+                    # angle between the faced normal and the view direction (-Dh) and MULTIPLY it into the albedo,
+                    # so the surface's own reflection takes on the shifting sheen. Only where the material flagged
+                    # a film thickness (irid > 0, in nanometres); irid == 0 leaves the albedo untouched.
+                    from holographic_thinfilm import interference_reflectance, spectrum_to_rgb
+                    it = np.where(irid > 0)[0]
+                    cos_v = np.abs(np.sum(Nf[it] * (-Dh[it]), axis=-1))     # view angle from the normal (k,)
+                    spec = interference_reflectance(irid[it], cos_v)        # (k, n_lambda), per-point thickness+angle
+                    alb[it] = alb[it] * spectrum_to_rgb(spec)              # the reflection takes the sheen
+                if sss_dir is not None and (sss > 0).any():
+                    # SUBSURFACE glow: a translucent surface lets light leak THROUGH thin regions. We measure how
+                    # much solid the light crosses inside the object to reach this point (holographic_raymarch.
+                    # subsurface -- Beer-Lambert on the SDF interior toward the sun) and add that as coloured glow,
+                    # like emission but modulated by thinness. Only for hits the material flagged (sss>0).
+                    # ANTI-BANDING: the march quantizes thickness into depth/steps levels, which reads as contour
+                    # bands on smooth objects. Use enough steps that the quantum is small, and DITHER each point's
+                    # sample offsets by a deterministic hash of its position (no RNG state -- reproducible), so the
+                    # residual quantization becomes fine noise the SVGF pass smooths away.
+                    from holographic_raymarch import subsurface as _sss_transmit
+                    st = np.where(sss > 0)[0]
+                    n_steps = max(10, int(sss_depth / 0.035))            # keep the step quantum ~0.035 world units
+                    jit = np.modf(np.sin(Ph[st] @ np.array([12.9898, 78.233, 37.719])) * 43758.5453)[0] % 1.0
+                    glow = _sss_transmit(sdf, Ph[st], Nf[st], sss_dir, depth=sss_depth, sigma=sss_sigma,
+                                         steps=n_steps, jitter=np.abs(jit))   # (k,)
+                    radiance[ghit[st]] += throughput[ghit[st]] * (sss[st] * glow)[:, None] * alb[st]
                 glass = ior > 1.0
                 surf = ~glass
                 if surf.any():                                  # opaque: GGX/diffuse BRDF bounce
                     si = np.where(surf)[0]
+                    if lights:
+                        # NEXT-EVENT ESTIMATION: besides the random bounce below (which carries INDIRECT light),
+                        # look straight at each light with a shadow ray and add its DIRECT contribution. This is
+                        # what makes small bright lamps converge and gives real, correctly-shaped shadows. The
+                        # bounce still happens, so indirect light (colour bleeding, ambient) is not lost.
+                        from holographic_lights import direct_lighting
+                        direct = direct_lighting(sdf, Ph[si], Nf[si], -Dh[si], alb[si], met[si], rough[si],
+                                                 lights, rng)                # (k,3) direct radiance
+                        radiance[ghit[si]] += throughput[ghit[si]] * direct
                     L, weight = sample_brdf(Nf[si], -Dh[si], alb[si], met[si], rough[si], rng)
                     throughput[ghit[si]] = throughput[ghit[si]] * weight
                     O[ghit[si]] = Ph[si] + Nf[si] * 2e-3

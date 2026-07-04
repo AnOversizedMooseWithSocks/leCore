@@ -1,5 +1,5 @@
 #!/bin/sh
-# build_package.sh -- build an installable leCore wheel from the flat repo.
+# build_package.sh -- build an installable leOS-core wheel from the flat repo.
 #
 # The idea you described: copy ONLY what the package needs into a clean staging folder -- the
 # holographic_*.py modules minus the tests, plus the packaging files -- then build the wheel from there.
@@ -7,7 +7,9 @@
 #
 # Requires:  pip install build
 # Usage:     sh build_package.sh
-# Output:    dist/lecore-<version>-py3-none-any.whl   and   dist/lecore-<version>.tar.gz
+# Output:    dist/leos_core-<version>-py3-none-any.whl   and   dist/leos_core-<version>.tar.gz
+#            (setuptools writes the distribution name "leos-core" as "leos_core" in the filenames; the
+#             import name is still "lecore" -- that is the lecore.py shim, unaffected by the dist name.)
 set -e
 
 STAGE=build_pkg          # the clean staging folder we assemble the package in
@@ -29,6 +31,13 @@ echo ">> copying the packaging files and the convenience shim"
 cp setup.py pyproject.toml lecore.py "$STAGE"/
 [ -f LICENSE ]   && cp LICENSE   "$STAGE"/ || true
 [ -f README.md ] && cp README.md "$STAGE"/ || true
+[ -f MANIFEST.in ] && cp MANIFEST.in "$STAGE"/ || true
+
+echo ">> copying the runtime data package (lecore_data/: the dictionary + material JSON the engine needs at runtime)"
+cp -r lecore_data "$STAGE"/
+# keep the distribution clean: no compiled caches or stray pyc leak into the wheel
+find "$STAGE" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
+find "$STAGE" -name "*.pyc" -delete 2>/dev/null || true
 
 echo ">> building the wheel and sdist from the clean copy"
 cd "$STAGE"

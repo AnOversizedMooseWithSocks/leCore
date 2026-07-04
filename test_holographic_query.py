@@ -90,3 +90,23 @@ def test_explain_is_a_dry_run():
     info = explain_program(mac, prog)
     assert info["faculties_called"] == ["denoise", "recall"]   # names the work WITHOUT doing it
     assert info["n_steps"] == 2
+
+
+def test_run_db_sql_update_delete_join_drop():
+    """The SQL skin now covers UPDATE / DELETE (WHERE required) / JOIN / DROP -- the writes an app needs day one."""
+    from holographic_query import Database, run_db_sql, QueryError
+    db = Database(); db.add_namespace("user")
+    run_db_sql("CREATE TABLE user.t (id, color)", db)
+    for i, c in [(1, "red"), (2, "blue"), (3, "red")]:
+        run_db_sql("INSERT INTO user.t (id, color) VALUES (%d, %s)" % (i, c), db)
+    assert run_db_sql("UPDATE user.t SET color = 'crimson' WHERE id = 1", db)["updated"] == 1
+    assert run_db_sql("DELETE FROM user.t WHERE color = 'blue'", db)["deleted"] == 1
+    run_db_sql("CREATE TABLE user.a (id, x)", db); run_db_sql("CREATE TABLE user.b (id, y)", db)
+    run_db_sql("INSERT INTO user.a (id, x) VALUES (1, A1)", db)
+    run_db_sql("INSERT INTO user.b (id, y) VALUES (1, B1)", db)
+    assert run_db_sql("SELECT x, y FROM user.a JOIN user.b ON id", db)[0] == {"x": "A1", "y": "B1"}
+    assert run_db_sql("DROP TABLE user.a", db)["dropped_table"] == "user.a"
+    try:
+        run_db_sql("UPDATE user.t SET color = 'x'", db); assert False       # WHERE required
+    except QueryError:
+        pass

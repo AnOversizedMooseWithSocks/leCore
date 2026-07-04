@@ -116,16 +116,17 @@ class Lexicon:
         return self._mean_names, self._mean_mat
 
     def nearest(self, word, k=5):
+        # DELEGATE the search to the Index home (consolidation H1): an exact cosine scan over the row-normalized
+        # meaning matrix. Same ranking as the old per-word cosine loop; we over-fetch by one and drop the query
+        # word itself (as the loop's `w != word` filter did).
+        from holographic_index import Index
         q = self.meaning[word]
         names, M = self._meaning_matrix()
-        s = M @ (q / (np.linalg.norm(q) + 1e-12))       # rows are unit-norm, so this is the per-word cosine
-        s[self._mean_index[word]] = -np.inf             # drop the query word itself, as the loop's filter did
         k = min(k, len(names) - 1)
         if k <= 0:
             return []
-        idx = np.argpartition(-s, k - 1)[:k]            # top-k unsorted, then order them
-        idx = idx[np.argsort(-s[idx])]
-        return [(names[j], float(s[j])) for j in idx]
+        hits = Index(M, labels=names, method="exact").nearest(q, k=k + 1)
+        return [(w, s) for (w, s) in hits if w != word][:k]
 
     def separation(self, similar_pairs, random_pairs):
         """The honest downstream metric: d-prime between known-similar word pairs

@@ -46,9 +46,20 @@ leCore has grown large, so here's the **generalized** view — the families of c
 
 You don't have to use all of it. Each capability works on its own; the point is that they *share one space*, so they compose.
 
+**You don't have to memorize any of it, either.** The engine keeps a searchable catalog of what it can do, so a plain-English description of your problem finds the right tool — `mind.find_capability("search a big pile of vectors")`, or `mind.suggest("edit an image")` for ranked options with the call to make, or `mind.route("render a scene")` which either hands you the call (when it's sure) or a short list of choices (when it isn't). The full plain-language menu — every capability, what it does, and the one line that gets you started — lives in **[`CAPABILITIES.md`](CAPABILITIES.md)**, and it's generated from that same catalog by CI so it never goes stale.
+
 ## How do you use it?
 
 It's a plain Python library. The core needs **only NumPy** — nothing else is ever required. Everything beyond that (the web UI, image I/O, tests and plots, and the `numba`/CuPy/SymPy accelerators) is **opt-in**, and you pull in exactly what you want with pip "extras."
+
+**The quick way — install from PyPI.** The package is published as **`leos-core`** (the core of the larger **leOS** project); the import name stays `lecore`:
+
+```bash
+pip install leos-core              # installs the engine (+ NumPy)
+python -c "import lecore; print(lecore.UnifiedMind)"
+```
+
+**Or work from a clone** (what you want if you're hacking on the engine or running the tour/UI):
 
 ```bash
 git clone https://github.com/AnOversizedMooseWithSocks/leCore
@@ -57,19 +68,20 @@ pip install numpy                  # the ONLY hard requirement -- the core runs 
 python app.py                      # then open the browser UI and click "Run full system tour"
 ```
 
-**Adding the optional bits.** Each optional group has a name; install it from the cloned folder with `pip install .[name]` (note the dot — it means "this folder"). Combine names with commas.
+**Adding the optional bits.** Each optional group has a name. If you installed from PyPI, name the extras on the package (`pip install "leos-core[name]"`); if you're working from a clone, use the dot, which means "this folder" (`pip install .[name]`). Combine names with commas. (The quotes around `leos-core[ui]` just keep some shells from trying to interpret the brackets — the dot form rarely needs them.)
 
 ```bash
-pip install .[ui]         # the browser UI + image I/O          (Flask, Pillow)
-pip install .[jit]        # numba-compiled fast paths           (numba)
-pip install .[symbolic]   # design-time symbolic gradients      (SymPy)
-pip install .[dev]        # run the tests and make plots        (pytest, matplotlib)
-pip install .[all]        # everything portable, in one shot
-pip install .[ui,jit]     # ...or combine whichever you want
+# from PyPI (no clone):                     # from a clone (the dot = this folder):
+pip install "leos-core[ui]"                 # pip install .[ui]        the browser UI + image I/O   (Flask, Pillow)
+pip install "leos-core[jit]"                # pip install .[jit]       numba-compiled fast paths     (numba)
+pip install "leos-core[symbolic]"           # pip install .[symbolic]  design-time gradients         (SymPy)
+pip install "leos-core[dev]"                # pip install .[dev]       run the tests and make plots  (pytest, matplotlib)
+pip install "leos-core[all]"                # pip install .[all]       everything portable, one shot
+pip install "leos-core[ui,jit]"             # pip install .[ui,jit]    ...or combine whichever you want
 
 # GPU support is separate, because CuPy is tied to your CUDA version:
-pip install .[gpu]        # tries plain `cupy`; if that fails, install the matching wheel by
-                          # hand instead, e.g.  pip install cupy-cuda12x
+pip install "leos-core[gpu]"                # pip install .[gpu]       tries plain `cupy`; if that fails, install
+                                            #                          the matching wheel by hand, e.g. cupy-cuda12x
 ```
 
 If you'd rather not install leCore as a package at all, you can of course just `pip install` those same libraries directly (`pip install flask pillow`, etc.) and run from the clone — the extras are simply a convenient, named way to do it. The engine notices what's present and lights up the matching fast paths on its own; nothing optional is ever required.
@@ -97,6 +109,22 @@ guess   = mind.cleanup(back)              # snap the noisy result to the nearest
 
 *(Method names above are illustrative of the shape — see the docs for exact signatures. The modules keep their `holographic_` prefix from the project's origins.)* From there, the same `mind` object is where you reach the geometry, rendering, simulation, and program-execution capabilities.
 
+**Describe a scene and shape it in words.** You can hand the engine a description and it builds a scene of *named* objects you can then adjust by talking to it — and when it doesn't understand a word, it says so and suggests alternatives instead of failing silently:
+
+```python
+scene = mind.build_scene("a big red metal sphere and a small blue glass box on a sunny day")
+scene.adjust("make the sphere bigger")        # reference a named object, change it in plain words
+scene.adjust("change the box to metal")
+scene.adjust("make the pyramid golden")       # no pyramid -> changes nothing, and scene.feedback explains why
+image  = scene.render()                       # best-effort 3-D render (default camera, the scene's sun/sky)
+frames = scene.simulate(steps=40)             # a simple gravity drop of the objects
+scene.options()                               # what you *can* say: the objects, and the words for colour/material/size
+```
+
+It's a controlled vocabulary, on purpose — deterministic and honest about its limits, not a black-box language model.
+
+**Run it as a standalone HTTP service.** leCore ships a small, dependency-free server (`holographic_service.py`, standard-library `http.server`) so you can drive it over HTTP — a SQL/GraphQL data store, long-running jobs you can pause and resume, and an agent-facing skills API (`GET /skills`, `POST /skills/suggest`, `POST /skills/route`) that lets a program discover and call capabilities the same way the `mind` methods above do. See **[`SERVICE.md`](SERVICE.md)** for the endpoints and `curl` examples.
+
 ## The rules it plays by
 
 If you contribute or build on it, these are the load-bearing rules — they're what keep it trustworthy:
@@ -116,10 +144,17 @@ Like leOS, leCore is **free and open source**, and the work that keeps it free i
 
 ## Learning more
 
+- **[`CAPABILITIES.md`](CAPABILITIES.md)** — the **front-door menu**: a plain-language, grouped list of what leCore can
+  do and the one call that starts each job. The friendliest place to begin if you're deciding whether the engine
+  already does the thing you need. Generated from the live capability catalog by `capdoc.py` and kept in sync by CI.
 - **[`REFERENCE.md`](REFERENCE.md)** — the **code reference**: a file/module map and a plain-language breakdown
   of every module (its "why this exists" note plus its public functions and classes). Start here to find your
   way around. It's generated from the code by `docgen.py` and kept in sync automatically by CI, so it never
   drifts from what's actually there.
+- **[`API_QUICKREF.md`](API_QUICKREF.md)** — the **app-builder's quick reference**: one scannable line per public
+  class/function for the modules you actually touch when building on leCore (scene, mesh, camera, render, ship).
+- **[`SERVICE.md`](SERVICE.md)** — the **standalone HTTP service**: every endpoint (data store, jobs, and the
+  agent-facing skills API) with `curl` examples, for driving leCore as an app rather than a library.
 - **[`GALLERY.md`](GALLERY.md)** — a **visual showcase**: renders, procedural patterns, memory/reconstruction demos, and performance charts, straight from the engine's tests (the visual companion to the code reference).
 - **[`writing_vsa_programs.md`](writing_vsa_programs.md)** — the **VSA program writing guide**: how to express
   your own logic as a holographic program on `HoloMachine`, the small stored-program machine, without baking it
@@ -129,6 +164,15 @@ Like leOS, leCore is **free and open source**, and the work that keeps it free i
 - **`ISA.md`** — the small instruction set the engine's programs are built from.
 - The module docstrings — every `holographic_*.py` file opens with a plain-language "why this exists" (and
   those are exactly what `REFERENCE.md` gathers up for you).
+
+**How the docs stay honest.** Three of the files above are *generated* from the code and *gated* in CI, so they can't
+quietly fall out of date: `REFERENCE.md` (from module docstrings), `API_QUICKREF.md` and `CAPABILITIES.md` (from the
+catalog). `SERVICE.md` is mostly hand-written, but its endpoint table is checked against the service's real route
+registry, so a new or renamed endpoint can't ship undocumented. On top of the test suite, CI also runs two small checks
+that keep the engine usable rather than just correct — a **discoverability gate** (`tools/catalog_gaps.py`: every
+capability a user would ask for has a findable home) and an **invocation gate** (`tools/skill_lint.py`: every faculty
+carries a docstring an agent can act on, and every "how to call it" example actually resolves). If you add a capability
+and forget to document or register it, CI tells you which one.
 
 ## Status
 

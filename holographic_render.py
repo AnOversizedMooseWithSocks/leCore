@@ -73,14 +73,17 @@ class Camera:
         P[3, 2] = -1.0
         return P
 
-    def ray_dirs(self, width, height):
+    def ray_dirs(self, width, height, jitter=None):
         """Per-pixel world-space ray origins (the eye) and unit directions, shape (H, W, 3), for ray marching.
-        Pixel centres, y increasing downward in the image (row 0 = top)."""
+        Pixel centres by default (y increasing downward, row 0 = top). Pass `jitter=(dx, dy)` -- each a scalar or
+        an (H,W) array of sub-pixel offsets in [-0.5, 0.5) -- to shoot the ray through a jittered point inside the
+        pixel instead of the centre; averaging several jittered samples anti-aliases the edges (see path_trace)."""
         r, u, f = self._basis()
         t = np.tan(np.radians(self.fov_deg) / 2.0)
         ys, xs = np.mgrid[0:height, 0:width]
-        ndc_x = (2.0 * (xs + 0.5) / width - 1.0) * self.aspect * t
-        ndc_y = (1.0 - 2.0 * (ys + 0.5) / height) * t
+        ox, oy = (0.5, 0.5) if jitter is None else (0.5 + jitter[0], 0.5 + jitter[1])
+        ndc_x = (2.0 * (xs + ox) / width - 1.0) * self.aspect * t
+        ndc_y = (1.0 - 2.0 * (ys + oy) / height) * t
         dirs = (ndc_x[..., None] * r + ndc_y[..., None] * u + f)   # f is forward
         dirs = dirs / (np.linalg.norm(dirs, axis=-1, keepdims=True) + 1e-12)
         return self.eye, dirs

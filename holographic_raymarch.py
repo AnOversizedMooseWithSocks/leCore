@@ -163,17 +163,24 @@ def refract_dir(D, N, ior=1.5):
     return np.where(k < 0, refl, refr)                        # TIR -> reflect
 
 
-def subsurface(sdf, P, N, Ldir, depth=0.6, steps=10, sigma=4.0):
+def subsurface(sdf, P, N, Ldir, depth=0.6, steps=10, sigma=4.0, jitter=None):
     """A field-native subsurface / translucency term: from just under the surface, march toward the light and
     measure how much SOLID the light must cross to reach P (the SDF is negative inside). Thin regions transmit
     more, so they GLOW -- the wax/skin/leaf look. An approximation of true diffusion SSS, computed from the
-    field's interior. Vectorised; loop over march steps."""
+    field's interior. Vectorised; loop over march steps.
+
+    BANDING: the march samples the interior at `steps` fixed positions, so the measured thickness is QUANTIZED to
+    multiples of depth/steps -- on a smooth object that shows up as visible contour bands. Fixes: more `steps`
+    (finer quantum), and/or `jitter` -- a per-point offset in [0,1) that shifts each point's sample positions by a
+    fraction of one step, DITHERING the quantization into fine noise a denoiser smooths away. jitter=None keeps
+    the exact old sampling (byte-identical)."""
     P = np.asarray(P, float)
     start = P - N * 1e-2                                      # step just inside the surface
     inside = np.zeros(len(P))
     dl = depth / steps
+    off = 0.0 if jitter is None else np.asarray(jitter, float).reshape(-1, 1) * dl   # per-point sub-step shift
     for i in range(steps):
-        Q = start + Ldir * (i * dl)
+        Q = start + Ldir * (i * dl) + (Ldir * off if jitter is not None else 0.0)
         inside += (sdf.eval(Q) < 0.0) * dl                    # accumulate interior path length toward the light
     return np.exp(-sigma * inside)                            # Beer-Lambert transmission: thin -> bright
 

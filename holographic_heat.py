@@ -122,7 +122,18 @@ def _load_enrichment():
     if _ENRICH_CACHE is not None:
         return _ENRICH_CACHE
     out = {}
-    path = os.path.join(os.path.dirname(__file__), "data", "definitions", "native", "materials", "enrich.json")
+    # the enrichment JSON ships in the lecore_data package (works from a clone and a wheel); fall back to the old
+    # repo-relative data/ path for older checkouts. Missing file -> defaults below, so this stays graceful either way.
+    path = None
+    try:
+        import lecore_data
+        cand = lecore_data.file("definitions", "native", "materials", "enrich.json")
+        if os.path.exists(cand):
+            path = cand
+    except Exception:
+        path = None
+    if path is None:
+        path = os.path.join(os.path.dirname(__file__), "data", "definitions", "native", "materials", "enrich.json")
     try:
         with open(path) as f:
             for row in json.load(f):

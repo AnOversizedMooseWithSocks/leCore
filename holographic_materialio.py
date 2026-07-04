@@ -84,7 +84,9 @@ class PBRMaterial:
 
     def __init__(self, name="material", base_color=(0.8, 0.8, 0.8, 1.0), metallic=0.0, roughness=0.8,
                  emissive=(0.0, 0.0, 0.0), base_color_map=None, metallic_map=None, roughness_map=None,
-                 emissive_map=None):
+                 emissive_map=None, ior=1.5, transmission=0.0, attenuation_color=(1.0, 1.0, 1.0),
+                 attenuation_distance=None, fiber=False, fiber_roughness=0.10, fiber_tilt_deg=-3.0, sss=0.0,
+                 temperature_K=0.0, iridescence_nm=0.0):
         self.name = str(name)
         self.base_color = tuple(float(c) for c in base_color)        # RGBA
         self.metallic = float(metallic)
@@ -96,6 +98,33 @@ class PBRMaterial:
         self.metallic_map = metallic_map
         self.roughness_map = roughness_map
         self.emissive_map = emissive_map
+        # ---- PHYSICAL properties the RENDERER needs (real glTF extensions; defaults keep old behaviour) ----
+        # KHR_materials_ior: index of refraction of the surface (1.0=air, 1.33=water, 1.5=glass, 2.4=diamond)
+        self.ior = float(ior)
+        # KHR_materials_transmission: fraction of light that passes THROUGH (0=opaque, 1=clear dielectric/glass)
+        self.transmission = float(transmission)
+        # KHR_materials_volume: Beer-Lambert absorption inside a transmissive body -- the colour the transmitted
+        # light tends toward, and the distance over which it is absorbed (None = no volumetric tint)
+        self.attenuation_color = tuple(float(c) for c in attenuation_color)
+        self.attenuation_distance = None if attenuation_distance is None else float(attenuation_distance)
+        # ---- FIBER (hair/fur) descriptor: a Marschner strand BSDF is not a surface BRDF, so it carries its own
+        # physical params. `fiber` flags the material as hair; the base_color drives absorption (dark hair absorbs
+        # more), fiber_roughness is the longitudinal lobe width, fiber_tilt_deg the cuticle scale tilt. ----
+        self.fiber = bool(fiber)
+        self.fiber_roughness = float(fiber_roughness)
+        self.fiber_tilt_deg = float(fiber_tilt_deg)
+        # SUBSURFACE strength (0 = opaque; >0 = translucent, glows where the object is thin toward the light --
+        # wax/jade/skin/marble). Read by holographic_matlib.shade and consumed by path_trace's SSS term.
+        self.sss = float(sss)
+        # TEMPERATURE (Kelvin, 0 = not glowing). A hot material EMITS blackbody radiation whose colour is set by
+        # its temperature (Planck's law): ~800K dull red, ~1200K orange, ~3000K yellow-white, ~6000K white. shade()
+        # turns this into the emission colour via holographic_blackbody, so "glowing hot metal" is a physical
+        # property of the material, not a hand-typed emissive colour.
+        self.temperature_K = float(temperature_K)
+        # IRIDESCENCE film thickness in NANOMETRES (0 = not iridescent). A thin transparent film (soap ~300 nm,
+        # oil ~450 nm) on the surface produces a rainbow sheen that shifts with the view angle -- thin-film
+        # interference. The path tracer reads this and tints the reflection via holographic_thinfilm.
+        self.iridescence_nm = float(iridescence_nm)
 
     def sample(self, u=0.5, v=0.5):
         """The effective PBR values at UV (u,v): each channel is its factor multiplied by its texture map where one
@@ -113,7 +142,10 @@ class PBRMaterial:
             se = np.asarray(self.emissive_map.sample(u, v), float)[:3]
             em = em * (se if len(se) == 3 else np.full(3, se[0]))
         return {"base_color": tuple(float(x) for x in bc), "metallic": metallic,
-                "roughness": roughness, "emissive": tuple(float(x) for x in em)}
+                "roughness": roughness, "emissive": tuple(float(x) for x in em),
+                "ior": self.ior, "transmission": self.transmission,
+                "attenuation_color": self.attenuation_color, "attenuation_distance": self.attenuation_distance,
+                "fiber": self.fiber, "fiber_roughness": self.fiber_roughness, "fiber_tilt_deg": self.fiber_tilt_deg}
 
     def __repr__(self):
         return (f"PBRMaterial(name={self.name!r}, base_color={tuple(round(c,3) for c in self.base_color)}, "
@@ -122,8 +154,10 @@ class PBRMaterial:
 
     # ----- glTF -------------------------------------------------------------------------------------
     def to_gltf_dict(self):
-        """The glTF 2.0 `materials[]` entry (pbrMetallicRoughness + emissiveFactor)."""
-        return {
+        """The glTF 2.0 `materials[]` entry (pbrMetallicRoughness + emissiveFactor), plus the standard KHR
+        extension blocks for the physical properties when they differ from the defaults (ior / transmission /
+        volume-absorption). Opaque default materials emit exactly the old entry -- backward compatible."""
+        d = {
             "name": self.name,
             "pbrMetallicRoughness": {
                 "baseColorFactor": list(self.base_color),
@@ -132,6 +166,19 @@ class PBRMaterial:
             },
             "emissiveFactor": list(self.emissive),
         }
+        ext = {}
+        if abs(self.ior - 1.5) > 1e-9:
+            ext["KHR_materials_ior"] = {"ior": self.ior}
+        if self.transmission > 0.0:
+            ext["KHR_materials_transmission"] = {"transmissionFactor": self.transmission}
+        if self.attenuation_distance is not None or any(abs(c - 1.0) > 1e-9 for c in self.attenuation_color):
+            vol = {"attenuationColor": list(self.attenuation_color)}
+            if self.attenuation_distance is not None:
+                vol["attenuationDistance"] = self.attenuation_distance
+            ext["KHR_materials_volume"] = vol
+        if ext:
+            d["extensions"] = ext
+        return d
 
     @classmethod
     def from_gltf_dict(cls, d):

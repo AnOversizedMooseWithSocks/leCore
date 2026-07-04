@@ -58,6 +58,11 @@ from holographic_materialio import PBRMaterial
 
 # (class, (r,g,b), metallic, roughness, emissive|None, alpha)
 RENDER_MATERIALS = {
+    # --- iridescent thin-film materials (soap bubble / oil slick / beetle shell) ---------------------
+    # base colour is dark so the rainbow SHEEN dominates; the film thickness (nm) is set in _IRIDESCENT below.
+    "soap_bubble":  ("diffuse", (0.05, 0.05, 0.06), 0.0, 0.06, None, 1.0),
+    "oil_slick":    ("diffuse", (0.03, 0.03, 0.04), 0.1, 0.10, None, 1.0),
+    "beetle_shell": ("metal",   (0.10, 0.10, 0.10), 1.0, 0.18, None, 1.0),
     # --- plain diffuse / dielectric mattes ---------------------------------------------------------
     "matte_white":  ("diffuse", (0.90, 0.90, 0.90), 0.0, 0.90, None, 1.0),
     "matte_gray":   ("diffuse", (0.50, 0.50, 0.50), 0.0, 0.90, None, 1.0),
@@ -204,6 +209,16 @@ RENDER_MATERIALS = {
     "magma_chamber":("deposit", (1.00, 0.35, 0.06), 0.0, 0.70, (1.00, 0.30, 0.05), 1.0),
     "salt_deposit": ("deposit", (0.90, 0.88, 0.85), 0.0, 0.60, None, 1.0),
     "uranium_ore":  ("deposit", (0.25, 0.45, 0.15), 0.1, 0.60, (0.05, 0.15, 0.03), 1.0),
+    # --- fiber (hair / fur): shaded by a Marschner strand BSDF, not a surface BRDF. The rgb is the perceived
+    #     hair colour (it drives absorption -- dark hair absorbs the transmitted lobes); the fiber roughness and
+    #     cuticle tilt are filled in by material() from _FIBER_PHYS below. ---------------------------------------
+    "fur_brown":    ("fiber", (0.36, 0.22, 0.12), 0.0, 0.30, None, 1.0),
+    "fur_ginger":   ("fiber", (0.62, 0.30, 0.12), 0.0, 0.30, None, 1.0),
+    "fur_gray":     ("fiber", (0.45, 0.44, 0.42), 0.0, 0.30, None, 1.0),
+    "hair_blonde":  ("fiber", (0.85, 0.65, 0.35), 0.0, 0.30, None, 1.0),
+    "hair_black":   ("fiber", (0.06, 0.05, 0.04), 0.0, 0.30, None, 1.0),
+    "hair_brown":   ("fiber", (0.28, 0.18, 0.10), 0.0, 0.30, None, 1.0),
+    "hair_red":     ("fiber", (0.50, 0.16, 0.08), 0.0, 0.30, None, 1.0),
 }
 
 
@@ -223,13 +238,127 @@ def classes():
 
 
 def material(name):
-    """Look up a preset -> a glTF-standard PBRMaterial. Raises a clear KeyError naming near matches."""
+    """Look up a preset -> a glTF-standard PBRMaterial, now carrying the PHYSICAL properties the renderer needs.
+    Beyond the metallic-roughness factors, transmissive classes (glass / gem / clear liquids) get a real index of
+    refraction + transmission + a volumetric attenuation colour, and fibers (hair/fur) get their strand-BSDF
+    params -- so a material out of this library is the single physical source of truth the renderer reads from
+    (see shade() / fiber_params()). Raises a clear KeyError naming near matches."""
     if name not in RENDER_MATERIALS:
         near = [n for n in RENDER_MATERIALS if name.split("_")[0] in n][:6]
         raise KeyError("unknown material %r%s" % (name, (" -- did you mean: %s" % near) if near else ""))
     cls, rgb, metallic, rough, emis, alpha = RENDER_MATERIALS[name]
-    return PBRMaterial(name=name, base_color=(rgb[0], rgb[1], rgb[2], alpha),
-                       metallic=metallic, roughness=rough, emissive=emis or (0.0, 0.0, 0.0))
+    mat = PBRMaterial(name=name, base_color=(rgb[0], rgb[1], rgb[2], alpha),
+                      metallic=metallic, roughness=rough, emissive=emis or (0.0, 0.0, 0.0))
+    _apply_physical(mat, cls, name, rgb)
+    return mat
+
+
+# reference indices of refraction, keyed by material name where it matters, else a per-class default
+_IOR = {"diamond": 2.42, "sapphire": 1.77, "ruby": 1.77, "emerald": 1.58, "amethyst": 1.55, "quartz": 1.55,
+        "jade": 1.66, "ice": 1.31, "water": 1.33, "water_deep": 1.33, "oil": 1.47, "honey": 1.50}
+_CLASS_IOR = {"glass": 1.50, "gem": 1.55, "liquid": 1.33}
+_TRANSMISSIVE_LIQUIDS = {"water", "water_deep", "oil", "honey"}     # the rest (milk/blood/mud) read as opaque
+# fiber strand-BSDF params (longitudinal roughness = lobe width; cuticle tilt in degrees), keyed by name
+_FIBER_PHYS = {"fur_brown": (0.28, -4.0), "fur_ginger": (0.26, -4.0), "fur_gray": (0.30, -4.0),
+               "hair_blonde": (0.15, -3.0), "hair_black": (0.12, -3.0), "hair_brown": (0.16, -3.0),
+               "hair_red": (0.18, -3.0)}
+
+
+# subsurface strength for translucent materials (0 = opaque). Wax/skin glow softly; jade/marble a bit; honey/milk too.
+_SSS = {"wax": 1.0, "skin_light": 0.9, "skin_dark": 0.7, "jade": 0.8, "marble": 0.5, "milk": 0.9,
+        "honey": 0.6, "flesh": 0.9, "leaf": 1.0}
+
+# IRIDESCENT thin-film materials: film thickness in NANOMETRES (0 = not iridescent). Soap ~ 300 nm, oil slick a
+# bit thicker, a beetle's cuticle in the strong-colour band. The path tracer tints the reflection by view angle.
+_IRIDESCENT = {"soap_bubble": 300.0, "oil_slick": 420.0, "beetle_shell": 250.0}
+
+
+def _apply_physical(mat, cls, name, rgb):
+    """Set the physical dielectric / fiber / subsurface properties on a freshly-built preset, by class and (where
+    it matters) by name. Transmissive materials refract; fibers carry their strand params; translucent materials
+    get a subsurface strength. Opaque presets are untouched."""
+    # a named subsurface material is a translucent SOLID (wax/jade/skin), not refractive glass -- SSS instead of
+    # transmission, so it takes precedence over the gem/liquid class default.
+    translucent_sss = name in _SSS
+    transmissive = (not translucent_sss) and ((cls in ("glass", "gem")) or
+                                              (cls == "liquid" and name in _TRANSMISSIVE_LIQUIDS))
+    if transmissive:
+        mat.transmission = 1.0
+        mat.ior = _IOR.get(name, _CLASS_IOR.get(cls, 1.5))
+        mat.attenuation_color = tuple(float(c) for c in rgb)     # the tint transmitted light picks up
+    if cls == "fiber":
+        mat.fiber = True
+        r, tilt = _FIBER_PHYS.get(name, (0.20, -3.0))
+        mat.fiber_roughness = r
+        mat.fiber_tilt_deg = tilt
+    if name in _SSS:
+        mat.sss = _SSS[name]                                     # translucent -> glows where thin (path_trace SSS term)
+    if name in _IRIDESCENT:
+        mat.iridescence_nm = _IRIDESCENT[name]                   # thin film -> rainbow sheen (path_trace irid term)
+
+
+# --------------------------------------------------------------------------- renderer adapters
+def shade(mat, n):
+    """Hand the path tracer its per-hit tuple (albedo(n,3), metallic(n,), roughness(n,), emission(n,3), ior(n,))
+    for `n` points all of material `mat` -- physical data read straight off the material instead of a hand-typed
+    tuple. A TRANSMISSIVE material reports ior=mat.ior (the tracer's smooth-dielectric BSDF then refracts) and its
+    'albedo' is the attenuation colour (the coloured-glass tint on transmitted light); an OPAQUE material reports
+    ior=0 and is shaded by the GGX/diffuse BRDF from base_color / metallic / roughness."""
+    base = np.array(mat.base_color[:3], float)
+    transmissive = getattr(mat, "transmission", 0.0) > 0.0
+    alb = np.tile(np.array(mat.attenuation_color, float) if transmissive else base, (n, 1)).astype(float)
+    met = np.full(n, 0.0 if transmissive else mat.metallic)
+    rough = np.full(n, mat.roughness)
+    emis = np.tile(np.array(mat.emissive, float), (n, 1)).astype(float)
+    # HOT material: a temperature > 0 EMITS blackbody radiation -- colour from Planck's law, brightness rising
+    # steeply with temperature (Stefan-Boltzmann is ~T^4; we use a gentler visible-range curve so it tonemaps).
+    # This makes "glowing hot metal" a physical property (temperature) rather than a hand-typed emissive colour.
+    T = float(getattr(mat, "temperature_K", 0.0))
+    if T > 500.0:
+        from holographic_blackbody import blackbody_rgb
+        col = np.array(blackbody_rgb(T), float)                 # the hue for this temperature (deep red -> white)
+        bright = ((T - 500.0) / 1500.0) ** 2                    # visible glow ramps from ~500K, quadratic in T
+        emis = emis + col * bright                              # add the thermal glow on top of any base emissive
+    ior = np.full(n, mat.ior if transmissive else 0.0)
+    sss = float(getattr(mat, "sss", 0.0))
+    irid = float(getattr(mat, "iridescence_nm", 0.0))
+    # IRIDESCENT material: a thin film (nm) on the surface -> the path tracer tints the reflection by view angle.
+    # Emit the full 7-tuple whenever a film is present, carrying sss alongside (0 if the surface isn't translucent).
+    if not transmissive and irid > 0.0:
+        return alb, met, rough, emis, ior, np.full(n, sss), np.full(n, irid)
+    if not transmissive and sss > 0.0:
+        return alb, met, rough, emis, ior, np.full(n, sss)      # translucent opaque -> carry the subsurface strength
+    return alb, met, rough, emis, ior
+
+
+def iridesce(name_or_mat, thickness_nm):
+    """Return a copy of a material with a thin iridescent film of `thickness_nm` nanometres -- it will show a
+    rainbow sheen that shifts with the view angle (soap ~300 nm, oil ~420 nm). A physical way to make anything
+    iridescent: iridesce('steel', 350) is oil-on-metal. Accepts a material name or an already-built material."""
+    import copy
+    mat = material(name_or_mat) if isinstance(name_or_mat, str) else copy.deepcopy(name_or_mat)
+    mat.iridescence_nm = float(thickness_nm)
+    return mat
+
+
+def heat(name_or_mat, temperature_K):
+    """Return a copy of a material heated to `temperature_K` -- it will EMIT blackbody radiation of the colour that
+    temperature implies (see shade). A physical way to make anything glow: heat('iron', 1400) is orange-hot iron,
+    heat('iron', 900) is a dull red. Accepts a material name or an already-built material."""
+    import copy
+    mat = material(name_or_mat) if isinstance(name_or_mat, str) else copy.deepcopy(name_or_mat)
+    mat.temperature_K = float(temperature_K)
+    return mat
+
+
+def fiber_params(mat):
+    """The physical strand parameters the Marschner hair shader needs, read off a fiber material: the hair COLOUR
+    (drives absorption -- dark hair absorbs the transmitted TT/TRT lobes), the longitudinal roughness (lobe width),
+    and the cuticle tilt (degrees). Raises if the material isn't a fiber."""
+    if not getattr(mat, "fiber", False):
+        raise ValueError("%r is not a fiber material (its class must be 'fiber')" % mat.name)
+    return {"hair_color": tuple(float(c) for c in mat.base_color[:3]),
+            "roughness": mat.fiber_roughness, "tilt_deg": mat.fiber_tilt_deg}
 
 
 def albedo(name):

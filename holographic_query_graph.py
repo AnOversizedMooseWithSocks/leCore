@@ -1,5 +1,8 @@
 """holographic_query_graph.py -- GRAPH TRAVERSAL over an edge table (query backlog B10).
 
+SUPERSEDED BY holographic_querygraph -- the wired version (it has the curated catalog home). This earlier implementation of the same
+backlog item is kept for its tests but is intentionally NOT wired into any pipeline; use holographic_querygraph instead.
+
 Recursive/graph queries -- descendants, ancestors, shortest path, reachability -- over a table whose rows are EDGES
 (a src column and a dst column). Think org charts, category trees, dependency graphs, foreign-key chains.
 

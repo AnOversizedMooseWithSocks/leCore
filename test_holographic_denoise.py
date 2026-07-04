@@ -120,3 +120,22 @@ def test_trajectory_method_is_the_pipeline_denoiser_promoted():
     faculty = np.asarray(m.denoise(sig, method="trajectory"))
     private = np.asarray(m._denoise_signal(sig))
     assert np.array_equal(faculty, private)
+
+
+def test_denoise_gate_routes_but_is_opt_in():
+    """The projection-denoise re-enable ROUTES on the residual ratio: clearly-noise-dominated -> project, else
+    fall back to the no-op. NOTE (kept negative): this gate is OPT-IN, not an auto-default -- a fixed threshold
+    can't robustly separate off-manifold detail from noise (measured harm-leak at strong detail). It's safe only
+    when the caller knows the signal is low-rank. Here we test the mechanical routing + the fallback identity."""
+    import numpy as np
+    from holographic_denoise import fit_manifold, manifold_denoise, denoise_gated
+    rng = np.random.default_rng(0); D, rank = 128, 8
+    Q = np.linalg.qr(rng.standard_normal((D, D)))[0]; base, det = Q[:, :rank], Q[:, rank:rank+24]
+    sc = lambda n: (rng.standard_normal((n, rank)) @ base.T) + 0.35 * (rng.standard_normal((n, 24)) @ det.T)
+    basis, mean = fit_manifold(sc(300), rank=rank)
+    lo = sc(1)[0] + 0.05 * rng.standard_normal(D)                 # low noise -> fallback (identity)
+    hi = sc(1)[0] + 0.8 * rng.standard_normal(D)                  # high noise -> project
+    r_lo, i_lo = denoise_gated(lo, basis, mean)
+    r_hi, i_hi = denoise_gated(hi, basis, mean)
+    assert i_lo["used"] == "fallback" and np.array_equal(r_lo, np.asarray(lo, float))   # safe no-op
+    assert i_hi["used"] == "superior" and np.array_equal(r_hi, manifold_denoise(hi, basis, mean))

@@ -23,18 +23,10 @@ from holographic_raymarch import sphere_trace, sdf_normal, refract_dir
 
 
 def _cosine_hemisphere(N, n, seed=0):
-    """n cosine-weighted sample directions around each unit normal in N:(M,3). Returns (M, n, 3). Vectorised."""
-    rng = np.random.default_rng(seed)
-    M = len(N)
-    u1 = rng.random((M, n)); u2 = rng.random((M, n))
-    r = np.sqrt(u1); th = 2 * np.pi * u2
-    x = r * np.cos(th); y = r * np.sin(th); z = np.sqrt(np.clip(1 - u1, 0, 1))   # local cosine-weighted dir
-    # build a tangent frame per normal
-    up = np.where(np.abs(N[:, 1:2]) < 0.99, np.array([0., 1, 0]), np.array([1., 0, 0]))
-    T = np.cross(up, N); T /= (np.linalg.norm(T, axis=1, keepdims=True) + 1e-12)
-    B = np.cross(N, T)
-    # world dir = x*T + y*B + z*N  (broadcast over the n samples)
-    return (x[..., None] * T[:, None, :] + y[..., None] * B[:, None, :] + z[..., None] * N[:, None, :])
+    """n cosine-weighted sample directions around each unit normal in N:(M,3). Returns (M, n, 3). Vectorised.
+    Delegates to the Sampling home (consolidation R4) -- one shared implementation, bit-identical."""
+    from holographic_samplinghome import Sampling
+    return Sampling.cosine_hemisphere(N, n, seed=seed)
 
 
 def gather_indirect(sdf, P, N, light_dir, base_color=(0.8, 0.6, 0.5), n_dirs=16, seed=0):
@@ -52,8 +44,8 @@ def gather_indirect(sdf, P, N, light_dir, base_color=(0.8, 0.6, 0.5), n_dirs=16,
     irr = np.zeros((len(D), 3))
     if hit.any():
         Nq = sdf_normal(sdf, Q[hit])
-        ndl = np.clip(Nq @ L, 0, None)                        # direct light at the bounce surface
-        irr[hit] = ndl[:, None] * base                       # it re-radiates that, tinted by its albedo
+        from holographic_brdf import lambert                  # the Shading home's diffuse term (consolidation R3)
+        irr[hit] = lambert(Nq, L, base)                       # = clip(Nq.L,0)*base, the bounce re-radiating direct light
     return irr.reshape(M, n_dirs, 3).mean(axis=1)            # average -> indirect irradiance
 
 

@@ -1,5 +1,8 @@
 """holographic_query_history.py -- the VERSIONED query table (PROMOTE P7-P12).
 
+SUPERSEDED BY holographic_querytime -- the wired version (it has the curated catalog home). This earlier implementation of the same
+backlog item is kept for its tests but is intentionally NOT wired into any pipeline; use holographic_querytime instead.
+
 The differentiated "time-travel / diff / branch / tamper-proof" family. None of it is new machinery: the versioning
 engine (holographic_history.VersionedStore), the delta/diff + Merkle root (holographic_deltachain), and the tamper
 locator (holographic_verify) all SHIP. They simply were not wired to the query Database. This module is the enabling

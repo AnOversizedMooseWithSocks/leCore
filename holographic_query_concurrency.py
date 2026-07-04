@@ -1,5 +1,8 @@
 """holographic_query_concurrency.py -- CONCURRENCY for the query layer (query backlog B8).
 
+SUPERSEDED BY holographic_querylock -- the wired version (it has the curated catalog home). This earlier implementation of the same
+backlog item is kept for its tests but is intentionally NOT wired into any pipeline; use holographic_querylock instead.
+
 The honest model for a NumPy-only, deterministic store is single-writer / multi-reader:
 
   * a WRITE LOCK -- at most one writer touches a table at a time, so two writers can't interleave and lose an update;

@@ -141,8 +141,12 @@ def _project(camera, P, width, height):
     return np.stack([sx, sy], axis=1), ndc[:, 2]
 
 
-def _draw_segment(img, p0, p1, color):
-    """Draw a 1-px line from p0 to p1 into the image (simple DDA). Readable, no external raster lib."""
+def _draw_segment(img, p0, p1, color, cover=None):
+    """Draw a 1-px line from p0 to p1 into the image (simple DDA). Readable, no external raster lib.
+
+    If `cover` (a same-size (H,W) array) is given, every pixel this segment paints is also marked 1.0 there -- a
+    coverage/alpha mask, so the hair can later be composited as a LAYER over another render (where cover==0 the
+    surface shows through). cover=None keeps the original behaviour exactly."""
     H, W = img.shape[:2]
     x0, y0 = p0; x1, y1 = p1
     n = int(max(abs(x1 - x0), abs(y1 - y0))) + 1
@@ -151,15 +155,30 @@ def _draw_segment(img, p0, p1, color):
         xi, yi = int(x), int(y)
         if 0 <= xi < W and 0 <= yi < H:
             img[yi, xi] = color
+            if cover is not None:
+                cover[yi, xi] = 1.0                          # this pixel is now covered by hair
 
 
 def render_hair(strands, camera, light_dir=(0.3, 0.6, 0.6), width=400, height=400,
                 shader="kajiya", hair_color=(0.55, 0.35, 0.15), background=(0.05, 0.05, 0.08),
-                smooth_levels=2, lod_stride=1):
+                smooth_levels=2, lod_stride=1, roughness=None, tilt_deg=None, reflect=0.10,
+                return_alpha=False):
     """Render a list of strands to an (H,W,3) image. Each strand's smoothed centerline is projected and its
     segments shaded by their tangent (`shader`='kajiya' or 'marschner'). Strands are drawn far-to-near (painter's
-    order). `lod_stride` > 1 draws every Nth strand (a cheap level of detail). Returns the image array."""
+    order). `lod_stride` > 1 draws every Nth strand (a cheap level of detail). Returns the image array.
+
+    PHYSICAL FIBER PARAMS (for the Marschner shader): `roughness` sets the longitudinal lobe WIDTH (beta_r), and
+    `tilt_deg` the cuticle scale TILT (alpha_r) -- read these straight off a fiber material via
+    holographic_matlib.fiber_params so the look comes from the material, not hard-coded numbers. Left as None they
+    fall back to the shader's defaults (backward compatible).
+
+    `return_alpha` (default False): also return a coverage mask (H,W) that is 1.0 where a strand painted a pixel
+    and 0.0 elsewhere -- so the hair can be composited as a LAYER over another render (the pipeline hair stage).
+    With return_alpha=True the call returns (image, alpha); default False returns just the image, unchanged."""
+    beta_r = np.radians(4.0 + 24.0 * roughness) if roughness is not None else np.radians(7.0)   # roughness -> lobe width
+    alpha_r = np.radians(tilt_deg) if tilt_deg is not None else np.radians(-6.0)                 # cuticle tilt
     img = np.ones((height, width, 3)) * np.asarray(background, float)
+    cover = np.zeros((height, width)) if return_alpha else None                                  # coverage mask
     eye = camera.eye
     l = _unit(light_dir)
     picked = strands[::max(1, lod_stride)]
@@ -173,11 +192,15 @@ def render_hair(strands, camera, light_dir=(0.3, 0.6, 0.6), width=400, height=40
             mid = 0.5 * (s.points[i] + s.points[i + 1])
             view_dir = _unit(eye - mid)
             if shader == "marschner":
-                col = marschner(tang[i], l, view_dir, hair_color=hair_color)
+                col = marschner(tang[i], l, view_dir, hair_color=hair_color,
+                                alpha_r=alpha_r, beta_r=beta_r, reflect=reflect)
             else:
                 col = kajiya_kay(tang[i], l, view_dir, diffuse_color=hair_color)
-            _draw_segment(img, pix[i], pix[i + 1], np.clip(col, 0, 1))
-    return np.clip(img, 0, 1)
+            _draw_segment(img, pix[i], pix[i + 1], np.clip(col, 0, 1), cover=cover)
+    img = np.clip(img, 0, 1)
+    if return_alpha:
+        return img, cover
+    return img
 
 
 def _selftest():

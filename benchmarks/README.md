@@ -54,3 +54,19 @@ comparisons (3% at 20k) -- the structural, sublinear win is always present. But 
 matrix-vector product, so fast that the forest's pure-Python traversal only overtakes it on wall-clock past
 ~20k items. **The forest buys sublinear *work*, which is what matters when each comparison is expensive or N is
 large; against a tight BLAS loop at small N, raw wall-time favours the scan.** Both directions are on the record.
+
+## bench_render.py -- the render path's throughput and time-to-quality (backlog J1)
+
+The speed-regression guard for render-pipeline work: path_trace pixel-samples/sec, render_auto time-to-quality
+(and its PSNR edge over an equal-budget raw trace, which must stay >= 0), the strand rasteriser's segments/sec
+(the known hot spot), StableFluid steps/sec, and volume_render field-samples/sec.
+
+Baseline captured 2026-07-03 (single-thread sandbox NumPy -- indicative, machine-dependent):
+
+```
+path_trace      :     88.2k pixel-samples/sec   (96x72 @ 8spp, 3 bounces)
+render_auto     :      2.9s to 'medium'          (mean 21spp / 8 passes; +3.4 dB vs raw at equal budget)
+render_hair     :      2.6k segments/sec         (800 strands, 160x120)   <- the F3 hot spot
+StableFluid.step:    212   steps/sec             (64x64 smoke)
+volume_render   :      7.8M field-samples/sec    (128x128 x 64 steps)
+```

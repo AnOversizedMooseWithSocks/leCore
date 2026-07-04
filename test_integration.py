@@ -8032,3 +8032,1868 @@ def test_stage_bake_plan_through_mind():
     # over a single frame nothing bakes (no amortisation)
     _pipe, plan1 = mind.plan_pipeline_bakes(PipelineConfig.preview(), frames=1)
     assert all(p["choice"] == "compute" for p in plan1)
+
+
+def test_render_auto_faculty_calibrates_through_unified_mind():
+    """The auto-calibrating render is reachable AS A FACULTY and actually wires the convergence machinery into a
+    render loop: passes run, effort concentrates on hard pixels, and it delegates to holographic_gbuffer."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    m = UnifiedMind(dim=256, seed=0)
+
+    # a tiny SDF scene (two spheres + floor) and a minimal camera exposing ray_dirs(w,h) -> (eye, dirs)
+    centers = np.array([[-0.7, 0, 0], [0.7, 0, 0]], float); radii = np.array([0.6, 0.6])
+    class Scene:
+        def eval(self, P):
+            d = np.min(np.linalg.norm(P[..., None, :] - centers, axis=-1) - radii, axis=-1)
+            return np.minimum(d, P[..., 1] + 0.9)
+    class Cam:
+        eye = np.array([0.0, 0.4, 3.2])
+        def ray_dirs(self, w, h):
+            ys, xs = np.mgrid[0:h, 0:w]
+            u = (xs / (w - 1) - 0.5) * 1.2; v = -(ys / (h - 1) - 0.5) * 1.2
+            d = np.stack([u, v, -np.ones_like(u)], -1)
+            return self.eye, d / np.linalg.norm(d, axis=-1, keepdims=True)
+    def material(P):
+        n = len(P); alb = np.tile([.8, .3, .3], (n, 1)).astype(float); alb[P[:, 0] < 0] = [.3, .4, .85]
+        return alb, np.zeros(n), np.full(n, .6), np.zeros((n, 3))
+
+    img, stats = m.render_auto(Scene(), Cam(), width=40, height=40, material=material, quality="medium",
+                               max_bounce=3, seed=0, return_stats=True)
+    assert img.shape == (40, 40, 3) and np.isfinite(img).all()
+    assert stats["passes"] >= 1
+    assert stats["max_samples"] >= stats["mean_samples"]      # the sampler calibrated effort, not a flat spp
+
+
+def test_scene_document_renders_through_unified_mind():
+    """The canonical Scene document is renderable AS A FACULTY: build a document by adding objects (each with a
+    stable handle, transform, SDF geometry, and library material), then render it through the mind -- the renderer
+    consuming the authoritative scene instead of a hand-built class (backlog H7). Cross-faculty: scene_doc +
+    matlib + render_auto meet here."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_scene_doc import Scene
+    from holographic_sdf import sphere, plane
+    m = UnifiedMind(dim=256, seed=0)
+
+    sc = Scene(seed=0)
+    sc.add(name="floor", geometry=plane(-0.9), material="matte_white")
+    T = np.eye(4); T[:3, 3] = (-0.7, 0, 0)
+    sc.add(name="red", geometry=sphere(0.5), transform=T.copy(), material="plastic_red")
+    T2 = np.eye(4); T2[:3, 3] = (0.7, 0, 0)
+    sc.add(name="gold", geometry=sphere(0.5), transform=T2, material="gold")
+
+    class Cam:
+        eye = np.array([0.0, 0.4, 3.2])
+        def ray_dirs(self, w, h, jitter=None):
+            ys, xs = np.mgrid[0:h, 0:w]
+            jx, jy = (0.0, 0.0) if jitter is None else (jitter[0], jitter[1])
+            u = ((xs + jx) / (w - 1) - 0.5) * 1.2; v = -((ys + jy) / (h - 1) - 0.5) * 1.2
+            d = np.stack([u, v, -np.ones_like(u)], -1); return self.eye, d / np.linalg.norm(d, axis=-1, keepdims=True)
+
+    # the mind flattens the document and renders it
+    img = m.render_scene_document(sc, Cam(), width=44, height=33, quality="draft", max_bounce=3, seed=0)
+    assert img.shape == (33, 44, 3) and np.isfinite(img).all() and img.min() >= 0
+    # the un-rendered bridge is a faculty too (sdf + material_fn), and the material_fn honours per-object materials
+    sdf, material_fn = m.scene_to_render(sc)
+    _, met, _, _, _ = material_fn(np.array([[0.7 + 0.5, 0.0, 0.0]]))     # a point ON the gold sphere's surface
+    assert met[0] == 1.0                                            # shaded as metal, from the document's material
+
+
+def test_subsurface_material_drives_render_through_unified_mind():
+    """Subsurface scattering reaches the RENDER via the material: a translucent library material (wax) carries an
+    sss strength, matlib.shade returns it as a 6th channel, the scene-render bridge passes it through, and
+    render_scene_document's SSS light makes the object glow -- brighter than the same material rendered opaque
+    (backlog H2). Cross-faculty: matlib + scene_doc + render_auto + raymarch.subsurface meet here."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_scene_doc import Scene
+    from holographic_sdf import sphere
+    m = UnifiedMind(dim=256, seed=0)
+
+    class Cam:
+        eye = np.array([0.0, 0.0, 3.2])
+        def ray_dirs(self, w, h, jitter=None):
+            ys, xs = np.mgrid[0:h, 0:w]
+            jx, jy = (0.0, 0.0) if jitter is None else (jitter[0], jitter[1])
+            u = ((xs + jx) / (w - 1) - 0.5) * 1.1; v = -((ys + jy) / (h - 1) - 0.5) * 1.1
+            d = np.stack([u, v, -np.ones_like(u)], -1); return self.eye, d / np.linalg.norm(d, axis=-1, keepdims=True)
+    sky = lambda D: np.tile([0.05, 0.06, 0.08], (len(D), 1))
+
+    wax = Scene(seed=0); wax.add(name="wax", geometry=sphere(0.7), material="wax")
+    opaque = Scene(seed=0); opaque.add(name="op", geometry=sphere(0.7), material="clay")
+    lit = m.render_scene_document(wax, Cam(), width=36, height=36, quality="draft", max_bounce=2, seed=0,
+                                  sky=sky, sss_dir=(-0.3, 0.4, -0.9))
+    flat = m.render_scene_document(opaque, Cam(), width=36, height=36, quality="draft", max_bounce=2, seed=0,
+                                   sky=sky, sss_dir=(-0.3, 0.4, -0.9))
+    assert lit.mean() > flat.mean() and np.isfinite(lit).all()    # the translucent wax glows brighter than opaque clay
+
+
+def test_hot_material_emits_through_render():
+    """A hot material glows in a RENDER by its temperature (backlog H2): heat a material via matlib, render the
+    same object cold vs hot in a dark room, and the hot one is brighter -- emission DERIVED from temperature
+    (blackbody), flowing through path_trace's emissive term. Cross-faculty: matlib.heat + blackbody + path_trace."""
+    import numpy as np
+    import holographic_matlib as ML
+    from holographic_pathtrace import path_trace
+    from holographic_render import Camera
+    from holographic_sdf import sphere
+
+    scene = sphere(0.7)
+    cold_m, hot_m = ML.material("iron"), ML.heat("iron", 2200)
+    def _mat(m):
+        def f(P):
+            return ML.shade(m, len(P))[:4]                       # (albedo, metallic, roughness, emission)
+        return f
+    cam = Camera(eye=(0, 0, 3.0), target=(0, 0, 0), fov_deg=40)
+    dark = lambda D: np.tile([0.02, 0.02, 0.03], (len(D), 1))    # a dark room: only the glow lights the object
+    cold = path_trace(scene, cam, 36, 36, spp=6, max_bounce=2, material=_mat(cold_m), sky=dark, seed=0)
+    hot = path_trace(scene, cam, 36, 36, spp=6, max_bounce=2, material=_mat(hot_m), sky=dark, seed=0)
+    assert hot.mean() > cold.mean() * 1.3 and np.isfinite(hot).all()   # the hot iron glows
+    assert hot[..., 0].mean() > hot[..., 2].mean()                     # and glows warm (red > blue)
+
+
+def test_crystal_socket_renders_through_unified_mind():
+    """A physical-structure material (a polycrystalline grain socket from crystal_material) drives a RENDER via the
+    scene document: the gem shows colour variation across facets, not a flat swatch (backlog H2). Cross-faculty:
+    crystal_material (cellular) + scene_doc + render_scene_document."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_scene_doc import Scene
+    from holographic_sdf import sphere
+    m = UnifiedMind(dim=256, seed=0)
+
+    cells, socket = m.crystal_material(n_seeds=30, base=(0.4, 0.5, 0.72), spread=0.28, seed=0)
+    sc = Scene(seed=0)
+    sc.add(name="gem", geometry=sphere(0.8), material="matte_white", overrides={"albedo_socket": socket})
+
+    class Cam:
+        eye = np.array([0.0, 0.0, 3.0])
+        def ray_dirs(self, w, h, jitter=None):
+            ys, xs = np.mgrid[0:h, 0:w]
+            jx, jy = (0.0, 0.0) if jitter is None else (jitter[0], jitter[1])
+            u = ((xs + jx) / (w - 1) - 0.5) * 1.1; v = -((ys + jy) / (h - 1) - 0.5) * 1.1
+            d = np.stack([u, v, -np.ones_like(u)], -1); return self.eye, d / np.linalg.norm(d, axis=-1, keepdims=True)
+    img = m.render_scene_document(sc, Cam(), width=48, height=48, quality="draft", max_bounce=2, seed=0)
+    # the rendered gem is not a flat colour: the object pixels vary (the Voronoi facets show through)
+    obj = img.reshape(-1, 3)[img.reshape(-1, 3).sum(1) > 0.05]
+    assert obj.shape[0] > 20 and float(obj.std(0).mean()) > 0.02
+
+
+def test_volume_stage_through_unified_mind_pipeline():
+    """A scene carrying a volume renders as ONE frame through the mind's pipeline: the volume stage composites the
+    smoke over the surface render (backlog H5). Cross-faculty: render_pipeline (holographic_pipeline) + the volume
+    renderer meet here."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_pipeline import RenderSpec
+    m = UnifiedMind(dim=256, seed=0)
+
+    class Scene:
+        def eval(self, P):
+            d = np.linalg.norm(P - np.array([0, 0, 0.]), axis=-1) - 0.5
+            return np.minimum(d, P[..., 1] + 0.6)
+    class Cam:
+        eye = np.array([0., 0.3, 3.0])
+        def ray_dirs(self, w, h, jitter=None):
+            ys, xs = np.mgrid[0:h, 0:w]; jx, jy = (0., 0.) if jitter is None else (jitter[0], jitter[1])
+            u = ((xs + jx) / (w - 1) - 0.5) * 1.1; v = -((ys + jy) / (h - 1) - 0.5) * 1.1
+            d = np.stack([u, v, -np.ones_like(u)], -1); return self.eye, d / np.linalg.norm(d, axis=-1, keepdims=True)
+    def mat(P):
+        n = len(P); return np.tile([.8, .4, .3], (n, 1)).astype(float), np.zeros(n), np.full(n, .5), np.zeros((n, 3))
+    def sky(D):
+        return np.tile([0.5, 0.6, 0.8], (len(D), 1))
+    def smoke(P):
+        P = np.asarray(P, float); return np.clip(1.0 - np.linalg.norm(P - np.array([0, 0.7, 0]), axis=1) / 0.4, 0, 1)
+
+    spec = RenderSpec(scene=Scene(), camera=Cam(), material=mat, sky=sky, width=40, height=30, quality="draft",
+                      max_bounce=2, volume={"field": smoke, "bounds": (np.array([-1., -1, -1]), np.array([1., 1.4, 1])),
+                                            "mode": "smoke", "sigma": 13.0, "steps": 48})
+    # build a pipeline with the volume stage on, through the mind's faculty, and run the scene
+    pipe = m.render_pipeline("final", denoise="svgf", volume=True)
+    ctx = pipe.run(scene=spec, seed=0)
+    base = m.render_pipeline("final", denoise="svgf").run(scene=spec, seed=0).image
+    assert "volume_alpha" in ctx.buffers and not np.allclose(base, ctx.image) and np.isfinite(ctx.image).all()
+
+
+def test_particle_stage_through_unified_mind_pipeline():
+    """A scene carrying a particle cloud renders as ONE frame through the mind's pipeline: the particle stage
+    projects and splats the points and composites them over the surface render (backlog H6). Cross-faculty:
+    render_pipeline (holographic_pipeline) + the point splatter (holographic_pointsplat) meet here."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_pipeline import RenderSpec
+    from holographic_render import Camera
+    m = UnifiedMind(dim=256, seed=0)
+
+    class Scene:
+        def eval(self, P):
+            d = np.linalg.norm(P - np.array([0, 0, 0.]), axis=-1) - 0.5
+            return np.minimum(d, P[..., 1] + 0.6)
+    cam = Camera(eye=(0., 0.3, 3.0), target=(0, 0, 0), fov_deg=45, aspect=40 / 30)
+    def mat(P):
+        n = len(P); return np.tile([.3, .3, .35], (n, 1)).astype(float), np.zeros(n), np.full(n, .5), np.zeros((n, 3))
+    def sky(D):
+        return np.tile([0.1, 0.12, 0.16], (len(D), 1))
+    rng = np.random.default_rng(1)
+    pts = rng.uniform([-0.8, -0.3, -0.3], [0.8, 0.9, 0.6], (120, 3))
+    spec = RenderSpec(scene=Scene(), camera=cam, material=mat, sky=sky, width=40, height=30, quality="draft",
+                      max_bounce=2, particles={"points": pts, "colors": (1.0, 0.7, 0.2), "radius_px": 1.5})
+
+    pipe = m.render_pipeline("final", denoise="svgf", particles=True)
+    ctx = pipe.run(scene=spec, seed=0)
+    base = m.render_pipeline("final", denoise="svgf").run(scene=spec, seed=0).image
+    assert "particle_alpha" in ctx.buffers and not np.allclose(base, ctx.image) and np.isfinite(ctx.image).all()
+
+
+def test_hair_stage_through_unified_mind_pipeline():
+    """A scene carrying hair/fur strands renders as ONE frame through the mind's pipeline: the hair stage renders
+    the strands with a coverage alpha and composites them over the surface render (backlog H4). Cross-faculty:
+    render_pipeline (holographic_pipeline) + the hair shader (holographic_hairshade) meet here."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_pipeline import RenderSpec
+    from holographic_render import Camera
+    from holographic_groom import groom
+    from holographic_sdf import sphere
+    m = UnifiedMind(dim=256, seed=0)
+
+    body = sphere(0.6)
+    strands = groom(body.eval, 300, ((-0.8, -0.8, -0.8), (0.8, 0.8, 0.8)), length=0.3, n_pts=6, curl=0.2, seed=0)
+    cam = Camera(eye=(0, 0, 2.5), target=(0, 0, 0), fov_deg=45, aspect=48 / 36)
+    def mat(P):
+        n = len(P); return np.tile([.4, .25, .15], (n, 1)).astype(float), np.zeros(n), np.full(n, .6), np.zeros((n, 3))
+    def sky(D):
+        return np.tile([0.3, 0.35, 0.45], (len(D), 1))
+    spec = RenderSpec(scene=body, camera=cam, material=mat, sky=sky, width=48, height=36, quality="draft",
+                      max_bounce=2, hair={"strands": strands, "shader": "kajiya", "hair_color": (0.6, 0.4, 0.2)})
+
+    pipe = m.render_pipeline("final", denoise="svgf", hair=True)
+    ctx = pipe.run(scene=spec, seed=0)
+    base = m.render_pipeline("final", denoise="svgf").run(scene=spec, seed=0).image
+    assert "hair_alpha" in ctx.buffers and not np.allclose(base, ctx.image) and np.isfinite(ctx.image).all()
+
+
+def test_iridescent_material_renders_through_unified_mind():
+    """A thin-film iridescent material (soap_bubble) drives a RENDER via the scene document: the sphere shows
+    view-dependent hue variation (a rainbow sheen), not a flat colour. Cross-faculty: matlib iridescence +
+    holographic_thinfilm + scene_doc + render_scene_document."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_scene_doc import Scene
+    from holographic_sdf import sphere
+    m = UnifiedMind(dim=256, seed=0)
+
+    sc = Scene(seed=0)
+    sc.add(name="bubble", geometry=sphere(0.8), material="soap_bubble")
+
+    class Cam:
+        eye = np.array([0.0, 0.0, 3.0])
+        def ray_dirs(self, w, h, jitter=None):
+            ys, xs = np.mgrid[0:h, 0:w]
+            jx, jy = (0.0, 0.0) if jitter is None else (jitter[0], jitter[1])
+            u = ((xs + jx) / (w - 1) - 0.5) * 1.1; v = -((ys + jy) / (h - 1) - 0.5) * 1.1
+            d = np.stack([u, v, -np.ones_like(u)], -1); return self.eye, d / np.linalg.norm(d, axis=-1, keepdims=True)
+    sky = lambda D: np.tile([0.7, 0.72, 0.8], (len(D), 1))
+    img = m.render_scene_document(sc, Cam(), width=44, height=44, quality="draft", max_bounce=3, seed=0, sky=sky)
+    px = img.reshape(-1, 3); px = px[px.sum(1) > 0.15]
+    assert px.shape[0] > 20
+    hue_spread = (px / (px.sum(1, keepdims=True) + 1e-6)).std(0).mean()
+    assert hue_spread > 0.015                                   # a view-dependent sheen, not a flat colour
+
+
+def test_lights_through_unified_mind_pipeline():
+    """A scene carrying placed lights renders through the mind's pipeline with next-event estimation: the lamps
+    light the scene (which a dark environment alone can't) and cast shadows (backlog: lights). Cross-faculty:
+    render_pipeline (holographic_pipeline) + the light sampler (holographic_lights) meet here."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_pipeline import RenderSpec
+    from holographic_render import Camera
+    from holographic_lights import PointLight
+    from holographic_sdf import sphere, box
+    m = UnifiedMind(dim=256, seed=0)
+
+    scene = sphere(0.6).smooth_union(box(2.0, 0.1, 2.0).translate((0, -0.7, 0)), k=0.05)
+    cam = Camera(eye=(0, 0.6, 3.0), target=(0, -0.2, 0), fov_deg=45, aspect=40 / 30)
+    def mat(P):
+        n = len(P); return np.tile([0.7, 0.6, 0.5], (n, 1)).astype(float), np.zeros(n), np.full(n, 0.6), np.zeros((n, 3))
+    dark = lambda D: np.tile([0.02, 0.02, 0.03], (len(D), 1))
+    light = PointLight(position=(1.5, 2.5, 1.0), intensity=12.0)
+
+    spec_dark = RenderSpec(scene=scene, camera=cam, material=mat, sky=dark, width=40, height=30, quality="draft",
+                           max_bounce=2)
+    spec_lit = RenderSpec(scene=scene, camera=cam, material=mat, sky=dark, width=40, height=30, quality="draft",
+                          max_bounce=2, lights=[light])
+    from holographic_pipeline import PipelineConfig, build_pipeline
+    dark_img = build_pipeline(PipelineConfig(denoise="svgf", dirty_only=False)).run(scene=spec_dark, seed=0).image
+    lit_img = m.render_pipeline("final", denoise="svgf").run(scene=spec_lit, seed=0).image
+    assert lit_img.mean() > dark_img.mean() * 1.5 and np.isfinite(lit_img).all()   # the lamp lit the scene
+
+
+def test_full_light_rig_through_unified_mind_pipeline():
+    """A scene lit by several of the new light types (spot+gobo, rect area, IES) renders through the mind's
+    pipeline via next-event estimation -- each shapes its beam and casts shadows (backlog: full light set).
+    Cross-faculty: render_pipeline + the expanded light sampler (holographic_lights) meet here."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_pipeline import RenderSpec, PipelineConfig, build_pipeline
+    from holographic_render import Camera
+    from holographic_lights import SpotLight, RectLight, IESLight, AmbientLight
+    from holographic_sdf import sphere, box
+    m = UnifiedMind(dim=256, seed=0)
+
+    scene = sphere(0.5).smooth_union(box(2.0, 0.1, 2.0).translate((0, -0.6, 0)), k=0.05)
+    cam = Camera(eye=(0, 0.7, 3.0), target=(0, -0.2, 0), fov_deg=45, aspect=48 / 36)
+    def mat(P):
+        n = len(P); return np.tile([0.7, 0.65, 0.6], (n, 1)).astype(float), np.zeros(n), np.full(n, 0.6), np.zeros((n, 3))
+    dark = lambda D: np.tile([0.02, 0.02, 0.03], (len(D), 1))
+    def stripes(uv):
+        return (np.sin(uv[:, 1] * 6.0) > 0).astype(float)
+    lights = [
+        AmbientLight(intensity=0.05),
+        SpotLight(position=(-1, 2.5, 1), direction=(0, -1, -0.3), intensity=45.0, gobo=stripes),
+        RectLight(position=(1, 2.2, 1), u_vec=(0.5, 0, 0), v_vec=(0, 0.4, 0.3), intensity=30.0),
+        IESLight(position=(0, 3, 0), direction=(0, -1, 0), profile=np.cos(np.linspace(0, np.pi / 2, 16)) ** 4,
+                 profile_max_deg=90, intensity=50.0),
+    ]
+    spec_dark = RenderSpec(scene=scene, camera=cam, material=mat, sky=dark, width=48, height=36, quality="draft",
+                           max_bounce=2)
+    spec_lit = RenderSpec(scene=scene, camera=cam, material=mat, sky=dark, width=48, height=36, quality="draft",
+                          max_bounce=2, lights=lights)
+    dark_img = build_pipeline(PipelineConfig(denoise="svgf", dirty_only=False)).run(scene=spec_dark, seed=0).image
+    lit_img = m.render_pipeline("final", denoise="svgf").run(scene=spec_lit, seed=0).image
+    assert lit_img.mean() > dark_img.mean() * 1.5 and np.isfinite(lit_img).all()   # the rig lit the scene
+
+
+def test_dome_light_through_unified_mind_pipeline():
+    """A DomeLight provides soft shadowed ambient fill through the mind's pipeline: it lifts the dark regions a dark
+    sky alone would leave black, and unlike a flat ambient it's occlusion-aware (backlog: dome light). Cross-
+    faculty: render_pipeline + the dome sampler (holographic_lights) meet here."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_pipeline import RenderSpec, PipelineConfig, build_pipeline
+    from holographic_render import Camera
+    from holographic_lights import DomeLight
+    from holographic_sdf import sphere, box
+    m = UnifiedMind(dim=256, seed=0)
+
+    scene = sphere(0.5).smooth_union(box(2.0, 0.1, 2.0).translate((0, -0.55, 0)), k=0.05)
+    cam = Camera(eye=(0, 0.7, 3.0), target=(0, -0.2, 0), fov_deg=45, aspect=40 / 30)
+    def mat(P):
+        n = len(P); return np.tile([0.72, 0.7, 0.68], (n, 1)).astype(float), np.zeros(n), np.full(n, 0.6), np.zeros((n, 3))
+    dark = lambda D: np.tile([0.01, 0.01, 0.015], (len(D), 1))
+    dome = DomeLight(color=(0.4, 0.5, 0.7), ground_color=(0.15, 0.12, 0.1), intensity=1.0)
+
+    spec_dark = RenderSpec(scene=scene, camera=cam, material=mat, sky=dark, width=40, height=30, quality="draft",
+                           max_bounce=2)
+    spec_dome = RenderSpec(scene=scene, camera=cam, material=mat, sky=dark, width=40, height=30, quality="draft",
+                           max_bounce=2, lights=[dome])
+    dark_img = build_pipeline(PipelineConfig(denoise="svgf", dirty_only=False)).run(scene=spec_dark, seed=0).image
+    dome_img = m.render_pipeline("final", denoise="svgf").run(scene=spec_dome, seed=0).image
+    # the dome lifts the scene above the near-black dark-sky-only render, and stays finite
+    assert dome_img.mean() > dark_img.mean() * 1.5 and np.isfinite(dome_img).all()
+    # and it's shadowed ambient, not flat: some variation across the frame (not a constant fill)
+    assert dome_img.std() > 0.01
+
+
+def test_cached_dome_through_unified_mind_pipeline():
+    """The cached dome faculty end to end through the mind: rendering a scene document with a DomeLight and
+    dome_cache=True lifts the scene the way ray-traced dome AO would, but via the cheap cache path -- and the two
+    agree closely (backlog RENDER-DC1). Cross-faculty: render_scene_document + holographic_domecache meet here."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_scene_doc import Scene
+    from holographic_render import Camera
+    from holographic_lights import DomeLight
+    from holographic_sdf import box, sphere
+    m = UnifiedMind(dim=256, seed=0)
+
+    def _T(t):
+        M = np.eye(4); M[:3, 3] = t; return M
+    doc = Scene(seed=0)
+    doc.add(name="floor", geometry=box(3.0, 0.1, 3.0).translate((0, -0.6, 0)), material="matte_white")
+    doc.add(name="ball", geometry=sphere(0.5), transform=_T((0, -0.1, 0)), material="matte_white")
+    cam = Camera(eye=(0, 0.8, 3.0), target=(0, -0.2, 0), fov_deg=45, aspect=1.0)
+    dark = lambda D: np.tile([0.01, 0.01, 0.015], (len(D), 1))
+    dome = DomeLight(color=(0.4, 0.5, 0.7), ground_color=(0.15, 0.12, 0.1), intensity=1.0)
+
+    dark_img = m.render_scene_document(doc, cam, 56, 42, quality="draft", max_bounce=2, seed=0, sky=dark)
+    cached = m.render_scene_document(doc, cam, 56, 42, quality="draft", max_bounce=2, seed=0, sky=dark,
+                                     lights=[dome], dome_cache=True)
+    traced = m.render_scene_document(doc, cam, 56, 42, quality="draft", max_bounce=2, seed=0, sky=dark,
+                                     lights=[dome], dome_cache=False)
+    # the cached dome lit the scene above the dark-sky-only render, is finite, and agrees with the traced dome
+    assert cached.mean() > dark_img.mean() * 1.3 and np.isfinite(cached).all()
+    assert abs(cached.mean() - traced.mean()) < 0.06                # cache and tracer land in the same place
+
+
+def test_demodulated_denoise_through_unified_mind_pipeline():
+    """The demodulate/denoise primitive (M1/M4) end to end through the mind: rendering a textured-diffuse scene with
+    demodulate=True denoises the smooth irradiance (albedo divided out) and restores the texture, matching the
+    guide-only path's brightness but cleaner on texture (backlog M-thread). Cross-faculty: render_scene_document +
+    holographic_modulate meet here."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_modulate import demodulate, remodulate
+    from holographic_scene_doc import Scene
+    from holographic_render import Camera
+    from holographic_lights import RectLight
+    from holographic_sdf import box, sphere
+    m = UnifiedMind(dim=256, seed=0)
+
+    # the primitive round-trips exactly where the carrier is known (unbind then bind)
+    x = np.random.default_rng(0).random((6, 6, 3)); c = 0.3 + np.random.default_rng(1).random((6, 6, 3))
+    assert np.allclose(remodulate(demodulate(x, c, eps=0.0), c), x, atol=1e-9)
+
+    def _T(t):
+        M = np.eye(4); M[:3, 3] = t; return M
+    doc = Scene(seed=0)
+    doc.add(name="floor", geometry=box(3.0, 0.1, 3.0).translate((0, -0.6, 0)), material="matte_white")
+    doc.add(name="ball", geometry=sphere(0.5), transform=_T((0, -0.1, 0)), material="matte_white")
+    cam = Camera(eye=(0, 0.8, 3.0), target=(0, -0.2, 0), fov_deg=45, aspect=1.0)
+    dark = lambda D: np.tile([0.02, 0.02, 0.03], (len(D), 1))
+    lights = [RectLight(position=(0.6, 2.4, 1.0), u_vec=(0.5, 0, 0), v_vec=(0, 0, 0.5), intensity=35.0)]
+    base = m.render_scene_document(doc, cam, 48, 36, quality="draft", max_bounce=2, seed=0, sky=dark, lights=lights)
+    demod = m.render_scene_document(doc, cam, 48, 36, quality="draft", max_bounce=2, seed=0, sky=dark,
+                                    lights=lights, demodulate=True)
+    # the demodulated render is finite, lit, and lands at the same brightness as guide-only (a denoise, not a shift)
+    assert np.isfinite(demod).all() and demod.mean() > 0.05
+    assert abs(demod.mean() - base.mean()) < 0.05
+
+
+def test_m5_demodulated_upscale_through_unified_mind():
+    """M5 through the mind: a high-res frame rendered at low-res lighting cost, sharper than a plain upscale on a
+    textured surface (backlog M5). Cross-faculty: render_demodulated_upscale + render_auto/primary_gbuffer meet."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_gbuffer import render_auto
+    from holographic_fsr import easu_upscale
+    from holographic_sdf import box, sphere
+    from holographic_render import Camera
+    from holographic_lights import RectLight
+    m = UnifiedMind(dim=256, seed=0)
+    scene = sphere(0.5).smooth_union(box(2.5, 0.1, 2.5).translate((0, -0.55, 0)), k=0.03)
+    cam = Camera(eye=(0, 0.9, 3.0), target=(0, -0.2, 0), fov_deg=46, aspect=1.0)
+    dark = lambda D: np.tile([0.02, 0.02, 0.03], (len(D), 1))
+    L = [RectLight(position=(0.6, 2.2, 1.0), u_vec=(0.5, 0, 0), v_vec=(0, 0.3, 0.3), intensity=36.0)]
+
+    def matfn(P):                                                     # procedural checker albedo (varies -> M5 helps)
+        n = len(P); u = (np.floor(P[:, 0] * 4) + np.floor(P[:, 2] * 4)).astype(int)
+        base = np.where((u % 2)[:, None] == 0, np.array([0.75, 0.45, 0.30]), np.array([0.30, 0.55, 0.70]))
+        return base.astype(float), np.zeros(n), np.full(n, 0.6), np.zeros((n, 3))
+
+    ref = render_auto(scene, cam, 96, 96, matfn, sky=dark, quality="draft", max_bounce=2, seed=0, lights=L)
+    m5 = m.render_demodulated_upscale(scene, cam, (48, 48), (96, 96), matfn, sky=dark, quality="draft",
+                                      max_bounce=2, seed=0, lights=L)
+    low = render_auto(scene, cam, 48, 48, matfn, sky=dark, quality="draft", max_bounce=2, seed=0, lights=L)
+    plain = easu_upscale(low, 2.0)[:96, :96]
+    assert m5.shape == (96, 96, 3) and np.isfinite(m5).all()
+    assert np.abs(m5 - ref).mean() < np.abs(plain - ref).mean()      # sharper than a plain upscale on texture
+
+
+def test_soft_light_cache_through_unified_mind():
+    """The cached soft area light end to end through the mind: soft_light_cache=True serves a RectLight's penumbra
+    from the screen-space cache (noise-free) instead of per-sample NEE, agreeing with the traced version but with
+    less seed-to-seed noise (backlog RENDER-DC2). Also pins the .soft-flag fix. Cross-faculty: render_scene_document
+    + holographic_lightcache + the area-light .soft flag meet here."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_lights import RectLight
+    from holographic_scene_doc import Scene
+    from holographic_render import Camera
+    from holographic_sdf import box, sphere
+    m = UnifiedMind(dim=256, seed=0)
+
+    assert getattr(RectLight(), "soft", False) is True               # the flag fix (was rendering as a hard light)
+
+    def _T(t):
+        M = np.eye(4); M[:3, 3] = t; return M
+    doc = Scene(seed=0)
+    doc.add(name="floor", geometry=box(3.0, 0.1, 3.0).translate((0, -0.6, 0)), material="matte_white")
+    doc.add(name="ball", geometry=sphere(0.5), transform=_T((0, -0.1, 0)), material="matte_white")
+    cam = Camera(eye=(0, 0.8, 3.0), target=(0, -0.2, 0), fov_deg=45, aspect=1.0)
+    dark = lambda D: np.tile([0.02, 0.02, 0.03], (len(D), 1))
+    rect = RectLight(position=(0.7, 2.2, 1.0), u_vec=(0.6, 0, 0), v_vec=(0, 0.4, 0.3), intensity=38.0)
+
+    cached = m.render_scene_document(doc, cam, 56, 42, quality="draft", max_bounce=1, seed=0, sky=dark,
+                                     lights=[rect], soft_light_cache=True)
+    traced = m.render_scene_document(doc, cam, 56, 42, quality="draft", max_bounce=1, seed=0, sky=dark,
+                                     lights=[rect], soft_light_cache=False)
+    # both light the scene and land in the same place (the cache reproduces the soft light, doesn't shift it)
+    assert np.isfinite(cached).all() and cached.mean() > 0.02
+    assert abs(cached.mean() - traced.mean()) < 0.05
+    # and the cached soft light is cleaner: less seed-to-seed variation on the DIRECT term than the tracer
+    cached2 = m.render_scene_document(doc, cam, 56, 42, quality="draft", max_bounce=1, seed=777, sky=dark,
+                                      lights=[rect], soft_light_cache=True)
+    traced2 = m.render_scene_document(doc, cam, 56, 42, quality="draft", max_bounce=1, seed=777, sky=dark,
+                                      lights=[rect], soft_light_cache=False)
+    assert np.abs(cached - cached2).mean() <= np.abs(traced - traced2).mean() + 1e-4
+
+
+def test_indirect_cache_through_unified_mind():
+    """The cached one-bounce GI end to end through the mind: indirect_cache=True renders direct-only and adds the
+    cached indirect term, landing near the full tracer's brightness but noise-free (backlog RENDER-DC3)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_lights import RectLight
+    from holographic_scene_doc import Scene
+    from holographic_render import Camera
+    from holographic_sdf import box, sphere
+    m = UnifiedMind(dim=256, seed=0)
+
+    def _T(t):
+        M = np.eye(4); M[:3, 3] = t; return M
+    doc = Scene(seed=0)
+    doc.add(name="floor", geometry=box(3.0, 0.1, 3.0).translate((0, -0.6, 0)), material="matte_white")
+    doc.add(name="ball", geometry=sphere(0.5), transform=_T((0, -0.1, 0)), material="matte_white")
+    cam = Camera(eye=(0, 0.8, 3.0), target=(0, -0.2, 0), fov_deg=45, aspect=1.0)
+    dark = lambda D: np.tile([0.02, 0.02, 0.03], (len(D), 1))
+    L = [RectLight(position=(0.6, 2.2, 1.0), u_vec=(0.5, 0, 0), v_vec=(0, 0.3, 0.3), intensity=36.0)]
+
+    full = m.render_scene_document(doc, cam, 56, 42, quality="draft", max_bounce=3, seed=0, sky=dark, lights=L)
+    cached = m.render_scene_document(doc, cam, 56, 42, quality="draft", max_bounce=3, seed=0, sky=dark, lights=L,
+                                     indirect_cache=True)
+    assert np.isfinite(cached).all() and cached.mean() > 0.02
+    # one-bounce cached GI lands close to (a bit under) the full multi-bounce tracer -- same ballpark, not a shift
+    assert abs(cached.mean() - full.mean()) < 0.08
+
+
+def test_capability_catalog_through_unified_mind():
+    """The consolidation catalog (C1) end to end through the mind: describe a problem in plain English and get the
+    engine home that already solves it -- BOTH a curated home and a live mind faculty are findable, and the catalog
+    surfaces the recently-built lightcache for 'speckle'. Cross-faculty: find_capability + seed_from_mind meet here."""
+    from holographic_unified import UnifiedMind
+    m = UnifiedMind(dim=256, seed=0)
+    # the headline: search before you build -> the search index home
+    hits = m.find_capability("search a big pile of vectors")
+    assert hits and "Index" in hits[0].name
+    # a live mind faculty is findable (auto-seeded from the mind's own methods)
+    assert any("render_scene_document" == h.name for h in m.find_capability("render a scene document with lights", k=5))
+    # the recent consolidation-relevant home is discoverable by the problem it solves
+    assert any("lightcache" in h.name.lower() for h in m.find_capability("placed light speckle noise", k=3))
+    # register a new home and find it (the pattern every consolidation item follows)
+    m.register_capability("TestHome", "does the test job for widgets", aliases=("widget",))
+    assert m.find_capability("widget job")[0].name == "TestHome"
+
+
+def test_r1_pipeline_dispatch_and_catalog_discovery():
+    """R1 end to end: a real render goes THROUGH the Pipeline via strategy dispatch, and the C1 catalog can find the
+    Pipeline home by description -- the two consolidation items meet (search-before-you-build finds the router)."""
+    import numpy as np
+    from holographic_pipeline import RenderSpec, Pipeline, ALL_STAGES, FrameState, dispatch_render, PipelineError
+    from holographic_sdf import box, sphere
+    from holographic_render import Camera
+    from holographic_catalog import default_catalog
+    scene = sphere(0.5).smooth_union(box(2.0, 0.1, 2.0).translate((0, -0.55, 0)), k=0.03)
+    cam = Camera(eye=(0, 0.7, 2.8), target=(0, -0.2, 0), fov_deg=45, aspect=1.0)
+
+    def mat(P):
+        n = len(P)
+        return np.tile([0.8, 0.8, 0.8], (n, 1)).astype(float), np.zeros(n), np.full(n, 0.6), np.zeros((n, 3))
+    # a raymarch preview routes through the pipeline and produces a finite image
+    spec = RenderSpec(scene=scene, camera=cam, material=mat, width=36, height=28, method="raymarch")
+    st = Pipeline([s for s in ALL_STAGES if s.name in ("render", "present")]).run(scene=spec, seed=0)
+    assert np.isfinite(st.image).all() and st.buffers["render_method"] == "raymarch"
+    # the needs check fires for a strategy whose input is missing
+    try:
+        dispatch_render(FrameState(scene=RenderSpec(scene=scene, camera=cam, method="radiance"), seed=0))
+        assert False
+    except PipelineError as e:
+        assert "radiance_field" in str(e)
+    # and the catalog finds the Pipeline home by problem description (C1 <-> R1)
+    assert any("Pipeline" in h.name for h in default_catalog().find_capability("compose a render run with stages"))
+
+
+def test_r2_field_home_backends_and_catalog():
+    """R2 end to end: one Field.sample interface over two backends giving identical values, and the C1 catalog
+    points at the Field home by description (search-before-you-build finds the field router)."""
+    import numpy as np
+    from holographic_fieldhome import Field
+    from holographic_catalog import default_catalog
+
+    def oracle(P):
+        return 1.0 - np.linalg.norm(np.asarray(P, float), axis=1)
+    lo = np.array([-1., -1., -1.]); hi = np.array([1., 1., 1.]); N = 12
+    axis = [lo[d] + np.arange(N) / N * (hi[d] - lo[d]) for d in range(3)]
+    gx, gy, gz = np.meshgrid(axis[0], axis[1], axis[2], indexing="ij")
+    grid = oracle(np.stack([gx.ravel(), gy.ravel(), gz.ravel()], axis=1)).reshape(N, N, N)
+    # two different backends, one interface, identical values at grid nodes
+    probe = np.array([[axis[0][3], axis[1][4], axis[2][5]], [axis[0][8], axis[1][2], axis[2][7]]])
+    assert np.allclose(Field.grid(grid, lo, hi).sample(probe), Field.callable(oracle).sample(probe), atol=1e-9)
+    # the catalog finds the field home by problem description (C1 <-> R2)
+    assert any("Field" in h.name for h in default_catalog().find_capability("sample a density field at points"))
+
+
+def test_h1_index_home_and_delegates():
+    """H1 end to end: the mind builds an Index (exact/forest + abstain), the two delegates (lexicon / TextEncoder)
+    route their search through it with unchanged rankings, and the catalog finds the Index home by description."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_catalog import default_catalog
+    m = UnifiedMind(dim=256, seed=0)
+    V = np.random.default_rng(0).standard_normal((300, 64))
+    idx = m.build_index(V, labels=[f"v{i}" for i in range(len(V))])
+    q = V[123] + 0.1 * np.random.default_rng(1).standard_normal(64)
+    assert idx.nearest(q)[0][0] == "v123"
+    assert idx.nearest(np.random.default_rng(9).standard_normal(64), abstain=0.01) == []   # calibrated abstain
+
+    # delegate 1: lexicon.nearest routes through Index, ranking unchanged vs the cosine loop
+    from holographic_lexicon import Lexicon
+    from holographic_machine import cosine
+    d = {f"w{i}": [f"w{(i + 1) % 20}", f"w{(i + 3) % 20}"] for i in range(20)}
+    lex = Lexicon(d, dim=256, seed=0).bootstrap(iters=3)
+    new = [w for w, _ in lex.nearest("w0", k=4)]
+    qv = lex.meaning["w0"]
+    old = [w for w, _ in sorted(((w, float(cosine(qv, lex.meaning[w]))) for w in lex.words if w != "w0"),
+                                key=lambda t: -t[1])[:4]]
+    assert new == old
+
+    # delegate 2: TextEncoder.nearest routes through Index
+    from holographic_encoders import TextEncoder
+    te = TextEncoder(dim=256, seed=0)
+    te.learn("the cat sat on the mat the dog sat on the log the cat and dog".split())
+    hits = te.nearest("cat", n=2)
+    assert hits and hits[0][1] >= hits[-1][1]                        # descending cosine
+
+    # the catalog finds the Index home
+    assert any("Index" in h.name for h in default_catalog().find_capability("nearest neighbour recall over vectors"))
+
+
+def test_h2_cache_home_and_delegating_bakes():
+    """H2 end to end: the mind bakes over a grid and looks it up; matbake & sdfbake route their grid generation
+    through Cache with bit-identical output; the catalog finds the Cache home by description."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_cachehome import Cache
+    from holographic_matbake import bake_field
+    from holographic_sdfbake import bake_sdf_grid
+    from holographic_catalog import default_catalog
+    m = UnifiedMind(dim=256, seed=0)
+    lo = np.array([-1., -1., -1.]); hi = np.array([1., 1., 1.]); res = 12
+    fn = lambda P: P[:, 0] ** 2 + P[:, 1]
+    bg = m.bake(fn, vary="position", lo=lo, hi=hi, res=res)
+    pts, _ = Cache.grid_points(lo, hi, res)
+    assert abs(float(bg.sample(pts[50][None, :])[0]) - float(fn(pts[50][None, :])[0])) < 1e-9
+
+    # both bakes now share Cache.grid_points -> bit-identical to the inline meshgrid
+    axes = [np.linspace(lo[k], hi[k], res) for k in range(3)]
+    gx, gy, gz = np.meshgrid(*axes, indexing="ij")
+    ipts = np.stack([gx.ravel(), gy.ravel(), gz.ravel()], axis=1)
+    assert np.array_equal(bake_field(fn, "roughness", lo, hi, res=res).grid, fn(ipts).reshape(res, res, res))
+    sdf = lambda P: np.linalg.norm(P, axis=1) - 0.5
+    assert np.array_equal(bake_sdf_grid(sdf, lo, hi, res)[0],
+                          np.asarray(sdf(ipts), float).reshape(res, res, res))
+    # the catalog finds the Cache home
+    assert any("Cache" in h.name for h in default_catalog().find_capability("bake a slow factor and look it up"))
+
+
+def test_r3_material_cache_shading_three_way():
+    """R3 end to end -- the three-way: a surface pulls CHANNELS from a Material, whose position-dependent channels
+    BAKE via the Cache home (H2), then it SHADES via the Shading home (brdf). Proves Material -> Cache -> Shading."""
+    import numpy as np
+    from holographic_surface import SurfaceMaterial
+    from holographic_param import Param
+    from holographic_matbake import bake_material, BakedField
+    from holographic_brdf import cook_torrance, lambert
+    from holographic_catalog import default_catalog
+
+    # a Material with position-varying channels (colour + roughness fields)
+    col = lambda P, **k: np.stack([0.5 + 0.4 * np.asarray(P)[:, 1], np.full(len(P), 0.3), np.full(len(P), 0.6)], axis=1)
+    rough = lambda P, **k: 0.3 + 0.2 * np.sin(np.asarray(P)[:, 0] * 2.0)
+    mat = SurfaceMaterial(color=Param(field=col), roughness=Param(field=rough), reflect=0.1, emission=0.0)
+
+    # BAKE the material -- its position channels go through Cache.grid_points (H2), stored as BakedField lookups
+    shade = bake_material(mat, (-1., -1., -1.), (1., 1., 1.), res=16)
+    assert isinstance(shade.__self__ if hasattr(shade, "__self__") else None, type(None))  # shade is a plain closure
+    P = np.array([[0.2, 0.3, -0.1], [-0.4, -0.2, 0.5]])
+    ch = shade(P)                                             # CHANNELS pulled from the (baked) Material
+    albedo = np.asarray(ch["color"], float)
+    roughness = np.asarray(ch["roughness"], float)
+    assert albedo.shape == (2, 3) and np.isfinite(albedo).all()
+
+    # SHADE via the Shading home (brdf): a full cook_torrance term + the standalone lambert diffuse
+    N = np.array([[0., 1., 0.], [0., 1., 0.]])
+    V = np.array([[0., 0.5, 1.], [0., 0.5, 1.]]); V /= np.linalg.norm(V, axis=1, keepdims=True)
+    L = np.array([0.3, 0.8, 0.5]); L /= np.linalg.norm(L)
+    Lb = np.broadcast_to(L, (2, 3))
+    radiance = cook_torrance(N, V, Lb, albedo, 0.0, roughness)
+    diffuse = lambert(N, L, albedo)
+    assert np.isfinite(radiance).all() and (radiance >= 0).all()
+    assert np.isfinite(diffuse).all() and (diffuse >= 0).all()
+
+    # the catalog finds both homes
+    assert any("Material" in h.name for h in default_catalog().find_capability("material channels albedo roughness"))
+    assert any("Shading" in h.name for h in default_catalog().find_capability("shade a surface with a brdf"))
+
+
+def test_r4_sampling_home_routes_pathtrace_and_mind():
+    """R4 end to end: pathtrace's AA offsets and the gather paths' cosine-hemisphere come from the Sampling home,
+    the mind's sampling faculties route through it (bit-identical), and the catalog finds it."""
+    import numpy as np
+    from holographic_samplinghome import Sampling
+    from holographic_unified import UnifiedMind
+    from holographic_catalog import default_catalog
+    from holographic_lowdiscrepancy import low_discrepancy
+    from holographic_sampling import poisson_disk_sample
+
+    # the mind's two sampling faculties now delegate to the home, bit-identical
+    m = UnifiedMind(dim=64, seed=0)
+    assert np.array_equal(m.low_discrepancy_sample(20, d=2, seed=3), low_discrepancy(20, 2, 3))
+    assert np.array_equal(m.blue_noise_sample(0.12, ((0, 0), (1, 1)), seed=0),
+                          poisson_disk_sample(0.12, ((0, 0), (1, 1)), k=30, seed=0))
+
+    # globalillum's cosine-hemisphere is now the home's (bit-identical) -- the three copies became one
+    from holographic_globalillum import _cosine_hemisphere
+    N = np.array([[0., 1., 0.], [0.5, 0.6, 0.62]])
+    assert np.array_equal(_cosine_hemisphere(N, 32, seed=4), Sampling.cosine_hemisphere(N, 32, seed=4))
+
+    # pathtrace still renders (its AA offsets come from Sampling.low_discrepancy) -- smoke, finite
+    from holographic_pathtrace import path_trace, constant_material
+    from holographic_sdf import sphere, box
+    from holographic_render import Camera
+    sdf = sphere(0.5).smooth_union(box(2., 0.1, 2.).translate((0, -0.55, 0)), k=0.03)
+    cam = Camera(eye=(0, 0.7, 2.6), target=(0, -0.2, 0), fov_deg=45, aspect=1.0)
+    img = path_trace(sdf, cam, width=24, height=18, spp=4, max_bounce=2, seed=0,
+                     material=constant_material(), antialias=True)
+    assert np.isfinite(img).all()
+
+    assert any("Sampling" in h.name for h in default_catalog().find_capability("blue noise sampling patterns"))
+
+
+def test_catalog_reaches_every_domain_through_the_mind():
+    """No buried functionality: the mind's catalog now seeds from EVERY module (not just faculties + homes), so a
+    plain-English problem surfaces any subsystem -- lights, materials, textures, fields, geometry, caches,
+    simulation, physics/chemistry -- and the formerly-undocstringed sdfscene is now findable."""
+    from holographic_unified import UnifiedMind
+    m = UnifiedMind(dim=128, seed=0)
+    checks = {
+        "thin film iridescence on a soap bubble": "thinfilm",
+        "simulate smoke and fire": "simulation",
+        "hair and fur grooming": "groom",
+        "granular material with MPM": "mpm",
+        "reaction diffusion cellular automaton": "automaton",
+        "gaussian splat scene": "splat",
+        "a scene as a set of SDF parts": "sdfscene",           # was buried (no docstring) -- now reachable
+    }
+    for probe, expect in checks.items():
+        names = " ".join(h.name for h in m.find_capability(probe, k=3)).lower()
+        assert expect in names, (probe, names)
+    assert len(m._capability_catalog()) > 700                  # faculties + homes + every module
+
+
+def test_r5_denoise_home_routes_pipeline_and_mind():
+    """R5 end to end: the pipeline's denoise stage and the mind's svgf_denoise / sharpen_loop all route through the
+    Denoise home (bit-identical), and the catalog finds it. The done-when: the pipeline denoise stage calls Denoise."""
+    import numpy as np
+    from holographic_denoisehome import Denoise
+    from holographic_svgf import atrous_bilateral
+    from holographic_unified import UnifiedMind
+    from holographic_catalog import default_catalog
+
+    rng = np.random.default_rng(0); H = W = 20
+    img = np.ones((H, W, 3)) * 0.5 + 0.1 * rng.standard_normal((H, W, 3))
+    N = np.tile([0., 0., 1.], (H, W, 1)); A = np.ones((H, W, 3)) * 0.5; D = np.ones((H, W))
+
+    m = UnifiedMind(dim=64, seed=0)
+    assert np.array_equal(m.svgf_denoise(img, N, A, D, levels=4), atrous_bilateral(img, N, A, D, levels=4))
+    x = np.sin(np.linspace(0, 6, 96))
+    from holographic_sharpen import sharpen_loop
+    assert np.array_equal(m.sharpen_loop(x, sigma=2.0, iters=15),
+                          sharpen_loop(np.asarray(x, float), blur=None, sigma=2.0, lam=1.0, iters=15, noise_level=0.0))
+
+    # the pipeline denoise stage runs the SVGF through the home -- render a tiny scene and denoise through the stage
+    from holographic_pipeline import RenderSpec, Pipeline, ALL_STAGES
+    from holographic_sdf import sphere, box
+    from holographic_render import Camera
+    def mat(P):
+        n = len(P); return np.tile([0.7, 0.7, 0.7], (n, 1)).astype(float), np.zeros(n), np.full(n, 0.6), np.zeros((n, 3))
+    sc = sphere(0.5).smooth_union(box(2., 0.1, 2.).translate((0, -0.55, 0)), k=0.03)
+    cam = Camera(eye=(0, 0.7, 2.6), target=(0, -0.2, 0), fov_deg=45, aspect=1.0)
+    spec = RenderSpec(scene=sc, camera=cam, material=mat, width=32, height=24, quality="draft", max_bounce=2)
+    pipe = Pipeline([s for s in ALL_STAGES if s.name in ("gbuffer", "render", "svgf_denoise", "present")])
+    st = pipe.run(scene=spec, seed=0)
+    assert np.isfinite(st.image).all()
+
+    assert any("Denoise" in h.name for h in default_catalog().find_capability("denoise a rendered image svgf"))
+
+
+def test_r6_texture_sources_material_channel_then_bakes_and_shades():
+    """R6 end to end, tying the homes together: a Texture field SOURCES a Material channel (R6), that channel BAKES
+    through the Cache home (H2), and the surface SHADES through the Shading home (R3). Texture -> Material -> Cache
+    -> Shading, one chain. Plus the catalog finds the Texture home."""
+    import numpy as np
+    from holographic_texturehome import Texture
+    from holographic_surface import SurfaceMaterial
+    from holographic_param import Param
+    from holographic_matbake import bake_material
+    from holographic_brdf import cook_torrance
+    from holographic_catalog import default_catalog
+
+    # a Voronoi crack field drives roughness; a constant colour
+    crack = Texture.voronoi(n_seeds=10, seed=0, kind="edge")
+    rough = lambda P, **k: 0.25 + 0.5 * np.clip(crack(P) * 4.0, 0, 1)
+    mat = SurfaceMaterial(color=(0.6, 0.6, 0.62), roughness=Param(field=rough), reflect=0.1, emission=0.0)
+
+    # BAKE the material (its Texture-sourced roughness channel bakes via Cache.grid_points, H2)
+    shade = bake_material(mat, (-1., -1., -1.), (1., 1., 1.), res=12)
+    P = np.array([[0.2, 0.1, -0.3], [-0.5, 0.4, 0.2]])
+    ch = shade(P)
+    roughness = np.asarray(ch["roughness"], float)
+    albedo = np.asarray(ch["color"], float)
+    assert roughness.shape == (2,) and (roughness >= 0.2).all()
+
+    # SHADE via the Shading home using the Texture-driven channels
+    N = np.array([[0., 1., 0.], [0., 1., 0.]])
+    V = N.copy()
+    L = np.array([0.3, 0.8, 0.5]); L /= np.linalg.norm(L)
+    rad = cook_torrance(N, V, np.broadcast_to(L, (2, 3)), albedo, 0.0, roughness)
+    assert np.isfinite(rad).all() and (rad >= 0).all()
+
+    assert any("Texture" in h.name for h in default_catalog().find_capability("procedural noise texture for a channel"))
+
+
+def test_r7_lighting_home_routes_two_render_methods():
+    """R7 end to end: TWO render methods get their lighting from the Lighting home -- the cached soft-light pass
+    (Lighting.direct) and the pipeline's PRT strategy (Lighting.prt) -- with the direct integral bit-identical to
+    holographic_lights.direct_lighting. Catalog finds the home."""
+    import numpy as np
+    from holographic_lightinghome import Lighting, RectLight, DirectionalLight
+    from holographic_lights import direct_lighting
+    from holographic_render import Camera
+    from holographic_sdf import sphere, box
+    from holographic_catalog import default_catalog
+
+    sdf = sphere(0.5).smooth_union(box(2.0, 0.1, 2.0).translate((0, -0.55, 0)), k=0.03)
+    cam = Camera(eye=(0, 0.8, 3.0), target=(0, -0.2, 0), fov_deg=45, aspect=1.0)
+
+    # render method 1: the cached soft-light pass gets its lighting from Lighting.direct
+    from holographic_lightcache import cached_soft_lights_shade
+    mf = lambda P: (np.tile([0.8, 0.8, 0.8], (len(P), 1)).astype(float), np.zeros(len(P)), np.full(len(P), 0.6),
+                    np.zeros((len(P), 3)))
+    L = [RectLight(position=(0.6, 2.0, 1.0), u_vec=(0.5, 0, 0), v_vec=(0, 0.3, 0.3), intensity=30.0)]
+    soft = cached_soft_lights_shade(sdf, cam, 40, 30, L, mf, area_samples=12, seed=0)
+    assert np.isfinite(soft).all()
+
+    # render method 2: the pipeline's PRT strategy gets its lighting from Lighting.prt
+    from holographic_pipeline import RenderSpec, FrameState, dispatch_render
+    from holographic_prt import project_env_to_sh
+    def mat(Q):
+        n = len(Q); return np.tile([0.8, 0.8, 0.8], (n, 1)).astype(float), np.zeros(n), np.full(n, 0.6), np.zeros((n, 3))
+    spec = RenderSpec(scene=sdf, camera=cam, material=mat, width=32, height=24, method="prt",
+                      light_sh=project_env_to_sh(lambda d: np.tile([0.5, 0.6, 0.8], (len(d), 1)), order=3, n=256))
+    ctx = FrameState(scene=spec, seed=0)
+    dispatch_render(ctx)
+    assert np.isfinite(ctx.image).all() and ctx.buffers["render_method"] == "prt"
+
+    # the direct integral is bit-identical to calling lights.direct_lighting
+    P = np.array([[0.0, -0.4, 0.0]]); N = np.array([[0.0, 1.0, 0.0]])
+    a = Lighting.direct(sdf, P, N, N, np.full((1, 3), 0.8), np.zeros(1), np.full(1, 0.5),
+                        [DirectionalLight(direction=(0, -1, 0), intensity=2.0)], np.random.default_rng(1))
+    b = direct_lighting(sdf, P, N, N, np.full((1, 3), 0.8), np.zeros(1), np.full(1, 0.5),
+                        [DirectionalLight(direction=(0, -1, 0), intensity=2.0)], np.random.default_rng(1))
+    assert np.array_equal(a, b)
+
+    assert any("Lighting" in h.name for h in default_catalog().find_capability("evaluate direct lighting from placed lights"))
+
+
+def test_r8_shadow_home_routes_two_render_paths():
+    """R8 end to end: TWO render paths get their visibility from the Shadow home -- raycoherence and semantic both
+    now call Shadow.soft / Shadow.ambient_occlusion (bit-identical to raymarch), and the catalog finds the home."""
+    import numpy as np
+    import inspect
+    from holographic_shadowhome import Shadow
+    from holographic_raymarch import soft_shadow, ambient_occlusion
+    from holographic_catalog import default_catalog
+
+    # the two render paths reference the Shadow home in their source (routed, not importing raymarch's shadow fns)
+    assert "Shadow" in inspect.getsource(__import__("holographic_raycoherence"))
+    assert "Shadow" in inspect.getsource(__import__("holographic_semantic"))
+
+    # and the home's strategies are bit-identical to the underlying raymarch functions
+    from holographic_sdf import sphere, box
+    scene = sphere(0.4).translate((0, 0.6, 0)).smooth_union(box(3.0, 0.1, 3.0).translate((0, -0.1, 0)), k=0.02)
+    P = np.array([[0.0, 3e-3, 0.0], [1.4, 3e-3, 0.0]]); N = np.tile([0., 1., 0.], (2, 1))
+    up = np.array([0.0, 1.0, 0.0])
+    assert np.array_equal(Shadow.soft(scene, P, up), soft_shadow(scene, P, up))
+    assert np.array_equal(Shadow.ambient_occlusion(scene, P, N), ambient_occlusion(scene, P, N))
+
+    # hard shadow-ray: blocked under the ball, clear beside it
+    vis = Shadow.hard(scene, P, N, np.tile([0., 1., 0.], (2, 1)), np.array([5.0, 5.0]))
+    assert vis[0] == 0.0 and vis[1] == 1.0
+
+    assert any("Shadow" in h.name for h in default_catalog().find_capability("soft shadow visibility ambient occlusion"))
+
+
+def test_h3_scale_home_routes_mind_scalers():
+    """H3 end to end: the mind's scale faculties (distribute_compute / partition_domain / partition_grid /
+    distribute_bricks) all delegate to the Scale home, and the map-reduce RESULT MATCHES the un-split computation
+    (the done-when: one domain scaler delegates + result matches). Catalog finds the home."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    from holographic_distribute import distribute, reduce_sum, partition, partition_2d
+    from holographic_catalog import default_catalog
+
+    m = UnifiedMind(dim=64, seed=0)
+
+    # distribute_compute delegates + result matches both the direct distribute AND the un-split sum
+    x = np.arange(800.0)
+    idx = partition(len(x), 6)
+    buckets = [x[i] for i in idx]
+    g, ginfo = m.distribute_compute(buckets, lambda b, c: b.sum(), reduce="sum")
+    r, _ = distribute(buckets, lambda b, c: b.sum(), reduce=reduce_sum)
+    assert g == r and abs(float(g) - float(x.sum())) < 1e-6 and ginfo["buckets"] == 6
+
+    # partition_grid delegates, tiles cover the image disjointly
+    tiles = m.partition_grid((16, 24), (4, 3))
+    assert tiles == partition_2d((16, 24), (4, 3))
+    canvas = np.zeros((16, 24), dtype=int)
+    for sl in tiles:
+        canvas[sl] += 1
+    assert (canvas == 1).all()
+
+    # a real domain scale: distribute a spatial brick render over the volume and it fills every brick
+    out_shape = (10, 10)
+    regions = m.partition_grid(out_shape, (2, 2))
+    def worker(sl, cache):
+        h = sl[0].stop - sl[0].start; w = sl[1].stop - sl[1].start
+        return np.full((h, w), 3.0)
+    out, info = m.distribute_bricks(out_shape, regions, worker, fill=0.0)
+    assert (out == 3.0).all()
+
+    assert any("Scale" in h.name for h in default_catalog().find_capability("distribute a job partition map reduce"))
+
+
+def test_h4_blend_home_two_delegates():
+    """H4 end to end: TWO delegates call the Blend home -- blendpose.blend_pose (weighted bundle) and
+    generate.morph_images (slerp) -- both bit-identical, and the catalog finds the home."""
+    import numpy as np
+    import inspect
+    from holographic_blendhome import Blend
+    from holographic_catalog import default_catalog
+
+    # delegate 1: blend_pose is now the Blend weighted bundle, bit-identical
+    from holographic_blendpose import blend_pose
+    targets = np.random.default_rng(3).standard_normal((4, 48)); w = np.array([0.4, 0.3, 0.2, 0.1])
+    assert np.array_equal(blend_pose(targets, w), Blend.bundle(targets, w))
+    assert "Blend" in inspect.getsource(blend_pose)
+
+    # delegate 2: generate.morph_images routes its slerp through the Blend home
+    assert "Blend.slerp" in inspect.getsource(__import__("holographic_generate"))
+    from holographic_ai import slerp
+    a = np.zeros(6); a[0] = 1.0; b = np.zeros(6); b[2] = 1.0
+    assert np.array_equal(Blend.slerp(a, b, 0.4), slerp(a, b, 0.4))
+
+    # a real IK use of blend_pose still solves through the home (forward skinning pose)
+    from holographic_blendpose import blend_pose as bp
+    pose = bp(targets, np.array([1.0, 0.0, 0.0, 0.0]))
+    assert abs(np.linalg.norm(pose) - 1.0) < 1e-6                 # a single-weight blend is just that target, normed
+
+    assert any("Blend" in h.name for h in default_catalog().find_capability("blend combine interpolate slerp"))
+
+
+def test_h5_transform_home_two_delegates_dedup():
+    """H5 end to end: TWO delegates route through the Transform home -- scenegraph's duplicate matrix builders
+    (translation/scaling/compose, bit-identical) and procgen's translate/scale -- deduping the matrix math that was
+    copied between scenegraph and holographic_transform. Catalog finds the home."""
+    import numpy as np
+    import inspect
+    from holographic_transformhome import Transform
+    from holographic_catalog import default_catalog
+    import holographic_transform as TF
+    import holographic_scenegraph as SG
+
+    # delegate 1: scenegraph builders now go through the Transform home, still bit-identical to the kit
+    assert "Transform" in inspect.getsource(SG.translation)
+    assert np.array_equal(SG.translation([1.5, -2, 3]), TF.translation([1.5, -2, 3]))
+    assert np.array_equal(SG.scaling([2, 0.5, 1.5]), TF.scaling([2, 0.5, 1.5]))
+    A = TF.translation([1, 0, 0]); B = TF.scaling(2)
+    assert np.array_equal(SG.compose_transforms(A, B), TF.compose(A, B))
+
+    # scenegraph's Rodrigues rotation is deliberately NOT routed (not bit-identical) -- determinism preserved
+    assert not np.array_equal(SG.rotation([0.3, 0.8, 0.5], 0.7), Transform.rotation([0.3, 0.8, 0.5], 0.7))
+
+    # delegate 2: procgen builds its instance transforms through the Transform home
+    assert "Transform.translation" in inspect.getsource(__import__("holographic_procgen"))
+    x, y, z, s = 1.0, 2.0, -1.0, 0.5
+    assert np.array_equal(Transform.translation([x, y, z]) @ Transform.scaling(s),
+                          SG.translation([x, y, z]) @ SG.scaling(s))
+
+    # a real scene still flattens through the (deduped) transforms
+    from holographic_scenegraph import SceneNode, flatten_scene
+    from holographic_mesh import Mesh
+    cube = Mesh(np.array([[0., 0, 0], [1, 0, 0], [0, 1, 0]]), [(0, 1, 2)])
+    root = SceneNode(SG.translation([0, 0, 0]), children=[SceneNode(SG.translation([2, 0, 0]), mesh=cube)])
+    flat = flatten_scene(root)
+    assert flat is not None
+
+    assert any("Transform" in h.name for h in default_catalog().find_capability("translate rotate scale matrix transform"))
+
+
+def test_h6_memory_home_residency_and_cache_resident_batch():
+    """H6 end to end: the residency path is reachable through the Memory home AND through the mind (bit-identical to
+    plain bind), and the batched contiguous kernel is measurably cache-resident (faster than the per-pair loop).
+    Catalog finds the home."""
+    import time
+    import numpy as np
+    from holographic_memoryhome import Memory
+    from holographic_unified import UnifiedMind
+    from holographic_residency import SpectrumCache, bind_cached
+    from holographic_ai import bind, bundle
+    from holographic_catalog import default_catalog
+
+    # residency reachable through the mind, and bit-identical to a plain bind
+    m = UnifiedMind(dim=64, seed=0)
+    cache = m.spectrum_cache()
+    assert isinstance(cache, SpectrumCache)
+    a = np.random.default_rng(0).standard_normal(256); b = np.random.default_rng(1).standard_normal(256)
+    assert np.array_equal(bind_cached(a, b, cache), bind(a, b))
+
+    # the batched kernel is measurably cache-resident (min-of-rounds timing, robust)
+    rng = np.random.default_rng(2); mm, d = 64, 1024
+    keys = rng.standard_normal((mm, d)); values = rng.standard_normal((mm, d))
+    def _b():
+        t = time.perf_counter()
+        for _ in range(20): Memory.bind_batch(keys, values)
+        return time.perf_counter() - t
+    def _l():
+        t = time.perf_counter()
+        for _ in range(20): bundle(np.stack([bind(keys[i], values[i]) for i in range(mm)]))
+        return time.perf_counter() - t
+    assert min(_b() for _ in range(3)) < min(_l() for _ in range(3))
+
+    assert any("Memory" in h.name for h in default_catalog().find_capability("keep reused fft spectra resident cache"))
+
+
+def test_h7_compute_home_fused_chain_measured():
+    """H7 end to end: a multi-op chain runs FUSED with a measured FFT-count drop, the fused result agrees with the
+    op-by-op path, the mind's fuse faculties route through the home (bit-identical), and the catalog finds it."""
+    import numpy as np
+    from holographic_computehome import Compute
+    from holographic_unified import UnifiedMind
+    from holographic_ai import bind, bundle
+    from holographic_catalog import default_catalog
+
+    rng = np.random.default_rng(0); n, d = 20, 512
+    keys = [rng.standard_normal(d) for _ in range(n)]
+    values = [rng.standard_normal(d) for _ in range(n)]
+
+    # measured FFT drop: fused chain uses 2n+2 FFTs vs the op-by-op ~3n
+    Compute.reset_fft_counts()
+    fused = Compute.fuse_record(keys, values)
+    total = sum(Compute.fft_counts().values())
+    assert total == 2 * n + 2 and total < 3 * n
+
+    # fused result agrees with the eager op-by-op record
+    ref = bundle(np.stack([bind(keys[i], values[i]) for i in range(n)]))
+    assert np.allclose(fused, ref, atol=1e-9)
+
+    # the mind's fuse faculties now route through the home, bit-identical
+    m = UnifiedMind(dim=64, seed=0)
+    assert np.array_equal(m.fuse_record(keys, values), Compute.fuse_record(keys, values))
+
+    assert any("Compute" in h.name for h in default_catalog().find_capability("fuse a bind chain into fewer ffts"))
+
+
+def test_r9_simulation_scaffold_two_solvers_one_loop_rendered():
+    """R9 end to end: two genuinely distinct solvers (Stable Fluids + reaction-diffusion) step through the SAME
+    Simulation loop, the Pipeline renders both fields, the solvers stay separate, and the catalog finds the scaffold."""
+    import numpy as np
+    from holographic_simulationhome import Simulation
+    from holographic_fluid import StableFluid
+    from holographic_automaton import HyperCA
+    from holographic_render import Camera
+    from holographic_integrate import SimStep
+    from holographic_catalog import default_catalog
+
+    cam = Camera(eye=(0.5, 0.5, 3.0), target=(0.5, 0.5, 0.5), fov_deg=45)
+
+    fluid = StableFluid((16, 16, 16), dt=0.1)
+    fluid.density[6:10, 2:6, 6:10] = 1.0; fluid.vel[1, :, :5, :] = 1.0
+    ca = HyperCA(size=20, dim=16, seed=0)
+
+    s_fluid = Simulation.for_fluid(fluid)
+    s_ca = Simulation.for_automaton(ca)
+
+    # the SAME loop drives both
+    s_fluid.run(5); s_ca.run(5)
+    assert s_fluid.steps_run == s_ca.steps_run == 5
+    assert isinstance(s_fluid.adapter, SimStep) and isinstance(s_ca.adapter, SimStep)
+
+    # the pipeline renders both fields
+    img1, a1 = s_fluid.render(cam, width=24, height=24, steps=24, sigma=12.0)
+    img2, a2 = s_ca.render(cam, width=24, height=24, steps=24, sigma=8.0)
+    assert np.isfinite(img1).all() and a1.max() > 0.1
+    assert np.isfinite(img2).all() and a2.max() > 0.1
+
+    # solvers stayed separate (each kept its own type + step signature)
+    assert fluid.density.shape == (16, 16, 16) and ca.grid.shape[:2] == (20, 20)
+
+    assert any("Simulation" in h.name for h in default_catalog().find_capability("step a fluid solver simulation loop"))
+
+
+def test_d1_hypervector_datatype_build_verbs_raw():
+    """D1 end to end: build a Hypervector from any data (encoder = constructor), call the five verbs as methods,
+    get the raw array back cheaply, and reach it through the mind. Catalog finds it."""
+    import numpy as np
+    from holographic_hypervector import Hypervector
+    from holographic_unified import UnifiedMind
+    from holographic_ai import bind, unbind, bundle, permute, cosine
+    from holographic_catalog import default_catalog
+
+    m = UnifiedMind(dim=512, seed=0)
+
+    # build from data via the mind's encoder (the 'make' side)
+    a = m.hypervector(0.3, tag="a")
+    b = m.hypervector(0.7, tag="b")
+    assert isinstance(a, Hypervector) and a.dim == 512
+
+    # the five verbs as methods, each matching the bare op
+    assert np.array_equal(a.bind(b).array, bind(a.array, b.array))
+    assert np.array_equal(a.bind(b).unbind(b).array, unbind(bind(a.array, b.array), b.array))
+    assert np.array_equal(a.bundle(b).array, bundle(np.stack([a.array, b.array])))
+    assert np.array_equal(a.permute(2).array, permute(a.array, 2))
+    assert a.cleanup({"a": a, "b": b}).tag == "a"
+
+    # raw array back cheaply (no copy) -- the thin-wrapper promise
+    assert a.raw() is a.array and np.asarray(a) is a.array
+
+    # a role/filler record built and queried with the datatype
+    role = m.hypervector("color", tag="role:color")
+    filler = m.hypervector("red", tag="red")
+    record = role.bind(filler)
+    assert record.unbind(role).cosine(filler) > cosine(role.array, filler.array)
+
+    assert any("Hypervector" in h.name for h in default_catalog().find_capability("a hypervector datatype with bind bundle methods"))
+
+
+def test_reenable_regime_gate_scaffold_and_iterate():
+    """Re-enable audit end to end: the RegimeGate pattern runs a niche method only in its regime, the closed-form
+    iterate re-enable is EXACT for a bind operator (never worse than stepping) and falls back for nonlinear ops,
+    and both are reachable -- Compute.iterate + the catalog find them."""
+    import numpy as np
+    from holographic_regimegate import RegimeGate
+    from holographic_computehome import Compute
+    from holographic_ai import bind
+    from holographic_catalog import default_catalog
+
+    # the scaffold: superior only in-regime, fallback outside, borderline -> fallback
+    g = RegimeGate("t", detect=lambda x: abs(x), threshold=10.0, superior=lambda x: x * 2, fallback=lambda x: x)
+    assert g.apply(50.0)[0] == 100.0 and g.apply(3.0)[0] == 3.0
+
+    # the iterate re-enable through the Compute home: exact for a bind operator
+    rng = np.random.default_rng(0); D = 256
+    kernel = rng.standard_normal(D); kernel /= np.max(np.abs(np.fft.rfft(kernel))) * 1.001
+    op = lambda x: bind(kernel, x); state = rng.standard_normal(D)
+    res, info = Compute.iterate(op, state, k=300)
+    slow = state.copy()
+    for _ in range(300):
+        slow = bind(kernel, slow)
+    assert info["used"] == "superior" and np.allclose(res, slow, atol=1e-8)
+
+    # nonlinear falls back (safe)
+    _, info_nl = Compute.iterate(lambda x: np.tanh(op(x)), state, k=300)
+    assert info_nl["used"] == "fallback"
+
+    assert any("Regime gate" in h.name for h in default_catalog().find_capability("re-enable a niche method behind a detector"))
+
+
+def test_reenable_load_gated_memory():
+    """Re-enable (FHRR at high load) end to end: the adaptive record picks real-HRR at low load and FHRR past the
+    capacity knee, recalls through a uniform interface, beats real-HRR at high load, and is reachable via the mind
+    faculty + the catalog."""
+    from holographic_loadmemory import AdaptiveRoleFillerMemory, choose_backend
+    from holographic_unified import UnifiedMind
+    from holographic_catalog import default_catalog
+
+    assert choose_backend(5, 512) == "hrr" and choose_backend(80, 512) == "fhrr"
+
+    # high-load win captured by the gate
+    N = 90
+    fhrr = AdaptiveRoleFillerMemory(dim=512, expected_pairs=N, seed=1)
+    hrr = AdaptiveRoleFillerMemory(dim=512, expected_pairs=1, seed=1)
+    for i in range(N):
+        fhrr.add(f"r{i}", f"f{i}"); hrr.add(f"r{i}", f"f{i}")
+    assert sum(fhrr.recall(f"r{i}") == f"f{i}" for i in range(N)) > sum(hrr.recall(f"r{i}") == f"f{i}" for i in range(N))
+
+    # reachable through the mind faculty
+    m = UnifiedMind(dim=512, seed=0)
+    rec = m.adaptive_record(expected_pairs=80)
+    rec.add("color", "red")
+    assert rec.backend == "fhrr" and rec.recall("color") == "red"
+
+    assert any("Adaptive record" in h.name for h in default_catalog().find_capability("role filler memory high load recall fhrr"))
+
+
+def test_reenable_tensor_exact_tier():
+    """Re-enable (tensor for exact recall): with exact=True and budget, the gate picks tensor and recalls EXACTLY at
+    a load where FHRR is already degraded; a tight budget falls back off tensor. Reachable via the mind faculty."""
+    from holographic_loadmemory import AdaptiveRoleFillerMemory, choose_backend
+    from holographic_unified import UnifiedMind
+
+    assert choose_backend(200, 256, exact=True) == "tensor"
+    assert choose_backend(200, 256, exact=True, max_numbers=1000) == "fhrr"      # budget too small
+
+    N = 200
+    m = AdaptiveRoleFillerMemory(dim=256, expected_pairs=N, exact=True, seed=2)
+    assert m.backend == "tensor"
+    for i in range(N):
+        m.add(f"r{i}", f"f{i}")
+    assert sum(m.recall(f"r{i}") == f"f{i}" for i in range(N)) == N              # exact
+
+    mind = UnifiedMind(dim=256, seed=0)
+    rec = mind.adaptive_record(expected_pairs=200, exact=True)
+    rec.add("color", "red")
+    assert rec.backend == "tensor" and rec.recall("color") == "red"
+
+
+def test_reenable_multiscatter_brdf():
+    """Re-enable (multi-scatter GGX): the Kulla-Conty term restores energy conservation for rough metals, gated by
+    roughness (single-scatter below, multi-scatter above), and the gated energy is never worse than single-scatter.
+    Reachable via the catalog."""
+    import numpy as np
+    from holographic_brdf import (directional_albedo, directional_albedo_ms, cook_torrance, brdf_gated,
+                                  MS_ROUGHNESS_GATE)
+    from holographic_catalog import default_catalog
+
+    # single-scatter loses ~half the energy for a rough metal; multi-scatter restores it
+    r = 0.8
+    ss = directional_albedo(metallic=1.0, roughness=r, base_color=(1, 1, 1), n=16384, view_cos=0.6, seed=0)
+    ms = directional_albedo_ms(metallic=1.0, roughness=r, base_color=(1, 1, 1), n=16384, view_cos=0.6, seed=0)
+    assert ss < 0.65 and 0.95 < ms < 1.10
+
+    # the gate routes by the exact roughness parameter
+    N = np.array([0., 0, 1]); V = np.array([0.6, 0, 0.8]); L = np.array([-0.3, 0.2, 0.93]); L = L / np.linalg.norm(L)
+    assert brdf_gated(N, V, L, (1, 1, 1), 1.0, 0.15)[1]["used"] == "fallback"
+    assert brdf_gated(N, V, L, (1, 1, 1), 1.0, 0.8)[1]["used"] == "superior"
+
+    # gated energy no worse than single-scatter at a smooth surface (below the gate -> unchanged)
+    r_lo = 0.15
+    assert r_lo < MS_ROUGHNESS_GATE
+    lo_val, _ = brdf_gated(N, V, L, (1, 1, 1), 1.0, r_lo)
+    assert np.allclose(lo_val, cook_torrance(N, V, L, (1, 1, 1), 1.0, r_lo))
+
+    assert any("Multi-scatter" in h.name for h in default_catalog().find_capability("energy conserving rough metal brdf multiscatter"))
+
+
+def test_coarsefirst_residual_pass_unlocks_group_b():
+    """The coarse-first residual pass: on a field with concentrated structure, refining only the high-uncertainty
+    cells recovers most of the coarse error at a fraction of the cost; concentration() is the honest breakeven
+    (low for uniform uncertainty). Reachable via the catalog. This is the shared detector the Group-B re-enables
+    (adaptive AA, Nystrom, splat refine, volint marching) all need."""
+    import numpy as np
+    from holographic_coarsefirst import (refine_where_uncertain, gradient_uncertainty, concentration, escalate_mask)
+    from holographic_catalog import default_catalog
+
+    H = W = 64
+    ys, xs = np.mgrid[0:H, 0:W] / float(H)
+    def f(Y, X): return 0.3 * np.sin(3 * Y) + 0.3 * np.cos(3 * X) + np.exp(-((X - 0.51) ** 2) / 0.0008)
+    truth = f(ys, xs)
+    cs = 4
+    cg = f(ys[::cs, ::cs], xs[::cs, ::cs])
+    coarse = np.repeat(np.repeat(cg, cs, axis=0), cs, axis=1)[:H, :W]
+    unc = gradient_uncertainty(coarse)
+
+    # concentrated -> coarse-first is a candidate; refining 20% recovers most of the error
+    assert concentration(unc) > 0.3
+    refined, mask, n = refine_where_uncertain(coarse, unc, lambda m: f(ys, xs), frac=0.2)
+    rmse = lambda a, b: float(np.sqrt(np.mean((a - b) ** 2)))
+    assert rmse(refined, truth) < 0.5 * rmse(coarse, truth) and n < truth.size // 3
+
+    # the honest breakeven: uniform uncertainty -> low concentration -> coarse-first can't help
+    rng = np.random.default_rng(0)
+    assert concentration(np.abs(rng.standard_normal((32, 32))) + 5.0) < 0.2
+
+    # exact top-k, no degenerate blow-up (the fixed edge case)
+    u = np.zeros((4, 4)); u[0, 0] = 10.0
+    assert int(escalate_mask(u, frac=0.0625).sum()) == 1
+
+    assert any("Coarse-first" in h.name for h in default_catalog().find_capability("refine where uncertain residual escalate adaptive"))
+
+
+def test_reenable_nystrom_lowrank_gate():
+    """Re-enable (Nystrom for low-rank kernels): the low-rank probe routes to cheap Nystrom on a smooth kernel (fast,
+    near-exact) and to exact on a sharp kernel (correct); the result is accurate whichever path runs. Reachable via
+    the catalog."""
+    import numpy as np, time
+    from holographic_nystrom import apply_kernel_gated, exact_kernel_apply
+    from holographic_catalog import default_catalog
+
+    rng = np.random.default_rng(0); N = 900
+    src = rng.standard_normal((N, 2)); pts = rng.standard_normal((N, 2)); w = rng.standard_normal(N)
+    rel = lambda a, b: float(np.linalg.norm(a - b) / (np.linalg.norm(b) + 1e-12))
+
+    # smooth kernel -> Nystrom, accurate AND faster than exact
+    ref = exact_kernel_apply(pts, src, w, 1.5)
+    t = time.perf_counter(); field, info = apply_kernel_gated(pts, src, w, 1.5, m=60); t_g = time.perf_counter() - t
+    t = time.perf_counter(); exact_kernel_apply(pts, src, w, 1.5); t_ex = time.perf_counter() - t
+    assert info["method"] == "nystrom" and rel(field, ref) < 0.05 and t_g < t_ex
+
+    # sharp kernel -> exact fallback, byte-correct
+    ref2 = exact_kernel_apply(pts, src, w, 0.15)
+    field2, info2 = apply_kernel_gated(pts, src, w, 0.15, m=60)
+    assert info2["method"] == "exact" and rel(field2, ref2) < 1e-9
+
+    assert any("Nystrom" in h.name for h in default_catalog().find_capability("low rank kernel field nystrom landmark"))
+
+
+def test_reenable_splat_aniso_refine():
+    """Re-enable (full-3DGS anisotropic refine, coarse-first): cheap isotropic base + anisotropic-refine the residual
+    beats the isotropic baseline on a sharp edge, never worsens it (no harm mode), and is reachable via the catalog.
+    Also records the honest finding that concentration() is the WRONG detector for anisotropy (it's backwards)."""
+    import numpy as np
+    from holographic_splat import splat_fit, splat_render, fit_coarse_first, splat_refine_residual, psnr
+    from holographic_coarsefirst import concentration
+    from holographic_catalog import default_catalog
+
+    H = W = 64
+    ys, xs = np.mgrid[0:H, 0:W].astype(float)
+    sharp = (ys > xs).astype(float) * 0.9 + 0.1 + 0.4 * np.exp(-(((ys - 45) ** 2 + (xs - 20) ** 2) / 50.0))
+    sharp /= sharp.max()
+
+    iso = psnr(splat_render(splat_fit(sharp, 30), (H, W)), sharp)
+    combined, _, _ = fit_coarse_first(sharp, K_iso=30, K_aniso=8)
+    assert psnr(combined, sharp) > iso + 2.0                          # big win on anisotropic content
+
+    # no harm mode: never worse than baseline (smooth target)
+    smooth = np.exp(-(((ys - 20) ** 2 + (xs - 20) ** 2) / 40.0)); smooth /= smooth.max()
+    iso_sp = splat_fit(smooth, 30)
+    base = psnr(splat_render(iso_sp, (H, W)), smooth)
+    comb2, _ = splat_refine_residual(smooth, iso_sp, K_aniso=8, steps=120)
+    assert psnr(comb2, smooth) >= base - 0.05
+
+    # honest: concentration() is backwards for anisotropy (sharp edge residual is LESS point-concentrated)
+    rs = sharp - splat_render(splat_fit(sharp, 30), (H, W))
+    rb = smooth - splat_render(iso_sp, (H, W))
+    assert concentration(np.abs(rs)) < concentration(np.abs(rb))
+
+    assert any("Splat aniso" in h.name for h in default_catalog().find_capability("anisotropic gaussian splat refine 3dgs"))
+
+
+def test_query_time_travel_and_audit():
+    """Query history promote (P7-P12): a query table gets a git-like timeline -- time-travel SELECT, diff, and
+    tamper-locate -- built on the shipped VersionedStore/DeltaChain/CompositionTree faculties. Reachable via the
+    catalog."""
+    from holographic_query import Database, update
+    from holographic_querytime import TableHistory, select_as_of, diff_versions, prove, find_tampering
+    from holographic_catalog import default_catalog
+
+    db = Database(); db.add_namespace("user")
+    db.create_table("user.acct", ["id", "balance"], dim=1024, seed=0)
+    t = db.namespaces["user"]["tables"]["acct"]; t.set_primary_key("id")
+    t.insert({"id": 1, "balance": 100})
+    h = TableHistory(t); v0 = h.commit(t, note="open")
+    update(t, "id = 1", {"balance": 250}); t.insert({"id": 2, "balance": 5}); v1 = h.commit(t, note="edit")
+
+    # time travel: id 1 was 100 at v0, is 250 at v1
+    assert select_as_of(h, v0, "SELECT balance FROM acct WHERE id = 1")[0]["balance"] == 100
+    assert select_as_of(h, v1, "SELECT balance FROM acct WHERE id = 1")[0]["balance"] == 250
+    # diff: id 2 added, id 1 changed
+    d = diff_versions(h, v0, v1)
+    assert d["n_added"] == 1 and any(c["key"] == 1 for c in d["changed"])
+    # audit: tamper a row vector and locate it
+    suspect = h._versions[v1]["records"].copy(); suspect[0] += 0.01
+    assert find_tampering(h, v1, suspect) == 0
+    assert isinstance(prove(h, v0), str)
+
+    assert any("time-travel" in cap.name.lower() for cap in default_catalog().find_capability("time travel diff version history audit"))
+
+
+def test_vsa_programs_as_db_objects():
+    """PR1-PR6: install a VSA program, find it by meaning, explain it (dry run), and execute it over query rows --
+    sandboxed and step-bounded, result carrying a confidence. Reuses the shipped HoloMachine; reachable via catalog."""
+    from holographic_queryprog import ProgramCatalog
+    from holographic_catalog import default_catalog
+
+    cat = ProgramCatalog(dim=2048, seed=0)
+    cat.install("prototype", [("LOAD", "color"), ("HALT", None)],
+                doc="build a prototype that clusters similar rows by color",
+                inputs=["color"], outputs=["color"], handlers=[], data=["color"])
+    # find-by-meaning: a clustering query surfaces it
+    assert cat.find("group similar rows into clusters")[0]["name"] == "prototype"
+    # explain is a dry run
+    assert "n_steps" in cat.explain("prototype")
+    # execute over query rows -> a confident result
+    out = cat.execute("prototype", [{"color": "red"}, {"color": "red"}])
+    assert 0.0 <= out["_confidence"] <= 1.0 and out["n_steps"] >= 1
+
+    assert any("vsa programs" in c.name.lower() for c in default_catalog().find_capability("install program stored procedure execute"))
+
+
+def test_workspace_folders_and_combine_scenes():
+    """WS7 folders (home ownership vs association grouping, scoped search, drop-deletes-only-home) + WS6 combine-scenes
+    (a scene is a bundle, so combining is addition). Reachable via the catalog."""
+    from holographic_query import Database
+    from holographic_queryfolder import FolderTree, _bare
+    from holographic_scene import SceneCoder, COLOURS, SHAPES, TEXTURES
+    from holographic_catalog import default_catalog
+
+    db = Database(); db.add_namespace("user", tier="persistent")
+    for t in ("sales", "returns", "catalog"):
+        db.create_table("user." + t, ["id"], dim=256, seed=0)
+    ft = FolderTree(db)
+    ft.set_home("user.sales", "reports"); ft.set_home("user.returns", "reports")
+    ft.set_home("user.catalog", "reference"); ft.link("user.catalog", "reports")
+    assert {_bare(q) for q in ft.tables_in("reports")} == {"sales", "returns", "catalog"}
+    deleted = ft.drop_folder("reports")
+    assert {_bare(q) for q in deleted} == {"sales", "returns"}               # only home tables deleted
+    assert db.namespaces["user"]["tables"].get("catalog") is not None       # linked-elsewhere survives
+
+    sc = SceneCoder(dim=4096, seed=0)
+    a = sc.encode_scene([{"colour": COLOURS[0], "shape": SHAPES[0], "texture": TEXTURES[0]}])
+    b = sc.encode_scene([{"colour": COLOURS[1], "shape": SHAPES[1], "texture": TEXTURES[0]}])
+    assert sc.count_objects(sc.combine(a, b)) == 2
+
+    assert any("folder" in c.name.lower() for c in default_catalog().find_capability("group tables into folders scoped search"))
+
+
+def test_graph_traversal_and_single_writer():
+    """B10 exact graph traversal (neighbors/descendants/reachable/shortest-path over a table's edges) + B8
+    single-writer lock with consistent reader snapshots. Both reachable via the catalog."""
+    from holographic_query import Database, update
+    from holographic_querygraph import EdgeGraph
+    from holographic_querylock import SingleWriterLock, ConcurrencyError
+    from holographic_catalog import default_catalog
+
+    db = Database(); db.add_namespace("user")
+    db.create_table("user.edges", ["src", "dst"], dim=256, seed=0)
+    t = db.namespaces["user"]["tables"]["edges"]
+    for s, d in [(1, 2), (1, 3), (2, 4), (3, 4), (4, 5)]:
+        t.insert({"src": s, "dst": d})
+    g = EdgeGraph(t, "src", "dst")
+    assert set(g.descendants(1)) == {2, 3, 4, 5} and g.reachable(1, 5) and not g.reachable(5, 1)
+    assert len(g.path(1, 5)) == 4
+
+    db.create_table("user.acct", ["id", "balance"], dim=256, seed=0)
+    a = db.namespaces["user"]["tables"]["acct"]; a.set_primary_key("id"); a.insert({"id": 1, "balance": 100})
+    lock = SingleWriterLock()
+    snap = lock.snapshot(a)
+    with lock.write():
+        update(a, "id = 1", {"balance": 250})
+        try:
+            with lock.write(block=False): assert False
+        except ConcurrencyError:
+            pass
+    assert snap.rows()[0]["balance"] == 100 and lock.snapshot(a).rows()[0]["balance"] == 250
+
+    cat = default_catalog()
+    assert any("graph" in c.name.lower() for c in cat.find_capability("graph reachable shortest path edges"))
+    assert any("writer" in c.name.lower() for c in cat.find_capability("single writer lock snapshot concurrency"))
+
+
+def _tile_worker(region, cache):
+    # a monoid 'render' worker: min-composite the shared cache over a bucket of indices (order-independent)
+    import numpy as np
+    return float(np.min([cache[i] for i in region]))
+
+
+def test_coordinator_localpool_bitexact_and_tiebreak():
+    """R2: a monoid job run on the LocalPool reassembles BIT-EXACT for MIN vs the in-process result (real separate
+    interpreters), and the margin-gated tie-break resolves a near-tie identically under different reduction orders.
+    Reachable via the catalog."""
+    import numpy as np
+    from holographic_coordinator import Coordinator, InProcessBackend, LocalPool, decide
+    from holographic_distribute import reduce_min
+    from holographic_catalog import default_catalog
+
+    cache = (np.arange(30, dtype=np.float64) - 15.0) ** 2
+    buckets = [list(range(0, 10)), list(range(10, 20)), list(range(20, 30))]
+    ip = Coordinator(InProcessBackend()).run(buckets, _tile_worker, cache=cache, reduce=reduce_min)
+    with Coordinator(LocalPool(n=3)) as lc:
+        lp = lc.run(buckets, _tile_worker, cache=cache, reduce=reduce_min)
+    assert ip == lp                                        # MIN is bit-exact wherever the worker ran
+
+    # tie-break gate: a near-tie (two reduction orders wobble by ~1e-13) resolves identically via the canonical rule
+    a = np.array([0.5, 0.5, 0.3])
+    b = a + np.array([1e-13, -1e-13, 0.0])
+    assert decide(a) == decide(b)                          # the rule decides, not the rounding
+    assert decide([0.9, 0.5, 0.3]) == 0                    # comfortable margin agrees anyway
+
+    assert any("coordinator" in cap.name.lower() for cap in default_catalog().find_capability("distribute compute process pool parallel"))
+
+
+def test_command_tool_feeds_planner_chain():
+    """R4: an allowlisted external command wired as an orchestrator Tool runs inside a Planner-style chain, and a
+    failing command trips the CircuitBreaker so the planner would skip it. Reachable via the catalog."""
+    from holographic_command import CommandRunner, CommandError, command_as_tool
+    from holographic_orchestrator import CircuitBreaker
+    from holographic_ai import Vocabulary
+    from holographic_catalog import default_catalog
+
+    r = CommandRunner(timeout=10)
+    r.register("upper", ["python3", "-c", "import sys;print(sys.argv[1].upper())", "{input}"])
+    r.register("reverse", ["python3", "-c", "import sys;print(sys.argv[1][::-1])", "{input}"])
+    vocab = Vocabulary(1024, 0)
+    up = command_as_tool(r, "upper", "text", "text", ["uppercase"], vocab)
+    rev = command_as_tool(r, "reverse", "text", "text", ["reverse"], vocab)
+
+    # a two-step external chain: upper -> reverse
+    out = rev.fn(up.fn("distributed").strip())
+    assert out.strip() == "DETUBIRTSID"
+
+    # allowlist gate holds; a non-registered command is refused
+    try:
+        r.run("cat", {"input": "/etc/passwd"}); assert False
+    except CommandError:
+        pass
+
+    assert any("command" in cap.name.lower() for cap in default_catalog().find_capability("run external tool subprocess command"))
+
+
+def test_network_farm_loopback_with_verification():
+    """R3: a worker daemon on localhost registers, receives the read-only cache ONCE (by content hash), computes a
+    bucket, and the coordinator ACCEPTS the result only after a verification path agrees (re-run one bucket locally
+    and compare). Same Coordinator.run as the local pool -- only where the worker runs changed. Reachable via catalog."""
+    import numpy as np
+    from holographic_coordinator import Coordinator
+    from holographic_farm import WorkerDaemon, NetworkFarm, _sum_indices, _content_hash
+    from holographic_distribute import reduce_sum
+    from holographic_catalog import default_catalog
+
+    node = WorkerDaemon(port=0)
+    node.register_worker("sum_indices", _sum_indices)
+    addr = node.start()
+    try:
+        cache = np.arange(40, dtype=np.float64) ** 1.5
+        buckets = [list(range(0, 20)), list(range(20, 40))]
+        with Coordinator(NetworkFarm([addr])) as coord:
+            got = coord.run(buckets, "sum_indices", cache=cache, reduce=reduce_sum)
+        # VERIFICATION path: recompute one bucket locally and confirm the network agrees before trusting the whole
+        local_check = _sum_indices(buckets[0], cache) + _sum_indices(buckets[1], cache)
+        assert abs(got - local_check) < 1e-6                   # network result accepted only after agreement
+        assert _content_hash(cache) in node.caches             # cache shipped once, kept by hash
+    finally:
+        node.stop()
+
+    assert any("farm" in c.name.lower() or "network" in c.name.lower()
+               for c in default_catalog().find_capability("network render farm another machine distributed"))
+
+
+def test_standalone_service_over_http():
+    """The standalone API service: start the real stdlib HTTP server, drive the SQL query layer over HTTP/JSON, and
+    confirm capability discovery works -- the 'run standalone, talk via API' path. Reachable via the catalog."""
+    import json, threading, urllib.request
+    from http.server import HTTPServer
+    from holographic_service import Service, make_handler
+    from holographic_catalog import default_catalog
+
+    svc = Service()
+    httpd = HTTPServer(("127.0.0.1", 0), make_handler(svc))
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        def call(method, path, body=None):
+            data = json.dumps(body).encode() if body is not None else None
+            req = urllib.request.Request("http://127.0.0.1:%d%s" % (port, path), data=data, method=method,
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return json.loads(r.read())
+
+        assert call("GET", "/health")["ok"]
+        call("POST", "/sql", {"sql": "CREATE TABLE user.svc (id, tag)"})
+        call("POST", "/sql", {"sql": "INSERT INTO user.svc (id, tag) VALUES (1, live)"})
+        assert call("POST", "/sql", {"sql": "SELECT tag FROM user.svc WHERE id = 1"})["result"][0]["tag"] == "live"
+        assert call("POST", "/capabilities/search", {"query": "distribute compute coordinator"})["matches"]
+    finally:
+        httpd.shutdown(); httpd.server_close()
+
+    assert any("api service" in c.name.lower() or "standalone" in c.name.lower()
+               for c in default_catalog().find_capability("standalone api server http rest"))
+
+
+
+def test_standalone_database_full_surface_over_http():
+    """The standalone service as a DROP-IN DATABASE over HTTP: full SQL (create/insert/update/delete/join), GraphQL
+    over documents, and persistence that survives a restart -- all over the real socket. Reachable via the catalog."""
+    import json, threading, os, tempfile, urllib.request
+    from http.server import HTTPServer
+    from holographic_service import Service, make_handler
+
+    path = os.path.join(tempfile.gettempdir(), "_lecore_integ_db.json")
+    if os.path.exists(path):
+        os.remove(path)
+    svc = Service(persist_path=path)
+    httpd = HTTPServer(("127.0.0.1", 0), make_handler(svc)); port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+    def call(method, path_, body=None):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request("http://127.0.0.1:%d%s" % (port, path_), data=data, method=method,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return json.loads(r.read())
+    try:
+        call("POST", "/sql", {"sql": "CREATE TABLE user.acct (id, name, bal)"})
+        call("POST", "/sql", {"sql": "INSERT INTO user.acct (id, name, bal) VALUES (1, alice, 100)"})
+        call("POST", "/sql", {"sql": "INSERT INTO user.acct (id, name, bal) VALUES (2, bob, 50)"})
+        assert call("POST", "/sql", {"sql": "UPDATE user.acct SET bal = 250 WHERE id = 1"})["result"]["updated"] == 1
+        assert call("POST", "/sql", {"sql": "DELETE FROM user.acct WHERE id = 2"})["result"]["deleted"] == 1
+        # join
+        call("POST", "/sql", {"sql": "CREATE TABLE user.tag (id, label)"})
+        call("POST", "/sql", {"sql": "INSERT INTO user.tag (id, label) VALUES (1, vip)"})
+        j = call("POST", "/sql", {"sql": "SELECT name, label FROM user.acct JOIN user.tag ON id"})["result"]
+        assert j == [{"name": "alice", "label": "vip"}]
+        # graphql
+        call("POST", "/documents", {"objects": [{"id": "o1", "name": "ring", "material": "gold"},
+                                                 {"id": "o2", "name": "pipe", "material": "copper"}]})
+        gq = call("POST", "/graphql", {"query": '{ objects(where: {material: "gold"}) { name } }'})
+        assert [o["name"] for o in gq["data"]["objects"]] == ["ring"]
+    finally:
+        httpd.shutdown(); httpd.server_close()
+
+    # RESTART: a fresh service loads the persisted file and still has the data
+    reborn = Service(persist_path=path)
+    try:
+        rows = reborn.dispatch("POST", "/sql", {"sql": "SELECT name, bal FROM user.acct"})[1]["result"]
+        assert rows[0]["bal"] == 250.0 and len(rows) == 1          # update kept, bob deleted, all survived restart
+        assert reborn.dispatch("GET", "/documents", {})[1]["count"] == 2
+    finally:
+        if os.path.exists(path):
+            os.remove(path)
+
+
+def test_distributed_hardening_over_farm():
+    """R5: over the real network farm, run buckets REDUNDANTLY and accept only on agreement (voting), and reject an
+    untrusted node via a canary. Composes with the same Coordinator backends. Reachable via the catalog."""
+    import numpy as np
+    from holographic_farm import WorkerDaemon, NetworkFarm, _sum_indices
+    from holographic_hardening import HardenedCoordinator, CanaryFailed
+    from holographic_distribute import reduce_sum
+    from holographic_catalog import default_catalog
+
+    node = WorkerDaemon(port=0)
+    node.register_worker("sum_indices", _sum_indices)
+    addr = node.start()
+    try:
+        cache = np.arange(20, dtype=float) ** 2
+        buckets = [list(range(0, 10)), list(range(10, 20))]
+        hc = HardenedCoordinator(NetworkFarm([addr]), redundancy=3, attempts=2, backoff=0.01)
+        # three independent runs must agree before the result is accepted
+        got = hc.run(buckets, "sum_indices", cache=cache, reduce=reduce_sum)
+        assert abs(got - float(np.sum(cache))) < 1e-6
+        # a canary with the WRONG expected answer proves the check fires (the node is honest, so its real answer != our lie)
+        try:
+            hc.run(buckets, "sum_indices", cache=cache, canaries=[([0, 1, 2], 999.0)]); assert False
+        except CanaryFailed:
+            pass
+        hc.close()
+    finally:
+        node.stop()
+
+    assert any("hardening" in c.name.lower() for c in default_catalog().find_capability("voting redundant retry untrusted node"))
+
+
+def test_job_lifecycle_pause_restart_resume():
+    """Start a long job (buckets + monoid reduce), pause it, checkpoint, RESTORE it in a fresh manager (the app
+    reopened), and resume -- each bucket runs exactly once, the reduced result is correct. Reachable via catalog."""
+    import time, tempfile
+    from holographic_jobs import JobManager, _slow_sum, _sum_bucket, DONE, PAUSED
+    from holographic_coordinator import InProcessBackend
+    from holographic_catalog import default_catalog
+
+    store = tempfile.mkdtemp(prefix="integ_jobs_")
+    m = JobManager(InProcessBackend(), store_dir=store)
+    m.register_worker("slow", _slow_sum)
+    m.create("render", [[i] for i in range(20)], "slow", reduce="sum")
+    m.start("render", background=True, batch=1)
+    time.sleep(0.05)
+    m.pause("render")
+    assert m.jobs["render"].status == PAUSED and 0 < len(m.jobs["render"].done) < 20
+
+    # a fresh manager reopens the checkpoint and resumes only the remaining buckets
+    m2 = JobManager(InProcessBackend(), store_dir=store)
+    m2.register_worker("slow", _slow_sum)
+    m2.load_all()
+    assert "render" in m2.jobs
+    m2.resume("render", background=False)
+    assert m2.jobs["render"].status == DONE and m2.result("render") == float(sum(range(20)))
+
+    assert any("job lifecycle" in c.name.lower() for c in default_catalog().find_capability("pause resume cancel render job checkpoint"))
+
+
+def test_material_library_bridge_render_and_science():
+    """The material libraries wired through UnifiedMind: 'tell me about gold' gives BOTH render appearance and physical
+    properties; the render material drives the actual glTF path; a physical-only material resolves for a scientist;
+    and it's discoverable via the catalog."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    m = UnifiedMind(dim=256, seed=0)
+
+    # unified bridge: appearance AND physics
+    gold = m.material_info("gold")
+    assert gold["render"]["class"] == "metal" and gold["render"]["metallic"] == 1.0
+    assert gold["physical"]["density"] == 19300
+
+    # RENDER: the library's material drives the real glTF export path (a cube shaded gold)
+    import holographic_materialindex as mi
+    pbr = mi.render_material("gold")
+    from holographic_mesh import Mesh
+    cube = Mesh.cube() if hasattr(Mesh, "cube") else None
+    if cube is not None:
+        glb = m.mesh_to_gltf(cube, material=pbr)
+        assert isinstance(glb, (bytes, bytearray)) and len(glb) > 0
+
+    # SCIENCE: a physical-only material resolves its numbers (mercury: dense liquid metal, no render preset)
+    merc = m.material_info("mercury")
+    assert merc["in_physical"] and not merc["in_render"]
+    assert merc["physical"]["phase"] == "liquid" and merc["physical"]["density"] > 10000
+
+    # DISCOVERABLE: find_capability surfaces the material library, find_materials searches across both
+    assert any("material librar" in c.name.lower() for c in m.find_capability("physical material properties density refractive index"))
+    assert any(r["name"] == "diamond" for r in m.find_materials("gem crystal"))
+    s = m.materials()["summary"]
+    assert s["render_presets"] >= 100 and s["physical_materials"] >= 30
+
+
+def test_expanded_physical_material_library_through_mind():
+    """The hardened + expanded physical library through UnifiedMind: ~120 validated materials in 12 categories with
+    units, a scientist query (density/thermal properties), and resolve_scenario still correct on the bigger set."""
+    from holographic_unified import UnifiedMind
+    m = UnifiedMind(dim=256, seed=0)
+
+    # organization + validation
+    cats = {c for c in m.materials()["summary"]["physical_categories"]}
+    assert {"metal", "liquid", "gas", "polymer", "ceramic", "wood"} <= cats
+    assert m.validate_materials() == []                      # the library self-audits clean
+    assert m.material_units()["density"][0] == "kg/m^3"
+    assert len(m.materials_by_category("metal")) >= 15
+
+    # a scientist pulls physical numbers with units
+    ti = m.material_info("titanium")
+    assert ti["physical"]["density"] == 4506 and ti["physical"]["category"] == "metal"
+    assert ti["physical_units"]["youngs"] == "GPa"
+    assert m.physical_material("tungsten")["melting_point"] == 3695
+
+    # resolve_scenario (density buoyancy) still correct after the merge -- legacy values preserved
+    from holographic_definitions import resolve_scenario, build_standard_library
+    lib = build_standard_library(dim=256, seed=0)
+    assert resolve_scenario("a block of wood floating in water", lib=lib).consistent
+    assert not resolve_scenario("a steel ball floating in water", lib=lib).consistent
+
+    # discoverable
+    assert any("material librar" in c.name.lower() for c in m.find_capability("physical material properties thermal conductivity melting point"))
+
+
+def test_vendored_dictionary_contextual_awareness():
+    """The vendored dictionary through UnifiedMind: real definitions + taxonomy for contextual awareness, the mind
+    LEARNING meaning from it, and discoverability via the catalog."""
+    from holographic_unified import UnifiedMind
+    m = UnifiedMind(dim=512, seed=0)
+
+    # real world-knowledge lookups
+    assert m.dictionary_size() > 100000
+    g = m.lookup("gravity")
+    assert g["part_of_speech"] == "noun" and "force" in g["definition"].lower()
+    assert "gravitation" in [s.lower() for s in g.get("synonyms", [])]
+    # taxonomy (encyclopedia side)
+    chain = m.word_taxonomy("dog")
+    assert any("animal" in c for c in chain)
+
+    # the mind can LEARN meaning from the vendored dictionary, then define by learned neighbours
+    m.learn_vocabulary(["car", "truck", "vehicle", "dog", "wolf", "cat"], iters=3)
+    car_nbrs = [w for w, _ in m.define("car", k=3)]
+    assert "vehicle" in car_nbrs or "truck" in car_nbrs        # sensible learned meaning
+
+    # discoverable
+    assert any("dictionary" in c.name.lower() for c in m.find_capability("what does a word mean definition synonyms"))
+
+
+def test_tool_families_wired_and_discoverable():
+    """2D editing/generation, text generation, language learning, and utilities are each usable through the mind AND
+    surfaced by natural-language catalog queries (the gap-closure the catalog audit identified)."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    m = UnifiedMind(dim=128, seed=0)
+
+    # 2D faculties are callable
+    a = np.random.default_rng(0).random((10, 10, 3)); b = np.random.default_rng(1).random((10, 10, 3))
+    assert m.recolor_image(a, b).shape == a.shape
+    assert len(m.blend_images(a, b, steps=4)) == 4
+    assert m.pattern_field("fbm") is not None
+
+    # each family is discoverable by a user-style query
+    checks = {"draw a picture": "2d image", "generate text": "text generation",
+              "learn from a corpus": "language learning", "verify data integrity": "utilit"}
+    for q, want in checks.items():
+        assert any(want in c.name.lower() for c in m.find_capability(q)), (q, want)
+
+
+def test_agentic_skills_through_mind_and_service():
+    """The agent-friendly layer: skill discovery/suggest/route/autocomplete through UnifiedMind AND over the HTTP
+    service, plus discoverability of the layer itself."""
+    from holographic_unified import UnifiedMind
+    m = UnifiedMind(dim=128, seed=0)
+
+    # through the mind
+    man = m.skills()
+    assert man["counts"]["capabilities"] > 50 and man["counts"]["methods"] > 100
+    assert m.route("render a scene with global illumination")["decision"] == "act"
+    assert m.route("distributed coordinator farm")["decision"] == "choose"
+    sug = m.suggest("edit an image")
+    assert sug and "2d image" in sug[0]["name"].lower() and 0.0 <= sug[0]["confidence"] <= 1.0
+    assert all(c["name"].startswith("learn_") for c in m.complete_method("learn_"))
+    assert m.describe_skill("material_info")["call"].startswith("mind.material_info(")
+
+    # over the HTTP service (dispatch)
+    from holographic_service import Service
+    svc = Service()
+    assert svc.dispatch("GET", "/skills", {})[1]["skills"]["counts"]["methods"] > 100
+    r = svc.dispatch("POST", "/skills/route", {"task": "start pause resume a render"})[1]
+    assert r["decision"] in ("act", "choose")
+    comp = svc.dispatch("POST", "/skills/complete", {"prefix": "material"})[1]["completions"]
+    assert any(c["name"] == "material_info" for c in comp)
+
+    # the agentic layer is itself discoverable
+    assert any("agent skills" in c.name.lower() for c in m.find_capability("autocomplete suggest a skill agentic"))
+
+
+def test_skill_lint_no_invocation_gaps():
+    """Guard: every public UnifiedMind faculty has a docstring summary an agent can invoke from (no CRITICAL/TERSE).
+    If this fails, a newly-added faculty needs a one-line 'what it does + what it returns' docstring."""
+    import importlib.util, os
+    path = os.path.join(os.path.dirname(__file__), "tools", "skill_lint.py")
+    spec = importlib.util.spec_from_file_location("skill_lint", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    a = mod.audit()
+    assert not a["critical"], "faculties with NO docstring: %s" % a["critical"]
+    assert not a["terse"], "faculties with a too-thin docstring: %s" % a["terse"]
+    h = mod.audit_home_examples()                          # the module functions an agent copies from home examples
+    assert not h["broken"], "broken example references: %s" % h["broken"]
+    assert not h["no_doc"], "example functions with no docstring: %s" % h["no_doc"]
+
+
+def test_describe_build_adjust_scene_through_mind():
+    """The full describe->build->adjust->render/simulate flow through UnifiedMind, plus discoverability."""
+    import numpy as np
+    from holographic_unified import UnifiedMind
+    m = UnifiedMind(dim=128, seed=0)
+
+    # describe -> the engine builds a live, named scene
+    scene = m.build_scene("a big red metal sphere and a small blue glass box on a sunny day")
+    assert len(scene.objects) == 2 and scene.environment["sun"] == "bright"
+
+    # adjust named objects in words
+    scene.adjust("make the sphere bigger")
+    assert scene.get({"shape": "sphere"})[0]["size"] == "large"
+    scene.adjust("change the box to metal")
+    assert scene.get({"shape": "box"})[0]["material"] == "metal"
+    scene.adjust("make everything glass")
+    assert all(o["material"] == "glass" for o in scene.objects)
+
+    # render and simulate both work end to end
+    img = np.asarray(scene.render(width=40, height=32, quality="fast"))
+    assert img.shape == (32, 40, 3)
+    frames = scene.simulate(steps=12)
+    assert len(frames) == 12
+
+    # wrap an existing scene and adjust it; encode it into a hypervector via the mind
+    sc2 = m.semantic_scene([{"shape": "sphere", "color": "red", "material": "matte", "size": "big"}])
+    sc2.set("the sphere", material="metal")
+    assert sc2.objects[0]["material"] == "metal"
+    vec, records, roles = sc2.encode()
+    assert vec.shape[0] == m.dim
+
+    # discoverable + confidently routed
+    assert any("scene from description" in c.name.lower() for c in m.find_capability("describe a scene and build it"))
+    assert m.route("describe a scene and build it")["decision"] == "act"

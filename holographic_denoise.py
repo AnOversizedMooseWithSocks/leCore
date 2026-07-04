@@ -239,3 +239,47 @@ def trajectory_denoise(x, window=None, rank=8):
     for i in range(K):
         out[i:i + L] += Hd[i]; cnt[i:i + L] += 1.0
     return out / np.maximum(cnt, 1.0)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# RE-ENABLE (consolidation, adaptive-dispatch audit): the fixed-rank PROJECTION denoiser was a kept negative --
+# it WINS increasingly as noise grows (+3.85 dB @ sigma=0.8) but HURTS at low noise (over-smooths a near-clean
+# signal, discarding real detail that lives beyond the fitted rank). With a catalog + adaptive dispatch, we can
+# gate it: project only when a cheap, deterministic detector says the discarded directions are noise-dominated.
+#
+# THE DETECTOR (measured, robust). Raw estimate_sigma is marginal here because off-manifold DETAIL looks like
+# noise to a difference-based estimator. The reliable signal is the RESIDUAL RATIO: of the energy the projection
+# would remove (the residual r = x - project(x), i.e. the discarded off-manifold directions), how much is
+# explained by NOISE ALONE? Under noise of std sigma, the discarded (D-rank)-dim subspace carries expected energy
+# sigma^2 * (D-rank). So
+#         ratio = ||x - project(x)||^2 / (sigma_est^2 * (D - rank))
+# is ~1 when the discarded directions are pure noise (projecting is safe -> DO it) and well below 1 when they hold
+# structured signal (projecting would over-smooth -> DON'T). Measured, the ratio rises monotonically with noise and
+# crosses the hurt/help boundary at ~0.55; we gate CONSERVATIVELY at 0.6 (project only when clearly noise-dominated,
+# so a misfire falls back to the harmless no-op rather than the -dB negative).
+
+def projection_residual_ratio(x, basis, mean):
+    """The regime detector for projection denoising: energy the projection would discard, over the energy noise
+    ALONE would put in that discarded subspace. ~1 => discarded directions are noise (safe to project); <<1 =>
+    they hold real signal detail (projecting would over-smooth). Cheap (one projection) and deterministic."""
+    x = np.asarray(x, float)
+    resid = x - manifold_denoise(x, basis, mean)          # the off-manifold component projection removes
+    sigma = estimate_sigma(x)
+    n_discarded = max(int(x.shape[-1]) - int(np.asarray(basis).shape[0]), 1)
+    noise_energy = sigma * sigma * n_discarded + 1e-9     # expected residual energy under noise alone
+    return float(np.sum(resid * resid) / noise_energy)
+
+
+def denoise_gated(x, basis, mean, threshold=0.6):
+    """Projection denoise, RE-ENABLED behind its regime detector. Projects x onto the fitted manifold ONLY when the
+    residual ratio says the off-manifold directions are noise-dominated (ratio >= threshold); otherwise returns x
+    UNCHANGED -- the safe fallback that avoids the low-noise over-smoothing negative. Returns (result, info) where
+    info records the score / threshold / which path ran, so the re-enabled method stays measurable. Deterministic.
+
+    `threshold` is biased conservative (0.6): borderline signals fall back to the no-op. Lower it toward the measured
+    knee (~0.55) to also capture the small wins just past the crossover, at a little more risk of over-smoothing."""
+    from holographic_regimegate import RegimeGate
+    gate = RegimeGate("projection_denoise", detect=projection_residual_ratio, threshold=threshold,
+                      superior=lambda z, b, m: manifold_denoise(z, b, m),   # the shelved aggressive projection
+                      fallback=lambda z, b, m: np.asarray(z, float))        # safe default: leave it alone
+    return gate.apply(x, basis, mean)

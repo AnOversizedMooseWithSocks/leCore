@@ -38,14 +38,15 @@ def reflect_transform(O, D, P_hit, N, bounce=None, eps=3e-3):
 def trace_reflection_color(ctx, O2, D2):
     """Trace + shade one bounce of reflected rays: where they hit an object, Lambert + AO + soft shadow; else the sky
     dome. Returns rgb per ray. (This is the per-ray cost we want to pay for only a sparse subset.)"""
-    from holographic_raymarch import sphere_trace, sdf_normal, ambient_occlusion, soft_shadow, sky_dome
+    from holographic_raymarch import sphere_trace, sdf_normal, sky_dome
+    from holographic_shadowhome import Shadow      # visibility via the Shadow home (R8)
     union = ctx["union"]; colors = ctx["colors"]; sun_dir = ctx["sun_dir"]; amb = ctx["amb"]; sun_i = ctx["sun_i"]
     rc = sky_dome(D2, sun_dir=tuple(sun_dir))
     hm, tm, Pmh = sphere_trace(union, O2, D2)
     if np.any(hm):
         Nm = sdf_normal(union, Pmh[hm]); idm = union.ids(Pmh[hm])
         lamm = np.clip((Nm * sun_dir).sum(1), 0, 1)
-        shm = soft_shadow(union, Pmh[hm] + Nm * 3e-3, sun_dir); aom = ambient_occlusion(union, Pmh[hm], Nm)
+        shm = Shadow.soft(union, Pmh[hm] + Nm * 3e-3, sun_dir); aom = Shadow.ambient_occlusion(union, Pmh[hm], Nm)
         rc[hm] = np.clip(colors[idm] * (amb * aom + lamm * shm * sun_i)[:, None], 0, 1)
     return rc
 

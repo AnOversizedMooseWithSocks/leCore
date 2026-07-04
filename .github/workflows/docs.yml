@@ -26,14 +26,17 @@ jobs:
       - name: Generate the code reference
         run: python docgen.py          # writes REFERENCE.md from every module's docstring + public API
 
-      - name: Commit REFERENCE.md if it changed
+      - name: Generate the capabilities menu
+        run: python capdoc.py          # writes CAPABILITIES.md from the live capability catalog (plain-language menu)
+
+      - name: Commit refreshed docs if they changed
         run: |
           git config user.name  "docs-bot"
           git config user.email "docs-bot@users.noreply.github.com"
-          if ! git diff --quiet REFERENCE.md; then
-            git add REFERENCE.md
-            git commit -m "docs: refresh REFERENCE.md [skip ci]"   # [skip ci] so this commit doesn't re-trigger CI
+          if ! git diff --quiet REFERENCE.md CAPABILITIES.md; then
+            git add REFERENCE.md CAPABILITIES.md
+            git commit -m "docs: refresh REFERENCE.md + CAPABILITIES.md [skip ci]"   # [skip ci] so it doesn't re-trigger CI
             git push
           else
-            echo "REFERENCE.md already up to date -- nothing to commit."
+            echo "REFERENCE.md and CAPABILITIES.md already up to date -- nothing to commit."
           fi

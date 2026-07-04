@@ -29,14 +29,31 @@ modules = [
 modules.append("lecore")                 # the convenience shim: `import lecore` -> lecore.UnifiedMind
 
 setup(
-    name="lecore",
+    # NOTE ON THE NAME: the *distribution* name (what you `pip install`) and the *import* name (what you
+    # `import` in Python) are independent. The plain name "lecore" is already taken on PyPI by an unrelated
+    # project, and this engine is the core of the larger leOS project -- so we publish as "leos-core" but the
+    # modules still install at the top level, so users write `import lecore` (via the lecore.py shim) exactly
+    # as they did from a clone. Install:  pip install leos-core   ->   then:  import lecore
+    name="leos-core",
     version="0.1.0",                     # bump per release (or let CI set it from the git tag -- see PACKAGING.md)
-    description="leCore -- the vector-symbolic core of leOS: memory, geometry, physics and more on one NumPy substrate.",
+    description="leOS-core (import name: lecore) -- the vector-symbolic core of leOS: memory, geometry, physics and more on one NumPy substrate.",
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
     author="AnOversizedMooseWithSocks",
     url="https://github.com/AnOversizedMooseWithSocks/leCore",
     py_modules=modules,                  # <- install these flat, top-level modules (no package nesting)
+    # The runtime data (the WordNet dictionary, material property JSON) ships as the small `lecore_data` PACKAGE, so
+    # it is carried into the wheel and resolves the same from a clone or an install (see lecore_data/__init__.py).
+    packages=["lecore_data"],
+    include_package_data=True,
+    package_data={
+        "lecore_data": [
+            "knowledge/*",                                  # dictionary.json.gz, manifest.json, LICENSE_WORDNET.txt
+            "definitions/*.md",
+            "definitions/native/materials/*.json",
+            "definitions/standards/generic_table/*.json",
+        ],
+    },
     python_requires=">=3.9",
     install_requires=["numpy"],          # the core needs ONLY NumPy -- nothing else is ever required
     extras_require={                      # opt-in extras -- the core runs, and passes every test, without them.

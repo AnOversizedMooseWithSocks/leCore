@@ -61,17 +61,15 @@ def identity():
 
 
 def translation(t):
-    M = np.eye(4)
-    M[:3, 3] = np.asarray(t, float)
-    return M
+    # consolidation H5: delegate to the Transform home (dedup -- this matrix was duplicated with holographic_transform)
+    from holographic_transformhome import Transform
+    return Transform.translation(t)
 
 
 def scaling(s):
-    """Uniform scale (scalar s) or per-axis scale (length-3 s)."""
-    M = np.eye(4)
-    s = np.asarray(s, float)
-    M[0, 0], M[1, 1], M[2, 2] = (s, s, s) if s.ndim == 0 else (s[0], s[1], s[2])
-    return M
+    """Uniform scale (scalar s) or per-axis scale (length-3 s). Delegates to the Transform home (consolidation H5)."""
+    from holographic_transformhome import Transform
+    return Transform.scaling(s)
 
 
 def rotation(axis, angle):
@@ -91,11 +89,9 @@ def rotation(axis, angle):
 
 
 def compose_transforms(*matrices):
-    """The product M0 @ M1 @ ... (apply right-to-left, parent then child)."""
-    out = np.eye(4)
-    for M in matrices:
-        out = out @ np.asarray(M, float)
-    return out
+    """The product M0 @ M1 @ ... (apply right-to-left, parent then child). Delegates to the Transform home (H5)."""
+    from holographic_transformhome import Transform
+    return Transform.compose(*matrices)
 
 
 class SceneNode:

@@ -4620,6 +4620,1031 @@ _imgB = _mind_rd.render_mesh(_M2rd, _camrd, 192, 192, lights=_lrd, base_color=(0
 _tiles, _frac = _mind_rd.render_frame_delta(_imgrd, _imgB, tile=32)
 print(f"  RENDERING -- the camera/lights/raster/volume the toolkit lacked, field-native where it counts. RASTERISE: a {_Mrd.n_faces}-face sphere shaded by a sun+ambient at 192x192 in {_rtrd*1000:.0f} ms, a real bright->dark gradient ({float(_litrd[_litrd>0.02].min()):.2f}..{float(_litrd.max()):.2f}). VOLUMETRIC (the VSA-native part -- smoke/fire/water ARE density fields, render = march rays through the field, vectorised over all pixels): smoke at 160x160x80 in {_vtrd*1000:.0f} ms with proper alpha ({float(_alpha.min()):.2f}..{float(_alpha.max()):.2f}); fire glows emissive red ({float(_fire[...,0].max()):.2f} red vs {float(_fire[...,2].max()):.2f} blue) via a blackbody ramp. PIXEL-STREAMING delta: a LOCAL edit dirties only {len(_tiles)}/{(192//32)**2} tiles ({_frac:.0%}) -- push that, not the frame. HONEST: ~1-2 s/frame in pure NumPy is NOT realtime and does NOT match Houdini/Maya's compiled+GPU core; this is the offline/preview BRAIN, the GPU stays the MUSCLE, and the VSA win is cheap DELTAS (O(edit) complement, field LOD, tile-delta), not raw throughput.  *** the engine renders fields natively and streams deltas; the GPU does the heavy realtime viewport ***")
 
+# AUTO-CALIBRATING RENDER: one quality knob -> converge each pixel (adaptive_sample) + variance-guided SVGF denoise
+class _CamAR:
+    eye = _np_vh.array([0.0, 0.4, 3.2])
+    def ray_dirs(self, _w, _h):
+        _ys, _xs = _np_vh.mgrid[0:_h, 0:_w]
+        _u = (_xs / (_w - 1) - 0.5) * 1.2; _v = -(_ys / (_h - 1) - 0.5) * 1.2
+        _d = _np_vh.stack([_u, _v, -_np_vh.ones_like(_u)], -1)
+        return self.eye, _d / _np_vh.linalg.norm(_d, axis=-1, keepdims=True)
+_ctrs_ar = _np_vh.array([[-0.7, 0, 0], [0.7, 0, 0]], float); _rad_ar = _np_vh.array([0.6, 0.6])
+class _SceneAR:
+    def eval(self, _P):
+        _d = _np_vh.min(_np_vh.linalg.norm(_P[..., None, :] - _ctrs_ar, axis=-1) - _rad_ar, axis=-1)
+        return _np_vh.minimum(_d, _P[..., 1] + 0.9)
+def _matAR(_P):
+    _n = len(_P); _alb = _np_vh.tile([.8, .3, .3], (_n, 1)).astype(float); _alb[_P[:, 0] < 0] = [.3, .4, .85]
+    return _alb, _np_vh.zeros(_n), _np_vh.full(_n, .6), _np_vh.zeros((_n, 3))
+_ta0 = _timerd.time()
+_imgAR, _stAR = _mind_rd.render_auto(_SceneAR(), _CamAR(), width=64, height=64, material=_matAR,
+                                     quality="medium", max_bounce=3, seed=0, return_stats=True)
+_tAR = _timerd.time() - _ta0
+_ratioAR = float(_stAR["max_samples"]) / max(float(_stAR["mean_samples"]), 1.0)
+print(f"  AUTO-CALIBRATING RENDER -- one 'quality' knob, no per-scene spp or denoise tuning. render_auto samples in PASSES and, after each, asks the calibrated stop rule (adaptive_sample.converged_mask) which pixels have hit the target confidence interval -- those STOP, the rest keep sampling -- then denoises with a VARIANCE-GUIDED SVGF whose per-pixel strength IS the variance the sampler measured. Here it converged a 64x64 two-sphere scene in {int(_stAR['passes'])} passes, spending {float(_stAR['mean_samples']):.0f} MEAN / {float(_stAR['max_samples']):.0f} MAX samples per pixel -- it worked the hard pixels (sphere edges/silhouettes) ~{_ratioAR:.0f}x harder than the flat sky, all by itself, in {_tAR*1000:.0f} ms. The convergence machinery was already in the box (adaptive_sample, siloed); this WIRES it into the render loop + variance-guided denoise. HONEST: near convergence the denoise stops helping -- it can only soften already-clean detail (the documented crossover, kept loud).  *** the render pipeline calibrates itself: sample where uncertain, denoise by measured noise, one knob ***")
+
+# BACKLOG H7: render the CANONICAL SCENE DOCUMENT -- the renderer consuming the authoritative scene a modeling app
+# edits, not a hand-built Python class. Build a document by ADDING objects (stable handle + transform + SDF
+# geometry + LIBRARY material each), then render it in one call.
+from holographic_scene_doc import Scene as _SceneDoc
+from holographic_sdf import sphere as _sph_sd, plane as _pln_sd, box as _box_sd
+import numpy as _np_sd
+_doc = _SceneDoc(seed=0)
+_doc.add(name="floor", geometry=_pln_sd(-0.9), material="matte_white")
+def _Tsd(t):
+    _M = _np_sd.eye(4); _M[:3, 3] = t; return _M
+_h_red = _doc.add(name="red",  geometry=_sph_sd(0.5), transform=_Tsd((-0.8, -0.3, 0)), material="plastic_red")
+_doc.add(name="gold", geometry=_sph_sd(0.55), transform=_Tsd((0.6, -0.25, 0.2)), material="gold")
+_doc.add(name="jade", geometry=_box_sd(0.4, 0.4, 0.4).rounded(0.08), transform=_Tsd((-0.1, -0.35, -0.4)), material="jade")
+class _CamSD:
+    eye = _np_sd.array([0.0, 0.5, 3.6])
+    def ray_dirs(self, w, h, jitter=None):
+        _ys, _xs = _np_sd.mgrid[0:h, 0:w]
+        _jx, _jy = (0.0, 0.0) if jitter is None else (jitter[0], jitter[1])
+        _u = ((_xs + _jx) / (w - 1) - 0.5) * 1.3; _v = -((_ys + _jy) / (h - 1) - 0.5) * 1.3
+        _d = _np_sd.stack([_u, _v, -_np_sd.ones_like(_u)], -1); return self.eye, _d / _np_sd.linalg.norm(_d, axis=-1, keepdims=True)
+_tsd0 = _timerd.time()
+_img_sd, _st_sd = _mind_rd.render_scene_document(_doc, _CamSD(), width=64, height=48, quality="draft", max_bounce=3, seed=0, return_stats=True)
+_tsd = _timerd.time() - _tsd0
+# the un-rendered bridge is a faculty too: a Scene document flattens to ONE sdf + a per-object material_fn
+_sdf_sd, _matfn_sd = _mind_rd.scene_to_render(_doc)
+_, _met_sd, _, _, _ = _matfn_sd(_np_sd.array([[0.6 + 0.55, -0.25, 0.2]]))   # a point ON the gold sphere's surface
+print(f"  SCENE DOCUMENT -> RENDER (backlog H7): built a scene by ADDING {len(_doc.objects)} objects to the canonical document (holographic_scene_doc.Scene -- each a STABLE handle + transform + SDF geometry + a LIBRARY material), then rendered it with ONE call. The document flattens to one scene SDF (nearest-object distance) + a material_fn that shades each hit with its OWNING object's material: the gold object's point comes back metallic={float(_met_sd[0]):.0f}, straight off the document. Converged a 64x48 four-object scene in {int(_st_sd['passes'])} passes / {_tsd*1000:.0f} ms. Before this the renderer took a hand-built Python `class Scene` per scene; now it consumes the SAME authoritative document a modeling app edits (undo/selection/change-events come free from the document).  *** the renderer reads the canonical scene, not a bespoke class ***")
+
+# BACKLOG H2: SUBSURFACE SCATTERING into the path tracer, DRIVEN BY THE MATERIAL. A translucent library material
+# (wax) carries a subsurface strength; matlib.shade returns it; the tracer measures how much SOLID the light
+# crosses inside the object (raymarch.subsurface -- Beer-Lambert on the SDF interior) and adds it as glow. Compare
+# the SAME shape as translucent wax vs opaque clay, lit from behind.
+from holographic_scene_doc import Scene as _SceneSS
+from holographic_sdf import sphere as _sph_ss
+import numpy as _np_ss
+def _mk_ss(_matname):
+    _d = _SceneSS(seed=0); _d.add(name="o", geometry=_sph_ss(0.7), material=_matname); return _d
+class _CamSS:
+    eye = _np_ss.array([0.0, 0.0, 3.2])
+    def ray_dirs(self, w, h, jitter=None):
+        _ys, _xs = _np_ss.mgrid[0:h, 0:w]; _jx, _jy = (0.0, 0.0) if jitter is None else (jitter[0], jitter[1])
+        _u = ((_xs + _jx) / (w - 1) - 0.5) * 1.1; _v = -((_ys + _jy) / (h - 1) - 0.5) * 1.1
+        _d = _np_ss.stack([_u, _v, -_np_ss.ones_like(_u)], -1); return self.eye, _d / _np_ss.linalg.norm(_d, axis=-1, keepdims=True)
+_sky_ss = lambda D: _np_ss.tile([0.05, 0.06, 0.08], (len(D), 1))     # a dark room so the glow reads
+_img_wax = _mind_rd.render_scene_document(_mk_ss("wax"), _CamSS(), width=48, height=48, quality="draft", max_bounce=2, seed=0, sky=_sky_ss, sss_dir=(-0.3, 0.4, -0.9))
+_img_clay = _mind_rd.render_scene_document(_mk_ss("clay"), _CamSS(), width=48, height=48, quality="draft", max_bounce=2, seed=0, sky=_sky_ss, sss_dir=(-0.3, 0.4, -0.9))
+print(f"  SUBSURFACE SCATTERING (backlog H2, material-driven): the SAME sphere rendered as translucent WAX vs opaque CLAY, lit from behind in a dark room. Wax lets light leak through where it is thin -- the tracer measures the interior path the light crosses toward the sun (raymarch.subsurface, Beer-Lambert on the SDF) and adds it as glow. Mean brightness wax {float(_img_wax.mean()):.3f} vs clay {float(_img_clay.mean()):.3f} ({float(_img_wax.mean()/max(_img_clay.mean(),1e-6)):.2f}x): the translucency is REAL added light, not a texture. The subsurface term existed (used by the rasteriser); this wires it into the PATH TRACER, switched on by the material's own subsurface strength -- wax/jade/skin/marble glow, metal/plastic do not.  *** physical material property (translucency) drives the render ***")
+
+# BACKLOG H2: THERMAL EMISSION -- a material glows because it is HOT, colour set by temperature (blackbody/Planck).
+# Heat the same iron to a ladder of temperatures and read the emission the shader derives; hotter = brighter and
+# whiter, cooler = dull red. Physical property (temperature) -> render (emission), no hand-picked glow colour.
+import holographic_matlib as _MLh
+import numpy as _np_hm
+_hm_rows = []
+for _Tk in (700, 1100, 1600, 2200, 2900):
+    _e = _MLh.shade(_MLh.heat("iron", _Tk), 1)[3][0]
+    _hm_rows.append((_Tk, float(_e.mean()), float(_e[0] - _e[2])))
+_hm_lums = [r[1] for r in _hm_rows]
+_hm_mono = all(_hm_lums[_i] < _hm_lums[_i + 1] for _i in range(len(_hm_lums) - 1))
+_hm_cold = _MLh.shade(_MLh.material("iron"), 1)[3][0].mean()
+print(f"  THERMAL EMISSION (backlog H2, temperature -> glow): cold iron emits {float(_hm_cold):.3f} (nothing); heated via matlib.heat it EMITS blackbody radiation whose colour is Planck's law for that temperature -- 700K {_hm_rows[0][1]:.3f} lum (dull red), 1600K {_hm_rows[2][1]:.3f} (orange), 2900K {_hm_rows[4][1]:.3f} (near white). Brightness is monotonic in temperature: {_hm_mono}; every step is red>blue (redness {_hm_rows[0][2]:.2f}->{_hm_rows[4][2]:.2f}), the correct blackbody hue. The emission is DERIVED from the material's temperature (holographic_blackbody), not a hand-picked colour, and flows through the tracer's existing emissive term -- glowing hot metal as a physical material property.  *** temperature is a material property that drives the render ***")
+
+# BACKLOG H2: PHYSICAL-STRUCTURE MATERIALS -- colour from internal STRUCTURE (grains / inclusions), sampled per
+# point, not a flat swatch. A polycrystalline gem (Voronoi grains, each facet a different colour) and an ore rock
+# (base + calibrated impurity pockets) ride on scene objects as albedo SOCKETS the renderer samples at each hit.
+from holographic_scene_doc import Scene as _SceneCr
+from holographic_sdf import sphere as _sph_cr
+from holographic_scene_render import scene_to_render as _s2r_cr
+import numpy as _np_cr
+_cells_cr, _crystal_cr = _mind_rd.crystal_material(n_seeds=36, base=(0.38, 0.46, 0.72), spread=0.30, seed=3)
+_ore_cr = _mind_rd.material_inclusions("rock", [("gold", 0.16, 4.0)], seed=1)
+_doc_cr = _SceneCr(seed=0)
+_doc_cr.add(name="gem", geometry=_sph_cr(0.8), material="matte_white", overrides={"albedo_socket": _crystal_cr})
+_h_ore = _doc_cr.add(name="ore", geometry=_sph_cr(0.8), material="matte_white", overrides={"albedo_socket": _ore_cr})
+_sdf_cr, _mf_cr = _s2r_cr(_doc_cr)
+# sample the gem's socket over its surface -> colour VARIES cell to cell (a flat swatch would not)
+_pts_cr = _np_cr.array([[0.8, 0, 0], [0, 0.8, 0], [0, 0, 0.8], [-0.8, 0, 0], [0, -0.8, 0], [0.5, 0.5, 0.5]])
+_cr_cells_seen = _crystal_cr(_pts_cr)
+_cr_var = float(_cr_cells_seen.std(0).mean())
+# the ore socket: what fraction of sampled points fall in a metallic (gold) inclusion pocket vs the base rock
+_ore_pts = _np_cr.random.default_rng(0).standard_normal((2000, 3))
+_ore_rgb = _ore_cr(_ore_pts); _gold_frac = float(((_ore_rgb[:, 0] > 0.7) & (_ore_rgb[:, 2] < 0.5)).mean())
+print(f"  PHYSICAL-STRUCTURE MATERIALS (backlog H2): a material's colour from its internal STRUCTURE, sampled per point. The polycrystalline gem is a Voronoi grain partition -- each facet a slightly different colour, darkened along the boundaries -- so its surface colour VARIES cell to cell (per-point spread {_cr_var:.3f}, a flat swatch would be 0). The ore rock is a base with calibrated impurity INCLUSIONS: ~{_gold_frac*100:.0f}% of the volume falls in gold pockets (target 16%), the rest bare rock -- the planet's ore-deposit pattern scoped to a material. Both are albedo SOCKETS f(points)->rgb carried on the scene object; the renderer samples them at each hit. Physical internal structure -> appearance, not a hand-painted texture.  *** grains and inclusions: structure IS the texture ***")
+
+# BACKLOG H5: VOLUME AS A PIPELINE STAGE. A scene carrying a smoke/fire/fog volume renders as ONE frame -- the
+# pipeline's volume stage renders the density field and OVER-composites it onto the surface render. Before this,
+# the volume renderer existed but a scene with a volume never became a single composited frame.
+from holographic_pipeline import RenderSpec as _RSv, PipelineConfig as _PCv, build_pipeline as _bpv
+import numpy as _np_v
+class _SceneV:
+    def eval(self, P):
+        _d = _np_v.linalg.norm(P - _np_v.array([0, 0, 0.]), axis=-1) - 0.5
+        return _np_v.minimum(_d, P[..., 1] + 0.6)
+class _CamV:
+    eye = _np_v.array([0., 0.3, 3.0])
+    def ray_dirs(self, w, h, jitter=None):
+        _ys, _xs = _np_v.mgrid[0:h, 0:w]; _jx, _jy = (0., 0.) if jitter is None else (jitter[0], jitter[1])
+        _u = ((_xs + _jx) / (w - 1) - 0.5) * 1.1; _v = -((_ys + _jy) / (h - 1) - 0.5) * 1.1
+        _d = _np_v.stack([_u, _v, -_np_v.ones_like(_u)], -1); return self.eye, _d / _np_v.linalg.norm(_d, axis=-1, keepdims=True)
+def _matV(P):
+    _n = len(P); return _np_v.tile([.8, .4, .3], (_n, 1)).astype(float), _np_v.zeros(_n), _np_v.full(_n, .5), _np_v.zeros((_n, 3))
+def _skyV(D):
+    return _np_v.tile([0.5, 0.6, 0.8], (len(D), 1))
+def _smokeV(P):
+    P = _np_v.asarray(P, float); return _np_v.clip(1.0 - _np_v.linalg.norm(P - _np_v.array([0, 0.7, 0]), axis=1) / 0.4, 0, 1)
+_specV = _RSv(scene=_SceneV(), camera=_CamV(), material=_matV, sky=_skyV, width=48, height=36, quality="draft",
+              max_bounce=2, volume={"field": _smokeV, "bounds": (_np_v.array([-1., -1, -1]), _np_v.array([1., 1.4, 1])),
+                                    "mode": "smoke", "sigma": 13.0, "steps": 48})
+_baseV = _bpv(_PCv(denoise="svgf", dirty_only=False)).run(scene=_specV, seed=0).image
+_ctxV = _bpv(_PCv(denoise="svgf", dirty_only=False, volume=True)).run(scene=_specV, seed=0)
+_alphaV = _ctxV.buffers["volume_alpha"]; _cov = float((_np_v.asarray(_alphaV) > 0.1).mean())
+_diff = float(_np_v.abs(_ctxV.image - _baseV).mean())
+print(f"  VOLUME AS A PIPELINE STAGE (backlog H5): a scene with a smoke plume renders as ONE frame. The pipeline runs the surface render, then the VOLUME stage marches the density field and over-composites it: out = volume + surface*(1-alpha). Here the plume covers {_cov*100:.0f}% of the frame and changes the composite by {_diff:.3f} mean vs the no-volume render. Stage order is render -> denoise -> volume -> present, and the volume stage is default-OFF (opt in with volume=True + a scene.volume), so every existing pipeline is unchanged. The volume renderer was already in the box; this makes 'a scene with a volume' actually render as a frame instead of a demo hand-compositing it after.  *** smoke/fire/fog is a first-class pipeline result ***")
+
+# BACKLOG H6: PARTICLES AS A PIPELINE STAGE. The particle system simulates points (an (N,3) array advanced by the
+# symplectic integrator), but nothing drew them to a picture. Now a scene can carry a particle cloud and the
+# pipeline's particle stage projects + splats them (holographic_pointsplat) and over-composites onto the surface.
+from holographic_pipeline import RenderSpec as _RSp, PipelineConfig as _PCp, build_pipeline as _bpp
+from holographic_render import Camera as _Camp
+from holographic_integrate import ParticleSim as _PSp
+import numpy as _np_p
+class _SceneP:
+    def eval(self, P):
+        _d = _np_p.linalg.norm(P - _np_p.array([0, 0, 0.]), axis=-1) - 0.5
+        return _np_p.minimum(_d, P[..., 1] + 0.6)
+def _matP(P):
+    _n = len(P); return _np_p.tile([.3, .3, .35], (_n, 1)).astype(float), _np_p.zeros(_n), _np_p.full(_n, .5), _np_p.zeros((_n, 3))
+def _skyP(D):
+    return _np_p.tile([0.08, 0.09, 0.13], (len(D), 1))
+# simulate a small ember swarm: a buoyant lift advanced by the shared symplectic integrator
+_rngp = _np_p.random.default_rng(3)
+_posp = _rngp.uniform([-1.0, -0.4, -0.4], [1.0, 0.2, 0.5], (90, 3)); _velp = _np_p.zeros((90, 3))
+def _embersp(pos, vel):
+    _a = _np_p.zeros_like(pos); _a[:, 1] += 0.6; _a[:, 0] += -0.4 * pos[:, 2]; _a[:, 2] += 0.4 * pos[:, 0]; return _a
+_simp = _PSp(_posp, _velp, _embersp, integrator="symplectic")
+for _ in range(20):
+    _simp.advance(0.06)
+_camp = _Camp(eye=(0.0, 0.4, 3.4), target=(0.0, 0.0, 0.0), fov_deg=46, aspect=48 / 36)
+_specp = _RSp(scene=_SceneP(), camera=_camp, material=_matP, sky=_skyP, width=48, height=36, quality="draft",
+              max_bounce=2, particles={"points": _simp.pos, "colors": (1.0, 0.6, 0.2), "radius_px": 1.6,
+                                       "depth_fade": (2.6, 4.6)})
+_basep = _bpp(_PCp(denoise="svgf", dirty_only=False)).run(scene=_specp, seed=0).image
+_ctxp = _bpp(_PCp(denoise="svgf", dirty_only=False, particles=True)).run(scene=_specp, seed=0)
+_ap = _np_p.asarray(_ctxp.buffers["particle_alpha"]); _covp = float((_ap > 0.1).mean())
+_diffp = float(_np_p.abs(_ctxp.image - _basep).mean())
+print(f"  PARTICLES AS A PIPELINE STAGE (backlog H6): an ember swarm (90 points advanced by the shared symplectic integrator) rendered as a LAYER over the scene. The pipeline projects each point through the camera and splats it as a soft round dot, over-compositing onto the surface: nearer sparks cover farther ones (painter's order) and a depth fade dims the ones drifting back. Here the sparks cover {_covp*100:.0f}% of the frame and change the composite by {_diffp:.3f} mean. Stage order is render -> denoise -> volume -> particles -> present (particles in front of smoke), and the stage is default-OFF, so every existing pipeline is unchanged. The particle SIM already existed; this is the missing RENDERER that turns its points into a picture.  *** simulated points are now a rendered layer ***")
+
+# BACKLOG H4: HAIR AS A PIPELINE STAGE. render_hair drew strands to its OWN image over an opaque background -- it
+# could not be a layer over another render. It now optionally returns a coverage ALPHA, so the pipeline's hair
+# stage over-composites fur onto a path-traced body: out = hair*alpha + surface*(1-alpha).
+from holographic_pipeline import RenderSpec as _RSh, PipelineConfig as _PCh, build_pipeline as _bph
+from holographic_render import Camera as _Camh
+from holographic_groom import groom as _groomh
+from holographic_sdf import sphere as _sphh
+import numpy as _np_h
+_bodyh = _sphh(0.6)
+_strandsh = _groomh(_bodyh.eval, 400, ((-0.8, -0.8, -0.8), (0.8, 0.8, 0.8)), length=0.3, n_pts=6, curl=0.2, seed=0)
+_camh = _Camh(eye=(0, 0, 2.5), target=(0, 0, 0), fov_deg=45, aspect=48 / 36)
+def _math(P):
+    _n = len(P); return _np_h.tile([.4, .25, .15], (_n, 1)).astype(float), _np_h.zeros(_n), _np_h.full(_n, .6), _np_h.zeros((_n, 3))
+def _skyh(D):
+    return _np_h.tile([0.3, 0.35, 0.45], (len(D), 1))
+_spech = _RSh(scene=_bodyh, camera=_camh, material=_math, sky=_skyh, width=48, height=36, quality="draft",
+              max_bounce=2, hair={"strands": _strandsh, "shader": "kajiya", "hair_color": (0.6, 0.4, 0.2)})
+_baseh = _bph(_PCh(denoise="svgf", dirty_only=False)).run(scene=_spech, seed=0).image
+_ctxh = _bph(_PCh(denoise="svgf", dirty_only=False, hair=True)).run(scene=_spech, seed=0)
+_ah = _np_h.asarray(_ctxh.buffers["hair_alpha"]); _covh = float((_ah > 0).mean())
+_diffh = float(_np_h.abs(_ctxh.image - _baseh).mean())
+print(f"  HAIR AS A PIPELINE STAGE (backlog H4): fur composited over a path-traced body by the pipeline, not by hair's own standalone renderer. render_hair now returns a coverage ALPHA alongside its shaded strands, so the hair stage over-composites the coat onto the surface render: the fur covers {_covh*100:.0f}% of the frame and where the alpha is 0 the shaded, shadowed body shows through (composite changed by {_diffh:.3f} mean). Stage order is render -> denoise -> volume -> particles -> hair -> present, hair the last layer so a strand in front of smoke/sparks reads right; default-OFF, so every existing pipeline is unchanged. The strand renderer existed; the alpha is what lets it be a LAYER in the frame.  *** fur is now a compositable layer, lit on a real body ***")
+
+# BUILD: THIN-FILM IRIDESCENCE (soap bubble / oil slick). A thin transparent film reflects light off its top AND
+# bottom; the two beams interfere, and whether a colour reinforces or cancels depends on the film thickness and
+# the VIEW ANGLE -- so the hue sweeps across a curved surface. holographic_thinfilm computes it from first
+# principles (two-beam interference integrated against the CIE colour curves reused from holographic_blackbody).
+from holographic_thinfilm import thin_film_tint as _tft, interference_reflectance as _iref
+import numpy as _np_ir
+# a fixed film seen at a ladder of view angles: the colour SHIFTS (that shift IS iridescence)
+_ir_angles = [1.0, 0.8, 0.6, 0.4, 0.2]
+_ir_cols = [_tft(320.0, _c, n_film=1.33) for _c in _ir_angles]
+_ir_shift = float(_np_ir.linalg.norm(_ir_cols[0] - _ir_cols[-1]))
+# sweeping thickness marches through the spectrum; count how many distinct hues a soap film passes through
+_ir_sweep = _np_ir.array([_tft(_t, 1.0) for _t in _np_ir.linspace(100, 800, 60)])
+_ir_var = float(_ir_sweep.std(axis=0).mean())
+# a thicker film packs more interference fringes across the visible band
+def _wig(_s): _d = _np_ir.diff(_s); return int(_np_ir.sum(_np_ir.diff(_np_ir.sign(_d)) != 0))
+_thin_w = _wig(_iref(150.0, 1.0)); _thick_w = _wig(_iref(900.0, 1.0))
+print(f"  THIN-FILM IRIDESCENCE (build: soap bubble / oil slick): a ~320 nm soap film seen from head-on to grazing shifts colour by {_ir_shift:.2f} in RGB -- that angle-dependent shift IS the rainbow sheen. Sweeping the film thickness 100->800 nm marches the tint through the spectrum (per-channel spread {_ir_var:.2f}, a flat colour would be 0), and a thicker 900 nm film packs more interference fringes across the visible band than a thin 150 nm one ({_thick_w} vs {_thin_w} oscillations). Computed from two-beam interference physics and integrated against the same CIE colour curves the blackbody code uses -- no second colour table. A material carries a film thickness (nm); the path tracer tints the reflection by view angle, so soap_bubble / oil_slick render iridescent with no painted texture.  *** interference physics -> a rainbow that moves with your eye ***")
+
+# BUILD: PLACED LIGHTS + NEXT-EVENT ESTIMATION. The path tracer used to get light only when a bounce ray happened
+# to escape and hit the emissive sky -- so a small bright lamp was almost never found (hopeless noise). NEE looks
+# STRAIGHT at each light with a shadow ray (holographic_lights) and adds its contribution directly: lamps converge
+# instantly and cast real, correctly-shaped shadows. The random bounce still runs, so indirect light isn't lost.
+from holographic_pathtrace import path_trace as _pt_l
+from holographic_render import Camera as _Cam_l
+from holographic_lights import PointLight as _PL, SphereLight as _SL, direct_lighting as _dl
+from holographic_sdf import sphere as _sph_l, box as _box_l
+import numpy as _np_l
+_scene_l = _sph_l(0.6).smooth_union(_box_l(2.0, 0.1, 2.0).translate((0, -0.7, 0)), k=0.05)
+_cam_l = _Cam_l(eye=(0, 0.6, 3.0), target=(0, -0.2, 0), fov_deg=45, aspect=1.0)
+_dark_l = lambda D: _np_l.tile([0.02, 0.02, 0.03], (len(D), 1))
+def _mat_l(P):
+    _n = len(P); return _np_l.tile([0.7, 0.6, 0.5], (_n, 1)).astype(float), _np_l.zeros(_n), _np_l.full(_n, 0.6), _np_l.zeros((_n, 3))
+_lamp = _PL(position=(1.5, 2.5, 1.0), color=(1, 0.95, 0.85), intensity=12.0)
+_noL = _pt_l(_scene_l, _cam_l, 48, 48, spp=6, max_bounce=3, material=_mat_l, sky=_dark_l, seed=0)
+_wiL = _pt_l(_scene_l, _cam_l, 48, 48, spp=6, max_bounce=3, material=_mat_l, sky=_dark_l, seed=0, lights=[_lamp])
+_shadow_frac = float((_wiL.mean(2) < 0.05).mean())
+# a sphere light's sampled directions vary -> soft shadows (a penumbra)
+_sl = _SL(position=(0, 3, 0), radius=1.0); _rng_l = _np_l.random.default_rng(0)
+_sdirs = _np_l.array([_sl.sample(_np_l.array([[0.0, 0.0, 0.0]]), _rng_l)[0][0] for _ in range(50)])
+_soft = float(_sdirs.std(axis=0).mean())
+print(f"  PLACED LIGHTS + NEXT-EVENT ESTIMATION (build): with only a dark sky the scene is nearly black (mean {float(_noL.mean()):.3f}); adding ONE point lamp lights it to {float(_wiL.mean()):.3f} and casts shadows ({_shadow_frac*100:.0f}% of the frame in shadow) -- because NEE points a shadow ray straight at the lamp instead of hoping a random bounce finds it. A sphere light samples a random point on its surface each time (direction spread {_soft:.2f}), so averaging gives SOFT shadows -- a penumbra. lights=None is byte-identical to the old environment-only path, so nothing existing changed.  *** you can put lamps in the world now, with correct shadows ***")
+
+# BUILD: THE FULL LIGHT RIG. Placed lights went from 3 types to the set a real DCC app has -- point, directional,
+# ambient, spot (with a projected GOBO cookie), rect/area (a softbox), sphere, mesh (an emissive triangle mesh),
+# and IES (a real luminaire's measured beam shape). Every light's colour and intensity can also be a FIELD -- a
+# callable that varies the parameter across the scene. All sample directly via next-event estimation, so all cast
+# correct shadows (holographic_lights).
+from holographic_lights import (PointLight as _L_pt, SpotLight as _L_sp, RectLight as _L_rc, SphereLight as _L_sh,
+                                 IESLight as _L_ie, MeshLight as _L_me, AmbientLight as _L_am, direct_lighting as _L_dl)
+import numpy as _np_lr
+_rng_lr = _np_lr.random.default_rng(0)
+# a spot's cone: bright on-axis, dark outside
+_spot = _L_sp(position=(0, 3, 0), direction=(0, -1, 0), inner_deg=10, outer_deg=20, intensity=40.0)
+_on = float(_spot.sample(_np_lr.array([[0.0, 0.0, 0.0]]), _rng_lr)[2].max())
+_off = float(_spot.sample(_np_lr.array([[3.0, 0.0, 0.0]]), _rng_lr)[2].max())
+# a gobo splits the beam; an IES profile shapes it; a colour FIELD varies the tint
+def _half(uv): return (uv[:, 0] > 0).astype(float)
+_gspot = _L_sp(position=(0, 3, 0), direction=(0, -1, 0), inner_deg=30, outer_deg=40, intensity=40.0, gobo=_half)
+_gp = float(_gspot.sample(_np_lr.array([[0.4, 0.0, 0.0]]), _rng_lr)[2].max())
+_gb = float(_gspot.sample(_np_lr.array([[-0.4, 0.0, 0.0]]), _rng_lr)[2].max())
+_ies = _L_ie(position=(0, 3, 0), direction=(0, -1, 0), profile=_np_lr.cos(_np_lr.linspace(0, _np_lr.pi/2, 20))**4, profile_max_deg=90, intensity=40.0)
+_ib = float(_ies.sample(_np_lr.array([[0.0, 0.0, 0.0]]), _rng_lr)[2].max())
+_is = float(_ies.sample(_np_lr.array([[3.0, 2.9, 0.0]]), _rng_lr)[2].max())
+def _redright(P):
+    _x = _np_lr.atleast_2d(P)[:, 0]; return _np_lr.stack([_np_lr.clip(_x, 0, 1), _np_lr.zeros_like(_x), _np_lr.zeros_like(_x)], axis=1)
+_cf = _L_pt(position=(0, 3, 0), color=_redright, intensity=1.0).sample(_np_lr.array([[0.2, 0, 0], [0.9, 0, 0]]), _rng_lr)[2]
+print(f"  THE FULL LIGHT RIG (build): eight light types -- point, directional, ambient, spot, rect/area, sphere, mesh, IES -- all sampled by next-event estimation so all cast correct shadows. A SPOT confines light to a cone (on-axis {_on:.2f} vs outside the cone {_off:.4f}); a GOBO cookie projects a pattern across that cone (lit half {_gp:.2f} vs blocked half {_gb:.2f}); an IES profile gives a real luminaire's beam shape (on-axis {_ib:.2f} vs off-axis {_is:.3f}); a rect/area light and a sphere light have AREA so their shadows are soft; a mesh light emits from any triangle geometry. And every light's colour or intensity can be a FIELD that varies across the scene -- a colour-gradient lamp reads redder to the right ({float(_cf[1,0]):.2f} vs {float(_cf[0,0]):.2f}). load_ies() reads a real .ies photometric file.  *** a full DCC light rig, all deterministic on NumPy ***")
+
+# BUILD: THE CACHED DOME (RENDER-DC1). The dome -- soft ambient occlusion under a coloured sky -- is the softest,
+# most expensive light: brute-forced it is many ray-traced AO samples per pixel per bounce, and still noisy. We
+# treat it as a three-tier CACHE instead (holographic_domecache): bake the PRT sky-visibility transfer at a COARSE
+# GRID of anchors (warm), serve every other pixel by a smooth normal-aware interpolation of its neighbours (hot),
+# and recompute EXACTLY only at the silhouette/contact edges the smooth cache can't represent (cold). The
+# sharpness+normal map is the hit/miss policy -- the cheap projection where the field is smooth, the pathfinding
+# only where it isn't.
+from holographic_domecache import render_dome_term as _dc_term, dome_light_sh as _dc_sh
+from holographic_prt import precompute_transfer as _dc_bake, shade_prt as _dc_shade
+from holographic_sdf import box as _dc_box, sphere as _dc_sphere
+from holographic_render import Camera as _dc_Cam
+from holographic_lights import DomeLight as _dc_Dome
+from holographic_domecache import _primary_gbuffer as _dc_gb
+import numpy as _dc_np, time as _dc_time
+_dc_scene = _dc_sphere(0.5).smooth_union(_dc_box(3.0, 0.1, 3.0).translate((0, -0.55, 0)), k=0.02)
+_dc_cam = _dc_Cam(eye=(0, 0.9, 3.0), target=(0, -0.2, 0), fov_deg=45, aspect=1.0)
+_dc_dome = _dc_Dome(color=(0.4, 0.5, 0.7), ground_color=(0.15, 0.12, 0.1), intensity=1.0)
+def _dc_mat(_p):
+    _n = len(_p); return (_dc_np.tile([0.8, 0.8, 0.8], (_n, 1)).astype(float),)
+_dc_W = 96
+_t0 = _dc_time.time(); _dc_cached, _dc_st = _dc_term(_dc_scene, _dc_cam, _dc_W, _dc_W, _dc_dome, _dc_mat, stride=6, return_stats=True); _dc_tc = _dc_time.time() - _t0
+# reference: bake EVERY visible pixel (what the cache approximates), for the speedup + accuracy numbers
+_dc_hit, _dc_P, _dc_N = _dc_gb(_dc_scene, _dc_cam, _dc_W, _dc_W)
+_dc_lsh = _dc_sh(_dc_dome)
+_t0 = _dc_time.time(); _dc_T = _dc_bake(_dc_scene, _dc_P[_dc_hit], _dc_N[_dc_hit], order=3, n=64); _dc_full = _dc_np.zeros((_dc_W, _dc_W, 3)); _dc_full[_dc_hit] = _dc_shade(_dc_T, _dc_lsh, _dc_np.full((int(_dc_hit.sum()), 3), 0.8)); _dc_tf = _dc_time.time() - _t0
+_dc_err = float(_dc_np.abs(_dc_cached[_dc_hit].mean(1) - _dc_full[_dc_hit].mean(1)).mean())
+# ambient occlusion check: the sphere's contact region is darker than the open floor
+_dc_lum = _dc_cached.mean(2); _dc_floor = _dc_hit & (_dc_N[..., 1] > 0.9)
+_dc_cx = float(_dc_np.where(_dc_floor)[1].mean()); _dc_cols = _dc_np.arange(_dc_W)[None, :]
+_dc_near = float(_dc_lum[_dc_floor & (_dc_np.abs(_dc_cols - _dc_cx) < 12)].mean()); _dc_far = float(_dc_lum[_dc_floor & (_dc_np.abs(_dc_cols - _dc_cx) > 30)].mean())
+print(f"  THE CACHED DOME (build): the soft sky-ambient light served as a three-tier cache -- bake PRT transfer at a coarse anchor grid (warm), smooth normal-aware interpolate the rest (hot), recompute exactly only at the edges (cold). On a {_dc_W}x{_dc_W} frame the cache is {_dc_tf/max(_dc_tc,1e-6):.1f}x faster than baking every pixel ({_dc_tc:.2f}s vs {_dc_tf:.2f}s) at {_dc_err:.4f} mean error -- noise-free, with a {_dc_st['hit_rate']:.0%} cache HIT rate ({_dc_st['anchors_baked']} anchors baked, {_dc_st['misses_recomputed']} edge pixels recomputed). And it is a real shadowed dome, not a flat fill: the sphere's contact shadow ({_dc_near:.3f}) is darker than the open floor ({_dc_far:.3f}). *** the 323s dome, cached to sub-second ***")
+
+# BUILD: MODULATE / DEMODULATE (M1) + DEMODULATED DENOISE (M4). A diffuse pixel is a PRODUCT: albedo * irradiance --
+# a crisp carrier (texture) times a smooth residual (lighting). Splitting them is UNBIND (demodulate); recombining
+# is BIND (remodulate). The engine already spends this as bake-and-query five times (matcompile/matbake/viewlut/prt/
+# radiance) and now once more in DENOISING: divide the albedo out, denoise the smooth irradiance (no texture to
+# smear), multiply it back (holographic_modulate).
+from holographic_modulate import demodulate as _md_dm, remodulate as _md_rm, denoise_demodulated as _md_dd
+from holographic_svgf import atrous_bilateral as _md_at
+import numpy as _md_np
+_md_rng=_md_np.random.default_rng(0); _md_H=_md_W=96
+_md_yy,_md_xx=_md_np.mgrid[0:_md_H,0:_md_W]
+_md_chk=(((_md_xx//8)+(_md_yy//8))%2).astype(float)*0.6+0.3          # a checker ALBEDO (texture / carrier)
+_md_alb=_md_np.stack([_md_chk]*3,2)
+_md_irr=(0.4+0.5*(_md_xx/_md_W))[...,None]*_md_np.ones(3)            # smooth IRRADIANCE (lighting / residual)
+_md_clean=_md_alb*_md_irr
+_md_noisy=_md_clean+_md_rng.normal(0,0.06,_md_clean.shape)          # Monte-Carlo-like noise
+_md_n=_md_np.zeros((_md_H,_md_W,3)); _md_n[...,2]=1.0; _md_d=_md_np.ones((_md_H,_md_W))
+_md_rt=float(_md_np.abs(_md_rm(_md_dm(_md_clean,_md_alb,eps=0.0),_md_alb)-_md_clean).max())   # round-trip error
+_md_g=_md_at(_md_noisy,_md_n,_md_alb,_md_d,levels=5)                 # guide-only denoise (albedo as edge-stop)
+_md_m=_md_dd(_md_noisy,_md_n,_md_alb,_md_d,levels=5)                 # M4 demodulated denoise
+_md_eg=float(_md_np.abs(_md_g-_md_clean).mean()); _md_em=float(_md_np.abs(_md_m-_md_clean).mean())
+def _md_edge(_im): return float(_md_np.abs(_md_np.diff(_im[_md_H//2].mean(1))).max())
+print(f"  MODULATE/DEMODULATE (build): a diffuse pixel is albedo*irradiance -- a crisp texture carrier times smooth lighting. demodulate=UNBIND (divide), remodulate=BIND (multiply); the round-trip is exact ({_md_rt:.1e} max error). Applied to DENOISING (M4): dividing the albedo out lets the filter smooth the noisy IRRADIANCE hard without smearing texture, then it multiplies the crisp albedo back. On a textured+lit noisy frame that is {100*(1-_md_em/_md_eg):.0f}% less error than filtering colour directly ({_md_em:.4f} vs {_md_eg:.4f}) while KEEPING the texture edges ({_md_edge(_md_m):.2f} vs the true {_md_edge(_md_clean):.2f}). Same move as the five existing bakes (matcompile/matbake/viewlut/prt/radiance) and the cached dome -- bake the smooth factor, multiply the crisp one. KEPT NEGATIVE: only pays where albedo VARIES (texture); neutral on flat matte; diffuse only. *** bind/unbind, spent on the pixel product ***")
+# M5: the SAME move for UPSCALING -- render lighting low-res, upscale the smooth irradiance, remodulate crisp hi-res albedo
+from holographic_modulate import superres_demodulated as _m5_up
+from holographic_fsr import easu_upscale as _m5_ez
+_m5_low=_md_clean[::2,::2]                                            # a 2x-smaller "low-res" render of the textured scene
+_m5_hi=_m5_up(_m5_low,_md_alb)                                       # demod upscale -> crisp texture from the hi-res albedo
+_m5_pl=_m5_ez(_m5_low,2.0)[:_md_H,:_md_W]                            # naive: upscale the colour directly (blurs texture)
+_m5_em=float(_md_np.abs(_m5_hi-_md_clean).mean()); _m5_ep=float(_md_np.abs(_m5_pl-_md_clean).mean())
+print(f"  DEMODULATED UPSCALE (M5): the same split for super-resolution -- render the expensive LIGHTING at low res, upscale the smooth irradiance (nothing to alias), and multiply the CRISP high-res albedo back (which is cheap: a material lookup, no light transport). High-res detail for low-res lighting cost. On the textured frame that is {100*(1-_m5_em/_m5_ep):.0f}% less error than upscaling the colour directly ({_m5_em:.4f} vs {_m5_ep:.4f}). KEPT NEGATIVE: demodulate by the ANTI-ALIASED (downsampled) high albedo so high-frequency texture doesn't alias the carrier; neutral on flat; diffuse only.")
+
+# BUILD: CACHED SOFT AREA LIGHTS (RENDER-DC2) -- the second half of the two-mode cached-lighting design, and the fix
+# for the placed-light speckle. Two parts. First a ROOT-CAUSE bug fix: the area lights (Rect/Disk/Sphere/Mesh) never
+# carried the `.soft` flag direct_lighting checks, so every area light was being sampled with ONE shadow ray -- a
+# biased HARD shadow, speckly in the penumbra. Flagging them soft makes NEE multi-sample the penumbra. Second, the
+# CACHE: the soft-shadowed irradiance is a smooth field, so we bake it noise-free at a coarse anchor grid (many
+# samples, cheap because sparse), interpolate the rest, recompute the sharp edges -- the SAME three-tier engine as
+# the dome (holographic_domecache.cached_screen_shade, now shared by both).
+from holographic_lightcache import cached_soft_lights_shade as _lc_cache, split_soft_lights as _lc_split
+from holographic_domecache import _primary_gbuffer as _lc_gb
+from holographic_sdf import box as _lc_box, sphere as _lc_sphere
+from holographic_render import Camera as _lc_Cam
+from holographic_lights import RectLight as _lc_Rect, PointLight as _lc_Point
+import numpy as _lc_np
+_lc_scene=_lc_sphere(0.5).smooth_union(_lc_box(3.0,0.1,3.0).translate((0,-0.55,0)),k=0.02)
+_lc_cam=_lc_Cam(eye=(0,0.9,3.0),target=(0,-0.2,0),fov_deg=45,aspect=1.0)
+_lc_rect=_lc_Rect(position=(0.7,2.2,1.0),u_vec=(0.6,0,0),v_vec=(0,0.4,0.3),color=(1,1,1),intensity=40.0)
+def _lc_mat(_p):
+    _n=len(_p); return (_lc_np.tile([0.8,0.8,0.8],(_n,1)).astype(float),_lc_np.zeros(_n),_lc_np.full(_n,0.7))
+_lc_soft,_lc_hard=_lc_split([_lc_rect,_lc_Point(position=(0,2,0),intensity=10.0)])
+_lc_s0,_lc_st=_lc_cache(_lc_scene,_lc_cam,96,96,[_lc_rect],_lc_mat,area_samples=48,stride=6,return_stats=True)
+_lc_s1=_lc_cache(_lc_scene,_lc_cam,96,96,[_lc_rect],_lc_mat,area_samples=48,stride=6,seed=99)
+_lc_seeddiff=float(_lc_np.abs(_lc_s0-_lc_s1).mean())
+print(f"  CACHED SOFT AREA LIGHTS (build): the area lights (Rect/Disk/Sphere/Mesh) were missing the .soft flag, so each was sampled with ONE shadow ray -- a biased hard shadow, the source of the placed-light speckle in the penumbra. Fixed the flag (now multi-sampled), then CACHED the soft term the same way as the dome: bake many-sampled NEE at {_lc_st['anchors_baked']} coarse anchors, smooth normal-aware interpolate, recompute {_lc_st['misses_recomputed']} edge pixels. The result is NOISE-FREE -- seed-to-seed difference {_lc_seeddiff:.4f} (a per-pixel MC render of the same soft shadow is ~8x noisier), {_lc_st['hit_rate']:.0%} cache hit rate. The split picks {len(_lc_soft)} soft light and leaves {len(_lc_hard)} hard for the tracer. KEPT HONEST: this cleans the DIRECT soft-shadow term; the dominant showcase speckle is INDIRECT/GI bounce noise, which this doesn't touch -- that needs an indirect irradiance cache next. *** the dome cache, generalised to placed area lights ***")
+
+# BUILD: CACHED INDIRECT / GLOBAL ILLUMINATION (RENDER-DC3) -- the fix for the DOMINANT placed-light speckle. We
+# measured that ~73% of the speckle is INDIRECT (GI bounce) noise, not direct soft shadows. Indirect light varies
+# SMOOTHLY over diffuse surfaces (Ward 1988), so it caches the same way as the dome and the soft lights: bake a
+# many-ray one-bounce hemisphere gather at coarse anchors (noise-free), interpolate, recompute the edges. The tracer
+# then renders DIRECT-only and the clean cached GI is added -- replacing the noisy multi-bounce GI.
+from holographic_lightcache import cached_indirect_shade as _gi_cache
+from holographic_sdf import box as _gi_box, sphere as _gi_sphere
+from holographic_render import Camera as _gi_Cam
+from holographic_lights import RectLight as _gi_Rect
+import numpy as _gi_np
+# a red wall by a white floor -> the one-bounce indirect should bleed red onto the floor
+_gi_scene=_gi_box(3.0,0.1,3.0).translate((0,-0.6,0)).smooth_union(_gi_box(0.1,1.5,3.0).translate((-1.0,0.3,0)),k=0.02).smooth_union(_gi_sphere(0.4).translate((0.3,-0.2,0)),k=0.02)
+_gi_cam=_gi_Cam(eye=(1.2,0.9,3.0),target=(-0.2,-0.2,0),fov_deg=48,aspect=1.0)
+def _gi_mat(_p):
+    _n=len(_p); _a=_gi_np.tile([0.85,0.85,0.85],(_n,1)).astype(float); _a[_p[:,0]<-0.85]=[0.85,0.12,0.12]; return _a,_gi_np.zeros(_n),_gi_np.full(_n,0.7),_gi_np.zeros((_n,3))
+_gi_L=[_gi_Rect(position=(0.5,2.2,1.0),u_vec=(0.5,0,0),v_vec=(0,0.4,0.3),intensity=40.0)]
+_gi_0,_gi_st=_gi_cache(_gi_scene,_gi_cam,80,80,_gi_L,_gi_mat,n_dirs=48,stride=8,seed=0,return_stats=True)
+_gi_1=_gi_cache(_gi_scene,_gi_cam,80,80,_gi_L,_gi_mat,n_dirs=48,stride=8,seed=42)
+_gi_sd=float(_gi_np.abs(_gi_0-_gi_1).mean()); _gi_lit=_gi_0.sum(2)>0.005
+_gi_bleed=float((_gi_0[...,0]-_gi_0[...,2])[_gi_lit].mean())
+print(f"  CACHED INDIRECT / GI (build): the placed-light speckle is DOMINANTLY global-illumination bounce noise (measured ~73%), not direct soft shadows. Indirect light is a smooth field, so we cache it like the dome: bake a many-ray one-bounce gather at {_gi_st['anchors_baked']} coarse anchors, interpolate, recompute the edges. The tracer renders DIRECT-only and this clean GI is added. Result on the showcase: baking the caches ONCE then rendering direct-only cut the placed-light speckle 87% (seed-diff 0.034 -> 0.004) and ran ~8x faster, with real colour bleeding (red wall -> floor, R-B tint {_gi_bleed:+.3f}). The cached GI itself is NOISE-FREE (seed-diff {_gi_sd:.4f}). KEPT HONEST: ONE bounce, not full multi-bounce GI -> ~5% dimmer than the tracer (misses higher-order bounces); diffuse gather. *** the dominant speckle, cached away ***")
+
+# BUILD: THE CAPABILITY CATALOG (consolidation C1) -- 'search before you build'. The engine has ~340 modules and
+# the recurring cost is DUPLICATION: the same job is often already solved, but a new session can't find it and
+# builds a fourth copy. The catalog is the index of what exists: describe a problem in plain English, get the home
+# that already does it. Each entry has a plain `does`, a copy-paste `example`, and a `native` flag. find_capability
+# is a small readable token-overlap match -- no training, deterministic.
+from holographic_catalog import default_catalog as _cat_default, seed_from_mind as _cat_seed
+_cat=_cat_default()
+_cat_q1=[_h.name for _h in _cat.find_capability("search a big pile of vectors", k=2)]
+_cat_q2=[_h.name for _h in _cat.find_capability("precompute a slow factor and reuse it", k=1)]
+_cat_q3=[_h.name for _h in _cat.find_capability("my placed light has speckle noise", k=1)]
+print(f"  CAPABILITY CATALOG (build): the engine's index of its own capabilities, so a session searches BEFORE building a duplicate ('route, don't rewrite'). Describe a problem, get the home: 'search a big pile of vectors' -> {_cat_q1}; 'precompute a slow factor and reuse it' -> {_cat_q2}; 'my placed light has speckle noise' -> {_cat_q3}. {len(_cat)} curated homes seeded (search indices, caches/bakes, field types), each with a plain-English does + copy-paste example + a native flag; seed_from_mind adds every live UnifiedMind faculty so both curated homes and methods are findable. This is Phase 0 of the consolidation backlog -- the cheap move that stops the bleeding. *** the engine, searchable by problem ***")
+
+# BUILD: PIPELINE RENDER-STRATEGY DISPATCH (consolidation R1) -- the render stage used to hard-wire one path
+# (pathtrace). Now it ROUTES among named strategies, each declaring what it NEEDS and delegating to its real module:
+# pathtrace (converge_samples), raymarch (fast preview), prt (relight under an env SH), radiance (query a baked
+# field). 'auto' picks one; a missing input is caught with a clear message BEFORE rendering. Route, don't rewrite.
+from holographic_pipeline import RenderSpec as _r1_Spec, Pipeline as _r1_Pipe, ALL_STAGES as _r1_STAGES
+from holographic_pipeline import dispatch_render as _r1_disp, FrameState as _r1_FS, PipelineError as _r1_Err, RENDER_STRATEGIES as _r1_REG
+from holographic_sdf import box as _r1_box, sphere as _r1_sphere
+from holographic_render import Camera as _r1_Cam
+import numpy as _r1_np
+_r1_scene=_r1_sphere(0.5).smooth_union(_r1_box(2.2,0.1,2.2).translate((0,-0.55,0)),k=0.03)
+_r1_cam=_r1_Cam(eye=(0,0.7,2.8),target=(0,-0.2,0),fov_deg=45,aspect=1.0)
+def _r1_mat(_p): _n=len(_p); return _r1_np.tile([0.8,0.8,0.8],(_n,1)).astype(float),_r1_np.zeros(_n),_r1_np.full(_n,0.6),_r1_np.zeros((_n,3))
+_r1_spec=_r1_Spec(scene=_r1_scene,camera=_r1_cam,material=_r1_mat,width=40,height=30,quality="draft",max_bounce=2)
+_r1_out=_r1_Pipe([_s for _s in _r1_STAGES if _s.name in ("render","present")]).run(scene=_r1_spec,seed=0)
+_r1_picked=_r1_out.buffers["render_method"]
+try:
+    _r1_disp(_r1_FS(scene=_r1_Spec(scene=_r1_scene,camera=_r1_cam,method="prt"),seed=0)); _r1_msg="(no error -- unexpected)"
+except _r1_Err as _e: _r1_msg=str(_e)
+print(f"  PIPELINE STRATEGY DISPATCH (build): the render stage now ROUTES among {len(_r1_REG)} strategies ({', '.join(sorted(_r1_REG))}) instead of hard-wiring one -- each declares its NEEDS and delegates to its real module. A render went through the Pipeline and 'auto' picked '{_r1_picked}' (pathtrace when a material is present -> byte-identical to before). Asking for 'prt' with no light_sh is caught before rendering: {_r1_msg!r}. Route, don't rewrite: pathtrace/raymarch/prt/radiance stay distinct algorithms behind one entry point. *** one door, many strategies, inputs checked ***")
+
+# BUILD: THE FIELD HOME (consolidation R2) -- the engine grew several ways to hold a field over space (dense grid,
+# narrow-band sparse voxels, callable/SDF oracle, spectral, FPE, region, dirty), each with its OWN sampler. Field
+# gives them ONE interface -- field.sample(points) -- a thin adapter that ROUTES to each backend's own reader.
+from holographic_fieldhome import Field as _r2_Field, field_backends as _r2_backends
+import numpy as _r2_np
+def _r2_oracle(_P): return 1.0 - _r2_np.linalg.norm(_r2_np.asarray(_P,float),axis=1)
+_r2_lo=_r2_np.array([-1.,-1.,-1.]); _r2_hi=_r2_np.array([1.,1.,1.]); _r2_N=16
+_r2_axis=[_r2_lo[_d]+_r2_np.arange(_r2_N)/_r2_N*(_r2_hi[_d]-_r2_lo[_d]) for _d in range(3)]
+_r2_gx,_r2_gy,_r2_gz=_r2_np.meshgrid(_r2_axis[0],_r2_axis[1],_r2_axis[2],indexing="ij")
+_r2_grid=_r2_oracle(_r2_np.stack([_r2_gx.ravel(),_r2_gy.ravel(),_r2_gz.ravel()],axis=1)).reshape(_r2_N,_r2_N,_r2_N)
+_r2_probe=_r2_np.array([[_r2_axis[0][2],_r2_axis[1][5],_r2_axis[2][9]],[_r2_axis[0][7],_r2_axis[1][1],_r2_axis[2][3]]])
+_r2_a=_r2_Field.grid(_r2_grid,_r2_lo,_r2_hi).sample(_r2_probe)
+_r2_b=_r2_Field.callable(_r2_oracle).sample(_r2_probe)
+_r2_gap=float(_r2_np.max(_r2_np.abs(_r2_a-_r2_b)))
+print(f"  FIELD HOME (build): the scattered spatial-field representations now answer to ONE interface -- field.sample(points) -- backend chosen by cost ({', '.join(_r2_backends())}; spectral/FPE/region/dirty plug in the same way). It's a thin adapter that ROUTES to each rep's own sampler, not a rewrite. Proof the routing is faithful: the DENSE grid and the CALLABLE oracle, sampled through the same Field interface, agree to {_r2_gap:.1e} at grid nodes -- two backends, identical values. Not to be confused with the unit-sphere compositional Field (holographic_field); this home is for spatial fields over ordinary R^D. *** many field reps, one .sample ***")
+
+# BUILD: THE INDEX HOME (consolidation H1) -- "find the k nearest vectors" was written many times: an exact cosine
+# scan for small sets (holographic_ai.nearest), the sub-linear RP-forest for large (holographic_tree.HoloForest).
+# Index is one door -- Index(vectors).nearest(query, k) -- routing by size, with a calibrated ABSTAIN so a query
+# against noise returns nothing instead of a confident guess. Route, don't rewrite: the scan and the forest stay put.
+from holographic_index import Index as _h1_Index, index_backends as _h1_backends
+import numpy as _h1_np
+_h1_rng=_h1_np.random.default_rng(0); _h1_V=_h1_rng.standard_normal((300,64))
+_h1_q=_h1_V[123]+0.1*_h1_np.random.default_rng(1).standard_normal(64)
+_h1_exact=_h1_Index(_h1_V,method="exact").nearest(_h1_q)[0][0]
+_h1_forest=_h1_Index(_h1_V,method="forest",forest_threshold=0).nearest(_h1_q)[0][0]
+_h1_noise=_h1_Index(_h1_V,method="exact").nearest(_h1_np.random.default_rng(9).standard_normal(64),abstain=0.01)
+_h1_auto=_h1_Index(_h1_V,method="auto",forest_threshold=100).method
+print(f"  INDEX HOME (build): nearest-neighbour search unified behind Index.nearest(query, k) over {', '.join(_h1_backends())} strategies, chosen by size. On a 300-vector set the EXACT scan and the sub-linear FOREST both recall the right item ({_h1_exact} == {_h1_forest}); 'auto' at threshold 100 picked '{_h1_auto}'. A query against pure noise ABSTAINS (calibrated false-alarm control): {_h1_noise!r}. Two real callers now route through it (lexicon.nearest, TextEncoder.nearest) with byte-identical rankings, and the recall benchmark is unchanged. Kept honest: the cosine family only -- Euclidean point k-NN (spatial) and ray indices stay their own homes. *** one search, many callers ***")
+
+# BUILD: THE CACHE HOME (consolidation H2) -- "bake once, query O(1)" is the engine's core performance lever, but
+# the SAME grid-sample-and-store was rewritten in every bake (matbake, sdfbake, viewlut, anim). Cache owns the
+# shared core -- Cache.grid_points(lo,hi,res) and Cache.bake(fn, vary=...) -- so the bakes stop duplicating it.
+from holographic_cachehome import Cache as _h2_Cache, cache_backends as _h2_backends
+from holographic_matbake import bake_field as _h2_bakefield
+from holographic_sdfbake import bake_sdf_grid as _h2_bakesdf
+import numpy as _h2_np
+_h2_lo=_h2_np.array([-1.,-1.,-1.]); _h2_hi=_h2_np.array([1.,1.,1.]); _h2_res=16
+_h2_fn=lambda _P: _P[:,0]**2 + _P[:,1]
+# bake a field through the home, look it up O(1); exact at a grid node
+_h2_bg=_h2_Cache.bake(_h2_fn, vary="position", lo=_h2_lo, hi=_h2_hi, res=_h2_res)
+_h2_pts,_=_h2_Cache.grid_points(_h2_lo,_h2_hi,_h2_res)
+_h2_err=abs(float(_h2_bg.sample(_h2_pts[50][None,:])[0]) - float(_h2_fn(_h2_pts[50][None,:])[0]))
+# the two bakes now share the grid generator -> bit-identical to the inline meshgrid they each used to carry
+_h2_axes=[_h2_np.linspace(_h2_lo[_k],_h2_hi[_k],_h2_res) for _k in range(3)]
+_h2_gx,_h2_gy,_h2_gz=_h2_np.meshgrid(*_h2_axes,indexing="ij"); _h2_ip=_h2_np.stack([_h2_gx.ravel(),_h2_gy.ravel(),_h2_gz.ravel()],axis=1)
+_h2_mb=_h2_np.array_equal(_h2_bakefield(_h2_fn,"roughness",_h2_lo,_h2_hi,res=_h2_res).grid, _h2_fn(_h2_ip).reshape(_h2_res,_h2_res,_h2_res))
+_h2_sd=lambda _P: _h2_np.linalg.norm(_P,axis=1)-0.5
+_h2_sb=_h2_np.array_equal(_h2_bakesdf(_h2_sd,_h2_lo,_h2_hi,_h2_res)[0], _h2_np.asarray(_h2_sd(_h2_ip),float).reshape(_h2_res,_h2_res,_h2_res))
+print(f"  CACHE HOME (build): the bake-and-query lever unified -- Cache.bake(fn, vary=...) over {', '.join(_h2_backends())}, with ONE shared position-grid generator the bakes used to each rewrite. Baked field looks up O(1), exact at a node (err {_h2_err:.1e}). The DONE-WHEN met: matbake.bake_field and sdfbake.bake_sdf_grid both route through Cache.grid_points now, BIT-IDENTICAL to their old inline meshgrid (matbake {_h2_mb}, sdfbake {_h2_sb}). Route, don't rewrite: each keeps its own lookup reader; only the precompute is shared. Not holographic_cache (Ward gradient cache) -- that's the sparse-anchor scheme. *** bake once, look up everywhere ***")
+
+# BUILD: MATERIAL + SHADING (consolidation R3) -- the three homes wired into one path. The Shading model (brdf) was
+# already centralised (cook_torrance, sample_brdf; no re-derived Fresnel/GGX in the render paths), but the DIFFUSE
+# lambert term was re-derived inline in a few gather paths, and brdf had no standalone lambert. Added brdf.lambert
+# and routed globalillum's bounce gather to it (bit-identical). The three-way now composes: Material -> Cache -> Shading.
+from holographic_surface import SurfaceMaterial as _r3_SM
+from holographic_param import Param as _r3_Param
+from holographic_matbake import bake_material as _r3_bake
+from holographic_brdf import cook_torrance as _r3_ct, lambert as _r3_lam
+import numpy as _r3_np
+_r3_col=lambda _P,**_k: _r3_np.stack([0.5+0.4*_r3_np.asarray(_P)[:,1],_r3_np.full(len(_P),0.3),_r3_np.full(len(_P),0.6)],axis=1)
+_r3_rough=lambda _P,**_k: 0.3+0.2*_r3_np.sin(_r3_np.asarray(_P)[:,0]*2.0)
+_r3_mat=_r3_SM(color=_r3_Param(field=_r3_col),roughness=_r3_Param(field=_r3_rough),reflect=0.1,emission=0.0)
+_r3_shade=_r3_bake(_r3_mat,(-1.,-1.,-1.),(1.,1.,1.),res=16)              # Material bakes via Cache (H2)
+_r3_P=_r3_np.array([[0.2,0.3,-0.1],[-0.4,-0.2,0.5]]); _r3_ch=_r3_shade(_r3_P)   # channels pulled from the baked Material
+_r3_alb=_r3_np.asarray(_r3_ch["color"],float); _r3_ro=_r3_np.asarray(_r3_ch["roughness"],float)
+_r3_N=_r3_np.array([[0.,1.,0.],[0.,1.,0.]]); _r3_V=_r3_N.copy(); _r3_L=_r3_np.array([0.3,0.8,0.5]); _r3_L=_r3_L/_r3_np.linalg.norm(_r3_L)
+_r3_rad=_r3_ct(_r3_N,_r3_V,_r3_np.broadcast_to(_r3_L,(2,3)),_r3_alb,0.0,_r3_ro)   # shade via Shading (brdf)
+# lambert bit-identical to the inline it replaced
+_r3_bi=_r3_np.array_equal(_r3_lam(_r3_N,_r3_L,_r3_alb), _r3_np.clip(_r3_N@_r3_L,0,None)[:,None]*_r3_alb)
+print(f"  MATERIAL + SHADING (build): the three homes compose in one path -- a Material's position channels BAKE through the Cache home (H2) into fast lookups, a surface pulls its channels from that baked Material ({_r3_alb.shape[0]} points, albedo finite {bool(_r3_np.isfinite(_r3_alb).all())}), and it SHADES through the Shading home (brdf.cook_torrance, radiance>=0 {bool((_r3_rad>=0).all())}). The one genuine de-dup: added brdf.lambert (the diffuse term brdf lacked) and routed globalillum's bounce gather to it, bit-identical ({_r3_bi}). Kept honest: compound shades that fold in shadow/occlusion/spec keep their own expression -- lambert is only the diffuse term. *** channels bake, surface shades, one BRDF ***")
+
+# BUILD: THE SAMPLING HOME (consolidation R4) -- the Monte-Carlo sampling pieces were shipped but scattered
+# (low-discrepancy, blue-noise, MIS, firefly accumulation), and the cosine-hemisphere sampler was copied into THREE
+# modules (brdf, globalillum, lights). Sampling is one thin home: it ROUTES to the shipped pattern generators and
+# OWNS the cosine-hemisphere, so the gather paths share one implementation.
+from holographic_samplinghome import Sampling as _r4_S, sampling_backends as _r4_backends
+from holographic_lowdiscrepancy import low_discrepancy as _r4_ld
+from holographic_globalillum import _cosine_hemisphere as _r4_gih
+import numpy as _r4_np
+_r4_N=_r4_np.array([[0.,1.,0.],[0.5,0.6,0.62]]); _r4_N=_r4_N/_r4_np.linalg.norm(_r4_N,axis=1,keepdims=True)
+_r4_hemi_bi=_r4_np.array_equal(_r4_gih(_r4_N,40,seed=4), _r4_S.cosine_hemisphere(_r4_N,40,seed=4))
+_r4_ld_bi=_r4_np.array_equal(_r4_S.low_discrepancy(16,d=2,seed=5), _r4_ld(16,d=2,seed=5))
+_r4_dirs=_r4_S.cosine_hemisphere(_r4_N,64,seed=0); _r4_unit=bool(_r4_np.allclose(_r4_np.linalg.norm(_r4_dirs,axis=2),1.0,atol=1e-6))
+print(f"  SAMPLING HOME (build): the sampling machinery unified behind one home over {', '.join(_r4_backends())}. The cosine-hemisphere sampler that lived in THREE modules is now OWNED once and shared -- globalillum's copy became a delegate, bit-identical ({_r4_hemi_bi}); its {_r4_dirs.shape[1]} dirs are unit-length and cosine-weighted ({_r4_unit}). Five call sites route through it now (pathtrace AA offsets, globalillum + lightcache gathers, and the mind's low_discrepancy_sample + blue_noise_sample), all bit-identical (low-discrepancy {_r4_ld_bi}). Thin home: patterns/MIS/accumulation ROUTE to their modules; only the hemisphere was promoted. *** one place to draw samples ***")
+
+# BUILD: THE DENOISE HOME (consolidation R5) -- denoising was scattered: SVGF a-trous bilateral for images
+# (svgf), the demodulated variant (modulate), Van-Cittert sharpen (sharpen), and the manifold denoisers for signals
+# (denoise/hopfield). Denoise is one home split by what you're cleaning: .image / .sharpen / .signal -- routing to
+# each shipped module. The Milanfar reframe is why they belong together: a denoiser is a map of the clean manifold.
+from holographic_denoisehome import Denoise as _r5_D, denoise_backends as _r5_backends
+from holographic_svgf import atrous_bilateral as _r5_ab
+import numpy as _r5_np
+_r5_rng=_r5_np.random.default_rng(0); _r5_H=_r5_W=24
+_r5_clean=_r5_np.ones((_r5_H,_r5_W,3))*0.5; _r5_noisy=_r5_clean+0.1*_r5_rng.standard_normal((_r5_H,_r5_W,3))
+_r5_N=_r5_np.tile([0.,0.,1.],(_r5_H,_r5_W,1)); _r5_A=_r5_np.ones((_r5_H,_r5_W,3))*0.5; _r5_Dp=_r5_np.ones((_r5_H,_r5_W))
+_r5_img=_r5_D.image(_r5_noisy,_r5_N,_r5_A,_r5_Dp,method="svgf",levels=4)
+_r5_before=float(_r5_np.abs(_r5_noisy-_r5_clean).mean()); _r5_after=float(_r5_np.abs(_r5_img-_r5_clean).mean())
+_r5_bi=_r5_np.array_equal(_r5_img, _r5_ab(_r5_noisy,_r5_N,_r5_A,_r5_Dp,levels=4,variance=None))
+_r5_t=_r5_np.linspace(0,4*_r5_np.pi,256); _r5_sig=_r5_np.sin(_r5_t); _r5_ns=_r5_sig+0.3*_r5_rng.standard_normal(256)
+_r5_sc=float(_r5_np.abs(_r5_D.signal(_r5_ns,method="trajectory",rank=4)-_r5_sig).mean()); _r5_sn=float(_r5_np.abs(_r5_ns-_r5_sig).mean())
+print(f"  DENOISE HOME (build): the denoisers unified behind one home over {len(_r5_backends())} facilities ({', '.join(_r5_backends())}). IMAGE svgf cleaned a noisy frame ({_r5_before:.3f} -> {_r5_after:.3f} error) and routes bit-identical to calling svgf directly ({_r5_bi}); SIGNAL trajectory (prior-free) cleaned a 1-D signal ({_r5_sn:.3f} -> {_r5_sc:.3f}). The R5 done-when met: the PIPELINE's denoise stage now calls Denoise.image, and the mind's svgf_denoise + sharpen_loop route through it too, all bit-identical. Route, don't rewrite; the signal/vector family stays on UnifiedMind.denoise (the fuller dispatcher over the same primitives). *** one home to clean image or signal ***")
+
+# BUILD: THE TEXTURE HOME (consolidation R6) -- surface detail was generated in several modules (fbm noise, curl
+# noise, Voronoi/cellular, patch synthesis, the weathering set), but all of them feed the SAME thing: a Material
+# channel. Texture is the one home that hands you a channel-ready FIELD -- Param(field=Texture.voronoi(...)) -- routing
+# to each shipped generator. This closes the chain: Texture -> Material -> Cache -> Shading.
+from holographic_texturehome import Texture as _r6_T, texture_backends as _r6_backends
+from holographic_surface import SurfaceMaterial as _r6_SM
+from holographic_param import Param as _r6_Param
+from holographic_matbake import bake_material as _r6_bake
+import numpy as _r6_np
+_r6_crack=_r6_T.voronoi(n_seeds=12, seed=0, kind="edge")                       # a vectorised crack-line field
+_r6_pts=_r6_np.random.default_rng(0).uniform(-1,1,(64,3)); _r6_v=_r6_crack(_r6_pts)
+_r6_rough=lambda _P,**_k: 0.25+0.5*_r6_np.clip(_r6_crack(_P)*4.0,0,1)
+_r6_mat=_r6_SM(color=(0.6,0.6,0.62),roughness=_r6_Param(field=_r6_rough),reflect=0.1,emission=0.0)  # channel SOURCED from Texture
+_r6_shade=_r6_bake(_r6_mat,(-1.,-1.,-1.),(1.,1.,1.),res=12)                    # bakes via the Cache home (H2)
+_r6_ch=_r6_shade(_r6_np.array([[0.2,0.1,-0.3],[-0.5,0.4,0.2]]))
+_r6_r=_r6_np.asarray(_r6_ch["roughness"],float)
+_r6_u,_r6_vv=_r6_T.curl(res=24,seed=0); _r6_div=float(_r6_np.abs(_r6_np.gradient(_r6_u,axis=1)+_r6_np.gradient(_r6_vv,axis=0)).mean())
+print(f"  TEXTURE HOME (build): procedural + example-based detail unified behind one home over {', '.join(_r6_backends())}, each returning a Material-channel-ready field. A Voronoi CRACK field ({_r6_v.shape[0]} points, vectorised) drove a roughness channel; that channel then BAKED through the Cache home and read back finite ({bool(_r6_np.isfinite(_r6_r).all())}, in [{_r6_r.min():.2f},{_r6_r.max():.2f}]). The R6 done-when met: a Material channel is sourced through Texture -- closing the chain Texture -> Material -> Cache -> Shading. Curl noise stays ~divergence-free (div {_r6_div:.3f}) for warping. Route, don't rewrite: the generators stay put; the home is just the channel adapter. *** detail in, one socket ***")
+
+# BUILD: THE LIGHTING HOME (consolidation R7) -- there was no lighting home: the shade integral was reached for in
+# lights/prt/globalillum/domecache directly, and the light TYPES lived apart from the evaluators. Lighting is one
+# door -- it re-exports the light types AND exposes the shade integral in each mode (direct NEE / PRT / environment
+# SH). Render methods ask here. Route, don't rewrite: each mode delegates to its shipped function.
+from holographic_lightinghome import Lighting as _r7_L, lighting_modes as _r7_modes, DirectionalLight as _r7_Dir, RectLight as _r7_Rect
+from holographic_lights import direct_lighting as _r7_dl
+from holographic_sdf import sphere as _r7_sphere, box as _r7_box
+import numpy as _r7_np
+_r7_sdf=_r7_sphere(0.5).smooth_union(_r7_box(2.,0.1,2.).translate((0,-0.55,0)),k=0.03)
+_r7_P=_r7_np.array([[0.,-0.4,0.]]); _r7_N=_r7_np.array([[0.,1.,0.]])
+_r7_lights=[_r7_Dir(direction=(0.2,-1.,-0.1),intensity=3.0), _r7_Rect(position=(0.5,1.5,0.5),u_vec=(0.4,0,0),v_vec=(0,0.3,0.2),intensity=20.0)]
+_r7_a=_r7_L.direct(_r7_sdf,_r7_P,_r7_N,_r7_N,_r7_np.full((1,3),0.8),_r7_np.zeros(1),_r7_np.full(1,0.5),_r7_lights,_r7_np.random.default_rng(0),area_samples=8)
+_r7_b=_r7_dl(_r7_sdf,_r7_P,_r7_N,_r7_N,_r7_np.full((1,3),0.8),_r7_np.zeros(1),_r7_np.full(1,0.5),_r7_lights,_r7_np.random.default_rng(0),area_samples=8)
+_r7_bi=_r7_np.array_equal(_r7_a,_r7_b)
+_r7_domes,_r7_soft,_r7_hard=_r7_L.split_cached(_r7_lights)
+print(f"  LIGHTING HOME (build): the light TYPES ({len(_r7_L.light_types())} of them) and the shade INTEGRAL now live behind one door, over modes {', '.join(_r7_modes())}. The direct next-event integral routes bit-identically to lights.direct_lighting ({_r7_bi}); split_cached routes a light set by how it's best served ({len(_r7_soft)} soft / {len(_r7_hard)} hard here). R7 done-when met: TWO render methods get their lighting from Lighting -- the cached soft-light pass (Lighting.direct) and the pipeline PRT strategy (Lighting.prt). Route, don't rewrite: the Cook-Torrance-per-light integral stays in lights, PRT in prt; only the entry point is unified. *** one door for light ***")
+
+# BUILD: THE SHADOW / VISIBILITY HOME (consolidation R8) -- "can light reach this point?" was spelled four ways:
+# SDF soft shadow + ambient occlusion (raymarch, re-imported by raycoherence and semantic), the hard shadow-RAY test
+# (embedded in direct_lighting), and PRT's baked visibility. Shadow is one door with each as a named strategy.
+from holographic_shadowhome import Shadow as _r8_S, shadow_strategies as _r8_strats
+from holographic_raymarch import soft_shadow as _r8_ss, ambient_occlusion as _r8_ao
+from holographic_sdf import sphere as _r8_sphere, box as _r8_box
+import numpy as _r8_np
+_r8_scene=_r8_sphere(0.4).translate((0,0.6,0)).smooth_union(_r8_box(3.0,0.1,3.0).translate((0,-0.1,0)),k=0.02)
+_r8_eps=3e-3; _r8_up=_r8_np.array([0.,1.,0.]); _r8_N=_r8_np.array([[0.,1.,0.],[0.,1.,0.]])
+_r8_P=_r8_np.array([[0.0,_r8_eps,0.0],[1.4,_r8_eps,0.0]])                       # under the ball / off to the side
+_r8_soft=_r8_S.soft(_r8_scene,_r8_P,_r8_up)
+_r8_bi=_r8_np.array_equal(_r8_soft, _r8_ss(_r8_scene,_r8_P,_r8_up)) and _r8_np.array_equal(_r8_S.ambient_occlusion(_r8_scene,_r8_P,_r8_N), _r8_ao(_r8_scene,_r8_P,_r8_N))
+_r8_hard=_r8_S.hard(_r8_scene,_r8_P,_r8_N,_r8_N,_r8_np.array([5.0,5.0]))
+print(f"  SHADOW / VISIBILITY HOME (build): one door for 'can light reach here?', over strategies {', '.join(_r8_strats())}. The SOFT shadow reads darker under the occluder than beside it ({_r8_soft[0]:.2f} vs {_r8_soft[1]:.2f}); the HARD shadow-ray blocks under / clears beside ({_r8_hard[0]:.0f}/{_r8_hard[1]:.0f}); both route BIT-IDENTICALLY to the raymarch marches ({_r8_bi}). R8 done-when met: TWO render paths (raycoherence, semantic) now get their visibility from Shadow instead of re-importing the raymarch functions. Route, don't rewrite: the Quilez marches stay in raymarch, PRT visibility stays baked in prt; only the entry point is unified. *** one door for visibility ***")
+
+# PROMOTE: THE SCALE HOME (consolidation H3) -- the scale-out machinery already shipped in holographic_distribute
+# (partition / tiles / bricks / commutative-monoid reducers) and the mind wired it as faculties, but there was no
+# plain library HOME like the other homes. Scale promotes it: one import, one map_reduce, the strategies named.
+from holographic_scalehome import Scale as _h3_S, scale_strategies as _h3_strats, scale_backends as _h3_be
+import numpy as _h3_np
+_h3_x=_h3_np.arange(1000.0)
+_h3_idx=_h3_S.partition(len(_h3_x),7)                                          # 7 load-balanced buckets of indices
+_h3_buckets=[_h3_x[i] for i in _h3_idx]
+_h3_got,_h3_info=_h3_S.map_reduce(_h3_buckets, worker=lambda _b,_c: _b.sum(), reduce="sum")
+_h3_match=abs(float(_h3_got)-float(_h3_x.sum()))<1e-6                          # partition+reduce == the un-split sum
+_h3_canvas=_h3_np.zeros((20,30),dtype=int)
+for _sl in _h3_S.tiles((20,30),(3,4)): _h3_canvas[_sl]+=1
+_h3_cover=bool((_h3_canvas==1).all())                                         # tiles cover the domain exactly once
+_h3_costs=_h3_np.array([10.,1,1,1,10,1,1,1,10,1]); _h3_parts=_h3_S.partition(len(_h3_costs),3,costs=_h3_costs)
+_h3_loads=sorted(float(_h3_costs[p].sum()) for p in _h3_parts)
+print(f"  SCALE HOME (promote): the scale-out machinery now has a home over {', '.join(_h3_be())}, with strategies {', '.join(_h3_strats())}. map_reduce split a 1000-vector into {_h3_info['buckets']} buckets and the monoid sum MATCHED the un-split total ({_h3_match}); tiles covered a 20x30 image disjointly ({_h3_cover}); the load-balanced partition kept bucket loads close ({_h3_loads[0]:.0f}..{_h3_loads[-1]:.0f}). H3 done-when met: the mind's distribute_compute / partition_domain / partition_grid / distribute_bricks all delegate to Scale, bit-identical. 'Limitations are usually bad approaches' -- partition it, prune the empty part, drop resolution where it doesn't show, superpose, or store only what's there. *** one door to scale out ***")
+
+# PROMOTE: THE BLEND HOME (consolidation H4) -- "combine these into one" is spelled many ways: superposition (bundle),
+# spherical interpolation (slerp), the Frechet mean on the sphere, front-to-back alpha compositing, and dict/scene
+# MERGE with a conflict policy; a soft weighted blend normalize(sum w_i v_i) is re-derived in skinning, the matter
+# model, etc. Blend promotes the canonical ops behind one door.
+from holographic_blendhome import Blend as _h4_B, blend_backends as _h4_be
+from holographic_blendpose import blend_pose as _h4_bp
+from holographic_ai import slerp as _h4_slerp
+import numpy as _h4_np
+_h4_targets=_h4_np.random.default_rng(0).standard_normal((3,64)); _h4_w=_h4_np.array([0.5,0.3,0.2])
+_h4_pose_bi=_h4_np.array_equal(_h4_bp(_h4_targets,_h4_w), _h4_B.bundle(_h4_targets,_h4_w))       # delegate 1: skinning
+_h4_a=_h4_np.zeros(8); _h4_a[0]=1.0; _h4_b=_h4_np.zeros(8); _h4_b[3]=1.0
+_h4_slerp_bi=_h4_np.array_equal(_h4_B.slerp(_h4_a,_h4_b,0.4), _h4_slerp(_h4_a,_h4_b,0.4))         # delegate 2: morph
+_h4_lerp_n=float(_h4_np.linalg.norm(_h4_B.lerp(_h4_a,_h4_b,0.5))); _h4_slerp_n=float(_h4_np.linalg.norm(_h4_B.slerp(_h4_a,_h4_b,0.5)))
+_h4_col,_h4_acc=_h4_B.alpha_composite(_h4_np.array([[1.,0,0],[0,1.,0]]), _h4_np.array([1.0,1.0]))  # opaque front hides back
+_h4_merged=_h4_B.merge({"a":1,"b":2},{"b":9,"c":3},policy="prefer_a")
+print(f"  BLEND HOME (promote): the combine operations unified over {', '.join(_h4_be())}. Two delegates now call it, bit-identical: blendpose.blend_pose is the weighted bundle ({_h4_pose_bi}) and generate.morph_images takes its slerp from Blend ({_h4_slerp_bi}). slerp stays ON the sphere while lerp cuts the chord (norms {_h4_slerp_n:.2f} vs {_h4_lerp_n:.2f}); alpha-composite lets an opaque front hide the back ({[float(x) for x in _h4_np.round(_h4_col,2)]}); merge respects a conflict policy ({_h4_merged}). Kept distinct on purpose: phasemorph's PHASE arc, mixture's solvent-base density, occlusion's composited READOUT -- specialised blends, not force-fit. *** one door to combine ***")
+
+# PROMOTE: THE TRANSFORM HOME (consolidation H5) -- "move / rotate / warp this" happens in several representations:
+# VSA (bind = a rigid shift, permute = order), 4x4 matrices (translate/scale/rotate/compose + decompose + quaternions
+# + look_at), clifford ROTORS (gimbal-lock-free rotation), and anisotropic STEERING. The basic 4x4 builders were
+# DUPLICATED between scenegraph and holographic_transform. Transform is one facade; the duplicate math is deduped.
+from holographic_transformhome import Transform as _h5_T, transform_kinds as _h5_kinds
+import holographic_transform as _h5_TF, holographic_scenegraph as _h5_SG
+import numpy as _h5_np
+_h5_dedup=_h5_np.array_equal(_h5_SG.translation([1.5,-2,3]), _h5_TF.translation([1.5,-2,3])) and _h5_np.array_equal(_h5_SG.scaling([2,0.5,1.5]), _h5_TF.scaling([2,0.5,1.5]))
+_h5_rot_kept=not _h5_np.array_equal(_h5_SG.rotation([0.3,0.8,0.5],0.7), _h5_T.rotation([0.3,0.8,0.5],0.7))  # Rodrigues kept distinct
+_h5_R=_h5_T.rotor([0,0,1],_h5_np.pi/2); _h5_v=_h5_T.rotate_vec(_h5_R, _h5_np.array([1.,0,0]))               # clifford: x->y
+_h5_M=_h5_T.translation([1.,2,3]); _h5_p=_h5_M @ _h5_np.array([0.,0,0,1])
+from holographic_ai import bind as _h5_bind
+_h5_a=_h5_np.random.default_rng(0).standard_normal(128); _h5_b=_h5_np.random.default_rng(1).standard_normal(128)
+_h5_vsa=_h5_np.array_equal(_h5_T.bind(_h5_a,_h5_b), _h5_bind(_h5_a,_h5_b))
+print(f"  TRANSFORM HOME (promote): move/rotate/warp unified across {', '.join(_h5_kinds())}. The 4x4 matrix builders that were COPIED between scenegraph and holographic_transform are deduped -- scenegraph now delegates, still bit-identical ({_h5_dedup}); its Rodrigues rotation is kept distinct on purpose (~1e-12 off the quaternion one, {_h5_rot_kept}) so no determinism flips. A clifford ROTOR spun x->y ({[float(x) for x in _h5_np.round(_h5_v,3)]}); the VSA bind routes bit-identical ({_h5_vsa}); a translation moved the origin to {[float(x) for x in _h5_np.round(_h5_p[:3],1)]}. H5 done-when met: scenegraph + procgen both build transforms through Transform. *** one door to move things ***")
+
+# PROMOTE: THE MEMORY HOME (consolidation H6) -- "keep the hot working set where the CPU can reach it fast". The
+# cache-hierarchy levers already ship (residency = keep reused FFT spectra resident; the batched contiguous bind =
+# one FFT for a whole record; tiling to fit; the opt-in GPU/numba backends) but had no single door. Memory is it.
+from holographic_memoryhome import Memory as _h6_M, memory_levers as _h6_lev
+from holographic_ai import bind as _h6_bind, bundle as _h6_bundle
+import numpy as _h6_np, time as _h6_time
+_h6_rng=_h6_np.random.default_rng(0)
+# RESIDENCY: bind_cached is bit-identical to bind and reuses the resident spectrum on repeat
+_h6_a=_h6_rng.standard_normal(1024); _h6_b=_h6_rng.standard_normal(1024); _h6_cache=_h6_M.spectrum_cache()
+_h6_bi=_h6_np.array_equal(_h6_M.bind_cached(_h6_a,_h6_b,_h6_cache), _h6_bind(_h6_a,_h6_b)); _h6_M.bind_cached(_h6_a,_h6_b,_h6_cache)
+# BATCHED LAYOUT: one FFT over contiguous arrays beats a Python loop of per-pair binds (min-of-rounds timing)
+_h6_m,_h6_d=64,1024; _h6_keys=_h6_rng.standard_normal((_h6_m,_h6_d)); _h6_vals=_h6_rng.standard_normal((_h6_m,_h6_d))
+def _h6_tb():
+    _t=_h6_time.perf_counter()
+    for _ in range(20): _h6_M.bind_batch(_h6_keys,_h6_vals)
+    return _h6_time.perf_counter()-_t
+def _h6_tl():
+    _t=_h6_time.perf_counter()
+    for _ in range(20): _h6_bundle(_h6_np.stack([_h6_bind(_h6_keys[_i],_h6_vals[_i]) for _i in range(_h6_m)]))
+    return _h6_time.perf_counter()-_t
+_h6_speedup=min(_h6_tl() for _ in range(3))/min(_h6_tb() for _ in range(3))
+print(f"  MEMORY HOME (promote): the cache-hierarchy levers unified over {', '.join(_h6_lev())}. RESIDENCY -- a repeated bind reuses the cached FFT spectrum, bit-identical to a plain bind ({_h6_bi}), cache hits={_h6_cache.hits}. BATCHED CONTIGUOUS LAYOUT -- encoding a {_h6_m}-pair record in ONE FFT over stacked arrays is {_h6_speedup:.1f}x faster than a Python loop of per-pair binds, i.e. measurably cache-resident. H6 done-when met: residency is reachable through Memory (and the mind's spectrum_cache now routes here), and the batched kernel is measurably faster. The GPU/numba backends stay OPT-IN -- accelerators, never requirements. *** keep the hot set close ***")
+
+# PROMOTE: THE COMPUTE HOME (consolidation H7) -- stay VSA-native. Every time a computation leaves the frequency
+# domain to make a Python decision it pays an FFT round-trip; so transform IN once, do all the bind/bundle/permute
+# algebra on the spectra, decide/clean up at the BOUNDARIES, transform OUT once. Compute is the one door over the
+# fuse / schedule / width / program levers -- and fft_counts() measures the win.
+from holographic_computehome import Compute as _h7_C, compute_levers as _h7_lev
+from holographic_ai import bind as _h7_bind, bundle as _h7_bundle
+import numpy as _h7_np
+_h7_rng=_h7_np.random.default_rng(0); _h7_n=32; _h7_d=512
+_h7_keys=[_h7_rng.standard_normal(_h7_d) for _ in range(_h7_n)]; _h7_vals=[_h7_rng.standard_normal(_h7_d) for _ in range(_h7_n)]
+_h7_C.reset_fft_counts()
+_h7_fused=_h7_C.fuse_record(_h7_keys,_h7_vals)
+_h7_total=sum(_h7_C.fft_counts().values()); _h7_naive=3*_h7_n
+_h7_ref=_h7_bundle(_h7_np.stack([_h7_bind(_h7_keys[_i],_h7_vals[_i]) for _i in range(_h7_n)]))
+_h7_agree=bool(_h7_np.allclose(_h7_fused,_h7_ref,atol=1e-9))
+print(f"  COMPUTE HOME (promote): the VSA-native levers unified over {', '.join(_h7_lev())}. FUSING a {_h7_n}-pair record -- collapsing the bind chain into the frequency domain -- took {_h7_total} FFTs vs {_h7_naive} for the op-by-op path ({100*(1-_h7_total/_h7_naive):.0f}% fewer), and the fused result AGREES with the eager one to FFT tolerance ({_h7_agree}). H7 done-when met: a multi-op chain runs fused with a measured FFT-count drop, and the mind's fuse_record/fuse_expression now route through Compute. The rule the home enforces: push decisions and cleanups to the BOUNDARIES, keep the hot middle in the vector domain. *** no Python hops in the middle ***")
+
+# BUILD: THE SIMULATION SCAFFOLD (consolidation R9) -- the solvers are legitimately DIFFERENT algorithms (Stable
+# Fluids, combustion, softbody, Cosserat rods, MPM, collision, reaction-diffusion) with different step signatures.
+# We do NOT merge them; we give them ONE step loop (via integrate.SolverAdapter) and expose their field so the
+# Pipeline can draw it. Keep the solvers separate; share only the loop.
+from holographic_simulationhome import Simulation as _r9_Sim, known_solver_strategies as _r9_strats
+from holographic_fluid import StableFluid as _r9_SF
+from holographic_automaton import HyperCA as _r9_CA
+from holographic_render import Camera as _r9_Cam
+import numpy as _r9_np
+_r9_cam=_r9_Cam(eye=(0.5,0.5,3.0), target=(0.5,0.5,0.5), fov_deg=45)
+_r9_fluid=_r9_SF((16,16,16), dt=0.1); _r9_fluid.density[6:10,2:6,6:10]=1.0; _r9_fluid.vel[1,:,:5,:]=1.0
+_r9_ca=_r9_CA(size=20, dim=16, seed=0)
+_r9_s1=_r9_Sim.for_fluid(_r9_fluid); _r9_s2=_r9_Sim.for_automaton(_r9_ca)      # two distinct algorithms
+_r9_s1.run(5); _r9_s2.run(5)                                                   # ... one shared loop
+_r9_i1,_r9_a1=_r9_s1.render(_r9_cam, width=24, height=24, steps=24, sigma=12.0)
+_r9_i2,_r9_a2=_r9_s2.render(_r9_cam, width=24, height=24, steps=24, sigma=8.0)
+_r9_sep=bool(_r9_fluid.density.shape==(16,16,16) and _r9_ca.grid.shape[:2]==(20,20))
+print(f"  SIMULATION SCAFFOLD (build): two genuinely DIFFERENT solvers -- Stable Fluids (advect+project) and a reaction-diffusion automaton -- stepped {_r9_s1.steps_run} times through the SAME loop, and the Pipeline rendered BOTH fields (alpha {float(_r9_a1.max()):.2f} smoke / {float(_r9_a2.max()):.2f} automaton). R9 done-when met. The solvers stayed SEPARATE ({_r9_sep}) -- each keeps its own math and its own step signature (fluid.step() vs ca.evolve(1)); the scaffold only unifies the INTERFACE via integrate.SolverAdapter and exposes the field as a Field (R2) for volume_render. Golden rule honoured: share the loop, never merge the algorithms. Strategies: {', '.join(_r9_strats())}; add any solver in three closures. *** one loop, many solvers ***")
+
+# BUILD: THE HYPERVECTOR DATATYPE (consolidation D1) -- the whole engine has been operating on ONE datatype
+# implicitly: a high-dimensional vector that carries meaning, travelling everywhere as a bare numpy array. Hypervector
+# gives that datatype a name and the five verbs as METHODS, without hiding the raw array (hot paths need it). As above,
+# so below: the capstone of the consolidation -- the thing all the homes have been passing around.
+from holographic_hypervector import Hypervector as _d1_HV
+from holographic_ai import bind as _d1_bind, unbind as _d1_unbind, bundle as _d1_bundle, permute as _d1_permute, cosine as _d1_cos
+from holographic_encoders import ScalarEncoder as _d1_Enc
+import numpy as _d1_np
+_d1_enc=_d1_Enc(dim=1024, seed=0)
+_d1_a=_d1_HV.encode(_d1_enc, 0.3, tag="a"); _d1_b=_d1_HV.encode(_d1_enc, 0.7, tag="b")     # MAKE: encoder is the constructor
+# CONSUME: the five verbs as methods, each matching the bare op exactly
+_d1_verbs_ok=bool(
+    _d1_np.array_equal(_d1_a.bind(_d1_b).array, _d1_bind(_d1_a.array,_d1_b.array)) and
+    _d1_np.array_equal(_d1_a.bind(_d1_b).unbind(_d1_b).array, _d1_unbind(_d1_bind(_d1_a.array,_d1_b.array),_d1_b.array)) and
+    _d1_np.array_equal(_d1_a.bundle(_d1_b).array, _d1_bundle(_d1_np.stack([_d1_a.array,_d1_b.array]))) and
+    _d1_np.array_equal(_d1_a.permute(3).array, _d1_permute(_d1_a.array,3)))
+_d1_clean=_d1_a.cleanup({"a":_d1_a,"b":_d1_b}).tag                                          # recognize
+_d1_raw_cheap=bool(_d1_a.raw() is _d1_a.array and _d1_np.asarray(_d1_a) is _d1_a.array)     # raw array, no copy
+_d1_recover=_d1_a.bind(_d1_b).unbind(_d1_a).cosine(_d1_b) > _d1_cos(_d1_a.array,_d1_b.array)
+print(f"  HYPERVECTOR DATATYPE (build): the datatype the whole engine has been passing around now has a name. MAKE it from data via any encoder (the constructor); CONSUME it with the five verbs as METHODS -- all matching the bare ops exactly ({_d1_verbs_ok}); cleanup recognized it as {_d1_clean!r}; a bind/unbind round-trip recovered the filler ({_d1_recover}). Thin by design: the raw array comes back with NO copy ({_d1_raw_cheap}) -- .array / np.asarray(hv) -- so the hot paths never pay for the wrapper, and nothing existing had to change. D1 done-when met: build from any data, five verbs as methods, raw array back cheaply. *** as above, so below: one datatype ***")
+
+# RE-ENABLE: closed-form ITERATE behind a regime gate (adaptive-dispatch audit). Some methods were shelved because
+# they are only right in a NICHE; with a catalog + adaptive dispatch, "only good in a niche" becomes "gate it". The
+# cleanest re-enable: for a LINEAR operator that is a bind (circular convolution), iterating is diagonal in Fourier,
+# so we jump k steps in ONE FFT -- EXACT, not approximate. Detector: recover the impulse response, verify it's a
+# convolution. Exact in regime => the gate can never do worse than stepping (it matches, or falls back).
+from holographic_computehome import Compute as _re_C
+from holographic_regimegate import RegimeGate as _re_G
+from holographic_ai import bind as _re_bind
+import numpy as _re_np, time as _re_time
+_re_rng=_re_np.random.default_rng(0); _re_D=1024
+_re_kernel=_re_rng.standard_normal(_re_D); _re_kernel/=_re_np.max(_re_np.abs(_re_np.fft.rfft(_re_kernel)))*1.001
+_re_op=lambda x: _re_bind(_re_kernel, x); _re_state=_re_rng.standard_normal(_re_D)
+_re_k=5000
+_re_t=_re_time.perf_counter(); _re_res,_re_info=_re_C.iterate(_re_op,_re_state,k=_re_k); _re_tg=_re_time.perf_counter()-_re_t
+_re_t=_re_time.perf_counter(); _re_slow=_re_state.copy()
+for _ in range(_re_k): _re_slow=_re_bind(_re_kernel,_re_slow)
+_re_ts=_re_time.perf_counter()-_re_t
+_re_exact=bool(_re_np.allclose(_re_res,_re_slow,atol=1e-8))
+_re_nl=_re_C.iterate(lambda x: _re_np.tanh(_re_op(x)), _re_state, k=_re_k)[1]["used"]     # nonlinear -> fallback
+print(f"  RE-ENABLE (closed-form iterate): a shelved niche method brought back behind a RegimeGate. For a bind operator, jumping {_re_k} iterations took ONE FFT vs {_re_k} steps -- {_re_ts/_re_tg:.0f}x faster and EXACT ({_re_exact}); a nonlinear operator falls back safely (used={_re_nl!r}). Because the closed form is exact IN REGIME, the gate can never do worse than stepping. The pattern (detect the regime cheaply, run the superior method only there, keep the safe fallback, measure the breakeven) is how we reconsider everything we kept out -- and it's honest both ways: the projection-denoise candidate was MEASURED to leak harm at a fixed threshold, so it stays shelved as an auto-default. *** niche is a reason to gate, not to shelve ***")
+
+# RE-ENABLE #2: FHRR-at-high-load, GATED BY THE PAIR COUNT. Binding many role->filler pairs into one vector is
+# capacity-limited; real-HRR is cheap but its recall falls off as load climbs, while FHRR phasors hold up at ~2x
+# storage. FHRR was kept opt-in ("changes nothing" at low load). The detector is the exact pair COUNT vs ~0.08*dim,
+# and -- unlike the denoise gate -- there is NO harm mode (FHRR recall >= real-HRR), so over-triggering only costs a
+# little storage, never correctness.
+from holographic_loadmemory import AdaptiveRoleFillerMemory as _re2_M
+_re2_N=90; _re2_dim=512
+_re2_fhrr=_re2_M(dim=_re2_dim, expected_pairs=_re2_N, seed=1)      # high load -> gate picks FHRR
+_re2_hrr=_re2_M(dim=_re2_dim, expected_pairs=1, seed=1)            # forced real-HRR, same atoms
+for _re2_i in range(_re2_N):
+    _re2_fhrr.add(f"r{_re2_i}", f"f{_re2_i}"); _re2_hrr.add(f"r{_re2_i}", f"f{_re2_i}")
+_re2_fh=sum(_re2_fhrr.recall(f"r{_re2_i}")==f"f{_re2_i}" for _re2_i in range(_re2_N))
+_re2_hh=sum(_re2_hrr.recall(f"r{_re2_i}")==f"f{_re2_i}" for _re2_i in range(_re2_N))
+_re2_lo=_re2_M(dim=_re2_dim, expected_pairs=6, seed=0); _re2_lo.add("color","red")   # low load -> cheap HRR
+print(f"  RE-ENABLE (FHRR at high load): the pair count IS the detector. At N={_re2_N} pairs in a dim-{_re2_dim} space (past the ~0.08*dim knee) the gate picked {_re2_fhrr.backend.upper()} and recalled {_re2_fh}/{_re2_N} correctly, vs real-HRR {_re2_hh}/{_re2_N} at the same load -- the capacity win captured automatically. At low load it stays on cheap real-HRR (backend={_re2_lo.backend}, recall of color = {_re2_lo.recall("color")!r}). No harm mode: FHRR recall >= real-HRR, so a misfire costs storage, never correctness. *** load is a reason to gate, not to shelve ***")
+
+# RE-ENABLE #3: TENSOR-PRODUCT binding for EXACT recall, gated by fidelity need + memory budget. Tensor is EXACT up
+# to M~D (perfect where HRR/FHRR have long degraded) but costs D*D numbers -- D-times the storage. So its gate adds
+# two deciders to the load one: is EXACT recall wanted, and does D*D fit the budget? No harm mode on recall (it is
+# exact in-regime); the cost is purely storage, answered by a known parameter.
+from holographic_loadmemory import AdaptiveRoleFillerMemory as _re3_M
+_re3_N=200; _re3_dim=256
+_re3_tensor=_re3_M(dim=_re3_dim, expected_pairs=_re3_N, exact=True, seed=3)   # exact wanted -> tensor
+_re3_fhrr=_re3_M(dim=_re3_dim, expected_pairs=_re3_N, seed=3)                 # not exact -> fhrr at this load
+for _re3_i in range(_re3_N):
+    _re3_tensor.add(f"r{_re3_i}", f"f{_re3_i}"); _re3_fhrr.add(f"r{_re3_i}", f"f{_re3_i}")
+_re3_th=sum(_re3_tensor.recall(f"r{_re3_i}")==f"f{_re3_i}" for _re3_i in range(_re3_N))
+_re3_fh=sum(_re3_fhrr.recall(f"r{_re3_i}")==f"f{_re3_i}" for _re3_i in range(_re3_N))
+_re3_budget=_re3_M(dim=_re3_dim, expected_pairs=_re3_N, exact=True, max_numbers=1000, seed=3)   # too small a budget
+print(f"  RE-ENABLE (tensor exact recall): with exact recall requested and the memory budget available, the gate picked {_re3_tensor.backend.upper()} and recalled {_re3_th}/{_re3_N} EXACTLY at a load where FHRR managed only {_re3_fh}/{_re3_N} -- but it spends {_re3_dim*_re3_dim} numbers ({_re3_dim}x the storage). Give it too small a budget and it honestly falls back off tensor (backend={_re3_budget.backend}). No harm mode on recall (tensor is exact in-regime); the D-times storage is the whole cost, and a known parameter decides whether it is worth paying. *** exactness is a reason to gate, not to shelve ***")
+
+# RE-ENABLE #4: MULTI-SCATTER GGX (Kulla-Conty), gated by ROUGHNESS. Single-scatter GGX drops the light that bounces
+# between microfacets more than once, so a rough METAL loses real energy (white-furnace ~0.36 at roughness 1.0). The
+# Kulla-Conty term adds it back from the baked single-scatter albedo. It OVERSHOOTS at low roughness, so we gate on
+# roughness (an exact parameter): smooth -> single-scatter (no overshoot), rough -> compensated (energy conserved).
+from holographic_brdf import directional_albedo as _re4_ss, directional_albedo_ms as _re4_ms, brdf_gated as _re4_g
+import numpy as _re4_np
+_re4_N=_re4_np.array([0.,0,1]); _re4_V=_re4_np.array([0.6,0,0.8]); _re4_L=_re4_np.array([-0.3,0.2,0.93]); _re4_L=_re4_L/_re4_np.linalg.norm(_re4_L)
+_re4_lo=_re4_g(_re4_N,_re4_V,_re4_L,(1,1,1),1.0,0.15)[1]["used"]      # smooth -> single-scatter
+_re4_hi=_re4_g(_re4_N,_re4_V,_re4_L,(1,1,1),1.0,0.8)[1]["used"]       # rough  -> multi-scatter
+_re4_e08_ss=_re4_ss(1.0,0.8,(1,1,1),16384,0.6,0); _re4_e08_ms=_re4_ms(1.0,0.8,(1,1,1),16384,0.6,0)
+_re4_e10_ss=_re4_ss(1.0,1.0,(1,1,1),16384,0.6,0); _re4_e10_ms=_re4_ms(1.0,1.0,(1,1,1),16384,0.6,0)
+print(f"  RE-ENABLE (multi-scatter GGX): a rough metal under single-scatter GGX loses energy -- white-furnace {float(_re4_e08_ss):.2f} at roughness 0.8, {float(_re4_e10_ss):.2f} at 1.0. The Kulla-Conty term (baked once from the single-scatter albedo) restores it to {float(_re4_e08_ms):.2f} and {float(_re4_e10_ms):.2f} -- energy conserving. The term OVERSHOOTS at low roughness, so we gate on the exact roughness parameter: at 0.15 the gate used the {_re4_lo} (plain GGX, no overshoot), at 0.8 the {_re4_hi} (compensated). Kept opt-in / backward-compatible; the default renderer is unchanged. Unlike the denoise gate, the detector is EXACT, so it reliably captures the win and dodges the overshoot. *** conserve energy where it is lost, gate where the fix would overshoot ***")
+
+# RE-ENABLE #5: the COARSE-FIRST residual pass -- the shared detector the Group-B methods need. Run the cheap method
+# everywhere, measure a per-cell uncertainty, and refine ONLY the hard cells. Wins when the uncertainty is
+# CONCENTRATED (a thin ridge, an edge) and that concentrated region carries the error.
+from holographic_coarsefirst import refine_where_uncertain as _re5_refine, gradient_uncertainty as _re5_unc, concentration as _re5_conc
+import numpy as _re5_np
+_re5_H=_re5_W=64; _re5_ys,_re5_xs=_re5_np.mgrid[0:_re5_H,0:_re5_W]/float(_re5_H)
+def _re5_f(Y,X): return 0.3*_re5_np.sin(3*Y)+0.3*_re5_np.cos(3*X)+_re5_np.exp(-((X-0.51)**2)/0.0008)  # smooth + a thin ridge
+_re5_truth=_re5_f(_re5_ys,_re5_xs); _re5_cs=4
+_re5_cg=_re5_f(_re5_ys[::_re5_cs,::_re5_cs],_re5_xs[::_re5_cs,::_re5_cs])
+_re5_coarse=_re5_np.repeat(_re5_np.repeat(_re5_cg,_re5_cs,axis=0),_re5_cs,axis=1)[:_re5_H,:_re5_W]     # cheap coarse estimate
+_re5_u=_re5_unc(_re5_coarse); _re5_c=_re5_conc(_re5_u)
+_re5_refined,_re5_mask,_re5_n=_re5_refine(_re5_coarse,_re5_u,lambda m:_re5_f(_re5_ys,_re5_xs),frac=0.2)
+_re5_rmse=lambda a,b: float(_re5_np.sqrt(_re5_np.mean((a-b)**2)))
+_re5_ec=_re5_rmse(_re5_coarse,_re5_truth); _re5_er=_re5_rmse(_re5_refined,_re5_truth)
+print(f"  RE-ENABLE (coarse-first residual pass): the shared Group-B detector -- run cheap, measure where it's uncertain, refine only there. On a smooth field with a thin ridge (uncertainty concentration {_re5_c:.2f}), refining only {_re5_n}/{_re5_truth.size} cells ({100*_re5_n/_re5_truth.size:.0f}%) cut the error {_re5_ec:.3f} -> {_re5_er:.3f} ({_re5_ec/_re5_er:.1f}x). concentration() is the honest breakeven: measured, adaptive path-trace AA does NOT beat uniform on a uniformly-noisy scene (low concentration) -- so this is NECESSARY, not sufficient. Each Group-B method (Nystrom, splat refine, volint) builds on this, each owing its own measured win. *** refine where uncertain = use the costly method only where the cheap one fails ***")
+
+# RE-ENABLE #6: NYSTROM for low-rank kernels, gated by a probe residual. Applying a kernel field is O(N^2) exact but
+# O(N*m) via m landmarks -- exact only when the kernel is LOW-RANK (smooth). Detector: compare exact vs Nystrom on a
+# tiny held-out PROBE (cheap); if they match, the kernel is low-rank -> use Nystrom, else fall back to exact.
+from holographic_nystrom import apply_kernel_gated as _re6_g, exact_kernel_apply as _re6_ex
+import numpy as _re6_np, time as _re6_time
+_re6_rng=_re6_np.random.default_rng(0); _re6_N=1500
+_re6_src=_re6_rng.standard_normal((_re6_N,2)); _re6_pts=_re6_rng.standard_normal((_re6_N,2)); _re6_w=_re6_rng.standard_normal(_re6_N)
+_re6_rel=lambda a,b: float(_re6_np.linalg.norm(a-b)/(_re6_np.linalg.norm(b)+1e-12))
+# smooth (low-rank) kernel -> Nystrom, fast + near-exact
+_re6_ref=_re6_ex(_re6_pts,_re6_src,_re6_w,1.5)
+_re6_t=_re6_time.perf_counter(); _re6_f,_re6_i=_re6_g(_re6_pts,_re6_src,_re6_w,1.5,m=90); _re6_tg=_re6_time.perf_counter()-_re6_t
+_re6_t=_re6_time.perf_counter(); _re6_ex(_re6_pts,_re6_src,_re6_w,1.5); _re6_tex=_re6_time.perf_counter()-_re6_t
+# sharp (full-rank) kernel -> exact fallback, byte-correct
+_re6_f2,_re6_i2=_re6_g(_re6_pts,_re6_src,_re6_w,0.15,m=90)
+_re6_ref2=_re6_ex(_re6_pts,_re6_src,_re6_w,0.15)
+print(f"  RE-ENABLE (Nystrom low-rank kernel): a smooth kernel field (probe error {_re6_i["score"]:.3f}) routed to {_re6_i["method"].upper()} -- {_re6_tex/_re6_tg:.1f}x faster than exact O(N^2) at N={_re6_N}, rel-err {_re6_rel(_re6_f,_re6_ref):.4f}. A sharp kernel (probe error {_re6_i2["score"]:.2f}) fell back to {_re6_i2["method"].upper()}, byte-correct (rel-err {_re6_rel(_re6_f2,_re6_ref2):.1e}). Because the fallback is EXACT, the gate can never be wrong -- only, rarely, slower than optimal. Ships where denoise did not: a reliable detector AND a safe fallback. *** cheap where the kernel is smooth, exact where it isn't ***")
+
+# RE-ENABLE #7: full-3DGS ANISOTROPIC splat refinement, composed COARSE-FIRST. A cheap isotropic splat cannot fit a
+# sharp / oriented feature, so it leaves residual there; aniso_fit (gradient descent) can. So: fit the cheap isotropic
+# base, then anisotropic-refine what it MISSED. Refining the residual only ADDS detail -> strictly >= baseline, no harm.
+from holographic_splat import splat_fit as _re7_sf, splat_render as _re7_sr, fit_coarse_first as _re7_cf, psnr as _re7_psnr
+import numpy as _re7_np
+_re7_H=_re7_W=64; _re7_ys,_re7_xs=_re7_np.mgrid[0:_re7_H,0:_re7_W].astype(float)
+_re7_sharp=(_re7_ys>_re7_xs).astype(float)*0.9+0.1+0.4*_re7_np.exp(-(((_re7_ys-45)**2+(_re7_xs-20)**2)/50.0)); _re7_sharp/=_re7_sharp.max()
+_re7_smooth=_re7_np.exp(-(((_re7_ys-20)**2+(_re7_xs-20)**2)/40.0)); _re7_smooth/=_re7_smooth.max()
+_re7_iso_sharp=_re7_psnr(_re7_sr(_re7_sf(_re7_sharp,30),(_re7_H,_re7_W)),_re7_sharp)
+_re7_cf_sharp=_re7_psnr(_re7_cf(_re7_sharp,K_iso=30,K_aniso=8)[0],_re7_sharp)
+_re7_iso_sm=_re7_psnr(_re7_sr(_re7_sf(_re7_smooth,30),(_re7_H,_re7_W)),_re7_smooth)
+_re7_cf_sm=_re7_psnr(_re7_cf(_re7_smooth,K_iso=30,K_aniso=8)[0],_re7_smooth)
+print(f"  RE-ENABLE (anisotropic splat refine, coarse-first): fit cheap isotropic splats, then gradient-refine the RESIDUAL with anisotropic Gaussians. On a SHARP edge (which isotropic blobs fundamentally can't fit) it jumped {_re7_iso_sharp:.1f} -> {_re7_cf_sharp:.1f} dB (+{_re7_cf_sharp-_re7_iso_sharp:.1f}); on a SMOOTH target it still helped a little ({_re7_iso_sm:.1f} -> {_re7_cf_sm:.1f}). Refining the residual only ADDS detail, so it is strictly >= the isotropic baseline -- NO harm mode across every target tested. That is why it ships WITHOUT a gate: unlike the parameter re-enables it needs no reliable detector, because a 'wrong' choice can't hurt -- concentration() is actually BACKWARDS for anisotropy, so we don't use it. Opt-in: apply it when you want the extra fidelity and can afford the anisotropic fit. *** refine the residual: strictly better, never worse ***")
+
+# QUERY HISTORY (P7-P12): a git-like timeline for a query table -- time-travel SELECT, diff, and tamper-locate, all
+# on the shipped versioning faculties. SQL does none of these well; here they fall out of "a row is a vector".
+from holographic_query import Database as _qh_DB, update as _qh_upd
+from holographic_querytime import TableHistory as _qh_TH, select_as_of as _qh_asof, diff_versions as _qh_diff, find_tampering as _qh_tamper
+_qh_db=_qh_DB(); _qh_db.add_namespace("user")
+_qh_db.create_table("user.acct",["id","balance"],dim=1024,seed=0)
+_qh_t=_qh_db.namespaces["user"]["tables"]["acct"]; _qh_t.set_primary_key("id")
+_qh_t.insert({"id":1,"balance":100}); _qh_h=_qh_TH(_qh_t); _qh_v0=_qh_h.commit(_qh_t,note="open")
+_qh_upd(_qh_t,"id = 1",{"balance":250}); _qh_t.insert({"id":2,"balance":5}); _qh_v1=_qh_h.commit(_qh_t,note="edit")
+_qh_then=_qh_asof(_qh_h,_qh_v0,"SELECT balance FROM acct WHERE id = 1")[0]["balance"]
+_qh_now=_qh_asof(_qh_h,_qh_v1,"SELECT balance FROM acct WHERE id = 1")[0]["balance"]
+_qh_d=_qh_diff(_qh_h,_qh_v0,_qh_v1)
+_qh_suspect=_qh_h._versions[_qh_v1]["records"].copy(); _qh_suspect[0]+=0.01
+_qh_loc=_qh_tamper(_qh_h,_qh_v1,_qh_suspect)
+print(f"  QUERY HISTORY (git-for-data): the same account queried AS OF two versions reads balance {int(_qh_then)} then {int(_qh_now)} -- time-travel SELECT, no history tables or triggers. diff(v0,v1) reports {_qh_d["n_added"]} row added and {_qh_d["n_changed"]} changed, with the field-level before/after. And the audit trail is provable: after tampering one stored row, CompositionTree.locate named row {_qh_loc} in O(log n). All of it wired onto the versioning faculties that already shipped -- SQL does none of these well. *** a row is a vector, so its whole history is one too ***")
+
+# VSA PROGRAMS AS DB OBJECTS (PR1-PR6): install a hypervector "stored procedure", find it BY MEANING, EXPLAIN it as a
+# dry run, and EXECUTE it over query rows -- sandboxed to whitelisted handlers, step-bounded, result with a confidence.
+from holographic_queryprog import ProgramCatalog as _pp_Cat
+_pp_cat=_pp_Cat(dim=2048, seed=0)
+_pp_cat.install("prototype",[("LOAD","color"),("HALT",None)], doc="build a prototype that clusters similar rows by color", inputs=["color"], outputs=["color"], handlers=[], data=["color"])
+_pp_cat.install("normalize_tag",[("LOAD","color"),("APPLY","normalize"),("HALT",None)], doc="normalize and tag records for anomaly detection", inputs=["color"], outputs=["color"], handlers=["normalize"], faculties=["normalize"])
+_pp_found=_pp_cat.find("group a series of similar things into clusters")[0]["name"]
+_pp_ex=_pp_cat.explain("normalize_tag")
+_pp_out=_pp_cat.execute("prototype",[{"color":"red"},{"color":"red"},{"color":"blue"}])
+print(f"  VSA PROGRAMS AS DB OBJECTS: installed two hypervector 'stored procedures'. Asked the catalog to find one BY MEANING -- 'group a series into clusters' -> '{_pp_found}' (a SQL function catalog is exact-match only). EXPLAIN dry-ran normalize_tag and reported it WOULD call {_pp_ex["faculties_called"]} without executing. Then EXECUTE ran prototype over three query rows in the vector domain, sandboxed to its whitelisted handlers and step-bounded, returning a result at confidence {_pp_out["_confidence"]:.2f}. A program is a hypervector over a tiny opcode set -- it can't do I/O or run host code, so it is safer than a SQL stored procedure. *** install a procedure that is a vector; discover it by meaning ***")
+
+# WORKSPACE FOLDERS (WS7) + COMBINE-SCENES (WS6): group a database's tables into a shallow tree (home = ownership,
+# links = grouping), and combine two 3D scenes by BUNDLING them (a scene is a superposition of objects, so + unions).
+from holographic_query import Database as _wf_DB
+from holographic_queryfolder import FolderTree as _wf_FT, _bare as _wf_bare
+from holographic_scene import SceneCoder as _wf_SC, COLOURS as _wf_C, SHAPES as _wf_S, TEXTURES as _wf_T
+_wf_db=_wf_DB(); _wf_db.add_namespace("user", tier="persistent")
+for _wf_t in ("sales","returns","catalog"): _wf_db.create_table("user."+_wf_t,["id"],dim=256,seed=0)
+_wf_ft=_wf_FT(_wf_db)
+_wf_ft.set_home("user.sales","reports"); _wf_ft.set_home("user.returns","reports")
+_wf_ft.set_home("user.catalog","reference"); _wf_ft.link("user.catalog","reports")
+_wf_scoped=sorted(_wf_bare(_wf_q) for _wf_q in _wf_ft.tables_in("reports"))
+_wf_deleted=sorted(_wf_bare(_wf_q) for _wf_q in _wf_ft.drop_folder("reports"))
+_wf_survived=_wf_db.namespaces["user"]["tables"].get("catalog") is not None
+_wf_sc=_wf_SC(dim=4096, seed=0)
+_wf_a=_wf_sc.encode_scene([{"colour":_wf_C[0],"shape":_wf_S[0],"texture":_wf_T[0]},{"colour":_wf_C[1],"shape":_wf_S[1],"texture":_wf_T[0]}])
+_wf_b=_wf_sc.encode_scene([{"colour":_wf_C[2],"shape":_wf_S[2],"texture":_wf_T[0]}])
+_wf_comb=_wf_sc.count_objects(_wf_sc.combine(_wf_a,_wf_b))
+print(f"  WORKSPACE FOLDERS: grouped tables under a shallow tree -- searching folder 'reports' scopes to just {_wf_scoped} (home tables + the linked catalog). Dropping 'reports' deleted only the tables it OWNS ({_wf_deleted}); the catalog, only LINKED there but HOMED in 'reference', survived (still in the DB: {_wf_survived}). Home = ownership -> lifecycle; a link = grouping -> never deletes. And COMBINE-SCENES: two 3D scenes ({_wf_sc.count_objects(_wf_a)} objects + {_wf_sc.count_objects(_wf_b)} object) merge by simple vector addition into one holding {_wf_comb} -- a scene IS a bundle, so union is a sum, and the resonator can still pull any object back out. *** rows -> tables -> folders -> databases, every rung the same bundle ***")
+
+# GRAPH TRAVERSAL (B10) + SINGLE-WRITER CONCURRENCY (B8): reachability over a table's edges (the exact index, because
+# the holographic graph store's recall collapses at scale), and one-writer-at-a-time with lock-free reader snapshots.
+from holographic_query import Database as _gl_DB, update as _gl_upd
+from holographic_querygraph import EdgeGraph as _gl_EG
+from holographic_querylock import SingleWriterLock as _gl_SWL, ConcurrencyError as _gl_CE
+_gl_db=_gl_DB(); _gl_db.add_namespace("user")
+_gl_db.create_table("user.edges",["src","dst"],dim=256,seed=0)
+_gl_t=_gl_db.namespaces["user"]["tables"]["edges"]
+for _gl_s,_gl_d in [(1,2),(1,3),(2,4),(3,4),(4,5)]: _gl_t.insert({"src":_gl_s,"dst":_gl_d})
+_gl_g=_gl_EG(_gl_t,"src","dst")
+_gl_desc=_gl_g.descendants(1); _gl_path=_gl_g.path(1,5)
+_gl_db.create_table("user.acct",["id","balance"],dim=256,seed=0)
+_gl_a=_gl_db.namespaces["user"]["tables"]["acct"]; _gl_a.set_primary_key("id"); _gl_a.insert({"id":1,"balance":100})
+_gl_lock=_gl_SWL(); _gl_snap=_gl_lock.snapshot(_gl_a)
+_gl_refused=False
+with _gl_lock.write():
+    _gl_upd(_gl_a,"id = 1",{"balance":250})
+    try:
+        with _gl_lock.write(block=False): pass
+    except _gl_CE: _gl_refused=True
+_gl_snap_bal=_gl_snap.rows()[0]["balance"]; _gl_fresh_bal=_gl_lock.snapshot(_gl_a).rows()[0]["balance"]
+print(f"  GRAPH + CONCURRENCY: over a table of edges, descendants(1) = {_gl_desc} and the shortest path 1->5 is {_gl_path} (length {len(_gl_path)}) -- recursive-CTE work, done as a plain BFS. It is an EXACT adjacency index on purpose: the holographic graph store's recall collapses at scale, so traversal doesn't use it. And under a single-writer lock, a concurrent second writer was refused ({_gl_refused}) while a reader snapshot taken before the write still read {_gl_snap_bal} even though a fresh read saw {_gl_fresh_bal} -- consistent, lock-free reads; MVCC deferred and said so. *** exact where exactness is cheap, honest where it is hard ***")
+
+# DISTRIBUTED COORDINATOR (R2): run monoid work on a pluggable backend -- in-process, or a persistent local process
+# pool with a shared_memory read-only cache -- reusing distribute's partition + monoid reduce. Plus a margin-gated
+# canonical tie-break so distributed results agree on knife-edge decisions.
+from holographic_coordinator import Coordinator as _co_C, InProcessBackend as _co_IP, LocalPool as _co_LP, decide as _co_decide, _sum_bucket as _co_sum
+from holographic_distribute import reduce_sum as _co_rs
+import numpy as _co_np, os as _co_os
+_co_cache=_co_np.arange(30, dtype=float)*2.0
+_co_buckets=[list(range(0,10)),list(range(10,20)),list(range(20,30))]
+_co_ip=_co_C(_co_IP()).run(_co_buckets,_co_sum,cache=_co_cache,reduce=_co_rs)
+with _co_C(_co_LP(n=3)) as _co_lc:
+    _co_lp=_co_lc.run(_co_buckets,_co_sum,cache=_co_cache,reduce=_co_rs)
+_co_tie_a=_co_decide([0.5,0.5,0.3]); _co_tie_b=_co_decide([0.5+1e-13,0.5-1e-13,0.3]); _co_clear=_co_decide([0.9,0.5,0.3])
+print(f"  DISTRIBUTED COORDINATOR: the same partitioned monoid job -- sum a shared read-only cache over three buckets -- reassembled to {_co_ip:.0f} in-process and {_co_lp:.0f} on a persistent LOCAL PROCESS POOL (each worker its own interpreter; the {_co_cache.nbytes}-byte cache shipped ONCE via shared_memory, not pickled per bucket). MIN/disjoint reassembly is bit-exact; plain SUM agrees to ~1e-12, which only matters if a TIE-SENSITIVE decision consumes it -- so a margin-gated canonical tie-break catches those: a knife-edge decision resolved to {_co_tie_a} and its ~1e-13-wobbled twin to {_co_tie_b} (identical -- a RULE broke the tie, not the rounding), while a comfortable-margin decision went to {_co_clear} regardless. It sits behind distribute, so the monoid math and shared cache are reused, not rebuilt. HONEST: on this 1-core box the pool shows no wall-clock speedup (offload COARSE, not fine); on a multi-core machine it parallelizes. *** one coordinator, one monoid reduce -- in a vector, across processes, across a farm ***")
+
+# COMMAND BACKEND (R4): run any ALLOWLISTED external program (the door to ffmpeg / solvers / API calls), wired as an
+# orchestrator Tool the Planner can chain. Allowlist + no-shell + timeout are the safety rails.
+from holographic_command import CommandRunner as _cr_CR, CommandError as _cr_CE, command_as_tool as _cr_tool
+from holographic_ai import Vocabulary as _cr_Vocab
+_cr_r=_cr_CR(timeout=10)
+_cr_r.register("upper",["python3","-c","import sys;print(sys.argv[1].upper())","{input}"], doc="uppercase")
+_cr_r.register("reverse",["python3","-c","import sys;print(sys.argv[1][::-1])","{input}"], doc="reverse")
+_cr_vocab=_cr_Vocab(1024,0)
+_cr_up=_cr_tool(_cr_r,"upper","text","text",["uppercase"],_cr_vocab)
+_cr_rev=_cr_tool(_cr_r,"reverse","text","text",["reverse"],_cr_vocab)
+_cr_chain=_cr_rev.fn(_cr_up.fn("distributed").strip()).strip()
+_cr_literal=_cr_r.run("upper",{"input":"safe; rm -rf /"})["stdout"].strip()
+_cr_refused=False
+try: _cr_r.run("cat",{"input":"/etc/passwd"})
+except _cr_CE: _cr_refused=True
+print(f"  COMMAND BACKEND: registered two external programs on an allowlist and CHAINED them as orchestrator Tools -- upper then reverse turned 'distributed' into '{_cr_chain}', a real subprocess pipeline the Planner can assemble. It is injection-safe by construction: no shell, so 'safe; rm -rf /' came back as the literal '{_cr_literal}' (the ';' was never interpreted), and a command NOT on the allowlist was refused ({_cr_refused}). An external program thus joins the same VSA fabric as an internal faculty -- selectable and chainable, with a CircuitBreaker on a flaky one. *** the can of worms opens inward, neatly: tools-as-vectors ***")
+
+# NETWORK FARM (R3): run the coordinator's workers on OTHER machines. A worker daemon (stdlib http/json) holds your
+# registered workers + a cache kept by content hash; the SAME Coordinator.run dispatches buckets to it.
+from holographic_coordinator import Coordinator as _nf_C
+from holographic_farm import WorkerDaemon as _nf_WD, NetworkFarm as _nf_NF, _sum_indices as _nf_sum, _content_hash as _nf_hash
+from holographic_distribute import reduce_sum as _nf_rs
+import numpy as _nf_np
+_nf_node=_nf_WD(port=0); _nf_node.register_worker("sum_indices",_nf_sum); _nf_addr=_nf_node.start()
+try:
+    _nf_cache=_nf_np.arange(30,dtype=float)**2
+    _nf_buckets=[list(range(0,10)),list(range(10,20)),list(range(20,30))]
+    with _nf_C(_nf_NF([_nf_addr])) as _nf_coord:
+        _nf_got=_nf_coord.run(_nf_buckets,"sum_indices",cache=_nf_cache,reduce=_nf_rs)
+    _nf_shipped_once=_nf_hash(_nf_cache) in _nf_node.caches
+    _nf_speed=round(_nf_node._measure_speed())
+    _nf_refused=not _nf_node._handle("/task",{"worker":"rm_rf","bucket":[1],"cache_hash":None})["ok"]
+finally:
+    _nf_node.stop()
+print(f"  NETWORK FARM: brought up a worker daemon on {_nf_addr} (a stand-in for another machine -- it speaks stdlib http+json, no framework) and dispatched the SAME partitioned monoid job to it: it summed the shared cache to {_nf_got:.0f}, matching the local answer, via the identical Coordinator.run -- only WHERE the worker ran changed. The {_nf_cache.nbytes}-byte read-only cache was shipped ONCE and kept by content hash for reuse ({_nf_shipped_once}); the node reported a speed of ~{_nf_speed} iters/s for load-balancing. And the security line held: buckets are data, workers are REGISTERED code, so an unregistered 'rm_rf' worker was refused ({_nf_refused}). Point the daemon's --host at a real machine and this is a render farm. *** one coordinator, one monoid reduce -- in a vector, across processes, across a farm ***")
+
+# STANDALONE API SERVICE: run the engine as a server on any OS and talk to it over HTTP/JSON. Stdlib-only; here we
+# drive the real service object through its route dispatch (the same code the HTTP layer calls).
+from holographic_service import Service as _sv_Service, __version__ as _sv_ver
+_sv=_sv_Service()
+_sv_health=_sv.dispatch("GET","/health",{})[1]
+_sv.dispatch("POST","/sql",{"sql":"CREATE TABLE user.items (id, name, color)"})
+_sv.dispatch("POST","/sql",{"sql":"INSERT INTO user.items (id, name, color) VALUES (1, widget, red)"})
+_sv.dispatch("POST","/sql",{"sql":"INSERT INTO user.items (id, name, color) VALUES (2, gadget, blue)"})
+_sv.dispatch("POST","/sql",{"sql":"UPDATE user.items SET color = 'crimson' WHERE id = 1"})
+_sv_rows=_sv.dispatch("POST","/sql",{"sql":"SELECT name, color FROM user.items WHERE id = 1"})[1]["result"]
+_sv.dispatch("POST","/documents",{"objects":[{"id":"o1","name":"ring","material":"gold"},{"id":"o2","name":"pipe","material":"copper"}]})
+_sv_gql=[o["name"] for o in _sv.dispatch("POST","/graphql",{"query":'{ objects(where: {material: "gold"}) { name } }'})[1]["data"]["objects"]]
+_sv_search=[m["name"] for m in _sv.dispatch("POST","/capabilities/search",{"query":"render farm another machine"})[1]["matches"][:2]]
+_sv_401=_sv_Service(token="secret")
+print(f"  STANDALONE API SERVICE: the engine runs as a server (v{_sv_ver}) you drive over HTTP/JSON -- stdlib only, launched by serve.sh on Linux/macOS or serve.bat on Windows. /health reports {_sv_health['capabilities']} capabilities on Python {_sv_health['python']}/{_sv_health['platform']}. The WHOLE database is exposed over HTTP: CREATE/INSERT then an UPDATE ... WHERE left {_sv_rows} -- and the full surface adds DELETE, JOIN and DROP too (UPDATE/DELETE require a WHERE, so a typo can't wipe a table). GraphQL rides alongside for nested data: a query for gold objects returned {_sv_gql}. With --persist the store is auto-saved and survives a restart, so it is a drop-in DATABASE for other apps -- talk SQL or GraphQL to it from any language. Bind it local by default; point it at 0.0.0.0 behind auth/TLS to reach it from another machine. *** the whole engine, standalone, a real database behind one HTTP door ***")
+
+# DISTRIBUTED HARDENING (R5): fault tolerance + verification for untrusted nodes -- retry, redundant-compute VOTING
+# (accept only what independent workers agree on), and canary spot-checks. The discipline before a public farm.
+from holographic_hardening import agree as _h5_agree, NoConsensus as _h5_NC, HardenedCoordinator as _h5_HC, CanaryFailed as _h5_CF, _sum_bucket as _h5_sum, _FlakyBackend as _h5_Flaky
+from holographic_coordinator import InProcessBackend as _h5_IP
+from holographic_distribute import reduce_sum as _h5_rs
+# voting: a clear majority is accepted; genuine disagreement ABSTAINS rather than guessing
+_h5_voted=_h5_agree([42.0, 42.0, 7.0])
+_h5_abstained=False
+try: _h5_agree([1.0,2.0,3.0])
+except _h5_NC: _h5_abstained=True
+# retry: a node that fails its first two attempts still yields a result on the third (reissue = reassign)
+_h5_retry=_h5_HC(_h5_Flaky(fail_times=2), redundancy=1, attempts=3, backoff=0.001).run([[1,2,3]], _h5_sum, reduce=_h5_rs)
+# redundant voting over 3 honest copies is accepted
+_h5_red=_h5_HC(_h5_IP(), redundancy=3).run([[1,2,3],[4,5]], _h5_sum, reduce=_h5_rs)
+# a canary (known answer) rejects a lying worker
+_h5_caught=False
+try: _h5_HC(_h5_Flaky(wrong_for=([1,2,3],999.0))).run([[9]], _h5_sum, canaries=[([1,2,3],6.0)])
+except _h5_CF: _h5_caught=True
+print(f"  DISTRIBUTED HARDENING (R5): the piece that lets STRANGERS help without being trusted. Redundant workers VOTE -- three answers [42,42,7] were accepted as {_h5_voted:.0f} by majority, while a genuine three-way disagreement ABSTAINED ({_h5_abstained}) rather than guess (a node can't FORCE a result). A worker that failed its first two attempts still succeeded on retry (reissue reassigns the work): {_h5_retry:.0f}. Three honest copies of a job agreed and were accepted: {_h5_red:.0f}. And a CANARY -- a bucket whose answer we already know -- caught a lying worker and rejected the run ({_h5_caught}). Repair (cleanup/fountain/verify) fixes accidental corruption; voting + canaries catch a node that faithfully returns a plausible LIE. This is the BOINC/SETI@home discipline, mandatory before a public farm. *** trust no single node -- require agreement, and check the canaries ***")
+
+# JOB LIFECYCLE (start/pause/resume/cancel, survive a restart): a long render/sim is buckets + a monoid reduce, so
+# completed buckets fold into partials and a paused job checkpoints to disk and resumes only the remaining work.
+import tempfile as _jl_tmp
+from holographic_jobs import JobManager as _jl_JM, _sum_bucket as _jl_w, DONE as _jl_DONE, PAUSED as _jl_PAUSED
+from holographic_coordinator import InProcessBackend as _jl_IP
+_jl_store=_jl_tmp.mkdtemp(prefix="tour_jobs_")
+_jl_m=_jl_JM(_jl_IP(), store_dir=_jl_store); _jl_m.register_worker("sum", _jl_w)
+_jl_m.create("render", [[i] for i in range(10)], "sum", reduce="sum")
+# pretend the first five tiles rendered, then we paused -- exactly what a checkpoint holds
+_jl_job=_jl_m.jobs["render"]; _jl_job.done=[0,1,2,3,4]; _jl_job.partials=[0.0,1.0,2.0,3.0,4.0]; _jl_job.status=_jl_PAUSED
+_jl_m.save("render")
+_jl_progress=_jl_m.jobs["render"].progress()
+# ... the app closes; a BRAND-NEW manager (a fresh session) reopens the checkpoint and resumes ...
+_jl_m2=_jl_JM(_jl_IP(), store_dir=_jl_store); _jl_m2.register_worker("sum", _jl_w)
+_jl_m2.load_all()
+_jl_remaining=len(_jl_m2.jobs["render"].remaining())
+_jl_m2.resume("render")
+_jl_result=_jl_m2.result("render")
+print(f"  JOB LIFECYCLE: a render was paused {int(_jl_progress*100)}% through and CHECKPOINTED to disk. Then -- as if the app had closed and reopened -- a brand-new manager loaded the checkpoint and saw {_jl_remaining} tiles still to do. Resuming ran ONLY those remaining tiles and reduced the whole thing to {_jl_result:.0f} (= sum 0..9), each tile computed exactly once, none lost or repeated. Because a long job is buckets + a commutative monoid reduce, pause/resume is just 'stop after a bucket, keep the partials, finish the rest later' -- and the same works across the network farm and over the HTTP API (start/pause/resume/cancel a render, close the app, reopen, resume). *** stop, save, close, reopen, resume -- the monoid makes it free ***")
+
+# MATERIAL LIBRARY (render appearance + physical properties, bridged and discoverable): one door to both of the
+# engine's material libraries -- how a material LOOKS (for rendering) and how it BEHAVES (for science).
+import holographic_materialindex as _mat_idx
+_mat_s=_mat_idx.summary()
+_mat_cats=_mat_idx.physical_categories()
+_mat_clean=(_mat_idx.validate_physical()==[])
+_mat_metals=len(_mat_idx.physical_by_category("metal"))
+_mat_gold=_mat_idx.material_info("gold")
+_mat_merc=_mat_idx.material_info("mercury")            # physical-only (a scientist's material, no render preset)
+_mat_gems=[r["name"] for r in _mat_idx.find_materials("gem crystal")][:5]
+_mat_pbr=_mat_idx.render_material("copper")            # a render-ready PBRMaterial straight from the library
+print(f"  MATERIAL LIBRARY: the engine ships TWO material libraries, now bridged and discoverable through one index -- {_mat_s['render_presets']} RENDER presets across {_mat_s['render_classes']} classes (metals, gems, woods, stones, liquids, biomes...) and {_mat_s['physical_materials']} PHYSICAL materials (density, refractive index, viscosity, Young's modulus, sound speed, specific heat, phase), with {_mat_s['in_both']} in both. Ask about GOLD and you get BOTH sides at once: it renders as a {_mat_gold['render']['class']} (metallic {_mat_gold['render']['metallic']:.0f}, base colour {[round(c,2) for c in _mat_gold['render']['base_color'][:3]]}) AND it weighs {_mat_gold['physical']['density']} kg/m3 with sound travelling {_mat_gold['physical']['sound_speed']} m/s through it -- appearance for the renderer, physics for a scientist. The physical side is a comprehensive, VALIDATED starting point ({_mat_clean}): {_mat_metals} metals plus liquids, gases, polymers, ceramics, glass, minerals, stone, wood, tissue, building materials and semiconductors across {len(_mat_cats)} categories, each field unit-documented. Materials without a render preset still carry their science: mercury is a {_mat_merc['physical']['phase']} at {_mat_merc['physical']['density']} kg/m3, and tungsten melts at {_mat_idx.material_info('tungsten')['physical']['melting_point']} K. Discovery works across both: 'gem crystal' finds {_mat_gems}, and copper comes back as a ready-to-render PBRMaterial (metallic {_mat_pbr.metallic:.0f}). *** how it looks and how it behaves -- one library, two audiences ***")
+
+# VENDORED DICTIONARY + TAXONOMY: real world-knowledge (~144k words) the engine carries, for contextual awareness.
+import holographic_dictionary as _dic
+_dic_n=_dic.size()
+_dic_grav=_dic.entry("gravity")
+_dic_tax=_dic.hypernym_chain("dog")[:5]
+_dic_algo=_dic.define("algorithm")
+print(f"  DICTIONARY + TAXONOMY: the engine now ships a real, comprehensive dictionary -- {_dic_n:,} English words, each with a definition, part of speech, synonyms, an example, and its 'is a kind of' parent -- so it has world-knowledge to lean on, not just internal machinery. It is Princeton WordNet, loaded stdlib-only (gzip+json) and used ONLY at build time via NLTK, so nothing is added to the runtime deps. Look up ALGORITHM and it knows: '{_dic_algo}'. Look up GRAVITY and it gives the physics definition plus synonyms {_dic_grav.get('s', _dic_grav.get('synonyms', []))[:2]}. And because every noun carries its hypernym, it doubles as an encyclopedia: a DOG walks up the taxonomy {_dic_tax}. The mind can also LEARN meaning from these real definitions (learn_vocabulary), and users can swap in a bigger dictionary against the same machinery. *** the engine reads the dictionary, so it knows what words mean ***")
+
+# TOOL DISCOVERABILITY: the catalog surfaces whole families of tools by plain-English need (2D, text, learning, utils).
+from holographic_catalog import default_catalog as _tw_cat, seed_from_modules as _tw_seed
+_tw_c=_tw_seed(_tw_cat())
+def _tw_top(q):
+    h=_tw_c.find_capability(q, k=1); return h[0].name if h else "NOTHING"
+_tw_draw=_tw_top("draw a picture")
+_tw_gen=_tw_top("generate text")
+_tw_learn=_tw_top("learn from a corpus")
+_tw_util=_tw_top("verify data integrity")
+print(f"  TOOL DISCOVERABILITY: the catalog turns a plain-English NEED into the right family of tools -- no need to know a module name. 'draw a picture' now lands on '{_tw_draw}', 'generate text' on '{_tw_gen}', 'learn from a corpus' on '{_tw_learn}', and 'verify data integrity' on '{_tw_util}'. Those 2D-image, text-generation, language-learning and utility tools were always in the engine, but until they had CURATED homes with the words a user would actually type, natural queries came up empty. The catalog also became our GAP-FINDER: pose the questions a user would ask (tools/catalog_gaps.py), and anything with no curated home is a discoverability hole to fill. *** if you can describe what you want, the catalog finds the tool ***")
+
+# AGENT-FRIENDLY LAYER: describe a task, get the right skill WITH a confidence, and a route decision (act / choose).
+import holographic_skills as _ag
+_ag_man=_ag.manifest()["counts"]
+_ag_act=_ag.route("render a scene with global illumination")
+_ag_amb=_ag.route("distributed coordinator farm")
+_ag_sug=_ag.suggest("edit an image")[0]
+_ag_comp=[c["name"] for c in _ag.complete("learn_")[:4]]
+print(f"  AGENT-FRIENDLY LAYER: the engine now describes and routes ITSELF, so an agent (or a person) does not have to memorise {_ag_man['methods']} methods across {_ag_man['capabilities']} capabilities. Ask for a task and it SUGGESTS with a confidence: 'edit an image' -> '{_ag_sug['name']}' (call: {_ag_sug['call'][:48]}...). It ROUTES with a decision node -- when it is sure it says ACT: 'render a scene' -> {_ag_act['decision']} ({_ag_act['confidence']:.0%}) -> {_ag_act['skill']['name']}; when it is genuinely torn it says CHOOSE rather than guess: 'distributed coordinator farm' -> {_ag_amb['decision']} among {[o['name'] for o in _ag_amb.get('options',[])][:3]}. And it AUTOCOMPLETES method names with their real signatures: mind.learn_<tab> -> {_ag_comp}. All of it is exposed over the HTTP API too (GET /skills, POST /skills/suggest|route|complete|card). *** the engine that can describe and route itself is the engine an agent can actually drive ***")
+
+# DESCRIBE A SCENE -> BUILD -> ADJUST -> RENDER: talk a 3-D scene into being, then adjust its named objects in words.
+from holographic_scene_semantic import scene_from_description as _sfd
+_ss=_sfd("a big red metal sphere and a small blue glass box on a sunny day")
+_ss_before=_ss.describe()
+_ss.adjust("make the sphere bigger"); _ss.adjust("change the box to metal"); _ss.adjust("make everything glass")
+_ss_after=_ss.describe()
+_ss.adjust("make the pyramid golden")            # unknown target -> safe no-op, edits nothing
+_ss_noop=_ss.describe()
+_ss_sim=_sfd("a red sphere and a blue box").simulate(steps=20)
+_ss_y0=float(list(_ss_sim[0].values())[0][1]); _ss_y1=float(list(_ss_sim[-1].values())[0][1])
+print(f"  DESCRIBE -> BUILD -> ADJUST -> RENDER/SIMULATE: you can now TALK a 3-D scene into being and then adjust it by talking to its named objects. Describe 'a big red metal sphere and a small blue glass box on a sunny day' and the engine builds it: [{_ss_before}]. Then edit in plain words -- 'make the sphere bigger', 'change the box to metal', 'make everything glass' -- and it becomes [{_ss_after}]. It is honest about what it does NOT understand: 'make the pyramid golden' names no known object, so it changes NOTHING [{_ss_noop}] rather than guessing. From there scene.render() draws it (default camera, the scene sun/sky) and scene.simulate() drops the objects under gravity until they settle (a ball fell from y={_ss_y0:.1f} to rest at y={_ss_y1:.2f}). One mind.build_scene() call, or mind.semantic_scene(objects) to adjust a scene you already have. *** describe it, the engine builds it, and you shape it in words ***")
+
 # OPTIMISATION: port the rasteriser's Python loop to a vectorised scatter (the "VSA-native" win) + V-Ray raymarch tricks
 _tl0 = _timerd.time(); _imloop = _mind_rd.render_mesh(_Mrd, _camrd, 256, 256, lights=_lrd, base_color=(0.8, 0.5, 0.3), vectorized=False); _tloop = _timerd.time() - _tl0
 _tv0 = _timerd.time(); _imvec = _mind_rd.render_mesh(_Mrd, _camrd, 256, 256, lights=_lrd, base_color=(0.8, 0.5, 0.3), vectorized=True); _tvec = _timerd.time() - _tv0

@@ -30,7 +30,7 @@ import wave
 
 import numpy as np
 
-from holographic_ai import slerp
+from holographic_blendhome import Blend        # slerp via the Blend home (consolidation H4)
 
 
 # ===========================================================================
@@ -65,7 +65,7 @@ def morph_images(M, img_a, img_b, steps=21):
     frames = []
     for t in np.linspace(0.0, 1.0, steps):
         mag = (1 - t) * na + t * nb
-        v = slerp(ua, ub, float(t)) * mag
+        v = Blend.slerp(ua, ub, float(t)) * mag
         frames.append(_idct_channels(M, v.reshape(ca.shape)))
     return frames
 

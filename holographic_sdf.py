@@ -129,12 +129,37 @@ class SDF:
 # Constructors (the primitive leaves).
 # ---------------------------------------------------------------------------
 
-def sphere(r=1.0):                 return SDF("sphere", (r,))
-def box(bx=1.0, by=1.0, bz=1.0):   return SDF("box", (bx, by, bz))
-def torus(R=1.0, r=0.3):           return SDF("torus", (R, r))
-def cylinder(h=1.0, r=0.5):        return SDF("cylinder", (h, r))
-def plane(h=0.0):                  return SDF("plane", (h,))     # ground plane at y = h
-def menger(iterations=3, size=1.0): return SDF("menger", (iterations, size))   # the classic fractal sponge
+def sphere(r=1.0):
+    """A sphere of radius `r`, centred at the origin. Returns an SDF you can transform (translate/rotate/scale) and
+    combine with union/intersect/subtract. The simplest primitive leaf."""
+    return SDF("sphere", (r,))
+
+
+def box(bx=1.0, by=1.0, bz=1.0):
+    """An axis-aligned box with half-extents (bx, by, bz) centred at the origin -- so the box spans [-bx, bx] on x,
+    etc. Returns an SDF. Combine with union/intersect/subtract to build solids."""
+    return SDF("box", (bx, by, bz))
+
+
+def torus(R=1.0, r=0.3):
+    """A torus in the XZ plane: `R` is the ring radius (centre to tube centre), `r` the tube radius. Returns an SDF."""
+    return SDF("torus", (R, r))
+
+
+def cylinder(h=1.0, r=0.5):
+    """A capped cylinder of half-height `h` and radius `r`, axis along Y, centred at the origin. Returns an SDF."""
+    return SDF("cylinder", (h, r))
+
+
+def plane(h=0.0):
+    """An infinite ground plane at height y = `h` (points above are outside). Returns an SDF -- handy as a floor."""
+    return SDF("plane", (h,))
+
+
+def menger(iterations=3, size=1.0):
+    """The Menger sponge: the classic recursive fractal cube, carved `iterations` deep at the given `size`. Returns an
+    SDF -- an example of rich geometry from a tiny deterministic rule."""
+    return SDF("menger", (iterations, size))
 
 
 # ---------------------------------------------------------------------------

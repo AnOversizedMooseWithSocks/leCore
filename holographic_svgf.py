@@ -35,15 +35,30 @@ def _rbf(diff2, sigma):
 
 
 def atrous_bilateral(image, normal, albedo, depth, sigma_normal=0.3, sigma_albedo=0.2,
-                     sigma_depth=0.5, sigma_color=0.6, levels=5):
+                     sigma_depth=0.5, sigma_color=0.6, levels=5, variance=None,
+                     color_scale=4.0, color_floor=0.03):
     """Edge-aware a-trous bilateral denoise. `image` is (H,W,3) noisy colour; `normal`/`albedo` are (H,W,3)
     feature buffers; `depth` is (H,W). At each level the filter blends the 3x3 neighbours at an increasing
     DILATION (1,2,4,...) -- the a-trous / multires hierarchy -- weighting each neighbour by the PRODUCT of RBF
     bumps on the normal/albedo/depth/colour differences (the bound-feature edge-stopping). Similar surfaces
-    blend; edges don't. Returns the denoised (H,W,3) image."""
+    blend; edges don't. Returns the denoised (H,W,3) image.
+
+    VARIANCE-GUIDED (the 'V' in SVGF -- Schied et al. 2017). If `variance` (H,W) -- the renderer's per-pixel
+    variance-of-the-mean -- is given, the COLOUR edge-stop width becomes PER-PIXEL: sigma_color_p = max(
+    color_scale*sqrt(variance_p), color_floor). Where a pixel is still noisy (high variance) the filter blends
+    freely (removes the grain); where it has CONVERGED (variance ~0) the colour sigma collapses to the floor, so
+    real detail is preserved instead of smeared. This is the wiring that lets the denoise strength CALIBRATE
+    ITSELF from the measured noise, instead of a hand-set global sigma_color. `variance=None` reproduces the
+    old fixed-sigma behaviour exactly (backward compatible)."""
     img = np.asarray(image, float).copy()
     H, W, _ = img.shape
     n = np.asarray(normal, float); a = np.asarray(albedo, float); z = np.asarray(depth, float)
+    # per-pixel colour sigma from the variance map (real SVGF), or the fixed scalar if no variance was supplied
+    if variance is not None:
+        vsig = np.sqrt(np.clip(np.asarray(variance, float), 0.0, None))     # noise level in luminance units
+        col_sigma = np.maximum(color_scale * vsig, color_floor)            # (H,W): wide where noisy, tiny where converged
+    else:
+        col_sigma = sigma_color                                            # scalar: the original behaviour
     # the 3x3 a-trous stencil with a small binomial spatial kernel
     offsets = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
     spatial = np.array([1, 2, 1, 2, 4, 2, 1, 2, 1], float)
@@ -62,7 +77,7 @@ def atrous_bilateral(image, normal, albedo, depth, sigma_normal=0.3, sigma_albed
             da = np.sum((a - a[YS, XS]) ** 2, axis=2)            # albedo difference (edge-stop across materials)
             dz = (z - z[YS, XS]) ** 2                            # depth difference (edge-stop across silhouettes)
             dc = np.sum((img - img[YS, XS]) ** 2, axis=2)        # colour difference (don't blend very different tones)
-            w = sw * _rbf(dn, sigma_normal) * _rbf(da, sigma_albedo) * _rbf(dz, sigma_depth) * _rbf(dc, sigma_color)
+            w = sw * _rbf(dn, sigma_normal) * _rbf(da, sigma_albedo) * _rbf(dz, sigma_depth) * _rbf(dc, col_sigma)
             w = w[:, :, None]
             out += w * img[YS, XS]
             wsum += w

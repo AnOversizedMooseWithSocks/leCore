@@ -124,3 +124,68 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# RE-ENABLE (adaptive-dispatch audit): the closed-form iterate is EXACT and nearly free -- but ONLY for a LINEAR
+# operator that is a circular convolution (a bind), because only then is it diagonal in the Fourier basis. That is
+# the kept negative ("only LINEAR operators diagonalise this way"). With adaptive dispatch we can DETECT the regime
+# and jump k iterations in one FFT where it holds, and step where it doesn't -- and because the closed form is
+# EXACT in its regime, the gate can NEVER do worse than stepping (it either matches it or falls back to it).
+#
+# THE DETECTOR (decidable, deterministic). An operator `op` is a circular convolution iff op(x) = bind(kernel, x)
+# for kernel = op(impulse) (its impulse response). Recover the kernel, then verify op == convolve-by-kernel on a
+# few seeded random probes. Pass -> use the closed form; fail -> step. No harm either way.
+
+def bind_kernel_of(op, dim):
+    """If `op` is a circular convolution, its kernel is its impulse response op([1,0,0,...]). (Any op's response to
+    the unit impulse; only meaningful as a kernel when op turns out to be a convolution -- checked separately.)"""
+    import numpy as _np
+    delta = _np.zeros(int(dim), float)
+    delta[0] = 1.0
+    return _np.asarray(op(delta), float)
+
+
+def is_bind_operator(op, dim, kernel=None, probes=3, seed=0, atol=1e-8):
+    """Regime detector for the closed-form iterate: 1.0 if `op` acts as bind(kernel, .) on seeded random probes
+    (a circular convolution -- diagonal in Fourier, so the closed form is exact), else 0.0. Deterministic."""
+    import numpy as _np
+    from holographic_ai import bind
+    if kernel is None:
+        kernel = bind_kernel_of(op, dim)
+    rng = _np.random.default_rng(seed)
+    for _ in range(int(probes)):
+        x = rng.standard_normal(int(dim))
+        if not _np.allclose(op(x), bind(kernel, x), atol=atol):
+            return 0.0
+    return 1.0
+
+
+def iterate_gated(op, state, k, min_k=8, probes=3, seed=0):
+    """Apply `op` to `state` k times, RE-ENABLING the closed-form jump behind its regime detector. If op is a
+    circular convolution (a bind) AND k is large enough for the detector to pay for itself (k >= min_k), evaluate
+    step_k in ONE FFT -- exact, ~k-fold fewer transforms. Otherwise step k times. Returns (result, info) where info
+    records the score / whether the closed form was used / the kernel dim, so the re-enable stays measurable.
+    The closed form is EXACT in regime, so this never does worse than stepping."""
+    import numpy as _np
+    state = _np.asarray(state, float)
+    dim = state.shape[0]
+
+    def _step_loop(_op, _state):
+        s = _np.asarray(_state, float)
+        for _ in range(int(k)):
+            s = _np.asarray(_op(s), float)
+        return s
+
+    # below min_k, stepping is cheaper than detecting -- don't bother probing.
+    if k < int(min_k):
+        return _step_loop(op, state), {"gate": "closed_form_iterate", "score": None, "used": "fallback",
+                                       "reason": "k<min_k", "k": int(k)}
+
+    kernel = bind_kernel_of(op, dim)
+    score = is_bind_operator(op, dim, kernel=kernel, probes=probes, seed=seed)
+    if score >= 1.0:
+        return step_k(state, kernel, int(k)), {"gate": "closed_form_iterate", "score": score, "used": "superior",
+                                               "reason": "linear bind operator", "k": int(k), "dim": dim}
+    return _step_loop(op, state), {"gate": "closed_form_iterate", "score": score, "used": "fallback",
+                                   "reason": "nonlinear/non-convolution operator", "k": int(k)}

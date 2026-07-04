@@ -475,6 +475,30 @@ def run_db_sql(sql, db):
         vals = _parse_values(m.group(3))
         db.insert(m.group(1), dict(zip(cols, vals)))
         return {"inserted": 1}
+    # SELECT ... FROM a JOIN b ON key -- a relational join over the API (before the plain-SELECT path, which a join
+    # query would otherwise match on its leading SELECT). See _run_join for the supported shape.
+    if _re.search(r"(?is)\bjoin\b", s) and low.startswith("select"):
+        return _run_join(s, db)
+    # UPDATE ns.t SET c=v, ... WHERE ...  -- a WHERE is REQUIRED here on purpose: a networked SQL endpoint should not
+    # let a typo rewrite a whole table. (Use the object API for a deliberate no-WHERE bulk write.)
+    if low.startswith("update "):
+        return _run_update(s, db)
+    # DELETE FROM ns.t WHERE ...  -- WHERE required, same safety guard as UPDATE.
+    if low.startswith("delete "):
+        return _run_delete(s, db)
+    # DROP TABLE ns.t  -- remove a table from its namespace (the system tier is protected by the wall).
+    if low.startswith("drop table"):
+        m = re.match(r"(?is)^drop\s+table\s+([\w.]+)\s*$", s)
+        if not m:
+            raise QueryError("DROP TABLE ns.name")
+        qn = m.group(1)
+        ns, _, name = qn.partition(".")
+        if db.tier_of(ns) == "system":
+            raise QueryError("cannot drop a table in the read-only 'system' tier")
+        if ns not in db.namespaces or name not in db.namespaces[ns]["tables"]:
+            raise QueryError("no such table %r" % qn)
+        del db.namespaces[ns]["tables"][name]
+        return {"dropped_table": qn}
     # SELECT: pull the qualified table name, resolve it, run the Part-1 query on the bare name
     m = re.match(r"(?is)^select\s+.+?\s+from\s+([\w.]+)", s)
     if not m:
@@ -483,6 +507,79 @@ def run_db_sql(sql, db):
     table = db.resolve(qn)
     bare = qn.split(".")[-1] if "." in qn else qn
     return run_sql(s.replace(qn, bare, 1), table)
+
+
+def _run_update(s, db):
+    """UPDATE ns.t SET c1=v1, c2=v2 WHERE <predicate>. Resolves the table, parses the assignments and the (required)
+    WHERE, and delegates to update() -- which tombstones + re-inserts, the append-only write model. Returns the count."""
+    import re
+    m = re.match(r"(?is)^update\s+([\w.]+)\s+set\s+(.+?)\s+where\s+(.+)$", s)
+    if not m:
+        raise QueryError("UPDATE ns.name SET col=val, ... WHERE predicate  (a WHERE is required)")
+    table = db.resolve(m.group(1))
+    # parse "a = 1, b = 'x'" -> {a: 1, b: 'x'}; the value pattern allows quoted strings (which may contain commas)
+    pairs = re.findall(r"(\w+)\s*=\s*('[^']*'|\"[^\"]*\"|[^,]+)", m.group(2))
+    changes = {col: _coerce_value(val) for col, val in pairs}
+    n = update(table, m.group(3).strip(), changes)               # update() takes a WHERE STRING
+    return {"updated": n}
+
+
+def _run_delete(s, db):
+    """DELETE FROM ns.t WHERE <predicate>. Resolves the table and delegates to delete() (tombstone the matches).
+    WHERE is required -- the same guard as UPDATE against a whole-table wipe from a typo."""
+    import re
+    m = re.match(r"(?is)^delete\s+from\s+([\w.]+)\s+where\s+(.+)$", s)
+    if not m:
+        raise QueryError("DELETE FROM ns.name WHERE predicate  (a WHERE is required)")
+    table = db.resolve(m.group(1))
+    n = delete(table, m.group(2).strip())
+    return {"deleted": n}
+
+
+def _run_join(s, db):
+    """SELECT cols FROM a [INNER|LEFT] JOIN b ON key [WHERE col op val]. Resolves both tables, hash-joins on the key,
+    then applies an optional single-predicate WHERE and projects the requested columns. Returns the joined rows.
+    A readable subset: one join, one optional predicate -- for anything richer, use the object join()/Query API."""
+    import re
+    m = re.match(r"(?is)^select\s+(.+?)\s+from\s+([\w.]+)\s+(inner\s+|left\s+)?join\s+([\w.]+)\s+on\s+(\w+)"
+                 r"(?:\s+where\s+(\w+)\s*(=|!=|>|<|>=|<=)\s*('[^']*'|\"[^\"]*\"|\S+))?\s*$", s)
+    if not m:
+        raise QueryError("SELECT cols FROM a JOIN b ON key [WHERE col op val]")
+    cols_raw, lqn, how_raw, rqn, key, wcol, wop, wval = m.groups()
+    left, right = db.resolve(lqn), db.resolve(rqn)
+    how = "left" if (how_raw and how_raw.strip().lower() == "left") else "inner"
+    rows = join(left, right, on=key, how=how)                    # the exact hash-join on the stored values
+    # optional single-predicate WHERE, applied to the joined dicts
+    if wcol is not None:
+        want = _coerce_value(wval)
+        rows = [r for r in rows if _cmp(r.get(wcol), wop, want)]
+    # column projection: '*' keeps everything, otherwise keep the named columns
+    cols = [c.strip() for c in cols_raw.split(",")]
+    if cols == ["*"]:
+        return rows
+    return [{c: r.get(c) for c in cols} for r in rows]
+
+
+def _cmp(a, op, b):
+    """Compare two stored values by a WHERE operator (used by the join's optional predicate)."""
+    if a is None:
+        return False
+    try:
+        if op == "=":
+            return a == b
+        if op == "!=":
+            return a != b
+        if op == ">":
+            return a > b
+        if op == "<":
+            return a < b
+        if op == ">=":
+            return a >= b
+        if op == "<=":
+            return a <= b
+    except TypeError:
+        return False
+    return False
 
 
 def _coerce_value(val):
@@ -1119,9 +1216,13 @@ def join(left, right, on, how="inner", suffix=("_l", "_r")):
         raise QueryError("join key %r is not a column of the right table" % rkey)
     index = {}                                                    # the hash side: right key value -> its right rows
     for rrow in right.rows:
+        if rrow.get("_deleted"):                                  # B2: skip tombstoned rows so a join sees LIVE data
+            continue
         index.setdefault(rrow.get(rkey), []).append(rrow)
     out = []
     for lrow in left.rows:
+        if lrow.get("_deleted"):                                  # (an UPDATE tombstones the old row + re-inserts a
+            continue                                              #  new one, so without this a join would double-count)
         matches = index.get(lrow.get(lkey), [])
         if matches:
             for rrow in matches:

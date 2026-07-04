@@ -18331,3 +18331,1959 @@ identical to 1/(1+exp(-z)) on non-overflowing inputs; ~0 (not a warning) on extr
 
 Tests 2998 -> 3011 collected (+13: png_bytes 1, sdfscene 7, build-ergonomics 5). The 3 facade tests now pass.
 Demo-side tools live under tools/ here (drop them into the gallery bundle); core items are in the engine repo.
+
+## Published as leos-core (import name stays lecore) + PyPI publish CI + docs (no test delta)
+
+Packaging/infra + docs, no new modules or tests.
+
+- The plain name `lecore` is TAKEN on PyPI (unrelated "Logic Elements core utilities", active). Distribution
+  name != import name, so we publish as **`leos-core`** (this engine is the core of leOS) and keep `import
+  lecore` via the shim. Verified end to end: built the wheel, installed it in a clean venv -> `pip show` says
+  `leos-core`, `import lecore` works. `setup.py` name changed; `lecore.py`/module layout untouched.
+- `package.yml` gained a `publish-pypi` job: runs only on a `v*` tag, only after the build+import smoke test,
+  uses PyPI **trusted publishing** (OIDC, `id-token: write`) so NO token lives in the repo. Optional
+  `environment: pypi` gate left commented for the simplest first setup. One-time PyPI-side setup (pending
+  publisher: owner AnOversizedMooseWithSocks, repo leCore, workflow package.yml) documented in PACKAGING.md.
+- Docs updated with the no-clone install path: README top now leads with `pip install leos-core` (then a
+  clone block for hacking/tour), and the extras block shows BOTH `pip install "leos-core[name]"` and the
+  `pip install .[name]` clone form. PACKAGING.md rewritten (install line, distribution-vs-import-name note,
+  numbered trusted-publisher walkthrough). build_package.sh output-filename comment fixed to leos_core-*.
+- NOT reserved by this: the bare `leos` name (PyPI reserves only the exact uploaded name) -- noted in
+  PACKAGING.md as a separate placeholder-upload if wanted. Off-repo: discoverleos.com would need the same
+  install line added by hand (outside this repo).
+- The `> Requires: numpy (pip install numpy)` line in REFERENCE.md is a per-module docstring requirement (not
+  a project install), so it's left alone; researchLog.md pip lines are historical log, left as-is.
+
+## Auto-calibrating render: wire the convergence machinery into the render loop (+ variance-guided SVGF)  [3011 -> 3021 tests]
+
+The gallery renders were grainy because make_gallery.py called the RAW path tracer at a fixed spp -- grainy in
+the hard spots (glass, reflections), wasteful in the easy ones (flat sky), and never touching the pipeline's
+denoise/adaptive machinery. Probe-first finding: the convergence machinery ALREADY EXISTED but was siloed --
+`holographic_adaptive_sample.py` (`converged_mask`, `sample_budget`: a calibrated CLT stop rule on path_trace's
+per-pixel variance-of-the-mean) was only used as a helper, never driving an actual render loop. So this was a
+WIRING problem, not a missing-capability one (the panel's recurring lesson).
+
+Two wiring fixes, both additive/backward-compatible:
+- **Variance-guided SVGF** (`holographic_svgf.atrous_bilateral` gained `variance=None`): the real SVGF move --
+  the per-pixel COLOUR edge-stop width becomes `max(color_scale*sqrt(variance_p), floor)`, so noisy pixels blend
+  freely (grain removed) and CONVERGED pixels collapse to the floor (detail preserved). `variance=None`
+  reproduces the old fixed-sigma behaviour bit-for-bit. This is what fixed the over-smoothing I kept hand-tuning
+  around: the denoise strength now CALIBRATES ITSELF from measured noise instead of a global magic sigma/levels.
+- **`holographic_gbuffer.render_auto`**: the auto-calibrating render. Samples in PASSES; after each, `converged_mask`
+  says which pixels hit the target CI -> they stop, the rest keep sampling (path_trace's `active` mask), so hard
+  pixels (glass/silhouettes/grazing) get more samples automatically. Then variance-guided SVGF. ONE knob:
+  `quality` (a target CI half-width). Also added `primary_gbuffer` (the missing real G-buffer -- one cheap primary
+  pass for normal/albedo/depth; the pipeline's g-buffer stage was a synthetic stand-in) and `render_denoised`
+  (the fixed-spp predecessor, kept + tested).
+
+MEASURED (spheres, tonemap-space PSNR vs a 128-spp reference -- tonemap space because MC grain is low-amplitude in
+raw HDR but shows after the tonemap stretches the shadows): at EQUAL average sample budget, render_auto BEATS a raw
+trace at draft/medium (+2.4 dB @ ~10 spp, +0.8 dB @ ~19 spp) and TIES near convergence at high (~-1 dB: once a
+pixel is converged, denoise can only soften detail -- the SAME documented crossover the denoise module already
+keeps loud). The adaptive sampler concentrates effort: on the spheres scene it spent ~31 mean / 64 max spp, i.e.
+~2x on the hard pixels. KEPT NEGATIVE unchanged and reaffirmed: SVGF denoises, it does not add detail; 5-level SVGF
+over-smooths (the sweep showed it plateaus low) -- variance guidance is what makes a fixed level safe.
+
+Wiring/close-out: `render_auto` wired as a UnifiedMind faculty next to `path_trace`; integration test
+`test_render_auto_faculty_calibrates_through_unified_mind` runs it through the mind and checks max_spp > mean_spp
+(effort actually calibrated). make_gallery.py rewired: every 3-D scene now calls `render_auto(quality="high")` with
+NO per-scene spp/denoise numbers (only max_bounce, a physical scene property, stays per-scene). Three NEW showcase
+scenes added: `render_identities` (one SDF surface as clay/copper/glass -- the mesh<->SDF<->splat "three costumes"),
+`render_fur` (groom + Marschner strand shading), `render_ocean` (SDF Gerstner water in a tank + a wooden cube at its
+Archimedes waterline, IOR-1.33 refraction). Tests +10 (gbuffer render_auto/adaptivity/determinism, variance-guided
+SVGF backward-compat+calibration, the integration test). tour.py: an AUTO-CALIBRATING RENDER block in the render
+section (verified in isolation: 8 passes, 28 mean / 64 max spp).
+
+## Render lighting & materials: ACES filmic + auto-exposure, HDR sun/sky, dispersion, caustics  [+3 tests]
+
+The renders looked washed out: a flat two-tone sky (no key light, low contrast, nothing bright to reflect) plus a
+plain Reinhard tonemap that compresses everything toward grey. Fixed the LIGHTING and the TONE curve, added two
+"crank it up" material effects, all backward-compatible additions in holographic_gbuffer.py (+ make_gallery.py):
+
+- **ACES filmic tonemap + auto-exposure** (`aces_tonemap`): Narkowicz's 2015 ACES curve fit -- filmic contrast and
+  a graceful highlight roll-off instead of Reinhard's grey mush. AUTO-EXPOSURE meters each scene's log-average
+  luminance onto mid-grey (0.18, Reinhard's photographic key), so scenes lit by a bright HDR sun self-expose to a
+  consistent mid-tone with no hand-set stop. Measured: mean pixel dropped from ~0.66 (bright/washed) to ~0.44 with
+  real blacks (p5~0.13) and controlled highlights (~0% blown) across all scenes.
+- **HDR sun/sky environment**: the gallery's flat `_sky` gradients now wrap `holographic_raymarch.sky_dome` (which
+  already had a bright sun disk + glow + HDRI-env support -- it just wasn't being used) with a bright HDR sun
+  (radiance >> 1) along one shared SUN direction. Metal/glass now have a high-contrast world to reflect/refract.
+- **Chromatic dispersion** (`render_dispersion`): trace R/G/B in three passes, each with a different dielectric IOR
+  (blue bends most -- Cauchy); take each channel from its own pass. Glass splits white light into a coloured fringe.
+  3x cost, for hero glass/water shots. Standard 3-wavelength spectral trick.
+- **Caustics** (`add_caustics`): a forward path tracer can't find caustic paths inline (no NEE/photon step), so use
+  `holographic_globalillum.caustics` (forward light-tracing: shoot light rays, refract through the dielectric, splat
+  where they land -> the focused cusp) to build a receiver-plane intensity map and composite the above-average
+  focusing onto the floor pixels BEFORE tonemapping. `caustic_sdf` restricts the refractor to just the dielectric so
+  opaque props don't spuriously refract.
+
+Wired into the glass gallery scene (dispersion=0.06 + a glass-only caustic under it). Interesting measured side effect:
+with the higher-contrast HDR lighting the spheres benchmark FLIPPED to a clear pipeline win even at high quality
+(auto 32.6 dB vs raw-at-38spp 30.3 dB, +2.3 dB) -- realistic bright-sun lighting makes more variance/fireflies, so
+the variance-guided denoise earns its keep where flat lighting left it near-neutral. Tests +3 (aces tonemap
+bounds/monotonicity/auto-exposure; dispersion splits R-vs-B in the refracted region; caustics brightens floor only,
+darkens nothing) -- these also NUMERICALLY verify the two effects fire, since the image viewer was unavailable to
+eyeball this pass. KEPT HONEST: caustics are composited (a separate forward light-trace), not found by the camera
+path tracer; dispersion is a 3-wavelength RGB approximation, not full-spectral; fur uses its own strand renderer so
+it doesn't pick up the ACES/auto-exposure path.
+
+## Physical materials wired into rendering: PBRMaterial physical props + matlib as the source of truth, fur fixed  [+7 tests]
+
+Two related issues: the fur looked bad, and materials weren't a single physical source of truth for the renderer
+(scenes hand-coded parameter tuples; the standard PBRMaterial and the ~130-entry holographic_matlib library were
+never consumed by the path tracer, and neither carried the physical dielectric/fiber properties glass and hair
+need). Probe-first finding: the render MATH was already physically based (GGX surfaces, Fresnel smooth-dielectric
+glass, a real Marschner R/TT/TRT fiber BSDF) -- what was missing was the material DEFINITIONS carrying that data.
+
+- **PBRMaterial extended with the physical channels the renderer needs** (holographic_materialio, backward-compatible
+  defaults): `ior`, `transmission`, `attenuation_color`/`attenuation_distance` (Beer-Lambert), and a fiber descriptor
+  (`fiber`, `fiber_roughness`, `fiber_tilt_deg`). These are the real glTF extensions KHR_materials_ior / _transmission
+  / _volume, emitted by `to_gltf_dict()` only when non-default (opaque materials export exactly the old entry). So a
+  material stays glTF/USD/Blender-Principled interchangeable AND now carries the physics.
+- **holographic_matlib.material() now populates the physics by class/name**: glass/gem/liquid presets get
+  transmission=1 + a real IOR (glass 1.5, diamond 2.42, water 1.33, ...) + an attenuation tint; a new `fiber` class
+  (fur_brown/ginger/gray, hair_blonde/black/brown/red) gets Marschner strand params. Added the renderer adapters
+  `shade(mat, n)` (-> the path tracer's (albedo, metallic, roughness, emission, ior) tuple, routing transmission vs
+  opaque) and `fiber_params(mat)` (-> the hair shader's colour/roughness/tilt). The library is now the single
+  physical source of truth the renderer reads FROM.
+- **render_hair reads physical fiber params** (holographic_hairshade): `roughness` -> longitudinal lobe width beta_r,
+  `tilt_deg` -> cuticle tilt alpha_r, forwarded to marschner. Backward-compatible (None -> old defaults).
+- **Gallery wired to the library**: the identities scene ("one surface, three materials") now pulls clay/copper/
+  glass_clear from matlib and reads their physical props (a `_put` helper writes metallic/roughness/ior per region);
+  the fur scene uses the `fur_ginger` fiber material with a denser/longer groom, RIM lighting from behind (fur reads
+  best backlit -- the translucent TT/TRT edges glow), a gradient background, and the ACES tonemap. The old fur was a
+  dark blob with a blown-out center; the new one has real dark fur (p5~0.02) with bright rim highlights (p95~0.95),
+  0% blown.
+
+Tests +7 (matlib: physical dielectric/fiber props, shade() routing, fiber_params refuses non-fiber; materialio:
+PBRMaterial physical extensions + glTF KHR export, opaque stays backward-compatible). KEPT HONEST: the path tracer
+still applies the transmitted tint per interface (a Beer-Lambert-ISH coloured-glass term), not a true distance-based
+volume absorption -- attenuation_distance is carried in the material and exported to glTF but the CPU tracer uses the
+tint approximation; fur uses its own strand renderer (not the path-traced environment), so it's rim-lit rather than
+lit by the scene's HDR sun. The material MODEL is now complete and standard; wiring every gallery scene through
+shade() (spheres/ocean still hand-assign a few regions) is a mechanical follow-up.
+
+## Ocean render fixed: a dedicated water shader (Fresnel + Snell refraction + Beer-Lambert depth + pool caustics)
+
+The ocean render was bad -- blown-out sky/ground with almost-black water, no visible refraction or depth. Root
+cause: the water was rendered through the path tracer's smooth-dielectric glass path, which is a CLOSED-object
+model (enter one face, exit the far face). An open water surface sitting over a floor doesn't fit that, so the
+refraction broke and the water crushed to black; meanwhile the bright studio sky filled the frame and the
+auto-exposure metered to it, blowing the top and bottom out.
+
+Replaced render_ocean with a dedicated, readable WATER shader (the standard water model, ~90 commented lines,
+vectorised NumPy -- renders in <1s, no path tracing):
+  * a look-DOWN camera so the frame is mostly water, not sky (kills the blown-sky problem);
+  * at the rippled surface (a summed-sinusoid height field with its ANALYTIC normal), FRESNEL (Schlick, water
+    F0~0.02) splits the ray into a sky REFLECTION and a REFRACTION into the water (Snell, eta=1/1.33);
+  * the refracted ray is marched to the sandy floor (or the cube's submerged side), and the colour it returns is
+    faded by BEER-LAMBERT absorption over the underwater distance -- sigma is largest in red, so deep water reads
+    blue and dark: that IS the volumetric depth/'fog' (the same extinction term holographic_volint.render_fog
+    uses, applied along the underwater path);
+  * POOL CAUSTICS via holographic_globalillum.caustics (sunlight focused through the wavy surface) brighten the
+    sand; a wooden cube floats at its Archimedes waterline; a sharp sun glint sparkles off the ripples.
+MEASURED (stats, since the image viewer was unavailable to eyeball): water region now reads blue/cyan
+(R 0.25 < G 0.48 < B 0.50, physically correct) with real variation (std 0.17 from refraction/caustics/ripples),
+0% black; the sky strip and the whole frame have 0% blown pixels (was an almost black-and-white image before);
+overall p5 0.18 / p50 0.36 / p95 0.71 -- a proper tonal range.
+KEPT HONEST: this is a single-bounce water shader (reflection + one refraction to the floor), not full multi-bounce
+path-traced water; it's the right tool for water-over-a-floor, and it's a SEPARATE path from render_auto (which
+stays the auto-calibrating path tracer for the closed-object scenes).
+
+## Fur grooming fix: comb the strands, supersample for AA, key+rim lighting
+
+Feedback on the fur: it looked better but (1) stood almost straight out instead of being groomed/styled, (2) was
+pixelated to where it was hard to read, and (3) the lighting was strange (a blotchy warm rim + a blown-out white
+centre). Root causes, all in make_gallery.render_fur (holographic_groom/hairshade are unchanged except last turn's
+fiber params):
+- STANDING OUT: groom() grows each strand along the surface NORMAL (its `lean` uses an arbitrary per-strand
+  tangent, so it can't comb coherently). Added a readable `_comb()` that reshapes each strand to curve from its
+  outward normal at the root toward a world FLOW direction (down + back) at the tip, projected onto the surface
+  tangent plane, with a little `lift` so it keeps loft and doesn't clip into the body. Verified numerically: tip
+  direction went from tip.normal=+0.93 / tip.flow=+0.05 (straight out) to tip.normal=+0.73 / tip.flow=+0.62 (lies
+  along the body and flows), 0/400 strands clipping inward.
+- PIXELATION: the strand rasteriser (_draw_segment) draws 1-px DDA lines, no AA. Render at 2x and box-downsample
+  (supersampling) -> smooth fur instead of pixel noise.
+- LIGHTING: the old single back-light gave the orange/blown look. Now two passes -- a KEY light (front-upper 3/4,
+  reveals the groomed form) plus a softer warm RIM from behind (edge glow) -- summed, with the Marschner `reflect`
+  lowered to 0.06 so no blown highlight. Composited over a soft gradient background and ACES-tonemapped.
+MEASURED (stats; the image viewer was still unavailable to eyeball): 0% blown pixels (was a blown white centre),
+balanced tones p5 0.06 / p50 0.56 / p95 0.68. ~32s at 240x180 (2x supersample, 5000 strands, key+rim = 2 passes).
+KEPT HONEST: still the REST groom + a procedural comb (not simulated dynamics or a captured scan), and it uses its
+own strand renderer, so it's lit by its own key/rim rig rather than the scene's HDR sun/path tracer.
+
+## Fur density: enough coverage that the body no longer shows through
+
+Feedback: the groom looked/styled/lit better, but too SPARSE -- you could see the body through the coat. The honest
+fix is simply more fur (render cost IS the strand count, so density is the lever). render_fur now grooms a DENSE
+coat: 16000 long strands + 8000 short UNDERCOAT strands (length 0.30) that fill the base, both with length_jitter
+for natural variation, combed and rendered as before. MEASURED coverage (fraction of the critter region that is fur
+vs. background showing through) rose to 0.93 -- the remaining ~7% is mostly the silhouette edge, not interior gaps.
+COST: ~230s at 240x180 (24000 strands x key+rim = 2 passes x 2x supersample), because the strand rasteriser draws
+1-px DDA lines in a Python loop -- that's the price of coverage with this renderer. If faster iteration matters more
+than the last bit of density, the levers are the strand counts (top of render_fur) or dropping the rim pass; a real
+speedup would be vectorising _draw_segment (batch all segments), a heavier follow-up. Image viewer still unavailable
+to eyeball, so coverage/exposure were checked by stats.
+
+## Fur brushed down / relaxed: gravity droop + flatter comb
+
+Feedback: making progress, but the coat still stuck out fairly straight, leaving spots where the body showed. Added
+a gravity `droop` term to _comb (a downward sag that grows as t^2 toward the tip -- the coat RELAXES/settles) and
+brushed it flatter (lift 0.40->0.16, bend 1.1->1.45). Verified by geometry: the strand tip went from tip.normal
++0.74 (standing off) to +0.49 (laid down), average loft off the surface 0.41->0.30, with 0/2500 strands clipping
+into the body. Result: the INTERIOR core gap fraction (bright background showing through the middle of the critter)
+is 0.2% -- the surface no longer shows through. The whole-silhouette coverage metric read slightly lower (0.93->0.88)
+only because flatter fur makes a tighter silhouette (less outward spike), not because of interior holes. All the comb
+knobs (flow direction, lift, bend, droop) are commented one-liners at the top of render_fur for easy tweaking.
+Image viewer still unavailable here, so this was tuned by geometry + coverage stats.
+
+## Render pipeline wiring, batch 1: pipeline renders REAL scenes; tonemap dedup; smoke&fire showcase  [+4 tests]
+
+Knocking down the RENDER_PIPELINE_BACKLOG. This batch (the "use what already exists" tier):
+- J1 (bench): new benchmarks/bench_render.py -- path_trace px-samples/sec, render_auto time-to-quality (+PSNR vs
+  equal-budget raw), render_hair segments/sec, StableFluid steps/sec, volume_render samples/sec. Baseline recorded
+  in benchmarks/README.md. This is the speed-regression guard for all the pipeline rewiring.
+- A1 (the big one): holographic_pipeline's gbuffer/render/svgf stages were demo stand-ins (a 24x24 _demo_scene).
+  Added a RenderSpec dataclass; pass one as run(scene=RenderSpec(...)) and those stages run the REAL machinery --
+  primary_gbuffer + a new converge_samples() (the sampling half of render_auto, extracted so both share one loop)
+  + variance-guided SVGF. Verified the staged pipeline composes the SAME frame render_auto returns, bit-for-bit.
+  None/plain scenes still hit the demo path unchanged (backward compatible; 15 old pipeline tests still green).
+- A4: the pipeline's SVGF stage now receives the render stage's per-pixel variance (variance-GUIDED), not a fixed
+  sigma.
+- E1 (dedup): holographic_postfx already owned aces/reinhard/exposure/gamma. The gbuffer aces_tonemap was a
+  duplicate of the Narkowicz fit -- now a thin delegate to postfx (verified bit-for-bit identical to the old inline
+  math, auto on and off). Added auto_exposure (log-average->mid-grey metering) to postfx so it lives with the curves.
+- E2: PipelineConfig gained postfx="off"|"aces"; the present stage grades via postfx when "aces" (default stays the
+  legacy inline Reinhard, byte-identical). Validation rejects bad values.
+- I1 (paired showcase): render_smoke_fire in the gallery -- ONE 3-D Stable-Fluids plume, rendered twice through
+  volume_render (smoke = grey absorption; fire = the hot density*temperature core through the blackbody ramp). The
+  sim and the volume renderer both existed but were never composed into a frame; now they are.
+Tests +4 (pipeline renders a real scene matching render_auto; demo path byte-identical; postfx aces grades + rejects
+bad config; the E1 aces bit-identity check). KEPT HONEST: the pipeline's adaptive_samples/reproject/splat stages are
+still demo stand-ins (not in this batch); the fire glow is a modest plume-base core (physically it's smoke above,
+fire at the base), not a bonfire; image viewer still unavailable so smoke/fire tuned by stats.
+
+## Render pipeline wiring, batch 2: low-discrepancy AA, materials drive spheres+glass, sun-sky default  [+1 test]
+
+Continuing the RENDER_PIPELINE_BACKLOG cheap-wins tier:
+- H1 (low-discrepancy anti-aliasing): the camera shot every sample through the pixel CENTRE, so more samples cut
+  noise but never smoothed edge jaggies. Added an opt-in `antialias=` to path_trace: each sample jitters the ray
+  to a sub-pixel position from holographic_lowdiscrepancy.low_discrepancy (Roberts' R-sequence -- even coverage,
+  unlike clumpy plain random). Cameras gained an optional ray_dirs(w,h,jitter=(dx,dy)); a camera that doesn't
+  support it falls back to centre rays. Default OFF in path_trace = byte-identical to before; ON in render_auto
+  (default) so the gallery gets AA. Verified: default off is byte-identical, on lowers edge total-variation
+  (354->344 at equal spp). Threaded antialias through converge_samples + render_auto. Also made the gallery's
+  raw-vs-pipeline BENCHMARK use antialias on BOTH the raw baseline and the reference, so the PSNR comparison stays
+  apples-to-apples (it had briefly gone unfair: render_auto AA vs a centre-ray reference).
+- B1 (materials drive the render): render_spheres and render_glass now pull physical materials from holographic_matlib
+  (gold/plastic_red/plastic_blue/glass_clear, checker floor from matte_white/black) via a small _put helper, instead
+  of hand-typed tuples -- joining render_identities which already did. Only render_ocean still hand-codes, and it uses
+  a bespoke water shader anyway.
+- D1 (sun-sky default): confirmed the gallery _sky/_sky2 already wrap holographic_raymarch.sky_dome (bright HDR sun +
+  graduated sky), which is the default environment for every path-traced scene.
+Tests +1 (the antialias opt-in: default byte-identical, on differs and stays valid). Render bench unchanged vs the
+recorded baseline (render_auto in the bench uses antialias=False to stay comparable). KEPT HONEST: AA is sub-pixel
+jitter only (no reconstruction filter beyond the box average of the samples); ocean still hand-codes its water.
+
+## Render pipeline wiring, batch 3: the renderer consumes the canonical SCENE DOCUMENT (H7)  [+6 tests]
+
+The gallery hand-built a bespoke Python `class Scene` per scene, tangling geometry and material logic, while the
+engine's canonical mutable document (holographic_scene_doc.Scene -- objects with stable handles, transforms, SDF
+geometry, materials, undo, selection, change-events) was never consumed by the renderer. New bridge module
+holographic_scene_render.py closes it:
+- scene_to_render(scene) -> (sdf, material_fn). Geometry: each object's SDF is PLACED by its transform (translation
+  + uniform scale read off the 4x4, applied via the SDF tree's own .translate()/.scale()) and UNION-ed into one
+  scene SDF (nearest-object distance). Material: at a point we argmin over the objects' |distance| to find which
+  object owns the nearest surface, then shade with that object's library material via matlib.shade -- the same
+  "closest wins" rule the union uses for distance, applied to appearance.
+- render_scene_document(scene, camera, ...) -> renders it through render_auto in one call.
+- Wired as UnifiedMind faculties render_scene_document + scene_to_render (anti-silo), with a cross-faculty
+  integration test (scene_doc + matlib + render_auto meet) and a tour block.
+Rendered a 4-object document (floor/red-plastic/gold-metal/jade-box) end to end, materials read straight off the
+document. Tests +6 (flatten=nearest-object; material_fn picks the owning object's material; transform places
+geometry; empty scene raises; end-to-end deterministic render; the UnifiedMind integration). KEPT HONEST: honours
+translation + uniform scale (what the scenes use); full rotation would compose the SDF's .rotate() too -- a noted
+extension, not silently wrong. The material argmin is over |distance| so it's correct AT surfaces (where the
+renderer shades); deep inside an object a different object's surface can be nearer, which is irrelevant to the
+render but caught me in a test (query surface points, not interior centres).
+
+## Render pipeline wiring, batch 4: subsurface scattering into the path tracer, driven by the material (H2)  [+3 tests]
+
+The subsurface term (raymarch.subsurface: Beer-Lambert on the SDF interior toward the light -> thin regions glow)
+existed but was only used by the RASTERISER. Wired it into the PATH TRACER, switched on by the material:
+- path_trace._unpack_mat now accepts an optional 6th material element, a per-point SUBSURFACE strength (4/5-tuple
+  callers unchanged). When present + a new sss_dir is given, a hit gets an added glow = sss * transmit(thinness) *
+  albedo -- like emission but modulated by how thin the object is toward the sun. Default sss_dir=None => byte-
+  identical to before (verified). Threaded sss_dir/depth/sigma through converge_samples + render_auto.
+- PBRMaterial gained an `sss` field; matlib.material() populates it for translucent presets (wax 1.0, skin 0.9,
+  jade 0.8, marble 0.5, milk/honey/flesh/leaf). IMPORTANT: a named SSS material is a translucent SOLID, so it now
+  takes precedence over the gem/liquid-class transmission -- jade/marble render as glowing solids, not refractive
+  glass. matlib.shade returns the 6-tuple for those; the scene-render bridge's material_fn carries the sss channel
+  through and only emits a 6-tuple when some object is translucent.
+- Wired end to end: render_scene_document gained sss_dir; the UnifiedMind faculty forwards it. Gallery demo
+  render_subsurface (wax/jade/marble backlit in a dark room, built on the scene document) + tour block comparing
+  translucent wax vs opaque clay (1.2x brighter, real added light).
+Tests +3 (sss opt-in: default byte-identical, on glows brighter; the matlib sss routing; the UnifiedMind integration
+wax>clay). KEPT HONEST: this is the field's approximate single-direction translucency (interior path length toward
+ONE light), not full multiple-scattering diffusion SSS -- it captures the thin-glow look, the kept-negative the
+raymarch.subsurface docstring already states.
+
+## Fix: subsurface demo simplified to ONE big bumpy blob (was 3 tiny shapes)
+The first render_subsurface used three even-thickness blobs (two spheres + a rounded box), so the thin-glows-more
+effect had no thin geometry to reveal -- it looked like flat translucent balls. Rebuilt with shapes that have real
+thickness variation: a WAX torus (thin ring glows through), a DISPLACED jade sphere (thin bumps light up), and a
+MARBLE box carved to a THIN SHELL (walls glow, thick base dark). Measured thin/thick contrast now present (bright-
+glow frac 0.33 alongside mid-dark frac 0.42). Lesson kept: an effect demo must include the geometry that EXHIBITS
+the effect, or the measurement is right but the picture lies.
+
+## Render pipeline wiring, batch 5: thermal emission -- hot materials glow by their temperature (H2 cont.)  [+3 tests]
+
+Second physical-property-drives-material item (after SSS). A material now has a temperature_K; a hot material EMITS
+blackbody radiation whose COLOUR is Planck's law for that temperature (holographic_blackbody.blackbody_rgb, already
+in the tree) and whose BRIGHTNESS ramps with temperature. Implemented in matlib.shade: T>500K adds col*bright to
+emission (col = blackbody_rgb(T), bright = ((T-500)/1500)^2). New matlib.heat(name_or_mat, T) returns a heated copy.
+Emission already flows through path_trace's emissive term, so NO tracer change was needed -- the physical property
+just feeds the existing path. Verified monotonic: iron 700K->2900K emission lum 0.006->1.63, every step red>=green>=
+blue (correct cooler=redder hue). Showcase render_hot_metal (five iron bars heated 700..2800K, a heat-gradient row
+in a dark room) + tour block + UnifiedMind-path integration test (hot iron glows warm vs cold iron dark). Tests +3.
+
+ALSO fixed this batch: the subsurface demo (batch 4) used even-thickness blobs so the thin-glows effect couldn't
+show; rebuilt with varied-thickness shapes (wax torus / displaced jade sphere / hollow marble shell). Lesson: an
+effect demo must contain the geometry that exhibits the effect.
+
+## Fix: subsurface demo -> ONE large displaced blob
+Three shapes were too small to read at gallery size. Dropped the torus and hollow shell; kept a single big
+displaced wax sphere filling the frame (bumpy surface = varied thickness all over; thin ridges glow, thick body
+dark). Fills 100% of frame, ~47% bright-glow / ~53% dark-thick. Simpler and legible.
+
+## Render pipeline wiring, batch 6: physical-structure materials (crystal grains + ore inclusions) into albedo (H2 cont.)  [+3 tests]
+
+Third physical-property-drives-material item. crystal_material (Voronoi grains, holographic_cellular) and
+material_inclusions (calibrated impurity pockets, holographic_inclusions) already returned albedo SOCKETS
+f(points)->(M,3) rgb, but nothing fed them to the renderer (its material(P) returned a flat colour per object).
+Wired them via the scene document: a scene object can carry overrides={"albedo_socket": socket}; scene_to_render's
+material_fn samples that socket at the hit points to override the flat base albedo (per-owner, so mixed scenes
+work). No socket -> flat material colour, unchanged. Showcase render_crystal (a polycrystalline gem + an ore
+boulder with gold/iron pockets) + tour block + UnifiedMind integration test (the gem renders with facet colour
+variation, not flat). Tests +3 (socket varies per-point; no-socket stays flat; the mind-path render). This is the
+same "material carries physics, shader reads it" pattern as SSS (batch 4) and thermal (batch 5), now for spatial
+structure -- structure IS the texture, deterministic and volumetric, no image maps.
+
+## Fix: subsurface demo -> ORANGE honey + two lighting bugs found and kept
+The white wax blob was unreadable (white glow on grey). Switched to honey (orange translucent) so the glow has a
+colour: thin bumps blaze orange, thick body absorbs to black. Debugging surfaced two real bugs worth keeping:
+(1) the "backlight" was pointed AT the camera -- sun_dir and the SSS march direction were +z while the camera sat
+at +z, i.e. a front light labelled back; a true backlight is -z, and a DEAD-ON backlight then blows the background
+white (camera stares into the halo) -- the working setup is SIDE-BACK, well off the camera axis. (2) the gallery's
+auto-exposure lifts a deliberately dark room to mid-grey, washing out exactly the dark-vs-glow contrast the demo
+exists to show -- this shot uses FIXED exposure (aces_tonemap(auto=False)). Also threaded sss_depth/sss_sigma
+through render_scene_document + the UnifiedMind faculty (they were stuck at the render_auto defaults). Final:
+blob ~29% orange glow (hue 0.79/0.65/0.20), background 0.12, nothing blown.
+
+## Fix: SSS contour banding -- march quantization, dithered
+Moose spotted contour bands on the subsurface blob. Cause: raymarch.subsurface samples the interior at 10 fixed
+positions, quantizing the measured thickness to depth/10 -- on the demo geometry that collapsed a smooth thickness
+ramp to 10 distinct transmit levels (7 visible plateau bands on a scanline). Fix, two parts: (1) subsurface() gained
+an optional per-point `jitter` (a [0,1) fraction shifting that point's sample offsets by a sub-step -- jitter=None
+is byte-identical to before); (2) path_trace's SSS term now uses enough steps to keep the quantum ~0.035 world
+units AND dithers with a deterministic hash of the hit position (sin-dot-product hash -- no RNG state, fully
+reproducible), so residual quantization becomes fine noise the SVGF pass smooths. Measured A/B on the demo's real
+geometry: 10 -> 30 distinct levels, 7 -> 4 plateau runs (the remainder are genuinely equal-thickness flats). Test
+pins jitter=None identity + the level improvement. Cost: 37 sdf evals instead of 10, only on translucent hits.
+
+## Render pipeline wiring, batch 7: VOLUME as a first-class pipeline stage (H5)  [+5 tests]
+
+Smoke/fire/fog SIMULATED in the pipeline but the volume RENDER never reached a frame -- the smoke/fire demo
+hand-composited it outside the pipeline. Fixed: RenderSpec gained an optional `volume` dict (field/bounds/mode/
+sigma/steps/emission_color/background); a new pipeline VOLUME stage (_volume_run) renders it with
+holographic_render.volume_render and over-composites onto the surface image: out = volume + surface*(1-alpha).
+Registered as Stage("volume", needs=("image",), produces=("composited",), enabled=cfg.volume); phase ordering puts
+it render -> svgf -> volume -> present. Default OFF (volume=False + scene.volume=None), so every existing pipeline
+is byte-unchanged; a volume=True flag with no scene.volume safely no-ops. Showcase render_smoke_over_scene (a plume
+rising behind two library-material spheres, composited BY THE PIPELINE) + tour block + UnifiedMind integration
+(render_pipeline('final', volume=True).run(scene-with-volume)). Tests +5 (composites over surface; ordering +
+default-off; safe no-op; the mind-path). 
+
+Sim-tuning lessons kept: StableFluid's UP axis defaults to axis 0 (X), NOT Y -- the working smoke_fire recipe uses
+that default, so the plume rises along grid-X; the demo transposes (1,0,2) to map sim-up -> world-Y. A plume is a
+CONCENTRATED column (centre alpha >> edge alpha ~ 0), verified by measuring the alpha's spatial spread, not a grey
+wash -- the naive "grey-pixel fraction" metric counts floor+sky and lies.
+
+## Render pipeline wiring, batch 8: PARTICLES as a first-class pipeline stage (H6)  [+15 tests]
+
+The particle sim (holographic_integrate.ParticleSim advances an (N,3) position array, even stashing it in
+ctx.buffers["particles"]) had no RENDERER -- simulated points never became a picture. Built the missing piece:
+NEW module holographic_pointsplat.py projects a point cloud through the camera's own view/projection matrices and
+splats each point as a soft round Gaussian dot, returning (image, alpha) -- the same contract as volume_render.
+Painter's order (far->near) so nearer sparks occlude farther; optional depth_fade dims receding points; fully
+deterministic (no RNG). Then a pipeline PARTICLE stage (_particles_run): RenderSpec gained a `particles` dict
+{points, colors, radius_px, intensity, depth_fade}; the stage over-composites the splatted layer onto the surface
+(out = points + surface*(1-alpha)). Registered after the volume stage (a spark in front of smoke reads right) --
+this required an explicit phase renumber: compositing stages volume(2), particles(3), present(4), because
+svgf_denoise produces "denoised" (not "image") so the compositors don't depend on it and were sorting by name into
+the wrong slot. Default OFF, byte-unchanged when unused; particles=True with no scene.particles safely no-ops.
+Showcase render_sparks_over_scene (an ember swarm over two spheres on a dark floor, composited BY THE PIPELINE) +
+tour block + UnifiedMind integration. Tests +15 (7 pointsplat module: projection/occlusion/depth-fade/empty/
+determinism; 3 pipeline: composite/ordering/safe-no-op; 1 mind integration; plus the module selftest).
+
+Demo lesson kept: too many particles in a small volume project into overlapping CLUMPS, not distinct sparks (320
+pts -> 6 merged blobs, one 2793px). Fewer + wider-spread reads as embers (90 pts -> 46 distinct spark-sized dots).
+Measure distinctness by connected-component blob sizes on the spark-only layer, not a bright-pixel fraction.
+
+## Render pipeline wiring, batch 9: HAIR/FUR as a first-class pipeline stage (H4)  [+7 tests]
+
+Third and last render-STAGE wiring (after volume H5 and particles H6). render_hair drew strands into its OWN image
+over an OPAQUE background and returned only that image -- so it could not be a layer over another render. Added an
+opt-in return_alpha: _draw_segment optionally marks a coverage buffer at every pixel it paints, and render_hair
+returns (image, alpha) when asked. Default (return_alpha=False) is byte-identical -- verified the image is unchanged
+and the alpha exactly matches the painted pixels. Then a pipeline HAIR stage (_hair_run): RenderSpec gained a `hair`
+dict {strands, shader, hair_color, light_dir, roughness, tilt_deg, lod_stride, smooth_levels}; the stage
+over-composites the shaded strands onto the surface (out = hair*alpha + surface*(1-alpha)). Registered LAST of the
+layer stages: volume(2) -> particles(3) -> hair(4) -> present(5), so a strand in front of smoke/sparks reads right.
+Default OFF, byte-unchanged when unused; hair=True with no scene.hair safely no-ops. Showcase render_fur_over_scene
+(a groomed creature coat composited over a PATH-TRACED skin-material body, Marschner look from fur_ginger's fiber
+params) + tour block + UnifiedMind integration. Tests +7 (1 module return_alpha back-compat + coverage-matches-
+painted; 3 pipeline composite/ordering/safe-no-op; 1 mind integration; + the existing selftest still green).
+
+The three layer stages now share one shape: simulate/build -> render to (image, alpha) -> over-composite. A scene
+carrying any of volume/particles/hair renders as one finished frame; before, each was a standalone renderer whose
+output a demo had to hand-composite. Coverage measured body-shaped (central-column warm fur 0.76 vs edge 0.004),
+confirming a real coat, not scattered noise.
+
+## Render build, batch 10: THIN-FILM IRIDESCENCE (soap bubble / oil slick) -- the one MISSING material  [+14 tests]
+
+The first genuine BUILD after the render-stage wiring trio (not wiring -- new capability). Soap-bubble / oil-slick
+iridescence: a thin transparent film reflects light off its top and bottom, the beams interfere, and whether a
+colour reinforces or cancels depends on film thickness AND view angle -> the hue sweeps across a curved surface.
+NEW module holographic_thinfilm.py computes it from first principles: interference_reflectance(thickness_nm,
+cos_theta, n_film) gives the two-beam reflectance spectrum (Snell for the in-film angle, OPD = 2*n*d*cos_t, half-
+wave flip, R(lambda) = sin^2(pi*OPD/lambda + flip/2)); spectrum_to_rgb integrates it against the CIE colour-matching
+curves REUSED from holographic_blackbody (no second colour table); thin_film_tint combines them; iridescent_socket
+builds a view-dependent albedo socket. The core is vectorised over per-point thickness AND per-point angle together.
+
+Wired into the renderer following the SSS pattern: _unpack_mat gained a 7th value = iridescence film thickness (nm,
+0 = none; 4/5/6-tuple callbacks unchanged), and the path tracer, where irid>0, computes the tint from the faced
+normal and view direction (-Dh, both already in hand at the hit) and multiplies it into the albedo before the BRDF
+bounce. PBRMaterial gained iridescence_nm; matlib.shade emits the 7-tuple for iridescent materials; three named
+presets (soap_bubble 300 nm, oil_slick 420 nm, beetle_shell 250 nm) via a new _IRIDESCENT table; matlib.iridesce(
+name_or_mat, nm) gives any material a film. scene_render's material_fn carries the 7th value through too.
+
+Showcase render_iridescence (a soap bubble + an oil-slick sphere against a colourful sky -- iridescence tints
+REFLECTED light so the environment needs colour). Measured: a 320 nm film shifts colour by 0.97 (RGB) head-on vs
+grazing; the soap sphere spans 5/12 hue bins, the oil sphere 6/12 -- a real rainbow sweep, not a flat tint.
+Saturation is gentle (~0.15-0.18), which is physically correct -- soap iridescence is a pearlescent shimmer, not
+neon. Tour block + UnifiedMind integration. Tests +14 (8 thinfilm module: spectrum range / thickness-cycle /
+angle-shift / per-point / fringe-density / socket / determinism / phase-flip; 2 matlib preset+helper; 1 pathtrace
+view-dependence; 1 mind integration; + the module selftest).
+
+Kept note: iridescence tints REFLECTED light, so it only reads against a colourful environment and on a curved/
+varying surface -- a flat grey sky gives almost no sheen (measured hue spread collapses). Not a bug, the physics.
+
+## Render build, batch 11: PLACED LIGHTS + NEXT-EVENT ESTIMATION -- the tracer's own kept-negative, closed  [+9 tests]
+
+The path tracer's docstring flagged its own gap: "No NEXT-EVENT ESTIMATION / no explicit light sampling: light is
+gathered only when a bounce ray happens to hit the emissive ENVIRONMENT... NEE/MIS-with-lights is the honest next
+step." Closed it. NEW module holographic_lights.py: PointLight (1/r^2 falloff, hard shadows), DirectionalLight
+(sun, no falloff), SphereLight (has AREA -> samples a random surface point each call -> SOFT shadows / penumbra),
+and direct_lighting(sdf, P, N, V, mat..., lights, rng) -- the NEE evaluation: per light, point a shadow ray at it
+(sphere_trace), if the first hit is farther than the light the point is visible, add f_r(cook_torrance)*L*cos.
+
+Wired into path_trace via a lights=None param: at each diffuse hit, direct_lighting adds the DIRECT term BEFORE
+the existing random BRDF bounce (which still runs, carrying indirect light -- nothing lost). No double-counting: the
+lights are ANALYTIC objects, not SDF geometry, so bounce rays can't also hit them. Threaded lights through
+converge_samples, render_auto, render_scene_document, RenderSpec + the pipeline render stage, and the mind's
+render_scene_document faculty (render_auto uses **kw, so lights flows through). lights=None is byte-identical to the
+old environment-only render (pinned by a test).
+
+Showcase render_lit_scene (three objects in a dark room lit by a warm SPHERE key + a cool POINT rim). Measured: with
+only a dark sky the scene is ~black (mean 0.016); one point lamp lights it to 0.099 (~6x) with real shadows (46%
+of frame in shadow via direct path_trace; the floor min drops to 0.03 under objects). SphereLight's sampled
+directions vary (std ~0.5) -> soft shadows. Tour block + UnifiedMind pipeline integration. Tests +9 (6 lights module:
+falloff/directional/NEE-lit-and-shadowed/backfacing/sphere-samples/no-lights; 2 pathtrace NEE+backcompat; 1 mind
+pipeline integration). This is foundational: every future render can now use real lamps, not just an environment.
+
+## Render build, batch 12: THE FULL LIGHT RIG -- 3 light types -> 8, plus fields & gobos  [+16 tests]
+
+Moose flagged the light list as thin. Expanded holographic_lights.py from 3 types (point/directional/sphere) to the
+full set a real DCC app has: PointLight, DirectionalLight, AmbientLight (a no-shadow fill -- albedo*colour, handled
+specially in direct_lighting), SpotLight (a cone with smoothstep inner/outer falloff + an optional GOBO -- a
+projected light cookie f(uv)->multiplier over the cone cross-section), RectLight (a one-sided area softbox, soft
+shadows, optional gobo), SphereLight (unchanged), MeshLight (an emissive triangle mesh: area-weighted triangle pick
++ sqrt-barycentric point sample, one-sided), and IESLight (a real luminaire beam shape from a candela profile --
+callable or array interpolated over angle). load_ies(text) parses a standard IESNA LM-63 .ies file (readable subset:
+vertical angles + first horizontal plane's candela; ignores TILT geometry and multi-plane azimuth, noted honestly).
+
+FIELDS: every light's colour AND intensity may be a constant OR a callable f(P)->values, so a lamp can have a
+colour gradient or an intensity map that varies across the scene (helper _resolve / _emit). The three original
+lights keep their exact constructor + sample() contract (the tracer and old tests depend on it -- pinned by a
+back-compat test), so nothing in path_trace changed; direct_lighting stays generic over all eight via the shared
+sample() -> shadow-ray -> BRDF path, with the ambient branch the one special case.
+
+Fixed a real coordinate issue found by the gobo selftest: for a straight-down spot the vertical-beam fallback
+up-vector was (1,0,0), which put the gobo's u-axis on world -z, so a pattern's horizontal didn't line up with world
+x. Switched the vertical fallback to (0,0,1) so a downlight's gobo u maps to world x (what an artist expects).
+
+Showcase render_light_types (a gobo spot casting striped bars on a backdrop + a soft rect light + a cool IES
+downlight over pillars). Measured: spot on-axis 4.44 vs 0.0000 outside the cone; gobo lit-half > blocked-half; IES
+on-axis > off-axis; colour-field lamp reads redder to the right; gobo projects 5 visible stripe bands on the
+backdrop; warm/cool split left(+0.022 R-B) vs right(-0.052 R-B). Tour block + UnifiedMind pipeline integration.
+Tests +16 (falloff/directional/NEE/backfacing/no-lights/ambient/spot-cone/gobo/rect-one-sided/sphere/mesh/IES-
+profile/load_ies/colour-field/intensity-field/back-compat).
+
+## Render build, batch 13: THE CACHED DOME (RENDER-DC1) -- the soft dome as a three-tier cache  [+6 tests]
+
+The dome (soft sky-ambient / AO) was the render backlog's worst cost: brute-forced it needs many ray-traced AO
+samples per pixel per bounce and is still noisy (the showcase dome was 323s). It is also the SOFTEST light, which a
+long design thread (with Moose) established is exactly where a cache wins -- measured, not assumed. Shipped
+holographic_domecache.py: a three-tier cache, same shape as anim's frame cache, on light instead of frames.
+  * WARM: bake the PRT sky-visibility transfer (holographic_prt: shadowed hemisphere -> SH) at a COARSE anchor grid.
+  * HOT: serve every other pixel by a SMOOTH, normal-aware Gaussian gather of its neighbouring anchors. The smooth
+    neighbourhood gather (not a 2x2 bilinear) is what fixed the "blocky shadows" Moose spotted -- bilinear on a coarse
+    grid fits a curved AO ramp with flat facets; the Gaussian overlap has no grid creases. Normal-aware so we never
+    blend the sky response across a geometry edge (light leak). KEPT NEGATIVE fixed: the first cut used bilinear and
+    faceted; measured the residual was grid-periodic; the Gaussian gather made it non-periodic (on-grid ~= off-grid).
+  * COLD: recompute transfer EXACTLY only at the misses -- pixels the interpolation couldn't serve (silhouettes) plus
+    the sharpest-gradient pixels (the vision.gradient sharpness map is the hit/miss policy). The pathfinding at the
+    discontinuities, spent only there.
+
+Measured (showcase scene, 180x120): 15-16x faster than baking every pixel, ~40x faster than a one-pass path-traced
+dome, at 0.004 mean error vs the full bake and NOISE-FREE (grain 0.0001 vs 0.019 brute), ~96% cache hit rate. On a
+96x96 tour frame: 7.7x vs full bake. The 323s showcase dome is now sub-second.
+
+Wired: render_scene_document(..., dome_cache=False) default-off -- when True, DomeLights are pulled from the
+per-sample lights and served by the screen-space cache, added back; byte-identical when off (pinned). Threaded
+through UnifiedMind.render_scene_document. Integration test renders a dome scene through the mind both ways and
+checks they agree (|Δmean| < 0.06). Reuses holographic_prt (bake/shade), holographic_vision (Sobel sharpness map),
+holographic_raymarch. Tests +6 (lights+hit-rate / shadowed-not-flat / matches-full-bake / no-grid-facets /
+empty-gbuffer / mind-pipeline integration). KEPT SCOPE: this is the DOME (softest case, biggest cache win); sharp
+and glossy terms stay on the tracer -- the soft/sharp router (measured across the design thread) picks which.
+
+## Render build, batch 14: MODULATE/DEMODULATE (M1) + DEMODULATED DENOISE (M4)  [+7 tests]
+
+From Moose's 3D-quality backlog. Probed first (don't redo): the five bakes it names -- matcompile, matbake, viewlut,
+prt, radiance -- already exist; svgf/atrous_bilateral uses albedo only as an edge-STOP guide, not demodulation; no
+demodulate primitive existed. So M1 (the primitive) and M4 (demodulated denoise) are genuine BUILDs.
+
+M1 -- holographic_modulate.py: demodulate(signal, carrier) = signal/(carrier+eps) [UNBIND], remodulate(residual,
+carrier) = residual*carrier [BIND]. A diffuse pixel is a product albedo*irradiance -- crisp carrier times smooth
+residual -- so splitting/recombining IS unbind/bind. Names the move the engine already spends as bake-and-query five
+times (and the cached dome is another instance): bake the smooth factor, multiply the crisp one at query. Round-trip
+exact where the carrier is known.
+
+M4 -- denoise_demodulated(): divide the albedo out, denoise the smooth IRRADIANCE with the shipped a-trous bilateral
+(geometry edge-stops kept: normal+depth; albedo guide uniform), multiply the albedo back. The filter can smooth the
+noise hard because there's no texture to smear. MEASURED on a textured+lit noisy synthetic: 33% less error than
+filtering colour directly (0.0049 vs 0.0074) while keeping texture edges (0.50 vs true 0.52); tile noise halved.
+
+KEPT NEGATIVES (measured, loud): (1) demodulation only pays when albedo VARIES -- on a uniform-albedo matte scene
+there is nothing to separate, so M4 is ~neutral (within ~5% of guide-only). It is therefore NOT the fix for the
+matte-showcase placed-light speckle, which is soft-light SAMPLING noise (needs the dome-style cache extended to the
+area lights, a separate item). (2) The carrier must be non-zero: near-black background (sky albedo ~0) explodes under
+division, so we mask it (carrier_floor -> carrier 1 there, a plain guide denoise). (3) Diffuse only -- radiance =
+albedo*irradiance is a plain product for diffuse; keep guide-only for glossy/view-dependent.
+
+Wired: render_auto(..., demodulate=False) default-off/byte-identical -> render_scene_document -> UnifiedMind, all
+threaded. Tests +7 (round-trip / elementwise unbind / cleaner-on-textured / preserves-edges / masks-black-background
+/ neutral-on-uniform / mind-pipeline integration). Reuses holographic_svgf (a-trous). This is the M-thread primitive;
+the cached dome (batch 13) is the same bake-and-query move on light.
+
+### batch 14 addendum -- M5 (super-res demodulation)  [+4 tests]
+
+Continued the M-thread. M5 -- holographic_modulate.superres_demodulated + render_demodulated_upscale: render the
+expensive LIGHTING at low resolution, DEMODULATE (divide out the albedo) to the smooth irradiance, upscale THAT
+(smooth -> no aliasing), REMODULATE with the CRISP high-res albedo (cheap: material lookup, no light transport).
+High-res detail at low-res lighting cost. Measured on a TEXTURED scene (200x200 from a 100x100 render): 2.6x faster
+than a full high-res render AND 18% cleaner than a plain colour upscale (err 0.0175 vs 0.0215).
+
+KEY FIX (measured): demodulate by the high albedo DOWNSAMPLED to low-res (area-average -> anti-aliased carrier),
+NOT a point-sampled low-res albedo. The first cut used the point-sampled low albedo and lost to plain upscale (-19%)
+because high-frequency texture aliased the carrier and rode through; the anti-aliased carrier matches what the low
+render integrated and flips it to +18%. Kept negatives (same as M4): helps where albedo VARIES (texture), neutral on
+flat; near-black background masked; diffuse only. Wired as UnifiedMind.render_demodulated_upscale + integration test.
+Reuses holographic_fsr (easu_upscale). Tests +4 (beats-plain-on-texture / carrier-from-downsampled-albedo /
+neutral-on-uniform / mind-integration).
+
+## Render build, batch 15: CACHED SOFT AREA LIGHTS (RENDER-DC2) + the .soft-flag bug fix  [+7 tests]
+
+Two things, chasing the placed-light speckle Moose kept showing.
+
+ROOT-CAUSE BUG FIX (holographic_lights): direct_lighting multi-samples a light only when getattr(light,'soft',False).
+The area lights (Rect/Disk/Sphere/Mesh) NEVER set that flag, so every area light was sampled with ONE shadow ray -- a
+biased HARD shadow, speckly across the penumbra, and area_samples did nothing. Added self.soft=True to all four area
+classes. This alone makes area lights multi-sample (default 2). Exposed a vacuous test (test_area_light_multisampling
+_reduces_variance compared two identical 1-sample arrays); fixed it to compare two MULTI-sample counts (1 sample is
+degenerate -- always the light centre, zero variance because deterministically blocked).
+
+CACHED SOFT LIGHTS (holographic_lightcache): the soft-shadowed irradiance is a smooth field, so cache it like the
+dome. Refactored holographic_domecache to extract a GENERIC three-tier engine cached_screen_shade(sdf,hit,P,N,albedo,
+bake_fn,...); cached_dome_shade now delegates to it with a PRT bake (behavior-preserving, dome tests still pass).
+cached_soft_lights_shade builds an NEE bake (many-sampled soft shadow) and calls the same engine. Measured: the cached
+soft light is NOISE-FREE (seed-diff 0.0045 at area_samples=48 vs 0.039 for the broken 1-sample path, ~8x cleaner),
+96% hit rate. Wired render_scene_document(soft_light_cache=False) + the mind, default-off/byte-identical; splits area
+lights out of per-sample NEE, serves them cached, adds back.
+
+HONEST DIAGNOSIS (measured, loud): on the showcase the soft-light cache removes only ~6% of the total speckle and is
+1.7x faster. Isolating direct vs indirect: seed-diff is 0.010 DIRECT-only (max_bounce=1) but 0.038 WITH GI bounces
+(max_bounce=3) -- so ~73% of the speckle is INDIRECT / global-illumination bounce noise, which a direct-light cache
+cannot touch. The cache correctly cleans the direct soft term (0.0103->0.0081 at bounce=1, 21%); the dominant fix is
+still owed. NEXT: cache the INDIRECT bounce irradiance the same way (it's also a smooth field over diffuse surfaces),
+which is the real remaining speckle fix. Tests +7 (split / flags / lights+hitrate / noise-free / more-samples-cleaner
+/ empty / mind-integration).
+
+## Render build, batch 16: CACHED INDIRECT / GLOBAL ILLUMINATION (RENDER-DC3) -- the real speckle fix  [+3 tests]
+
+Batch 15's honest diagnosis said the DOMINANT placed-light speckle is INDIRECT/GI bounce noise (~73%), not direct
+soft shadows. This caches it. Indirect light varies smoothly over diffuse surfaces (Ward 1988's irradiance-caching
+insight), so it fits the same three-tier engine (cached_screen_shade). cached_indirect_shade (in holographic_lightcache):
+at each coarse anchor, sample many cosine-weighted hemisphere directions, trace each, and gather the DIRECT light the
+bounce surface re-radiates -- using the ACTUAL scene lights + materials (direct_lighting + material_fn), not the
+stand-in single-light gather holographic_globalillum.gather_indirect uses. Reuses _cosine_hemisphere from globalillum,
+sphere_trace/sdf_normal from raymarch.
+
+Wired render_scene_document(indirect_cache=False): when True the tracer renders DIRECT-only (max_bounce=1) and the
+clean cached one-bounce GI is added -- replacing the tracer's noisy multi-bounce GI. Threaded through the mind.
+
+MEASURED on the showcase (180x120): the cached GI is NOISE-FREE (seed-diff 0.0062, 96% hit rate) and carries real
+colour bleeding (red wall -> floor). PRODUCTION scenario (bake the caches ONCE, then render): placed-light speckle
+0.0337 -> 0.0044 = 87% LESS, and ~8x faster (bake 2.8s once + 6.4s/frame direct-only vs 75s/frame multi-bounce).
+Single-frame floor grain 47% lower. KEPT NEGATIVES (loud): it's ONE bounce, not full multi-bounce GI, so ~5% dimmer
+than the tracer (misses higher-order bounces); diffuse gather (no glossy interreflection); the small remaining noise
+is the direct-only tracer's AA-edge jitter, not GI. This is the third and load-bearing piece of the two-mode cached
+lighting: dome (DC1) + soft area lights (DC2) + indirect GI (DC3), all on one shared cache engine. Tests +3
+(indirect lights+noise-free / colour-bleeding / mind-integration).
+
+## Consolidation build, C1: THE CAPABILITY CATALOG -- "search before you build"  [+9 tests]
+
+First item of the consolidation backlog (Phase 0 -- "cheap, stops the bleeding"). Probed first (the backlog's own
+rule): holographic_query.capability_registry ALREADY exists (builds a SQL-queryable table of the mind's faculties,
+used by holographic_query_programs) -- so C1 is mostly PROMOTE. Built holographic_catalog.py as the richer HOME:
+  * Capability = {name, does (plain English), example (copy-paste), native (True=stays in the batched vector domain,
+    False=hops to Python), aliases}.
+  * Catalog.register_capability / find_capability(problem, k) -- find_capability is a small READABLE token-overlap
+    match over each entry's name+does+aliases (stop-words dropped, name-hits weighted, deterministic tie-break by
+    name). No training, NumPy-free.
+  * default_catalog() seeds the consolidation HOMES the audits named -- the search indices, the caches/bakes, the
+    field types, distribute/fuse, the kernel verbs -- so they're findable today.
+  * seed_from_mind(catalog, mind) reuses capability_registry's faculty-walk to auto-register every public mind
+    method (docstring as `does`), so BOTH curated homes and live faculties are findable (702 total on the mind).
+
+Wired UnifiedMind.find_capability / register_capability / _capability_catalog (lazily built + cached). Measured:
+'search a big pile of vectors' -> Index home; 'my placed light has speckle noise' -> holographic_lightcache (last
+batch's work, now discoverable); 'render a scene document' -> the mind's own render_scene_document faculty. This is
+the substrate for the whole consolidation effort: as each home (Index/Cache/Field/...) lands, register it here so
+"take full advantage in all scenarios" is real. KEPT HONEST: the match is lexical token-overlap, not semantic VSA
+similarity (good enough for discovery; could be upgraded to encode `does` with the text encoder). Tests +9 (register/
+find, headline query, native flag, seeded homes, deterministic ranking, no-match, tokeniser, seed_from_mind, mind
+integration).
+
+## Consolidation build, R1: PIPELINE render-strategy dispatch -- the one entry point  [+5 tests]
+
+Second consolidation item (Phase 2, "highest leverage, do first"). PROMOTE of holographic_pipeline (already the
+staged entry point with Stage needs/produces + toposort). The render stage hard-wired the pathtrace path
+(converge_samples). R1 turns the render methods into a ROUTING (not a merge): a RENDER_STRATEGIES registry --
+name -> (needs, run, does) -- with four strategies that each DELEGATE to their real module and declare what they
+need:
+  * pathtrace -> converge_samples + declfirefly (the exact pre-R1 path; byte-identical, pinned by a test)
+  * raymarch  -> sphere_trace + matte lambert (a fast, noise-free primary-visibility preview)
+  * prt       -> precompute_transfer + shade_prt (relight the G-buffer under an environment SH; needs light_sh)
+  * radiance  -> reconstruct_view (render = a lookup into a baked radiance field; needs radiance_field)
+Added RenderSpec.method ("auto"|...) + light_sh + radiance_field (additive). dispatch_render(ctx) resolves the
+method (via _pick_render_method for "auto"), CHECKS the chosen strategy's needs are present, and raises a clear
+PipelineError naming the missing field BEFORE running -- the "catch a missing input" the backlog asked for.
+_render_run's RenderSpec branch now just calls dispatch_render; _pipe_gbuffer reuses domecache._primary_gbuffer.
+
+'auto' picks pathtrace whenever a material is present, so every existing RenderSpec caller is byte-identical (all
+27 prior pipeline tests pass unchanged). Registered "Pipeline (render/sim)" in the C1 catalog. Verified: a render
+goes through the Pipeline (auto->pathtrace), each strategy dispatches, and method='prt' without a light_sh raises
+"render strategy 'prt' needs (scene, camera, light_sh), but the RenderSpec is missing: light_sh" -- both directly
+and through a full build_pipeline run. KEPT HONEST: raymarch is a preview (no GI/lights); prt/radiance need their
+baked inputs. Tests +5 (through-pipeline, strategies dispatch, needs-check, byte-identical pathtrace pin, R1<->C1
+integration).
+
+## Consolidation build, R2: THE FIELD HOME -- one .sample interface over the spatial field backends  [+6 tests]
+
+Third consolidation item. Probed first (twice rewarded): holographic_ndfield is the sparse-reconstruct PATTERN, and
+holographic_field.Field already exists but is the UNIT-SPHERE compositional field (it normalises points) -- a
+different abstraction. So R2 is a small NEW home for the SPATIAL field reps the render/sim stack uses. Built
+holographic_fieldhome.py: class Field with field.sample(points) over R^D, a thin ADAPTER that ROUTES to each
+representation's own sampler (route, don't rewrite):
+  * Field.callable(fn)      -> an analytic / oracle field (SDF expression, FPE surface read)
+  * Field.grid(arr, lo, hi) -> a DENSE grid (holographic_fields.sample_field/_3d), world->index mapping only
+  * Field.sparse(SparseField) -> the NARROW-BAND field (delegates to SparseField.sample)
+field_backends() lists the route targets. DONE-WHEN (met, exceeded): two backends reachable with identical values --
+the dense grid and the callable oracle, sampled through the same Field, agree to 0.0 at grid nodes; the sparse
+backend also routes and matches the true SDF within its band. Updated the C1 catalog's "Field" entry to point at the
+new home. KEPT HONEST: the sparse backend is narrow-band (matches only inside the band, sign*band outside, by design);
+spectral/FPE/region/dirty are named as future backends (spectral evolves state rather than point-sampling, so it
+wraps differently). NOT holographic_field.Field (unit-sphere) -- documented to avoid the collision. Tests +6 (dense==
+callable at nodes, uniform interface, sparse routing, backends listed, repr/kind, R2<->C1 integration).
+
+## Consolidation build, H1: THE INDEX HOME -- one nearest-neighbour interface (exact/forest + calibrated abstain)  [+7 tests]
+
+Fourth consolidation item. Before building, used a new AST scout (tools/consolidation_scout.py) to MAP the search
+surface across the whole tree (modules, tests, tour, experiments) -- it and a targeted grep found index APIs the
+backlog had NOT named: holographic_spatial.knn (Euclidean point k-NN), holographic_uri.nearest (prefix-scoped),
+holographic_octree.query, holographic_lexicon/encoders.nearest -- alongside the named tree(HoloForest)/pivot/rayindex.
+
+Built holographic_index.py: class Index over a set of vectors, Index.nearest(query, k, abstain=alpha) ->
+[(label_or_index, score), ...] best first. ROUTES by size (route, don't rewrite): EXACT cosine scan for small sets
+(reuses holographic_ai.nearest verbatim for the top-1 core), the sub-linear RP-FOREST (HoloForest, built with the
+correct HoloForest(dim,...).build(items) API) for large; 'auto' picks by forest_threshold. Optional calibrated
+ABSTAIN via holographic_honesty.RecallNull -- return [] when the best hit is noise-level. Deterministic tie-break
+(descending score, ascending index via lexsort).
+
+HONEST SCOPE (kept loud): this is the COSINE/vector NN family only. holographic_spatial.knn (Euclidean over point
+clouds) and holographic_rayindex (which pixels a ray touches) are DIFFERENT metrics/purposes and stay their own
+homes -- registered in the catalog so they're findable, NOT force-merged (the "don't over-consolidate" rule). For a
+forest-backed index, k>1 and abstain fall back to an exact rank over the full set (documented; sub-linear path is
+top-1).
+
+Wired UnifiedMind.build_index; updated the C1 catalog "Index" entry + added spatial.knn / rayindex entries.
+DONE-WHEN (met): TWO delegates route through Index -- holographic_lexicon.nearest and holographic_encoders.
+TextEncoder.nearest -- both with BYTE-IDENTICAL rankings vs their old cosine loops (verified), and the recall
+benchmark (bench_recall.py, uses HoloForest/brute-force directly) is UNCHANGED (forest @1 100% to 8k, 97% at 20k,
+sub-linear comparisons). Tests +7 (exact==forest, top-k ordered/deterministic, labels, abstain, auto-routing, empty,
+H1<->C1<->delegates integration). Also shipped tools/consolidation_scout.py (AST dupe-finder + concept-locator).
+
+## Consolidation build, H2: THE CACHE HOME -- bake-and-query, one shared grid core over the scattered bakes  [+8 tests]
+
+Fifth consolidation item. Scouted the bake/cache surface first (tools/consolidation_scout.py concept cache + grep):
+the real bakes are matbake.bake_field / bake_material, sdfbake.bake_sdf_grid, viewlut.bake_view_lut, anim.
+bake_deformation, prt.precompute_transfer. The two POSITION bakes (matbake, sdfbake) rewrite the IDENTICAL grid
+generation -- np.linspace -> meshgrid(indexing='ij') -> stack -- then their own trilinear reader.
+
+Built holographic_cachehome.py: class Cache (a namespace of staticmethods). The load-bearing shared core is
+Cache.grid_points(lo, hi, res) -> (points, res3): the ONE position-grid generator both bakes duplicated. Plus
+Cache.bake_grid(evaluator, lo, hi, res) (sample + reshape), Cache.bake(evaluator, vary=...) dispatching by what
+VARIES (constant=compute once; position=grid+BakedGrid trilinear lookup; view->viewlut.bake_view_lut;
+time->anim.bake_deformation), and a BakedGrid reader mirroring matbake.BakedField.
+
+DONE-WHEN (met): matbake.bake_field AND sdfbake.bake_sdf_grid now call Cache.grid_points, producing BIT-IDENTICAL
+grids to their old inline meshgrid (verified: matbake scalar grid, sdfbake dist+ids grids all np.array_equal to the
+reference; their existing tests pass). Route, don't rewrite: each bake keeps its own lookup reader (BakedField /
+GridSDF); only the precompute is shared. Wired UnifiedMind.bake; updated the C1 catalog Cache entry. KEPT HONEST:
+NOT holographic_cache.py (Ward irradiance-GRADIENT cache -- sparse anchors + Jacobian, a different scheme),
+documented to avoid the collision. Tests +8 (grid matches inline, per-axis res, scalar/channel bake, trilinear-exact
+at nodes, constant strategy, matbake+sdfbake bit-identical delegation, backends).
+
+## Consolidation build, R3: MATERIAL + SHADING -- the three-way (Material -> Cache -> Shading)  [+2 tests]
+
+Sixth consolidation item. Scouted the BRDF/shading surface (scout concept + a grep hunt for inline Schlick-Fresnel/
+GGX): the SPECULAR model is already centralised in holographic_brdf (cook_torrance, sample_brdf, fresnel_dielectric)
+and the real render paths CALL it (pathtrace imports sample_brdf/fresnel_dielectric; lights.direct_lighting uses
+cook_torrance) -- NO re-derived Fresnel/GGX found. So the "render methods call Shading, not re-derive" half of R3 was
+already true (another probe-first win).
+
+The one genuine remaining de-dup: the DIFFUSE lambert term (clip(N.L,0)*albedo) was re-derived inline in the gather
+paths, and brdf had no standalone lambert (it lived only inside cook_torrance). Added holographic_brdf.lambert(N, L,
+base_color) -- the diffuse half exposed on its own -- and routed holographic_globalillum.gather_indirect to it,
+BIT-IDENTICAL (verified). KEPT HONEST: the other lambert-looking sites (raymarch, surface, checkerboard) are COMPOUND
+shades that fold in shadow / occlusion / a Phong spec / an ambient blend -- not pure lambert -- so they keep their own
+expression (don't over-consolidate); lambert is only the diffuse term.
+
+DONE-WHEN (met): the three-way composes end to end -- a SurfaceMaterial's position channels BAKE via the Cache home
+(matbake.bake_material -> bake_field -> Cache.grid_points, H2), a surface pulls its channels from that baked Material,
+and it SHADES via the Shading home (brdf.cook_torrance + lambert). Registered "Material (channels)" and "Shading
+(BRDF)" in the C1 catalog. Tests +2 (lambert bit-identical/back-facing/shape; R3 three-way integration).
+
+## Consolidation build, R4: THE SAMPLING HOME -- patterns / directions / MIS / accumulation in one place  [+8 tests]
+
+Seventh consolidation item (thin). Scouted the sampling surface (scout concept + grep): the pieces are shipped but
+scattered -- lowdiscrepancy (quasi-random), sampling (Poisson/blue-noise), mis (Veach), accumulate (firefly clamp) --
+and the COSINE-HEMISPHERE direction sampler was re-implemented in THREE modules (brdf._cosine_sample,
+globalillum._cosine_hemisphere, lights._cosine_hemisphere).
+
+Built holographic_samplinghome.py: class Sampling (staticmethods). THIN -- routes to the shipped modules for
+low_discrepancy / poisson_disk / mis_weight / accumulate (route, don't rewrite); the one thing it OWNS is the
+vectorised cosine_hemisphere(N, n, seed), promoted here (the exact globalillum code) so the copies collapse to one.
+
+Routed FIVE call sites through it, all bit-identical: pathtrace's AA offsets (Sampling.low_discrepancy -- the R4
+done-when), globalillum._cosine_hemisphere (now a delegate) + lightcache's gather import, and the mind's
+low_discrepancy_sample + blue_noise_sample faculties. Registered "Sampling" in the C1 catalog. KEPT HONEST: the
+rng-based single-dir samplers (brdf._cosine_sample, lights._cosine_hemisphere) have different signatures (rng vs seed,
+1 vs n dirs) so they were left as-is rather than force-fit -- only the vectorised seed-based one was shared. Tests +8
+(low-discrepancy routes exactly, hemisphere unit/upper/deterministic, hemisphere==globalillum bit-identical, firefly
+clamp, poisson routes, backends; R4 integration through pathtrace + mind).
+
+## Consolidation: DISCOVERABILITY SWEEP -- make the whole engine reachable (no buried functionality)  [+5 tests]
+
+Moose's point: the engine has many pipelines/domains (adaptive rendering, sampling, lights, materials, textures,
+fields, geometry, caches, simulation, physical/chemical properties, ...) and "there's no point in unreachable or
+buried functionality." The catalog (C1) only curated ~24 homes + auto-seeded mind faculties, so most of the 344
+modules could not be FOUND by describing a problem.
+
+Fixed at the root: added holographic_catalog.seed_from_modules(catalog) -- AST-reads EVERY holographic_*.py module's
+docstring (never imports; the docgen discipline) and registers it as a findable capability with its one-line summary
+as `does`, tagged by domain family (_family_of + _FAMILY_KEYWORDS). Wired UnifiedMind._capability_catalog to seed
+from modules too, so find_capability now covers homes + faculties + every module (700+ entries on the mind, 362 in
+the bare module catalog). Added top-level DOMAIN homes to default_catalog: Lighting, Geometry, Texture, Simulation,
+Physics & chemistry, Adaptive rendering, Denoise, Query/database -- one findable pointer per subsystem.
+
+Built tools/reachability_audit.py (AST-only): reports, per module, docstring present? public API? referenced by the
+mind? recorded negative? It FOUND the one genuinely buried module -- holographic_sdfscene had its documentation in
+`#` comments, not a docstring, so AST couldn't read it -> undiscoverable. Converted its header to a real module
+docstring. Audit now: 303 modules reachable via a faculty, 7 deliberately-unwired recorded negatives, 163 modules
+that DOCUMENT a kept negative (honest measurement, good), NO-DOCSTRING = 0. Added a GUARD test
+(test_every_engine_module_has_a_docstring) so no future module can become buried, plus domain-coverage tests and a
+through-the-mind integration test. Verified: 'thin film iridescence' -> holographic_thinfilm, 'MPM granular' ->
+holographic_mpm, 'hair grooming' -> holographic_groom, 'a scene as SDF parts' -> holographic_sdfscene (the fixed
+one) -- all reachable by plain description. Fixed a stale example (Physics home referenced a non-existent
+holographic_matter; the model is in holographic_mixture). Tests +5. Also shipped tools/reachability_audit.py.
+
+## Consolidation build, R5: THE DENOISE HOME -- image / sharpen / signal, one home  [+9 tests]
+
+Eighth consolidation item (thin). Scouted the denoise surface: it was scattered across svgf (a-trous bilateral for
+images), modulate (demodulated denoise), sharpen (Van-Cittert), diffuse (denoise-as-diffusion), and the manifold
+family in denoise/hopfield. The SIGNAL/vector denoisers already have a home -- UnifiedMind.denoise dispatches
+manifold/adaptive/codebook/nlm/trajectory/spectral/pnp -- so that half was done (probe-first). The scattered part was
+IMAGE denoise: the pipeline stage, mind.svgf_denoise, and modulate all called svgf/modulate directly.
+
+Built holographic_denoisehome.py: class Denoise (staticmethods) split by what you clean --
+  * Denoise.image(img, normal, albedo, depth, method='svgf'|'demodulated', ...) -> svgf.atrous_bilateral / modulate.
+    denoise_demodulated.
+  * Denoise.sharpen(x, ...) -> sharpen.sharpen_loop.
+  * Denoise.signal(x, samples/codebook/method='auto') -> holographic_denoise (manifold/adaptive/codebook/trajectory)
+    -- the lighter library entry over the same primitives UnifiedMind.denoise dispatches (the Milanfar reframe:
+    cleanup/consolidation ARE denoisers).
+All thin routing (route, don't rewrite).
+
+DONE-WHEN (met): the PIPELINE's _svgf_run denoise stage now calls Denoise.image(method='svgf') -- bit-identical to
+the old atrous_bilateral call. Also routed mind.svgf_denoise -> Denoise.image and mind.sharpen_loop -> Denoise.sharpen,
+both bit-identical (verified). Updated the C1 catalog Denoise entry to point at the home. KEPT HONEST: the signal
+family stays on UnifiedMind.denoise (fuller: adds nlm/pnp/spectral + auto sigma); Denoise.signal is the lighter entry,
+not a competing dispatcher. Tests +9 (image svgf cleans + bit-identical, demodulated routes, unknown-method raises,
+signal trajectory/manifold clean & route, auto + missing-prior, sharpen routes, backends; R5 pipeline+mind integration).
+
+## Consolidation build, R6: THE TEXTURE HOME -- detail fields feeding Material channels  [+7 tests]
+
+Ninth consolidation item (thin) -- completes the thin trio. Scouted the texture surface: detail is generated in
+holographic_noise (FractalNoise fBm), holographic_curlnoise (divergence-free curl), holographic_cellular
+(VoronoiCells), holographic_texturesynth (patch synthesis), plus the weathering set (oxidation/burn/inclusions).
+They all feed the SAME consumer -- a Material channel's Param(field=callable) or Param(map=grid) (from R3).
+
+Built holographic_texturehome.py: class Texture (staticmethods) returning channel-ready detail --
+  * Texture.fbm(...) -> a fractal-noise field callable (wraps FractalNoise; query is per-point so the field loops,
+    fine for a channel baked once via the Cache home).
+  * Texture.voronoi(...) -> a VECTORISED cellular field: kind='edge' (crack/grout distance) or 'id' (per-cell tint).
+  * Texture.curl(...) -> a divergence-free (u,v) flow grid for warping.
+  * Texture.synth(sample, ...) -> a larger texture image grown from a small sample (Param(map=...)).
+Thin routing (route, don't rewrite); the generators stay their own modules, the home is only the "return something a
+channel can eat" adapter.
+
+DONE-WHEN (met): a Material channel is SOURCED through Texture -- a Voronoi crack field drives a SurfaceMaterial
+roughness channel, verified end to end. Better, it closes the chain across the earlier homes: Texture -> Material
+(R3) -> Cache (H2, the channel bakes via Cache.grid_points) -> Shading (R3, cook_torrance) -- one integration test
+walks all four. Updated the C1 catalog Texture entry to point at the home. KEPT HONEST: FractalNoise.query is
+per-point (not vectorised) so Texture.fbm loops -- acceptable for a baked channel, noted. Tests +7 (voronoi vectorised/
+deterministic, channel-sourced-through-texture, fbm field, curl divergence-free, backends; R6 Texture->Material->Cache
+->Shading integration).
+
+## Consolidation build, R7: THE LIGHTING HOME -- light types + the shade integral, one door  [+6 tests]
+
+Tenth consolidation item ([BUILD], not thin). Scouted the lighting surface: the light TYPES (point/directional/spot/
+area/dome/IES) live in holographic_lights, but the shade INTEGRAL is reached for directly in several render paths --
+lights.direct_lighting (NEE over placed lights), prt.shade_prt (baked relight under SH), domecache.dome_light_sh
+(dome->SH), gather_indirect (one-bounce). No single lighting entry point.
+
+Built holographic_lightinghome.py: it RE-EXPORTS the 10 light types (so `from holographic_lightinghome import
+Lighting, RectLight` is the one lighting import) and class Lighting exposes the shade integral in each mode:
+  * Lighting.direct(sdf, P, N, V, albedo, metallic, roughness, lights, rng, ...) -> NEE from placed lights + shadow
+    rays (routes to holographic_lights.direct_lighting).
+  * Lighting.prt(transfer, light_sh, albedo) -> relight a baked transfer under an environment SH (routes to prt).
+  * Lighting.environment_sh(dome, order, n) -> project a dome/sky to SH (routes to domecache).
+  * Lighting.split_cached(lights) -> partition into dome / soft-area / hard, so a render method routes its lights
+    without knowing the flags.
+Route, don't rewrite: the Cook-Torrance-per-light integral stays in holographic_lights, PRT in holographic_prt; only
+the entry point is unified.
+
+DONE-WHEN (met, exceeded): TWO+ render methods now get their lighting from Lighting -- the cached soft-light pass and
+the cached indirect pass (holographic_lightcache -> Lighting.direct) AND the pipeline's PRT strategy
+(holographic_pipeline._strat_prt -> Lighting.prt). All bit-identical (Lighting.direct == direct_lighting verified;
+lightcache deterministic; PRT strategy renders finite). Updated the C1 catalog Lighting entry to point at the home.
+Tests +6 (direct integral bit-identical, light types re-exported, split_cached partitions, prt relight, modes; R7
+two-render-method integration).
+
+## Consolidation build, R8: THE SHADOW / VISIBILITY HOME -- visibility strategies, one door  [+6 tests]
+
+Eleventh consolidation item ([BUILD], R7's companion). Scouted the visibility surface: "can light reach this point?"
+is spelled four ways -- SDF SOFT shadow (Quilez penumbra) + SDF AMBIENT OCCLUSION in holographic_raymarch (re-imported
+by holographic_raycoherence and holographic_semantic), the HARD shadow-RAY test embedded in
+holographic_lights.direct_lighting, and PRT's baked visibility (holographic_prt). (Note: holographic_occlusion is a
+DIFFERENT concept -- VSA recall under occlusion, not rendering visibility -- and was correctly left alone.)
+
+Built holographic_shadowhome.py: class Shadow (staticmethods), each spelling a named strategy --
+  * Shadow.soft(sdf, P, Ldir, ...) -> SDF soft shadow [0,1] (routes to raymarch.soft_shadow).
+  * Shadow.ambient_occlusion(sdf, P, N, ...) -> SDF AO [0,1] (routes to raymarch.ambient_occlusion).
+  * Shadow.hard(sdf, P, N, light_dir, dist, ...) -> shadow-RAY visibility 1/0, the NEE test EXTRACTED so any render
+    path can call it (sphere_trace: visible = ~hit | t>dist-eps).
+  * Shadow.prt_visibility_note() -> documents the baked (fourth) strategy without importing prt eagerly.
+Route, don't rewrite: the Quilez marches stay in raymarch; PRT visibility stays baked in prt.
+
+DONE-WHEN (met): TWO render paths now get their visibility from Shadow -- holographic_raycoherence (1 soft + 1 AO
+call) and holographic_semantic (4 soft + 4 AO calls) were switched from importing raymarch's shadow fns to calling
+Shadow.soft / Shadow.ambient_occlusion, BIT-IDENTICAL (their 25 tests pass). Registered "Shadow / visibility" in the
+C1 catalog. KEPT HONEST: the SDF soft/AO/hard-ray need the point offset off the surface (P + N*eps) as the callers do
+-- documented. Tests +6 (soft darker under occluder + bit-identical, AO in-range + bit-identical, hard-ray blocks/
+clears, strategies, prt note; R8 two-render-path integration).
+
+## Consolidation promote, H3: THE SCALE HOME -- partition + monoid-reduce, one door  [+9 tests]
+
+Twelfth consolidation item ([PROMOTE]). Scouted the scale-out surface: the machinery already ships in
+holographic_distribute -- partition / adaptive_partition (load-balanced), partition_2d / partition_3d (image tiles /
+volume bricks), distribute_bricks (place a worker per region), distribute (the map-reduce), and the commutative-monoid
+reducers (reduce_sum/min/max/bundle/sum_exact). The mind already wired it as faculties (distribute_compute,
+partition_domain, partition_grid, distribute_bricks). What was MISSING was the plain library HOME the other homes have.
+
+Built holographic_scalehome.py: class Scale (staticmethods) promoting holographic_distribute --
+  * Scale.map_reduce(buckets, worker, reduce='sum'|'min'|'max'|'bundle'|'exact'|callable, cache=None) -> the core
+    partition + commutative-monoid reduce (routes to distribute; the reducer table moved here).
+  * Scale.partition(n, k, costs=None) -> load-balanced buckets. Scale.tiles(shape, blocks) -> 2D tiles / 3D bricks.
+    Scale.bricks(out_shape, regions, worker, ..., skip) -> place-per-region, skip empty bricks.
+  * Names the five STRATEGIES: tiling (here), octree (prune empty space), multires (coarse-to-fine), superposed (VSA
+    bundling -- scale by superposition not storage), sparsefield (store only active cells).
+
+DONE-WHEN (met): the mind's four scale faculties (distribute_compute / partition_domain / partition_grid /
+distribute_bricks) now DELEGATE to the Scale home, all bit-identical -- and the map-reduce RESULT MATCHES the un-split
+computation (map_reduce of a 1000-vector == np.sum, verified). The reducer table (sum/min/max/bundle/exact) now lives
+in the home, so distribute_compute is a thin delegate. Registered "Scale (distribute)" in the C1 catalog. Tests +9
+(map_reduce matches un-split sum + bit-identical, partition load-balances, tiles cover 2D/3D disjointly, min/bundle
+monoids, bricks place+skip, backends/strategies; H3 mind-scaler integration).
+
+## Consolidation promote, H4: THE BLEND HOME -- combine into one, one door  [+8 tests]
+
+Thirteenth consolidation item ([PROMOTE]). Scouted the blend/merge/interpolate surface: "combine these into one" is
+spelled many ways -- superposition (holographic_ai.bundle), spherical interp (holographic_ai.slerp), Frechet/Riemannian
+mean (holographic_sphere.frechet_mean), front-to-back alpha compositing (occlusion/splat), dict/scene merge -- and a
+soft weighted blend normalize(sum w_i v_i) is re-derived in blend skinning (blendpose), the matter model (mixture), etc.
+
+Built holographic_blendhome.py: class Blend (staticmethods) promoting the canonical ops --
+  * Blend.bundle(vectors, weights=None) -> superposition; weighted = normalize(sum w_i v_i) (routes to ai.bundle when
+    unweighted; the weighted path matches blend_pose exactly).
+  * Blend.lerp / Blend.slerp (routes to ai.slerp) -> chord vs shortest-arc interpolation.
+  * Blend.mean(vectors, weights) -> Frechet mean on the sphere (routes to holographic_sphere).
+  * Blend.alpha_composite(colors, alphas) -> front-to-back OVER compositing.
+  * Blend.merge(a, b, policy='prefer_a'|'prefer_b'|'average') -> the scene/workspace combine discipline made explicit.
+
+DONE-WHEN (met): TWO delegates now call Blend, bit-identical -- holographic_blendpose.blend_pose delegates to
+Blend.bundle (the weighted bundle), and holographic_generate.morph_images takes its slerp from Blend.slerp. Registered
+"Blend (combine)" in the C1 catalog. KEPT DISTINCT ON PURPOSE (don't over-consolidate): phasemorph's PHASE-domain
+shortest arc (angle interpolation on unit phasors), mixture's solvent-base weighted DENSITY (a physical blend with a
+baseline term), and occlusion's alpha-composited bundle READOUT (a decompression, not a forward blend) each stay in
+their own module -- they are not the same operation. Tests +8 (weighted bundle == blend_pose, unweighted == ai.bundle,
+slerp == ai.slerp + on-sphere, lerp chord, alpha composite, merge policies, frechet mean; H4 two-delegate integration).
+
+## Consolidation promote, H5: THE TRANSFORM HOME -- move/rotate/warp, one facade + a real dedup  [+8 tests]
+
+Fourteenth consolidation item ([PROMOTE]). Scouted the transform surface and found a genuine DUPLICATION: the basic
+4x4 matrix builders (translation / scaling / compose) were copied between holographic_scenegraph and
+holographic_transform (the modeling-app gizmo kit). translation/scaling/compose were BIT-IDENTICAL across the two;
+rotation was NOT (scenegraph Rodrigues vs transform quaternion-to-matrix, ~1e-12 apart).
+
+Built holographic_transformhome.py: class Transform -- one facade over "move/rotate/warp" across representations,
+routing to each module (route, don't rewrite):
+  * VSA: Transform.bind (rigid shift = one binding) / permute (order) -> holographic_ai.
+  * geometric 4x4: translation/scaling/rotation/compose/decompose/compose_trs/look_at -> holographic_transform.
+  * rotor: Transform.rotor/rotate_vec (gimbal-lock-free geometric-algebra rotation) -> holographic_clifford.
+  * anisotropic: Transform.steer_bandwidths -> holographic_steering.
+
+DONE-WHEN (met) + a real de-silo: TWO delegates route through Transform -- holographic_scenegraph's
+translation/scaling/compose_transforms now DELEGATE to the home (deduping the copied matrix math, bit-identical), and
+holographic_procgen builds its instance transforms through Transform.translation/scaling. KEPT DISTINCT ON PURPOSE:
+scenegraph's Rodrigues rotation is NOT routed (it's ~1e-12 off the quaternion rotation, and flipping those bits could
+flip a downstream tie -- the bind_batch lesson), and splatexport's 3DGS-ordered quaternions + cosserat's quaternion
+helpers stay put (different conventions). Registered "Transform (warp)" in the C1 catalog. Tests +8 (matrices route
+bit-identical, translate moves a point, TRS round-trip, bind/permute route, clifford rotor x->y, scenegraph-rotation-
+kept-distinct, kinds; H5 two-delegate dedup integration).
+
+## Consolidation promote, H6: THE MEMORY HOME -- cache-hierarchy levers, one door  [+7 tests]
+
+Fifteenth consolidation item ([PROMOTE]). Scouted the memory/cache surface, keeping the RENDERING caches (Ward
+gradient cache holographic_cache, baked grids -- H2's Cache home) DISTINCT from the memory-HIERARCHY machinery. The
+hierarchy levers already ship: holographic_residency (SpectrumCache LRU of atom->rfft(atom) + bind_cached/unbind_cached,
+bit-identical to bind), the batched contiguous bind (holographic_ai.bundle_bind/bind_batch -- one FFT for a whole
+record), tiling-to-fit (Scale.tiles), and the opt-in backends (holographic_backend GPU / holographic_jit numba). The
+mind already exposed spectrum_cache + fuse_record. What was missing was the single "keep the hot working set close" door.
+
+Built holographic_memoryhome.py: class Memory over the levers (route, don't rewrite) --
+  * Memory.spectrum_cache / bind_cached / unbind_cached -> residency (reuse a resident FFT spectrum; bit-identical).
+  * Memory.bind_batch(keys, values) -> one batched, contiguous FFT for a record (cache-resident layout).
+  * Memory.tiles(shape, blocks) -> cut a working set into cache-sized tiles (delegates to the Scale home, H3).
+  * Memory.backend(kind) / gpu_available() -> select the opt-in GPU/numba path, graceful NumPy fallback.
+Documented the L1-L4+RAM hierarchy as the organizing frame.
+
+DONE-WHEN (met, measured): (1) the residency path is reachable through Memory AND through the mind -- routed
+UnifiedMind.spectrum_cache to Memory.spectrum_cache, bit-identical; bind_cached == plain bind verified. (2) the batched
+kernel is measurably CACHE-RESIDENT -- encoding a 64-pair record in ONE FFT over stacked contiguous arrays runs ~2-3x
+faster than a Python loop of per-pair binds (min-of-rounds timing, robust to load). Registered "Memory (cache
+hierarchy)" in the C1 catalog. KEPT NEGATIVE carried: bind_batch's batched FFT is ~1e-12 off the scalar-loop bind, so
+it stays OUT of tie-sensitive decision paths. Tests +7 (bind_cached bit-identical + residency reuse, unbind_cached
+recovers, batched kernel faster [min-timing], tiles cover, backend fallback, residency-through-mind, levers).
+
+## Consolidation promote, H7: THE COMPUTE HOME -- stay VSA-native, one door  [+6 tests]
+
+Sixteenth consolidation item ([PROMOTE]) -- the last H-home. Scouted the fuse/schedule/execute surface: the
+VSA-native compute levers already ship -- holographic_fuse (collapse a bind/bundle/permute expression tree into ~2
+FFTs, one forward per distinct leaf + one inverse out, with fft_counts() to MEASURE the win), holographic_schedule
+(the cost model: fuse runs of linear ops, eager at the boundaries), holographic_superschedule (width), and
+holographic_machine (run logic as a VSA program). The mind already had fuse_record/fuse_expression/realize_recipe_fused.
+What was missing was the single door and the stated RULE.
+
+Built holographic_computehome.py: class Compute over the levers (route, don't rewrite) --
+  * Compute.leaf/bind/unbind/bundle/sum/permute -> build a fusable expression tree (holographic_fuse builders).
+  * Compute.fuse(expr, cache) / fuse_record(keys, values, cache) -> collapse into ~2 FFTs (equal to op-by-op to ~1e-15).
+  * Compute.reset_fft_counts() / fft_counts() -> MEASURE the FFT count.
+  * Compute.run_recipe / run_scheduled -> the fuse-runs scheduler (holographic_schedule).
+  * Compute.machine(dim, seed, ...) -> the stored-program VSA machine (holographic_machine).
+The rule, stated once: PUSH decisions and cleanups to the BOUNDARIES; keep the linear middle in the vector domain
+(every exit to Python costs an FFT round-trip).
+
+DONE-WHEN (met, measured): a multi-op chain runs FUSED with a measured FFT-count drop -- fusing a 32-pair record took
+66 FFTs vs 96 for the op-by-op path (~31% fewer, exactly 2*len+2), and the fused result agrees with the eager one to
+FFT tolerance. Routed UnifiedMind.fuse_record + fuse_expression through the Compute home, bit-identical. Registered
+"Compute (VSA-native)" in the C1 catalog. KEPT NEGATIVE carried: the fused/batched FFT is ~1e-15 off the op-by-op
+result, so tie-sensitive encoders (the maze-rescue path) must NOT use it -- documented on the faculty. Tests +6
+(fewer-FFTs-measured, fuse_record agrees op-by-op, fuse_expression agrees eager, matches mind faculty, machine
+reachable, levers).
+
+## Consolidation build, R9: THE SIMULATION SCAFFOLD -- one step loop, solvers kept separate  [+7 tests]
+
+Seventeenth consolidation item ([BUILD]) -- the last real build. Scouted the solver surface (292 step/advance hits):
+the solvers are legitimately DIFFERENT algorithms with DIFFERENT step signatures -- StableFluid.step() (no args),
+softbody.step(dt, gravity, iterations, ...), Fire.step(dt, ambient_K, ...), MPMSnow.step(dt), CosseratStrand.settle(),
+HyperCA.evolve(steps), etc. The GOLDEN RULE for R9: do NOT merge them (that would destroy the differences that make each
+correct). Also found the scaffold already half-exists: holographic_integrate.SimStep + SolverAdapter ("wrap an existing
+solver behind a uniform advance") + the integrators.
+
+Built holographic_simulationhome.py: class Simulation -- a shared STEP LOOP over ANY solver, built on
+integrate.SolverAdapter. The solver's math is untouched; the Simulation only (1) gives it one interface step(dt) /
+run(steps, dt) via the SolverAdapter (the SimStep the render Pipeline's sim stage already calls), and (2) exposes its
+field as a Field (R2) so volume_render / the Pipeline (R1) can draw it (a 2D grid is lifted to a thin slab for the 3D
+marcher). Strategy factories adapt a specific solver in a few closures: Simulation.for_fluid(StableFluid),
+Simulation.for_automaton(HyperCA); add any other (softbody/mpm/combustion/...) the same way -- its step closure + its
+field extractor.
+
+DONE-WHEN (met): TWO genuinely distinct solvers -- Stable Fluids (advect+project) and a reaction-diffusion automaton --
+step through the SAME loop, and the Pipeline renders BOTH fields (volume_render, alpha ~0.95 / ~1.00). The solvers
+stayed SEPARATE (fluid still a StableFluid with fluid.step(); automaton still a HyperCA with ca.evolve(1)) -- only the
+interface is shared. Updated the C1 catalog Simulation entry to point at the scaffold. This composes the earlier homes:
+Simulation.field() is a Field (R2), rendered through the volume path (R1). Tests +7 (two-solvers-one-loop, pipeline
+renders both, solvers-stay-separate, field-is-a-Field, grid-advances, strategies; R9 integration).
+
+## Consolidation build, D1: THE HYPERVECTOR DATATYPE -- the capstone, one datatype named  [+8 tests]
+
+Eighteenth and FINAL consolidation item ([BUILD], thin). Scouted for an existing wrapper -- there was NONE; the whole
+engine had been operating on one datatype implicitly (a high-dimensional numpy array carrying meaning), passed around
+bare so its dim / which-encoder-made-it / "what am I" all lived in the caller's head. So this is a genuine build.
+
+Built holographic_hypervector.py: class Hypervector -- THIN by design. Carries the raw array + dim + encoder + tag.
+  * MAKE (the encoders are the constructors): Hypervector.wrap(array, ...) or Hypervector.encode(encoder, value) --
+    build one from data via any encoder (scalar/text/record/FPE/UniversalEncoder or a plain callable).
+  * CONSUME (the five VSA verbs as METHODS, each returning a Hypervector, each matching the bare holographic_ai op
+    exactly): bind / unbind / bundle / permute / cleanup. Verbs accept a Hypervector OR a raw array on the other side,
+    so the wrapper mixes freely with existing code.
+  * READ: cosine / decode.
+  * The raw array is NEVER hidden: .array, .raw() (no copy), and __array__ so np.asarray(hv) returns the raw array
+    with no copy -- the hot paths never pay for the wrapper, and nothing existing had to change.
+Added a mind faculty: UnifiedMind.hypervector(x, modality, tag) -- encode via the one UniversalEncoder and return a
+first-class Hypervector (the encoder-as-constructor tie).
+
+DONE-WHEN (met): build one from any data (m.hypervector(0.3) / Hypervector.encode(enc, v)), call the five verbs as
+methods (all bit-identical to the bare ops), and get the raw array back cheaply (.array / np.asarray(hv) with no copy).
+cleanup snaps to the nearest atom in a Vocabulary / dict / (N,dim) array. Registered "Hypervector (datatype)" in the C1
+catalog. Tests +8 (encode carries metadata, five verbs match bare ops, verbs accept raw arrays, raw-array-no-copy,
+cleanup dict/array/vocab, cosine round-trip, mind faculty, repr; D1 integration through the mind).
+
+### CONSOLIDATION BACKLOG COMPLETE (18/18)
+All items shipped: C1 (catalog) + the R-homes (R1 Pipeline, R2 Field, R3 Material+Shading, R4 Sampling, R5 Denoise,
+R6 Texture, R7 Lighting, R8 Shadow, R9 Simulation) + the H-homes (H1 Index, H2 Cache, H3 Scale, H4 Blend, H5 Transform,
+H6 Memory, H7 Compute) + D1 (Hypervector datatype), plus the discoverability sweep (catalog seeds from every module;
+reachability audit; every-module-has-a-docstring guard). Golden rule held throughout: ROUTE, don't rewrite -- distinct
+algorithms kept as strategies, only the scaffolding unified; every routed call pinned bit-identical (or the difference
+kept as a loud negative, e.g. scenegraph Rodrigues rotation, bind_batch's ~1e-12).
+
+## RE-ENABLE audit: shelved methods that adaptive dispatch can bring back  [+15 tests]
+
+Moose's prompt: now that we have a catalog + adaptive dispatch, reconsider functionality we kept OUT because it only
+worked in a niche. "Only good in a niche" flips from a reason to SHELVE into a reason to GATE -- run the niche method
+only when a cheap, conservative, deterministic detector says we're in its regime; safe default everywhere else.
+Probed the audit doc's candidates against the LIVE code (probe-first). Outcomes -- honest, one per candidate:
+
+BUILT THE PATTERN: holographic_regimegate.RegimeGate(name, detect, threshold, superior, fallback, above) -- .apply(x)
+returns (result, info{score, threshold, used}). Conservative by construction: the FALLBACK is the safe default, so a
+misfire costs at most the default, never worse than the shelved negative. Deterministic. This is the reusable home for
+every re-enable.
+
+PASS -- closed-form ITERATE (holographic_iterate.iterate_gated, wired as Compute.iterate). For a LINEAR operator that
+is a circular convolution (a bind), the iterate is diagonal in Fourier, so step_k jumps k iterations in ONE FFT --
+EXACT (matches stepping to ~1e-8), not an approximation. Detector: recover the impulse response op(delta) and verify
+op == bind(kernel, .) on seeded probes (decidable). Because it's exact in regime, the gate NEVER does worse than
+stepping -- it matches (bind) or falls back (nonlinear). MEASURED speedup vs stepping: 2.3x @ k=50, 17x @ k=500, 186x
+@ k=5000, all exact. Only attempts the closed form when k >= min_k so the detector pays for itself. Clean win, shipped.
+
+FAIL (kept shelved, measured why) -- PROJECTION DENOISE gated by noise. The audit put it in Group A ("cheap noise
+estimate"), but probing showed the detector is NOT robust. The plain fixed-rank projection wins at high noise
+(+~10 dB) and HURTS at low noise (over-smooths real off-manifold detail). MEASURED: (1) the built-in
+adaptive_manifold_denoise does NOT fix the low-noise harm (slightly worse); (2) a residual-ratio detector
+(||x-project(x)||^2 / (sigma_est^2 (D-rank))) looked clean at one detail level but LEAKS HARM across detail levels --
+a threshold sweep found NO fixed threshold that both guarantees "never worse than the no-op" AND keeps a meaningful win
+(even at t=1.25, worst harm -0.27 dB, win collapsed to +0.4 dB). Root cause: at low noise with real detail,
+"clean+detail" and "noisy" put energy in the same discarded directions -- a single noisy vector can't cheaply tell
+them apart (estimate_sigma is fooled by detail). This is the audit's own caveat firing ("some negatives are
+fundamental, not regime-shaped"). So denoise_gated ships as an OPT-IN tool (for callers who KNOW their signal is
+low-rank), NOT an auto-default. The negative stays kept.
+
+OUT (constitution) -- SPARSE/CHEBYSHEV eigenbasis at large N. holographic_spectral's own docstring: a sparse
+eigensolver "would need scipy, i.e. a second dependency -- out of scope." NumPy-only constraint forbids it. Scratched.
+
+REMAINING CANDIDATES (Group A parameter-read, not yet done): brdf multi-scatter GGX at high roughness (needs the
+Kulla-Conty term BUILT first, then gate on roughness); fhrr/tensor/sbc at high load (gate on pair/factor count);
+mixture phase-field on the tension dial. Group B (coarse-residual): nystrom low-rank probe, splat 3DGS refine, volint
+marching, pathtrace adaptive AA, raymarch over-relax -- each once the coarse-first pass lands. Each still owes a
+measured breakeven before shipping (the denoise result is the cautionary template). Registered "Regime gate
+(re-enable)" in the C1 catalog. Tests +15 (RegimeGate scaffold x5, iterate gate x5, denoise routing x1, plus the
+existing suites; re-enable integration x1). Discipline held: probe-first, measure the breakeven, keep the fallback,
+keep the negative when the gate can't be made honest.
+
+## RE-ENABLE #2: FHRR-at-high-load, gated by the pair count  [+6 tests]
+
+Second re-enable from the adaptive-dispatch audit (Group A, parameter-read). Binding N role->filler pairs into one
+vector is capacity-limited: real-HRR is cheap and near-perfect at low load but its recall falls off as pairs climb;
+FHRR (unit phasors) holds recall far better at high load, at ~2x storage + a little compute. FHRR was kept opt-in
+because at low load it "changes nothing" and only costs the complex domain.
+
+PROBED + MEASURED the crossover (fair, same dim) before setting any threshold: recall ties at low load (both ~1.0),
+FHRR pulls away past the knee -- dim=512: N=60 -> HRR 0.71 vs FHRR 0.96; N=100 -> 0.40 vs 0.75. The knee scales with
+dim: N ~ 0.06-0.08 * dim (dim=256 knee ~20, dim=1024 knee ~64). Set LOAD_KNEE_FRAC=0.08 (biased slightly high so we
+stay on the cheap default until FHRR's win is clear).
+
+KEY DIFFERENCE from the denoise re-enable: there is NO HARM MODE. FHRR recall is always >= real-HRR, so the gate can
+never give a WORSE answer -- a borderline misfire costs only a little storage, never correctness. That makes the load
+gate safe by construction (the detector is an exact integer, and the downside of over-triggering is benign cost).
+
+BUILT holographic_loadmemory.AdaptiveRoleFillerMemory(dim, expected_pairs): choose_backend() reads the pair count
+against 0.08*dim and picks 'hrr' (real, cheap) or 'fhrr' (phasor, high recall); uniform add/recall hides the backend
+(real trace + Vocabulary vs complex trace + PhasorVocabulary). MEASURED at N=90, dim=512: FHRR 66/90 vs real-HRR 41/90
+-- the win captured automatically. Wired mind.adaptive_record(expected_pairs); registered "Adaptive record
+(load-gated)" in the C1 catalog. +6 tests (backend choice by load incl. dim-relative, low-load hrr perfect recall,
+high-load fhrr beats hrr, uniform interface, mind faculty; re-enable integration).
+
+RE-ENABLE SCOREBOARD so far: PASS closed-form iterate (exact in regime), PASS FHRR-at-high-load (no harm mode),
+FAIL projection denoise (kept shelved -- detector can't separate detail from noise), OUT sparse eigenbasis (needs
+scipy). Remaining Group A: brdf multi-scatter (needs the Kulla-Conty term built first), tensor/sbc exact-recall knees,
+mixture phase-field on the tension dial. Group B (coarse-residual): nystrom, splat 3DGS, volint, adaptive AA,
+raymarch over-relax.
+
+## RE-ENABLE #3: tensor-product binding for EXACT recall, gated by fidelity need + memory budget  [+4 tests]
+
+Third re-enable (Group A). Extended the load-gated memory to a THIRD tier: tensor-product (outer-product) binding.
+MEASURED (fair, dim=256): tensor stays EXACT (1.00 recall) up to M~D where HRR/FHRR have collapsed -- N=250 gave HRR
+0.05, FHRR 0.10, tensor 1.00. The cost is honest and large: D*D numbers = D-times the storage of HRR/FHRR (65536 vs
+256 at dim=256).
+
+So tensor is a no-harm-mode win ON RECALL (exact in-regime) but with a real STORAGE cost, which is why its gate needs
+one more decider than FHRR: choose_backend(expected_pairs, dim, exact, max_numbers) picks tensor only when EXACT recall
+is requested AND the pairs fit (M <= dim) AND D*D is within the memory budget; else FHRR past the load knee; else cheap
+HRR. All deciders known up front (an integer, a boolean, a budget) -- no estimate, so no detector-reliability risk.
+
+Extended holographic_loadmemory.AdaptiveRoleFillerMemory with the tensor backend (buffers the key/value atoms, seals a
+TensorBindMemory on first recall, recalls by argmax over the stored fillers). MEASURED: tensor 200/200 EXACT at N=200
+where FHRR at the same load is well under half. The budget cap is respected -- exact requested but D*D over max_numbers
+falls back to the best affordable lossy option (honest: you asked for exact but couldn't pay for it). Updated
+mind.adaptive_record(expected_pairs, exact, max_numbers); refreshed the catalog entry. +4 tests (tensor exact, budget
+cap, tensor-beats-fhrr-at-load; tensor integration).
+
+RE-ENABLE SCOREBOARD: PASS closed-form iterate (exact in regime), PASS FHRR-at-high-load (no harm mode), PASS tensor
+exact recall (no harm mode on recall, storage-gated), FAIL projection denoise (kept shelved), OUT sparse eigenbasis
+(scipy). The pattern holds: the SAFE re-enables are the ones with no harm mode -- the superior method is exactly correct
+or strictly-better in its regime, so the only question is when the win is worth the cost (storage / complex domain),
+which a known parameter answers. Remaining Group A: brdf multi-scatter (a BUILD first -- the Kulla-Conty term), sbc
+many-factor knee, mixture phase-field on the tension dial. Group B (coarse-residual, all quality-tradeoffs so they need
+denoise-level scrutiny): nystrom, splat 3DGS, volint marching, adaptive AA, raymarch over-relax.
+
+## RE-ENABLE #4: multi-scatter GGX (Kulla-Conty), gated by roughness -- plus two "already enabled" findings  [+6 tests]
+
+Probed three more audit candidates (probe-first). Two were ALREADY ENABLED in the live code -- the audit
+(auto-generated from NOTES) listed them as shelved, but the codebase already re-enabled both, like the consolidation
+re-audits:
+
+  * SBC resonator: ALREADY THE DEFAULT factorizer. mind.factor_composite prefers holographic_sbc.decompose_structure
+    (the validated SBC resonator) and DEPRECATES the dense ResonatorNetwork path; decompose_structure is a first-class
+    faculty. My measurement justifies that existing choice: at matched compute budget (6x50 iters), SBC matches or
+    BEATS the dense resonator at its big budget (20x400) on high-factor problems -- ~26x more compute-efficient at
+    high load, equal-or-better accuracy. Nothing to rebuild.
+  * mixture phase-field (immiscible double-well): ALREADY GATED by the tension dial. matter_step does
+    `if mix.tension: phi += dt*tension*(-double_well(phi) + 0.5*lap)` -- tension==0 skips the double-well (cheap
+    miscible blend), tension>0 applies the phase-field (sharp oil/water interface). The tension dial IS the parameter
+    gate the audit proposed. Nothing to rebuild.
+
+GENUINELY-UNBUILT + shipped: BRDF MULTI-SCATTER (Kulla-Conty 2017), gated by roughness. Single-scatter GGX drops
+inter-microfacet bounces, so a rough METAL loses real energy -- MEASURED white-furnace at metallic=1: 0.85 @ r=0.2
+down to 0.36 @ r=1.0 (dielectrics hide it behind the diffuse term; metals lose ~50%). Built the Kulla-Conty
+compensation: bake the single-scatter directional albedo E(mu) per roughness (cached), then f_ms = (1-E(v))(1-E(l)) /
+(pi (1-E_avg)) tinted by F_avg, added as f_ms*N.L. MEASURED: white-furnace energy restored 0.36->1.00 @ r=1.0,
+0.50->1.01 @ r=0.8.
+
+HONEST NUANCE (not a pure no-harm-mode win): the analytic term OVERSHOOTS at low roughness (1.16 @ r=0.2) where
+E_avg~1 makes (1-E_avg) tiny -- over-brightening. That is exactly why the roughness GATE exists. Unlike the denoise
+gate, the detector is an EXACT parameter (roughness), not an estimate, so the gate is reliable: MEASURED crossover ~
+r=0.22-0.25 (below, single-scatter is closer to conserving; above, multi-scatter wins big). Set MS_ROUGHNESS_GATE=0.25;
+the gated |energy-1| is <= single-scatter at EVERY roughness (0.27->0.27 @ r=0.15 unchanged, 0.61->0.003 @ r=1.0).
+Kept BACKWARD-COMPATIBLE: cook_torrance_ms / brdf_gated are opt-in; the default renderer is unchanged (energy
+compensation changes rendered brightness, so it must be opt-in). Registered "Multi-scatter BRDF (re-enable)" in the
+catalog. +6 tests (single-scatter loss, multi restores energy, gate routing, gated-never-worse, term-only-adds;
+integration).
+
+RE-ENABLE SCOREBOARD: PASS iterate (exact), PASS FHRR (no harm mode), PASS tensor (no harm mode on recall), PASS
+multi-scatter BRDF (exact detector, gated to avoid the overshoot); ALREADY-DONE sbc + mixture phase-field; FAIL
+projection denoise (unreliable detector); OUT sparse eigenbasis (scipy). Remaining Group B (coarse-residual,
+quality-tradeoffs): nystrom, splat 3DGS, volint marching, adaptive AA, raymarch over-relax -- all wait on the
+coarse-first pass and need denoise-level scrutiny.
+
+## RE-ENABLE #5: the COARSE-FIRST residual pass (the Group-B unlocker) + an honest adaptive-AA caveat  [+7 tests]
+
+Group B of the audit (nystrom, splat 3DGS refine, volint marching, adaptive AA, over-relaxed tracing) all share ONE
+detector: run the cheap method, measure a per-cell residual/uncertainty, escalate to the expensive method only where
+it's high. Built that shared primitive: holographic_coarsefirst --
+  * escalate_mask(uncertainty, frac|threshold) -> WHERE to refine (exact top-k by frac, or >= an absolute threshold).
+  * refine_where_uncertain(coarse, uncertainty, refine_fn, frac) -> run refine_fn ONLY on the flagged cells, merge
+    into the coarse base (which is always kept). Returns (refined, mask, n).
+  * gradient_uncertainty(field) -> a generic cheap signal (local gradient = probably under-resolved).
+  * concentration(uncertainty) -> the honest breakeven check.
+
+MEASURED (adaptive field approximation -- the shape nystrom/splat/volint share): a smooth field with a thin ridge,
+coarse RMSE 0.051 -> 0.006 after refining only ~20% of cells (~26% of the field evaluated). Clean 8x error drop at a
+quarter of the cost, BECAUSE the uncertainty is concentrated (concentration 0.59).
+
+TWO honest findings kept:
+  * DEGENERATE-MASK BUG found+fixed: a value-threshold at the k-th largest blew up when the cut landed on a common
+    baseline (0) -- every cell >= 0 got flagged. Switched the frac path to an exact stable top-k. (A reminder that
+    conservative ">=" needs care around ties.)
+  * ADAPTIVE PATH-TRACE AA does NOT cleanly win at equal budget on simple scenes (MEASURED): a big diffuse sphere has
+    UNIFORM GI noise (concentration ~0.57, adaptive 0.019 vs uniform 0.015 RMSE -> uniform wins); a small object has
+    concentrated variance (concentration ~1.0) yet adaptive only TIES, because the object is a small fraction of the
+    whole-image error and the sky is free for both. So concentration() is NECESSARY, not sufficient: low concentration
+    rules coarse-first OUT; high concentration makes it a CANDIDATE that still owes a measured win where the hard region
+    also carries the error. The pathtracer already exposes the mechanism (return_variance + active mask); the primitive
+    plugs straight in, but the SCENE decides whether it pays. Kept as a loud caveat, not shipped as an auto-default.
+
+Registered "Coarse-first refine (re-enable)" in the catalog. +7 tests (mask by frac/threshold, refine touches only
+flagged, field-approx win, concentration low-for-uniform / high-for-spike, gradient flags edges; integration).
+
+RE-ENABLE SCOREBOARD: PASS iterate / FHRR / tensor / multi-scatter BRDF; PASS the coarse-first PRIMITIVE (the Group-B
+detector, measured on field approximation); ALREADY-DONE sbc + mixture; FAIL projection denoise; CAVEAT adaptive
+path-trace AA (mechanism wired, win is scene-dependent -- needs concentrated error, not just concentrated variance);
+OUT sparse eigenbasis. The remaining Group-B candidates (nystrom, splat refine, volint) can now be built ON the
+coarse-first primitive -- each still owes its own measured breakeven, and concentration() is the tool to pre-check it.
+
+## RE-ENABLE #6: Nystrom for low-rank kernels, gated by a probe residual  [+6 tests]
+
+Second Group-B candidate, and the FIRST with a clean-enough detector to ship (the audit put it in Group B, needing a
+residual probe). Nystrom applies a kernel-weighted field in O(N*m) via m landmarks instead of exact O(N^2), but it is
+exact only when the kernel is LOW-RANK (a smooth field, sigma not tiny) -- the kept negative.
+
+THE DETECTOR (measured RELIABLE, unlike the adaptive-AA variance): compute BOTH exact and Nystrom on a small held-out
+PROBE (a few points, cheap) and take their relative error. MEASURED across sigma: the probe error tracks the FULL-field
+error closely (0.06 vs 0.06 at the good end, 0.58 vs 0.63 at the bad end); even where it diverges at tiny sigma both are
+high, so the gate still correctly falls back. The probe costs O(probe*Ns) -- a few percent of the full exact -- so a
+small overhead when we fall back and a big win when Nystrom is safe.
+
+BUILT apply_kernel_gated(points, sources, weights, sigma, m, threshold=0.1): probe the low-rank-ness; if the probe error
+<= threshold use Nystrom (O(N*m)), else fall back to EXACT (O(N^2)). Uses RegimeGate with above=False (superior=cheap
+Nystrom in the low-rank regime; fallback=exact, the always-correct safe default). MEASURED speedup on a smooth kernel:
+6.6x @ N=800, 13.9x @ N=2000 (the win grows with N), rel-err ~0.000-0.002. On a sharp kernel it falls back to exact
+(byte-correct). KEY: because the fallback is EXACT, the gate can never be WRONG -- at worst (probe under-reads) it is a
+little slower than optimal. That is why this ships where projection-denoise did not: the exact fallback removes the harm
+mode entirely, and the detector is reliable besides.
+
+Registered "Nystrom kernel (re-enable)" in the catalog. +6 tests (low-rank->nystrom accurate, high-rank->exact
+byte-correct, probe tracks regime, result-always-accurate across sigma, info reporting; integration with measured
+speedup).
+
+RE-ENABLE SCOREBOARD: PASS iterate / FHRR / tensor / multi-scatter BRDF / coarse-first primitive / Nystrom low-rank
+gate; ALREADY-DONE sbc + mixture; FAIL projection denoise; CAVEAT adaptive path-trace AA; OUT sparse eigenbasis. The
+Nystrom win reinforces the rule: a re-enable ships cleanly when (a) its detector is reliable AND (b) it has a safe
+(exact / strictly-better) fallback -- Nystrom has both. Remaining Group B: splat 3DGS refine and volint marching
+(both build on the coarse-first primitive; each still owes a measured breakeven).
+
+## RE-ENABLE #7: full-3DGS anisotropic splat refinement, composed coarse-first  [+5 tests]
+
+Third Group-B candidate. splat_fit is a cheap isotropic matching pursuit; an isotropic blob cannot represent a sharp or
+oriented feature, so it leaves residual there. aniso_fit (gradient descent on anisotropic covariances) can -- so the
+re-enable composes them COARSE-FIRST: fit the cheap isotropic base, then anisotropic-refine what it MISSED (its
+residual). Built splat_refine_residual(target, iso_splats, K_aniso, steps) and fit_coarse_first(target, K_iso, K_aniso).
+
+MEASURED: on a sharp diagonal edge, iso 15.7 dB -> coarse-first 20.0 dB (+4.4). At EQUAL wall-clock, iso+aniso-refine
+(20.0) beats spending the same time on more isotropic splats (18.7). NO HARM MODE (measured across sharp/smooth/ridge/
+random targets): refining the residual only adds detail, so it is always >= the isotropic baseline (sharp +4.4, smooth
++0.3, ridge +1.5, noise +0.3 -- never negative).
+
+TWO honest findings kept:
+  * concentration() is the WRONG detector here, and BACKWARDS: an anisotropic edge spreads its residual ALONG the edge
+    (many cells, low POINT-concentration = 0.16), while a smooth blob's residual is point-concentrated (0.34). So the
+    coarse-first concentration signal (great for point-like structure) does not detect anisotropy.
+  * a structure-tensor anisotropy score did not separate the cases cleanly either (sharp 0.41, ridge 0.51, smooth 0.34
+    -- too much overlap). So there is NO reliable cheap detector for WHEN anisotropic refinement is the best use of
+    compute.
+BECAUSE it has no harm mode, it does not NEED a detector to be safe -- shipped as an always-safe OPT-IN refinement (the
+caller applies it for higher fidelity when it can afford the anisotropic fit), NOT an auto-gate. Contrast the
+parameter-gated re-enables (iterate/FHRR/tensor/BRDF/Nystrom), which needed a reliable detector because a wrong choice
+there would cost quality or correctness.
+
+Registered "Splat aniso-refine (re-enable)" in the catalog. +5 tests (beats-iso-on-sharp-edge, no-harm-mode across
+targets, returns render+splats, concentration-is-backwards; integration).
+
+RE-ENABLE SCOREBOARD: PASS iterate / FHRR / tensor / multi-scatter BRDF / coarse-first primitive / Nystrom / splat
+aniso-refine (opt-in, no harm mode); ALREADY-DONE sbc + mixture; FAIL projection denoise; CAVEAT adaptive path-trace AA;
+OUT sparse eigenbasis. The rule now has TWO safe-to-ship shapes: (1) a reliable detector + a safe fallback (Nystrom,
+BRDF), or (2) NO harm mode at all, so no detector is needed (splat aniso-refine, FHRR, tensor). Only volint marching
+remains of the original Group B.
+
+## QUERY BACKLOG batch 1: probe-first sweep + the history family (P7-P12) wired  [+8 tests]
+
+New backlog (holostuff_query_backlog.md): harden the query layer to a real database + promote the differentiated
+faculties. PROBED the LIVE query module first (it grew 651 -> 1323 lines since the backlog snapshot, so a large
+fraction was ALREADY BUILT -- exactly the backlog's own "never re-request what ships" rule):
+
+  ALREADY DONE (verified working, not rebuilt):
+  * FIX tier F1/F2/F3: unknown-column now raises QueryError; LIMIT 0 returns no rows; AND/OR in WHERE WORKS (B3).
+  * B1 JOIN (join()/`_joined_row`, inner+outer), B2 UPDATE/DELETE/compact (tombstone `_deleted` + replay GC),
+    B4 primary-key index (set_primary_key/pk_lookup, O(1)), B5 constraints (PK-unique/NOT NULL/UNIQUE/FK/CHECK via
+    ConstraintError), B9 OFFSET/DISTINCT/OR -- all present and measured working.
+  * P1-P6 similarity family (similar_to/cluster/anomalies/near_duplicates/explain_match/recommend) -- all shipped as
+    module functions and working (cluster reports coherence; anomalies calibrated; explain_match shows which columns
+    drive the match).
+
+  GENUINELY MISSING -> BUILT THIS BATCH: the history family P7-P12 (query.py imports only the kernel, so the
+  versioning faculties were never wired to the tables). New module holographic_querytime.py -- a git-like timeline
+  for a query Table that REUSES the shipped faculties (VersionedStore vectors, DeltaChain diff, CompositionTree
+  tamper-locate):
+    P7 select_as_of(h, version, sql)  -- TIME TRAVEL: checkout the past table, run an ordinary SELECT (measured: a
+       balance reads 100 at v0, 250 at v2).
+    P8 history_of(h, pk_col, key)     -- BLAME: a row's value timeline across versions (None before it existed).
+    P9 diff_versions(h, a, b)         -- added/removed/changed with FIELD-level detail; reuses DeltaChain._changed_rows
+       for the vector cross-check when shapes match.
+    P10 revert_to(h, version)         -- git-style undo (append-only; never rewrites history).
+    P11 branch/compare/discard        -- git-for-data what-ifs; MERGE deferred (needs an explicit conflict policy).
+    P12 prove(h, v)/find_tampering    -- a compact Merkle digest per version + CompositionTree.locate names the altered
+       row in O(log n) (measured: tamper row 1 -> located row 1; untampered -> None).
+  Registered "Query time-travel & audit" in the catalog. +8 tests (one per verb + determinism; integration).
+
+KEPT NEGATIVES (loud): a commit snapshots the record matrix + row dicts (O(rows)/version -- the delta-compressed
+vector store is available underneath, but exact time-travel needs the lossless row values); revert is append-only;
+branch ships without merge. Still genuinely TODO in the backlog: P13 (verify+doc), PR1-PR6 (installable VSA programs),
+WS1-WS7 (tiered workspaces/folders), B6/B7 (transactions/durability -- a `transaction` ctx + Rollback already exist,
+to be verified next), B10 (graph, with the loud recall-collapse caveat).
+
+## QUERY BACKLOG batch 2: B6/B7 + P13 verified done; PR programs (PR1-PR6) built  [+8 tests]
+
+Continued the probe-first sweep, then built the PR wave.
+
+VERIFIED ALREADY DONE (not rebuilt):
+  * B6 transactions -- `with transaction(t): ...` snapshots on entry, commits on clean exit, and rolls the WHOLE
+    batch back on any exception (swallows `raise Rollback`, re-raises real errors). Measured: an explicit Rollback,
+    a ValueError, and a mid-transaction ConstraintError each reverted an earlier in-txn update too (true atomicity).
+  * P13 add-column-no-migration -- `add_column` appends a role; old rows stay sparse, new rows carry it, no rewrite.
+  * B7 durability -- to_state/from_state give save+replay; fsync-per-batch is an ops detail outside the NumPy core.
+
+BUILT: holographic_queryprog.py -- VSA programs as installable database objects (stored procedures, VSA-native). A
+program is a hypervector the HoloMachine runs (LOAD/BIND/APPLY/HALT -- not arbitrary code), so it can't do I/O or run
+host code and can only call the whitelisted handlers it was installed with (safer than a SQL stored procedure). Reuses
+the shipped machine.assemble/run and explain_program.
+  PR1 list_programs -- the catalog as queryable rows (name/domain/doc/tier), like pg_proc.
+  PR3 explain -- a handler-less DRY RUN: which faculties it WOULD call, how many steps (no execution).
+  PR4 find(text) -- find a program BY MEANING (doc word-overlap descriptor, cosine-ranked with confidence) -- a SQL
+      catalog is exact-match only. Measured: "group a series into clusters" ranks the clustering program first.
+  PR5 install -- CREATE FUNCTION: assemble the instructions to a program vector, merge the program's symbols
+      SCOPED-by-name into the shared vocab (self-discovery), catalog the metadata.
+  PR6 execute -- run a program over query rows: encode rows -> accumulator, run with ONLY the whitelisted handlers
+      (sandbox) and a step bound (no runaway), decode with a calibrated confidence (garbage shows LOW confidence).
+Registered "VSA programs as DB objects" in the catalog (47 homes). +8 tests (install/list/find/explain/execute/
+sandbox/step-bound/system-read-only; integration).
+
+KEPT NEGATIVES (loud): find-by-meaning is WORD-OVERLAP over docs, not a language model; execute results are on the
+fuzzy side so they carry a confidence and can abstain; symbols are scoped per program to avoid a flat-namespace
+collision; system-tier programs are read-only (uninstall refused). Remaining in the backlog: WS1-WS7 (tiered
+workspaces/folders), B8 (concurrency), B10 (graph traversal, with the loud recall-collapse caveat).
+
+## QUERY BACKLOG batch 3: WS tier -- most already shipped; folders (WS7) + combine-scenes (WS6) built  [+8 tests]
+
+Probed the workspace/persistence tier. Nearly all of it was ALREADY BUILT (holographic_workspace.py, 199 ln):
+  * WS1 tiers -- add_namespace(tier=)/create_namespace/drop_namespace(protects system)/tier_of: three-tier model
+    (system read-only / persistent durable / workspace transient) at the _require_writable chokepoint. DONE.
+  * WS2 tier-scoped save -- to_state(tiers=['persistent']) filters by tier. DONE.
+  * WS3 Workspace + WorkspaceManager (new/switch/clear/active). DONE.
+  * WS4 reset_to_default -- verified: persistent data survives, workspaces cleared, system restored. DONE.
+  * WS5 export/import_workspace -- round-trips. DONE.
+  * WS6 combine_workspaces -- unions two workspaces' tables with an explicit collision policy (error/suffix/left/
+    right). DONE. But the SCENE-level combine was explicitly deferred ("left to those handles") -> built below.
+
+GENUINELY MISSING -> BUILT THIS BATCH:
+  * WS7 folders (holographic_queryfolder.py): a shallow grouping tree over the tables (database > folder > table).
+    A folder REFERENCES existing tables, never copies them. The load-bearing decision: HOME folder = ownership (one
+    per table, governs lifecycle -- dropping it deletes its tables) vs ASSOCIATION link = grouping (many per table,
+    unlink never deletes). tables_in(folder, recursive) powers scoped search (drill-down = a smaller candidate set).
+    Measured: drop_folder deletes only the HOME tables; a table linked elsewhere survives; unlink from home is
+    refused (would orphan it); a folder can't reference a table that doesn't exist. Honours the system read-only wall.
+  * WS6 combine-scenes (SceneCoder.combine): a scene IS a bundle (unnormalised superposition of object products), so
+    combining two scenes is vector ADDITION -- the object counts add (norm^2 ~ n), the resonator still recovers any
+    object. Measured: 2 objects + 1 object -> 3. Kept negative: two IDENTICAL objects superpose (amplitude doubles)
+    rather than staying distinct -- re-key an id if duplicates must be kept separate.
+  Registered "Workspace folders" in the catalog (48 homes). +8 tests (folder ownership/association/resolve/unlink/
+  drop/scoped-recursive + combine-is-a-bundle; integration).
+
+KEPT NEGATIVES (loud): keep the folder tree SHALLOW (depth is as annoying as a flat pile); an association is a
+grouping not a copy (edits seen everywhere, lifecycle follows home only). Remaining in the whole query backlog: B8
+(concurrency -- single-writer+snapshot), B10 (graph traversal, with the loud recall-collapse-at-scale caveat).
+
+## QUERY BACKLOG batch 4 (FINAL): B8 concurrency + B10 graph traversal -- backlog complete  [+11 tests]
+
+The last two, both use-case-dependent and honestly caveated in the backlog.
+
+  * B10 graph traversal (holographic_querygraph.py): reachability over a table's edges -- neighbors, descendants,
+    reachable, shortest path (BFS) -- what recursive SQL CTEs make painful. Built on an EXACT adjacency index BY
+    DESIGN: the holographic graph memory has a measured recall collapse at scale (routed descent overloads like an
+    over-full maze field), so traversal uses a plain deterministic dict-of-neighbours, which scales as O(V+E) and
+    returns exact answers -- no recall cliff. Tombstone-aware (skips _deleted edge rows), directed or undirected.
+    Measured: descendants(1)={2,3,4,5}, shortest path 1->5 length 4, reachable is directional, undirected reaches back.
+    LOUD KEPT NEGATIVE: exact index on purpose -- the holographic graph store is NOT used for traversal (it stays for
+    classification by routed descent, where it belongs).
+  * B8 concurrency (holographic_querylock.py): single-writer + snapshot readers. One writer at a time (exclusive
+    threading.Lock; a second writer waits with block=True or fails fast with ConcurrencyError on block=False), and
+    lock-free reader SNAPSHOTS -- a consistent point-in-time copy immune to later writes (reusing the B6 snapshot).
+    Measured: a snapshot taken before a write still reads the OLD value while a fresh read sees the new one; the lock
+    releases on exit. HONEST SCOPE: concurrent-WRITER isolation (MVCC) is DEFERRED -- this single-writer model is the
+    correct simple first step and covers most workloads; do not advertise serialisable multi-writer isolation.
+  Registered "Graph traversal (exact)" + "Single-writer concurrency" in the catalog (50 homes). +11 tests.
+
+=== QUERY BACKLOG COMPLETE ===
+Across four batches: FIX (F1-F3), B1-B7 (JOIN/UPDATE-DELETE/multi-WHERE/PK-index/constraints/transactions/durability),
+B8-B10 (concurrency/SQL-surface/graph), P1-P13 (similarity family + history family + add-column), PR1-PR6 (installable
+VSA programs), WS1-WS7 (tiered workspaces + folders). The striking part, per the backlog's own probe-first rule: the
+query module had grown 651 -> 1323 lines plus a full workspace module BEFORE this engagement, so the large majority was
+ALREADY BUILT -- the genuinely-new work was the history family (querytime), the programs layer (queryprog), folders
+(queryfolder), graph traversal (querygraph), and the writer lock (querylock). Everything else was verify-and-document.
+
+## DISTRIBUTED COORDINATOR batch 1: R2 Coordinator + LocalPool + margin-gated tie-break  [+9 tests]
+
+New backlog (leCore_distributed_coordinator_backlog.md): a distributed compute Coordinator with PLUGGABLE BACKENDS,
+sitting BEHIND holographic_distribute (which already holds the render-farm theory: partition -> worker -> shared
+read-only cache -> monoid reduce, all stdlib). Probe confirmed distribute has partition/adaptive_partition(LPT)/
+distribute/reduce_sum/min/max and runs workers sequentially in-process; no coordinator existed.
+
+BUILT holographic_coordinator.py (R2, the base case -- useful with zero network nodes):
+  * Coordinator(backend).run(buckets, worker, cache, reduce) -- backend-agnostic schedule + collect + monoid reduce;
+    releases the shared cache in a finally even if a worker raises.
+  * InProcessBackend -- sequential default (mirrors distribute, always available, the reference).
+  * LocalPool(n) -- a PERSISTENT ProcessPoolExecutor (each worker its own interpreter + GIL) + shared_memory for the
+    read-only cache (a numpy array is written ONCE, workers map it read-only by name -- no per-bucket pickling). The
+    child re-attaches via a top-level _run_with_cache trampoline (picklable by reference); the parent owns unlink().
+  * decide(sims, safe_margin) / decide_sequence -- the MARGIN-GATED canonical tie-break: cleanup already computed the
+    sims so the margin is free; a comfortable margin trusts the fast/distributed argmax, only the rare knife-edge is
+    resolved by determinism.argmax_tiebreak so every node agrees (a RULE breaks the tie, not the ~1e-12 float wobble).
+
+MEASURED (honest):
+  * Correctness: LocalPool workers run in SEPARATE interpreters (distinct PIDs from the parent -- verified); MIN
+    reassembly is BIT-EXACT vs in-process; a shared-cache SUM matches a direct compute.
+  * SPEED / KEPT NEGATIVE: this sandbox has ONE CPU core, so process parallelism gives NO wall-clock speedup here
+    (workers time-slice on the single core; the pool even loses slightly on light work -- exactly the "offload COARSE,
+    not fine" rule: IPC + spawn cost dominates unless a bucket is compute-heavy). The mechanism is correct and will
+    parallelize on a multi-core box; the win cannot be shown on 1 core. Documented loudly rather than faked.
+
+Registered "Distributed coordinator" in the catalog (51 homes). +9 tests (in-proc reduce, shared cache, separate PIDs,
+MIN bit-exact across backends, decide margin gate, decide identical under reduction wobble, decide_sequence, cache
+released on error; integration bit-exact + tie-break). Remaining rungs: R4 command backend + orchestrator Tools, R3
+network farm (worker daemon + socket/json), R5 hardening (stragglers/retry/redundant-compute voting).
+
+## DISTRIBUTED COORDINATOR batch 2: R4 command backend + orchestrator Tools  [+8 tests]
+
+BUILT holographic_command.py (R4 -- run ANY program/script, the door to external tools/services):
+  * CommandRunner -- run a registered ALLOWLISTED command via subprocess, capture stdout/stderr/exit, TIME-BOXED.
+    SECURITY (the highest-risk surface, kept loud): allowlist ONLY (a command runs only if its NAME was registered;
+    no path from input to a new command); NEVER a shell (subprocess argv list, shell=False -> no globbing/`;`/pipe
+    injection -- an arg value is one argv element, can't become a new command); VALUES fill "{key}" placeholders,
+    they don't build the command; every run has a timeout. Measured: "hello; rm -rf /" echoes as a LITERAL (the ';'
+    is not interpreted); an unregistered name is refused; a hung command is killed at the timeout.
+  * command_as_tool(runner, name, ...) -- wrap an allowlisted command as an orchestrator Tool (fn returns stdout,
+    raises on non-zero exit) so the Planner can select+chain it and the CircuitBreaker trips on a flaky one -- an
+    external program joins the same VSA fabric as an internal faculty. Measured: a two-step external chain
+    (upper -> reverse) runs; a failing command opens its breaker so the planner skips it.
+  Registered "Command runner (external tools)" in the catalog (52 homes). +8 tests (allowlist gate, no-shell
+  injection, capture, missing-placeholder, unknown-exe-at-register, timeout, tool+breaker; integration Planner chain).
+
+The sandboxing beyond allowlist+no-shell+timeout (restricted user / container / no-network) is an OPERATIONAL
+responsibility, stated as such -- this module gives the in-process safety rails. Remaining rungs: R3 network farm
+(worker daemon + socket/json + cache shipping), R5 hardening (stragglers/retry/redundant-compute voting + auth).
+
+## DISTRIBUTED COORDINATOR batch 3: R3 network farm (run on another machine)  [+8 tests]
+
+BUILT holographic_farm.py (R3 -- the render farm / SETI@home rung; stdlib http.server + json + base64, no framework):
+  * WorkerDaemon -- runs ON a node. A registry of NAMED workers (YOUR trusted code) + a cache store keyed by content
+    hash. Endpoints /ping (health + a measured speed for LPT), /cache (receive the read-only cache ONCE, keep by hash),
+    /task (run a named worker on a bucket). Runnable STANDALONE: `python holographic_farm.py --host 0.0.0.0 --port N`
+    starts a node another machine's coordinator can dispatch to.
+  * NetworkFarm -- a Coordinator BACKEND. Registers nodes (pings for speed), publishes the cache once per node by
+    content hash (nodes reuse it), and dispatches buckets CONCURRENTLY via a thread pool (http I/O releases the GIL).
+    Plugs into the SAME Coordinator.run() as the local pool -- only WHERE the worker runs changes.
+  So Coordinator(NetworkFarm([addr])).run(buckets, "worker_name", cache, reduce) fans a monoid job across machines.
+
+MEASURED: over the real http/json path -- network SUM matches a direct compute; MIN reassembly is BIT-EXACT over the
+network; the cache is shipped ONCE and kept by content hash; an unregistered worker name is REFUSED; a worker error is
+reported, not crashed. END-TO-END proof of "run on another machine": started the daemon as a genuinely SEPARATE PROCESS
+(its own PID) and a coordinator in ANOTHER process dispatched a real job over the socket and got the correct result --
+loopback here stands in for a remote host; point --host at the remote IP and it is a real farm.
+
+LOAD-BEARING SECURITY (loud): buckets are DATA, workers are REGISTERED CODE -- the coordinator sends a worker NAME + a
+bucket, never code; a daemon runs only its registered workers. Do NOT expose a daemon openly (bind local / auth / TLS
+across the internet -- deployment responsibility, stated). UNTRUSTED nodes still need redundant-compute + voting (R5) --
+a node can faithfully return a plausible WRONG answer, which repair does not catch; this backend is for a TRUSTED farm
+until R5. Registered "Network render farm" in the catalog (53 homes). +8 tests. Remaining: R5 hardening
+(stragglers/backup exec, retry+reassign, redundant-compute voting + canary buckets + auth before untrusted nodes).
+
+## STANDALONE API SERVICE: run on any OS, talk via HTTP/JSON  [+7 tests]
+
+Moose: run the app standalone on any supported OS, communicated with via an API. BUILT holographic_service.py -- a
+STDLIB-ONLY HTTP/JSON service (http.server + json; numpy is the only real dep, which the engine needs anyway, so it
+runs on any Python 3 with near-zero setup). A tiny route registry (method, path) -> handler makes the surface read top
+to bottom and adds an endpoint in one line.
+
+  GET  /                     -- self-describing index of the endpoints
+  GET  /health               -- {ok, name, version, python, platform, capabilities}
+  GET  /capabilities         -- every advertised capability (name + description)
+  POST /capabilities/search  -- {query} -> matching capability homes (plain-English discovery)
+  POST /sql                  -- {sql} -> run CREATE/INSERT/SELECT against the service's VSA Database (the whole query
+                                layer, over HTTP) -- clean 400 on bad SQL, 404 unknown route, 500 unexpected.
+Optional --token: a bearer-token gate (401 without it). Binds 127.0.0.1 by DEFAULT; --host 0.0.0.0 exposes it (only
+behind auth/TLS on a trusted network -- stated loud).
+
+CROSS-OS LAUNCHERS (readable, mirror the existing run.bat):
+  * serve.sh  (Linux/macOS, POSIX sh, LF) -- find python3, set PYTHONHASHSEED=0, ensure numpy, run the service; passes
+    --host/--port/--token through.
+  * serve.bat (Windows, CRLF) -- same, matching run.bat's style.
+
+MEASURED end-to-end over REAL HTTP: started the service as a subprocess and drove it with urllib -- /health returns
+version+platform, the token gate returns 401 without the bearer and 200 with it, capability search finds the right
+home, and CREATE/INSERT/SELECT round-trips through /sql with WHERE filtering. serve.sh launches the server and answers
+/health. Registered "Standalone API service" in the catalog (54 homes). +7 tests (routes, SQL CRUD, error statuses,
+real-http round-trip, token gate over http; integration). Reference: SERVICE.md (endpoints, curl examples, security).
+
+## STANDALONE DB: full SQL surface + GraphQL + persistence over the API  [+7 tests, +1 join fix]
+
+Moose: make the SQL/GraphQL work in standalone mode so leCore can be a DROP-IN DATABASE for other apps. The API service
+now exposes the WHOLE database, not just CREATE/INSERT/SELECT:
+
+  * EXTENDED run_db_sql (holographic_query.py) with the writes an app needs day one:
+    - UPDATE ns.t SET c=v,... WHERE ...   (delegates to update(); WHERE REQUIRED -- a networked endpoint must not let a
+      typo rewrite a whole table)
+    - DELETE FROM ns.t WHERE ...          (delegates to delete(); WHERE required, same guard)
+    - SELECT cols FROM a [LEFT] JOIN b ON key [WHERE c op v]   (delegates to join(), then projects + filters)
+    - DROP TABLE ns.t
+    Readable helper fns _run_update / _run_delete / _run_join + _cmp, thoroughly commented.
+  * FIXED a real join bug found by the new integration test: join() iterated ALL rows including tombstoned ones, so an
+    UPDATE (which tombstones the old row + re-inserts) made a join DOUBLE-COUNT. Now skips _deleted rows on both sides.
+  * SERVICE endpoints added: POST /graphql (resolve a GraphQL query over nested documents -- the natural fit for nested
+    data, via holographic_graphql.Scene/resolve), POST/GET /documents (the document store), POST /save + /load (disk
+    persistence), and --persist FILE (auto-load on start, auto-save after every write).
+
+MEASURED as a real DB replacement: over REAL HTTP across TWO separate processes -- session 1 wrote accounts (incl. an
+UPDATE) + documents with --persist, was KILLED; session 2 (a fresh process) read back the SQL rows (the UPDATE
+survived: alice 250) AND the GraphQL documents. to_state/from_state are JSON-serialisable (deterministic replay), so
+the whole store round-trips through one JSON file. Updated the catalog entry to "standalone DATABASE server ... drop-in
+DB replacement". +7 service tests (full SQL, join, WHERE-required, graphql, persistence-survives-restart, save/load) +
+1 query test (extended run_db_sql) + a full-surface HTTP integration test. SERVICE.md documents every endpoint + curl
+examples + the WHERE-required guard.
+
+## DISTRIBUTED COORDINATOR batch 4 (FINAL): R5 hardening -- backlog complete  [+12 tests]
+
+BUILT holographic_hardening.py (R5 -- fault tolerance + verification, the BOINC/SETI@home discipline, mandatory before
+untrusted farm nodes). Composes on top of any Coordinator backend via the same submit()->future interface:
+  * agree(results, tol, quorum) -- majority VOTING: group results by approximate equality (allclose for arrays, tol
+    for numbers, == otherwise), accept the largest group only if it reaches a quorum (strict majority by default),
+    else raise NoConsensus (abstain, don't guess). This is the defense a node can't beat: it can't FORCE a result.
+  * retrying(make_and_wait, attempts, backoff) -- retry with exponential backoff; each attempt RE-SUBMITS, so a
+    reissue reassigns a dead node's work to whatever node the backend picks next.
+  * HardenedCoordinator(backend, redundancy, attempts, backoff, tol) -- .run() resolves every bucket with retry,
+    optionally REDUNDANTLY (redundancy independent copies) then votes, and can gate the run on CANARY buckets first
+    (known-answer spot checks; a wrong canary -> CanaryFailed, the whole run rejected). redundancy=1 = trusted pool
+    (retry only); redundancy>1 = untrusted nodes.
+  * run_with_backups(...) -- speculative straggler execution: reissue a task still unfinished after a grace period,
+    take whichever copy finishes first (correctness-preserving; wall-time benefit needs idle workers on >1 core).
+
+MEASURED: voting accepts a clear majority and abstains on three-way disagreement; retry recovers after 2 simulated
+node failures; a canary with a wrong answer rejects an untrusted worker; over the REAL network farm, redundancy=3
+runs three independent copies and accepts only on agreement; straggler backups keep the reduction correct. Needed one
+tiny additive fix: gave the in-process _Immediate future a .done() so the future interface is uniform across backends.
+Registered "Distributed hardening (R5)" in the catalog (55 homes). +12 tests (voting/arrays/no-consensus, retry
+succeed+giveup, hardened-reissue, redundant-accept, canary reject+pass, straggler-correct, min-reduce; integration
+over the farm).
+
+KEPT NEGATIVES (loud): voting catches a node returning a DIFFERENT wrong answer, not all nodes sharing a bug (that's
+what canaries are for); redundancy multiplies compute (use only for untrusted nodes); straggler backups help only with
+idle workers on >1 core. === DISTRIBUTED COORDINATOR BACKLOG COMPLETE: R2 local pool + R3 network farm + R4 command
+backend + R5 hardening + the standalone API/DB service, one Coordinator + one monoid reduce at every rung. ===
+
+## JOB LIFECYCLE: start/pause/resume/cancel, survive a restart, across the farm  [+17 tests]
+
+Moose: start/stop/pause/resume/cancel long-running work (renders, sims, dataset processing) -- across the distributed
+network AND across an app restart (start a render, pause, save, close, reopen, resume). BUILT holographic_jobs.py.
+
+The fit: a long job is distributed MONOID work -- buckets processed by a worker, combined by a commutative/associative
+reducer (sum/min/max/bundle). That structure makes pause/resume clean: completed buckets fold into `partials`, and
+because the reduce is order-independent, you can stop after ANY bucket and combine what you have with whatever you
+finish later. So:
+  * PAUSE = stop dispatching at the next bucket boundary + checkpoint the partials; RESUME = process only the REMAINING
+    buckets and reduce everything; CANCEL = stop + mark cancelled. Cooperative control (checked between buckets), so
+    in-flight remote work is never killed mid-bucket -- pick the bucket size / dispatch `batch` for responsiveness.
+  * A checkpoint is just (buckets, worker NAME, reducer NAME, cache, done-indices, partials) -> ONE JSON file. So a
+    paused job SURVIVES the app closing: reopen, load_all(), resume. Workers are referenced by NAME (registered on the
+    manager / the farm daemon) so a restored job re-resolves its code -- same rule as the farm.
+
+Job(id, buckets, worker, reduce, cache) + JobManager(backend, store_dir): create / start(background=) / pause / resume
+/ cancel / status / list / wait / result, save/load + load_all() (restore every checkpoint on startup). Runs over ANY
+coordinator backend (InProcess / LocalPool / NetworkFarm) -- the same job code, only WHERE the buckets run changes.
+
+Wired into the standalone service: POST /jobs/create, /jobs/start, /jobs/pause, /jobs/resume, /jobs/cancel,
+/jobs/status, /jobs/result, GET /jobs -- with checkpoints beside the --persist file and load_all() on startup, so jobs
+survive a SERVICE restart too.
+
+MEASURED end-to-end: (1) deterministic restart -- a half-done PAUSED job saved, loaded into a FRESH manager, resumed
+to a correct total (each bucket exactly once); (2) background start/pause/resume + cancel; (3) over the REAL network
+farm -- a render paused mid-job at 4/10 tiles, reopened in a fresh manager, resumed the remaining 6 on the farm,
+correct result; (4) over the REAL HTTP API across TWO app processes -- started a 30-tile render, paused at 8/30, KILLED
+the app, restarted (the paused render reappeared in GET /jobs), resumed -> 435 = sum(0..29), no tile duplicated or
+lost. Small additive change: gave backends a `by_name` flag so the job layer resolves a worker-by-name correctly
+(callable for local, name for the farm). Registered "Job lifecycle control" in the catalog (56 homes). +17 tests (10
+jobs + 6 service jobs + integration). SERVICE.md documents the /jobs endpoints.
+
+## MATERIAL LIBRARY: wired up + discoverable, render + physical bridged  [+9 tests]
+
+Moose: make sure our physical material library is wired up and discoverable -- organized, usable for RENDERING and for
+SCIENTISTS; work with the data we already have (users can add their own).
+
+PROBE-FIRST caught a near-duplicate: I started building a new material library, then found the engine ALREADY has two
+rich ones -- deleted my duplicate and worked with what's there (the project's own rule). Audit:
+  * RENDER: holographic_matlib.py -- 141 PBR appearance presets across 17 classes (metal/gem/wood/stone/glass/liquid/
+    biome/...), each a render-ready PBRMaterial; catalog()/material()/by_class(). Already wired via UnifiedMind
+    surface_material()/material_catalog().
+  * PHYSICAL: holographic_definitions.MATERIALS -- 33 materials with density/refractive/viscosity/youngs/sound_speed/
+    specific_heat/phase (the numbers a SOLVER needs). Already wired via UnifiedMind physical_material().
+  * 15 names in BOTH (gold, water, diamond, copper, ...), but the two libraries were NOT connected, and NEITHER had a
+    discoverable catalog home -- that was the actual gap.
+
+BUILT holographic_materialindex.py -- a thin BRIDGE + discovery layer over the two existing libraries (no data moved or
+duplicated): material_info(name) -> the unified view (RENDER appearance AND PHYSICAL properties, whichever exist);
+find_materials(query) -> keyword search across both (name/class/phase); all_materials()/summary() -> the roster + counts.
+render_material()/physical_properties() reach each home library through one door. User data added to either home library
+shows up here automatically.
+
+WIRED: UnifiedMind gained material_info() / find_materials() / materials() (bridge + discovery) beside the existing
+physical_material()/surface_material()/material_catalog(). Registered "Material library (render + physical)" in the
+catalog (57 homes) so find_capability('physical properties density refractive index') now surfaces it.
+
+MEASURED: material_info('gold') -> render class metal + metallic 1.0 AND physical density 19300; a render-only preset
+(chrome) resolves appearance, a physical-only material (mercury) resolves its physics; the bridged render material
+drives the real cook_torrance/glTF path; find_materials('gem crystal') -> diamond/emerald/quartz/... Registered +9 tests
++ integration (bridge render+science+discoverable). Kept scope note: find_materials is readable word-overlap (name/
+class/phase), not semantic; roughness in the render presets is a finish DEFAULT, not a physical constant.
+
+## PHYSICAL MATERIAL LIBRARY: hardened + expanded (33 -> 117, validated, categorized)  [+13 tests]
+
+Moose: harden the physical material properties and expand the library to a comprehensive collection -- a good starting
+point for a variety of users. Probed first: the physical library lived inline in holographic_definitions.MATERIALS (33
+materials, density/phase always + partial sound_speed/specific_heat/youngs/viscosity/refractive), consumed by
+resolve_scenario (density-based buoyancy), physical_material, and the material index.
+
+BUILT holographic_materialdata.py -- a comprehensive, categorised, VALIDATED physical database (116 materials across 12
+categories: metal/liquid/gas/polymer/ceramic/glass/mineral/stone/wood/biological/building/semiconductor). Real standard
+reference values (CRC/engineering tables, ~20 C 1 atm), SI throughout, with new fields beyond the legacy set:
+thermal_conductivity (W/mK), thermal_expansion (1/K), melting_point (K), boiling_point (K), plus a `category`. A UNITS
+dict documents every field's unit + meaning; validate() plausibility-checks every entry (units/ranges/category/phase)
+and the library is CLEAN; field_coverage() reports honest partial coverage (refractive only on transparent media, etc.).
+HONESTY kept loud: values are good STARTING POINTS, not lab certificates -- real materials vary with alloy/grade/temp/
+grain; where a property is strongly variable or uncertain the field is OMITTED, not guessed (a missing field means "look
+it up for your material", not zero).
+
+MERGED into holographic_definitions.MATERIALS by ENRICHMENT: legacy entries get their MISSING fields added via
+setdefault (so long-standing values are NEVER overwritten -- resolve_scenario's wood<water<steel<mercury verdicts are
+unchanged, all 29 definitions tests still green), and the new materials are added. One source the whole engine reads;
+the readable data lives in its own module. MATERIALS went 33 -> 117.
+
+WIRED the new richness through holographic_materialindex + UnifiedMind: physical_categories() / physical_by_category() /
+physical_units() / validate_physical(); material_info() now attaches per-field UNITS so a value is self-describing;
+UnifiedMind gained material_units() / materials_by_category() / validate_materials(). Updated the catalog entry (now
+"~120 physical materials in 12 categories ... validated, unit-documented"). MEASURED: 23 metals + 10 gases + polymers/
+ceramics/etc.; validate clean; tungsten melts at 3695 K; diamond thermal conductivity 2200 W/mK; the material index now
+bridges 141 render + 117 physical (31 in both). +13 tests (8 data + index accessors + integration) all green. Kept
+scope note: values are representative starting points; users add their own via add_material()/editing MATERIALS.
+
+## VENDORED DICTIONARY + TAXONOMY: real world-knowledge for contextual awareness  [+10 tests]
+
+Moose: the dictionary/encyclopedia used for text-gen testing should be wired up as a real thing for contextual
+awareness; vendor a more comprehensive one if we can. Probed first: holographic_lexicon/encyclopedia and the mind's
+learn_dictionary/define are MACHINERY that consume a {word: [def words]} map -- but NO dictionary shipped; the text-gen
+tests DOWNLOAD NLTK Gutenberg books (fiction) on demand. So define() was empty until fed a dictionary.
+
+VENDORED a comprehensive one: Princeton WordNet 3.0 (via NLTK, free w/ attribution) -> data/knowledge/dictionary.json.gz
+(144,478 words, 5.8 MB gzipped) + manifest.json + LICENSE_WORDNET.txt. Each word carries definition, part of speech,
+synonyms, an example, and its is_a parent (hypernym) -- so ONE file is both a DICTIONARY and a TAXONOMY/encyclopedia.
+NLTK was used ONCE at build time to extract; the runtime loader is STDLIB-ONLY (gzip+json, lazy), honouring the
+NumPy/stdlib rule.
+
+BUILT holographic_dictionary.py: define/entry/synonyms/part_of_speech/example/search over the dictionary, is_a +
+hypernym_chain over the taxonomy (dog -> domestic animal -> animal -> ... -> entity), and definition_map(vocab) -- the
+bridge that feeds the mind's learn_dictionary from REAL definitions. WIRED into UnifiedMind: lookup(word) (real
+world-knowledge, distinct from define()'s learned-meaning neighbours), word_taxonomy(word), dictionary_size(), and
+learn_vocabulary(vocab) -- bootstrap the encoder's word meanings from the vendored dictionary. Registered "Dictionary +
+taxonomy (vendored)" in the catalog (58 homes); find_capability('what does a word mean') surfaces it.
+
+MEASURED: 144k words; lookup('gravity') -> physics force-of-attraction + synonyms + is_a 'attraction'; word_taxonomy(
+'dog') climbs to animal/entity; after learn_vocabulary(['car','truck','vehicle',...]) define('car') -> vehicle/truck
+(real learned meaning). +10 tests + integration. Zip grows ~20 -> ~26 MB (the dictionary). Kept note: this is the
+batteries-included default -- users can replace the vendored file or pass their own/larger dictionary to the same
+machinery. RECOMMENDATIONS for other resources (formulas, programming refs, K-12, science papers, books) delivered
+separately to Moose.
+
+## TOOL WIRING: 2D / text-gen / language-learning / utilities made discoverable (catalog-driven)  [+7 tests]
+
+Moose: 2D editing/generation, text generation + learning, and utility/helper tools should be wired up and discoverable
+-- and USE the catalog to find gaps faster. Did exactly that: instead of hand-auditing modules, posed the plain-English
+queries a USER would ask and checked what find_capability returned. The gap was clear -- the TOOLS mostly existed as
+mind faculties, but had NO curated homes, so natural queries returned only auto-docstring module hits or NOTHING
+("draw a picture", "make a 2d drawing", "paint on a canvas" -> empty).
+
+FIX (discoverability, mostly): registered 4 CURATED catalog homes with rich, user-language aliases (62 homes total):
+  * "2D image editing & generation" -- recolor/colour-transfer, sharpen, svgf-denoise, downscale, blend/crossfade/morph,
+    procedural pattern_field, svg_canvas, image_archive, compare_images. Now the top hit for edit/generate/draw/paint/
+    sharpen/downscale/recolor/crossfade/svg queries (the previously-empty ones included).
+  * "Text generation" -- generate/generate_structured/respond/answer. Top hit for generate/write/answer queries.
+  * "Language learning" -- learn_text/dictionary/vocabulary/encyclopedia/sequence (the curriculum). Top for
+    learn-from-corpus/curriculum/teach queries.
+  * "Utilities & helpers" -- uri (content address/hash), verify (tamper), fountain (erasure), deltachain, history
+    (rollback), compress/codec, determinism. Top for verify/erasure/content-address/version-history queries.
+
+WIRED (usability): two genuinely-useful 2D ops that existed as modules but weren't mind faculties -- recolor_image
+(holographic_colortransfer.color_transfer) and blend_images (holographic_generate.crossfade_images). (Left pack/unpack
+OUT: it is a delta packer for SIMILAR frames, lossy on arbitrary images -- exposing it as a general packer would
+mislead; kept as a module for advanced use.)
+
+TOOL for the future: tools/catalog_gaps.py -- pose user-style queries per family, flag any with no curated home (only
+'holographic_*' auto-hits or nothing). Reports 0 gaps for the four fixed families now. This is the reusable version of
+the audit Moose suggested: the catalog finds discoverability gaps faster than grepping modules. +7 tests + integration.
+
+## AGENT-FRIENDLY LAYER: skills, suggest, confident routing, autocomplete  [+9 tests]
+
+Moose: make the app agentic-friendly (and human-usable) -- suggested autocomplete, decision trees when confident, skill
+descriptions. Also finished the cross-engine discoverability sweep (below).
+
+BUILT holographic_skills.py -- an agent layer over the catalog + UnifiedMind, deterministic + stdlib-only:
+  * SKILL DESCRIPTIONS: mind_methods() introspects EVERY public UnifiedMind method (via inspect) -> {name: signature,
+    summary}; skill_card(name) resolves a capability OR a method to a machine-readable card (what it does + how to
+    CALL it, real signature); manifest() is the whole surface (434 capabilities + ~700 methods) an agent loads once.
+  * SUGGEST / AUTOCOMPLETE: suggest(task) ranks capabilities for a plain-English task WITH a 0..1 confidence + the
+    concrete call; complete(prefix) autocompletes method names with signatures ('mind.learn_<tab>').
+  * CONFIDENT ROUTING (decision node): route(task) -> {'decision':'act', skill, call} when one skill clearly wins,
+    else {'decision':'choose', options} when ambiguous, else {'decision':'unknown', prompt}. 'Act when confident, ask
+    when not', score-based -- never a silent guess.
+  * CONFIDENCE FIX (kept): computed among CURATED homes only -- an auto-registered module twin (holographic_jobs) is a
+    pointer to a capability, not a competing skill, so it must not dilute confidence. Genuine ambiguity between
+    DIFFERENT curated homes (e.g. the three distributed homes) still yields 'choose'. Added Catalog.find_scored() to
+    expose match scores for this.
+
+WIRED: UnifiedMind gained suggest/route/describe_skill/complete_method/skills (describe was already taken -> _skill).
+The STANDALONE SERVICE gained GET /skills + POST /skills/suggest|route|complete|card -- so an AGENT driving the HTTP
+API can discover the whole surface, get confidence-scored suggestions, and route decisions. Registered "Agent skills
+(discover & route)" in the catalog (76 homes). MEASURED: route('render a scene') -> act 1.0 -> Rendering; route(
+'distributed coordinator farm') -> choose (3 options); complete('material') -> material_info/... with signatures;
+/skills manifest 434 caps + 702 methods over HTTP. +9 tests + integration. SERVICE.md documents the endpoints.
+
+## CROSS-ENGINE DISCOVERABILITY SWEEP: 12 domain homes so nothing hides  [catalog-driven]
+
+Used the catalog as the gap-finder (Moose's suggestion) across ~19 families: posed the plain-English queries a user
+would ask and flagged any returning only auto-docstring module hits or nothing. Found ~50 gaps -> registered 12 curated
+DOMAIN homes: Rendering (path trace), Mesh editing (DCC), SDF & procedural geometry, Navigation & planning, Learning &
+agents, Data analysis, Symbolic reasoning, Signal & spectral, Compression & codec, Video (temporal), Honesty &
+measurement, Program & machine (VM) -- plus an Encoders home and particle/mass-spring aliases on Simulation. Expanded
+tools/catalog_gaps.py to sweep all 19 families; it now reports 0 gaps. The few remaining module-name-wins (raymarch a
+scene -> holographic_raymarch, particle system -> holographic_emitter) return the PRECISE correct module, not a gap.
+
+## SKILL LINT: no faculty an agent can't invoke from its docstring  [+3 tests]
+
+Follow-up to the agentic layer: a skill card's summary is the first line of a method's docstring, so a missing/thin
+docstring = a capability an agent can FIND but can't confidently CALL. BUILT tools/skill_lint.py (the invocation-quality
+twin of tools/catalog_gaps.py): over all 703 public UnifiedMind methods it flags CRITICAL (no docstring at all) and
+TERSE (summary < 5 words), plus an advisory NO_RETURN note (full docstring never hints at a return value). Deterministic,
+stdlib-only; exit code = hard-gap count so CI can gate.
+
+RAN it: 4 CRITICAL, 0 terse. FILLED the 4 -- all core faculties that had only inline comments, no docstring:
+  * learn(x, label, modality=None) -- the base learning verb (perceive -> prototype + recall index; infers modality;
+    registers record fillers). Returns self.
+  * next_symbol(context, name=None) -- next-char prediction on a FLAT n-gram schema (needs
+    learn_sequence(hierarchical=False)); returns the next character.
+  * reinforce(state, action, reward, modality=None) -- the RL update into the decision brain; returns self.
+  * describe() -- human one-line summary of what the mind holds (prototypes/labels, recall index, brain, generators);
+    returns a string. (Distinct from describe_skill(name), the machine-readable card.)
+Re-ran: 0 CRITICAL + 0 TERSE. Improved the NO_RETURN advisory to scan the FULL docstring (610 -> 278 notes) so it's a
+real soft signal, not noise -- left as advisory, NOT force-fixed (many are legitimate mutators or describe the return
+without the trigger words). +3 tests + an integration GUARD (test_skill_lint_no_invocation_gaps) so a future
+undocumented faculty fails CI until it gets a one-line 'what it does + what it returns' docstring.
+
+## SKILL LINT extended to home EXAMPLES: no broken/undocumented references an agent copies  [+1 test]
+
+An agent following a skill card's `example` often calls a MODULE-level function directly (e.g. "from
+holographic_raymarch import sphere_trace"), so those need to resolve AND be documented. Extended tools/skill_lint.py
+with audit_home_examples(): it parses every curated home's example for `from holographic_X import Y` / `holographic_X.Y(`
+references and flags BROKEN (name/module doesn't resolve -> ImportError for the agent), NO DOC, and TERSE.
+
+RAN it over 77 referenced functions -> found 6: FOUR BROKEN references (worse than a missing doc -- the example itself
+was wrong) and TWO missing docstrings:
+  * broken: holographic_ai.cleanup (it's Vocabulary.cleanup, not module-level) -> example now imports bind, bundle +
+    Vocabulary; holographic_distribute.reduce (real names reduce_sum/min/max/bundle) -> fixed; holographic_meshpoly.
+    extrude (extrude is extrude_face in holographic_meshverbs) -> fixed; holographic_uri.content_id (real:
+    address_from_content / make_key) -> fixed.
+  * no doc: holographic_sdf.box, holographic_sdf.sphere -> documented all six SDF primitive leaves (sphere/box/torus/
+    cylinder/plane/menger) with one-line docstrings.
+Re-ran: 0 method gaps + 0 example gaps (BROKEN+NODOC+TERSE all zero). The linter's report now prints both surfaces and
+its exit code / TOTAL covers both; the integration guard asserts no broken references too, so a future home example that
+names a non-existent function fails CI. Lesson kept: a discoverable capability with a WRONG example is worse than an
+undocumented one -- the lint now catches both.
+
+## DESCRIBE A SCENE -> BUILD -> ADJUST NAMED OBJECTS -> RENDER / SIMULATE  [+9 tests]
+
+Moose: describe a scene and have the system build it, then render/simulate it; or take an existing scene of NAMED
+objects/materials and reference + adjust them semantically. Probed first: holographic_semantic already PARSES a
+description (parse_description) and REALIZES + renders it (realize_scene, render_scene, and mind.render_scene_description
+does text->image in one call), and has find_objects/batch_set. What was MISSING: a live, adjustable scene object with
+named objects, a natural-language ADJUST flow, and any of it wired as one ergonomic thing.
+
+Found + fixed a real PARSER BUG while probing: "a big red metal sphere and a small blue glass box ON A SUNNY DAY"
+parsed to ZERO objects -- a clause carrying both objects AND weather was classified wholly as environment, dropping the
+objects. Fixed to HARVEST env keywords from any clause but only DROP a clause's tokens when it is purely environmental
+(and guard "blue" as sky only when no object is present). Now the sunny-day scene yields both objects.
+
+BUILT holographic_scene_semantic.py -- SemanticScene: named, mutable objects + environment, with
+  * scene_from_description(text) / mind.build_scene(text) -- the one-call "describe it, engine builds it" entry.
+  * mind.semantic_scene(objects) -- wrap an EXISTING object list to adjust semantically.
+  * .adjust(command) -- 'make the sphere bigger', 'change the red box to metal', 'make everything glass'. parse_adjust
+    disambiguates cleanly: a colour/material/size is a SELECTOR when a shape word FOLLOWS it ('red box'), else the
+    CHANGE ('make the box red'); relative sizes ('bigger') are always a change; explicit_all ('everything') vs an
+    UNRESOLVED target ('the pyramid' -> no known shape) -> the latter is a safe NO-OP, never edits everything by accident.
+  * .set(ref, **fields), .get/.select(ref), .names(), .describe().
+  * .render(camera=None) -- best-effort 3-D render (default pulled-back camera; fast single-pass or hyperreal path
+    tracer), applying the scene's sun/sky. .simulate(steps) -- a deliberately SIMPLE rigid gravity-drop (point mass per
+    object, ground at y=radius) so "or simulate it" is real end to end; richer media stay behind the Simulation home.
+  * .encode(mind) -- the scene as one content-addressable hypervector (encode_scene).
+Wired mind.build_scene / semantic_scene; registered "Scene from description (semantic)" (77 homes); route('describe a
+scene and build it') -> act. +9 tests + integration (describe->build->adjust->render->simulate->encode).
+
+## SKILL LINT closes the loop on mind.method example refs  [Moose's follow-up]
+
+Extended audit_home_examples() to also parse `mind.method(` references in home examples (not just module imports) and
+verify each names a real public UnifiedMind method. Caught one immediately: the Language learning home said
+mind.learn_text(corpus) -- there is no learn_text on the mind (it's encoder.learn_text); the mind's corpus reader is
+mind.read(corpus). Fixed the example + the does text. Now 105 references checked (module + mind), 0 broken. So EVERY
+copy-paste target in a skill card -- module function OR mind method -- is guaranteed to resolve.
+
+## SCENE ADJUST: suggestions & clarifying questions instead of silent failure  [+7 tests]
+
+Moose: when a request is unclear, offer suggestions/questions to clarify (like a person would) rather than just
+failing. Applied that to SemanticScene, matching the route() 'choose' pattern. holographic_scene_semantic now has
+interpret_command(scene, command): it DOES ITS BEST (resolves known synonyms via the SynonymResolver table --
+crimson->red, chrome->metal, shiny->mirror), then returns a report -- understood / read_as / matched / applied /
+questions / suggestions / unknown. adjust() applies what it can AND stores the report in scene.feedback; interpret()
+(alias suggest()) previews without applying; options() lists the palette (object names + colour/material/size words).
+Also gave the CREATE side the same courtesy: scene_from_description passes a resolver (so 'a shiny crimson orb' ->
+red mirror sphere) and attaches feedback when a description yields no objects or has unknown words. Honest boundary
+kept: 'make the pyramid golden' changes nothing (no known 'pyramid') but now explains + suggests the scene's real
+objects, rather than silently no-op'ing. difflib supplies 'did you mean' for near-typos; stdlib only. +7 tests.
+
+## CI + DOCS leverage the new capabilities (digestible / discoverable / usable)  [+4 tests]
+
+Goal: make leCore easier to digest, discover, and build on -- as a standalone app and a library -- and have CI enforce it.
+
+NEW GENERATED DOC: capdoc.py -> CAPABILITIES.md, a plain-language MENU of what the engine does, grouped into ~14 themes
+(Core, Discover, Memory, Geometry, Scenes, Simulation, Language, Learning, Data, Compression, Honesty, Navigation,
+Service, More), each home with its one-line 'what + how to start' call and the words to find it by. Reads the live
+catalog (no module imports), same old-school stdlib style as docgen.py/apiquickref.py, and writes NO timestamp so the
+drift check is stable (apiquickref's date-in-file actually makes ITS drift check fragile -- noted, not touched).
+
+CI (ci.yml) gained three things beyond pytest: a DISCOVERABILITY gate (tools/catalog_gaps.py -- every capability a user
+would ask for has a curated home; made it sys.exit(gaps)), an INVOCATION gate (tools/skill_lint.py -- every faculty has
+an agent-usable docstring and every home example, module OR mind.method, resolves), and a CAPABILITIES.md drift check.
+docs.yml now regenerates + commits CAPABILITIES.md alongside REFERENCE.md.
+
+README updated with digestible sections: a runtime-discovery pointer under 'What can it do?' (find_capability/suggest/
+route + CAPABILITIES.md), a 'Describe a scene and shape it in words' example, a 'Run it as a standalone HTTP service'
+pointer (SERVICE.md), an expanded 'Learning more' (CAPABILITIES/API_QUICKREF/SERVICE), and a 'How the docs stay honest'
+note explaining the generated docs + the two CI gates. So both a person and an agent can find the front door. +4 tests
+(capdoc: generates, deterministic, no timestamp, every home placed).
+
+## PACKAGING HARDENED: the wheel now ships its runtime data (pip install actually works)  [+5 tests]
+
+Moose asked if the package publishing is good to go for `pip install`. Probed it and found a REAL gap: setup.py uses
+py_modules (flat top-level modules) with NO package_data, and build_package.sh copied ONLY holographic_*.py -- so the
+wheel shipped with NO data. holographic_dictionary reads data/knowledge/dictionary.json.gz at runtime (the wired
+lookup/word_taxonomy/learn_vocabulary faculties), so a pip-installed dictionary would FileNotFoundError. (heat also
+reads material JSON but degrades gracefully to defaults.)
+
+FIX -- a small importable data package (the standard way to ship data with a flat layout): created lecore_data/ (a
+package with __init__.py + file()/exists() resolvers) and MOVED the runtime-vendored data into it
+(lecore_data/knowledge/dictionary.json.gz + manifest + WordNet license; lecore_data/definitions/.../*.json). `import
+lecore_data` resolves the same from a clone AND a wheel. Updated the two consumers (holographic_dictionary,
+holographic_heat) to resolve via lecore_data with a fallback to the old data/ path. Demo-only datasets (market npz/json)
+stay in data/ and are deliberately NOT shipped.
+
+Wired the packaging: setup.py gains packages=['lecore_data'] + include_package_data + package_data globs;
+build_package.sh copies lecore_data/ into staging and strips __pycache__; MANIFEST.in includes it in the sdist;
+PACKAGING.md documents why it's a package. Hardened the RELEASE gate: package.yml's smoke test now installs the wheel,
+runs from an isolated temp dir, and asserts lecore_data.exists(dictionary) AND holographic_dictionary.size()>100000 --
+so a wheel built without its data fails the release instead of reaching users.
+
+PROVEN end to end: built the wheel, pip-installed it into a CLEAN venv away from the repo -> import lecore, UnifiedMind,
+holographic_dictionary (144,478 words), mind.lookup, mind.word_taxonomy, build_scene, render all work. Wheel + sdist
+both contain lecore_data; 0 __pycache__ in the wheel; all 374 modules present. +5 packaging tests (guard the data
+ships, the loaders find it, setup.py/build_package.sh declare it) so plain pytest catches a regression before a wheel
+is ever built. leCore is now genuinely `pip install leos-core`-able.
+
+## SERVICE.md DRIFT CHECK: the endpoint list can't fall out of date  [+6 tests]
+
+Moose: add a drift check for SERVICE.md, like the CAPABILITIES.md one. SERVICE.md is different from CAPABILITIES.md
+though -- most of it is hand-written prose worth keeping (curl examples, security notes, job-lifecycle explanation);
+only the ENDPOINT TABLE structurally rots when routes change. So rather than regenerate the whole file, servicedoc.py
+CHECKS that the table's (method, path) set exactly matches the routes the live Service registers -- catching an added,
+renamed, or removed endpoint that wasn't documented. Proven to catch both directions (undocumented route, stale row).
+
+First made the endpoints self-documenting: added concise one-line docstrings to the 13 service handlers that lacked
+them (format 'What it does. Body: {...}. Returns: {...}.'), so all 23 endpoints now describe themselves in the code --
+a readable win on its own, and it lets servicedoc's `--print` emit a paste-ready fresh table from the live routes.
+
+servicedoc.py (stdlib only, imports Service just to read its route table, no socket opened): routes() (live routes +
+parsed docstrings), doc_endpoints() (parse the table), check() -> (missing, stale), generated_table(), and a __main__
+that reports + exits non-zero on drift. Wired into ci.yml as the 'SERVICE.md documents every endpoint' gate (next to
+the catalog/skill/capabilities gates). Added a note in SERVICE.md that the table is CI-checked, and folded it into the
+README 'How the docs stay honest' paragraph. +6 tests. Now every public surface -- module reference, capability menu,
+API quickref, AND the service endpoints -- is kept honest by CI.
+
+## BURIED-TECH AUDIT: nothing left unwired or lost  [+4 tests]
+
+Moose: now that everything's cataloged/agentic, check nothing is unwired or buried. Ran tools/reachability_audit.py
+(373 modules): 312 reachable via a UnifiedMind faculty, 7 declared negatives, 0 undiscoverable, but 55 "import-only"
+(findable via catalog, not a mind faculty). Deepened it with a cross-reference -- does ANY other module/tour/catalog/
+service reference it? 55 -> WIRED INTO A PIPELINE (infra/home modules reached through facades: lightcache<-lightinghome
+<-pipeline, coordinator<-farm/jobs/hardening, etc. -- fine). That left 6 truly referenced-by-nothing modules, each with
+its own passing test + selftests (they WORK, just wired to nothing):
+
+MEASURED (not assumed) each against its likely twin:
+- SUPERSEDED DUPLICATES (4): query_history->querytime, query_programs->queryprog, query_concurrency->querylock,
+  query_graph->querygraph. Same backlog items (P7-P12, PR1-PR6, B8, B10) reimplemented under cleaner names that got
+  the curated homes; the underscore originals were left behind. querytime/queryprog are clear supersets; querylock/
+  querygraph cover theirs. Constitution = additive, don't delete working+tested code, don't wire a duplicate -> added
+  a loud "SUPERSEDED BY holographic_<twin>" banner to each docstring (still works, tests pass, reader is redirected).
+- BURIED UNIQUE (2): workspace (the WS3-WS6 3-tier session MANAGER -- persistent DB + isolated transient per-session
+  scratch, make/switch/clear/reset/export/import/combine) is NOT the same as queryfolder (WS7 table folders); and
+  query_durable (B7 write-ahead Journal + point-in-time recover) is unique beyond the service's plain save/load. Real
+  capability, wired to nothing. Wired them the way their siblings are -- curated catalog HOMES ("Workspaces (durable DB
+  + transient sessions)", "Durability & crash recovery") -- so find_capability/suggest/route reach them. Catalog 77->79.
+
+Taught reachability_audit.py to recognize "superseded by" as a declared marker (like kept negatives), so the 4 twins
+read as declared, not unexplained (import-only 55->51). Result, verified by an independent cross-reference: "still
+buried: NONE -- clean". +4 guard tests (the 2 unique modules stay discoverable; the 4 duplicates keep their banner; and
+a no-module-is-buried check so this can't silently regress).

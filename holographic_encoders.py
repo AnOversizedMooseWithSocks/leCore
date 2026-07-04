@@ -227,12 +227,16 @@ class TextEncoder:
         return bundle([self.wordvec(w) for w in tokens])
 
     def nearest(self, w, n=3):
-        """The n learned words most similar to w -- handy for inspection."""
+        """The n learned words most similar to w -- handy for inspection. DELEGATES the search to the Index home
+        (consolidation H1): an exact cosine scan over the context word vectors, same descending-cosine ranking as
+        the old loop."""
+        from holographic_index import Index
         target = self.wordvec(w)
-        scored = [(other, cosine(target, self.wordvec(other)))
-                  for other in self.context if other != w]
-        scored.sort(key=lambda r: r[1], reverse=True)
-        return scored[:n]
+        others = [o for o in self.context if o != w]
+        if not others:
+            return []
+        M = np.stack([self.wordvec(o) for o in others])
+        return Index(M, labels=others, method="exact").nearest(target, k=min(n, len(others)))
 
     # -- persistence: store BOTH the learned context AND the index atoms minted so far.
     # Index atoms are seed-derived, but minting advances a shared rng, so a reloaded

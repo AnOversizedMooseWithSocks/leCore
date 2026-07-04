@@ -58,3 +58,36 @@ jobs:
             echo "API_QUICKREF.md is out of date -- run 'python apiquickref.py' and commit the result.";
             exit 1;
           }
+
+      # DISCOVERABILITY GATE. Every capability family a user would ask for must have a curated catalog home, so the
+      # engine can surface it from a plain-English query (mind.find_capability / mind.suggest). This fails if any
+      # probe query in tools/catalog_gaps.py has no curated home -- i.e. something is built but effectively hidden.
+      # Fix by registering a home in holographic_catalog.py (see the existing ones for the shape).
+      - name: Gate -- no discoverability gaps
+        run: python tools/catalog_gaps.py
+
+      # INVOCATION GATE. Every public UnifiedMind faculty must carry a docstring an agent can act on (skill cards are
+      # built from the first line), and every "how to call it" example in a catalog home must actually resolve --
+      # both module imports and mind.method() references. This fails on a missing/thin docstring or a broken example,
+      # so a capability can never be discoverable-but-uncallable. Fix by writing the one-line docstring / correcting
+      # the example the linter names.
+      - name: Gate -- no invocation gaps
+        run: python tools/skill_lint.py
+
+      # Keep CAPABILITIES.md (the plain-language "what can it do + how to start" menu) current. Same drift-check
+      # pattern as API_QUICKREF.md: regenerate from the live catalog and fail if the committed copy is stale.
+      # capdoc.py writes no timestamp, so this only trips on a real change. Fix: `python capdoc.py` and commit.
+      - name: Check CAPABILITIES.md is up to date
+        run: |
+          python capdoc.py
+          git diff --exit-code CAPABILITIES.md || {
+            echo "CAPABILITIES.md is out of date -- run 'python capdoc.py' and commit the result.";
+            exit 1;
+          }
+
+      # ENDPOINT GATE. SERVICE.md is mostly hand-written prose (kept), but its endpoint table must list exactly the
+      # routes the service registers -- no more, no less. This checks the table against the live route registry and
+      # fails if a route was added/renamed/removed without updating the doc. It does NOT rewrite the prose; on failure
+      # it names the offending endpoints and `python servicedoc.py --print` gives you a fresh table to paste.
+      - name: Gate -- SERVICE.md documents every endpoint
+        run: python servicedoc.py

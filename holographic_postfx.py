@@ -75,6 +75,17 @@ def exposure(img, ev=0.0):
     return np.asarray(img, float) * (2.0 ** ev)
 
 
+def auto_exposure(img, key=0.18):
+    """AUTO-exposure: meter the frame so its LOG-AVERAGE luminance lands on the mid-grey `key` (0.18, the
+    photographer's grey card -- Reinhard et al.'s photographic key). A scene lit by a bright HDR sun has no fixed
+    'right' exposure; this makes every scene self-expose to a consistent mid-tone with no hand-set stop. Applied
+    BEFORE tonemapping (works in HDR), exactly like exposure()."""
+    x = np.asarray(img, float)
+    lum = x @ np.array([0.2126, 0.7152, 0.0722])                 # perceptual luminance
+    log_avg = np.exp(np.mean(np.log(np.clip(lum, 0, None) + 1e-4)))   # log-average = the scene's key luminance
+    return x * (key / (log_avg + 1e-6))
+
+
 def reinhard(img):
     """Reinhard HDR -> LDR tonemap: x / (1 + x). The simplest highlight compressor."""
     x = np.maximum(np.asarray(img, float), 0.0)

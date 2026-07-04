@@ -1,14 +1,15 @@
-# holographic_sdfscene.py -- a small, documented base class for "a scene is a set of SDF parts".
-#
-# WHY THIS EXISTS. Every demo that ray-marches a custom scene ends up hand-writing the same three methods:
-# `.eval` (nearest-surface distance = min over the parts), `.part_ids` (which part owns a point, for material
-# lookup), and `.ids` (the SAME thing under the name the splat exporter/`to_splats` happens to expect). You only
-# discover that contract by reverse-engineering the exporters. This base class writes that contract down ONCE:
-# subclass it, implement `parts()`, and you get `.eval`, `.part_ids`, and `.ids` for free.
-#
-# SDF SIGN CONVENTION (stated once, load-bearing): each part's sdf_fn returns NEGATIVE inside the surface,
-# ZERO on it, POSITIVE outside -- the engine-wide convention. `eval` returns the min over parts, so the scene's
-# own zero-level-set is the union of the parts.
+"""holographic_sdfscene.py -- a small, documented base class for "a scene is a set of SDF parts".
+
+WHY THIS EXISTS. Every demo that ray-marches a custom scene ends up hand-writing the same three methods:
+`.eval` (nearest-surface distance = min over the parts), `.part_ids` (which part owns a point, for material
+lookup), and `.ids` (the SAME thing under the name the splat exporter/`to_splats` happens to expect). You only
+discover that contract by reverse-engineering the exporters. This base class writes that contract down ONCE:
+subclass it, implement `parts()`, and you get `.eval`, `.part_ids`, and `.ids` for free.
+
+SDF SIGN CONVENTION (stated once, load-bearing): each part's sdf_fn returns NEGATIVE inside the surface,
+ZERO on it, POSITIVE outside -- the engine-wide convention. `eval` returns the min over parts, so the scene's
+own zero-level-set is the union of the parts.
+"""
 
 import numpy as np
 

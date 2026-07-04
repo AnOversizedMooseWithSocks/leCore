@@ -34,7 +34,8 @@ import numpy as np
 
 from holographic_sdf import sphere, box as sdf_box, torus, cylinder, menger, to_callable
 from holographic_mesh import Mesh, box as mesh_box
-from holographic_scenegraph import SceneNode, flatten_scene, translation, scaling
+from holographic_scenegraph import SceneNode, flatten_scene
+from holographic_transformhome import Transform   # translate/scale via the Transform home (consolidation H5)
 from holographic_grammar import _align_z_to
 
 
@@ -145,7 +146,7 @@ def scatter_on_terrain(terrain, instance_fn, count=12, seed=0, scale_range=(0.5,
         x = float(rng.uniform(x0, x1)); y = float(rng.uniform(y0, y1))
         z = terrain.height([x, y])
         s = float(rng.uniform(*scale_range))
-        T = translation([x, y, z]) @ scaling(s)
+        T = Transform.translation([x, y, z]) @ Transform.scaling(s)
         if jitter_yaw:                                         # spin about the up (+z) axis for variety
             from holographic_scenegraph import rotation
             T = T @ rotation([0, 0, 1], float(rng.uniform(0, 2 * np.pi)))

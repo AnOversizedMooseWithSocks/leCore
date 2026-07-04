@@ -56,3 +56,19 @@ def test_fresnel_dielectric_glass():
     from holographic_brdf import fresnel_dielectric
     assert abs(float(fresnel_dielectric(1.0, 1.5)) - 0.04) < 0.005     # normal incidence
     assert float(fresnel_dielectric(0.02, 1.5)) > 0.7                  # grazing -> mostly reflective
+
+
+def test_lambert_diffuse_term():
+    import numpy as np
+    from holographic_brdf import lambert
+    rng = np.random.default_rng(0)
+    N = rng.standard_normal((40, 3)); N /= np.linalg.norm(N, axis=1, keepdims=True)
+    L = np.array([0.3, 0.8, 0.5]); L /= np.linalg.norm(L)
+    base = np.array([0.8, 0.6, 0.5])
+    out = lambert(N, L, base)
+    # bit-identical to the inline clip(N.L,0)*albedo the gather paths used
+    assert np.array_equal(out, np.clip(N @ L, 0.0, None)[:, None] * base)
+    # back-facing normals contribute nothing
+    assert np.allclose(lambert(np.array([[0., -1., 0.]]), np.array([0., 1., 0.]), base), 0.0)
+    # shape and non-negativity
+    assert out.shape == (40, 3) and (out >= 0).all()

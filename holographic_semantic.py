@@ -276,17 +276,21 @@ def parse_description(text, resolver=None):
         has_obj = any(t in SHAPES for t in toks) or any(MATERIALS.get(t) in _VOLUMETRIC for t in toks)
         env_subject = any(t in ("sun", "sky", "sunny") for t in toks)
         cloud_words = any(t in ("cloud", "clouds", "cloudy", "overcast") for t in toks)
-        is_env = env_subject or (cloud_words and not has_obj)   # 'cloud' alone is env only with no object content
-        if is_env:
+        # A clause can carry BOTH objects and weather ("...a glass box on a sunny day"). So we always HARVEST the
+        # environment keywords, but only DROP the clause's tokens when it is PURELY environmental (no object in it) --
+        # otherwise the objects in a mixed clause were silently lost (the "sunny day" bug).
+        if env_subject or cloud_words:
             if "sun" in toks or "sunny" in toks:
                 env["sun"] = "bright" if ("bright" in toks or "sunny" in toks) else "soft"
             if "partly" in toks and ("cloudy" in toks or "cloud" in toks or "clouds" in toks):
                 env["sky"] = "partly"
             elif "cloudy" in toks or "overcast" in toks:
                 env["sky"] = "cloudy"
-            elif "clear" in toks or "blue" in toks:
+            # only read "clear/blue" as SKY when the clause has no object -- otherwise "blue" is an object's colour
+            elif "clear" in toks or ("blue" in toks and not has_obj):
                 env["sky"] = "clear"
-        else:
+        is_pure_env = (env_subject or cloud_words) and not has_obj
+        if not is_pure_env:
             obj_tokens.extend(toks)
 
     objects = []
@@ -598,13 +602,14 @@ def _perp_frames(D):
 def _shade_reflection_rays(union, O, D, colors, sun_dir, amb, sun_i):
     """Trace + shade one bounce of reflection rays (sky where they miss). Factored so the sharp mirror ray AND the
     glossy frame's tilted rays use identical shading."""
-    from holographic_raymarch import sphere_trace, sdf_normal, ambient_occlusion, soft_shadow, sky_dome
+    from holographic_raymarch import sphere_trace, sdf_normal, sky_dome
+    from holographic_shadowhome import Shadow      # visibility via the Shadow home (R8)
     rc = sky_dome(D, sun_dir=tuple(sun_dir))
     hm, tm, Pmh = sphere_trace(union, O, D)
     if np.any(hm):
         Nm = sdf_normal(union, Pmh[hm]); idm = union.ids(Pmh[hm])
         lamm = np.clip((Nm * sun_dir).sum(1), 0, 1)
-        shm = soft_shadow(union, Pmh[hm] + Nm * 3e-3, sun_dir); aom = ambient_occlusion(union, Pmh[hm], Nm)
+        shm = Shadow.soft(union, Pmh[hm] + Nm * 3e-3, sun_dir); aom = Shadow.ambient_occlusion(union, Pmh[hm], Nm)
         rc[hm] = np.clip(colors[idm] * (amb * aom + lamm * shm * sun_i)[:, None], 0, 1)
     return rc
 
@@ -665,7 +670,8 @@ def _scene_setup(objects, ground, sky, sun, glass_tint, rs=None):
 def _shade_rays(ctx, O, D):
     """Shade an ARBITRARY batch of rays against the scene (used for the base grid AND for edge subrays). Returns
     (col (M,3), hit (M,), t (M,), ids (M,) with -1 = background)."""
-    from holographic_raymarch import sphere_trace, sdf_normal, ambient_occlusion, soft_shadow, sky_dome
+    from holographic_raymarch import sphere_trace, sdf_normal, sky_dome
+    from holographic_shadowhome import Shadow      # visibility via the Shadow home (R8)
     union = ctx["union"]; sdfs = ctx["sdfs"]; colors = ctx["colors"]; refl = ctx["refl"]; is_glass = ctx["is_glass"]
     sun_dir = ctx["sun_dir"]; amb = ctx["amb"]; sun_i = ctx["sun_i"]
     hit, t, P = sphere_trace(union, O, D, relax=ctx.get("relax", 1.0))
@@ -675,8 +681,8 @@ def _shade_rays(ctx, O, D):
         ids = union.ids(P[hit]); ids_full[hit] = ids
         N = sdf_normal(union, P[hit])
         lam = np.clip((N * sun_dir).sum(1), 0, 1)
-        sh = soft_shadow(union, P[hit] + N * 3e-3, sun_dir)     # marches the WHOLE union -> inter-object shadows
-        ao = ambient_occlusion(union, P[hit], N)
+        sh = Shadow.soft(union, P[hit] + N * 3e-3, sun_dir)     # marches the WHOLE union -> inter-object shadows
+        ao = Shadow.ambient_occlusion(union, P[hit], N)
         shade = amb * ao + lam * sh * sun_i
         albedo = colors[ids]                                    # default: the nearest object's colour
         r_amt = refl[ids]                                       # reflectivity and roughness default to the object's
@@ -727,8 +733,8 @@ def _shade_rays(ctx, O, D):
             if np.any(h2):
                 N2 = sdf_normal(un2, P2[h2])
                 lam2 = np.clip((N2 * sun_dir).sum(1), 0, 1)
-                sh2 = soft_shadow(union, P2[h2] + N2 * 3e-3, sun_dir)
-                ao2 = ambient_occlusion(un2, P2[h2], N2)
+                sh2 = Shadow.soft(union, P2[h2] + N2 * 3e-3, sun_dir)
+                ao2 = Shadow.ambient_occlusion(un2, P2[h2], N2)
                 behind[h2] = np.clip(ng_colors[un2.ids(P2[h2])] * (amb * ao2 + lam2 * sh2 * sun_i)[:, None], 0, 1)
             Ng = sdf_normal(union, Pg)
             fres = (1.0 - np.clip(np.abs((Ng * (-Dg)).sum(1)), 0, 1)) ** 3
@@ -744,7 +750,7 @@ def _shade_rays(ctx, O, D):
                 behindT = sky_dome(Dt, sun_dir=tuple(sun_dir))
                 if np.any(hT):
                     NT = sdf_normal(unT, PT[hT]); lamT = np.clip((NT * sun_dir).sum(1), 0, 1)
-                    shT = soft_shadow(union, PT[hT] + NT * 3e-3, sun_dir); aoT = ambient_occlusion(unT, PT[hT], NT)
+                    shT = Shadow.soft(union, PT[hT] + NT * 3e-3, sun_dir); aoT = Shadow.ambient_occlusion(unT, PT[hT], NT)
                     behindT[hT] = np.clip(ngT[unT.ids(PT[hT])] * (amb * aoT + lamT * shT * sun_i)[:, None], 0, 1)
                 # diffuse mix: half the object's own (tinted) colour, half the (scattered) light from behind
                 col[tidx] = np.clip(0.5 * col[tidx] + 0.5 * behindT * colors[ids][trans_here] * 1.4, 0, 1)

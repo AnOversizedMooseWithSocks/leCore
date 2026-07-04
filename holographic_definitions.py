@@ -111,6 +111,20 @@ MATERIALS = {
     "carbon_dioxide": dict(density=1.98,   viscosity=1.47e-5, phase="gas", sound_speed=267),
 }
 
+# HARDEN + EXPAND: fold in the comprehensive physical database (holographic_materialdata). We ENRICH the legacy
+# entries above (adding fields they lack -- thermal conductivity, melting point, category, ... -- via setdefault, so
+# their long-standing values are never overwritten and resolve_scenario's density-based verdicts are unchanged) and we
+# ADD the many new materials. This keeps ONE source the whole engine reads (resolve_scenario, physical_material, the
+# material index) while the readable, validated data lives in its own module.
+from holographic_materialdata import PHYSICAL_MATERIALS as _PHYS_DB
+
+for _mname, _mprops in _PHYS_DB.items():
+    if _mname in MATERIALS:
+        for _mk, _mv in _mprops.items():
+            MATERIALS[_mname].setdefault(_mk, _mv)          # enrich: add only fields the legacy entry is missing
+    else:
+        MATERIALS[_mname] = dict(_mprops)                   # add: a brand-new material
+
 # The words a user might type -> the canonical material name above. Adjectives fold to nouns
 # ("wooden"->wood), common synonyms map to a representative substance ("stone"->granite). This is
 # the controlled physical-material vocabulary, the physical twin of holographic_semantic.MATERIALS

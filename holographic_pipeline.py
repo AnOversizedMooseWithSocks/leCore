@@ -68,6 +68,56 @@ class FrameState:
 
 
 @dataclass
+class RenderSpec:
+    """A REAL scene for the pipeline (backlog A1). Pass one of these as `run(scene=...)` and the gbuffer /
+    render / svgf stages run the actual machinery -- primary_gbuffer, the converging sampler, variance-guided
+    SVGF -- instead of the built-in demo stand-ins (which still run for plain/None scenes, so every old caller
+    and test behaves exactly as before).
+
+    Fields mirror holographic_gbuffer.render_auto: `scene` is an SDF-like object with .eval(P); `camera` exposes
+    ray_dirs(w,h) -> (eye, dirs); `material(P)` returns the tracer's per-hit tuple (use holographic_matlib.shade
+    to build one from a library material); `sky(D)` is the environment; `quality` is the target CI half-width
+    ('draft'/'medium'/'high'/'ultra' or a float)."""
+    scene: object = None
+    camera: object = None
+    material: object = None
+    sky: object = None
+    width: int = 96
+    height: int = 72
+    quality: object = "high"
+    max_bounce: int = 4
+    pass_spp: int = 8
+    max_passes: int = 8
+    firefly_k: float = 3.0
+    svgf_levels: int = 5
+    # optional VOLUME (smoke / fire / fog) composited over the surface render by the volume stage (backlog H5).
+    # A dict: {"field": callable points(N,3)->density>=0, "bounds": (lo, hi), "mode": "smoke"|"fire"|"density",
+    # "sigma": float, "steps": int, "emission_color": (r,g,b) or None, "background": (r,g,b)}. None = no volume.
+    volume: object = None
+    # optional PARTICLES (sparks / dust / rain) composited over the surface by the particle stage (backlog H6).
+    # A dict: {"points": (N,3) world positions, "colors": (N,3) or (3,) or None, "radius_px": float,
+    # "intensity": float, "depth_fade": (near, far) or None}. None = no particles.
+    particles: object = None
+    # optional HAIR/FUR composited over the surface by the hair stage (backlog H4). A dict:
+    # {"strands": [Strand,...], "shader": "kajiya"|"marschner", "hair_color": (r,g,b), "light_dir": (x,y,z),
+    # "roughness": float or None, "tilt_deg": float or None, "lod_stride": int, "smooth_levels": int}. The stage
+    # renders the strands WITH an alpha mask and over-composites them onto the surface. None = no hair.
+    hair: object = None
+    # optional LIGHTS (a list of holographic_lights PointLight/SphereLight/DirectionalLight) sampled directly by
+    # the path tracer via next-event estimation -- real placed lamps with correct shadows. None = environment only.
+    lights: object = None
+    # RENDER STRATEGY (backlog R1): which way to turn the scene into an image. "auto" picks one from what's provided
+    # (radiance_field -> "radiance"; light_sh and no lights -> "prt"; material -> "pathtrace"; else -> "raymarch").
+    # Each named strategy DELEGATES to its existing module and declares what it needs, so the render stage catches a
+    # missing input before running. Values: "auto"|"pathtrace"|"raymarch"|"prt"|"radiance".
+    method: str = "auto"
+    # inputs some strategies need: an environment projected to spherical harmonics (for "prt", from
+    # holographic_prt.project_env_to_sh) and a baked radiance field (for "radiance", a holographic_radiance field).
+    light_sh: object = None
+    radiance_field: object = None
+
+
+@dataclass
 class PipelineConfig:
     """Everything you'd otherwise piece together by hand, in ONE place -- the single opt-in/out surface. Presets
     are named starting points."""
@@ -85,8 +135,12 @@ class PipelineConfig:
     adaptive_samples: bool = True
     denoise: str = "off"            # "off" | "svgf" | "bilateral"
     splat_proxy: bool = False
+    volume: bool = False            # composite a volume (smoke/fire/fog) over the surface render (needs scene.volume)
+    particles: bool = False         # composite a particle layer (sparks/dust/rain) over the surface (needs scene.particles)
+    hair: bool = False              # composite a hair/fur layer over the surface render (needs scene.hair)
     lod: bool = True
     quality: str = "preview"        # "preview" | "final"
+    postfx: str = "off"             # "off" (legacy Reinhard present) | "aces" (auto-exposure + ACES via holographic_postfx)
 
     @staticmethod
     def preview():
@@ -141,10 +195,122 @@ def _demo_scene(seed, H=24, W=24):
 
 
 def _gbuffer_run(ctx):
-    # SVGF needs per-pixel normals/albedo/depth. Produce a REAL g-buffer for the demo scene (deterministic off the
-    # seed) so the denoise stage can actually edge-stop, not a random stand-in.
-    _, normal, albedo, depth = _demo_scene(ctx.seed)
+    # SVGF needs per-pixel normals/albedo/depth. REAL scene (a RenderSpec): trace the actual primary G-buffer
+    # (backlog A1). Demo scene: the deterministic stand-in, so old callers/tests behave exactly as before.
+    if isinstance(ctx.scene, RenderSpec):
+        from holographic_gbuffer import primary_gbuffer
+        r = ctx.scene
+        normal, albedo, depth = primary_gbuffer(r.scene, r.camera, r.width, r.height, r.material, sky=r.sky)
+    else:
+        _, normal, albedo, depth = _demo_scene(ctx.seed)
     ctx.buffers["gbuffer"] = {"normal": normal, "albedo": albedo, "depth": depth}
+    return ctx
+
+
+def _pipe_gbuffer(r):
+    """Primary G-buffer for the non-pathtrace strategies: the visible point + normal per pixel (reuses the shared
+    primary trace). Returns (hit H,W bool; P,N H,W,3)."""
+    from holographic_domecache import _primary_gbuffer
+    return _primary_gbuffer(r.scene, r.camera, r.width, r.height)
+
+
+def _strat_pathtrace(ctx):
+    # STRATEGY 'pathtrace' -- the full Monte-Carlo render (GI, soft shadows, the adaptive sampler). Delegates to the
+    # SAME converging sampler render_auto uses, so the staged pipeline and the one-call render agree. This is the
+    # exact code the RenderSpec branch ran before R1, so method='pathtrace'/'auto'-with-material is byte-identical.
+    from holographic_gbuffer import converge_samples, declfirefly
+    r = ctx.scene
+    M, vom, N, info = converge_samples(r.scene, r.camera, r.width, r.height, r.material, sky=r.sky,
+                                       quality=r.quality, max_bounce=r.max_bounce, seed=ctx.seed,
+                                       pass_spp=r.pass_spp, max_passes=r.max_passes, lights=r.lights)
+    ctx.image = declfirefly(M, k=r.firefly_k) if r.firefly_k is not None else M
+    ctx.buffers["variance"] = vom
+    ctx.buffers["render_stats"] = {"passes": info["passes"], "mean_samples": float(N.mean()),
+                                   "max_samples": float(N.max()), "tol": info["tol"]}
+
+
+def _strat_raymarch(ctx):
+    # STRATEGY 'raymarch' -- a fast primary-visibility PREVIEW: sphere-trace the SDF, shade matte lambert from one
+    # fixed key direction on the surface normal. No GI, no light sampling -> cheap and noise-free. Delegates to
+    # holographic_raymarch (via the shared G-buffer).
+    r = ctx.scene
+    hit, P, N = _pipe_gbuffer(r)
+    img = np.zeros((r.height, r.width, 3))
+    if hit.any():
+        key = np.array([0.4, 0.8, 0.5]); key = key / np.linalg.norm(key)
+        lam = np.clip(N[hit] @ key, 0.05, 1.0)[:, None]                  # a little ambient floor so it's not black
+        alb = np.asarray(r.material(P[hit])[0], float) if r.material is not None else np.full((int(hit.sum()), 3), 0.8)
+        img[hit] = lam * alb
+    ctx.image = img
+
+
+def _strat_prt(ctx):
+    # STRATEGY 'prt' -- relight the G-buffer under an environment (spherical harmonics) by a dot product. Needs a
+    # `light_sh` (project an env with holographic_prt.project_env_to_sh). Delegates to holographic_prt.
+    from holographic_prt import precompute_transfer
+    from holographic_lightinghome import Lighting   # the Lighting home (consolidation R7)
+    r = ctx.scene
+    hit, P, N = _pipe_gbuffer(r)
+    img = np.zeros((r.height, r.width, 3))
+    if hit.any():
+        alb = np.asarray(r.material(P[hit])[0], float) if r.material is not None else np.full((int(hit.sum()), 3), 0.8)
+        T = precompute_transfer(r.scene, P[hit], N[hit], order=3, n=64)
+        img[hit] = Lighting.prt(T, r.light_sh, alb)
+    ctx.image = img
+
+
+def _strat_radiance(ctx):
+    # STRATEGY 'radiance' -- render = a LOOKUP into a baked holographic radiance field. Needs a `radiance_field`.
+    # Delegates to holographic_radiance.reconstruct_view.
+    from holographic_radiance import reconstruct_view
+    r = ctx.scene
+    hit, P, N = _pipe_gbuffer(r)
+    ctx.image = np.asarray(reconstruct_view(r.radiance_field, P[hit], hit, r.width, r.height), float)
+
+
+# The render STRATEGY registry (backlog R1): name -> (needs, run, does). `needs` are RenderSpec fields that must be
+# provided; the render stage checks them and raises a CLEAR error before running (catch a missing input, not a
+# wrong image). This is a ROUTING, not a merge -- each strategy stays its own distinct algorithm.
+RENDER_STRATEGIES = {
+    "pathtrace": (("scene", "camera", "material"), _strat_pathtrace,
+                  "full Monte-Carlo path trace: global illumination, soft shadows, the adaptive sampler"),
+    "raymarch":  (("scene", "camera"), _strat_raymarch,
+                  "fast primary-visibility preview: sphere-trace + matte lambert on the normal, no GI"),
+    "prt":       (("scene", "camera", "light_sh"), _strat_prt,
+                  "precomputed radiance transfer: relight the G-buffer under an environment SH by a dot product"),
+    "radiance":  (("scene", "camera", "radiance_field"), _strat_radiance,
+                  "query a baked holographic radiance field (render becomes a lookup)"),
+}
+
+
+def _pick_render_method(r):
+    """The 'auto' picker: choose a strategy from what the RenderSpec actually provides. Ordered most-specific first."""
+    if getattr(r, "radiance_field", None) is not None:
+        return "radiance"
+    if getattr(r, "light_sh", None) is not None and not getattr(r, "lights", None):
+        return "prt"
+    if getattr(r, "material", None) is not None:
+        return "pathtrace"                                              # the default -- unchanged from before R1
+    return "raymarch"
+
+
+def dispatch_render(ctx):
+    """Resolve the RenderSpec's render method (or pick one via 'auto'), CHECK the chosen strategy's needs are present,
+    then run it. Raises PipelineError with a clear message when a required input is missing -- the needs check R1 is
+    about. Records the chosen method in ctx.buffers['render_method']."""
+    r = ctx.scene
+    method = getattr(r, "method", "auto") or "auto"
+    if method == "auto":
+        method = _pick_render_method(r)
+    if method not in RENDER_STRATEGIES:
+        raise PipelineError("unknown render method %r (have: %s)" % (method, ", ".join(sorted(RENDER_STRATEGIES))))
+    needs, run, _does = RENDER_STRATEGIES[method]
+    missing = [n for n in needs if getattr(r, n, None) is None]
+    if missing:
+        raise PipelineError("render strategy %r needs (%s), but the RenderSpec is missing: %s"
+                            % (method, ", ".join(needs), ", ".join(missing)))
+    run(ctx)
+    ctx.buffers["render_method"] = method
     return ctx
 
 
@@ -157,6 +323,11 @@ def _render_run(ctx):
     if renderer is not None:
         ctx.image = renderer(ctx)
         return ctx
+    if isinstance(ctx.scene, RenderSpec):
+        # REAL render (backlog A1 + R1): DISPATCH to the chosen render strategy (pathtrace / raymarch / prt /
+        # radiance), checking its declared needs first. 'auto' picks pathtrace when a material is present, so this
+        # is byte-identical to the pre-R1 path for every existing RenderSpec caller.
+        return dispatch_render(ctx)
     from holographic_accumulate import robust_accumulate
     clean, _, _, _ = _demo_scene(ctx.seed)
     rng = np.random.default_rng(ctx.seed)
@@ -227,8 +398,10 @@ def _svgf_run(ctx):
     img = ctx.image
     gb = ctx.buffers.get("gbuffer")
     if img is not None and isinstance(gb, dict):
-        from holographic_svgf import atrous_bilateral
-        den = atrous_bilateral(img, gb["normal"], gb["albedo"], gb["depth"], levels=5)
+        from holographic_denoisehome import Denoise                       # the Denoise home (consolidation R5)
+        levels = ctx.scene.svgf_levels if isinstance(ctx.scene, RenderSpec) else 5
+        den = Denoise.image(img, gb["normal"], gb["albedo"], gb["depth"], method="svgf", levels=levels,
+                            variance=ctx.buffers.get("variance"))    # variance-GUIDED when the render measured one
         clean = ctx.buffers.get("_clean")
         if clean is not None:
             def _psnr(a, b):
@@ -248,13 +421,80 @@ def _splat_run(ctx):
     return ctx
 
 
+def _volume_run(ctx):
+    # VOLUME stage (backlog H5): if the scene carries a volume (smoke/fire/fog), render it and COMPOSITE it over
+    # the surface image. volume_render returns (colour, alpha) from marching the density field along camera rays;
+    # the standard over-operator puts it in front of the solid: out = volume + surface*(1-alpha). This is what
+    # makes smoke/fire/fog a first-class pipeline result instead of something a demo hand-composites afterwards.
+    if not isinstance(ctx.scene, RenderSpec) or ctx.scene.volume is None or ctx.image is None:
+        return ctx
+    from holographic_render import volume_render
+    r = ctx.scene; v = r.volume
+    vol_img, alpha = volume_render(v["field"], r.camera, v["bounds"], r.width, r.height,
+                                   steps=v.get("steps", 96), mode=v.get("mode", "smoke"),
+                                   sigma=v.get("sigma", 12.0), emission_color=v.get("emission_color"),
+                                   background=v.get("background", (0.0, 0.0, 0.0)))
+    a = np.asarray(alpha, float)[..., None]                       # (H,W,1) coverage of the volume
+    ctx.image = np.asarray(vol_img, float) + ctx.image * (1.0 - a)   # over-composite the volume onto the surface
+    ctx.buffers["volume_alpha"] = alpha
+    return ctx
+
+
+def _particles_run(ctx):
+    # PARTICLE stage (backlog H6): if the scene carries a particle cloud (sparks/dust/rain), project and splat the
+    # points into the camera image and OVER-composite them onto the surface. holographic_pointsplat returns
+    # (colour, alpha) just like the volume renderer, so the composite is the same over-operator:
+    #     out = points + surface*(1-alpha).
+    # Particles composite AFTER the volume so a spark in front of smoke reads correctly.
+    if not isinstance(ctx.scene, RenderSpec) or ctx.scene.particles is None or ctx.image is None:
+        return ctx
+    from holographic_pointsplat import splat_points
+    r = ctx.scene; p = r.particles
+    pts_img, alpha = splat_points(p["points"], r.camera, r.width, r.height,
+                                  colors=p.get("colors"), radius_px=p.get("radius_px", 2.0),
+                                  intensity=p.get("intensity", 1.0), depth_fade=p.get("depth_fade"))
+    a = np.asarray(alpha, float)[..., None]                   # (H,W,1) coverage of the particle layer
+    ctx.image = np.asarray(pts_img, float) + ctx.image * (1.0 - a)   # over-composite the particles onto the frame
+    ctx.buffers["particle_alpha"] = alpha
+    return ctx
+
+
+def _hair_run(ctx):
+    # HAIR stage (backlog H4): if the scene carries hair/fur strands, render them WITH a coverage alpha and
+    # over-composite onto the surface. render_hair already projects and shades the strands (Kajiya-Kay/Marschner)
+    # with painter's ordering; the new return_alpha gives the mask, so this is the same over-operator as the
+    # volume and particle stages: out = hair*alpha + surface*(1-alpha). Hair composites LAST of the layers so a
+    # strand in front of smoke/sparks reads correctly.
+    if not isinstance(ctx.scene, RenderSpec) or ctx.scene.hair is None or ctx.image is None:
+        return ctx
+    from holographic_hairshade import render_hair
+    r = ctx.scene; h = r.hair
+    hair_img, alpha = render_hair(h["strands"], r.camera, width=r.width, height=r.height,
+                                  shader=h.get("shader", "kajiya"), hair_color=h.get("hair_color", (0.55, 0.35, 0.15)),
+                                  light_dir=h.get("light_dir", (0.3, 0.6, 0.6)), roughness=h.get("roughness"),
+                                  tilt_deg=h.get("tilt_deg"), lod_stride=h.get("lod_stride", 1),
+                                  smooth_levels=h.get("smooth_levels", 2), background=(0.0, 0.0, 0.0),
+                                  return_alpha=True)
+    a = np.asarray(alpha, float)[..., None]                   # (H,W,1) hair coverage
+    ctx.image = np.asarray(hair_img, float) * a + ctx.image * (1.0 - a)   # over-composite the hair onto the frame
+    ctx.buffers["hair_alpha"] = alpha
+    return ctx
+
+
 def _present_run(ctx):
     # the SINGLE present/grade stage (G3): tonemap + gamma, so preview and final grade identically.
+    # postfx="aces" (backlog E2) delegates the grade to holographic_postfx (auto-exposure -> ACES -> gamma), the
+    # module that OWNS the tone curves; the default stays the legacy inline Reinhard, byte-identical for old callers.
     img = ctx.image
     if img is not None:
-        ctx.image = np.clip(img, 0, None)
-        ctx.image = ctx.image / (1.0 + ctx.image)                # Reinhard tonemap
-        ctx.image = np.power(ctx.image, 1.0 / 2.2)               # gamma
+        cfg = getattr(ctx, "_cfg", None)
+        if cfg is not None and getattr(cfg, "postfx", "off") == "aces":
+            from holographic_postfx import auto_exposure, aces, gamma
+            ctx.image = gamma(aces(auto_exposure(np.clip(img, 0, None)) * 0.6))   # 0.6 = Narkowicz input scale
+        else:
+            ctx.image = np.clip(img, 0, None)
+            ctx.image = ctx.image / (1.0 + ctx.image)            # Reinhard tonemap
+            ctx.image = np.power(ctx.image, 1.0 / 2.2)           # gamma
     return ctx
 
 
@@ -282,9 +522,15 @@ ALL_STAGES = [
           "SVGF denoise (needs the G-buffer)"),
     Stage("splat_proxy", ("scene",), ("splats",), lambda c: c.splat_proxy, _splat_run,
           "emit a splat proxy for fast preview"),
-    # present stage (phase 2: last)
+    Stage("volume", ("image",), ("composited",), lambda c: c.volume, _volume_run,
+          "composite a volume (smoke/fire/fog) over the surface render", phase=2),
+    Stage("particles", ("image",), ("particled",), lambda c: c.particles, _particles_run,
+          "composite a particle layer (sparks/dust/rain) over the surface render", phase=3),
+    Stage("hair", ("image",), ("haired",), lambda c: c.hair, _hair_run,
+          "composite a hair/fur layer over the surface render", phase=4),
+    # present stage (phase 5: last)
     Stage("present", ("image",), ("final_image",), lambda c: True, _present_run,
-          "tonemap + gamma -- the single present/grade stage", phase=2),
+          "tonemap + gamma -- the single present/grade stage", phase=5),
 ]
 
 
@@ -302,6 +548,8 @@ def _check_conflicts(cfg):
                             "previous frame to keep for the clean tiles. Set temporal_reuse=True or dirty_only=False.")
     if cfg.denoise not in ("off", "svgf", "bilateral"):
         raise PipelineError("denoise must be 'off', 'svgf', or 'bilateral', got %r" % (cfg.denoise,))
+    if cfg.postfx not in ("off", "aces"):
+        raise PipelineError("postfx must be 'off' or 'aces', got %r" % (cfg.postfx,))
     if cfg.quality == "final" and cfg.splat_proxy:
         raise PipelineError("splat_proxy is a fast-PREVIEW approximation; it conflicts with quality='final'. Drop "
                             "splat_proxy for a final render.")
@@ -368,15 +616,16 @@ def build_pipeline(cfg, registry=None):
                     active_names.add(dep.name)
                     have |= set(dep.produces)
         i += 1
-    return Pipeline(_toposort(active))
+    return Pipeline(_toposort(active), cfg=cfg)
 
 
 class Pipeline:
     """An ordered list of stages. `plan()` is the dry run (what will run and why, WITHOUT rendering); `run()`
     threads a FrameState through the stages in order."""
 
-    def __init__(self, stages):
+    def __init__(self, stages, cfg=None):
         self.stages = list(stages)
+        self.cfg = cfg                                            # kept so run() can hand it to grade-by-config stages
 
     def plan(self):
         """Dry run / EXPLAIN: every active stage, WHY it is here, and what it NEEDS and PRODUCES -- without
@@ -397,6 +646,7 @@ class Pipeline:
         if none is given. Returns the final FrameState."""
         ctx = FrameState(scene=scene, seed=seed, prev_frame=prev_frame)
         ctx._renderer = renderer                                  # dependency-injected real renderer (or None)
+        ctx._cfg = getattr(self, "cfg", None)                     # the config, for stages that grade by it (postfx)
         for s in self.stages:
             ctx = s.run(ctx)
         return ctx

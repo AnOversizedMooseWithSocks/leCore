@@ -39,3 +39,24 @@ def test_render_and_lod():
     cf = (full.sum(axis=2) > 0.25).astype(float); cc = (coarse.sum(axis=2) > 0.25).astype(float)
     assert (cf * cc).sum() / (cc.sum() + 1e-9) > 0.6
     assert np.array_equal(full, render_hair(strands, cam, width=120, height=120, smooth_levels=1))
+
+
+def test_render_hair_return_alpha_backward_compatible():
+    # backlog H4: return_alpha adds a coverage mask WITHOUT changing the default image (byte-identical).
+    import numpy as np
+    from holographic_groom import groom
+    from holographic_hairshade import render_hair
+    from holographic_render import Camera
+    from holographic_sdf import sphere
+    strands = groom(sphere(0.6).eval, 120, ((-0.8, -0.8, -0.8), (0.8, 0.8, 0.8)), length=0.3, n_pts=6, curl=0.2, seed=0)
+    cam = Camera(eye=(0, 0, 2.5), target=(0, 0, 0), fov_deg=45, aspect=1.0)
+    img = render_hair(strands, cam, width=80, height=80, hair_color=(0.6, 0.4, 0.2))
+    img2, alpha = render_hair(strands, cam, width=80, height=80, hair_color=(0.6, 0.4, 0.2), return_alpha=True)
+    assert np.array_equal(img, img2)                             # image unchanged by asking for alpha
+    assert alpha.shape == (80, 80)
+    assert 0.0 < (alpha > 0).mean() < 1.0                        # some pixels covered, some background
+    # alpha is 1 exactly where a strand painted: those pixels differ from the black background in img2-on-black
+    black_bg = render_hair(strands, cam, width=80, height=80, hair_color=(0.6, 0.4, 0.2),
+                           background=(0.0, 0.0, 0.0))
+    painted = black_bg.sum(axis=2) > 1e-6
+    assert np.array_equal(painted, alpha > 0)                    # coverage mask matches the painted pixels

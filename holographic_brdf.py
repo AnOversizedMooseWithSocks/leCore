@@ -95,6 +95,17 @@ def cook_torrance(N, V, L, base_color, metallic, roughness):
     return (diffuse + spec) * ndl[..., None]
 
 
+def lambert(N, L, base_color):
+    """The diffuse (Lambertian) shade -- matte reflected radiance for unit incoming light from direction L:
+    max(N.L, 0) * base_color. N: (...,3) unit normals; L: a (3,) light direction (dotted via matmul); base_color:
+    (...,3) or (3,). Returns (...,3). This is the diffuse half of cook_torrance exposed on its own so the many
+    matte / one-bounce gather paths call the Shading home instead of re-deriving clip(N.L,0)*albedo. (Compound
+    shades that fold in shadow / occlusion / a specular lobe keep their own expression -- lambert is just the term.)
+    """
+    ndl = np.clip(np.asarray(N, float) @ np.asarray(L, float), 0.0, None)
+    return ndl[..., None] * np.asarray(base_color, float)
+
+
 def _tangent_frame(N):
     """An orthonormal (T, B, N) frame for each normal -- to map tangent-space samples to world."""
     N = np.asarray(N, float)
@@ -211,3 +222,96 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# RE-ENABLE (adaptive-dispatch audit): MULTI-SCATTER energy compensation (Kulla-Conty 2017), gated by roughness.
+# Single-scatter GGX (cook_torrance above) drops the light that bounces between microfacets more than once, so a
+# ROUGH METAL loses energy -- the white-furnace test dips to ~0.5 at roughness 0.8 (measured). Kulla-Conty adds that
+# energy back with a cheap analytic term built from the single-scatter directional albedo E(mu): bake E once, then
+# the term is a couple of interpolated lookups. It only ADDS the missing energy (never removes), so it cannot
+# over-brighten an already-conserving surface -- NO harm mode. We still GATE on roughness so smooth surfaces (where
+# the loss is negligible and the diffuse term masks it anyway) skip the compensation entirely.
+
+_MS_ENERGY_CURVES = {}          # roughness (rounded) -> (mu_grid, E_grid, E_avg), baked once each
+
+
+def _ms_energy_curve(roughness, n_mu=12, n=4096, seed=0):
+    """Bake (once, cached) the single-scatter specular directional albedo E(mu) for this roughness -- the fraction
+    of energy the single-scatter lobe reflects at each view cosine (metallic/white, so no diffuse to mask it) -- plus
+    its cosine-weighted average E_avg. These are the ingredients of the Kulla-Conty multi-scatter term."""
+    key = round(float(roughness), 2)
+    hit = _MS_ENERGY_CURVES.get(key)
+    if hit is not None:
+        return hit
+    mu = np.linspace(0.06, 1.0, n_mu)
+    E = np.array([directional_albedo(metallic=1.0, roughness=key, base_color=(1.0, 1.0, 1.0),
+                                     n=n, view_cos=float(m), seed=seed) for m in mu])
+    E = np.clip(E, 0.0, 1.0)
+    g = E * mu
+    E_avg = float(2.0 * np.sum(0.5 * (g[1:] + g[:-1]) * np.diff(mu)))   # E_avg = 2 integral E(mu) mu dmu (trapezoid)
+    _MS_ENERGY_CURVES[key] = (mu, E, E_avg)
+    return _MS_ENERGY_CURVES[key]
+
+
+def _f_avg(base_color, metallic):
+    """The hemisphere-average Fresnel reflectance, F_avg ~ F0 + (1-F0)/21 (the analytic average of Schlick). Tints
+    the multi-scatter lobe for coloured metals; ~1 for the white furnace."""
+    F0 = metallic_f0(np.asarray(base_color, float), metallic)
+    return F0 + (1.0 - F0) / 21.0
+
+
+def multiscatter_term(roughness, n_dot_v, n_dot_l, base_color=(1.0, 1.0, 1.0), metallic=1.0):
+    """The Kulla-Conty multi-scatter BRDF term (no cosine): f_ms = (1-E(v))(1-E(l)) / (pi (1-E_avg)), tinted by the
+    average Fresnel. Returns the energy the single-scatter lobe missed. Broadcast-safe in n_dot_l."""
+    mu, E, E_avg = _ms_energy_curve(roughness)
+    Ev = np.interp(np.clip(n_dot_v, 0.0, 1.0), mu, E)
+    El = np.interp(np.clip(n_dot_l, 0.0, 1.0), mu, E)
+    fms = (1.0 - Ev) * (1.0 - El) / (np.pi * (1.0 - E_avg) + 1e-6)
+    favg = _f_avg(base_color, metallic)                 # (3,) per-channel tint
+    # colored multi-scatter energy scaling (Kulla-Conty): F_avg^2 E_avg / (1 - F_avg (1 - E_avg))
+    scale = favg * favg * E_avg / (1.0 - favg * (1.0 - E_avg) + 1e-6)
+    return fms[..., None] * scale if np.ndim(fms) else fms * scale
+
+
+def cook_torrance_ms(N, V, L, base_color, metallic, roughness):
+    """Cook-Torrance GGX WITH the multi-scatter energy compensation added (the re-enabled, energy-conserving BRDF).
+    Equals the single-scatter cook_torrance plus f_ms * N.L. Use where roughness is high enough for the loss to
+    matter (see brdf_gated)."""
+    single = cook_torrance(N, V, L, base_color, metallic, roughness)
+    N = np.asarray(N, float); V = np.asarray(V, float); L = np.asarray(L, float)
+    n_dot_v = np.clip(np.sum(N * V, axis=-1), 0.0, 1.0)
+    n_dot_l = np.clip(np.sum(N * L, axis=-1), 0.0, 1.0)
+    fms = multiscatter_term(roughness, n_dot_v, n_dot_l, base_color, metallic)
+    return single + fms * n_dot_l[..., None]            # add back the missing energy, cosine-weighted
+
+
+# roughness below this, single-scatter loss is negligible -> skip the compensation (measured: metals only lose real
+# energy once roughness climbs; the diffuse term masks it for dielectrics).
+MS_ROUGHNESS_GATE = 0.25
+
+
+def brdf_gated(N, V, L, base_color, metallic, roughness, roughness_gate=MS_ROUGHNESS_GATE):
+    """Evaluate the BRDF, RE-ENABLING multi-scatter compensation only in its regime. At low roughness (< gate) the
+    single-scatter loss is negligible, so use the cheap cook_torrance; at high roughness add the Kulla-Conty term to
+    conserve energy. Returns (brdf_value, info). The detector is the material roughness -- known per hit -- and the
+    term only adds missing energy, so the gate can never over-brighten a conserving surface."""
+    from holographic_regimegate import RegimeGate
+    gate = RegimeGate("multiscatter_ggx", detect=lambda _r: float(roughness), threshold=roughness_gate,
+                      superior=lambda _r: cook_torrance_ms(N, V, L, base_color, metallic, roughness),
+                      fallback=lambda _r: cook_torrance(N, V, L, base_color, metallic, roughness))
+    return gate.apply(roughness)
+
+
+def directional_albedo_ms(metallic, roughness, base_color=(1.0, 1.0, 1.0), n=8192, view_cos=1.0, seed=0):
+    """The white-furnace test WITH multi-scatter compensation -- should return ~1.0 (energy conserving) where the
+    single-scatter directional_albedo dips below 1.0."""
+    rng = np.random.default_rng(seed)
+    N = np.array([0.0, 0.0, 1.0])
+    V = np.array([np.sqrt(max(0.0, 1.0 - view_cos ** 2)), 0.0, view_cos])
+    u1 = rng.random(n); u2 = rng.random(n)
+    z = u1; r = np.sqrt(1.0 - z * z); ph = 2 * np.pi * u2
+    L = np.stack([r * np.cos(ph), r * np.sin(ph), z], axis=-1)
+    Nb = np.broadcast_to(N, L.shape); Vb = np.broadcast_to(V, L.shape)
+    fr = cook_torrance_ms(Nb, Vb, L, base_color, metallic, roughness)
+    return float(np.mean(fr.sum(-1) / 3.0) * 2.0 * np.pi)

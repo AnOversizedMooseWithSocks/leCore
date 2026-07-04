@@ -359,6 +359,15 @@ class SceneCoder:
         structure."""
         return scene + self.encode(tags)
 
+    def combine(self, scene_a, scene_b):
+        """WS6 -- combine two scenes. A scene IS a bundle (an unnormalised superposition of object products), so
+        combining two scenes is simply BUNDLING them: vector addition. The object counts add (norm^2 ~ n), and the
+        resonator can still pull any object back out of the union -- the same 'as above, so below' as combining
+        render channels or archive plates. Kept negative: two IDENTICAL objects superpose (their shared product's
+        amplitude doubles) rather than staying two distinct entries -- distinct objects add cleanly; re-key an id if
+        you need duplicates kept separate."""
+        return scene_a + scene_b
+
     def remove_object(self, scene, match, iters=60, sweeps=2, seed=0):
         """Edit the scene VECTOR directly: removing an object is factoring the
         scene, finding the object whose tags match `match` (a sub-dict, e.g.

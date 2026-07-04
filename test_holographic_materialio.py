@@ -76,3 +76,18 @@ def test_deterministic_sampling():
     rng = _np_tex.random.default_rng(0); img = rng.random((8, 8, 3))
     t = TextureMap(img)
     assert _np_tex.array_equal(t.sample(0.37, 0.62), t.sample(0.37, 0.62))
+
+
+def test_pbrmaterial_physical_extensions_and_gltf_export():
+    from holographic_materialio import PBRMaterial
+    # a plain opaque material emits exactly the old glTF entry (no extensions) -- backward compatible
+    opaque = PBRMaterial(name="matte", base_color=(0.8, 0.2, 0.2, 1.0), roughness=0.7)
+    assert "extensions" not in opaque.to_gltf_dict()
+    s = opaque.sample()
+    assert s["ior"] == 1.5 and s["transmission"] == 0.0 and s["fiber"] is False
+    # a transmissive glass material carries the KHR extension blocks
+    glass = PBRMaterial(name="glass", transmission=1.0, ior=1.5, attenuation_color=(0.9, 0.95, 0.92))
+    ext = glass.to_gltf_dict().get("extensions", {})
+    assert "KHR_materials_transmission" in ext and "KHR_materials_volume" in ext
+    diamond = PBRMaterial(name="diamond", transmission=1.0, ior=2.42)
+    assert "KHR_materials_ior" in diamond.to_gltf_dict()["extensions"]

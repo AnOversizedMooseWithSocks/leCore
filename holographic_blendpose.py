@@ -55,12 +55,10 @@ from holographic_denoise import project_onto_constraints
 
 def blend_pose(targets, weights):
     """The forward skinning/blendshape map: a soft weighted blend of the pose-target structures, normalize(sum_i
-    w_i targets_i). `targets` is (m, dim), `weights` is (m,). Returns the (dim,) pose vector."""
-    P = np.asarray(targets, float)
-    w = np.asarray(weights, float)
-    v = P.T @ w
-    n = np.linalg.norm(v)
-    return v / n if n > 0 else v
+    w_i targets_i). `targets` is (m, dim), `weights` is (m,). Returns the (dim,) pose vector. Delegates to the
+    Blend home (consolidation H4) -- the weighted bundle, bit-identical."""
+    from holographic_blendhome import Blend
+    return Blend.bundle(targets, weights)
 
 
 def _simplex_project(w):

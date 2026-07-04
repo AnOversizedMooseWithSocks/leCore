@@ -1,0 +1,15 @@
+{
+  "name": "WordNet English dictionary + taxonomy",
+  "entries": 144478,
+  "fields": {
+    "d": "definition",
+    "p": "part of speech",
+    "s": "synonyms",
+    "e": "example",
+    "h": "is_a (hypernym)"
+  },
+  "source": "Princeton WordNet 3.0 via NLTK",
+  "license": "WordNet License (free use with attribution)",
+  "file": "dictionary.json.gz",
+  "format": "gzip-compressed JSON, word -> entry"
+}

@@ -1,6 +1,7 @@
 # .github/workflows/package.yml
-# Build an installable leCore wheel on every push to main and on version tags, smoke-test that it imports,
-# upload it as a build artifact, and attach it to a GitHub Release when you push a tag like v0.1.0.
+# Build an installable leOS-core wheel on every push to main and on version tags, smoke-test that it imports,
+# upload it as a build artifact, attach it to a GitHub Release on a tag, and -- on a version tag -- publish it
+# to PyPI so people can `pip install leos-core` (and then `import lecore`).
 name: package
 
 on:
@@ -10,6 +11,9 @@ on:
   workflow_dispatch:            # lets you run it by hand from the Actions tab
 
 jobs:
+  # ---------------------------------------------------------------------------------------------------------
+  # Job 1: build the wheel + sdist, prove the wheel imports, and stash the built files as an artifact.
+  # ---------------------------------------------------------------------------------------------------------
   build-wheel:
     runs-on: ubuntu-latest
     steps:
@@ -26,15 +30,23 @@ jobs:
       - name: Build the package (copies essentials, strips tests, builds the wheel)
         run: sh build_package.sh
 
-      - name: Smoke-test the wheel (install it clean, in isolation, and import it)
+      - name: Smoke-test the wheel (install it clean, in isolation, and exercise its bundled data)
         run: |
           python -m pip install dist/*.whl
-          python -c "import lecore; assert hasattr(lecore, 'UnifiedMind'); print('leCore import OK')"
+          # Run from a TEMP dir, not the repo checkout, so nothing resolves against repo files by accident --
+          # this proves the WHEEL is self-contained, including the vendored data it needs at runtime.
+          cd "$(mktemp -d)"
+          # The distribution is "leos-core" but the import name is still "lecore" (via the lecore.py shim).
+          python -c "import lecore; assert hasattr(lecore, 'UnifiedMind'); print('leOS-core installed; import lecore OK')"
+          # The runtime data package must be present AND its dictionary must load -- this is the check that would
+          # have caught a wheel shipped without its data. If it fails, the data isn't in package_data / build_package.sh.
+          python -c "import lecore_data; assert lecore_data.exists('knowledge', 'dictionary.json.gz'), 'vendored dictionary missing from the wheel'"
+          python -c "import holographic_dictionary as d; assert d.size() > 100000; print('dictionary works from the wheel:', d.size(), 'words')"
 
       - name: Upload the wheel + sdist as build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: lecore-dist
+          name: leos-core-dist          # the later publish job downloads this exact name
           path: dist/*
 
       - name: Attach to the GitHub Release (only when a version tag is pushed)
@@ -42,3 +54,35 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+
+  # ---------------------------------------------------------------------------------------------------------
+  # Job 2: publish to PyPI. Runs ONLY on a version tag (v*), and ONLY after the build job succeeded.
+  #
+  # This uses PyPI "Trusted Publishing" (OIDC): GitHub proves to PyPI who it is, so there is NO API token or
+  # password stored anywhere in this repo. The `id-token: write` permission below is what lets that handshake
+  # happen. You do a ONE-TIME setup on PyPI first -- see PACKAGING.md for the exact clicks:
+  #   PyPI -> your project (or "pending publisher") -> Publishing -> add a GitHub trusted publisher with
+  #   owner = AnOversizedMooseWithSocks, repo = leCore, workflow = package.yml.
+  # After that, pushing a tag like v0.1.0 publishes that version automatically.
+  # ---------------------------------------------------------------------------------------------------------
+  publish-pypi:
+    needs: build-wheel                       # don't publish unless the wheel built and imported cleanly
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write                        # REQUIRED for trusted publishing (the OIDC handshake). No token needed.
+    # environment: pypi                      # optional: create a GitHub Environment named "pypi" for an extra
+                                             #   approval gate, then set the same name on PyPI's publisher config
+                                             #   and uncomment this line. Leave commented for the simplest setup.
+    steps:
+      - name: Download the built wheel + sdist from Job 1
+        uses: actions/download-artifact@v4
+        with:
+          name: leos-core-dist
+          path: dist                         # the publish action expects the files in dist/
+
+      - name: Publish to PyPI (trusted publishing -- no stored secret)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # Defaults publish to the real PyPI. To rehearse on TestPyPI first, uncomment:
+        # with:
+        #   repository-url: https://test.pypi.org/legacy/

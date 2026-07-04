@@ -1,0 +1,11 @@
+# MANIFEST.in -- what goes into the SOURCE distribution (sdist) beyond the .py files.
+#
+# The wheel gets the runtime data via setup.py's package_data (see there); this file makes sure the same data,
+# the license, and the readme also land in the sdist tarball. Kept small and explicit -- readable over clever.
+
+include README.md
+include LICENSE
+include requirements.txt
+
+# the runtime data package (the vendored dictionary + material property JSON the engine reads at runtime)
+recursive-include lecore_data *

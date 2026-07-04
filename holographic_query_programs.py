@@ -1,5 +1,8 @@
 """holographic_query_programs.py -- VSA PROGRAMS AS DATABASE OBJECTS (query backlog PR1-PR6).
 
+SUPERSEDED BY holographic_queryprog -- the wired version (it has the curated catalog home). This earlier implementation of the same
+backlog item is kept for its tests but is intentionally NOT wired into any pipeline; use holographic_queryprog instead.
+
 Stored procedures, VSA-native: a catalog of installed programs you can query, an "install" that registers a program
 with the semantic metadata it needs to be self-discoverable, and the ability to RUN a program over data -- all from
 the database interface. In DB terms this is pg_proc-style stored procedures / UDFs, where the "procedure" is a

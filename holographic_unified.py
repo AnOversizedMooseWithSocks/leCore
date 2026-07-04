@@ -181,6 +181,33 @@ class UnifiedMind:
                 out.append((w, float(wv @ ov / ((np.linalg.norm(wv) * np.linalg.norm(ov)) + 1e-12))))
         return sorted(out, key=lambda t: -t[1])[:k]
 
+    def lookup(self, word):
+        """Look a word up in the VENDORED DICTIONARY (~144k English words): its definition, part of speech, synonyms,
+        an example, and its 'is a kind of' parent. This is real world-knowledge the engine carries with it -- distinct
+        from define(), which returns nearest words by LEARNED meaning. Returns None for an unknown word.
+        See holographic_dictionary."""
+        import holographic_dictionary as _dict
+        return _dict.entry(word)
+
+    def word_taxonomy(self, word):
+        """The 'what kind of thing is this?' chain from the vendored dictionary's taxonomy: e.g. 'dog' -> ['domestic
+        animal', 'animal', 'organism', ... 'entity']. Contextual grounding straight from the dictionary's is_a
+        hierarchy. See holographic_dictionary.hypernym_chain."""
+        import holographic_dictionary as _dict
+        return _dict.hypernym_chain(word)
+
+    def dictionary_size(self):
+        """How many words the vendored dictionary holds (and its source/license via .manifest())."""
+        import holographic_dictionary as _dict
+        return _dict.size()
+
+    def learn_vocabulary(self, vocab, iters=3, alpha=0.7):
+        """Bootstrap the mind's word meanings from the VENDORED DICTIONARY over a given vocabulary: builds the
+        {word: [definition words]} map from real definitions and runs learn_dictionary on it. So instead of supplying
+        your own dictionary, the mind can learn meaning from the batteries-included one. Returns self."""
+        import holographic_dictionary as _dict
+        return self.learn_dictionary(_dict.definition_map(vocab), iters=iters, alpha=alpha)
+
     def learn_encyclopedia(self, facts, maintain=True):
         """LANGUAGE CURRICULUM, layer 3 -- learn RELATIONAL knowledge (an
         encyclopedia) natively, by absorbing each concept as a role-bound record
@@ -361,6 +388,25 @@ class UnifiedMind:
         system; the memory and the brain never encode anything themselves."""
         return self.encoder.encode(x, modality)
 
+    def hypervector(self, x, modality=None, tag=None):
+        """The same encode, but returned as a first-class Hypervector (consolidation D1): the raw array plus its
+        dim / encoder / tag, with the five verbs (bind/unbind/bundle/cleanup/permute) as methods. The encoder is the
+        'constructor'; the raw array stays one attribute away (.array / np.asarray(hv)). See holographic_hypervector.
+        """
+        from holographic_hypervector import Hypervector
+        return Hypervector(self.encoder.encode(x, modality), encoder=self.encoder,
+                           tag=tag if tag is not None else repr(x)[:40])
+
+    def adaptive_record(self, expected_pairs, exact=False, max_numbers=None, seed=0):
+        """A role->filler memory whose representation is GATED BY LOAD and FIDELITY NEED (the FHRR/tensor re-enables):
+        cheap real-HRR at low load, FHRR phasors past the capacity knee, or tensor-product binding for EXACT recall
+        (perfect to M~dim, at dim*dim storage) when `exact=True` and the D*D budget fits `max_numbers`. Uniform
+        add/recall. The deciders are exact integers/flags, and there is no harm mode on recall (FHRR >= real-HRR,
+        tensor is exact in-regime), so the gate just avoids paying for capacity until it's worth it. See
+        holographic_loadmemory."""
+        from holographic_loadmemory import AdaptiveRoleFillerMemory
+        return AdaptiveRoleFillerMemory(self.encoder.dim, expected_pairs, exact=exact, max_numbers=max_numbers, seed=seed)
+
     # -- axial perception (orientation-like values; holographic_mobius via the encoder) ----
     # An AXIAL value is one where theta and theta+pi mean the SAME thing -- the orientation of an
     # unoriented line, a director field, a crystal axis. modality="axial" encodes it on the Mobius
@@ -383,6 +429,14 @@ class UnifiedMind:
 
     # -- one memory: classification + organization -------------------------
     def learn(self, x, label, modality=None):
+        """Learn one labelled example NATIVELY -- the base learning verb the whole curriculum is built on. Perceives
+        `x` into a hypervector and folds it into memory under `label` two ways: as a self-organized PROTOTYPE (for
+        classification) and as an individual kept for exact RECALL. `modality` ('text' / 'image' / 'record' / ...) is
+        INFERRED from `x` when left None, so the tag recorded always matches the encoding actually used. For a `record`
+        (a {role: filler} dict) it also registers the fillers seen per role -- the cleanup vocabulary that lets the
+        mind later read roles back out by unbinding. Returns self (chainable). Specializations: learn_text,
+        learn_dictionary, learn_sequence, learn_encyclopedia.
+        """
         # SELF-DISCOVERY: if the caller does not name the modality, the encoder
         # infers it from the input itself (encoder.infer is the single source of
         # truth, so the tag recorded here always matches the encoding used).
@@ -1625,6 +1679,10 @@ class UnifiedMind:
         return self._actions[a], float(null.pvalue(float(sup)))
 
     def reinforce(self, state, action, reward, modality=None):
+        """Reinforcement-learning update: teach the decision brain that taking `action` in `state` earned `reward`.
+        Perceives `state` into a hypervector (modality inferred when None), then records the (state, action, reward)
+        experience so future decide()/act() calls prefer higher-reward actions in similar states. `action` must be one
+        the mind already knows (see self._actions). Returns self (chainable), so you can stream experiences."""
         s = self.perceive(state, modality)
         self._brain.remember([s], [self._actions.index(action)], [float(reward)])
         return self
@@ -1697,6 +1755,11 @@ class UnifiedMind:
         return gens[compression_gate(seed_text, gated)[0][1]]
 
     def next_symbol(self, context, name=None):
+        """Predict the next symbol (character) that should follow `context`, using a learned FLAT n-gram sequence
+        schema. `name` selects among several learned schemas (defaults to the one matching the context). Returns the
+        single most likely next character. Requires a flat engine -- train one with
+        learn_sequence(text, hierarchical=False); raises RuntimeError if the selected schema is the hierarchical
+        (fractal) kind, which decodes its own way. For whole continuations rather than one step, use generate()."""
         g = self._pick_gen(name, context)
         if g["kind"] != "flat":
             raise RuntimeError("next_symbol needs the flat engine: learn_sequence(text, hierarchical=False)")
@@ -2927,8 +2990,8 @@ class UnifiedMind:
         (residual hits the noise floor) to avoid amplifying noise -- the kept negative is that running past that
         over-sharpens, and an over-large `lam` diverges into ringing. Data-type-agnostic: the partner to the
         splat negative-lobe sharpening, for any smeared signal."""
-        from holographic_sharpen import sharpen_loop
-        return sharpen_loop(np.asarray(x, float), blur=blur, sigma=sigma, lam=lam, iters=iters, noise_level=noise_level)
+        from holographic_denoisehome import Denoise                    # the Denoise home (consolidation R5)
+        return Denoise.sharpen(np.asarray(x, float), blur=blur, sigma=sigma, lam=lam, iters=iters, noise_level=noise_level)
 
     def smooth_sharp_split(self, x, k_smooth, k_sharp):
         """Split a signal into a SMOOTH layer (its k_smooth lowest-frequency coefficients) and a SHARP layer (the
@@ -4031,8 +4094,8 @@ class UnifiedMind:
         measurably tighter coverage than default_rng -- a quasi-Monte-Carlo integrator with far lower error
         than plain MC at equal count. Use default_rng where genuine independence is wanted (these points are
         correlated by construction). `seed` defaults to the mind's seed."""
-        from holographic_lowdiscrepancy import low_discrepancy
-        return low_discrepancy(n, d, self.seed if seed is None else seed)
+        from holographic_samplinghome import Sampling                 # via the Sampling home (consolidation R4)
+        return Sampling.low_discrepancy(n, d=d, seed=self.seed if seed is None else seed)
 
     def generate_vector(self, codebook, steps=12, beta0=4.0, beta1=40.0, noise0=0.6, seed=None,
                         readout="softmax"):
@@ -4805,6 +4868,133 @@ class UnifiedMind:
         return path_trace(sdf, camera, width=width, height=height, spp=spp, max_bounce=max_bounce,
                           material=material, sky=sky, seed=seed)
 
+    def render_auto(self, sdf, camera, width=96, height=96, material=None, sky=None, quality="high",
+                    max_bounce=4, seed=0, return_stats=False, **kw):
+        """AUTO-CALIBRATING render -- one quality knob, no per-scene spp or denoise tuning. It wires together
+        machinery the engine already had but never connected into a render loop: it samples in PASSES and, after
+        each, asks the calibrated stop rule (holographic_adaptive_sample.converged_mask) which pixels have reached
+        the target confidence interval -- those STOP, the rest keep sampling (path_trace's `active` mask) -- so
+        hard pixels (glass, silhouettes, grazing reflections) automatically get more samples than flat regions.
+        It then denoises with a VARIANCE-GUIDED SVGF whose per-pixel strength is set by the variance the sampler
+        measured, so residual grain is smoothed and converged detail is preserved. `quality` is a target CI
+        half-width (name 'draft'/'medium'/'high'/'ultra' or a float). MEASURED: at equal average sample budget it
+        beats a raw path trace at draft/medium and ties near convergence at high (denoise stops mattering once a
+        pixel is already converged -- the documented crossover). See holographic_gbuffer.render_auto."""
+        from holographic_gbuffer import render_auto
+        return render_auto(sdf, camera, width, height, material, sky=sky, quality=quality,
+                           max_bounce=max_bounce, seed=seed, return_stats=return_stats, **kw)
+
+    def render_scene_document(self, scene, camera, width=96, height=72, quality="medium", max_bounce=4,
+                              seed=0, sky=None, default_material="matte_gray", return_stats=False, sss_dir=None,
+                              sss_depth=0.6, sss_sigma=4.0, lights=None, dome_cache=False, demodulate=False, soft_light_cache=False,
+                              indirect_cache=False):
+        """Render the canonical SCENE DOCUMENT (holographic_scene_doc.Scene) -- the 'a modeling app builds a
+        document, then renders it' path. The document is a table of objects (each a stable handle + transform +
+        SDF geometry + library material); this flattens it to ONE scene SDF (nearest-object distance) plus a
+        material_fn that shades each hit with its owning object's material, then renders with render_auto. So the
+        renderer consumes the authoritative scene instead of a hand-built Python class per scene (backlog H7).
+        `sss_dir` (a light direction) turns on the SUBSURFACE glow for translucent materials (wax/jade/skin).
+        `dome_cache` (default off) serves any DomeLight via the cheap cached-dome pass (holographic_domecache)
+        instead of ray-traced ambient occlusion. `demodulate` (default off) denoises by dividing the albedo out
+        (holographic_modulate, M4) -- cleaner on textured diffuse surfaces. See
+        holographic_scene_render.render_scene_document."""
+        from holographic_scene_render import render_scene_document
+        return render_scene_document(scene, camera, width=width, height=height, quality=quality,
+                                     max_bounce=max_bounce, seed=seed, sky=sky,
+                                     default_material=default_material, return_stats=return_stats, sss_dir=sss_dir,
+                                     sss_depth=sss_depth, sss_sigma=sss_sigma, lights=lights, dome_cache=dome_cache,
+                                     demodulate=demodulate, soft_light_cache=soft_light_cache,
+                                     indirect_cache=indirect_cache)
+
+    def bake(self, evaluator, vary="position", **kw):
+        """CONSOLIDATION CACHE (H2) -- bake a slow `evaluator` over the thing that VARIES, then look it up cheaply.
+        vary='position' (kw: lo, hi, res) returns a BakedGrid with .sample(points); 'constant' computes once; 'view'
+        and 'time' delegate to the BRDF LUT / frame bakes. See holographic_cachehome.Cache."""
+        from holographic_cachehome import Cache
+        return Cache.bake(evaluator, vary=vary, **kw)
+
+    def build_index(self, vectors, labels=None, method="auto", seed=0):
+        """CONSOLIDATION INDEX (H1) -- build a nearest-neighbour index over `vectors` with one interface: an exact
+        cosine scan for small sets, the sub-linear RP-forest for large ones (chosen by `method='auto'`). The result
+        has `.nearest(query, k, abstain=alpha)` -> [(label_or_index, score), ...], with an optional calibrated
+        abstain. See holographic_index.Index."""
+        from holographic_index import Index
+        return Index(vectors, labels=labels, method=method, seed=seed)
+
+    def find_capability(self, problem, k=3):
+        """CONSOLIDATION CATALOG (C1) -- 'search before you build'. Describe a problem in plain English and get the
+        engine homes that already solve it, best first, so you don't build a duplicate. The catalog is seeded with
+        the consolidation homes (Index/Cache/Field/...) AND this mind's own public faculties (their docstrings), so
+        both curated homes and live methods are findable. Returns a list of holographic_catalog.Capability (each has
+        .name, .does, .example, .native). See holographic_catalog."""
+        return self._capability_catalog().find_capability(problem, k=k)
+
+    def suggest(self, task, k=5):
+        """AGENT-FRIENDLY autocomplete: turn a plain-English task into the best capabilities to use, each with a
+        CONFIDENCE (0..1) and the concrete call to make. Like find_capability, but scored + call-ready so an agent (or
+        a person) can decide what to invoke. See holographic_skills.suggest."""
+        import holographic_skills as _sk
+        return _sk.suggest(task, k=k)
+
+    def route(self, task):
+        """AGENT-FRIENDLY decision node: when one skill clearly wins, returns {'decision':'act', 'skill':..., 'call'}
+        so the agent just does it; when it's ambiguous, returns {'decision':'choose', 'options':[...]} so it asks
+        instead of guessing. 'Act when confident, ask when not', score-based. See holographic_skills.route."""
+        import holographic_skills as _sk
+        return _sk.route(task)
+
+    def describe_skill(self, name):
+        """A machine-readable SKILL CARD for a capability or a UnifiedMind method by name: what it does + how to CALL
+        it (real signature for methods). The 'skill description' an agent reads before invoking. See holographic_skills."""
+        import holographic_skills as _sk
+        return _sk.skill_card(name)
+
+    def complete_method(self, prefix, k=15):
+        """Method-name AUTOCOMPLETE: this mind's methods starting with `prefix`, each with its signature -- what an
+        agent (or an IDE) offers while constructing a `mind.<prefix...` call. See holographic_skills.complete."""
+        import holographic_skills as _sk
+        return _sk.complete(prefix, k=k)
+
+    def skills(self, include_methods=True):
+        """The full machine-readable SKILL MANIFEST: every curated capability home plus every public method (with its
+        signature). What an agent loads ONCE to know the whole surface it can drive. See holographic_skills.manifest."""
+        import holographic_skills as _sk
+        return _sk.manifest(include_methods=include_methods)
+
+    def _capability_catalog(self):
+        """Lazily build (once) and cache the capability catalog: the curated homes + this mind's faculties + EVERY
+        engine module (by docstring), so a problem description can surface anything built -- nothing stays buried."""
+        cat = getattr(self, "_catalog_cache", None)
+        if cat is None:
+            from holographic_catalog import default_catalog, seed_from_mind, seed_from_modules
+            cat = seed_from_modules(seed_from_mind(default_catalog(), self))
+            self._catalog_cache = cat
+        return cat
+
+    def register_capability(self, name, does, example="", native=True, aliases=()):
+        """Register a capability in the catalog so future `find_capability` calls surface it (backlog C1: as each
+        consolidation home lands, register it here). Additive; returns the entry."""
+        return self._capability_catalog().register_capability(name, does, example=example, native=native,
+                                                              aliases=aliases)
+
+    def scene_to_render(self, scene, default_material="matte_gray"):
+        """Flatten a Scene document to (sdf, material_fn) for the path tracer, without rendering -- the bridge
+        render_scene_document uses. Useful when you want the scene's SDF/material to hand to a custom render
+        (dispersion, caustics, a preview session). See holographic_scene_render.scene_to_render."""
+        from holographic_scene_render import scene_to_render
+        return scene_to_render(scene, default_material=default_material)
+
+    def render_demodulated_upscale(self, sdf, camera, low_wh, high_wh, material_fn, sky=None, quality="medium",
+                                   max_bounce=3, seed=0, lights=None):
+        """M5 -- render a HIGH-resolution frame at LOW-resolution lighting cost. Render the expensive lighting at
+        `low_wh`=(w,h), read the cheap high-res G-buffer at `high_wh`, and combine by demodulation: upscale the
+        smooth irradiance, multiply the crisp high-res albedo back (holographic_modulate). ~2.6x faster than a full
+        high-res render and cleaner than a plain upscale ON TEXTURED surfaces (the detail lives in the albedo).
+        Kept negative: neutral on uniform-albedo (no texture to restore); diffuse only."""
+        from holographic_modulate import render_demodulated_upscale
+        return render_demodulated_upscale(sdf, camera, low_wh, high_wh, material_fn, sky=sky, quality=quality,
+                                          max_bounce=max_bounce, seed=seed, lights=lights)
+
     def fluid_solver(self, shape, **kwargs):
         """A grid-based STABLE-FLUIDS solver (Stam 1999) for smoke, buoyant plumes, and combustion/FIRE -- the
         method professional smoke engines (Houdini, Bifrost Aero) are built on. Incompressibility is enforced by
@@ -5136,8 +5326,8 @@ class UnifiedMind:
         The exclusion principle done right -- nearly matches adaptive matching-pursuit placement and beats random
         by ~3 dB on a fixed-budget splat fit, and is the gold standard for stippling / particle init / Monte
         Carlo. `bounds`=(min,max), any dimension. See holographic_sampling.poisson_disk_sample."""
-        from holographic_sampling import poisson_disk_sample
-        return poisson_disk_sample(radius, bounds, k=k, seed=seed)
+        from holographic_samplinghome import Sampling                 # via the Sampling home (consolidation R4)
+        return Sampling.poisson_disk(radius, bounds, k=k, seed=seed)
 
     def sample_field(self, field, positions):
         """Read a grid field at continuous particle positions (bilinear, periodic) -- how particles feel a
@@ -5860,19 +6050,16 @@ class UnifiedMind:
         superposition -- forces, fields, radiance, densities), 'min' (SDF union), 'max' (occupancy), 'bundle' (VSA
         scene/memory), or a callable. Runs in-process here (no speedup claimed); it builds the STRUCTURE that makes
         distribution correct. Returns (result, info). See holographic_distribute."""
-        from holographic_distribute import distribute, reduce_sum, reduce_min, reduce_max, reduce_bundle, reduce_sum_exact
-        table = {"sum": reduce_sum, "min": reduce_min, "max": reduce_max, "bundle": reduce_bundle, "exact": reduce_sum_exact}
-        red = table.get(reduce, reduce) if isinstance(reduce, str) else reduce
-        return distribute(buckets, worker, reduce=red, cache=cache)
+        from holographic_scalehome import Scale                      # the Scale home (consolidation H3)
+        return Scale.map_reduce(buckets, worker, reduce=reduce, cache=cache)
 
     def partition_domain(self, n, k, costs=None):
         """Decompose a domain of n items into k disjoint buckets for distribution. With `costs` (a per-item work
         estimate) it LOAD-BALANCES -- heaviest-first onto the lightest bucket -- so the slowest bucket, which bounds a
         farm's wall-time, is minimised (adaptive bucket sizing). Returns a list of index arrays. See
         holographic_distribute.partition / adaptive_partition."""
-        from holographic_distribute import partition, adaptive_partition
-        import numpy as np
-        return adaptive_partition(np.asarray(costs, float), k) if costs is not None else partition(n, k)
+        from holographic_scalehome import Scale                      # the Scale home (consolidation H3)
+        return Scale.partition(n, k, costs=costs)
 
     def partition_grid(self, shape, blocks):
         """Decompose a 2D image/field (shape=(H,W)) into TILES or a 3D volume/grid (shape=(X,Y,Z)) into BRICKS -- the
@@ -5880,16 +6067,16 @@ class UnifiedMind:
         slice-tuples covering the domain disjointly; each is an independent bucket (a separate VM/node), and a 3D brick
         with no surface can be skipped (sparse volumes). Also the cache-blocking layout -- a tile/brick sized to a
         working budget streams through a fast cache level. See holographic_distribute.partition_2d / partition_3d."""
-        from holographic_distribute import partition_2d, partition_3d
-        return partition_3d(shape, blocks) if len(shape) == 3 else partition_2d(shape, blocks)
+        from holographic_scalehome import Scale                      # the Scale home (consolidation H3)
+        return Scale.tiles(shape, blocks)
 
     def distribute_bricks(self, out_shape, regions, worker, cache=None, fill=0.0, skip=None):
         """Run `worker(region, cache)` on each tile/brick and PLACE its result at that region -- disjoint, so
         order-independent and seamless (the shared read-only cache makes borders agree). `skip(region)->bool` drops
         EMPTY bricks (sparse volumes: most of a volume is empty space -- the real speed win of bricking 3D, beyond
         parallelism). Returns (out, info) with the ran/skipped counts. See holographic_distribute.distribute_bricks."""
-        from holographic_distribute import distribute_bricks
-        return distribute_bricks(out_shape, regions, worker, cache=cache, fill=fill, skip=skip)
+        from holographic_scalehome import Scale                      # the Scale home (consolidation H3)
+        return Scale.bricks(out_shape, regions, worker, cache=cache, fill=fill, skip=skip)
 
     def surface_material(self, name=None, color=(0.7, 0.7, 0.7), **channels):
         """The FIRST-CLASS render material: every channel (color, roughness, reflect, emission, opacity) is a Param
@@ -5916,21 +6103,21 @@ class UnifiedMind:
         """Fill 1 (residency): a content-addressed cache of atom -> rfft(atom), so binds/unbinds against KNOWN
         atoms skip the forward transform. Bit-identical to recompute. Pass it to `fuse`/`run_scheduled` to make
         their leaf transforms free for known atoms. See holographic_residency.SpectrumCache."""
-        from holographic_residency import SpectrumCache
-        return SpectrumCache(max_items=max_items)
+        from holographic_memoryhome import Memory                # the Memory home (consolidation H6)
+        return Memory.spectrum_cache(max_items=max_items)
 
     def fuse_record(self, keys, values, spectrum_cache=None):
         """Fill 2 (spectral fusion): build a role/filler record -- bundle([bind(k_i, v_i)]) -- in ONE fused FFT
         pass (leaves+1 transforms instead of ~3*len), equal to the op-by-op result to ~1e-15. THROUGHPUT path:
         tie-sensitive encoders (the maze-rescue path) must NOT use this. See holographic_fuse."""
-        from holographic_fuse import fuse_record
-        return fuse_record(keys, values, spectrum_cache=spectrum_cache)
+        from holographic_computehome import Compute                  # the Compute home (consolidation H7)
+        return Compute.fuse_record(keys, values, spectrum_cache=spectrum_cache)
 
     def fuse_expression(self, expr, spectrum_cache=None):
         """Fill 2: evaluate a five-op (bind/unbind/bundle/permute) expression tree in the FFT domain -- one
         transform per leaf, one out. Build `expr` with holographic_fuse.{leaf,fbind,funbind,fbundle,fpermute}."""
-        from holographic_fuse import fuse
-        return fuse(expr, spectrum_cache=spectrum_cache)
+        from holographic_computehome import Compute                  # the Compute home (consolidation H7)
+        return Compute.fuse(expr, spectrum_cache=spectrum_cache)
 
     def superpose_batch(self, keys, items, gated=True):
         """Fill 3 (auto-superposition + spill): pack N independent keyed items into the FEWEST superposed vectors
@@ -6061,6 +6248,19 @@ class UnifiedMind:
         (0 = a perfect match). See holographic_imagecompare.perceptual_distance."""
         from holographic_imagecompare import perceptual_distance
         return perceptual_distance(x, y, **kw)
+
+    def recolor_image(self, image, reference, mode="covariance", strength=1.0):
+        """2D EDIT -- grade an image toward another image's COLOUR statistics (a colour-transfer / recolour). `mode`
+        'meanstd' matches per-channel mean+std, 'covariance' does full whitening/colouring; `strength` blends
+        0->original .. 1->full transfer. Returns an image the same shape as the input. See holographic_colortransfer."""
+        from holographic_colortransfer import color_transfer
+        return color_transfer(image, reference, mode=mode, strength=strength)
+
+    def blend_images(self, image_a, image_b, steps=21):
+        """2D GENERATE -- a crossfade/morph sequence between two images (the midpoint is the 0.5*a+0.5*b double
+        exposure). Returns `steps` frames from a to b. See holographic_generate.crossfade_images."""
+        from holographic_generate import crossfade_images
+        return crossfade_images(image_a, image_b, steps=steps)
 
     def auto_displace(self, mesh, rgb, amount=0.1, sigma=4.0, min_confidence=0.02):
         """Inverse-rendering IR5: promote an auto-bump height (IR1) from a shading bump to REAL geometry -- move a
@@ -6423,8 +6623,8 @@ class UnifiedMind:
         beats a plain blur measurably (kept negative: it denoises, it can't add detail). The sibling render pieces
         already exist -- robust_accumulate (firefly clamp), SPRTRecall (adaptive sampling), TemporalReuse
         (reproject). See holographic_svgf."""
-        from holographic_svgf import atrous_bilateral
-        return atrous_bilateral(image, normal, albedo, depth, levels=levels, **kw)
+        from holographic_denoisehome import Denoise                    # the Denoise home (consolidation R5)
+        return Denoise.image(image, normal, albedo, depth, method="svgf", levels=levels, **kw)
 
     def forecast(self, series, d=20, alpha=0.1, abstain_width=None, seed=0):
         """Forecasting backlog (F3): the "forecast any data" door. Routes a 1-D series to the producer that
@@ -7013,6 +7213,46 @@ class UnifiedMind:
             near = [n for n in MATERIALS if name.split("_")[0] in n][:6]
             raise KeyError("unknown material %r%s" % (name, (" -- did you mean: %s" % near) if near else ""))
         return dict(MATERIALS[name])
+
+    def material_info(self, name):
+        """EVERYTHING the engine knows about a named material in one view: its RENDER appearance (PBR: base colour,
+        metallic, roughness, ior, class -- if it's a preset) AND its PHYSICAL properties (density, refractive index,
+        viscosity, Young's modulus, sound speed, specific heat, phase -- if defined). This bridges the two material
+        libraries so 'tell me about gold' returns both how it LOOKS (for rendering) and how it BEHAVES (for science).
+        See holographic_materialindex.material_info."""
+        import holographic_materialindex as _mi
+        return _mi.material_info(name)
+
+    def find_materials(self, query, k=10):
+        """Discover materials across BOTH libraries (render presets + physical definitions) by plain-English keywords
+        -- name, render class (metal/gem/liquid/...), or phase. Returns matches with which library each lives in.
+        See holographic_materialindex.find_materials."""
+        import holographic_materialindex as _mi
+        return _mi.find_materials(query, k=k)
+
+    def materials(self):
+        """The whole material roster: every material with which library it lives in, plus a summary (counts by render
+        class, physical count, overlap). The 'what materials do we have?' entry point. See holographic_materialindex."""
+        import holographic_materialindex as _mi
+        return {"summary": _mi.summary(), "materials": _mi.all_materials()}
+
+    def material_units(self):
+        """The units of the physical properties (density -> kg/m^3, youngs -> GPa, ...) -- so a returned value is
+        self-describing for a scientist. See holographic_materialindex.physical_units."""
+        import holographic_materialindex as _mi
+        return _mi.physical_units()
+
+    def materials_by_category(self, category):
+        """The physical materials in a category (metal / liquid / gas / polymer / ceramic / glass / mineral / stone /
+        wood / biological / building / semiconductor). See holographic_materialindex.physical_by_category."""
+        import holographic_materialindex as _mi
+        return _mi.physical_by_category(category)
+
+    def validate_materials(self):
+        """Plausibility-check the physical material database (units, ranges, category/phase). Empty list = clean --
+        the honest self-audit of the library. See holographic_materialindex.validate_physical."""
+        import holographic_materialindex as _mi
+        return _mi.validate_physical()
 
     def resolve_scenario(self, description):
         """Turn a physical description ('a block of wood floating in water', 'a steel ball sinking in oil') into a
@@ -7929,6 +8169,22 @@ class UnifiedMind:
         general language model (see the module SCOPE note)."""
         from holographic_semantic import parse_description
         return parse_description(text)
+
+    def build_scene(self, text):
+        """DESCRIBE a scene in plain words and get back a LIVE, adjustable scene the system built for you -- a
+        SemanticScene of NAMED objects plus the environment. Then talk to it: scene.adjust('make the sphere bigger'),
+        scene.render(), scene.simulate(), scene.describe(). The one-call 'describe it and let the engine create it'
+        entry point; controlled-vocabulary + deterministic (see holographic_scene_semantic)."""
+        from holographic_scene_semantic import scene_from_description
+        return scene_from_description(text, mind=self)
+
+    def semantic_scene(self, objects, environment=None):
+        """Wrap an EXISTING list of scene objects ({shape,color,material,size,...}) as a SemanticScene so you can
+        reference its named objects and adjust them in words -- scene.set('the red sphere', material='glass'),
+        scene.adjust('make everything matte'). For starting from a scene you already have rather than a description.
+        See holographic_scene_semantic.SemanticScene."""
+        from holographic_scene_semantic import SemanticScene
+        return SemanticScene(objects, environment=environment, mind=self)
 
     def encode_scene(self, objects):
         """Encode parsed objects into ONE composable scene hypervector: superpose bind(OBJ_i, record_i). Returns
@@ -8883,6 +9139,10 @@ class UnifiedMind:
         return choice
 
     def describe(self):
+        """A human-readable one-line summary of what this mind currently HOLDS: how many memory prototypes over how
+        many labels, the size of the recall index, the decision brain and its action set, and any learned sequence
+        generators. Takes no arguments and returns a string -- handy for logging or a quick 'what do you know?' check.
+        (For a machine-readable skill card of a method or capability, use describe_skill(name) instead.)"""
         parts = [f"memory of {self.memory.live.size()} prototypes over "
                  f"{len(self.memory.live.counts_by_label())} labels"]
         if self._recall is not None:
