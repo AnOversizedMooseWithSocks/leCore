@@ -10430,3 +10430,274 @@ def test_deform_rig_through_mind(tmp_path):
     posed = m.deform_mesh(lm, clip=lm.animations[0], t=1.0)    # posed at t=1
     assert np.allclose(posed.vertices - rest.vertices, [0, 2, 0], atol=1e-4)
     assert any("import artist file" in c.name.lower() for c in m.find_capability("deform a rigged model with skinning"))
+
+
+def test_opponent_and_refine_through_mind():
+    """Composability keystone: two estimates decompose via mind.opponent_channels (leOS-compatible opponent channels),
+    and mind.refine drives a noisy vector to agree with a trusted reference using that agreement as the critic -- both
+    through the one mind."""
+    import numpy as np
+    m = UnifiedMind(dim=512, seed=0)
+    rng = np.random.default_rng(0)
+
+    # two estimates that nearly match -> small divergence, act on the agreement
+    truth = rng.standard_normal(512); truth /= np.linalg.norm(truth)
+    close = truth + 0.01 * rng.standard_normal(512)
+    ch = m.opponent_channels(truth, close)
+    assert ch["divergence_score"] < 0.3 and ch["cosine_similarity"] > 0.9
+    assert np.allclose(ch["purple"], ch["a_exclusive"] + ch["b_exclusive"])   # the leOS purple identity, via the mind
+
+    # a stranger -> large divergence, surface the conflict (don't merge)
+    outlier = rng.standard_normal(512)
+    ch2 = m.opponent_channels(truth, outlier)
+    assert ch2["divergence_score"] > 0.5
+
+    # refine a noisy vector toward the reference, critic = opponent agreement (cosine)
+    from holographic_refine import opponent_critic
+    noisy = truth + 1.5 * rng.standard_normal(512)
+    log = m.refine(produce=lambda: noisy,
+                   critique=opponent_critic(truth),
+                   adjust=lambda v, s: 0.5 * (v / np.linalg.norm(v)) + 0.5 * truth,
+                   accept=0.9, budget=12)
+    assert log["accepted"] and log["tries"] >= 1
+
+    assert any("opponent" in c.name.lower() for c in m.find_capability("combine two estimates"))
+
+
+def test_tool_interface_both_directions_through_mind():
+    """Layer 1 anti-silo: leCore AS a tool (round-trip a /invoke over the in-process service) and leCore USING tools
+    (orchestrator registers a remote-style tool + a shell command; attach_llm wires an LLM as a refine critic)."""
+    import numpy as np
+    from holographic_service import Service
+    m = UnifiedMind(dim=256, seed=0)
+
+    # --- leCore AS a tool: GET /tools lists faculties; POST /invoke runs one, over the in-process service ---
+    svc = Service()
+    manifest = svc.dispatch("GET", "/tools", None)[1]
+    assert manifest["ok"] and manifest["count"] > 100
+    names = {t["name"] for t in manifest["tools"]}
+    assert "opponent_channels" in names and "refine" in names
+    inv = svc.dispatch("POST", "/invoke",
+                       {"name": "opponent_channels", "args": {"vec_a": [1, 0, 0], "vec_b": [0, 1, 0]}})[1]
+    assert inv["ok"] and inv["result"]["channel_magnitudes"]["purple"] > 1.0   # numpy result serialized
+    assert not svc.dispatch("POST", "/invoke", {"name": "_private", "args": {}})[1]["ok"]  # private refused
+
+    # --- leCore USING tools: register a callable tool + an allowlisted shell command in the orchestrator ---
+    class _Doubler:
+        name = "double"; description = "double the input"
+        def run(self, v): return v * 2
+    m.orchestrator.register(_Doubler())
+    m.orchestrator.register_command("shout", ["echo", "LOUD:"], allow=True)
+    assert set(["double", "shout"]).issubset(set(m.orchestrator.tools()))
+    shout = [t for t in m.orchestrator.registry.tools if t.name == "shout"][0]
+    assert shout.fn("hi").strip() == "LOUD: hi"
+
+    # --- attach an LLM (a plain callable) and use it AS a refine critic (ties L1 + L2 together) ---
+    bridge = m.attach_llm(lambda text: "reply:" + text, name="critic")
+    assert bridge.llm("x") == "reply:x" and bridge.bus is m.bus()
+    # a toy refine: an LLM-style critic scores a string by length until it's long enough
+    log = m.refine(produce=lambda: "a",
+                   critique=lambda s: min(len(s) / 5.0, 1.0),
+                   adjust=lambda s, sc: s + "a", accept=1.0, budget=10)
+    assert log["accepted"] and log["result"] == "aaaaa"
+
+    assert any("tool" in c.name.lower() for c in m.find_capability("expose leCore as a tool over http"))
+
+
+def test_principals_isolated_through_mind():
+    """Layer 5 anti-silo: three principals from the one mind message point-to-point and see only their own inbox and
+    namespace; provenance tags trace each contribution to its principal."""
+    import numpy as np
+    m = UnifiedMind(dim=512, seed=0)
+    alice = m.principal("alice", workspace="lab", kind="user")
+    bob = m.principal("bob", workspace="lab", kind="user")
+    carol = m.principal("carol", workspace="lab", kind="agent")
+
+    # distinct private namespaces; own-namespace writes only
+    assert len({alice.namespace_name, bob.namespace_name, carol.namespace_name}) == 3
+    assert alice.can_write(alice.namespace_name) and not alice.can_write(bob.namespace_name)
+
+    # directed messaging: alice -> bob, only bob sees it, stamped from alice
+    alice.send(m.bus(), to="bob", payload={"hello": "bob"})
+    got = bob.poll(m.bus())
+    assert len(got) == 1 and got[0].sender == "alice"
+    assert alice.poll(m.bus()) == [] and carol.poll(m.bus()) == []
+
+    # provenance: bob's tag recovers under bob's role, not carol's
+    from holographic_provenance import of_source
+    v = np.random.default_rng(0).standard_normal(512); v /= np.linalg.norm(v)
+    tagged = bob.tag(v)
+    cg = float(np.dot(of_source(tagged, "bob", 512), v))
+    cc = float(np.dot(of_source(tagged, "carol", 512), v))
+    assert cg > 0.5 and cg > 2 * abs(cc)
+
+    assert any("principal" in c.name.lower() or "identity" in c.name.lower()
+               for c in m.find_capability("scoped identity per user"))
+
+
+def test_fork_merge_multiplayer_through_mind():
+    """Layer 6 anti-silo: two principals fork a shared world, diverge one slot and agree on another; merge_forks
+    auto-merges the agreement and surfaces exactly the conflict -- all through the one mind."""
+    import numpy as np
+    m = UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+    shared = rng.standard_normal(256); shared /= np.linalg.norm(shared)
+
+    alice = m.principal("alice", workspace="lab", kind="user")
+    bob = m.principal("bob", workspace="lab", kind="user")
+    assert alice.namespace_name != bob.namespace_name
+
+    # both nudge 'ground' the same way (agree); they set 'sky' very differently (conflict)
+    alice_delta = {"ground": shared + 0.003 * rng.standard_normal(256), "sky": rng.standard_normal(256)}
+    bob_delta = {"ground": shared + 0.003 * rng.standard_normal(256), "sky": rng.standard_normal(256)}
+
+    res = m.merge_forks([alice_delta, bob_delta], policy="select")
+    assert "ground" in res["merged"]                       # agreement auto-merged
+    assert len(res["conflicts"]) == 1 and res["conflicts"][0][0] == "sky"   # real conflict surfaced
+
+    # 'auto' keeps only the agreement, drops the conflict
+    auto = m.merge_forks([alice_delta, bob_delta], policy="auto")
+    assert "ground" in auto["merged"] and "sky" not in auto["merged"] and not auto["conflicts"]
+
+    assert any("merge" in c.name.lower() or "fork" in c.name.lower()
+               for c in m.find_capability("merge two forked copies of a world"))
+
+
+def test_multiplayer_fork_edit_merge_apply_through_mind():
+    """Layer 6 end-to-end: two principals fork a shared world, edit in isolation, merge_forks reconciles, and
+    mind.apply writes the agreement back -- the full fork -> edit -> merge -> apply loop, all through the one mind."""
+    import numpy as np
+    m = UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+    ground = rng.standard_normal(256); ground /= np.linalg.norm(ground)
+
+    alice = m.principal("alice", workspace="lab", kind="user")
+    bob = m.principal("bob", workspace="lab", kind="user")
+    assert alice.namespace_name != bob.namespace_name
+
+    # a shared starting world; each forks it and edits in isolation
+    m.workspace.world("lab").set("ground", ground)
+    mine = m.workspace.fork("lab")
+    theirs = m.workspace.fork("lab")
+    assert "sky" not in m.workspace.world("lab").slots         # shared world untouched by forks
+
+    blue = rng.standard_normal(256)
+    mine.set("sky", blue)                                      # both agree on the sky
+    theirs.set("sky", blue + 0.002 * rng.standard_normal(256))
+    theirs.set("tree", rng.standard_normal(256))              # only theirs adds a tree
+
+    res = m.merge_forks([mine.delta, theirs.delta], policy="select")
+    assert "sky" in res["merged"] and "tree" in res["merged"] and not res["conflicts"]
+    changed = m.apply(res["merged"], world="lab")
+    assert "sky" in changed and "tree" in changed
+    assert "sky" in m.workspace.world("lab").slots            # the agreement is now in the shared world
+
+    assert any("fork" in c.name.lower() or "workspace" in c.name.lower()
+               for c in m.find_capability("fork a shared world and apply changes back"))
+
+
+def test_presence_and_access_control_through_mind():
+    """Layer 7 anti-silo: a host invites a guest with a specific read grant, the guest reads only what's shared (the
+    read chokepoint blocks the rest), the host shares/un-shares selectively, and the registry tracks who's online --
+    all through the one mind."""
+    from holographic_access import require_readable, AccessError
+    m = UnifiedMind(dim=128, seed=0)
+
+    # host admits a guest via an invite granting read to just 'lab/scene'
+    inv = m.invite(kind="user", grants={"read": ["lab/scene"]})
+    guest = m.admit(inv, "visitor", workspace="lab")
+    assert guest.kind == "user"
+    assert guest.can_read("lab/scene") and not guest.can_read("lab/notes")
+    assert guest.can_read(guest.namespace_name)             # own namespace always readable
+    assert not guest.can_write("ws:lab/user:someone_else")  # writes stay own-namespace-only
+
+    # the read chokepoint enforces it
+    require_readable(guest, "lab/scene")                    # no raise
+    try:
+        require_readable(guest, "lab/notes")
+        assert False, "should have blocked"
+    except AccessError:
+        pass
+
+    # share more, then stop sharing
+    m.grant(guest, read="lab/notes")
+    assert guest.can_read("lab/notes")
+    m.revoke(guest, read="lab/notes")
+    assert not guest.can_read("lab/notes")
+
+    # a spent single-use invite can't admit twice
+    try:
+        m.admit(inv, "gatecrasher")
+        assert False, "reused invite should fail"
+    except AccessError:
+        pass
+
+    # presence: the guest is online and discoverable; a second actor joins
+    assert m.registry.is_online(guest)
+    m.registry.announce(m.principal("agent1", workspace="lab", kind="agent"))
+    assert m.registry.count() >= 2 and m.registry.count(kind="agent") == 1
+
+    assert any("access" in c.name.lower() or "invite" in c.name.lower()
+               for c in m.find_capability("invite a guest and choose what to share"))
+
+
+def test_network_farm_through_mind():
+    """Layer 3 anti-silo: mind.farm(nodes) runs a partition-and-reduce job across a remote worker daemon and matches
+    the in-process result -- workers run by NAME (no code crosses the wire)."""
+    import threading, time
+    from http.server import HTTPServer
+    from holographic_coordinator import (Coordinator, InProcessBackend, WorkerNode,
+                                          _make_worker_handler, _sum_bucket)
+    from holographic_distribute import reduce_sum
+
+    node = WorkerNode(token="farm", workers={"sum": _sum_bucket})
+    httpd = HTTPServer(("127.0.0.1", 0), _make_worker_handler(node))
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start(); time.sleep(0.15)
+    try:
+        m = UnifiedMind(dim=128, seed=0)
+        buckets = [[1, 2, 3], [4, 5], [6, 7, 8, 9]]
+        local = Coordinator(InProcessBackend()).run(buckets, _sum_bucket, cache=None, reduce=reduce_sum)
+        remote = m.farm(["127.0.0.1:%d" % port], token="farm").run(buckets, "sum", cache=None, reduce=reduce_sum)
+        assert remote == local == 45.0
+        assert any("farm" in c.name.lower() or "distributed" in c.name.lower()
+                   for c in m.find_capability("run compute across several machines"))
+    finally:
+        httpd.shutdown(); httpd.server_close()
+
+
+def test_distributed_bus_through_mind():
+    """Layer 4 anti-silo: two mind-created distributed buses on separate ports share a topic across the wire, and a
+    bounded mailbox applies backpressure -- all through the mind."""
+    import threading, time
+    from http.server import HTTPServer
+    from holographic_distbus import _make_bus_handler
+    m = UnifiedMind(dim=128, seed=0)
+
+    servers = []
+    a = m.distributed_bus(token="t", node_id="A")
+    b = m.distributed_bus(token="t", node_id="B")
+    def _spin(bus):
+        httpd = HTTPServer(("127.0.0.1", 0), _make_bus_handler(bus, "t"))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        servers.append(httpd)
+        return "127.0.0.1:%d" % httpd.server_address[1]
+    try:
+        a.add_peer(_spin(b)); b.add_peer(_spin(a)); time.sleep(0.15)
+        b.open_mailbox("watch", ["plan.*"])
+        a.publish("plan.step", {"n": 1}, sender="A")
+        time.sleep(0.15)
+        assert [msg.payload["n"] for msg in b.poll("watch")] == [1]     # crossed machines
+
+        # backpressure: a bounded mailbox drops the oldest and tracks it
+        b.open_mailbox("bounded", ["ev.*"], maxlen=2)
+        for i in range(6):
+            b.publish("ev.tick", {"i": i}, sender="B")
+        st = b.mailbox_stats("bounded")
+        assert st["pending"] == 2 and st["dropped"] == 4
+
+        assert any("distributed bus" in c.name.lower() or "across machines" in c.name.lower()
+                   for c in m.find_capability("share messages between agents on different machines"))
+    finally:
+        for h in servers:
+            h.shutdown(); h.server_close()

@@ -92,7 +92,10 @@ class MessageBus:
             handlers = [h for (pat, h) in self._subs if topic_matches(pat, topic)]     # snapshot under the lock
             for mb in self._mailboxes.values():
                 if any(topic_matches(pat, topic) for pat in mb["patterns"]):
-                    mb["queue"].append(msg)
+                    q = mb["queue"]
+                    if q.maxlen is not None and len(q) == q.maxlen:
+                        mb["dropped"] += 1                      # bounded + full: appending will drop the oldest
+                    q.append(msg)
         for h in handlers:                                  # call handlers OUTSIDE the lock (they may publish)
             try:
                 h(msg)
@@ -125,12 +128,25 @@ class MessageBus:
         return self.publish("to:" + to, payload, sender=sender, reply_to=reply_to)
 
     # ---- mailboxes (pull side) --------------------------------------------------------------------------
-    def open_mailbox(self, name, patterns=("*",)):
+    def open_mailbox(self, name, patterns=("*",), maxlen=None):
         """Open (or re-open) a named mailbox that collects messages matching any of `patterns`. A party that prefers
-        to PULL -- e.g. a remote agent reading its inbox over HTTP -- opens one and calls poll(name). Returns the name."""
+        to PULL -- e.g. a remote agent reading its inbox over HTTP -- opens one and calls poll(name). Returns the name.
+        BACKPRESSURE: pass `maxlen` to bound the queue; when it's full the OLDEST message is dropped as new ones arrive
+        (so a slow reader can't make the queue grow without limit), and the count of dropped messages is tracked --
+        see mailbox_stats(). maxlen=None (the default) is unbounded, as before."""
         with self._lock:
-            self._mailboxes[name] = {"patterns": tuple(patterns), "queue": deque()}
+            self._mailboxes[name] = {"patterns": tuple(patterns), "queue": deque(maxlen=maxlen),
+                                     "dropped": 0, "maxlen": maxlen}
         return name
+
+    def mailbox_stats(self, name):
+        """{'pending', 'dropped', 'maxlen'} for a mailbox -- how many wait, how many the bound has dropped, the bound.
+        Lets a slow subscriber (or an operator) SEE backpressure instead of silently losing messages."""
+        with self._lock:
+            mb = self._mailboxes.get(name)
+            if mb is None:
+                return {"pending": 0, "dropped": 0, "maxlen": None}
+            return {"pending": len(mb["queue"]), "dropped": mb["dropped"], "maxlen": mb["maxlen"]}
 
     def poll(self, name, limit=None):
         """Pull and REMOVE the pending messages from mailbox `name` (oldest first). `limit` caps how many. Returns a

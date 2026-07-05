@@ -232,3 +232,201 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+# ============================================================================================================
+# Backend 3 -- NetworkFarm (workers run on REMOTE nodes; the client brokers over stdlib sockets/JSON).
+#
+# This is the cross-machine build. Each node runs serve_worker() with a set of workers registered BY NAME. The
+# NetworkFarm is a Coordinator backend that, for each bucket, POSTs (worker_name, bucket, cache) to a node and
+# collects the result -- then the Coordinator reassembles by the same monoid reducer as the local backends.
+#
+# SAFETY BY DESIGN: workers are referenced by NAME, never shipped as code. A node ONLY runs a worker it has itself
+# registered, so a client can't make a node execute arbitrary code -- the network equivalent of the command
+# allowlist. (On an untrusted/public farm you additionally want redundant-compute voting + signed/verified results;
+# those are the opponent + verify mechanisms, switched on at deploy time -- see the backlog's honest-scope note.)
+# ============================================================================================================
+import json as _json
+import urllib.request as _urlreq
+import urllib.error as _urlerr
+
+
+def _encode(o):
+    """Make a bucket / cache / result JSON-safe WITHOUT losing numpy fidelity: an ndarray becomes a tagged dict that
+    _decode turns back into the same array (dtype + shape preserved). Everything else passes through / recurses."""
+    if isinstance(o, np.ndarray):
+        return {"__nd__": True, "data": o.tolist(), "dtype": str(o.dtype), "shape": list(o.shape)}
+    if isinstance(o, (np.floating, np.integer)):
+        return float(o)
+    if isinstance(o, dict):
+        return {str(k): _encode(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_encode(v) for v in o]
+    return o
+
+
+def _decode(o):
+    """Inverse of _encode: tagged ndarray dicts come back as real numpy arrays; everything else recurses."""
+    if isinstance(o, dict):
+        if o.get("__nd__"):
+            return np.array(o["data"], dtype=o["dtype"]).reshape(o["shape"])
+        return {k: _decode(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [_decode(v) for v in o]
+    return o
+
+
+def _http_post(url, body, token=None, timeout=60.0):
+    """One small stdlib POST of a JSON body, returning the parsed JSON reply (bearer-token auth, like the service)."""
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = "Bearer %s" % token
+    req = _urlreq.Request(url, data=_json.dumps(body).encode("utf-8"), headers=headers, method="POST")
+    try:
+        with _urlreq.urlopen(req, timeout=timeout) as resp:
+            return _json.loads(resp.read().decode("utf-8"))
+    except _urlerr.HTTPError as e:                          # a 4xx/5xx still carries a JSON error body
+        try:
+            return _json.loads(e.read().decode("utf-8"))
+        except Exception:
+            raise
+
+
+class NetworkFarm:
+    """A Coordinator backend that runs workers on REMOTE nodes. Point it at a list of nodes ('host:port'); each node
+    must be running serve_worker() with the SAME worker names registered. Buckets are round-robined across the nodes
+    and POSTed concurrently; results come back in bucket order so the monoid reduce stays deterministic."""
+
+    by_name = True                                         # submit() takes a worker NAME (a string), resolved on the node
+
+    def __init__(self, nodes, token=None, timeout=60.0, max_workers=None):
+        from concurrent.futures import ThreadPoolExecutor
+        self.nodes = list(nodes)
+        if not self.nodes:
+            raise ValueError("NetworkFarm needs at least one node ('host:port')")
+        self.token = token
+        self.timeout = timeout
+        # one thread per in-flight POST so buckets on different nodes truly overlap
+        self.pool = ThreadPoolExecutor(max_workers=max_workers or max(4, len(self.nodes) * 2))
+        self._rr = 0                                        # round-robin cursor over the nodes
+
+    def publish_cache(self, cache):
+        """Serialize the read-only cache ONCE; it is then carried with each run request. (A future optimisation is to
+        push it to each node once and reference it by handle; carrying it is the simple, correct v1.)"""
+        return ("carry", _encode(cache))
+
+    def submit(self, worker, bucket, handle):
+        """Pick the next node (round-robin) and POST the run there, off the thread pool -> a real Future."""
+        node = self.nodes[self._rr % len(self.nodes)]
+        self._rr += 1
+        return self.pool.submit(self._run_remote, node, worker, bucket, handle)
+
+    def _run_remote(self, node, worker, bucket, handle):
+        body = {"worker": worker, "bucket": _encode(bucket), "cache": handle[1]}
+        resp = _http_post("http://%s/run" % node, body, token=self.token, timeout=self.timeout)
+        if not resp.get("ok", False):
+            raise RuntimeError("farm node %s failed: %s" % (node, resp.get("error", "unknown error")))
+        return _decode(resp["result"])
+
+    def release_cache(self, handle):
+        pass                                               # the cache was carried, nothing persists on the nodes
+
+    def close(self):
+        self.pool.shutdown(wait=True)
+
+
+# ------------------------------------------------------------------------------------------------------------
+# The worker daemon: run one on each node. It holds workers BY NAME and runs only those (never client code).
+# ------------------------------------------------------------------------------------------------------------
+class WorkerNode:
+    """The state behind serve_worker: a name -> worker registry plus the run() that a request dispatches to. Kept
+    separate from the HTTP plumbing so it can be driven directly in a test (no socket)."""
+
+    def __init__(self, token=None, workers=None):
+        self.token = token
+        self.workers = {}
+        for name, fn in (workers or {}).items():
+            self.register_worker(name, fn)
+
+    def register_worker(self, name, fn):
+        """Offer a worker under `name`. Only registered names can be run -- this is the safety boundary."""
+        self.workers[name] = fn
+        return self
+
+    def run(self, worker, bucket, cache):
+        """Resolve `worker` by name and run it on (bucket, cache). Raises if the name isn't registered."""
+        fn = self.workers.get(worker)
+        if fn is None:
+            raise KeyError("worker %r is not registered on this node" % worker)
+        return fn(bucket, cache)
+
+    # the two request handlers, returning plain dicts (the HTTP layer just serializes them)
+    def handle_run(self, payload):
+        payload = payload or {}
+        result = self.run(payload.get("worker", ""), _decode(payload.get("bucket")), _decode(payload.get("cache")))
+        return {"ok": True, "result": _encode(result)}
+
+    def handle_health(self):
+        return {"ok": True, "role": "worker", "workers": sorted(self.workers)}
+
+
+def _make_worker_handler(node):
+    """A BaseHTTPRequestHandler bound to a WorkerNode: GET /health, POST /run. Bearer-token gated if the node has one."""
+    from http.server import BaseHTTPRequestHandler
+
+    class _Handler(BaseHTTPRequestHandler):
+        def _authed(self):
+            if not node.token:
+                return True
+            return self.headers.get("Authorization", "") == "Bearer %s" % node.token
+
+        def _reply(self, code, obj):
+            body = _json.dumps(obj).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _read_json(self):
+            n = int(self.headers.get("Content-Length", 0) or 0)
+            return _json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
+
+        def do_GET(self):
+            if not self._authed():
+                return self._reply(401, {"ok": False, "error": "unauthorized"})
+            if self.path == "/health":
+                return self._reply(200, node.handle_health())
+            self._reply(404, {"ok": False, "error": "no such endpoint: %s" % self.path})
+
+        def do_POST(self):
+            if not self._authed():
+                return self._reply(401, {"ok": False, "error": "unauthorized"})
+            try:
+                if self.path == "/run":
+                    return self._reply(200, node.handle_run(self._read_json()))
+                self._reply(404, {"ok": False, "error": "no such endpoint: %s" % self.path})
+            except Exception as e:                         # report the type, don't leak a traceback
+                self._reply(500, {"ok": False, "error": "%s: %s" % (type(e).__name__, e)})
+
+        def log_message(self, *a):                         # keep the console quiet
+            pass
+
+    return _Handler
+
+
+def serve_worker(host="0.0.0.0", port=9000, token=None, workers=None):
+    """Start a farm worker daemon (BLOCKING) on this node. `workers` is a {name: fn(bucket, cache)} dict of the workers
+    this node offers; a NetworkFarm client runs them by name. Endpoints: GET /health, POST /run {worker, bucket, cache}
+    -> {ok, result}. stdlib http.server + JSON; bearer-token auth if `token` is set. Ctrl-C to stop."""
+    from http.server import HTTPServer
+    node = WorkerNode(token=token, workers=workers)
+    httpd = HTTPServer((host, port), _make_worker_handler(node))
+    print("leCore farm worker on http://%s:%d -- workers: %s" % (host, port, sorted(node.workers)))
+    if host == "0.0.0.0":
+        print("  NOTE: bound to ALL interfaces -- only behind auth/TLS on a trusted network.")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopping worker.")
+        httpd.server_close()

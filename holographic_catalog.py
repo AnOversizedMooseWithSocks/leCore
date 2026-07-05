@@ -252,6 +252,119 @@ def default_catalog():
                           native=True, aliases=("instance", "instancing", "shared definition", "edit once", "duplicate",
                                                 "reuse geometry", "material binding", "surface volume", "place copies",
                                                 "instanced scene", "clone", "prototype"))
+    c.register_capability("Messaging across machines (distributed bus)", "the same publish/subscribe/send bus, spread "
+                          "across nodes: mind.distributed_bus(peers, token, node_id) publishes locally AND fans out to "
+                          "peer nodes (each running holographic_distbus.serve_bus), so agents on different machines "
+                          "share topics -- a swarm coordinates across the farm the way it does in one process. Received "
+                          "messages deliver local-only (no loops), dedup by a global id, and a dead peer never blocks "
+                          "the publisher. Bound a mailbox (open_mailbox(maxlen=)) for backpressure at high fan-out.",
+                          example="bus = mind.distributed_bus(['hostB:9100'], token, node_id='A'); from holographic_distbus import serve_bus  # serve_bus(bus, port=9100, token) in a thread",
+                          native=True, aliases=("distributed bus", "messaging across machines", "cross-node messaging",
+                                                "swarm messaging", "pub sub across nodes", "fan out", "gossip",
+                                                "backpressure", "bounded mailbox", "flow control", "topic across nodes"))
+    c.register_capability("Distributed compute across machines (farm)", "run the same partition-and-reduce work across "
+                          "a FARM of machines. Each node runs holographic_coordinator.serve_worker(workers={name: fn}); "
+                          "mind.farm(['host1:9000','host2:9000'], token).run(buckets, worker_name, cache, reduce) "
+                          "round-robins the buckets across nodes and reassembles by the monoid reducer -- the same call "
+                          "as the local pool, just cross-machine. SAFE by design: workers run BY NAME (a node only runs "
+                          "workers it registered), so no code crosses the wire, only data. stdlib sockets/JSON.",
+                          example="from holographic_coordinator import serve_worker; serve_worker(port=9000, workers={'sum': fn})  # then: mind.farm(['host:9000'], token).run(buckets, 'sum', None, reduce_sum)",
+                          native=True, aliases=("farm", "distributed compute", "cluster", "network farm", "worker node",
+                                                "serve_worker", "render farm", "compute across machines", "scale out",
+                                                "map reduce", "parallel across nodes", "grid"))
+    c.register_capability("Who's online (presence registry)", "mind.registry tracks live actors: announce(principal) is "
+                          "a heartbeat, registry.list(kind=, workspace=) discovers who's here, is_online() checks one, "
+                          "and an actor that stops heart-beating for `ttl` seconds drops out on its own. Rides the "
+                          "mind's bus so presence is visible across nodes -- how a swarm or farm finds its peers.",
+                          example="mind.registry.announce(agent); online = mind.registry.list(kind='agent'); mind.registry.is_online(agent)",
+                          native=True, aliases=("registry", "presence", "who is online", "heartbeat", "discover peers",
+                                                "list agents", "who's connected", "liveness", "roster", "online users",
+                                                "node discovery"))
+    c.register_capability("Invite guests and share selectively (access control)", "control who reads what. mind.invite("
+                          "kind, grants) mints a token admitting a guest with specific initial read grants; mind.admit("
+                          "code, id) redeems it into a scoped Principal that reads ONLY what it was granted (default: "
+                          "nothing but its own namespace) and writes only its own. mind.grant / mind.revoke share and "
+                          "un-share namespaces later; holographic_access.require_readable is the read chokepoint (the "
+                          "symmetric twin of the DB's write-only-your-own rule).",
+                          example="code = mind.invite(kind='user', grants={'read':['lab/scene']}); g = mind.admit(code, 'visitor'); mind.grant(g, read='lab/notes')",
+                          native=True, aliases=("access control", "invite", "grant", "revoke", "permissions", "share",
+                                                "who can read", "admit a guest", "invite token", "selective sharing",
+                                                "read grant", "guest access", "authorize", "private namespace"))
+    c.register_capability("Fork and apply a shared world (workspace)", "mind.workspace.fork(name) hands out a "
+                          "copy-on-write editing view of a named world (a set of vector SLOTS): reads fall through to "
+                          "the shared base, writes accumulate in the fork's private .delta, so your edits don't touch "
+                          "the shared world (or another fork) until you reconcile. Feed the deltas to mind.merge_forks, "
+                          "then mind.apply(merged, world=name) writes the agreed edits back. Closes the "
+                          "fork -> edit -> merge -> apply loop; a world is a seed + deltas, so only the sparse changes "
+                          "travel.",
+                          example="f = mind.workspace.fork('lab'); f.set('sky', v); mind.apply(mind.merge_forks([f.delta, other])['merged'], world='lab')",
+                          native=True, aliases=("workspace", "fork a world", "apply changes", "copy on write", "world",
+                                                "shared world", "checkout", "branch a world", "edit in isolation",
+                                                "commit changes", "seed and deltas", "single-player fork"))
+    c.register_capability("Merge forked worlds (fork/merge)", "mind.merge_forks(forks, policy, tol) reconciles several "
+                          "forked copies of a world, each a {slot: vector} delta. Slots the forks AGREE on merge "
+                          "conflict-free into the consensus (pairwise opponent divergence below tol, matching leOS's "
+                          "pairwise convention); slots they DISAGREE on are handled by policy: 'select' surfaces the "
+                          "conflict for a human, 'auto' keeps only agreements, 'left'/'right'/callable resolve it. "
+                          "Because a world is a seed + deltas, forking to single-player and merging back is cheap. "
+                          "Returns {merged, conflicts}.",
+                          example="res = mind.merge_forks([mine, theirs], policy='select'); apply(res['merged']); resolve(res['conflicts'])",
+                          native=True, aliases=("merge", "merge forks", "fork and merge", "reconcile", "combine worlds",
+                                                "resolve conflicts", "multiplayer merge", "branch and merge", "diff merge",
+                                                "three-way merge", "collaborative edit", "sync changes"))
+    c.register_capability("Scoped identity for any actor (Principal)", "mind.principal(id, workspace, kind) gives an "
+                          "agent, user, service, or peer leCore instance ONE scoped identity where isolation is the "
+                          "default: a private database namespace (it writes only there), a directed inbox topic (it "
+                          "reads only its own messages, sender-stamped), a provenance role that tags everything it "
+                          "contributes (holographic_provenance.source_role / from_external), and an optional private "
+                          "learning overlay. Signals and state can't cross between principals -- so multiplayer "
+                          "workspaces, agent swarms, and guest peer nodes are the same isolation solved once.",
+                          example="alice = mind.principal('alice', workspace='lab', kind='user'); alice.send(mind.bus(), to='bob', payload={...}); alice.poll(mind.bus())",
+                          native=True, aliases=("principal", "identity", "scoped identity", "per-agent state",
+                                                "per-user namespace", "multiplayer", "multi-user", "swarm", "agent isolation",
+                                                "inbox", "directed message", "provenance", "source role", "who sent this",
+                                                "guest", "peer node", "federation", "workspace member"))
+    c.register_capability("Serve leCore as a tool (/tools + /invoke)", "run the HTTP service (holographic_service.serve) "
+                          "and any harness, LLM, or another leCore drives this node over two endpoints: GET /tools "
+                          "returns the manifest of every public faculty (name, description, params); POST /invoke with "
+                          "{name, args} runs one faculty and returns its result as JSON. Token-gated; private methods "
+                          "are refused. This is leCore AS a tool provider -- the same shape every node speaks.",
+                          example="from holographic_service import serve; serve(host='127.0.0.1', port=8080, token='secret')  # GET /tools ; POST /invoke {name,args}",
+                          native=True, aliases=("serve as a tool", "tool server", "/tools", "/invoke", "expose faculties",
+                                                "http api", "call leCore remotely", "function calling", "tool manifest",
+                                                "let an agent use leCore", "let an llm call leCore"))
+    c.register_capability("Use external tools (remote nodes / LLMs / commands)", "leCore CALLS tools in the same shape it "
+                          "serves them. holographic_toolclient.remote_tools(base_url, token) fetches another node's "
+                          "/tools and yields each as a callable RemoteTool (its run(args) POSTs to that node's /invoke). "
+                          "mind.attach_llm(callable) wires an LLM (any text->text, no SDK). mind.orchestrator.register / "
+                          "register_command / register_remote add remote tools, shell programs (allowlisted), and whole "
+                          "remote nodes so a planner can chain local faculties, remote tools, LLMs, and commands "
+                          "uniformly.",
+                          example="for t in remote_tools('http://host:8080', token='x'): mind.orchestrator.register(t)  # + mind.attach_llm(llm); mind.orchestrator.register_command('ffmpeg', ['ffmpeg','-i','{}'])",
+                          native=True, aliases=("call a tool", "remote tools", "use an llm", "attach llm", "orchestrator",
+                                                "register a tool", "run a command", "shell command tool", "call another node",
+                                                "chain tools", "planner", "toolclient", "peer node", "federation"))
+    c.register_capability("Agreement across estimates (opponent)", "given TWO estimates of the SAME thing (two models, "
+                          "two solvers, two forked worlds, two farm nodes), mind.opponent_channels(a, b) decomposes "
+                          "their disagreement (opponent-processing, ported from leOS) into: agreement (what both see), "
+                          "a_exclusive / b_exclusive (what only each sees), magnitude_dispute, PURPLE (a_exclusive + "
+                          "b_exclusive -- the emergent signal in NEITHER alone), and divergence_score (the angular "
+                          "disagreement). Act on the agreement when divergence is small; surface the conflict when "
+                          "it's large. classify() names the disagreement type; blend() mixes them by the channels.",
+                          example="ch = mind.opponent_channels(est_a, est_b); if ch['divergence_score'] < 0.2: use ch['agreement']  # else look at ch['purple']",
+                          native=True, aliases=("opponent", "agreement", "disagreement", "purple channel", "consensus",
+                                                "vote", "voting", "ensemble", "combine estimates", "reconcile",
+                                                "who agrees", "divergence", "abstain when uncertain", "cross-check",
+                                                "opponent channels", "emergent signal", "leos opponent"))
+    c.register_capability("Refine loop (produce / critique / adjust)", "mind.refine(produce, critique, adjust, accept, "
+                          "budget) makes a result, has a CRITIC score it (a metric, opponent agreement, a model, or a "
+                          "human), adjusts, and retries until it's good enough or the budget runs out -- the pipeline "
+                          "middle that sits leCore between a big compute and a checker. Returns {result, score, "
+                          "accepted, tries}. The callable-critic sibling of project_onto_constraints.",
+                          example="log = mind.refine(produce=lambda: gen(), critique=score, adjust=lambda r,s: tweak(r,s), accept=0.9)",
+                          native=True, aliases=("refine", "iterate", "produce critique adjust", "retry until good",
+                                                "optimization loop", "analysis by synthesis", "draft and revise",
+                                                "improve until accepted", "critic loop", "feedback loop"))
     c.register_capability("Import artist file formats (OBJ/glTF/textures/volume)", "import the files artists hand you: "
                           "mind.load_obj('model.obj') reads Wavefront geometry + its .mtl (UVs, normals, per-face "
                           "material, map_* textures); mind.load_glb('model.glb') reads glTF/GLB geometry AND its full PBR "

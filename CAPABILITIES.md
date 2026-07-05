@@ -26,6 +26,14 @@ from holographic_computehome import Compute; Compute.fuse_record(keys, values)
 ```
 *Find it by:* compute, fuse, fused, schedule, execute, program, machine, fft
 
+### Distributed compute across machines (farm)
+run the same partition-and-reduce work across a FARM of machines. Each node runs holographic_coordinator.serve_worker(workers={name: fn}); mind.farm(['host1:9000','host2:9000'], token).run(buckets, worker_name, cache, reduce) round-robins the buckets across nodes and reassembles by the monoid reducer -- the same call as the local pool, just cross-machine. SAFE by design: workers run BY NAME (a node only runs workers it registered), so no code crosses the wire, only data. stdlib sockets/JSON..
+
+```python
+from holographic_coordinator import serve_worker; serve_worker(port=9000, workers={'sum': fn})  # then: mind.farm(['host:9000'], token).run(buckets, 'sum', None, reduce_sum)
+```
+*Find it by:* farm, distributed compute, cluster, network farm, worker node, serve_worker, render farm, compute across machines
+
 ### Encoders (number to vector)
 turn raw values into hypervectors: scalar & fractional-power encoding (encoders/fpe -- nearby numbers map to nearby vectors), N-D coordinate fields (fpefield), complex-phasor FHRR (fhrr), sparse block codes (sbc), geometric-algebra Clifford (clifford), and exact integer arithmetic over phasors (rns). How data ENTERS the substrate.
 
@@ -69,6 +77,14 @@ the AGENT-FRIENDLY layer: mind.skills() lists every capability + method with how
 mind.route('render a scene'); mind.suggest('edit an image'); mind.complete_method('learn_')
 ```
 *Find it by:* agent, agentic, skills, skill description, autocomplete, suggest, decision tree, route
+
+### Who's online (presence registry)
+mind.registry tracks live actors: announce(principal) is a heartbeat, registry.list(kind=, workspace=) discovers who's here, is_online() checks one, and an actor that stops heart-beating for `ttl` seconds drops out on its own. Rides the mind's bus so presence is visible across nodes -- how a swarm or farm finds its peers..
+
+```python
+mind.registry.announce(agent); online = mind.registry.list(kind='agent'); mind.registry.is_online(agent)
+```
+*Find it by:* registry, presence, who is online, heartbeat, discover peers, list agents, who's connected, liveness
 
 ## Memory, search & recall
 
@@ -422,9 +438,33 @@ bridge = mind.agent_bridge(llm=my_llm); bridge.notify_on('render.done', 'does it
 ```
 *Find it by:* message bus, event bus, pubsub, publish subscribe, agent bridge, llm bridge, notify the agent, push notification
 
+### Scoped identity for any actor (Principal)
+mind.principal(id, workspace, kind) gives an agent, user, service, or peer leCore instance ONE scoped identity where isolation is the default: a private database namespace (it writes only there), a directed inbox topic (it reads only its own messages, sender-stamped), a provenance role that tags everything it contributes (holographic_provenance.source_role / from_external), and an optional private learning overlay. Signals and state can't cross between principals -- so multiplayer workspaces, agent swarms, and guest peer nodes are the same isolation solved once..
+
+```python
+alice = mind.principal('alice', workspace='lab', kind='user'); alice.send(mind.bus(), to='bob', payload={...}); alice.poll(mind.bus())
+```
+*Find it by:* principal, identity, scoped identity, per-agent state, per-user namespace, multiplayer, multi-user, swarm
+
+### Serve leCore as a tool (/tools + /invoke)
+run the HTTP service (holographic_service.serve) and any harness, LLM, or another leCore drives this node over two endpoints: GET /tools returns the manifest of every public faculty (name, description, params); POST /invoke with {name, args} runs one faculty and returns its result as JSON. Token-gated; private methods are refused. This is leCore AS a tool provider -- the same shape every node speaks..
+
+```python
+from holographic_service import serve; serve(host='127.0.0.1', port=8080, token='secret')  # GET /tools ; POST /invoke {name,args}
+```
+*Find it by:* serve as a tool, tool server, /tools, /invoke, expose faculties, http api, call leCore remotely, function calling
+
 ## Data analysis & signals
 
 *analyse data and signals -- transport, graphs, embeddings, topology, FFT, faint-signal detection.*
+
+### Agreement across estimates (opponent)
+given TWO estimates of the SAME thing (two models, two solvers, two forked worlds, two farm nodes), mind.opponent_channels(a, b) decomposes their disagreement (opponent-processing, ported from leOS) into: agreement (what both see), a_exclusive / b_exclusive (what only each sees), magnitude_dispute, PURPLE (a_exclusive + b_exclusive -- the emergent signal in NEITHER alone), and divergence_score (the angular disagreement). Act on the agreement when divergence is small; surface the conflict when it's large. classify() names the disagreement type; blend() mixes them by the channels..
+
+```python
+ch = mind.opponent_channels(est_a, est_b); if ch['divergence_score'] < 0.2: use ch['agreement']  # else look at ch['purple']
+```
+*Find it by:* opponent, agreement, disagreement, purple channel, consensus, vote, voting, ensemble
 
 ### Data analysis
 analyse data with VSA-native methods: optimal transport / Wasserstein (transport), graph Laplacian + spectral filtering (graphsignal), Nystrom embedding / dimensionality reduction, persistent-homology topology, kernel density estimate, point-cloud structure (cosmic), and time-series / market analysis.
@@ -554,6 +594,14 @@ from holographic_hardening import HardenedCoordinator; HardenedCoordinator(farm,
 ```
 *Find it by:* voting, redundant compute, retry, fault tolerance, canary, untrusted node, quorum, straggler
 
+### Fork and apply a shared world (workspace)
+mind.workspace.fork(name) hands out a copy-on-write editing view of a named world (a set of vector SLOTS): reads fall through to the shared base, writes accumulate in the fork's private .delta, so your edits don't touch the shared world (or another fork) until you reconcile. Feed the deltas to mind.merge_forks, then mind.apply(merged, world=name) writes the agreed edits back. Closes the fork -> edit -> merge -> apply loop; a world is a seed + deltas, so only the sparse changes travel..
+
+```python
+f = mind.workspace.fork('lab'); f.set('sky', v); mind.apply(mind.merge_forks([f.delta, other])['merged'], world='lab')
+```
+*Find it by:* workspace, fork a world, apply changes, copy on write, world, shared world, checkout, branch a world
+
 ### Job lifecycle control
 start / pause / resume / cancel long-running work (renders, simulations, dataset processing) as CHECKPOINTABLE monoid jobs: completed buckets fold into partials, so a job pauses at a bucket boundary, saves to disk, survives an app restart, and resumes only the remaining buckets. Works across any coordinator backend (local pool / farm).
 
@@ -561,6 +609,14 @@ start / pause / resume / cancel long-running work (renders, simulations, dataset
 from holographic_jobs import JobManager; m.create(id, buckets, worker); m.start(id, background=True); m.pause(id); m.resume(id)
 ```
 *Find it by:* job, start, pause, resume, cancel, checkpoint, render job, long running
+
+### Messaging across machines (distributed bus)
+the same publish/subscribe/send bus, spread across nodes: mind.distributed_bus(peers, token, node_id) publishes locally AND fans out to peer nodes (each running holographic_distbus.serve_bus), so agents on different machines share topics -- a swarm coordinates across the farm the way it does in one process. Received messages deliver local-only (no loops), dedup by a global id, and a dead peer never blocks the publisher. Bound a mailbox (open_mailbox(maxlen=)) for backpressure at high fan-out..
+
+```python
+bus = mind.distributed_bus(['hostB:9100'], token, node_id='A'); from holographic_distbus import serve_bus  # serve_bus(bus, port=9100, token) in a thread
+```
+*Find it by:* distributed bus, messaging across machines, cross-node messaging, swarm messaging, pub sub across nodes, fan out, gossip, backpressure
 
 ### Query / database (domain)
 treat VSA stores as a database: SQL over tables, similarity/time-travel/diff, durable + concurrent + graph + history query layers.
@@ -648,6 +704,27 @@ B7: make the query store survive a crash. Take a durable SNAPSHOT of the persist
 from holographic_query_durable import save_snapshot, Journal, recover; recover(snap_path, journal_path)
 ```
 
+### Invite guests and share selectively (access control)
+control who reads what. mind.invite(kind, grants) mints a token admitting a guest with specific initial read grants; mind.admit(code, id) redeems it into a scoped Principal that reads ONLY what it was granted (default: nothing but its own namespace) and writes only its own. mind.grant / mind.revoke share and un-share namespaces later; holographic_access.require_readable is the read chokepoint (the symmetric twin of the DB's write-only-your-own rule)..
+
+```python
+code = mind.invite(kind='user', grants={'read':['lab/scene']}); g = mind.admit(code, 'visitor'); mind.grant(g, read='lab/notes')
+```
+
+### Merge forked worlds (fork/merge)
+mind.merge_forks(forks, policy, tol) reconciles several forked copies of a world, each a {slot: vector} delta. Slots the forks AGREE on merge conflict-free into the consensus (pairwise opponent divergence below tol, matching leOS's pairwise convention); slots they DISAGREE on are handled by policy: 'select' surfaces the conflict for a human, 'auto' keeps only agreements, 'left'/'right'/callable resolve it. Because a world is a seed + deltas, forking to single-player and merging back is cheap. Returns {merged, conflicts}..
+
+```python
+res = mind.merge_forks([mine, theirs], policy='select'); apply(res['merged']); resolve(res['conflicts'])
+```
+
+### Refine loop (produce / critique / adjust)
+mind.refine(produce, critique, adjust, accept, budget) makes a result, has a CRITIC score it (a metric, opponent agreement, a model, or a human), adjusts, and retries until it's good enough or the budget runs out -- the pipeline middle that sits leCore between a big compute and a checker. Returns {result, score, accepted, tries}. The callable-critic sibling of project_onto_constraints..
+
+```python
+log = mind.refine(produce=lambda: gen(), critique=score, adjust=lambda r,s: tweak(r,s), accept=0.9)
+```
+
 ### Regime gate (re-enable)
 run a superior-but-niche method ONLY in its regime, behind a cheap conservative detector, with a safe fallback everywhere else -- the pattern for re-enabling a shelved 'kept negative' now that adaptive dispatch can spot its regime (e.g. closed-form iterate for linear/bind operators).
 
@@ -662,6 +739,13 @@ Monte-Carlo sampling: low-discrepancy / blue-noise patterns, cosine-hemisphere d
 from holographic_samplinghome import Sampling; Sampling.cosine_hemisphere(N, n, seed)
 ```
 
+### Use external tools (remote nodes / LLMs / commands)
+leCore CALLS tools in the same shape it serves them. holographic_toolclient.remote_tools(base_url, token) fetches another node's /tools and yields each as a callable RemoteTool (its run(args) POSTs to that node's /invoke). mind.attach_llm(callable) wires an LLM (any text->text, no SDK). mind.orchestrator.register / register_command / register_remote add remote tools, shell programs (allowlisted), and whole remote nodes so a planner can chain local faculties, remote tools, LLMs, and commands uniformly..
+
+```python
+for t in remote_tools('http://host:8080', token='x'): mind.orchestrator.register(t)  # + mind.attach_llm(llm); mind.orchestrator.register_command('ffmpeg', ['ffmpeg','-i','{}'])
+```
+
 ### Utilities & helpers
 the engine's cross-cutting UTILITY tools: content addressing & hashing (uri), tamper-evident verification (verify), erasure/rateless coding for reliability (fountain), chunked delta chains with integrity proofs (deltachain), versioned rollback history (history), lossless compression (compress/codec), and the determinism contract (determinism). The plumbing every faculty leans on.
 
@@ -671,4 +755,4 @@ from holographic_uri import address_from_content, make_key; from holographic_ver
 
 ---
 
-*76 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*87 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

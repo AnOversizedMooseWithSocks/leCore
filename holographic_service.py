@@ -40,9 +40,10 @@ class Service:
     """Holds the standalone app's state (a VSA Database + the capability catalog) and the route table. One instance
     per running server."""
 
-    def __init__(self, token=None, persist_path=None):
+    def __init__(self, token=None, persist_path=None, mind=None):
         self.token = token
-        self.persist_path = persist_path                    # if set: auto-load on start, auto-save after writes
+        self.persist_path = persist_path
+        self._mind = mind                                   # the tool-interface mind (lazily built if left None)                    # if set: auto-load on start, auto-save after writes
         self.db = Database()
         self.db.add_namespace("user")                       # a ready-to-use writable namespace for SQL clients
         self.documents = []                                 # nested-object store for the GraphQL front door
@@ -73,6 +74,8 @@ class Service:
         self._routes[("GET", "/health")] = self._health
         self._routes[("GET", "/capabilities")] = self._capabilities
         self._routes[("POST", "/capabilities/search")] = self._capabilities_search
+        self._routes[("GET", "/tools")] = self._tools           # the standard tool manifest (name, description, params)
+        self._routes[("POST", "/invoke")] = self._invoke         # run one faculty: {name, args} -> its result
         self._routes[("POST", "/sql")] = self._sql
         self._routes[("POST", "/graphql")] = self._graphql       # GraphQL over nested documents
         self._routes[("POST", "/documents")] = self._set_documents
@@ -136,6 +139,47 @@ class Service:
         hits = default_catalog().find_capability(query)
         return {"ok": True, "query": query,
                 "matches": [{"name": c.name, "description": c.does} for c in hits]}
+
+    # ---- the tool interface: this node AS a tool (GET /tools + POST /invoke) --------------------------------
+    @property
+    def mind(self):
+        """The UnifiedMind whose faculties /tools advertises and /invoke runs. Built lazily on first use, so a service
+        that only does SQL/docs/jobs never pays for it. Pass your own configured mind to serve(mind=...) to override."""
+        if getattr(self, "_mind", None) is None:
+            from holographic_unified import UnifiedMind
+            self._mind = UnifiedMind()
+        return self._mind
+
+    def _tools(self, _payload):
+        """The standard tool manifest: every public faculty an /invoke can run, as {name, description, params}. Body:
+        none. Returns: {ok, tools:[...]}. This is the shape a harness, an LLM, or another leCore reads to drive us."""
+        from holographic_skills import manifest
+        tools = []
+        for m in manifest(include_methods=True).get("methods", []):
+            name = m["name"]
+            # params = the argument names from the introspected signature, minus self (best-effort, for display)
+            call = m.get("call", "")
+            params = call[call.find("(") + 1:call.rfind(")")] if "(" in call else ""
+            param_list = [p.strip().split("=")[0].split(":")[0].strip()
+                          for p in params.split(",") if p.strip() and p.strip() != "self"]
+            tools.append({"name": name, "description": m.get("summary", ""),
+                          "params": param_list, "call": call})
+        return {"ok": True, "count": len(tools), "tools": tools}
+
+    def _invoke(self, payload):
+        """Run ONE faculty on this node's mind. Body: {name, args:{...}}. Returns: {ok, name, result}. Only PUBLIC
+        faculties are callable (no leading underscore); the result is coerced to a JSON-safe form. This is the single
+        call a tool client (remote_tools) or a harness makes to use us."""
+        payload = payload or {}
+        name = payload.get("name", "")
+        args = payload.get("args", {}) or {}
+        if not name or name.startswith("_"):
+            return {"ok": False, "error": "invalid or private tool name: %r" % name}
+        fn = getattr(self.mind, name, None)
+        if not callable(fn):
+            return {"ok": False, "error": "no such tool: %r" % name}
+        result = fn(**args) if isinstance(args, dict) else fn(*args)
+        return {"ok": True, "name": name, "result": _jsonable(result)}
 
     def _sql(self, payload):
         """Run SQL against the store: CREATE/INSERT/SELECT/UPDATE/DELETE/JOIN/DROP (UPDATE and DELETE require a WHERE, as a safety guard). Body: {sql}. Returns: {ok, ...} (rows for SELECT, rowcount for writes)."""
@@ -420,9 +464,28 @@ def _json_default(o):
     raise TypeError("not JSON serializable: %r" % type(o))
 
 
-def serve(host="127.0.0.1", port=8080, token=None, persist_path=None):
-    """Start the standalone API server (blocking). Returns nothing; Ctrl-C to stop."""
-    service = Service(token=token, persist_path=persist_path)
+def _jsonable(o):
+    """Coerce a faculty result into something JSON can carry. Basic types and numpy pass straight through; dicts and
+    lists recurse; anything else (a Mesh, a LoadedMesh, ...) becomes a typed summary so /invoke never crashes on an
+    un-serializable return value."""
+    import numpy as np
+    if o is None or isinstance(o, (bool, int, float, str)):
+        return o
+    if isinstance(o, (np.floating, np.integer)):
+        return float(o)
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    if isinstance(o, dict):
+        return {str(k): _jsonable(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_jsonable(v) for v in o]
+    return {"type": type(o).__name__, "repr": repr(o)[:500]}    # object -> a typed summary, not a crash
+
+
+def serve(host="127.0.0.1", port=8080, token=None, persist_path=None, mind=None):
+    """Start the standalone API server (blocking). Returns nothing; Ctrl-C to stop. Pass `mind` to expose a specific
+    configured UnifiedMind at /tools + /invoke; otherwise a default one is built on first use."""
+    service = Service(token=token, persist_path=persist_path, mind=mind)
     httpd = HTTPServer((host, port), make_handler(service))
     where = "%s:%d" % (host, port)
     print("leCore API service v%s serving on http://%s" % (__version__, where))

@@ -1,3 +1,18 @@
 /.venv
 /__pycache__
 holostuff.zip
+/current backlogs
+holostuff_chunking_transfer_backlog.md
+holostuff_consolidation_backlog.md
+holostuff_crosscutting_backlog.md
+holostuff_holographic_dcc_backlog.md
+holostuff_inverse_rendering_backlog.md
+holostuff_panel_generative_compression.md
+holostuff_panel_integration_review.md
+holostuff_panel_proven_structure.md
+holostuff_panel_review_crosscutting.md
+holostuff_panel_review_rendering_backlog.md
+holostuff_rendering_backlog.md
+holostuff_vm_backlog.md
+PANEL_occlusion_speed_backlog.md
+RENDER_PIPELINE_BACKLOG.md

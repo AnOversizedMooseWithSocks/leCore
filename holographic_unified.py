@@ -8422,6 +8422,152 @@ class UnifiedMind:
         from holographic_skindeform import deform
         return deform(loaded, clip=clip, t=t)
 
+    # ---- composability: agreement/disagreement across estimates, and the refine loop -----------------------
+    def opponent_channels(self, vec_a, vec_b, interrupt_threshold=0.35):
+        """Decompose the disagreement between TWO estimates of the same thing (the opponent-processing decomposition,
+        ported from leOS) into {agreement, a_exclusive, b_exclusive, magnitude_dispute, purple (=a_exclusive+
+        b_exclusive, the emergent signal in NEITHER alone), divergence_score, cosine_similarity, interrupt}. Act on
+        the agreement when divergence is small; surface the conflict when it's large. See holographic_opponent."""
+        from holographic_opponent import opponent_channels
+        return opponent_channels(vec_a, vec_b, interrupt_threshold=interrupt_threshold)
+
+    def refine(self, produce, critique, adjust, accept=0.9, budget=8):
+        """Produce a result, have a CRITIC (any callable -- a metric, opponent agreement, a model, a human) score it,
+        adjust, and retry until accepted or the budget runs out. Returns {result, score, accepted, tries}. The
+        pipeline middle: sit leCore between a big compute and a checker. See holographic_refine."""
+        from holographic_refine import refine
+        return refine(produce, critique, adjust, accept=accept, budget=budget)
+
+    def attach_llm(self, llm, name="agent"):
+        """Attach an LLM -- ANY callable text->text (leCore imports no model SDK). Returns an AgentBridge wired to the
+        mind's bus, so the LLM can receive bus events and publish replies, and is now usable as a tool or a refine
+        critic. Pass None for a bus-only bridge. See holographic_agent_bridge."""
+        from holographic_agent_bridge import AgentBridge
+        self._llm = llm
+        self._agent_bridge = AgentBridge(self.bus(), llm=llm, name=name)
+        return self._agent_bridge
+
+    @property
+    def orchestrator(self):
+        """A tool Orchestrator for this mind: register(local faculty / remote tool / callable), register_command(shell
+        program, allowlisted), register_remote(base_url) to pull another node's /tools, then plan over them all in one
+        shape. Built lazily. See holographic_orchestrator.Orchestrator."""
+        if getattr(self, "_orchestrator", None) is None:
+            from holographic_orchestrator import Orchestrator
+            self._orchestrator = Orchestrator(dim=self.dim, seed=self.seed)
+        return self._orchestrator
+
+    @property
+    def db(self):
+        """A shared query Database that principals carve private namespaces out of (their isolated stores). Built
+        lazily; distinct from the mind's own query path. See holographic_query.Database."""
+        if getattr(self, "_principal_db", None) is None:
+            from holographic_query import Database
+            self._principal_db = Database()
+        return self._principal_db
+
+    @property
+    def base(self):
+        """A partition SharedMind over this mind -- the frozen shared base that principals branch private, copy-on-write
+        learning overlays from (so a population of actors learns without disturbing each other). See
+        holographic_partition.SharedMind."""
+        if getattr(self, "_principal_base", None) is None:
+            from holographic_partition import SharedMind
+            self._principal_base = SharedMind(self)
+        return self._principal_base
+
+    def principal(self, actor_id, workspace="default", kind="agent", overlay=False):
+        """A scoped Principal identity for an actor (agent/user/service/peer), wired to this mind's db, bus, and (if
+        overlay=True) a private partition overlay. Isolation is by construction: it writes only its own namespace,
+        reads only its own inbox, and tags its contributions with its own provenance role. See holographic_principal."""
+        from holographic_principal import Principal
+        base = self.base if overlay else None
+        p = Principal(base, self.db, actor_id, workspace=workspace, kind=kind, dim=self.dim, seed=self.seed)
+        return p.connect(self.bus())
+
+    def merge_forks(self, forks, policy="select", tol=0.2):
+        """Reconcile several forked worlds, each a {slot: vector} delta layer. Slots the forks AGREE on merge
+        conflict-free (pairwise opponent divergence < tol); slots they DISAGREE on go to the policy ('select' surfaces
+        them, 'auto' keeps only agreements, 'left'/'right'/callable resolve). Returns {merged, conflicts}. See
+        holographic_merge."""
+        from holographic_merge import merge_forks
+        return merge_forks(forks, policy=policy, tol=tol)
+
+    @property
+    def workspace(self):
+        """A WorldSpace of named worlds (each a set of vector SLOTS) for the fork -> edit -> merge -> apply loop:
+        mind.workspace.fork(name) hands out a copy-on-write editing view whose .delta feeds mind.merge_forks. Built
+        lazily. (Distinct from the DB workspace tiers on the query layer.) See holographic_world.WorldSpace."""
+        if getattr(self, "_worldspace", None) is None:
+            from holographic_world import WorldSpace
+            self._worldspace = WorldSpace()
+        return self._worldspace
+
+    def apply(self, delta, world="default"):
+        """Write a merged delta ({slot: vector}, e.g. from mind.merge_forks(...)["merged"]) back into a shared world.
+        Returns the slots changed. Completes the fork/merge/apply loop. See holographic_world."""
+        return self.workspace.apply(delta, name=world)
+
+    @property
+    def registry(self):
+        """A presence Registry -- who is online. Actors announce (heartbeat); registry.list(kind=)/is_online discover
+        them. Rides the mind's bus so presence is visible across nodes. Built lazily. See holographic_registry."""
+        if getattr(self, "_registry", None) is None:
+            from holographic_registry import Registry
+            self._registry = Registry(bus=self.bus())
+        return self._registry
+
+    def invite(self, kind="user", grants=None, code=None):
+        """Create an invite token admitting a guest as `kind` with initial READ grants (e.g. {'read': ['lab/scene']}).
+        Hand the returned invite's .code to the guest; redeem it with mind.admit(code_or_invite, actor_id). Default is
+        nothing shared -- a guest sees only what the invite (and later grants) allow. See holographic_access."""
+        from holographic_access import invite as _invite
+        inv = _invite(kind=kind, grants=grants, code=code)
+        self._invites = getattr(self, "_invites", {})
+        self._invites[inv.code] = inv
+        return inv
+
+    def admit(self, invite_or_code, actor_id, workspace="default"):
+        """Redeem an invite (an Invite or its code) to admit a guest: a scoped Principal of the invite's kind with
+        EXACTLY the invite's read grants (and nothing more), connected to the bus and announced to the registry.
+        Writes stay own-namespace-only. See holographic_principal / holographic_access."""
+        from holographic_access import apply_invite, AccessError
+        invites = getattr(self, "_invites", {})
+        inv = invite_or_code if hasattr(invite_or_code, "code") else invites.get(invite_or_code)
+        if inv is None:
+            raise AccessError("unknown invite code: %r" % invite_or_code)
+        if not inv.is_valid():
+            raise AccessError("invite already used: %r" % inv.code)
+        p = self.principal(actor_id, workspace=workspace, kind=inv.kind)
+        apply_invite(p, inv)
+        self.registry.announce(p)
+        return p
+
+    def grant(self, principal, read=None):
+        """Share selectively: grant a principal READ access to a namespace (or list of them). See holographic_access."""
+        from holographic_access import grant as _grant
+        return _grant(principal, read=read)
+
+    def revoke(self, principal, read=None):
+        """Stop sharing: revoke a principal's READ access to a namespace (or list). See holographic_access."""
+        from holographic_access import revoke as _revoke
+        return _revoke(principal, read=read)
+
+    def farm(self, nodes, token=None, timeout=60.0):
+        """A distributed-compute Coordinator over a NetworkFarm of remote worker nodes ('host:port' each running
+        serve_worker with the same worker names). farm.run(buckets, worker_name, cache, reduce) partitions the work
+        across the nodes and reassembles by the monoid reducer -- same call as the local pool, just cross-machine.
+        See holographic_coordinator.NetworkFarm."""
+        from holographic_coordinator import Coordinator, NetworkFarm
+        return Coordinator(NetworkFarm(nodes, token=token, timeout=timeout))
+
+    def distributed_bus(self, peers=None, token=None, node_id="node"):
+        """A DistributedBus: the same publish/subscribe/send bus, but publishes also fan out to peer nodes ('host:port'
+        each running holographic_distbus.serve_bus), so agents on different machines share topics. Local delivery is
+        the unchanged deterministic MessageBus. See holographic_distbus.DistributedBus."""
+        from holographic_distbus import DistributedBus
+        return DistributedBus(peers=peers, token=token, node_id=node_id)
+
     def encode_scene(self, objects):
         """Encode parsed objects into ONE composable scene hypervector: superpose bind(OBJ_i, record_i). Returns
         (scene_vector, [record_vectors], [role_atoms]). Query it back by slot with query_scene_slot -- the scene is

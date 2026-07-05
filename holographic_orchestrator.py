@@ -515,3 +515,70 @@ if __name__ == "__main__":
     demo_orchestrator()
     demo_execution()
     _optimize_selftest()
+
+
+class Orchestrator:
+    """A ready-to-use tool orchestrator -- the 'leCore can USE tools' side of the tool interface.
+
+    Owns a keyword Vocabulary, a ToolRegistry, and a Planner, so you can register LOCAL faculties, REMOTE tools (from
+    holographic_toolclient.remote_tools), an LLM, and shell COMMANDS uniformly, then discover/plan over them. Every
+    registered tool becomes an orchestrator.Tool with a keyword vector, so the registry can semantic-match a goal to
+    the right tool regardless of where the tool actually runs.
+    """
+
+    def __init__(self, dim=1024, seed=0):
+        self.vocab = Vocabulary(dim, seed=seed)          # get(word) derives a deterministic atom for ANY word
+        self.registry = ToolRegistry()
+        self.planner = Planner(self.registry)
+        self.allowlist = set()                            # shell programs permitted by register_command (SAFETY)
+
+    def _vec(self, text):
+        """A keyword vector over the words in `text` -- the tool's meaning, for semantic routing."""
+        words = [w.lower() for w in re.split(r"[^A-Za-z0-9]+", text) if w]
+        return keyword_vector(self.vocab, words or ["tool"])
+
+    def register(self, tool, in_type="any", out_type="any"):
+        """Register a tool. Accepts a raw orchestrator.Tool (added as-is) OR any object with .name/.description and a
+        .run or .fn callable (a RemoteTool, an LLM wrapper, your own object) -- wrapped into a Tool with a keyword
+        vector so it's discoverable. Returns the registered Tool."""
+        if isinstance(tool, Tool):
+            return self.registry.add(tool)
+        name = getattr(tool, "name", None) or getattr(tool, "__name__", "tool")
+        desc = getattr(tool, "description", "") or getattr(tool, "does", "")
+        run = getattr(tool, "run", None) or getattr(tool, "fn", None) or (tool if callable(tool) else None)
+        if run is None:
+            raise TypeError("register needs a Tool, or an object with a .run/.fn callable (got %r)" % type(tool))
+        it = getattr(tool, "in_type", in_type)
+        ot = getattr(tool, "out_type", out_type)
+        return self.registry.add(Tool(name, it, ot, self._vec(name + " " + desc), fn=run))
+
+    def register_command(self, name, argv, description="", allow=True, timeout=60.0):
+        """Register a shell PROGRAM as a tool. `argv` is the command as a list (e.g. ['ffmpeg', '-i', '{}']); the
+        tool's input value substitutes for a '{}' placeholder, or is appended if there is none. Runs via subprocess,
+        returning stdout. SAFETY: argv[0] must be ALLOWLISTED -- allow=True adds it here; otherwise pre-populate
+        self.allowlist. Never register a command from untrusted input."""
+        import subprocess
+        prog = argv[0]
+        if allow:
+            self.allowlist.add(prog)
+
+        def run(value, _argv=list(argv)):
+            if _argv[0] not in self.allowlist:
+                raise PermissionError("command not allowlisted: %r" % _argv[0])
+            if "{}" in _argv:
+                cmd = [str(value) if a == "{}" else a for a in _argv]
+            else:
+                cmd = _argv + [str(value)]
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            return out.stdout
+
+        return self.registry.add(Tool(name, "any", "any", self._vec(name + " " + description), fn=run))
+
+    def register_remote(self, base_url, token=None):
+        """Fetch a remote node's /tools and register every one (as RemoteTools). Returns the list of registered Tools."""
+        from holographic_toolclient import remote_tools
+        return [self.register(t) for t in remote_tools(base_url, token=token)]
+
+    def tools(self):
+        """The names of everything registered."""
+        return [t.name for t in self.registry.tools]

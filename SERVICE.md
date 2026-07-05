@@ -29,6 +29,8 @@ By default it binds to **127.0.0.1** (local only). `--token X` requires `Authori
 | GET | `/health` | — | `{ok, name, version, python, platform, capabilities}` |
 | GET | `/capabilities` | — | every capability the instance advertises (name + description) |
 | POST | `/capabilities/search` | `{"query":"..."}` | the capability homes that match, plain-English |
+| GET | `/tools` | — | the tool manifest: every public faculty as `{name, description, params}` (drive it with `/invoke`) |
+| POST | `/invoke` | `{"name":"...","args":{...}}` | run one faculty on this node's mind and return its result as JSON (public faculties only) |
 | POST | `/sql` | `{"sql":"..."}` | run SQL: `CREATE TABLE` / `INSERT` / `SELECT` / `UPDATE` / `DELETE` / `JOIN` / `DROP TABLE` |
 | POST | `/graphql` | `{"query":"{...}"[, "objects":[...]]}` | resolve a GraphQL query over nested documents |
 | POST | `/documents` | `{"objects":[...]}` | set the stored document set GraphQL queries run against |

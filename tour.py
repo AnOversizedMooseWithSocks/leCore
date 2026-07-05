@@ -5979,6 +5979,122 @@ try:
 finally:
     _sh_ai.rmtree(_ai_root, ignore_errors=True)
 
+# ---- composability keystone: opponent (leOS opponent channels) + refine (produce->critique->adjust) ----
+import numpy as _np_op
+_op_rng = _np_op.random.default_rng(0)
+_op_truth = _op_rng.standard_normal(512); _op_truth /= _np_op.linalg.norm(_op_truth)
+_op_close = _op_truth + 0.01*_op_rng.standard_normal(512)                    # a near-identical second estimate
+_op_a = _np_op.zeros(512); _op_a[0]=1.0; _op_b = _np_op.zeros(512); _op_b[1]=1.0   # two orthogonal estimates
+_op_agree = _mind_rd.opponent_channels(_op_truth, _op_close)
+_op_split = _mind_rd.opponent_channels(_op_a, _op_b)
+_op_purple_id = bool(_np_op.allclose(_op_split["purple"], _op_split["a_exclusive"] + _op_split["b_exclusive"]))
+from holographic_refine import opponent_critic as _op_crit
+_op_noisy = _op_truth + 1.5*_op_rng.standard_normal(512)
+_op_log = _mind_rd.refine(produce=lambda: _op_noisy, critique=_op_crit(_op_truth),
+                          adjust=lambda v,s: 0.5*(v/_np_op.linalg.norm(v)) + 0.5*_op_truth, accept=0.9, budget=12)
+print(f"  COMPOSABILITY KEYSTONE -- opponent channels (ported faithfully from leOS) + refine. mind.opponent_channels(a, b) decomposes the disagreement between TWO estimates of the same thing (the opponent-processing metaphor: red-green, blue-yellow) into AGREEMENT (what both see), each side's EXCLUSIVE part, MAGNITUDE_DISPUTE, and the PURPLE channel -- a_exclusive + b_exclusive, the EMERGENT signal that exists in NEITHER estimate alone (like the colour purple, which has no wavelength and is invented by opponent processing). Two near-identical estimates report divergence {float(_op_agree['divergence_score']):.2f} (redundant -- act on the agreement); two orthogonal estimates report divergence {float(_op_split['divergence_score']):.2f} with a real purple signal (magnitude {float(_op_split['channel_magnitudes']['purple']):.2f}) -- emergent info to keep, not a conflict to drop. The purple identity holds ({_op_purple_id}): purple is exactly the sum of the exclusives, non-cancelling because each is measured against the OTHER's direction. Then mind.refine(produce, critique, adjust) is the pipeline middle: make a result, have a CRITIC score it (here opponent agreement with a trusted reference), adjust, retry until good -- it drove a noisy vector to accepted={_op_log['accepted']} in {int(_op_log['tries'])} rounds. *** two estimates -> agreement, exclusives, and the emergent purple channel; produce -> critique -> adjust until good ***")
+
+# ---- composability Layer 1: the tool interface both directions (leCore AS a tool + USING tools) ----
+from holographic_service import Service as _ToolService
+_tsvc = _ToolService()
+_tools_manifest = _tsvc.dispatch("GET", "/tools", None)[1]
+_tinv = _tsvc.dispatch("POST", "/invoke", {"name": "opponent_channels", "args": {"vec_a":[1,0,0],"vec_b":[0,1,0]}})[1]
+class _TourDoubler:
+    name="double"; description="double the input"
+    def run(self,v): return v*2
+_mind_rd.orchestrator.register(_TourDoubler())
+_mind_rd.orchestrator.register_command("shout", ["echo","LOUD:"], allow=True)
+_tour_bridge = _mind_rd.attach_llm(lambda t: "reply:"+t, name="tour")
+_tour_names = _mind_rd.orchestrator.tools()
+print(f"  COMPOSABILITY LAYER 1 -- the tool interface, both directions: one shape ('GET /tools' + 'POST /invoke') that a harness, an LLM, or another leCore all speak. leCore AS a tool: GET /tools advertised {int(_tools_manifest['count'])} public faculties, and POST /invoke ran one over the wire -- opponent_channels on two orthogonal vectors came back with divergence {float(_tinv['result']['divergence_score']):.2f} and a purple magnitude {float(_tinv['result']['channel_magnitudes']['purple']):.2f} (numpy serialized to JSON; private methods refused; token-gated). leCore USING tools: mind.orchestrator.register() took a plain callable object, register_command() took an allowlisted shell program (it ran and returned {[t for t in _mind_rd.orchestrator.registry.tools if t.name=='shout'][0].fn('hi').strip()!r}), and remote_tools(url) would pull another node's /tools the same way -- registered now: {_tour_names}. mind.attach_llm() wired an LLM (any text->text, no SDK) onto the mind's bus, usable as a tool or a refine critic. Every node wires to every node. *** GET /tools + POST /invoke: leCore is a tool AND uses tools -- remote nodes, LLMs, and shell commands, one shape ***")
+
+# ---- composability Layer 5: Principal -- one scoped identity for any actor (multiplayer / swarm / federation) ----
+_al = _mind_rd.principal("alice", workspace="lab", kind="user")
+_bo = _mind_rd.principal("bob", workspace="lab", kind="user")
+_ag = _mind_rd.principal("agent7", workspace="lab", kind="agent")
+_al.send(_mind_rd.bus(), to="bob", payload={"note": "for bob only"})
+_bo_inbox = _bo.poll(_mind_rd.bus())
+_al_inbox = _al.poll(_mind_rd.bus())
+import numpy as _np_pr
+_pv = _np_pr.random.default_rng(0).standard_normal(_mind_rd.dim); _pv /= _np_pr.linalg.norm(_pv)
+_tagged = _bo.tag(_pv)
+from holographic_provenance import of_source as _of_source
+_own = float(_np_pr.dot(_of_source(_tagged, "bob", _mind_rd.dim), _pv))
+_other = float(_np_pr.dot(_of_source(_tagged, "alice", _mind_rd.dim), _pv))
+print(f"  COMPOSABILITY LAYER 5 -- Principal: ONE scoped identity for ANY actor (an agent, a user, a service, or a whole peer leCore connecting as a guest -- the audit's finding that these are the SAME isolation problem). mind.principal(id, workspace, kind) bundles four isolations by construction: a private DB namespace it alone writes ({_al.namespace_name!r} vs {_bo.namespace_name!r} -- can't collide), a directed inbox it alone reads, a provenance role that tags everything it contributes, and an optional private learning overlay. Alice sent a directed note to bob: bob's inbox received {len(_bo_inbox)} (from {_bo_inbox[0].sender!r}), alice's own inbox saw {len(_al_inbox)} -- signals never cross. Provenance holds too: bob's tagged vector recovers strongly under bob's role (alignment {_own:.2f}) but is noise under alice's ({_other:.2f}), so a contribution always traces to who made it. Multiplayer, swarm, and federation all fall out of this one primitive. *** every actor is a Principal: private namespace + private inbox + provenance role, isolation by default ***")
+
+# ---- composability Layer 6: fork -> edit -> merge -> apply a shared world (multiplayer <-> single-player) ----
+import numpy as _np_mg
+_mg_rng = _np_mg.random.default_rng(0)
+_mg_ground = _mg_rng.standard_normal(_mind_rd.dim); _mg_ground /= _np_mg.linalg.norm(_mg_ground)
+_mind_rd.workspace.world("lab").set("ground", _mg_ground)          # a shared starting world
+_mg_mine = _mind_rd.workspace.fork("lab"); _mg_theirs = _mind_rd.workspace.fork("lab")
+_mg_blue = _mg_rng.standard_normal(_mind_rd.dim)
+_mg_mine.set("sky", _mg_blue)                                       # both agree on the sky
+_mg_theirs.set("sky", _mg_blue + 0.002*_mg_rng.standard_normal(_mind_rd.dim))
+_mg_theirs.set("cloud", _mg_rng.standard_normal(_mind_rd.dim))      # only theirs adds a cloud
+_mg_untouched = "sky" not in _mind_rd.workspace.world("lab").slots  # forks didn't touch the shared world
+_mg_res = _mind_rd.merge_forks([_mg_mine.delta, _mg_theirs.delta], policy="select")
+_mg_changed = _mind_rd.apply(_mg_res["merged"], world="lab")
+print(f"  COMPOSABILITY LAYER 6 -- fork -> edit -> merge -> apply a shared world. A world is a SEED + DELTAS, so a fork is cheap (regenerate the base locally, keep your own delta) and only the sparse edits travel. mind.workspace.fork('lab') hands out a COPY-ON-WRITE view: two users edited in isolation and the shared world stayed untouched ({_mg_untouched}) until apply. mind.merge_forks reconciled their deltas the honest way -- where they AGREE it merges conflict-free, where they DISAGREE it detects the split with the opponent channels (pairwise, per leOS) and surfaces it instead of guessing. Both nudged 'sky' the same way and only one added a 'cloud': the merge produced {sorted(_mg_res['merged'].keys())} with {len(_mg_res['conflicts'])} conflicts, and mind.apply wrote {_mg_changed} back into the shared world. The same primitive gives you single-player forks, multiplayer workspaces, and (with Principals) swarms -- one loop. *** fork (copy-on-write) -> edit alone -> merge (agree=combine, disagree=surface) -> apply back ***")
+
+# ---- composability Layer 7: presence registry (who's online) + invite/grant access control (share selectively) ----
+from holographic_access import require_readable as _require_readable, AccessError as _AccessError
+_l7_inv = _mind_rd.invite(kind="user", grants={"read": ["lab/scene"]})
+_l7_guest = _mind_rd.admit(_l7_inv, "visitor", workspace="lab")
+_l7_can_scene = _l7_guest.can_read("lab/scene")
+try:
+    _require_readable(_l7_guest, "lab/notes"); _l7_blocked = False
+except _AccessError:
+    _l7_blocked = True
+_mind_rd.grant(_l7_guest, read="lab/notes"); _l7_after_grant = _l7_guest.can_read("lab/notes")
+_mind_rd.revoke(_l7_guest, read="lab/notes"); _l7_after_revoke = _l7_guest.can_read("lab/notes")
+_mind_rd.registry.announce(_mind_rd.principal("agent1", workspace="lab", kind="agent"))
+_l7_online = [d["id"] for d in _mind_rd.registry.list()]
+print(f"  COMPOSABILITY LAYER 7 -- presence + access control, the pieces the moment OTHERS connect. mind.registry tracks WHO IS ONLINE: actors announce (a heartbeat), others discover them, and anyone who stops heart-beating drops out on their own -- online now: {_l7_online}. Access control is the symmetric twin of leCore's existing 'write only your OWN namespace' rule: a guest sees NOTHING until shared. mind.invite(grants={{'read':['lab/scene']}}) minted a token, mind.admit() redeemed it into a scoped guest who can read lab/scene ({_l7_can_scene}) but is BLOCKED from lab/notes ({_l7_blocked}) by the read chokepoint. The host then shared lab/notes selectively (readable={_l7_after_grant}) and un-shared it (readable={_l7_after_revoke}); writes stay own-namespace-only throughout, and the single-use invite can't admit a crowd. Every actor -- user, agent, service, or a whole guest leCore -- is admitted and scoped the same way. *** who is online + choose exactly what to share; default is nothing, sharing is an explicit grant ***")
+
+# ---- composability Layer 3: NetworkFarm -- the same partition-and-reduce job, now ACROSS MACHINES ----
+import threading as _f_thr, time as _f_time
+from http.server import HTTPServer as _FHTTP
+from holographic_coordinator import (Coordinator as _FCoord, InProcessBackend as _FLocal, WorkerNode as _FNode,
+                                      _make_worker_handler as _f_handler, _sum_bucket as _f_sum)
+from holographic_distribute import reduce_sum as _f_reduce
+_f_node = _FNode(token="farm", workers={"sum": _f_sum})            # a node offering ONE worker, by name
+_f_httpd = _FHTTP(("127.0.0.1", 0), _f_handler(_f_node))
+_f_port = _f_httpd.server_address[1]
+_f_thr.Thread(target=_f_httpd.serve_forever, daemon=True).start(); _f_time.sleep(0.15)
+_f_buckets = [[1,2,3],[4,5],[6,7,8,9]]
+_f_local = _FCoord(_FLocal()).run(_f_buckets, _f_sum, cache=None, reduce=_f_reduce)
+_f_farm = _mind_rd.farm(["127.0.0.1:%d" % _f_port], token="farm")
+_f_remote = _f_farm.run(_f_buckets, "sum", cache=None, reduce=_f_reduce)
+try:
+    _f_farm.run([[1]], "rm_rf", cache=None, reduce=_f_reduce); _f_safe = False
+except Exception: _f_safe = True
+_f_farm.close(); _f_httpd.shutdown()
+print(f"  COMPOSABILITY LAYER 3 -- NetworkFarm: distributed compute ACROSS MACHINES, the one genuine cross-machine build. The local pool already parallelised across your cores; this parallelises across a farm of nodes with the SAME call. Each node runs serve_worker(workers={{name: fn}}); mind.farm(nodes, token).run(buckets, 'sum', cache, reduce) round-robins the buckets to the nodes and reassembles by the monoid reducer. Over a real socket just now the farm returned {_f_remote} -- identical to the in-process {_f_local} (results come back in bucket order, so the reduce stays deterministic across machines). SAFE by design: workers run BY NAME, so a node only ever runs a worker it registered -- asking for an unregistered worker was refused ({_f_safe}), the network equivalent of the command allowlist; no code crosses the wire, only data. stdlib sockets + JSON, numpy fidelity preserved. *** local pool -> network farm: same partition-and-reduce, one machine or many, workers by name (no code over the wire) ***")
+
+# ---- composability Layer 4: DistributedBus -- the same bus, topics shared ACROSS MACHINES ----
+import threading as _b_thr, time as _b_time
+from http.server import HTTPServer as _BHTTP
+from holographic_distbus import _make_bus_handler as _b_handler
+_b_servers = []
+_b_A = _mind_rd.distributed_bus(token="t", node_id="A")
+_b_B = _mind_rd.distributed_bus(token="t", node_id="B")
+def _b_spin(_bus):
+    _h = _BHTTP(("127.0.0.1", 0), _b_handler(_bus, "t"))
+    _b_thr.Thread(target=_h.serve_forever, daemon=True).start(); _b_servers.append(_h)
+    return "127.0.0.1:%d" % _h.server_address[1]
+_b_A.add_peer(_b_spin(_b_B)); _b_B.add_peer(_b_spin(_b_A)); _b_time.sleep(0.15)
+_b_B.open_mailbox("watch", ["plan.*"])
+_b_A.publish("plan.step", {"n": 1}, sender="A")                      # published on A...
+_b_time.sleep(0.15)
+_b_crossed = [m.payload["n"] for m in _b_B.poll("watch")]           # ...arrives on B
+_b_B.open_mailbox("bounded", ["ev.*"], maxlen=2)                     # backpressure demo
+for _i in range(6): _b_B.publish("ev.tick", {"i": _i}, sender="B")
+_b_st = _b_B.mailbox_stats("bounded")
+for _h in _b_servers: _h.shutdown()
+print(f"  COMPOSABILITY LAYER 4 -- DistributedBus: the message bus spread across machines, the last cross-machine build. It SUBCLASSES the in-process bus and keeps everything (topics, directed sends, sender, deterministic seq) unchanged -- it just also FORWARDS each publish to peer nodes, which deliver to their own local subscribers. Over a real socket a message published on node A reached a subscriber on node B ({_b_crossed} arrived), and a directed send would cross the same way -- so a swarm on many machines coordinates with the exact publish/subscribe/send API it uses in one process. No loops (a forwarded message delivers local-only and is deduped by a global node#seq id), and a dead peer never blocks the publisher (best-effort fan-out). For high fan-out, a bounded mailbox applies BACKPRESSURE: after open_mailbox(maxlen=2), six events left {_b_st['pending']} pending and dropped {_b_st['dropped']} (oldest-first), tracked so the loss is visible, not silent. *** same bus, one machine or many: publish here, subscribers everywhere; bounded mailboxes for backpressure ***")
+
 # OPTIMISATION: port the rasteriser's Python loop to a vectorised scatter (the "VSA-native" win) + V-Ray raymarch tricks
 _tl0 = _timerd.time(); _imloop = _mind_rd.render_mesh(_Mrd, _camrd, 256, 256, lights=_lrd, base_color=(0.8, 0.5, 0.3), vectorized=False); _tloop = _timerd.time() - _tl0
 _tv0 = _timerd.time(); _imvec = _mind_rd.render_mesh(_Mrd, _camrd, 256, 256, lights=_lrd, base_color=(0.8, 0.5, 0.3), vectorized=True); _tvec = _timerd.time() - _tv0

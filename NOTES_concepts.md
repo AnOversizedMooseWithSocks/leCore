@@ -21027,3 +21027,223 @@ Three changes, all readable/stdlib, no heavy plugins:
 
 Note on DEMOS: the tour imports ~everything so it's "always affected" -- it stays a manually-run integration demo, not
 in CI. The same select_tests approach could gate gallery/tour regeneration, but neither is in CI today.
+
+## COMPOSABILITY BACKLOG -- step 1-2: opponent (leOS-faithful) + refine  [+20 tests]
+
+Starting the composability master backlog in its own sequenced order. Probed first: most substrate already exists
+(service, orchestrator, agent_bridge, bus, jobs, partition, workspace, distribute, deltachain, and coordinator already
+has Coordinator/InProcessBackend/LocalPool). Genuinely-new modules to build: opponent, refine, toolclient, principal,
+merge, plus the network builds (NetworkFarm/DistributedBus) and access control.
+
+  * holographic_opponent.py -- a FAITHFUL PORT of leOS's project/subsystems/opponent_channels.py (Moose flagged that
+    the opponent channels are a leOS COMPATIBILITY CONTRACT). It is PAIRWISE (A vs B), the opponent-processing metaphor
+    (red-green / blue-yellow). opponent_channels(a, b) -> {agreement (=sign(a)*sign(b)*min(|a|,|b|), element-wise),
+    a_exclusive (a minus its projection onto B), b_exclusive (b minus its projection onto A), magnitude_dispute, PURPLE
+    = a_exclusive + b_exclusive (the emergent signal in NEITHER alone), divergence_score (geodesic angle),
+    cosine_similarity, interrupt, channel_magnitudes}. Plus classify() (redundant/contradictory/novel/hierarchical/
+    complementary) and blend() (agreement + weighted exclusives + 0.1*purple). decompose = alias for the leOS name.
+    CORRECTION ON THE RECORD: my first pass wrongly GENERALIZED opponent to N vectors with a single mean-consensus,
+    which forced all residuals orthogonal to the same direction so their signed sum was identically zero -- then I
+    "fixed" that self-made problem by redefining purple as an SVD axis. That BROKE the leOS contract. The real design
+    uses CROSS-projection (a onto b, b onto a): the two exclusives are measured against DIFFERENT references, so
+    purple = a_exclusive + b_exclusive does NOT cancel (a=b -> 0; a orthogonal b -> a+b). VERIFIED: leCore's port
+    matches leOS's own decompose to float32 precision over 200 random pairs (the only delta is leOS computing in
+    float32 and rounding scalars to 4dp; leCore is float64). purple is now correct and leOS-compatible.
+  * holographic_refine.py -- refine(produce, critique, adjust, accept, budget) -> {result, score, accepted, tries}:
+    the pipeline middle. opponent_critic(reference) scores a candidate by cosine_similarity (agreement) with a
+    reference via the opponent channels. HONEST on the backlog's "fold into project_onto_constraints": same spirit,
+    different mechanism (callable critic vs fixed numeric convergence) -- kept as two readable functions.
+
+Wired mind.opponent_channels(a, b) + mind.refine. Catalog homes "Agreement across estimates (opponent)" + "Refine loop"
+(catalog 92->94), discoverable. 20 tests (10 opponent incl. the purple identity + a leOS cross-check shape, 5 refine,
+plus 5 earlier) + 1 integration (opponent decomposition through the mind + refine driven by an opponent critic). Tour
+block added. Gates green; core purity intact.
+
+STILL ON THE BACKLOG (next turns, in order): Layer 1 toolclient (remote_tools + tools_manifest/invoke over service);
+Layer 3 NetworkFarm + CommandRunner (LocalPool already exists); Layer 5 Principal; Layer 6 merge_forks (uses the
+opponent divergence/agreement); Layer 4 DistributedBus; Layer 7 presence registry + invite/grant access control. The
+how-to is the acceptance target for the whole stack.
+
+## COMPOSABILITY BACKLOG -- Layer 1: the tool interface, both directions  [+8 tests]
+
+leCore AS a tool, and leCore USING tools, in one shape (GET /tools + POST /invoke) -- the backlog's through-line that
+lets any node wire to any node. All reuse; no new engine deps.
+
+  * SERVER side (holographic_service.py): added GET /tools (the manifest of every PUBLIC faculty as {name, description,
+    params}, from skills.manifest) and POST /invoke ({name, args} -> getattr(mind, name)(**args) -> result). Results
+    pass through a new _jsonable() coercer (numpy -> lists, objects -> a typed summary) so /invoke never crashes on an
+    un-serializable return. Private/underscore names and unknown names are refused. The Service gained a LAZY `mind`
+    property (builds a UnifiedMind on first use, so a SQL/docs/jobs-only service never pays for it) and serve(mind=...)
+    to expose a specific configured mind. Token-gated by the existing bearer auth. SERVICE.md endpoint table updated
+    (servicedoc gate).
+  * CLIENT side (holographic_toolclient.py, stdlib urllib): remote_tools(base_url, token) fetches a node's /tools and
+    yields each as a RemoteTool whose run(args) POSTs to that node's /invoke; call() is a one-shot; list_tools() is the
+    raw manifest. A remote faculty is now used exactly like a local one.
+  * ORCHESTRATOR (holographic_orchestrator.py): new Orchestrator class (owns a Vocabulary + ToolRegistry + Planner).
+    register() accepts a raw Tool or any object with .name/.description + .run/.fn (RemoteTools, callables) and wraps it
+    with a keyword vector so it's discoverable; register_command(name, argv) registers a shell PROGRAM as a tool via
+    subprocess, ALLOWLISTED (argv[0] must be permitted -- SAFETY); register_remote(url) pulls + registers a whole node.
+  * mind wiring: mind.attach_llm(callable) -> an AgentBridge on the mind's bus (any text->text, no SDK); mind.orchestrator
+    -> a lazy Orchestrator. Both are catalog homes ("Serve leCore as a tool", "Use external tools") -> catalog 94->96.
+
+Verified end-to-end over a REAL socket (start Service on an OS-assigned port, remote_tools lists 736 tools, remote
+opponent_channels returns divergence 1.571 / purple 1.414, wrong token rejected) and in-process (the anti-silo
+integration test round-trips /invoke over the Service, registers a callable + a command in the orchestrator, and wires
+an LLM as a refine critic). 8 toolclient tests (port-0 so parallel-safe) + 1 integration. Tour block added. Gates green.
+
+STILL ON THE BACKLOG (next, in order): Layer 3 NetworkFarm + CommandRunner (LocalPool exists); Layer 5 Principal;
+Layer 6 merge_forks (uses opponent divergence/agreement, PAIRWISE per leOS); Layer 4 DistributedBus; Layer 7 presence
+registry + invite/grant access control. NOTE for later: Tool.fn is value->value (single arg); a remote/faculty tool
+takes an args DICT -- the loose "any"->"any" contract makes direct calls work; strict planner CHAINING of kwargs-tools
+is a thin adapter (documented, not yet built).
+
+## COMPOSABILITY BACKLOG -- Layer 5 (Principal + provenance) + Layer 6 (fork/merge)  [+20 tests]
+
+Single-node multiplayer: one scoped identity for any actor, and conflict-free fork/merge. Reuses partition/query/bus/
+opponent; probed leOS first for the merge convention.
+
+  * holographic_provenance.py -- the one provenance model the whole stack reads. source_role(name, dim) is a
+    deterministic role vector (derived_atom of "source:"+name), so every node agrees on a source's role with NO
+    registry. from_external(vec, source) = bind(source_role, unit(vec)) tags an external vector with its origin;
+    of_source() unbinds to recover/check it. KEPT LIMIT: single bind/unbind recovery is HRR-approximate (~0.7 cos at
+    dim 1024, higher at 4096+) -- fine for provenance DISCRIMINATION (right source clearly beats wrong).
+  * holographic_principal.py -- Principal(base, db, actor_id, workspace, kind): ONE scoped identity for agent | user |
+    service | peer (the audit's finding that these are the same isolation problem). Isolation by construction: a
+    private DB namespace ("ws:<workspace>/<kind>:<id>", writes stay here), a directed inbox topic ("to:<id>", read via
+    bus.open_mailbox+poll), a provenance role tagging everything it contributes, and an OPTIONAL private partition
+    learning overlay (base.branch). send/poll/tag/can_write. A kind="peer" principal is a whole guest leCore.
+  * holographic_merge.py -- merge_forks(forks, policy, tol): reconcile [{slot: vector}] fork deltas. PROBED leOS FIRST
+    (project/rendering/multi_user.merge_displacements compares each PAIR of users) -> confirmed the merge convention is
+    PAIRWISE, matching the leOS opponent. So a slot's forks agree iff EVERY pair is within tol radians of divergence;
+    agree -> conflict-free consensus (SYMMETRIC mean, deliberately NOT opponent.blend which is an asymmetric 70/30
+    cross-model mix); disagree -> policy ('select' surfaces, 'auto' keeps agreements only, 'left'/'right'/callable
+    resolve). Returns {merged, conflicts}.
+
+Wired mind.base (partition SharedMind over the mind), mind.db (shared query Database), mind.principal(id, workspace,
+kind, overlay=), mind.merge_forks. Catalog homes "Scoped identity (Principal)", "Merge forked worlds", + earlier tool
+homes -> catalog 96->98. 20 tests (4 provenance + 6 principal + 6 merge + earlier) + 2 integration (3 principals
+isolated through the mind; two principals fork/diverge/merge with the conflict surfaced). 2 tour blocks. Gates green.
+
+STILL ON THE BACKLOG (next, in order): Layer 7 presence registry (G-A) + invite/grant access control (G-C); Layer 3
+NetworkFarm + serve_worker + CommandRunner (the real cross-machine build; LocalPool exists); Layer 4 DistributedBus +
+backpressure (G-B). Also pending workspace plumbing: mind.workspace.fork + mind.apply(merged) to close the full
+fork->edit->merge->apply loop the how-to shows (merge_forks is the reconciliation core; fork/apply is the surrounding
+workspace glue).
+
+## COMPOSABILITY BACKLOG -- Layer 6 completion: the fork -> edit -> merge -> apply loop  [+6 tests]
+
+merge_forks was the reconciliation CORE; this closes the surrounding loop the how-to shows, so multiplayer is now
+end-to-end.
+
+  * holographic_world.py -- a shared WORLD is a named set of vector SLOTS (dict slot -> vector). World.fork() returns a
+    Fork: a COPY-ON-WRITE editing view (reads fall through to the shared base; writes accumulate in the fork's private
+    .delta -- so your edits never touch the shared world or another fork until you reconcile). World.apply(delta)
+    writes a merged delta back. WorldSpace holds named worlds. Deliberately small/readable: dicts of numpy arrays,
+    copy-on-write on fork. "A world is a seed + deltas" -- the base can regenerate from a procgen/recipe seed; this is
+    the concrete slot side that merge_forks consumes.
+    NOTE: distinct from holographic_workspace.WorkspaceManager (which handles DB-table TIERS -- a different 'workspace'
+    concern); documented so the two aren't confused.
+  * Wired mind.workspace (a lazy WorldSpace) and mind.apply(delta, world=). The full how-to loop now works through the
+    mind: m.workspace.fork('lab') -> fork.set(slot, vec) -> m.merge_forks([mine.delta, theirs.delta]) ->
+    m.apply(res['merged'], world='lab'). Fork edits stay isolated until apply; agreements merge; conflicts are surfaced,
+    never silently written.
+
+Catalog home "Fork and apply a shared world (workspace)" -> catalog 98->99. 6 world tests + 1 end-to-end integration
+(two principals fork a shared world, edit in isolation, merge, apply -- the agreement lands in the shared world, an
+unmatched slot from one fork is carried, no conflict). Layer 6 tour block rewritten to the full loop. Gates green.
+
+Layer 6 (fork/merge worlds) is now COMPLETE end-to-end. STILL ON THE BACKLOG (next, in order): Layer 7 presence
+registry (G-A) + invite/grant access control (G-C); Layer 3 NetworkFarm + serve_worker + CommandRunner (LocalPool
+exists); Layer 4 DistributedBus + backpressure (G-B).
+
+## COMPOSABILITY BACKLOG -- Layer 7: presence registry (G-A) + invite/grant access control (G-C)  [+15 tests]
+
+The pieces the connect-and-share scenarios genuinely need, both LOW effort, both reuse.
+
+  * holographic_registry.py (G-A) -- WHO IS ONLINE. Registry(ttl, clock, bus): announce(actor) records/refreshes
+    presence (the heartbeat), list(kind=, workspace=) discovers live actors, is_online() checks one, leave() drops
+    immediately, and anyone not seen within ttl is pruned as offline. Time is the only impure input and it's INJECTABLE
+    (clock=), so tests are deterministic. announce publishes 'presence.announce' on the bus so remote nodes see
+    presence too.
+  * holographic_access.py (G-C) -- WHO MAY READ WHAT. The symmetric twin of the DB's _require_writable ("write only your
+    own"): per-principal READ GRANTS, default NOTHING (a guest sees only its own namespace until shared). grant/revoke
+    share/un-share specific namespaces; can_read / require_readable(principal, ns) is the read chokepoint (raises
+    AccessError). invite(kind, grants) mints an unguessable single-use token (secrets); apply_invite redeems it onto a
+    fresh principal with exactly those grants. Writes stay own-namespace-only (unchanged). OPT-IN: a trusted host that
+    wants read-any simply never calls require_readable.
+  * Principal gained self.grants={"read":set()} + can_read(). Wired mind.registry, mind.invite(kind, grants),
+    mind.admit(code_or_invite, id, workspace) (redeem -> scoped guest, connected + announced), mind.grant/mind.revoke.
+
+Catalog homes "Who's online (presence registry)" + "Invite guests and share selectively (access control)" -> catalog
+99->101. 15 tests (5 registry + 5 access + earlier) + 1 integration (host invites a guest with one read grant; guest
+reads only that, the chokepoint blocks the rest, host shares/un-shares, a spent invite can't re-admit, registry tracks
+who's online). Tour block added. Gates green; core purity intact.
+
+STILL ON THE BACKLOG (the real cross-machine builds, the only genuine "HIGH effort" items left): Layer 3 NetworkFarm +
+serve_worker + CommandRunner (LocalPool already exists); Layer 4 DistributedBus + backpressure (G-B). After those, the
+public-deployment scenario is a matter of turning on the guardrails (redundant-compute voting via opponent, verify-
+checked deltas, auth/TLS, the CommandRunner allowlist, policy-gated merges) -- all mechanisms now in the box.
+
+## COMPOSABILITY BACKLOG -- Layer 3: NetworkFarm + serve_worker (the real cross-machine build)  [+9 tests]
+
+The one genuine HIGH-effort build. LocalPool already parallelised across cores; this parallelises across MACHINES with
+the same partition-and-reduce call, as a third Coordinator backend.
+
+  * Appended to holographic_coordinator.py: NetworkFarm(nodes, token, timeout) -- a backend with by_name=True, so the
+    Coordinator passes a worker NAME (a string) that each node resolves from its own registry. publish_cache serializes
+    the read-only cache once (carried per run -- simple correct v1); submit round-robins buckets across nodes and POSTs
+    them concurrently via a ThreadPoolExecutor -> real Futures, collected in BUCKET order so the monoid reduce stays
+    deterministic across machines. WorkerNode (name->fn registry + run) and serve_worker(host, port, token, workers)
+    -- a blocking daemon: GET /health, POST /run {worker, bucket, cache} -> {ok, result}, stdlib http.server + JSON,
+    bearer-token auth. A small _encode/_decode codec ships numpy arrays with dtype+shape fidelity.
+  * SAFETY BY DESIGN (kept loud): workers run BY NAME -- a node only runs a worker it registered, so no code crosses
+    the wire, only data (the network twin of the command allowlist). An unregistered worker name is refused; wrong
+    token is 401. For an untrusted/public farm, add redundant-compute voting (opponent) + verify-checked results at
+    deploy time -- mechanisms already in the box.
+  * Wired mind.farm(nodes, token) -> Coordinator(NetworkFarm(...)). Catalog home "Distributed compute across machines
+    (farm)" -> catalog 101->102.
+
+Verified over a REAL socket: farm result == in-process result (scalar 45.0 and elementwise array [6,6,6,6]);
+array codec preserves dtype/shape; deterministic across repeated runs; unregistered worker + wrong token refused;
+multi-node round-robin reduces correctly. 8 farm tests (port-0, parallel-safe) + 1 integration (farm through the mind
+matches in-process). Tour block runs a localhost worker over a real socket. Gates green; core purity intact.
+
+STILL ON THE BACKLOG: Layer 4 DistributedBus (the bus API routed across nodes over the Coordinator's network, + G-B
+backpressure). After that, the whole composability stack (L1-L7 + farm) is in place, and public deployment is turning
+on guardrails (redundant-compute voting, verify-checked signed deltas, auth/TLS, the allowlist, policy-gated merges),
+not new code. FOLLOW-UP for the farm: publish_cache currently carries the cache per run; pushing it to each node once
+and referencing by handle is the natural optimisation when caches get large.
+
+## COMPOSABILITY BACKLOG -- Layer 4: DistributedBus + backpressure (G-B) -- STACK COMPLETE  [+14 tests]
+
+The last cross-machine build. The bus, spread across machines, with the same API.
+
+  * holographic_distbus.py: DistributedBus(MessageBus) -- keeps ALL local behaviour (topics, directed send, sender,
+    deterministic seq) and adds fan-out: publish() delivers locally (super().publish) AND forwards to peer nodes;
+    send() is inherited so directed messages cross too. deliver_remote() is the receive path -- delivers a peer's
+    message LOCAL-ONLY (MessageBus.publish, no re-fan-out) and dedups by a global id (node_id#seq), so a meshed peer
+    set can't echo forever. Fan-out is best-effort/at-most-once: a down peer is skipped, never blocks the publisher.
+    serve_bus(bus, host, port, token) is the receive daemon (POST /bus -> deliver_remote; GET /health), stdlib
+    http.server + JSON, bearer auth. KEPT LIMITS (loud): direct fan-out only (originator -> its peers; multi-hop GOSSIP
+    and topic SHARDING are noted follow-ups, the dedup id is already in place for gossip); payloads must be
+    JSON-serializable (control plane -- bulk data goes through the farm).
+  * BACKPRESSURE (G-B) in the CORE bus (additive, backward-compatible): open_mailbox(name, patterns, maxlen=) bounds a
+    mailbox with a drop-OLDEST policy (deque(maxlen)); publish tracks drops; mailbox_stats(name) -> {pending, dropped,
+    maxlen} so a slow subscriber's loss is VISIBLE, not silent. Default maxlen=None = unbounded (unchanged).
+  * Wired mind.distributed_bus(peers, token, node_id). Catalog home "Messaging across machines (distributed bus)" ->
+    catalog 102->103.
+
+Verified over REAL sockets (two nodes A/B): a publish on A reaches a subscriber on B; a directed send crosses;
+duplicate global ids are dropped; a dead peer doesn't crash the publisher; bounded mailbox keeps the newest N and
+counts the drops. 7 distbus tests + 1 integration (through the mind) + backpressure tests. Tour block runs two bus
+nodes over sockets. Gates green; core purity intact.
+
+=== COMPOSABILITY STACK COMPLETE ===
+All layers now built and wired: L1 tool interface both directions (/tools + /invoke, toolclient, orchestrator,
+attach_llm), L2 refine, L3 LocalPool (pre-existing) + NetworkFarm + serve_worker, L4 DistributedBus + backpressure,
+L5 Principal + provenance, L6 fork/merge worlds (opponent-detected conflicts) + fork/apply loop, L7 presence registry
++ invite/grant access control -- over the opponent keystone (a faithful leOS port). The extreme case (public federated
+farm) needs NO new mechanism: it's L1-L7 composed with the guardrails switched from optional to required
+(redundant-compute voting via opponent, verify-checked signed deltas, auth/TLS, the worker/command allowlist,
+policy-gated merges). Remaining are OPTIMISATIONS/HARDENING, not new capability: farm publish_cache push-once-by-handle;
+distbus multi-hop gossip + topic sharding; and the public-deployment guardrail pass.
