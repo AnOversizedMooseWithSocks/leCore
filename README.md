@@ -171,6 +171,7 @@ Like leOS, leCore is **free and open source**, and the work that keeps it free i
 - **`ISA.md`** — the small instruction set the engine's programs are built from.
 - The module docstrings — every `holographic_*.py` file opens with a plain-language "why this exists" (and
   those are exactly what `REFERENCE.md` gathers up for you).
+- **`leCore_composability_howto.md`** — information about using leCore within an LLM pipeline, as well as scaling for multiple users or agents.
 
 **How the docs stay honest.** Three of the files above are *generated* from the code and *gated* in CI, so they can't
 quietly fall out of date: `REFERENCE.md` (from module docstrings), `API_QUICKREF.md` and `CAPABILITIES.md` (from the
