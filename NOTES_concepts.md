@@ -21275,3 +21275,22 @@ timing, not logic. Root causes + fixes:
 KNOWN WARNING (not a failure): under xdist + LocalPool's ProcessPoolExecutor(fork), Python 3.12 warns "fork() in a
 multi-threaded process may deadlock". Harmless today (the localpool tests pass); a future hardening is to use a spawn
 context. Left as-is to avoid the spawn slowdown.
+
+## CI FIX: affected-test selection now runs on PUSHES too (not just PRs)
+
+Symptom: a docs/workflow-only push to main ran the whole ~3,700-test suite. Cause: the affected-selection was gated to
+`pull_request` only; every PUSH fell through to a full run. Since this is a solo repo (pushes go straight to main),
+the selection never actually kicked in.
+
+Considered splitting tests into path-filtered CI STAGES (the intuitive idea) and rejected it: path filters can't see
+IMPORTS, so a change to a hub like holographic_ai (imported by nearly everything) wouldn't trigger a "render stage"
+unless holographic_ai were listed in every stage's paths -- which defeats the point. The import-graph selector
+(tools/select_tests.py) already solves that correctly (transitive closure), so the fix is to USE it on pushes, not to
+replace it with a dumber mechanism.
+
+Change (ci.yml): push AND pull_request now both run only AFFECTED tests; the FULL suite runs on a weekly schedule
+(cron Mon 06:00 UTC), the manual "Run workflow" button (workflow_dispatch), and version tags -- the safety net for
+anything the static graph can't see. Push diffs github.event.before..HEAD (covers multi-commit pushes; a new branch
+with no previous tip -> full). PR diffs origin/base...HEAD. select_tests still fails safe: unscopable change (data
+file / new module) -> "ALL" -> full; docs/config only -> nothing. Dry-run verified: docs push -> nothing; opponent.py
+push -> 118 files; data-file push -> full; schedule/manual/tag -> full.
