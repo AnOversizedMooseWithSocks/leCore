@@ -59,6 +59,10 @@ wheel, **installs it in isolation and imports it as a smoke test**, uploads the 
 artifacts, and — on a `v*` tag — attaches them to the GitHub Release. On a `v*` tag it **also publishes the
 release to PyPI** (see below), so `pip install leos-core` picks it up.
 
+> **If the "Attach to the GitHub Release" step fails with `Resource not accessible by integration`:** the job's
+> token is read-only. Attaching files *writes* to the release (part of the `contents` scope), so the `build-wheel`
+> job declares `permissions: contents: write`. That block is what grants it — don't remove it.
+
 ### Publishing to PyPI (trusted publishing — no stored token)
 
 The `publish-pypi` job uses PyPI **Trusted Publishing** (OpenID Connect). GitHub proves its identity to PyPI

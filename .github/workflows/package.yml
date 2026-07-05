@@ -16,6 +16,12 @@ jobs:
   # ---------------------------------------------------------------------------------------------------------
   build-wheel:
     runs-on: ubuntu-latest
+    # The default GITHUB_TOKEN is READ-ONLY. Attaching the wheel/sdist to a GitHub Release WRITES to the release,
+    # which lives under the "contents" scope -- without this the release step fails with
+    # "Resource not accessible by integration". contents:write also covers the read that checkout needs, and we scope
+    # it to just this job (least privilege; the publish job below keeps its own id-token:write and nothing more).
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
