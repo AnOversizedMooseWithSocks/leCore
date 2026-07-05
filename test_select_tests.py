@@ -46,3 +46,18 @@ def test_leaf_change_is_smaller_than_full_suite():
     picked = affected_tests(["holographic_assetimport.py"], root=ROOT)
     assert picked != "ALL"
     assert len(picked) < total                                 # a leaf change must skip SOME tests
+
+
+def test_build_artifacts_are_inert():
+    # the repo's own build zip must NOT force a full run (it's regenerated, never a test input)
+    assert affected_tests(["holographic_vsa_complete.zip"], root=ROOT) == []
+    # the exact docs+config+zip change set from a real PR -> nothing to run
+    assert affected_tests(["NOTES_concepts.md", "ci.yml", "holographic_vsa_complete.zip"], root=ROOT) == []
+    # packaging output dirs are inert too
+    assert affected_tests(["dist/leos_core-0.1.0.whl"], root=ROOT) == []
+    assert affected_tests(["leos_core.egg-info/PKG-INFO"], root=ROOT) == []
+
+
+def test_unknown_archive_elsewhere_still_forces_full():
+    # a .zip that ISN'T the build artifact could be genuine capability/test data -> stay safe, run everything
+    assert affected_tests(["features/mystery_dataset.zip"], root=ROOT) == "ALL"
