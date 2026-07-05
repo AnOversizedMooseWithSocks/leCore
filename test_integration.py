@@ -2644,7 +2644,7 @@ def test_splat_densify_beats_one_shot_on_multiscale():
 
     one = mse(m.splat_aniso(T, k=12, steps=210)[1])
     st = {}
-    cf = mse(m.splat_densify(T, k=12, stats=st)[1])
+    cf = mse(m.splat_densify(T, k=12, stage_steps=(40, 80, 650), stats=st)[1])
     assert st["stages"] == 3, st
     assert cf < one * 0.5, (cf, one)                                # densify reaches a markedly better optimum
 

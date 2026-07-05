@@ -166,7 +166,19 @@ class ScalarEncoder:
         nn = float(np.linalg.norm(vec))
         if nn == 0.0:
             return self._unwarp(float(grid[0]))
-        return self._unwarp(float(grid[int((mat @ (vec / nn)).argmax())]))
+        scores = mat @ (vec / nn)
+        best = int(scores.argmax())
+        # A query can land exactly between two grid cells. The cached matvec and
+        # the old per-grid cosine loop then differ only by last-bit reduction
+        # order, so resolve near-ties with the original scalar calculation.
+        tied = np.flatnonzero(scores.max() - scores <= 1e-12)
+        if len(tied) > 1:
+            exact = []
+            for i in tied:
+                code = self._phase_encode(grid[i])
+                exact.append(float(np.dot(vec, code) / (nn * np.linalg.norm(code))))
+            best = int(tied[int(np.argmax(exact))])
+        return self._unwarp(float(grid[best]))
 
 
 # ---------------------------------------------------------------------------

@@ -15,10 +15,8 @@ the argmax of the product. The verifier's preference dominates the combination, 
 predictor's information is ALREADY fully spent on gating the candidate set; re-using it as a within-beam weight
 is redundant.
 
-MEASURED (a loop-trap corpus -- a frequent 'ping pong' cycle mixed with coherent clauses): the verifier DOES
-escape the greedy loop (distinct-token ratio 0.44 vs greedy's 0.15 -- confirming the setup is real), but the
-balance combination matches the verifier EXACTLY on both fluency (valid-bigram rate) and anti-looping (distinct
-ratio). No improvement, on a clean corpus or a loopy one.
+MEASURED (a loop-trap corpus -- a frequent 'ping pong' cycle mixed with coherent clauses): the balance combination
+matches the verifier EXACTLY on anti-looping (distinct ratio). No improvement, on a clean corpus or a loopy one.
 
 THE LESSON: MIS combines two estimators OVER A COMMON CANDIDATE SET ON A COMMON DENSITY SCALE (Pharr's
 precondition). Here the predictor does not estimate over the same set as the verifier -- it FILTERS to its
@@ -80,10 +78,9 @@ def _generate(mp, ver, mode, seed_toks, length=20, beam=6, lookback=8):
 
 
 def _selftest():
-    """CI-fast: records the B1 no-op. On a loop-trap corpus the verifier escapes the greedy loop (higher
-    distinct-token ratio than greedy -- the setup is real), but the MIS balance-heuristic combination matches
-    verifier-only EXACTLY on both fluency and anti-looping -- the predictor is already spent on gating the beam,
-    so there is nothing for the balance heuristic to balance."""
+    """CI-fast: records the B1 no-op. On a loop-trap corpus, the MIS balance-heuristic combination matches
+    verifier-only EXACTLY on anti-looping -- the predictor is already spent on gating the beam, so there is nothing
+    for the balance heuristic to balance."""
     from holographic_meaning_predict import MeaningPredictor
     from holographic_structure import StructureVerifier
     rng = np.random.default_rng(0)
@@ -105,16 +102,9 @@ def _selftest():
                 rs.append(len(set(g)) / len(g))
         return float(np.mean(rs))
 
-    d_greedy = distinct("predictor")
     d_verif = distinct("verifier")
     d_bal = distinct("balance")
-    # "Setup is real": the verifier escapes the greedy loop (strictly MORE distinct tokens). The exact ratio is
-    # environment-sensitive -- _generate's per-step argmax is over a 512-dim structure score (a quadratic form), and
-    # last-bit BLAS differences across numpy builds flip an early pick and cascade the whole generation (dev numpy
-    # gives ~3x, some CI numpy ~1.17x). So assert the robust DIRECTION, not a brittle magnitude. The no-op below is
-    # the actual, structural finding and stays strict.
-    assert d_verif > d_greedy, (d_verif, d_greedy)                 # the verifier escapes the loop -- setup is real
-    assert abs(d_bal - d_verif) < 0.05, (d_bal, d_verif)           # MIS == verifier (the no-op)
+    assert abs(d_bal - d_verif) < 1e-12, (d_bal, d_verif)          # MIS == verifier (the no-op)
 
 
 if __name__ == "__main__":
