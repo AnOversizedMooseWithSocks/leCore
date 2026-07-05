@@ -21275,3 +21275,37 @@ timing, not logic. Root causes + fixes:
 KNOWN WARNING (not a failure): under xdist + LocalPool's ProcessPoolExecutor(fork), Python 3.12 warns "fork() in a
 multi-threaded process may deadlock". Harmless today (the localpool tests pass); a future hardening is to use a spawn
 context. Left as-is to avoid the spawn slowdown.
+
+## CI FIX: affected-test selection now runs on PUSHES too (not just PRs)
+
+Symptom: a docs/workflow-only push to main ran the whole ~3,700-test suite. Cause: the affected-selection was gated to
+`pull_request` only; every PUSH fell through to a full run. Since this is a solo repo (pushes go straight to main),
+the selection never actually kicked in.
+
+Considered splitting tests into path-filtered CI STAGES (the intuitive idea) and rejected it: path filters can't see
+IMPORTS, so a change to a hub like holographic_ai (imported by nearly everything) wouldn't trigger a "render stage"
+unless holographic_ai were listed in every stage's paths -- which defeats the point. The import-graph selector
+(tools/select_tests.py) already solves that correctly (transitive closure), so the fix is to USE it on pushes, not to
+replace it with a dumber mechanism.
+
+Change (ci.yml): push AND pull_request now both run only AFFECTED tests; the FULL suite runs on a weekly schedule
+(cron Mon 06:00 UTC), the manual "Run workflow" button (workflow_dispatch), and version tags -- the safety net for
+anything the static graph can't see. Push diffs github.event.before..HEAD (covers multi-commit pushes; a new branch
+with no previous tip -> full). PR diffs origin/base...HEAD. select_tests still fails safe: unscopable change (data
+file / new module) -> "ALL" -> full; docs/config only -> nothing. Dry-run verified: docs push -> nothing; opponent.py
+push -> 118 files; data-file push -> full; schedule/manual/tag -> full.
+
+## CI FIX: the committed build zip forced full runs ("change can't be scoped")
+
+Symptom: a PR of NOTES_concepts.md + ci.yml + holographic_vsa_complete.zip ran the FULL suite -- select_tests saw the
+.zip (an unknown extension) and fell back to "ALL" (safe default). Root cause: the 23MB BUILD ARTIFACT was committed to
+the repo, so it shows up in diffs.
+
+Two fixes:
+  * .gitignore now excludes the build outputs (holographic_vsa_complete.zip, dist/, build/, build_pkg/, *.egg-info) --
+    they're regenerated, don't belong in git (and a 23MB binary per build bloats history). NOTE for Moose: gitignore
+    doesn't untrack an already-tracked file; untrack the zip once with `git rm --cached holographic_vsa_complete.zip`.
+  * tools/select_tests.py now recognises the repo's OWN build outputs as INERT (no test impact): the packaging zip by
+    name, plus dist/ build/ build_pkg/ *.egg-info paths. Done by name/path, NOT by extension -- a .zip/.gz elsewhere
+    can be a genuine capability input (the filemap ingests archives), so an UNKNOWN archive still correctly forces a
+    full run. Verified: the exact PR change set -> nothing; features/*.zip -> ALL (safety kept); +2 tests.

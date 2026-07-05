@@ -1,24 +1,29 @@
 # Continuous integration for the Holographic VSA engine.
 #
-# Runs the full pytest suite on every push and every pull request. The job only
-# goes green if every test passes -- a single failing test makes pytest exit
-# non-zero, which fails the job. To make that gate actually BLOCK a merge (not
-# just show a red X), mark this check as required once:
-#   GitHub repo -> Settings -> Branches -> Branch protection rule for `main`
-#   -> "Require status checks to pass before merging" -> select "pytest".
+# On a push or a pull request it runs only the tests AFFECTED by the changed files (see the "Run the test suite"
+# step). A docs- or config-only change runs no tests at all. As a safety net, the WHOLE suite runs weekly (schedule),
+# on demand (the "Run workflow" button), and on a version tag -- so nothing that the affected-selection might miss can
+# hide for long. The job only goes green if every test that ran passes.
 #
-# A handful of tests exercise the optional NLTK corpora (language ID, corpus-scale
-# routing). Those skip themselves automatically when the data isn't installed, so
-# they don't turn a clean runner red -- every other test must pass.
+# To make that gate actually BLOCK a merge (not just show a red X), mark this check as required once:
+#   GitHub repo -> Settings -> Branches -> Branch protection rule for `main`
+#   -> "Require status checks to pass before merging" -> select "tests".
+#
+# A handful of tests exercise the optional NLTK corpora (language ID, corpus-scale routing). Those skip themselves
+# automatically when the data isn't installed, so they don't turn a clean runner red -- every other test must pass.
 
 name: tests
 
-# Direct pushes to the default branch (covers both common names), plus all PRs.
-# If your default branch is named something else, add it to the push list.
+# Pushes to the default branch (both common names) and all PRs run AFFECTED tests. The schedule + manual button +
+# version tags run the FULL suite as the safety net. If your default branch has another name, add it to the push list.
 on:
   push:
     branches: [main, master]
+    tags:     [ "v*" ]
   pull_request:
+  schedule:
+    - cron: "0 6 * * 1"        # 06:00 UTC every Monday -- a weekly FULL-suite run, the safety net
+  workflow_dispatch:            # a "Run workflow" button in the Actions tab -> full suite on demand
 
 jobs:
   pytest:
@@ -61,33 +66,52 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run the test suite
-        # Two speed levers together:
-        #   1. -n auto spreads tests across ALL the runner's CPU cores (ubuntu-latest has 4). The suite is
-        #      deterministic and each test is independent (own tmp_path / in-memory stores), so it parallelises cleanly.
-        #   2. On a PULL REQUEST we run only the tests AFFECTED by the changed files -- tools/select_tests.py builds a
-        #      static import graph and picks every test whose imports (transitively) reach a changed module. A test that
-        #      can't reach any changed file doesn't run. On a PUSH TO MAIN we run the WHOLE suite, so main is always
-        #      fully verified -- the affected-only run is fast PR feedback, the full run is the safety net.
-        # It fails safe: if a change can't be scoped (a data file, a brand-new module) select_tests prints "ALL" and we
-        # run everything; if nothing is affected (docs only) we skip the run (the doc gates below still check docs).
+        # Two speed levers work together here:
+        #   1. -n auto spreads tests across ALL the runner's cores. The suite is deterministic and each test is
+        #      independent (own tmp_path / in-memory stores), so it parallelises cleanly.
+        #   2. On a push OR a pull request we run only the tests AFFECTED by the changed files. tools/select_tests.py
+        #      builds a static import graph and picks every test whose imports (transitively) reach a changed module;
+        #      a test that can't reach any changed file doesn't run, and a docs/config-only change runs nothing.
+        # The FULL suite runs on the schedule, the manual button, and version tags -- that's the safety net for
+        # anything the static graph can't see. It also fails safe: if a change can't be scoped (a data file, a
+        # brand-new module) select_tests prints "ALL" and we run everything.
         run: |
           set -e
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
+          EVENT="${{ github.event_name }}"
+
+          run_full () { echo "== FULL suite ($1) =="; pytest -q -n auto --durations=15; }
+
+          # --- the safety net: weekly schedule, manual run, or a version tag -> run EVERYTHING ---
+          case "$EVENT" in
+            schedule|workflow_dispatch) run_full "$EVENT"; exit 0 ;;
+          esac
+          case "${{ github.ref }}" in
+            refs/tags/*) run_full "version tag"; exit 0 ;;
+          esac
+
+          # --- otherwise (a push or a PR): work out what changed, then run only the affected tests ---
+          if [ "$EVENT" = "pull_request" ]; then
+            # everything this PR adds on top of its base branch
             CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
-            echo "Changed files in this PR:"; echo "$CHANGED"
-            SELECTED=$(python tools/select_tests.py $CHANGED)
-            if [ "$SELECTED" = "ALL" ]; then
-              echo "== change can't be scoped -> running the FULL suite =="
-              pytest -q -n auto --durations=15
-            elif [ -z "$SELECTED" ]; then
-              echo "== no tests affected by these changes (docs/config only) -- skipping the test run =="
-            else
-              echo "== running only the affected tests =="; echo "$SELECTED"
-              pytest -q -n auto --durations=15 $SELECTED
-            fi
           else
-            echo "== push to ${{ github.ref_name }} -> running the FULL suite =="
-            pytest -q -n auto --durations=15
+            # a push: diff everything between the previous tip and now (covers multi-commit pushes). If there's no
+            # previous tip (a brand-new branch), we can't scope it -> run the full suite to be safe.
+            BEFORE="${{ github.event.before }}"
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git rev-parse "$BEFORE" >/dev/null 2>&1; then
+              run_full "new branch / no previous commit"; exit 0
+            fi
+            CHANGED=$(git diff --name-only "$BEFORE" HEAD)
+          fi
+
+          echo "Changed files:"; echo "$CHANGED"
+          SELECTED=$(python tools/select_tests.py $CHANGED)
+          if [ "$SELECTED" = "ALL" ]; then
+            run_full "change couldn't be scoped"
+          elif [ -z "$SELECTED" ]; then
+            echo "== no tests affected by these changes (docs/config only) -- nothing to run =="
+          else
+            echo "== running only the affected tests =="; echo "$SELECTED"
+            pytest -q -n auto --durations=15 $SELECTED
           fi
 
       # Keep API_QUICKREF.md current on its own: regenerate it and fail if the committed copy is stale.
