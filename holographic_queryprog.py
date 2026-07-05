@@ -182,7 +182,9 @@ class ProgramCatalog:
             return 0.0
         sims = [abs(float(cosine(acc, prog["machine"].data_atoms.get(o, np.zeros(self.dim)))))
                 for o in prog["outputs"] if o in prog["machine"].data_atoms]
-        return max(sims) if sims else float(np.linalg.norm(acc) > 0)
+        # a cosine can round to just over 1.0 (e.g. 1.0000000000000002) depending on float summation order, so clamp:
+        # a confidence is a probability-like quantity and must stay in [0, 1].
+        return min(1.0, max(sims)) if sims else float(np.linalg.norm(acc) > 0)
 
 
 # ---- a convenience: seed a system program (read-only) ------------------------------------------------------

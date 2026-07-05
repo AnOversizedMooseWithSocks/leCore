@@ -21247,3 +21247,31 @@ farm) needs NO new mechanism: it's L1-L7 composed with the guardrails switched f
 (redundant-compute voting via opponent, verify-checked signed deltas, auth/TLS, the worker/command allowlist,
 policy-gated merges). Remaining are OPTIMISATIONS/HARDENING, not new capability: farm publish_cache push-once-by-handle;
 distbus multi-hop gossip + topic sharding; and the public-deployment guardrail pass.
+
+## CI FIX: 4 flaky failures = multi-threaded-BLAS non-determinism + a wall-clock timing test
+
+Once the parallelism change let the suite actually FINISH (instead of timing out), 4 real failures surfaced. All passed
+locally (1-core, single-threaded numpy) but failed on the multi-core CI runner -- the tell that it's float-order /
+timing, not logic. Root causes + fixes:
+
+  * multi-threaded BLAS breaks determinism. numpy on a multi-core runner sums dot-products in a different ORDER per
+    run, which flips knife-edge results. FIX (systemic, the real one): ci.yml pins the engine's design assumption --
+    PYTHONHASHSEED=0 + OMP/OPENBLAS/MKL/NUMEXPR_NUM_THREADS=1 (single-threaded numpy). With `-n auto` this is also
+    FASTER (each xdist worker gets a core with one BLAS thread, no oversubscription). This restores the deterministic
+    reference the tests assume and fixes the three float-order failures:
+      - test_pr6_execute_sandboxed_and_confident + test_vsa_programs_as_db_objects: a cosine rounded to
+        1.0000000000000002 > 1.0. Also clamped at the source (queryprog._result_confidence -> min(1.0, max(sims))): a
+        confidence is [0,1], clamp regardless of float noise. Belt + suspenders.
+      - test_big_dai_structure_holds_at_scale: sequentiality_z on the 2-SYMBOL U/D sign series -- the DOCUMENTED
+        degenerate case (the statistic is numerically unstable on 2 symbols). Deterministically z~1.8 (vs levels ~113
+        = essentially unordered), but multi-thread noise swung it to 4.74. Pinned threads removes the swing; also gave
+        the assert honest headroom (< 2.5, was < 2.0) with a comment tying it to the documented degeneracy, since ~1.8
+        is a thin margin for a knowingly-unstable statistic.
+  * test_reenable_nystrom_lowrank_gate: asserted t_g < t_ex (wall-clock), flaky under parallel CI CPU contention. At
+    N=900 both paths are sub-millisecond so wall-clock is noise. FIX: assert routing (method==nystrom) + accuracy
+    (rel<0.05) HARD (the re-enable criteria, deterministic), and keep only a GENEROUS timing sanity bound
+    (t_g < t_ex*4 + 5e-3) that still catches a real perf regression without flaking on jitter.
+
+KNOWN WARNING (not a failure): under xdist + LocalPool's ProcessPoolExecutor(fork), Python 3.12 warns "fork() in a
+multi-threaded process may deadlock". Harmless today (the localpool tests pass); a future hardening is to use a spawn
+context. Left as-is to avoid the spawn slowdown.

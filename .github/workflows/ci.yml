@@ -29,6 +29,17 @@ jobs:
     # a couple of modules import pyplot at load time and would otherwise complain.
     env:
       MPLBACKEND: Agg
+      # The engine is DETERMINISTIC BY DESIGN (PYTHONHASHSEED=0, hashlib not hash(), seeded RNG). Multi-threaded BLAS
+      # breaks that: it sums float dot-products in a different ORDER per run, which flips knife-edge results (a cosine
+      # that rounds to 1.0000000000000002 instead of 1.0; a borderline z-score). So pin numpy to ONE thread and fix
+      # the hash seed -- this restores the deterministic reference the tests assume. With `-n auto` it's also FASTER:
+      # each xdist worker gets its own core with a single BLAS thread, instead of 4 workers x N BLAS threads fighting
+      # over the cores (oversubscription). If a test only fails in CI and passes locally, this is usually why.
+      PYTHONHASHSEED: "0"
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
 
     steps:
       - name: Check out the code
