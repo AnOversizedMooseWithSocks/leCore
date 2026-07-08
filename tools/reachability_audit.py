@@ -20,12 +20,21 @@ import sys
 
 def _engine_modules(root):
     out = []
-    for path in sorted(glob.glob(os.path.join(root, "holographic_*.py"))):
-        base = os.path.basename(path)
-        if base.startswith("test_"):
-            continue
-        out.append(path)
-    return out
+    # engine modules live under the holographic/ package (holographic/<family>/holographic_*.py); recurse it.
+    # Fall back to a flat root glob too, so this still works on an un-reorganized checkout.
+    patterns = [os.path.join(root, "holographic", "**", "holographic_*.py"),
+                os.path.join(root, "holographic_*.py")]
+    seen = set()
+    for pat in patterns:
+        for path in sorted(glob.glob(pat, recursive=True)):
+            base = os.path.basename(path)
+            if base.startswith("test_"):
+                continue
+            if base in seen:                                    # don't double-count if both patterns hit
+                continue
+            seen.add(base)
+            out.append(path)
+    return sorted(out)
 
 
 def _public_api(tree):
@@ -45,8 +54,10 @@ _KNOWN_NEGATIVES = {
 
 
 def audit(root):
-    mind_path = os.path.join(root, "holographic_unified.py")
-    mind_src = open(mind_path, encoding="utf-8", errors="replace").read() if os.path.exists(mind_path) else ""
+    # holographic_unified.py moved into the package (holographic/misc/); find it wherever it lives.
+    _unified = glob.glob(os.path.join(root, "holographic", "**", "holographic_unified.py"), recursive=True) \
+               or glob.glob(os.path.join(root, "holographic_unified.py"))
+    mind_src = open(_unified[0], encoding="utf-8", errors="replace").read() if _unified else ""
 
     modules = _engine_modules(root)
     no_doc, no_public, import_only, kept_neg, documents_neg, superseded = [], [], [], [], [], []

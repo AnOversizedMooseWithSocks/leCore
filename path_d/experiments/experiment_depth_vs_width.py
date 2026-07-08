@@ -24,8 +24,8 @@ import sys, os
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "repo"))
-from holographic_core import bind, unbind, bundle
-from holographic_ai import bind_batch, derived_atom
+from holographic.misc.holographic_core import bind, unbind, bundle
+from holographic.agents_and_reasoning.holographic_ai import bind_batch, derived_atom
 
 SEED = 11
 

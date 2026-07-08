@@ -7,7 +7,7 @@ _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)
 bulk: superposition (many items in one vector), a 1-bit memory footprint, and
 vectorised cleanup."""
 import numpy as np, time
-from holographic_ai import Vocabulary, HolographicMemory
+from holographic.agents_and_reasoning.holographic_ai import Vocabulary, HolographicMemory
 
 dim = 8192
 print("BATCH OPERATIONS  (dim = %d)\n" % dim)

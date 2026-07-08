@@ -24,7 +24,7 @@ The lesson the numbers teach: for sprites the win is the *representation*
 import io, os, sys, zlib
 import numpy as np
 from PIL import Image
-import pack_sprites as ps
+import tools.pack_sprites as ps
 
 
 def _load():

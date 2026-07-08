@@ -19,13 +19,11 @@ echo ">> cleaning any previous build"
 rm -rf "$STAGE" "$DIST"
 mkdir -p "$STAGE"
 
-echo ">> copying the essential modules (holographic_*.py) WITHOUT the tests"
-for f in holographic_*.py; do
-    case "$f" in
-        test_*|*_test.py) continue ;;    # skip tests (glob already excludes test_holographic_*; this is safety)
-    esac
-    cp "$f" "$STAGE"/
-done
+echo ">> copying the essential modules (the holographic/ package, plus the standalone service script) WITHOUT the tests"
+cp -r holographic "$STAGE"/
+# belt-and-suspenders: strip any stray test files that ended up inside the package tree
+find "$STAGE"/holographic -name "test_*.py" -delete 2>/dev/null || true
+[ -f holographic_service.py ] && cp holographic_service.py "$STAGE"/ || true
 
 echo ">> copying the packaging files and the convenience shim"
 cp setup.py pyproject.toml lecore.py "$STAGE"/

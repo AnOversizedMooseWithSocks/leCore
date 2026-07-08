@@ -19,8 +19,8 @@ on parallel/neuromorphic hardware the K shards run at once). The win measured he
 import sys, os
 import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "repo"))
-from holographic_core import unitary_vector, bundle
-from holographic_ai import bind_batch, bind_fixed
+from holographic.misc.holographic_core import unitary_vector, bundle
+from holographic.agents_and_reasoning.holographic_ai import bind_batch, bind_fixed
 from sklearn.datasets import make_blobs
 from sklearn.model_selection import train_test_split
 

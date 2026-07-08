@@ -90,6 +90,10 @@ floats at its **Archimedes waterline** (submerged fraction = density ratio ≈ 0
 
 *__Thermal emission__ — a material glows because it is __hot__, and the colour of the glow is set by its temperature (Planck's law / blackbody radiation): dull red near 700 K, orange by ~1400 K, yellow-white past ~2500 K. Left to right the same iron bars are heated to increasing temperatures, so the blackbody ramp reads as a row. The emission is __derived__ from the material's temperature (`matlib.heat` + `holographic_blackbody`), not a hand-picked colour — a physical property driving the render.*
 
+![A realistic volumetric cumulus cloud](gallery/render_cloud.png)
+
+*__Realistic volumetric cloud__ — a fluffy cumulus from `mind.make_cloud()` / `build_scene("a fluffy cloud")`. The shape is a smooth-union of many fBm-eroded lobes with a flat base (`holographic_semantic.cloud_field`); the look comes from physically-motivated volume lighting (`holographic_render.volume_render`): single-scatter self-shadowing for the bright sunlit crown and sky-blue shadowed base, a Henyey-Greenstein forward lobe for the silver-lining glow, a Beer-Powder term for roundness, and a cheap multi-scatter approximation so the shadows never go black. The fBm density bakes with the exact vectorised `sample_grid_fast` (~40x faster than the per-point path). See `RENDERING_GUIDE.md`.*
+
 ![Smoke and fire from one fluid sim](gallery/render_smoke_fire.png)
 
 *Smoke (left) and **fire** (right) from **one** 3-D Stable-Fluids simulation, rendered volumetrically. A heated plume is simulated on a voxel grid, then a trilinear sampler exposes that grid as the callable density field the volume ray-marcher (`holographic_render.volume_render`) marches: the smoke pass reads it as grey absorption, the fire pass reads the hot (density×temperature) core through a blackbody emission ramp. Both pieces existed; this is the first time the solver and the volume renderer were pointed at each other for a picture.*

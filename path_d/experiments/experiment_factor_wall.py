@@ -12,8 +12,8 @@ algebra. Question: does distributing the search break the wall, matched on dimen
 import sys, os, time
 import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "repo"))
-from holographic_resonator import ResonatorNetwork, map_codebook, map_bind
-from holographic_sbc import sbc_codebook, sbc_reconstruct, sbc_resonator
+from holographic.misc.holographic_resonator import ResonatorNetwork, map_codebook, map_bind
+from holographic.misc.holographic_sbc import sbc_codebook, sbc_reconstruct, sbc_resonator
 
 D = 1024                      # matched dimension for both schemes
 B, L = 64, 16                 # SBC layout: 64 blocks x 16 positions = 1024 dims

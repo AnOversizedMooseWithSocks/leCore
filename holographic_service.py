@@ -31,7 +31,7 @@ import platform
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from holographic_query import Database, run_db_sql, QueryError
+from holographic.agents_and_reasoning.holographic_query import Database, run_db_sql, QueryError
 
 __version__ = "1.0"
 
@@ -49,7 +49,7 @@ class Service:
         self.documents = []                                 # nested-object store for the GraphQL front door
         self._routes = {}                                   # (method, path) -> handler(payload) -> dict
         self._jobs = self._make_job_manager()               # long-running job control (start/pause/resume/cancel)
-        from holographic_bus import MessageBus
+        from holographic.misc.holographic_bus import MessageBus
         self._bus = MessageBus()                            # the message bus: person + agent both connected (push, no poll)
         self._register()
         if persist_path:
@@ -58,8 +58,8 @@ class Service:
     def _make_job_manager(self):
         """A JobManager over a local process pool, checkpointing beside the persist file (so paused jobs survive a
         restart). Registers a demo 'sum' worker; a real app registers its own trusted workers here by name."""
-        from holographic_jobs import JobManager, _sum_bucket, _slow_sum
-        from holographic_coordinator import InProcessBackend
+        from holographic.scene_and_pipeline.holographic_jobs import JobManager, _sum_bucket, _slow_sum
+        from holographic.scene_and_pipeline.holographic_coordinator import InProcessBackend
         jobs_dir = (self.persist_path + ".jobs") if self.persist_path else None
         mgr = JobManager(InProcessBackend(), store_dir=jobs_dir)
         mgr.register_worker("sum", _sum_bucket)             # a built-in demo worker; apps add their own
@@ -120,21 +120,21 @@ class Service:
 
     def _health(self, _payload):
         """Liveness + version probe. Body: none. Returns: {ok, name, version, python, platform, capabilities}."""
-        from holographic_catalog import default_catalog
+        from holographic.caching_and_storage.holographic_catalog import default_catalog
         return {"ok": True, "name": "leCore", "version": __version__,
                 "python": platform.python_version(), "platform": platform.system(),
                 "capabilities": len(default_catalog())}
 
     def _capabilities(self, _payload):
         """Every capability the running instance advertises. Body: none. Returns: {ok, count, capabilities:[{name, description}]}."""
-        from holographic_catalog import default_catalog
+        from holographic.caching_and_storage.holographic_catalog import default_catalog
         caps = default_catalog().all()
         return {"ok": True, "count": len(caps),
                 "capabilities": [{"name": c.name, "description": c.does} for c in caps]}
 
     def _capabilities_search(self, payload):
         """The capability homes matching a plain-English query. Body: {query}. Returns: {ok, query, matches}."""
-        from holographic_catalog import default_catalog
+        from holographic.caching_and_storage.holographic_catalog import default_catalog
         query = (payload or {}).get("query", "")
         hits = default_catalog().find_capability(query)
         return {"ok": True, "query": query,
@@ -146,14 +146,14 @@ class Service:
         """The UnifiedMind whose faculties /tools advertises and /invoke runs. Built lazily on first use, so a service
         that only does SQL/docs/jobs never pays for it. Pass your own configured mind to serve(mind=...) to override."""
         if getattr(self, "_mind", None) is None:
-            from holographic_unified import UnifiedMind
+            from holographic.misc.holographic_unified import UnifiedMind
             self._mind = UnifiedMind()
         return self._mind
 
     def _tools(self, _payload):
         """The standard tool manifest: every public faculty an /invoke can run, as {name, description, params}. Body:
         none. Returns: {ok, tools:[...]}. This is the shape a harness, an LLM, or another leCore reads to drive us."""
-        from holographic_skills import manifest
+        from holographic.misc.holographic_skills import manifest
         tools = []
         for m in manifest(include_methods=True).get("methods", []):
             name = m["name"]
@@ -199,7 +199,7 @@ class Service:
         if not query:
             raise QueryError("POST /graphql needs a JSON body {\"query\": \"{ ... }\"}")
         objects = payload.get("objects", self.documents)
-        from holographic_graphql import Scene, resolve
+        from holographic.io_and_interop.holographic_graphql import Scene, resolve
         scene = Scene(objects, dim=2048, seed=0)
         return {"ok": True, "data": resolve(scene, query)}
 
@@ -358,12 +358,12 @@ class Service:
     def _skills_manifest(self, _payload):
         """The full machine-readable skill list -- every capability + method with how to call it. An agent loads this
         once to know the whole surface it can drive."""
-        import holographic_skills as _sk
+        import holographic.misc.holographic_skills as _sk
         return {"ok": True, "skills": _sk.manifest()}
 
     def _skills_suggest(self, payload):
         """A plain-English task -> ranked skills with a confidence and the concrete call. {"task": "...", "k"?: N}."""
-        import holographic_skills as _sk
+        import holographic.misc.holographic_skills as _sk
         task = (payload or {}).get("task")
         if not task:
             raise QueryError("POST /skills/suggest needs {\"task\": \"...\"}")
@@ -371,7 +371,7 @@ class Service:
 
     def _skills_route(self, payload):
         """A task -> a decision: 'act' (with the call) when confident, else 'choose' (the options). {"task": "..."}."""
-        import holographic_skills as _sk
+        import holographic.misc.holographic_skills as _sk
         task = (payload or {}).get("task")
         if not task:
             raise QueryError("POST /skills/route needs {\"task\": \"...\"}")
@@ -379,13 +379,13 @@ class Service:
 
     def _skills_complete(self, payload):
         """Method-name autocomplete: {"prefix": "learn_"} -> matching mind methods with their signatures."""
-        import holographic_skills as _sk
+        import holographic.misc.holographic_skills as _sk
         prefix = (payload or {}).get("prefix", "")
         return {"ok": True, "prefix": prefix, "completions": _sk.complete(prefix, k=int((payload or {}).get("k", 15)))}
 
     def _skills_card(self, payload):
         """A skill card for one capability or method by name: {"name": "..."}."""
-        import holographic_skills as _sk
+        import holographic.misc.holographic_skills as _sk
         name = (payload or {}).get("name")
         if not name:
             raise QueryError("POST /skills/card needs {\"name\": \"...\"}")

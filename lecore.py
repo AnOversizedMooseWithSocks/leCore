@@ -18,12 +18,12 @@ import types
 # ---------------------------------------------------------------------------------------------------
 # The main entry point -- always present, imported eagerly so `lecore.UnifiedMind` works with no fuss.
 # ---------------------------------------------------------------------------------------------------
-from holographic_unified import UnifiedMind
+from holographic.misc.holographic_unified import UnifiedMind
 
 # Convenience: re-export the raw VSA algebra if it's present. Guarded so that a future rename can never
 # break `import lecore` itself -- the mind is what matters, the loose ops are a nicety.
 try:
-    from holographic_ai import random_vector, unitary_vector, bind, unbind, involution
+    from holographic.agents_and_reasoning.holographic_ai import random_vector, unitary_vector, bind, unbind, involution
 except Exception:                        # pragma: no cover
     pass
 
@@ -38,36 +38,29 @@ except Exception:                        # pragma: no cover
 # ---------------------------------------------------------------------------------------------------
 
 # scene -- author and store a scene document (objects, handles, transforms, undo snapshots).
-from holographic_scene_doc import Scene, SceneObject
+from holographic.scene_and_pipeline.holographic_scene_doc import Scene, SceneObject
 
 # model -- edit geometry: the modifier stack, object description, SDF primitives, key mesh verbs.
-from holographic_modifier import ModifierStack, describe_object
-from holographic_sdf import sphere, box                       # SDF primitives (more live in holographic_sdf)
-from holographic_meshverbs import extrude_face, inset_face, dissolve_vertex
+from holographic.misc.holographic_modifier import ModifierStack, describe_object
+from holographic.mesh_and_geometry.holographic_sdf import sphere, box                       # SDF primitives  more live in holographic_sdf
+from holographic.mesh_and_geometry.holographic_meshverbs import extrude_face, inset_face, dissolve_vertex
 
 # render -- turn a scene into pixels, with a config and a cooperative cancel handle.
-from holographic_session import RenderSession
-from holographic_pathtrace import path_trace
-from holographic_cancel import CancelToken
-from holographic_pipeline import PipelineConfig
+from holographic.scene_and_pipeline.holographic_session import RenderSession
+from holographic.rendering.holographic_pathtrace import path_trace
+from holographic.misc.holographic_cancel import CancelToken
+from holographic.scene_and_pipeline.holographic_pipeline import PipelineConfig
 
 # sim -- physical simulation: shallow-water wave planner/solver, free surface, snow (MPM), stable fluid,
 # and the particle<->grid transfer pair every sim needs.
-from holographic_waveadaptive import plan_waves, solve_waves
-from holographic_freesurface import FreeSurface
-from holographic_mpm import MPMSnow
-from holographic_fluid import StableFluid
-from holographic_transfer import scatter, gather
+from holographic.simulation_and_physics.holographic_waveadaptive import plan_waves, solve_waves
+from holographic.mesh_and_geometry.holographic_freesurface import FreeSurface
+from holographic.simulation_and_physics.holographic_mpm import MPMSnow
+from holographic.simulation_and_physics.holographic_fluid import StableFluid
+from holographic.misc.holographic_transfer import scatter, gather
 
 # transform -- the gizmo / property-panel math kit: TRS decompose/compose, a full quaternion kit, look_at.
-from holographic_transform import (
-    decompose, compose_trs, look_at,
-    quat_normalize, quat_mul,
-    quat_from_axis_angle, quat_to_axis_angle,
-    quat_from_matrix, quat_to_matrix,
-    quat_from_euler, quat_to_euler,
-    quat_slerp, quat_rotate,
-)
+from holographic.misc.holographic_transform import decompose, compose_trs, look_at, quat_normalize, quat_mul, quat_from_axis_angle, quat_to_axis_angle, quat_from_matrix, quat_to_matrix, quat_from_euler, quat_to_euler, quat_slerp, quat_rotate
 
 
 def _area(**members):

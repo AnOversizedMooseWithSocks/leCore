@@ -57,6 +57,12 @@ echo   A browser window will open shortly.
 echo   Leave this window open while you use the app; press Ctrl+C here to stop.
 echo.
 start "" http://127.0.0.1:5000
-"%PY%" unified_app.py
+
+REM "%PY%" tools\unified_app.py
+
+set PYTHONPATH=%~dp0;%PYTHONPATH%
+"%PY%" "%~dp0tools\unified_app.py"
+
+pause
 
 endlocal

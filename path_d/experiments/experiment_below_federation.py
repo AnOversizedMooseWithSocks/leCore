@@ -20,10 +20,10 @@ buys the OPERATIONAL wins -- fault isolation, parallel local ops, and RAID -- se
 import sys, os, functools
 import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "repo"))
-import holographic_ai, holographic_array
-from holographic_core import unitary_vector, random_vector, bind, bundle
-from holographic_ai import bind_batch
-from holographic_array import HoloArray
+import holographic.agents_and_reasoning.holographic_ai as holographic_ai, holographic.misc.holographic_array as holographic_array
+from holographic.misc.holographic_core import unitary_vector, random_vector, bind, bundle
+from holographic.agents_and_reasoning.holographic_ai import bind_batch
+from holographic.misc.holographic_array import HoloArray
 
 _orig = holographic_ai.derived_atom
 @functools.lru_cache(maxsize=None)

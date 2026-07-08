@@ -8,7 +8,7 @@ for compressing inactive data.
 Everything here is reached through one object, the `UnifiedMind`:
 
 ```python
-from holographic_unified import UnifiedMind
+from holographic.misc.holographic_unified import UnifiedMind
 mind = UnifiedMind(dim=1024, seed=0)   # dim = hypervector width; seed keeps everything deterministic
 ```
 
@@ -243,7 +243,7 @@ plain dict (fast lookups).
 mind.lookup("gravity")                         # {'definition': ..., 'pos': ..., 'synonyms': [...], ...}
 mind.word_taxonomy("dog")                       # 'a dog is a kind of ...'
 
-import holographic_dictionary as hd
+import holographic.misc.holographic_dictionary as hd
 hd.stats()                                      # {'loaded': False, 'source': 'dictionary.json.xz', ...} -- reading this does NOT load it
 hd.preload()                                    # force the one-time load at startup (optional)
 hd.unload()                                     # drop the ~22 MB back; the next lookup transparently reloads

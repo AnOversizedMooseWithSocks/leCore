@@ -37,8 +37,7 @@ CURATED = [
 
 
 def signature(node):
-    """Build a readable `name(arg, arg=default, ...)` string from a function's AST node. Defaults are shown as
-    their source text where simple (numbers, strings, names) and as '...' otherwise, so the line stays short."""
+    """Build a readable `name(arg, arg=default, ...)` string from a function's AST node. Defaults are shown as    their source text where simple (numbers, strings, names) and as '...' otherwise, so the line stays short."""
     a = node.args
     params = []
     posonly = getattr(a, "posonlyargs", [])
@@ -104,6 +103,20 @@ def module_entries(path):
     return mod_doc, lines
 
 
+def _resolve_module_path(root, mod):
+    """Find a curated module's actual file, whether it's flat at the repo root (old layout) or nested under
+    holographic/<family>/ (current layout)."""
+    flat = os.path.join(root, mod + ".py")
+    if os.path.exists(flat):
+        return flat
+    holo_root = os.path.join(root, "holographic")
+    if os.path.isdir(holo_root):
+        for dirpath, _, filenames in os.walk(holo_root):
+            if mod + ".py" in filenames:
+                return os.path.join(dirpath, mod + ".py")
+    return flat  # doesn't exist either way; the not-found branch below handles it
+
+
 def generate(root="."):
     """Write API_QUICKREF.md for the CURATED surface. Returns the output path."""
     out = ["# leCore API Quick Reference",
@@ -115,7 +128,7 @@ def generate(root="."):
         out.append("## %s" % section)
         out.append("")
         for mod in modules:
-            path = os.path.join(root, mod + ".py")
+            path = _resolve_module_path(root, mod)
             if not os.path.exists(path):
                 out.append("### `%s` -- *(module not found)*" % mod)
                 out.append("")

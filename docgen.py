@@ -25,12 +25,20 @@ from pathlib import Path
 # ------------------------------------------------------------------------------------------------------------
 
 def find_modules(root):
-    """Return the sorted list of engine module paths -- every holographic_*.py that is not a test."""
+    """Return the sorted list of engine module paths -- every holographic_*.py that is not a test, wherever it
+    lives under the holographic/ package (or, for backward compatibility, flat at the repo root)."""
     mods = []
-    for name in sorted(os.listdir(root)):
-        if name.startswith("holographic_") and name.endswith(".py") and not name.startswith("test_"):
-            mods.append(Path(root) / name)
-    return mods
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in (".git", "__pycache__", ".venv", "venv") and not d.startswith(".")]
+        # only descend into the holographic package and the repo root itself
+        rel = os.path.relpath(dirpath, root)
+        if rel != "." and not (rel == "holographic" or rel.startswith("holographic" + os.sep)):
+            dirnames[:] = []  # don't descend further (skip tests/, tools/, docs/, etc.)
+            continue
+        for name in sorted(filenames):
+            if name.startswith("holographic_") and name.endswith(".py") and not name.startswith("test_"):
+                mods.append(Path(dirpath) / name)
+    return sorted(mods, key=lambda p: p.name)
 
 
 # ------------------------------------------------------------------------------------------------------------

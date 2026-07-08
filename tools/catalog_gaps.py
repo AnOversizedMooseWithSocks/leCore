@@ -12,7 +12,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from holographic_catalog import default_catalog, seed_from_modules
+from holographic.caching_and_storage.holographic_catalog import default_catalog, seed_from_modules
 
 PROBES = {
     "2D image editing & generation": ["draw a picture", "make a 2d drawing", "paint on a canvas", "edit an image",

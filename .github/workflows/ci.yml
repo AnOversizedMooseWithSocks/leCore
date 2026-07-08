@@ -140,14 +140,17 @@ jobs:
       - name: Gate -- no invocation gaps
         run: python tools/skill_lint.py
 
-      # Keep CAPABILITIES.md (the plain-language "what can it do + how to start" menu) current. Same drift-check
-      # pattern as API_QUICKREF.md: regenerate from the live catalog and fail if the committed copy is stale.
-      # capdoc.py writes no timestamp, so this only trips on a real change. Fix: `python capdoc.py` and commit.
-      - name: Check CAPABILITIES.md is up to date
+      # Keep CAPABILITIES.md (the plain-language "what can it do + how to start" menu) AND capabilities.json
+      # (its machine-readable sibling that apps ingest) current. Same drift-check pattern as API_QUICKREF.md:
+      # regenerate from the live catalog and fail if either committed copy is stale. capdoc.py writes no timestamp
+      # and sorts keys, so this only trips on a real change. Fix: `python capdoc.py` and commit both files.
+      # Gating the JSON matters especially: a consuming app reads capabilities.json, so a stale copy would feed it
+      # capabilities the engine no longer has (or hide new ones) -- this gate makes that impossible to merge.
+      - name: Check CAPABILITIES.md and capabilities.json are up to date
         run: |
           python capdoc.py
-          git diff --exit-code CAPABILITIES.md || {
-            echo "CAPABILITIES.md is out of date -- run 'python capdoc.py' and commit the result.";
+          git diff --exit-code CAPABILITIES.md capabilities.json || {
+            echo "CAPABILITIES.md / capabilities.json are out of date -- run 'python capdoc.py' and commit the result.";
             exit 1;
           }
 

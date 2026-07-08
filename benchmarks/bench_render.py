@@ -66,7 +66,7 @@ def _psnr(a, b):
 # ---------------------------------------------------------------------- the five benches
 def bench_path_trace(W=96, H=72, spp=8, max_bounce=3):
     """Raw tracer throughput: pixel-samples per second at a fixed bounce budget."""
-    from holographic_pathtrace import path_trace
+    from holographic.rendering.holographic_pathtrace import path_trace
     t0 = time.time()
     path_trace(_Scene(), _Cam(), width=W, height=H, spp=spp, max_bounce=max_bounce,
                material=_material, sky=_sky, seed=0)
@@ -79,8 +79,8 @@ def bench_path_trace(W=96, H=72, spp=8, max_bounce=3):
 def bench_render_auto(W=96, H=72):
     """Time-to-quality: seconds for render_auto to hit its 'medium' target, and the honest PSNR comparison
     against a raw trace at the SAME average sample budget (the pipeline must not lose to raw)."""
-    from holographic_gbuffer import render_auto
-    from holographic_pathtrace import path_trace
+    from holographic.rendering.holographic_gbuffer import render_auto
+    from holographic.rendering.holographic_pathtrace import path_trace
     ref = path_trace(_Scene(), _Cam(), width=W, height=H, spp=128, max_bounce=3,
                      material=_material, sky=_sky, seed=99)
     t0 = time.time()
@@ -98,10 +98,10 @@ def bench_render_auto(W=96, H=72):
 
 def bench_render_hair(n_strands=800, W=160, H=120):
     """Strand rasteriser throughput: shaded strand-SEGMENTS per second (the F3 hot spot to watch)."""
-    from holographic_groom import groom
-    from holographic_hairshade import render_hair
-    from holographic_render import Camera
-    from holographic_sdf import sphere
+    from holographic.mesh_and_geometry.holographic_groom import groom
+    from holographic.mesh_and_geometry.holographic_hairshade import render_hair
+    from holographic.rendering.holographic_render import Camera
+    from holographic.mesh_and_geometry.holographic_sdf import sphere
     strands = groom(sphere(1.0).eval, n_strands, ([-1.6] * 3, [1.6] * 3), length=0.5, n_pts=6, curl=0.5, seed=0)
     cam = Camera(eye=(0.0, 0.0, 3.2), target=(0.0, 0.0, 0.0), fov_deg=45.0, aspect=W / H)
     n_segments = sum(len(s.points) - 1 for s in strands)
@@ -114,7 +114,7 @@ def bench_render_hair(n_strands=800, W=160, H=120):
 
 def bench_fluid(size=64, steps=30):
     """Smoke-sim throughput: StableFluid steps per second on a size^2 grid."""
-    from holographic_fluid import StableFluid
+    from holographic.simulation_and_physics.holographic_fluid import StableFluid
     f = StableFluid((size, size), dt=0.05)
     f.add_source(region=(slice(size // 2 - 4, size // 2 + 4), slice(4, 12)), density=1.0, temperature=1.0)
     t0 = time.time()
@@ -127,7 +127,7 @@ def bench_fluid(size=64, steps=30):
 
 def bench_volume_render(W=128, H=128, steps=64):
     """Volume-render throughput: field samples per second marching a smoke blob."""
-    from holographic_render import volume_render, Camera
+    from holographic.rendering.holographic_render import volume_render, Camera
     def blob(P):
         P = np.asarray(P, float)
         return np.clip(1.0 - np.linalg.norm(P, axis=1) / 0.6, 0, 1)

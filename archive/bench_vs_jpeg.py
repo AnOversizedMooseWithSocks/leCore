@@ -19,7 +19,7 @@ because every cell carries a little of the whole picture.
 import io, sys, numpy as np
 from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-from holographic_image import HolographicImage, _demo_image, _psnr
+from holographic.io_and_interop.holographic_image import HolographicImage, _demo_image, _psnr
 
 S = 240
 img = _demo_image(S)                          # 4 flat colour fields + a dotted high-freq edge

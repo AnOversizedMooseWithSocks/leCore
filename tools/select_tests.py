@@ -6,10 +6,13 @@ handful of modules; the ~450 test files that don't reach those modules don't nee
 
 How it decides, with NO coverage tracing and NO plugins -- just a static import graph built with `ast`:
 
-  1. Every *.py at the repo root is a "project module" (the layout is flat, so the module name is just the filename
-     stem, e.g. holographic_render.py -> "holographic_render").
+  1. Every *.py under the repo (skipping ignored dirs) is a "project module", named by its DOTTED PATH from the repo
+     root -- e.g. holographic/rendering/holographic_render.py -> "holographic.rendering.holographic_render". (Before
+     the repo was reorganized into packages this was just the flat filename stem; this version works for either.)
   2. For each module we read its imports with `ast` -- BOTH top-level imports and the ones written inside functions
-     (the test suite uses a lot of function-local imports, and ast walks the whole tree, so we catch them).
+     (the test suite uses a lot of function-local imports, and ast walks the whole tree, so we catch them). We keep
+     the imported name AT FULL LENGTH (not just its first component) so edges are precise even though everything now
+     shares the "holographic" package prefix.
   3. A test file is AFFECTED by a changed module M if M is in that test's transitive import set (the modules it
      imports, plus what those import, and so on), or if the changed file IS that test.
 
@@ -23,7 +26,8 @@ Safety comes first -- it is always OK to run a test we didn't need, never OK to 
 
 Usage:
     python tools/select_tests.py <changed_file> [<changed_file> ...]
-      -> prints affected test files, one per line (or the single line "ALL"; or nothing if no test is affected).
+      -> prints affected test files (real paths, ready to hand to pytest), one per line
+         (or the single line "ALL"; or nothing if no test is affected).
 
 Importable too: affected_tests(changed_files, root=".") -> sorted list of test paths, or the string "ALL".
 """
@@ -31,6 +35,12 @@ import ast
 import os
 import sys
 
+# directories that are never project modules (mirrors reorganize_repo.py's DEFAULT_IGNORE)
+_IGNORE_DIRS = {
+    ".git", "__pycache__", ".venv", "venv", "env", "node_modules",
+    "dist", "build", "build_pkg", ".mypy_cache", ".pytest_cache", ".tox",
+    "site-packages", ".idea", ".vscode", ".egg-info",
+}
 
 # file kinds that never affect a test result -> a change to only these selects nothing
 _INERT_EXT = {".md", ".rst", ".txt", ".yml", ".yaml", ".cfg", ".toml", ".ini", ".gitignore", ".editorconfig"}
@@ -54,19 +64,34 @@ def _is_build_artifact(path):
     return any(p.startswith(prefix) for prefix in _BUILD_DIR_PREFIXES)
 
 
+def _path_to_module(rel_path):
+    """'holographic/rendering/holographic_render.py' -> 'holographic.rendering.holographic_render'
+    (matches the dotted names reorganize_repo.py uses when it rewrites imports)."""
+    rel_path = rel_path.replace("\\", "/")
+    no_ext = rel_path[:-3] if rel_path.endswith(".py") else rel_path
+    parts = no_ext.split("/")
+    if parts and parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts)
+
+
 def discover_modules(root):
-    """{module_name: relative_path} for every *.py at the repo root (the flat project layout)."""
+    """{dotted_module_name: relative_path} for every *.py anywhere under root (works for a flat layout, a package
+    layout, or a mix of both -- whatever's actually on disk)."""
     mods = {}
-    for name in os.listdir(root):
-        if name.endswith(".py") and os.path.isfile(os.path.join(root, name)):
-            mods[name[:-3]] = name
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _IGNORE_DIRS and not d.startswith(".")]
+        for name in filenames:
+            if name.endswith(".py"):
+                rel = os.path.relpath(os.path.join(dirpath, name), root).replace("\\", "/")
+                mods[_path_to_module(rel)] = rel
     return mods
 
 
 def _imported_names(path):
-    """The set of module names this .py file imports -- top-level AND nested (ast walks the whole tree). We only keep
-    the first component ('holographic_render' from 'holographic_render.Camera'); non-project names get filtered later
-    against the module map."""
+    """The set of FULL dotted module names this .py file imports -- top-level AND nested (ast walks the whole tree).
+    Kept at full length (not truncated to the first component) so edges stay precise once every module shares a
+    common package prefix like 'holographic.*'; non-project names get filtered later against the module map."""
     try:
         tree = ast.parse(open(path, "r", encoding="utf-8", errors="ignore").read(), filename=path)
     except SyntaxError:
@@ -75,10 +100,10 @@ def _imported_names(path):
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                names.add(alias.name.split(".")[0])
+                names.add(alias.name)
         elif isinstance(node, ast.ImportFrom):
-            if node.module and node.level == 0:                 # ignore relative imports (none in this flat layout)
-                names.add(node.module.split(".")[0])
+            if node.module and node.level == 0:                 # skip relative imports; none expected currently
+                names.add(node.module)
     return names
 
 
@@ -93,13 +118,22 @@ def _uses_dynamic_import(path):
 
 
 def build_graph(root="."):
-    """Return (modules, direct) where modules={name:path} and direct={name: set(project modules it imports)}."""
+    """Return (modules, direct) where modules={dotted_name: relpath} and
+    direct={dotted_name: set(project modules it imports)}."""
     modules = discover_modules(root)
     known = set(modules)
     direct = {}
     for name, rel in modules.items():
         imported = _imported_names(os.path.join(root, rel))
-        direct[name] = {n for n in imported if n in known}      # keep only edges to OTHER project modules
+        edges = set()
+        for n in imported:
+            if n in known:
+                edges.add(n)
+            else:
+                # an import of a PACKAGE (e.g. "holographic.rendering") rather than a leaf module -- treat it as
+                # touching every module inside that package, since we can't tell which submodule is actually used.
+                edges |= {m for m in known if m == n or m.startswith(n + ".")}
+        direct[name] = edges
     return modules, direct
 
 
@@ -120,14 +154,14 @@ def _transitive(name, direct, _cache):
 
 def affected_tests(changed_files, root="."):
     """The test files affected by `changed_files`: those whose transitive imports include a changed module, plus any
-    changed test file itself, plus the always-run (dynamic-import) test files. Returns a sorted list, or the string
-    "ALL" if something changed that we can't reason about safely."""
+    changed test file itself, plus the always-run (dynamic-import) test files. Returns a sorted list of REAL file
+    paths (ready to pass to pytest), or the string "ALL" if something changed that we can't reason about safely."""
     modules, direct = build_graph(root)
-    test_files = sorted(n for n in modules if n.startswith("test_"))
+    test_names = sorted(n for n in modules if os.path.basename(modules[n])[:-3].startswith("test_"))
 
     changed_modules = set()
     for f in changed_files:
-        f = f.strip().replace("\\", "/")
+        f = f.strip().replace("\\", "/").lstrip("./")
         if not f:
             continue
         base = os.path.basename(f)
@@ -137,18 +171,11 @@ def affected_tests(changed_files, root="."):
         if _is_build_artifact(f):
             continue                                            # the repo's own build output -> no test impact
         if ext == ".py":
-            if "/" in f and not f.startswith("./"):
-                # a .py that isn't at the repo root (e.g. tools/, a package dir). If it's a known root module name
-                # we still map it; otherwise be safe and run everything.
-                if stem in modules:
-                    changed_modules.add(stem)
-                else:
-                    return "ALL"
+            mod = _path_to_module(f)
+            if mod in modules:
+                changed_modules.add(mod)
             else:
-                if stem in modules:
-                    changed_modules.add(stem)
-                else:
-                    return "ALL"                                # a new .py not yet in the map -> don't risk it
+                return "ALL"                                    # a .py we can't place in the map -> don't risk it
         else:
             return "ALL"                                        # data / binary / unknown -> run the whole suite
 
@@ -159,30 +186,37 @@ def affected_tests(changed_files, root="."):
 
     _cache = {}
     picked = set()
-    for t in test_files:
-        path = os.path.join(root, t + ".py")
+    for t in test_names:
+        path = os.path.join(root, modules[t])
         if _uses_dynamic_import(path):
             picked.add(t)                                       # can't analyse it -> always run it
             continue
         reach = _transitive(t, direct, _cache)
         if (reach & changed_modules) or (t in changed_modules):  # imports something changed, or IS the changed test
             picked.add(t)
-    return sorted(t + ".py" for t in picked)
+    return sorted(modules[t] for t in picked)
 
 
 def _selftest():
     # a change to holographic_render should pull in the render-family tests, not (say) a pure-language test
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    picked = affected_tests(["holographic_render.py"], root=root)
+    modules = discover_modules(root)
+    render_mod = next((rel for name, rel in modules.items() if name.endswith(".holographic_render")
+                        or name == "holographic_render"), None)
+    render_test = next((rel for name, rel in modules.items()
+                         if os.path.basename(rel) == "test_holographic_render.py"), None)
+    assert render_mod and render_test, "expected to find holographic_render.py and its test somewhere in the repo"
+
+    picked = affected_tests([render_mod], root=root)
     assert picked != "ALL", "a known module change should not force ALL"
-    assert "test_holographic_render.py" in picked, picked
+    assert render_test in picked, picked
     # a doc-only change selects NO tests (the doc-drift gates handle docs separately)
     docs = affected_tests(["README.md"], root=root)
     assert docs == [], docs
     # an unknown binary change is conservative
     assert affected_tests(["features/sprites.hsp"], root=root) == "ALL"
-    print("OK: select_tests self-test passed (render change -> %d test files incl. test_holographic_render.py; "
-          "README-only -> no render test; unknown binary -> ALL)" % (len(picked)))
+    print("OK: select_tests self-test passed (render change -> %d test files incl. %s; "
+          "README-only -> no render test; unknown binary -> ALL)" % (len(picked), render_test))
 
 
 if __name__ == "__main__":

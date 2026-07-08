@@ -54,8 +54,8 @@ jobs:
           python -c "import lecore; assert hasattr(lecore, 'UnifiedMind'); print('leOS-core installed; import lecore OK')"
           # The runtime data package must be present AND its dictionary must load -- this is the check that would
           # have caught a wheel shipped without its data. If it fails, the data isn't in package_data / build_package.sh.
-          python -c "import lecore_data; assert lecore_data.exists('knowledge', 'dictionary.json.gz'), 'vendored dictionary missing from the wheel'"
-          python -c "import holographic_dictionary as d; assert d.size() > 100000; print('dictionary works from the wheel:', d.size(), 'words')"
+          python -c "import lecore_data; assert lecore_data.exists('knowledge', 'dictionary.json.xz'), 'vendored dictionary missing from the wheel'"
+          python -c "import holographic.misc.holographic_dictionary as d; assert d.size() > 100000; print('dictionary works from the wheel:', d.size(), 'words')"
 
       - name: Upload the wheel + sdist as build artifacts
         uses: actions/upload-artifact@v4
