@@ -19,11 +19,19 @@ whichever packs smallest), because that single choice drives the residual size.
 WHEN THIS HELPS, AND WHEN IT DOES NOT (measured -- see benchmark()):
   * It wins big when images share large BIT-IDENTICAL regions and differ in
     localized spots: the delta is itself sparse and zlib crushes it. On a 6-logo
-    suite it packs to ~39% of per-file PNG and beats gzip-the-whole-set too.
-  * It LOSES when each image is already highly compressible on its own (smooth
-    gradients, photographs): per-file PNG/JPEG already exploit that, and the
-    inter-image delta is not sparse. For those, just PNG each image (and, if you
-    like, zip the PNGs together). The benchmark shows both so the choice is clear.
+    suite it packs to 1,744 B against 3,553 B of per-file PNG (49%) and 3,162 B
+    of gzip-the-whole-set (55%) -- it beats both.
+  * It LOSES, and badly, when each image is already highly compressible on its
+    own (smooth gradients, photographs): per-file PNG/JPEG already exploit that,
+    and the inter-image delta is not sparse. On the gradient ramp it packs to
+    32,274 B against per-file PNG's 1,987 B -- SIXTEEN TIMES WORSE. For those,
+    just PNG each image (and, if you like, zip the PNGs together).
+    The benchmark shows both so the choice is clear. Run it; do not guess.
+
+  Both baselines are the ENGINE's own pure-stdlib PNG encoder, not Pillow's.
+  Measuring that swap is what exposed the encoder's missing scanline filters
+  (it was 43x larger than Pillow on a gradient, and nobody had checked). A
+  baseline you have not measured is not a baseline.
 
 A lossy tier (integer Walsh-Hadamard on the residual) was tried and dropped: it
 never beat JPEG, so shipping it would have been misleading.
@@ -124,16 +132,29 @@ def _psnr(a, b):
 
 def benchmark(images):
     """Returns rows (name, bytes, psnr) comparing per-file PNG, gzip-the-PNGs,
-    the set packer, and per-file JPEG (a lossy reference point)."""
-    from PIL import Image
+    the set packer, and -- only if Pillow happens to be installed -- per-file
+    JPEG as a lossy reference point.
+
+    The PNG baseline is the ENGINE's own encoder (holographic_render.png_bytes),
+    not Pillow's. This module used to import PIL to make its own baseline, which
+    (a) put an image library in the core, against the rules, and (b) duplicated a
+    pure-stdlib PNG encoder the engine already shipped. Measuring that swap is
+    what turned up the encoder's missing scanline filters -- it was 43x larger
+    than Pillow on a gradient. Filtered, it is within 20% of Pillow there and
+    beats it 2x on flat art, so it is now an honest baseline as well as the
+    right dependency."""
     import io
+    from holographic.rendering.holographic_render import png_bytes    # the shared stdlib encoder; no PIL in core
     stack = _as_stack(images)
     n = stack.shape[0]
     rgb = stack.shape[-1] == 3
     pick = lambda im: im if rgb else im[..., 0]
 
     def png_blob(im):
-        b = io.BytesIO(); Image.fromarray(pick(im)).save(b, "PNG", optimize=True); return b.getvalue()
+        a = pick(im)
+        if a.ndim == 2:
+            a = np.repeat(a[:, :, None], 3, axis=2)                   # the encoder is 8-bit RGB
+        return png_bytes(a.astype(float) / 255.0, level=6)
 
     pngs = [png_blob(im) for im in stack]
     rows = [("raw uint8", stack.size, float("inf")),
@@ -146,6 +167,13 @@ def benchmark(images):
                 for i in range(n))
     rows.append((f"set-pack (delta) {'[exact]' if exact else '[BROKEN]'}", len(blob), float("inf")))
 
+    # The lossy reference point needs a DCT encoder, which the engine does not ship and will not add to core.
+    # It is genuinely optional: without Pillow the comparison is simply reported as unavailable, not faked.
+    try:
+        from PIL import Image                                          # OPTIONAL, and only for the lossy baseline
+    except ImportError:
+        rows.append(("per-file JPEG (lossy) -- skipped, Pillow not installed", 0, float("nan")))
+        return rows
     for q in (75, 90):
         tot = 0; ps = []
         for im in stack:

@@ -10703,3 +10703,182 @@ def test_distributed_bus_through_mind():
     finally:
         for h in servers:
             h.shutdown(); h.server_close()
+
+
+def test_bake_then_gather_then_slide_is_a_grid_free_convolution():
+    """H3 -> H2, end to end through the mind: bake a function into ONE vector, compile a 5-tap stencil into ONE
+    query vector, then SLIDE that rule across the domain with a single bind per output sample.
+
+    That is a convolution with no grid, no resampling and no per-tap fetch -- the taps were paid for once, at
+    compile time. Measured: the swept output tracks the true stencil sum to 0.035 RMS/std, while the UNFILTERED
+    function is 1.56 away -- so it is really doing the filtering, not quietly handing back f."""
+    from holographic.misc.holographic_unified import UnifiedMind as _Mind
+    m = _Mind(dim=64, seed=0)
+
+    def f(t):
+        return np.sin(2 * np.pi * 2.0 * t) + 0.4 * np.cos(2 * np.pi * 3.0 * t)
+
+    xs = np.linspace(0.0, 1.0, 600)
+    bake = m.bake_field(xs, f(xs), dim=4096)
+
+    h = 0.10                                            # taps wide enough that the filtering is visible
+    taps = np.array([-2, -1, 0, 1, 2]) * h
+    w = np.array([1.0, 4.0, 6.0, 4.0, 1.0]); w /= w.sum()
+    rule = m.gather_rule(bake, taps + 0.5, w)           # compiled once, centred at 0.5
+
+    qs = np.linspace(0.25, 0.75, 40)
+    swept = np.array([m.gather_field(bake, m.translate_rule(bake, rule, q - 0.5), normalize=True) for q in qs])
+    truth = np.array([float(np.sum(w * f(taps + q))) for q in qs])
+    sd = float(np.std(truth))
+    assert np.sqrt(np.mean((swept - truth) ** 2)) / sd < 0.08          # it computes the stencil sum
+    assert np.sqrt(np.mean((swept - f(qs)) ** 2)) / sd > 1.0           # ...and it is NOT just returning f
+
+    # A compiled rule is a superposition of ONE encoder's atoms. Bake a second field with the SAME encoder (same
+    # dim, seed, and an explicit shared bandwidth) and the rule applies to it for one dot product, no recompile.
+    # Bake it with its own bandwidth instead and the rule is meaningless there -- so it raises rather than answer.
+    import pytest as _pytest
+    other = m.bake_field(xs, np.cos(2 * np.pi * 1.0 * xs), dim=4096, bandwidth=bake["bandwidth"])
+    got = m.gather_field(other, rule, normalize=True)
+    assert abs(got - float(np.sum(w * np.cos(2 * np.pi * 1.0 * (taps + 0.5))))) < 0.10
+    with _pytest.raises(ValueError):
+        m.gather_field(m.bake_field(xs, np.cos(2 * np.pi * 1.0 * xs), dim=4096), rule)
+
+    assert any("gather" in c.name.lower() for c in m.find_capability("gather many samples in one dot product"))
+
+
+def test_detrended_bake_and_nd_bake_are_faculties_end_to_end():
+    """H4 -> H5 through the mind. Two lessons chained: a non-periodic function must be DETRENDED before baking (the
+    probe is an FFT and reads the endpoint mismatch as a jump), and an n-D bake must have its per-axis bandwidths
+    PROBED (the encoder's library default of 3.0 carries no information). Both failures are silent; both are here."""
+    import warnings as _w
+
+    from holographic.misc.holographic_unified import UnifiedMind as _Mind
+    m = _Mind(dim=64, seed=0)
+
+    # H4: sqrt is not periodic. Detrended, the fetch tracks it; plain, it does not -- at the same seed.
+    xs = np.linspace(0.0, 1.0, 400)
+    q = np.linspace(0.02, 0.98, 100)
+    rel = lambda g: float(np.sqrt(np.mean((g - np.sqrt(q)) ** 2)) / np.std(np.sqrt(q)))
+    with _w.catch_warnings():
+        _w.simplefilter("ignore")
+        plain = m.bake_field(xs, np.sqrt(xs), dim=4096)
+        detr = m.bake_field(xs, np.sqrt(xs), dim=4096, detrend=True)
+    assert rel(m.fetch_field(detr, q, normalize=True)) < rel(m.fetch_field(plain, q, normalize=True))
+    with pytest.raises(ValueError):
+        m.fetch_field(detr, 0.5)                       # a raw kernel sum cannot carry an absolute trend back
+
+    # H5: the same function of two variables, in ONE vector, read at points that were never sampled.
+    ax = np.linspace(0.0, 1.0, 40)
+    P = np.stack(np.meshgrid(ax, ax, indexing="ij"), -1)
+    g = lambda A: np.sin(2 * np.pi * A[..., 0]) * np.cos(2 * np.pi * A[..., 1])
+    bake = m.bake_field_nd([ax, ax], g(P), dim=8192)
+    Q = np.random.default_rng(0).uniform(0.05, 0.95, (150, 2))
+    got, truth = m.fetch_field_nd(bake, Q), g(Q)
+    c = float(np.dot(got, truth) / np.dot(got, got))
+    assert float(np.sqrt(np.mean((c * got - truth) ** 2)) / np.std(truth)) < 0.25      # shape recovered
+    assert 0.4 < float(np.dot(got, truth) / np.dot(truth, truth)) < 0.9                # amplitude attenuated
+
+    assert any("detrend" in c.name.lower() for c in m.find_capability("bake a non-periodic function"))
+
+
+
+def test_the_limit_surface_cites_iterate_and_beats_subdividing_for_normals():
+    """The unifier, end to end. `iterate` names subdivision as a client; `meshsubdiv` now cites it, and the payoff
+    is concrete on an IRREGULAR mesh: the exact limit normal, in O(V), beats area-averaging a mesh subdivided three
+    levels (64x the faces).
+
+    HONEST SCOPE, found by measuring: on a REGULAR mesh (an icosphere, an ellipsoid) the area-weighted normal is
+    already exact to machine precision, because a symmetric ring's face normals average to the tangent-plane normal.
+    The win appears only where the rings are irregular -- which is precisely where a subdivision scheme is hard."""
+    from holographic.mesh_and_geometry.holographic_meshsmooth import _icosphere
+    from holographic.mesh_and_geometry.holographic_meshsubdiv import Mesh, loop_subdivide
+    from holographic.misc.holographic_unified import UnifiedMind as _Mind
+    m = _Mind(dim=64, seed=0)
+
+    rng = np.random.default_rng(0)
+    base = _icosphere(2)                                        # has extraordinary (valence-5) vertices
+    V = base.vertices * np.array([1.0, 0.6, 2.2]) + 0.10 * rng.standard_normal(base.vertices.shape)
+    mesh = Mesh(V, base.faces)
+
+    def area_normals(mm, upto):
+        Vv = mm.vertices
+        acc = np.zeros_like(Vv)
+        for (a, b, c) in np.asarray(mm.faces):
+            fn = np.cross(Vv[b] - Vv[a], Vv[c] - Vv[a])
+            acc[a] += fn; acc[b] += fn; acc[c] += fn
+        acc = acc[:upto]
+        return acc / np.linalg.norm(acc, axis=1, keepdims=True)
+
+    def max_angle(a, b):
+        return float(np.degrees(np.arccos(np.clip(np.abs((a * b).sum(1)), -1, 1))).max())
+
+    P, N = m.mesh_limit_surface(mesh)                           # closed form, no subdivision
+    ref = area_normals(loop_subdivide(mesh, 6), mesh.n_vertices)   # a deep proxy for the true limit normal
+
+    control = max_angle(area_normals(mesh, mesh.n_vertices), ref)
+    three = max_angle(area_normals(loop_subdivide(mesh, 3), mesh.n_vertices), ref)
+    exact = max_angle(N, ref)
+
+    assert control > 5.0, control            # the control mesh's normal is badly wrong (measured 19.1 deg)
+    assert three < control                   # subdividing helps...
+    assert exact < three / 10.0, (exact, three)   # ...but the closed form beats k=3 by 60x, at 1/64 the faces
+    assert exact < 0.05, exact               # measured 0.0052 deg
+
+    # ...and the limit POSITIONS are genuinely elsewhere: the control vertices are not on the limit surface.
+    assert float(np.abs(P - V).max()) > 0.05
+
+    assert any("limit" in c.name.lower() for c in m.find_capability("push vertices to the limit"))
+
+
+def test_run_command_is_agent_reachable_but_the_allowlist_is_not():
+    """The command faculty, end to end over a real socket -- and the security boundary that makes it safe. The HTTP
+    service exposes every PUBLIC method to /invoke by name. So `run_command` (which can run nothing not already on
+    the operator's allowlist) is reachable, and `_register_command` (which extends the allowlist) is NOT, because it
+    is underscore-prefixed. MEASURED before the fix: a public register let an agent add `sh`; this pins that shut."""
+    import json
+    import threading
+    import urllib.error
+    import urllib.request
+    from http.server import HTTPServer
+
+    import holographic_service as svc_mod
+    from holographic.misc.holographic_unified import UnifiedMind as _Mind
+
+    mind = _Mind(dim=64, seed=0)
+    mind._register_command("echo", ["echo", "{input}"], doc="safe demo")   # operator, in process, before serving
+
+    svc = svc_mod.Service(mind=mind)
+    httpd = HTTPServer(("127.0.0.1", 0), svc_mod.make_handler(svc))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = "http://127.0.0.1:%d" % httpd.server_address[1]
+
+    def invoke(name, args):
+        body = json.dumps({"name": name, "args": args}).encode()
+        req = urllib.request.Request(base + "/invoke", data=body, headers={"Content-Type": "application/json"})
+        try:
+            return json.loads(urllib.request.urlopen(req, timeout=30).read())
+        except urllib.error.HTTPError as e:
+            return json.loads(e.read())
+
+    try:
+        # 1. an allowlisted command runs over the wire, and no shell interprets the value
+        ok = invoke("run_command", {"name": "echo", "args": {"input": "hi; rm -rf /"}})
+        assert ok["ok"] and ok["result"]["stdout"].strip() == "hi; rm -rf /"
+
+        # 2. a command NOT on the allowlist is refused, not executed
+        bad = invoke("run_command", {"name": "python3", "args": {"input": "x"}})
+        assert not bad["ok"] and "allowlist" in bad["error"]
+
+        # 3. THE BOUNDARY: registration is not reachable over /invoke at all (underscore-prefixed)
+        blocked = invoke("_register_command", {"name": "sh", "argv": ["sh", "-c", "{input}"]})
+        assert not blocked["ok"] and "private" in blocked["error"]
+
+        # 4. and it is not even advertised in the tool manifest
+        tools = json.loads(urllib.request.urlopen(base + "/tools", timeout=30).read())
+        names = {t["name"] for t in tools["tools"]}
+        assert "run_command" in names and "_register_command" not in names and "configure_commands" not in names
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+    assert any("command" in c.name.lower() for c in mind.find_capability("run an external command"))

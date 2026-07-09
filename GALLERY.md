@@ -214,10 +214,10 @@ rate-distortion code vs SQLite on the same structured data, as the table grows. 
 *Recall accuracy as the memory vector is progressively zeroed out. It declines **gracefully** rather than
 crashing — the hallmark of distributed/holographic storage.*
 
-![Capacity vs load (harness)](gallery/bench_capacity.png)
-![Recall under corruption (harness)](gallery/bench_corruption.png)
+![Capacity vs load (harness)](benchmarks/bench_capacity.png)
+![Recall under corruption (harness)](benchmarks/bench_corruption.png)
 ![Quantization robustness (harness)](gallery/quant_robust.png)
-![Throughput (harness)](gallery/bench_throughput.png)
+![Throughput (harness)](benchmarks/bench_throughput.png)
 ![Scaling under stress (harness)](gallery/stress_scaling.png)
 ![An ablation result (harness)](gallery/improve_final.png)
 

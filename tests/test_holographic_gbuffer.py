@@ -173,3 +173,43 @@ def test_add_caustics_brightens_floor_only():
     assert out.shape == flat.shape
     assert float(out.max()) > 0.2 + 1e-3                      # some floor pixels got brighter (the focused cusp)
     assert float(out.min()) >= 0.2 - 1e-9                     # nothing was darkened
+
+
+# ======================================================================================================
+# The stop rule is an ESCALATE MASK. `adaptive_sample.converged_mask` now cites the unifier that owns them.
+# ======================================================================================================
+def test_converged_mask_is_bit_identical_to_the_old_inline_comparison_including_exact_ties():
+    """The one thing delegation had to preserve is the TIE CONVENTION, and it is the opposite of coarse-first's
+    default: a pixel whose CI half-width is EXACTLY the tolerance has CONVERGED and must stop, where an escalation
+    rule refines on a tie. Hence `escalate_mask(..., inclusive=False)`. Ties are constructed on purpose here."""
+    from holographic.sampling_and_signal.holographic_adaptive_sample import Z95, ci_half_width, converged_mask
+    rng = np.random.default_rng(0)
+    tol = 0.022
+    vom = rng.random(100_000) * 0.01
+    vom[:500] = (tol / Z95) ** 2                       # ci_half_width == tol EXACTLY
+    old = ci_half_width(vom) <= tol                    # the comparison that used to live inline
+    new = converged_mask(vom, tol)
+    assert np.array_equal(old, new)
+    assert new[:500].all()                             # a tie is CONVERGED (stop), not escalated
+
+
+def test_the_adaptive_renderer_still_stops_per_pixel_through_the_delegated_mask():
+    from holographic.rendering.holographic_gbuffer import converge_samples
+    img, vom, N, info = converge_samples(_scene(), _Cam(), 24, 24, _material, sky=_sky, quality="draft",
+                                         max_bounce=2, seed=0, pass_spp=4, max_passes=3)
+    assert img.shape == (24, 24, 3) and N.shape == (24, 24)
+    assert int(N.min()) < int(N.max())                 # the stop rule really is per pixel: counts differ
+    # median_ci is legitimately 0.0 at draft quality: most pixels are background rays with zero variance, and a
+    # zero-variance pixel has a zero-width confidence interval. Assert the contract, not a hoped-for number.
+    assert 1 <= info["passes"] <= 3 and info["median_ci"] >= 0.0
+    assert np.isfinite(vom).all() and float(vom.min()) >= 0.0
+    img2, *_ = converge_samples(_scene(), _Cam(), 24, 24, _material, sky=_sky, quality="draft",
+                                max_bounce=2, seed=0, pass_spp=4, max_passes=3)
+    assert np.array_equal(img, img2)                   # deterministic, as before
+
+
+def test_escalate_mask_tie_conventions_are_both_available_and_opposite():
+    from holographic.misc.holographic_coarsefirst import escalate_mask
+    u = np.array([0.5, 1.0, 1.5])
+    assert list(escalate_mask(u, threshold=1.0)) == [False, True, True]                  # refine on a tie
+    assert list(escalate_mask(u, threshold=1.0, inclusive=False)) == [False, False, True]  # strict

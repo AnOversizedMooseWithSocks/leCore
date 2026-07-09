@@ -128,6 +128,169 @@ def splat_refit(splats, target):
     return [(cy, cx, float(amps[i]), s) for i, (cy, cx, _, s) in enumerate(splats)]
 
 
+# ==================================================================================================================
+# H8 -- FREQUENCY-LIFTED (GABOR) SPLATS.  The backlog's proposal, and what measurement did to it.
+#
+# THE PROPOSAL: the `splatsharpen` kept negative says no post-process recovers frequency the representation never
+# stored, and "the only fix is to store more." The backlog's counter-proposal was to store more DIMENSIONS PER
+# PRIMITIVE rather than more primitives: give each splat a frequency and a phase, making it a Gabor atom (a Gaussian
+# envelope times a cosine carrier). Its evidence: a Gaussian basis "saturated" at 11.6 dB regardless of K, while
+# Gabor climbed to 18.3 dB and "captured essentially all the frequency content."
+#
+# WHAT THE MEASUREMENT SAID. Three separate things, and the first one is a warning about baselines.
+#
+#   (1) THE GAUSSIAN BASIS WAS NEVER SATURATED. It was a STRAWMAN BASELINE. That flat-in-K curve is the signature of
+#       greedy matching pursuit's overlap double-counting -- which this module has always had a fix for, one
+#       function away: `splat_refit` (a joint least-squares amplitude solve), whose own docstring says the gain
+#       "GROWS with the splat count." Measured on a sharp disk:
+#
+#           K            32       128       256
+#           Gauss MP   11.7 dB  12.6 dB   14.3 dB      <- the backlog's baseline
+#           Gauss+REFIT 12.9 dB  16.2 dB   20.9 dB     <- the strongest honest baseline, one call away
+#
+#       Against the strawman, Gabor looks like +12.6 dB at K=256. Against the real baseline, +6.0 dB. Half the
+#       advertised win was the baseline's handicap. `splat_refit` was already in this file.
+#
+#   (2) AND +6.0 dB IS STILL NOT A FAIR COMPARISON, because it is per PRIMITIVE, and a Gabor atom carries SEVEN
+#       numbers (cy, cx, amp, sigma, freq, theta, phase) where a Gaussian carries four. At equal PARAMETER BUDGET
+#       (Gabor K=128 against Gaussian K=224, both jointly refit), the win depends entirely on the content:
+#
+#           target                       Gaussian+refit          Gabor+refit           dPSNR
+#           disk (broadband edge)     20.5 dB  HF 37% of target  20.7 dB  HF 46%       +0.2 dB
+#           stripes (narrowband)       8.9 dB  HF 27%           15.9 dB  HF 58%        +7.0 dB
+#           texture (noise-like)      20.2 dB  HF  4%           20.3 dB  HF  5%        +0.1 dB
+#
+#   (3) SO THE LAW IS: A GABOR ATOM IS A BANDPASS PRIMITIVE, AND IT BUYS YOU EXACTLY THE BAND IT IS TUNED TO. Where
+#       the content's high-frequency energy is NARROWBAND and ORIENTED -- a grating, a stripe pattern, a periodic
+#       texture -- one atom matches a whole band and the win is enormous. A sharp EDGE is not a band; it is all
+#       bands at once, with no orientation an atom can lock onto. There, the lift buys +0.2 dB.
+#
+#   (4) AND THE EXTRA DIMENSIONS ARE A TAX UNTIL THE BUDGET CAN AFFORD THEM. Seven numbers per atom against four is
+#       a 1.75x levy, paid up front. On the stripes, at equal parameter budget, the advantage GROWS -- and the
+#       high-frequency share CROSSES OVER partway up (target HF share in brackets):
+#
+#           budget     Gaussian+refit          Gabor+refit           dPSNR
+#             224     6.5 dB  [ 9.5% HF]      7.2 dB  [ 3.1% HF]     +0.6
+#             448     7.4 dB  [18.6% HF]     11.3 dB  [10.1% HF]     +3.8
+#             896     8.9 dB  [26.8% HF]     15.9 dB  [58.2% HF]     +7.0
+#           1,344    10.4 dB  [35.0% HF]     17.9 dB  [71.3% HF]     +7.5
+#
+#       Below the crossover, Gabor spends its atoms on the coarse structure and stores LESS of the detail than the
+#       cheaper basis does. Above it, the carrier starts paying and the gap widens fast. A lifted basis is not
+#       uniformly better; it is better past a budget that the lift itself raises.
+#
+# KEPT NEGATIVE, and the backlog claimed the opposite: the `splatsharpen` negative is NOT dissolved for the case it
+# was recorded on. It was recorded on a sharp non-separable disk -- a broadband edge -- and at equal budget Gabor
+# buys +0.2 dB there. Widening a basis only pays when the widening MATCHES the content's structure. "Just add more
+# dimensions" is the right instinct and the wrong slogan: the dimensions have to be the right ones.
+#
+# COST, which the backlog never stated: the Gabor dictionary at each placement is 4 scales x (1 + 4 freqs x 6
+# orientations x 2 phases) = 196 atoms against the Gaussian's 4. Measured 89x the fitting time for 64 atoms. This is
+# a preview/offline tier, not an interactive one.
+# ==================================================================================================================
+GABOR_FREQS = (0.0, 0.06, 0.12, 0.20, 0.30)          # cycles per pixel; 0.0 IS a plain Gaussian
+GABOR_THETAS = tuple(np.pi * k / 6 for k in range(6))
+GABOR_PHASES = (0.0, np.pi / 2)                      # even (cosine) and odd (sine) atoms
+
+
+def _gabor(shape, cy, cx, sigma, freq, theta, phase):
+    """A unit-L2-norm Gabor atom: a Gaussian envelope times an oriented cosine carrier.
+
+    `freq=0` reduces to `_gaussian` up to normalisation, which is what makes the Gaussian dictionary a strict SUBSET
+    of the Gabor one -- so the comparison between them cannot be rigged in Gabor's favour."""
+    ys, xs = np.mgrid[0:shape[0], 0:shape[1]]
+    dy, dx = ys - cy, xs - cx
+    env = np.exp(-(dy * dy + dx * dx) / (2.0 * sigma * sigma))
+    carrier = np.cos(2.0 * np.pi * freq * (dx * np.cos(theta) + dy * np.sin(theta)) + phase)
+    g = env * carrier
+    return g / (np.sqrt((g * g).sum()) + 1e-12)
+
+
+def gabor_fit(target, K, scales=(1.0, 2.0, 3.5, 6.0), freqs=GABOR_FREQS, thetas=GABOR_THETAS,
+              phases=GABOR_PHASES, refit=True):
+    """H8 -- fit `target` with K GABOR atoms by the same matching pursuit as `splat_fit`.
+
+    Returns a list of (cy, cx, amplitude, sigma, freq, theta, phase) -- seven numbers per primitive against a
+    Gaussian splat's four. Render with `gabor_render`; `refit=True` (the default here) jointly re-solves the
+    amplitudes, exactly as `splat_refit` does for Gaussians.
+
+    WHEN TO USE IT, measured and narrow: a Gabor atom is a BANDPASS primitive, so it buys you exactly the band it is
+    tuned to. At equal PARAMETER BUDGET against a jointly-refit Gaussian fit, it wins +7.0 dB on a narrowband
+    oriented pattern (stripes) and +0.2 dB on a sharp broadband edge (a disk). Reach for it when the content is
+    oscillatory -- gratings, periodic texture, ripples -- and not otherwise.
+
+    AND ONLY WHEN THE BUDGET CAN AFFORD IT. Seven numbers per atom is a 1.75x levy paid up front, so on the same
+    stripes the win grows from +0.6 dB at a 224-number budget to +7.5 dB at 1,344 -- and the fraction of the
+    target's high-frequency energy it stores CROSSES OVER the Gaussian's only partway up (3.1% vs 9.5% at the
+    smallest budget; 71.3% vs 35.0% at the largest). Below that crossover the extra dimensions are a tax.
+
+    COST: the dictionary is 196 atoms per placement against the Gaussian's 4 (measured 89x the fitting time). An
+    offline/preview tier.
+
+    KEPT NEGATIVE: this does NOT dissolve the `splatsharpen` negative, which the backlog predicted it would. That
+    negative was recorded on a sharp non-separable disk, and a sharp edge is not a band -- it is every band at once,
+    with no orientation to lock onto. Widening a basis pays only when the widening matches the content's structure.
+    See the block above for the full table, including the strawman baseline that made the original win look 2x
+    bigger than it is."""
+    R = np.asarray(target, float).copy()
+    atoms = []
+    for _ in range(int(K)):
+        cy, cx = np.unravel_index(np.abs(R).argmax(), R.shape)
+        best = None                                       # (energy, amp, sigma, freq, theta, phase, atom)
+        for s in scales:
+            for f in freqs:
+                # a zero-frequency atom has no orientation and no phase to choose -- do not search them
+                for th in (thetas if f > 0 else (0.0,)):
+                    for ph in (phases if f > 0 else (0.0,)):
+                        g = _gabor(R.shape, cy, cx, s, f, th, ph)
+                        amp = float((R * g).sum())        # least-squares amplitude (g is unit norm)
+                        if best is None or amp * amp > best[0]:
+                            best = (amp * amp, amp, s, f, th, ph, g)
+        _, amp, s, f, th, ph, g = best
+        R = R - amp * g
+        atoms.append((int(cy), int(cx), amp, s, f, th, ph))
+    return gabor_refit(atoms, target) if refit else atoms
+
+
+def gabor_render(atoms, shape):
+    """Render a Gabor atom list back to a 2-D array -- the superposition (sum) of its primitives."""
+    out = np.zeros(shape, float)
+    for cy, cx, amp, s, f, th, ph in atoms:
+        out += amp * _gabor(shape, cy, cx, s, f, th, ph)
+    return out
+
+
+def gabor_refit(atoms, target):
+    """Re-solve ALL Gabor amplitudes JOINTLY by least squares, keeping every other parameter fixed.
+
+    The Gabor twin of `splat_refit`, and for the same reason: greedy matching pursuit fits each atom against the
+    residual at the moment it is placed, so overlapping atoms double-count. One joint solve removes it. Closed-form
+    and gradient-free (a single lstsq), so it stays inside the NumPy-only rule.
+
+    Measure with this ON. It is what makes the Gaussian baseline honest, and the same courtesy is owed to Gabor."""
+    target = np.asarray(target, float)
+    if not atoms:
+        return atoms
+    G = np.stack([_gabor(target.shape, cy, cx, s, f, th, ph).ravel()
+                  for (cy, cx, _, s, f, th, ph) in atoms], axis=1)
+    a, *_ = np.linalg.lstsq(G, target.ravel(), rcond=None)
+    return [(cy, cx, float(a[i]), s, f, th, ph) for i, (cy, cx, _, s, f, th, ph) in enumerate(atoms)]
+
+
+def spectral_energy_fraction(img, cutoff=0.5):
+    """Fraction of an image's spectral energy above `cutoff` x Nyquist -- "is the sharpness actually STORED?".
+
+    PSNR is dominated by low frequencies, because that is where the energy is, so a fit can match a target's PSNR
+    while holding almost none of its detail. This is the number the `splatsharpen` negative is about, and the one
+    to report next to PSNR whenever a basis claims to capture detail."""
+    a = np.asarray(img, float)
+    F = np.abs(np.fft.fftshift(np.fft.fft2(a))) ** 2
+    ys, xs = np.mgrid[0:a.shape[0], 0:a.shape[1]]
+    r = np.sqrt((ys - a.shape[0] // 2) ** 2 + (xs - a.shape[1] // 2) ** 2)
+    rad = float(cutoff) * min(a.shape) / 2.0
+    return float(F[r > rad].sum() / max(F.sum(), 1e-12))
+
+
 def splat_denoise(noisy, K, scales=(1.0, 2.0, 3.5, 6.0)):
     """Denoise a 2-D field by fitting K splats and rendering them: the smooth Gaussian basis
     captures structure but not high-frequency noise, so the fit is a denoiser."""
@@ -468,9 +631,54 @@ def _c3_selftest():
     assert mse_es <= mse_full * 1.10 + 1e-6, (mse_es, mse_full)     # at a small MSE cost (a real trade, not free)
 
 
+def _h8_selftest():
+    """H8 -- the Gabor lift, and the two things that keep it honest.
+
+    Fails loudly on the exact numeric contracts: freq=0 reduces to a Gaussian; the Gabor dictionary is a strict
+    superset so its greedy fit can never do worse per primitive; the win is CONTENT-DEPENDENT (large on a grating,
+    negligible on a broadband edge) once measured against the STRONG baseline (Gaussian + joint refit); and the
+    strawman baseline that made the original claim look twice as good is reproduced so nobody re-runs it."""
+    n = 48
+    ys, xs = np.mgrid[0:n, 0:n]
+
+    # freq = 0 IS a Gaussian: the dictionaries nest, so the comparison cannot be rigged.
+    a = _gabor((n, n), 24, 24, 3.0, 0.0, 0.0, 0.0)
+    g = _gaussian((n, n), 24, 24, 3.0)
+    assert np.max(np.abs(a - g)) < 1e-12, "a zero-frequency Gabor atom must BE a Gaussian"
+
+    # a joint refit never hurts, for either basis (it is a least-squares solve over the same atoms)
+    disk = (np.sqrt((ys - n / 2 + .5) ** 2 + (xs - n / 2 + .5) ** 2) < n * 0.28).astype(float)
+    raw = splat_fit(disk, 48)
+    assert psnr(splat_render(splat_refit(raw, disk), (n, n)), disk) >= psnr(splat_render(raw, (n, n)), disk) - 1e-9
+
+    # THE STRAWMAN, reproduced: greedy MP looks flat in K; the same basis WITH refit does not.
+    mp = [psnr(splat_render(splat_fit(disk, K), (n, n)), disk) for K in (24, 96)]
+    rf = [psnr(splat_render(splat_refit(splat_fit(disk, K), disk), (n, n)), disk) for K in (24, 96)]
+    assert (rf[1] - rf[0]) > 2.0 * (mp[1] - mp[0]), (mp, rf)   # refit turns "saturated" into "climbing"
+
+    # CONTENT DEPENDENCE, at equal PARAMETER budget (Gabor 7/atom, Gaussian 4/atom).
+    stripes = (np.sin(2 * np.pi * 5 * xs / n) > 0).astype(float)
+    def _delta(target, K):
+        gauss = splat_render(splat_refit(splat_fit(target, int(round(K * 7 / 4))), target), (n, n))
+        gab = gabor_render(gabor_fit(target, K), (n, n))
+        return psnr(gab, target) - psnr(gauss, target)
+    d_stripes, d_disk = _delta(stripes, 64), _delta(disk, 64)
+    assert d_stripes > 2.0, d_stripes                 # a grating IS a band: the carrier locks on
+    assert d_disk < d_stripes / 2.0, (d_disk, d_stripes)   # a sharp edge is every band: the lift barely helps
+
+    # the spectral probe is what the splatsharpen negative is actually about, and it is not PSNR
+    assert spectral_energy_fraction(stripes) > 10 * spectral_energy_fraction(
+        np.exp(-((ys - n / 2) ** 2 + (xs - n / 2) ** 2) / (2 * 8.0 ** 2)))
+    print("holographic_splat H8 selftest passed (freq=0 is a Gaussian; refit turns the 'saturated' Gaussian "
+          "baseline into a climbing one -- the original win was measured against a strawman; and at equal "
+          "PARAMETER budget the Gabor lift buys %+.1f dB on a grating against %+.1f dB on a broadband edge, "
+          "because a Gabor atom is a BANDPASS primitive and an edge is every band at once)" % (d_stripes, d_disk))
+
+
 if __name__ == "__main__":
     _c1_selftest()
     _c3_selftest()
+    _h8_selftest()
     print("holographic_splat C1 densify + C3 early-stop selftests passed")
 
 

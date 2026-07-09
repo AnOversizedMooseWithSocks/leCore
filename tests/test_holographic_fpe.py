@@ -102,3 +102,125 @@ def test_deterministic():
     a = VectorFunctionEncoder(2, dim=512, bounds=[(0, 5), (0, 5)], seed=9)
     b = VectorFunctionEncoder(2, dim=512, bounds=[(0, 5), (0, 5)], seed=9)
     assert np.allclose(a.encode((1.0, 2.0)), b.encode((1.0, 2.0)))
+
+
+# ======================================================================================================
+# H5 -- the n-D Nyquist, and where the crosstalk budget actually lives.
+# ======================================================================================================
+def _g2(P):
+    return np.sin(2 * np.pi * 2.0 * P[..., 0]) * np.cos(2 * np.pi * 2.0 * P[..., 1])
+
+
+def _grid(n=40):
+    ax = np.linspace(0.0, 1.0, n)
+    P = np.stack(np.meshgrid(ax, ax, indexing="ij"), -1)
+    return ax, P, _g2(P)
+
+
+def _scale_free(got, truth):
+    """1.0 means 'carries no information at all' -- the same reading as a random vector."""
+    got = np.asarray(got, float)
+    c = float(np.dot(got, truth) / np.dot(got, got)) if np.dot(got, got) > 0 else 0.0
+    return float(np.sqrt(np.mean((c * got - truth) ** 2)) / np.std(truth))
+
+
+def test_the_library_default_bandwidth_carries_no_information_and_probing_fixes_it():
+    """The class default of 3.0 is not "a bit blurry". Measured scale-free RMS 1.0015 -- worse than the mean."""
+    from holographic.rendering.holographic_shader import bake_nd, fetch_nd
+    ax, P, V = _grid()
+    qs = np.random.default_rng(0).uniform(0.15, 0.85, (120, 2))
+    truth = _g2(qs)
+
+    bad = VectorFunctionEncoder(2, dim=8192, bounds=[(0, 1), (0, 1)], bandwidth=3.0, seed=0)
+    F, D = bad.bundle_normalized(P.reshape(-1, 2), V.reshape(-1))
+    assert _scale_free([bad.query_normalized(F, D, q) for q in qs], truth) > 0.9
+
+    good = bake_nd([ax, ax], V, dim=8192, seed=0)          # bandwidth probed from the data
+    assert _scale_free(fetch_nd(good, qs), truth) < 0.20   # measured 0.101
+
+
+def test_axis_bandwidths_pools_slices_because_a_near_zero_slice_reads_pure_noise():
+    """A slice through a node of a separable function carries no signal, so its 99.5%-energy cut lands on noise.
+    Measured with 1e-6 of added noise: per-slice max 248.22, pooled 12.41, true 12.57."""
+    from holographic.rendering.holographic_shader import bandwidth_probe
+    from holographic.sampling_and_signal.holographic_fpe import axis_bandwidths
+    ax = np.linspace(0.0, 1.0, 81)
+    P = np.stack(np.meshgrid(ax, ax, indexing="ij"), -1)
+    V = _g2(P) + 1e-6 * np.random.default_rng(0).standard_normal(P.shape[:2])
+
+    pooled = axis_bandwidths([ax, ax], V)
+    sl = np.moveaxis(V, 0, 0).reshape(V.shape[0], -1)
+    per_slice_max = max(bandwidth_probe(ax, sl[:, j]) for j in range(sl.shape[1]))
+    assert per_slice_max > 100.0                            # measured 248.22
+    assert abs(pooled[0] - 2 * np.pi * 2.0) < 0.15 * 2 * np.pi * 2.0    # measured 12.41 vs 12.57
+
+    # on a coarse grid the probe errs HIGH (spectral leakage), which is the safe direction
+    coarse = axis_bandwidths(*[[np.linspace(0, 1, 40)] * 2, _grid(40)[2]])
+    assert coarse[0] >= 2 * np.pi * 2.0 * 0.95
+
+
+def test_the_nd_kernel_is_the_product_only_in_expectation_with_a_one_over_sqrt_d_floor():
+    """`kernel_at` promises the product of the per-axis kernels. The realized inner product deviates by ~1/sqrt(D),
+    and THAT is this representation's crosstalk budget -- not the number of points you bundle."""
+    rng = np.random.default_rng(0)
+    devs = {}
+    for D in (1024, 16384):
+        enc = VectorFunctionEncoder(2, dim=D, bounds=[(0, 1), (0, 1)], bandwidth=[18.0, 18.0], seed=0)
+        e = [abs(float(np.dot(enc.encode(p), enc.encode(q))) - enc.kernel_at(p - q))
+             for p, q in ((rng.uniform(0, 1, 2), rng.uniform(0, 1, 2)) for _ in range(50))]
+        devs[D] = float(np.mean(e))
+    assert devs[1024] < 0.06 and devs[16384] < 0.015       # measured 0.031 and 0.006
+    assert devs[1024] / devs[16384] > 2.5                  # 16x the dimension -> ~4x less deviation
+
+
+def test_bundling_more_points_never_hurts_and_bandwidth_is_a_bias_variance_dial():
+    """Two separate claims, and only one of them is "spend dimensions".
+
+    (a) N: a bundled function is only ever SUMMED, never unbound, so there is no capacity wall -- the same side of
+        the line the H2 gather sits on. More samples never hurt.
+    (b) D: dimension is the VARIANCE budget, not a cure-all. At a margin too small for the signal the error is pure
+        BIAS -- a kernel too smooth to hold the function -- and sixteen times the dimension changes nothing. That
+        is the diagnostic: double D, and if nothing moves, raise the margin instead."""
+    from holographic.rendering.holographic_shader import bake_nd, fetch_nd
+    qs = np.random.default_rng(0).uniform(0.15, 0.85, (120, 2))
+    truth = _g2(qs)
+
+    # (a) more bundled points never hurt
+    errs_n = [_scale_free(fetch_nd(bake_nd(*[[np.linspace(0, 1, n)] * 2, _grid(n)[2]], dim=8192, seed=0), qs), truth)
+              for n in (10, 40)]
+    assert errs_n[1] < errs_n[0] / 2.0, errs_n             # measured 0.708 -> 0.104
+
+    # (b) BIAS-limited: a 1-cycle sine at the default margin does not improve with 16x the dimension
+    ax = np.linspace(0.0, 1.0, 40)
+    P = np.stack(np.meshgrid(ax, ax, indexing="ij"), -1)
+    g1 = np.sin(2 * np.pi * P[..., 0]) * np.cos(2 * np.pi * P[..., 1])
+    q1 = np.random.default_rng(0).uniform(0.05, 0.95, (200, 2))
+    t1 = np.sin(2 * np.pi * q1[:, 0]) * np.cos(2 * np.pi * q1[:, 1])
+
+    def sf1(got):
+        c = float(np.dot(got, t1) / np.dot(got, got))
+        return float(np.sqrt(np.mean((c * got - t1) ** 2)) / np.std(t1))
+
+    lo = sf1(fetch_nd(bake_nd([ax, ax], g1, dim=4096, margin=1.5), q1))
+    hi = sf1(fetch_nd(bake_nd([ax, ax], g1, dim=65536, margin=1.5), q1))
+    assert hi > 0.85 * lo, (lo, hi)                        # measured 0.1179 -> 0.1191: a bias FLOOR
+
+    # ...and the fix is the margin, not the dimension
+    knee = sf1(fetch_nd(bake_nd([ax, ax], g1, dim=65536, margin=2.5), q1))
+    assert knee < lo / 2.0, (lo, knee)                     # measured 0.0315
+
+
+def test_nd_readout_is_a_shape_estimator_not_a_calibrated_one():
+    """KEPT NEGATIVE, pinned. The RBF kernel is a Gaussian smoother and the crosstalk floor attenuates further, so
+    at the default margin the amplitude gain is ~0.6. A wider margin plus more dimensions buys amplitude back."""
+    from holographic.rendering.holographic_shader import bake_nd, fetch_nd
+    ax, _, V = _grid(40)
+    qs = np.random.default_rng(0).uniform(0.15, 0.85, (300, 2))
+    truth = _g2(qs)
+    gain = lambda got: float(np.dot(got, truth) / np.dot(truth, truth))
+
+    g_default = gain(fetch_nd(bake_nd([ax, ax], V, dim=8192, seed=0), qs))
+    g_wide = gain(fetch_nd(bake_nd([ax, ax], V, dim=32768, seed=0, margin=4.0), qs))
+    assert g_default < 0.75, g_default                      # measured 0.580 -- do NOT read amplitudes off this
+    assert g_wide > 0.85, g_wide                            # measured 0.943
+    assert _scale_free(fetch_nd(bake_nd([ax, ax], V, dim=8192, seed=0), qs), truth) < 0.20   # ...shape is fine

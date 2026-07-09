@@ -292,7 +292,12 @@ class UnifiedMind:
 
         # -- 'is X a Y?' / 'is X an Y?' -> taxonomic membership ----------------
         m = re.match(r"^(?:is|are)\s+(?:a|an|the)?\s*(.+?)\s+(?:a|an|the)?\s*(\S+)$", ql)
-        if m and hasattr(self, "_encyclopedia"):
+        # The guard asks "was a curriculum encyclopedia ever TAUGHT?" -- without one there is no taxonomy to walk,
+        # and answering `is_a: False` from an empty memory is a fabrication, not an answer. Written as an explicit
+        # getattr against the curriculum DICT rather than hasattr(): a lazily-instantiating property named
+        # `_encyclopedia` once shadowed this attribute and pinned the flag permanently True (see the encyclopedia
+        # faculty below). An existence check that a mere name collision can satisfy is not a check.
+        if m and getattr(self, "_encyclopedia", None) is not None:
             x, y = m.group(1).strip().split()[-1], m.group(2).strip()
             reached, hops, tp = self.is_a(x, y)
             return {"kind": "is_a", "subject": x, "ancestor": y,
@@ -3671,6 +3676,98 @@ class UnifiedMind:
         from holographic.mesh_and_geometry.holographic_meshverbs2 import loop_cut
         return loop_cut(mesh, start_face, start_edge)
 
+    def pack_images(self, images):
+        """Pack a FAMILY of 8-bit images as ONE reference plus per-image deltas, entropy-coded with zlib. Lossless
+        and bit-exact (the residual is taken modulo 256); `mind.unpack_images(blob)` returns the originals byte for
+        byte. The reference is chosen automatically (first / per-pixel mean / median -- whichever packs smallest).
+
+        WHEN IT WINS, MEASURED: images sharing large BIT-IDENTICAL regions and differing in localized spots -- a
+        logo suite, sprite variants, UI frames, scanned pages. On a 6-logo suite: 1,744 B against 3,553 B of
+        per-file PNG and 3,162 B of gzip-the-whole-set.
+
+        KEPT NEGATIVE, loud: it LOSES badly when each image is already compressible on its own. On six smooth
+        gradients it packs to 32,274 B against per-file PNG's 1,987 B -- sixteen times WORSE. Run
+        mind.pack_benchmark(images) and read the table; do not guess. See holographic_pack."""
+        from holographic.misc.holographic_pack import pack
+        return pack(images)
+
+    def unpack_images(self, blob):
+        """Reconstruct the image family packed by mind.pack_images -- bit-exact, byte for byte.
+        See holographic_pack.unpack."""
+        from holographic.misc.holographic_pack import unpack
+        return unpack(blob)
+
+    def pack_benchmark(self, images):
+        """Should you set-pack this family at all? Returns rows (name, bytes, psnr) for raw, per-file PNG,
+        gzip-the-PNGs, the set packer, and (only if Pillow is installed) per-file JPEG as a lossy reference.
+
+        This exists because the answer is CONTENT-DEPENDENT and the packer loses by 16x on the wrong content. The
+        PNG baselines use the engine's own stdlib encoder. See holographic_pack.benchmark."""
+        from holographic.misc.holographic_pack import benchmark
+        return benchmark(images)
+
+    def refine_where_uncertain(self, coarse, uncertainty, refine_fn, frac=0.25, threshold=None):
+        """COARSE-FIRST: run the cheap method everywhere, then pay for the expensive one ONLY where a per-cell
+        uncertainty signal is high. `refine_fn(mask)` receives the boolean escalate mask. Returns
+        (refined, mask, n_refined); the coarse result survives wherever the mask is False.
+
+        Measured on adaptive anti-aliasing of a hard-edged disk (uncertainty = the coarse render's gradient): 6.2x
+        fewer samples than supersampling everywhere, for a 21% RMSE cost. THE CONTROL THAT CLAIM OWES: the same
+        budget spent at RANDOM cells leaves RMSE 3x worse -- so it is the SIGNAL that pays, not the budget.
+
+        TWO NECESSARY CONDITIONS, and check both before believing a win. (1) The uncertainty must be CONCENTRATED --
+        mind.uncertainty_concentration says so before any work is done; near 0 rules coarse-first out entirely.
+        (2) The expensive method must be priced PER CELL: a greedy placement method (matching pursuit) is already
+        adaptive, its cost is per primitive, and a mask tells it nothing -- measured 21.0 dB with and without, at
+        0.9x the speed. And the trap that follows: a GREEDY coarse pass destroys the concentration its own
+        refinement needs (0.416 for a uniform base, 0.106 for a greedy one, same size). Coarse-first wants a cheap,
+        uniform, dumb base. See holographic_coarsefirst."""
+        from holographic.misc.holographic_coarsefirst import refine_where_uncertain
+        return refine_where_uncertain(coarse, uncertainty, refine_fn, frac=frac, threshold=threshold)
+
+    def escalate_mask(self, uncertainty, frac=0.25, threshold=None):
+        """WHERE to escalate: the top `frac` of cells by uncertainty (a fixed budget), or everything at or above an
+        absolute `threshold`. Conservative -- ties at the cutoff are INCLUDED, because escalating a cell that did
+        not need it wastes a little work while missing a hard one reintroduces the error.
+        See holographic_coarsefirst.escalate_mask."""
+        from holographic.misc.holographic_coarsefirst import escalate_mask
+        return escalate_mask(uncertainty, frac=frac, threshold=threshold)
+
+    def uncertainty_concentration(self, uncertainty):
+        """The coarse-first GATE, and it costs nothing: how concentrated the uncertainty is (0..1), i.e. the share
+        of it carried by the hardest 10% of cells, above what a uniform field would give.
+
+        NECESSARY, NOT SUFFICIENT. Near 0 means coarse-first CANNOT help -- the hard work is everywhere and uniform
+        refinement is simpler. High means it MIGHT: that region still owes a measured win against a uniform baseline
+        AND a random-mask control at the same budget. See holographic_coarsefirst.concentration."""
+        from holographic.misc.holographic_coarsefirst import concentration
+        return concentration(uncertainty)
+
+    def gradient_uncertainty(self, field):
+        """A cheap, deterministic uncertainty signal for a 2-D field: local gradient magnitude. Where a coarse
+        estimate changes fast it is probably under-resolved. Domain code should supply a better signal when it has
+        one (a fit residual, a path-trace variance). See holographic_coarsefirst.gradient_uncertainty."""
+        from holographic.misc.holographic_coarsefirst import gradient_uncertainty
+        return gradient_uncertainty(field)
+
+    def mesh_limit_surface(self, mesh):
+        """The Loop LIMIT surface in closed form: where infinite subdivision would put every vertex, plus the EXACT
+        limit normal there. Returns (positions, normals), both (nV, 3). O(V), and no subdivision is performed.
+
+        This is `iterate`'s k -> infinity case, applied to the LOCAL Loop operator. The piece of that operator that
+        is not shift-invariant is only the centre vertex: the ring-to-ring block is exactly the CIRCULANT of the
+        kernel [3/8, 1/8, ..., 1/8], i.e. a bind operator, so `iterate.transfer` (an rfft) diagonalises it for free.
+        Mode 0 (eigenvalue 5/8 at every valence) gives the limit position; modes +-1 span the tangent plane, so the
+        normal is EXACT rather than an area-weighted approximation -- measured 0.0000 degrees against a 6-times
+        subdivided icosphere, where the positions converge 6.0e-4 -> 3.7e-5 -> 2.3e-6 at k = 4/6/8. Warren's beta is
+        read off the ring's spectrum, not hard-coded: beta = (1/n)(lambda_0 - lambda_1^2).
+
+        HONEST SCOPE: this is the infinite-k case. A FINITE number of levels on an irregular mesh still needs the
+        full Stam evaluation, which is not built -- use mind.mesh_subdivide(mesh, k) for that, at O(4^k).
+        See holographic_meshsubdiv.loop_limit."""
+        from holographic.mesh_and_geometry.holographic_meshsubdiv import loop_limit
+        return loop_limit(mesh)
+
     def mesh_subdivide(self, mesh, levels=1):
         """Loop-SUBDIVIDE a triangle mesh (holographic_meshsubdiv, FWD-8): refine each triangle into four and
         low-pass smooth with the Loop masks (a C2 limit surface). Two operations braided -- a topological refine
@@ -4222,7 +4319,8 @@ class UnifiedMind:
         return {"offsets": offsets, "scale": s, "n_maps": N, "points": pts,
                 "dimension": dim, "expected": expected, "depth": d}
 
-    def splat_field(self, target, k=20, denoise=False, refit=True, noise_thresh=None, k_min=4, k_max=200):
+    def splat_field(self, target, k=20, denoise=False, refit=True, noise_thresh=None, k_min=4, k_max=200,
+                    basis="gaussian"):
         """Represent a 2-D field/image as a SUPERPOSITION of K Gaussian primitives (holographic_splat) --
         the structural twin of bundle (a Gaussian-splat scene IS a bundle, and the RBF ScalarEncoder is
         already a Gaussian splat in hypervector space). Fits the splats by matching pursuit (greedy
@@ -4240,12 +4338,32 @@ class UnifiedMind:
         refit -- the count is WHERE the splats go, refit is HOW STRONG they are. None keeps the fixed-k path
         unchanged. (Meaningful only for fields the smooth Gaussian basis can represent: a hard edge runs to k_max.)
 
+        basis="gabor" (H8, default off) lifts each primitive with a FREQUENCY, ORIENTATION and PHASE -- a Gabor
+        atom, seven numbers instead of four -- and returns 7-tuples. It is a BANDPASS primitive, so it buys you
+        exactly the band it is tuned to. Measured at equal PARAMETER budget against this same jointly-refit Gaussian
+        fit: +7.0 dB on a narrowband oriented grating, +0.2 dB on a sharp broadband edge, +0.1 dB on noise-like
+        texture. It costs 89x the fitting time (a 196-atom dictionary per placement against 4). Reach for it when
+        the content is oscillatory, and only when the budget is large -- seven numbers per atom is a levy paid up
+        front, so on the same grating the win grows from +0.6 dB at a 224-number budget to +7.5 dB at 1,344.
+        KEPT NEGATIVE, against the backlog's prediction: it does NOT dissolve the `splatsharpen` negative, which
+        was recorded on a sharp edge. An edge is not a band; it is every band at once.
+
         KEPT NEGATIVE / SCOPE: isotropic splats and a fixed scale set (the honest matching-pursuit
         baseline); the *amplitude* refit is the gradient-free half of 'looping', but the gradient
         optimisation of positions/scales and anisotropic covariances (full 3DGS) needs autodiff and stays
         out of scope. Storing a whole gallery AS splat codes is now splat_archive() (holographic_splat_archive)."""
         from holographic.rendering.holographic_splat import splat_fit, splat_render
         target = np.asarray(target, float)
+        if basis == "gabor":                                 # H8: the frequency-lifted basis, default off
+            if noise_thresh is not None:
+                raise ValueError("splat_field: the adaptive count (noise_thresh) is only defined for the Gaussian "
+                                 "basis -- its stopping rule is calibrated against the Gaussian residual.")
+            from holographic.rendering.holographic_splat import gabor_fit, gabor_render
+            atoms = gabor_fit(target, k, refit=refit)
+            rendered = gabor_render(atoms, target.shape)
+            return rendered if denoise else (atoms, rendered)
+        if basis != "gaussian":
+            raise ValueError("splat_field: basis must be 'gaussian' or 'gabor', got %r" % (basis,))
         if noise_thresh is not None:                          # ADAPT-1: let the COUNT adapt to content
             from holographic.rendering.holographic_splat import adaptive_fit
             splats, _ = adaptive_fit(target, noise_thresh=noise_thresh, k_min=k_min, k_max=k_max, refit=refit)
@@ -4253,6 +4371,16 @@ class UnifiedMind:
             splats = splat_fit(target, k, refit=refit)
         rendered = splat_render(splats, target.shape)
         return rendered if denoise else (splats, rendered)
+
+    def spectral_detail(self, img, cutoff=0.5):
+        """The fraction of an image's spectral energy above `cutoff` x Nyquist -- "is the sharpness actually STORED?"
+
+        PSNR is dominated by low frequencies, because that is where the energy lives, so a fit can match a target's
+        PSNR while holding almost none of its detail. This is the number the `splatsharpen` kept negative is really
+        about, and the one to report next to PSNR whenever a basis claims to capture detail.
+        See holographic_splat.spectral_energy_fraction."""
+        from holographic.rendering.holographic_splat import spectral_energy_fraction
+        return spectral_energy_fraction(img, cutoff=cutoff)
 
     def export_splats(self, splats, path=None, fmt="ply", colors=None):
         """EXPORT Gaussian splats to a browser-renderer format (holographic_splatexport, FS-3) -- so a field/scene
@@ -6426,6 +6554,51 @@ class UnifiedMind:
         from holographic.simulation_and_physics.holographic_mpm import MPMSnow
         return MPMSnow(grid=grid, dx=dx, E=E, nu=nu, gravity=gravity, seed=seed)
 
+    def simulation(self, solver, step_fn, field_fn, lo=(0.0, 0.0, 0.0), hi=(1.0, 1.0, 1.0), name="sim"):
+        """The SIMULATION SCAFFOLD (R9): wrap ANY time-stepped solver in ONE step loop, without flattening the
+        solvers into one (that would destroy the differences that make each correct). `step_fn(solver, dt)` calls
+        the solver's REAL step; `field_fn(solver)` returns its current grid. The returned Simulation gives it a
+        uniform step(dt) / run(steps, dt), exposes its field for the volumetric renderer, and plugs into the render
+        Pipeline's sim stage. Factories exist for the common solvers -- see Simulation.for_fluid / for_automaton.
+
+        This returns a LIVE object (it holds the solver and a step adapter), so it is for IN-PROCESS use. Over an
+        HTTP /invoke boundary use `run_simulation`, the stateless twin. See holographic_simulationhome.Simulation."""
+        from holographic.misc.holographic_simulationhome import Simulation
+        return Simulation(solver, step_fn, field_fn, lo=lo, hi=hi, name=name)
+
+    def run_simulation(self, kind, steps, dt=1.0 / 60.0, grid=48, seed=0, lo=(0.0, 0.0, 0.0), hi=(1.0, 1.0, 1.0),
+                       **solver_kwargs):
+        """Build a known solver, run it `steps` times through the shared loop, and return its final field grid --
+        all in one call, from plain arguments to a plain array. The stateless twin of `simulation`, callable with
+        nothing but JSON.
+
+        `kind` is a registered strategy: 'fluid' (StableFluid, advect+project, a 3D `grid`-cubed smoke box seeded
+        with a density blob and a little upward flow) or 'automaton' (HyperCA reaction-diffusion, a genuinely
+        different algorithm). Returns the field the renderer would draw. `run_simulation('fluid', 30)` steps a fresh
+        fluid 30 times and hands back its density grid.
+
+        WHY A TWIN: `simulation` returns a live solver+adapter that does not survive JSON serialization -- the same
+        reason `gather_samples` exists beside the bake/gather pair. This re-builds the solver every call (no reuse),
+        so drive a long simulation in process; this is for one-shot agent-facing use. See holographic_simulationhome."""
+        from holographic.misc.holographic_simulationhome import Simulation
+        g = int(grid)
+        k = str(kind).lower()
+        if k == "fluid":
+            from holographic.simulation_and_physics.holographic_fluid import StableFluid
+            fluid = StableFluid((g, g, g), **solver_kwargs)
+            lo_i = g // 3
+            fluid.density[lo_i:lo_i + max(g // 4, 1), 1:max(g // 3, 2), lo_i:lo_i + max(g // 4, 1)] = 1.0
+            fluid.vel[1, :, :max(g // 6, 1), :] = 1.0                # a little upward flow so something happens
+            sim = Simulation.for_fluid(fluid, lo=lo, hi=hi)
+        elif k == "automaton":
+            from holographic.misc.holographic_automaton import HyperCA
+            sim = Simulation.for_automaton(HyperCA(size=g, seed=seed, **solver_kwargs), lo=lo, hi=hi)
+        else:
+            from holographic.misc.holographic_simulationhome import known_solver_strategies
+            raise ValueError("run_simulation: unknown kind %r; known: %s (or use mind.simulation() with your own "
+                             "step/field closures)" % (kind, [x.replace("for_", "") for x in known_solver_strategies()]))
+        return sim.run(int(steps), dt).grid()
+
     def simulate_snow(self, cx=24, cy=12, w=10, h=8, n=400, grid=48, gravity=9.81, dt=2e-3, steps=600, seed=0):
         """Physics backlog (#8B): seed a snow block and run it -- it falls, piles, and compresses plastically.
         Returns the settled MPMSnow. See holographic_mpm.MPMSnow."""
@@ -7506,6 +7679,189 @@ class UnifiedMind:
         """{job_id: status} for every job on the shared manager (this process's, plus any reopened from
         .lecore_jobs/ via job_status on a known id)."""
         return {jid: self._job_manager.status(jid) for jid in self._job_manager.jobs}
+
+    # -- the NAVIGATOR: the creature, repurposed to search the data tree with a LEARNED adaptive budget ---------
+    # State lives on the mind (a trained agent is expensive to build), and every method takes/returns plain data.
+    def train_navigator(self, items, queries=1500, leaf_size=48, max_regions=16, noise=0.5, hot_size=48, seed=0):
+        """Train a learned navigator over `items` ((N, D) vectors) and hold it on this mind. Returns the world's
+        shape: {items, regions, depth, train_queries}.
+
+        WHY A LEARNED NAVIGATOR instead of the tree's built-in routing: a fixed beam spends the SAME effort on every
+        query -- b regions read whether the cue lands cleanly in one or straddles a boundary -- so it must be set
+        wide enough for the hard minority and overpays on the easy majority. The navigator reads a region, senses
+        how confident the answer looks, and decides arrive-or-keep-moving.
+
+        MEASURED against the tree's own fixed-beam curve (1,200 items, 32 regions, 250 eval queries): the navigator
+        reaches 98.0% recall at 173 comparisons. The cheapest fixed beam that matches that recall is beam 12, at 450
+        comparisons -- 2.6x more. And at the navigator's own budget the best fixed beam (4) reaches only 81.6%. Both
+        readings agree, which is the point of quoting both. See holographic_navigator."""
+        import numpy as _np
+        from holographic.agents_and_reasoning.holographic_navigator import DataWorld, Navigator, train
+        from holographic.misc.holographic_creature import CreatureEncoder, HolographicMind
+        arr = _np.asarray(items, float)
+        dim = int(arr.shape[1])
+        world = DataWorld(arr, leaf_size=int(leaf_size), seed=int(seed), max_regions=int(max_regions),
+                          noise=float(noise))
+        enc = CreatureEncoder(dim, seed=seed + 1)
+        agent = HolographicMind(dim, DataWorld.ACTIONS, k=12, epsilon=0.3, novelty_bonus=0.1,
+                                memory_cap=4000, seed=seed + 3)
+        train(world, enc, agent, queries=int(queries), seed=seed + 1)
+        self._navigator_obj = Navigator(world, enc, agent, hot_size=int(hot_size))
+        st = world.tree.stats()
+        return {"items": int(arr.shape[0]), "regions": int(st["leaves"]), "depth": int(st["depth"]),
+                "train_queries": int(queries)}
+
+    def _require_navigator(self):
+        nav = getattr(self, "_navigator_obj", None)
+        if nav is None:
+            raise ValueError("no navigator: call mind.train_navigator(items) first (training is expensive, so it "
+                             "is an explicit step rather than a lazy one)")
+        return nav
+
+    def navigator_find(self, cue, explain=False):
+        """Search the trained navigator's data tree for `cue` (a (D,) vector): {index, comparisons, trace}.
+        A ReflexCache fronts it, so a FAMILIAR query is recognised instantly and only unfamiliar ones pay for the
+        deeper search -- it gets faster at whatever you ask for most. See holographic_navigator.Navigator.find."""
+        import numpy as _np
+        idx, comps, trace = self._require_navigator().find(_np.asarray(cue, float), explain=explain)
+        return {"index": int(idx), "comparisons": int(comps), "trace": list(trace)}
+
+    def navigator_benchmark(self, queries=250, beams=(1, 2, 4, 8, 12, 16), seed=999):
+        """The honest comparison, agent-callable: {recall, comparisons, fixed_beams:[{beam, recall, comparisons}]}.
+        The fixed-beam curve is the tree's OWN routing at a range of budgets -- the strongest baseline in the
+        original space, not a strawman. See holographic_navigator.evaluate / fixed_beam_curve."""
+        from holographic.agents_and_reasoning.holographic_navigator import evaluate, fixed_beam_curve
+        nav = self._require_navigator()
+        rec, comps = evaluate(nav.world, nav.encoder, nav.mind, queries=int(queries), seed=int(seed))
+        rows = fixed_beam_curve(nav.world, beams=tuple(beams), queries=int(queries), seed=int(seed))
+        return {"recall": float(rec), "comparisons": float(comps),
+                "fixed_beams": [{"beam": int(r["beam"]), "recall": float(r["recall"]),
+                                 "comparisons": float(r["comparisons"])} for r in rows]}
+
+    # -- the ENCYCLOPEDIA: relational knowledge over concepts (is_a taxonomy + has parts) --------------------
+    # A lazily-built Encyclopedia held ON THE MIND. It stores hypervectors, so it is a LIVE object -- but unlike a
+    # bake or a Simulation it does not need a stateless twin, because the state lives here and every method below
+    # takes and returns PLAIN DATA (strings, floats, lists). A long-lived service therefore accumulates knowledge
+    # across /invoke calls, which is exactly what a knowledge layer is for. Build it once with encyclopedia_reset()
+    # if you want a different dim/seed.
+    #
+    # NAMED `_encyclopedia_faculty`, NOT `_encyclopedia` -- and the name is load-bearing. The curriculum layer
+    # (learn_encyclopedia, above) had already claimed the plain attribute `self._encyclopedia` for its
+    # {concept: {role: filler}} dict, and answer() uses that attribute's mere EXISTENCE as its "an encyclopedia
+    # was taught" flag. A lazily-instantiating property of the same name broke BOTH sides at once:
+    # learn_encyclopedia raised AttributeError (a property has no setter), and -- the quiet half -- the flag was
+    # pinned permanently True, so a mind that had learned NOTHING answered "is a dog an animal?" with a
+    # confident is_a=False at throughput 1.0 instead of abstaining. The fabricated answer is the worse bug,
+    # because the crash is the one that gets fixed. Two faculties, two names. (Kept negative: do NOT "fix" this
+    # by adding a setter -- that silences the crash and leaves the fabrication.)
+    @property
+    def _encyclopedia_faculty(self):
+        if getattr(self, "_encyclopedia_obj", None) is None:
+            from holographic.agents_and_reasoning.holographic_encyclopedia import Encyclopedia
+            self._encyclopedia_obj = Encyclopedia(dim=self.dim, seed=self.seed)
+        return self._encyclopedia_obj
+
+    def encyclopedia_reset(self, dim=None, seed=None):
+        """Start a fresh encyclopedia (dropping everything taught so far). Returns the number of concepts cleared."""
+        from holographic.agents_and_reasoning.holographic_encyclopedia import Encyclopedia
+        n = len(getattr(self._encyclopedia_faculty, "parent", {})) if getattr(self, "_encyclopedia_obj", None) else 0
+        self._encyclopedia_obj = Encyclopedia(dim=int(dim or self.dim), seed=int(self.seed if seed is None else seed))
+        return n
+
+    def encyclopedia_add(self, concept, is_a=None, has=None):
+        """Teach one concept: its is_a PARENT (taxonomy) and/or its HAS parts. Key concepts by a sense id like
+        'dog.n.01' so different senses of a word do not collapse into one. Returns the concept.
+
+        This is the third rung of the dictionary -> grammar -> encyclopedia curriculum: a dictionary tells you what
+        a word MEANS; an encyclopedia places it in a web of relations. See holographic_encyclopedia.Encyclopedia."""
+        self._encyclopedia_faculty.add(concept, is_a=is_a, has=has)
+        return concept
+
+    def encyclopedia_is_a(self, concept):
+        """One hop up the taxonomy: (parent, cleanup_confidence). See holographic_encyclopedia.Encyclopedia.is_a."""
+        parent, conf = self._encyclopedia_faculty.is_a(concept)
+        return {"parent": parent, "confidence": float(conf)}
+
+    def encyclopedia_climb(self, concept, hops=99, min_throughput=0.0, hop_discount=0.9):
+        """Walk the is_a chain upward as a relation ray: {chain, throughput}. `throughput` is the product of per-hop
+        confidences times an explicit `hop_discount` per step -- a longer chain of deductions is deliberately less
+        certain than a short one, because with exact unitary-atom unbinding each hop is near-lossless and the depth
+        penalty would otherwise vanish. It ABSTAINS rather than emit noise once throughput would fall below
+        `min_throughput`. See holographic_encyclopedia.Encyclopedia.climb."""
+        chain, tp = self._encyclopedia_faculty.climb(concept, hops=hops, min_throughput=min_throughput,
+                                                     hop_discount=hop_discount)
+        return {"chain": list(chain), "throughput": float(tp)}
+
+    def encyclopedia_is_a_transitive(self, concept, ancestor):
+        """Taxonomic membership: does `concept` reach `ancestor` by is_a? {reached, hops, throughput}.
+        See holographic_encyclopedia.Encyclopedia.is_a_transitive."""
+        reached, hops, tp = self._encyclopedia_faculty.is_a_transitive(concept, ancestor)
+        return {"reached": bool(reached), "hops": int(hops), "throughput": float(tp)}
+
+    def encyclopedia_siblings(self, concept):
+        """Concepts sharing this one's is_a parent -- relatedness from STRUCTURE, not word overlap (which is the
+        capability a dictionary lacks). See holographic_encyclopedia.Encyclopedia.siblings."""
+        return list(self._encyclopedia_faculty.siblings(concept))
+
+    def encyclopedia_relatedness(self, a, b):
+        """A structural relatedness score in [0, 1]: 1 / (1 + depth_a + depth_b) to the nearest common ancestor.
+        Measured -- identical 1.000, parent 0.500, siblings 0.333, cousins 0.200, unrelated 0.000. It ORDERS
+        taxonomic distance; it is not a probability and it does not saturate at 1 for "closely related". (The
+        underlying docstring used to claim 1.0 for siblings. It is 0.333; only a concept against itself scores 1.0.)
+
+        This is what the encyclopedia layer ADDS over a dictionary: `dog` and `wolf` share no letters, yet sit
+        beside each other in the taxonomy. See holographic_encyclopedia.Encyclopedia.relatedness."""
+        return float(self._encyclopedia_faculty.relatedness(a, b))
+
+    # -- external COMMANDS as tools (R4): run an ALLOWLISTED program, wired into the same VSA fabric -----------
+    # SECURITY, and it is load-bearing: this mind is exposed over HTTP, where /invoke calls any public method by
+    # name. So a general command runner reachable here is arbitrary-process execution reachable by any agent. The
+    # gate is the ALLOWLIST, and the one rule that makes it a gate is that the allowlist is owned by the OPERATOR
+    # and never fed from agent input: `register_command` is a configuration call (a human/deployer names the exe and
+    # a FIXED argv template up front), and `run_command` can only ever run a name that is already on it. Values fill
+    # "{key}" placeholders one-token-in-one-token-out, and there is NO shell -- so "a; rm -rf /" passed as a value
+    # is echoed literally, never interpreted (verified in holographic_command's selftest). Do not add a faculty that
+    # registers a command from a run_command argument; that would hand the allowlist to the caller and void the gate.
+    @property
+    def _commands(self):
+        if getattr(self, "_command_runner", None) is None:
+            from holographic.scene_and_pipeline.holographic_command import CommandRunner
+            self._command_runner = CommandRunner(timeout=getattr(self, "_command_timeout", 30))
+        return self._command_runner
+
+    def _register_command(self, name, argv, doc=""):
+        """OPERATOR configuration -- add an external program to the allowlist so run_command may later run it.
+
+        UNDERSCORE-PREFIXED ON PURPOSE, and this is the whole security design: the HTTP service exposes every PUBLIC
+        method to /invoke by name, blocking only names that start with '_'. If registration were public, an agent
+        could POST /invoke {"name":"register_command","args":{"name":"sh","argv":["sh","-c","{input}"]}} and the
+        allowlist would no longer be a boundary -- MEASURED: it did exactly that before this was made private. So
+        registration is an IN-PROCESS operator call (configure the mind, THEN serve it), and only `run_command` --
+        which can run nothing that is not already on the list -- is reachable over the wire.
+
+        `argv` is a FIXED token list; "{path}" placeholders are filled from run_command's args one-token-in-one-
+        token-out, and there is no shell. The executable must exist on PATH. Returns the name. See
+        holographic_command.CommandRunner.register."""
+        return self._commands.register(name, argv, doc=doc)
+
+    def registered_commands(self):
+        """The allowlist: {name: doc}. The ONLY external programs run_command can run. See
+        holographic_command.CommandRunner.registered."""
+        return self._commands.registered()
+
+    def run_command(self, name, args=None):
+        """Run an allowlisted external program: {stdout, stderr, returncode, ok}. Raises if `name` is not on the
+        allowlist (the security gate -- commands never come from the caller, only their argument VALUES do) or the
+        run times out. No shell, so an injection attempt in a value is a literal value. See
+        holographic_command.CommandRunner.run."""
+        return self._commands.run(name, args)
+
+    def command_tool(self, name, in_type, out_type, keywords, args_from=None):
+        """Wrap an allowlisted command as an orchestrator Tool, so the Planner can select and chain it and the
+        CircuitBreaker trips on a flaky one -- an external program joining the same VSA fabric as an internal
+        faculty. `name` must already be registered. See holographic_command.command_as_tool."""
+        from holographic.scene_and_pipeline.holographic_command import command_as_tool
+        return command_as_tool(self._commands, name, in_type, out_type, keywords, self.vocab, args_from=args_from)
 
     # -- agentic FILE / CODE editing (read/write/replace/insert/delete/archive/grep/list) ------------------
     # A lazily-built Editor scoped to a project root, so an agent (or an /invoke caller) can work the codebase
@@ -8794,13 +9150,292 @@ class UnifiedMind:
         from holographic.misc.holographic_access import revoke as _revoke
         return _revoke(principal, read=read)
 
-    def farm(self, nodes, token=None, timeout=60.0):
+    # ---- P10: the two "dark" modules, wired. Both were real capability with tests and ZERO engine references --
+    # discoverable by nobody, called by nothing. Neither is superseded, so both get a door rather than an archive.
+    def compose_from_tags(self, tag_list, dim=1024, seed=0):
+        """FORWARD compositional generation: bind each object's (colour, shape, texture) tags into a composite
+        vector and superpose them into a scene -- the inverse of the resonator's factor(). This is the step up
+        from morphing what is stored to COMPOSING what was never stored. `tag_list` is a list of tag-dicts (one
+        per object); pass a single dict for one object. Returns the scene vector. See holographic_compose."""
+        from holographic.misc.holographic_compose import compose_object, compose_scene
+        import holographic.scene_and_pipeline.holographic_scene as hs
+        coder = hs.SceneCoder(dim=dim, seed=seed)
+        if isinstance(tag_list, dict):
+            return compose_object(coder, tag_list)
+        return compose_scene(coder, tag_list)
+
+    def novel_object_specs(self):
+        """Every (colour, shape, texture) combination the scene coder can compose -- including the ones never
+        stored. The generation space, enumerated. See holographic_compose.all_object_specs."""
+        from holographic.misc.holographic_compose import all_object_specs
+        return all_object_specs()
+
+    def regime_detector(self, fast=0.5, slow=0.02, threshold=0.3, trigger=1.2):
+        """A DOUBLE-DIFFUSIVE regime/layer detector, borrowed from ocean physics: a FAST component tracks the
+        present while a SLOW one holds the persistent state, and when their divergence stays high the system
+        commits to a new LAYER. `detector.observe(x)` -> (divergence, layer_index, started_new_layer).
+
+        Use it to notice that a stream has genuinely CHANGED REGIME rather than merely wobbled -- the same
+        question the coherence-gated reorganizer asks of its store. See holographic_diffusion.DoubleDiffusion."""
+        from holographic.misc.holographic_diffusion import DoubleDiffusion
+        return DoubleDiffusion(fast=fast, slow=slow, threshold=threshold, trigger=trigger)
+
+    def denoise_tensor(self, X, sigma=None):
+        """Tier 5 -- denoise MULTI-WAY data by projecting onto the low-rank Tucker manifold implied by the noise
+        level. The Milanfar reframe applied to tensors: a denoiser IS a map of the manifold clean signals live on,
+        and for multi-way data that manifold is 'low rank along EVERY axis at once'. Ranks are chosen by the noise
+        floor (a singular value above sigma*(sqrt(m)+sqrt(n)) cannot be noise), and sigma is estimated from the data
+        if not given. Returns (clean, ranks, sigma).
+
+        MEASURED on a real diffusing field: 31.5 dB noisy -> 48.6 dB, where a per-slice SVD denoiser (blind to the
+        correlation ACROSS slices) reaches 39.5 -- about +7 dB, at every noise level tried.
+
+        KEPT NEGATIVE: a low-rank prior is a CLAIM about the signal. On a FULL-RANK signal it destroys the data
+        (43.1 dB -> 17.1 dB). Call mind.compress_tensor / rank_gate first: (near-)full ranks mean this is the wrong
+        map. See holographic_tucker.tucker_denoise."""
+        from holographic.caching_and_storage.holographic_tucker import tucker_denoise
+        return tucker_denoise(X, sigma=sigma)
+
+    def shader_pipeline(self, shape):
+        """H1 -- a filter GRAPH compiled to ONE transfer before any data is touched. Every stage (blur, translate,
+        gain, unsharp blend) is linear and shift-invariant, hence a multiplication in Fourier, so the whole graph
+        collapses into a single operator:
+
+            out = mind.shader_pipeline(img.shape).blur(k, 8).translate(3).unsharp(k_wide, 0.6).apply(img)
+
+        A GPU runs three passes over the image; this runs one multiply. Measured on a 3-stage graph: exact to
+        6.7e-16 against the staged computation, 34 us per application against 205 us (6.0x) -- and the compiled cost
+        does not depend on the number of stages at all. `translate` accepts fractional (sub-sample) shifts, and
+        `blur` a fractional number of passes. See holographic_shader.Pipeline."""
+        from holographic.rendering.holographic_shader import Pipeline
+        return Pipeline(shape)
+
+    def shader_combine(self, pipelines, weights=None):
+        """H7 -- blend M compiled shader variants into ONE transfer, exactly. An LOD stack, a multi-scale filter, an
+        MIS-weighted combination, a parameter sweep you intend to average: any FIXED linear combination of pipelines
+        is itself linear and shift-invariant, so the transfers just add. Returns a Pipeline you can keep chaining.
+
+        Measured against staging the variants and blending their images: identical to 2.2e-16, and the cost does not
+        depend on M -- 4.3x at M=4, 9.3x at M=16, 30.0x at M=64.
+
+        KEPT NEGATIVE, so nobody rebuilds it: the OTHER half of H7 -- superposing M variants under distinct keys so
+        you can unbind any one back out -- does not work. Unbinding recovers a variant at 1/sqrt(M) (measured .712 /
+        .353 / .177 at M = 2 / 8 / 32, matching 1/sqrt(M) to three digits), not at the 1 - sqrt(M/D) the plan
+        assumed; real variants are filtered copies of one field and so are strongly correlated (mean |cos| 0.487 at
+        M=2), which defeats the cleanup that normally resets crosstalk; and the bank still pays M inverse transforms,
+        so it measured SLOWER (0.83-0.87x) than just applying the variants. Superposition buys width only when the
+        items are near-orthogonal and a cleanup follows the readout. See holographic_shader.combine."""
+        from holographic.rendering.holographic_shader import combine
+        return combine(pipelines, weights)
+
+    def bake_field(self, xs, ys, dim=4096, seed=0, margin=1.5, bandwidth=None, detrend=False):
+        """H3 -- bake a sampled function into ONE hypervector ("the texture unit"): F = sum f(x_i) Z(x_i). Fetch any
+        point afterwards with mind.fetch_field(bake, x) -- a single dot product, at any x, sampled or not.
+
+        THE ALGEBRA HAS A NYQUIST. The phasor bandwidth B decides the finest detail the code can hold, and below the
+        signal's maximum angular frequency the bake does not blur -- it returns a confident, smooth-looking, WRONG
+        answer, and raises nothing. So B is chosen FROM THE DATA (margin * omega_max, via the bandwidth probe).
+        Measured: with B set this way a fetch lands within 0.06 RMS at every frequency tried, where B = 0.5*omega_max
+        gives 0.09-0.30. Supplying your own B below omega_max warns. See holographic_shader.
+
+        H4 -- `detrend=True` subtracts the line joining the endpoints, bakes the RESIDUAL, and restores the line
+        analytically. Turn it on for anything that is not already periodic. The probe is an FFT, so it treats the
+        samples as wrapping: a function whose endpoints disagree carries an implicit JUMP, and a jump has an
+        unbounded spectrum. A STRAIGHT LINE therefore probes at 607.95 where sqrt probes at 789.70 and an actual
+        2-cycle sine probes at 12.53. It was never the singularity; it was the wrap.
+
+        Measured absolute relative error, mean +- sd over 12 encoder seeds (D=4096, 400 samples), plain vs
+        detrended: sqrt 0.1105 +- 0.0379 -> 0.0087 +- 0.0051 (12.6x); cube root 0.1404 -> 0.0170 (8.3x); f(x)=x
+        0.1330 -> exactly 0.0000. It costs nothing when the endpoints already agree (a periodic sine is unchanged).
+        The plain bake is not merely worse, it is UNSTABLE -- an inflated bandwidth collapses the kernel toward a
+        delta, so the fetch returns whichever sample lands nearest, and 1/(x+0.05) scores 1.83 +- 4.25. A detrended
+        bake must be read with normalize=True.
+        """
+        from holographic.rendering.holographic_shader import bake_1d
+        return bake_1d(xs, ys, dim=dim, seed=seed, margin=margin, bandwidth=bandwidth, detrend=detrend)
+
+    def fetch_field(self, bake, x, normalize=False):
+        """Query a baked field at any point: one dot product. See holographic_shader.fetch.
+
+        `normalize=True` divides by the bake's density field, returning the kernel AVERAGE rather than the kernel
+        SUM. Use it whenever the samples were not uniformly spaced -- the raw fetch's gain is the local sample
+        density, and reading it as f(x) is off by a factor nobody wrote down (measured: raw fetch on 3:1 clumped
+        samples lands at 1.229 RMS, worse than predicting the mean; normalized, 0.283, with nothing fitted)."""
+        from holographic.rendering.holographic_shader import fetch
+        return fetch(bake, x, normalize=normalize)
+
+    def gather_rule(self, bake, points, weights=None):
+        """H2 -- compile N weighted lookups into ONE query vector: Q = sum_j w_j Z(u_j). A quadrature rule, a filter
+        stencil, a set of light samples: whatever the rule, it becomes a single hypervector, and applying it to a
+        baked field is then one dot product forever (mind.gather_field). See holographic_shader.gather_rule.
+
+        Compiling costs the same N encodings the naive path pays, so this pays on REUSE: measured on a 64-tap rule
+        against 200 baked fields, naive 2,806 ms vs 0.48 ms of dot products -- 190x amortised including the compile."""
+        from holographic.rendering.holographic_shader import gather_rule
+        return gather_rule(bake, points, weights)
+
+    def gather_field(self, bake, rule, normalize=False):
+        """H2 -- apply a compiled rule to a baked field: ONE dot product, whatever N was.
+
+        EXACT, not approximate: <F, sum_j w_j Z(u_j)> is sum_j w_j <F, Z(u_j)> by linearity (measured to 7e-15). And
+        there is NO sqrt(N/D) crosstalk wall here -- a gather never unbinds, so more taps make it MORE accurate, the
+        bake's independent per-point errors averaging each other down (measured 0.053 -> 0.008 RMS from N=2 to 512).
+        The crosstalk law governs cleanup-gated recall (holographic_superposed), not superposition you only ever sum.
+        See holographic_shader.gather."""
+        from holographic.rendering.holographic_shader import gather
+        return gather(bake, rule, normalize=normalize)
+
+    def bake_field_nd(self, grids, values, dim=8192, seed=0, margin=1.5):
+        """H5 -- the texture unit in N dimensions: a gridded function baked into ONE hypervector, with the per-axis
+        bandwidths probed FROM THE DATA. Read it back at any point with mind.fetch_field_nd(bake, point).
+
+        The underlying n-D encoder defaults to bandwidth 3.0 on every axis, which measures at ~1.00 scale-free RMS
+        on a 2-D sine -- literally no information, and it raises nothing. Probed from the data, it lands near 0.12.
+
+        There is NO capacity budget on how many points you bundle (a bundled function is only ever summed, never
+        unbound): at a fixed bandwidth the error is flat as the grid goes 400 -> 6,400 points (0.098 -> 0.118).
+
+        BANDWIDTH IS A BIAS-VARIANCE DIAL AND `dim` IS THE VARIANCE BUDGET. The causal variable is the bandwidth
+        B = margin * w_max, not `margin`, so the same margin is a different kernel on different data. On a 1-cycle
+        sine, margin 1.5 (B = 9.4) is BIAS-limited: sixteen times the dimension buys NOTHING (scale-free RMS 0.1179
+        at D=4,096 against 0.1191 at D=65,536). At B = 18.8 the same signal is VARIANCE-limited and D pays (0.122 ->
+        0.043), as does a 2-cycle sine at that same B. THE DIAGNOSTIC COSTS ONE EXTRA BAKE: double `dim`. If the
+        error drops you are variance-limited, so keep spending dimension; if it does not move you are bias-limited,
+        so raise the margin instead. You cannot buy your way out of a bad bandwidth with dimension.
+
+        KEPT NEGATIVE: at the default margin this is a SHAPE estimator, not a calibrated one (amplitude gain 0.66).
+        Read shape, not amplitude, unless you raised margin and dim together. See holographic_shader.bake_nd."""
+        from holographic.rendering.holographic_shader import bake_nd
+        return bake_nd(grids, values, dim=dim, seed=seed, margin=margin)
+
+    def fetch_field_nd(self, bake, point, normalize=True):
+        """H5 -- query an n-D baked field at any point: one dot product (two, normalized).
+        See holographic_shader.fetch_nd. Read shape, not amplitude, unless you raised the margin."""
+        from holographic.rendering.holographic_shader import fetch_nd
+        return fetch_nd(bake, point, normalize=normalize)
+
+    def gather_samples(self, xs, ys, points, weights=None, dim=4096, seed=0, margin=1.5, bandwidth=None,
+                       normalize=True):
+        """H2 -- bake, compile a rule and gather in ONE call, from plain numbers to a plain number.
+
+        mind.bake_field / mind.gather_rule hand back live objects (an encoder, a hypervector), which serialise to
+        dead dictionaries across an HTTP /invoke boundary. This is the stateless twin: same math, no handles,
+        callable with nothing but JSON. It re-bakes every call, so it buys none of the reuse win -- use the
+        bake+rule pair in-process when you have more than one query. See holographic_shader.gather_samples."""
+        from holographic.rendering.holographic_shader import gather_samples
+        return gather_samples(xs, ys, points, weights=weights, dim=dim, seed=seed, margin=margin,
+                              bandwidth=bandwidth, normalize=normalize)
+
+    def translate_rule(self, bake, rule, dx):
+        """H2 -- slide an entire compiled gather rule by `dx`, for ONE bind, at a cost independent of N. The encoder
+        is a fractional power encoding, so binding Z(dx) translates every tap of the superposition at once (measured:
+        cosine 1.0000000000 against re-encoding all N taps). A GPU re-fetches N taps per offset.
+        See holographic_shader.translate_rule."""
+        from holographic.rendering.holographic_shader import translate_rule
+        return translate_rule(bake, rule, dx)
+
+    def filter_passes(self, field, kernel, n_passes):
+        """H6 -- apply N passes of a circular filter in ONE evaluation. A GPU runs the kernel N times; a bind is
+        diagonal in Fourier, so N passes is just the transfer raised to the N-th power. Measured 1,824x at N=4096,
+        exact to 2.3e-14, and N=1,000,000 costs the same as N=1.
+
+        Two things a GPU structurally cannot do: N may be FRACTIONAL (half a blur pass is well defined, and two
+        halves compose to one), and N may be INFINITE -- see filter_limit. See holographic_shader."""
+        from holographic.rendering.holographic_shader import filter_k
+        return filter_k(field, kernel, n_passes)
+
+    def filter_limit(self, field, kernel, tol=1e-6):
+        """H6 -- the N -> infinity steady state of a circular filter, in closed form: an idempotent PROJECTION onto
+        the modes it does not decay. Reached in one O(D) evaluation; a literal loop can need hundreds of thousands
+        of passes (measured: a 3-tap blur's slowest mode decays as 0.999849^N). Raises if the filter amplifies."""
+        from holographic.rendering.holographic_shader import filter_limit
+        return filter_limit(field, kernel, tol=tol)
+
+    def tensor_structure(self, X, tol=1e-6):
+        """Will a tensor factorisation pay for this array -- BEFORE you pay to find out?
+
+        Compares the rank kept at every cut (the Schmidt rank: how many numbers must cross that boundary) to the
+        most it could possibly be. Ranks far below the bound mean the cost of a cut is set by its BOUNDARY, not by
+        the volume it encloses -- an AREA LAW -- and a tensor train is cheap. Ranks that saturate the bound mean
+        every degree of freedom is independent -- a VOLUME LAW -- and nothing will compress it.
+
+        Measured: a diffusing field scores saturation 0.21 (area-law) and its TT code is 4,394 B against int8's
+        24,576; white noise scores 1.00 (volume-law) and its TT code is 104,782 B. The verdict predicts the byte
+        outcome. Returns {ranks, bound, saturation, verdict}. See holographic_tucker.structure_verdict."""
+        from holographic.caching_and_storage.holographic_tucker import structure_verdict
+        return structure_verdict(X, tol=tol)
+
+    def compress_tensor(self, X, energy=0.99, method="tucker", tol=1e-4):
+        """A7/M1 -- compress MULTI-WAY data (a field over x,y,t; a frame stack; a BRDF table; a volume) by factoring
+        structure out of EVERY axis at once, not one flattened SVD and not per-slice.
+
+          method="tucker" -- HOSVD: a small dense core plus one factor per mode. Ranks chosen by the RANK GATE from
+                             `energy`. Measured on a real diffusing field: 57x compression at rel-err 7.5e-3, where
+                             per-slice SVD manages 5.9x -- a 9.7x gain, because per-slice sees structure WITHIN a
+                             frame but none ACROSS frames.
+          method="tt"     -- Tensor Train: storage LINEAR in the number of modes (Tucker's core is exponential in
+                             it), error tracks `tol`.
+
+        NEVER CP: for 3+ modes a best rank-R CP approximation may not exist at all (the set isn't closed), so this
+        offers only the two SVD-based decompositions, which always exist. The gate returns FULL rank on data with no
+        low-rank structure -- the honest 'store it raw' answer. Use `mind.decompress_tensor(code)` to rebuild.
+        See holographic_tucker."""
+        from holographic.caching_and_storage.holographic_tucker import tucker_compress, tt_compress
+        if method == "tucker":
+            return tucker_compress(X, energy=energy)
+        if method == "tt":
+            return tt_compress(X, tol=tol)
+        raise ValueError("method must be 'tucker' or 'tt' (never CP -- it may have no best approximation)")
+
+    def decompress_tensor(self, code):
+        """Rebuild a tensor from mind.compress_tensor()."""
+        from holographic.caching_and_storage.holographic_tucker import tucker_reconstruct, tt_reconstruct
+        return tt_reconstruct(code) if "cores" in code else tucker_reconstruct(code)
+
+    def solve_poisson_periodic(self, f, dx=1.0):
+        """L5/M2 -- solve laplacian(u) = f on a PERIODIC grid in CLOSED FORM (one FFT; u_hat = f_hat / -|k|^2).
+        Exact to machine precision on band-limited data (measured 6.7e-16), where an iterative stepper is still at
+        1e-4 after 1000 steps. Only valid because the periodic Laplacian is a circular convolution -- see
+        holographic_laplacian.is_circular."""
+        from holographic.simulation_and_physics.holographic_laplacian import solve_poisson_spectral
+        return solve_poisson_spectral(f, dx=dx)
+
+    def diffuse_periodic(self, temp, alpha, t, dx=1.0):
+        """L5/M2 -- evolve dT/dt = alpha*laplacian(T) on a PERIODIC grid to time `t` EXACTLY, in one evaluation:
+        every Fourier mode just decays by exp(-alpha |k|^2 t). No time step, no stability limit, no substeps, and
+        t = 1e-6 costs the same as t = 1e6. See holographic_laplacian.diffuse_spectral."""
+        from holographic.simulation_and_physics.holographic_laplacian import diffuse_spectral
+        return diffuse_spectral(temp, alpha, t, dx=dx)
+
+    def solve_laplace(self, sdf_eval, points, boundary_value, walks=256, eps=1e-3, seed=0,
+                      source=None, dirichlet_sdf=None, dim=3, max_steps=64):
+        """A2 -- solve Laplace/Poisson on an SDF domain with NO MESH and no global linear system: Walk on Spheres
+        (and Walk on *Stars* when `dirichlet_sdf` marks the absorbing part, making the rest zero-flux/Neumann).
+        The only geometry query is distance-to-boundary, which is what an SDF returns -- so this is the solver
+        leCore was already built for.
+
+        Pointwise (evaluate only where you care), progressive (error ~ 1/sqrt(walks)), and farm-parallel with NO
+        seed coordination: every random number is a pure function of position and walk index (determinism.hash_unit),
+        so any node computes any walk in any order and gets the same answer. See holographic_wost."""
+        from holographic.simulation_and_physics.holographic_wost import solve_laplace
+        return solve_laplace(sdf_eval, points, boundary_value, walks=walks, max_steps=max_steps, eps=eps,
+                             seed=seed, source=source, dirichlet_sdf=dirichlet_sdf, dim=dim)
+
+    def farm(self, nodes, token=None, timeout=60.0, redundancy=1, attempts=1):
         """A distributed-compute Coordinator over a NetworkFarm of remote worker nodes ('host:port' each running
         serve_worker with the same worker names). farm.run(buckets, worker_name, cache, reduce) partitions the work
         across the nodes and reassembles by the monoid reducer -- same call as the local pool, just cross-machine.
-        See holographic_coordinator.NetworkFarm."""
-        from holographic.scene_and_pipeline.holographic_coordinator import Coordinator, NetworkFarm
-        return Coordinator(NetworkFarm(nodes, token=token, timeout=timeout))
+
+        P9 -- HARDENING (the public-farm guardrail, opt-in): `attempts>1` retries a bucket that fails transiently;
+        `redundancy>1` runs each bucket on several nodes and accepts the result only on AGREEMENT, which is the
+        detector for an untrusted node returning a plausible-but-wrong answer. Both delegate to
+        `hardening.HardenedCoordinator` via `coordinator.hardened()`; the defaults (1, 1) are the plain
+        Coordinator, so a trusted pool pays nothing. See holographic_coordinator / holographic_hardening."""
+        from holographic.scene_and_pipeline.holographic_coordinator import Coordinator, NetworkFarm, hardened
+        backend = NetworkFarm(nodes, token=token, timeout=timeout)
+        if redundancy > 1 or attempts > 1:
+            return hardened(backend, redundancy=redundancy, attempts=attempts)
+        return Coordinator(backend)
 
     def distributed_bus(self, peers=None, token=None, node_id="node"):
         """A DistributedBus: the same publish/subscribe/send bus, but publishes also fan out to peer nodes ('host:port'

@@ -164,3 +164,108 @@ def test_scalar_encoder_is_its_kernel_and_rbf_reads_density_better():
         return float(_np.corrcoef(r, true)[0, 1])
 
     assert corr("rbf") > corr("sinc") + 0.1        # RBF tracks the bimodal density far better
+
+
+# ======================================================================================================
+# The merge bug, and the faculty. `add` used to CLOBBER a concept's record instead of merging.
+# ======================================================================================================
+def _taxonomy(obj, add):
+    for concept, parent in (("dog.n.01", "canine.n.01"), ("wolf.n.01", "canine.n.01"),
+                            ("canine.n.01", "carnivore.n.01"), ("carnivore.n.01", "mammal.n.01"),
+                            ("cat.n.01", "feline.n.01"), ("feline.n.01", "carnivore.n.01")):
+        add(concept, parent)
+    return obj
+
+
+def test_adding_parts_after_a_parent_does_not_clobber_the_is_a_role():
+    """THE BUG: KnowledgeStore.add REPLACES a record (`self.attrs[name] = dict(attrs)`), which is the right contract
+    for a primitive store. Encyclopedia called it as if it merged, so add(is_a=) then add(has=) silently dropped the
+    is_a role from the bound vector -- while the Python-side `parent` dict still held it. is_a() reads the VECTOR,
+    so it returned "tail", and climb() walked into ["dog.n.01", "tail"]. A taxonomy that breaks with nothing raised."""
+    from holographic.agents_and_reasoning.holographic_encyclopedia import Encyclopedia
+    enc = Encyclopedia(dim=2048, seed=0)
+    enc.add("dog.n.01", is_a="canine.n.01")
+    assert enc.is_a("dog.n.01")[0] == "canine.n.01"
+
+    enc.add("dog.n.01", has=["tail", "fur"])                 # the second add used to clobber the first
+    assert enc.is_a("dog.n.01")[0] == "canine.n.01"          # is_a survives...
+    assert enc._read("dog.n.01", "has")[0] == "tail"         # ...and the new role is there
+    assert enc.climb("dog.n.01")[0] == ["dog.n.01", "canine.n.01"]
+
+    # and the single-call path is untouched
+    e2 = Encyclopedia(dim=2048, seed=0)
+    e2.add("x", is_a="y")
+    assert e2.is_a("x")[0] == "y"
+
+
+def test_relatedness_is_one_over_one_plus_the_summed_depths_not_one_for_siblings():
+    """KEPT NEGATIVE against the module's own former docstring, which claimed 1.0 for siblings. Only a concept
+    against ITSELF scores 1.0. The number ORDERS taxonomic distance; it is not a probability."""
+    from holographic.agents_and_reasoning.holographic_encyclopedia import Encyclopedia
+    enc = Encyclopedia(dim=2048, seed=0)
+    _taxonomy(enc, lambda c, p: enc.add(c, is_a=p))
+    r = enc.relatedness
+    assert abs(r("dog.n.01", "dog.n.01") - 1.0) < 1e-12         # identical
+    assert abs(r("dog.n.01", "canine.n.01") - 0.5) < 1e-12      # parent
+    assert abs(r("dog.n.01", "wolf.n.01") - 1 / 3) < 1e-12      # SIBLINGS -- not 1.0
+    assert abs(r("dog.n.01", "cat.n.01") - 0.2) < 1e-12         # cousins
+    assert r("dog.n.01", "rock.n.01") == 0.0                    # unrelated
+    assert r("dog.n.01", "wolf.n.01") > r("dog.n.01", "cat.n.01") > r("dog.n.01", "rock.n.01")
+
+
+def test_climb_throughput_decays_with_depth_and_abstains():
+    from holographic.agents_and_reasoning.holographic_encyclopedia import Encyclopedia
+    enc = Encyclopedia(dim=2048, seed=0)
+    _taxonomy(enc, lambda c, p: enc.add(c, is_a=p))
+    chain, tp_deep = enc.climb("dog.n.01")
+    assert chain == ["dog.n.01", "canine.n.01", "carnivore.n.01", "mammal.n.01"]
+    _, tp_shallow = enc.climb("carnivore.n.01")
+    assert tp_deep < tp_shallow                                  # a longer deduction is deliberately less certain
+    assert enc.climb("dog.n.01", hops=1)[0] == ["dog.n.01", "canine.n.01"]
+    short, _ = enc.climb("dog.n.01", min_throughput=0.95)        # abstain rather than emit low-confidence noise
+    assert len(short) < len(chain)
+
+
+def test_encyclopedia_faculty_through_the_mind_and_over_http():
+    """The state lives on the mind, and every method takes and returns PLAIN DATA -- so a long-lived service
+    accumulates knowledge across /invoke calls and needs no stateless twin."""
+    import json
+    import threading
+    import urllib.request
+    from http.server import HTTPServer
+
+    import holographic_service as svc_mod
+    from holographic.misc.holographic_unified import UnifiedMind
+
+    mind = UnifiedMind(dim=2048, seed=0)
+    svc = svc_mod.Service(mind=mind)
+    httpd = HTTPServer(("127.0.0.1", 0), svc_mod.make_handler(svc))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = "http://127.0.0.1:%d" % httpd.server_address[1]
+
+    def invoke(name, args):
+        body = json.dumps({"name": name, "args": args}).encode()
+        req = urllib.request.Request(base + "/invoke", data=body, headers={"Content-Type": "application/json"})
+        return json.loads(urllib.request.urlopen(req, timeout=30).read())
+
+    try:
+        # teach across SEPARATE calls -- the state persists on the mind between them
+        for c, p in (("dog.n.01", "canine.n.01"), ("wolf.n.01", "canine.n.01"),
+                     ("canine.n.01", "carnivore.n.01"), ("carnivore.n.01", "mammal.n.01")):
+            assert invoke("encyclopedia_add", {"concept": c, "is_a": p})["ok"]
+        assert invoke("encyclopedia_add", {"concept": "dog.n.01", "has": ["tail"]})["ok"]   # merge, not clobber
+
+        r = invoke("encyclopedia_is_a", {"concept": "dog.n.01"})
+        assert r["ok"] and r["result"]["parent"] == "canine.n.01"
+
+        r = invoke("encyclopedia_is_a_transitive", {"concept": "dog.n.01", "ancestor": "mammal.n.01"})
+        assert r["ok"] and r["result"]["reached"] and r["result"]["hops"] == 3
+
+        r = invoke("encyclopedia_relatedness", {"a": "dog.n.01", "b": "wolf.n.01"})
+        assert r["ok"] and abs(r["result"] - 1 / 3) < 1e-9      # siblings, plain JSON float
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+    assert mind.encyclopedia_reset() == 4                        # concepts cleared
+    assert mind.encyclopedia_siblings("dog.n.01") == []

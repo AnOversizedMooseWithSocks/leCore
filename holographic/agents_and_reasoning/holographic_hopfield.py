@@ -34,6 +34,7 @@ DESIGN NOTES (backward-compatible by construction)
 """
 
 import numpy as np
+from holographic.misc.holographic_determinism import argmax_tiebreak
 
 
 def _unit_rows(M):
@@ -183,7 +184,8 @@ def _decode_combo(z, roles, fillers):
     This is the structure's discrete CONTENT -- when it stops changing across diffusion steps, the generated
     structure has settled (the B3 stop signal)."""
     from holographic.agents_and_reasoning.holographic_ai import unbind
-    return tuple(int(np.argmax(fillers @ unbind(z, r))) for r in roles)
+    # DETERMINISM CONTRACT (ISA-1): the recalled filler IS the observable decision -- cite the tie-break rule.
+    return tuple(argmax_tiebreak(fillers @ unbind(z, r)) for r in roles)
 
 
 def generate_structure(roles, fillers, steps=16, beta0=4.0, beta1=60.0, noise0=0.5, seed=0, readout="softmax",

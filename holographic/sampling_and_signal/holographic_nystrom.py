@@ -11,8 +11,8 @@ THE MOVE (and why it is the irradiance cache, applied to the latent space)
 --------------------------------------------------------------------------
 Indirect light is smooth, so Ward's irradiance cache computes it at a sparse set of anchor points and interpolates
 the rest. The leading eigenvectors of a smooth affinity are *also* smooth and low-rank, so the SAME move works:
-  * pick m << N LANDMARKS that cover the data (farthest-point sampling = guaranteed coverage of every "hot"
-    cluster / local manifold, the discrete cousin of the engine's blue-noise sampling),
+  * pick m << N LANDMARKS that cover the data (farthest-point sampling, the discrete cousin of the engine's
+    blue-noise sampling -- but read the measured caveat under LANDMARK RULES below before trusting the default),
   * do the high-precision eigh on the small m x m landmark affinity block (the expensive computation, paid only
     on the anchors),
   * EXTEND the eigenvectors to all N points by the Nystrom formula (the cheap interpolation = the coarse
@@ -26,11 +26,48 @@ kept negatives (coverage-limited, low-rank-affinity-limited).
 import numpy as np
 
 
+# ==================================================================================================================
+# LANDMARK RULES -- and the measured caveat that the default was carrying the wrong intuition.
+#
+# The docstring above once said farthest-point sampling gives "guaranteed coverage of every hot cluster ... unlike
+# uniform-random, which can miss a small cluster." Coverage is real. It is also not what a spectral embedding wants.
+# FPS spends its budget on EXTREMES, and the leading eigenvectors of a smooth affinity carry their mass in the DENSE
+# regions. On data with outliers those are opposite instructions.
+#
+# MEASURED -- subspace alignment against the dense O(N^3) embedding (1.0 = the same subspace), m=24, n_basis=6,
+# mean +- sd over 50 trials (10 data seeds x 5 landmark seeds):
+#
+#     dataset                    fps (the default)      uniform random        random beats fps
+#     clusters + outliers        0.8692 +- 0.0216       0.9512 +- 0.0315         47 / 50
+#     smooth curve               0.9831 +- 0.0071       0.9792 +- 0.0079         18 / 50
+#     uniform blob               0.9889 +- 0.0033       0.9743 +- 0.0126          2 / 50
+#
+# So `landmarks="fps"` is the right default on clean, well-spread data and a MATERIALLY WORSE one as soon as there
+# are outliers -- which is the case the coverage argument was invented for. If your points have stragglers, pass
+# `landmarks="random"` and measure. The default is unchanged (it wins on the other two rows, and changing it would
+# flip existing decisions), but it is no longer described as strictly better.
+#
+# KEPT NEGATIVE -- COARSE-FIRST LANDMARK SELECTION IS WORSE THAN BOTH. The obvious "adaptive Nystrom" is to pivot
+# greedily on the diagonal residual r(x) = k(x,x) - k_x^T pinv(Wmm) k_x (pivoted/incomplete Cholesky; Fine &
+# Scheinberg 2001) -- spend the next landmark where the current approximation is most uncertain. Measured on the
+# same 50 trials: 0.8434 +- 0.0207 on clusters+outliers, 0.9757 on the curve, 0.9742 on the blob. It never wins,
+# and it is WORST exactly where FPS is worst -- because the point of maximum residual IS the most isolated point.
+# The residual is a COVERAGE signal; the embedding needs a MASS signal. It is FPS's failure mode, amplified.
+#
+# AND THE COARSE-FIRST GATE CANNOT SEE THIS. `coarsefirst.concentration` of that residual scores 0.328 / 0.403 /
+# 0.321 on the three datasets -- essentially flat, and comfortably "concentrated" on all of them. The gate says
+# CANDIDATE, and the measurement says no. That is exactly what "necessary, not sufficient" means, and this is the
+# case it was written for: a concentrated uncertainty that concentrates on the wrong thing.
+# ==================================================================================================================
 def farthest_point_landmarks(points, m, seed=0):
     """Greedy farthest-point sampling: start at a random point, then repeatedly add the point furthest from the
     current landmark set. Guarantees the m landmarks COVER the data -- every cluster / local manifold gets an
-    anchor (unlike uniform-random, which can miss a small cluster). O(N*m), vectorised inner loop. Returns the
-    landmark indices."""
+    anchor. O(N*m), vectorised inner loop. Returns the landmark indices.
+
+    MEASURED CAVEAT (see the block above): coverage is not what a spectral embedding wants when the data has
+    OUTLIERS, because FPS spends its budget on extremes while the leading eigenvectors carry their mass in the
+    dense regions. On clusters with a sprinkle of stragglers, uniform-random landmarks beat this in 47 of 50 trials
+    (subspace alignment 0.9512 +- 0.0315 against 0.8692 +- 0.0216). On clean data FPS wins. Choose by measuring."""
     P = np.asarray(points, float)
     n = len(P)
     m = min(m, n)
@@ -77,7 +114,8 @@ def dense_embedding(points, n_basis, sigma):
 def nystrom_embedding(points, n_basis, m=None, sigma=None, seed=0, landmarks="fps"):
     """Landmark spectral embedding: approximate the top n_basis smooth eigenvectors of the normalized affinity in
     O(m^3 + N*m) instead of O(N^3), forming only the N x m and m x m affinity blocks. `m` landmarks (default
-    ~8*n_basis) are chosen by farthest-point sampling ('fps', covers every cluster) or 'random'. `sigma` defaults
+    ~8*n_basis) are chosen by farthest-point sampling ('fps', covers every cluster -- but see the LANDMARK RULES
+    block: 'random' beats it on outlier-laden data, 0.951 against 0.869 in 47/50 trials) or 'random'. `sigma` defaults
     to the median landmark distance (a robust bandwidth). Returns (eigenvalues, eigenvectors (N, n_basis)) -- the
     same shape as the dense path, so it is a drop-in for laplacian_eigenbasis on the smooth-embedding use."""
     P = np.asarray(points, float)
@@ -134,13 +172,41 @@ def _selftest():
     vn, Pn = nystrom_embedding(blobs, n_basis=3, m=48, sigma=1.0)
     align = subspace_alignment(Pd, Pn)
     assert align > 0.9, align                                # landmark embedding ~ the dense one
-    # FPS coverage beats random landmarks (random can miss a blob)
-    _, Pr = nystrom_embedding(blobs, n_basis=3, m=12, sigma=1.0, landmarks="random", seed=3)
-    _, Pf = nystrom_embedding(blobs, n_basis=3, m=12, sigma=1.0, landmarks="fps", seed=3)
-    a_rand = subspace_alignment(Pd, Pr); a_fps = subspace_alignment(Pd, Pf)
-    assert a_fps >= a_rand - 0.05                            # FPS at least as good (usually better) at tiny m
-    print(f"nystrom selftest ok: subspace alignment to dense {align:.3f} (48 landmarks vs {len(blobs)} pts); "
-          f"FPS {a_fps:.2f} >= random {a_rand:.2f} at m=12")
+    # WHICH LANDMARK RULE WINS DEPENDS ON THE DATA, AND THE DEFAULT IS NOT UNIFORMLY BETTER.
+    # (The old assertion here compared FPS against random on the 3 well-separated blobs above, where both score
+    # 0.998 and the ordering is noise, with a 0.05 slack -- it could not fail. Two datasets that discriminate,
+    # in the regime the measurement was made: 2-D, sigma = the median landmark distance, i.e. the module default.)
+    def _sigma(P, m=24):
+        L = P[farthest_point_landmarks(P, m, seed=0)]
+        DL = np.sqrt(((L[:, None, :] - L[None, :, :]) ** 2).sum(-1))
+        return float(np.median(DL[DL > 0])) or 1.0
+
+    def _mean_align(P, sig, rule, m=24, k=6):   # n_basis=6: with k=3 both rules are near-perfect and tie
+        _, Pd_ = dense_embedding(P, n_basis=k, sigma=sig)
+        return float(np.mean([subspace_alignment(Pd_, nystrom_embedding(
+            P, n_basis=k, m=m, sigma=sig, landmarks=rule, seed=s_)[1]) for s_ in range(5)]))
+
+    # (a) NOTHING TO COVER -> FPS's spread wins. Measured 0.9889 +- 0.0033 against random's 0.9743 +- 0.0126
+    #     over 50 trials; random won only 2 of them.
+    blob = rng.uniform(-1, 1, (320, 2))
+    sb = _sigma(blob)
+    b_fps, b_rand = _mean_align(blob, sb, "fps"), _mean_align(blob, sb, "random")
+    assert b_fps > b_rand, (b_fps, b_rand)
+
+    # (b) OUTLIERS -> the coverage argument INVERTS, badly. FPS spends its budget on the stragglers, while the
+    #     leading eigenvectors carry their mass in the dense regions. Measured 0.8692 +- 0.0216 against random's
+    #     0.9512 +- 0.0315 over 50 trials; random won 47. Pinned so the default is never again called better.
+    core = np.vstack([rng.normal(c, 0.12, (120, 2)) for c in ([0, 0], [2.5, 0.3], [1.2, 2.2])])
+    stragglers = np.vstack([core, rng.uniform(-4, 6, (40, 2))])
+    so = _sigma(stragglers)
+    o_fps, o_rand = _mean_align(stragglers, so, "fps"), _mean_align(stragglers, so, "random")
+    assert o_rand > o_fps + 0.02, (o_rand, o_fps)
+
+    print(f"nystrom selftest ok: subspace alignment to dense {align:.3f} (48 landmarks vs {len(blobs)} pts). "
+          f"THE LANDMARK RULE IS DATA-DEPENDENT: with nothing to cover, FPS's spread wins ({b_fps:.3f} > "
+          f"{b_rand:.3f}); with OUTLIERS the coverage argument INVERTS -- random {o_rand:.3f} > FPS {o_fps:.3f} -- "
+          f"because FPS spends its landmarks on the stragglers while the leading eigenvectors carry their mass in "
+          f"the dense regions")
 
 
 if __name__ == "__main__":

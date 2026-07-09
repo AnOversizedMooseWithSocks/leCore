@@ -135,6 +135,12 @@ jobs:
       - name: Gate -- no broken imports
         run: python tools/audit_imports.py
 
+      # WIRING GATE (T-5). A module can exist, work, have tests -- and be reachable by nothing ('compose' and
+      # 'diffusion' were). That never fails a test, so it persists. This fails CI when a NEW module has no
+      # caller, honouring KEPT NEGATIVE / KEPT NO-OP annotations and the recorded KNOWN_DARK debt.
+      - name: Gate -- no new dark modules
+        run: python tools/wiring_report.py --check
+
       - name: Gate -- no discoverability gaps
         run: python tools/catalog_gaps.py
 

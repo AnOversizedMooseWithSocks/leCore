@@ -35,8 +35,15 @@ def ci_half_width(variance_of_mean, z=Z95):
 def converged_mask(variance_of_mean, tolerance, z=Z95):
     """Which pixels have CONVERGED: their CI half-width is already within `tolerance` -- stop sampling them.
     Returns a boolean mask (True = converged / stop). Its complement is the renderer's `active` mask for the
-    next pass."""
-    return ci_half_width(variance_of_mean, z) <= float(tolerance)
+    next pass.
+
+    THE COMPLEMENT IS AN ESCALATE MASK, so this cites the unifier that owns them (`holographic_coarsefirst`) rather
+    than hand-rolling a second threshold rule. The tie convention is the one thing that had to be preserved and is
+    the reason `inclusive` exists: a pixel whose CI half-width is EXACTLY the tolerance has converged and must stop,
+    so the escalation is strict (`u > t`), where coarse-first's default refines on a tie (`u >= t`). Verified
+    bit-identical to the old inline comparison on 100,000 random variances including exact ties."""
+    from holographic.misc.holographic_coarsefirst import escalate_mask
+    return ~escalate_mask(ci_half_width(variance_of_mean, z), threshold=float(tolerance), inclusive=False)
 
 
 def samples_to_target(variance_of_mean, current_n, target_half_width, z=Z95):

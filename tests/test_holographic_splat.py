@@ -1,5 +1,6 @@
 """Holographic Gaussian splatting (B8): a scene as a superposition of Gaussian primitives."""
 import numpy as np
+import pytest
 from holographic.rendering.holographic_splat import splat_fit, splat_render, splat_refit, splat_denoise, psnr, adaptive_fit
 
 
@@ -182,3 +183,91 @@ def test_tiled_splat_migration_is_byte_identical_to_the_old_inline_tiling():
     assert set(scene["tiles"].keys()) == set(expected.keys())
     for k in expected:
         assert np.array_equal(scene["tiles"][k], expected[k]), f"tile {k} changed under migration"
+
+
+# ======================================================================================================
+# H8 -- frequency-lifted (Gabor) splats. The lift is real; the backlog's evidence for it was not.
+# ======================================================================================================
+def _h8_targets(n=48):
+    ys, xs = np.mgrid[0:n, 0:n]
+    disk = (np.sqrt((ys - n / 2 + .5) ** 2 + (xs - n / 2 + .5) ** 2) < n * 0.28).astype(float)
+    stripes = (np.sin(2 * np.pi * 5 * xs / n) > 0).astype(float)
+    return disk, stripes
+
+
+def test_a_zero_frequency_gabor_atom_is_exactly_a_gaussian():
+    """The dictionaries NEST. That is what makes the Gaussian-vs-Gabor comparison honest: the greedy fit can always
+    fall back on a Gaussian, so Gabor can never lose per primitive, and any win is a real win."""
+    from holographic.rendering.holographic_splat import _gabor, _gaussian
+    a = _gabor((32, 32), 16, 16, 3.0, 0.0, 0.0, 0.0)
+    g = _gaussian((32, 32), 16, 16, 3.0)
+    assert np.max(np.abs(a - g)) < 1e-12
+
+
+def test_the_saturated_gaussian_baseline_was_a_strawman_refit_makes_it_climb():
+    """The backlog's headline was 'the Gaussian basis saturates at 11.6 dB regardless of K'. That flat curve is
+    greedy matching pursuit's overlap double-counting -- and splat_refit, already in the same module, removes it."""
+    from holographic.rendering.holographic_splat import psnr, splat_fit, splat_refit, splat_render
+    disk, _ = _h8_targets()
+    mp = [psnr(splat_render(splat_fit(disk, K), disk.shape), disk) for K in (24, 96)]
+    rf = [psnr(splat_render(splat_refit(splat_fit(disk, K), disk), disk.shape), disk) for K in (24, 96)]
+    assert rf[1] > rf[0], rf                                 # the refit basis climbs with K...
+    assert (rf[1] - rf[0]) > 2.0 * (mp[1] - mp[0]), (mp, rf)  # ...far faster than the strawman did
+
+
+def test_a_gabor_atom_is_a_bandpass_primitive_so_the_win_is_content_dependent():
+    """At equal PARAMETER budget (Gabor 7 numbers/atom, Gaussian 4): a grating IS a band and the carrier locks onto
+    it; a sharp edge is EVERY band at once and there is nothing to lock onto."""
+    from holographic.rendering.holographic_splat import (gabor_fit, gabor_render, psnr, splat_fit,
+                                                         splat_refit, splat_render)
+    disk, stripes = _h8_targets()
+
+    def delta(target, K):
+        gauss = splat_render(splat_refit(splat_fit(target, int(round(K * 7 / 4))), target), target.shape)
+        gab = gabor_render(gabor_fit(target, K), target.shape)
+        return psnr(gab, target) - psnr(gauss, target)
+
+    d_stripes, d_disk = delta(stripes, 64), delta(disk, 64)
+    assert d_stripes > 2.0, d_stripes
+    assert d_disk < d_stripes / 2.0, (d_disk, d_stripes)
+
+
+def test_the_splatsharpen_negative_survives_on_a_broadband_edge():
+    """KEPT NEGATIVE, and the backlog predicted it would fall. Widening a basis pays only when the widening MATCHES
+    the content's structure. On the very target the negative was recorded against, the lift barely moves."""
+    from holographic.rendering.holographic_splat import (gabor_fit, gabor_render, psnr, splat_fit,
+                                                         splat_refit, splat_render)
+    disk, _ = _h8_targets()
+    gauss = splat_render(splat_refit(splat_fit(disk, 112), disk), disk.shape)   # equal budget: 64*7 == 112*4
+    gab = gabor_render(gabor_fit(disk, 64), disk.shape)
+    assert psnr(gab, disk) - psnr(gauss, disk) < 2.5                            # not the dissolution promised
+
+
+def test_spectral_detail_measures_what_psnr_cannot():
+    """PSNR lives in the low frequencies, where the energy is. The splatsharpen negative is a statement about the
+    HIGH ones, so it needs its own number."""
+    from holographic.rendering.holographic_splat import spectral_energy_fraction
+    n = 48
+    ys, xs = np.mgrid[0:n, 0:n]
+    grating = (np.sin(2 * np.pi * 5 * xs / n) > 0).astype(float)
+    blob = np.exp(-((ys - n / 2) ** 2 + (xs - n / 2) ** 2) / (2 * 8.0 ** 2))
+    assert spectral_energy_fraction(grating) > 10 * spectral_energy_fraction(blob)
+    assert 0.0 <= spectral_energy_fraction(blob) < 1e-3
+
+
+def test_gabor_basis_through_the_mind_and_its_guards():
+    from holographic.misc.holographic_unified import UnifiedMind
+    from holographic.rendering.holographic_splat import psnr
+    m = UnifiedMind(dim=64, seed=0)
+    _, stripes = _h8_targets()
+    atoms, rendered = m.splat_field(stripes, k=48, basis="gabor")
+    assert len(atoms[0]) == 7                                    # seven numbers per primitive, not four
+    splats, gauss = m.splat_field(stripes, k=84)                 # equal parameter budget
+    assert len(splats[0]) == 4
+    assert psnr(rendered, stripes) > psnr(gauss, stripes)
+    assert m.spectral_detail(stripes) > m.spectral_detail(gauss)  # the target is sharper than either fit
+    with pytest.raises(ValueError):
+        m.splat_field(stripes, basis="nope")
+    with pytest.raises(ValueError):
+        m.splat_field(stripes, basis="gabor", noise_thresh=0.03)  # adaptive count is Gaussian-calibrated
+    assert any("gabor" in c.name.lower() for c in m.find_capability("gabor splat"))

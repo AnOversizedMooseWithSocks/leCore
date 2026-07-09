@@ -68,3 +68,37 @@ def test_fog_wired_into_render_scene():
     foggy = render_scene(objs, cam, width=64, height=64, ss=1, dither=0.0, fog=vol, fog_density=0.2)
     assert foggy.shape == clear.shape
     assert np.abs(foggy - clear).mean() > 1e-4                  # fog actually changed the frame
+
+
+def test_the_cost_is_independent_of_ray_length_so_there_is_no_loop_to_escalate():
+    """Evidence for the unifier ledger: `volint` is entered in NOT_APPLICABLE for coarse-first, because coarse-first
+    buys adaptivity for a method priced PER CELL and the closed form deleted the cells.
+
+    A marcher's cost grows with ray length. This one's does not: the integral of a complex exponential is a complex
+    exponential, so a ray of any length is one inner product. Measured flat across a 128x range of L."""
+    import time
+
+    from holographic.misc.holographic_volint import HolographicVolume
+    from holographic.sampling_and_signal.holographic_fpe import VectorFunctionEncoder
+
+    enc = VectorFunctionEncoder(3, dim=1024, bounds=[(-1, 1)] * 3, seed=0)
+    vol = HolographicVolume.from_blobs(enc, [(0, 0, 0), (0.4, 0.1, -0.2)])
+    rng = np.random.default_rng(0)
+    R = 512
+    O = rng.uniform(-1, 1, (R, 3))
+    D = rng.standard_normal((R, 3))
+    D /= np.linalg.norm(D, axis=1, keepdims=True)
+
+    times = []
+    for L in (0.5, 64.0):                                    # a 128x range of ray length
+        vol.optical_depth(O, D, L)                           # warm the caches
+        t0 = time.perf_counter()
+        for _ in range(3):
+            vol.optical_depth(O, D, L)
+        times.append((time.perf_counter() - t0) / 3)
+    assert max(times) < 3.0 * min(times), times              # flat in L: no marching loop exists here
+
+    # ...and the answer is not merely fast, it is correct at every length: a longer ray integrates more density.
+    tau_short = vol.optical_depth(np.zeros((1, 3)), np.array([[1.0, 0.0, 0.0]]), 0.2)
+    tau_long = vol.optical_depth(np.zeros((1, 3)), np.array([[1.0, 0.0, 0.0]]), 1.5)
+    assert tau_long[0] > tau_short[0] > 0.0, (tau_short, tau_long)

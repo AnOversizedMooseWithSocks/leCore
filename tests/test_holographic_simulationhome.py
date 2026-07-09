@@ -1,5 +1,6 @@
 """Tests for holographic_simulationhome -- the Simulation scaffold (R9: one step loop, solvers kept separate)."""
 import numpy as np
+import pytest
 from holographic.misc.holographic_simulationhome import Simulation, known_solver_strategies
 
 
@@ -62,3 +63,59 @@ def test_grid_advances_over_steps():
 
 def test_strategies_listed():
     assert set(known_solver_strategies()) == {"for_fluid", "for_automaton"}
+
+
+# ======================================================================================================
+# The scaffold as a mind faculty: in-process wrapper + stateless twin for /invoke.
+# ======================================================================================================
+def test_simulation_faculty_wraps_a_solver_in_process():
+    from holographic.misc.holographic_unified import UnifiedMind
+    from holographic.simulation_and_physics.holographic_fluid import StableFluid
+    m = UnifiedMind(dim=64, seed=0)
+    fluid = StableFluid((16, 16, 16), dt=0.1)
+    fluid.density[6:10, 2:6, 6:10] = 1.0
+    sim = m.simulation(fluid, lambda s, dt: s.step(), lambda s: np.asarray(s.density, float))
+    sim.run(4)
+    assert sim.steps_run == 4
+    assert sim.grid().shape == (16, 16, 16)
+    assert fluid.density.shape == (16, 16, 16)                   # the solver stayed itself
+
+
+def test_run_simulation_is_the_stateless_twin_and_both_kinds_run():
+    from holographic.misc.holographic_unified import UnifiedMind
+    m = UnifiedMind(dim=64, seed=0)
+    gf = m.run_simulation("fluid", 6, grid=16)
+    ga = m.run_simulation("automaton", 6, grid=16)
+    assert gf.shape == (16, 16, 16) and np.isfinite(gf).all() and float(gf.sum()) > 0.0
+    assert ga.shape == (16, 16) and np.isfinite(ga).all() and float(ga.max()) > 0.0
+    # the two are DIFFERENT algorithms behind one loop -- not the same output
+    with pytest.raises(ValueError):
+        m.run_simulation("nope", 1)
+
+
+def test_run_simulation_survives_a_real_http_invoke():
+    """The live Simulation holds a solver + step adapter that do not survive JSON. run_simulation is the twin --
+    plain arguments in, a plain field grid out. Proven over a real socket, like gather_samples."""
+    import json
+    import threading
+    import urllib.request
+    from http.server import HTTPServer
+
+    import holographic_service as svc_mod
+    from holographic.misc.holographic_unified import UnifiedMind
+
+    svc = svc_mod.Service(mind=UnifiedMind(dim=64, seed=0))
+    httpd = HTTPServer(("127.0.0.1", 0), svc_mod.make_handler(svc))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = "http://127.0.0.1:%d" % httpd.server_address[1]
+    try:
+        tools = json.loads(urllib.request.urlopen(base + "/tools", timeout=30).read())
+        assert "run_simulation" in {t["name"] for t in tools["tools"]}
+        body = json.dumps({"name": "run_simulation", "args": {"kind": "automaton", "steps": 6, "grid": 16}})
+        req = urllib.request.Request(base + "/invoke", data=body.encode(),
+                                     headers={"Content-Type": "application/json"})
+        r = json.loads(urllib.request.urlopen(req, timeout=60).read())
+        assert r["ok"] and isinstance(r["result"], list) and len(r["result"]) == 16
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

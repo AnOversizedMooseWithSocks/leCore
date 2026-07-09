@@ -29,6 +29,7 @@ Pure NumPy + holostuff spirit; deterministic; reuses StructureRecipe (B7) and de
 """
 
 import numpy as np
+from holographic.misc.holographic_determinism import argmax_tiebreak
 
 from holographic.agents_and_reasoning.holographic_ai import bind, unbind, derived_atom, cosine
 from holographic.misc.holographic_recipe import StructureRecipe
@@ -63,7 +64,7 @@ def traverse(M, nodes, steps, cleanup="hard", beta=8.0):
         succ = unbind(M, cur)
         if prev is not None:                                # remove the known predecessor (intrinsic leak)
             succ = succ - float(succ @ prev) * prev
-        nearest = int(np.argmax(nodes @ succ))
+        nearest = argmax_tiebreak(nodes @ succ)          # DETERMINISM CONTRACT (ISA-1)
         rec.append(nearest)
         prev = cur
         if cleanup is None:
@@ -95,7 +96,7 @@ def recover_continuous_values(roles, codebook, M, true_vecs, beta=12.0):
     hard_c, soft_c = [], []
     for i in range(len(roles)):
         noisy = unbind(M, roles[i])
-        hard = codebook[int(np.argmax(codebook @ noisy))]
+        hard = codebook[argmax_tiebreak(codebook @ noisy)]   # DETERMINISM CONTRACT (ISA-1)
         soft = dense_cleanup(noisy, codebook, beta, steps=3)
         hard_c.append(cosine(hard, true_vecs[i]))
         soft_c.append(cosine(soft, true_vecs[i]))

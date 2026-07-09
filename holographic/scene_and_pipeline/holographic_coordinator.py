@@ -430,3 +430,16 @@ def serve_worker(host="0.0.0.0", port=9000, token=None, workers=None):
     except KeyboardInterrupt:
         print("\nstopping worker.")
         httpd.server_close()
+
+
+def hardened(backend, redundancy=1, attempts=3, backoff=0.1, tol=1e-9, quorum=None):
+    """P9 -- a Coordinator whose every bucket is RETRIED, optionally run REDUNDANTLY and accepted only on
+    AGREEMENT, and whose run can be gated on canary buckets first.
+
+    This is the guardrail the public-farm plan calls for (an untrusted node can return a plausible-but-wrong
+    answer; voting is the detector). It already existed as `hardening.HardenedCoordinator` and was reachable
+    from the catalog and nothing else. Use redundancy>1 + canaries for untrusted nodes; redundancy=1 on a
+    trusted pool, where it is simply retry. Same `.run(buckets, worker, cache, reduce)` call as Coordinator."""
+    from holographic.misc.holographic_hardening import HardenedCoordinator
+    return HardenedCoordinator(backend, redundancy=redundancy, attempts=attempts, backoff=backoff,
+                               tol=tol, quorum=quorum)

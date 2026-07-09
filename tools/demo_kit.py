@@ -20,7 +20,9 @@ def png_response(img, level=6):
     png_bytes: 1 for fast streamed preview frames, 6 for stills."""
     from flask import Response
     from holographic.rendering.holographic_render import png_bytes            # item 1 -- the shared encoder, no per-demo copy
-    r = Response(png_bytes(img, level), mimetype="image/png")
+    # A streamed preview frame wants speed, not bytes: skip the filter search (it costs a second zlib pass) below
+    # level 6. Stills keep it -- measured 34x smaller on a smooth gradient. See holographic_render.png_bytes.
+    r = Response(png_bytes(img, level, filters=(level >= 6)), mimetype="image/png")
     r.headers["Cache-Control"] = "no-cache"
     return r
 

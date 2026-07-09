@@ -31,16 +31,14 @@ import numpy as np
 
 
 def _laplacian(p):
-    """Finite-difference Laplacian with edge replication (a hard/reflecting Neumann wall at the domain border),
-    any dimension. The spatial half of the wave update."""
-    P = np.pad(p, 1, mode="edge")
-    center = tuple(slice(1, -1) for _ in range(p.ndim))
-    lap = np.zeros_like(p, float)
-    for ax in range(p.ndim):
-        up = list(center); up[ax] = slice(2, None)
-        dn = list(center); dn[ax] = slice(0, -2)
-        lap += P[tuple(up)] + P[tuple(dn)] - 2.0 * P[center]
-    return lap
+    """The edge-replicated (zero-flux / Neumann) discrete Laplacian, any dimension.
+
+    A1: this stencil was duplicated bit-for-bit in `holographic_heat` and `holographic_wave`. It now lives
+    once in `holographic_laplacian.laplacian(field, bc=)`, which also offers the periodic and dirichlet
+    boundaries; this alias keeps the old private name working for existing callers.
+    """
+    from holographic.simulation_and_physics.holographic_laplacian import laplacian
+    return laplacian(p, bc="neumann")
 
 
 class WaveField:

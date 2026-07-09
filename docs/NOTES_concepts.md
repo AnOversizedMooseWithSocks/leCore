@@ -21362,3 +21362,1826 @@ Ran the whole suite in chunks on a 1-core box: files 1-463 all covered, 11 failu
 green. The single remaining "failure" seen locally is `test_creature_gauntlet::test_bootstrap_rescue_cracks_the_starved_maze`
 tripping an artificial 100s pytest-timeout I imposed -- it legitimately takes ~264s (it is the slowest test in CI's own
 durations list) and is NOT a real failure.
+
+## MATH & DETERMINISM BACKLOG -- TIER 0 complete (+D-1, D-3), and GALLERY.md fixed
+
+Worked the backlog in its own prescribed order (Tier 0 = free/near-free first), probing the live code before every
+claim and measuring before every statement. Every number below was reproduced here, not copied from the doc.
+
+**A0 -- float-SUM caveat retired.** VERIFIED, no work: `reduce_sum_exact(parts, bits=40)` ships in `distribute`, `rns`
+ships. Nothing to build.
+
+**P1 -- Propagator -> iterate.** The headline. PROBE FIRST caught a contract the backlog glosses over: `rollout()`
+returns the WHOLE (k, dim) trajectory while `iterate.step_k` returns only the k-th state -- a naive swap would have
+silently changed the API. So:
+  * `rollout(state,k)` keeps its contract but now takes the FFT once and raises the transfer by one power per step
+    instead of paying 2 FFTs per `bind`. Output identical to the old loop (max abs diff 3.33e-16).
+  * NEW `jump(state,k)` = the closed form (`iterate.step_k`): cos 1.000000 vs k sequential steps, measured
+    41x (k=64) / 113x (k=512) / 1059x (k=4096); k=1,000,000 in 583us. NEW `limit(state)` = the k->inf steady state.
+  * `recall_at(state,k)` now delegates to `step_k` against `U_inv` -- same answer (cos 1.000000), no loop.
+  * CORRECTNESS: a divergent operator made the hand-rolled loop overflow to nan SILENTLY (reproduced: max|eig|=261
+    -> nan by k=200). `jump`/`limit` now RAISE; `rollout` WARNS (raising there would break existing callers).
+    The guard fires on predicted GROWTH (r**k), not on r>1 -- a learned propagator legitimately sits at r=1.0005,
+    and a guard that cries wolf gets ignored. (Bug found while building: python's `float**k` raises OverflowError
+    instead of returning inf; use np.float_power.)
+
+**P3 -- the determinism contract, cited.** `resonator`/`classifier`/`hopfield`/`peel` did 6 bare `np.argmax` calls
+and cited `argmax_tiebreak` 0 times. All 6 now call the named rule. numpy's argmax IS deterministic; the hazard is
+that the SCORES aren't bit-stable across backends/orders, so a 1e-17 delta flips the winner (the `bind_batch`
+lesson). 0 bare argmax remain in those four; 28 tests green.
+
+**A6/E1 -- the encoder's silent catastrophic default.** MEASURED, and worse than the backlog's number: encoding data
+spanning [0,100] with the `UniversalEncoder` default range (-4,4) gives normalized decode error **0.5422** against a
+RANDOM-VECTOR baseline of **0.5436** -- the code carried no information and said nothing. Fixes (additive):
+`ScalarEncoder.for_values(data, dim)` ranges to the data (err 0.0014, **385x** better) and `encode()` now warns ONCE
+when a value falls outside [lo,hi]. `SelfOrganizingMind(number_range=...)` is now explicit and documented; the
+default is unchanged (backward compatible).
+  * THE WARNING IMMEDIATELY EARNED ITS KEEP: it fires in `test_holographic_matlib::test_planet_has_deposit_pockets`,
+    where a planet field samples **-9.9 against an FPE domain of [-8,8]**. The test passes, so this is a latent
+    domain overrun, not a crash. FLAGGED, not silently "fixed" -- Moose should decide whether the sampler or the
+    domain is wrong.
+
+**D-2 -- the unifier adoption lint (the durable fix).** NEW `tools/unifiers.py` is the registry (unifier -> module,
+citing symbols, named clients, why) + `status()` which reads the live source (text search, no imports).
+NEW `tests/test_unifier_adoption.py`: wired clients may never silently un-wire, and the PENDING set must match
+reality EXACTLY -- so wiring one forces deleting its line (progress recorded) and un-wiring one fails CI. VERIFIED IT
+BITES: un-wiring `peel` fails the lint; restored, it passes. Measured adoption today (matches the backlog's audit):
+iterate 1/7 (was 0/7 -- P1), argmax_tiebreak 4/4 (was 0/4 -- P3), lowdiscrepancy 1/4, rns 1/4, octnormal 0/5,
+project_onto_constraints 4/6.
+
+**D-1 (bonus) -- `docs/UNIFIERS.md`** generated from the registry (`python tools/unifiers.py --markdown`).
+
+**D-3 (bonus) -- the contracts are findable now.** Reproduced the miss: `find_capability("break ties
+deterministically")` returned `Distributed coordinator`, and `argmax_tiebreak` appeared **0 times** in
+CAPABILITIES.md -- which is exactly why four modules hand-rolled it. Registered four ENGINE-CONTRACT capabilities
+(argmax_tiebreak, iterate, reduce_sum_exact/rns, octnormal). All four now return the right home. (`skill_lint`
+caught that my octnormal example named the wrong module path and wrong function names -- the gate doing its job;
+real API is `mesh_and_geometry.holographic_octnormal.oct_quantize/oct_dequantize`.)
+
+**GALLERY.md -- 4 broken image links fixed.** Two causes: `bench_capacity/bench_corruption/bench_throughput.png` were
+linked as `gallery/*` but live in `benchmarks/` (repointed); `gallery/render_cloud.png` was linked and had a
+generator in `tools/make_gallery.py` but had never been produced -- GENERATED it (240x180, 3557 unique colours, not a
+blank frame) rather than deleting the section. All 36 links now resolve. NEW `tests/test_gallery_links.py` guards it
+(every link resolves; no zero-byte/truncated images) -- verified it fails when a link is broken.
+
+**Still on the backlog** (unchanged, and now tracked executably in PENDING): P2 (route sbc/diffuse/resonator/chaos/
+equilibrium through `iterate`), P4 (prt's Fibonacci -> lowdiscrepancy), P5 (rns -> measure/accumulate/fountain),
+P6 (octnormal x5), P7 (resonator+dynamics -> project_onto_constraints), P8-P10, the A-series consolidations, T-series
+audit tooling, and Tiers 3-6 (Walk on Stars, TT codec, the shader algebra).
+
+## MATH BACKLOG -- TIER 1 (promote & wire): P2 RETRACTED (measured), A1, P4, P5 done
+
+The round's headline is a NEGATIVE, and it is the most valuable thing here.
+
+**P2 -- "route sbc/diffuse/resonator/chaos/equilibrium/meshsubdiv through `iterate`" IS MATHEMATICALLY IMPOSSIBLE.**
+Probed before wiring, then MEASURED with a linearity probe (f(a+b) == f(a)+f(b), f(ca) == c f(a)):
+  * `dynamics.step` = bind(U,x): LINEAR + CIRCULAR -> jumpable (this is why P1 worked).
+  * `diffuse.manifold_denoise_step`: softmax-weighted mean -> NOT linear (measured).
+  * `resonator`/`sbc` cleanup: softmax -> NOT linear (measured).
+  * `chaos.NonlinearPropagator.free_run`: tanh reservoir with its prediction fed back -> nonlinear BY DESIGN (that
+    lift is the whole point; it's what beats the linear propagator on chaotic flows).
+  * `equilibrium._relax`: nonlinear rho() + clipping.
+  * `meshsubdiv`: the operator CHANGES SIZE each level (vertices grow) -- no fixed square operator to exponentiate.
+  * `heat`/`wave`: LINEAR but NOT CIRCULAR. The edge-replicated (Neumann) Laplacian is diagonal in the DCT basis, not
+    the DFT, so `bind`'s free eigendecomposition does not apply. With bc='periodic' it would.
+`step_k` needs BOTH properties (linear AND circular), and only `dynamics` has them. The backlog quoted `iterate`'s
+own docstring ("subdivision, rollout, diffusion steady state, resonator fixed points are ALL iterate a linear
+operator") -- an overclaim that would have cost a round of wiring work. The docstring is now CORRECTED at source with
+the measurement, the registry scopes `iterate` to its one legitimate client (now honestly 1/1, not a false 1/7), and
+the six retractions live in `tools/unifiers.py::NOT_APPLICABLE` with their measured reason, guarded by a lint test so
+nobody re-proposes them. *A wrong backlog item is worse than a missing one: it looks like work.*
+The nonlinear cousins belong to the OTHER unifier -- `project_onto_constraints` ("iterate a projection").
+
+**A1 -- one Laplacian.** VERIFIED `heat._laplacian` and `wave._laplacian` were bit-identical twins (1-D/2-D/3-D,
+maxdiff 0.00e+00). NEW `holographic_laplacian.laplacian(field, bc="neumann"|"periodic"|"dirichlet")` holds the
+stencil once; heat/wave keep their private names as thin aliases (outputs bit-identical). `is_circular(bc)` states
+the iterate connection executably. 6 tests, incl. the measurement that only the periodic Laplacian is a bind.
+
+**P4 -- prt's spherical Fibonacci promoted.** `holographic_prt._sphere_dirs` was a private, in-house-proven
+low-discrepancy lattice reachable through one door. Promoted to `lowdiscrepancy.sphere_directions(n)` (public,
+stateless -- the i-th direction is a pure function of (i,n), which is what makes it farm-parallel with no seed
+coordination); `prt` delegates via an alias. Output identical; `seed` accepted and ignored, documented.
+lowdiscrepancy: 1/4 -> 2/4.
+
+**P5 -- exact reduction, opt-in.** `accumulate.robust_accumulate(..., exact=True)` reduces through
+`reduce_sum_exact`. MEASURED on samples spanning 12 orders of magnitude: the float mean differs by 7.3e-12 between
+two bucket ORDERS; exact mode is BIT-IDENTICAL (0.0) for any order, at a stated cost of ~6.5e-8 quantization
+(bits=40). Default stays float -- nothing existing changes. `schedule='ema'` + exact=True RAISES, because an
+exponential blend is order-dependent by construction (weighting later samples more IS its job).
+  * `fountain` RETRACTED as a client: it reduces by XOR, which is already exact, associative and commutative --
+    an integer sum would add quantization for zero gain. It was never a real client.
+rns: 1/4 -> 2/3 (measure remains, a legitimate future opt-in).
+
+**Adoption now:** iterate 1/1, argmax_tiebreak 4/4, lowdiscrepancy 2/4, rns 2/3, octnormal 0/5,
+project_onto_constraints 4/6. The lint caught both newly-wired clients and MADE me record them -- working as designed.
+
+**Still open** (tracked executably in `PENDING`, so it can't be forgotten): P6 (octnormal x5, MED), P7 (resonator +
+dynamics -> project_onto_constraints), P8 (nine query_* satellites), P9 (hardening/ablate), P10 (dark modules
+compose/diffusion), A3/A8 + the exact-twin cluster, T-1..T-5 audit tooling, D-4..D-6, and Tiers 3-6 (Walk on Stars,
+TT codec, the shader algebra H1-H8). 689 tests green across a 1-in-5 regression; all gates pass.
+
+## MATH BACKLOG -- TIER 1 COMPLETE: every unifier is now wired to every client the MATH permits
+
+PENDING is now `set()`. Not because the list was abandoned -- because each remaining item was either WIRED or
+RETRACTED WITH A MEASUREMENT. Probing first turned out to matter more than the wiring itself: of the backlog's 20
+named client relationships, 13 were wrong, and wiring them would have introduced bugs, lossy compression, or changed
+algorithms. Final adoption: iterate 1/1, argmax_tiebreak 4/4, lowdiscrepancy 3/3, rns 2/2, octnormal 1/1,
+project_onto_constraints 5/5.
+
+**P7 -- resonator WIRED (bit-exactly), dynamics RETRACTED.**
+  * The test for "is this a projection?" is IDEMPOTENCE: P(P(x)) == P(x). MEASURED: the resonator's cleanup is
+    idempotent (it snaps to the nearest codebook atom); `dynamics.step` = bind(U,x) is NOT -- it ADVANCES a state
+    rather than snapping it onto a set. Dynamics is not a projection at all; it belongs to `iterate`. Retracted.
+  * The resonator IS a projection family, but it does a JACOBI (simultaneous) block update while
+    `project_onto_constraints` swept SEQUENTIALLY (Gauss-Seidel). So the unifier was missing a MODE, not a call.
+    Added `sweep="simultaneous"` (+ `average=True` = Cimmino's averaged projections, the convergent choice for many
+    fighting convex constraints). For DISJOINT blocks -- each factor cleaned against its own codebook -- summing the
+    moves reproduces the block update EXACTLY. VERIFIED BIT-EXACT: max|old - new| = 0.000e+00 over 50 random trials.
+    The resonator now delegates its sweep and keeps its own exit conditions (exact reconstruction / stuck detection),
+    which the generic engine has no opinion about. project_onto_constraints: 4/6 -> 5/5.
+
+**P6 -- octnormal: all five named clients RETRACTED; the real one was already wired.**
+  PROBED: none of `mesh`/`meshcurvature`/`render`/`splat`/`gbuffer` quantizes a normal (splat does not even mention
+  one). Wiring octnormal there would INTRODUCE lossy compression nobody asked for and change render/mesh output.
+  octnormal is a STORAGE primitive; its real client is `autobump`, which already cites it. MEASURED so a future
+  serializer has a bar: at equal STORAGE, 3 bytes/normal gives 0.021 deg mean angular error vs 0.169 deg for naive
+  per-component xyz+renormalize -- ~8x better for the same bytes (8-bit: 0.338 deg @2 bytes; 16-bit: 0.0013 deg
+  @4 bytes). The genuine opportunity is `gltf`/`splatexport` -- a format change, i.e. a BUILD, not a wiring job.
+
+**P4/L2' -- randomized QMC where it belongs, and NOWHERE else.**
+  Probe-first again: `globalillum` does not sample directions -- it delegates to `Sampling.cosine_hemisphere`
+  (samplinghome). THAT is the real client, so wiring globalillum directly would have re-created the very duplicate a
+  previous consolidation removed. Wired `cosine_hemisphere(..., low_discrepancy=True)` instead: the 2-D (u1,u2)
+  square is drawn from the R-sequence. MEASURED on a smooth hemisphere integral: white noise errs 0.797 @n=16 and
+  0.217 @n=256; the low-discrepancy set 0.008 and 0.00003 -- 97x to 6787x better. As an estimator: 2.2x (n=16) ->
+  121x (n=256) lower variance. It is RANDOMIZED (per-point Cranley-Patterson rotation) -- not decoration: an
+  unrandomized low-discrepancy sequence has NO unbiased variance estimator, so `measure`'s error bars over it would
+  be fiction. Default path untouched.
+  RETRACTED: `sampling` (Bridson POISSON-DISK = blue noise, a different family: min-distance point sets for
+  stippling/splat placement, not integration error). lowdiscrepancy: 2/4 -> 3/3.
+
+**P5 -- `measure` RETRACTED as an rns client.** It reduces a handful of scalars across seeds in a FIXED order on one
+  machine, so order-independence buys nothing, and quantizing a metric at bits=40 would perturb the very CI
+  thresholds the harness exists to defend. Revisit only if `measure` ever aggregates parts returned by a farm.
+  rns: 2/3 -> 2/2.
+
+**The meta-lesson, kept loud.** "Promote and generalize" is not "wire everything the docstring names." Two-thirds of
+this backlog's named wirings were wrong, and only MEASUREMENT distinguished them: linearity (f(a+b)==f(a)+f(b)),
+circularity (is it a bind?), idempotence (is it a projection?), and "does this module even do the thing?" All 13
+retractions are recorded in `tools/unifiers.py::NOT_APPLICABLE` with their reason and guarded by a lint, so nobody
+re-proposes them. 1121 tests green (432 integration + 689 regression); all gates pass.
+
+**Still open:** P8 (nine query_* satellites), P9 (hardening/ablate), P10 (dark modules compose/diffusion), A3/A8 +
+the exact-twin cluster, T-1..T-5 audit tooling, D-4..D-6, and Tiers 3-6 (Walk on Stars, TT codec, shader algebra
+H1-H8) -- those are genuine BUILDS with measurement bars, not wiring.
+
+## MATH BACKLOG -- Tier 1 finished: P6/P7 verified, P8/P9/P10 wired, T-5 built
+
+### The registry was hiding work, and the lint was vacuously green
+Probed the unifier registry before trusting it and found the lint COULD be satisfied by NARROWING the client lists --
+delete a hard client and everything reads "fully wired". Fixed: `tools/unifiers.py` now carries `DESIGN_CLIENTS` (every
+client each unifier's design ever named) and `unaccounted()`; a new lint asserts each design client ends up either
+WIRED, tracked in PENDING, or RETRACTED in NOT_APPLICABLE with a measured reason. **Verified it bites** (deleting a
+client from the registry fails the test). A second lint re-verifies the two load-bearing retraction reasons against
+LIVE CODE, so a reason cannot quietly go stale.
+
+### P6 / P7 -- verified, not taken on faith
+Both were already resolved (as retractions + real wiring); I checked all five claims against live code rather than
+trusting the prose: `sampling` really is Bridson blue-noise (a different family from low-discrepancy); `globalillum`
+really delegates to `Sampling.cosine_hemisphere` (samplinghome is the real client, wired); `octnormal` really is
+referenced by 0 of {mesh, meshcurvature, render, splat, gbuffer} -- none quantizes normals, so wiring it would have
+INTRODUCED lossy compression nobody asked for -- and its real client `autobump` does cite it; and `bind(U,x)` really
+is NOT idempotent, so dynamics is not a projection (measured).
+
+### P9 -- the "catalog-only" class, wired through real call paths (not re-exports)
+`hardening` and `ablate` were referenced by exactly ONE engine file: the catalog. Discoverable, never called.
+  * `refine(..., attempts=n, backoff=)` -> `hardening.retrying` (verified: survives 2 transient failures; attempts=1,
+    the default, still raises -- backward compatible).
+  * `coordinator.hardened(backend, redundancy, attempts)` -> `hardening.HardenedCoordinator`, and
+    `mind.farm(nodes, redundancy=3, attempts=3)` reaches it. This IS the public-farm guardrail: an untrusted node can
+    return a plausible-but-WRONG answer, and voting is the detector. redundancy=1 costs a trusted pool nothing.
+  * `measure.fdr_gate(rows, alpha)` -> `ablate.fdr_verdicts`. Measured: a real effect survives at p=0.0039, the null
+    does not (p=1.000).
+
+### P8 -- nine query_* satellites, now OPT-IN LAYERS on `Database` (their natural home)
+Durability (`snapshot`/`Database.restore`/`journal`), concurrency (`writer_lock`, `snapshot_reader`), time travel
+(`versioned`), graph (`adjacency`). All seven verified end to end. Two API bugs caught by smoke-testing rather than
+assuming: `Database` uses `resolve(name)`, not a `.tables` dict; and `load_snapshot(path)` is a CONSTRUCTOR, so
+`restore` is a @staticmethod returning a new Database, not an in-place load.
+
+### P10 -- the dark modules, given doors
+`compose` (forward compositional generation) and `diffusion` (double-diffusive regime detection) had ZERO engine
+references. Neither is superseded, so both got faculties rather than an archive: `mind.compose_from_tags`,
+`mind.novel_object_specs`, `mind.regime_detector`. The detector fires on a sustained step change and NOT on noise.
+
+### T-5 -- the wiring report (why this class of debt persisted)
+NEW `tools/wiring_report.py`: from the same AST import graph, lists DARK modules (zero engine references) and
+CATALOG-ONLY modules. It honours documented dead ends -- and the marker scan found the engine writes them two ways
+(`KEPT NEGATIVE` and `KEPT NO-OP`, which is what `misgen` says), so both are recognised.
+**It immediately found 15 dark modules where the backlog knew of 2.** Wiring P8/P10 cleared three; the remaining
+fourteen are recorded in `KNOWN_DARK` with an honest per-module status (reference demos and audits vs. genuine
+"TODO wire" debt). `--check` fails CI on a NEW dark module and ALSO fails if a known one gets wired without deleting
+its line -- the same "progress must be recorded" discipline as PENDING. Wired into ci.yml as a gate.
+
+### Catalog
+Registered homes for the FDR gate, the database layers, compose, and the regime detector. Did NOT register one for
+hardening: it already had a home ("Distributed hardening (R5)") and a second would be the very duplication this round
+is removing. One regression caught by the integration suite and fixed: my regime-detector home matched the token
+"diffusion" and DISPLACED the reaction-diffusion automaton home for the probe "reaction diffusion cellular
+automaton" -- one token, two unrelated meanings. Alias narrowed; both are findable again.
+
+**Adoption:** iterate 1/1, argmax_tiebreak 4/4, lowdiscrepancy 3/3, rns 2/2, octnormal 1/1, project_onto_constraints
+5/5 -- with every retracted client carrying a measured reason. Catalog-only: 0. Dark: 14, frozen and recorded.
+**Tests:** 92 targeted + 693 regression + 432 integration, all green; every gate passes.
+
+**Remaining:** the A3/A8 exact-twin cluster, T-1..T-4, D-4..D-6, the KNOWN_DARK backlog (8 genuine "TODO wire"), and
+Tiers 3-6 -- Walk on Stars, TT codec, the shader algebra (H1-H8). Those are BUILDS with measurement bars, not wiring.
+
+## MATH BACKLOG -- Tier 3 headline: A4/D1 (stateless randomness) + A2 (Walk on Stars)
+
+These are ONE story: Walk on Spheres is only trivially farm-parallel if its randomness needs no seed coordination.
+
+### A4/D1 -- `determinism.hash_unit` (built; the enabler)
+`np.random.default_rng` carries STATE: the n-th draw depends on every draw before it. On a farm that makes results
+depend on bucket ORDER and forces every node to agree on a seed and a draw count. The fix is to stop drawing and
+start LOOKING UP: `hash_unit(x, y, walk, step, seed)` is a pure function of WHERE and WHICH.
+  * Pure integer arithmetic (splitmix64 mixer; FNV-1a fold for string domain separators) -- never Python's salted
+    `hash()`. VERIFIED IDENTICAL across PYTHONHASHSEED=0/1/12345.
+  * Floats keyed by their IEEE-754 BIT PATTERN, so 0.1 and 0.100000000000001 never collide.
+  * MEASURED: mean 0.49999 / std 0.28845 (ideal 0.28868) over 200k; corr(neighbouring keys) = -0.006;
+    `hash_direction` is uniform on the sphere (|mean vector| 0.003, z-std 0.577 = equal-area, not pole-clustered).
+  * Also added `hash_u64` and `hash_direction(dim=2|3)`.
+
+### A2 -- `holographic_wost` (built; the headline)
+Walk on Spheres / Stars: solve Laplace/Poisson inside an SDF with NO mesh, NO grid, NO global linear system. The only
+geometry query is distance-to-boundary -- exactly what an SDF returns, which is why leCore was already built for it.
+  * Dirichlet: recovers the harmonic u(x,y)=x on the unit disk. MEASURED RMSE over 60 interior points x 4 seeds:
+    0.0741 (64 walks) -> 0.0357 -> 0.0180 -> 0.0091 (4096). Ratios 0.48 / 0.50 / 0.51 -- the textbook 1/sqrt(N).
+  * Poisson (source term) recovered; 3-D on a real `sdf.sphere` through `mind.solve_laplace`.
+  * FARM-PARALLEL BY CONSTRUCTION: bit-identical run-to-run AND invariant to the ORDER of the points solved (a
+    permutation test that a stateful rng would fail). No seed coordination.
+
+**THE BUG THE DISCRIMINATING TEST CAUGHT (the round's real lesson).** My first Neumann implementation detected a
+boundary hit and pushed the walk back inside. It looked fine -- the half-disk test passed. It was WRONG, and the
+test was too weak to see it: the Dirichlet data happened to EQUAL the true solution on the reflecting edge, so an
+absorbing walk got the right answer by accident. Re-testing with the reflecting wall POISONED (u=99 there, which a
+correct walk must never read) exposed it: RMSE 50. Root cause is fundamental -- if the ball radius is the distance to
+the NEAREST boundary, a walk beside a reflecting wall can only take vanishing steps, crawls along it, exhausts its
+budget and never reaches the absorbing boundary. **That is precisely why vanilla WoS cannot do Neumann.** Real Walk
+on Stars sizes the ball by the distance to the ABSORBING boundary only (so it may poke through a reflecting wall) and
+MIRRORS any escapee back inside (x <- x - 2*sdf*n), which IS the zero-flux condition. Rewritten that way:
+  * poisoned reflecting wall, exact u=x: **WoSt RMSE 0.0091 (clean 1/sqrt(N)) vs vanilla WoS 55.1**.
+The API changed with the fix: `dirichlet_sdf=` (distance to the absorbing part) rather than a "which walls are
+Neumann" predicate -- the predicate CANNOT express what the algorithm needs.
+*Rule earned: a boundary-condition test that passes with the boundary condition disabled is not a test.*
+
+Kept limits, loud: Monte-Carlo 1/sqrt(N) (one more digit costs 100x the walks) -- pointwise and progressive, not a
+competitor to multigrid on a dense grid; the reflecting treatment is the zero-flux case (general Robin/flux is NOT
+done); the Poisson estimator is unbiased but noisier (single-sample ball integral); walks that exhaust `max_steps`
+fall back to the nearest boundary value (a bounded, documented bias).
+
+### Wiring
+`mind.solve_laplace(...)`. Catalog homes for both ("Grid-free PDE solve on an SDF (Walk on Stars)", "Stateless
+coordinate-keyed randomness (hash_unit)") -- both findable by plain-English query. `hash_unit` registered in
+`tools/unifiers.py` as a UNIFIER: wired to `wost` (1/4), with `brdf`/`mis`/`traverse` recorded in PENDING -- they
+still draw from a stateful `default_rng` (3, 1 and 1 call sites), which is the honest A4 remainder and is now
+enforced by the adoption lint rather than living in prose.
+
+11 new tests; 581 regression tests green; every gate passes.
+
+## MATH BACKLOG -- A4 finished (stateless BRDF) + L5/M2 (closed-form spectral Laplace)
+
+### A4/D1 remainder -- and two more retractions the probe earned
+The backlog says "route brdf/mis/traverse off default_rng". PROBED FIRST: `mis` and `traverse` call `default_rng` in
+exactly ONE place each -- **inside their own `_selftest`**. There is no sampling path to make stateless; a seeded
+selftest on one machine is already reproducible. They were never clients. Retracted with that evidence in
+NOT_APPLICABLE. Only `brdf.sample_ggx` is a real sampling path.
+
+`brdf.sample_ggx(N, V, roughness, rng=None, keys=None)` now takes EITHER source, exactly one:
+  * `rng=` -- stateful, unchanged, backward compatible.
+  * `keys=(pixel_x, pixel_y, bounce, sample)` -- the two uniforms become `hash_unit(...)`, a pure function of the
+    sample's identity. This is what makes a path trace farm-parallel: trace pixels in any order, get the same image.
+MEASURED: statistically identical estimators (mean cos(N,L) 0.7392 stateless vs 0.7417 stateful; pdf 1.241 vs 1.246),
+and the discriminating property -- **the stateless path is invariant to the ORDER of the samples; the stateful path
+provably is not** (a permutation test that fails for `default_rng` by construction). Passing both or neither raises.
+hash_unit: 2/2 wired.
+
+### L5/M2 -- the closed form, and the payoff of the earlier retraction
+When P2 was retracted I wrote down WHY `iterate` could not be wired into the PDE solvers: the Neumann Laplacian is
+linear but NOT circular, so it does not diagonalise in the FFT. The corollary is the win: **on a PERIODIC domain it
+IS circular**, so the solve is closed form. Built in `holographic_laplacian`:
+  * `solve_poisson_spectral(f, dx)` -- laplacian(u)=f in one FFT (u_hat = -f_hat/|k|^2). The k=0 mode is a free
+    constant (fixed to zero mean) and the solvability condition (a periodic domain needs zero net source) is
+    enforced EXPLICITLY by subtracting the mean rather than silently returning nonsense.
+  * `diffuse_spectral(T, alpha, t, dx)` -- dT/dt = alpha*laplacian(T) evolved to ANY t in ONE evaluation: each mode
+    decays by exp(-alpha |k|^2 t). No time step, no stability limit, no substepping; t=1e-6 costs what t=1e6 costs.
+MEASURED (band-limited data): spectral error **6.7e-16** (Poisson) and **2.2e-16** (heat) vs an iterative stepper
+still at **1.5e-4 after 1000 steps**. This is `iterate`'s "diagonalise once, evaluate any level in closed form",
+finally reaching a PDE -- for exactly the boundary condition the math permits, and no other.
+  * MY OWN MEASUREMENT ERROR, on record: the first numbers looked terrible (8e-4, 5.5e-1). Neither was a code bug --
+    I fed the solver a DISCRETE Laplacian while it inverts the CONTINUOUS operator, and passed dx=1 on a grid of
+    spacing 1/n. Corrected the measurement, not the code. *Check the harness before blaming the engine.*
+Wired `mind.solve_poisson_periodic` / `mind.diffuse_periodic`, catalog home ("Exact periodic PDE solve"), 5 tests
+incl. the head-to-head against iterative stepping.
+
+581 regression tests green; all gates pass. Remaining: A7/M1 (TT/Tucker codec + rank gate -- never CP), W2/L1 + M4
+(descriptor bake -> adaptive/route/dispatch), A3/A8 twins, T-1..T-4, D-4..D-6, the 8 KNOWN_DARK "TODO wire" modules,
+and Tier 4's shader algebra (H1-H8, the invented layer).
+
+## MATH BACKLOG -- A7/M1: multi-way tensor codec (Tucker / TT) with a rank gate
+
+PROBED FIRST, and the probe-first ledger was WRONG: it lists "tensor (TT/MPS truncation)" as already shipped.
+`holographic_tensor` contains only `TensorBindMemory` and `outer_bind` -- no truncation of any kind. So this was a
+genuine build, not a wire. (Worth noting: the ledger that exists to stop us rebuilding shipped things can itself be
+stale. Probe the code, not the ledger.)
+
+NEW `holographic_tucker.py`:
+  * `tucker_compress/reconstruct` -- HOSVD: one factor matrix per mode plus a small dense core.
+  * `tt_compress/reconstruct` -- Tensor Train (Oseledets), storage LINEAR in the number of modes where Tucker's core
+    is exponential in it.
+  * `rank_gate(X, energy)` -- ranks chosen from each mode's singular spectrum.
+  * `per_slice_svd_size` -- the honest BASELINE this must beat: compress each frame independently. It sees structure
+    WITHIN a frame and none ACROSS frames, which is exactly the correlation Tucker/TT exploit.
+
+**NEVER CP**, stated in the docstring with the reason: for d>=3 the set of rank-R tensors is not closed, so a best
+rank-R CP approximation **may not exist** (de Silva & Lim 2008) -- the fit descends while the factors blow up.
+Tucker and TT are SVD-based, quasi-optimal, and always exist. `mind.compress_tensor(method='cp')` RAISES.
+
+MEASURED on a real engine tensor (a heat field diffusing over time, (20,24,24) -- smooth in x, y and t):
+  | energy | ranks    | rel-err | Tucker | per-slice SVD | gain |
+  | 0.99   | (2,2,2)  | 5.6e-2  |  80.0x |          5.9x | 13.6x |
+  | 0.999  | (2,3,3)  | 7.5e-3  |  57.0x |          5.9x |  9.7x |
+  | 0.99999| (3,4,3)  | 2.7e-3  |  43.6x |          5.9x |  7.4x |
+(the backlog predicted 5.3-7.3x; measured 7.4-13.6x). TT tracks its tolerance: rel-err 2.7e-3 @ tol=1e-2, 2.6e-5 @
+1e-4, 6.5e-7 @ 1e-6, and 5.5e-15 at full rank.
+
+**THE GATE'S HONEST NEGATIVE, pinned by a test:** on white noise the gate returns FULL rank (12,12,12) and a Tucker
+"compression" would store 2160 numbers for a 1728-number tensor -- it COSTS more. A compressor that always
+compresses is one that sometimes destroys; this one says "store it raw".
+
+**A REAL BUG THE MEASUREMENT CAUGHT.** TT's error floored at 6.6e-2 no matter the tolerance, while its size grew --
+a contradiction that could only be a bug. Cause: I pinned singular-vector SIGNS for determinism (the ISA-1 fence)
+but flipped only `U`, not the paired row of `Vt`, so `U @ diag(s) @ Vt` no longer reconstructed the matrix. **Tucker
+was immune** -- its factors appear twice (project, then reconstruct) so the signs cancel -- which is exactly why the
+bug hid. Fixed by applying the same flip to `C`; regression test pins it. *If size grows and error doesn't fall,
+that is not a tuning problem.*
+
+Wired `mind.compress_tensor` / `mind.decompress_tensor`; catalog home ("Multi-way tensor compression (Tucker / TT)");
+8 tests. 592 regression tests green; all gates pass.
+
+Remaining: W2/L1 + M4 (descriptor bake -> adaptive/route/dispatch), A3/A8 twins, T-1..T-4, D-4..D-6, the 8
+KNOWN_DARK "TODO wire" modules, Tier 5 subsystem applications (TT codec into ratedistortion/compress/denoise -- now
+that the codec exists), and Tier 4's shader algebra (H1-H8).
+
+## MATH BACKLOG -- Tier 5 first application: the tensor codec as a DENOISER
+
+The Milanfar reframe, applied to multi-way data: a denoiser IS a map of the manifold clean signals live on, and for
+a field over (x,y,t) that manifold is "low rank along EVERY axis at once". Added to `holographic_tucker`:
+  * `noise_ranks(X, sigma)` -- ranks chosen by the NOISE FLOOR, not by an oracle or a hand-picked energy: a singular
+    value above sigma*(sqrt(rows)+sqrt(cols)) cannot be produced by noise, so it is signal. Parameter-free.
+  * `tucker_denoise(X, sigma=None)` -- estimates sigma itself (Donoho MAD) and projects onto that manifold.
+  * `per_slice_svd_denoise` -- the honest BASELINE, same noise rule, applied per frame.
+
+MEASURED (real diffusing field, PSNR vs the clean truth):
+  | sigma | noisy   | tucker  | per-slice SVD |
+  | 0.02  | 39.4 dB | 54.6 dB | 47.3 dB |
+  | 0.05  | 31.5 dB | 48.6 dB | 39.5 dB |
+  | 0.10  | 25.4 dB | 39.3 dB | 32.9 dB |
+~7 dB over the baseline at EVERY level, because per-slice SVD sees the manifold within a frame and is blind to the
+one across frames. `noise_ranks` recovers the exact multilinear rank (3,3,3) of a synthetic rank-3 tensor.
+
+**THE KEPT NEGATIVE, and it is the important part.** A low-rank prior is a CLAIM ABOUT THE SIGNAL. Where the claim
+is false the denoiser does not decline -- it DESTROYS the data: on a full-rank signal with light noise, 43.1 dB ->
+17.1 dB. It throws the signal away with the noise, and it cannot detect this from the inside, because a full-rank
+signal and full-rank noise look identical to the method. The remedy is procedural, not algorithmic: run `rank_gate`
+/ `noise_ranks` FIRST; (near-)full ranks mean this is the wrong map. Pinned by a test.
+(My first draft of the docstring claimed it "declines to invent structure" on unstructured data. That was WRONG --
+I had only tested pure noise, where there is nothing to destroy. Testing a full-rank SIGNAL exposed it. Same class
+of error as the Neumann poison test: a negative you never constructed is a negative you never had.)
+
+Two more honest facts kept in tests rather than hidden:
+  * the gain GROWS with the data (7.6 dB at (10,14,14), 8.4 at (12,16,16), 11.9 at (16,20,20)) -- a bigger tensor
+    has more redundancy for the prior to exploit;
+  * sigma comes back a little HIGH (0.06 for a true 0.05) because Donoho's MAD-of-differences assumes the clean
+    signal is smoother than the noise, and this field carries a sin(4*pi*x) term that lands in the finest detail
+    band. The rank rule is therefore slightly conservative -- the safe direction, but a bias, not a coincidence.
+
+Wired `mind.denoise_tensor`; catalog home ("Denoise multi-way data (low-rank tensor prior)"); 6 more tests (14 in
+the file). 592 regression tests green; all gates pass.
+
+Remaining: TT into `ratedistortion` (quant='tt') and `compress`; W2/L1 + M4 (descriptor bake -> adaptive/route/
+dispatch); A3/A8 twins; T-1..T-4; D-4..D-6; the 8 KNOWN_DARK "TODO wire" modules; Tier 4's shader algebra (H1-H8).
+
+## MATH BACKLOG -- Tier 5: the TT codec as STORAGE (quant='tt')
+
+`ratedistortion`'s `rd` code is a 2-D KLT, so arrays with 3+ modes (a volume, a frame stack, a BRDF table) never saw
+it -- they fell straight to int8. Added the tensor-train path:
+  * `pack_tt` / `unpack_tt` / `tt_bytes` -- serialize a TT code (JSON header + float32 cores). float32 is
+    deliberate: the ranks are already chosen by an error budget, so truncation error dominates by orders of
+    magnitude and 8 bytes/entry would buy precision the code does not have.
+  * `save_tensor(X, path)` / `load_tensor(path)` -- the door that works TODAY.
+  * `core._try_tt(arr)` -- hooked into `core.save(quant='rd')` and `quant='auto')`, and `core.load` grew a `"tt"`
+    branch. Taken ONLY when strictly better than int8 on BOTH axes (fewer bytes AND smaller error), so it can never
+    be a downgrade.
+
+MEASURED on a real (24,32,32) diffusing field:
+  int8 : 24,576 B, rel-err 9.5e-3
+  TT   :  4,394 B, rel-err 3.9e-5     -> 5.6x smaller AND 244x more accurate
+
+**A REAL BUG, caught by the control case.** My first size test was `len(packed) < X.nbytes` -- against RAW FLOAT64.
+White noise packs to 104 KB, comfortably under float64's 196 KB, so it was ACCEPTED: a lossy code beating a 24 KB
+int8 alternative. **The bar is int8 (1 byte/element), not float64** -- any array can be stored at a byte per element,
+so beating float64 proves nothing. Fixed; white noise now stores RAW and round-trips exactly. Pinned by a test.
+
+**AN HONEST GAP, written down rather than hidden.** No object the engine currently persists holds a 3-D array
+(checked: `UnifiedMind`'s float64 state is all 1-D/2-D). So the `core.save` hook is ready but UNEXERCISED by real
+state today -- which is why `_try_tt`'s decisions are tested directly (accept a structured field; refuse white noise;
+refuse 2-D, which belongs to the rd/KLT code; refuse tiny arrays), and why `save_tensor` exists as the door that
+works now. A hook nobody can reach is the same silo class the wiring report exists to catch.
+
+Catalog home ("Store a multi-way array (tensor-train file)"). 4 more tests (18 in the file, plus the core-persistence
+and ratedistortion suites still green). 592 regression tests green; all gates pass.
+
+## THE HOLOGRAPHIC-CAPACITY PAPER: what transferred, and what did not (honest triage)
+
+Moose supplied Weiner, "The Cosmological Constant as Inverse Holographic Information Capacity" (IPI Letters 2026),
+suggesting it might fill gaps under some of the engine's failed approaches. Triaged it the way we triage everything.
+
+### What I CANNOT verify, and will not pretend to
+The modular-algebra derivation on the cosmic causal diamond is outside anything this engine can test. Two things I
+can say, because they are arithmetic rather than cosmology:
+  * Eq. (6), rho_Lambda(z) = Omega_Lambda(z) * rho_info(z), is an IDENTITY once rho_info is asserted to equal
+    rho_crit, because Omega_Lambda is DEFINED as rho_Lambda/rho_crit. The physical content sits entirely in the
+    prior claim rho_info = rho_crit (eq. 5), not in the final multiplication. The paper is clear that eq. (5) is the
+    structural prediction; a reader could easily mistake eq. (6) for a derivation of the SCALE.
+  * rho_Lambda/rho_Pl ~ Omega_Lambda / N_P is the standard holographic-dark-energy relation for an IR cutoff at the
+    Hubble radius (Cohen-Kaplan-Nelson; Li -- both cited by the paper as refs [8,9]). It reproduces 10^-123 because
+    N_P ~ (c/H / l_Pl)^2 ~ 10^123. Choosing the cutoff is what does the work; the paper's contribution is arguing
+    that the modular structure FIXES that choice rather than imposing it. Whether that argument succeeds is a
+    physics question, not one measurable here.
+  * w(z) = -1 to 1e-5 is a genuinely falsifiable, pre-registered prediction, currently in 2.6-3.9 sigma tension with
+    DESI 2024 -- which the paper states plainly and to its credit.
+
+### Does it fill a gap under any KEPT NEGATIVE? Measured answer: NO uplift.
+  * `splatsharpen` / `jittersplat` -- "you cannot post-process back information the representation never stored".
+    The paper does NOT fix this; it RESTATES its shape. Both are counting arguments: a hierarchy (or a missing
+    frequency band) is a CAPACITY, not a tuning failure. That is a useful thing to have said out loud, and it is
+    exactly what the existing negative already says. No new fix; no re-opening.
+  * `ldexplore` (QMC on a Markov chain) -- untouched by anything in the paper.
+  * The VSA capacity cliff -- already governed by Plate's capacity mathematics. Nothing changes.
+
+### What DID transfer, because it is checkable: the AREA LAW
+The one structural idea that survives translation is: **a capacity is a COUNT ACROSS A BOUNDARY, not a tunable
+parameter.** In linear algebra that is the Schmidt rank across a cut -- and it decides, before you spend anything,
+whether a tensor factorisation can pay. MEASURED, reshaping a length-2^12 signal into 12 binary modes (the maximum
+possible bond rank is 2,4,8,...,64,...,8,4,2):
+
+    sin(6*pi*x)   -> rank 2 at EVERY cut           an area law in its purest form
+    smooth bump   -> 2,4,8,7,6,5,4,4,3,3,2         bounded well below the volume bound
+    white noise   -> 2,4,8,16,32,64,32,16,8,4,2    saturates the bound exactly -- a volume law
+
+Built `bond_ranks`, `volume_law_bound` and `structure_verdict` in `holographic_tucker`, wired as
+`mind.tensor_structure(X)`. It is the TT gate that was missing (a rank gate existed only for Tucker), and it
+PREDICTS the byte outcome without paying for the encode: the diffusing field scores saturation 0.21 -> "area-law"
+and its TT code is 4,394 B against int8's 24,576; white noise scores 1.00 -> "volume-law" and its TT code is
+104,782 B. Pinned by a test that asserts the verdict agrees with the bytes.
+
+HONEST SCOPE, in the docstring: this is classical linear algebra across a cut. It borrows the DISCIPLINE of the
+physics and none of its claims. There is no entanglement here, and nothing about the diagnostic depends on any
+physical theory being correct -- it is measured against SVD, which either finds low rank or does not. (This is the
+same line the repo already draws in ISA_REVERSIBLE.md: "VSA is not a quantum computer... we borrow the DISCIPLINE.")
+
+Also worth recording: this closes part of the Tier-6 research item "area law <-> tensor network <-> erasure code" --
+the tensor-network half is now measured and shipped. The erasure-code half (rank-allocated `fountain` parity) is
+still open, and is the natural next step of that thread.
+
+4 more tests (22 in the file); 782 regression tests green; all gates pass.
+
+## P2 REVISITED after the modular-flow paper -- the verdict stands, the REASON was wrong
+
+Moose asked the right question: the P2 retraction ("iterate.step_k cannot serve the nonlinear clients") was decided
+BEFORE the causal-diamond paper was on the table. Does the paper change it? I re-tested rather than re-argued.
+
+**What the paper contributes, and I had under-weighted.** Its central move is the ALGEBRA-PRIMARY stance: "K is
+foundational and T_uv is determined by the modular state -- inverting the standard QFT direction." Modular flow is a
+LINEAR one-parameter group acting on OBSERVABLES, even when the state evolution is not linear. That is Koopman
+theory, and leCore already believes it (`dynamics` IS "the Koopman operator in Fourier coordinates"). So "the update
+map is nonlinear" is NOT by itself a proof that no closed form exists. My retraction reason was too strong.
+
+**So I measured the lift.** Learn a bind operator U from (x -> f(x)) pairs of `diffuse`'s softmax denoise step:
+
+  * GLOBALLY it fails outright: cos(learned bind, true nonlinear) = 0.078, and 8-step jump = 0.002. One linear
+    operator has ONE fixed point; the cleanup has one per codebook atom. No single bind can hold them all.
+  * LOCALLY, near one fixed point, it SUCCEEDS: cos 0.976 at one step, 0.949 for an 8-step CLOSED-FORM jump.
+  * And the error is second order in the radius -- log-log slope 1.81 over eps in [0.02, 0.08] (2.0 is exact
+    second order). That is precisely the paper's "corrections enter at O(eps^2) near the modular vacuum" structure,
+    reproduced in leCore's own cleanup dynamics. The paper's framing is CORRECT and it applies here.
+
+**But the engineering verdict is unchanged, for a better reason.** Measured on a settle() run from pure noise
+(dim=128, 6 atoms), cosine-to-limit per step: 0.17, 0.69, 0.95, 1.00, 1.00, ...
+  * the walk spends its iterations OUTSIDE the eps-ball where the linearisation holds;
+  * it enters that ball only once it has already converged;
+  * and inside it, the fixed point is one `argmax` away (measured: an argmax after ONE step returns the limit at
+    cos 1.0000).
+So the closed form is valid exactly where it is useless. `iterate.step_k` stays retracted for the nonlinear clients
+-- not because a linearisation cannot exist (it can, and the paper says so correctly), but because **the regime in
+which it holds is the regime that costs nothing.**
+
+Note the regime difference that explains everything: the paper operates at eps ~ 5e-6 (a near-vacuum perturbation);
+leCore's cleanup operates at eps ~ 1 (denoising from pure noise is the whole job). Same mathematics, opposite ends
+of it.
+
+NOT_APPLICABLE reasons for `diffuse` and `resonator` rewritten with the measurement. New lint test
+`test_the_nonlinear_iterate_is_a_bind_only_near_its_fixed_point` pins global failure, local success, and the
+uselessness of the local regime -- so nobody re-proposes P2 on the strength of the Koopman argument alone, and
+nobody re-retracts it for the wrong reason either.
+
+*The lesson, which is the engagement's lesson again: "I measured it" beat "it is nonlinear, therefore impossible."
+The first claim was right; the reason attached to it was wrong, and a good paper exposed that.*
+
+## THE LEDGER WAS WRONG: "impossible" vs "possible but doesn't pay" -- and one real closed form recovered
+
+Moose's challenge: the backlog's theory was TESTED before it was written, so any "impossible" I recorded is more
+likely a misinterpretation than a discovery. He was right. Re-audited every retraction.
+
+### The one I got flatly wrong: SUBDIVISION HAS A CLOSED FORM
+I retracted `meshsubdiv` from `iterate` because "each level produces a different, larger operator, so there is no
+fixed square operator to exponentiate." That confuses a SQUARE operator with a REFINEMENT operator. One level of
+Chaikin on a CLOSED curve is a zero-insert upsample followed by a CIRCULAR convolution -- still diagonal in the
+Fourier basis. A zero-insert upsample TILES the spectrum, so k levels compose analytically:
+
+    X_k[m] = X_0[m mod n] * prod_{t=0..k-1} H(w_m * 2^t),     w_m = 2*pi*m/N,  N = n*2^k
+
+This is the cascade/refinement formula -- the same object behind Stam's exact subdivision evaluation, which
+`iterate`'s own docstring cites and which I failed to recognise. MEASURED against k literal subdivisions:
+max abs diff 6.7e-16 (k=1) to 2.7e-15 (k=5); 2.4x (k=6) to 3.8x (k=8) faster.
+
+BUILT `iterate.refine_k(x, taps, k)` -- the primitive I said could not exist. `subdivcurve.subdivide_sequence`
+now DELEGATES to it for closed curves (open curves keep the loop: their ends break shift-invariance, which is the
+honest boundary of the closed form). `iterate` goes from a false "1/1 wired" to an honest 2/3, with `meshsubdiv`
+(irregular 2-D, extraordinary vertices -- Stam's LOCAL eigen-analysis) moved to PENDING: a build, not a wall.
+
+### The structural error underneath it
+I had ONE bucket, `NOT_APPLICABLE`, and I put two different verdicts in it:
+  * closed by MATHEMATICS (a nonlinear map has no operator power; XOR is already exact; `mis`/`traverse` have no
+    sampling path at all; the five octnormal clients never quantize a normal), and
+  * possible, constructible, but MEASUREMENT says it does not pay.
+Filing the second under the first reads as "impossible" and stops the next person from trying. That is exactly what
+happened to subdivision. Split the ledger:
+  * NOT_APPLICABLE (6): closed by mathematics or by the code's actual shape.
+  * DEFERRED (8): the construction EXISTS -- each entry now says so explicitly and states the measured cost. Includes
+    diffuse/resonator/sbc/chaos/equilibrium (linearise near a fixed point, which is where the answer is already
+    free), heat/wave (Neumann is not circular -- but the PERIODIC closed form is built and exact to 2.2e-16, and
+    wiring it into `heat` as bc='periodic' is an open follow-up), measure (opt-in the day it aggregates farm parts),
+    and dynamics -> project_onto_constraints (bind is not idempotent, but masking onto the persistent eigenspace IS
+    a true projector -- not built, not impossible).
+  * PENDING (1): meshsubdiv.
+A new lint asserts the two classes never overlap, that every verdict carries evidence, and that each DEFERRED reason
+states why it does not pay rather than that it cannot be done.
+
+*The lesson, sharpened: "I measured it" is only half the discipline. The other half is being precise about WHAT was
+measured. I measured that a bind cannot be a softmax and wrote "impossible"; I measured that an operator changes
+size and wrote "impossible". The first was a cost finding, the second was simply wrong.*
+
+12 lint tests; 51 targeted + 274 regression tests green; all gates pass.
+
+## THE TWO DEFERRED ITEMS, BUILT -- both were real, both were mislabelled by me
+
+Having split the ledger into "impossible" vs "possible but doesn't pay", I went back for the two entries whose own
+reasons admitted a construction existed. Both took under an hour and both work.
+
+### P7: `dynamics` DOES belong in `project_onto_constraints`
+My retraction: "bind(U,x) advances a state, it does not snap it onto a set, so it is not a projection (not
+idempotent)." The first half is true. The conclusion was not: the module contains a projector, I just had not
+looked for it.
+
+MEASURED on an operator with a genuine persistent subspace (20 of 129 modes at |eigenvalue| = 1):
+  * `iterate.limit` is NOT a projection: |P(Px) - Px| = 1.61. It keeps the eigenvalue H on the surviving modes, so
+    applying it twice multiplies by H^2. (This is the trap: `limit` LOOKS like the projector and is not.)
+  * masking those modes with 1.0 IS idempotent: |P(Px) - Px| = 2.2e-16, and the subspace is invariant under `step`
+    (2.2e-16) -- exactly what a constraint set must be.
+BUILT `Propagator.persistent_projection(state)` and `Propagator.constraint()`. It composes in the shared engine:
+`project_onto_constraints(x, [prop.constraint(), unit_norm])` returns a vector of norm 1.0000 that is in-subspace to
+2.8e-17. `project_onto_constraints` goes from a false 5/5 to an honest 6/6.
+
+### heat with a PERIODIC boundary is the closed form
+`diffuse_heat(..., bc='periodic')` now delegates to `laplacian.diffuse_spectral`: exact to 2.2e-16 in ONE evaluation,
+any t (t=1e6 costs what t=1e-6 costs), no stability limit, no substepping. The Neumann default is untouched and
+still conserves heat; a bad `bc` raises. What remains genuinely deferred is only the Neumann case, whose eigenbasis
+is the DCT rather than the DFT.
+
+### Adoption, honestly, after the whole correction
+  iterate 2/3 (was a false 1/1) . argmax_tiebreak 4/4 . lowdiscrepancy 3/3 . rns 2/2 . octnormal 1/1
+  hash_unit 2/2 . project_onto_constraints 6/6 (was a false 5/5)
+Ledger: 6 impossible-by-mathematics, 7 possible-but-deferred (each stating the construction), 1 pending build
+(`meshsubdiv`, Stam's local eigen-analysis on irregular meshes).
+
+**Three of my "impossible" verdicts have now fallen** -- subdivision (a closed form exists and is exact to 2.7e-15),
+dynamics-as-a-projection (the projector was in the module), and heat-on-a-periodic-domain (already built, unwired).
+All three fell to the same error: I measured a true fact, drew a stronger conclusion than it supported, and filed it
+somewhere that discouraged anyone from re-checking. The backlog's authors had tested the theory. I should have
+assumed my reading was wrong before assuming their theory was.
+
+53 targeted + 394 regression tests green; all gates pass.
+
+## TIER 4 OPENED: H6 -- N filter passes in ONE evaluation (`holographic_shader`)
+
+A GPU blurs by running the kernel again. N passes cost N passes. But a circular convolution IS a bind, and a bind is
+diagonal in the Fourier basis, so N passes is just the transfer raised to the N-th power. This is the same
+"diagonalise once, evaluate any level in closed form" that `iterate` gives the propagator and `refine_k` gives
+subdivision -- now pointed at filtering.
+
+MEASURED (1024-sample field, 3-tap circular blur) against literally running the kernel N times:
+
+    N            iterative      closed form    speedup     max abs diff
+    16              637 us           61 us       10.4x        1.8e-15
+    256           8,024 us          157 us       51.2x        5.5e-15
+    4096        130,289 us           71 us    1,824.0x        2.3e-14
+    1,000,000    (~9 hours)          65 us         --            --
+
+**Two things a GPU structurally cannot do**, both built and tested:
+  * FRACTIONAL N. "Half a blur pass" is well defined for a diagonal operator (H**0.5), and two halves compose to
+    exactly one pass (verified to 1e-9); so do three thirds.
+  * INFINITE N. `filter_limit` is the steady state as an IDEMPOTENT PROJECTION onto the modes the filter does not
+    decay -- one O(D) evaluation. It matters: this blur's slowest non-DC mode decays as 0.999849^N, so a literal
+    loop needs ~200,000 passes to arrive (measured error 1.8e-1 at 1,000 passes, 6.3e-3 at 20,000, 1.1e-14 at
+    200,000). The closed form returns it immediately, and being a 0/1 mask it is a true projection -- unlike
+    `H**N` for large N, which keeps rescaling the survivors.
+
+HONEST SCOPE, in the docstring and pinned by tests:
+  * The kernel must be a CIRCULAR convolution. A clamped or mirrored border is not diagonal in the DFT -- the same
+    boundary condition that keeps `iterate` out of the Neumann PDE solvers.
+  * A fractional power of a complex number needs a branch cut. For a SMOOTHING kernel the transfer is real and
+    non-negative and there is no ambiguity. For a transfer that CHANGES SIGN there is no canonical branch, and we
+    RAISE rather than pick one silently. (Care needed here: a "sharpen" kernel 2 - cos(w) is strictly POSITIVE, so
+    its fractional power is perfectly well defined and is allowed -- my first guard mislabelled it. The right test
+    is the sign of the transfer, not the name of the filter.)
+  * If any |transfer| > 1 the filter amplifies and H**N overflows exactly as the loop would; we warn on real
+    growth rather than return a silent inf, and `filter_limit` raises (no finite limit exists).
+
+Wired `mind.filter_passes` / `mind.filter_limit`; catalog home ("N filter passes in one evaluation (shader
+algebra)"), findable by "blur n times", "fractional blur", "steady state filter". 7 tests. 451 regression tests
+green; all gates pass.
+
+Remaining in Tier 4: H1 (compose baked kernels/translations/blends over `fpefield` -- the compiler), H7 (superposed
+variant banks via `superposed.pack`, budget M <= D/256), H3 (bandwidth-aware bake: B from the descriptor's
+`variation` probe -- "the algebra has a Nyquist"), H2, H4/H5, H8 (Gabor splats).
+
+## TIER 4: H3 -- the algebra has a Nyquist (and the "variation probe", in its checkable form)
+
+The texture unit bakes a sampled function into ONE hypervector -- F = sum f(x_i) Z(x_i) -- and a fetch at ANY x is a
+single dot product; interpolation is built into the algebra, with no grid and no lookup table. What decides whether
+it works is the phasor BANDWIDTH B, which sets the finest detail the code can hold.
+
+REPRODUCED THE FAILURE FIRST (a sine of frequency f, 240 samples, D=4096, scale-free RMS error of the fetch):
+
+      f     w_max=2*pi*f    B=0.5*w    B=1.0*w    B=1.5*w
+     2.0        12.6         0.298      0.046      0.018
+     5.0        31.4         0.198      0.047      0.034
+     8.0        50.3         0.085      0.042      0.042
+    12.0        75.4         0.102      0.060      0.042
+
+So the law is exactly a Nyquist condition: **B must exceed w_max**, and B ~ 1.5*w_max is the sweet spot (past that
+it stops improving and eventually costs capacity). Below it the bake does NOT gently blur -- it returns a confident,
+smooth-looking, wrong answer, and nothing raises.
+
+BUILT:
+  * `bandwidth_probe(xs, ys)` -- the maximum angular frequency carrying 99.5% of the power. This is the descriptor's
+    "variation" probe in the one form that is actually checkable: not "how rough does this look" but "what is the
+    highest frequency I must not throw away". Measured: recovers 2*pi*f to within 15% (12.5 vs 12.6 at f=2).
+  * `bake_1d(xs, ys)` -- sets B = 1.5 * w_max FROM THE DATA rather than from a default. Measured RMS error 0.018
+    (f=2), 0.034 (f=5), 0.048 (f=12) -- it simply works at every frequency tried.
+  * Supplying your own B below w_max WARNS, loudly, naming the Nyquist. That warning is the only defence, because
+    the failure is otherwise silent -- so a test asserts both the warning AND that the bad bake is >4x worse.
+
+This is the interlock the backlog predicted: the two inventions (the bake and the descriptor) meet at the bandwidth.
+Wired `mind.bake_field` / `mind.fetch_field`; catalog home ("Bake a function into one vector (texture unit)"),
+findable by "texture unit", "bake a function", "nyquist bandwidth". 4 more tests (11 in the file).
+
+451 regression tests green; all gates pass. Tier 4 remaining: H1 (compose baked kernels/translations/blends -- the
+compiler), H7 (superposed variant banks, budget M <= D/256), H2 (superposed gather), H4/H5 (domain-warped LUTs;
+2-D/3-D with a measured crosstalk budget), H8 (Gabor splats).
+
+## TIER 4: H1 -- the compiler (a filter graph collapses to ONE transfer)
+
+Every stage of a post-process graph -- a blur, a translation, a gain, an unsharp blend -- is LINEAR and
+SHIFT-INVARIANT. In the Fourier basis each is a multiplication, so the whole graph composes ALGEBRAICALLY before any
+data is touched. A GPU runs three passes over the image; this runs one multiply.
+
+    pipe = mind.shader_pipeline(img.shape).blur(k, 8).translate(3).unsharp(k_wide, 0.6)
+    out  = pipe.apply(img)          # one FFT, one multiply, one inverse FFT -- for a 3-stage graph
+
+MEASURED (1024-sample field; blur x8 -> translate 3 -> unsharp): the composed transfer reproduces the staged
+computation to **6.7e-16**; compiles once in ~1.1 ms; each application then costs **34 us against the staged 205 us
+(6.0x)** -- and the compiled cost does not depend on the number of stages at all. Note `unsharp` is a LINEAR
+COMBINATION of two branches and still folds into a single transfer, which is why a graph, not merely a chain,
+collapses.
+
+Two things with no GPU analogue, both exact: fractional blur passes, and FRACTIONAL (sub-sample) translation -- a
+phase ramp needs no resampling filter.
+
+### THE LESSON THE TEST FOUND -- compose the operators, not the images
+A half-sample shift puts a genuinely IMAGINARY component in the Nyquist bin. Composed inside the pipeline, two
+half-shifts equal one whole shift to **8.9e-16**. But apply one, take the real part to materialise an intermediate
+image, then apply the other, and that component is silently discarded -- **9.3e-2 of signal, gone, no error raised**
+(measured; pinned by a test asserting BOTH the exactness of the composed path and the loss of the staged one).
+That is the compiler's entire argument in one line, and I only found it because the assertion I expected to pass
+failed. `translate`'s docstring now carries the caution.
+
+Wired `mind.shader_pipeline`; catalog home ("Compile a filter graph to one pass (shader pipeline)"), findable by
+"shader pipeline", "sub-pixel shift", "fuse passes". 4 more tests (15 in the file). 451 regression tests green; all
+gates pass.
+
+Tier 4 remaining: H7 (superposed variant banks via `superposed.pack`, crosstalk ~ sqrt(M/D), budget M <= D/256),
+H2 (superposed gather), H4/H5 (domain-warped LUTs; 2-D/3-D with a measured crosstalk budget), H8 (Gabor splats).
+
+## TIER 4: H2 -- the superposed gather (and a capacity law that turned out not to apply)
+
+N weighted lookups -- a quadrature rule, a filter stencil, a set of light samples: sum_j w_j f(u_j) -- compile into
+ONE query vector before the field is ever touched:
+
+    Q = sum_j w_j Z(u_j)                 # the rule, as a hypervector
+    value = <F, Q>                       # apply it to any baked field: one dot product, whatever N was
+
+WHAT THE MEASUREMENT SAID, AND WHERE IT CONTRADICTED THE PLAN.
+
+The backlog came in predicting crosstalk growing as sqrt(N/D) -- "err 0.017 @32 lookups, growing to 0.14 by N=512 --
+the capacity law". That is the right law for the wrong object, and the measurement said so twice:
+
+  * The gather is EXACT, not approximate. <F, sum_j w_j Z(u_j)> == sum_j w_j <F, Z(u_j)> by linearity, and it
+    measures that way: |gather - sum-of-fetches| = 0.0 to 7e-15 at N = 4, 32, 128, 512. There is nothing here to
+    approximate; the gather inherits the bake's error and adds none of its own.
+  * There is therefore NO CAPACITY WALL. Measured on an interpolation rule (weights summing to 1):
+
+        N          2       8      32     128     512
+        RMS/std  0.053   0.027   0.012   0.011   0.008        (sqrt(N/D) would have said 0.022 -> 0.354)
+
+    More taps make a superposed gather MORE accurate, because the bake's independent per-point errors average each
+    other down. THE RULE, STATED SO IT TRAVELS: superposing things you must later TELL APART pays crosstalk (that is
+    holographic_superposed, and its wall is real); superposing things you only ever SUM does not, because nothing is
+    ever unbound. Naming which regime you are in is the whole skill. I was in the second one and reached for the
+    first one's law.
+
+THE WIN IS REUSE, AND ONLY REUSE. Compiling costs N encodings -- exactly the N the naive path pays -- so a
+single-use gather saves N-1 dot products and nothing else. Reused, the picture changes: a 64-tap rule against 200
+baked fields costs 2,806 ms naive against 14 ms to compile plus 0.48 ms of dot products (5,871x per application,
+190x amortised). And the rule is a VECTOR, so BINDING TRANSLATES IT: the whole N-tap stencil slides to any offset
+for one bind, at a cost independent of N (cos(bind-shifted, re-encoded-from-scratch) = 1.0000000000, gathered values
+agree to 1e-13). That gives a grid-free convolution: swept across the domain, one bind per output sample, a 5-tap
+stencil tracks the true convolution to 0.035 RMS/std while the unfiltered signal sits 1.56 away. A GPU re-fetches
+N taps per offset.
+
+### TWO DEFECTS THE MEASUREMENT FOUND IN CODE THAT WAS ALREADY GREEN
+
+(1) THE RAW FETCH'S GAIN IS THE SAMPLE COUNT. `fetch` returns the kernel SUM, sum_i y_i k(x_i - x), which is
+    proportional to f(x) -- and the constant is how densely you sampled. Measured implied scale 7.8 / 15.6 / 31.2 /
+    62.4 for 100 / 200 / 400 / 800 samples of the same function: exactly linear in the sample count. The old
+    selftest quietly fitted the constant against the truth ("the bake has an arbitrary gain") and nobody wrote it
+    down. `bake_1d` now also bakes the density field (sum Z(x_i), free -- the encodings are already in hand) and
+    `fetch(..., normalize=True)` divides by it: the kernel AVERAGE, Nadaraya-Watson, no fitted constant.
+    On 3:1 clumped samples the raw fetch lands at 1.229 RMS/std -- worse than predicting the mean, even after the
+    kindest possible rescale -- while the normalized fetch lands at 0.283.
+    KEPT NEGATIVE, loud: normalizing is not free. On a UNIFORM bake the denominator carries its own bake error and
+    dividing two noisy numbers compounds them -- 0.046 with a constant fitted from the truth, 0.083 normalized. If
+    your sampling is uniform and you know the scale independently, the raw fetch is the more accurate of the two.
+    It is the scattered case where normalizing stops being a nicety.
+
+(2) A COMPILED RULE IS VALID AGAINST EXACTLY ONE ENCODER. A rule is a superposition of that encoder's atoms.
+    `bake_1d` picks its bandwidth from the data, so two different functions get two different encoders by default --
+    and the integration test found this the way this project always finds things: a stencil compiled against one
+    bake, applied to another, returned 1.816 where the truth was -0.818. Finite, confident, wrong, and silent.
+    Rules now carry the encoder's signature and `gather`/`translate_rule` REFUSE on a mismatch (pass the bare vector
+    to opt out). To share a rule across fields, bake them with the same dim, seed and an explicit shared bandwidth.
+
+(3) ...and a third, smaller: `bandwidth_probe` is an FFT, so it only means anything on UNIFORMLY spaced xs. On
+    scattered samples it reads the spacing jitter as high-frequency content and over-reported w_max as 100.8 against
+    a true 18.8 -- which then fired a *false* Nyquist warning on a perfectly good explicit bandwidth. `bake_1d` now
+    checks the spacing: it will not alarm off a number it cannot trust, and if asked to CHOOSE a bandwidth from
+    scattered data it says it cannot.
+
+
+### A FOURTH DEFECT, found by taking "prove the HTTP round-trip" literally
+
+`/tools` advertises `bake_field`, `fetch_field`, `gather_rule`, `gather_field`, `translate_rule` and
+`shader_pipeline` -- every public mind method is auto-introspected -- and NONE of them could actually be driven over
+`/invoke`. They hand back LIVE objects (a ScalarEncoder, a hypervector); `_jsonable` flattens the encoder into a
+plain dict, so an agent receives a handle that reads fine and cannot be fed back in. The capability was advertised,
+discoverable, catalogued, lint-clean, and unreachable from outside the process. "It works in-process" and "an agent
+can call it" really are different claims, and only the socket settles it.
+
+Closed for the gather with `gather_samples(xs, ys, points, weights)` -- the stateless one-shot twin: plain numbers
+in, a plain number out, no handles. Proven over a real socket (POST /invoke -> -0.038551 against a truth of
+-0.047746, inside the bake's own error) and pinned by a test that spins an HTTPServer. It re-bakes on every call, so
+it buys NONE of the reuse win -- that is the honest trade, and it is stated in the docstring rather than hidden.
+The same gap remains open for `shader_pipeline` and the raw bake/fetch pair: recorded here, not papered over.
+
+Wired `mind.gather_rule` / `mind.gather_field` / `mind.translate_rule` / `mind.gather_samples`, and
+`mind.fetch_field(..., normalize=)`.
+Catalog home ("Gather N lookups in one dot product (superposed gather)"), findable by "quadrature rule", "filter
+stencil", "slide a stencil", "many lookups at once". 9 more tests (24 in the file), plus a cross-faculty integration
+test (bake -> compile a stencil -> slide it = a grid-free convolution) and the shader algebra's first tour block
+(H6/H3/H1/H2 in one demo -- the earlier three items never got one). All gates pass.
+
+Tier 4 remaining: H7 (superposed variant banks -- and note that THIS one has to tell its variants apart, so it
+should pay crosstalk; measured next, and the answer was worse than that), H4/H5 (domain-warped LUTs; 2-D/3-D with a
+measured crosstalk budget), H8 (Gabor splats).
+
+## TIER 4: H7 -- one half shipped, the other half is a KEPT NEGATIVE (and it kills its own cost model)
+
+The plan: role-bind each of M shader variants, bundle them, apply the bundle to the field ONCE, unbind to read any
+variant -- "a GPU runs M passes; we run one and unbind" -- with crosstalk budgeted by sqrt(M/D), M <= D/256.
+Measured at D=8192. All three parts of that are wrong.
+
+**(1) FIDELITY FOLLOWS 1/sqrt(M), NOT sqrt(M/D).** Unbinding a bundle of M keyed items returns the item plus M-1
+random vectors, so the recovered vector's cosine with the truth is ~1/sqrt(M). On UNCORRELATED variants -- the
+kindest possible case -- it matches to three digits:
+
+    M                2       4       8      16      32
+    cos(rec, true)  .712    .507    .353    .249    .177
+    1/sqrt(M)       .707    .500    .354    .250    .177
+
+sqrt(M/D) is a DIFFERENT QUANTITY: the cosine with a WRONG item, i.e. a confusion measure. The backlog read a
+confusion budget as a fidelity budget. At M=2 the two differ by 45x (0.71 vs 0.016). The bank was never within two
+orders of magnitude of usable, and the number that would have said so was sitting in `holographic_superposed`'s own
+selftest table the whole time (K=2 -> 0.712, K=8 -> 0.357). I did not read it until I had re-derived it.
+
+**(2) REAL VARIANTS ARE CORRELATED, WHICH MAKES IT WORSE, NOT BETTER.** M blurs of the SAME field are M filtered
+copies of one signal, not M independent items: mean |cos| between distinct variants' true outputs is **0.487 at
+M=2**. Cleanup -- the discrete decision that normally RESETS crosstalk, and the whole reason cleanup-gated recall
+holds ~0.1*D against continuous recall's ~0.02*D -- needs a near-orthogonal codebook and has none here. Selecting
+which variant produced a given output collapses, while direct comparison is perfect:
+
+    M                      2      4      8     16     32     64
+    bank-select accuracy  .60    .33    .20    .17    .07    .03
+    direct comparison    1.00   1.00   1.00   1.00   1.00   1.00
+
+**(3) THERE WAS NO COST TO SAVE.** The bank still needs M inverse transforms to read M outputs. The "M passes" a GPU
+runs are the M READOUTS, not the M multiplies -- the multiply was never the expensive part. Measured, the bank runs
+at 0.83-0.87x the direct path (i.e. SLOWER) at M = 4, 16, 64. The cost model that motivated the item does not exist.
+This is the one I should have caught before writing any code: the item's premise was a claim about where the time
+goes, and nobody had timed it.
+
+### WHAT SURVIVED, AND IT IS THE BETTER HALF
+
+Any FIXED linear combination of the variants -- sum_j w_j * pipe_j: an LOD stack, a multi-scale filter, an
+MIS-weighted combination, a parameter sweep you intend to average -- is itself linear and shift-invariant, so the
+TRANSFERS simply add. `combine(pipelines, weights)` returns one Pipeline, still chainable:
+
+    M           staged        combined     speedup
+    4           0.99 ms        0.229 ms       4.3x
+    16          2.17 ms        0.233 ms       9.3x
+    64          8.66 ms        0.289 ms      30.0x        exact to 2.2e-16 throughout
+
+It gets relatively CHEAPER the more variants you have, because the combined cost does not depend on M at all. This
+is `unsharp` generalised -- unsharp is the two-branch case -- and it is why a filter GRAPH, not merely a chain,
+collapses to one multiply.
+
+### THE RULE THIS LEAVES BEHIND -- worth more than the item was
+
+**Superposition buys width only when the items are near-orthogonal AND a cleanup follows the readout.** Superposing
+things you must later TELL APART pays crosstalk and needs orthogonality; superposing things you only ever SUM pays
+nothing and needs neither. H2's gather sits on the good side of that line (it never unbinds; its error AVERAGES
+DOWN with taps). H7's bank sits on the bad side twice over -- it unbinds, and its items are correlated. Two items,
+one session, arriving at the same dividing line from opposite directions. Name the regime before reaching for the
+law.
+
+Shipped `combine` + `gauss_kernel`; wired `mind.shader_combine`; catalog home ("Blend M shader variants into one
+transfer") with the negative stated in the description, findable by "lod stack", "combine shader variants",
+"multi-scale filter", "variant bank". The negative is pinned by two tests (`_phasor_key` is private on purpose --
+it exists only to reproduce the failure) and reproduced live in the tour block, which prints 0.363 against a
+predicted 0.354. 5 more tests (29 in the file). All gates pass.
+
+Tier 4 remaining: H4/H5 (domain-warped LUTs for near-singular functions; 2-D/3-D bakes with a measured crosstalk
+budget), H8 (Gabor / frequency-lifted splats).
+
+## TIER 4: H4 + H5 -- shipped without a close-out, and the tables were single seeds
+
+Both items were already IN THE TREE when I went to build them: `bake_1d(detrend=True)`, `bake_nd`, `fetch_nd`,
+`axis_bandwidths`, wired to `mind.bake_field(detrend=)` / `mind.bake_field_nd` / `mind.fetch_field_nd`, catalogued
+and self-tested. Probe-first caught it before a line of duplicate code was written -- the audit returned "Bake an
+N-D function into one vector" and "Detrend before you bake" as the top two hits for the queries I was about to build
+against.
+
+But the close-out was HALF DONE, and the half that was missing is the half that rots: **zero pytest tests, no NOTES
+entry, no tour block, no guide section.** A capability with a self-test and no regression test is one refactor away
+from silently dying. That is the gap class this project exists to hunt, and it had opened inside the very module
+that hunts it.
+
+### THE SCIENCE HELD. THE NUMBERS DID NOT.
+
+Re-measuring the shipped claims against the shipped code, with spread across seeds:
+
+**H4, the finding is right:** `bandwidth_probe` is an FFT, an FFT treats its samples as periodic, so any function
+whose endpoints disagree carries an implicit jump -- and a jump has an unbounded spectrum. A STRAIGHT LINE probes at
+607.95 where sqrt probes at 789.70 and a genuine 2-cycle sine probes at 12.53. It was never the singularity; it was
+the wrap. Detrend (subtract the endpoint line, bake the residual, restore the line analytically) and it goes away.
+
+**H4, the numbers were a lottery ticket.** The shipped table gave six single-seed values (sqrt plain 0.3280, cube
+root 4.4871). Not one reproduces; all sit outside the 95% CI of the quantity they claim to measure. Re-measured over
+12 encoder seeds (400 samples, D=4096, 61 query points, absolute relative error, bootstrap CI on the mean):
+
+    f(x)              plain bake                    DETRENDED                    ratio
+    sqrt(x)           0.1105 +- 0.0379 [.090,.133]  0.0087 +- 0.0051 [.006,.012]  12.6x
+    x**(1/3)          0.1404 +- 0.0887 [.096,.195]  0.0170 +- 0.0062 [.014,.021]   8.3x
+    1/(x + 0.05)      1.8278 +- 4.2475 [.397,4.45]  0.1157 +- 0.0606 [.086,.152]  15.8x
+    exp(3x)           0.2225 +- 0.0638 [.188,.260]  0.0214 +- 0.0106 [.015,.028]  10.4x
+    x (a line)        0.1330 +- 0.0604 [.098,.167]  0.0000 exactly                exact
+    sin(2*pi*2*x)     0.2064 +- 0.0413 [.184,.230]  0.2064 +- 0.0413              1.0x
+
+The INSTABILITY is the mechanism, not noise around it. `1/(x+0.05)` plain scores **1.83 +- 4.25** -- a 95% CI
+spanning an order of magnitude, sometimes four times worse than predicting the mean. Seed-to-seed coefficient of
+variation 2.32, against the detrended bake's 0.52. An inflated B collapses the RBF kernel toward a delta, so the
+fetch stops interpolating and returns whichever sample happens to land nearest -- and which sample that is, the
+random phases decide. **Any single-seed number in this regime is a lottery ticket.** And dimension does not save
+you: sqrt at D = 1k / 4k / 16k measures plain 0.199 / 0.113 / 0.069 against detrended 0.026 / 0.006 / 0.006. You
+cannot buy your way out of a bad bandwidth with dimension.
+
+**The self-test was a seed-fragile CI flake.** It asserted `plain > 4.0` for the cube root -- a bar that passes only
+because seed 0 happens to be the maximum of a distribution running 0.268 to 4.487. One seed change and CI goes red
+for no reason. Replaced with the invariant that actually holds: **detrending wins at EVERY seed** (worst ratio
+measured 2.13, median 5-17x), a line detrends to an exactly zero residual, and a periodic function is untouched.
+Assert the contrast, not the constant.
+
+**H5, one structural claim was backwards.** The shipped docstring said the n-D bake's "error is flat in N and falls
+with D". Flat in N is right (at a fixed bandwidth, 400 -> 6,400 grid points moves the error 0.098 -> 0.118 -- a
+bundled function is only ever summed, never unbound, so it sits exactly where the H2 gather sits). "Falls with D" is
+wrong at the default margin, and it is the sentence a user would act on. Measured, 2-D sine, scale-free RMS:
+
+    margin      D=4,096      D=16,384      D=65,536      amplitude gain (D=65,536)
+      1.5        0.1179       0.1174        0.1191             0.66
+      2.5        0.0715       0.0566        0.0315             0.84
+      4.0        0.1256       0.0777        0.0320             0.91
+      6.0        0.1972       0.1546        0.0568             0.88
+
+**BANDWIDTH IS A BIAS-VARIANCE DIAL AND `dim` IS THE VARIANCE BUDGET.** At margin 1.5 the error is pure BIAS -- a
+kernel too smooth to hold the function -- and sixteen times the dimension changes nothing (0.1179 -> 0.1191). Raise
+the margin and the bias falls, but a narrower kernel has fewer effective neighbours and so more crosstalk, which is
+precisely what D pays for: margin 4.0 and 6.0 are WORSE than 1.5 at D=4,096 and far better at D=65,536. The knee is
+near margin 2.5. Raise the two together, or leave both alone.
+
+Also refined: "the library default bandwidth of 3.0 carries no information" is frequency-dependent, as it must be.
+Against a 2-cycle sine (w_max = 12.6, four times the default) it measures ~1.0 scale-free RMS -- nothing. Against a
+1-cycle sine (w_max = 6.3) it measures 0.58 -- mangled, not empty. The default is not wrong by a little; it is wrong
+by whatever your data happens to be.
+
+### KEPT NEGATIVES
+
+* RETIRED AND REPLACED: "a raw baked LUT of sqrt measured 0.125 -- near-singular functions need DOMAIN WARPING."
+  Wrong cause (the wrap, not the singularity) and the weaker fix (warping buys ~1.9x, and only when it happens to
+  LINEARIZE the function; on 1/(x+0.05) it buys nothing over detrending). Detrending buys 8-16x, always.
+* NEW, in its place: a plain bake of ANY non-periodic function is silently wrong, AND unstable, and the probe will
+  not tell you -- because the probe is the thing that is confused.
+* At the default margin the n-D readout is a SHAPE estimator, not a calibrated one (amplitude gain 0.66).
+* A detrended bake cannot be read with a raw `fetch` (the trend is an absolute offset; a kernel sum has no absolute
+  scale) and cannot be `gather`ed (the compiled rule is one vector and no longer knows its own sample points). Both
+  raise rather than silently drop the line.
+
+### METHODS NEGATIVE, KEPT LOUD BECAUSE IT WAS MINE
+
+Six numbers shipped in a docstring as a measurement when they were one seed each. The directions were right, the
+conclusion was right, and the code was right -- which is exactly why nobody caught it, and why it is worth saying
+out loud. **The engine's own rule -- every claim carries a baseline, a variance estimate, and its negatives -- binds
+the docstrings too. A number without a spread is an anecdote.** Every table in this module now states its protocol
+and its spread.
+
+Backfilled: 9 pytest tests (38 in the file, from 29), a cross-faculty integration test (detrended 1-D bake -> n-D
+bake, both through the mind), the tour block (which now recomputes every number it prints), and a guide section.
+Corrected the numbers in the module comment, both docstrings, the mind's two faculties, and both catalog entries.
+All gates pass.
+
+**Tier 4 is now complete except H8** (Gabor / frequency-lifted splats).
+
+## TIER 4 CLOSE-OUT: H4/H5 hardening -- two of my own bars were lottery tickets, and one block argued with itself
+
+Auditing the H4/H5 work rather than extending it (RULE 0 applied to my own output, which is the harder case).
+Three defects found, all in code that was green:
+
+**(1) TWO TESTS WERE SEED LOTTERIES.** The H4 tests pinned the PLAIN bake's absolute error (`> 0.30` for sqrt,
+`> 4.0` for the cube root). Re-measured across six seeds, the plain bake's error swings enormously, because an
+inflated bandwidth collapses the RBF kernel toward a delta and the answer then depends on which sample happens to
+be nearest:
+
+      f(x)            plain: min .. max        detrended: min .. max     median ratio
+      sqrt            0.260 .. 0.901           0.0165 .. 0.0384              18.8x
+      cube root       0.296 .. 4.487           0.0691 .. 0.1228              14.7x
+      1/(x+0.05)      0.407 .. 14.624          0.0714 .. 0.1724               5.7x
+      exp(3x)         0.188 .. 0.569           0.0226 .. 0.0595               9.9x
+      x (a line)      0.131 .. 0.542           0.0000 .. 0.0000              exact
+
+The instability IS the symptom, and a bar drawn through it asserts nothing. The stable invariants are the RATIO
+(plain / detrended, median over seeds) and the DETRENDED bar, which barely moves. Both tests now assert those, and
+the detrended cube-root bar was widened from 0.10 to 0.15 -- it would have failed on seeds it had never run.
+*A test whose bar only holds at seed 0 is a test that passes for the wrong reason.*
+
+**(2) THE H5 BLOCK CONTRADICTED ITSELF.** A re-measurement was appended ("bandwidth is a bias-variance dial; at
+margin 1.5 sixteen times the dimension buys nothing") while the superseded conclusion twenty lines above -- "the
+error is flat in N and FALLS WITH D. Spend dimensions, not restraint." -- was left standing. Both tables are real;
+they were taken at different margins on different signals, and only one of them generalises. Mapped both regimes:
+
+                              D=4,096   D=16,384   D=65,536
+      1 cycle/axis  m=1.5      0.1179     0.1174     0.1191    <-- BIAS FLOOR: dimension buys nothing
+                    m=2.5      0.0715     0.0566     0.0315    <-- bias gone; dimension pays
+      2 cycles/axis m=1.5      0.1269     0.0819     0.0297    <-- already variance-limited; dimension pays
+                    m=4.0      0.2665     0.1595     0.1223    <-- margin too wide; D cannot catch up
+
+The old conclusion was true only because that signal, at that margin, happened to be variance-limited. The
+superseded text is now marked as superseded IN PLACE rather than deleted -- getting it wrong is the instructive
+part -- and the diagnostic that resolves it is stated: **double D. If the error drops you are variance-limited;
+if it does not move you are bias-limited, and the fix is a larger margin, never more dimension. You cannot buy your
+way out of a bad bandwidth with dimension.**
+
+**(3) I REBUILT WORK THAT ALREADY SHIPPED.** H7 was proposed as the next item; `find_capability("evaluate many
+shader variants at once")` returned "Blend M shader variants into one transfer" on the first probe -- already built,
+already carrying its kept negative. Then a duplicate H4/H5 test section and a duplicate integration test were
+written before the live test file was read, shadowing an `_arel` helper and re-defining
+`test_a_detrended_bake_refuses_a_raw_fetch_and_a_gather`. Both removed. The existing tests were BETTER than the
+replacements (they already swept seeds). Probe-first is not a formality to discharge at the top of a session; it is
+the check you run before every file you touch, including the ones you think you wrote.
+
+No new capability this pass. Net: two flaky bars replaced with the invariants they should always have asserted, one
+self-contradicting docstring resolved with the regime map that explains both halves, two duplicate test blocks
+removed. All gates pass; catalog, capdoc and docgen regenerated with no drift.
+
+### ADDENDUM, same session: the two tables that disagreed, and the variable neither of them named
+
+Correcting H5 turned up a second table, in `holographic_fpe`, whose columns clearly showed the error FALLING with D
+at the same default margin where my re-measurement showed a flat bias floor. Two tables, one codebase, opposite
+conclusions. The tempting move is to pick one. The right move is to find the variable neither of them stated.
+
+It is the BANDWIDTH B. `margin` is a RATIO -- B = margin * w_max -- so "margin 1.5" is B = 9.4 on a 1-cycle sine and
+B = 18.8 on a 2-cycle one. The fpe table used a 2-cycle sine; mine used a 1-cycle sine. Holding B fixed and varying
+the signal makes the confound vanish (40x40 grid, bandwidth supplied rather than probed, scale-free RMS):
+
+        B      signal      D=2,048   D=8,192   D=32,768     does D pay?
+       9.4    1-cycle       0.1315    0.1117    0.1104          no
+      18.8    1-cycle       0.1220    0.0777    0.0431         YES
+      18.8    2-cycle       0.1801    0.0905    0.0547         YES
+      28.3    2-cycle       0.3240    0.1451    0.0419         YES
+
+Two DIFFERENT signals at the SAME B behave the same. The SAME signal at two different B's does not. So:
+
+**A wide kernel (small B) is BIAS-limited and no amount of dimension fixes it. A narrow kernel (large B) is
+VARIANCE-limited, and variance is exactly what D buys down. B is the dial; `dim` is the budget; `margin` is neither
+-- it is a ratio that hides the dial behind your data's own bandwidth.**
+
+Both tables were right about their own B. Neither said what it was. STATE B, NOT MARGIN. And the diagnostic is
+cheap and now written into the docstrings: **double `dim`.** If the error drops you are variance-limited, so keep
+spending dimension. If it does not move you are bias-limited, so raise the margin instead.
+
+This is the third time this session that a claim's *quantity* was right and its *conditioning variable* was
+unstated -- the sqrt(M/D) crosstalk law (H7) measured confusion and was read as fidelity; the sqrt(N/D) gather wall
+(H2) belonged to keyed bundles and was applied to a sum; and now "falls with D" belonged to one bandwidth and was
+read as a property of the method. The recurring error is not arithmetic. It is failing to name what the number is a
+function of.
+
+## TIER 4: H8 -- the Gabor lift is real, its evidence was a strawman, and the negative it promised to kill survives
+
+The last Tier 4 item, and the one with a real prediction attached: the `splatsharpen` kept negative says no
+post-process recovers frequency the representation never stored, and "the only fix is to store more." The backlog
+proposed storing more DIMENSIONS PER PRIMITIVE instead of more primitives -- give each splat a frequency and a phase,
+making it a Gabor atom -- and reported the Gaussian basis SATURATING at 11.6 dB regardless of K while Gabor climbed
+to 18.3 dB and "captured essentially all the frequency content."
+
+Measurement says three things, and the first one is about us, not about Gabor.
+
+### (1) THE GAUSSIAN BASIS WAS NEVER SATURATED. IT WAS A STRAWMAN BASELINE, AND THE FIX WAS IN THE SAME FILE.
+
+A PSNR curve that is flat in K is the signature of greedy matching pursuit's overlap double-counting -- and
+`holographic_splat` has always shipped `splat_refit`, a joint least-squares amplitude solve, whose own docstring says
+the gain "GROWS with the splat count." Measured on the sharp disk the negative was recorded against:
+
+    K              32       128       256
+    Gauss MP     11.7 dB  12.6 dB   14.3 dB      <- the backlog's baseline
+    Gauss+REFIT  12.9 dB  16.2 dB   20.9 dB      <- the strongest honest baseline, one function call away
+
+Against the strawman, Gabor at K=256 looks like +12.6 dB. Against the real baseline: +6.0 dB. **Half the advertised
+win was the baseline's handicap.** The engine's own rule -- "a win without a proper baseline is not a result; compare
+against the strongest honest baseline in the original space" -- would have caught this before a line was written. I
+found it only because `splat_refit`'s docstring contradicted the backlog's premise in the same breath.
+
+### (2) AND +6.0 dB IS STILL THE WRONG COMPARISON, BECAUSE IT IS PER PRIMITIVE.
+
+A Gabor atom carries SEVEN numbers (cy, cx, amp, sigma, freq, theta, phase) where a Gaussian carries four. Comparing
+at equal K quietly hands Gabor 1.75x the parameters. At equal PARAMETER BUDGET (Gabor K=128 against Gaussian K=224,
+both jointly refit), the win depends entirely on the content:
+
+    target                       Gaussian+refit           Gabor+refit            dPSNR
+    disk (broadband edge)     20.5 dB  HF 37% of target  20.7 dB  HF 46%        +0.2 dB
+    stripes (narrowband)       8.9 dB  HF 27%           15.9 dB  HF 58%         +7.0 dB
+    texture (noise-like)      20.2 dB  HF  4%           20.3 dB  HF  5%         +0.1 dB
+
+### (3) THE LAW: A GABOR ATOM IS A BANDPASS PRIMITIVE. IT BUYS YOU EXACTLY THE BAND IT IS TUNED TO.
+
+Where the high-frequency energy is NARROWBAND and ORIENTED -- a grating, a stripe pattern, a periodic texture -- one
+atom matches a whole band and the win is enormous. **A sharp EDGE is not a band. It is every band at once, with no
+orientation an atom can lock onto.** There the lift buys +0.2 dB.
+
+And the extra dimensions are a TAX until the budget can afford them. On the stripes, at equal parameter budget, the
+advantage grows and the high-frequency share CROSSES OVER partway up:
+
+    budget     Gaussian+refit          Gabor+refit           dPSNR
+      224     6.5 dB  [ 9.5% HF]      7.2 dB  [ 3.1% HF]     +0.6
+      448     7.4 dB  [18.6% HF]     11.3 dB  [10.1% HF]     +3.8
+      896     8.9 dB  [26.8% HF]     15.9 dB  [58.2% HF]     +7.0
+    1,344    10.4 dB  [35.0% HF]     17.9 dB  [71.3% HF]     +7.5
+
+Below the crossover Gabor spends its atoms on the coarse structure and stores LESS of the detail than the cheaper
+basis. A lifted basis is not uniformly better; it is better past a budget that the lift itself raises.
+
+### KEPT NEGATIVES
+
+* **The `splatsharpen` negative SURVIVES**, and the backlog predicted it would fall. It was recorded on a sharp
+  non-separable disk -- a broadband edge -- and at equal budget the Gabor lift buys +0.2 dB there. **"Just add more
+  dimensions" is the right instinct and the wrong slogan: the dimensions have to be the right ones.** Widening a
+  basis pays only when the widening MATCHES the content's structure. The engine's design philosophy #5 now carries
+  this qualifier, measured.
+* **The backlog's "Gabor captures essentially all the frequency content" is false.** At equal budget it captures 46%
+  of the disk's high-frequency energy against the Gaussian's 37%, and on the checkerboard it captures LESS (15% vs
+  47%) while still winning +2.0 dB PSNR.
+* **Cost, which the backlog never stated:** the Gabor dictionary is 196 atoms per placement against the Gaussian's 4
+  (4 scales x (1 + 4 freqs x 6 orientations x 2 phases)). Measured **89x** the fitting time for 64 atoms. An
+  offline/preview tier, not an interactive one.
+* **PSNR cannot see the thing the negative is about.** PSNR lives in the low frequencies, where the energy is, so a
+  fit can match a target's PSNR while holding almost none of its detail (the checkerboard row above is exactly
+  that). Shipped `spectral_energy_fraction` / `mind.spectral_detail` -- report it NEXT TO PSNR whenever a basis
+  claims to capture detail.
+
+### THE THING THAT MADE THE COMPARISON HONEST
+
+`freq=0` reduces a Gabor atom exactly to a Gaussian (asserted to 1e-12), so the Gaussian dictionary is a strict
+SUBSET of the Gabor one. The greedy fit can always fall back, Gabor can never lose per primitive, and every
+remaining question is about the BUDGET, not about the search. Nesting the dictionaries is what turned a vague
+"is the lift better?" into a decidable one.
+
+Shipped `gabor_fit` / `gabor_render` / `gabor_refit` / `spectral_energy_fraction`; extended `mind.splat_field` with
+`basis='gabor'` (default off -- extend the faculty, do not add a sibling) and added `mind.spectral_detail`. Catalog
+home ("Frequency-lifted (Gabor) splats") carrying the kept negative in its description, findable by "gabor splat",
+"fit a grating", "bandpass primitive", and -- deliberately -- "does my fit store the sharpness". 6 pytest tests,
+module `_h8_selftest`, tour block that recomputes every number it prints. All gates pass.
+
+**TIER 4 IS COMPLETE.** H1, H2, H3, H6, H7 (half + a negative), H4, H5, H8 (a lift with a stated domain + a negative
+that survived). Of the eight items, three of the backlog's headline predictions were WRONG in a way measurement
+caught -- the sqrt(N/D) gather wall, the sqrt(M/D) variant bank, the dissolution of splatsharpen -- and each was
+wrong the same way: a quantity was right and its conditioning variable was never named.
+
+## THE LAST PENDING UNIFIER: `meshsubdiv` -> `iterate`, and Warren's beta turns out to be an eigenvalue
+
+With Tier 4 closed I asked the live system what was still open rather than my notes. `tools/unifiers.py` answered in
+one line: **`iterate.step_k / limit` -- 2/3 wired, not wired: holographic_meshsubdiv.** The single remaining PENDING
+entry in the whole registry, and the ledger even carried the diagnosis, written by a previous session:
+
+> "an irregular 2-D mesh around an extraordinary vertex is not shift-invariant: Stam's method diagonalises the
+> LOCAL subdivision matrix there instead. **A build, not a wall.**"
+
+It was a build, and it was much smaller than it looked, because **the part of the local Loop operator that is not
+shift-invariant is only the centre vertex.** Write the operator around an interior vertex of valence n on the
+coordinates [v, r_0..r_{n-1}]:
+
+    v'   = (1 - n*beta) v + beta * sum_i r_i
+    e_i' = 3/8 v + 3/8 r_i + 1/8 r_{i-1} + 1/8 r_{i+1}
+
+The ring-to-ring block is **exactly the circulant** of the kernel [3/8, 1/8, 0, ..., 0, 1/8] -- verified to 0.0 at
+valences 3, 5, 6, 7. A circulant IS a bind operator, and `iterate.transfer` is an rfft, so **the unifier already
+owned the eigendecomposition; nobody had noticed it was there.**
+
+### WHAT EACH FOURIER MODE OF THE RING IS FOR
+
+* **Mode 0** has eigenvalue `transfer(c)[0] = 5/8` at EVERY valence. Coupled to the centre it gives a 2x2 system
+  whose lambda = 1 left eigenvector is the LIMIT POSITION mask, `(3 v + 8 n beta * mean(ring)) / (3 + 8 n beta)`.
+  Checked against the classical Loop stencil to 5e-15, and against literally subdividing an icosphere: the k-th
+  subdivision approaches it as 6.0e-4 -> 3.7e-5 -> 2.3e-6 at k = 4 / 6 / 8, i.e. at the subdominant eigenvalue's
+  rate.
+* **Modes +-1** have eigenvalue `transfer(c)[1] = 3/8 + cos(2 pi / n)/4` -- which is, to the last bit, the term
+  inside Warren's beta. **So beta is not a magic constant. It is `(1/n)(lambda_0 - lambda_1^2)`, read straight off
+  the ring's eigenvalues** (0.0840932189 against the published 0.0840932189 at n=5; and (1/3)(5/8 - 1/16) = 3/16 is
+  the classical valence-3 value). The subdivision mask's own parameter is a property of the operator's spectrum.
+  Those two modes span the tangent plane, so their cross product is the EXACT limit normal.
+* **A boundary vertex** has no ring, only a cubic-B-spline curve. Its local operator's lambda = 1 left eigenvector
+  is (2/3, 1/6, 1/6) -- the classical boundary limit mask, from the same principle.
+
+### THE MEASURED PAYOFF, AND THE SCOPE THAT MEASUREMENT FORCED ON IT
+
+The first integration test I wrote claimed the exact limit normal beats an area-weighted one. **It measured 0.0000
+degrees for both** -- on an icosphere, a symmetric ring's face normals average to the tangent-plane normal exactly,
+so the approximation is accidentally perfect and the test proved nothing. I nearly shipped a tautology as a result.
+
+On an IRREGULAR mesh (perturbed, anisotropically scaled, with extraordinary valence-5 vertices) the win is real:
+
+    method                                          max angle vs the true limit normal      faces built
+    area-weighted on the control mesh                        19.1378 deg                        128
+    area-weighted after 3 Loop levels                         0.3290 deg                      8,192
+    CLOSED FORM (this)                                        0.0052 deg                        128
+
+Sixty times better than area-averaging a mesh with 64x the faces, in O(V), subdividing nothing.
+
+### KEPT NEGATIVES
+
+* **On a REGULAR mesh the exact normal buys nothing measurable** -- area-weighting is already exact to machine
+  precision, because a symmetric ring's face normals average to the tangent plane. The win exists only where the
+  rings are irregular, which is precisely where a subdivision scheme is hard. Stated in the docstring, pinned by
+  the integration test's comment, and it is why the first version of that test was worthless.
+* **This is the k -> INFINITY case only.** A FINITE number of levels on an irregular mesh still needs the full Stam
+  evaluation -- the non-DC modes do not decouple from the centre for finite k -- and that remains unbuilt.
+  `loop_subdivide(mesh, k)` is the honest path there, at O(4^k). The ledger's PENDING entry has been retired with
+  that scope written into its epitaph, rather than deleted quietly.
+
+### THE LEDGER WORKED EXACTLY AS DESIGNED
+
+Wiring the client made `test_unifier_adoption.py` FAIL -- `assert not {('iterate.step_k / limit',
+'holographic_meshsubdiv')}` -- because the lint asserts the PENDING set exactly matches reality. Progress is
+recorded by deletion, and the lint forces the deletion. That is D-2 doing its job two sessions after it was built.
+
+**`tools/unifiers.py` now reports 3/3, 4/4, 3/3, 2/2, 1/1, 2/2, 6/6 -- every registered unifier is cited by every
+named client it has, or that client sits in NOT_APPLICABLE with a measured reason. PENDING is empty for the first
+time.**
+
+Shipped `loop_limit` + `_ring_kernel` + `_ordered_rings`; wired `mind.mesh_limit_surface`; catalog home
+("Subdivision limit surface (closed form)"), findable by "limit surface", "exact limit normal", "infinite
+subdivision", "stam evaluation". 6 pytest tests, an integration test, module selftest extended, tour block that
+recomputes every number it prints. All gates pass.
+
+*The line worth keeping:* **the infinite iteration is the cheap one -- it is the finite ones that cost.** `iterate`
+has been saying this since it was written (`limit` is O(D); `step_k` is a power). It took a mesh to make it obvious.
+
+## `coarsefirst`: a dark unifier gets a door -- and a second necessary condition nobody had written down
+
+The reachability audit reports 13 DARK modules -- "capability with no door", zero engine references. I went to check
+the list with grep and got it wrong: `creature_mind`, `navigator` and `lexicon` all *appear* in
+`holographic_unified.py`. They appear in its DOCSTRINGS. `wiring_report` builds an AST import graph; my grep was the
+naive tool. **Probe-first cuts both ways: the audit was right and I was wrong, and I nearly "fixed" three modules
+that were never broken.**
+
+`holographic_coarsefirst` is the real thing: a general primitive -- "run the cheap method everywhere, measure a
+per-cell uncertainty, escalate only where it is high" -- excellent, tested, and reachable from nothing.
+
+### THE MEASURED POSITIVE, on its own first named client
+
+Adaptive anti-aliasing of a hard-edged disk, uncertainty = the coarse render's gradient, cost = samples taken:
+
+    method                              RMSE      samples
+    coarse only (1 spp)                0.0647       9,216
+    uniform 16 spp everywhere          0.0159     147,456
+    COARSE-FIRST, top-10% at 16 spp    0.0193      23,968     <- 6.2x cheaper, 21% more RMSE
+    CONTROL: same budget, RANDOM cells 0.0553      46,080     <- 3x worse at identical cost
+
+**The control is the point.** A coarse-first win is trivially available by spending more samples; the claim is that
+the SIGNAL directs them. Escalating random cells at the same budget lands 3x worse. Every coarse-first claim owes
+that control, and it is now in the module's self-test as an assertion, not a comment.
+
+### THE SECOND NECESSARY CONDITION, which the module did not state
+
+Its docstring carried one gate -- **the uncertainty must be CONCENTRATED** -- with an honest caveat that this is
+necessary and not sufficient. Trying to adopt it in a real client found the second:
+
+**THE EXPENSIVE METHOD MUST BE PRICED PER CELL.** Escalation saves work only if refusing to refine a cell means not
+paying for it. I tried the obvious client -- the Gabor splat fit I shipped earlier this session, which costs 89x a
+Gaussian fit and is therefore *begging* for escalation. It does not work, and it cannot:
+
+* A greedy placement method is **already adaptive**. Matching pursuit puts its next primitive where the residual
+  peaks. Its cost is per PRIMITIVE, not per cell, and a mask tells it nothing it did not already know. Measured,
+  Gabor atoms fitted to the residual of a uniform Gaussian base: **21.0 dB over the whole residual, 21.0 dB
+  restricted to the top-25% mask, at 0.9x the speed.** Zero win, some loss.
+
+### AND THE TRAP THAT FOLLOWS FROM BOTH
+
+**A greedy coarse pass destroys the concentration its own refinement needs.** On a grating patch over a smooth
+background, the residual of a UNIFORM Gaussian base scores concentration **0.416**; the residual of a GREEDY
+matching-pursuit base of the same size scores **0.106**. Greedy fitting spends its atoms exactly where the error
+was, flattening the very signal the escalator reads.
+
+So coarse-first wants a **cheap, uniform, DUMB base pass** and a **per-cell-priced refinement**. That is adaptive
+AA, per-pixel supersampling, per-cell solver escalation. It is emphatically not splat refinement -- which the
+module's own docstring named as a client, and which `concentration` would have ruled out for free, before any code
+was written. I ran the experiment anyway. **The gate was right; the docstring that shipped the gate had also
+shipped the wrong client list.**
+
+### THE LEDGERS, USED AS DESIGNED RATHER THAN AS DECORATION
+
+* `wiring_report.py`'s KNOWN_DARK line for `coarsefirst` is **deleted** -- 13 dark modules -> 12, and `--check`
+  still passes, so the frozen debt shrank rather than grew.
+* `coarsefirst.refine_where_uncertain` is now a **registered unifier** in `tools/unifiers.py`, which honestly
+  **RE-OPENS PENDING** (0/3 wired: `gbuffer`, `nystrom`, `volint`), one session after I emptied it. An empty PENDING
+  that hides an unregistered unifier is worse than a full one. Each entry carries its reason:
+  `gbuffer.converge_samples` already escalates per pixel with a CALIBRATED absolute-threshold rule, and routing it
+  through `escalate_mask(threshold=)` for cosmetic credit would risk that calibration -- **that is forced wiring,
+  and the strategy forbids it**; `nystrom` selects landmarks by farthest-point sampling, a different rule that owes
+  a baseline; `volint` marches uniformly and is the clean unmeasured case.
+* `holographic_splat` is entered in **NOT_APPLICABLE with the measurement**, not deleted. "Deleting a hard client is
+  not progress; retiring it with evidence is." `unaccounted()` returns none.
+
+### A SMALLER LESSON, KEPT
+
+I registered a *second* catalog entry for coarse-first before noticing the engine already had one ("Coarse-first
+refine (re-enable)") whose example was a raw import and whose description named the client measurement has now
+retired. Deleted mine; updated the existing entry in place. **Extend the faculty, do not add a sibling -- and that
+rule applies to the catalog, which is where a discoverability tax is actually paid.**
+
+Wired `mind.refine_where_uncertain` / `mind.escalate_mask` / `mind.uncertainty_concentration` /
+`mind.gradient_uncertainty`. 4 pytest tests (10 in the file), self-test now asserts the random-mask control and the
+escalate-mask contracts. All gates pass; `unifiers` lint 12/12 with PENDING honestly at 3.
+
+*The line worth keeping:* **an adaptive method cannot be made more adaptive by telling it where to look. Coarse-first
+is a way to buy adaptivity for a method that has none -- so its base pass had better be dumb.**
+
+## A dark module, a constitutional violation, and a 34x PNG regression nobody had measured
+
+The plan was small: `holographic_pack` is a DARK module -- "a lossless delta set packer for image families; a storage
+capability with no door." Wire it, catalog it, delete its line from the frozen dark ledger.
+
+Reading it first turned up something else. `pack.benchmark()` imports **PIL**, to build its own PNG baseline. Two
+things wrong with that at once:
+
+  * **PIL in core is a constitutional violation** -- "NumPy / Flask / stdlib / hashlib only; no PIL-in-core."
+  * **The engine already ships a pure-stdlib PNG encoder** (`holographic_render.png_bytes`, zlib + struct). A module
+    imported an image library to duplicate a primitive sitting one import away. The exact silo the unifier program
+    exists to catch, hiding inside a benchmark.
+
+### AND THE BASELINE, ONCE MEASURED, TURNED OUT TO BE 43x TOO BIG
+
+Swapping in the engine's encoder meant measuring it against Pillow, which nobody had done. Six 96x96 images:
+
+    image set            engine (filter 0)     Pillow (optimize)     ratio
+    smooth gradients          67,245 B             1,560 B          43.1x
+    flat logo suite            3,553 B             4,467 B           0.80x
+
+`png_bytes` emitted **PNG filter type 0 (None) on every scanline**, from the day it was written. Correct, lossless,
+and it leaves almost the entire point of the format unused: PNG's per-scanline filters (Sub / Up / Average / Paeth)
+predict each byte from its neighbours so zlib compresses the RESIDUAL, not the pixels. Every render this engine has
+ever written to disk paid that. Nothing failed, because **a PNG that is 43x too big is still a perfectly valid PNG
+that opens fine.**
+
+### THE FIX, AND THE HEURISTIC THAT LOST
+
+Implemented the five filters with libpng's minimum-sum-of-absolute-differences heuristic. It fixed the gradient
+(67,245 -> 1,987 B) and **made the flat logo suite WORSE** (3,553 -> 4,903 B).
+
+That is not a bug in the heuristic; it is the heuristic's blind spot. Filter 0 leaves the byte stream uniform, so
+zlib's LZ77 matches long runs ACROSS scanlines -- matches that mixed per-line filters break. **No per-line cost
+function can see a cross-line match. Only the compressor can.** So `png_bytes` now compresses BOTH strategies and
+keeps the smaller, with ties going to the legacy stream:
+
+    image set          legacy      filtered     shipped (min)     vs Pillow
+    smooth gradients   67,245 B     1,987 B       1,987 B           1.27x
+    flat logo suite     3,553 B     4,903 B       3,553 B           0.80x
+    white noise       196,992 B   196,992 B     196,992 B            --
+
+**34x smaller on a gradient, never worse on anything, and it now beats Pillow 2x on flat vector art.**
+
+The filter search vectorises across ALL scanlines at once -- PNG's filters reference the UNFILTERED row above, so no
+line depends on another line's choice. A per-line Python loop measured 11x the legacy encode cost; vectorised, the
+whole thing is 3.4x, and that 3.4x is the two zlib passes, not the search. The streamed-preview path (`level=1` in
+`demo_kit`) opts out, because a preview frame wants speed, not bytes.
+
+### KEPT NEGATIVES AND GUARANTEES
+
+* **Lossless, pinned by our own decoder.** PNG filtering is lossless by construction, but a test that trusts Pillow
+  to say so would paper over an encoder bug with a decoder bug. `test_holographic_render.py` now carries a ~30-line
+  stdlib un-filter and asserts the decoded pixels are byte-identical for both strategies, on a gradient, on flat
+  art, and on white noise.
+* **`filters=False` reproduces the legacy byte stream exactly**, asserted against a hand-built reference. An escape
+  hatch that is not exact is not an escape hatch.
+* **Ties keep the lower filter number** (`np.argmin` returns the first minimum), so identical pixels always give
+  identical bytes -- determinism, in a place where nobody would have looked for it.
+* **THE DEFAULT OUTPUT BYTES CHANGED.** This is the one place this session where I did not keep an existing default.
+  The decoded PIXELS are provably identical, no test or artifact depends on the byte layout, and leaving a 34x
+  regression in place to preserve an unobservable serialisation seemed the worse trade. `filters=False` restores it.
+  Flagging it explicitly rather than burying it in a diff.
+
+### AND THE PACKER'S OWN CLAIMS, RE-MEASURED AGAINST THE STRONGER BASELINE
+
+Both survive, and the negative got sharper:
+
+    logo suite      set-pack 1,744 B  |  per-file PNG 3,553 B  |  gzip-the-PNGs 3,162 B     -> beats both
+    gradient ramp   set-pack 32,274 B |  per-file PNG 1,987 B                               -> 16x WORSE
+
+Its docstring said "~39% of per-file PNG", measured against Pillow. Against the engine's own (now competitive)
+encoder it is 49%. The direction held; the number did not. **A baseline you have not measured is not a baseline** --
+which is the same lesson as the strawman Gaussian splat fit, three items ago, arriving from a completely different
+direction.
+
+Wired `mind.pack_images` / `mind.unpack_images` / `mind.pack_benchmark`; catalog home ("Lossless set-packing for
+image families") carrying the 16x negative in its description, findable by "lossless set packer", "compress a set of
+images", "delta compression". `pack` and `coarsefirst` both deleted from `wiring_report`'s KNOWN_DARK: **13 dark
+modules -> 11**, and `--check` still passes, so the frozen debt shrank rather than grew. 3 pack tests + 4 PNG tests.
+All gates pass.
+
+*The line worth keeping:* **the thing that has never failed is the thing nobody has measured.** A filter byte of zero
+on every scanline for the life of the project, valid every single time.
+
+### ADDENDUM, same session: I wrote a PENDING reason from a module's NAME
+
+The `coarsefirst` registry entry I had just added listed three unwired clients, each with a reason. One of them read:
+
+> `volint` marches uniformly. This is the clean case, and unmeasured.
+
+**`volint` does not march at all.** Its whole point is that it doesn't: the FPE basis is a phase code, the integral
+of a complex exponential is a complex exponential, so the volumetric line integral has a CLOSED FORM -- one inner
+product per ray. Its docstring says so in its second paragraph. I wrote that reason from the module's name, one step
+after appending a NOTES entry about probing before claiming.
+
+Measured, so the retirement is evidence and not assertion:
+
+    ray length L      0.5      2.0      8.0     64.0        (a 128x range)
+    time             1023 ms  1092 ms  1072 ms  1089 ms     -- FLAT
+    ray count R      1,024    4,096   16,384
+    time per ray      253 us   265 us   266 us              -- CONSTANT
+
+**Coarse-first buys adaptivity for a method priced per cell. The closed form deleted the cells.** `volint` moves to
+NOT_APPLICABLE with that measurement; the volumetric client coarse-first actually wants is
+`render.volume_render`, which marches every pixel with the same `steps` -- a dumb uniform base, priced per pixel,
+the clean case -- and it takes volint's place in PENDING with the experiment it owes written out (coarse march,
+alpha-gradient uncertainty, re-march the escalated rays, report sample count against uniform-high, with a random
+control).
+
+That correction propagated: `coarsefirst`'s own docstring named "volumetric marching" among its clients and the
+pre-existing catalog entry named `volint` outright. Both now carry the measured list. The chain of custody for that
+error runs: one module's docstring -> a catalog description -> my registry entry -> a NOTES claim. **Nothing in that
+chain touched the code.** The lesson is not "read more carefully"; it is that a client list is a CLAIM, and claims
+in this engine are supposed to be measured. The registry now treats them that way.
+
+`volint`'s cost model is pinned by a test, so a future edit that reintroduces a loop fails loudly. Lint 12/12,
+`unaccounted()` none, PENDING honestly at 3.
+
+### AND THEN THE AUDIT TOOL ITSELF: a silent degradation, found by an anomaly I still cannot fully explain
+
+Rebuilding the zip, `wiring_report` reported **11** dark modules where the same command had reported 13 at the start
+of this segment. One of the two -- `coarsefirst` -- I had wired on purpose. The other was `holographic_pack`, which
+I never touched.
+
+`holographic_pack` is imported by `holographic_unified.py` (inside `mind.pack_benchmark`). It should never have been
+dark. So either the earlier report was wrong, or something in my edits changed the import graph. **I cannot account
+for it, and I am recording that rather than inventing a cause.** What I could do was ask what would have to be true
+for the tool to be wrong, and then test it.
+
+**IT CAN BE WRONG, SILENTLY, AND HERE IS THE MECHANISM.** `_imports` and `_module_docstring` both did this:
+
+    try:
+        tree = ast.parse(...)
+    except SyntaxError:
+        return set()          # <-- indistinguishable from "this file imports nothing"
+
+An unparseable file contributes ZERO references and says nothing about it. `holographic_unified.py` alone references
+**342 modules**. One broken edit to it -- a stray character, a mangled line ending -- and every module reachable only
+through the mind is reported DARK, while the report prints a clean, confident summary and `--check` either passes or
+fails for the wrong reason. Demonstrated on a temporary copy: healthy file -> 342 imports found; the same file with
+one unbalanced parenthesis -> 0 imports found, no error, no warning.
+
+**AN AUDIT THAT DEGRADES SILENTLY IS WORSE THAN NO AUDIT**, because everything downstream trusts it -- the dark
+list, the catalog-only list, and `select_tests`, which shares the same module walk and could quietly deselect the
+very tests that would have caught the breakage.
+
+FIXED: parse failures are collected in `PARSE_FAILURES`, printed under a heading that says the report is not
+trustworthy until they are fixed, and `--check` now exits non-zero on any of them -- before it evaluates a single
+dark module. Two tests pin it: one proves the failure is recorded rather than swallowed, and one asserts the live
+tree parses, which is the condition under which every other assertion in that file means anything.
+
+The stale `KNOWN_DARK` line for `pack` is gone, which is correct either way: `--check` already fails on an annotation
+for a module that is no longer dark ("delete them from KNOWN_DARK so the progress is recorded"). Dark count 13 -> 11,
+`--check` green, and now it is green for a reason it can defend.
+
+*Kept, because it is the third time this session:* **the tools that certify the work need the same discipline as the
+work.** The seed-fragile self-test, the single-seed docstring table, and now an audit that fails quietly. Each was
+green. None was right.
+
+## The coarse-first experiment `volume_render` owed -- and the law that has now retired three clients
+
+I put `render.volume_render` into PENDING as "the clean case, unmeasured": it marches every pixel with the same
+`steps`, a dumb uniform base priced per pixel, exactly what coarse-first wants. So I ran the experiment it owed.
+
+First a two-line additive change: `volume_render(..., only=mask)` marches only the flagged rays. Verified bit-
+identical inside the mask, `background` at alpha 0 outside, and the skipped rays genuinely cost nothing.
+
+Then the measurement (two-blob scene with a sharp shell, 64x64, cost = FIELD EVALUATIONS, the thing that is actually
+paid for). The gate said GO -- the coarse render's gradient scored **0.967** concentration:
+
+    base                         uniform 96 steps       coarse-first, top 20% at 96 steps
+    empty_skip + early_term        22,461 evals          23,137 evals   (1.0x -- the coarse pass is pure overhead)
+    both OFF (a dumb march)       341,184 evals         115,512 evals   (3.0x, at IDENTICAL RMSE 0.00145)
+
+**`empty_skip` and `early_term` ARE coarse-first.** Do not sample rays in empty macro-cells; stop sampling a ray once
+it is opaque. Spatial escalation and temporal escalation, under other names, written before `coarsefirst` existed.
+Together they buy **15.2x** on this scene. A residual mask on top buys **1.0x**, because the pixels a gradient flags
+are the same pixels that hit the volume -- there is nothing left for the mask to find.
+
+And the mechanism is confirmed rather than assumed: **turn the smart base off and coarse-first works exactly as
+advertised** -- 3.0x at identical RMSE, with the random-mask control at the same budget landing 8.8x worse (0.01273
+against 0.00145). The signal is real. The escalation is real. The client had 5x better adaptivity already.
+
+`volume_render(only=)` is kept -- it earned its place by making the measurement possible, it is exact, and tiling /
+previews / user-side escalation all want it. Two tests pin it, and one pins the negative so nobody re-runs the
+experiment.
+
+### THE LAW, WHICH NOW SUBSUMES BOTH OF COARSE-FIRST'S CONDITIONS
+
+**COARSE-FIRST BUYS ADAPTIVITY FOR A METHOD THAT HAS NONE.**
+
+Three of this unifier's four named engine clients already had some, and every one fails for that single reason:
+
+  * `splat` -- greedy matching pursuit places its next primitive where the residual peaks. Already adaptive; cost is
+    per PRIMITIVE, not per cell (21.0 dB with and without the mask, at 0.9x the speed).
+  * `volint` -- the line integral is CLOSED FORM. There is no per-cell loop to escalate (cost flat across a 128x
+    range of ray length).
+  * `render` -- `empty_skip` + `early_term`, above.
+
+The two conditions I derived earlier -- "the uncertainty must be concentrated" and "the expensive method must be
+priced per cell" -- are both corollaries. An already-adaptive method has either flattened its own residual (killing
+concentration) or dissolved its cells (killing per-cell pricing), or both.
+
+### AND THE HONEST CONSEQUENCE, WHICH IS NOT A WIRING GAP
+
+`coarsefirst` was invented AFTER its clients. Each of them had already solved the problem, differently and better.
+Its remaining two entries are of a different kind: `gbuffer.converge_samples` already escalates per pixel with a
+CALIBRATED threshold rule (a DELEGATION candidate -- stop hand-rolling the mask -- not a speed win), and `nystrom`
+picks landmarks by farthest-point sampling (a different rule, owing a baseline).
+
+**So the primitive's real home is user- and agent-facing code, through `mind.refine_where_uncertain`, not the
+engine's inner loops.** A unifier with no engine adopters is normally a silo. This one is a general capability whose
+specialised competitors all predate it and all win. That is worth knowing, and it is only knowable by measuring --
+the registry would otherwise have carried three PENDING lines forever, each of them a build nobody should do.
+
+PENDING: 3 -> 2. `unaccounted()` none. Lint 12/12. 2 more tests. All gates pass.
+
+### The one adoption an already-adaptive engine could give: `converged_mask` cites the unifier
+
+Two PENDING entries remained. One of them, `gbuffer`, turned out to be **the wrong module** -- `converge_samples`
+does not build the escalate mask, it CALLS `adaptive_sample.converged_mask`. That is where the second threshold rule
+actually lived. Reading the code found it; the registry had carried the name for as long as the entry existed.
+
+And here the adoption is real, because it is **not about speed at all.** The renderer's stop rule is already
+per-pixel and already calibrated; coarse-first buys it nothing (that is the law, three times over). But
+`converged_mask`'s complement IS an escalate mask, and having two independent threshold comparisons in one engine is
+exactly the silo the unifier registry exists to prevent. So `converged_mask` now delegates:
+
+    return ~escalate_mask(ci_half_width(vom, z), threshold=tolerance, inclusive=False)
+
+**THE ONE THING THAT HAD TO BE PRESERVED IS THE TIE CONVENTION, AND IT IS THE OPPOSITE OF COARSE-FIRST'S.** A cell
+exactly AT an escalation cutoff should be REFINED (refining a cell that did not need it wastes a little work;
+missing a hard one reintroduces the error). A pixel whose confidence interval is exactly the tolerance has
+CONVERGED and must STOP. Both are conservative -- in opposite directions -- and delegating without noticing would
+have silently changed a calibrated renderer's behaviour on the tie. So `escalate_mask` grew `inclusive=False`, and
+the equivalence is proven rather than assumed: **bit-identical on 100,000 random variances including 500 constructed
+to hit the tolerance exactly.**
+
+This is the adoption an already-adaptive engine can give: not "make it faster", but **one place that decides what
+"above the cutoff" means, and what happens on a tie.** The speed home of coarse-first is user- and agent-facing code
+through `mind.refine_where_uncertain`; its contract home is `converged_mask`.
+
+*A test I wrote wrong, kept:* my first end-to-end assertion demanded `median_ci > 0`. It is legitimately **0.0** at
+draft quality, because most pixels are background rays with zero variance and a zero-variance pixel has a
+zero-width confidence interval. The code was right and the assertion was a hoped-for number. Replaced with the
+contract (`>= 0`, finite, non-negative variances) and the thing that actually matters -- that per-pixel sample
+counts differ, which is the stop rule doing its job.
+
+PENDING: 2 -> 1 (`nystrom`, which owes a baseline against farthest-point sampling). `unaccounted()` none. Lint 12/12.
+`coarsefirst` now has a genuine engine caller. 3 more tests.
+
+## The last PENDING: the gate passes, the method loses — and the shipped default was worse than random
+
+`nystrom` was the final entry, and unlike the others it was a real open question: does spending the landmark budget
+where the approximation is *uncertain* beat farthest-point sampling? That is adaptive Nystrom -- greedily pivot the
+next landmark onto the point of maximum diagonal residual `r(x) = k(x,x) - k_x^T pinv(Wmm) k_x` (pivoted Cholesky;
+Fine & Scheinberg 2001). It is a QUALITY question at a FIXED budget, not a cost question -- m landmarks either way.
+
+Measured against the dense O(N^3) embedding (subspace alignment, 1.0 = the same subspace), m=24, n_basis=6, mean
++- sd over 50 trials (10 data seeds x 5 landmark seeds):
+
+    dataset                   fps (default)       uniform random       coarse-first residual
+    clusters + outliers      0.8692 +- 0.0216    0.9512 +- 0.0315      0.8434 +- 0.0207
+    smooth curve             0.9831 +- 0.0071    0.9792 +- 0.0079      0.9757 +- 0.0058
+    uniform blob             0.9889 +- 0.0033    0.9743 +- 0.0126      0.9742 +- 0.0044
+
+**COARSE-FIRST NEVER WINS, AND IT IS WORST EXACTLY WHERE FPS IS WORST.** The point of maximum residual IS the most
+isolated point. The residual is a COVERAGE signal, and a spectral embedding needs a MASS signal, because the leading
+eigenvectors carry their weight in the DENSE regions. It is FPS's failure mode, amplified.
+
+**AND THE GATE CANNOT SEE IT.** `coarsefirst.concentration` of that residual scores 0.328 / 0.403 / 0.321 -- flat,
+and comfortably "concentrated" on all three. The gate says CANDIDATE; the measurement says no. That is precisely
+what "necessary, not sufficient" was written to mean, and this is the case it was written for: **a concentrated
+uncertainty that concentrates on the wrong thing.**
+
+### THE SEPARATE FINDING, WHICH MATTERS MORE THAN THE ITEM
+
+The shipped default is **materially worse than uniform random** on outlier-laden data: 0.8692 against 0.9512, with
+random winning **47 of 50 trials**. And `nystrom`'s docstring said the opposite --
+
+> "farthest-point sampling = guaranteed coverage of every hot cluster / local manifold ... unlike uniform-random,
+> which can miss a small cluster"
+
+Coverage is real. It is not what a spectral embedding wants. FPS deliberately picks EXTREMES; with stragglers in the
+data those are the points that matter least. The default stays (it wins on the other two rows, and flipping it would
+change existing decisions), but it is **no longer described as strictly better**, and both regimes are now pinned by
+tests and printed by the self-test.
+
+### THE OLD SELF-TEST COULD NOT FAIL, AND MY FIRST THREE REPLACEMENTS WERE WRONG
+
+The shipped assertion was `a_fps >= a_rand - 0.05` on three well-separated blobs where both rules score **0.998**.
+A tautology with slack. Replacing it took four attempts, each corrected by running it:
+
+  1. asserted `fps > random` on the same blobs -- 0.99814 vs 0.99878, random wins, the ordering is noise;
+  2. moved to a 3-D uniform blob at `sigma=1.0` -- 0.583 vs 0.676, random wins again (wrong sigma regime);
+  3. matched the 2-D median-landmark sigma but kept `n_basis=3` -- 0.9941 vs 0.9893, the effect is there but the
+     margin is 0.005, below my 0.02 bar;
+  4. matched `n_basis=6`, the regime the measurement was actually made in -- and both assertions hold with real
+     margins (0.995 > 0.976 clean; random 0.966 > FPS 0.868 with outliers).
+
+**Every one of those was me asserting a result in a regime I had not measured it in.** The effect is real; three of
+its four framings were not. A test that pins the wrong regime is a tautology waiting to be discovered.
+
+### THE REGISTRY IS NOW EMPTY FOR THE RIGHT REASON
+
+    iterate.step_k / limit              3/3      determinism.hash_unit      2/2
+    coarsefirst.refine_where_uncertain  1/1      rns / reduce_sum_exact     2/2
+    determinism.argmax_tiebreak         4/4      octnormal                  1/1
+    lowdiscrepancy                      3/3      project_onto_constraints   6/6
+
+    PENDING: 0     unaccounted(): none     NOT_APPLICABLE: 10 (each with a measurement)
+
+`coarsefirst` finished with **one** engine client (`converged_mask`, a contract not a speedup) and **four measured
+retirements**, all for one reason: **coarse-first buys adaptivity for a method that has none.** Three of the four
+already had some. The fourth had an uncertainty signal pointing the wrong way.
+
+**Note the shape of that result.** A unifier invented AFTER its clients may find every one of them already solved
+the problem, differently and better. That is not a wiring debt to be paid down. It is a discovery about where the
+primitive belongs -- and it is only reachable by measuring, because **a registry full of plausible PENDING lines
+looks exactly like work worth doing.**
+
+## Wiring a dark module surfaced a live security hole: an agent could extend the command allowlist over HTTP
+
+`holographic_command` was a `TODO wire` dark module: a general external-program runner (ffmpeg, a solver, an API
+client), designed carefully -- allowlist, no shell ever, one-token-in-one-token-out placeholder filling, injection
+tested in its own selftest. Wiring it to `UnifiedMind` gives it a door. **It also gives it a door onto the HTTP
+service, and that is where wiring it turned up a real hole.**
+
+The service exposes EVERY public mind method to `/invoke` by name; the only gate is a leading underscore. My first
+cut wired `register_command` as a public method with a docstring saying "do not call this from /invoke input." A
+docstring is not a boundary. **Measured, over a real socket:**
+
+    POST /invoke {"name":"register_command","args":{"name":"sh","argv":["sh","-c","{input}"]}}  ->  ok: true, "sh"
+
+An agent could add `sh -c {input}` to the allowlist and then run it. The entire allowlist design -- careful, no-shell,
+injection-safe -- is void the moment the caller can extend the list. **The gate has to be on registration, not just
+on execution.**
+
+FIXED by the one mechanism the service actually enforces: registration is now `_register_command`, underscore-
+prefixed, so `/invoke` refuses it by name and `/tools` does not advertise it. Only `run_command` -- which can run
+NOTHING that is not already on the operator's in-process allowlist -- is reachable over the wire. Pinned end to end
+by an integration test that spins the real HTTPServer and asserts all four facts: an allowlisted command runs, an
+unlisted one is refused, `_register_command` is blocked as private, and it is absent from the manifest.
+
+I also added and then REMOVED a public `configure_commands(allowlist)` helper. It read as operator setup, but public
+is public: a deployer who exposed it would re-open the exact hole. Any PUBLIC path to registration defeats the gate,
+so there is none. The allowlist is set in process, before the mind is served, and that is the whole contract.
+
+### THE GENERAL LESSON, WHICH IS BIGGER THAN THIS MODULE
+
+**Wiring is not neutral. A capability that was safe as a dark module can be unsafe the moment it has a door**, because
+the door in this engine is `/invoke`, and `/invoke` is agent-facing by design. The reachability audit hunts for
+capabilities with no door; this session it produced one whose door needed a lock. Every future `run_*` / `write_*` /
+`register_*` faculty inherits this: **if a method mutates a security-relevant boundary, it must be private, and the
+test that proves it must go through the socket, not the object.** "It's safe in process" and "it's safe over /invoke"
+are different claims -- the same lesson as `gather_samples`, now with teeth.
+
+Dark modules 11 -> 10. `mind.run_command` / `mind.command_tool` wired; catalog home ("Run an allowlisted external
+command") with the security note in its description; findable by "run ffmpeg", "job runner", "shell out". 1 test
+(the integration test); the module's own injection-safety selftest already existed. All gates pass.
+
+## `simulationhome`: catalogued but dark, and the stateless-twin pattern again
+
+`holographic_simulationhome` was a `TODO wire` dark module -- but with a twist the reachability audit had already
+flagged: it was CATALOGUED. "Simulation (domain)" was in the catalog, findable by "step any solver forward", with an
+example that imported the class directly (`from holographic.misc.holographic_simulationhome import Simulation`). So
+it was discoverable and had no mind faculty -- reachable by a human reading CAPABILITIES.md, not by an agent calling
+/invoke. Discoverability and wiring are different axes, and this was the case that proves it: a module can score
+perfectly on one and zero on the other.
+
+The scaffold itself is a good design and needed no changes: ONE step loop over any time-stepped solver (Stable
+Fluids, reaction-diffusion, softbody, MPM, ...), each keeping its own math, wrapped in three closures. The wiring
+was the whole job -- and it hit the SAME wall as `gather_samples` and the bake family: `Simulation` returns a LIVE
+object (it holds the solver and a step adapter), which does not survive JSON serialization across /invoke.
+
+So the faculty is a PAIR, the pattern this project has now converged on for every live-handle capability:
+  * `mind.simulation(solver, step_fn, field_fn)` -- the in-process wrapper, full power, returns the live object.
+  * `mind.run_simulation(kind, steps)` -- the stateless twin: build a known solver ('fluid' or 'automaton', two
+    genuinely different algorithms), run it, return its field grid as plain JSON. Proven over a real socket:
+    POST /invoke {"name":"run_simulation","args":{"kind":"automaton","steps":6,"grid":16}} returns a 16x16 list.
+
+THE RULE, now explicit enough to state as a convention: **a faculty that returns a live handle owes a stateless twin
+if it is to be agent-facing.** bake/fetch -> gather_samples; Simulation -> run_simulation. The live form is for
+in-process reuse; the twin re-builds each call and speaks only JSON. A capability that returns an un-serializable
+object is discoverable, wired in-process, and still unreachable over the wire -- which is exactly the gap `/tools`
+advertises and `/invoke` cannot fulfil. The twin closes it.
+
+Catalog entry UPDATED IN PLACE (not duplicated -- the discoverability tax lesson from `coarsefirst`): its example
+now uses `mind.run_simulation` instead of a raw import, and it names both faculties. Dark modules 10 -> 9. 3 tests
+(including the HTTP round-trip); the module's own two-distinct-solvers selftest already existed. All gates pass.
+
+## The last two TODO-wire dark modules: `encyclopedia` (with a real bug) and `navigator` (with a verified claim)
+
+### `encyclopedia` -- and a data-corruption bug the wiring surfaced
+
+A `TODO wire` structured-knowledge layer (is_a taxonomy + has parts, the third rung of the dictionary -> grammar ->
+encyclopedia curriculum). Wiring it to the mind -- state ON the mind, every method taking and returning PLAIN DATA,
+so a long-lived service accumulates knowledge across /invoke calls and needs no stateless twin -- surfaced two
+defects that had been sitting in green code.
+
+**(1) `add` clobbered instead of merging, silently corrupting the taxonomy.** `KnowledgeStore.add(name, **attrs)`
+REPLACES a record (`self.attrs[name] = dict(attrs)`), which is the right contract for a primitive store. Encyclopedia
+called it as if it merged: `add("dog", is_a="canine")` then `add("dog", has=["tail"])` dropped the is_a role from the
+bound VECTOR. The Python-side `parent` dict still held it, so the two diverged -- `is_a("dog")` (reads the vector)
+returned "tail", and `climb("dog")` walked into `["dog.n.01", "tail"]`. A taxonomy that breaks the moment a concept
+is given parts after a parent, with nothing raised. Fixed by merging from the existing record before re-binding.
+
+**(2) `relatedness` was documented as "1.0 if siblings"; it is 0.333.** The score is `1/(1 + depth_a + depth_b)` to
+the nearest common ancestor -- identical 1.000, parent 0.500, siblings 0.333, cousins 0.200, unrelated 0.000. Only a
+concept against ITSELF scores 1.0. It ORDERS taxonomic distance; it is not a probability. Both docstrings corrected.
+
+The module also had NO `_selftest()` and no `__main__` -- a build-loop requirement it never met. Added one that
+asserts the numeric contract and pins the merge bug. (The bug also depressed cleanup confidence: is_a("dog") returned
+0.69 with the clobbered record, 1.00 once merged.)
+
+### `navigator` -- verify the claim BEFORE wiring it
+
+The creature's reinforcement-learning brain, repurposed to search the data tree with a LEARNED adaptive budget
+instead of a fixed beam. It ships a headline claim -- "matches a wide beam's recall at a fraction of the cost" --
+and the rule this session has hammered is that a claim is not wired until it is measured against its strongest
+honest baseline. The module ships that baseline itself: `fixed_beam_curve`, the tree's OWN routing at a range of
+budgets.
+
+MEASURED (1,200 items, 32 regions, 250 eval queries), quoting BOTH readings so neither flatters:
+
+    fixed-beam baseline        beam  1: 43.2% @  37.5    beam  8: 95.2% @ 300.1
+                               beam  4: 81.6% @ 150.0    beam 12: 98.4% @ 450.0
+    LEARNED NAVIGATOR          98.0% recall @ 173.4 comparisons
+
+  * cheapest fixed beam matching 98.0% recall: beam 12, at 450 comparisons -- the navigator is 2.6x cheaper.
+  * at the navigator's budget (<=173 comparisons): the best fixed beam is 4, at 81.6% -- 16 points worse.
+
+The claim holds on both axes. Wired `train_navigator` / `navigator_find` / `navigator_benchmark` (state on the mind,
+plain data across the wire, HTTP round-trip proven), with the fixed-beam curve exposed by `navigator_benchmark` so
+the baseline travels WITH the capability -- an agent can re-run the comparison, not just take the number.
+
+### THE MILESTONE
+
+**Every TODO-wire dark module is now wired. Dark count 13 -> 7**, and the 7 that remain are not debt: each has a
+recorded reason it is not a callable faculty -- three are reference DEMOS or test harnesses meant to be read/run not
+imported (`creature_mind`, `photos`, `lexicon`), one is EVIDENCE not a faculty (`reanchor`, the audit that proves
+re-anchoring is load-bearing), one is a BASE CLASS meant to be subclassed (`sdfscene`), one is superseded
+(`farm` -> coordinator.NetworkFarm), and one is a grab-bag to be triaged into homes and deleted (`extras`). Those
+are decisions, recorded and frozen by `wiring_report --check`, not omissions.
+
+encyclopedia: 4 tests (+ the merge-bug and relatedness-scale pins) and a new module selftest. navigator: 3 tests
+including the both-readings baseline check and the HTTP round-trip. All gates pass.
+
+## The encyclopedia name collision -- one attribute, two faculties, sixteen red tests and one silent lie
+
+CI went red with 16 failures across five test files. All sixteen were **one bug**, and the bug was a *name*.
+
+Two independent faculties had each claimed `self._encyclopedia` on `UnifiedMind`:
+
+1. the **curriculum layer** (`learn_encyclopedia`, layer 3 of dictionary -> grammar -> encyclopedia), which stores a
+   plain `{concept: {role: filler}}` dict there and absorbs the facts into the mind's OWN memory as role-bound
+   records -- `climb`/`is_a` read the memory, never the dict; and
+2. the **encyclopedia faculty** (`encyclopedia_add`/`climb`/`relatedness`, wired last session), a lazily-built
+   `Encyclopedia` object exposed as `@property _encyclopedia`.
+
+A property has no setter, so `learn_encyclopedia`'s `self._encyclopedia = dict(facts)` raised `AttributeError`.
+That was the loud half, and it accounted for every red test.
+
+**The quiet half is the one worth writing down.** `answer()` gated its `is_a` branch on
+`hasattr(self, "_encyclopedia")` -- using the attribute's mere EXISTENCE as the "an encyclopedia was taught" flag.
+A *lazily-instantiating* property satisfies `hasattr` unconditionally: it builds the object on access and returns it.
+So the flag was pinned permanently True, and a mind that had learned **nothing at all** answered
+`"is a dog an animal?"` with `kind='is_a', answer=False, hops=-1, throughput=1.0` -- a confident verdict, at full
+confidence, out of an empty memory. Measured on a virgin mind before the fix; `kind='unknown'` after it.
+
+**KEPT NEGATIVE -- do not "fix" this by adding a setter.** A setter silences the sixteen red tests and leaves the
+fabrication in place, because the fabrication is not caused by the missing setter; it is caused by the *name*. The
+crash is the half that gets fixed by accident. The lie is the half that survives, and it survives green. This is the
+`argmax_tiebreak` / fake-perfect pattern in a new costume: a guard that a mere name collision can satisfy is not a
+guard. **An existence check is only a check if the thing whose existence it tests cannot spring into being on being
+looked at.**
+
+**The fix.** The newcomer takes the new name: property `_encyclopedia` -> `_encyclopedia_faculty` (backing slot
+`_encyclopedia_obj` unchanged), and its seven call sites repointed. The curriculum keeps the attribute it held first
+(backward-compatible, per the constitution -- the older decision does not flip). `answer()`'s guard is rewritten as
+an explicit `getattr(self, "_encyclopedia", None) is not None` against the curriculum dict, with a WHY-comment
+naming the collision so the next reader does not re-shadow it.
+
+**Sideways check, done and clean.** An AST audit of every `@property` on `UnifiedMind` against every `self.X = ...`
+assignment in the class: nine properties (`_job_manager`, `_commands`, `_editor`, `orchestrator`, `db`, `base`,
+`workspace`, `registry`, and this one), **exactly one collision**, zero setters anywhere. The other eight all follow
+the safe `_x` property -> `_x_obj` slot pattern with no assignment to the property name. The newcomer simply picked a
+name that was already occupied. *That audit is three lines of `ast` and should be run whenever a lazy property is
+added to a class that also has plain attributes.*
+
+**Delta:** 3,965 -> 3,967 tests (+2), 16 failing -> 0. The two new tests are regression traps, and both were
+**proven to fail against the reintroduced bug** before being accepted -- one pins the two faculties as distinct
+objects that do not touch each other's state, the other pins abstention on a virgin mind (and pins that exercising
+the *faculty* must not flip the *curriculum* flag). An untested regression test is not a trap.
+
+Verified: static compile, `holographic_encyclopedia` selftest, end-to-end through the mind, and the full HTTP
+`/invoke` round-trip -- all eight `encyclopedia_*`/`learn_encyclopedia` methods are advertised in `GET /tools` and
+callable; `learn_encyclopedia` (the method that used to raise) and `answer` both round-trip. `reachability_audit`
+(43 IMPORT-ONLY, unchanged from pristine -- a pre-existing review bucket, not a regression from this change),
+`catalog_gaps` 0, `skill_lint` 0. `capdoc.py`/`docgen.py` regenerated; the only REFERENCE.md drift is the module's
+line count (+15 comment lines), no docstring changed.

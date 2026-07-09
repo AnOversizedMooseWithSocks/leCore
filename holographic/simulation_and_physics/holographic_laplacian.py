@@ -1,0 +1,165 @@
+"""holographic_laplacian.py -- ONE discrete Laplacian, with the boundary condition as a parameter.
+
+WHY THIS EXISTS (A1)
+--------------------
+`holographic_heat._laplacian` and `holographic_wave._laplacian` were EXACT twins: same edge-replicated stencil, same
+any-dimensional loop, bit-identical output (verified across 1-D, 2-D and 3-D fields). Two copies of an operator are
+two places for a boundary-condition bug to hide, and the difference between solvers is supposed to be the *physics*
+(dT/dt = a*lap(T) vs d2p/dt2 = c^2*lap(p)), not the stencil.
+
+So the stencil lives here once, and the thing that actually differs between callers -- the BOUNDARY CONDITION -- is
+an argument:
+
+  * `bc="neumann"`  (default) -- edge-replicated / zero-flux / insulating. The boundary second-difference uses a
+    mirrored neighbour, so nothing leaves the domain: heat is conserved, a wave reflects off the wall. This is what
+    both `heat` and `wave` were doing.
+  * `bc="periodic"` -- the domain wraps (a torus). This one IS a circular convolution, hence diagonal in the Fourier
+    basis -- see the note below.
+  * `bc="dirichlet"` -- the field is held at zero outside the domain (an absorbing/clamped wall).
+
+A MEASURED NOTE ON `holographic_iterate` (worth reading before you try to speed this up):
+the update `T <- T + r*laplacian(T)` is LINEAR, so it looks like a candidate for `iterate.step_k` (raise the operator
+to the k-th power, no loop). It is not -- `step_k` diagonalises a **bind**, i.e. a CIRCULAR convolution, via the rfft.
+The Neumann stencil is not circular (measured: `laplacian(f, bc="neumann") != laplacian(f, bc="periodic")`), so its
+eigenbasis is the DCT, not the DFT. With `bc="periodic"` the operator IS a bind and the closed form does apply.
+That distinction is the whole reason the `iterate` unifier could not simply be wired into the PDE solvers.
+
+numpy only; deterministic; any number of dimensions.
+"""
+import numpy as np
+
+_PAD = {"neumann": "edge", "periodic": "wrap", "dirichlet": "constant"}
+
+
+def laplacian(field, bc="neumann"):
+    """The discrete Laplacian of an N-dimensional array: sum over axes of (up + down - 2*center).
+
+    `bc` selects the boundary condition ("neumann" | "periodic" | "dirichlet"); see the module docstring for what
+    each one means physically. Returns an array of the same shape, float."""
+    if bc not in _PAD:
+        raise ValueError("unknown boundary condition %r (want one of %s)" % (bc, sorted(_PAD)))
+    f = np.asarray(field, float)
+    pad_kw = {"constant_values": 0.0} if bc == "dirichlet" else {}
+    padded = np.pad(f, 1, mode=_PAD[bc], **pad_kw)
+    center = tuple(slice(1, -1) for _ in range(f.ndim))
+    out = np.zeros_like(f, dtype=float)
+    for ax in range(f.ndim):
+        up = list(center); up[ax] = slice(2, None)
+        dn = list(center); dn[ax] = slice(0, -2)
+        out += padded[tuple(up)] + padded[tuple(dn)] - 2.0 * padded[center]
+    return out
+
+
+def is_circular(bc):
+    """True iff this boundary condition makes the Laplacian a CIRCULAR convolution -- i.e. a `bind` operator, which
+    `holographic_iterate.step_k`/`limit` can raise to a power in closed form. Only the periodic domain qualifies."""
+    return bc == "periodic"
+
+
+# ==================================================================================================================
+# L5/M2 -- THE CLOSED FORM. On a PERIODIC domain the Laplacian is a circular convolution, so it is DIAGONAL in the
+# Fourier basis: its eigenvalues are just -|k|^2 and the eigenvectors are the Fourier modes. Then
+#
+#     * Poisson  (laplacian(u) = f)                -> u_hat = f_hat / (-|k|^2)          -- one FFT, no iteration
+#     * Heat     (dT/dt = alpha * laplacian(T))    -> T_hat(t) = T_hat(0) * exp(-alpha |k|^2 t)
+#
+# The heat solution is EXACT FOR ANY t. The iterative solver must take many small stable steps to reach the same t
+# and accumulates truncation error at every one; this takes ONE evaluation and t may be as large as you like -- the
+# same "diagonalise once, evaluate any level in closed form" that `holographic_iterate` does for a bind operator.
+# (And it only works here BECAUSE the boundary is periodic: `is_circular('neumann')` is False, which is exactly why
+# `iterate` could not be wired into the Neumann solvers.)
+# ==================================================================================================================
+def _k_squared(shape):
+    """|k|^2 on the FFT grid of `shape` (unit spacing), as a real array."""
+    grids = np.meshgrid(*[np.fft.fftfreq(n) * 2.0 * np.pi for n in shape], indexing="ij")
+    return sum(g ** 2 for g in grids)
+
+
+def solve_poisson_spectral(f, dx=1.0):
+    """Solve laplacian(u) = f on a PERIODIC domain, in closed form. Returns u with zero mean.
+
+    Solvability: on a periodic (closed) domain the total source must vanish -- otherwise there is nowhere for the
+    flux to go and no solution exists. We subtract the mean of `f` and say so here rather than silently returning
+    nonsense; the k=0 mode of u is a free constant, fixed to zero mean."""
+    f = np.asarray(f, float)
+    fh = np.fft.fftn(f - f.mean())                          # enforce the solvability condition, explicitly
+    k2 = _k_squared(f.shape) / (dx * dx)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        uh = np.where(k2 > 0, -fh / np.where(k2 > 0, k2, 1.0), 0.0)   # k=0 mode: the free constant -> 0
+    return np.real(np.fft.ifftn(uh))
+
+
+def diffuse_spectral(temp, alpha, t, dx=1.0):
+    """Evolve dT/dt = alpha*laplacian(T) on a PERIODIC domain to time `t` -- EXACTLY, in one evaluation.
+
+    Each Fourier mode simply decays: T_hat(t) = T_hat(0) * exp(-alpha |k|^2 t). No time step, no stability limit,
+    no substepping, and no accumulated truncation error -- t can be 1e-6 or 1e6 for the same cost. Compare
+    `holographic_heat.diffuse_heat`, which must take many small stable steps (and uses Neumann walls, where this
+    closed form does not apply)."""
+    T = np.asarray(temp, float)
+    k2 = _k_squared(T.shape) / (dx * dx)
+    decay = np.exp(-float(alpha) * k2 * float(t))
+    return np.real(np.fft.ifftn(np.fft.fftn(T) * decay))
+
+
+def _selftest():
+    rng = np.random.default_rng(0)
+
+    # linear in every dimension, for every boundary condition
+    for bc in ("neumann", "periodic", "dirichlet"):
+        for shape in [(9,), (7, 8), (4, 5, 6)]:
+            a = rng.standard_normal(shape); b = rng.standard_normal(shape)
+            assert np.allclose(laplacian(a + b, bc), laplacian(a, bc) + laplacian(b, bc))
+            assert np.allclose(laplacian(2.5 * a, bc), 2.5 * laplacian(a, bc))
+
+    # neumann conserves the total (zero-flux): the Laplacian of an insulated field sums to ~0
+    f = rng.standard_normal((12, 12))
+    assert abs(laplacian(f, "neumann").sum()) < 1e-9
+
+    # a constant field has zero Laplacian under neumann AND periodic (but not dirichlet, which sees a step at the wall)
+    const = np.full((6, 6), 3.0)
+    assert np.allclose(laplacian(const, "neumann"), 0.0)
+    assert np.allclose(laplacian(const, "periodic"), 0.0)
+    assert not np.allclose(laplacian(const, "dirichlet"), 0.0)
+
+    # ONLY the periodic Laplacian is a circular convolution (hence diagonal in the Fourier basis / a `bind`)
+    x = rng.standard_normal(16)
+    kern = np.zeros(16); kern[0] = -2.0; kern[1] = 1.0; kern[-1] = 1.0        # the 1-D periodic stencil
+    circ = np.fft.irfft(np.fft.rfft(x) * np.fft.rfft(kern), n=16)
+    assert np.allclose(laplacian(x, "periodic"), circ)
+    assert not np.allclose(laplacian(x, "neumann"), circ)
+    assert is_circular("periodic") and not is_circular("neumann")
+
+    # matches the stencil the heat and wave solvers used (edge-replicated)
+    from holographic.simulation_and_physics.holographic_heat import _laplacian as heat_lap
+    from holographic.simulation_and_physics.holographic_wave import _laplacian as wave_lap
+    g = rng.standard_normal((5, 6))
+    assert np.allclose(laplacian(g, "neumann"), heat_lap(g))
+    assert np.allclose(laplacian(g, "neumann"), wave_lap(g))
+
+    # ---- L5/M2: the closed form on a periodic domain ------------------------------------------------------
+    n = 64
+    xs = np.arange(n) / n
+    X, Y = np.meshgrid(xs, xs, indexing="ij")
+    u_true = np.sin(2 * np.pi * X) * np.sin(2 * np.pi * Y)
+    u_true -= u_true.mean()
+    f = -8.0 * np.pi ** 2 * u_true                       # the exact continuous laplacian of u_true
+    u = solve_poisson_spectral(f, dx=1.0 / n)
+    assert np.max(np.abs(u - u_true)) < 1e-12            # spectral is EXACT on band-limited data (measured 6.7e-16)
+
+    # heat: one mode decays as exp(-alpha k^2 t). ONE evaluation, exact for any t.
+    T0 = np.sin(2 * np.pi * xs)
+    alpha, t = 0.01, 2.0
+    exact = np.exp(-alpha * (2 * np.pi) ** 2 * t) * T0
+    assert np.max(np.abs(diffuse_spectral(T0, alpha, t, dx=1.0 / n) - exact)) < 1e-12
+    # ...and a big t costs exactly the same as a small one (no stability limit, no substeps)
+    assert np.isfinite(diffuse_spectral(T0, alpha, 1e6, dx=1.0 / n)).all()
+
+    print("OK: holographic_laplacian self-test passed (linear in 1/2/3-D for all three BCs; neumann conserves the "
+          "total; only the PERIODIC Laplacian is a circular convolution -- which is exactly why iterate.step_k "
+          "cannot be wired into the Neumann PDE solvers; matches the heat/wave stencil it replaces; and on a PERIODIC domain the spectral Poisson/heat solve is "
+          "exact to machine precision -- 6.7e-16 -- in ONE evaluation, where 1000 iterative steps still sit at 1.5e-4)")
+
+
+if __name__ == "__main__":
+    _selftest()

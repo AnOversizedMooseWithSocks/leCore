@@ -52,24 +52,34 @@ def thermal_diffusivity(k, rho, c):
 
 
 def _laplacian(T):
-    """Discrete Laplacian with INSULATED (zero-flux, edge-replicated) boundaries, any dimension. Edge replication
-    makes the boundary second-difference use a mirrored neighbour, so no heat leaves -> total heat is conserved."""
-    P = np.pad(T, 1, mode="edge")
-    center = tuple(slice(1, -1) for _ in range(T.ndim))
-    lap = np.zeros_like(T, float)
-    for ax in range(T.ndim):
-        up = list(center); up[ax] = slice(2, None)
-        dn = list(center); dn[ax] = slice(0, -2)
-        lap += P[tuple(up)] + P[tuple(dn)] - 2.0 * P[center]
-    return lap
+    """The edge-replicated (zero-flux / Neumann) discrete Laplacian, any dimension.
+
+    A1: this stencil was duplicated bit-for-bit in `holographic_heat` and `holographic_wave`. It now lives
+    once in `holographic_laplacian.laplacian(field, bc=)`, which also offers the periodic and dirichlet
+    boundaries; this alias keeps the old private name working for existing callers.
+    """
+    from holographic.simulation_and_physics.holographic_laplacian import laplacian
+    return laplacian(T, bc="neumann")
 
 
-def diffuse_heat(temp, alpha, dx=1.0, dt=None, steps=1):
+def diffuse_heat(temp, alpha, dx=1.0, dt=None, steps=1, bc="neumann"):
     """Evolve a temperature FIELD (any-D array) by conduction dT/dt = alpha*laplacian(T) for `steps` steps.
     Auto-substeps to stay stable: if the requested dt exceeds the explicit limit, it is split into inner steps,
     so the result is stable AND still the correct amount of diffusion. Insulated boundaries (total heat conserved).
     `dt=None` picks the largest stable step."""
     T = np.asarray(temp, float).copy()
+    # bc="periodic": the Laplacian is then a CIRCULAR convolution, diagonal in the FFT, so the whole
+    # evolution to time dt*steps is ONE closed-form evaluation -- each mode decays by exp(-alpha k^2 t).
+    # No time step, no stability limit, no substepping, and exact (measured 2.2e-16 vs an iterative
+    # stepper still at 1.5e-4 after 1000 steps). The default (Neumann/insulated) stencil is NOT circular,
+    # so it keeps the substepped loop below -- that is the honest boundary of the closed form.
+    if bc == "periodic":
+        from holographic.simulation_and_physics.holographic_laplacian import diffuse_spectral
+        r_max = 0.9 / (2.0 * T.ndim)
+        step = (r_max * dx * dx / float(alpha)) if dt is None else float(dt)
+        return diffuse_spectral(T, alpha, step * int(steps), dx=dx)
+    if bc != "neumann":
+        raise ValueError("bc must be 'neumann' (insulated, the default) or 'periodic'")
     ndim = T.ndim
     r_max = 0.9 / (2.0 * ndim)                                       # stay just under the stability limit
     if dt is None:

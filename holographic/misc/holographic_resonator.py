@@ -49,6 +49,7 @@ meaning settler, now solving an exponential search.
 Needs: numpy.
 """
 import numpy as np
+from holographic.misc.holographic_determinism import argmax_tiebreak
 
 
 def map_codebook(n_codes, dim, seed):
@@ -84,15 +85,34 @@ class ResonatorNetwork:
     def _run(self, c, iters, seed):
         rng = np.random.default_rng(seed)
         ests = [np.sign(rng.standard_normal(self.dim)) for _ in range(self.F)]
-        for t in range(iters):
-            new = []
-            for f in range(self.F):
+        # UNIFIER (P7): one iteration of this loop IS an iterate-a-projection sweep -- each factor is projected
+        # onto its own codebook (cleanup is idempotent, measured) while the others are held fixed. Because the
+        # factors are DISJOINT blocks, the "simultaneous" (Jacobi) sweep of `project_onto_constraints` sums the
+        # block moves and reproduces this update EXACTLY -- verified bit-for-bit. We delegate the sweep and keep
+        # our own exit conditions (exact reconstruction / stuck detection), which the generic engine has no
+        # opinion about.
+        from holographic.rendering.holographic_denoise import project_onto_constraints
+
+        def _projection(f):
+            def proj(x):
+                blocks = x.reshape(self.F, self.dim)
                 others = c.copy()
                 for g in range(self.F):
                     if g != f:
-                        others = others * ests[g]
-                new.append(self._cleanup(others, self.books[f]))
-            idx = tuple(int(np.argmax(self.books[f] @ new[f])) for f in range(self.F))
+                        others = others * blocks[g]
+                out = blocks.copy()
+                out[f] = self._cleanup(others, self.books[f])
+                return out.reshape(-1)
+            return proj
+
+        projections = [_projection(f) for f in range(self.F)]
+        for t in range(iters):
+            stacked, _sweeps, _conv = project_onto_constraints(
+                np.concatenate(ests), projections, iters=1, sweep="simultaneous")
+            new = list(stacked.reshape(self.F, self.dim))
+            # DETERMINISM CONTRACT (ISA-1): cite argmax_tiebreak, don't hand-roll. The scores' last bits are not
+            # stable across backends/orders, so the WINNER must come from the named rule (ties -> lowest index).
+            idx = tuple(argmax_tiebreak(self.books[f] @ new[f]) for f in range(self.F))
             rec = np.ones(self.dim)
             for f in range(self.F):
                 rec = rec * self.books[f][idx[f]]

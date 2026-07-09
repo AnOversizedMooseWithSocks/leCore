@@ -60,7 +60,17 @@ class Encyclopedia:
         self.parts = {}           # concept -> [has parts]
 
     def add(self, concept, is_a=None, has=None):
-        attrs = {}
+        """Teach one concept: its is_a PARENT and/or its HAS parts. Calling `add` again for the same concept MERGES
+        with what is already known about it.
+
+        WHY THE MERGE, and it was a real bug: `KnowledgeStore.add(name, **attrs)` REPLACES a record (`self.attrs[name]
+        = dict(attrs)`), which is the right contract for a primitive store. Encyclopedia was calling it as if it
+        merged, so `add("dog", is_a="canine")` followed by `add("dog", has=["tail"])` silently dropped the `is_a`
+        role from the bound record. The Python-side `parent` dict still held it, so the two disagreed:
+        `is_a("dog")` (which reads the VECTOR) returned "tail", and `climb("dog")` walked into
+        ["dog.n.01", "tail"] -- a taxonomy that breaks the moment a concept is given parts after a parent, with
+        nothing raised. Pinned by the self-test."""
+        attrs = dict(self.ks.attrs.get(concept, {}))          # start from what this concept already knows
         if is_a is not None:
             attrs["is_a"] = is_a
             self.parent[concept] = is_a
@@ -68,7 +78,7 @@ class Encyclopedia:
             attrs["has"] = has[0] if isinstance(has, (list, tuple)) else has
             self.parts[concept] = list(has) if isinstance(has, (list, tuple)) else [has]
         if attrs:
-            self.ks.add(concept, **attrs)
+            self.ks.add(concept, **attrs)                     # re-bind the FULL record, not just the new roles
         return self
 
     def _read(self, concept, role):
@@ -127,9 +137,22 @@ class Encyclopedia:
         return [c for c, par in self.parent.items() if par == p and c != concept]
 
     def relatedness(self, a, b):
-        """A structural relatedness score: 1.0 if siblings (shared parent), else
-        decaying with the distance to the nearest common ancestor; 0 if unrelated
-        within the stored world."""
+        """A structural relatedness score in [0, 1]: 1 / (1 + depth_a + depth_b), where the depths are the number of
+        is_a hops from each concept up to their NEAREST COMMON ANCESTOR. 0 if they have no common ancestor in the
+        stored world.
+
+        MEASURED SCALE (the docstring here used to say "1.0 if siblings", which is wrong -- only a concept compared
+        with ITSELF scores 1.0):
+
+            identical   dog / dog       depths 0 + 0   -> 1.0000
+            parent      dog / canine    depths 1 + 0   -> 0.5000
+            siblings    dog / wolf      depths 1 + 1   -> 0.3333
+            cousins     dog / cat       depths 2 + 2   -> 0.2000
+            unrelated   dog / rock                     -> 0.0000
+
+        What the number IS: a monotone decreasing function of taxonomic distance, correctly ordering
+        identical > parent > sibling > cousin > unrelated. What it is NOT: a probability, or a similarity that
+        saturates at 1 for "closely related". Compare scores against each other, not against 1.0."""
         ca, _ = self.climb(a)
         cb, _ = self.climb(b)
         common = set(ca) & set(cb)
@@ -169,3 +192,58 @@ class Curriculum:
             out["encyclopedia_relatedness"] = float(np.mean(
                 [self.encyclopedia.relatedness(a, b) for a, b in sibling_pairs]))
         return out
+
+
+def _selftest():
+    """The relational contract, asserted numerically. What the encyclopedia layer ADDS over a dictionary is
+    STRUCTURE: `dog` and `wolf` share no letters, and a word-overlap measure calls them unrelated."""
+    enc = Encyclopedia(dim=2048, seed=0)
+    for concept, parent in (("dog.n.01", "canine.n.01"), ("wolf.n.01", "canine.n.01"),
+                            ("canine.n.01", "carnivore.n.01"), ("carnivore.n.01", "mammal.n.01"),
+                            ("cat.n.01", "feline.n.01"), ("feline.n.01", "carnivore.n.01")):
+        enc.add(concept, is_a=parent)
+
+    # one hop is EXACT (the stored parent comes back by name), with a cleanup confidence attached
+    parent, conf = enc.is_a("dog.n.01")
+    assert parent == "canine.n.01" and 0.0 < conf <= 1.0, (parent, conf)
+
+    # the is_a chain climbs to the root, and throughput DECAYS with depth on purpose (hop_discount)
+    chain, tp = enc.climb("dog.n.01")
+    assert chain == ["dog.n.01", "canine.n.01", "carnivore.n.01", "mammal.n.01"], chain
+    _, tp1 = enc.climb("carnivore.n.01")
+    assert tp < tp1, (tp, tp1)                       # a longer deduction is deliberately less certain
+    assert enc.climb("dog.n.01", hops=1)[0] == ["dog.n.01", "canine.n.01"]
+
+    # THE MERGE BUG, pinned: adding parts AFTER a parent used to drop the is_a role from the bound record, so
+    # is_a() (which reads the vector) returned "tail" and climb() walked into ["dog.n.01", "tail"].
+    enc.add("dog.n.01", has=["tail", "fur"])
+    assert enc.is_a("dog.n.01")[0] == "canine.n.01"
+    assert enc.climb("dog.n.01")[0][:2] == ["dog.n.01", "canine.n.01"]
+    assert enc._read("dog.n.01", "has")[0] == "tail"          # ...and the new role is there too
+
+    # taxonomic membership across several hops
+    reached, hops, _ = enc.is_a_transitive("dog.n.01", "mammal.n.01")
+    assert reached and hops == 3, (reached, hops)
+    assert not enc.is_a_transitive("dog.n.01", "feline.n.01")[0]
+
+    assert enc.siblings("dog.n.01") == ["wolf.n.01"]
+
+    # RELATEDNESS is 1/(1 + depth_a + depth_b) to the nearest common ancestor -- it ORDERS taxonomic distance.
+    # It does NOT return 1.0 for siblings (an earlier docstring claimed it did); only a concept against itself does.
+    r = enc.relatedness
+    assert abs(r("dog.n.01", "dog.n.01") - 1.0) < 1e-12
+    assert abs(r("dog.n.01", "canine.n.01") - 0.5) < 1e-12
+    assert abs(r("dog.n.01", "wolf.n.01") - 1.0 / 3.0) < 1e-12
+    assert abs(r("dog.n.01", "cat.n.01") - 0.2) < 1e-12
+    assert r("dog.n.01", "rock.n.01") == 0.0
+    assert r("dog.n.01", "wolf.n.01") > r("dog.n.01", "cat.n.01") > r("dog.n.01", "rock.n.01")
+
+    print("OK: holographic_encyclopedia self-test passed (is_a exact at one hop with confidence %.2f; the chain "
+          "climbs dog -> canine -> carnivore -> mammal and its throughput DECAYS with depth (%.3f vs %.3f) because "
+          "a longer deduction is deliberately less certain; transitive membership reached in 3 hops; relatedness is "
+          "1/(1+depth_a+depth_b) -- identical 1.000, parent 0.500, siblings 0.333, cousins 0.200, unrelated 0.000, "
+          "NOT 1.0 for siblings as the old docstring claimed)" % (conf, tp, tp1))
+
+
+if __name__ == "__main__":
+    _selftest()

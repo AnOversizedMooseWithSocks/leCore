@@ -28,6 +28,7 @@ Real basis: Kanerva (Sparse Distributed Memory); Rahimi, Imani, Rosing, Kleyko, 
 (AdaptHD / OnlineHD); Heddes et al. 2024 (HDC framework).
 """
 import numpy as np
+from holographic.misc.holographic_determinism import argmax_tiebreak
 from holographic.misc.holographic_core import bind, bundle, random_vector
 from holographic.io_and_interop.holographic_encoders import ScalarEncoder
 
@@ -82,7 +83,7 @@ class HolographicClassifier:
             order = rng.permutation(len(H)) if shuffle else np.arange(len(H))
             P = self.protos / (np.linalg.norm(self.protos, axis=1, keepdims=True) + 1e-12)
             for n in order:
-                pred = int(np.argmax(P @ H[n]))
+                pred = argmax_tiebreak(P @ H[n])          # DETERMINISM CONTRACT (ISA-1): the named tie-break rule
                 if pred != yi[n]:
                     self.protos[yi[n]] += lr * H[n]
                     self.protos[pred]  -= lr * H[n]
@@ -96,7 +97,7 @@ class HolographicClassifier:
         return H @ P.T
 
     def predict(self, X):
-        return self.classes_[np.argmax(self._scores(X), axis=1)]
+        return self.classes_[argmax_tiebreak(self._scores(X), axis=1)]   # DETERMINISM CONTRACT (ISA-1)
 
     # convenience: one-shot-only prediction (no retraining), for measuring what retraining adds
     def fit_oneshot(self, X, y):

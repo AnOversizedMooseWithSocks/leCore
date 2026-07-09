@@ -27,7 +27,7 @@ Pure stdlib/numpy-free control flow; whatever your callables do is your business
 """
 
 
-def refine(produce, critique, adjust, accept=0.9, budget=8):
+def refine(produce, critique, adjust, accept=0.9, budget=8, attempts=1, backoff=0.1):
     """Produce a result, critique it, and adjust-and-retry until the critic's score reaches `accept` or `budget`
     attempts are spent.
 
@@ -39,11 +39,21 @@ def refine(produce, critique, adjust, accept=0.9, budget=8):
 
     Returns {"result", "score", "accepted", "tries"} where `tries` is how many adjust rounds were used (0 if the
     first attempt already passed)."""
-    result = produce()
+    # P9 -- `attempts>1` runs each production through `hardening.retrying` (bounded retry with backoff). A critic
+    # loop that talks to a flaky node, a subprocess or a model endpoint should not die on the first transient
+    # error; the retry belongs to the hardening home, not re-rolled here. attempts=1 (default) is a plain call,
+    # so nothing existing changes.
+    _produce, _adjust = produce, adjust
+    if attempts > 1:
+        from holographic.misc.holographic_hardening import retrying
+        _produce = lambda: retrying(produce, attempts=attempts, backoff=backoff)
+        _adjust = lambda r, s_: retrying(lambda: adjust(r, s_), attempts=attempts, backoff=backoff)
+
+    result = _produce()
     score = float(critique(result))
     tries = 0
     while score < accept and tries < budget:
-        result = adjust(result, score)
+        result = _adjust(result, score)
         score = float(critique(result))
         tries += 1
     return {"result": result, "score": score, "accepted": score >= accept, "tries": tries}
