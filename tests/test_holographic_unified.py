@@ -787,3 +787,49 @@ def test_answer_role_question_on_records():
     m.maintain_now()
     a = m.answer("what is the capital of france?")
     assert a["kind"] == "role" and a["value"] == "paris"
+
+# -- REGRESSION TRAP: the encyclopedia name collision -------------------------------------------------
+# Two different faculties both wanted the attribute `self._encyclopedia`: the CURRICULUM layer
+# (learn_encyclopedia -> a {concept: {role: filler}} dict, knowledge absorbed into the mind's own memory)
+# and the ENCYCLOPEDIA FACULTY (encyclopedia_add/climb/... -> a lazily-built Encyclopedia object). When the
+# faculty landed as a @property of that name it broke both sides. These pin both halves so it cannot recur.
+
+def test_curriculum_and_encyclopedia_faculty_do_not_collide():
+    # HALF ONE, the loud half: a property has no setter, so learn_encyclopedia raised AttributeError.
+    from holographic.misc.holographic_unified import UnifiedMind
+    m = UnifiedMind(dim=1024, seed=0)
+    m.learn_encyclopedia({"dog": {"is_a": "canine"}, "canine": {"is_a": "mammal"},
+                          "mammal": {"is_a": "animal"}, "animal": {"is_a": "organism"}})
+    assert m.climb("dog")[0] == ["dog", "canine", "mammal", "animal", "organism"]
+
+    # the FACULTY is a separate store keyed by sense ids -- teaching one must not touch the other
+    m.encyclopedia_add("dog.n.01", is_a="canine.n.01")
+    m.encyclopedia_add("canine.n.01", is_a="mammal.n.01")
+    assert m.encyclopedia_climb("dog.n.01")["chain"] == ["dog.n.01", "canine.n.01", "mammal.n.01"]
+    # ... and the curriculum chain is untouched by the faculty write
+    assert m.climb("dog")[0] == ["dog", "canine", "mammal", "animal", "organism"]
+
+    # the two names are distinct objects: a dict for the curriculum, an Encyclopedia for the faculty
+    assert isinstance(m._encyclopedia, dict)
+    assert type(m._encyclopedia_faculty).__name__ == "Encyclopedia"
+
+
+def test_a_mind_that_learned_no_encyclopedia_abstains_instead_of_fabricating():
+    # HALF TWO, the QUIET half, and the one that would have survived a "just add a setter" fix.
+    # answer() gates the is_a branch on the curriculum attribute EXISTING. A lazily-instantiating property of
+    # the same name pinned that flag permanently True, so a mind holding no taxonomy at all still answered
+    # "is a dog an animal?" with kind='is_a', answer=False, throughput=1.0 -- a confident fabrication from an
+    # empty memory. Abstention is the contract: no knowledge, no is_a verdict.
+    from holographic.misc.holographic_unified import UnifiedMind
+    virgin = UnifiedMind(dim=256, seed=0)
+    a = virgin.answer("is a dog an animal?")
+    assert a["kind"] != "is_a", "a mind with no encyclopedia must not return an is_a verdict"
+
+    # touching the FACULTY must not flip the curriculum flag either (that is what a property collision did)
+    virgin.encyclopedia_add("dog.n.01", is_a="canine.n.01")
+    assert virgin.answer("is a dog an animal?")["kind"] != "is_a"
+
+    # and once the curriculum IS taught, the branch engages and answers correctly
+    virgin.learn_encyclopedia({"dog": {"is_a": "animal"}})
+    got = virgin.answer("is a dog an animal?")
+    assert got["kind"] == "is_a" and got["answer"] is True

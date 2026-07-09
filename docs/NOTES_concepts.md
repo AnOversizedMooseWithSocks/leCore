@@ -23131,3 +23131,57 @@ are decisions, recorded and frozen by `wiring_report --check`, not omissions.
 
 encyclopedia: 4 tests (+ the merge-bug and relatedness-scale pins) and a new module selftest. navigator: 3 tests
 including the both-readings baseline check and the HTTP round-trip. All gates pass.
+
+## The encyclopedia name collision -- one attribute, two faculties, sixteen red tests and one silent lie
+
+CI went red with 16 failures across five test files. All sixteen were **one bug**, and the bug was a *name*.
+
+Two independent faculties had each claimed `self._encyclopedia` on `UnifiedMind`:
+
+1. the **curriculum layer** (`learn_encyclopedia`, layer 3 of dictionary -> grammar -> encyclopedia), which stores a
+   plain `{concept: {role: filler}}` dict there and absorbs the facts into the mind's OWN memory as role-bound
+   records -- `climb`/`is_a` read the memory, never the dict; and
+2. the **encyclopedia faculty** (`encyclopedia_add`/`climb`/`relatedness`, wired last session), a lazily-built
+   `Encyclopedia` object exposed as `@property _encyclopedia`.
+
+A property has no setter, so `learn_encyclopedia`'s `self._encyclopedia = dict(facts)` raised `AttributeError`.
+That was the loud half, and it accounted for every red test.
+
+**The quiet half is the one worth writing down.** `answer()` gated its `is_a` branch on
+`hasattr(self, "_encyclopedia")` -- using the attribute's mere EXISTENCE as the "an encyclopedia was taught" flag.
+A *lazily-instantiating* property satisfies `hasattr` unconditionally: it builds the object on access and returns it.
+So the flag was pinned permanently True, and a mind that had learned **nothing at all** answered
+`"is a dog an animal?"` with `kind='is_a', answer=False, hops=-1, throughput=1.0` -- a confident verdict, at full
+confidence, out of an empty memory. Measured on a virgin mind before the fix; `kind='unknown'` after it.
+
+**KEPT NEGATIVE -- do not "fix" this by adding a setter.** A setter silences the sixteen red tests and leaves the
+fabrication in place, because the fabrication is not caused by the missing setter; it is caused by the *name*. The
+crash is the half that gets fixed by accident. The lie is the half that survives, and it survives green. This is the
+`argmax_tiebreak` / fake-perfect pattern in a new costume: a guard that a mere name collision can satisfy is not a
+guard. **An existence check is only a check if the thing whose existence it tests cannot spring into being on being
+looked at.**
+
+**The fix.** The newcomer takes the new name: property `_encyclopedia` -> `_encyclopedia_faculty` (backing slot
+`_encyclopedia_obj` unchanged), and its seven call sites repointed. The curriculum keeps the attribute it held first
+(backward-compatible, per the constitution -- the older decision does not flip). `answer()`'s guard is rewritten as
+an explicit `getattr(self, "_encyclopedia", None) is not None` against the curriculum dict, with a WHY-comment
+naming the collision so the next reader does not re-shadow it.
+
+**Sideways check, done and clean.** An AST audit of every `@property` on `UnifiedMind` against every `self.X = ...`
+assignment in the class: nine properties (`_job_manager`, `_commands`, `_editor`, `orchestrator`, `db`, `base`,
+`workspace`, `registry`, and this one), **exactly one collision**, zero setters anywhere. The other eight all follow
+the safe `_x` property -> `_x_obj` slot pattern with no assignment to the property name. The newcomer simply picked a
+name that was already occupied. *That audit is three lines of `ast` and should be run whenever a lazy property is
+added to a class that also has plain attributes.*
+
+**Delta:** 3,965 -> 3,967 tests (+2), 16 failing -> 0. The two new tests are regression traps, and both were
+**proven to fail against the reintroduced bug** before being accepted -- one pins the two faculties as distinct
+objects that do not touch each other's state, the other pins abstention on a virgin mind (and pins that exercising
+the *faculty* must not flip the *curriculum* flag). An untested regression test is not a trap.
+
+Verified: static compile, `holographic_encyclopedia` selftest, end-to-end through the mind, and the full HTTP
+`/invoke` round-trip -- all eight `encyclopedia_*`/`learn_encyclopedia` methods are advertised in `GET /tools` and
+callable; `learn_encyclopedia` (the method that used to raise) and `answer` both round-trip. `reachability_audit`
+(43 IMPORT-ONLY, unchanged from pristine -- a pre-existing review bucket, not a regression from this change),
+`catalog_gaps` 0, `skill_lint` 0. `capdoc.py`/`docgen.py` regenerated; the only REFERENCE.md drift is the module's
+line count (+15 comment lines), no docstring changed.

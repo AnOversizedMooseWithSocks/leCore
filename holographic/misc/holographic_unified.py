@@ -292,7 +292,12 @@ class UnifiedMind:
 
         # -- 'is X a Y?' / 'is X an Y?' -> taxonomic membership ----------------
         m = re.match(r"^(?:is|are)\s+(?:a|an|the)?\s*(.+?)\s+(?:a|an|the)?\s*(\S+)$", ql)
-        if m and hasattr(self, "_encyclopedia"):
+        # The guard asks "was a curriculum encyclopedia ever TAUGHT?" -- without one there is no taxonomy to walk,
+        # and answering `is_a: False` from an empty memory is a fabrication, not an answer. Written as an explicit
+        # getattr against the curriculum DICT rather than hasattr(): a lazily-instantiating property named
+        # `_encyclopedia` once shadowed this attribute and pinned the flag permanently True (see the encyclopedia
+        # faculty below). An existence check that a mere name collision can satisfy is not a check.
+        if m and getattr(self, "_encyclopedia", None) is not None:
             x, y = m.group(1).strip().split()[-1], m.group(2).strip()
             reached, hops, tp = self.is_a(x, y)
             return {"kind": "is_a", "subject": x, "ancestor": y,
@@ -7739,8 +7744,18 @@ class UnifiedMind:
     # takes and returns PLAIN DATA (strings, floats, lists). A long-lived service therefore accumulates knowledge
     # across /invoke calls, which is exactly what a knowledge layer is for. Build it once with encyclopedia_reset()
     # if you want a different dim/seed.
+    #
+    # NAMED `_encyclopedia_faculty`, NOT `_encyclopedia` -- and the name is load-bearing. The curriculum layer
+    # (learn_encyclopedia, above) had already claimed the plain attribute `self._encyclopedia` for its
+    # {concept: {role: filler}} dict, and answer() uses that attribute's mere EXISTENCE as its "an encyclopedia
+    # was taught" flag. A lazily-instantiating property of the same name broke BOTH sides at once:
+    # learn_encyclopedia raised AttributeError (a property has no setter), and -- the quiet half -- the flag was
+    # pinned permanently True, so a mind that had learned NOTHING answered "is a dog an animal?" with a
+    # confident is_a=False at throughput 1.0 instead of abstaining. The fabricated answer is the worse bug,
+    # because the crash is the one that gets fixed. Two faculties, two names. (Kept negative: do NOT "fix" this
+    # by adding a setter -- that silences the crash and leaves the fabrication.)
     @property
-    def _encyclopedia(self):
+    def _encyclopedia_faculty(self):
         if getattr(self, "_encyclopedia_obj", None) is None:
             from holographic.agents_and_reasoning.holographic_encyclopedia import Encyclopedia
             self._encyclopedia_obj = Encyclopedia(dim=self.dim, seed=self.seed)
@@ -7749,7 +7764,7 @@ class UnifiedMind:
     def encyclopedia_reset(self, dim=None, seed=None):
         """Start a fresh encyclopedia (dropping everything taught so far). Returns the number of concepts cleared."""
         from holographic.agents_and_reasoning.holographic_encyclopedia import Encyclopedia
-        n = len(getattr(self._encyclopedia, "parent", {})) if getattr(self, "_encyclopedia_obj", None) else 0
+        n = len(getattr(self._encyclopedia_faculty, "parent", {})) if getattr(self, "_encyclopedia_obj", None) else 0
         self._encyclopedia_obj = Encyclopedia(dim=int(dim or self.dim), seed=int(self.seed if seed is None else seed))
         return n
 
@@ -7759,12 +7774,12 @@ class UnifiedMind:
 
         This is the third rung of the dictionary -> grammar -> encyclopedia curriculum: a dictionary tells you what
         a word MEANS; an encyclopedia places it in a web of relations. See holographic_encyclopedia.Encyclopedia."""
-        self._encyclopedia.add(concept, is_a=is_a, has=has)
+        self._encyclopedia_faculty.add(concept, is_a=is_a, has=has)
         return concept
 
     def encyclopedia_is_a(self, concept):
         """One hop up the taxonomy: (parent, cleanup_confidence). See holographic_encyclopedia.Encyclopedia.is_a."""
-        parent, conf = self._encyclopedia.is_a(concept)
+        parent, conf = self._encyclopedia_faculty.is_a(concept)
         return {"parent": parent, "confidence": float(conf)}
 
     def encyclopedia_climb(self, concept, hops=99, min_throughput=0.0, hop_discount=0.9):
@@ -7773,20 +7788,20 @@ class UnifiedMind:
         certain than a short one, because with exact unitary-atom unbinding each hop is near-lossless and the depth
         penalty would otherwise vanish. It ABSTAINS rather than emit noise once throughput would fall below
         `min_throughput`. See holographic_encyclopedia.Encyclopedia.climb."""
-        chain, tp = self._encyclopedia.climb(concept, hops=hops, min_throughput=min_throughput,
-                                             hop_discount=hop_discount)
+        chain, tp = self._encyclopedia_faculty.climb(concept, hops=hops, min_throughput=min_throughput,
+                                                     hop_discount=hop_discount)
         return {"chain": list(chain), "throughput": float(tp)}
 
     def encyclopedia_is_a_transitive(self, concept, ancestor):
         """Taxonomic membership: does `concept` reach `ancestor` by is_a? {reached, hops, throughput}.
         See holographic_encyclopedia.Encyclopedia.is_a_transitive."""
-        reached, hops, tp = self._encyclopedia.is_a_transitive(concept, ancestor)
+        reached, hops, tp = self._encyclopedia_faculty.is_a_transitive(concept, ancestor)
         return {"reached": bool(reached), "hops": int(hops), "throughput": float(tp)}
 
     def encyclopedia_siblings(self, concept):
         """Concepts sharing this one's is_a parent -- relatedness from STRUCTURE, not word overlap (which is the
         capability a dictionary lacks). See holographic_encyclopedia.Encyclopedia.siblings."""
-        return list(self._encyclopedia.siblings(concept))
+        return list(self._encyclopedia_faculty.siblings(concept))
 
     def encyclopedia_relatedness(self, a, b):
         """A structural relatedness score in [0, 1]: 1 / (1 + depth_a + depth_b) to the nearest common ancestor.
@@ -7796,7 +7811,7 @@ class UnifiedMind:
 
         This is what the encyclopedia layer ADDS over a dictionary: `dog` and `wolf` share no letters, yet sit
         beside each other in the taxonomy. See holographic_encyclopedia.Encyclopedia.relatedness."""
-        return float(self._encyclopedia.relatedness(a, b))
+        return float(self._encyclopedia_faculty.relatedness(a, b))
 
     # -- external COMMANDS as tools (R4): run an ALLOWLISTED program, wired into the same VSA fabric -----------
     # SECURITY, and it is load-bearing: this mind is exposed over HTTP, where /invoke calls any public method by
