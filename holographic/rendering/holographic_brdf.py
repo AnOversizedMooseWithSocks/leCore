@@ -115,15 +115,33 @@ def _tangent_frame(N):
     return T, B
 
 
-def sample_ggx(N, V, roughness, rng):
+def sample_ggx(N, V, roughness, rng=None, keys=None):
     """Importance-sample a reflected direction L from the GGX distribution about N, for a path tracer. Returns
     (L, pdf): L the bounced direction (...,3), pdf its solid-angle density. Sampling H ~ D(H)(N.H) and reflecting
     V gives pdf(L) = D(N.H)(N.H) / (4 (V.H)) -- so brdf/pdf cancels the D and the 1/(4 N.V N.L), leaving a cheap,
-    low-variance estimator (the whole point of importance sampling)."""
+    low-variance estimator (the whole point of importance sampling).
+
+    A4/D1 -- TWO WAYS TO GET THE TWO UNIFORMS:
+      * `rng=` : any object with `.random(shape)` (e.g. np.random.default_rng). STATEFUL: the n-th draw depends on
+        every draw before it, so the result depends on the ORDER pixels/bounces are traced. Fine on one machine.
+      * `keys=`: a tuple of coordinates that IDENTIFY this sample -- e.g. (pixel_x, pixel_y, bounce, sample_index).
+        The uniforms become `hash_unit(...)`, a pure function of those keys, so any node can trace any pixel in any
+        order and get the identical answer, with no seed to coordinate. This is what makes a path trace farm-parallel.
+    Exactly one of `rng` / `keys` must be given. The two are statistically equivalent estimators (measured: the same
+    directional albedo to within Monte-Carlo error); they differ only in WHERE the randomness comes from.
+    """
+    if (rng is None) == (keys is None):
+        raise ValueError("sample_ggx needs exactly one of rng= (stateful) or keys= (stateless coordinate keys)")
     N = np.asarray(N, float); V = np.asarray(V, float)
     a = np.asarray(roughness, float) ** 2
     shp = N.shape[:-1]
-    u1 = rng.random(shp); u2 = rng.random(shp)
+    if rng is not None:
+        u1 = rng.random(shp); u2 = rng.random(shp)
+    else:
+        from holographic.misc.holographic_determinism import hash_unit
+        ks = tuple(keys)
+        u1 = np.broadcast_to(hash_unit("ggx_u1", *ks), shp) if shp else hash_unit("ggx_u1", *ks)
+        u2 = np.broadcast_to(hash_unit("ggx_u2", *ks), shp) if shp else hash_unit("ggx_u2", *ks)
     phi = 2.0 * np.pi * u1
     cos_t = np.sqrt((1.0 - u2) / (1.0 + (a * a - 1.0) * u2 + 1e-12))
     sin_t = np.sqrt(np.clip(1.0 - cos_t * cos_t, 0.0, 1.0))

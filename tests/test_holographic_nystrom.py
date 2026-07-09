@@ -70,3 +70,89 @@ def test_nystrom_field_degrades_on_high_frequency():
     ex = exact_kernel_apply(pts, pts, w, sigma=0.08)
     ap = nystrom_kernel_apply(pts, pts, w, sigma=0.08, m=64)
     assert np.corrcoef(ex, ap)[0, 1] < 0.8                         # kept negative: high-freq field is full-rank
+
+
+# ======================================================================================================
+# The landmark rule is DATA-DEPENDENT, and the shipped default is not uniformly better.
+# ======================================================================================================
+def _sigma_of(P, m=24):
+    from holographic.sampling_and_signal.holographic_nystrom import farthest_point_landmarks
+    L = P[farthest_point_landmarks(P, m, seed=0)]
+    DL = np.sqrt(((L[:, None, :] - L[None, :, :]) ** 2).sum(-1))
+    return float(np.median(DL[DL > 0])) or 1.0
+
+
+def _mean_align(P, sig, rule, m=24, k=6, seeds=5):
+    from holographic.sampling_and_signal.holographic_nystrom import (dense_embedding, nystrom_embedding,
+                                                                     subspace_alignment)
+    _, Pd = dense_embedding(P, n_basis=k, sigma=sig)
+    return float(np.mean([subspace_alignment(Pd, nystrom_embedding(
+        P, n_basis=k, m=m, sigma=sig, landmarks=rule, seed=s)[1]) for s in range(seeds)]))
+
+
+def test_fps_wins_when_there_is_nothing_to_cover():
+    """The regime the default was chosen for. Measured 0.9889 +- 0.0033 against random's 0.9743 +- 0.0126 over 50
+    trials; random won 2 of them."""
+    rng = np.random.default_rng(0)
+    blob = rng.uniform(-1, 1, (320, 2))
+    sig = _sigma_of(blob)
+    assert _mean_align(blob, sig, "fps") > _mean_align(blob, sig, "random")
+
+
+def test_with_outliers_the_coverage_argument_inverts_and_random_wins():
+    """KEPT NEGATIVE against the module's own former docstring, which said FPS covers every cluster "unlike
+    uniform-random". Coverage is real; it is not what a spectral embedding wants. FPS spends its budget on the
+    stragglers while the leading eigenvectors carry their mass in the DENSE regions. Measured 0.8692 +- 0.0216
+    against random's 0.9512 +- 0.0315 over 50 trials -- random wins 47."""
+    rng = np.random.default_rng(0)
+    core = np.vstack([rng.normal(c, 0.12, (120, 2)) for c in ([0, 0], [2.5, 0.3], [1.2, 2.2])])
+    P = np.vstack([core, rng.uniform(-4, 6, (40, 2))])
+    sig = _sigma_of(P)
+    fps, rand = _mean_align(P, sig, "fps"), _mean_align(P, sig, "random")
+    assert rand > fps + 0.02, (rand, fps)
+
+
+def test_coarse_first_landmark_selection_loses_and_the_gate_cannot_see_it():
+    """The last coarse-first retirement, and the most interesting: the GATE PASSES and the method still loses.
+    Pivoting the next landmark onto the maximum diagonal residual picks the most ISOLATED point -- the residual is a
+    COVERAGE signal, and a spectral embedding needs a MASS signal. `concentration` scores it 'concentrated' anyway,
+    which is exactly what 'necessary, not sufficient' means."""
+    from holographic.misc.holographic_coarsefirst import concentration
+    from holographic.sampling_and_signal.holographic_nystrom import (dense_embedding, farthest_point_landmarks,
+                                                                     gaussian_affinity, nystrom_embedding,
+                                                                     subspace_alignment)
+
+    def residual_landmarks(P, m, sigma, seed=0):
+        idx = [int(np.random.default_rng(seed).integers(len(P)))]
+        r = None
+        while len(idx) < m:
+            L = P[idx]
+            Wnm = gaussian_affinity(P, L, sigma)
+            r = 1.0 - np.einsum("ij,jk,ik->i", Wnm, np.linalg.pinv(gaussian_affinity(L, L, sigma)), Wnm)
+            r[idx] = -np.inf
+            idx.append(int(np.argmax(r)))
+        return np.array(idx), r
+
+    rng = np.random.default_rng(0)
+    core = np.vstack([rng.normal(c, 0.12, (120, 2)) for c in ([0, 0], [2.5, 0.3], [1.2, 2.2])])
+    P = np.vstack([core, rng.uniform(-4, 6, (40, 2))])
+    sig = _sigma_of(P)
+    _, Pd = dense_embedding(P, n_basis=6, sigma=sig)
+
+    lm, resid = residual_landmarks(P, 24, sig)
+    # a hand-rolled embedding on the residual landmarks, using nystrom's own machinery for the rest
+    from holographic.sampling_and_signal.holographic_nystrom import gaussian_affinity as ga
+    L = P[lm]
+    Wmm, Wnm = ga(L, L, sig), ga(P, L, sig)
+    deg = np.maximum(Wnm @ (np.linalg.pinv(Wmm) @ (Wnm.T @ np.ones(len(P)))), 1e-12)
+    dnm, dmm = 1 / np.sqrt(deg), 1 / np.sqrt(deg[lm])
+    val, U = np.linalg.eigh(dmm[:, None] * Wmm * dmm[None, :])
+    val, U = np.maximum(val[::-1], 1e-12), U[:, ::-1]
+    Phi = (dnm[:, None] * Wnm * dmm[None, :]) @ (U[:, :6] / val[:6])
+    Phi /= np.linalg.norm(Phi, axis=0, keepdims=True) + 1e-12
+
+    a_resid = subspace_alignment(Pd, Phi)
+    a_rand = _mean_align(P, sig, "random")
+    assert a_resid < a_rand - 0.05, (a_resid, a_rand)      # coarse-first loses to a random control
+
+    assert concentration(np.clip(resid, 0, None)) > 0.2    # ...and the gate says CANDIDATE anyway

@@ -53,6 +53,23 @@ def low_discrepancy(n, d=2, seed=0):
     return (offset + k * alpha) % 1.0
 
 
+def sphere_directions(n):
+    """`n` deterministic, near-uniform directions on the unit sphere -- a SPHERICAL FIBONACCI lattice.
+
+    Equal-area in cos(polar) and golden-angle in azimuth, which spreads the points with far lower discrepancy than
+    white-noise sampling, so a Monte-Carlo integral over the sphere converges with far fewer samples. Stateless and
+    deterministic (no seed): the i-th direction is a pure function of (i, n).
+
+    P4: this lived privately inside `holographic_prt._sphere_dirs`, proven in-house but reachable through exactly
+    one door. It is a low-discrepancy sequence, so it belongs in the low-discrepancy home, where the renderer's
+    other spherical integrals (globalillum, sampling) can find it. Returns an (n, 3) array of unit vectors."""
+    i = np.arange(int(n)) + 0.5
+    phi = np.arccos(1.0 - 2.0 * i / int(n))                      # polar angle, equal-area in cos
+    golden = np.pi * (1.0 + 5.0 ** 0.5)                          # the golden angle
+    theta = golden * i
+    return np.stack([np.sin(phi) * np.cos(theta), np.sin(phi) * np.sin(theta), np.cos(phi)], axis=1)
+
+
 def dispersion(points, grid=64):
     """Coverage measure (2-D): the LARGEST distance from any test point -- a `grid` x `grid` lattice over the
     unit square -- to its nearest sample. Lower = more even coverage = fewer holes. Random clumps (high

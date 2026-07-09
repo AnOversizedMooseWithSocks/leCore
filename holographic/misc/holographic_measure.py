@@ -39,6 +39,18 @@ def measure(run_once, seeds=range(10), n_boot=2000, boot_seed=0):
             "n": len(xs), "scores": xs}
 
 
+def fdr_gate(rows, alpha=0.1):
+    """P9 -- false-discovery control across a whole ABLATION TABLE, from the measurement home.
+
+    `measure()` gives one claim an honest CI. But a table of ablations is a SCAN: test enough subsystems and one
+    clears its per-test bar by luck. That is the exposure Benjamini-Yekutieli exists for, and the gate already
+    lives in `holographic_ablate` -- it was reachable from the catalog and from nowhere else. This is the door.
+    Delegates to `ablate.fdr_verdicts(rows, alpha)`; returns (augmented_rows, n_load_bearing, n_survive).
+    """
+    from holographic.misc.holographic_ablate import fdr_verdicts
+    return fdr_verdicts(rows, alpha=alpha)
+
+
 def assert_robust(stats, floor):
     """Pass only if the LOWER CI bound clears the floor -- not just the mean. This is
     what stops a lucky-seed point estimate from passing as a real result."""

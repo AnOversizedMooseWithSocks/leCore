@@ -83,6 +83,90 @@ def argmax_tiebreak(a, axis=None):
 
 
 # =================================================================================================
+# ==================================================================================================================
+# A4/D1 -- STATELESS, COORDINATE-KEYED RANDOMNESS.
+#
+# `np.random.default_rng(seed)` carries STATE: the n-th draw depends on every draw before it. That is fatal for work
+# you want to split across a farm, because bucket order then changes the numbers, and it forces every node to agree
+# on a seed and a draw count. The fix is to stop drawing and start LOOKING UP: make the random value a pure function
+# of WHERE and WHICH -- hash_unit(x, y, walk, step, seed). Same inputs, same value, on any node, in any order, with
+# no coordination at all. (This is what the shadertoy/renderer world calls "hash noise", and what PBRT's stateless
+# sampler does.)
+#
+# Pure integer arithmetic (the same family as `pattern._hash01`), so it is reproducible to the bit and independent of
+# PYTHONHASHSEED -- never Python's salted hash(). Floats are keyed by their exact BIT PATTERN, so two different
+# coordinates never collide by rounding.
+# ==================================================================================================================
+_HASH_ODD = np.uint64(0x9E3779B97F4A7C15)          # golden-ratio odd constant (splitmix64's increment)
+
+
+def _fold_str(text):
+    """A deterministic uint64 for a STRING key (a domain separator like "sphere_z"). An FNV-1a byte fold in pure
+    integer arithmetic -- NEVER Python's hash(), which is salted per process and would break reproducibility."""
+    h = np.uint64(0xCBF29CE484222325)                                  # FNV offset basis
+    with np.errstate(over="ignore"):
+        for byte in text.encode("utf-8"):
+            h = (h ^ np.uint64(byte)) * np.uint64(0x100000001B3)       # FNV prime
+    return h
+
+
+def _as_u64(key):
+    """Turn one key into uint64 bits: a str is folded deterministically (a domain separator); an int keeps its value;
+    a float is keyed by its IEEE-754 BIT PATTERN (so 0.1 and 0.100000000000001 are different keys, as they must be);
+    an array keeps its shape so keys broadcast together."""
+    if isinstance(key, str):
+        return _fold_str(key)
+    a = np.asarray(key)
+    if a.dtype.kind in "US":                                           # an array of strings: fold each
+        return np.array([_fold_str(str(x)) for x in a.ravel()], dtype=np.uint64).reshape(a.shape)
+    if a.dtype.kind == "f":
+        return a.astype(np.float64).view(np.uint64)
+    return a.astype(np.int64).view(np.uint64)
+
+
+def _mix64(x):
+    """splitmix64's finalizer: an avalanche mixer -- one input bit flips ~half the output bits."""
+    with np.errstate(over="ignore"):                                   # uint64 wraparound IS the arithmetic
+        x = (x ^ (x >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
+        x = (x ^ (x >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
+        return x ^ (x >> np.uint64(31))
+
+
+def hash_u64(*keys):
+    """A deterministic uint64 hash of any tuple of keys (ints, floats, or numpy arrays -- broadcast together)."""
+    with np.errstate(over="ignore"):
+        h = np.uint64(0)
+        for k in keys:
+            h = _mix64(h + _HASH_ODD + _as_u64(k))                     # sequentially absorb each key
+        return _mix64(h)
+
+
+def hash_unit(*keys):
+    """A uniform float in [0, 1), a PURE FUNCTION of the keys -- stateless randomness.
+
+    hash_unit(x, y, walk, step, seed) gives the same number on every node, in any order, with no seed coordination
+    and no draw counter. Use it wherever a sample is indexed by WHERE it is rather than by HOW MANY came before:
+    walk-on-spheres steps, path-tracer bounces, per-pixel jitter, farm buckets. Returns a scalar for scalar keys and
+    an array for array keys (they broadcast). 53 bits of mantissa, so the values are as fine-grained as a double."""
+    h = hash_u64(*keys)
+    out = (h >> np.uint64(11)).astype(np.float64) * (1.0 / 9007199254740992.0)    # 53 bits -> [0,1)
+    return float(out) if np.isscalar(out) or out.ndim == 0 else out
+
+
+def hash_direction(*keys, dim=3):
+    """A uniform direction on the unit sphere (dim=3) or circle (dim=2), keyed statelessly. Uses the area-preserving
+    map for the sphere (uniform in cos(theta)), so directions are genuinely uniform, not clustered at the poles."""
+    if dim == 2:
+        a = 2.0 * np.pi * hash_unit("circle", *keys)
+        return np.stack([np.cos(a), np.sin(a)], axis=-1)
+    if dim != 3:
+        raise ValueError("hash_direction supports dim=2 or dim=3, got %r" % dim)
+    z = 2.0 * hash_unit("sphere_z", *keys) - 1.0                       # uniform in cos(theta) == equal area
+    a = 2.0 * np.pi * hash_unit("sphere_a", *keys)
+    r = np.sqrt(np.maximum(0.0, 1.0 - z * z))
+    return np.stack([r * np.cos(a), r * np.sin(a), z], axis=-1)
+
+
 def _selftest():
     """The sign rule is deterministic, idempotent, and obeys its stated convention; the argmax tie-break picks
     the lowest index on an exact tie."""

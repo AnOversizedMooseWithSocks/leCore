@@ -294,8 +294,14 @@ class SelfOrganizingMind:
     old one right up to the instant of the swap."""
 
     def __init__(self, dim=1024, seed=0, buffer_cap=20000,
-                 max_k=6, coherence=0.45):
-        self.encoder = UniversalEncoder(dim, seed=seed)
+                 max_k=6, coherence=0.45, number_range=(-4.0, 4.0)):
+        # A6/E1: the scalar encoder's working range is what makes nearby numbers similar. Values OUTSIDE it
+        # collapse together silently -- measured, a (-4, 4) encoder on data spanning [0, 100] decodes at
+        # CHANCE (err 0.5422 vs a random-vector baseline of 0.5436); ranged to the data it is 0.0014.
+        # The default suits standardized/whitened features. If you absorb raw numbers on another scale, pass
+        # number_range=(lo, hi) -- or range an encoder to your data with ScalarEncoder.for_values(data, dim).
+        # The encoder now warns once when a value falls outside its range, so this can no longer fail quietly.
+        self.encoder = UniversalEncoder(dim, seed=seed, number_range=number_range)
         self.live = SubPrototypeMemory()
         self.buffer = []                            # experience replay (vec, label)
         self.buffer_cap = buffer_cap

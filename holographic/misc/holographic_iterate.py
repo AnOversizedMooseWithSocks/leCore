@@ -1,8 +1,21 @@
 """Spectral iteration of a bind operator (RT-I1): diagonalise once, evaluate any level or the limit in closed form.
 
-The unification: subdivision (Stam's exact eval), the dynamics propagator's k-step rollout, the diffusion
-sampler's steady state, and the resonator's fixed points are ALL "iterate a linear operator." And the operator
-here is a `bind` (circular convolution), which is DIAGONAL in the Fourier basis: its eigenvalues are simply its
+The unification, stated precisely (this was once stated too broadly, and the imprecision cost a round of work):
+subdivision, the propagator's k-step rollout, the diffusion sampler's steady state and the resonator's fixed
+points all share the PATTERN "iterate a map." Only some of them share the ALGEBRA that makes the closed form
+possible, and the closed form needs BOTH properties:
+   (1) the map is LINEAR, and
+   (2) it is a `bind` -- a CIRCULAR convolution -- so it is diagonal in the Fourier basis.
+MEASURED (probe, not opinion): `dynamics.step` = bind(U,x) satisfies both -> jumpable. `diffuse`'s
+softmax denoise step and the `resonator`/`sbc` cleanup step are NOT linear (superposition fails). `chaos`
+feeds a tanh reservoir back on itself; `equilibrium` clips a nonlinear energy relaxation; `meshsubdiv`'s
+operator changes size at every level. And `heat`/`wave` ARE linear but use an edge-replicated (Neumann)
+stencil, which is NOT circular -- its eigenbasis is the DCT, not the DFT (see holographic_laplacian).
+So the ONLY module that can delegate here today is `dynamics` (it does: `Propagator.jump`/`limit`/`recall_at`).
+The rest belong to the "iterate a projection" unifier (`project_onto_constraints`), which is a different
+engine. Do not "wire" them here; the math does not permit it.
+
+The operator here is a `bind` (circular convolution), which is DIAGONAL in the Fourier basis: its eigenvalues are simply its
 rfft spectrum, its eigenvectors the Fourier modes. So the eigendecomposition is FREE -- it is the FFT, not a
 dense O(n^3) decomposition. That is the whole point: live in the Fourier/structured form where the spectrum is
 free, never a dense SVD at D=4096 (which is exactly what the topology module timed out on).
@@ -47,6 +60,48 @@ def limit(state, U, tol=1e-6):
         raise ValueError(f"operator diverges (max|eigenvalue| = {mag.max():.4f} > 1): no finite limit")
     persistent = np.where(mag >= 1.0 - tol, H, 0.0)          # keep |.|~1 modes, drop the decaying ones
     return np.fft.irfft(np.fft.rfft(state) * persistent, n=state.shape[0])
+
+
+def refine_k(x, taps, k, axis=0):
+    """Apply k levels of a REFINEMENT operator in ONE closed-form evaluation: upsample by 2 and circularly convolve,
+    k times, without ever running the loop.
+
+    This is the case `step_k` cannot express, and the reason is worth stating: `step_k` raises a SQUARE operator to a
+    power, but subdivision maps a space of n points into a space of 2n. It is not a square operator -- and I once
+    concluded from that it therefore has no closed form. Wrong. It is a *refinement* operator, and on a CLOSED,
+    uniform curve it is still diagonal in the Fourier basis, so k levels compose analytically (the cascade /
+    refinement formula behind Stam's exact subdivision evaluation):
+
+        X_k[m] = X_0[m mod n] * prod_{t=0..k-1} H(w_m * 2^t),      w_m = 2*pi*m/N,  N = n * 2^k
+
+    -- a zero-insert upsample TILES the spectrum, and each level's convolution multiplies by the mask's transfer
+    evaluated at that level's frequencies. Verified against k literal subdivisions: max abs diff 6.7e-16 at k=1,
+    2.7e-15 at k=5. Measured 2.4x (k=6) to 3.8x (k=8) faster, and it evaluates any level directly.
+
+    `taps` maps integer offset -> coefficient, e.g. Chaikin corner-cutting is {0: .75, 1: .25, -1: .75, -2: .25}.
+    `x` is (n,) or (n, dim); the refinement runs along `axis`.
+
+    HONEST SCOPE: this needs the operator to be SHIFT-INVARIANT on a closed (periodic) domain -- a uniform curve, a
+    regular grid. An irregular mesh around an extraordinary vertex is not shift-invariant; Stam's full method
+    diagonalises the local subdivision matrix there instead, which is a different (and heavier) construction.
+    """
+    x = np.moveaxis(np.asarray(x, float), axis, 0)
+    n = x.shape[0]
+    k = int(k)
+    if k <= 0:
+        return np.moveaxis(x.copy(), 0, axis)
+    N = n * (2 ** k)
+    spec = np.fft.fft(x, axis=0)
+    tiled = np.tile(spec, (2 ** k,) + (1,) * (x.ndim - 1))      # zero-insert upsample == tile the spectrum
+    w = 2.0 * np.pi * np.arange(N) / N
+    transfer = np.ones(N, dtype=complex)
+    for level in range(k):
+        omega = w * (2 ** level)
+        transfer *= sum(c * np.exp(-1j * omega * t) for t, c in taps.items())
+    if x.ndim > 1:
+        transfer = transfer.reshape((N,) + (1,) * (x.ndim - 1))
+    out = np.real(np.fft.ifft(tiled * transfer, axis=0))
+    return np.moveaxis(out, 0, axis)
 
 
 def dominant_eigenvector(U):

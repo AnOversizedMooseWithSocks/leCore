@@ -66,13 +66,14 @@ def sh_eval(dirs, order=3):
 
 
 def _sphere_dirs(n, seed=0):
-    """`n` deterministic near-uniform directions on the unit sphere (a spherical Fibonacci lattice -- low-discrepancy,
-    so the Monte-Carlo integrals converge with far fewer samples than white-noise sampling)."""
-    i = np.arange(n) + 0.5
-    phi = np.arccos(1.0 - 2.0 * i / n)                          # polar angle, equal-area in cos
-    golden = np.pi * (1.0 + 5.0 ** 0.5)                        # golden-angle azimuth
-    theta = golden * i
-    return np.stack([np.sin(phi) * np.cos(theta), np.sin(phi) * np.sin(theta), np.cos(phi)], axis=1)
+    """`n` deterministic near-uniform directions on the unit sphere (a spherical Fibonacci lattice).
+
+    P4: the lattice itself now lives in the low-discrepancy home -- this is a thin alias so existing callers
+    keep working. `seed` is accepted and ignored: the sequence is stateless (the i-th direction is a pure
+    function of (i, n)), which is exactly what makes it farm-parallel with no seed coordination.
+    """
+    from holographic.sampling_and_signal.holographic_lowdiscrepancy import sphere_directions
+    return sphere_directions(n)
 
 
 def project_env_to_sh(env_fn, order=3, n=2048):

@@ -247,6 +247,56 @@ class Database:
         self.add_namespace("system", writable=False)
 
     # -- namespaces ---------------------------------------------------------------------------------------------
+    # ==========================================================================================================
+    # P8 -- the query_* SATELLITES, as OPT-IN LAYERS.
+    # Nine modules shipped durability, locking, concurrency, time-travel, graph traversal, folders and stored
+    # programs for this database, each with tests -- and NOTHING imported them. Built, tested, disconnected.
+    # They stay optional (a plain Database pays nothing for them) but they now have a door, here, on the object
+    # they extend. Each method delegates; none reimplements.
+    # ==========================================================================================================
+    def snapshot(self, path, tiers=("persistent",)):
+        """DURABILITY: write a crash-safe snapshot (write-then-rename) of the persistent tier to `path`.
+        See holographic_query_durable.save_snapshot."""
+        from holographic.agents_and_reasoning.holographic_query_durable import save_snapshot
+        return save_snapshot(self, path, tiers=tiers)
+
+    @staticmethod
+    def restore(path, system_tables=None):
+        """DURABILITY: rebuild a Database from a snapshot written by `snapshot()`. This is a CONSTRUCTOR (it returns
+        a new Database by deterministic replay), not an in-place load -- `db = Database.restore(path)`.
+        See holographic_query_durable.load_snapshot."""
+        from holographic.agents_and_reasoning.holographic_query_durable import load_snapshot
+        return load_snapshot(path, system_tables=system_tables)
+
+    def journal(self, path):
+        """DURABILITY: an append-only REDO log of writes since the last snapshot; `replay(db)` re-applies it.
+        See holographic_query_durable.Journal."""
+        from holographic.agents_and_reasoning.holographic_query_durable import Journal
+        return Journal(path)
+
+    def writer_lock(self):
+        """CONCURRENCY: one writer at a time, readers never blocked. See holographic_querylock.SingleWriterLock."""
+        from holographic.agents_and_reasoning.holographic_querylock import SingleWriterLock
+        return SingleWriterLock()
+
+    def snapshot_reader(self, table_name):
+        """CONCURRENCY: a point-in-time READ view of a table -- a consistent read that never blocks the writer and
+        never sees later writes. See holographic_query_concurrency.snapshot_reader."""
+        from holographic.agents_and_reasoning.holographic_query_concurrency import snapshot_reader
+        return snapshot_reader(self.resolve(table_name))
+
+    def versioned(self, table_name):
+        """TIME TRAVEL: wrap a table with a committed, recoverable history (commit / read-at / fork).
+        See holographic_query_history.VersionedTable."""
+        from holographic.agents_and_reasoning.holographic_query_history import VersionedTable
+        return VersionedTable(self.resolve(table_name))
+
+    def adjacency(self, table_name, src_col, dst_col, reverse=False):
+        """GRAPH: build a live adjacency dict from an edge table (tombstoned edges skipped), for
+        descendants()/ancestors() traversal. See holographic_query_graph."""
+        from holographic.agents_and_reasoning.holographic_query_graph import build_adjacency
+        return build_adjacency(self.resolve(table_name), src_col, dst_col, reverse=reverse)
+
     def add_namespace(self, name, writable=True, tier=None):
         """Create a namespace. WS1: each namespace has a TIER -- 'system' (read-only, the mind's live state),
         'persistent' (the durable user DB, survives reset/sessions), or 'workspace' (transient session scratch,

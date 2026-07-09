@@ -121,7 +121,8 @@ def codebook_denoise(x, codebook, beta=25.0, steps=3, readout="softmax"):
     return dense_cleanup(x, codebook, beta=beta, steps=steps, readout=readout)
 
 
-def project_onto_constraints(x, projections, iters=30, tol=None, omega=1.0):
+def project_onto_constraints(x, projections, iters=30, tol=None, omega=1.0, sweep="sequential",
+                             average=False):
     """Iterated projection -- satisfy a set of constraints by repeatedly projecting onto each in turn. This
     is the structure three things the engine grew separately all share (Macklin's observation -- the same
     object he builds in position-based dynamics):
@@ -135,15 +136,36 @@ def project_onto_constraints(x, projections, iters=30, tol=None, omega=1.0):
     stability when many constraints fight. When the projections are onto convex sets this IS von Neumann /
     POCS alternating projection and converges to a point in their intersection.
 
+    `sweep` picks HOW the projections combine within one iteration:
+      * "sequential" (default, Gauss-Seidel): each projection sees the x the previous one produced. This is
+        POCS / von Neumann, and what the PnP loop and a PBD constraint sweep want.
+      * "simultaneous" (Jacobi): EVERY projection sees the same x, and their moves are summed. With
+        `average=True` this is Cimmino's averaged-projection method (the convergent choice for many
+        fighting convex constraints). With disjoint constraints -- each projection touching its own block of
+        x, as in the resonator, where each factor is cleaned against its own codebook -- summing the moves
+        reproduces the block update EXACTLY, which is why the resonator can delegate here.
+
     `iters` sweeps; `tol` (if set) stops early once a full sweep moves x by less than tol (relative); `tol=None`
     runs all `iters` -- what the PnP loop wants. Returns (x, n_sweeps, converged) where `converged` is True only
     when `tol` triggered an early stop. Deterministic given deterministic projections (no RNG of its own)."""
+    if sweep not in ("sequential", "simultaneous"):
+        raise ValueError("sweep must be 'sequential' or 'simultaneous', got %r" % (sweep,))
     x = np.asarray(x, float).copy()
+    m = max(len(projections), 1)
     for it in range(iters):
         prev = x.copy()
-        for proj in projections:
-            px = np.asarray(proj(x), float)
-            x = px if omega == 1.0 else x + omega * (px - x)
+        if sweep == "sequential":
+            for proj in projections:                       # Gauss-Seidel: each sees the updated x
+                px = np.asarray(proj(x), float)
+                x = px if omega == 1.0 else x + omega * (px - x)
+        else:
+            # JACOBI / simultaneous: every projection sees the SAME x, then the moves are combined.
+            delta = np.zeros_like(x)
+            for proj in projections:
+                delta += np.asarray(proj(x), float) - x
+            if average:
+                delta /= m                                 # Cimmino averaged projections (convex sets)
+            x = x + omega * delta
         if tol is not None and np.linalg.norm(x - prev) <= tol * (np.linalg.norm(prev) + 1e-12):
             return x, it + 1, True
     return x, iters, False

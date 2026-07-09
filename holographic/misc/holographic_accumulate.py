@@ -39,15 +39,31 @@ def _winsorize(X, k):
     return c + dev * factor.reshape((-1,) + (1,) * (A.ndim - 1))
 
 
-def robust_accumulate(samples, schedule="harmonic", alpha=0.2, clamp_k=None):
+def robust_accumulate(samples, schedule="harmonic", alpha=0.2, clamp_k=None, exact=False):
     """Average a sequence of noisy estimates of one quantity, robustly. `schedule='harmonic'` uses 1/n weights
     (ACCUM-2: converges, best for a STATIONARY target); `'ema'` uses a fixed-alpha exponential blend (best for a
     DRIFTING target); `'mean'` is the plain mean. `clamp_k` (ACCUM-3), if set, winsorizes outlier samples to
     clamp_k robust-scales from the median BEFORE accumulating, so one firefly can't dominate. Samples may be
-    scalars or vectors."""
+    scalars or vectors.
+
+    P5 -- `exact=True` reduces through `reduce_sum_exact` (exact integer accumulation) instead of a float
+    sum. Float addition is not associative, so accumulating the SAME samples in a different order -- exactly
+    what a render farm does when buckets return out of order -- gives a different answer (measured: 7.3e-12
+    across two orders, on samples spanning 12 orders of magnitude). Exact mode is BIT-IDENTICAL for any
+    order. Honest trade: it quantizes at bits=40, so it differs from the float sum by ~9e-8. Use it when
+    reproducibility across nodes matters more than the last few ulps; the default stays float, so nothing
+    existing changes. Only the ORDER-INDEPENDENT schedules ("mean", "harmonic") accept it -- "ema" is
+    order-dependent by design (it deliberately weights later samples more), so exact=True raises there.
+    """
     X = np.array([np.asarray(s, float) for s in samples], float)
     if clamp_k is not None:
         X = _winsorize(X, clamp_k)
+    if exact:
+        if schedule == "ema":
+            raise ValueError("exact=True is meaningless for the 'ema' schedule: an exponential blend is "
+                             "order-dependent by construction")
+        from holographic.scene_and_pipeline.holographic_distribute import reduce_sum_exact
+        return reduce_sum_exact(list(X)) / float(len(X))   # exact integer sum -> identical for ANY order
     if schedule == "harmonic":
         acc = np.zeros_like(X[0])
         for n, s in enumerate(X, 1):

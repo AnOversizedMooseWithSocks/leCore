@@ -13,3 +13,5 @@ holographic_vsa_complete.zip
 /build_pkg
 *.egg-info
 repo.zip
+/temp
+/current backlogs

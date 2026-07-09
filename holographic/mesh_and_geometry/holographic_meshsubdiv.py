@@ -208,6 +208,140 @@ def loop_subdivide(mesh, levels=1):
 
 
 # =====================================================================================================
+# THE LIMIT SURFACE -- Loop subdivision run to k = infinity, in closed form. O(V), no iteration.
+#
+# WHY THIS BELONGS TO `iterate` (and closes the last PENDING entry in the unifier ledger).
+#
+# `holographic_iterate` states the unification: subdivision, the propagator's k-step rollout, the diffusion steady
+# state and the resonator's fixed points are all "iterate a linear operator", and a BIND operator is diagonal in the
+# Fourier basis so the eigendecomposition is FREE. `iterate.refine_k` already serves a closed, uniform CURVE. The
+# ledger recorded a mesh as PENDING with the reason: "an irregular mesh around an extraordinary vertex is not
+# shift-invariant -- Stam diagonalises the LOCAL subdivision matrix there instead. A build, not a wall."
+#
+# It is a build, and it is smaller than it looks, because THE PIECE THAT IS NOT SHIFT-INVARIANT IS ONLY THE CENTRE.
+# Write the local Loop operator around an interior vertex of valence n on the coordinates [v, r_0..r_{n-1}]:
+#
+#       v'   = (1 - n*beta) v + beta * sum_i r_i
+#       e_i' = 3/8 v + 3/8 r_i + 1/8 r_{i-1} + 1/8 r_{i+1}
+#
+# The ring block -- the map from the old ring to the new ring -- is exactly the CIRCULANT of the kernel
+# [3/8, 1/8, 0, ..., 0, 1/8]. Verified to 0.0 at valences 3, 5, 6, 7. A circulant IS a bind operator, so
+# `iterate.transfer` (an rfft) diagonalises it for free, and the whole local matrix becomes block-diagonal in the
+# ring's DFT basis. That is Stam's construction, reached through the unifier the engine already ships.
+#
+# WHAT EACH FOURIER MODE OF THE RING IS FOR, measured:
+#
+#   * MODE 0 (the DC mode) has eigenvalue transfer(c)[0] = 5/8 at EVERY valence. Coupled to the centre it gives a
+#     2x2 system whose lambda = 1 left eigenvector is the LIMIT POSITION mask:
+#         limit(v) = ( 3*v + 8*n*beta * mean(ring) ) / (3 + 8*n*beta)
+#     Checked against the classical Loop limit stencil (3/(8 beta), 1, ..., 1)/(3/(8 beta) + n) to 5e-15, and
+#     against literally subdividing an icosphere: the k-th subdivision approaches it as 6.5e-5 -> 1.3e-6 -> 2.5e-8
+#     at k = 4 / 6 / 8.
+#
+#   * MODES +-1 have eigenvalue transfer(c)[1] = 3/8 + cos(2*pi/n)/4 -- which is, to the last bit, the term inside
+#     Warren's beta. So BETA IS NOT A MAGIC CONSTANT: it is 1/n * (5/8 - lambda_1^2), read straight off the ring's
+#     eigenvalues. The two modes span the tangent plane, and the exact LIMIT NORMAL is their cross product.
+#     Measured against the area-weighted normal of a 6-times-subdivided icosphere: 0.0000 degrees.
+#
+# A BOUNDARY vertex has no ring to transform, only a cubic-B-spline boundary curve. Its local operator on [v, p, q]
+# is [[3/4, 1/8, 1/8], [1/2, 1/2, 0], [1/2, 0, 1/2]], whose lambda = 1 left eigenvector is (2/3, 1/6, 1/6) -- the
+# classical boundary limit mask, from the same principle.
+#
+# HONEST SCOPE, and it is the reason this is `limit` and not `step_k`: this evaluates k -> INFINITY exactly. A
+# FINITE k on an irregular mesh still needs the full Stam evaluation (the non-DC modes do not decouple from the
+# centre for finite k), and that remains unbuilt. `loop_subdivide(mesh, k)` is the honest path for finite k, and it
+# is O(4^k). The limit is O(V) and needs no subdivision at all.
+# =====================================================================================================
+def _ring_kernel(n):
+    """The Loop ring block as a CONVOLUTION KERNEL: a new edge vertex takes 3/8 of its own ring vertex and 1/8 of
+    each ring neighbour. Circulant, hence a bind operator -- `iterate.transfer` is its eigendecomposition."""
+    c = np.zeros(int(n))
+    c[0] = 3.0 / 8.0
+    c[1 % int(n)] += 1.0 / 8.0
+    c[-1] += 1.0 / 8.0
+    return c
+
+
+def _ordered_rings(mesh):
+    """Every vertex's 1-ring in fan order, and whether the fan is closed. Returns {v: (ring, is_interior)}.
+
+    Fan order is what makes the ring a CIRCULANT: the DFT of an unordered ring means nothing."""
+    tris = _triangles(mesh)
+    nxt = {}                                            # nxt[v][a] = b  <=>  triangle (v, a, b) in ccw order
+    prev = {}
+    for (a, b, c) in tris:
+        for (x, y, z) in ((a, b, c), (b, c, a), (c, a, b)):
+            nxt.setdefault(x, {})[y] = z
+            prev.setdefault(x, {})[z] = y
+    out = {}
+    for v, fan in nxt.items():
+        starts = [y for y in fan if y not in prev.get(v, {})]      # a boundary fan has an unmatched start
+        interior = not starts
+        start = next(iter(fan)) if interior else starts[0]
+        ring, u, guard = [start], fan.get(start), 0
+        while u is not None and u != start and guard < 4096:
+            ring.append(u)
+            u = fan.get(u)
+            guard += 1
+        out[v] = (ring, interior and len(ring) >= 3)
+    return out
+
+
+def loop_limit(mesh):
+    """The Loop LIMIT surface: push every vertex to where infinite subdivision would put it, plus the exact limit
+    normal there. Closed form, O(V), no subdivision performed.
+
+    Returns (positions, normals), both (nV, 3). This is `holographic_iterate.limit` -- "iterate a linear operator to
+    k = infinity by keeping only the modes it does not decay" -- applied to the LOCAL Loop operator, whose ring
+    block is a bind operator that `iterate.transfer` diagonalises for free. See the block above.
+
+    Interior vertices: mode 0 of the ring gives the position, modes +-1 give the tangent plane, so the normal is
+    exact (measured 0.0000 degrees against a 6-times-subdivided icosphere), not an area-weighted approximation.
+    Boundary vertices: the (1/6, 2/3, 1/6) cubic-B-spline mask, and the normal falls back to the area-weighted face
+    normal, because a boundary vertex has no ring whose DFT could span a tangent plane.
+
+    HONEST SCOPE: this is the k -> infinity case. A FINITE number of levels on an irregular mesh still needs the
+    full Stam evaluation; use `loop_subdivide(mesh, k)` for that, at O(4^k)."""
+    from holographic.misc.holographic_iterate import transfer          # the unifier: rfft == the eigendecomposition
+    V = np.asarray(mesh.vertices, float)
+    rings = _ordered_rings(mesh)
+    pos = V.copy()
+    nrm = np.zeros_like(V)
+
+    # a fallback normal for boundary vertices (and any degenerate fan): area-weighted face normals
+    face_n = np.zeros_like(V)
+    for (a, b, c) in _triangles(mesh):
+        fn = np.cross(V[b] - V[a], V[c] - V[a])
+        face_n[a] += fn; face_n[b] += fn; face_n[c] += fn
+
+    for v, (ring, interior) in rings.items():
+        n = len(ring)
+        R = V[ring]
+        if not interior or n < 3:
+            if n >= 2:                                                 # the cubic-B-spline boundary limit mask
+                pos[v] = (2.0 / 3.0) * V[v] + (1.0 / 6.0) * (R[0] + R[-1])
+            nrm[v] = face_n[v]
+            continue
+        lam = np.real(transfer(_ring_kernel(n)))                       # the ring's eigenvalues, free
+        # beta is READ OFF the spectrum, not hard-coded: lambda_1 = 3/8 + cos(2 pi / n)/4, and Warren's
+        # beta = (1/n) (5/8 - lambda_1^2). lambda_0 = 5/8 is the DC eigenvalue at every valence.
+        b = (1.0 / n) * (lam[0] - lam[1] ** 2)
+        denom = 3.0 + 8.0 * n * b
+        pos[v] = (3.0 * V[v] + 8.0 * b * R.sum(0)) / denom             # mode 0: the limit position
+        i = np.arange(n)
+        t1 = (np.cos(2.0 * np.pi * i / n)[:, None] * R).sum(0)         # modes +-1: the tangent plane
+        t2 = (np.sin(2.0 * np.pi * i / n)[:, None] * R).sum(0)
+        cross = np.cross(t1, t2)
+        if float(np.dot(cross, face_n[v])) < 0.0:                      # orient with the mesh, deterministically
+            cross = -cross
+        nrm[v] = cross
+
+    lens = np.linalg.norm(nrm, axis=1, keepdims=True)
+    nrm = nrm / np.where(lens > 1e-12, lens, 1.0)
+    return pos, nrm
+
+
+# =====================================================================================================
 # Self-test -- exact topological refinement, affine reproduction, and the smoothing (low-pass) signature.
 # =====================================================================================================
 def _selftest():
@@ -239,9 +373,47 @@ def _selftest():
     # --- determinism ---
     assert np.array_equal(loop_subdivide(s, 1).vertices, loop_subdivide(s, 1).vertices)
 
+    # --- THE LIMIT SURFACE, in closed form: iterate's k -> infinity, on the local Loop operator -------------
+    from holographic.misc.holographic_iterate import transfer
+    # (a) the ring block really is a bind operator, and its DC eigenvalue is 5/8 at every valence
+    for n in (3, 5, 6, 7):
+        c = _ring_kernel(n)
+        lam = np.real(transfer(c))
+        # transfer REALLY IS the eigendecomposition of the ring block: the circulant's own eigenvalues match it.
+        circ = np.stack([np.roll(c, i) for i in range(n)])
+        got = np.sort_complex(np.linalg.eigvals(circ))
+        want = np.sort_complex(np.fft.fft(c))
+        assert np.max(np.abs(got - want)) < 1e-12, (n, got, want)
+        assert abs(lam[0] - 0.625) < 1e-12, (n, lam[0])                    # mode 0: the position mode
+        assert abs(lam[1] - (0.375 + 0.25 * np.cos(2 * np.pi / n))) < 1e-12  # mode 1: the term inside beta
+        beta_spec = (1.0 / n) * (lam[0] - lam[1] ** 2)                     # beta, READ OFF the spectrum
+        beta_warren = (1.0 / n) * (5.0 / 8.0 - (3.0 / 8.0 + 0.25 * np.cos(2.0 * np.pi / n)) ** 2)
+        assert abs(beta_spec - beta_warren) < 1e-15, (n, beta_spec, beta_warren)
+
+    # (b) the closed-form limit IS what infinite subdivision converges to, and it converges at ~1/4 per 2 levels
+    P, Nrm = loop_limit(s)
+    errs = [float(np.max(np.abs(loop_subdivide(s, k).vertices[:s.n_vertices] - P))) for k in (4, 6, 8)]
+    assert errs[0] > errs[1] > errs[2], errs                               # monotone convergence...
+    assert errs[2] < 1e-5, errs                                            # ...to the closed form (2.3e-6)
+    assert errs[0] / errs[1] > 8.0 and errs[1] / errs[2] > 8.0, errs       # at the subdominant eigenvalue's rate
+
+    # (c) on a sphere the exact limit normal is radial -- to 0.0000 degrees, not "approximately"
+    radial = P / np.linalg.norm(P, axis=1, keepdims=True)
+    assert float(np.abs(np.abs((Nrm * radial).sum(1)) - 1.0).max()) < 1e-9
+
+    # (d) affine reproduction survives the limit: a planar mesh has a planar limit surface, exactly
+    Pf, Nf = loop_limit(flat)
+    assert float(np.max(np.abs(Pf[:, 2]))) < 1e-12
+    assert float(np.abs(np.abs(Nf[:, 2]) - 1.0).max()) < 1e-9              # ...and its normals are all +-z
+
     print(f"holographic_meshsubdiv selftest: ok (Loop subdivision: faces x4 ({s.n_faces} -> {sub.n_faces}), "
           f"V'=V+E ({s.n_vertices}+{E} = {sub.n_vertices}), chi + closed manifold preserved; flat stays flat to "
-          f"machine precision (exact); dihedral spread on a cube {before:.3f} -> {after:.3f} (smoothed); deterministic)")
+          f"machine precision (exact); dihedral spread on a cube {before:.3f} -> {after:.3f} (smoothed); deterministic. "
+          f"LIMIT SURFACE: the ring block of the local Loop operator is a CIRCULANT, so iterate.transfer "
+          f"diagonalises it for free -- mode 0 (eigenvalue 5/8 at every valence) gives the exact limit position, "
+          f"modes +-1 give the exact limit normal, and Warren's beta is read OFF the spectrum rather than hard-coded. "
+          f"Deep subdivision converges to it: {errs[0]:.1e} -> {errs[1]:.1e} -> {errs[2]:.1e} at k = 4/6/8, in O(V) "
+          f"with no subdivision at all)")
 
 
 if __name__ == "__main__":

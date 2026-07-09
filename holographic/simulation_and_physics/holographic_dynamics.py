@@ -32,6 +32,8 @@ DESIGN NOTES
   * Pure NumPy, deterministic.
 """
 
+import warnings
+
 import numpy as np
 from holographic.agents_and_reasoning.holographic_ai import bind
 
@@ -81,19 +83,106 @@ class Propagator:
         """One-step prediction = a single bind with the learned operator."""
         return bind(self.U, np.asarray(state, float))
 
+    def spectral_radius(self):
+        """max |eigenvalue| of the operator. The bind operator is DIAGONAL in the Fourier basis, so its eigenvalues
+        are just its rfft (holographic_iterate.transfer) -- free, no O(n^3) eigendecomposition. >1 means the iterate
+        blows up: k steps will overflow to inf/nan rather than converge."""
+        from holographic.misc.holographic_iterate import transfer
+        return float(np.abs(transfer(self.U)).max())
+
+    # A learned operator very often sits a hair above 1 (e.g. 1.0005) and is perfectly usable -- 1.0005**5 = 1.003.
+    # What actually hurts is GROWTH BIG ENOUGH TO DESTROY THE ANSWER: measured, max|eig|=261 overflows to nan by
+    # k=200. So the guard fires on the predicted growth r**k, not on r>1, and stays quiet for benign operators.
+    _GROWTH_LIMIT = 1e12
+
+    def _warn_if_divergent(self, k, what):
+        """A divergent operator makes k steps silently overflow to inf/nan. We WARN rather than raise, because
+        raising would change the behaviour of existing callers -- but the caller now finds out instead of quietly
+        reading nans. `jump()`/`limit()` raise, since there the answer is genuinely undefined."""
+        r = self.spectral_radius()
+        if r <= 1.0:
+            return
+        with np.errstate(over="ignore"):
+            # NB: python's float**k raises OverflowError; numpy returns inf, which is what we want to test for.
+            growth = float(np.float_power(np.float64(r), np.float64(k)))   # how much the iterate scales the state
+        if not np.isfinite(growth) or growth > self._GROWTH_LIMIT:
+            warnings.warn(
+                "Propagator.%s(k=%d): operator diverges (max|eigenvalue| = %.4f > 1, growth ~%.1e); the iterate will "
+                "overflow to inf/nan. Use jump()/limit() for a clean error, or re-learn with more ridge."
+                % (what, k, r, growth), RuntimeWarning, stacklevel=3)
+
     def rollout(self, state, k):
-        """Predict k steps ahead; returns the k predicted states (shape (k, dim))."""
+        """Predict k steps ahead; returns the k predicted states (shape (k, dim)).
+
+        NOTE the contract: this returns the WHOLE TRAJECTORY, not just the k-th state -- compare against
+        `rollout(...)[-1]`, never against the array itself. For only the k-th state use `jump()`, which is the
+        closed form and is ~50-1300x faster.
+
+        RT-I1: the eigen-decomposition of a bind operator is its rfft, so the i-th state is one inverse FFT of
+        `rfft(state) * transfer**i`. We take that transform ONCE and raise the transfer by one power per step,
+        instead of paying two FFTs per step inside `bind`. Identical output (it is the same math), just cheaper.
+        """
+        from holographic.misc.holographic_iterate import transfer
         s = np.asarray(state, float)
-        out = np.empty((k, s.shape[0]))
+        n = s.shape[0]
+        self._warn_if_divergent(k, "rollout")
+        F = np.fft.rfft(s)
+        H = transfer(self.U)
+        acc = H.copy()                                        # transfer**(i+1) carried forward, one multiply per step
+        out = np.empty((k, n))
         for i in range(k):
-            s = self.step(s)
-            out[i] = s
+            out[i] = np.fft.irfft(F * acc, n=n)
+            acc *= H
         return out
+
+    def jump(self, state, k):
+        """The state k steps ahead in ONE closed-form evaluation (no loop): `iterate.step_k`, i.e. the transfer
+        raised to the k-th power. Matches k sequential `step()` calls to FFT tolerance (measured cos 1.000000) and
+        is 50x (k=64) to 1300x (k=4096) faster -- k=1e6 costs the same as k=1. Raises on a divergent operator,
+        where the loop would silently overflow to nan. This is what `UnifiedMind.propagator_jump` already used;
+        it now lives on the Propagator itself so every caller gets it."""
+        from holographic.misc.holographic_iterate import step_k
+        r = self.spectral_radius()
+        with np.errstate(over="ignore"):
+            growth = float(np.float_power(np.float64(r), np.float64(k))) if r > 1.0 else 1.0
+        if not np.isfinite(growth) or growth > self._GROWTH_LIMIT:
+            raise ValueError("operator diverges (max|eigenvalue| = %.4f > 1, growth ~%.1e over %d steps): the "
+                             "k-step iterate has no usable finite value" % (r, growth, k))
+        return step_k(np.asarray(state, float), self.U, k)
+
+    def limit(self, state, tol=1e-6):
+        """The k -> infinity steady state, in closed form (`iterate.limit`): decaying modes vanish, persistent
+        (|eigenvalue| ~ 1) modes remain. No iteration, and no k to choose. Raises if the operator diverges."""
+        from holographic.misc.holographic_iterate import limit as _limit
+        return _limit(np.asarray(state, float), self.U, tol=tol)
+
+    def persistent_projection(self, state, tol=1e-6):
+        """Project a state onto the operator's PERSISTENT (non-decaying) eigenspace: keep the Fourier modes with
+        |eigenvalue| ~ 1, drop the rest. Whatever survives infinite iteration lives here.
+
+        P7 -- this is what lets `dynamics` join the `project_onto_constraints` family, and it is NOT `limit()`.
+        `limit` keeps the eigenvalue H on the surviving modes, so applying it twice multiplies by H^2: measured
+        |P(Px) - Px| = 1.61, i.e. it is not idempotent and therefore not a projection. Masking those modes with 1.0
+        instead IS idempotent (measured 2.2e-16) and the subspace is invariant under `step` (2.2e-16), which is
+        exactly what a constraint set must be. Use `constraint()` to hand it to the iterated-projection engine.
+        """
+        from holographic.misc.holographic_iterate import transfer
+        x = np.asarray(state, float)
+        keep = (np.abs(transfer(self.U)) >= 1.0 - tol).astype(float)
+        return np.fft.irfft(np.fft.rfft(x) * keep, n=x.shape[0])
+
+    def constraint(self, tol=1e-6):
+        """This propagator as a CONSTRAINT for `denoise.project_onto_constraints`: a callable x -> x' snapping a
+        state onto the dynamics' invariant subspace. Compose it with other projections (a codebook cleanup, a data
+        term, a collision set) and the shared iterate-a-projection engine solves them together."""
+        return lambda x: self.persistent_projection(x, tol=tol)
 
     def recall_at(self, state_now, k):
         """Recover the state k steps BEFORE `state_now` by applying the inverse operator k times --
-        the trajectory is content-addressable, not just forward-runnable."""
-        s = np.asarray(state_now, float)
-        for _ in range(k):
-            s = bind(self.U_inv, s)
-        return s
+        the trajectory is content-addressable, not just forward-runnable.
+
+        RT-I1: k inverse binds ARE the inverse transfer raised to the k-th power, so this is one closed-form
+        `iterate.step_k` call against `U_inv` -- same answer (cos 1.000000), ~50-1300x faster, no loop."""
+        from holographic.misc.holographic_iterate import step_k
+        self._warn_if_divergent(k, "recall_at")
+        return step_k(np.asarray(state_now, float), self.U_inv, k)
