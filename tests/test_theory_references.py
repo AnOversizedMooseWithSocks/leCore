@@ -7,7 +7,12 @@ import os
 def test_theory_doc_references_are_live():
     here = os.path.dirname(os.path.abspath(__file__))                 # tests/ -- where cited test files live
     repo_root = os.path.dirname(here)                                  # repo root -- where THEORY.md lives
-    text = open(os.path.join(repo_root, "THEORY.md")).read()
+    # THEORY.md lives in docs/ since the repo reorganisation; fall back to the old root location so this test
+    # works in either layout.
+    theory = os.path.join(repo_root, "docs", "THEORY.md")
+    if not os.path.exists(theory):
+        theory = os.path.join(repo_root, "THEORY.md")
+    text = open(theory).read()
 
     # explicit `test_file.py::test_function` citations must resolve to a real function in that real file
     refs = re.findall(r"(test_[a-z0-9_]+\.py)::([A-Za-z0-9_]+)", text)

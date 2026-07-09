@@ -4,3 +4,17 @@
 [build-system]
 requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
+
+# --- pytest ---------------------------------------------------------------------------------------------------
+# WHY pythonpath IS REQUIRED (this bit is load-bearing -- removing it breaks CI):
+# The tests import the engine from the repo root, either as the package (`from holographic.misc... import ...`) or as
+# a root module (`import app`, `from holographic_service import ...`). Bare `pytest` -- which is what CI runs -- does
+# NOT put the current directory on sys.path. It only inserts each test file's first parent WITHOUT an __init__.py,
+# which since the reorg is `tests/`, not the repo root. So every test died at import with
+# "ModuleNotFoundError: No module named 'holographic'".
+# (`python -m pytest` happens to work because the -m form adds the cwd -- which is exactly why this hid locally.)
+# Setting pythonpath here puts the repo root back on sys.path for BOTH invocations, so `pytest` and `python -m pytest`
+# behave identically. Before the reorg this came for free: the test files lived at the root themselves.
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

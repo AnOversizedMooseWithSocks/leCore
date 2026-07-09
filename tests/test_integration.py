@@ -5799,9 +5799,9 @@ def test_semantic_synonyms_and_single_pass_through_mind():
     from holographic.rendering.holographic_render import Camera
     mind = UnifiedMind(dim=1024, seed=0)
     r = SynonymResolver()
-    scene = mind.parse_scene_description("a crimson spherical ball beside a giant chrome cube") \
+    scene = mind.parse_scene_description("a scarlet spherical ball beside a petite chrome cube") \
         if False else importlib.import_module("holographic.simulation_and_physics.holographic_semantic").parse_description(
-            "a crimson spherical ball beside a giant chrome cube", resolver=r)
+            "a scarlet spherical ball beside a petite chrome cube", resolver=r)
     objs = scene["objects"]
     assert len(objs) == 2 and objs[0]["color"] == "red" and objs[1]["material"] == "metal"
     sv, recs, roles = mind.encode_scene(objs)

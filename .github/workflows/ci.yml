@@ -129,6 +129,12 @@ jobs:
       # engine can surface it from a plain-English query (mind.find_capability / mind.suggest). This fails if any
       # probe query in tools/catalog_gaps.py has no curated home -- i.e. something is built but effectively hidden.
       # Fix by registering a home in holographic_catalog.py (see the existing ones for the shape).
+      # IMPORT GATE. After a module moves, an import can name a location that no longer exists and still pass by
+      # accident (stale file on disk, or the repo root happening to be on sys.path) until it doesn't. This
+      # resolves EVERY import in the repo against what's actually there, with ast -- no imports executed.
+      - name: Gate -- no broken imports
+        run: python tools/audit_imports.py
+
       - name: Gate -- no discoverability gaps
         run: python tools/catalog_gaps.py
 

@@ -30,7 +30,10 @@ def test_suggest_ranks_with_confidence():
 
 
 def test_route_acts_when_confident():
-    r = sk.route("start pause resume cancel a job")
+    # The catalog now has a SECOND job-flavoured home ("Background cloud bake", which also advertises
+    # pause/resume/cancel), so the bare phrase is genuinely ambiguous and the router honestly asks instead of
+    # guessing. Use a query that names the capability distinctly, which is what "confident" means here.
+    r = sk.route("checkpointable job lifecycle start pause resume cancel")
     assert r["decision"] == "act" and "call" in r["skill"]
 
 

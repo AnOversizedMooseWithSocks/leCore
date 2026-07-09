@@ -7,24 +7,35 @@ from select_tests import affected_tests, build_graph, _transitive
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def _rel_of(basename):
+    """The on-disk path (and dotted name) of a module, found by its FILE NAME. Looked up from the import graph
+    rather than hard-coded, so these tests keep working wherever the modules live (flat root, package, or a mix)."""
+    mods, _ = build_graph(ROOT)
+    for dotted, rel in mods.items():
+        if dotted.split(".")[-1] == basename:
+            return rel, dotted
+    raise AssertionError("module %r not found anywhere in the repo" % basename)
+
+
 def test_changed_module_selects_its_own_test():
-    picked = affected_tests(["holographic_render.py"], root=ROOT)
+    rel, _dotted = _rel_of("holographic_render")
+    picked = affected_tests([rel], root=ROOT)
     assert picked != "ALL"
-    assert "test_holographic_render.py" in picked
+    assert any(os.path.basename(p) == "test_holographic_render.py" for p in picked)
 
 
 def test_transitive_dependency_is_followed():
     # a test that reaches holographic_render only THROUGH holographic_unified must still be selected
     m, d = build_graph(ROOT)
     cache = {}
-    # find a test that imports unified but not render directly
-    picked = affected_tests(["holographic_render.py"], root=ROOT)
+    rel, dotted = _rel_of("holographic_render")
+    picked = affected_tests([rel], root=ROOT)
     # every picked test either imports render (transitively) or uses dynamic imports (always-run)
-    from select_tests import _uses_dynamic_import
+    from select_tests import _uses_dynamic_import, _path_to_module
     for t in picked:
-        name = t[:-3]
+        name = _path_to_module(t)                           # dotted module name, whatever the layout
         reach = _transitive(name, d, cache)
-        assert ("holographic_render" in reach) or _uses_dynamic_import(os.path.join(ROOT, t)) or name == "holographic_render", t
+        assert (dotted in reach) or _uses_dynamic_import(os.path.join(ROOT, t)) or name == dotted, t
 
 
 def test_docs_only_change_selects_nothing():
@@ -42,8 +53,9 @@ def test_new_unmapped_py_is_conservative():
 
 def test_leaf_change_is_smaller_than_full_suite():
     import glob
-    total = len(glob.glob(os.path.join(ROOT, "test_*.py")))
-    picked = affected_tests(["holographic_assetimport.py"], root=ROOT)
+    total = len(glob.glob(os.path.join(ROOT, "tests", "test_*.py"))) or len(glob.glob(os.path.join(ROOT, "test_*.py")))
+    rel, _dotted = _rel_of("holographic_assetimport")
+    picked = affected_tests([rel], root=ROOT)
     assert picked != "ALL"
     assert len(picked) < total                                 # a leaf change must skip SOME tests
 

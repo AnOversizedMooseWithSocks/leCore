@@ -21309,3 +21309,56 @@ Two fixes:
     name, plus dist/ build/ build_pkg/ *.egg-info paths. Done by name/path, NOT by extension -- a .zip/.gz elsewhere
     can be a genuine capability input (the filemap ingests archives), so an UNKNOWN archive still correctly forces a
     full run. Verified: the exact PR change set -> nothing; features/*.zip -> ALL (safety kept); +2 tests.
+
+## POST-REORG AUDIT: fixed the collection failure + 11 stale tests  [+3 guard tests, +1 tool, +1 CI gate]
+
+### THE ROOT CAUSE (one line of config, ~3,700 tests)
+Every test errored at collection with `ModuleNotFoundError: No module named 'holographic'` / `'app'`. Bare `pytest`
+(what CI runs) does NOT put the repo root on sys.path -- it inserts each test file's first parent WITHOUT an
+__init__.py, which since the reorg is `tests/`, not the root. Pre-reorg this came for free because the test files
+themselves lived at the root. `python -m pytest` masks it (the -m form adds the cwd), which is exactly why it looked
+fine locally and died in CI.
+FIX: `[tool.pytest.ini_options] pythonpath = ["."]` (+ `testpaths = ["tests"]`) in pyproject.toml. Bare `pytest` now
+collects all 3,783 tests. No engine code was involved.
+
+### TOOLING BUILT FIRST (so the audit was mechanical, not guesswork)
+* `tools/audit_imports.py` -- walks EVERY .py with `ast` (never importing anything) and resolves each import against
+  the modules actually on disk. Reports BROKEN (resolves to nothing -- a real landmine) and FLAT (bare `holographic_x`
+  when it now lives in a package -- works only while the root is on sys.path). Result on the reorg: **0 broken, 0 flat**
+  -- the move itself was clean, which is what let me stop hunting imports and go after behaviour.
+  Wired into ci.yml as a `Gate -- no broken imports`.
+* `tools/select_tests.py` was ALREADY reorg-aware (Moose updated discover_modules to walk + use dotted names). Verified:
+  a leaf module now selects 9 test files, the holographic_ai hub selects 327 -- the package layout makes selection
+  SHARPER than the flat one. No change needed.
+
+### THE 11 REAL TEST FAILURES -- all stale tests, no engine bugs
+Root cause of most: the semantic VOCABULARY GREW (COLORS 12 -> 30, plus new sizes/shapes/materials), so words the tests
+used as out-of-vocabulary SYNONYMS became first-class vocabulary:
+  * `crimson` is now a first-class colour (own RGB) -> no longer resolves to red. `scarlet`/`azure`/`emerald` still do.
+  * `giant`/`miniature` are now first-class SIZES -> no longer resolve to big/small. `petite`/`stretched` still do.
+  * `gold` is now BOTH a colour and a material, and colours match first -> "make everything gold" reads as colour=gold.
+    `golden` is material-only. (**Flagged, not changed**: this is a genuine ambiguity introduced by the vocabulary
+    growth. The engine's precedence is a design call, so the tests now use the unambiguous word.)
+  * `cloud` is now a volumetric material -> "a smoke cloud" parses as TWO blobs, not one smoke object.
+  * `pyramid` is now a known shape (-> cone). An absent-but-known target is answered with a QUESTION, not a
+    suggestion -- the feedback path changed and is BETTER; the test pinned the old channel.
+  * environment parse now also derives a `lighting` key. (**Flagged**: "partly cloudy sky" -> lighting=`overcast` is
+    semantically debatable. Tests now assert the keys they care about instead of pinning the whole dict.)
+  * skills `route("start pause resume cancel a job")` now returns `choose`, because the catalog grew a SECOND
+    job-flavoured home ("Background cloud bake", which also advertises pause/resume/cancel). The router is honestly
+    abstaining, not failing -- top hit is still correct. Test now uses a distinctly-named query.
+Files touched: test_holographic_semantic (5), test_holographic_scene_semantic (4), test_holographic_skills (1),
+test_integration (1), test_material_pinning (1: pinned the literal string "from holographic_brdf import", which the
+reorg rewrote to the package path -- now matches either layout), test_select_tests (3: hard-coded flat paths; now
+discovers module paths from the import graph so it survives ANY future move), test_theory_references (THEORY.md moved
+to docs/).
+
+### GUARDS ADDED (so this class of break can't come back silently)
+`tests/test_repo_layout.py`: pins `pythonpath` in pyproject (verified it FAILS when removed), asserts the engine is
+importable both ways CI imports it, and asserts audit_imports finds nothing broken.
+
+### COVERAGE / HONEST BOUND
+Ran the whole suite in chunks on a 1-core box: files 1-463 all covered, 11 failures found and fixed, everything else
+green. The single remaining "failure" seen locally is `test_creature_gauntlet::test_bootstrap_rescue_cracks_the_starved_maze`
+tripping an artificial 100s pytest-timeout I imposed -- it legitimately takes ~264s (it is the slowest test in CI's own
+durations list) and is NOT a real failure.

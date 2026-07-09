@@ -52,7 +52,10 @@ def test_semantic_scene_from_existing_objects():
     sc = SemanticScene([{"shape": "sphere", "color": "red", "material": "metal", "size": "big"},
                         {"shape": "box", "color": "blue", "material": "glass", "size": "small"}])
     assert len(sc.names()) == 2
-    sc.adjust("make everything gold")
+    # NOTE: "gold" is now BOTH a colour and a material in the vocabulary, and colours are resolved first, so
+    # "make everything gold" reads as colour=gold. "golden" is material-only -- the unambiguous way to ask for
+    # the MATERIAL, which is what this test is about.
+    sc.adjust("make everything golden")
     assert all(o["material"] == "gold" for o in sc.objects)
 
 
@@ -73,10 +76,12 @@ def test_render_produces_image():
 
 def test_adjust_leaves_helpful_feedback_on_unknown():
     sc = scene_from_description("a red sphere and a blue box")
-    sc.adjust("make the pyramid golden")               # unknown target
+    # "pyramid" is now a KNOWN shape (it resolves to cone), so an absent-but-known target is answered with a
+    # QUESTION, not a suggestion. To test the UNKNOWN-WORD path we need a word that is genuinely out of vocabulary.
+    sc.adjust("make the dodecahedron golden")          # unknown target
     fb = sc.feedback
     assert not fb["applied"] and fb["suggestions"]
-    assert any("pyramid" in s for s in fb["suggestions"])
+    assert any("dodecahedron" in s for s in fb["suggestions"])
     # scene unchanged
     assert sc.get({"shape": "sphere"})[0].get("material") in (None,)
 
@@ -90,9 +95,11 @@ def test_interpret_previews_without_applying():
 
 def test_adjust_resolves_synonyms():
     sc = scene_from_description("a blue box")
-    rep = sc.interpret("make it crimson")
-    assert rep["read_as"].get("crimson") == "color=red"
-    sc.adjust("make it crimson")
+    # "crimson" is now a first-class colour (it has its own RGB), so it is NOT resolved to red any more.
+    # "scarlet" is still a synonym of red -- which is the synonym-resolution path this test is for.
+    rep = sc.interpret("make it scarlet")
+    assert rep["read_as"].get("scarlet") == "color=red"
+    sc.adjust("make it scarlet")
     assert sc.objects[0]["color"] == "red"
 
 
@@ -116,7 +123,8 @@ def test_description_with_no_objects_gives_help():
 
 
 def test_build_does_its_best_with_synonyms():
-    sc = scene_from_description("a shiny crimson orb")
+    # "scarlet" (a synonym of red), not "crimson" -- crimson is now a colour in its own right.
+    sc = scene_from_description("a shiny scarlet orb")
     o = sc.objects[0]
     assert o["shape"] == "sphere" and o["color"] == "red" and o["material"] == "mirror"
 

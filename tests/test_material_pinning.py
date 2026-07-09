@@ -67,7 +67,7 @@ def test_raymarch_delegates_to_canonical_brdf():
     drifts back in, this fails."""
     import holographic.rendering.holographic_raymarch as holographic_raymarch
     src = inspect.getsource(holographic_raymarch)
-    assert "from holographic_brdf import" in src                  # it imports the canonical BRDF
+    assert "holographic_brdf import" in src                       # it imports the canonical BRDF (flat OR package path)
     assert "def fresnel" not in src and "def cook_torrance" not in src   # ... and defines no rival of its own
 
 
