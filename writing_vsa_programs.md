@@ -32,7 +32,7 @@ There is one register: the **accumulator** (ACC). Instructions transform it.
 ## Quick start
 
 ```python
-from holographic_machine import HoloMachine
+from holographic.agents_and_reasoning.holographic_machine import HoloMachine
 
 vm = HoloMachine(dim=4096, seed=7)            # default data alphabet is 'a'..'f'
 prog = [("LOAD", "a"), ("BIND", "b"), ("BUNDLE", "c"), ("HALT", "")]

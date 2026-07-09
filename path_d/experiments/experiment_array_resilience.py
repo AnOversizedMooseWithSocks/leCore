@@ -16,7 +16,7 @@ import sys, os
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "repo"))
-from holographic_array import HoloArray
+from holographic.misc.holographic_array import HoloArray
 
 D = 1024
 K = 8                 # data shards

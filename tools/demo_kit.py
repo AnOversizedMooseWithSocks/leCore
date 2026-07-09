@@ -19,7 +19,7 @@ def png_response(img, level=6):
     always shows the freshly-rendered frame, not a stale cached one). `level` is passed straight to the engine's
     png_bytes: 1 for fast streamed preview frames, 6 for stills."""
     from flask import Response
-    from holographic_render import png_bytes            # item 1 -- the shared encoder, no per-demo copy
+    from holographic.rendering.holographic_render import png_bytes            # item 1 -- the shared encoder, no per-demo copy
     r = Response(png_bytes(img, level), mimetype="image/png")
     r.headers["Cache-Control"] = "no-cache"
     return r

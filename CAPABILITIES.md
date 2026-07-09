@@ -22,15 +22,15 @@ Or over HTTP, once you run the service (see SERVICE.md): `GET /skills`, `POST /s
 stay in the vector/frequency domain with no Python hops: FUSE a bind/bundle/permute chain into ~2 FFTs (measure the FFT drop), the fuse-runs SCHEDULER, width, and running logic as a VSA PROGRAM. Rule: push decisions/cleanups to the boundaries.
 
 ```python
-from holographic_computehome import Compute; Compute.fuse_record(keys, values)
+from holographic.misc.holographic_computehome import Compute; Compute.fuse_record(keys, values)
 ```
 *Find it by:* compute, fuse, fused, schedule, execute, program, machine, fft
 
 ### Distributed compute across machines (farm)
-run the same partition-and-reduce work across a FARM of machines. Each node runs holographic_coordinator.serve_worker(workers={name: fn}); mind.farm(['host1:9000','host2:9000'], token).run(buckets, worker_name, cache, reduce) round-robins the buckets across nodes and reassembles by the monoid reducer -- the same call as the local pool, just cross-machine. SAFE by design: workers run BY NAME (a node only runs workers it registered), so no code crosses the wire, only data. stdlib sockets/JSON..
+run the same partition-and-reduce work across a FARM of machines. Each node runs holographic.scene_and_pipeline.holographic_coordinator.serve_worker(workers={name: fn}); mind.farm(['host1:9000','host2:9000'], token).run(buckets, worker_name, cache, reduce) round-robins the buckets across nodes and reassembles by the monoid reducer -- the same call as the local pool, just cross-machine. SAFE by design: workers run BY NAME (a node only runs workers it registered), so no code crosses the wire, only data. stdlib sockets/JSON..
 
 ```python
-from holographic_coordinator import serve_worker; serve_worker(port=9000, workers={'sum': fn})  # then: mind.farm(['host:9000'], token).run(buckets, 'sum', None, reduce_sum)
+from holographic.scene_and_pipeline.holographic_coordinator import serve_worker; serve_worker(port=9000, workers={'sum': fn})  # then: mind.farm(['host:9000'], token).run(buckets, 'sum', None, reduce_sum)
 ```
 *Find it by:* farm, distributed compute, cluster, network farm, worker node, serve_worker, render farm, compute across machines
 
@@ -38,7 +38,7 @@ from holographic_coordinator import serve_worker; serve_worker(port=9000, worker
 turn raw values into hypervectors: scalar & fractional-power encoding (encoders/fpe -- nearby numbers map to nearby vectors), N-D coordinate fields (fpefield), complex-phasor FHRR (fhrr), sparse block codes (sbc), geometric-algebra Clifford (clifford), and exact integer arithmetic over phasors (rns). How data ENTERS the substrate.
 
 ```python
-from holographic_encoders import ScalarEncoder; from holographic_fpe import ...
+from holographic.io_and_interop.holographic_encoders import ScalarEncoder; from holographic.sampling_and_signal.holographic_fpe import ...
 ```
 *Find it by:* encode, encoder, number to vector, scalar encoding, fractional power encoding, fpe, encode coordinates, phasor
 
@@ -46,7 +46,7 @@ from holographic_encoders import ScalarEncoder; from holographic_fpe import ...
 the first-class hypervector: a raw vector + its dim / encoder / tag, with the five verbs (bind/unbind/bundle/cleanup/permute) as methods. Encoders are the constructors; the raw array stays one attribute away (.array / np.asarray(hv)).
 
 ```python
-from holographic_hypervector import Hypervector; Hypervector.encode(encoder, value).bind(other)
+from holographic.sampling_and_signal.holographic_hypervector import Hypervector; Hypervector.encode(encoder, value).bind(other)
 ```
 *Find it by:* hypervector, datatype, vector, vsa, hdvector, symbol, bind, bundle
 
@@ -54,7 +54,7 @@ from holographic_hypervector import Hypervector; Hypervector.encode(encoder, val
 move / rotate / warp across representations: VSA bind (rigid) + permute (order), 4x4 matrices (translate/scale/rotate/compose/decompose/look_at + quaternions), clifford rotors, anisotropic steering -- one facade.
 
 ```python
-from holographic_transformhome import Transform; Transform.translation(t)
+from holographic.misc.holographic_transformhome import Transform; Transform.translation(t)
 ```
 *Find it by:* transform, warp, rotate, translate, scale, rigid, affine, matrix
 
@@ -62,7 +62,7 @@ from holographic_transformhome import Transform; Transform.translation(t)
 the five primitives: bind (attach/transform), unbind (query), bundle (superpose/blend), permute (order), cleanup (recognise/denoise).
 
 ```python
-from holographic_ai import bind, bundle; from holographic_ai import Vocabulary  # Vocabulary(...).cleanup(x)
+from holographic.agents_and_reasoning.holographic_ai import bind, bundle; from holographic.agents_and_reasoning.holographic_ai import Vocabulary  # Vocabulary(...).cleanup(x)
 ```
 *Find it by:* bind, unbind, bundle, cleanup, permute, superpose, blend
 
@@ -94,7 +94,7 @@ mind.registry.announce(agent); online = mind.registry.list(kind='agent'); mind.r
 a role->filler memory that picks its representation by LOAD and FIDELITY need -- cheap real-HRR at low load, FHRR phasors past the capacity knee, or tensor-product binding for EXACT recall (perfect to M~dim, at dim*dim storage). Uniform add/recall; deciders are exact integers/flags, no harm mode on recall.
 
 ```python
-from holographic_loadmemory import AdaptiveRoleFillerMemory; m=AdaptiveRoleFillerMemory(dim, pairs, exact=True)
+from holographic.simulation_and_physics.holographic_loadmemory import AdaptiveRoleFillerMemory; m=AdaptiveRoleFillerMemory(dim, pairs, exact=True)
 ```
 *Find it by:* adaptive record, role filler memory, fhrr, phasor, tensor, exact recall, load, capacity
 
@@ -102,9 +102,17 @@ from holographic_loadmemory import AdaptiveRoleFillerMemory; m=AdaptiveRoleFille
 bake a slow evaluator over what VARIES (position/view/time/constant) then look it up cheaply -- one shared grid-sample core over the scattered bakes (matbake, sdfbake, viewlut, anim).
 
 ```python
-from holographic_cachehome import Cache; Cache.bake(fn, vary='position', lo=lo, hi=hi, res=24)
+from holographic.caching_and_storage.holographic_cachehome import Cache; Cache.bake(fn, vary='position', lo=lo, hi=hi, res=24)
 ```
 *Find it by:* bake, precompute, lookup, cache, memoise, irradiance, lut, grid
+
+### Code / file editing (agentic)
+read, view (line-numbered), write, exact-string replace, replace-lines, insert/delete lines, grep, find-definition, list, tree, archive, move, and UNDO -- structured source-file editing for an agent working the codebase, scoped to a project ROOT so a path can never escape it. Atomic writes; replace requires a unique match; every mutation is reversible with file_undo; replace_across renames a string across many files (with a dry-run preview); python_check (syntax) and import_check (real import in a subprocess) catch a broken edit immediately. Exposed as mind.file_* methods, so callable over the HTTP tool protocol (GET /tools, POST /invoke) like any faculty.
+
+```python
+mind.set_file_root('.'); mind.file_find_definition('make_cloud'); mind.file_replace('a.py', 'old()', 'new()'); mind.file_import_check('a.py'); mind.file_undo()
+```
+*Find it by:* edit file, edit code, modify file, modify code, write file, read file, replace in file, patch
 
 ### Cold storage (compress inactive data)
 shrink INACTIVE data to save memory and disk, and inflate it back on demand: store = mind.cold_store(keep_warm=8) keeps only the K most-recently-used values live and compresses the rest, warming any of them transparently on get(); mind.cool(big_table) wraps ONE value so c.cool() frees its RAM and c.get() brings it back bit-identical. Works on tables, whole databases, big arrays, any picklable structure; codec='lzma' packs smaller, spill_dir=... writes cold blobs to disk. Honest: high-entropy VSA vectors barely compress (the win there is freeing the live object / spilling to disk); redundant/text/structured data compresses a lot. The query Database can auto-cool its own idle tables: db.enable_cold_storage(keep_warm=K) then db.cool_idle() compresses tables you haven't queried lately and a query warms them back -- and a DB shipped to a distributed worker arrives warm + cooling-off, so a shared read-only cache is never mutated..
@@ -126,7 +134,7 @@ fm = mind.ingest_files('my_project.zip'); fm.find('*.obj'); fm.search_text('norm
 nearest-neighbour / recall over a pile of vectors with ONE interface (Index.nearest(q,k)): exact cosine scan for small sets, sub-linear RP-forest for large, plus a calibrated abstain.
 
 ```python
-from holographic_index import Index; Index(vectors, labels=names).nearest(query, k=5)
+from holographic.caching_and_storage.holographic_index import Index; Index(vectors, labels=names).nearest(query, k=5)
 ```
 *Find it by:* knn, nearest, lookup, recall, retrieve, similarity, search, index
 
@@ -134,7 +142,7 @@ from holographic_index import Index; Index(vectors, labels=names).nearest(query,
 keep the hot working set where the CPU can reach it fast: FFT spectrum residency (skip recomputing a reused transform), batched contiguous bind (one FFT for a whole record), tiling to fit a cache level, and the opt-in GPU / numba backends.
 
 ```python
-from holographic_memoryhome import Memory; Memory.bind_cached(a, b, cache)
+from holographic.simulation_and_physics.holographic_memoryhome import Memory; Memory.bind_cached(a, b, cache)
 ```
 *Find it by:* memory, cache, residency, resident, spectrum cache, batch, bind_batch, backend
 
@@ -162,7 +170,7 @@ mind.recolor_image(img, ref); mind.blend_images(a, b); mind.pattern_field('fbm')
 the render call that picks its own methods/quality: the converging sampler that stops per-pixel when the confidence interval is tight, and the render-method auto-picker.
 
 ```python
-from holographic_gbuffer import render_auto, converge_samples
+from holographic.rendering.holographic_gbuffer import render_auto, converge_samples
 ```
 *Find it by:* adaptive, auto, quality, converge, raytracing mode, render mode
 
@@ -174,11 +182,27 @@ lib = mind.asset_library(); lib.add('project/textures/water/wave.png'); lib.reli
 ```
 *Find it by:* asset, assets, relink, relocate, missing textures, broken path, fix paths, external files
 
+### Background cloud bake (resumable)
+run the slow fBm noise bake behind a cloud render as a monitorable background JOB you can pause/resume/cancel (even across a process restart), then feed the baked grid straight into a render without re-baking. The agent-friendly way to handle a render that takes minutes: kick it off, poll progress, do other work.
+
+```python
+jid = mind.bake_cloud_job(radius=1.0, seed=0, background=True); mind.job_status(jid); mind.job_pause(jid); mind.job_resume(jid); grid = mind.job_result(jid)
+```
+*Find it by:* bake cloud, background render, resumable render, monitor render, pause render, long render, render job, noise bake
+
+### Compare rendered images (files)
+perceptual similarity in [0,1] between two images given as FILE PATHS (e.g. two rendered PNGs) -- SSIM + colour + edge, shift/lighting-tolerant, the on-disk companion to compare_images. The call an agent makes to check 'did my render change or match the target?' when the images are files.
+
+```python
+mind.compare_image_files('render_a.png', 'render_b.png')  # -> {similarity, distance, ...}
+```
+*Find it by:* compare images, image diff, render diff, compare renders, image comparison, did the render change, image similarity
+
 ### Field
 sample a scalar/vector field at points with ONE interface (field.sample(points)); the backend is chosen by cost: callable/oracle, dense grid, narrow-band sparse (spectral/FPE/region/dirty are backends too).
 
 ```python
-from holographic_fieldhome import Field; Field.grid(arr, lo, hi).sample(pts)
+from holographic.misc.holographic_fieldhome import Field; Field.grid(arr, lo, hi).sample(pts)
 ```
 *Find it by:* field, grid, volume, density, sdf, sample, voxel
 
@@ -186,7 +210,7 @@ from holographic_fieldhome import Field; Field.grid(arr, lo, hi).sample(pts)
 build and edit shapes three ways: explicit MESH (half-edge + verbs), implicit SDF (CSG + raymarch), and SPLATS (Gaussian clouds) -- convertible via meshbridge.
 
 ```python
-from holographic_mesh import Mesh; from holographic_sdf import box, sphere
+from holographic.mesh_and_geometry.holographic_mesh import Mesh; from holographic.mesh_and_geometry.holographic_sdf import box, sphere
 ```
 *Find it by:* geometry, mesh, sdf, splat, shape, model, csg, subdivide
 
@@ -218,7 +242,7 @@ mind.layered_material([mind.material_layer('base', paint), mind.material_layer('
 one home for lighting: the light types (point/directional/spot/area/dome/IES) and the shade INTEGRAL in each mode -- direct NEE, PRT relight, environment SH; render methods call it.
 
 ```python
-from holographic_lightinghome import Lighting, RectLight
+from holographic.rendering.holographic_lightinghome import Lighting, RectLight
 ```
 *Find it by:* lighting, light, lamp, shadow, dome, area, ies, spot
 
@@ -226,7 +250,7 @@ from holographic_lightinghome import Lighting, RectLight
 the material as a record of named channels (albedo/metallic/roughness/normal/...) you sample per point; its position-dependent channels BAKE via the Cache home and shade via the Shading home.
 
 ```python
-from holographic_material import Material
+from holographic.materials_and_texture.holographic_material import Material
 ```
 *Find it by:* material, channels, albedo, roughness, metallic, shader
 
@@ -242,7 +266,7 @@ mind.material_info('gold'); mind.find_materials('clear liquid'); mind.materials(
 modeling/DCC edits on a Mesh: extrude/inset faces (meshpoly), subdivide + smooth (meshsubdiv, Catmull-Clark), deform/warp (deform), rig-skin-pose a skeleton (blendpose), UV unwrap (chart), decimate/QEM, booleans, and mesh<->SDF. Blender-parity polygon editing.
 
 ```python
-mind.deform(mesh, ...); mind.mesh_to_sdf(mesh); from holographic_meshverbs import extrude_face
+mind.deform(mesh, ...); mind.mesh_to_sdf(mesh); from holographic.mesh_and_geometry.holographic_meshverbs import extrude_face
 ```
 *Find it by:* edit a mesh, extrude, bevel, inset, subdivide, smooth a mesh, decimate, reduce polygons
 
@@ -258,7 +282,7 @@ mind.multi_material([metal, rust], [1.0, mind.texture_leaf('fbm', n_dims=2)]).sa
 energy-conserving GGX for rough metals: the Kulla-Conty multi-scatter term adds back the energy single-scatter GGX loses (white-furnace ~0.4 -> ~1.0 at high roughness), GATED by roughness so smooth surfaces skip it (the term overshoots at low roughness). Detector is the exact material roughness.
 
 ```python
-from holographic_brdf import brdf_gated, cook_torrance_ms; brdf_gated(N,V,L,color,metallic,roughness)
+from holographic.rendering.holographic_brdf import brdf_gated, cook_torrance_ms; brdf_gated(N,V,L,color,metallic,roughness)
 ```
 *Find it by:* multi-scatter, multiscatter, kulla-conty, energy conservation, brdf, ggx, rough metal, white furnace
 
@@ -266,7 +290,7 @@ from holographic_brdf import brdf_gated, cook_torrance_ms; brdf_gated(N,V,L,colo
 run the coordinator's monoid workers on OTHER machines: a worker daemon per node (stdlib http/json), the read-only cache shipped ONCE by content hash and reused, buckets dispatched concurrently and reduced -- the same Coordinator.run as the local pool. Buckets are data, workers are registered code; a node runs only its registered workers.
 
 ```python
-from holographic_farm import WorkerDaemon, NetworkFarm; Coordinator(NetworkFarm([addr])).run(buckets, 'worker_name', cache, reduce)
+from holographic.misc.holographic_farm import WorkerDaemon, NetworkFarm; Coordinator(NetworkFarm([addr])).run(buckets, 'worker_name', cache, reduce)
 ```
 *Find it by:* render farm, distributed, network, seti, worker daemon, remote, cluster, node
 
@@ -274,7 +298,7 @@ from holographic_farm import WorkerDaemon, NetworkFarm; Coordinator(NetworkFarm(
 compose a render or sim run as ordered stages that declare what they need/produce; dispatch among render strategies (pathtrace/raymarch/prt/radiance) and catch a missing input before running.
 
 ```python
-from holographic_pipeline import build_pipeline, PipelineConfig, RenderSpec
+from holographic.scene_and_pipeline.holographic_pipeline import build_pipeline, PipelineConfig, RenderSpec
 ```
 *Find it by:* pipeline, stage, compose, run, render, strategy, dispatch, route
 
@@ -298,7 +322,7 @@ rg = mind.render_graph(); rg.add_texture('rust', graph, static=True).set_scene(s
 render a scene to an image: path_trace (Monte-Carlo global illumination), a camera controller, indirect-light gather + irradiance cache (globalillum), precomputed radiance transfer (prt), volumetric integration, and lens/DOF + post-FX. The analysis-by-synthesis render path.
 
 ```python
-mind.path_trace(scene); mind.camera(); from holographic_raymarch import sphere_trace
+mind.path_trace(scene); mind.camera(); from holographic.rendering.holographic_raymarch import sphere_trace
 ```
 *Find it by:* render a scene, path trace, ray tracing, global illumination, camera, depth of field, lens, volumetric render
 
@@ -306,7 +330,7 @@ mind.path_trace(scene); mind.camera(); from holographic_raymarch import sphere_t
 implicit + procedural geometry: signed distance fields (sdf), sphere-trace raymarching with ambient occlusion (raymarch), sculpting, procedural terrain (procgen), spatial tiling + octree, and voxelization. Native-first shape building.
 
 ```python
-from holographic_raymarch import sphere_trace; mind.terrain(...); from holographic_sdf import ...
+from holographic.rendering.holographic_raymarch import sphere_trace; mind.terrain(...); from holographic.mesh_and_geometry.holographic_sdf import ...
 ```
 *Find it by:* sdf, signed distance field, raymarch, sphere trace, sculpt, procedural terrain, procedural geometry, voxelize
 
@@ -314,7 +338,7 @@ from holographic_raymarch import sphere_trace; mind.terrain(...); from holograph
 the shade model: cook_torrance (full specular+diffuse per light), lambert (diffuse term), sample_brdf (importance-sampled bounce) -- call these instead of re-deriving Fresnel/GGX/diffuse.
 
 ```python
-from holographic_brdf import cook_torrance, lambert
+from holographic.rendering.holographic_brdf import cook_torrance, lambert
 ```
 *Find it by:* shade, brdf, cook_torrance, lambert, fresnel, ggx, specular, diffuse
 
@@ -322,7 +346,7 @@ from holographic_brdf import cook_torrance, lambert
 test whether light or the environment reaches a point: SDF soft shadow (Quilez penumbra), ambient occlusion, hard shadow-ray (NEE), and PRT baked visibility -- one home of strategies render paths call.
 
 ```python
-from holographic_shadowhome import Shadow; Shadow.soft(sdf, P, Ldir)
+from holographic.rendering.holographic_shadowhome import Shadow; Shadow.soft(sdf, P, Ldir)
 ```
 *Find it by:* shadow, visibility, occlusion, ambient occlusion, penumbra, shadow ray, soft shadow, unoccluded
 
@@ -330,7 +354,7 @@ from holographic_shadowhome import Shadow; Shadow.soft(sdf, P, Ldir)
 full-3DGS anisotropic refinement composed coarse-first: fit cheap isotropic splats, then gradient-refine the RESIDUAL (what iso missed -- sharp / oriented features) with anisotropic Gaussians. Strictly >= the isotropic baseline (no harm mode); big win on sharp edges. Opt-in (no reliable cheap detector for WHEN it pays).
 
 ```python
-from holographic_splat import fit_coarse_first; fit_coarse_first(target, K_iso, K_aniso)
+from holographic.rendering.holographic_splat import fit_coarse_first; fit_coarse_first(target, K_iso, K_aniso)
 ```
 *Find it by:* splat refine, anisotropic splat, 3dgs, gaussian splat, coarse first splat, aniso fit, residual refine, gradient refine
 
@@ -338,7 +362,7 @@ from holographic_splat import fit_coarse_first; fit_coarse_first(target, K_iso, 
 procedural + example-based surface detail as FIELDS you plug into a Material channel: fbm noise, Voronoi/cellular cracks, divergence-free curl, patch synthesis; plus the weathering set (burn/oxidation/inclusions).
 
 ```python
-from holographic_texturehome import Texture; Param(field=Texture.voronoi(kind='edge'))
+from holographic.materials_and_texture.holographic_texturehome import Texture; Param(field=Texture.voronoi(kind='edge'))
 ```
 *Find it by:* texture, noise, fbm, voronoi, curl, procedural, weathering, pattern
 
@@ -363,7 +387,7 @@ tex = mind.texture_op('mix', a=mind.texture_leaf(value='orange'), b=mind.texture
 *talk a 3-D scene into being, then adjust its named objects in words, and render or simulate it.*
 
 ### Scene from description (semantic)
-DESCRIBE a 3-D scene in plain words and the engine builds it, then you ADJUST it by talking to named objects: mind.build_scene('a big red metal sphere and a small blue glass box on a sunny day') returns a live SemanticScene; then scene.adjust('make the sphere bigger'), scene.adjust('change the box to metal'), scene.set('the red sphere', material='glass'), scene.render(), scene.simulate(). NAME objects to reference them easily -- scene.name('the red sphere', 'hero') or scene.adjust('call the box crate'), then scene.adjust('make hero glass'); scene.rename('hero','champion'). PAINT a procedural TEXTURE by talking to it -- scene.adjust('give hero a rusty texture'), scene.paint('crate', 'marbled') (rusty/marbled/mossy/cloudy/lava/striped/noisy) -- and scene.render() paints it on. Attach an EXTERNAL image file as a texture -- scene.attach_texture_file('the sphere', 'project/textures/wave.png') -- and the scene tracks it in an AssetLibrary: if the files move, scene.set_asset_roots([...]) + scene.resolve_assets() (or scene.relink(one, new)) re-find them and render() reloads them, falling back to the object's colour if one is missing. When a command is unclear it SUGGESTS rather than fails -- scene.interpret(cmd) previews what it understood + 'did you mean?' hints, scene.options() lists what you can say, scene.feedback holds the last report. Or wrap an existing object list with mind.semantic_scene(objects). Controlled vocabulary, deterministic.
+DESCRIBE a 3-D scene in plain words and the engine builds it, then you ADJUST it by talking to named objects: mind.build_scene('a big red metal sphere and a small blue glass box on a sunny day') returns a live SemanticScene; then scene.adjust('make the sphere bigger'), scene.adjust('change the box to metal'), scene.set('the red sphere', material='glass'), scene.render(), scene.simulate(). NAME objects to reference them easily -- scene.name('the red sphere', 'hero') or scene.adjust('call the box crate'), then scene.adjust('make hero glass'); scene.rename('hero','champion'). PAINT a procedural TEXTURE by talking to it -- scene.adjust('give hero a rusty texture'), scene.paint('crate', 'marbled') (rusty/marbled/mossy/cloudy/lava/striped/noisy) -- and scene.render() paints it on. Set the MOOD with a time-of-day/lighting word in the description -- 'a white sphere at sunset', '...at noon', '...on an overcast day', 'a dramatic ...' -- which sets the sun direction, colour and ambient (noon/morning/afternoon/sunset/sunrise/golden/dusk/overcast/night/moonlit/studio/dramatic). Attach an EXTERNAL image file as a texture -- scene.attach_texture_file('the sphere', 'project/textures/wave.png') -- and the scene tracks it in an AssetLibrary: if the files move, scene.set_asset_roots([...]) + scene.resolve_assets() (or scene.relink(one, new)) re-find them and render() reloads them, falling back to the object's colour if one is missing. When a command is unclear it SUGGESTS rather than fails -- scene.interpret(cmd) previews what it understood + 'did you mean?' hints, scene.options() lists what you can say, scene.feedback holds the last report. Or wrap an existing object list with mind.semantic_scene(objects). Controlled vocabulary, deterministic.
 
 ```python
 scene = mind.build_scene('a red metal sphere and a blue box'); scene.name('the sphere','hero'); scene.adjust('give hero a rusty texture'); scene.render()
@@ -378,7 +402,7 @@ scene = mind.build_scene('a red metal sphere and a blue box'); scene.name('the s
 physical/chemical PROPERTIES and their evolution: the matter model (Mixture/matter_step: smoke->oil separation), diffusion, equilibrium propagation, thin-film iridescence, oxidation/weathering.
 
 ```python
-from holographic_mixture import Mixture, matter_step
+from holographic.misc.holographic_mixture import Mixture, matter_step
 ```
 *Find it by:* physics, chemistry, matter, mixture, diffusion, material properties, iridescence, oxidation
 
@@ -386,7 +410,7 @@ from holographic_mixture import Mixture, matter_step
 a shared STEP LOOP over any solver (fluids/smoke, fire/combustion, softbody/cloth, hair, MPM, collision, reaction-diffusion) -- each keeps its own math; the scaffold gives them one step(dt) and exposes their field for the Pipeline to render.
 
 ```python
-from holographic_simulationhome import Simulation; Simulation.for_fluid(fluid).run(10)
+from holographic.misc.holographic_simulationhome import Simulation; Simulation.for_fluid(fluid).run(10)
 ```
 *Find it by:* simulation, solver, fluid, smoke, fire, cloth, softbody, step
 
@@ -395,10 +419,10 @@ from holographic_simulationhome import Simulation; Simulation.for_fluid(fluid).r
 *generate text, teach the engine language, and look words up in a real vendored dictionary.*
 
 ### Dictionary + taxonomy (vendored)
-a comprehensive vendored English DICTIONARY (~144k words: definition, part of speech, synonyms, example) AND an is_a TAXONOMY (encyclopedia side: 'a dog is a kind of domestic animal...'), giving the engine real world-knowledge for contextual awareness beyond its internal machinery. OPT-IN + lazy: it never loads from importing leCore or building a mind -- only the first language call decompresses it (lzma, ~3.3 MB on disk) into a plain dict in RAM (~22 MB), after which lookups are instant. Control it explicitly with holographic_dictionary.is_loaded()/preload()/unload()/stats(). Stdlib-only (lzma+json); the mind can also LEARN meaning from it. Princeton WordNet, free with attribution.
+a comprehensive vendored English DICTIONARY (~144k words: definition, part of speech, synonyms, example) AND an is_a TAXONOMY (encyclopedia side: 'a dog is a kind of domestic animal...'), giving the engine real world-knowledge for contextual awareness beyond its internal machinery. OPT-IN + lazy: it never loads from importing leCore or building a mind -- only the first language call decompresses it (lzma, ~3.3 MB on disk) into a plain dict in RAM (~22 MB), after which lookups are instant. Control it explicitly with holographic.misc.holographic_dictionary.is_loaded()/preload()/unload()/stats(). Stdlib-only (lzma+json); the mind can also LEARN meaning from it. Princeton WordNet, free with attribution.
 
 ```python
-mind.lookup('gravity'); mind.word_taxonomy('dog'); import holographic_dictionary as hd; hd.stats()
+mind.lookup('gravity'); mind.word_taxonomy('dog'); import holographic.misc.holographic_dictionary as hd; hd.stats()
 ```
 *Find it by:* dictionary, define, definition, word meaning, synonyms, encyclopedia, taxonomy, is a
 
@@ -470,7 +494,7 @@ ch = mind.opponent_channels(est_a, est_b); if ch['divergence_score'] < 0.2: use 
 analyse data with VSA-native methods: optimal transport / Wasserstein (transport), graph Laplacian + spectral filtering (graphsignal), Nystrom embedding / dimensionality reduction, persistent-homology topology, kernel density estimate, point-cloud structure (cosmic), and time-series / market analysis.
 
 ```python
-from holographic_transport import wasserstein; from holographic_graphsignal import laplacian_filter
+from holographic.misc.holographic_transport import wasserstein; from holographic.misc.holographic_graphsignal import laplacian_filter
 ```
 *Find it by:* data analysis, cluster, optimal transport, wasserstein, graph laplacian, spectral, dimensionality reduction, embedding
 
@@ -478,7 +502,7 @@ from holographic_transport import wasserstein; from holographic_graphsignal impo
 apply a kernel-weighted field in O(N*m) instead of exact O(N^2), gated by a low-rank probe: if a cheap held-out probe says the kernel is low-rank (smooth) use Nystrom (measured 6-14x faster, near-exact), else fall back to exact. The exact fallback is always correct, so the gate can't be wrong.
 
 ```python
-from holographic_nystrom import apply_kernel_gated; apply_kernel_gated(points, sources, weights, sigma)
+from holographic.sampling_and_signal.holographic_nystrom import apply_kernel_gated; apply_kernel_gated(points, sources, weights, sigma)
 ```
 *Find it by:* nystrom, landmark, low rank, kernel, rbf field, large field, spectral embedding, o(n^2)
 
@@ -486,7 +510,7 @@ from holographic_nystrom import apply_kernel_gated; apply_kernel_gated(points, s
 make something bigger than one box / one pass can hold: partition a job, run the pieces independently, reassemble with a commutative monoid -- map_reduce, load-balanced partition, image tiles / volume bricks; strategies tiling/octree/multires/superposed/sparsefield.
 
 ```python
-from holographic_scalehome import Scale; Scale.map_reduce(buckets, worker, reduce='sum')
+from holographic.misc.holographic_scalehome import Scale; Scale.map_reduce(buckets, worker, reduce='sum')
 ```
 *Find it by:* scale, distribute, partition, map reduce, tile, brick, parallel, shard
 
@@ -494,7 +518,7 @@ from holographic_scalehome import Scale; Scale.map_reduce(buckets, worker, reduc
 1-D signal processing: FFT / spectral analysis (spectral), faint-signal detection in noise with a calibrated false-discovery rate (signal_structure), drifting-narrowband / de-Doppler search (dedoppler), spectral flatness, and bandwidth. The radio-SETI-style detection stack.
 
 ```python
-from holographic_spectral import ...; from holographic_dedoppler import ...
+from holographic.sampling_and_signal.holographic_spectral import ...; from holographic.sampling_and_signal.holographic_dedoppler import ...
 ```
 *Find it by:* signal processing, fft, spectral, spectrum, detect a signal, faint signal, narrowband, doppler
 
@@ -502,7 +526,7 @@ from holographic_spectral import ...; from holographic_dedoppler import ...
 recover structure symbolically: symbolic regression to find a formula (symbolic), resonator networks that FACTOR a bound vector into its parts (sbc/resonator), is_a taxonomy climbing, and relational reasoning over records. Turning data and vectors back into laws.
 
 ```python
-from holographic_symbolic import ...; mind.climb('dog'); from holographic_sbc import ...
+from holographic.agents_and_reasoning.holographic_symbolic import ...; mind.climb('dog'); from holographic.misc.holographic_sbc import ...
 ```
 *Find it by:* symbolic regression, find a formula, factor a vector, resonator, factorization, decompose a signal, reason, reasoning
 
@@ -514,7 +538,7 @@ from holographic_symbolic import ...; mind.climb('dog'); from holographic_sbc im
 shrink data losslessly or by rate-distortion: a sequence/entropy codec (codec), general compression (compress), rate-distortion quantization (ratedistortion), and content-addressed storage (storage). How the engine fits vectors into bytes.
 
 ```python
-from holographic_codec import ...; from holographic_ratedistortion import ...
+from holographic.misc.holographic_codec import ...; from holographic.misc.holographic_ratedistortion import ...
 ```
 *Find it by:* compress, compression, codec, entropy coding, rate distortion, quantize, content addressed storage, encode data
 
@@ -522,7 +546,7 @@ from holographic_codec import ...; from holographic_ratedistortion import ...
 temporal image sequences: video compression with keyframe/delta coding (video), temporal compression, motion/phase morph between frames (phasemorph), and frame interpolation. Moving pictures on the substrate.
 
 ```python
-from holographic_video import ...; mind.blend_images(a, b)
+from holographic.io_and_interop.holographic_video import ...; mind.blend_images(a, b)
 ```
 *Find it by:* video, compress a video, temporal compression, frames, motion, interpolate frames, keyframe, sequence of images
 
@@ -534,7 +558,7 @@ from holographic_video import ...; mind.blend_images(a, b)
 measure claims honestly: error bars + significance (measure), ablation studies (ablate), proof-of-structure against a null (structure), calibrated detection with false-discovery control, benchmark + variance harness, and stress tests. The engine's own truth-in-advertising tools.
 
 ```python
-from holographic_measure import ...; from holographic_ablate import ...
+from holographic.misc.holographic_measure import ...; from holographic.misc.holographic_ablate import ...
 ```
 *Find it by:* measure, error bars, significance, ablation, false discovery rate, calibrated, benchmark, variance
 
@@ -546,7 +570,7 @@ from holographic_measure import ...; from holographic_ablate import ...
 reachability over a table's edges -- neighbors, descendants, reachable, shortest path -- what recursive SQL CTEs make painful. Uses an EXACT adjacency index by design: the holographic graph store's recall collapses at scale, so traversal is a plain deterministic graph (tombstone-aware, directed or undirected).
 
 ```python
-from holographic_querygraph import EdgeGraph; EdgeGraph(t,'src','dst').path(a,b)
+from holographic.agents_and_reasoning.holographic_querygraph import EdgeGraph; EdgeGraph(t,'src','dst').path(a,b)
 ```
 *Find it by:* graph, reachable, descendants, shortest path, traversal, adjacency, recursive cte, edges
 
@@ -554,7 +578,7 @@ from holographic_querygraph import EdgeGraph; EdgeGraph(t,'src','dst').path(a,b)
 find a way through a space or structure: A*/shortest-path route planning (plan), slime-mould flow networks (flow), tree/graph navigation (navigator), and maze solving. Pathfinding on the VSA substrate.
 
 ```python
-from holographic_plan import ...; mind.solve_maze(world); from holographic_flow import ...
+from holographic.scene_and_pipeline.holographic_plan import ...; mind.solve_maze(world); from holographic.misc.holographic_flow import ...
 ```
 *Find it by:* navigation, plan a route, pathfinding, shortest path, maze, slime mould, flow network, route
 
@@ -562,7 +586,7 @@ from holographic_plan import ...; mind.solve_maze(world); from holographic_flow 
 the VSA computer: a stored-program holographic machine (machine/HoloMachine) that runs vector programs, recipes with holes / hygienic templates (template), a content-addressed compile cache (compile), tool-orchestration planning (orchestrator/voidsynth), and reversible computation. Programs as data.
 
 ```python
-from holographic_machine import HoloMachine; from holographic_template import RecipeTemplate
+from holographic.agents_and_reasoning.holographic_machine import HoloMachine; from holographic.simulation_and_physics.holographic_template import RecipeTemplate
 ```
 *Find it by:* virtual machine, stored program, run a program, vm, recipe, template, recipe with holes, compile
 
@@ -574,7 +598,7 @@ from holographic_machine import HoloMachine; from holographic_template import Re
 run any registered ALLOWLISTED program/script as a task (subprocess, no shell, time-boxed) and wire it as an orchestrator Tool the Planner can chain, with a CircuitBreaker on a flaky one -- the door to external tools and services. SECURITY: allowlist only, never a command from untrusted input, values fill placeholders.
 
 ```python
-from holographic_command import CommandRunner, command_as_tool; r.register('ffmpeg', [...]); r.run('ffmpeg', args)
+from holographic.scene_and_pipeline.holographic_command import CommandRunner, command_as_tool; r.register('ffmpeg', [...]); r.run('ffmpeg', args)
 ```
 *Find it by:* run command, external tool, subprocess, shell, run program, ffmpeg, job runner, allowlist
 
@@ -582,7 +606,7 @@ from holographic_command import CommandRunner, command_as_tool; r.register('ffmp
 run monoid work (partition -> worker -> shared read-only cache -> reduce) on a pluggable BACKEND: an in-process default or a persistent local process pool (ProcessPoolExecutor + shared_memory, cache shipped ONCE, workers in separate interpreters). Sits behind distribute; includes a margin-gated canonical tie-break so distributed results agree on knife-edge decisions.
 
 ```python
-from holographic_coordinator import Coordinator, LocalPool; Coordinator(LocalPool(4)).run(buckets, worker, cache, reduce)
+from holographic.scene_and_pipeline.holographic_coordinator import Coordinator, LocalPool; Coordinator(LocalPool(4)).run(buckets, worker, cache, reduce)
 ```
 *Find it by:* coordinator, distribute compute, process pool, parallel, render farm, offload, shared memory, backend
 
@@ -590,7 +614,7 @@ from holographic_coordinator import Coordinator, LocalPool; Coordinator(LocalPoo
 fault tolerance + verification for untrusted farm nodes: retry-with-backoff (a reissue reassigns a dead node's work), redundant computation + majority VOTING (accept only what independent nodes agree on -- a node can't force a result), canary buckets (known answers reject an untrusted node), and speculative straggler backups. The BOINC/SETI@home discipline, mandatory before public contributors.
 
 ```python
-from holographic_hardening import HardenedCoordinator; HardenedCoordinator(farm, redundancy=3).run(buckets, worker, cache, reduce, canaries=[...])
+from holographic.misc.holographic_hardening import HardenedCoordinator; HardenedCoordinator(farm, redundancy=3).run(buckets, worker, cache, reduce, canaries=[...])
 ```
 *Find it by:* voting, redundant compute, retry, fault tolerance, canary, untrusted node, quorum, straggler
 
@@ -606,7 +630,7 @@ f = mind.workspace.fork('lab'); f.set('sky', v); mind.apply(mind.merge_forks([f.
 start / pause / resume / cancel long-running work (renders, simulations, dataset processing) as CHECKPOINTABLE monoid jobs: completed buckets fold into partials, so a job pauses at a bucket boundary, saves to disk, survives an app restart, and resumes only the remaining buckets. Works across any coordinator backend (local pool / farm).
 
 ```python
-from holographic_jobs import JobManager; m.create(id, buckets, worker); m.start(id, background=True); m.pause(id); m.resume(id)
+from holographic.scene_and_pipeline.holographic_jobs import JobManager; m.create(id, buckets, worker); m.start(id, background=True); m.pause(id); m.resume(id)
 ```
 *Find it by:* job, start, pause, resume, cancel, checkpoint, render job, long running
 
@@ -614,7 +638,7 @@ from holographic_jobs import JobManager; m.create(id, buckets, worker); m.start(
 the same publish/subscribe/send bus, spread across nodes: mind.distributed_bus(peers, token, node_id) publishes locally AND fans out to peer nodes (each running holographic_distbus.serve_bus), so agents on different machines share topics -- a swarm coordinates across the farm the way it does in one process. Received messages deliver local-only (no loops), dedup by a global id, and a dead peer never blocks the publisher. Bound a mailbox (open_mailbox(maxlen=)) for backpressure at high fan-out..
 
 ```python
-bus = mind.distributed_bus(['hostB:9100'], token, node_id='A'); from holographic_distbus import serve_bus  # serve_bus(bus, port=9100, token) in a thread
+bus = mind.distributed_bus(['hostB:9100'], token, node_id='A'); from holographic.scene_and_pipeline.holographic_distbus import serve_bus  # serve_bus(bus, port=9100, token) in a thread
 ```
 *Find it by:* distributed bus, messaging across machines, cross-node messaging, swarm messaging, pub sub across nodes, fan out, gossip, backpressure
 
@@ -622,7 +646,7 @@ bus = mind.distributed_bus(['hostB:9100'], token, node_id='A'); from holographic
 treat VSA stores as a database: SQL over tables, similarity/time-travel/diff, durable + concurrent + graph + history query layers.
 
 ```python
-from holographic_query import run_sql, UserTable
+from holographic.agents_and_reasoning.holographic_query import run_sql, UserTable
 ```
 *Find it by:* query, sql, database, table, history, diff, time travel
 
@@ -630,7 +654,7 @@ from holographic_query import run_sql, UserTable
 git-for-data on a query table: SELECT as-of a past version (time travel), blame a row across versions, diff two versions (added/removed/changed with field detail), revert, branch/compare/discard, and prove/locate-tampering (Merkle root + O(log n) which-row-changed). Wires the shipped versioning faculties into the query layer.
 
 ```python
-from holographic_querytime import TableHistory, select_as_of, diff_versions, prove
+from holographic.agents_and_reasoning.holographic_querytime import TableHistory, select_as_of, diff_versions, prove
 ```
 *Find it by:* time travel, as of, temporal, blame, diff versions, revert, branch, git for data
 
@@ -638,7 +662,7 @@ from holographic_querytime import TableHistory, select_as_of, diff_versions, pro
 B8 concurrency: one writer at a time (serialised by an exclusive lock; a second writer waits or fails fast) plus lock-free reader SNAPSHOTS (a consistent point-in-time view immune to later writes). MVCC deferred, stated honestly.
 
 ```python
-from holographic_querylock import SingleWriterLock; with lock.write(): ...
+from holographic.agents_and_reasoning.holographic_querylock import SingleWriterLock; with lock.write(): ...
 ```
 *Find it by:* lock, single writer, concurrency, snapshot read, writer lock, isolation, consistent read
 
@@ -654,7 +678,7 @@ run the engine as a standalone DATABASE server on any OS and talk to it over HTT
 installable, runnable 'stored procedures' that are hypervectors the machine executes (LOAD/BIND/APPLY/HALT -- not arbitrary code): install, list a queryable catalog, find a program BY MEANING (fuzzy over its doc), EXPLAIN (dry run), and EXECUTE over query rows sandboxed to whitelisted handlers + step-bounded, result carrying a calibrated confidence. Safer than a SQL stored procedure.
 
 ```python
-from holographic_queryprog import ProgramCatalog; cat.install(...); cat.find('cluster a series')
+from holographic.agents_and_reasoning.holographic_queryprog import ProgramCatalog; cat.install(...); cat.find('cluster a series')
 ```
 *Find it by:* stored procedure, install program, execute program, udf, pg_proc, find program, run program, vsa program
 
@@ -662,7 +686,7 @@ from holographic_queryprog import ProgramCatalog; cat.install(...); cat.find('cl
 a shallow grouping tree over a database's tables (database > folder > table): each table has one HOME folder (ownership -> lifecycle/tier) plus any number of ASSOCIATION links (grouping, no deletion on unlink). Scoped search runs over just a subtree. Folders reference existing tables, they do not copy them.
 
 ```python
-from holographic_queryfolder import FolderTree; ft.set_home('user.sales','reports'); ft.tables_in('reports')
+from holographic.agents_and_reasoning.holographic_queryfolder import FolderTree; ft.set_home('user.sales','reports'); ft.tables_in('reports')
 ```
 *Find it by:* folder, group tables, namespace tree, organize tables, home folder, association folder, scoped search, drill down
 
@@ -670,7 +694,7 @@ from holographic_queryfolder import FolderTree; ft.set_home('user.sales','report
 WS3-WS6: run one persistent user database alongside many TRANSIENT per-session workspaces (loose scratch tables + the 3D/sim/render context) that stay isolated -- clearing or resetting one never touches the persistent DB or a sibling. Make / switch / clear / reset-keeping-data, export/import a workspace, and combine two with an EXPLICIT collision policy (a merge is a decision, not a guess).
 
 ```python
-from holographic_workspace import WorkspaceManager; m=WorkspaceManager(); m.new_workspace('sessionA'); m.switch_workspace('sessionA')
+from holographic.scene_and_pipeline.holographic_workspace import WorkspaceManager; m=WorkspaceManager(); m.new_workspace('sessionA'); m.switch_workspace('sessionA')
 ```
 *Find it by:* workspace, session, scratch tables, transient tables, isolate session, reset keep data, export workspace, combine workspaces
 
@@ -680,28 +704,28 @@ from holographic_workspace import WorkspaceManager; m=WorkspaceManager(); m.new_
 combine things into one: bundle (superposition, weighted = soft mixture), lerp / slerp interpolation, Frechet mean on the sphere, front-to-back alpha composite, and dict/scene merge with a conflict policy.
 
 ```python
-from holographic_blendhome import Blend; Blend.bundle(vectors, weights)
+from holographic.misc.holographic_blendhome import Blend; Blend.bundle(vectors, weights)
 ```
 
 ### Coarse-first refine (re-enable)
 run the cheap method everywhere, measure a per-cell residual/uncertainty, and escalate to the expensive method ONLY where it's high -- the shared detector for the Group-B re-enables (adaptive AA, Nystrom, splat refine, volint). concentration() is the honest breakeven check (low => uniform is just as good).
 
 ```python
-from holographic_coarsefirst import refine_where_uncertain, concentration
+from holographic.misc.holographic_coarsefirst import refine_where_uncertain, concentration
 ```
 
 ### Denoise (domain)
 clean a render or signal with one home: image SVGF (variance-guided a-trous) or demodulated (divide albedo out), sharpen, and the signal manifold denoisers (adaptive/manifold/codebook/trajectory).
 
 ```python
-from holographic_denoisehome import Denoise; Denoise.image(img, N, A, D, method='svgf')
+from holographic.rendering.holographic_denoisehome import Denoise; Denoise.image(img, N, A, D, method='svgf')
 ```
 
 ### Durability & crash recovery
 B7: make the query store survive a crash. Take a durable SNAPSHOT of the persistent tiers (replay-based, so it rebuilds byte-identically), keep a write-ahead JOURNAL of inserts/updates/deletes since the snapshot, and RECOVER to the last consistent point by loading the snapshot and replaying the journal. The snapshot+WAL discipline, on top of the plain save/load the service already exposes.
 
 ```python
-from holographic_query_durable import save_snapshot, Journal, recover; recover(snap_path, journal_path)
+from holographic.agents_and_reasoning.holographic_query_durable import save_snapshot, Journal, recover; recover(snap_path, journal_path)
 ```
 
 ### Invite guests and share selectively (access control)
@@ -729,18 +753,18 @@ log = mind.refine(produce=lambda: gen(), critique=score, adjust=lambda r,s: twea
 run a superior-but-niche method ONLY in its regime, behind a cheap conservative detector, with a safe fallback everywhere else -- the pattern for re-enabling a shelved 'kept negative' now that adaptive dispatch can spot its regime (e.g. closed-form iterate for linear/bind operators).
 
 ```python
-from holographic_regimegate import RegimeGate; RegimeGate(name, detect, threshold, superior, fallback)
+from holographic.misc.holographic_regimegate import RegimeGate; RegimeGate(name, detect, threshold, superior, fallback)
 ```
 
 ### Sampling
 Monte-Carlo sampling: low-discrepancy / blue-noise patterns, cosine-hemisphere directions, MIS weighting, firefly-clamped accumulation -- one home over the shipped samplers.
 
 ```python
-from holographic_samplinghome import Sampling; Sampling.cosine_hemisphere(N, n, seed)
+from holographic.sampling_and_signal.holographic_samplinghome import Sampling; Sampling.cosine_hemisphere(N, n, seed)
 ```
 
 ### Use external tools (remote nodes / LLMs / commands)
-leCore CALLS tools in the same shape it serves them. holographic_toolclient.remote_tools(base_url, token) fetches another node's /tools and yields each as a callable RemoteTool (its run(args) POSTs to that node's /invoke). mind.attach_llm(callable) wires an LLM (any text->text, no SDK). mind.orchestrator.register / register_command / register_remote add remote tools, shell programs (allowlisted), and whole remote nodes so a planner can chain local faculties, remote tools, LLMs, and commands uniformly..
+leCore CALLS tools in the same shape it serves them. holographic.io_and_interop.holographic_toolclient.remote_tools(base_url, token) fetches another node's /tools and yields each as a callable RemoteTool (its run(args) POSTs to that node's /invoke). mind.attach_llm(callable) wires an LLM (any text->text, no SDK). mind.orchestrator.register / register_command / register_remote add remote tools, shell programs (allowlisted), and whole remote nodes so a planner can chain local faculties, remote tools, LLMs, and commands uniformly..
 
 ```python
 for t in remote_tools('http://host:8080', token='x'): mind.orchestrator.register(t)  # + mind.attach_llm(llm); mind.orchestrator.register_command('ffmpeg', ['ffmpeg','-i','{}'])
@@ -750,9 +774,9 @@ for t in remote_tools('http://host:8080', token='x'): mind.orchestrator.register
 the engine's cross-cutting UTILITY tools: content addressing & hashing (uri), tamper-evident verification (verify), erasure/rateless coding for reliability (fountain), chunked delta chains with integrity proofs (deltachain), versioned rollback history (history), lossless compression (compress/codec), and the determinism contract (determinism). The plumbing every faculty leans on.
 
 ```python
-from holographic_uri import address_from_content, make_key; from holographic_verify import CompositionTree
+from holographic.io_and_interop.holographic_uri import address_from_content, make_key; from holographic.misc.holographic_verify import CompositionTree
 ```
 
 ---
 
-*87 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*90 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

@@ -34,10 +34,9 @@ import numpy as np
 
 # Build on the engine's real, frozen kernel -- not a private reimplementation.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "repo"))
-from holographic_core import (unitary_vector, random_vector, bind, unbind, involution,
-                              bundle, cosine)
+from holographic.misc.holographic_core import unitary_vector, random_vector, bind, unbind, involution, bundle, cosine
 # vectorised binds for speed (bit-identical to the single-pair bind, per their docstrings)
-from holographic_ai import bind_batch, bind_fixed
+from holographic.agents_and_reasoning.holographic_ai import bind_batch, bind_fixed
 
 SEED = 7
 rng = np.random.default_rng(SEED)

@@ -1,16 +1,12 @@
 # setup.py -- packaging for leCore.
 #
-# leCore is a flat collection of ~260 `holographic_*.py` modules that import each other by their plain
-# top-level names (e.g. `from holographic_ai import bind`). The simplest, least-surprising way to ship
-# that is to install them AS top-level modules, exactly as they sit in the repo -- so anything that works
-# from a clone works once installed, with NO import rewrites and NO sys.path tricks.
-#
-# We glob the module list at build time (so adding a new holographic_*.py needs no edit here) and add one
-# small convenience module, `lecore.py`, that re-exports the main API -- so callers can just `import lecore`.
+# leCore's engine code lives in the `holographic` package (holographic/<family>/holographic_*.py), imported as
+# e.g. `from holographic.rendering.holographic_camera import ...`. We ship it as a real package tree via
+# find_packages() (so adding a new module/subpackage needs no edit here), plus one small top-level convenience
+# module, `lecore.py`, that re-exports the main API -- so callers can just `import lecore`.
 
-import glob
 import os
-from setuptools import setup
+from setuptools import setup, find_packages
 
 here = os.path.dirname(os.path.abspath(__file__))
 
@@ -18,15 +14,9 @@ def read(name):
     path = os.path.join(here, name)
     return open(path, encoding="utf-8").read() if os.path.exists(path) else ""
 
-# every holographic_*.py in this folder becomes a top-level module in the wheel.
-# (test files are named test_holographic_*.py, so this glob already excludes them; the build script
-#  also copies only the non-test modules into the staging folder, belt-and-suspenders.)
-modules = [
-    os.path.splitext(os.path.basename(path))[0]
-    for path in sorted(glob.glob(os.path.join(here, "holographic_*.py")))
-    if not os.path.basename(path).startswith("test_")
-]
-modules.append("lecore")                 # the convenience shim: `import lecore` -> lecore.UnifiedMind
+# every package under holographic/ (holographic itself + every family subpackage) ships in the wheel.
+# lecore_data is a separate runtime-data package, declared alongside it below.
+engine_packages = find_packages(where=here, include=["holographic", "holographic.*"])
 
 setup(
     # NOTE ON THE NAME: the *distribution* name (what you `pip install`) and the *import* name (what you
@@ -41,10 +31,10 @@ setup(
     long_description_content_type="text/markdown",
     author="AnOversizedMooseWithSocks",
     url="https://github.com/AnOversizedMooseWithSocks/leCore",
-    py_modules=modules,                  # <- install these flat, top-level modules (no package nesting)
+    py_modules=["lecore", "holographic_service"],   # <- top-level: the import-lecore shim + the standalone HTTP service (from holographic_service import serve)
+    packages=engine_packages + ["lecore_data"],   # <- the real holographic/ package tree + the runtime data package
     # The runtime data (the WordNet dictionary, material property JSON) ships as the small `lecore_data` PACKAGE, so
     # it is carried into the wheel and resolves the same from a clone or an install (see lecore_data/__init__.py).
-    packages=["lecore_data"],
     include_package_data=True,
     package_data={
         "lecore_data": [

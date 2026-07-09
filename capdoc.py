@@ -90,7 +90,7 @@ def generate(root=None):
     """Write CAPABILITIES.md from the catalog's curated homes, grouped by theme. Returns the output path."""
     if root is None:
         root = os.path.dirname(os.path.abspath(__file__))
-    from holographic_catalog import default_catalog
+    from holographic.caching_and_storage.holographic_catalog import default_catalog
     cat = default_catalog()                                     # curated homes only (no module imports)
     homes = [c for c in cat.all() if not c.name.startswith("holographic_")]
 
@@ -173,6 +173,52 @@ def generate(root=None):
     return dest
 
 
+# Schema version for the machine-readable artifact. BUMP THIS (and update any consumer) whenever the JSON
+# shape changes in a backward-incompatible way -- consumers should refuse a major version they don't know.
+CAPABILITIES_SCHEMA_VERSION = "1.0"
+
+
+def generate_json(root=None):
+    """Write capabilities.json -- the MACHINE-READABLE sibling of CAPABILITIES.md, built from the same catalog.
+
+    An app that wants to ingest 'what can leCore do' should read THIS, not parse the markdown: it is a stable,
+    versioned contract (schema_version + a flat list of capability records), needs no engine import to consume,
+    and never drifts from the prose because both come from one catalog in one run. Deterministic and timestamp-
+    free (like CAPABILITIES.md) so the CI drift-gate only trips on a real change."""
+    import json
+    if root is None:
+        root = os.path.dirname(os.path.abspath(__file__))
+    from holographic.caching_and_storage.holographic_catalog import default_catalog
+    cat = default_catalog()
+    homes = [c for c in cat.all() if not c.name.startswith("holographic_")]
+
+    records = []
+    for c in sorted(homes, key=lambda c: c.name):
+        records.append({
+            "name": c.name,
+            "does": c.does,
+            "example": c.example or "",
+            "aliases": list(c.aliases),
+            "native": bool(c.native),
+            "theme": _theme_for(c) or "More capabilities",
+        })
+
+    payload = {
+        "schema_version": CAPABILITIES_SCHEMA_VERSION,
+        "count": len(records),
+        "capabilities": records,
+    }
+    # sort_keys so the bytes are deterministic run-to-run (drift-gate friendly); ensure_ascii=False keeps
+    # any non-ASCII in descriptions readable rather than escaped.
+    text = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    dest = os.path.join(root, "capabilities.json")
+    with open(dest, "w", encoding="utf-8") as f:
+        f.write(text)
+    return dest
+
+
 if __name__ == "__main__":
     p = generate()
     print("wrote", p)
+    j = generate_json()
+    print("wrote", j)

@@ -5,7 +5,7 @@ _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)
 
 import numpy as np, matplotlib
 matplotlib.use("Agg"); import matplotlib.pyplot as plt
-from holographic_image import HolographicImage, _demo_image, _psnr, _cg
+from holographic.io_and_interop.holographic_image import HolographicImage, _demo_image, _psnr, _cg
 
 img=_demo_image(240); S=240; M=None
 hi=HolographicImage(img.shape, keep=4000, dim=16384, seed=0).store(img)

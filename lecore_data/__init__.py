@@ -17,13 +17,13 @@ are for running the demos from a clone, not part of the installed library.
 """
 import os
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
 def file(*parts):
     """Absolute path to a bundled data file, e.g. file('knowledge', 'dictionary.json.gz'). Does not check existence --
     use exists() for that. Works identically from a clone and a pip-installed wheel."""
-    return os.path.join(_HERE, *parts)
+    return os.path.join(_ROOT, *parts)
 
 
 def exists(*parts):

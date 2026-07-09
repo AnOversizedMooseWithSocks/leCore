@@ -91,7 +91,7 @@ The **fastest way to get it** is the tour: it runs the whole engine end to end i
 In code, the heart of it is one class, **`UnifiedMind`**, which carries every general capability on one shared space:
 
 ```python
-from holographic_unified import UnifiedMind
+from holographic.misc.holographic_unified import UnifiedMind
 
 mind = UnifiedMind(dim=4096, seed=0)     # one high-dimensional space; seed -> fully deterministic
 
@@ -101,7 +101,7 @@ mind.learn("a long soft yellow fruit", "banana")
 (label, description), score = mind.recall("something red you can eat")   # -> ('apple', ...) with a score
 
 # the raw algebra everything is built on (bind / unbind / cleanup):
-from holographic_ai import Vocabulary, bind, unbind
+from holographic.agents_and_reasoning.holographic_ai import Vocabulary, bind, unbind
 
 vocab = Vocabulary(dim=4096, seed=0)
 role, filler = vocab.get("role"), vocab.get("filler")   # two named random vectors
@@ -151,9 +151,22 @@ Like leOS, leCore is **free and open source**, and the work that keeps it free i
   materials/textures, the describe-a-scene authoring flow (naming, texturing, external files), external-asset
   relocation and the queryable file map, the message-bus + optional-agent harness, and the opt-in language layer. Every
   example is a short, commented, runnable snippet. The best place to start if you want to *use* the new capabilities.
+- **[`RENDERING_GUIDE.md`](RENDERING_GUIDE.md)** — a **practical guide to 3D, rendering & simulation**: the
+  surface-vs-volume mental model, three ways to make a cloud (describe it, one call, or by hand), building scenes
+  from words, cameras and lights, volumetric smoke/fog/fire, and the adaptive path tracer. Every snippet is
+  verified-runnable, with real cost numbers and a troubleshooting table. Start here if you want to *make a picture*.
+- **[`DEVELOPMENT_STRATEGY.md`](DEVELOPMENT_STRATEGY.md)** — the **standard process for changing leCore**: audit with
+  `find_capability` first, wire every capability to a mind faculty (so it is `/invoke`-able), register it in the
+  catalog so it is discoverable, and run the reachability/gap audits — the discipline that keeps the codebase from
+  growing gaps or isolating code in tests. Read this before making code changes.
 - **[`CAPABILITIES.md`](CAPABILITIES.md)** — the **front-door menu**: a plain-language, grouped list of what leCore can
   do and the one call that starts each job. The friendliest place to begin if you're deciding whether the engine
   already does the thing you need. Generated from the live capability catalog by `capdoc.py` and kept in sync by CI.
+- **`capabilities.json`** — the **machine-readable sibling** of `CAPABILITIES.md`, for tools and apps that ingest
+  the capability list as data rather than parsing the prose. Generated in the same `capdoc.py` run from the same
+  catalog (so the two never disagree), and CI-gated so a consumer never reads a stale copy. It is a versioned
+  contract: a top-level `schema_version` plus a flat `capabilities` array, each entry `{name, does, example,
+  aliases, native, theme}`. Consumers should check `schema_version` and refuse a major version they don't know.
 - **[`REFERENCE.md`](REFERENCE.md)** — the **code reference**: a file/module map and a plain-language breakdown
   of every module (its "why this exists" note plus its public functions and classes). Start here to find your
   way around. It's generated from the code by `docgen.py` and kept in sync automatically by CI, so it never
@@ -171,7 +184,6 @@ Like leOS, leCore is **free and open source**, and the work that keeps it free i
 - **`ISA.md`** — the small instruction set the engine's programs are built from.
 - The module docstrings — every `holographic_*.py` file opens with a plain-language "why this exists" (and
   those are exactly what `REFERENCE.md` gathers up for you).
-- **`leCore_composability_howto.md`** — information about using leCore within an LLM pipeline, as well as scaling for multiple users or agents.
 
 **How the docs stay honest.** Three of the files above are *generated* from the code and *gated* in CI, so they can't
 quietly fall out of date: `REFERENCE.md` (from module docstrings), `API_QUICKREF.md` and `CAPABILITIES.md` (from the

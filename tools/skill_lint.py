@@ -39,8 +39,8 @@ def audit():
 
     critical/terse look at the SUMMARY (first line, what a skill card shows). no_return scans the FULL docstring -- a
     method that never once hints at what it returns leaves an agent guessing about the result it will get back."""
-    import holographic_skills as sk
-    from holographic_unified import UnifiedMind
+    import holographic.misc.holographic_skills as sk
+    from holographic.misc.holographic_unified import UnifiedMind
     ms = sk.mind_methods()
     critical, terse, no_return = [], [], []
     for name in sorted(ms):
@@ -66,10 +66,13 @@ def audit_home_examples():
     agent copying it gets an ImportError/AttributeError before it even runs. no_doc/terse mirror the method checks."""
     import re
     import importlib
-    from holographic_catalog import default_catalog
+    from holographic.caching_and_storage.holographic_catalog import default_catalog
     cat = default_catalog()
-    pat_import = re.compile(r"from (holographic_\w+) import ([\w, ]+)")
-    pat_dotted = re.compile(r"(holographic_\w+)\.(\w+)\(")
+    # Examples now use dotted package paths (holographic.<family>.holographic_x), so the module pattern must
+    # allow dots -- the old holographic_\w+ only matched the pre-reorg FLAT names and silently stopped checking
+    # the dotted ones. [\w.]+ matches both the flat legacy form and the current dotted form.
+    pat_import = re.compile(r"from ([\w.]*holographic_\w+) import ([\w, ]+)")
+    pat_dotted = re.compile(r"([\w.]*holographic_\w+)\.(\w+)\(")
     pat_mind = re.compile(r"\bmind\.(\w+)\(")                   # mind.method( references an agent copies directly
     refs = {}                                                   # (module, name) -> home name
     mind_refs = {}                                             # method_name -> home name
@@ -103,7 +106,7 @@ def audit_home_examples():
         elif len(_summary_words(summary)) < MIN_SUMMARY_WORDS:
             terse.append((mod, fn, home, summary))
     # 2. mind.method references -- must name a real, public UnifiedMind method
-    import holographic_skills as sk
+    import holographic.misc.holographic_skills as sk
     methods = sk.mind_methods()
     for fn, home in sorted(mind_refs.items()):
         if fn not in methods:
@@ -114,7 +117,7 @@ def audit_home_examples():
 def report(strict=False):
     """Print a human report; return the count of hard gaps (CRITICAL + TERSE) so callers/CI can gate on it."""
     a = audit()
-    import holographic_skills as sk
+    import holographic.misc.holographic_skills as sk
     total = len(sk.mind_methods())
 
     print("skill-lint over %d public UnifiedMind methods\n" % total)
