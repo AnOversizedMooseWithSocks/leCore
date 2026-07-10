@@ -131,6 +131,15 @@ def bind(a, b):
     exact (not approximate) for real input, matching the old complex-fft bind to
     machine epsilon (~7e-17). involution-based unbind is unchanged.
     """
+    # SHAPE GUARD (NCA backlog B4). `n=a.shape[0]` is the transform length, which is only the vector length when
+    # `a` is 1-D. Handed an (N, D) batch this silently returned an (N, N) array -- a confident wrong answer that
+    # raised nothing, exactly the failure class the constitution names. `bind_batch` / `bind_fixed` are the correct
+    # batched forms and always were; this is a missing guard, not a missing capability.
+    a = np.asarray(a, float)
+    b = np.asarray(b, float)
+    if a.ndim != 1 or b.ndim != 1:
+        raise ValueError("bind is 1-D (got shapes %r and %r); use bind_batch(A, B) for an (N, D) batch, or "
+                         "bind_fixed(v, B) to bind one vector against many." % (a.shape, b.shape))
     return _irfft(_rfft(a) * _rfft(b), n=a.shape[0])
 
 
@@ -489,7 +498,9 @@ def recall_all(trace, keys, codebook, iterative=True):
         return j, float(sims[j])
 
     if not iterative:
-        return [best_match(unbind(trace, k))[0] for k in keys]
+        # BATCHED (backlog B3): K unbinds of ONE trace is one batched transform. `bind_fixed` with the involution
+        # stack IS `recover_all`; bit-identical to the loop, measured 3.8x at D=1024/K=8.
+        return [best_match(s)[0] for s in bind_fixed(trace, involution_batch(np.asarray(keys, float)))]
 
     residual = np.array(trace, dtype=float)
     remaining = set(range(len(keys)))

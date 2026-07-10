@@ -93,12 +93,157 @@ REGISTRY = {
         "clients": ["holographic_meshik", "holographic_blendpose", "holographic_softbody", "holographic_collide",
                     "holographic_resonator", "holographic_dynamics"],
     },
+
+    # ---- the 2026 "holographic GPU" cohort: primitives shipped with measurements, adopted by almost nobody -------
+    "superposed width (bind_fixed / recover_all / pack)": {
+        "module": "holographic_superposed",
+        "symbols": ["holographic_superposed", "bind_fixed", "recover_all", "pack("],
+        "why": "binding a FIXED operand against K vectors, or unbinding one composite against K keys, is ONE batched "
+               "rfft -- not K of them inside a Python loop. MEASURED, bit-identical (np.array_equal): recover_all "
+               "is 3.8x at (D=1024, K=8) and 4.3x at K=16; bind_batch is 2.8x at (1024, 8). "
+               "CORRECTION, and it shrank the item by 25x: a first AST scan reported 77 candidate loop sites across "
+               "30 modules. It was counting LOOP-CARRIED ACCUMULATORS -- `acc = bind(acc, d)` in the VSA machine's "
+               "interpreter, `x` reassigned each trial in `flatness` -- which have a data dependency and cannot "
+               "batch at all. A strict scan (bind/unbind inside a comprehension, one operand loop-invariant, the "
+               "other the loop variable) finds exactly THREE: hopfield's `_structure_project` and `_decode_combo`, "
+               "and `ai`'s non-iterative recall path. All three are now batched. SCOPE: the win is in K, not D -- "
+               "the speedup falls to 1.7x by K=64 as the per-call overhead stops dominating.",
+        "clients": ["holographic_hopfield", "holographic_ai"],
+    },
+    "shader algebra (bake once, compose passes)": {
+        "module": "holographic_shader",
+        "symbols": ["holographic_shader"],
+        "why": "H1-H8: a baked field is a texture unit; a kernel is diagonal, so N filter passes compose into ONE "
+               "elementwise multiply whose cost is independent of kernel size and pass count. This is the closest "
+               "thing the engine has to a GPU, and NOT ONE RENDERER USES IT -- render, raymarch, pathtrace, postfx, "
+               "texturerender, globalillum and svgf all cite it zero times. SCOPE: ~1% accuracy, a preview/coarse "
+               "tier, and the phasor bandwidth must exceed the field's max frequency (the algebra has a Nyquist). "
+               "G8 CLOSED THE postfx SILO BY GENERALIZING THE PRIMITIVE, not by paying for the wrong spectrum: "
+               "`Pipeline(shape, real=True)` builds the transfer on the HALF-spectrum (rfftn), which is what a real "
+               "field wants. Delegating was a 2.2x LOSS on the full fftn grid; on the half-spectrum it is "
+               "BIT-IDENTICAL (max|diff| 0.0e+00) at the same speed (1.10 ms vs 1.04 ms per 128x128x3 image), and "
+               "rfftn is 3.0x faster than fftn on a 256^2 real field. `Pipeline.from_transfer` avoids the identity "
+               "allocation a caller with a composed transfer does not need (measured: the long way cost 42%).",
+        # NOT a graphics unifier. `filter_k(field, kernel, n)` is rank-agnostic (verified on 1-D, 2-D and 3-D
+        # arrays), `bake_1d(xs, ys)` approximates ANY sampled scalar function, and `Pipeline(shape)` composes in
+        # 1-D. The clients below are therefore both renderers AND the non-graphics operator-iterators.
+        # SCOPE, measured: the closed form needs the operator to be LINEAR *and* CIRCULAR. Applying the periodic
+        # diffusion transfer to a Neumann (edge-replicated) problem is 4.76e-02 WRONG. Boundary condition is the
+        # gate, not the domain.
+        #
+        # THE NON-GRAPHICS CLIENT IS `laplacian`, NOT `heat`. heat's periodic path already had an exact closed form
+        # (`diffuse_spectral`) -- better than the filter_k form I proposed, because it solves the CONTINUOUS PDE
+        # rather than reproducing the discrete Euler stepper. What it lacked was composition: it re-exponentiated
+        # exp(-alpha|k|^2 t) on every call. `laplacian.diffusion_operator` now builds a `Pipeline` from that
+        # transfer -- bit-identical (max|diff| 0.0e+00), ~1.9x faster on reuse, and it COMPOSES (two half-steps
+        # multiply to one full step, exact to 1.1e-15). heat delegates to it via `diffuse_heat(operator=...)`.
+        "clients": ["holographic_laplacian", "holographic_postfx"],
+    },
+    "distribute.reduce_sum_exact_partitioned": {
+        "module": "holographic_distribute",
+        "symbols": ["reduce_sum_exact_partitioned", "exact_partial", "run_exact", "distribute_exact"],
+        "why": "distribute()'s DEFAULT reduce is float `reduce_sum`, which is not partition-invariant: a 4-way and a "
+               "7-way farm split of the same work disagree by 2.98e-08 (measured, magnitudes spanning 16 orders). "
+               "The exact path ships and is bit-identical across 1/4/7/13/700-way splits. NOT A DROP-IN SWAP: the "
+               "exact reduce consumes buckets of CONTRIBUTIONS, not bucket sums, so the worker contract has to grow "
+               "an `exact_partial` mode. That is the item -- correctness class, not speed.",
+        "clients": ["holographic_coordinator"],
+    },
+    "collide.advance_ccd / time_of_impact": {
+        "module": "holographic_collide",
+        "symbols": ["advance_ccd", "time_of_impact", "resolve_swept_collision"],
+        "why": "conservative advancement IS sphere tracing, so CCD costs nothing extra on an SDF. MEASURED: a 30 m/s "
+               "body stepping 0.5 m per frame passes CLEAN THROUGH a 0.1 m wall under the discrete "
+               "resolve_sdf_collision that `softbody` still calls, and is stopped exactly on it by advance_ccd. "
+               "Correctness class: no margin can fix it (a margin resolves a crossed body out the WRONG side).",
+        "clients": ["holographic_softbody"],
+    },
+    "island.color_waves (deterministic lock-free scheduling)": {
+        "module": "holographic_island",
+        "symbols": ["color_waves", "conflict_graph", "run_waves"],
+        "why": "two tasks in one colour touch disjoint resources, so a wave runs with no locks and no atomics, in a "
+               "reproducible order -- which is exactly how Box3D earns cross-platform determinism. MEASURED: 2,000 "
+               "transactions over 300 keys colour into 24 waves, 83x lock-free parallelism, every wave verified "
+               "conflict-free. `querylock` adopted it; the coordinator and farm have not.",
+        "clients": ["holographic_querylock", "holographic_coordinator"],
+    },
+    "island.SleepTracker (solve only what moves)": {
+        "module": "holographic_island",
+        "symbols": ["SleepTracker", "step_islands", "island_energy", "connected_components"],
+        "why": "a sleeping island is AT ITS FIXED POINT; skipping it is bit-identical to stepping it, and the saving "
+               "is exactly the awake fraction (measured: 3 of 20 islands moving -> step() called 3 times, not 20). "
+               "Physics steppers advance every body every frame regardless.",
+        "clients": ["holographic_softbody"],
+    },
+    "tucker.LowRankField (compressed-domain compute)": {
+        "module": "holographic_tucker",
+        "symbols": ["LowRankField", "worth_factoring"],
+        "why": "linear field ops pass through a factorization, so blur/add/query never form the array. MEASURED "
+               "(1024^2, rank 3): 171x fewer bytes; separable blur 2.53 ms / 0.049 MB vs 66.60 ms / 8.4 MB dense at "
+               "3.11e-15 error. Wired as `fieldhome.Field.low_rank`, a fourth field backend beside callable/dense/"
+               "sparse. THE GATE IS AN ERROR BUDGET, not `rank_gate`'s 99% ENERGY: measured on REAL 128x128 fields, "
+               "a sphere SDF at 99% energy is rank 2 and 7.45% WRONG, a box SDF 18.19% wrong, and fbm noise passes "
+               "the energy gate at rank 5 with 28.54% error. `rank_for_error` sizes on max-abs error: sphere SDF "
+               "rank 4 (16x fewer bytes, pays), box SDF rank 12 (5.3x, pays), fbm rank 50 (1.27x, marginal), white "
+               "noise rank 124 (refused). SCOPE: the blur must be SEPARABLE, nonlinear ops do not survive, and the "
+               "field must be BAKED ONCE and QUERIED MANY TIMES -- factoring a streamed frame costs an SVD, measured "
+               "53.7x the FFT blur it would accelerate at 128^2 and 91.7x at 256^2.",
+        "clients": ["holographic_fieldhome"],
+    },
+    "cachehome.MarginCache (fat margin for a drifting query)": {
+        "module": "holographic_cachehome",
+        "symbols": ["MarginCache", "suggest_margin", "drift_scale"],
+        "why": "a drifting query (a camera, a cursor, a recall neighbourhood) should be served from an ENLARGED baked "
+               "region, not re-keyed exactly. MEASURED on a unit-step 2-D walk of 400 queries: exact-key caching "
+               "rebuilds 400/400; margin 6.0 rebuilds 20 at 95% hits. Wired into RenderSession.preview(reuse_margin=), "
+               "where the drifting query is the CAMERA POSE: 20 drifting frames at margin 0.12 give 19 hits, 1 rebuild. "
+               "THE GATE a caller must pass is NOT a hit-rate target: a hit serves a STALE value, and on a rendered "
+               "frame the max error saturates at the FIRST reuse (0.5864, a silhouette edge) while the mean creeps "
+               "0.0001 -> 0.0051. `suggest_margin_for_error(..., max_abs_error=)` sizes it against the error you "
+               "cannot tolerate. Measured: on a value that jumps 0->1, a mean-only budget passes margin 0.1929 and "
+               "serves a completely wrong answer (max error 1.00); the max-error bound stops at 0.094558, and 0.095158 "
+               "is already catastrophic. The admissible margin is a CLIFF, not a slope.",
+        "clients": ["holographic_session"],
+    },
+    "denoise.soft_relaxation (stiffness in physical units)": {
+        "module": "holographic_denoise",
+        # NB: "stiffness=" is NOT a symbol here. `RigidBody.step(stiffness=1.0)` has its own unrelated parameter of
+        # that name, and matching it reported a silo as WIRED. A lint that lies is worse than no lint.
+        # `stiffness=stiffness` IS precise: it is the pass-through into project_onto_constraints, and nothing else
+        # in the tree writes it.
+        "symbols": ["soft_relaxation", "stiffness=stiffness"],
+        "why": "`omega` is a per-sweep number, so the same dial is different physics at different substep counts "
+               "(measured: omega=0.30 lands at 0.942 after 8 sweeps and 1.000 after 64). stiffness=(hertz, zeta) is "
+               "substep-invariant to first order, and stiffness=(inf, zeta) is BIT-IDENTICAL to the rigid default -- "
+               "which is the gate every caller must prove before it plumbs the dial through. MEASURED at the IK call "
+               "site, fixed physical horizon: omega=0.30 reaches within 0.4253 / 0.0314 / 0.0000 at 5 / 20 / 80 "
+               "iterations, while stiffness=(8 Hz, 1.0) reaches 0.0033 / 0.0002 / 0.0001 -- the dial holds its "
+               "meaning, omega does not. And at the softbody PBD site a stretched bone relaxes to 1.028 at 20 Hz and "
+               "1.7498 at 2 Hz against a rest length of 1.0. NB `RigidBody.step(stiffness=...)` is an unrelated "
+               "scalar spring constant in a different class -- that name once fooled this very lint into reporting "
+               "softbody as wired.",
+        "clients": ["holographic_meshik", "holographic_softbody"],
+    },
 }
+
 
 # Clients that are KNOWN not to cite their unifier yet. This is the backlog, made executable: the lint asserts this
 # set EXACTLY matches reality, so wiring one forces you to delete the line (progress is recorded), and un-wiring one
 # fails CI (a silo cannot re-form quietly).
 PENDING = set()
+# (an empty set, not an empty dict -- `PENDING = {}` is a dict and the lint's set arithmetic dies on it)
+_PENDING_NOTE = """
+    # EMPTY. Every declared client of every registered unifier now cites it. The 2026 cohort arrived here with 21
+    # PENDING lines; all 21 are gone -- 12 by WIRING (and each wiring forced its line to be deleted), 9 by measured
+    # RETIREMENT into DEFERRED or NOT_APPLICABLE below.
+    #
+    # The retirements are the more interesting half. FIVE of the original client names were the module where the
+    # SYMPTOM was visible rather than the module that OWNS the mechanism: `lightcache` for MarginCache (the camera
+    # lives in `session`), `postfx` for LowRankField (the field lives in `fieldhome`), `heat` for the shader algebra
+    # (the closed form lives in `laplacian`), `farm` for the exact reduce (the reduce lives in `coordinator`; farm
+    # is a transport backend), and `physics`/`emitter` for sleep and CCD (neither has an island or a collider).
+    # Reading each one is what found that; no scan could have.
+"""
 # EMPTY AGAIN, and this time because four clients were MEASURED AND RETIRED rather than because none was registered.
 #
 # `coarsefirst` was DARK -- a general primitive with no door. It now has a mind faculty, and exactly one engine
@@ -157,6 +302,26 @@ DESIGN_CLIENTS = {
     "determinism.hash_unit": ["holographic_wost", "holographic_brdf", "holographic_mis", "holographic_traverse"],
     "coarsefirst.refine_where_uncertain": ["holographic_adaptive_sample", "holographic_nystrom",
                                            "holographic_volint", "holographic_render", "holographic_splat"],
+
+    # ---- the 2026 cohort, as the FIRST wiring audit named them. Several names were wrong -- the module where the
+    # symptom shows rather than the one that owns the mechanism -- and every one of those must now appear in
+    # NOT_APPLICABLE or DEFERRED with a measured reason. Recording them here is what stops "narrow the registry
+    # until it is green" from being a strategy.
+    "superposed width (bind_fixed / recover_all / pack)": ["holographic_machine", "holographic_flatness",
+                                                           "holographic_query", "holographic_reasoning",
+                                                           "holographic_sequence", "holographic_hopfield",
+                                                           "holographic_ai"],
+    "shader algebra (bake once, compose passes)": ["holographic_postfx", "holographic_render",
+                                                   "holographic_texturerender", "holographic_heat",
+                                                   "holographic_laplacian"],
+    "distribute.reduce_sum_exact_partitioned": ["holographic_coordinator", "holographic_farm"],
+    "collide.advance_ccd / time_of_impact": ["holographic_softbody", "holographic_emitter"],
+    "island.color_waves (deterministic lock-free scheduling)": ["holographic_querylock", "holographic_coordinator"],
+    "island.SleepTracker (solve only what moves)": ["holographic_softbody", "holographic_physics"],
+    "tucker.LowRankField (compressed-domain compute)": ["holographic_postfx", "holographic_fieldhome"],
+    "cachehome.MarginCache (fat margin for a drifting query)": ["holographic_lightcache", "holographic_domecache",
+                                                                "holographic_session"],
+    "denoise.soft_relaxation (stiffness in physical units)": ["holographic_meshik", "holographic_softbody"],
 }
 
 
@@ -184,6 +349,15 @@ def unaccounted(root=None):
 # This class exists because I previously filed these under NOT_APPLICABLE, which reads as "impossible". It isn't.
 # A future session may revisit any of these with a better lever; none of them is closed by mathematics.
 DEFERRED = {
+    ("tucker.LowRankField (compressed-domain compute)", "holographic_postfx"):
+        "The factorization EXISTS and is exact; it simply does not pay, and this is DEFERRED rather than "
+        "NOT_APPLICABLE precisely so nobody reads it as impossible. postfx STREAMS frames: each image is produced, "
+        "filtered once, and thrown away, so there is nothing to amortize an SVD against. Measured: factoring costs "
+        "67.5 ms per 128x128 frame against 1.26 ms for the FFT blur it would accelerate (53.7x), and 592.6 ms vs "
+        "6.46 ms at 256x256 (91.7x). A real rendered frame is not even very low rank -- silhouettes push it to rank "
+        "28 of 96 at a 1% error budget, a 1.7x byte saving. It WOULD pay for a frame reused many times (a baked "
+        "lightmap, a cached irradiance buffer); that is the follow-up. LowRankField's home is a field BAKED ONCE and "
+        "QUERIED MANY TIMES -- `fieldhome`, where it is now wired.",
     ("iterate.step_k / limit", "holographic_diffuse"):
         "A closed form EXISTS near a fixed point: a learned bind reproduces the softmax denoise at cos 0.976 one "
         "step out, and 0.949 for an 8-step closed-form jump, with linearisation error scaling as eps^1.81 -- second "
@@ -215,6 +389,59 @@ DEFERRED = {
 
 # NOT_APPLICABLE -- closed by MATHEMATICS or by the code's actual shape, not by a cost judgement.
 NOT_APPLICABLE = {
+    ("shader algebra (bake once, compose passes)", "holographic_heat"):
+        "CLOSED BY LAYERING, and it is a wiring that happened one module down. `heat`'s periodic path already had "
+        "an exact closed form (`laplacian.diffuse_spectral`), better than the `filter_k` form the backlog proposed "
+        "because it solves the CONTINUOUS PDE rather than reproducing the discrete Euler stepper (measured: the "
+        "stepper carries 9.97e-05 of truncation error against it). What was missing was COMPOSITION, and that now "
+        "lives in `laplacian.diffusion_operator`, which builds a `shader.Pipeline` from exp(-alpha|k|^2 t) -- "
+        "bit-identical (0.0e+00), ~1.9x faster on reuse, and composable (two half-steps multiply into one, exact to "
+        "1.1e-15). `heat` consumes it via `diffuse_heat(operator=...)`. The unifier's client is the module that OWNS "
+        "the mechanism, not the one that shows the symptom.",
+    ("shader algebra (bake once, compose passes)", "holographic_render"):
+        "CLOSED BY STRUCTURE, and it echoes `coarsefirst` -> `render` exactly. PROBED: `render` has no linear, "
+        "shift-invariant pass to compose. Its 31 matches for 'filter' are PNG SCANLINE filters in the image encoder. "
+        "The inner loop is per-ray sphere tracing plus nonlinear shading -- neither is diagonal in any Fourier basis, "
+        "and neither is a chain of passes. The composition target for a rendered image is `postfx`, which is where "
+        "the algebra is used (and DEFERRED from delegating, for its own measured reason). And as with coarse-first, "
+        "render already owns the adaptivity the algebra would offer: `empty_skip` + `early_term` buy 15.2x.",
+    ("shader algebra (bake once, compose passes)", "holographic_texturerender"):
+        "CLOSED BY STRUCTURE. PROBED: zero convolutions, zero FFTs, zero baked grids. It marches a union SDF and "
+        "evaluates material channels per hit -- a per-sample nonlinear program, not a filter chain. There is no "
+        "transfer to compose and no expensive scalar function sampled densely enough to bake.",
+    ("distribute.reduce_sum_exact_partitioned", "holographic_farm"):
+        "CLOSED BY LAYERING. `farm.NetworkFarm` is a Coordinator BACKEND -- it submits work to hosts and returns "
+        "results. It performs NO reduction; grep finds `reduce` only in its docstring. The reduce lives in "
+        "`Coordinator`, where `run_exact` is wired. And the exactness is a property of the REDUCE, not the "
+        "transport: MEASURED, `run_exact` is bit-identical across InProcessBackend and a 2-process LocalPool at "
+        "4-, 7- and 13-way splits, while the float `run()` disagrees by 3.73e-08 between 4- and 7-way on either "
+        "backend. Wiring `farm` would mean giving a transport layer an opinion about arithmetic.",
+    ("collide.advance_ccd / time_of_impact", "holographic_emitter"):
+        "CLOSED BY STRUCTURE. PROBED: `emitter.advance(pos, vel, force, dt, damping, wrap_to)` is a free-flight "
+        "semi-implicit Euler step. It takes NO collider, and the module's only SDF use is `emit_from_surface`, which "
+        "PROJECTS spawn points onto a surface rather than sweeping through it. There is no discrete collision to "
+        "make continuous. Giving `advance` a collider would be a new feature with its own bar, not a wiring job -- "
+        "and `softbody`, which does collide, is wired.",
+    ("island.SleepTracker (solve only what moves)", "holographic_physics"):
+        "CLOSED BY STRUCTURE. PROBED: `holographic_physics` is the fractional-power KINEMATICS module (five "
+        "functions and one `Kinematics` class) that demonstrates encode(a+b) == bind(encode(a), encode(b)). It holds "
+        "no constraint graph, no islands, and no per-frame stepper over many bodies -- there is nothing to put to "
+        "sleep. The stepper with islands is `softbody`, and it is wired.",
+    ("cachehome.MarginCache (fat margin for a drifting query)", "holographic_lightcache/holographic_domecache"):
+        "CLOSED BY STRUCTURE, not by measurement. `lightcache` and `domecache` are STATELESS per-frame SCREEN-SPACE "
+        "stride caches: they bake every Nth pixel of one frame and interpolate the rest. There is no query STREAM to "
+        "drift -- the query is a pixel grid, regenerated whole on every call, and the functions hold no state between "
+        "frames. A fat margin needs a drifting query and a cache that outlives it. The state lives one level up, in "
+        "`RenderSession`, whose camera IS the drifting query -- and that is where MarginCache is now wired. Naming "
+        "these two as clients was an error in the first wiring audit.",
+    ("superposed width (bind_fixed / recover_all / pack)",
+     "holographic_machine/holographic_flatness/holographic_query/holographic_reasoning/holographic_sequence"):
+        "CLOSED BY DATA DEPENDENCY, not by measurement. The VSA machine's interpreter runs `acc = bind(acc, d)` -- "
+        "a loop-CARRIED accumulator. Each bind consumes the previous one's output, so there is no set of K "
+        "independent binds to batch; the sequence is the semantics. `run_batch` already provides the width that IS "
+        "available here (28x at 256 accumulators), by widening the DATA, not the instruction stream. The same holds "
+        "for `flatness` (x is redrawn every trial), `query`, `reasoning` and `sequence`. An early AST scan counted "
+        "these as 77 batchable sites; it was wrong, and a strict scan finds three (in hopfield and ai).",
     ("coarsefirst.refine_where_uncertain", "holographic_nystrom"):
         "MEASURED, and it is the most interesting of the four retirements, because the coarse-first GATE PASSES and "
         "the method still loses. Adaptive Nystrom -- greedily pivot the next landmark onto the point of maximum "

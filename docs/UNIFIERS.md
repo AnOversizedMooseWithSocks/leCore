@@ -81,20 +81,104 @@
 | `holographic_resonator` | ✅ wired |
 | `holographic_dynamics` | ✅ wired |
 
+## `superposed width (bind_fixed / recover_all / pack)`  — 2/2 wired
+
+*binding a FIXED operand against K vectors, or unbinding one composite against K keys, is ONE batched rfft -- not K of them inside a Python loop. MEASURED, bit-identical (np.array_equal): recover_all is 3.8x at (D=1024, K=8) and 4.3x at K=16; bind_batch is 2.8x at (1024, 8). CORRECTION, and it shrank the item by 25x: a first AST scan reported 77 candidate loop sites across 30 modules. It was counting LOOP-CARRIED ACCUMULATORS -- `acc = bind(acc, d)` in the VSA machine's interpreter, `x` reassigned each trial in `flatness` -- which have a data dependency and cannot batch at all. A strict scan (bind/unbind inside a comprehension, one operand loop-invariant, the other the loop variable) finds exactly THREE: hopfield's `_structure_project` and `_decode_combo`, and `ai`'s non-iterative recall path. All three are now batched. SCOPE: the win is in K, not D -- the speedup falls to 1.7x by K=64 as the per-call overhead stops dominating.*
+
+| client | status |
+|---|---|
+| `holographic_hopfield` | ✅ wired |
+| `holographic_ai` | ✅ wired |
+
+## `shader algebra (bake once, compose passes)`  — 2/2 wired
+
+*H1-H8: a baked field is a texture unit; a kernel is diagonal, so N filter passes compose into ONE elementwise multiply whose cost is independent of kernel size and pass count. This is the closest thing the engine has to a GPU, and NOT ONE RENDERER USES IT -- render, raymarch, pathtrace, postfx, texturerender, globalillum and svgf all cite it zero times. SCOPE: ~1% accuracy, a preview/coarse tier, and the phasor bandwidth must exceed the field's max frequency (the algebra has a Nyquist). G8 CLOSED THE postfx SILO BY GENERALIZING THE PRIMITIVE, not by paying for the wrong spectrum: `Pipeline(shape, real=True)` builds the transfer on the HALF-spectrum (rfftn), which is what a real field wants. Delegating was a 2.2x LOSS on the full fftn grid; on the half-spectrum it is BIT-IDENTICAL (max|diff| 0.0e+00) at the same speed (1.10 ms vs 1.04 ms per 128x128x3 image), and rfftn is 3.0x faster than fftn on a 256^2 real field. `Pipeline.from_transfer` avoids the identity allocation a caller with a composed transfer does not need (measured: the long way cost 42%).*
+
+| client | status |
+|---|---|
+| `holographic_laplacian` | ✅ wired |
+| `holographic_postfx` | ✅ wired |
+
+## `distribute.reduce_sum_exact_partitioned`  — 1/1 wired
+
+*distribute()'s DEFAULT reduce is float `reduce_sum`, which is not partition-invariant: a 4-way and a 7-way farm split of the same work disagree by 2.98e-08 (measured, magnitudes spanning 16 orders). The exact path ships and is bit-identical across 1/4/7/13/700-way splits. NOT A DROP-IN SWAP: the exact reduce consumes buckets of CONTRIBUTIONS, not bucket sums, so the worker contract has to grow an `exact_partial` mode. That is the item -- correctness class, not speed.*
+
+| client | status |
+|---|---|
+| `holographic_coordinator` | ✅ wired |
+
+## `collide.advance_ccd / time_of_impact`  — 1/1 wired
+
+*conservative advancement IS sphere tracing, so CCD costs nothing extra on an SDF. MEASURED: a 30 m/s body stepping 0.5 m per frame passes CLEAN THROUGH a 0.1 m wall under the discrete resolve_sdf_collision that `softbody` still calls, and is stopped exactly on it by advance_ccd. Correctness class: no margin can fix it (a margin resolves a crossed body out the WRONG side).*
+
+| client | status |
+|---|---|
+| `holographic_softbody` | ✅ wired |
+
+## `island.color_waves (deterministic lock-free scheduling)`  — 2/2 wired
+
+*two tasks in one colour touch disjoint resources, so a wave runs with no locks and no atomics, in a reproducible order -- which is exactly how Box3D earns cross-platform determinism. MEASURED: 2,000 transactions over 300 keys colour into 24 waves, 83x lock-free parallelism, every wave verified conflict-free. `querylock` adopted it; the coordinator and farm have not.*
+
+| client | status |
+|---|---|
+| `holographic_querylock` | ✅ wired |
+| `holographic_coordinator` | ✅ wired |
+
+## `island.SleepTracker (solve only what moves)`  — 1/1 wired
+
+*a sleeping island is AT ITS FIXED POINT; skipping it is bit-identical to stepping it, and the saving is exactly the awake fraction (measured: 3 of 20 islands moving -> step() called 3 times, not 20). Physics steppers advance every body every frame regardless.*
+
+| client | status |
+|---|---|
+| `holographic_softbody` | ✅ wired |
+
+## `tucker.LowRankField (compressed-domain compute)`  — 1/1 wired
+
+*linear field ops pass through a factorization, so blur/add/query never form the array. MEASURED (1024^2, rank 3): 171x fewer bytes; separable blur 2.53 ms / 0.049 MB vs 66.60 ms / 8.4 MB dense at 3.11e-15 error. Wired as `fieldhome.Field.low_rank`, a fourth field backend beside callable/dense/sparse. THE GATE IS AN ERROR BUDGET, not `rank_gate`'s 99% ENERGY: measured on REAL 128x128 fields, a sphere SDF at 99% energy is rank 2 and 7.45% WRONG, a box SDF 18.19% wrong, and fbm noise passes the energy gate at rank 5 with 28.54% error. `rank_for_error` sizes on max-abs error: sphere SDF rank 4 (16x fewer bytes, pays), box SDF rank 12 (5.3x, pays), fbm rank 50 (1.27x, marginal), white noise rank 124 (refused). SCOPE: the blur must be SEPARABLE, nonlinear ops do not survive, and the field must be BAKED ONCE and QUERIED MANY TIMES -- factoring a streamed frame costs an SVD, measured 53.7x the FFT blur it would accelerate at 128^2 and 91.7x at 256^2.*
+
+| client | status |
+|---|---|
+| `holographic_fieldhome` | ✅ wired |
+
+## `cachehome.MarginCache (fat margin for a drifting query)`  — 1/1 wired
+
+*a drifting query (a camera, a cursor, a recall neighbourhood) should be served from an ENLARGED baked region, not re-keyed exactly. MEASURED on a unit-step 2-D walk of 400 queries: exact-key caching rebuilds 400/400; margin 6.0 rebuilds 20 at 95% hits. Wired into RenderSession.preview(reuse_margin=), where the drifting query is the CAMERA POSE: 20 drifting frames at margin 0.12 give 19 hits, 1 rebuild. THE GATE a caller must pass is NOT a hit-rate target: a hit serves a STALE value, and on a rendered frame the max error saturates at the FIRST reuse (0.5864, a silhouette edge) while the mean creeps 0.0001 -> 0.0051. `suggest_margin_for_error(..., max_abs_error=)` sizes it against the error you cannot tolerate. Measured: on a value that jumps 0->1, a mean-only budget passes margin 0.1929 and serves a completely wrong answer (max error 1.00); the max-error bound stops at 0.094558, and 0.095158 is already catastrophic. The admissible margin is a CLIFF, not a slope.*
+
+| client | status |
+|---|---|
+| `holographic_session` | ✅ wired |
+
+## `denoise.soft_relaxation (stiffness in physical units)`  — 2/2 wired
+
+*`omega` is a per-sweep number, so the same dial is different physics at different substep counts (measured: omega=0.30 lands at 0.942 after 8 sweeps and 1.000 after 64). stiffness=(hertz, zeta) is substep-invariant to first order, and stiffness=(inf, zeta) is BIT-IDENTICAL to the rigid default -- which is the gate every caller must prove before it plumbs the dial through. MEASURED at the IK call site, fixed physical horizon: omega=0.30 reaches within 0.4253 / 0.0314 / 0.0000 at 5 / 20 / 80 iterations, while stiffness=(8 Hz, 1.0) reaches 0.0033 / 0.0002 / 0.0001 -- the dial holds its meaning, omega does not. And at the softbody PBD site a stretched bone relaxes to 1.028 at 20 Hz and 1.7498 at 2 Hz against a rest length of 1.0. NB `RigidBody.step(stiffness=...)` is an unrelated scalar spring constant in a different class -- that name once fooled this very lint into reporting softbody as wired.*
+
+| client | status |
+|---|---|
+| `holographic_meshik` | ✅ wired |
+| `holographic_softbody` | ✅ wired |
+
 ## Retractions
 
 **Closed by mathematics** (do not re-propose):
 
+* `cachehome.MarginCache (fat margin for a drifting query)` -> `holographic_lightcache/holographic_domecache`: CLOSED BY STRUCTURE, not by measurement. `lightcache` and `domecache` are STATELESS per-frame SCREEN-SPACE stride caches: they bake every Nth pixel of one frame and interpolate the rest. There is no query STREAM to drift -- the query is a pixel grid, regenerated whole on every call, and the functions hold no state between frames. A fat margin needs a drifting query and a cache that outlives it. The state lives one level up, in `RenderSession`, whose camera IS the drifting query -- and that is where MarginCache is now wired. Naming these two as clients was an error in the first wiring audit.
 * `coarsefirst.refine_where_uncertain` -> `holographic_nystrom`: MEASURED, and it is the most interesting of the four retirements, because the coarse-first GATE PASSES and the method still loses. Adaptive Nystrom -- greedily pivot the next landmark onto the point of maximum diagonal residual r(x) = k(x,x) - k_x^T pinv(Wmm) k_x (pivoted Cholesky; Fine & Scheinberg 2001) -- scores subspace alignment 0.8434 +- 0.0207 on clusters-with-outliers, against farthest-point sampling's 0.8692 and uniform random's 0.9512 (50 trials: 10 data seeds x 5 landmark seeds, m=24, n_basis=6). It never wins on any of three datasets, and it is WORST exactly where FPS is worst -- because the point of maximum residual IS the most isolated point. The residual is a COVERAGE signal; a spectral embedding needs a MASS signal, since the leading eigenvectors carry their weight in the DENSE regions. And `concentration` cannot see this: it scores 0.328 / 0.403 / 0.321 on the three datasets, flat and comfortably 'concentrated'. The gate says CANDIDATE and the measurement says no -- which is precisely what 'necessary, not sufficient' means. A concentrated uncertainty that concentrates on the WRONG THING. (Separately measured and recorded in nystrom's own docstring: the shipped landmarks='fps' default is materially worse than 'random' on outlier-laden data, 0.869 against 0.951, random winning 47 of 50 -- and the docstring had claimed the opposite.)
 * `coarsefirst.refine_where_uncertain` -> `holographic_render`: MEASURED, and it is the strongest kind of retirement: the client already implements coarse-first, under other names, better. `volume_render`'s `empty_skip` (do not sample rays in empty macro-cells) and `early_term` (stop sampling a ray once it is opaque) are spatial and temporal escalation. On a two-blob scene at 96 steps they cost 22,461 field evaluations against 341,184 with both off -- 15.2x. Running coarse-first on top (render at 12 steps, escalate the top 20% by alpha gradient to 96) costs 23,137 evaluations: 1.0x, the coarse pass is pure overhead, because the pixels a gradient flags are the same pixels that hit the volume. Turn the smart base OFF and coarse-first works exactly as advertised -- 115,512 evaluations against 341,184 (3.0x) at IDENTICAL RMSE (0.00145), with a random-mask control at the same budget landing 8.8x worse. So the signal is real and the escalation is real; the client simply had 5x better adaptivity already. `volume_render(only=mask)` was added to run this experiment and kept: it is exact inside the mask and free outside.
 * `coarsefirst.refine_where_uncertain` -> `holographic_splat`: MEASURED, and it fails BOTH of coarse-first's necessary conditions. (1) The expensive method must be priced PER CELL: a greedy matching pursuit is already adaptive -- it places its next primitive where the residual peaks -- so its cost is per PRIMITIVE and an escalate mask tells it nothing it did not know. Gabor atoms fitted to the residual of a uniform Gaussian base scored 21.0 dB over the whole residual and 21.0 dB restricted to the top-25% mask, at 0.9x the speed: zero win, some loss. (2) The uncertainty must be CONCENTRATED, and a greedy coarse pass DESTROYS the concentration its own refinement needs -- on a grating patch over a smooth background, the residual of a uniform Gaussian base scores 0.416 and the residual of a greedy base of the same size scores 0.106. Coarse-first wants a cheap, uniform, DUMB base pass. `concentration` predicted this before any code was written; I ran the experiment anyway, and it was right.
 * `coarsefirst.refine_where_uncertain` -> `holographic_volint`: MEASURED: there is no loop to escalate. `volint` evaluates the volumetric line integral in CLOSED FORM -- one inner product per ray, because the FPE basis is a phase code and the integral of a complex exponential is a complex exponential. Its cost is flat in ray LENGTH (1023 / 1092 / 1072 / 1089 ms at L = 0.5 / 2 / 8 / 64, a 128x range) and linear in ray COUNT (265 us/ray, constant). Coarse-first buys adaptivity for a method priced per cell; the closed form deleted the cells. The volumetric client coarse-first actually wants is `render.volume_render`, which marches every pixel with the same `steps` -- it is in PENDING. (volint's own docstring is careful about this: SCATTERING still wants marching; ABSORPTION does not.)
+* `collide.advance_ccd / time_of_impact` -> `holographic_emitter`: CLOSED BY STRUCTURE. PROBED: `emitter.advance(pos, vel, force, dt, damping, wrap_to)` is a free-flight semi-implicit Euler step. It takes NO collider, and the module's only SDF use is `emit_from_surface`, which PROJECTS spawn points onto a surface rather than sweeping through it. There is no discrete collision to make continuous. Giving `advance` a collider would be a new feature with its own bar, not a wiring job -- and `softbody`, which does collide, is wired.
 * `determinism.hash_unit` -> `holographic_mis`: PROBED: `mis` calls default_rng in exactly ONE place -- inside its own `_selftest`. There is no sampling path to make stateless; a seeded selftest on one machine is already reproducible. It was never a client.
 * `determinism.hash_unit` -> `holographic_traverse`: PROBED: same as `mis` -- its only default_rng use is inside `_selftest`. Not a sampling path.
+* `distribute.reduce_sum_exact_partitioned` -> `holographic_farm`: CLOSED BY LAYERING. `farm.NetworkFarm` is a Coordinator BACKEND -- it submits work to hosts and returns results. It performs NO reduction; grep finds `reduce` only in its docstring. The reduce lives in `Coordinator`, where `run_exact` is wired. And the exactness is a property of the REDUCE, not the transport: MEASURED, `run_exact` is bit-identical across InProcessBackend and a 2-process LocalPool at 4-, 7- and 13-way splits, while the float `run()` disagrees by 3.73e-08 between 4- and 7-way on either backend. Wiring `farm` would mean giving a transport layer an opinion about arithmetic.
+* `island.SleepTracker (solve only what moves)` -> `holographic_physics`: CLOSED BY STRUCTURE. PROBED: `holographic_physics` is the fractional-power KINEMATICS module (five functions and one `Kinematics` class) that demonstrates encode(a+b) == bind(encode(a), encode(b)). It holds no constraint graph, no islands, and no per-frame stepper over many bodies -- there is nothing to put to sleep. The stepper with islands is `softbody`, and it is wired.
 * `lowdiscrepancy` -> `holographic_globalillum`: globalillum does not sample directions itself -- it delegates to `Sampling.cosine_hemisphere` (samplinghome). That IS the real client, and it is now wired (opt-in `low_discrepancy=True`), so globalillum gets the win for free. Wiring globalillum directly would re-create the duplicate this consolidation removed.
 * `lowdiscrepancy` -> `holographic_sampling`: `sampling` is Bridson POISSON-DISK (blue noise) -- a different family. Blue noise optimises a minimum-distance point set for stippling/splat placement; low-discrepancy optimises integration error. They are complementary, not one wrapping the other.
 * `octnormal` -> `holographic_mesh/holographic_meshcurvature/holographic_render/holographic_splat/holographic_gbuffer`: PROBED: none of these five quantizes normals at all -- they carry float normals in memory (splat does not even mention a normal). Wiring octnormal here would INTRODUCE lossy compression nobody asked for and change render/mesh output. octnormal is a STORAGE primitive; its real client is `autobump` (wired). The genuine future opportunity is the SERIALIZERS (`gltf`, `splatexport`), which is a format change -- a build with a bar (0.021 deg at 3 bytes/normal), not a wiring job.
 * `rns / reduce_sum_exact` -> `holographic_fountain`: fountain reduces by XOR, which is already exact, associative and commutative -- a bit-exact integer sum would add quantization for no gain. It was never a real client of this unifier.
+* `shader algebra (bake once, compose passes)` -> `holographic_heat`: CLOSED BY LAYERING, and it is a wiring that happened one module down. `heat`'s periodic path already had an exact closed form (`laplacian.diffuse_spectral`), better than the `filter_k` form the backlog proposed because it solves the CONTINUOUS PDE rather than reproducing the discrete Euler stepper (measured: the stepper carries 9.97e-05 of truncation error against it). What was missing was COMPOSITION, and that now lives in `laplacian.diffusion_operator`, which builds a `shader.Pipeline` from exp(-alpha|k|^2 t) -- bit-identical (0.0e+00), ~1.9x faster on reuse, and composable (two half-steps multiply into one, exact to 1.1e-15). `heat` consumes it via `diffuse_heat(operator=...)`. The unifier's client is the module that OWNS the mechanism, not the one that shows the symptom.
+* `shader algebra (bake once, compose passes)` -> `holographic_render`: CLOSED BY STRUCTURE, and it echoes `coarsefirst` -> `render` exactly. PROBED: `render` has no linear, shift-invariant pass to compose. Its 31 matches for 'filter' are PNG SCANLINE filters in the image encoder. The inner loop is per-ray sphere tracing plus nonlinear shading -- neither is diagonal in any Fourier basis, and neither is a chain of passes. The composition target for a rendered image is `postfx`, which is where the algebra is used (and DEFERRED from delegating, for its own measured reason). And as with coarse-first, render already owns the adaptivity the algebra would offer: `empty_skip` + `early_term` buy 15.2x.
+* `shader algebra (bake once, compose passes)` -> `holographic_texturerender`: CLOSED BY STRUCTURE. PROBED: zero convolutions, zero FFTs, zero baked grids. It marches a union SDF and evaluates material channels per hit -- a per-sample nonlinear program, not a filter chain. There is no transfer to compose and no expensive scalar function sampled densely enough to bake.
+* `superposed width (bind_fixed / recover_all / pack)` -> `holographic_machine/holographic_flatness/holographic_query/holographic_reasoning/holographic_sequence`: CLOSED BY DATA DEPENDENCY, not by measurement. The VSA machine's interpreter runs `acc = bind(acc, d)` -- a loop-CARRIED accumulator. Each bind consumes the previous one's output, so there is no set of K independent binds to batch; the sequence is the semantics. `run_batch` already provides the width that IS available here (28x at 256 accumulators), by widening the DATA, not the instruction stream. The same holds for `flatness` (x is redrawn every trial), `query`, `reasoning` and `sequence`. An early AST scan counted these as 77 batchable sites; it was wrong, and a strict scan finds three (in hopfield and ai).
 
 **Possible, but measurement says it does not pay** (revisit with a better lever):
 
@@ -105,4 +189,5 @@
 * `iterate.step_k / limit` -> `holographic_resonator`: Same as `diffuse`: the alternating cleanup linearises near its fixed point and nowhere else. Its real home is project_onto_constraints, where it IS wired.
 * `iterate.step_k / limit` -> `holographic_sbc`: Same as `diffuse` -- the per-block softmax linearises only in a neighbourhood of a fixed point.
 * `rns / reduce_sum_exact` -> `holographic_measure`: `measure` reduces a handful of scalars across seeds in a FIXED order on one machine, so order-independence buys nothing today, and quantizing a metric at bits=40 would perturb the very CI thresholds it defends. Trivially wireable as an opt-in the day measure aggregates parts returned by a farm.
+* `tucker.LowRankField (compressed-domain compute)` -> `holographic_postfx`: The factorization EXISTS and is exact; it simply does not pay, and this is DEFERRED rather than NOT_APPLICABLE precisely so nobody reads it as impossible. postfx STREAMS frames: each image is produced, filtered once, and thrown away, so there is nothing to amortize an SVD against. Measured: factoring costs 67.5 ms per 128x128 frame against 1.26 ms for the FFT blur it would accelerate (53.7x), and 592.6 ms vs 6.46 ms at 256x256 (91.7x). A real rendered frame is not even very low rank -- silhouettes push it to rank 28 of 96 at a 1% error budget, a 1.7x byte saving. It WOULD pay for a frame reused many times (a baked lightmap, a cached irradiance buffer); that is the follow-up. LowRankField's home is a field BAKED ONCE and QUERIED MANY TIMES -- `fieldhome`, where it is now wired.
 

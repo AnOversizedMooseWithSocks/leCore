@@ -56,17 +56,41 @@ ARITY = {
 INEXACT = {"twist", "displace"}
 
 
+def as_eval(sdf):
+    """Return a plain callable `P:(M,D) -> distances:(M,)` for ANY of the engine's three ways of naming an SDF:
+
+      * a node object with `.eval(P)`   -- what `sphere()`/`box()`/`parse_dsl()` build
+      * a bare callable                 -- what `collide`, `emitter` and every ad-hoc lambda pass around
+      * a DSL STRING, e.g. "(sphere 1.0)" -- parsed here, which is what makes an SDF consumer agent-callable:
+        a callable cannot cross a JSON boundary, but its s-expression can.
+
+    WHY: the conventions grew independently and every consumer had to know which it was holding. The evidence was
+    already in the tree -- `holographic_sdf_render` wraps a callable in a throwaway `_Obj()` class purely to give
+    it an `.eval`, and `sdf_normal` below simply crashed on a lambda (`'function' object has no attribute
+    'eval'`). One adapter at the boundary, instead of a private shim per call site."""
+    if isinstance(sdf, str):
+        return to_callable(parse_dsl(sdf))
+    ev = getattr(sdf, "eval", None)
+    return ev if callable(ev) else sdf
+
+
 def sdf_normal(sdf, P, eps=1e-3):
     """The surface normal at points P:(M,3) = the normalised gradient of the SDF, by central differences (6
     vectorised evals). WHY THIS LIVES HERE (backlog G1): the gradient is a property of the FIELD, not the
     renderer -- emission, collision, displacement, sculpting, field-effect falloff, and Walk-on-Spheres all need
     the SAME normal, so it is defined ONCE here and delegated everywhere (no drift, no six private copies). `sdf`
-    is anything with an `.eval(P)`."""
+    is anything with an `.eval(P)` OR a bare callable (see `as_eval`).
+
+    A ZERO gradient is possible and is NOT an error: on an SDF's medial axis (the dead centre of a slab, the axis
+    of a cylinder) the central differences cancel exactly and there is no normal to return. The `+ 1e-12` below
+    makes that a zero vector rather than a NaN; callers that must MOVE a point (collision resolution) have to
+    detect the zero and pick an escape direction themselves -- see holographic_collide.resolve_sdf_collision."""
     P = np.asarray(P, float)
+    _ev = as_eval(sdf)
     ex = np.array([eps, 0, 0]); ey = np.array([0, eps, 0]); ez = np.array([0, 0, eps])
-    nx = sdf.eval(P + ex) - sdf.eval(P - ex)
-    ny = sdf.eval(P + ey) - sdf.eval(P - ey)
-    nz = sdf.eval(P + ez) - sdf.eval(P - ez)
+    nx = _ev(P + ex) - _ev(P - ex)
+    ny = _ev(P + ey) - _ev(P - ey)
+    nz = _ev(P + ez) - _ev(P - ez)
     N = np.stack([nx, ny, nz], axis=1)
     return N / (np.linalg.norm(N, axis=1, keepdims=True) + 1e-12)
 

@@ -48,6 +48,18 @@ class Capability:
         return "Capability(%r, %s)" % (self.name, "native" if self.native else "python")
 
 
+def _alias_tokens(aliases):
+    """Every alias contributes BOTH its whole lowercased phrase (so an exact single-token alias still matches)
+    and its individual content words. Without the tokenization a multi-word alias is dead weight -- see
+    Catalog.find_capability's docstring for the measurement (55.5% of this repo's aliases were inert)."""
+    out = set()
+    for a in aliases:
+        a = a.lower()
+        out.add(a)
+        out.update(_tokens(a))
+    return out
+
+
 class Catalog:
     """The registry + the search. `register_capability` adds/updates an entry; `find_capability` ranks entries
     against a problem description by how many content words they share (favouring entries that cover the query)."""
@@ -74,14 +86,21 @@ class Catalog:
         """Return up to `k` capabilities whose description best matches `problem`, best first. The score is the
         number of shared content words, normalised by the query length so a short query isn't swamped -- plus a
         small bonus when a query word appears in the entry's NAME (a strong signal). Deterministic ties break by
-        name so the result is stable run-to-run (the engine's determinism rule)."""
+        name so the result is stable run-to-run (the engine's determinism rule).
+
+        Aliases are TOKENIZED into the haystack, not matched as whole strings. That was a real bug, measured: the
+        haystack used to take each alias as one lowercased phrase, so a multi-word alias could only ever match a
+        query that was that exact single token -- i.e. never. 827 of the repo's 1,489 aliases (55.5%) contained a
+        space and were therefore INERT, including every alias written the way the build loop asks for them ("a
+        phrase a stranger would type"). The whole phrase is still kept as a token, so exact-phrase hits are
+        unaffected; tokens are added, never removed, so no previously-findable capability became unfindable."""
         q = set(_tokens(problem))
         if not q:
             return []
         scored = []
         for cap in self._by_name.values():
             name_words = set(_tokens(cap.name))
-            hay = name_words | set(_tokens(cap.does)) | set(w.lower() for w in cap.aliases)
+            hay = name_words | set(_tokens(cap.does)) | _alias_tokens(cap.aliases)
             overlap = len(q & hay)
             if overlap == 0:
                 continue
@@ -99,7 +118,7 @@ class Catalog:
         scored = []
         for cap in self._by_name.values():
             name_words = set(_tokens(cap.name))
-            hay = name_words | set(_tokens(cap.does)) | set(w.lower() for w in cap.aliases)
+            hay = name_words | set(_tokens(cap.does)) | _alias_tokens(cap.aliases)
             overlap = len(q & hay)
             if overlap == 0:
                 continue
@@ -372,6 +391,904 @@ def default_catalog():
                           native=True, aliases=("refine", "iterate", "produce critique adjust", "retry until good",
                                                 "optimization loop", "analysis by synthesis", "draft and revise",
                                                 "improve until accepted", "critic loop", "feedback loop"))
+    c.register_capability("Purity & effect analysis (the gate a cache needs)", "decide whether a Python function is "
+                          "PURE -- side-effect free and deterministic -- so a shape-keyed cache can safely memoize it. "
+                          "mind.function_purity(source, name) is the verdict; mind.purity_report(source) explains every "
+                          "function; mind.purity_scan(root) runs the whole tree. Built from stdlib `ast` alone: no "
+                          "linter dependency, no constitutional exception. CONSERVATIVE BY CONTRACT -- a wrong 'impure' "
+                          "costs a cache miss; a wrong 'pure' silently corrupts a cache and everything downstream, so an "
+                          "unresolved callee, an unrecognised method and any attribute write are impure. Escape analysis "
+                          "is implemented: mutating a container the function itself allocated is invisible from outside, "
+                          "so `out = []; out.append(x)` is pure. THE CORRECTION: the analysis is closed over the CALL "
+                          "GRAPH, because a function that calls an impure function is impure however clean its own body "
+                          "looks. Measured on this tree (2,154 module-level functions): a LOCAL rule that ignores calls "
+                          "reports 54.3% pure; the sound fixpoint reports 32.1%. The backlog's '76.0% with escape "
+                          "analysis' is a local-rule number, and a local purity rule is unsound for a cache -- so "
+                          "purity_report carries BOTH figures and never lets the flattering one travel alone.",
+                          example="src = 'def f(xs):\\n    out = []\\n    for x in xs: out.append(x*2)\\n    return out\\n'; "
+                                  "print(mind.function_purity(src, 'f'), mind.purity_report(src)['fraction'])",
+                          native=True, aliases=("purity", "pure function", "side effects", "effect analysis",
+                                                "decide whether a python function is pure", "is this function pure",
+                                                "can i cache this function", "memoization gate", "linter",
+                                                "static analysis", "escape analysis", "call graph", "ast analysis",
+                                                "safe to memoize", "deterministic function", "impure"))
+    c.register_capability("Recursive factoring (past the resonator's cliff)", "factor a DEEP bound composite by "
+                          "solving a SHALLOW problem over composed chunks, then expanding each chunk by LOOKUP instead "
+                          "of by search. mind.recursive_factor(composite, codebook, vocab) tries each chunk level "
+                          "deepest-first, VERIFIES every candidate by re-composition, and falls back one level on "
+                          "failure -- so it is verified correct or reported unsolved, never a silent guess. The "
+                          "codebook is R1's mind.learn_chunks output: one codebook family, second consumer. MEASURED "
+                          "(D=4096, 32 symbols, MAP binding): the flat resonator is a CLIFF, not a slope -- 93.3% at "
+                          "depth 2, 60.0% at depth 4, 0.0% at depth 5 and beyond. With promoted chunks (62 pairs -> 64 "
+                          "quads) a depth-8 composite factors at 90.0% here vs 0.0% flat, and 3x FASTER (a 64-entry "
+                          "codebook is a smaller search space than V^8). HONEST SCOPE: below the cliff recursion is a "
+                          "modest gain at 5x the cost (depth 4: 93.3% vs 86.7% flat) -- use it past the cliff. The "
+                          "condition is R1's: no structure, no dividend, and mind.structure_score measures it first. "
+                          "Note MAP binding is self-inverse, so a leaf appearing twice CANCELS -- mind.reduce_involution "
+                          "recovers the minimal multiset, and a non-minimal expansion can still be exactly correct.",
+                          example="vocab = mind.map_codebook(16, 2048, seed=0); cb = mind.learn_chunks(stream); "
+                                  "res = mind.recursive_factor(mind.map_bind(*[vocab[i] for i in [0,1,2,3,4,5,6,7]]), cb, vocab)",
+                          native=True, aliases=("recursive factoring", "factor using learned chunks", "chunk levels",
+                                                "factor a deep composite that the resonator cannot handle",
+                                                "my resonator fails past four factors", "resonator cliff",
+                                                "break a bound product into eight parts", "deep factorization",
+                                                "macro codebook factoring", "expand by lookup", "verify gate",
+                                                "map bind", "involution", "self inverse binding", "multiset factors"))
+    c.register_capability("Post-effect kernel fusion (N linear passes, one FFT pair)", "compose a RUN of linear, "
+                          "shift-invariant post-effects (denoise, sharpen) into ONE transfer and evaluate it with a "
+                          "single FFT pair instead of one per stage -- diagonal operators commute and multiply, so the "
+                          "composed operator is the elementwise product of theirs. This is holographic_shader's "
+                          "Pipeline, in image space. mind.postfx_fuse_transfers(shape, steps) composes; "
+                          "mind.postfx_apply_transfer(img, T) evaluates; mind.postfx_fusable_runs(steps) shows which "
+                          "runs qualify; PostChain.apply(img, fuse=True) is the wired door. MEASURED (256x256x3, three "
+                          "linear stages): 14.76 ms sequential vs 5.03 ms fused -- 2.9x, max|diff| 4.44e-16. THREE KEPT "
+                          "NEGATIVES: (1) the SHIPPED chains have no adjacent linear stages -- every blur is separated "
+                          "by a nonlinear tone curve -- so fuse=True is correctly a bit-identical NO-OP on "
+                          "default_chain and cinematic_chain; it is a capability for chains that HAVE such runs. "
+                          "(2) sharpen clips internally, so fusing DEFERS the clamp -- which only matters when the "
+                          "clamped stage is FOLLOWED by another in the run: denoise->sharpen is exact (1.33e-15), "
+                          "sharpen->denoise differs by 2.81e-01. (3) batching the 3 channels into one FFT is 0.66x "
+                          "SLOWER (non-contiguous strides), bit-identical output -- the per-channel loop stays. "
+                          "motion_blur and glare clamp their edges, so they are not shift-equivariant and are REFUSED "
+                          "rather than approximated. THE ALGEBRA IS NOT GRAPHICS (G1): mind.diffusion_operator(shape, "
+                          "alpha, t) builds the heat equation's exact periodic propagator exp(-alpha|k|^2 t) as a "
+                          "Pipeline -- bit-identical to diffuse_spectral, ~1.9x faster on reuse because the transfer "
+                          "is composed once rather than re-exponentiated per call, and it COMPOSES (two half-steps "
+                          "multiply into one full step, exact to 1.1e-15). Nothing in Pipeline knows what a pixel is. "
+                          "Same gate: applying it to a Neumann problem is 4.76e-02 WRONG.",
+                          example="import numpy as np; from holographic.rendering.holographic_postfx import PostChain; "
+                                  "img = np.random.default_rng(0).uniform(0.2, 0.6, size=(64,64,3)); "
+                                  "ch = PostChain().then('denoise', sigma=1.0).then('sharpen', amount=0.3, sigma=1.5); "
+                                  "print(abs(ch.apply(img) - ch.apply(img, fuse=True)).max())",
+                          native=True, aliases=("kernel fusion", "fuse post effects", "compose filter passes",
+                                                "one fft instead of many", "post processing chain", "postfx",
+                                                "fuse blur and sharpen", "compose transfers", "pipeline fusion",
+                                                "apply the same filter a million times", "linear passes"))
+    c.register_capability("Information-rate rendering (shade the news, reproject the rest)", "instead of shading "
+                          "every pixel every frame, warp the previous frame forward and shade only a budget: the "
+                          "disocclusion border (the strip the camera just revealed) plus the OLDEST k pixels, so "
+                          "nothing goes stale. mind.refresh_renderer(frame0, budget=0.2).step(shade, known_shift=...) "
+                          "runs the loop; mind.refresh_report(...) scores it. MEASURED on a parallax-free procedural "
+                          "scene (12 frames, 20% budget): 57.5 dB mean / 55.9 dB worst with a KNOWN camera shift -- "
+                          "FIVE TIMES FEWER SHADER EVALUATIONS at visually-indistinguishable quality, tail slope "
+                          "+0.22 dB (stable). THREE KEPT NEGATIVES: (1) recovering the shift from pixels with est_dx "
+                          "costs 10.5 dB and turns the tail slope to -9.52 (decay) -- the loop warps its own output, "
+                          "so a 0.07 px error compounds; the renderer knows how the camera moved, so tell it. "
+                          "(2) integer np.roll decays too: 40.7 dB against 57.5 for the same budget -- bilinear warp "
+                          "is the mechanism, not a refinement. (3) THE FAKE-PERFECT BUG: a threshold selection "
+                          "('refresh every pixel whose age >= the k-th largest') selects ALL 16,384 pixels when ages "
+                          "are tied, which they are on frame 0 -- 100% shaded, PSNR 99 dB, a perfect score achieved by "
+                          "doing all the work. mind.exact_k_oldest takes exactly k with a stated tie-break. HONEST "
+                          "SCOPE: 57.5 dB belongs to a scene with no parallax and no view-dependent shading; on a real "
+                          "3-D scene the reprojection ceiling is itself ~38-41 dB, and refresh cannot beat it.",
+                          example="import numpy as np; H = W = 64; "
+                                  "world = lambda ox: np.sin((np.arange(W)+ox)*0.11)[None,:] * np.cos(np.arange(H)*0.09)[:,None]; "
+                                  "r = mind.refresh_report(lambda i: world(i*1.7), n_frames=6, known_shift=(0.0, -1.7)); "
+                                  "print(round(r['shaded_fraction'],3), round(r['psnr_mean'],1))",
+                          native=True, aliases=("information rate rendering", "reproject and refresh",
+                                                "shade fewer pixels", "temporal upsampling", "TAA render mode",
+                                                "age budget", "oldest pixel refresh", "disocclusion border",
+                                                "exact k selection", "amortized shading", "render fewer pixels"))
+    c.register_capability("Cross field (smoothest 4-RoSy) + the bar that was vacuous", "field-aligned retopology "
+                          "begins with a cross field: a direction at every face, defined up to 90-degree rotation, as "
+                          "smooth as the surface allows. mind.cross_field(mesh) solves for it as the eigenvector of "
+                          "the smallest eigenvalue of the complex CONNECTION LAPLACIAN (Knoppel, Crane, Pinkall & "
+                          "Schroder, SIGGRAPH 2013) -- a solve, not an iteration. mind.singularity_index gives a "
+                          "per-vertex index that is EXACTLY a multiple of 1/4 (residual 0.0e+00); mind.field_report "
+                          "carries every number. THE HEADLINE IS A RETRACTION: the previous session recorded "
+                          "'sum of the singularity indices equals the Euler characteristic' as this item's bar -- an "
+                          "integer, no tolerance to argue about. It is true, it is exact here, AND IT IS VACUOUS. "
+                          "Measured on the same sphere: the smoothest field sums to +2.0 with 49 singularities; a "
+                          "uniformly RANDOM field sums to +2.0 with 127; an all-zero field sums to +2.0 with 203; an "
+                          "adversarial alternating field sums to +2.0. The matching integers are antisymmetric, so "
+                          "their contribution cancels pairwise around every dual edge and what remains is a function "
+                          "of the MESH alone. A BAR THAT PASSES FOR EVERY INPUT IS NOT A BAR. Judge a field by its "
+                          "singularity COUNT and its Dirichlet ENERGY (54.7 smoothest against 1542.2 random). "
+                          "Poincare-Hopf validates the transport and the dual rings, which is worth having and is "
+                          "not what it was advertised as. TWO MORE KEPT NEGATIVES: antisymmetry must be ENFORCED, "
+                          "not hoped for -- computing the transport from both directed edges lets atan2's branch cut "
+                          "differ by 2pi, which shifts the matching by 4 and the index by 1 per edge (a sphere's "
+                          "indices summed to -43 instead of +2), and `wrap` at exactly +-pi is a tie that broke "
+                          "antisymmetry on a tetrahedron; and Jacobi smoothing does NOT converge -- a torus's energy "
+                          "fell to 2788 by 50 sweeps and ROSE to 2866 by 400. HONEST SCOPE: eigh on a dense "
+                          "(faces, faces) matrix is O(F^3), fine to a few thousand faces; the mesh must be closed and "
+                          "consistently oriented (mind.mesh_is_oriented); quad EXTRACTION is a mixed-integer problem "
+                          "and is not here.",
+                          example="import numpy as np; from holographic.mesh_and_geometry.holographic_mesh import tetrahedron; "
+                                  "phi, ctx = mind.cross_field(tetrahedron()); "
+                                  "print(mind.field_report(tetrahedron(), phi, ctx))",
+                          native=True, aliases=("cross field", "cross field on a surface", "4-rosy",
+                                                "smoothest direction field", "field aligned remesh",
+                                                "singularities of a direction field", "instant meshes",
+                                                "quad mesh from a field", "retopology", "connection laplacian",
+                                                "poincare hopf", "direction field"))
+    c.register_capability("Dialect emitters (WGSL / C / JS from the Python kernel)", "leCore's kernels are written "
+                          "once, in Python, and the browser needs them in WGSL. mind.emit_kernel(fn, dialect) walks "
+                          "the same AST that code_structure decomposes and a dialect table supplies the type names, "
+                          "the intrinsic names and the declaration syntax -- so the hand-written compute shader "
+                          "becomes a PROJECTION of the authoritative Python kernel: one source of truth, two "
+                          "runtimes, no drift. Dialects: wgsl, c_f64, c_f32, js. THE BAR IS EXECUTED, not asserted: "
+                          "mind.validate_kernel COMPILES the emitted C with cc and RUNS it on the same inputs. "
+                          "MEASURED on the sphere SDF, smoothstep and cosine over 200 random inputs: c_f64 is "
+                          "BIT-IDENTICAL to the Python original (same order of operations, same doubles); c_f32 "
+                          "differs by 8.0e-08 to 3.4e-07. KEPT NEGATIVE 1: A WGSL KERNEL CANNOT BE BIT-IDENTICAL TO "
+                          "ITS PYTHON ORIGINAL -- WGSL's f32 is single precision and NumPy is double, so the bar is "
+                          "'to float tolerance' and THE TOLERANCE IS f32 EPSILON, not a number anybody chooses. "
+                          "c_f32 exists so that tolerance is measured by running it. KEPT NEGATIVE 2: the emitted "
+                          "WGSL is NOT executed by any test here -- there is no GPU and no browser. Its arithmetic "
+                          "semantics are validated through c_f32, which shares the IR and differs only in a table; "
+                          "what is NOT validated is WGSL's own precision guarantees, its fast-math latitude, or "
+                          "whether the shader compiles. That is a real gap, stated. KEPT NEGATIVE 3: `bind` is NOT "
+                          "emittable and that is not a missing feature -- it is a circular convolution by FFT, a "
+                          "whole-array cooperative algorithm, and its WGSL is a workgroup FFT, a different artifact. "
+                          "A scalar emitter that pretended otherwise would emit an O(D^2) loop nest and call it a "
+                          "bind. K10's rule is obeyed throughout: the emitter REFUSES rather than guesses, because a "
+                          "wrong int/double is a wrong answer at no tolerance.",
+                          example="src = 'def sdf_sphere(px: float, py: float, pz: float, r: float) -> float:\\n"
+                                  "    d = sqrt(px * px + py * py + pz * pz)\\n    return d - r\\n'; "
+                                  "print(mind.emit_kernel(src, 'wgsl')); print(mind.emit_kernel(src, 'c_f32'))",
+                          native=True, aliases=("emit wgsl", "wgsl emitter", "transpile a kernel",
+                                                "one source of truth two runtimes", "compute shader from python",
+                                                "emit c", "dialect emitter", "code generation", "kernel port",
+                                                "webgpu shader"))
+    c.register_capability("Canonical element + delta chain (instancing, generalised)", "a renderer's instancing says "
+                          "'these two objects are the same mesh'; this says 'these two objects are the same ANYTHING, "
+                          "modulo a recognised delta'. mind.canonical_form(V, family) splits an element into "
+                          "(canonical, delta) with V = canonical @ A.T + b EXACTLY (1e-12); mind.recognize_elements "
+                          "collapses a scene into classes; mind.canon_storage_report carries the baseline. THREE "
+                          "FAMILIES, and choosing one is the whole decision: `rigid` (7-float delta) recognises "
+                          "congruent copies, `similarity` (8) recognises similar copies at any size, `affine` "
+                          "(3*rank + 3) collapses shape. MEASURED on 200 triangles from 5 base shapes under random "
+                          "rotation + translation + scale: rigid finds 200 classes (UNDER-fits -- scale is not in the "
+                          "family, so nothing matches, 0.56x), similarity finds 5 (exactly the generating family, "
+                          "1.09x), affine finds 5 (0.98x). AFFINE GIVES 5 AND NOT 1 for a reason worth having: "
+                          "whitening a triangle's hull makes it exactly EQUILATERAL (all three sides sqrt(6), "
+                          "measured), so the shape really is collapsed -- what remains is the in-hull ROTATION, and "
+                          "pinning that on a symmetric configuration needs a vertex ORDER an unordered point set does "
+                          "not carry. 'Every non-degenerate triangle is affinely the same' is a statement about "
+                          "ORDERED triangles. KEPT NEGATIVE: A TRIANGLE CAN NEVER PAY. Its hull is rank 2, so the "
+                          "affine delta is 3*2+3 = 9 floats for a 9-float triangle -- break-even before storing a "
+                          "single canonical. The dividend scales with the ELEMENT against an O(1) delta: 0.75x at 3 "
+                          "vertices, 2.96x at 12, 22x at 100, 143x at 2000 -- and zlib manages only 1.04x on float64 "
+                          "coordinates, so this IS a codec for large elements, unlike the same idea applied to source "
+                          "code (which came out 1.12x LARGER than zlib). Per-triangle canonicalisation is a "
+                          "RECOGNISER; its dividend is the dependency-keyed compute cache, not storage.",
+                          example="import numpy as np; rng = np.random.default_rng(0); base = rng.normal(size=(50,3)); "
+                                  "els = [base @ np.linalg.qr(rng.normal(size=(3,3)))[0].T + rng.normal(size=3) for _ in range(30)]; "
+                                  "r = mind.canon_storage_report(els, 'rigid'); "
+                                  "print(r['classes'], round(r['ratio'],1), r['beats_zlib'])",
+                          native=True, aliases=("store a mesh as canonical plus deltas", "canonical element",
+                                                "recognize that two triangles are the same up to a transform",
+                                                "instancing generalized", "delta chain for geometry",
+                                                "shape recognition", "congruent", "similar shapes",
+                                                "canonicalize a point set", "deduplicate geometry"))
+    c.register_capability("Dependency-keyed cache (key on what the operator reads)", "Part C's compute model: every "
+                          "triangle is THE canonical triangle plus a recognised chain of deltas; a computation runs "
+                          "on the canonical ONCE and its RESULT is transformed through the deltas, while deltas the "
+                          "computation never reads -- a material, for a geometric quantity -- never enter the cache "
+                          "key at all. mind.delta_cache(op, canonical, policy=...) and mind.delta_cache_report carry "
+                          "the comparison. Which deltas an operator reads is MEASURED, not guessed: "
+                          "mind.equivariance_table decides. MEASURED on 400 triangles (64 rotation deltas x 8 "
+                          "materials; the first 400 contain 50 distinct shapes): brute 400 computes; `read_set` 50 "
+                          "computes, 8.0x, BIT-IDENTICAL, because the material never enters the key; `equivariant` 1 "
+                          "compute, 400x, because `area` is measured INVARIANT under rotation so the shape delta "
+                          "drops out too. KEPT NEGATIVE: the equivariant path is NOT bit-identical -- max|diff| "
+                          "8.3e-17. Rotating a triangle and re-integrating accumulates round-off the canonical "
+                          "evaluation never incurs, so the CACHE is the one that is right and the BRUTE path carries "
+                          "the error; `max_abs_diff` is reported rather than a boolean, and `equivariant` is opt-in "
+                          "because this engine's constitution says a change at 1e-12 has still flipped a creature's "
+                          "trajectory. C4: THE CACHE IS ONLY SOUND OVER DETERMINISTIC EVALUATORS. mind.is_deterministic "
+                          "is the gate, and DeltaCache REFUSES an evaluator that draws from a global RNG stream "
+                          "(measured: the same input returned 0.4019 then 0.3188) -- the cache would serve its first "
+                          "draw forever while the uncached path kept drawing, and the cache would get blamed. Key the "
+                          "sampler by its input's coordinates with hash_unit. PART C, END TO END: "
+                          "mind.evaluate_elements(elements, op, op_name, family) takes RAW point sets with no shape "
+                          "ids -- canonmesh.recognize derives the classes (C3), the equivariance table says what the "
+                          "operator reads (C2), and the cache keys on that (C1). MEASURED on 200 raw triangles from 5 "
+                          "base shapes: area under `similarity` is 5 classes, 5 computes, exact to 1.4e-14 -- 40x. A "
+                          "COMPOSITE FAMILY'S VERDICT IS THE WEAKEST OF ITS PARTS (mind.family_verdict): area is "
+                          "invariant under `rigid` but only equivariant under `similarity`, because a uniform scale "
+                          "moves it. AND RECOGNITION ALONE IS NOT ENOUGH -- reusing the canonical's area directly "
+                          "under `similarity` is wrong by 8.54. `max_x` finds 5 classes and still does 200 computes, "
+                          "because `recompute` means there is no dividend and it says so.",
+                          example="import numpy as np; from holographic.mesh_and_geometry.holographic_equivariance import area; "
+                                  "rng = np.random.default_rng(0); "
+                                  "bases = [rng.normal(size=(3,3)) for _ in range(5)]; "
+                                  "els = [1.5*b @ np.linalg.qr(rng.normal(size=(3,3)))[0].T + rng.normal(size=3) for b in bases for _ in range(20)]; "
+                                  "vals, st = mind.evaluate_elements(els, area, 'area', family='similarity'); "
+                                  "print(len(els), '->', st)",
+                          native=True, aliases=("evaluate elements", "cache over recognised classes",
+                                                "dependency keyed memoization", "cache a computation by its dependencies",
+                                                "read set of a computation", "skip work whose inputs did not change",
+                                                "per triangle cache", "canonical plus delta caching",
+                                                "instancing generalized", "deferred shading", "delta id",
+                                                "is my evaluator deterministic", "coordinate keyed sampling"))
+    c.register_capability("Canonical affine recovery (Fourier-Mellin + refine)", "recover the canonical (S, T) of "
+                          "an arbitrary translate/scale edit history: after(x) = before((x - T) / S). Translate and "
+                          "scale do NOT commute, and scale is not diagonal in the linear-frequency basis -- but the "
+                          "family CLOSES: every order of a chain collapses to some single affine group element, and "
+                          "that element is the recoverable object. mind.affine_compose(chain) is the exact group law; "
+                          "mind.recover_affine(before, after) inverts it blind. THE LIFT: |FFT| discards the "
+                          "translation, and resampling the magnitude spectrum onto a LOG-frequency axis turns the "
+                          "dilation into a SHIFT -- so the estimator is the same cross-correlation-with-a-parabola "
+                          "that est_dx uses on images (Reddy & Chatterji's Fourier-Mellin move). Scale becomes "
+                          "translation; the engine already knew how to find a translation. Then a shrinking-grid "
+                          "refine on the (s, t) manifold. MEASURED: 3.7e-04 scale error on a 4-edit chain, alignment "
+                          "0.9995. KEPT NEGATIVE: **the SUPPORT BAND is the gate, not log-vs-plain magnitudes.** The "
+                          "backlog says to use log magnitudes 'because dilation scales spectrum amplitude, which "
+                          "tilts plain correlation' -- measured, that reason is wrong: multiplying one signal by a "
+                          "constant scales the whole cross-correlation and leaves the argmax exactly where it was "
+                          "(peak 7.0 either way). What decides it is the band: on a narrowband spectrum the log axis "
+                          "is mostly noise floor, log amplifies it, and the peak pins at ZERO shift for every true "
+                          "scale (1.05, 1.2, 1.5 all recover 1.00). Band to the support and both work to ~0.5%. "
+                          "SECOND KEPT NEGATIVE: the group law is exact on the PARAMETERS; repeated RESAMPLING is "
+                          "not. Four interpolated resamples do NOT reproduce one resample by (S, T) -- max|chain - "
+                          "direct| is 0.157 at n=1024, 0.058 at 2048, 0.0045 at 8192 -- so recovery from a chained "
+                          "signal fits the affine that best explains a slightly-blurred observation. AND STATE THE "
+                          "UNIT: the scale lands at 3.7e-04, the SHIFT at 0.37 SAMPLES, not the 1e-4 the backlog "
+                          "reports. HONEST SCOPE: 1-D. Two dimensions adds rotation and needs the log-POLAR resample "
+                          "of the full Fourier-Mellin transform.",
+                          example="import numpy as np; from holographic.sampling_and_signal.holographic_registration import resample_affine; "
+                                  "x = np.linspace(0,1,2048); f = np.sin(2*np.pi*(20*x + 60*x**2)) * np.exp(-((x-0.5)**2)/0.06) + 0.5*np.sin(2*np.pi*180*x)*np.exp(-((x-0.3)**2)/0.005); "
+                                  "S, T = mind.affine_compose([(1.03, 4.0), (0.98, -2.5), (1.05, 3.1)]); "
+                                  "g = resample_affine(f, S, T); r = mind.recover_affine(f, g); "
+                                  "print('true', (round(S,4), round(T,4)), '->', round(r['scale'],4), round(r['alignment'],5))",
+                          native=True, aliases=("recover a scale and shift between two signals", "recover_affine",
+                                                "fourier mellin registration", "estimate the dilation",
+                                                "canonical affine edit", "register two signals", "image registration 1d",
+                                                "log polar", "scale becomes translation", "affine group law",
+                                                "edit history canonical form"))
+    c.register_capability("Conformal UV unwrap (LSCM) + the metric that sees folds", "least-squares conformal maps "
+                          "(Levy, Petitjean, Ray & Maillot, SIGGRAPH 2002): the angle-preserving unwrap, as ONE "
+                          "linear least-squares solve on the mesh -- no iteration, no autodiff. mind.mesh_lscm(mesh) "
+                          "or mind.mesh_uv_unwrap(mesh, method='lscm'). MEASURED (mean quasi-conformal ratio "
+                          "sigma1/sigma2; 1.0 is conformal): a flat patch gives lscm 1.00000, isomap 1.10866, planar "
+                          "1.00000 -- LSCM is EXACT on a developable surface; a hemisphere cap gives lscm 1.086, "
+                          "isomap 1.878, planar 4.390. THREE KEPT NEGATIVES: (1) LSCM buys angles with AREA -- 0.4420 "
+                          "area spread on the cap against isomap's 0.2957. Compare charts on the functional they "
+                          "optimise, or you will conclude the wrong thing; mind.mesh_uv_report prints angle, area and "
+                          "stretch for every method. (2) REPORT THE MEDIAN, not the mean: the mean quasi-conformal "
+                          "ratio is unbounded -- one near-degenerate face sends sigma2 to 0, and a cap stretched 6x "
+                          "in z gives LSCM a mean of 398.0 against a median of 4.8. (3) NEITHER the stretch metric "
+                          "NOR the mean ratio can see a FOLD: on that stretched cap isomap has a BETTER mean (2.573 "
+                          "vs 398.038) while folding 128 of 256 faces against LSCM's 72. Half its map is inverted and "
+                          "every scalar summary says it is fine. mind.mesh_uv_angle_distortion reports `flipped`, and "
+                          "a fold is a MINORITY orientation, not a negative determinant -- a globally mirrored chart "
+                          "(classical MDS returns one routinely) has every det < 0 and no folds at all.",
+                          example="from holographic.mesh_and_geometry.holographic_meshuv import flat_grid_mesh; "
+                                  "m = flat_grid_mesh(6); uv = mind.mesh_lscm(m); "
+                                  "print(mind.mesh_uv_angle_distortion(m, uv))",
+                          native=True, aliases=("lscm", "least squares conformal maps", "conformal map",
+                                                "unwrap a mesh into UV", "uv coordinates", "texture atlas",
+                                                "angle distortion of a parameterization", "quasi-conformal",
+                                                "does my uv map fold", "flipped triangles", "uv distortion",
+                                                "parameterization"))
+    c.register_capability("Progressive LOD stream (rank-ordered TT cores)", "the brain/muscle format contract: "
+                          "leCore bakes, the front end consumes. mind.stream_encode(X) emits {descriptor, levels} "
+                          "where every byte PREFIX is itself a valid, coarser field -- rank-ordered TT cores are a "
+                          "progressive LOD. mind.stream_prefix(payload, max_bytes) picks the richest level that fits, "
+                          "from the DESCRIPTOR alone (shape, dtype, full_ranks, per-level bytes, rel_rms, rel_max), "
+                          "so the consumer knows what a prefix costs and what it is worth before fetching it. "
+                          "mind.stream_decode reconstructs any level; mind.stream_report carries the ladder. "
+                          "MEASURED on a 6-mode separable field (20^3): 6 levels, 314 B at 57% RMS error to 3,914 B "
+                          "at 1.4e-15, and a 10% RMS budget costs 20.4x fewer bytes than dense. THE GUARANTEE IS IN "
+                          "RMS, NOT MAX-ABS -- TT truncation is Frobenius-optimal, so adding a rank always lowers the "
+                          "L2 error and can still make one voxel WORSE: on white noise the max-abs error rises at 4 of "
+                          "15 levels while the RMS falls at every one. A progressive format must publish which norm "
+                          "its monotonicity is in. TWO MORE KEPT NEGATIVES: the ladder is a property of the FIELD's "
+                          "rank, not of the format -- white noise never reaches a 10% budget below FULL rank, where "
+                          "the TT is only 1.8x smaller than dense; and a coarse level is the same shape SMOOTHED, not "
+                          "a smaller field -- rank is not resolution, and a front end wanting fewer samples needs a "
+                          "mip chain, which is a different object.",
+                          example="import numpy as np; g = np.linspace(0,1,12); X,Y,Z = np.meshgrid(g,g,g,indexing='ij'); "
+                                  "F = sum(w*np.sin((k+1)*np.pi*X)*np.cos((k+1)*np.pi*Y)*np.exp(-(k+1)*Z) for k,w in enumerate([1,.5,.25,.12])); "
+                                  "p = mind.stream_encode(F); r = mind.stream_report(F, p); "
+                                  "print(r['monotone_rms'], p['descriptor']['bytes'], mind.stream_prefix(p, 1000))",
+                          native=True, aliases=("progressive level of detail stream", "progressive LOD", "LOD stream",
+                                                "stream a field to the browser", "rank ordered payload",
+                                                "truncate to a byte budget", "format contract for the front end",
+                                                "brain muscle protocol", "tensor train stream", "streaming payload",
+                                                "descriptor", "byte budget"))
+    c.register_capability("Equivariance table (the cache policy, measured)", "for each (operator, transform) pair, "
+                          "WHICH of the three mechanisms applies: INVARIANT (the delta drops out of the cache key), "
+                          "EQUIVARIANT (the delta becomes a transform of the output), ADJOINT (the delta moves to the "
+                          "other operand), or RECOMPUTE (no law exists). mind.equivariance_table() MEASURES it rather "
+                          "than asserting it; mind.cache_policy(op, transform) turns a verdict into a key decision; "
+                          "mind.classify_equivariance runs one cell. THE FINDING, and it cost two wrong cells: my "
+                          "first pass reported area under shear and normal under reflection as RECOMPUTE. Both were a "
+                          "MISSING LAW, not a missing law -- area(Ax) = |det A| * ||A^-T n|| * area(x) and "
+                          "normal(Ax) = sign(det A) * normalize(A^-T n), each exact to 1e-12 for every affine family. "
+                          "**RECOMPUTE must mean NO LAW EXISTS, not 'I did not write one down'** -- a table that says "
+                          "recompute where a law exists is a cache that never fires, and it looks exactly like a "
+                          "table that is merely honest. AND THE READ-SET IS THE POINT: area's law reads the NORMAL, "
+                          "so the key must carry the normal's class too. Every non-rigid law here reads the normal. "
+                          "THE ADJOINT, corrected: Part C's 'shade a rotated triangle by unrotating the light', "
+                          "shade(Ax, L) == shade(x, A^-1 L), is exact for a ROTATION (3.9e-16) and WRONG for "
+                          "everything else -- including a plain uniform scale, by 0.38, because the normal is "
+                          "renormalised and the scale does not cancel. mind.shade_adjoint carries the correction, "
+                          "which (again) reads the normal. `max_x` is registered as a genuine recompute case so the "
+                          "negative branch is exercised by something real: which vertex attained the maximum is "
+                          "information the scalar threw away.",
+                          example="t = mind.equivariance_table(); print(t['area']); "
+                                  "print(mind.cache_policy('area', 'shear')); print(mind.cache_policy('max_x', 'rotate'))",
+                          native=True, aliases=("equivariance table", "equivariance", "invariance",
+                                                "is this operator invariant under rotation", "cache policy",
+                                                "does the delta drop out of the cache key",
+                                                "transform the result not the input", "which cache policy applies",
+                                                "adjoint transfer", "canonical plus delta", "jacobian law",
+                                                "unrotate the light"))
+    c.register_capability("Cloud stack (closed-form shadow rays)", "single-scattered volumetric clouds assembled "
+                          "from shipped parts: volint's CLOSED-FORM line integral over an FPE density field, plus the "
+                          "renderer's Henyey-Greenstein phase. mind.cloud_transmittance is Beer-Lambert on a tau that "
+                          "costs ONE inner product per ray -- no marching. mind.cloud_single_scatter marches the VIEW "
+                          "ray (it must: the integrand contains the transmittance being accumulated) and evaluates "
+                          "every SHADOW ray in closed form. THE CLOSED FORM PAYS ON THE SHADOW RAY, and it is not a "
+                          "speed-for-accuracy trade: MEASURED at 64 rays x 32 view steps against a 64-step marched "
+                          "shadow, the closed form uses 32 density evaluations against 2,080 (65x fewer), runs 52x "
+                          "faster, and is 13x MORE ACCURATE (3.03e-07 vs a 16-step march's 3.94e-06) -- because it is "
+                          "the exact integral and the march is the one carrying error. mind.cloud_report carries the "
+                          "comparison. HONEST SCOPE: the view integral still marches (volint's own note: absorption "
+                          "does not want marching, scattering still does); multiple scattering is not here; and the "
+                          "closed form's physical SCALE is a fitted constant whose accuracy is that of the short "
+                          "march it was calibrated against (3.5e-05 at calibration_steps=24, 5.1e-07 at 256). "
+                          "`optical_depth` takes a PER-RAY L -- passing a median instead is a 1000x accuracy loss.",
+                          example="import numpy as np; from holographic.misc.holographic_volint import HolographicVolume; "
+                                  "from holographic.sampling_and_signal.holographic_fpe import VectorFunctionEncoder; "
+                                  "rng = np.random.default_rng(0); enc = VectorFunctionEncoder(3, dim=256, bounds=[(-1,1)]*3, bandwidth=2.5, seed=0); "
+                                  "vol = HolographicVolume.from_blobs(enc, rng.uniform(-0.5,0.5,size=(16,3)), calibration_steps=96); "
+                                  "O = np.stack([np.full(8,-0.95), np.zeros(8), np.linspace(-0.2,0.2,8)], axis=1); D = np.tile([1.,0,0],(8,1)); "
+                                  "print(mind.cloud_report(vol, O, D, 1.9, (0,1,0), ceiling=0.95, view_steps=8, reference_shadow_steps=32))",
+                          native=True, aliases=("render a cloud", "cloud stack", "volumetric clouds",
+                                                "closed form transmittance", "shadow ray without marching",
+                                                "single scattering", "henyey greenstein", "beer lambert",
+                                                "fog", "atmosphere", "participating media", "optical depth"))
+    c.register_capability("Points to mesh (isosurface / surface reconstruction)", "the inverse of "
+                          "sdf_surface_points, which the engine could do in one direction only. "
+                          "mind.sdf_from_points(points, normals, lo, hi, res) builds a signed distance grid from an "
+                          "ORIENTED point cloud -- distance to the nearest sample, signed by that sample's normal -- "
+                          "and mind.surface_nets(field, grids) extracts a WATERTIGHT quad mesh by dual isosurface "
+                          "extraction: one vertex per sign-changing cell at the mean of its edge crossings, one quad "
+                          "per sign-changing grid edge. mind.points_to_mesh runs both; mind.mesh_report scores it "
+                          "(watertight, Euler characteristic, max surface error). MEASURED on a unit sphere, 600 "
+                          "samples, 32^3 grid (cell 0.1032): 1,804 vertices, 1,802 quads, watertight, Euler = 2, max "
+                          "vertex error 0.0454 -- 0.44 CELLS, and the cell size is the honest baseline because a dual "
+                          "extractor cannot place a vertex better than the cell it lives in. HONEST SCOPE: this is "
+                          "naive surface nets, NOT Dual Contouring -- averaging the crossings rounds off SHARP "
+                          "features, which DC's QEF solve (Ju et al., SIGGRAPH 2002) recovers. Smooth surfaces. "
+                          "THREE KEPT NEGATIVES: (1) the point-cloud SDF is LEAST accurate near the surface, exactly "
+                          "where the extractor reads it (max err 0.2225 within 0.1 of the surface, 0.0695 beyond 0.6) "
+                          "-- distance-to-nearest-SAMPLE overestimates distance-to-SURFACE by up to the sample "
+                          "spacing; (2) accuracy is set by the CLOUD, not the grid -- the near-surface error tracks "
+                          "the spacing at 1.3-1.7x, so refining the grid under a sparse cloud buys nothing; (3) the "
+                          "MESH is watertight AND ORIENTED -- every directed edge once, every normal along +grad -- "
+                          "which `watertight` alone cannot see: mind.mesh_is_oriented(quads) is the stronger check, "
+                          "and before it existed the sphere was watertight with 228 duplicated directed edges and 98 "
+                          "of 200 normals pointing inward, so Mesh.half_edges() refused it. Orienting needs TWO sign "
+                          "flips composed (the crossing's direction AND the frame's parity, since (1,0,2) is an odd "
+                          "permutation); fixing only the first left 136 of 408 normals outward. The "
+                          "MESH is 4.7x more accurate than the FIELD it came from, because averaging twelve edge "
+                          "crossings cancels per-sample noise -- do not read one error as the other, in either "
+                          "direction. The all-pairs distance matrix is chunked: unchunked, a 24^3 grid against 9,600 "
+                          "points allocated 133M floats and the process was killed.",
+                          example="import numpy as np; rng = np.random.default_rng(0); "
+                                  "p = rng.normal(size=(400,3)); p /= np.linalg.norm(p, axis=1, keepdims=True); "
+                                  "V, Q, F, g = mind.points_to_mesh(p, p, np.full(3,-1.6), np.full(3,1.6), 20); "
+                                  "print(mind.mesh_report(V, Q, sdf=lambda X: np.linalg.norm(X,axis=1)-1.0))",
+                          native=True, aliases=("marching cubes", "dual contouring", "surface nets", "isosurface",
+                                                "convert splats to a mesh", "surface reconstruction from points",
+                                                "sdf from a point cloud", "point cloud to mesh", "mesh from an sdf",
+                                                "extract a surface", "watertight mesh", "poisson reconstruction"))
+    c.register_capability("Fill the gaps in a field (inpaint / impute)", "fill the unknown cells of a field, "
+                          "dispatched on TYPE. mind.inpaint(field, known) sends a float array to a harmonic (Laplace) "
+                          "solve -- each hole relaxes to the mean of its four neighbours, known cells pinned -- and an "
+                          "integer array to a majority neighbour vote, because a discrete field has no mean and "
+                          "averaging it is a category error. mind.fill_report scores ON THE HOLES ONLY. MEASURED "
+                          "(48x48, 59% erased, 8 seeds): harmonic MAE 0.0015 mean (range 0.0012-0.0018); majority "
+                          "accuracy 0.9653 mean (0.9553-0.9749), and 0.9990 in region INTERIORS -- nearly all the "
+                          "error is boundary error, so the overall number is a property of the FIELD while the "
+                          "interior number is a property of the ALGORITHM. THE BOUNDARY CONDITION IS THE GATE: "
+                          "periodic=False (edge-clamped) is the default, because wrapping a non-periodic field with "
+                          "np.roll solves a different problem and costs 5.4x (MAE 0.00666 vs 0.00123). DECLARED "
+                          "NEGATIVES, measured, do not rebuild them: a VSA record (one vector per cell, roles bound "
+                          "per channel) LOSES to both of these on both channels -- temperature MAE 0.0248 vs harmonic "
+                          "0.0077, material accuracy 94.2% vs majority 96.0%; per-step cleanup in a multi-role NCA "
+                          "DOUBLES the continuous error (0.0248 -> 0.0485) for zero categorical benefit, because "
+                          "cleanup is per-role but the bundle is shared; and merely encoding a scalar into a 2-role "
+                          "record and reading it back costs MAE 0.0160, more than twice what a harmonic solve achieves "
+                          "while actually reconstructing missing values.",
+                          example="import numpy as np; N = 32; y, x = np.meshgrid(np.linspace(0,1,N), np.linspace(0,1,N), indexing='ij'); "
+                                  "f = 0.3*x + 0.4*np.exp(-((x-0.6)**2 + (y-0.3)**2)/0.05); "
+                                  "known = np.random.default_rng(0).random((N,N)) > 0.5; "
+                                  "print(mind.fill_report(f, mind.inpaint(f, known), known))",
+                          native=True, aliases=("inpaint", "inpaint a hole", "impute missing values",
+                                                "fill in missing data", "label propagation", "hole filling",
+                                                "missing data", "impute", "fill gaps in a field",
+                                                "extrapolate a sparse field", "harmonic inpainting",
+                                                "laplace solve on holes", "majority vote fill", "gap filling"))
+    c.register_capability("Frame-to-frame motion by one unbind (reprojection velocity)", "recover the translation "
+                          "between two frames with ONE unbind: cross-correlation in the Fourier domain is "
+                          "conj(F(a))*F(b), and its peak is the shift. This is TAA's analytic reprojection velocity, "
+                          "and it is the engine's core operator applied to images. mind.est_dx(a, b) returns (dy, dx) "
+                          "to sub-pixel precision; mind.reproject(a, b, tile=None) warps a forward to predict b; "
+                          "mind.reproject_report(a, b) carries every baseline. MEASURED on a REAL rendered frame "
+                          "warped by a known amount: 0.0705 px mean error, 0.1087 px worst; integer shifts exact. "
+                          "FOUR KEPT NEGATIVES, all measured: (1) `normalize=True` -- textbook PHASE correlation -- is "
+                          "2.3x WORSE at sub-pixel, because it sharpens the peak toward a delta and a parabola needs "
+                          "curvature -- and WHITE NOISE is the worst case for the same reason, its autocorrelation "
+                          "being a delta; (2) a Hann window, the textbook wrap-bias fix, is worse still (2.05 px, 1.17 px "
+                          "even after mean removal); (3) the residual is THE SCENE, not estimator error -- warping "
+                          "lifts a lateral pan from 23.23 dB to 36.84 dB but plateaus. With the camera FIXED and the "
+                          "scene moving (the only non-vacuous control -- a far-away camera makes the two frames "
+                          "IDENTICAL, and warping nothing perfectly proves nothing), two spheres at the SAME depth "
+                          "gain 11.65 dB from a warp while the same slide at DIFFERENT depths gains 6.06 dB: parallax "
+                          "halves what one translation can explain, and a depth slide (a scale change) gains only "
+                          "5.48 dB; (4) TILING LOSES ON UNIFORM MOTION "
+                          "(pan: 40.46 dB global vs 36.67-40.67 tiled) and wins only on a non-uniform field (dolly: "
+                          "34.82 vs 37.43 at tile 48) -- and the per-tile shift SPREAD does NOT tell you which regime "
+                          "you are in (a pure translation has the largest spread and global still wins by 22 dB). So "
+                          "the backlog's 'one unbind per tile INSTEAD of motion vectors from geometry' does not hold: "
+                          "the unbind is an excellent ESTIMATOR, not a substitute for knowing how the camera moved.",
+                          example="import numpy as np; from holographic.rendering.holographic_reproject import warp; "
+                                  "x = np.linspace(0, 6, 64); a = np.outer(np.sin(x), np.cos(1.7*x)) + 0.3*np.outer(x, x[::-1]); "
+                                  "b = warp(a, 1.4, -2.6, wrap=True); "
+                                  "print('truth (1.4, -2.6) ->', np.round(mind.est_dx(a, b), 3))",
+                          native=True, aliases=("est_dx", "reprojection velocity", "motion vectors between frames",
+                                                "estimate the shift between two images", "phase correlation",
+                                                "temporal reprojection", "TAA", "optical flow", "image registration",
+                                                "subpixel shift", "warp the previous frame", "frame prediction"))
+    c.register_capability("Code as canonical shape + name delta (exact, not a codec)", "a statement is (canonical "
+                          "SHAPE) + (name DELTA): erase the identity-carrying leaves -- names, attributes, constants, "
+                          "argument names -- and what remains is pure structure; what you erased is the delta. Part "
+                          "C's triangle, applied to code. mind.code_decompose(stmt) splits it, mind.code_recompose "
+                          "inverts it EXACTLY (a delta of the wrong length RAISES rather than short-reading into "
+                          "plausible wrong code), mind.code_structure(src) / mind.code_rebuild(cb, stream) do a whole "
+                          "module, and mind.code_shape_census(src) measures the split. THE BAR, MET: 63,121 of 63,121 "
+                          "statement subtrees reconstruct bit-exactly, and 421 of 421 modules rebuild to a "
+                          "byte-identical normalized source -- 'normalized' being precise, because ast.unparse is a "
+                          "FIXED POINT on every module here and the reparsed AST is identical. MEASURED census: "
+                          "identifiers kept 1.19x reuse, identifiers erased 2.34x -- erasing them collapses ~49% of "
+                          "distinct statements. STATE THE UNIT WITH THE NUMBER: the same census over FUNCTIONS reads "
+                          "1.13x, and reading one as a refutation of the other is a unit error. KEPT NEGATIVE: this is "
+                          "NOT a compressor. mind.code_byte_report(src) reports the structure at 1.12x LARGER than "
+                          "zlib on the whole tree, because 83.2% of shapes occur exactly once -- code's tail is long. "
+                          "The shape is a semantic KEY (structural search, duplicate detection, refactor targeting), "
+                          "and never a cache key.",
+                          example="import ast; tmpl, delta = mind.code_decompose('total = a + 7'); print(delta); "
+                                  "print(ast.unparse(mind.code_recompose(tmpl, ['x', 'y', 9])))",
+                          native=True, aliases=("code structure", "canonical shape and name delta",
+                                                "decompose code into shape and names", "ast round trip",
+                                                "reconstruct source from a structure", "statement shape",
+                                                "structural search", "find duplicate code", "shape census",
+                                                "code as canonical plus delta", "exact ast decomposition"))
+    c.register_capability("Memoize a pure function (the purity gate is the point)", "skip re-execution of PURE work "
+                          "whose inputs repeat. mind.memoize_pure(fn) keys on (the function's EXACT canonical source, "
+                          "its arguments) and REFUSES a function that is not pure -- is_pure rejects the clock, RNG, "
+                          "IO, global writes, and transitive impurity through a call-graph fixpoint, while accepting a "
+                          "locally-allocated container. A cache over an impure function returns a stale answer "
+                          "silently, so the gate raises instead. MEASURED: 36x on a repeated 256x256 SVD, "
+                          "bit-identical. THE BACKLOG CALLS THIS 'shape-keyed memoization', AND THAT NAME IS A BUG: a "
+                          "canonical shape erases identifiers and constants, so `def f(x): return x + 1` and "
+                          "`def g(x): return x + 2` have the SAME shape and would share a cache entry. "
+                          "mind.canonical_shape(fn) exists, and is a COMPRESSION primitive, never a cache key. "
+                          "KEPT NEGATIVE: the key costs O(input bytes) -- fingerprinting a 512x512 array costs 1.747 "
+                          "ms while A.sum() costs 0.084 ms, so a cheap function of a large array loses 21x; ask "
+                          "mind.machine_place with the function's own cost as the baseline. TWO BACKLOG NUMBERS DID "
+                          "NOT REPRODUCE: shape reuse is 1.13x (node type + depth) or 1.87x (control flow), not 2.36x "
+                          "-- it is a property of the equivalence relation, not the code; and tree purity is 35.4% "
+                          "(781 of 2,188 module-level functions), not 76%. HONEST SCOPE: the gate resolves callees "
+                          "within ONE module, so a function that calls an IMPORTED helper is refused as unresolved "
+                          "(sound, and why tucker.rank_gate is rejected -- it reaches fix_eigvec_signs from another "
+                          "module). Cross-module resolution wants types.",
+                          example="import numpy as np; from holographic.simulation_and_physics.holographic_island import island_energy; "
+                                  "f = mind.memoize_pure(island_energy); X = np.zeros((64,3)); V = np.ones((64,3)); "
+                                  "f(X, V); f(X, V); print(f.cache_stats())",
+                          native=True, aliases=("memoize", "memoize a pure function", "cache a function keyed on its inputs",
+                                                "skip repeated work", "pure function cache", "content addressed memoization",
+                                                "shape keyed memoization", "canonical shape of a function",
+                                                "is it safe to cache this", "lru cache but safe", "purity gate"))
+    c.register_capability("Scatter / gather (any rank, any kernel, exact on demand)", "deposit values onto a grid of "
+                          "ANY rank at continuous coordinates, and read them back through the SAME kernel -- scatter "
+                          "and gather are adjoint. mind.scatter(points, values, shape, kernel=) is rank-agnostic "
+                          "(verified 1-D through 4-D), mass-preserving (a partition-of-unity kernel's weights sum to "
+                          "1), handles vector values (N,C), and clamps or wraps at the edges. kernel='nearest' is the "
+                          "GPU's scatter -- an atomic add at an index, ties rounding UP by stated convention -- and "
+                          "scattering ones at integer coordinates IS np.bincount, so a nearest scatter is a HISTOGRAM. "
+                          "kernel='bilinear' spreads over 2^D cells; 'bspline' is the smooth MPM kernel. "
+                          "mind.scatter_exact(...) is PERMUTATION-INVARIANT: a scatter is a reduce PER CELL and "
+                          "np.add.at accumulates in point order, so a float scatter of the same points reordered gives "
+                          "a different grid -- MEASURED, 4,000 points onto 16x16 with weights spanning 16 orders of "
+                          "magnitude, the float scatter differs by 1.12e-08 under a permutation (9.31e-09 for a "
+                          "nearest histogram) and the exact one does not differ at all. scatter_to_field and "
+                          "scatter_to_field_3d are the graphics doors onto this same function.",
+                          example="import numpy as np; idx = np.random.default_rng(0).integers(0, 8, size=200); "
+                                  "hist = mind.scatter(idx[:, None].astype(float), np.ones(200), (8,), kernel='nearest'); "
+                                  "print(np.array_equal(hist, np.bincount(idx, minlength=8).astype(float)))",
+                          native=True, aliases=("scatter", "gather", "scatter add", "atomic add",
+                                                "scatter values into an output array", "deposit particles onto a grid",
+                                                "accumulate into arbitrary indices", "order independent scatter",
+                                                "splat values to a grid", "histogram", "histogram of values",
+                                                "bincount", "particle to grid", "grid to particle", "P2G", "G2P",
+                                                "adjoint of sampling", "deterministic histogram"))
+    c.register_capability("The machine model (leCore's hardware units + memory tiers)", "THE SPEC SHEET, and the "
+                          "first thing to read before building anything that smells like a cache, a kernel, a "
+                          "scheduler or a lookup -- the odds are the unit already exists and has a measured cost "
+                          "model. mind.machine_map() lists every COMPUTE unit (SIMD lanes, SIMT width, texture unit, "
+                          "gather, kernel fusion, batched operator power, RT core, per-thread RNG, atomics-free wave "
+                          "scheduler, occupancy gate) and every MEMORY tier (compiled operator, fat-margin cache, "
+                          "baked grid, content-addressed cache, compressed RAM, cold store, durable delta chain), "
+                          "each with the real module+symbol, its setup cost, its marginal cost, how that marginal "
+                          "cost SCALES, and the conditions under which it must NOT be used. mind.machine_place(...) "
+                          "answers the only question that matters -- does the work amortize the setup -- and returns "
+                          "break_even_n = inf when a unit can NEVER pay. mind.machine_spec_sheet() re-MEASURES all 17 "
+                          "units on your box (a spec sheet that cannot re-measure itself is a rumour), and "
+                          "mind.machine_place_unit(name, baseline_ns, n_calls) runs the placement on those MEASURED "
+                          "numbers rather than on ones you remembered. CAVEAT, and it is the program's oldest error: "
+                          "`baseline_ns` must be the cost of what the unit REPLACES -- kernel_fusion replaces N passes, "
+                          "gather replaces N fetches. Priced against a raw array read (130 ns) almost every unit "
+                          "correctly reports NEVER; if everything says never, check the denominator. "
+                          "KEPT NEGATIVE, measured: the textbook latency ladder (registers < L1 < L2 < RAM) is FALSE "
+                          "here -- a dense array index (132 ns) beats the fat-margin cache (3,485 ns) and the texture "
+                          "unit (376,032 ns) on a single scalar access, because NONE of these is a scalar unit. They "
+                          "are BATCH units: BakedGrid costs 61,765 ns/point at N=1 and 274 ns/point at N=10,000, and "
+                          "`gather`'s marginal cost is CONSTANT in N (182,010x at N=2,048 -- when the rule is reused).",
+                          example="sheet = mind.machine_spec_sheet(); "
+                                  "print(mind.machine_place_unit('t2_baked_grid', baseline_ns=50_000, n_calls=10**6, sheet=sheet)); "
+                                  "print(mind.machine_unit('gather_unit')['do_not_use_when'])",
+                          native=True, aliases=("machine model", "hardware units", "spec sheet", "cost model",
+                                                "what hardware units does this engine have", "gpu equivalent",
+                                                "what is the gpu equivalent here", "memory hierarchy", "cache hierarchy",
+                                                "which tier should my data live in", "is it worth caching this",
+                                                "break even for a cache", "should I bake this or compute it each time",
+                                                "amortize", "setup vs marginal cost", "L1 L2 L3", "registers",
+                                                "warp", "texture unit", "rt core", "tensor core", "occupancy",
+                                                "which unit should I use", "pattern to use"))
+    c.register_capability("Compressed-domain compute (never touch the decompressed field)", "blur, add, scale and "
+                          "query a 2-D field by operating on its rank-r FACTORS, never forming the array. "
+                          "mind.low_rank_field(X) returns a LowRankField with .blur(kernel_1d) / .add(other) / "
+                          ".scale(a) / .query(i,j) / .to_dense(); mind.worth_factoring(X) is the honest gate; "
+                          "mind.factored_field_report(X, k) re-runs the comparison for you. The bandwidth wall is "
+                          "physics (this box reads ~12.3 GB/s, a GPU's HBM does 1-3 TB/s) -- you do not out-bandwidth "
+                          "a GPU, you flank it by never touching decompressed data. MEASURED (1024x1024 smooth field, "
+                          "rank 3, 171x fewer bytes): separable blur 66.60 ms / 8.4 MB dense vs 2.53 ms / 0.049 MB "
+                          "factored, error 3.11e-15; add two fields 16.8 MB vs 0.066 MB, error 5.83e-14; a point query "
+                          "takes 1.7 us and 72 bytes against materialising 8.4 MB. FOUR KEPT NEGATIVES: (1) the blur "
+                          "must be SEPARABLE -- a 2-D kernel is outside the algebra and is REFUSED, not approximated; "
+                          "(2) add inflates rank (six naive adds take rank 2 -> 14) so it recompresses, lossily, at a "
+                          "tolerance; (3) NONLINEAR ops do not survive -- ReLU on factors differs from ReLU on the "
+                          "field by 1.283, so clamp/threshold/min/max need to_dense(); (4) if the field is not low "
+                          "rank, factoring COSTS more -- white noise gates to rank 197 of 256 and worth_factoring "
+                          "returns False. WIRED (B2) as fieldhome.Field.low_rank, a fourth backend beside "
+                          "callable/dense/sparse. AND THE GATE IS AN ERROR BUDGET, not rank_gate's 99% ENERGY: "
+                          "measured on REAL fields (SDF slices, not synthetic outer products), a sphere SDF at 99% "
+                          "energy is rank 2 and 7.45% WRONG, a box SDF 18.19% wrong, and fbm noise passes the energy "
+                          "gate at rank 5 with 28.54% error -- an SDF that wrong does not sphere-trace. Use "
+                          "mind.rank_for_error(X, max_abs_error) and mind.worth_factoring(X, max_error=...): at 1% of "
+                          "amplitude a sphere SDF needs rank 4 (16x fewer bytes, pays), a box SDF rank 12 (5.3x), fbm "
+                          "rank 50 (1.27x, marginal), white noise rank 124 (refused). DEFERRED for postfx: it STREAMS "
+                          "frames, so an SVD costs 53.7x the FFT blur it would accelerate at 128^2 and 91.7x at 256^2 "
+                          "-- LowRankField pays where a field is baked once and queried many times.",
+                          example="import numpy as np; x = np.linspace(0,1,256); "
+                                  "X = np.outer(np.sin(3*np.pi*x), np.cos(2*np.pi*x)); "
+                                  "k = np.array([1.,4,6,4,1]); k /= k.sum(); "
+                                  "print(mind.factored_field_report(X, k)); print(mind.worth_factoring(X))",
+                          native=True, aliases=("compressed domain", "low rank field", "operate on factors",
+                                                "blur a field without decompressing it", "factored ops",
+                                                "operate on tensor train cores directly", "never decompress",
+                                                "add two compressed fields", "query a compressed field at a point",
+                                                "bandwidth wall", "low rank factorization of a field", "svd field",
+                                                "separable blur", "compressed compute", "rank gate"))
+    c.register_capability("Hierarchical superposition (cleanup between levels)", "hold far more items in one vector "
+                          "than the flat capacity law allows, by cleaning up BETWEEN levels. mind.hierarchical_pack "
+                          "superposes G group-keyed chunks; mind.hierarchical_recall unbinds the group key, SNAPS the "
+                          "noisy chunk to its exact pattern in a chunk codebook (the crosstalk reset), then unbinds the "
+                          "leaf; mind.flat_recall is the baseline it must beat, shipped beside it. MEASURED (D=2048, 8 "
+                          "items/group, 16 shared patterns): flat recall 100% / 90% / 56.7% / 18.3% at G = 4 / 16 / 32 / "
+                          "64 groups, while hierarchical recall stays at 100% throughout. Capacity is bounded by the "
+                          "WORST SINGLE LEVEL, not by the product of levels. KEPT NEGATIVE (theorem-shaped): "
+                          "superposition is LINEAR, so naive bundle-of-bundles with product roles IS one flat bundle -- "
+                          "measured identical to 2.78e-16. Nesting alone buys nothing; the mid-level cleanup is the "
+                          "entire mechanism. SECOND NEGATIVE, correcting the backlog: shared chunks do NOT buy recall "
+                          "(64 distinct patterns for 64 groups still recalls 100%) -- they buy a SMALL CODEBOOK, 16 "
+                          "patterns instead of 64, and that is where R1's promoted chunks pay. Say it plainly: the "
+                          "single vector holds the STRUCTURE, the codebooks hold the content. "
+                          "R3 -- THE ONE CODEBOOK FAMILY, third consumer: mind.chunk_codebook_vectors(codebook, items, "
+                          "leaf_keys) turns R1's LEARNED chunk codebook (mind.learn_chunks) into these chunk vectors. "
+                          "R1 learns WHICH chunks recur; R2 realizes each as a map_bind product; this realizes each as "
+                          "a pack superposition -- same identities, different vectors. Reproduced on a learned "
+                          "codebook: flat 100/95/70/30 at G=4/16/32/64, hierarchical 100/100/100/100. "
+                          "THIRD NEGATIVE, and it is the dangerous one: if a group is NOT in the chunk codebook (R1 "
+                          "was allowed too few merges), the mid-level cleanup snaps to the NEAREST entry -- the wrong "
+                          "chunk -- and returns an item with every appearance of success. Measured: uncovered group "
+                          "chunk_similarity 0.036, covered 0.502. Pass min_chunk_similarity=0.15 to ABSTAIN instead of "
+                          "lying, and mind.chunk_coverage(...) tells you the fraction at risk (60 merges covered 8 of "
+                          "16 groups; 150 covered all 16).",
+                          example="import numpy as np; from holographic.agents_and_reasoning.holographic_ai import unitary_vector; "
+                                  "from holographic.misc.holographic_superposed import pack; r = np.random.default_rng(0); "
+                                  "at = lambda n: np.stack([unitary_vector(512, r) for _ in range(n)]); "
+                                  "lk, gk, items = at(4), at(8), at(16); "
+                                  "chunks = np.stack([pack(lk, items[p*4:(p+1)*4]) for p in range(4)]); "
+                                  "S = mind.hierarchical_pack(gk, chunks[[0,1,2,3,0,1,2,3]]); "
+                                  "r = mind.hierarchical_recall(S, gk[3], lk[2], chunks, items, min_chunk_similarity=0.15); "
+                                  "print(r['item_index'], r['abstained'])",
+                          native=True, aliases=("hierarchical superposition", "chunked memory", "mid-level cleanup",
+                                                "cleanup between levels", "store many items in one vector and recall them",
+                                                "how many items can i bundle before recall fails", "capacity",
+                                                "chunked memory with a shared codebook", "bundle of bundles",
+                                                "nested superposition", "crosstalk reset", "recall capacity",
+                                                "two level memory", "group and leaf"))
+    c.register_capability("Learned chunk codebook (iterated pair promotion)", "learn the RECURRING CHUNKS of a symbol "
+                          "stream by iterated pair promotion (BPE -- Gage 1994; Sennrich et al. 2016), where the merged "
+                          "chunks are factoring and storage codebooks, not tokenizer vocabulary. mind.learn_chunks(stream) "
+                          "returns a plain-data codebook; mind.chunk_encode / mind.chunk_decode round-trip it LOSSLESSLY; "
+                          "mind.structure_score(stream) is the one-number probe for whether a stream has reusable "
+                          "structure at all. THE ONE CODEBOOK FAMILY (R3): the same codebook feeds recursive factoring "
+                          "(R2), hierarchical superposition's mid-level cleanup (W5) and the edit codec (DL8) -- three "
+                          "consumers, one structure. MEASURED: a workflow stream of 6,000 symbols tokenizes to 1,392 "
+                          "(4.3x) with mean chunk depth 4.31 and max depth 16; a uniform control stalls at 1.3x, mean "
+                          "depth 1.34, max depth 2. No structure, no recursion dividend -- and this measures it before "
+                          "anything is built on top. KEPT NEGATIVE: it is NOT a byte compressor. On the same stream zlib "
+                          "takes 1,820 bytes and the codebook+tokens take 3,578; mind.chunk_byte_report(...) reports both "
+                          "so the token ratio cannot be mistaken for a compression claim. Deterministic: count ties break "
+                          "on the pair, never on dict insertion order.",
+                          example="from holographic.agents_and_reasoning.holographic_chunkcodebook import workflow_stream; "
+                                  "s = workflow_stream(); cb = mind.learn_chunks(s); "
+                                  "assert mind.chunk_decode(mind.chunk_encode(s, cb), cb) == s; print(mind.chunk_stats(s, cb))",
+                          native=True, aliases=("chunk codebook", "bpe", "byte pair encoding", "pair promotion",
+                                                "learn a codebook of repeated pairs from a stream", "chunk promotion",
+                                                "tokenize a sequence into learned chunks", "find repeated motifs in a sequence",
+                                                "repeated motifs", "does my data have repeating structure",
+                                                "structure probe", "reusable chunks", "macro codebook",
+                                                "promote frequent chunks", "learned vocabulary", "sequence chunking",
+                                                "recursion dividend", "shared codebook"))
+    c.register_capability("Physics event codec (a trace as base + interruptions)", "record a simulation as its BASE "
+                          "state plus its EVENTS -- the impulses and contacts where the deterministic flow was "
+                          "interrupted -- and regenerate everything else. Between events physics is a deterministic "
+                          "function of the state, so the states were never data. mind.record_physics_trace(...) gives "
+                          "(trace, EventTrace); mind.replay_physics_trace(ev) reconstructs it BIT-IDENTICALLY; "
+                          "mind.physics_compression_report(trace, ev) reports the codec's size beside every baseline it "
+                          "claims to beat, so the comparison travels with the capability. MEASURED (600 frames x 16 "
+                          "bodies, 663 events): raw 460,800 bytes; zlib(raw) 308,090; zlib(frame deltas) 87,057; EVENT "
+                          "CODEC 6,360 -- 13.7x over the bar, and lossless. KEPT NEGATIVE 1: the win is event SPARSITY "
+                          "(663 events replace 9,600 state rows), NOT a codebook -- a quantized impulse codebook adds "
+                          "only ~2x and it is LOSSY, and the loss amplifies because events decide which events happen "
+                          "next (at q=0.1 the replay leaves a box of half-extent 2.0 by 4.47). KEPT NEGATIVE 2: "
+                          "DeltaChain is the wrong tool here -- it skips unchanged rows, but a sim moves every body "
+                          "every frame, so it takes 614,144 bytes, MORE than the raw 460,800. Dense mutation with "
+                          "sparse causes is a different structure from sparse mutation.",
+                          example="trace, ev = mind.record_physics_trace(n=8, frames=200); "
+                                  "assert (mind.replay_physics_trace(ev) == trace).all(); "
+                                  "print(mind.physics_compression_report(trace, ev))",
+                          native=True, aliases=("event codec", "physics codec", "compress a physics simulation trace",
+                                                "compress a simulation", "record a replay", "deterministic replay",
+                                                "seed and events", "netcode", "state sync", "delta compress a stream of states",
+                                                "impulse events", "contact events", "replay a trace",
+                                                "compress a physics trace", "trace compression", "lockstep",
+                                                "store a simulation compactly", "sync physics over the network",
+                                                "shrink a recorded sim", "sparse events"))
+    c.register_capability("Fat-margin cache (for a query that drifts)", "when a query DRIFTS -- a camera nudging "
+                          "forward, a cursor, an agent, a recall neighbourhood -- do not key the cache on the exact "
+                          "query: bake an ENLARGED region around it and serve everything that lands inside. Catto's "
+                          "enlarged AABB (he grows a moving body's box so it need not re-insert into the broadphase "
+                          "every frame), generalized past physics. mind.margin_cache(builder, margin).get(p) -> "
+                          "(value, hit); mind.drift_scale(queries) is the variation probe pointed at the QUERY STREAM "
+                          "instead of the data; mind.suggest_margin(queries, target) picks the smallest margin meeting "
+                          "a hit-rate target by REPLAYING the stream (empirical on purpose: a random walk's exit time "
+                          "scales like (R/sigma)^2 but the measured rebuilds sit ~1.8x off, so a fitted law is worse "
+                          "than a replay). MEASURED on a unit-step 2-D walk of 400 queries: margin 0 -> 0% hits / 400 "
+                          "rebuilds; 1.0 -> 35.5% / 258; 3.0 -> 85.0% / 60; 6.0 -> 95.0% / 20. KEPT NEGATIVE: this is "
+                          "NOT the sleep tracker's two-threshold hysteresis -- a margin cache has exactly ONE radius, "
+                          "because a cache entry has no state to hover at a bar and flicker between; an inner "
+                          "threshold would never be read. Cousins, not the same mechanism. WIRED (C4) into "
+                          "RenderSession.preview(reuse_margin=...), where the drifting query is the CAMERA POSE: 20 "
+                          "drifting frames at margin 0.12 give 19 hits and 1 rebuild. THE GATE IS NOT A HIT-RATE "
+                          "TARGET -- a hit serves a STALE value, and on a rendered frame the max error saturates at "
+                          "the FIRST reuse (0.5864, a silhouette edge) while the mean creeps 0.0001 -> 0.0051. Use "
+                          "mind.suggest_margin_for_error(queries, values, max_mean_error, max_abs_error=...) and "
+                          "mind.replay_margin_error(...): a value that jumps 0->1 passes a mean-only budget at margin "
+                          "0.1929 and serves a completely wrong answer (max error 1.00), while the max-error bound "
+                          "stops at 0.094558 and 0.095158 is already catastrophic. The admissible margin is a CLIFF. "
+                          "SECOND CORRECTION: lightcache and domecache are NOT clients -- they are stateless per-frame "
+                          "screen-space stride caches with no query stream to drift.",
+                          example="import numpy as np; q = np.cumsum(np.random.default_rng(0).normal(size=(400,2)), axis=0); "
+                                  "mc = mind.margin_cache(lambda p: ('bake', tuple(p)), margin=mind.suggest_margin(q, 0.9)); "
+                                  "vals = [mc.get(x) for x in q]; print(mc.stats())",
+                          native=True, aliases=("fat margin", "margin cache", "drifting query", "cache reuse",
+                                                "cache a result for a query that keeps moving slightly",
+                                                "avoid rebuilding a cache every frame", "hysteresis cache",
+                                                "reuse a render tile when the camera barely moved", "enlarged region",
+                                                "how big should my cache region be", "cache invalidation",
+                                                "temporal reuse", "camera drift", "query drift", "rebuild less often",
+                                                "variation probe", "drift statistics"))
+    c.register_capability("Graph-colour waves (lock-free deterministic parallelism)", "schedule conflicting work into "
+                          "WAVES that touch disjoint resources, so a wave runs fully parallel with no locks and no "
+                          "atomics. mind.conflict_graph(item_keys) builds the graph (two tasks conflict iff they share "
+                          "a resource); mind.color_waves(n, edges) colours it greedily in ascending index, so the "
+                          "schedule is DETERMINISTIC -- same input, same waves, same order, every machine and every run, "
+                          "which is exactly how Box3D earns its cross-platform determinism. mind.plan_write_waves(keys) "
+                          "applies it to database write batches: the single-writer lock serialises writers because two "
+                          "MIGHT touch the same row; colouring proves when they cannot. MEASURED: 2,000 transactions "
+                          "over 300 keys colour into 24 waves, mean size 83.3 -- 83x lock-free parallelism, every wave "
+                          "verified conflict-free. A physics constraint graph, a mesh's edge adjacency, a farm's "
+                          "conflict graph and a DB write set are the same object; greedy is not optimal (colouring is "
+                          "NP-hard) and does not need to be -- one extra wave costs one extra pass.",
+                          example="n, edges = mind.conflict_graph([{'a','b'}, {'b','c'}, {'d'}]); waves = mind.color_waves(n, edges)",
+                          native=True, aliases=("graph colouring", "graph coloring", "colour a graph", "waves",
+                                                "lock free", "run tasks in parallel without locks", "no atomics",
+                                                "deterministic parallelism", "conflict graph", "conflict free batches",
+                                                "batch database writes that do not conflict", "wave scheduling",
+                                                "group work so nothing collides", "parallel scheduling",
+                                                "schedule conflicting tasks", "write batches", "key overlap"))
+    c.register_capability("Partition-invariant sums (same answer at any bucket count)", "sum contributions so the "
+                          "result is BIT-IDENTICAL no matter how the work is split -- 4-way, 7-way, one bucket, or one "
+                          "bucket per item. mind.reduce_sum_exact_partitioned(buckets) fixes one global fixed-point "
+                          "scale (from the global peak and count, both partition-invariant since max and len are), then "
+                          "each bucket reduces to an int64 accumulator that merges in any order: integer addition is "
+                          "exact, associative and commutative, so the accumulators form a monoid. MEASURED (700 "
+                          "contributions spanning 16 orders of magnitude): plain float 4-way vs 7-way differs by 3e-08; "
+                          "this is bit-identical across 1-, 4-, 7-, 13- and 700-way splits and under row shuffles. "
+                          "KEPT NEGATIVE: reduce_sum_exact is order-independent but NOT partition-independent -- if a "
+                          "farm float-sums INSIDE each bucket first, the rounding has already diverged and no exact "
+                          "merge can undo it. Exactness must reach the leaves. This is determinism that survives "
+                          "re-partitioning a running farm, which is the invariance Box3D does not claim. THE SAME "
+                          "MONOID GIVES A SCAN (G3): mind.scan_exact(x) is a prefix sum that is bit-identical however "
+                          "the array is blocked, and mind.scan_exact_blocked(x, k) proves it for every k from 1 to N. "
+                          "A blocked FLOAT scan -- what every parallel scan actually is -- disagrees with itself: "
+                          "4-block vs 7-block differ by 1.14e-12 on uniform data, 3.87e-07 across 16 orders of "
+                          "magnitude, and 92.0 (9.2e-15 relative) on [1e16, 1, -1e16] repeated. KEPT NEGATIVE: the "
+                          "exact scan is NOT more accurate than np.cumsum -- it is more REPRODUCIBLE. A sequential "
+                          "cumsum wins on precision (7.8e-16 vs 6.5e-15 relative); it just cannot run on eight blocks "
+                          "and give the same bits. If you are not blocking the scan, do not use it. "
+                          "mind.distribute_exact(buckets, worker) and Coordinator.run_exact(...) are the wired doors: "
+                          "the worker returns the bucket's CONTRIBUTIONS, not their sum, and that contract change IS "
+                          "the fix. Swapping reduce_sum_exact into distribute() does NOT repair it -- by then the "
+                          "worker has already float-summed inside its own bucket.",
+                          example="import numpy as np; d = np.random.default_rng(0).normal(size=(64,3)); "
+                                  "total, info = mind.distribute_exact(np.array_split(d, 7), lambda b, c: np.asarray(b, float)); "
+                                  "print(info['scale'], total)",
+                          native=True, aliases=("partition invariant", "bit exact sum", "reproducible sum",
+                                                # G3: the prefix sum, same monoid
+                                                "prefix sum of an array", "prefix sum", "scan", "scan an array",
+                                                "running total", "cumulative sum bit exact", "blocked scan",
+                                                "parallel scan", "cumsum reproducible",
+                                                "same answer no matter how many machines i use", "reduce_sum_exact",
+                                                "my sim gives different results on different nodes", "float associativity",
+                                                "deterministic reduction", "exact accumulation", "order independent sum",
+                                                "bit identical across nodes", "farm determinism", "rns"))
+    c.register_capability("Tunnelling & CCD (speculative margins, conservative advancement)", "stop fast bodies "
+                          "passing through thin walls. mind.time_of_impact(X, V, dt, sdf) sweeps each point along its "
+                          "path and returns (hit, toi, contact) -- continuous collision detection by conservative "
+                          "advancement; mind.advance_ccd(...) advances one step without tunnelling and cancels the "
+                          "into-surface velocity (restitution bounces); mind.sdf_offset(sdf, margin) is the speculative "
+                          "contact margin, which for an SDF-native engine costs ONE SUBTRACTION (no inflated AABBs). "
+                          "The core CCD query -- how far can I move without hitting anything -- IS the SDF value, so "
+                          "this is sphere tracing and it reuses the renderer's raymarch.sphere_trace: same march that "
+                          "renders a pixel, same distance query Walk-on-Spheres steps by, no dedicated CCD pass. "
+                          "MEASURED: a 30 m/s body stepping 0.5 m per frame passes clean through a 0.1 m wall under "
+                          "discrete resolution and is stopped exactly on it here. KEPT NEGATIVE: a margin DETECTS "
+                          "proximity but does not PREVENT tunnelling -- it resolves an already-crossed body out the "
+                          "WRONG side, because a point sample has no memory of the swept path. The sdf argument accepts "
+                          "a callable, an sdf node, or a DSL STRING like '(sphere 1.0)' -- the string form is what lets "
+                          "an agent call these over HTTP, since a callable cannot cross a JSON boundary. "
+                          "mind.resolve_swept_collision(X_prev, X, sdf) is the POSITIONAL twin for a PBD solver, and "
+                          "softbody.step(continuous=True) is the wired door: nodes the sweep does not catch come back "
+                          "bit-identical, so it is a strict addition.",
+                          example="hit, toi, contact = mind.time_of_impact([[-3,0,0]], [[120,0,0]], 1/60., '(sphere 1.0)')",
+                          native=True, aliases=("ccd", "continuous collision detection", "tunnelling", "tunneling",
+                                                "stop a fast bullet going through a thin wall",
+                                                "my object passes through the floor", "swept collision",
+                                                "time of impact", "toi", "when will my object hit the ground",
+                                                "conservative advancement", "speculative margin", "contact margin",
+                                                "grow a collider by a small amount", "offset an sdf",
+                                                "sphere tracing", "fast moving object collision", "bullet through paper",
+                                                "prevent objects passing through each other", "swept sphere"))
+    c.register_capability("Modal jump solver (skip the substeps)", "advance a LINEAR physics island in closed form "
+                          "instead of substepping it: within a contact mode a soft-constraint system is the affine "
+                          "recurrence s <- A s + b, so N substeps are ONE eigendecomposition and t=10s costs the same "
+                          "as t=1s. mind.affine_jump(state, A, b, k) is the stateless jump; mind.modal_solver(...) "
+                          "keeps a per-mode factorization and re-diagonalizes only at contact-mode SWITCHES; "
+                          "mind.should_jump(dim, k) is the measured gate (jump pays at k >= 20*dim); "
+                          "mind.escalation_plan(dim, k, energy=...) is THE ESCALATION LADDER (X11) that picks "
+                          "{sleep | jump | substep} per island per frame -- Catto's '4 substeps' dial and our closed "
+                          "form are two ends of one axis, and the descriptor chooses the rung. mind.soft_chain_bank + "
+                          "mind.advance_bank are the TUNING BANK (X8): M stiffness/damping variants advanced in ONE "
+                          "batched eigendecomposition (M=32 x 1,920 substeps: 4.3x over substepping the batch, exact "
+                          "to 1.9e-12). KEPT NEGATIVE: that is NOT a superposition -- a trajectory is linear in the "
+                          "FORCING (blend exactly, mind.blend_forcings, 1.1e-16) and nonlinear in the OPERATOR "
+                          "(blending stiffness gives 2.9e-01 of nonsense), so variants batch as arrays and there is "
+                          "no capacity budget to spend; the backlog's 'M <= D/256' came from the retracted sqrt(M/D) "
+                          "law. MEASURED: a "
+                          "12-body chain (hertz=15, zeta=0.7) matches 3,840 substeps to 2.5e-12 at 8x the speed. "
+                          "HONEST SCOPE: the win is where contact topology is STABLE (machinery, ragdolls at rest, "
+                          "suspensions); where contacts churn, substepping is still the right tool and the gate says "
+                          "so -- it degrades to stepping, never worse. Kept negative: a free-body island is a Jordan "
+                          "block with no eigenbasis; it is REFUSED and stepped, not silently jumped.",
+                          example="A, b, h = mind.soft_chain_matrices(12, hertz=15.0, zeta=0.7); "
+                                  "s = mind.affine_jump(np.zeros(24), A, b, 3840)",
+                          native=True, aliases=("modal jump", "closed form physics", "skip substeps",
+                                                "skip thousands of physics substeps", "substepping too slow",
+                                                "my machinery sim is too slow", "fast forward a simulation",
+                                                "fast forward a ragdoll to where it settles",
+                                                "advance a spring network without stepping", "linear recurrence",
+                                                "affine recurrence", "matrix power", "eigendecomposition",
+                                                "is it worth diagonalizing this system", "contact mode",
+                                                "mode switch", "jump ahead in time", "soft constraint chain",
+                                                "escalation ladder", "choose how many substeps to use",
+                                                "tuning bank", "variant bank", "evaluate many parameter variants in one pass",
+                                                "sweep friction and stiffness settings at once", "parameter sweep",
+                                                "blend forcings", "many variants at once",
+                                                "pick the right solver for this island", "how many substeps",
+                                                "damped oscillator system", "Catto soft step", "propagate ahead"))
+    c.register_capability("Islands + sleep (solve only what is still moving)", "partition a system into ISLANDS -- "
+                          "the connected components of its constraint graph -- and step only the AWAKE ones, so a "
+                          "pile of settled bodies costs nothing. mind.islands(n, edges) is the flood fill (a physics "
+                          "island, a mesh shell, a farm bucket and a DDM subdomain are the same object); "
+                          "mind.island_energy(pos, vel) is the sleep sensor; mind.island_sleep_tracker() adds "
+                          "HYSTERESIS (sleep after N quiet frames, wake instantly above an outer bar -- one threshold "
+                          "flickers on float noise, measured); mind.step_islands(...) carries a sleeping island's rows "
+                          "through BIT-IDENTICALLY. And SLEEP IS THE CLOSED FORM: mind.settle_island(state, U) jumps "
+                          "straight to the fixed point via iterate.limit() instead of stepping until it settles. "
+                          "Measured negative: that fixed point is NOT rest -- modes with |eigenvalue|~1 persist, so a "
+                          "diffusive island settles to its MEAN; only a strictly contractive operator settles to zero.",
+                          example="isl = mind.islands(6, [(0,1),(1,2),(4,5)]); tr = mind.island_sleep_tracker(); "
+                                  "state, awake, asleep = mind.step_islands(np.zeros((6,3)), isl, lambda s: s+1.0, tracker=tr); "
+                                  "print(awake, asleep)",
+                          native=True, aliases=("island", "islands", "sleep", "sleeping bodies", "put bodies to sleep",
+                                                "put resting bodies to sleep", "skip simulating objects that stopped moving",
+                                                "solve only the parts that are still moving", "connected components",
+                                                "constraint graph", "group bodies connected by constraints",
+                                                "island decomposition", "wake and sleep", "at rest", "settled",
+                                                "jump a settled system to its final state", "fixed point of a system",
+                                                "sleep threshold", "hysteresis", "awake islands", "skip idle work",
+                                                "steady state", "settle", "quiescent", "energy probe",
+                                                # C1/C2: the two wired clients
+                                                "softbody sleep", "skip sleeping cloth", "solve only moving nodes",
+                                                "coordinator waves", "lock free coordinator", "wave schedule"))
+    c.register_capability("Soft constraints (hertz + damping ratio)", "make any constraint SPRINGY instead of rigid, "
+                          "in physical units: mind.project_onto_constraints(x, projs, stiffness=(hertz, zeta), dt=h) "
+                          "specifies a constraint by its natural frequency (hertz) and damping ratio (zeta; 1.0 = "
+                          "critically damped, no overshoot) instead of a hand-tuned per-sweep omega. Catto's Soft Step "
+                          "parameterization: the same (hertz, zeta) means the same physics at ANY substep count, where "
+                          "the same omega does not -- so the substep count becomes an accuracy dial, not a physics dial. "
+                          "stiffness=(inf, zeta) is the hard projection exactly. Because PBD, FABRIK/IK, the resonator "
+                          "and the PnP denoise loop are all ONE iterated projection, they all gain softness from this one "
+                          "dial. mind.soft_relaxation(hertz, zeta, dt) exposes the factor itself. Kept negative: being "
+                          "position-level it cannot RING -- zeta is a rate dial, not an overshoot dial; underdamped "
+                          "bounce needs the velocity solver (dynamics). WIRED (C3): mind.solve_ik(..., stiffness=(hz, "
+                          "zeta), dt=...) makes an IK chain springy, and SoftBody.step(solver='pbd', stiffness=...) "
+                          "makes its constraints soft -- both gated on stiffness=(inf, zeta) being BIT-IDENTICAL to the "
+                          "rigid default. Measured: an IK end-effector lags its target by 0.3673 / 0.0336 / 0.0000 at "
+                          "2 / 8 / 40 Hz; a stretched PBD bone relaxes to 1.7498 at 2 Hz and 1.028 at 20 Hz against a "
+                          "rest length of 1.0. The XPBD path ignores it -- its per-constraint compliance already IS "
+                          "this idea.",
+                          example="x, n, ok = mind.project_onto_constraints(x0, [proj], iters=64, stiffness=(15.0, 1.0), dt=1/240)",
+                          native=True, aliases=("soft constraint", "soft constraints", "stiffness", "hertz",
+                                                "damping ratio", "zeta", "springy constraint", "make it springy",
+                                                "how stiff should my constraint be", "spring stiffness",
+                                                "soft body stiffness in hertz", "compliance", "XPBD compliance",
+                                                "under-relaxation", "omega", "soft step", "Catto soft constraint",
+                                                "substep invariant", "why does my solver change with more substeps",
+                                                "rigid vs springy", "joint softness", "cloth stiffness",
+                                                "damping for a joint", "constraint stiffness", "soft_relaxation"))
     c.register_capability("Import artist file formats (OBJ/glTF/textures/volume)", "import the files artists hand you: "
                           "mind.load_obj('model.obj') reads Wavefront geometry + its .mtl (UVs, normals, per-face "
                           "material, map_* textures); mind.load_glb('model.glb') reads glTF/GLB geometry AND its full PBR "
@@ -729,6 +1646,10 @@ def default_catalog():
                           example="from holographic.misc.holographic_determinism import hash_unit, hash_direction; u = hash_unit(x, y, bounce, seed)",
                           native=True, aliases=("stateless random", "hash noise", "coordinate keyed", "no seed coordination",
                                                 "reproducible random", "farm parallel sampling", "hash_unit",
+                                                # a GPU's per-thread RNG is exactly this: a pure function of the
+                                                # thread's coordinates, with no draw counter and no seed stream.
+                                                "random number per thread without a seed stream", "per thread rng",
+                                                "gpu random", "philox", "counter based rng", "thread id random",
                                                 "deterministic sampling", "per pixel random"))
     c.register_capability("Exact periodic PDE solve (spectral Laplace)", "on a PERIODIC grid the Laplacian is a "
                           "circular convolution, so it is DIAGONAL in the Fourier basis and the solve is closed "
@@ -740,7 +1661,9 @@ def default_catalog():
                           example="u = mind.solve_poisson_periodic(f, dx=1/64); T = mind.diffuse_periodic(T0, alpha=0.01, t=1e6, dx=1/64)",
                           native=True, aliases=("spectral laplace", "poisson fft", "closed form heat", "exact diffusion",
                                                 "periodic pde", "fourier solve", "no time step", "steady state exact",
-                                                "diagonalise the laplacian"))
+                                                "diagonalise the laplacian", "diffuse a field to a given time", "propagator as a transfer",
+                                                "diffusion operator", "compose once apply many",
+                                                "reuse a pde propagator", "exp(-alpha k^2 t)"))
     c.register_capability("Multi-way tensor compression (Tucker / TT)", "compress data with structure along SEVERAL "
                           "axes -- a field over (x,y,t), a frame stack, a BRDF table, a volume -- by factoring every "
                           "mode at once. mind.compress_tensor(X, method='tucker') uses HOSVD with a RANK GATE that "
@@ -805,7 +1728,7 @@ def default_catalog():
                           "(measured: RMS error under 0.06 at every frequency tried; half that bandwidth gives "
                           "0.09-0.30). Supplying too small a bandwidth warns.",
                           example="b = mind.bake_field(xs, ys); y = mind.fetch_field(b, 0.37)   # any x, one dot product",
-                          native=True, aliases=("bake a function", "texture unit", "store a curve", "lookup table",
+                          native=True, aliases=("bake a function", "texture unit", "lookup table", "LUT", "interpolate a lookup table at arbitrary points", "approximate a function I only have samples of", "function approximation", "cache an expensive function", "memoize a continuous function", "gpu texture", "store a curve", "lookup table",
                                                 "interpolate anywhere", "bandwidth", "nyquist", "sample a field",
                                                 "function encoding"))
     c.register_capability("Detrend before you bake (non-periodic functions)", "the bandwidth probe is an FFT, and an "
@@ -938,6 +1861,12 @@ def default_catalog():
                           "`for _ in range(k): x = step(x)`.",
                           example="from holographic.misc.holographic_iterate import step_k, limit; x_k = step_k(x, U, k); x_inf = limit(x, U)",
                           native=True, aliases=("iterate a linear operator many steps", "k steps at once", "operator power",
+                                                # B2 (NCA backlog): SSP grid addressing IS step_k. a(i,j) = Ax^i * Ay^j,
+                                                # built by `step_k(step_k(delta, Ax, i), Ay, j)` -- cosine 1.0000000000
+                                                # against the loop, 249x faster at a(1000,1000). Not a new module.
+                                                "address a grid cell with a vector", "grid address as a vector",
+                                                "transport a code to a neighbouring cell", "shift is a binding",
+                                                "spatial semantic pointer", "SSP", "convolutive power",
                                                 "steady state", "fixed point", "rollout k steps", "closed form iteration",
                                                 "repeat a filter n times", "propagator jump", "diffusion steady state"))
     c.register_capability("Exact order-independent sum (reduce_sum_exact / rns)", "float addition is not associative, "

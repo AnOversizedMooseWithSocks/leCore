@@ -46,6 +46,13 @@ def sphere_trace(sdf, O, D, max_steps=96, max_dist=20.0, surf_eps=1e-3, relax=1.
     O = np.asarray(O, float); D = np.asarray(D, float)
     M = len(D)
     t = np.zeros(M); hit = np.zeros(M, bool)
+    # accept a node object OR a bare callable -- the engine has both conventions; one adapter, not a shim per site
+    from holographic.mesh_and_geometry.holographic_sdf import as_eval as _as_eval
+    _ev = _as_eval(sdf)
+
+    class _E:                                                     # keep the body below reading `sdf.eval(...)`
+        eval = staticmethod(_ev)
+    sdf = _E()
     if relax <= 1.0:
         active = np.arange(M)                                     # indices of the rays still marching
         for _ in range(max_steps):

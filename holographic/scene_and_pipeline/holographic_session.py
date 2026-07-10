@@ -83,11 +83,57 @@ class RenderSession:
 
     # -- the SAME scene, three ways --------------------------------------------------------------------------------
 
-    def preview(self, width=None, height=None, **kw):
+    def _camera_pose(self):
+        """The camera as a plain vector, so a drifting viewport is a drifting QUERY (eye + target)."""
+        return np.concatenate([np.asarray(self.camera.eye, float), np.asarray(self.camera.target, float)])
+
+    def preview(self, width=None, height=None, reuse_margin=None, **kw):
         """FAST path: the material preview via render_surface (Lambert + spec + env reflection + one transparency
         layer), resolving every SurfaceMaterial channel per hit. Seconds, not minutes -- what a viewport shows while
-        you edit. Optional smaller width/height for an even quicker draft."""
-        return render_surface(self.sdf, self.camera, width or self.width, height or self.height, self.materials, **kw)
+        you edit. Optional smaller width/height for an even quicker draft.
+
+        FAT-MARGIN REUSE (backlog C4), opt-in. A viewport camera DRIFTS, so `reuse_margin` serves the last preview
+        whenever the camera pose is within that margin of the pose it was rendered at -- Catto's enlarged AABB, as a
+        frame cache. `cache_stats()` counts hits and rebuilds. `reuse_margin=None` (the default) and
+        `reuse_margin=0.0` both re-render every call, bit-identically to today.
+
+        WHAT IT COSTS, and this is why it is opt-in and why the sizing tool bounds the WORST error, not the mean: a
+        hit serves a STALE frame. Measured on a drifting camera (40 frames, drift 0.0316), against re-rendering:
+
+            margin   hit rate   rebuilds   max|err|   mean|err|
+              0.00       0.0%         40     0.0000      0.0000
+              0.02      15.0%         34     0.5864      0.0001
+              0.05      77.5%          9     0.5864      0.0007
+              0.50      97.5%          1     0.5864      0.0051
+
+        **The max error saturates at the FIRST reuse** -- one stale frame at a silhouette edge is already 0.59 --
+        while the mean creeps. Size the margin with `cachehome.suggest_margin_for_error(..., max_abs_error=...)` on
+        a captured camera path; sizing it on hit rate alone will ship a visibly wrong frame."""
+        if not reuse_margin:
+            return render_surface(self.sdf, self.camera, width or self.width, height or self.height,
+                                  self.materials, **kw)
+        from holographic.caching_and_storage.holographic_cachehome import MarginCache
+        key = (width or self.width, height or self.height, tuple(sorted(kw.items(), key=repr)))
+        cache = getattr(self, "_preview_cache", None)
+        if cache is None or self._preview_key != key or cache.margin != float(reuse_margin):
+            cache = MarginCache(
+                builder=lambda _pose: render_surface(self.sdf, self.camera, key[0], key[1], self.materials, **kw),
+                margin=float(reuse_margin))
+            self._preview_cache, self._preview_key = cache, key
+        img, _hit = cache.get(self._camera_pose())
+        return img
+
+    def cache_stats(self):
+        """{hits, rebuilds, hit_rate, margin} for the preview's fat-margin cache, or None if it is not in use.
+        The trade is COUNTED, not asserted."""
+        cache = getattr(self, "_preview_cache", None)
+        return None if cache is None else cache.stats()
+
+    def invalidate_preview(self):
+        """Drop the preview cache -- call after any scene edit. A margin cache keys on the CAMERA; it cannot see a
+        material change, so an edit must say so. Same shape as a sleeping island that cannot wake itself."""
+        self._preview_cache = None
+        return self
 
     def render_final(self, spp=64, on_progress=None, progress_every=8, width=None, height=None, max_bounce=4,
                      sky=None, seed=0, should_stop=None):

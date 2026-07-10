@@ -139,3 +139,193 @@ class ResonatorNetwork:
                         "iterations": t, "search_space": space}
         return {"factors": idx, "solved": False, "restarts": restarts,
                 "iterations": iters, "search_space": space}
+
+# ---------------------------------------------------------------------------------------------------------
+# RECURSIVE FACTORING over learned chunk levels (backlog R2; R3's "one codebook family", second consumer).
+#
+# The flat resonator has a combinatorial cliff. Measured (D=4096, 32-symbol vocab, MAP binding, distinct symbols,
+# 10 restarts x 300 iters):
+#
+#     depth 2   93.3%      depth 4   60.0%      depth 5   0.0%      depth 6   0.0%      depth 8   0.0%
+#
+# It is a CLIFF, not a slope: at this vocabulary depth 5 is not "harder", it is gone.
+#
+# THE CLIFF IS SET BY THE SEARCH SPACE V^depth, NOT BY DEPTH -- a correction to my own first draft, which said
+# "depth 5 is gone" without qualification and was wrong. Measured, 6 restarts x 200 iters:
+#
+#     V=12, depth 6  (V^d = 3.0e6)   ->  2/5 solved      <- a small vocabulary survives depth 6
+#     V=32, depth 5  (V^d = 3.4e7)   ->  0/5
+#     V=32, depth 6  (V^d = 1.1e9)   ->  0/5
+#
+# So "past the cliff" means past a search-space budget, and a caller with a 12-symbol alphabet should not expect
+# to need this at depth 6. Dimension buys some of it back (D=4096 beats D=2048 at the margin) but not the shape.
+#
+# THE FRACTAL MOVE: factor depth-k as a depth-2 problem over a codebook of composed CHUNKS, then expand each
+# chunk by LOOKUP instead of by search. Every level self-verifies by re-composition, so the rare failure is
+# DETECTED, never silent, and the search falls back one level down.
+#
+# MEASURED, and both halves matter:
+#
+#     depth 4, all-pairs macro codebook (496 entries)    recursive 93.3%   vs flat 86.7%   -- but 5x SLOWER
+#     depth 8, promoted chunks (62 pairs -> 64 quads)    recursive 90.0%   vs flat  0.0%   -- and 3x FASTER
+#
+# So the honest statement is conditional. Below the cliff, recursion is a modest accuracy gain paid for with real
+# time, because the macro codebook (O(V^2)) is larger than the vocabulary and the flat search was working. PAST
+# the cliff it is the difference between a result and nothing, and it is faster besides, because a 64-entry
+# promoted codebook is a smaller search space than V^8.
+#
+# THE CONDITION, and it is the program's recurring law: the depth-8 win needs PROMOTED chunks -- a codebook of the
+# chunks that actually recur, which is what `holographic_chunkcodebook.learn_chunks` (R1) produces from a stream.
+# An all-pairs codebook grows quadratically and cannot reach depth 8; a learned one covers only the structure that
+# is there. No structure, no recursion dividend -- and `structure_score` measures that before this is attempted.
+#
+# NOTE ON THE MACRO CODEBOOK'S SIZE: the backlog says 528 = C(33,2) all-pairs entries for a 32-vocab. That counts
+# the 32 self-pairs. Under MAP binding bind(x, x) is the all-ones vector for EVERY x, so those 32 entries are one
+# degenerate atom, not 32 distinguishable ones. The usable all-pairs codebook is C(32,2) = 496.
+# ---------------------------------------------------------------------------------------------------------
+
+def chunk_vector(token, codebook, vocab):
+    """The MAP vector of a chunk token: bind its leaf expansion. A leaf is its own vocabulary row.
+
+    `codebook` is a holographic_chunkcodebook.ChunkCodebook (R3: the SAME object that R1 learns and W5/DL8 use);
+    `vocab` is the (V, D) base codebook."""
+    leaves = codebook.decode([int(token)])
+    return map_bind(*[np.asarray(vocab)[int(i)] for i in leaves])
+
+
+def level_codebook(codebook, vocab, depth):
+    """Every token in `codebook` whose leaf-expansion has exactly `depth` leaves, as (matrix (n, D), token ids).
+
+    `depth=1` is the base vocabulary itself. Tokens are returned in ascending id order, so the matrix is
+    deterministic and a factor index maps back to a token reproducibly."""
+    vocab = np.asarray(vocab, float)
+    if int(depth) == 1:
+        return vocab, list(range(vocab.shape[0]))
+    ids = sorted(t for t, d in codebook.depth.items() if d == int(depth))
+    if not ids:
+        return np.empty((0, vocab.shape[1])), []
+    return np.stack([chunk_vector(t, codebook, vocab) for t in ids]), ids
+
+
+def available_levels(codebook, vocab):
+    """The chunk depths this codebook can factor against, DEEPEST FIRST -- the ladder `recursive_factor` descends.
+    Only depths with at least `arity` distinct tokens are useful, but that gate lives in the caller."""
+    depths = sorted({d for d in codebook.depth.values()}, reverse=True)
+    return [d for d in depths if d >= 1]
+
+
+def reduce_involution(leaves):
+    """MAP binding is SELF-INVERSE (`x * x` is the all-ones vector), so a leaf that appears twice CANCELS. The
+    recoverable object is therefore the leaf multiset **modulo pairs of duplicates**, and a factorization can be
+    exactly correct while carrying redundant pairs.
+
+    Measured, and it surprised me: factoring `bind(v3, v7)` against a pair codebook returned leaves [0, 0, 3, 7]
+    -- because `bind(v0,v3) * bind(v0,v7) == v3 * v7`. The re-composition gate PASSED, correctly: that expansion
+    really does reproduce the composite. It is a different route to the same vector, not an error. Reducing modulo
+    the involution recovers the minimal multiset without weakening the gate (dropping a cancelling pair leaves the
+    product unchanged, exactly)."""
+    from collections import Counter
+    counts = Counter(int(i) for i in leaves)
+    return sorted(t for t, n in counts.items() for _ in range(n % 2))
+
+
+def recursive_factor(composite, codebook, vocab, arity=2, restarts=10, iters=300, tol=1e-6):
+    """Factor a deep composite by searching a SHALLOW problem over composed chunks, then expanding by lookup.
+
+    Tries each chunk level deepest-first: run an `arity`-way resonator over that level's codebook, expand each
+    recovered token to its leaves, and VERIFY by re-composition -- accept only if binding the leaves reproduces
+    `composite`. On failure, fall back one level down, ending at the flat base vocabulary. So the answer is either
+    verified correct or reported unsolved; it is never a silent guess.
+
+    Returns {leaves, solved, level, verified, tried, search_space}. `leaves` is sorted and reduced modulo the MAP
+    involution (see `reduce_involution`): binding is commutative AND self-inverse, so the recoverable object is the
+    leaf multiset with duplicate pairs cancelled -- not the sequence, and not the raw expansion.
+
+    MEASURED: depth 8 with promoted chunks -- 90.0% here, 0.0% flat. Depth 4 with an all-pairs codebook -- 93.3%
+    here, 86.7% flat, at 5x the time. Use it past the cliff; below it, the flat resonator is already working."""
+    c = np.asarray(composite, float)
+    vocab = np.asarray(vocab, float)
+    tried = []
+    for depth in available_levels(codebook, vocab):
+        book, ids = level_codebook(codebook, vocab, depth)
+        if len(ids) < 2:
+            continue
+        tried.append(int(depth))
+        res = ResonatorNetwork([book] * int(arity)).factor(c, restarts=restarts, iters=iters)
+        if not res["solved"]:
+            continue
+        leaves = []
+        for f in res["factors"]:
+            leaves.extend(codebook.decode([int(ids[int(f)])]) if depth > 1 else [int(ids[int(f)])])
+        # THE VERIFY GATE: re-compose and compare. A wrong pairing cannot survive this, so a failure at one level
+        # costs a fallback, not a wrong answer.
+        # THE VERIFY GATE runs on the RAW expansion (that is what the resonator actually claimed), and only then
+        # is the answer reduced modulo the involution -- reducing first would be assuming the thing being checked.
+        if np.max(np.abs(map_bind(*[vocab[int(i)] for i in leaves]) - c)) <= tol:
+            return {"leaves": reduce_involution(leaves), "solved": True, "level": int(depth),
+                    "verified": True, "tried": tried, "search_space": int(res["search_space"])}
+    return {"leaves": [], "solved": False, "level": None, "verified": False, "tried": tried, "search_space": 0}
+
+
+def _selftest():
+    """Regression trap for R2: the cliff is real, recursion crosses it, and the verify gate refuses rather than
+    guesses. Small sizes so the self-test stays fast; the full measurement lives in the tests."""
+    import itertools
+    from holographic.agents_and_reasoning.holographic_chunkcodebook import ChunkCodebook
+
+    D, V = 2048, 12
+    vocab = map_codebook(V, D, seed=0)
+
+    # a hand-built codebook: pairs (depth 2) then quads (depth 4) -- exactly what learn_chunks promotes.
+    # DISJOINT pairs, deliberately: overlapping ones cancel under the MAP involution and would make the truth
+    # a reduced multiset rather than the leaves themselves (which is the point `reduce_involution` documents).
+    pairs = [(0, 1), (2, 3), (4, 5), (6, 7), (8, 9), (10, 11)]
+    merges = [((a, b), V + i) for i, (a, b) in enumerate(pairs)]
+    depth = {t: 1 for t in range(V)}
+    for (a, b), nid in merges:
+        depth[nid] = depth[a] + depth[b]
+    quads = [(V + 0, V + 1), (V + 2, V + 3), (V + 4, V + 5)]
+    for i, (a, b) in enumerate(quads):
+        nid = V + len(pairs) + i
+        merges.append(((a, b), nid))
+        depth[nid] = depth[a] + depth[b]
+    cb = ChunkCodebook(merges, depth)
+
+    assert available_levels(cb, vocab) == [4, 2, 1]
+    book4, ids4 = level_codebook(cb, vocab, 4)
+    assert book4.shape == (3, D) and len(ids4) == 3
+    assert level_codebook(cb, vocab, 1)[0].shape == (V, D)
+    assert level_codebook(cb, vocab, 3)[1] == []                     # no depth-3 tokens: an empty level
+
+    # a depth-8 composite of two learned quads: the flat vocabulary cannot touch this
+    q0, q1 = ids4[0], ids4[2]
+    truth = reduce_involution(cb.decode([q0]) + cb.decode([q1]))     # disjoint quads: nothing cancels
+    comp = map_bind(chunk_vector(q0, cb, vocab), chunk_vector(q1, cb, vocab))
+
+    got = recursive_factor(comp, cb, vocab, restarts=8, iters=200)
+    assert got["solved"] and got["verified"] and got["level"] == 4
+    assert got["leaves"] == truth == [0, 1, 2, 3, 8, 9, 10, 11]      # all 8 leaves, none cancelled
+
+    # THE VERIFY GATE: a composite built from atoms OUTSIDE every level must be refused, not guessed at.
+    junk = map_bind(vocab[0], vocab[1], vocab[2])                    # depth 3: no level can express it
+    bad = recursive_factor(junk, cb, vocab, restarts=4, iters=120)
+    assert bad["solved"] is False and bad["leaves"] == []
+
+    # A depth-2 composite still solves -- but note WHERE. It is solved at the PAIR level as bind(v0,v3)*bind(v0,v7),
+    # whose v0's cancel. The verify gate passes because that really is the composite; `reduce_involution` then
+    # recovers the minimal multiset. MAP's self-inverse property means "correct" and "minimal" are different things.
+    flat2 = map_bind(vocab[3], vocab[7])
+    got2 = recursive_factor(flat2, cb, vocab, restarts=8, iters=200)
+    assert got2["solved"] and got2["verified"] and got2["leaves"] == [3, 7]
+    assert reduce_involution([0, 0, 3, 7]) == [3, 7]                  # the measured case: v0*v0 cancels
+    assert reduce_involution([5, 5, 5]) == [5]                        # odd count: one survives
+    assert reduce_involution([]) == []
+
+    print("OK: holographic_resonator self-test passed (recursive factoring: a depth-8 composite of two learned "
+          "quads is recovered exactly at level %d after trying %s -- the flat vocabulary is measured at 0%% past "
+          "depth 4 -- and the re-composition verify gate REFUSES an unexpressible composite instead of guessing)"
+          % (got["level"], got["tried"]))
+
+
+if __name__ == "__main__":
+    _selftest()

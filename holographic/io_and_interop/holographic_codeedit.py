@@ -122,11 +122,20 @@ class Editor:
                     out.append(self._rel(os.path.join(base, name)))
         return sorted(out)
 
-    def grep(self, pattern, relpath=".", suffix=".py", max_hits=200):
-        """Plain-substring search across files under `relpath` (filtered by `suffix`). Returns a list of
-        {file, line, text} for each match -- the 'find where X is used' an agent reaches for constantly."""
+    def grep(self, pattern, relpath=".", suffix=".py", max_hits=200, regex=False):
+        """Search across files under `relpath` (filtered by `suffix`). Returns a list of {file, line, text} for each
+        match -- the 'find where X is used' an agent reaches for constantly.
+
+        `regex=False` (the default) is a plain SUBSTRING match, so a pattern full of `(`, `*` and `.` means exactly
+        what it looks like. `regex=True` compiles the pattern with `re` -- additive, default-off, and the reason it
+        exists is that the substring-only signature cost a wasted call while dogfooding (NCA backlog B7). An invalid
+        pattern raises `re.error` rather than silently matching nothing."""
         base = self._resolve(relpath)
         hits = []
+        matches = None
+        if regex:
+            import re as _re
+            matches = _re.compile(pattern).search        # compiled ONCE, and an invalid pattern raises here
         walk_root = base if os.path.isdir(base) else os.path.dirname(base)
         for dp, dns, fns in os.walk(walk_root):
             dns[:] = [d for d in dns if d != "__pycache__" and not d.startswith(".")]
@@ -137,7 +146,7 @@ class Editor:
                 try:
                     with open(full, "r", encoding="utf-8", errors="replace") as f:
                         for i, line in enumerate(f, 1):
-                            if pattern in line:
+                            if (matches(line) if matches else (pattern in line)):
                                 hits.append({"file": self._rel(full), "line": i, "text": line.rstrip("\n")[:300]})
                                 if len(hits) >= max_hits:
                                     return hits

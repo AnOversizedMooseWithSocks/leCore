@@ -244,3 +244,169 @@ def iterate_gated(op, state, k, min_k=8, probes=3, seed=0):
                                                "reason": "linear bind operator", "k": int(k), "dim": dim}
     return _step_loop(op, state), {"gate": "closed_form_iterate", "score": score, "used": "fallback",
                                    "reason": "nonlinear/non-convolution operator", "k": int(k)}
+
+# ---------------------------------------------------------------------------------------------------------
+# DENSE AFFINE RECURRENCES -- the same faculty (diagonalise once, evaluate any power) for a GENERAL operator.
+#
+# Everything above exploits the fact that a `bind` is a CIRCULAR CONVOLUTION, hence diagonal in the Fourier
+# basis: the eigendecomposition is free (an rfft) and there is no O(n^3) work. That covers learned dynamics
+# operators, filters, and subdivision. It does NOT cover a physics island: the implicit-Euler step of a
+# soft-constraint system is `s <- A s + b` with A a general dense matrix and b an affine forcing term (gravity).
+# Same faculty, different operator class -- so it lives here rather than in a sibling module.
+# ---------------------------------------------------------------------------------------------------------
+
+def affine_transfer(A, check=True):
+    """Eigendecompose a dense operator `A` once: returns (eigenvalues, V, V_inv). This is the O(n^3) cost that
+    every subsequent jump amortizes against.
+
+    `check=True` verifies the reconstruction A ~ V diag(lam) V^-1 and raises if it is poor. That guard is not
+    decoration: a DEFECTIVE (non-diagonalizable) matrix has no eigenbasis, `numpy.linalg.eig` returns a
+    near-singular V anyway, and every jump computed through it is silently wrong. Physics islands are rarely
+    defective, but 'rarely' is not 'never', and a wrong trajectory that raises no error is the worst outcome
+    this engine can produce."""
+    A = np.asarray(A, float)
+    lam, V = np.linalg.eig(A)
+    Vi = np.linalg.inv(V)
+    if check:
+        resid = np.abs((V * lam) @ Vi - A).max()
+        scale = max(np.abs(A).max(), 1.0)
+        if resid > 1e-6 * scale:
+            raise ValueError("operator is not safely diagonalizable (reconstruction residual %.2e); "
+                             "it is defective or badly conditioned -- step it instead of jumping it" % resid)
+    return lam, V, Vi
+
+
+def affine_step_k(s0, A, b, k, transfer=None, unit_tol=1e-9):
+    """Jump k steps of the affine recurrence `s <- A s + b` in ONE evaluation:
+
+        s_k = A^k s_0 + (sum_{j=0}^{k-1} A^j) b
+
+    Diagonalise A once and both terms become elementwise functions of the eigenvalues -- so k costs the same as
+    k=1, and any horizon costs the same as any other. Pass a cached `transfer` (from `affine_transfer`) to reuse
+    a factorization across many jumps; that is what makes a modal solver cheap.
+
+    THE UNIT-MODE SPLIT, and why the obvious formula is wrong. The textbook accumulator is
+    (I - A)^-1 (I - A^k), which requires I - A to be invertible. It is NOT: any island with a marginal mode
+    (eigenvalue exactly 1 -- a free-floating body whose momentum is conserved, a rigid translation) makes I - A
+    exactly singular and `numpy.linalg.solve` raises. Measured on a 3-body unanchored island: all six eigenvalues
+    at 1.0. In the eigenbasis the accumulator is a scalar geometric series per mode, so the fix is per-mode and
+    exact: sum_{j<k} lam^j = (1 - lam^k)/(1 - lam) for lam != 1, and = k for lam == 1 -- a RAMP, not a geometric
+    sum. A marginal mode under constant forcing accumulates linearly forever, which is exactly what free fall is.
+
+    THE LIMIT OF THAT FIX, measured and kept. The ramp branch rescues modes that are marginal AND diagonalizable
+    (verified exact: A = I under constant forcing, 250 steps, max|diff| 0.0; a mixed unit+contractive pair at 400
+    steps, 5.7e-14). It does NOT rescue a genuinely DEFECTIVE island. The canonical free-body block
+    A = [[I, h*I], [0, I]] carries eigenvalue 1 with algebraic multiplicity 4 and geometric multiplicity 2 -- a
+    Jordan block, so no eigenbasis exists. `numpy.linalg.eig` returns a full-rank-LOOKING V anyway (rank 4 of 4);
+    only `affine_transfer`'s reconstruction residual catches it (measured 1.0e-02, and it raises). Such an island
+    must be STEPPED, not jumped. That is not a gap to paper over with another special case: in this basis the
+    closed form genuinely does not exist, and saying so is the answer.
+
+    Returns a real array when A and b are real (the imaginary parts of conjugate eigenpairs cancel; anything
+    left is round-off and is dropped). Deterministic: no RNG."""
+    s0 = np.asarray(s0, float)
+    b = np.asarray(b, float)
+    k = int(k)
+    if k < 0:
+        raise ValueError("k must be >= 0, got %r" % (k,))
+    if k == 0:
+        return s0.copy()
+    lam, V, Vi = affine_transfer(A) if transfer is None else transfer
+
+    lam_k = lam ** k
+    # per-mode geometric sum, with the lam==1 modes taking the RAMP branch instead of dividing by zero
+    near_one = np.abs(lam - 1.0) <= unit_tol
+    denom = np.where(near_one, 1.0, 1.0 - lam)                 # dummy 1.0 keeps the division finite
+    geo = np.where(near_one, float(k), (1.0 - lam_k) / denom)
+
+    out = V @ (lam_k * (Vi @ s0)) + V @ (geo * (Vi @ b))
+    return np.real_if_close(out, tol=1e6).astype(float) if not np.iscomplexobj(s0) else out
+
+
+def affine_limit(A, b, transfer=None, unit_tol=1e-9):
+    """The k -> infinity fixed point of `s <- A s + b`: s_inf = (I - A)^-1 b, computed per-mode so it can REFUSE
+    honestly. Raises if any |eigenvalue| >= 1: a marginal or divergent mode has no finite limit (a free body under
+    gravity never settles), and returning a number there would be a fabrication. This is the dense twin of
+    `limit()` above, and it is what "this island has gone to sleep" means when you can compute it."""
+    lam, V, Vi = affine_transfer(A) if transfer is None else transfer
+    mag = np.abs(lam)
+    if mag.max() >= 1.0 - 0.0 and np.any(mag >= 1.0 - unit_tol):
+        raise ValueError("operator has a marginal or divergent mode (max|eigenvalue| = %.6f): no finite limit"
+                         % mag.max())
+    b = np.asarray(b, float)
+    out = V @ ((1.0 / (1.0 - lam)) * (Vi @ b))
+    return np.real_if_close(out, tol=1e6).astype(float)
+
+# ---------------------------------------------------------------------------------------------------------
+# BATCHED affine recurrences -- M variants of one system, advanced together (backlog X8, Box3D lesson B7).
+#
+# The backlog proposed a SUPERPOSED tuning bank: bundle M (friction, stiffness) variants of one island into a
+# single hypervector under distinct keys, run one pass, unbind to read any variant, "budget M <= D/256". All of
+# that is wrong, and it is wrong in two independent ways, both already measured elsewhere in this engine:
+#
+#   (1) the capacity law is retracted. `holographic_shader`'s H7 note records it: unbinding one of M keyed items
+#       returns the item plus M-1 random vectors, so fidelity follows 1/sqrt(M) -- 0.354 at M=8, 0.177 at M=32 --
+#       and sqrt(M/D) is a DIFFERENT quantity (the cosine with a wrong item). There is no D/256 budget to spend.
+#
+#   (2) worse, the object does not superpose at all. A trajectory is s_k = A^k s0 + G(A,k) b, which is LINEAR in
+#       the forcing b and emphatically NONLINEAR in the operator A. Measured on a 8-body chain over 600 substeps:
+#           variants in the FORCING b  : blend-then-solve == solve-then-blend to 1.11e-16   (exact superposition)
+#           variants in the OPERATOR A : blend-then-solve vs solve-then-blend, max diff 2.94e-01  (nonsense)
+#       Stiffness and friction live in A. They cannot be summed into one vector at any dimension.
+#
+# What DOES serve a designer's tuning dial is the other half of B7 -- "data-oriented SoA, batch the constraint
+# rows as arrays" -- and numpy gives it for free: `numpy.linalg.eig` is vectorised over a STACK of matrices, so M
+# variants share ONE batched eigendecomposition and then jump any horizon together. Measured, M=32 variants x
+# 1,920 substeps: 13.20 ms substepped vs 3.10 ms batched-closed-form (4.3x), max diff 1.86e-12, and the horizon is
+# free as always. Exact, no crosstalk, and no capacity budget -- because nothing was superposed.
+# ---------------------------------------------------------------------------------------------------------
+
+def affine_transfer_batch(A, check=True):
+    """Eigendecompose a STACK of operators `A`:(M,d,d) in one call: returns (lam:(M,d), V:(M,d,d), Vi:(M,d,d)).
+
+    `check=True` verifies each reconstruction and raises naming the offending variant -- the same guard as
+    `affine_transfer`, and for the same reason: a defective member of the bank would otherwise poison exactly one
+    row of the answer, silently."""
+    A = np.asarray(A, float)
+    if A.ndim != 3 or A.shape[1] != A.shape[2]:
+        raise ValueError("A must be a stack of square matrices (M, d, d), got %r" % (A.shape,))
+    lam, V = np.linalg.eig(A)
+    Vi = np.linalg.inv(V)
+    if check:
+        recon = np.einsum("mij,mj->mij", V, lam) @ Vi
+        resid = np.abs(recon - A).max(axis=(1, 2))
+        scale = np.maximum(np.abs(A).max(axis=(1, 2)), 1.0)
+        bad = np.flatnonzero(resid > 1e-6 * scale)
+        if bad.size:
+            raise ValueError("variant(s) %s are not safely diagonalizable (max residual %.2e); step them instead"
+                             % (bad.tolist(), float(resid[bad].max())))
+    return lam, V, Vi
+
+
+def affine_step_k_batch(S0, A, b, k, transfer=None, unit_tol=1e-9):
+    """Jump k steps of M independent affine recurrences `s <- A_m s + b_m` at once.
+
+    `S0`:(M,d) initial states, `A`:(M,d,d), `b`:(M,d). Returns (M,d). One batched eigendecomposition serves every
+    variant and every horizon -- the tuning-bank primitive. Same unit-mode RAMP branch as `affine_step_k` (a
+    marginal mode accumulates k*b, not a geometric sum), applied per variant.
+
+    Use it to sweep stiffness/friction/damping settings for a designer dial: M variants, one pass, EXACT (measured
+    1.86e-12 against substepping all of them). Do NOT reach for superposition here -- see the module note above:
+    trajectories are nonlinear in the operator, so stiffness variants do not sum."""
+    S0 = np.asarray(S0, float)
+    b = np.asarray(b, float)
+    k = int(k)
+    if k < 0:
+        raise ValueError("k must be >= 0, got %r" % (k,))
+    if k == 0:
+        return S0.copy()
+    lam, V, Vi = affine_transfer_batch(A) if transfer is None else transfer
+
+    lam_k = lam ** k
+    near_one = np.abs(lam - 1.0) <= unit_tol
+    geo = np.where(near_one, float(k), (1.0 - lam_k) / np.where(near_one, 1.0, 1.0 - lam))
+
+    x0 = np.einsum("mij,mj->mi", Vi, S0.astype(complex))
+    xb = np.einsum("mij,mj->mi", Vi, b.astype(complex))
+    out = np.einsum("mij,mj->mi", V, lam_k * x0) + np.einsum("mij,mj->mi", V, geo * xb)
+    return np.real(out)

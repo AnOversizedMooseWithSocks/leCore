@@ -106,27 +106,18 @@ def route_csg(operation, mesh_a, mesh_b, res=28, bounds=None):
 
 def connected_components(mesh):
     """The number of connected components of a mesh (flood fill over edge adjacency). A boolean union of two
-    overlapping solids has 1; of two separate solids, 2."""
-    adj = {v: set() for v in range(mesh.n_vertices)}
+    overlapping solids has 1; of two separate solids, 2.
+
+    DELEGATES to holographic_island.connected_components: a mesh's edge adjacency and a physics constraint graph
+    are the same object, so there is one flood fill for both (and it returns the components themselves, not just
+    the count, which is what island decomposition needs). This function keeps its count-only contract."""
+    from holographic.simulation_and_physics.holographic_island import connected_components as _cc
+    edges = []
     for f in mesh.faces:
         n = len(f)
         for k in range(n):
-            adj[f[k]].add(f[(k + 1) % n])
-            adj[f[(k + 1) % n]].add(f[k])
-    seen = set()
-    count = 0
-    for start in range(mesh.n_vertices):
-        if start in seen:
-            continue
-        count += 1
-        stack = [start]
-        while stack:
-            u = stack.pop()
-            if u in seen:
-                continue
-            seen.add(u)
-            stack.extend(adj[u] - seen)
-    return count
+            edges.append((f[k], f[(k + 1) % n]))
+    return len(_cc(mesh.n_vertices, edges))
 
 
 def mesh_volume(mesh):

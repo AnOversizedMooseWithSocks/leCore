@@ -1,5 +1,6 @@
 """Denoising as manifold projection + Plug-and-Play restoration (B7)."""
 import numpy as np
+import pytest
 from holographic.rendering.holographic_denoise import fit_manifold, manifold_denoise, pnp_restore, codebook_denoise, nlm_denoise
 
 
@@ -138,3 +139,138 @@ def test_denoise_gate_routes_but_is_opt_in():
     r_hi, i_hi = denoise_gated(hi, basis, mean)
     assert i_lo["used"] == "fallback" and np.array_equal(r_lo, np.asarray(lo, float))   # safe no-op
     assert i_hi["used"] == "superior" and np.array_equal(r_hi, manifold_denoise(hi, basis, mean))
+
+# ============================================================================================
+# X2 -- SOFT CONSTRAINTS (Catto's Soft Step) folded into the projection family.
+# The claim under test: a constraint stated as (hertz, zeta) means the SAME PHYSICS at any
+# substep count, where a hand-tuned per-sweep `omega` does not. Baseline = fixed omega.
+# ============================================================================================
+
+def _pull_to(target):
+    """A single hard constraint: snap x onto `target`. The simplest projection there is."""
+    t = np.asarray(target, float)
+    return lambda x: t.copy()
+
+
+def test_hard_limit_is_bit_identical_to_the_old_omega_path():
+    # BACKWARD COMPATIBILITY, pinned numerically. stiffness=(inf, zeta) must reproduce the pre-existing
+    # omega=1.0 path EXACTLY -- not 'to 1e-12'. Twelve callers depend on that default not moving.
+    from holographic.rendering.holographic_denoise import project_onto_constraints, soft_relaxation
+    assert soft_relaxation(np.inf, 1.0, 1 / 60.0) == 1.0
+    x0 = np.array([0.0, 3.0, -2.0])
+    projs = [_pull_to([1.0, 1.0, 1.0]), lambda x: x * 0.5]
+    a, na, _ = project_onto_constraints(x0, projs, iters=7, tol=None)                       # old path
+    b, nb, _ = project_onto_constraints(x0, projs, iters=7, tol=None,
+                                        stiffness=(np.inf, 1.0), dt=1 / 60.0)               # new path
+    assert np.array_equal(a, b) and na == nb        # bit-identical, not merely close
+
+
+def test_stiffness_is_substep_invariant_where_omega_is_not():
+    # THE BAR. Fixed horizon T, rising substep count N. (hertz, zeta) converges to the continuous
+    # 1 - exp(-lambda*T) at FIRST order; a fixed omega converges to the wrong number entirely.
+    from holographic.rendering.holographic_denoise import project_onto_constraints
+    hz, ze, T = 1.0, 2.0, 0.2
+    lam = 2.0 * np.pi * hz / (2.0 * ze)
+    exact = 1.0 - np.exp(-lam * T)
+    x0, proj = np.array([0.0]), _pull_to([1.0])
+
+    errs = []
+    for N in (16, 32, 64, 128):
+        x, _, _ = project_onto_constraints(x0, [proj], iters=N, stiffness=(hz, ze), dt=T / N, tol=None)
+        errs.append(abs(float(x[0]) - exact))
+    assert errs[0] < 3e-3                       # already close at N=16
+    for a, b in zip(errs, errs[1:]):
+        assert 1.8 < a / b < 2.2                # error halves as N doubles => first order
+
+    # the HONEST BASELINE, in the original space: the same omega at different N is different physics
+    xs = [float(project_onto_constraints(x0, [proj], iters=N, omega=0.30, tol=None)[0][0])
+          for N in (8, 64)]
+    assert abs(xs[0] - xs[1]) > 0.05            # omega drifts with N ...
+    assert abs(xs[1] - exact) > 0.5             # ... and lands nowhere near the physical answer
+
+
+def test_kept_negative_the_mass_scale_form_vanishes_with_substeps():
+    # Pinned so a future session does not "restore" Catto's velocity coefficients into a position solver.
+    # alpha = dt*bias_rate*mass_scale is O(dt^2), so the TOTAL relaxation over a fixed horizon -> 0.
+    def wrong(hz, ze, dt):
+        w = 2.0 * np.pi * hz
+        a1 = 2.0 * ze + dt * w
+        a2 = dt * w * a1
+        return (dt * w / a1) * (a2 / (1.0 + a2))
+    assert wrong(5.0, 1.0, 1 / 256.0) * 256 < wrong(5.0, 1.0, 1 / 8.0) * 8
+
+    # ... and the shipped coefficient does NOT vanish: N*alpha stays O(1) as N rises
+    from holographic.rendering.holographic_denoise import soft_relaxation
+    assert soft_relaxation(5.0, 1.0, 1 / 256.0) * 256 > 0.5 * soft_relaxation(5.0, 1.0, 1 / 8.0) * 8
+
+
+def test_degenerate_dials_and_refusal_to_guess():
+    from holographic.rendering.holographic_denoise import project_onto_constraints, soft_relaxation
+    assert soft_relaxation(0.0, 1.0, 0.01) == 0.0      # zero stiffness: inert constraint
+    assert soft_relaxation(5.0, 0.0, 0.01) == 1.0      # zeta=0 degenerates to HARD, never to ringing
+    x0, proj = np.array([0.0]), _pull_to([1.0])
+    with pytest.raises(ValueError):                    # two names for one dial -- refuse to pick
+        project_onto_constraints(x0, [proj], omega=0.5, stiffness=(5.0, 1.0), dt=0.01)
+    with pytest.raises(ValueError):                    # stiffness needs dt to become a factor
+        project_onto_constraints(x0, [proj], stiffness=(5.0, 1.0))
+    with pytest.raises(ValueError):                    # dt alone is meaningless
+        project_onto_constraints(x0, [proj], dt=0.01)
+
+
+def test_softness_is_monotone_in_hertz():
+    # The dial must actually be a dial: stiffer => closer to the constraint after a fixed horizon.
+    from holographic.rendering.holographic_denoise import project_onto_constraints
+    x0, proj = np.array([0.0]), _pull_to([1.0])
+    got = [float(project_onto_constraints(x0, [proj], iters=32, stiffness=(hz, 1.0), dt=1 / 240.0)[0][0])
+           for hz in (0.5, 2.0, 8.0, 32.0)]
+    assert all(a < b for a, b in zip(got, got[1:])), got
+    assert got[0] < 0.2 and got[-1] > 0.9
+
+
+def test_cross_faculty_one_dial_serves_geometry_and_hypervectors():
+    # INTEGRATION, and the point of X2: the projection engine is shared, so ONE stiffness dial reaches two
+    # faculties that never import each other -- a PBD-style geometric distance constraint, and a cleanup
+    # projection on a hypervector. The hard-lesson on record is that a shared kernel is not a shared
+    # manifold, so this asserts behaviour in BOTH spaces, not just that the call returns.
+    import lecore
+    m = lecore.UnifiedMind(dim=512, seed=0)
+
+    # (a) GEOMETRY: hold two particles at rest length 1.0 -- the PBD distance constraint.
+    def distance_constraint(p):
+        p = p.reshape(2, 2).copy()
+        d = p[1] - p[0]
+        n = np.linalg.norm(d)
+        if n > 1e-12:
+            corr = 0.5 * (n - 1.0) * (d / n)
+            p[0] += corr
+            p[1] -= corr
+        return p.reshape(-1)
+
+    start = np.array([0.0, 0.0, 3.0, 0.0])                     # stretched to length 3
+    soft, _, _ = m.project_onto_constraints(start, [distance_constraint], iters=20,
+                                            stiffness=(2.0, 1.0), dt=1 / 240.0)
+    hard, _, _ = m.project_onto_constraints(start, [distance_constraint], iters=20,
+                                            stiffness=(np.inf, 1.0), dt=1 / 240.0)
+    len_soft = np.linalg.norm(soft[2:] - soft[:2])
+    len_hard = np.linalg.norm(hard[2:] - hard[:2])
+    assert abs(len_hard - 1.0) < 1e-9                          # rigid: rest length met
+    assert len_soft > len_hard + 0.5                           # soft: still stretched, as a spring should be
+
+    # (b) HYPERVECTORS: the same dial on a cleanup projection toward a stored atom.
+    atom = np.asarray(m.hypervector("anchor").array, float)
+    noisy = atom + 0.9 * np.asarray(m.hypervector("some other symbol").array, float)
+    to_atom = lambda v: atom.copy()
+    v_soft, _, _ = m.project_onto_constraints(noisy, [to_atom], iters=20, stiffness=(2.0, 1.0), dt=1 / 240.0)
+    v_hard, _, _ = m.project_onto_constraints(noisy, [to_atom], iters=20, stiffness=(np.inf, 1.0), dt=1 / 240.0)
+    cos = lambda a, b: float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b)))
+    assert cos(v_hard, atom) > 0.999999                        # rigid: snapped onto the atom
+    assert cos(noisy, atom) < cos(v_soft, atom) < cos(v_hard, atom)   # soft: moved toward it, not onto it
+
+
+def test_soft_relaxation_is_wired_to_the_mind():
+    import lecore
+    m = lecore.UnifiedMind(dim=256, seed=0)
+    assert m.soft_relaxation(np.inf, 1.0, 1 / 60.0) == 1.0
+    w = 2.0 * np.pi * 5.0
+    assert abs(m.soft_relaxation(5.0, 1.0, 0.01) - 0.01 * w / (2.0 + 0.01 * w)) < 1e-15
+    assert "Soft constraints" in str(m.find_capability("how stiff should my constraint be")[:3])
