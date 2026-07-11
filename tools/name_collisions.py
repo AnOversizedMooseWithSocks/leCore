@@ -38,7 +38,13 @@ import sys
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
 # Names that are structural, not capability collisions -- every module may define these and they are not a hazard.
-_IGNORE = {"main", "demo", "run"}
+# SHARED with holographic_capuri._STRUCTURAL_NAMES (imported, not re-listed) so the two collision audits -- this AST
+# scan and the capuri URI view -- can never disagree on what counts as a collision. If the import fails (capuri not
+# importable in a bare-tools context), fall back to the literal set, which must match capuri's.
+try:
+    from holographic.caching_and_storage.holographic_capuri import _STRUCTURAL_NAMES as _IGNORE
+except Exception:
+    _IGNORE = frozenset({"main", "demo", "run"})
 
 # Collisions a human has read and accepted. Format: frozenset of module stems keyed by the shared function name.
 # TO CHANGE THIS: read every body in the pair, then either UNIFY (delegate, per [DELEGATE, DON'T DUPLICATE]) and
@@ -140,10 +146,47 @@ def classify(name, mods):
     return verdicts
 
 
+def addressability_report():
+    """S1.3: verify every current name collision is ADDRESSABLE -- i.e. its bare name resolves, through the capuri
+    URI index, to distinct full paths (one per home). A collision is safe not because it is forbidden but because a
+    caller can supply the path to disambiguate it; this checks that promise holds for every collision. Returns
+    (ok, problems) where problems is a list of (name, reason) for any collision that does NOT resolve cleanly."""
+    from holographic.caching_and_storage.holographic_capuri import resolve_uri, collisions
+    problems = []
+    coll = collisions(ignore_structural=True)                  # same set the AST scan reports (shared ignore)
+    for name, uris in coll.items():
+        resolved = resolve_uri(name)
+        if len(resolved) < 2:
+            problems.append((name, "resolves to %d URI(s), expected >=2 for a collision" % len(resolved)))
+            continue
+        if len(set(resolved)) != len(resolved):
+            problems.append((name, "resolves to duplicate URIs: %s" % resolved))
+            continue
+        # each full URI must itself resolve to exactly one thing (the disambiguation actually works).
+        for u in resolved:
+            if resolve_uri(u) != [u]:
+                problems.append((name, "full URI %s does not resolve to itself" % u))
+    return (not problems), problems
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--new", action="store_true", help="show only collisions NOT in the budget (CI-failing set)")
+    ap.add_argument("--addressable", action="store_true",
+                    help="verify every collision resolves to distinct URIs (the S1.3 addressability property)")
     args = ap.parse_args(argv)
+
+    if args.addressable:
+        ok, problems = addressability_report()
+        if ok:
+            print("ADDRESSABLE: every name collision resolves to distinct capability URIs -- each is disambiguable "
+                  "by supplying its path. A collision is a path to supply, not a hazard to forbid.")
+            return 0
+        print("NOT ADDRESSABLE -- these collisions do not resolve cleanly (the semantic hierarchy cannot "
+              "disambiguate them; fix the URI index or the collision):")
+        for name, reason in problems:
+            print("  %-26s %s" % (name, reason))
+        return 1
 
     found = scan()
     new = {n: m for n, m in found.items() if frozenset(m) != KNOWN_COLLISIONS.get(n)}
@@ -183,8 +226,13 @@ def _selftest():
     # 4. classify() reads delegation out of the source: cosserat.quat_from_axis_angle delegates to transform's
     v = classify("quat_from_axis_angle", ["cosserat", "transform"])
     assert v.get("cosserat") == "delegates", v
+    # 5. S1.3 ADDRESSABILITY: every collision resolves to distinct URIs, so it is disambiguable by path. This is the
+    # deeper safety property than the frozen budget -- a collision is fine iff a caller can supply its path.
+    ok, problems = addressability_report()
+    assert ok, "collisions that do not resolve cleanly (the hierarchy cannot disambiguate them): %s" % problems
     print("tools/name_collisions selftest OK: %d collisions, all %d reviewed, detector bites, classify() reads "
-          "delegation" % (len(found), len(KNOWN_COLLISIONS)))
+          "delegation, every collision is ADDRESSABLE (resolves to distinct URIs)" % (len(found),
+          len(KNOWN_COLLISIONS)))
 
 
 if __name__ == "__main__":

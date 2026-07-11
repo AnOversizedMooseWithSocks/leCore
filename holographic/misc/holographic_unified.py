@@ -736,6 +736,184 @@ class UnifiedMind:
         from holographic.misc.holographic_bandwidth import spectral_bandwidth
         return spectral_bandwidth(x, energy_fraction=energy_fraction)
 
+    def mutual_information(self, x, y, bins=16):
+        """Mutual information I(X;Y) in BITS between two equal-length signals (discrete or continuous, continuous
+        quantile-binned). Zero iff independent; higher = more shared information. This is the RAW estimate --
+        biased upward by finite samples, so for a significance-aware number use mutual_information_vs_null. See
+        holographic_mutualinfo.mutual_information."""
+        from holographic.sampling_and_signal.holographic_mutualinfo import mutual_information
+        return mutual_information(x, y, bins=bins)
+
+    def mutual_information_vs_null(self, x, y, bins=16, n_shuffle=64, seed=0):
+        """Mutual information ABOVE its SHUFFLE NULL -- the honest dependence measure. Computes raw MI, then a null
+        of MI with `y` shuffled (real dependence destroyed, only finite-sample bias left), and reports the excess
+        as a z-score. A dependence counts as REAL only when z clears a few sigma; raw MI without its null is a
+        Rorschach test. Returns {mi, null_mean, null_std, excess, z}. The gate the pipeline assembler needs. See
+        holographic_mutualinfo.mutual_information_vs_null."""
+        from holographic.sampling_and_signal.holographic_mutualinfo import mutual_information_vs_null
+        return mutual_information_vs_null(x, y, bins=bins, n_shuffle=n_shuffle, seed=seed)
+
+    def measure(self, run_once, seeds=range(0, 10), n_boot=2000, boot_seed=0):
+        """The VARIANCE HARNESS (holographic_measure) -- every headline number gets a mean, a spread, and a
+        confidence interval, not a lucky-seed point estimate. Runs `run_once(seed)` (a callable returning a scalar
+        score) across `seeds` and returns {mean, std, ci (95% bootstrap), n, scores}. The constitution's honest-
+        measurement discipline made invocable: a claim without this is not a result. See holographic_measure.measure."""
+        from holographic.misc.holographic_measure import measure
+        return measure(run_once, seeds=seeds, n_boot=n_boot, boot_seed=boot_seed)
+
+    def measure_report(self, name, stats, floor=None):
+        """Format a stats dict from `measure` as 'name: mean +/- std (95% CI [lo, hi], n)', flagging FRAGILE when
+        the spread is large relative to the margin above `floor`. The honest one-line summary of a measured claim.
+        See holographic_measure.report."""
+        from holographic.misc.holographic_measure import report
+        return report(name, stats, floor=floor)
+
+    def assert_robust(self, stats, floor):
+        """Pass only if the LOWER CI bound of a `measure` result clears `floor` -- not just the mean. This is what
+        stops a lucky-seed point estimate from passing as a real result. Returns None (raises on failure). The
+        no-win-without-a-baseline gate made invocable. See holographic_measure.assert_robust."""
+        from holographic.misc.holographic_measure import assert_robust
+        return assert_robust(stats, floor)
+
+    def is_fragile(self, stats, margin_floor):
+        """Is a measured claim FRAGILE? True if its spread is large relative to how far its mean sits above the
+        floor it must clear (std >= half the margin -- a couple of unlucky seeds could sink it). Flags a result
+        that looks fine on the mean but rests on luck. See holographic_measure.is_fragile."""
+        from holographic.misc.holographic_measure import is_fragile
+        return is_fragile(stats, margin_floor)
+
+    def regime_gate(self, name, detect, threshold, superior, fallback, above=True):
+        """Build a REGIME GATE (holographic_regimegate) -- route to a superior-but-NICHE method only when a cheap
+        detector says you are in its regime, and to a safe fallback everywhere else. Returns a RegimeGate; call
+        `.apply(x, *a, **k)` to get (result, info) where info records the score, threshold, and which path ran.
+        `detect(x)->score`, `above=True` uses `superior` when score>=threshold. The honest way to re-enable a
+        shelved 'only good in a niche' method: the fallback stays the safe default, so a misfire costs at most the
+        default. The adaptive-dispatch pattern as a reusable object. See holographic_regimegate.RegimeGate."""
+        from holographic.misc.holographic_regimegate import RegimeGate
+        return RegimeGate(name, detect, threshold, superior, fallback, above=above)
+
+    def phase_randomize(self, x, seed=0):
+        """A PHASE-RANDOMIZED surrogate of a 1-D signal: same power spectrum (same autocorrelation) as `x` but
+        random phases, so deterministic/nonlinear structure is destroyed while the linear second-order statistics
+        are preserved EXACTLY (Theiler et al. 1992). The honest null for a CONTINUOUS, autocorrelated signal --
+        unlike a permutation, it does not destroy the autocorrelation a trivial forecaster exploits. See
+        holographic_surrogate.phase_randomize."""
+        from holographic.sampling_and_signal.holographic_surrogate import phase_randomize
+        return phase_randomize(x, seed=seed)
+
+    def surrogate_zscore(self, x, statistic, n_surrogates=64, seed=0):
+        """Measure a structure `statistic(x)` against an ensemble of PHASE-RANDOMIZED surrogates and report how
+        far the real value exceeds the null, in null std devs (a z-score). Because the surrogates share the real
+        signal's autocorrelation, a high z means structure BEYOND linear autocorrelation -- the honest continuous
+        analogue of the discrete shuffle-null. The gate for a continuous forecast/structure test. See
+        holographic_surrogate.surrogate_zscore."""
+        from holographic.sampling_and_signal.holographic_surrogate import surrogate_zscore
+        return surrogate_zscore(x, statistic, n_surrogates=n_surrogates, seed=seed)
+
+    def amplitude_adjusted_surrogate(self, x, seed=0):
+        """AAFT surrogate -- the STRICTER null for NON-GAUSSIAN signals (holographic_surrogate). Basic
+        phase_randomize preserves the spectrum but GAUSSIANIZES the marginal (destroying fat tails, e.g. of price
+        returns); AAFT preserves BOTH the exact amplitude DISTRIBUTION and (approximately) the power spectrum, by
+        phase-randomizing a Gaussian-ranked copy and mapping the original's sorted amplitudes back on. Use this
+        when the amplitude distribution matters (fat tails); use phase_randomize when the signal is ~Gaussian and
+        the spectrum must match exactly. See holographic_surrogate.amplitude_adjusted_surrogate."""
+        from holographic.sampling_and_signal.holographic_surrogate import amplitude_adjusted_surrogate
+        return amplitude_adjusted_surrogate(x, seed=seed)
+
+    def iaaft_surrogate(self, x, n_iter=100, tol=1e-8, seed=0):
+        """IAAFT surrogate -- the gold-standard null matching BOTH the exact amplitude distribution AND (to
+        convergence) the exact power spectrum (Schreiber & Schmitz 1996). AAFT only approximates the spectrum;
+        IAAFT ITERATES two projections (impose target magnitudes / impose the amplitude distribution) until they
+        agree -- the same iterate-a-projection move as IK/PBD/the resonator. Prefer over AAFT for strongly-coloured
+        non-Gaussian signals (e.g. fat-tailed price returns with real autocorrelation), at the cost of iterations.
+        See holographic_surrogate.iaaft_surrogate."""
+        from holographic.sampling_and_signal.holographic_surrogate import iaaft_surrogate
+        return iaaft_surrogate(x, n_iter=n_iter, tol=tol, seed=seed)
+
+    def candle_carrier(self, candles, kind="typical"):
+        """Turn OHLC candles into the one-value-per-bar WAVE they sample (holographic_candles): a price candle is a
+        SAMPLE of a continuous wave, and this returns the carrier signal -- 'typical' price (H+L+C)/3, 'close',
+        'median' (H+L)/2, or 'ohlc4'. Feed the result to any signal op (spectrum, band-limit, phase_randomize,
+        fit_deterministic, ladder_predict). Accepts (N,4) OHLC, (N,5/6) [ts,OHLC(V)], or dicts. See
+        holographic_candles.carrier."""
+        from holographic.misc.holographic_candles import carrier
+        return carrier(candles, kind=kind)
+
+    def candle_envelope(self, candles):
+        """The high/low BAND around a candle series' carrier (holographic_candles) -- how far the price wave swung
+        INTRA-bar, which a close-only line throws away. Returns (upper, lower) = (highs, lows). The band width is
+        the per-bar range, the amplitude of the wave's within-sample excursion. See holographic_candles.envelope."""
+        from holographic.misc.holographic_candles import envelope
+        return envelope(candles)
+
+    def candle_intrabar_path(self, candles, steps_per_bar=4):
+        """Reconstruct a HIGHER-RESOLUTION wave from OHLC candles (holographic_candles): each bar becomes O ->
+        {High,Low in the inferred order} -> C, so within-bar excursions enter the signal. The H/L order is inferred
+        from bar direction (up bar dips to the low then runs to the high; down bar the reverse). Honest about being
+        a PLAUSIBLE path -- OHLC doesn't record the true order. Hits every open/close exactly. See
+        holographic_candles.intrabar_path."""
+        from holographic.misc.holographic_candles import intrabar_path
+        return intrabar_path(candles, steps_per_bar=steps_per_bar)
+
+    def candle_range(self, candles):
+        """Per-bar RANGE (High-Low, the within-bar swing amplitude) and BODY (|Close-Open|) of a candle series
+        (holographic_candles). A small body inside a big range is a bar that went nowhere despite swinging --
+        the range/body ratio is a classic noise-vs-trend measure. Returns (ranges, bodies). See
+        holographic_candles.candle_range."""
+        from holographic.misc.holographic_candles import candle_range
+        return candle_range(candles)
+
+    def guide_structure(self, state, constraints, iters=50, tol=1e-6, omega=1.0):
+        """Guide a `state` toward a goal by ITERATING A PROJECTION -- the level-generic form of IK / PBD / denoise
+        / resonator (all 'iterate a projection', Macklin). `constraints` is a list of projection callables (pin a
+        root to a target, clamp a link length, snap to a codebook, ...) applied in turn until the state settles.
+        Returns {state, iters_used, converged, residual}. The constraints ARE the structure of the space;
+        iterating them is legal movement through it. Builders: guide_pin / guide_clamp_link / guide_snap. See
+        holographic_guide.guide_structure."""
+        from holographic.misc.holographic_guide import guide_structure
+        return guide_structure(state, constraints, iters=iters, tol=tol, omega=omega)
+
+    def guide_pin(self, index, value):
+        """Constraint builder for guide_structure: pin state[index] to `value` (an IK end-effector target / a
+        boundary condition). See holographic_guide.pin."""
+        from holographic.misc.holographic_guide import pin
+        return pin(index, value)
+
+    def guide_clamp_link(self, i, j, length):
+        """Constraint builder for guide_structure: clamp the distance between state[i] and state[j] to at most
+        `length` (a bone/edge length limit -- the PBD distance constraint). See holographic_guide.clamp_link."""
+        from holographic.misc.holographic_guide import clamp_link
+        return clamp_link(i, j, length)
+
+    def guide_snap(self, book):
+        """Constraint builder for guide_structure: snap every state entry to its nearest value in `book` (the
+        resonator's codebook cleanup as a projection). See holographic_guide.snap_to_codebook."""
+        from holographic.misc.holographic_guide import snap_to_codebook
+        return snap_to_codebook(book)
+
+    def assemble_pipeline(self, x, y, candidates, min_z=3.0, holdout=0.3, bins=16, n_shuffle=48, seed=0):
+        """Find which candidate transform(s) connect input `x` to output `y`, VALIDATED against a shuffle null
+        (the honest pipeline assembler). `candidates` is a dict name -> callable (x -> y_hat). Each is scored on a
+        HELD-OUT segment (search overfits its own tests) AND gated by MI-over-shuffle-null (does the REAL input
+        drive the output more than a shuffled one?). Returns survivors sorted by z; a candidate passes only if
+        z >= min_z, else it is chance alignment, not a discovery. An empty list is an honest 'nothing connects
+        these'. The gate that stops 'any random projection works'. See holographic_assemble.assemble_pipeline."""
+        from holographic.agents_and_reasoning.holographic_assemble import assemble_pipeline
+        return assemble_pipeline(x, y, candidates, min_z=min_z, holdout=holdout, bins=bins,
+                                 n_shuffle=n_shuffle, seed=seed)
+
+    def fit_deterministic(self, data, coarse=64, keep_frac=0.25, refine_steps=12, tie_tol=0.02, seed=0):
+        """Recover the deterministic GENERATOR that best explains a 1-D `data` signal (the inverse of the ladder):
+        SNAP the data against a baked generator bank (sine/chirp/gauss/sawtooth), then REFINE the winning family's
+        params. Returns {family, params, correlation, residual_frac, ties, verdict}. Q8: the snap compares
+        BAND-LIMITED signatures, so families differing only above the coarse rate TIE honestly rather than one
+        winning on aliased detail. REFUSES (family=None) when no generator beats the noise -- 'no deterministic
+        structure' is a result. If it fits, store (family, params) -- bytes, not samples. See
+        holographic_fitgen.fit_deterministic."""
+        from holographic.agents_and_reasoning.holographic_fitgen import fit_deterministic
+        return fit_deterministic(data, coarse=coarse, keep_frac=keep_frac, refine_steps=refine_steps,
+                                 tie_tol=tie_tol, seed=seed)
+
     def analyze_axes(self, data, coords=None, categorical=None):
         """Which axis of a tensor is the INDEX (carrier) vs the PAYLOAD (content)?
         (holographic_axisrole). Measures, per axis, its marginal information (how
@@ -2801,8 +2979,10 @@ class UnifiedMind:
     def validate_recipe(self, recipe):
         """Check a StructureRecipe is WELL-FORMED (holographic_recipeops, ARCH-1) -- the recipe's is_manifold():
         every op references only EARLIER existing results (a DAG, no forward/dangling/out-of-range refs), raw
-        indices and repeat templates in range. Returns (ok, problems). Pairs with the recipe EDIT operators below
-        -- the recipe equivalent of the mesh Euler operators (validate + local invariant-preserving edits)."""
+        indices and repeat templates in range, every DECLARED OUTPUT points to a produced result, and set-ops
+        (bundle/superpose) have a non-empty member list. Returns (ok, problems). Catches recipes that pass the DAG
+        check but crash at build (a dangling output -> IndexError; an empty bundle -> a degenerate zero vector).
+        Pairs with the recipe EDIT operators below -- the recipe equivalent of the mesh Euler operators."""
         from holographic.misc.holographic_recipeops import validate
         return validate(recipe)
 
@@ -3540,6 +3720,171 @@ class UnifiedMind:
         from holographic.misc.holographic_resonator import map_bind as _mb
         return _mb(*[np.asarray(v, float) for v in vectors])
 
+    def climb_ladder(self, corpus, lens="sequence", max_depth=8, min_gain=0.02):
+        """Climb a CORPUS into a TOWER of abstraction levels (the abstraction ladder): consolidate -> find
+        patterns -> promote to a new alphabet -> repeat, STOPPING when the MDL gain drops below `min_gain` (a
+        fraction of current bits). Returns the tower (level dicts with depth, alphabet size, bits, gain, stable
+        hashlib atom ids, and the terminal refusal reason). The generic form of the seven-step loop run by hand
+        (letters->words, verts->parts->scene, transforms->grammar). `lens` picks adjacency: 'sequence' = position
+        (ordered streams), 'structure' = shared group (order-INDEPENDENT set promotion -- recurring
+        sub-assemblies in any order, the instanced-scene case). The lens is the choice of what counts as adjacent,
+        never guessed: shuffled parts are structureless to 'sequence' but highly compressible to 'structure'. A
+        ladder that tops out shallow is a RESULT (most data does), logged loudly. See holographic_ladder.climb."""
+        from holographic.agents_and_reasoning.holographic_ladder import climb
+        return climb(corpus, lens=lens, max_depth=max_depth, min_gain=min_gain)
+
+    def ladder_summary(self, tower):
+        """A compact human-readable summary of a climbed tower (from climb_ladder): per level its depth, alphabet
+        size, bits, and gain over the previous level, plus the terminal refusal reason. For logging a climb result
+        honestly. See holographic_ladder.tower_summary."""
+        from holographic.agents_and_reasoning.holographic_ladder import tower_summary
+        return tower_summary(tower)
+
+    def identify_level(self, corpus, max_merges=100, min_count=2):
+        """'What am I looking at?' -- classify a CORPUS by which ladder operations pay on it, returning a
+        signature of MEASUREMENTS (not a label): `compressible` (is there a level above?), `gain_over_null`
+        (compression that survives a shuffle -- high-D noise has basins too, so only this counts), `lens`
+        (sequence vs structure, PICKED not guessed by which adjacency compresses more), `regime`
+        (repetitive / nested-structured / irreducible -- Wolfram's taxonomy as a measurement), and
+        `compress_sensitivity` (Quilez Q6: how hard the structure resists, free from two passes). The step-0
+        question of a climb, and a faculty of its own -- agents ask 'what is this' constantly. See
+        holographic_ladder.identify_level."""
+        from holographic.agents_and_reasoning.holographic_ladder import identify_level
+        return identify_level(corpus, max_merges=max_merges, min_count=min_count)
+
+    def ladder_kit_report(self, level):
+        """Report a ladder LEVEL's invariant-kit slots (from a climb_ladder tower) as WIRED, DECLARED-NEGATIVE, or
+        SILENT-GAP. Returns {'wired', 'declared_negative', 'silent_gaps'}. Every level should have 0 silent gaps --
+        each of delta/chunk/scale/decompose/cleanup/bake/seed/tile/lod/canonical/cache/fuse/superpose/guide is
+        either wired to a primitive or a declared negative with a reason. See holographic_ladder.kit_report."""
+        from holographic.agents_and_reasoning.holographic_ladder import kit_report
+        return kit_report(level)
+
+    def adaptive_pipeline(self, corpus, null_margin=0.05, max_depth=8, min_gain=0.02):
+        """MEASUREMENT-DRIVEN adaptive dispatcher: run identify_level, then route the data to the method its
+        REGIME names instead of hard-coding one. ABSTAINS on null-indistinguishable input (the SETI gate -- never
+        'clean' noise into a fabricated signal); FOLDS repetitive data (Quilez -- cheap, never pay for a climb);
+        CLIMBS nested structure with the lens picked per-signal (Puckette -- the lens is the analysis window).
+        Returns {method: abstain|fold|climb|store_raw, regime, lens, gain_over_null, reason, tower/dominant}. A
+        readable, refusable dispatch on numbers already computed -- no new learner. See
+        holographic_ladder.adaptive_pipeline."""
+        from holographic.agents_and_reasoning.holographic_ladder import adaptive_pipeline
+        return adaptive_pipeline(corpus, null_margin=null_margin, max_depth=max_depth, min_gain=min_gain)
+
+    def sweep_directions(self, corpus, max_depth=6, min_gain=0.02):
+        """The UP / DOWN / SIDEWAYS completeness sweep (holographic_ladder): does the ladder's structure-finding
+        hold in all three directions, or only one? DOWN -- does structure survive DECOMPOSITION (are the parts
+        themselves analyzable)? UP -- does it survive EMBEDDING in a larger corpus? SIDEWAYS -- which lens COSTUMES
+        (sequence/structure) does the data wear? Returns a per-direction ok flag with the measurement behind it,
+        plus `gaps` (failed directions) and `complete`. Null-aware: an irreducible corpus flags all three, never
+        fabricating structure. A capability that works in only one direction is an INCOMPLETE faculty -- this makes
+        that check runnable, like kit_gaps did for the invariant kit. See holographic_ladder.sweep_directions."""
+        from holographic.agents_and_reasoning.holographic_ladder import sweep_directions
+        return sweep_directions(corpus, max_depth=max_depth, min_gain=min_gain)
+
+    def ladder_predict(self, history, order=2, max_merges=200, min_count=2, null_margin=0.02, seed=0):
+        """Predict what comes NEXT after `history` using the ladder's learned HIERARCHICAL alphabet (the
+        compression<->prediction duality -- a good compressor is a good predictor). Learns a chunk codebook over
+        the history, predicts the next CHUNK by matching the context against continuation counts over the promoted
+        alphabet, and decodes it to raw symbols -- so one step can emit a whole learned pattern, not one flat
+        symbol. THE GATE (SETI, on the time axis): abstains to the persistence baseline ('next = last') when the
+        ladder does not beat persistence on held-out continuations -- a forecast that cannot beat 'same as last' is
+        a null result, said loudly. Returns {prediction, confidence, method, beats_persistence, reason}. See
+        holographic_ladder.ladder_predict."""
+        from holographic.agents_and_reasoning.holographic_ladder import ladder_predict
+        return ladder_predict(history, order=order, max_merges=max_merges, min_count=min_count,
+                              null_margin=null_margin, seed=seed)
+
+    def ladder_forecast_calibrated(self, series, order=2, alpha=0.1, min_history=12, seed=0):
+        """Forecast the next value of a numeric `series` with the ladder predictor, wrapped in a CALIBRATED
+        prediction interval (an uncalibrated forecast is not a measurement). Rolls ladder_predict over the series
+        to gather residuals on data it did not fit, calibrates a conformal forecaster on them, and returns the
+        next-step POINT forecast plus an interval with MEASURED coverage -- not an assumed one. Returns {point,
+        interval, half_width, coverage, empirical_coverage, n_calibration, reason}. Falls back to point-only when
+        the history is too short to calibrate honestly. See holographic_ladder.ladder_forecast_calibrated."""
+        from holographic.agents_and_reasoning.holographic_ladder import ladder_forecast_calibrated
+        return ladder_forecast_calibrated(series, order=order, alpha=alpha, min_history=min_history, seed=seed)
+
+    def extend_generator(self, fit_result, n_ahead, original_length):
+        """FORECAST by playing a fitted generator PAST its data (store the formula, play the future). Given a
+        fit_deterministic result and the original data length, regenerate `n_ahead` samples beyond the end.
+        Returns {forecast, t_range, valid}; `valid` is False (samples still returned) when extrapolating far past
+        the fit's validated window -- a generator fit on [0,1] evaluated at t=100 is confident nonsense, so it
+        refuses beyond where it was validated. A refused fit cannot be extended. See
+        holographic_fitgen.extend_generator."""
+        from holographic.agents_and_reasoning.holographic_fitgen import extend_generator
+        return extend_generator(fit_result, n_ahead, original_length)
+
+    def reconstruct_tower(self, tower):
+        """Expand a climbed ladder TOWER back to its ORIGINAL corpus of base symbols -- the inverse of
+        climb_ladder (found by the down-sweep: a tower you cannot decompress is useless). For a SEQUENCE-lens
+        tower this is LOSSLESS: reconstruct_tower(climb_ladder(corpus)) == corpus exactly. For a STRUCTURE-lens
+        tower it recovers the SET of base part-types per group (order and duplicate counts are dropped by design --
+        the structure lens's premise). See holographic_ladder.reconstruct."""
+        from holographic.agents_and_reasoning.holographic_ladder import reconstruct_corpus
+        return reconstruct_corpus(tower)
+
+    def chart_space(self, alphabet, rays=64, steps=24, margin=0.1, band_keep=0.5, seed=0):
+        """Chart a holographic ALPHABET as a measured atlas -- march rays between atoms and record where they
+        enter cleanup BASINS (nearest atom distinctively nearer than the runner-up by `margin`). Returns
+        hit_fraction, basins_per_ray, coverage (dead atoms never win), and the honest verdict structure_over_null
+        (basin coverage MINUS a band-limited random-alphabet null, Quilez Q8). A region is structure only ABOVE
+        the matched null -- high-D noise has basins too, so an atlas without its null is a Rorschach test. Uses for
+        the number: capacity forecasting (shrinking coverage predicts an auto_scale trigger) and codebook
+        placement (put new atoms in dead zones). See holographic_ladder.chart_space."""
+        from holographic.agents_and_reasoning.holographic_ladder import chart_space
+        return chart_space(alphabet, rays=rays, steps=steps, margin=margin, band_keep=band_keep, seed=seed)
+
+    def bank_or_formula(self, eval_cost_us, hit_rate, n_entries, bytes_per_entry, lookup_cost_us=0.5,
+                        regen_from_seed=True):
+        """Decide whether to BANK computed values or keep the FORMULA and regenerate on demand (Quilez Q1, 'store
+        the formula not the samples'). The demoscene economy as a MEASURED gate: banking pays iff
+        hit_rate*eval_cost - lookup_cost > 0 (a miss must BUILD the entry, so only reused evals amortize the bake;
+        break-even hit_rate = lookup/eval). A bank of things a cheap formula gives you for free is NEGATIVE
+        storage. Returns {bank, saving_us_per_query, storage_bytes, reason}. The reusable wheel the transform bank,
+        the generator bank, and any cache should consult before banking by reflex. See
+        holographic_ladder.bank_or_formula."""
+        from holographic.agents_and_reasoning.holographic_ladder import bank_or_formula
+        return bank_or_formula(eval_cost_us, hit_rate, n_entries, bytes_per_entry,
+                               lookup_cost_us=lookup_cost_us, regen_from_seed=regen_from_seed)
+
+    def resolve_capability_uri(self, query):
+        """Resolve a bare function name or a partial path to its FULL capability URI(s) 'family/module/name', most
+        specific first. A colliding bare name returns every match ('sphere' -> mesh_and_geometry/sdf/sphere AND
+        misc/codegen/sphere); supplying more of the path narrows it ('sdf/sphere' -> one). Makes the 42 semantic
+        name collisions addressable by path instead of ambiguous. See holographic_capuri.resolve."""
+        from holographic.caching_and_storage.holographic_capuri import resolve_uri
+        return resolve_uri(query)
+
+    def browse_capabilities(self, prefix="", by="location"):
+        """Browse the capability namespace like a CONTEXT MENU. `by='location'` (default) walks the physical family
+        tree: browse('') -> families, 'mesh_and_geometry/' -> modules, 'mesh_and_geometry/sdf/' -> leaf functions
+        (the name IS the hierarchy, so it can't drift from the code). `by='semantic'` walks the File->Export->PNG
+        VERB tree instead (select/ transform/ create/ ...) -- grouped by what a user DOES, not where the code lives;
+        only capabilities with a semantic tag appear (see SEMANTIC_TAXONOMY.md). Returns {branch: leaf_count}. See
+        holographic_capuri.browse / browse_semantic."""
+        if by == "semantic":
+            from holographic.caching_and_storage.holographic_capuri import browse_semantic
+            return browse_semantic(prefix)
+        from holographic.caching_and_storage.holographic_capuri import browse
+        return browse(prefix)
+
+    def capability_collisions(self):
+        """Every bare function name that resolves to more than one capability URI -- the semantic collisions, each
+        with its disambiguating full paths. The name_collisions audit re-read through the URI lens: a collision is
+        not a hazard to forbid but a name whose PATH you supply. See holographic_capuri.collisions."""
+        from holographic.caching_and_storage.holographic_capuri import collisions
+        return collisions()
+
+    def resolve_capability_uri(self, name):
+        """Resolve a bare capability name or a partial path to the FULL capability URI(s) that match
+        (holographic_capuri) -- 'rotation' -> ['mesh_and_geometry/meshskin/rotation',
+        'scene_and_pipeline/scenegraph/rotation']; 'sdf/sphere' narrows to one. The disambiguation step when a name
+        collides: supply more of the path. Pairs with browse_capabilities (the menu) and capability_collisions (the
+        collision list). See holographic_capuri.resolve_uri."""
+        from holographic.caching_and_storage.holographic_capuri import resolve_uri
+        return resolve_uri(name)
+
     def chunk_levels(self, codebook, vocab):
         """The chunk depths a learned codebook can factor against, DEEPEST FIRST -- the ladder recursive_factor
         descends. See holographic_resonator.available_levels."""
@@ -3668,6 +4013,248 @@ class UnifiedMind:
         and a **-4.52 dB tail slope** (the loop warps its own output). See holographic_realtime.RealtimeSession."""
         from holographic.scene_and_pipeline.holographic_realtime import RealtimeSession
         return RealtimeSession(session, budget=float(budget), shade_kwargs=shade_kwargs)
+
+    def frame_budget_controller(self, target_fps=60, ladder=None, headroom=0.15, start_level=None,
+                                climb_after=8, climb_margin=0.6):
+        """Build a FRAME-BUDGET CONTROLLER (holographic_framebudget) -- the one knob from a target FPS to concrete
+        render + sim quality, held closed-loop against MEASURED frame time. Each frame call `.current()` for the
+        quality preset to render/simulate with, then `.report(frame_ms)` with the measured time; the controller
+        DROPS a quality level on a budget miss (react fast) and CLIMBS only after a streak of comfortable frames
+        (hysteresis, so quality doesn't oscillate). This is the missing conductor tying render_adaptive,
+        draft_vs_refine_simulation, and the LOD chains to a target frame rate for a front-end client. The ladder
+        exposes render and sim quality SEPARATELY -- a coarse render is a draft of the fine one, but a coarse
+        chaotic sim is a DIFFERENT trajectory (see draft_vs_refine_simulation), so you may hold the sim fixed and
+        trade only render quality. See holographic_framebudget.FrameBudgetController."""
+        from holographic.scene_and_pipeline.holographic_framebudget import FrameBudgetController
+        return FrameBudgetController(target_fps=target_fps, ladder=ladder, headroom=headroom,
+                                     start_level=start_level, climb_after=climb_after, climb_margin=climb_margin)
+
+    def frame_budget_ms(self, target_fps, headroom=0.15):
+        """Convert a target frame rate to a per-frame millisecond BUDGET, minus a headroom fraction (a frame that
+        exactly fills 1/fps has already missed the vsync interval). 60 fps -> ~14.2 ms usable, 30 fps -> ~28.3 ms.
+        See holographic_framebudget.frame_budget_ms."""
+        from holographic.scene_and_pipeline.holographic_framebudget import frame_budget_ms
+        return frame_budget_ms(target_fps, headroom=headroom)
+
+    def workspace_manager(self):
+        """A WORKSPACE MANAGER (holographic_workspace) over this mind's database -- durable user data coexisting
+        with transient 3D/sim SCENES, each in its own namespace so they don't step on each other. Use it to SAVE
+        and LOAD a workspace/scene: new_workspace(name), switch_workspace(name), export_workspace(name) -> a JSON
+        blob, import_workspace(blob) -> rebuilds it BYTE-IDENTICALLY (the seed fixes every atom), combine_workspaces,
+        reset_to_default (drop transient scenes, keep the durable tier). The persistence layer for a real-time
+        client's scene. See holographic_workspace.WorkspaceManager."""
+        from holographic.scene_and_pipeline.holographic_workspace import WorkspaceManager
+        if getattr(self, "_workspace_manager", None) is None:
+            self._workspace_manager = WorkspaceManager(self.db)
+        return self._workspace_manager
+
+    def frame_server(self, ladder=None, headroom=0.15):
+        """Build a FRAME SERVER (holographic_framebudget) -- server-side real-time frame serving for front-end
+        clients that PULL frames (the request/response form of a frame stream). Keeps one frame-budget controller
+        PER SESSION; call `.next_frame(session, target_fps, last_frame_ms)` each frame to get the quality preset to
+        render/simulate with, holding each client's target fps closed-loop. Two clients can run at different rates
+        (a phone at 30, a desktop at 60). This is what the HTTP service's POST /frame endpoint delegates to. See
+        holographic_framebudget.FrameServer."""
+        from holographic.scene_and_pipeline.holographic_framebudget import FrameServer
+        return FrameServer(ladder=ladder, headroom=headroom)
+
+    def pick_element(self, wireframe, screen_u, screen_v, want="vertex", cam_z=3.0, fov_scale=1.6):
+        """VIEWPORT PICKING for a 3D-modeling app (holographic_framebudget): given a wireframe cage and a screen
+        coordinate (screen_u, screen_v in -1..1 under the cursor), return which element the user is pointing at --
+        {kind, index, distance, position/vertices} for the nearest 'vertex', 'edge', or 'face'. Projects the cage's
+        own verts to the screen and finds the closest (exact, deterministic, no GPU pick buffer needed). The select
+        step a modeling app needs before editing a vert/edge/face. See holographic_framebudget.pick_element."""
+        from holographic.scene_and_pipeline.holographic_framebudget import pick_element
+        return pick_element(wireframe, screen_u, screen_v, want=want, cam_z=cam_z, fov_scale=fov_scale)
+
+    def mesh_selection(self, mesh, mode="vertex", indices=None):
+        """A sub-object MESH SELECTION (holographic_meshselect) -- a persistent set of VERTS / EDGES / FACES with a
+        mode and set algebra (add/remove/toggle/union/intersect/invert/select_all) plus mode CONVERSION
+        (face->verts, verts->faces, ...). This is the edit-mode selection a modeling app operates every edit on,
+        complementary to the object-level `selection` (which picks whole objects). Bind to a mesh {vertices, faces}
+        so indices are validated. See holographic_meshselect.MeshSelection."""
+        from holographic.mesh_and_geometry.holographic_meshselect import MeshSelection
+        return MeshSelection(mesh, mode=mode, indices=indices)
+
+    def select_edge_loop(self, mesh, seed_edge):
+        """Select the EDGE LOOP through `seed_edge` (holographic_meshselect) -- the ring of edges continuing
+        'straight' across quads, the Alt-click primitive users expect from Blender/Maya. Walks both ways from the
+        seed, stopping at a pole or boundary (honest -- loops are only well-defined on quads). Returns an edge-mode
+        MeshSelection. See holographic_meshselect.select_edge_loop."""
+        from holographic.mesh_and_geometry.holographic_meshselect import select_edge_loop
+        return select_edge_loop(mesh, seed_edge)
+
+    def select_face_ring(self, mesh, seed_face):
+        """Select the FACE RING from `seed_face` (holographic_meshselect) -- the band of quads a loop cut runs
+        through, walking quad to quad across shared edges. Terminates at a non-quad or boundary. Returns a
+        face-mode MeshSelection. See holographic_meshselect.select_face_ring."""
+        from holographic.mesh_and_geometry.holographic_meshselect import select_face_ring
+        return select_face_ring(mesh, seed_face)
+
+    def select_boundary_loops(self, mesh):
+        """Select the OPEN BOUNDARY edges of a mesh (holographic_meshselect) -- the edges used by exactly one face
+        (a hole rim or open-surface border), the 'select the hole' step before filling or bridging. Returns an
+        edge-mode MeshSelection. See holographic_meshselect.select_boundary_loops."""
+        from holographic.mesh_and_geometry.holographic_meshselect import select_boundary_loops
+        return select_boundary_loops(mesh)
+
+    def soft_selection_weights(self, mesh, selection, radius, falloff="smooth"):
+        """SOFT SELECTION as a reusable per-vertex WEIGHT FIELD (holographic_meshselect) -- 1 on the selection,
+        falling off to 0 at `radius` along the surface (multi-source geodesic). This is proportional editing: a
+        transform reads these weights and moves each vertex by weight*delta, dragging neighbours smoothly. Takes a
+        MeshSelection or a raw vertex-index list; falloff is 'linear'/'smooth'/'sharp'. See
+        holographic_meshselect.soft_selection_weights."""
+        from holographic.mesh_and_geometry.holographic_meshselect import soft_selection_weights
+        return soft_selection_weights(mesh, selection, radius, falloff=falloff)
+
+    def select_symmetric(self, mesh, selection, axis=0, tol=1e-4):
+        """SYMMETRY SELECTION (holographic_meshselect) -- add a selection's mirror-image elements across a world
+        axis plane (axis 0/1/2 = x/y/z=0), so a symmetric edit can be applied to both sides. The selection-level
+        complement to mirror_mesh (which mirrors GEOMETRY); here nothing is created, we find the counterpart
+        elements that already exist, paired by reflected position within tol. See holographic_meshselect.select_symmetric."""
+        from holographic.mesh_and_geometry.holographic_meshselect import select_symmetric
+        return select_symmetric(mesh, selection, axis=axis, tol=tol)
+
+    def select_in_box(self, mesh, lo, hi, mode="vertex", project=None):
+        """REGION SELECT (holographic_meshselect) -- select every element inside the axis-aligned box [lo,hi], the
+        box/rubber-band select of a viewport. Edge/face modes select if ANY vertex is in (inclusive, matching
+        to_mode). Pass `project` (a view-projection matrix or a pt->(u,v) callable) to test in SCREEN coords instead
+        -- that is frustum/rectangle select from the camera. Returns a MeshSelection. See
+        holographic_meshselect.select_in_box."""
+        from holographic.mesh_and_geometry.holographic_meshselect import select_in_box
+        return select_in_box(mesh, lo, hi, mode=mode, project=project)
+
+    def ray_mesh_intersect(self, mesh, origin, direction, cull_backface=False):
+        """RAY-VS-MESH picking (holographic_raypick) -- cast a ray at a mesh {vertices, faces} and return the
+        NEAREST hit {face, position, distance, barycentric, triangle} or None. Moller-Trumbore per triangle with an
+        AABB broad phase; quads/n-gons are fan-triangulated but report the ORIGINAL face. This is how viewport
+        picking hits a user's real geometry (not just the demo cage). See holographic_raypick.ray_mesh_intersect."""
+        from holographic.mesh_and_geometry.holographic_raypick import ray_mesh_intersect
+        return ray_mesh_intersect(mesh, origin, direction, cull_backface=cull_backface)
+
+    def ray_sdf_intersect(self, sdf_fn, origin, direction, max_dist=50.0, max_steps=128, eps=1e-3):
+        """RAY-VS-SDF picking (holographic_raypick) -- sphere-trace a ray into an SDF (any sdf_fn(pt)->distance) and
+        return the hit {position, distance, normal, steps} or None. The native pick for the field/procedural half
+        of a scene -- exact to the field, no triangulation. See holographic_raypick.ray_sdf_intersect."""
+        from holographic.mesh_and_geometry.holographic_raypick import ray_sdf_intersect
+        return ray_sdf_intersect(sdf_fn, origin, direction, max_dist=max_dist, max_steps=max_steps, eps=eps)
+
+    def screen_ray(self, screen_u, screen_v, cam_eye=(0.0, 0.0, 3.0), cam_z=-1.6):
+        """Build a world-space RAY from a normalized screen coordinate (holographic_raypick) -- (screen_u, screen_v)
+        in -1..1 under the cursor -> (origin, direction) for the intersect functions, so 'the user clicked here'
+        becomes a geometry query. See holographic_raypick.screen_ray."""
+        from holographic.mesh_and_geometry.holographic_raypick import screen_ray
+        return screen_ray(screen_u, screen_v, cam_eye=cam_eye, cam_z=cam_z)
+
+    def pick_mesh(self, mesh, screen_u, screen_v, cam_eye=(0.0, 0.0, 3.0), cam_z=-1.6, want="face"):
+        """VIEWPORT PICK on a REAL mesh (holographic_raypick) -- from a cursor (screen_u, screen_v in -1..1), build
+        the ray and return the nearest 'face' or 'vertex' the user clicked, as {kind, index, position, distance} or
+        {index:None} on a miss. The generalization of pick_element (which works on the demo cage) onto a user's
+        arbitrary geometry -- one call from 'clicked here' to 'selected this'. See holographic_raypick.pick_mesh."""
+        from holographic.mesh_and_geometry.holographic_raypick import pick_mesh
+        return pick_mesh(mesh, screen_u, screen_v, cam_eye=cam_eye, cam_z=cam_z, want=want)
+
+    def transform_selection(self, points, selection_idx, translate=None, rotate=None, scale=None,
+                            pivot="median", space="world", constraint=(1, 1, 1),
+                            cursor=None, active=None, view_matrix=None, local_matrix=None, weights=None):
+        """The GIZMO BACKEND (holographic_transform_space): transform selected vertices about a PIVOT
+        (median/active/cursor/bbox), in a SPACE (world/local/view), under an axis CONSTRAINT mask -- the triple that
+        turns a raw matrix into the move/rotate/scale a modeler expects. `translate` (masked 3-vector), `rotate`
+        (axis, angle), `scale` (scalar or 3-vector) about the pivot. Pass `weights` (e.g. soft_selection_weights) for
+        PROPORTIONAL editing -- neighbours drag by their falloff. Non-destructive (returns new points). See
+        holographic_transform_space.transform_selection."""
+        from holographic.mesh_and_geometry.holographic_transform_space import transform_selection
+        return transform_selection(points, selection_idx, translate=translate, rotate=rotate, scale=scale,
+                                   pivot=pivot, space=space, constraint=constraint, cursor=cursor, active=active,
+                                   view_matrix=view_matrix, local_matrix=local_matrix, weights=weights)
+
+    def pivot_point(self, points, selection_idx, mode="median", cursor=None, active=None):
+        """Resolve the PIVOT for a transform (holographic_transform_space) -- 'median' (centroid), 'bbox' (box
+        centre), 'cursor' (a given point), or 'active' (a chosen vertex). The point a rotate/scale turns around.
+        See holographic_transform_space.pivot_point."""
+        from holographic.mesh_and_geometry.holographic_transform_space import pivot_point
+        return pivot_point(points, selection_idx, mode=mode, cursor=cursor, active=active)
+
+    def snap_to_grid(self, point, increment=1.0, origin=(0.0, 0.0, 0.0)):
+        """GEOMETRIC grid snap (caching_and_storage/holographic_snap) -- snap a 3-D point to the nearest grid node
+        of spacing `increment` (scalar OR per-axis; an axis with spacing <= 0 is left alone). The 'snap to grid' a
+        modeler holds Ctrl for. Distinct from guide_snap (which is VSA codebook cleanup). See
+        holographic_snap.snap_to_grid (the canonical geometric snap: 'snapping IS cleanup')."""
+        from holographic.caching_and_storage.holographic_snap import snap_to_grid
+        r = snap_to_grid(point, increment, origin)
+        return r.tolist() if hasattr(r, "tolist") else r
+
+    def snap_to_vertices(self, point, vertices, max_dist=None):
+        """Snap a point to the NEAREST vertex (holographic_snap) -- returns {index, position, distance} or None if
+        beyond max_dist. The vertex-snap that makes two verts coincide exactly. See
+        holographic_snap.snap_to_vertices."""
+        from holographic.mesh_and_geometry.holographic_snap import snap_to_vertices
+        return snap_to_vertices(point, vertices, max_dist=max_dist)
+
+    def snap_transform_delta(self, delta, target="grid", increment=1.0, moved_point=None, vertices=None,
+                             edges=None, origin=(0.0, 0.0, 0.0), max_dist=None):
+        """Snap a TRANSFORM DELTA so the dragged point lands on a target (holographic_snap) -- target
+        'grid'/'vertex'/'edge'; returns {delta (corrected), snapped_to}. The form the gizmo uses: it has a raw delta
+        and the point being dragged, and wants the delta adjusted so that point snaps. Keeps transform and snap
+        layers separate -- transform_selection just adds the returned delta. See holographic_snap.snap_transform_delta."""
+        from holographic.mesh_and_geometry.holographic_snap import snap_transform_delta
+        return snap_transform_delta(delta, target=target, increment=increment, moved_point=moved_point,
+                                    vertices=vertices, edges=edges, origin=origin, max_dist=max_dist)
+
+    def sdf_scene(self, parts, bounds=None):
+        """Build an SDF SCENE from parts (holographic_sdfscene) -- 'a scene is a set of SDF parts'. Pass a list of
+        (sdf_fn, material_name) and optional (center, radius) bounds; get back a scene with .eval (nearest-surface
+        distance = min over parts, what a ray-marcher calls), .part_ids / .material_at (argmin, for material
+        lookup), and .parts_near (spatial cull). The SDF-scene state model for a modeling app, composing parts the
+        way a splat scene bundles primitives. See holographic_sdfscene.SDFScene.from_parts."""
+        from holographic.mesh_and_geometry.holographic_sdfscene import SDFScene
+        return SDFScene.from_parts(parts, bounds=bounds)
+
+    def residue_system(self, moduli=(7, 11, 13), dim=2048, seed=0):
+        """Exact integer arithmetic in vectors via a RESIDUE NUMBER SYSTEM (holographic_extras) -- encode integers
+        in [0,M) as CRT residues carried in hypervectors, then add/subtract/scale with vector ops that are exact
+        (no floating error), decoding back to the integer. The number-theoretic view of VSA bundling. See
+        holographic_extras.ResidueSystem."""
+        from holographic.misc.holographic_extras import ResidueSystem
+        return ResidueSystem(moduli=moduli, dim=dim, seed=seed)
+
+    def vsa_region(self, center, radius):
+        """A REGION of space as a signed-distance ball with boolean algebra (holographic_extras) -- union /
+        intersect / subtract / complement of spherical regions, plus contains() and steer(). The set-algebra
+        complement to sdf_scene: compose regions of interest for selection or routing. See holographic_extras.ball
+        (and Region for the operators)."""
+        from holographic.misc.holographic_extras import ball
+        return ball(center, radius)
+
+    def predictive_filter(self, momentum=0.5, base_decay=0.9, k=4.0, warmup=6):
+        """A SURPRISE filter (holographic_extras) -- observe(vec) returns (is_novel, surprise); slow drift is
+        absorbed by a moving prediction while an abrupt change fires once. Pass only surprising observations
+        downstream, stay quiet on predictable ones -- an event gate for a stream. See
+        holographic_extras.PredictiveFilter."""
+        from holographic.misc.holographic_extras import PredictiveFilter
+        return PredictiveFilter(momentum=momentum, base_decay=base_decay, k=k, warmup=warmup)
+
+    def edit_history(self, max_depth=256):
+        """The UNDO/REDO log for an interactive edit session (holographic_edithistory) -- an EditHistory you thread
+        scene state through: `h.do(state, cmd)` applies and records, `h.undo(state)` / `h.redo(state)` walk it, all
+        bit-identical (tie-safe replay). Build commands with `vertex_move_command` / `capture_edit_command`. This is
+        what makes a modeling session undoable. See holographic_edithistory.EditHistory."""
+        from holographic.mesh_and_geometry.holographic_edithistory import EditHistory
+        return EditHistory(max_depth=max_depth)
+
+    def vertex_move_command(self, indices, delta, name="move"):
+        """A reversible VERTEX MOVE command (holographic_edithistory) for the undo log -- apply adds `delta` to the
+        given vertices, invert subtracts it (closed-form inverse, O(edit) memory). Feed to EditHistory.do. See
+        holographic_edithistory.vertex_move."""
+        from holographic.mesh_and_geometry.holographic_edithistory import vertex_move
+        return vertex_move(indices, delta, name=name)
+
+    def capture_edit_command(self, indices, new_positions, prev_positions, name="edit"):
+        """Wrap an ARBITRARY geometry edit into a reversible command (holographic_edithistory) by snapshotting the
+        before/after positions of just the touched vertices -- O(edit) memory, for edits with no cheap algebraic
+        inverse (a bevel, a smooth). Feed to EditHistory.do. See holographic_edithistory.capture_inverse."""
+        from holographic.mesh_and_geometry.holographic_edithistory import capture_inverse
+        return capture_inverse(indices, new_positions, prev_positions, name=name)
 
     def draft_vs_refine_simulation(self, kind="fluid", steps=30, draft_grid=16, refine_grid=32, seed=0):
         """MEASURE whether a coarse simulation is a draft of the fine one. Returns {draft_ms, refine_ms, speedup,
@@ -5190,6 +5777,15 @@ class UnifiedMind:
         from holographic.misc.holographic_eulerops import split_face
         return split_face(mesh, f_index, i, j)
 
+    def mesh_poke(self, mesh, f_index, height=0.0):
+        """POKE polygon face `f_index` (holographic_eulerops, FWD-7): add a vertex at the face centroid (pushed out
+        along the face normal by `height`) and fan the face into triangles, one per original edge. An n-gon becomes
+        n triangles. V+1, E+n, F+(n-1), chi unchanged -- a legal Euler edit. The 'poke faces' every modeler uses to
+        fan a quad/ngon to triangles or raise a spike; the inverse of dissolving the center vertex. Returns a new
+        Mesh. height=0 (default) keeps the center in the face plane (pure retopology, no shape change)."""
+        from holographic.misc.holographic_eulerops import poke_face
+        return poke_face(mesh, f_index, height=height)
+
     def mesh_smooth(self, mesh, lam=0.55, mu=-0.58, iters=8, weights="cotangent"):
         """Taubin lambda|mu no-shrink mesh smoothing / denoising (holographic_meshsmooth, FWD-4): the shipped
         `graphsignal.taubin_filter` WIRED onto explicit mesh geometry -- 3-D vertex positions as the signal,
@@ -5628,6 +6224,15 @@ class UnifiedMind:
         radius to cos(theta/2) (the candy-wrapper artifact) -- dual-quaternion skinning is the fix, not shipped."""
         from holographic.mesh_and_geometry.holographic_meshskin import skin_mesh as _skin_mesh
         return _skin_mesh(mesh, transforms, weights)
+
+    def skin_bind_weights(self, vertices, bones, falloff=2.0, max_influences=4):
+        """AUTO-SKIN BINDING (holographic_meshskin) -- compute per-vertex bone weights from bone anchor points, the
+        'bind' step that produces the weights skin_mesh consumes. Inverse-distance falloff to the nearest bones,
+        keeping max_influences and renormalizing to a PARTITION OF UNITY (so rigid motion is exact). The
+        distance-based auto-bind a rig starts from. Kept negative: ignores the surface (can bind across a thin gap);
+        geodesic refinement is future. See holographic_meshskin.skin_bind_weights."""
+        from holographic.mesh_and_geometry.holographic_meshskin import skin_bind_weights
+        return skin_bind_weights(vertices, bones, falloff=falloff, max_influences=max_influences)
 
     def blend_pose(self, targets, weights):
         """The forward blendshape/skinning map for STRUCTURES (holographic_blendpose, ARCH-6): a soft weighted blend
@@ -6876,13 +7481,46 @@ class UnifiedMind:
         from holographic.caching_and_storage.holographic_index import Index
         return Index(vectors, labels=labels, method=method, seed=seed)
 
-    def find_capability(self, problem, k=3):
+    def find_capability(self, problem, k=3, accepts=None, produces=None):
         """CONSOLIDATION CATALOG (C1) -- 'search before you build'. Describe a problem in plain English and get the
         engine homes that already solve it, best first, so you don't build a duplicate. The catalog is seeded with
         the consolidation homes (Index/Cache/Field/...) AND this mind's own public faculties (their docstrings), so
         both curated homes and live methods are findable. Returns a list of holographic_catalog.Capability (each has
-        .name, .does, .example, .native). See holographic_catalog."""
-        return self._capability_catalog().find_capability(problem, k=k)
+        .name, .does, .example, .native, .semantic, .consumes, .produces).
+
+        S3 io-shape filter: `accepts='mesh'` keeps only capabilities that consume a mesh ('what can I run on this
+        mesh?'); `produces='mesh'` keeps only those that yield one. Untagged capabilities are unspecified and always
+        shown. See holographic_catalog."""
+        return self._capability_catalog().find_capability(problem, k=k, accepts=accepts, produces=produces)
+
+    def find_capability_uris(self, problem, k=3):
+        """Like find_capability, but each result is annotated with its disambiguating capability URI(s) so a caller
+        NEVER gets a bare ambiguous name (holographic_catalog + holographic_capuri). Returns [{name, does, example,
+        uris}] where `uris` is the full path(s) the name resolves to -- one for a unique name, several for a
+        colliding one (e.g. 'rotation' -> both meshskin and scenegraph). The collision fix at the discovery layer:
+        the agent sees the path to supply, not just the name. See holographic_catalog.find_capability_uris."""
+        return self._capability_catalog().find_capability_uris(problem, k=k)
+
+    def suggest_pipeline(self, start_kind, goal_kind, max_len=4, require_step=False):
+        """Propose a PIPELINE from `start_kind` to `goal_kind` (io kinds, see holographic_iokinds) by chaining
+        capabilities whose `produces` feeds the next's `consumes` (holographic_catalog). Returns the shortest chain
+        as a list of {name, consumes, produces} steps, or None if no route within `max_len`. The render-graph idea
+        over the whole catalog: instead of one capability, the engine proposes a ROUTE -- e.g. 'transform'->'selection'
+        chains transform_selection then mesh_selection. Answers 'how do I get from what I have to what I want?'.
+
+        `require_step=True` on a same-kind query ('mesh'->'mesh') demands a real TRANSFORMING edge (mesh_smooth,
+        mesh_subdivide, ...) instead of the empty 'already there' pipeline -- the 'what can I DO to a mesh?' answer.
+        See holographic_catalog.suggest_pipeline."""
+        return self._capability_catalog().suggest_pipeline(start_kind, goal_kind, max_len=max_len,
+                                                           require_step=require_step)
+
+    def io_kinds(self):
+        """The closed vocabulary of io DATATYPE kinds a capability can consume/produce (holographic_iokinds) --
+        mesh, points, sdf, sdf_scene, field, image, hypervector, transform, selection, scalar, curve, skeleton.
+        These are the kinds the find_capability accepts=/produces= filter and suggest_pipeline route over. Coarse on
+        purpose: the fine distinctions live in each capability's docstring. See holographic_iokinds.IO_KINDS."""
+        from holographic.caching_and_storage.holographic_iokinds import IO_KINDS
+        return list(IO_KINDS)
 
     def find_scored(self, problem, k=3):
         """Like find_capability, but returns [(capability, score)] -- so a caller can tell a HIT from a FALLBACK.
@@ -10142,9 +10780,11 @@ class UnifiedMind:
         return Mesh(Q, [tuple(f) for f in base.faces]) if is_mesh else Q
 
     def timeline(self):
-        """A keyframe Timeline: `.key(channel, t, value)` then `.sample(channel, t)` for the lerp-interpolated
-        value at time t (t may be an array -- vectorised). Key blendshape weights, deform params, or transforms
-        and drive the animation from it. See holographic_anim.Timeline."""
+        """A keyframe Timeline (holographic_anim): `.key(channel, t, value, interp='linear')` then
+        `.sample(channel, t)` for the interpolated value at time t (t may be an array -- vectorised). EASING per key:
+        interp='linear' (default), 'step' (hold), 'smooth' (ease in-out), 'ease_in', or 'ease_out' -- the ease in
+        ease out of an animation curve. Key blendshape weights, deform params, or transforms and drive the animation
+        from it. See holographic_anim.Timeline."""
         from holographic.misc.holographic_anim import Timeline
         return Timeline()
 

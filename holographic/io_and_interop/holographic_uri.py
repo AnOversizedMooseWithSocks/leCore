@@ -64,6 +64,23 @@ def parse_key(key, order=DEFAULT_ORDER, kv=False, delim="/"):
     return {order[i]: segs[i] for i in range(min(len(order), len(segs)))}
 
 
+def common_prefixes(keys, prefix="", delim="/", counts=None):
+    """The distinct next-level segments under `prefix` -- S3's CommonPrefixes roll-up, i.e. the 'folders' one
+    level down -- over ANY flat collection of slash-delimited `keys`. Returns {rolled_up_prefix: count}, sorted.
+    `counts` optionally maps each key to a weight (e.g. how many records live at that key); default weight 1.
+    Extracted from FacetStore so the same roll-up serves any URI namespace (capability paths, scene keys, files)
+    -- one implementation, not a per-substrate copy. Pure, deterministic."""
+    out = {}
+    for k in keys:
+        if not k.startswith(prefix):
+            continue
+        rest = k[len(prefix):]
+        seg = rest.split(delim, 1)[0]
+        cp = prefix + seg + (delim if delim in rest else "")
+        out[cp] = out.get(cp, 0) + (counts.get(k, 1) if counts else 1)
+    return dict(sorted(out.items()))
+
+
 # ======================================================================
 # the store  --  a flat keyspace with prefix listing (like S3).
 # ======================================================================
@@ -89,18 +106,11 @@ class FacetStore:
         return [r for k in sorted(self.flat) if k.startswith(prefix) for r in self.flat[k]]
 
     def common_prefixes(self, prefix="", delimiter=None):
-        """The distinct next-level segments under `prefix` -- S3's CommonPrefixes
-        roll-up, i.e. the 'folders' one level down."""
+        """The distinct next-level segments under `prefix` -- S3's CommonPrefixes roll-up, i.e. the 'folders' one
+        level down. Delegates to the module-level common_prefixes (one shared roll-up for every URI namespace)."""
         d = delimiter or self.delim
-        out = {}
-        for k in self.flat:
-            if not k.startswith(prefix):
-                continue
-            rest = k[len(prefix):]
-            seg = rest.split(d, 1)[0]
-            cp = prefix + seg + (d if d in rest else "")
-            out[cp] = out.get(cp, 0) + len(self.flat[k])
-        return dict(sorted(out.items()))
+        counts = {k: len(self.flat[k]) for k in self.flat}
+        return common_prefixes(self.flat.keys(), prefix=prefix, delim=d, counts=counts)
 
     def bucket(self, key):
         return self.flat.get(key, [])

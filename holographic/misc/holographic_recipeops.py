@@ -105,8 +105,14 @@ def _template_problems(template, op_pos):
 def validate(recipe):
     """Check a recipe is WELL-FORMED -- the recipe's is_manifold(). Every op must reference only EARLIER, existing
     results (the build-graph is a DAG: no forward, dangling, or out-of-range references); raw indices and repeat
-    templates must be in range. Returns (ok, problems) where `problems` is a list of human-readable strings (empty
-    iff ok)."""
+    templates must be in range; every DECLARED OUTPUT must point to a produced result; and set-ops (bundle/
+    superpose) must have a non-empty member list. Returns (ok, problems) where `problems` is a list of
+    human-readable strings (empty iff ok).
+
+    WHY the output + arity checks (ARCH-1 hardening): a recipe that marks output #99 when only 1 result exists, or
+    a bundle over an empty member list, PASSES the DAG-reference check but CRASHES at build time -- validation
+    that lets a build-time crash through is not doing its job. These are additive: all previously-accepted recipes
+    still validate; only genuinely broken ones that used to slip through are now caught."""
     problems = []
     count = 0                                              # results that exist BEFORE the current op
     for p, op in enumerate(recipe._ops):
@@ -116,6 +122,9 @@ def validate(recipe):
             refs = [op[1], op[2]]
         elif kind in ("bundle", "superpose"):
             refs = list(op[1])
+            # a set-op over NO members produces nothing meaningful and divides by zero at build -- catch it here.
+            if len(refs) == 0:
+                problems.append(f"op {p}: {kind} has an empty member list -- nothing to combine")
         elif kind in ("permute", "normalize"):
             refs = [op[1]]
         elif kind == "raw":
@@ -134,6 +143,13 @@ def validate(recipe):
                 problems.append(f"op {p}: reference {r} points to a not-yet-produced result (>= {count}) "
                                 f"-- forward/dangling reference")
         count += op[1] if kind == "repeat" else 1
+
+    # DECLARED OUTPUTS must point to results that actually exist (else the recipe crashes when asked to build
+    # them). `count` is now the total number of produced results. An out-of-range output is a dangling promise.
+    for oi in getattr(recipe, "_outputs", []):
+        if not isinstance(oi, (int, np.integer)) or oi < 0 or oi >= count:
+            problems.append(f"output {oi} points to a non-existent result (have {count}) -- dangling output")
+
     return (len(problems) == 0, problems)
 
 
@@ -198,6 +214,19 @@ def _selftest():
     bad_ok, bad_problems = validate(bad)
     assert not bad_ok and bad_problems, "validate must reject a forward/dangling reference"
 
+    # --- ARCH-1 hardening: validate must also reject a DANGLING OUTPUT and an EMPTY set-op, both of which pass the
+    #     DAG-reference check but fail downstream (a dangling output crashes outputs() with IndexError; an empty
+    #     bundle silently produces a degenerate ZERO vector -- worse than a crash). ---
+    dangling = _clone(r)
+    dangling._outputs = list(dangling._outputs) + [99]     # promise an output that does not exist
+    d_ok, d_problems = validate(dangling)
+    assert not d_ok and any("dangling output" in p for p in d_problems), "validate must reject a dangling output"
+    empty = _clone(r)
+    empty._ops.append(("bundle", []))                      # a set-op over no members
+    empty._outputs = [len(empty._ops) - 1]
+    e_ok, e_problems = validate(empty)
+    assert not e_ok and any("empty member list" in p for p in e_problems), "validate must reject an empty set-op"
+
     # --- commute_bind: vector unchanged (FFT precision), its own inverse, still valid ---
     flipped = commute_bind(r, ab)
     assert validate(flipped)[0]
@@ -224,9 +253,10 @@ def _selftest():
     assert np.array_equal(commute_bind(r, ab).outputs()[0], commute_bind(r, ab).outputs()[0])
 
     print("holographic_recipeops selftest: ok (the recipe's Euler operators: validate accepts well-formed + "
-          "REJECTS a dangling reference; commute_bind preserves the vector and is its own inverse; reorder_members "
-          "preserves the vector and inverts by the inverse perm; substitute_atom changes the result and reverses "
-          "exactly; deterministic)")
+          "REJECTS a dangling reference, a DANGLING OUTPUT (crashes outputs()), and an EMPTY set-op (degenerate "
+          "zero vector); commute_bind preserves the vector and is its own inverse; reorder_members preserves the "
+          "vector and inverts by the inverse perm; substitute_atom changes the result and reverses exactly; "
+          "deterministic)")
 
 
 if __name__ == "__main__":

@@ -28359,6 +28359,54 @@ discoverable. Delta: +1 faculty (sample_from), 3 duplicate sampler loops removed
 test. Budgets: audit 0/0/0, collisions 42/42, wired 387. The merged feature is now fully generalized: ONE sampler,
 every generator delegates, directly callable.
 
+---
+
+## MISSING BRANCH RECORD, recovered (holographic_tokensample) -- the ORIGINAL design/measurement note
+
+[Recovered later: the branch was merged (see the reconciliation note directly above) but this primary record --
+the branch's own writeup of the WHY and the measured evidence -- was not copied into NOTES at merge time. Preserved
+here verbatim as ground truth; the merge note above refers back to these numbers.]
+
+### Token sampling: the generation dual of prediction (holographic_tokensample)
+
+SHIPPED: `holographic_tokensample.sample_from_distribution` (temperature + nucleus over any
+{symbol: weight} distribution -- PROMOTED from the char generator's inline sampler, not reinvented),
+`PredictiveMemory.next_distribution / sample / generate_sampled`, and the mind faculties
+`sample_instruction` / `sample_recipe` over the recipe grammar. Catalog-registered (5/5 stranger
+phrasings), HTTP /tools + /invoke round-trip proven, 9 new pytest contracts.
+
+WHY (measured): a deterministic next-symbol predictor LIMIT-CYCLES as a generator. Transform-recipe
+corpus: greedy MMD2 0.599 vs 0.011 sampled, 15x verbatim-copy, net rotation 8x real. Real physics
+traces (record_physics_trace): greedy emits the mode forever -- zero bounce events on a 98.5%-'g'
+stream. Sampled T=1.0 reproduced bounce rate within 7% and run-length quantile distance 208 -> 7.8.
+Rule: prediction may argmax; generation must sample.
+
+KEPT NEGATIVES (loud, in the docstrings):
+  * Heavy-tailed alphabets: nucleus/low-T silently DELETE rare events (top_p=0.95 removed every
+    collision from generated physics). Safe default there: T=1.0, top_p=1.0. top_p must exceed
+    1 - (rare-event mass).
+  * Well-formedness is the CALLER's job: 18% of raw emissions violated run/event alternation, merging
+    adjacent runs and destroying residual autocorrelation (+0.29 -> +0.12); enforcing alternation in
+    the decode loop recovered it (+0.15 vs +0.02 null, AR(1) decode beating pooled bins 9x).
+  * T -> 0 underflows weight**(1/T) to zero mass; guarded by argmax fallback (which is what T->0 means).
+    The self-test caught this before ship.
+  * Discretize-or-round decode pays a correlation tax regardless of model: fitted AR phi=0.29 survives
+    emission at ~50%. Quantified across three independent decode designs; continuous state helps,
+    rounding still taxes.
+  * Fractional spectral powers of a GENERIC unitary are branch-ambiguous ((T^0.5)^2 != T, err 0.11) --
+    the wrap bug at operator level, 4th sighting. Integer powers exact (k=1000 jump: 58x, 4.3e-13);
+    fractional only where a continuous log exists.
+
+Test-count delta: +9 (tests/test_holographic_tokensample.py); suite collects 4,991.
+
+ROUTING BUG FOUND & FIXED BY DOGFOODING THE SAMPLER (holographic_predictive._correct): reinforce/nudge
+gated on SURPRISE alone, so a prediction that happened to be right reinforced the nearest SAME-SUCCESSOR
+entry even at context similarity ~0 -- a (ctx -> next) transition identical to a stored one read back as
+an EMPTY distribution (its mass absorbed by the zero-context row). Fix: reinforce/nudge now also require
+best_s >= novelty_threshold ("nearest MATCHING entry" must actually match); below that line the context
+is a new home. Pinned by test_repeated_recipe_context_is_stored_not_absorbed. Real-pipeline effect:
+AR-decode resCorr +0.150 -> +0.166 (10x its null). Test-count delta now +10.
+
 ## CI FIX: two reported failures + one latent stale pin the merge carried in
 
 CI showed 2 failures (both pre-existing in the merged branch, not caused by recent work); fixing the second
@@ -28780,3 +28828,1097 @@ Delta: +1 module (holographic_shapefromshading), pipeline faculties confirmed wi
 
 Also this session: fixed the FOUR ascii aspect bugs (subject/metric/camera/rasterizer -- see the ascii-aspect NOTE
 above); pinned a sphere-roundness regression; shipped W19_cube_calibration.png as the ascii reference.
+
+## ABSTRACTION LADDER: iq review + L1/L3/L4 shipped
+
+Showed the abstraction-ladder plan (PLAN_abstraction_ladder.md) to the iq panel seat. iq's review added FOUR
+techniques, each a real published Quilez method mapped onto ladder machinery (ladder_iq_review.md):
+- Q5 "don't march empty space": a CONSERVATIVE gain pre-gate (zlib redundancy) prunes a level that cannot pay
+  BEFORE the expensive promotion pass. Built into L1's runner.
+- Q6 carry-the-derivative (analytic gradient noise): §3e diagnostics should return (value, sensitivity) where
+  the measurement is already differential. Deferred to L8.
+- Q7 temporal reprojection: the streaming climb is reprojection of the TOWER -- reuse the previous window's tower
+  as a prior. Reserved as climb(prior_tower=) from day one (raises NotImplementedError in L1; batch path proven).
+- Q8 band-limit the alphabet (analytic prefiltering): coarse-SNAP bakes must be low-passed to the coarse rate or
+  two generators alias to one signature. Deferred to L13/L14 (§3j/§3k).
+
+SHIPPED (holographic_ladder, agents_and_reasoning):
+- L1: climb(corpus, lens, max_depth, min_gain) -- consolidate/promote/re-alphabet via the chunk codebook
+  (learn_chunks, delegated -- NO new math), MDL bit gate stops the climb; a shallow ceiling is a RESULT logged
+  loudly. Stable atom ids = hashlib over (child ids, depth) -- reproducible across sessions (sweep-mandated).
+  Level isolation: contamination_check verifies no atom id shared across levels (shared-kernel lesson enforced).
+  Q5 zlib pre-gate + Q7 prior_tower reservation folded in.
+- L3: mind.climb_ladder + mind.ladder_summary faculties; catalog "Abstraction ladder (climb)" with all 6 plan
+  stranger-aliases resolving (level up my representation / find hierarchy / automatic abstraction / recursive
+  chunking / build a tower of patterns / keep compressing until it stops paying).
+- L4: retrofit integration test -- climbs a real workflow stream (the codebook's own validation data) and
+  compresses; refuses on pure noise; atom ids bit-identical across two climbs.
+
+MEASURED: planted 2-level corpus compresses 80.3% at depth 1 then STOPS (depth 2 refused at -3.8%); pure noise
+refused at depth 0 (-18.9%). One BPE pass captures multi-level structure internally, so "2-level planted" lands
+as one big rung + a stop -- the contract is 'big compression then a logged stop', not a fixed depth.
+
+KEPT NEGATIVE: zeroth-order entropy is the WRONG pre-gate bound -- it roughly equals current bits (both are
+zeroth-order), so it made every climb refuse at depth 0. Fixed to a zlib-redundancy bound (zlib finds repeated
+substrings, the same thing pair-promotion does), which is a cheap honest proxy for achievable gain.
+
+REMAINING ladder items (not yet built): L2 structure lens, L5 up/down/sideways sweep, L6 tools/kit_gaps.py, L7
+fuse-promotion, L8 identify_level (+Q6), L9 object×transform bank, L10 guide_structure, L11 shape registry + MI
+faculty, L12 assemble_pipeline, L13 chart_space (+Q8), L14 fit_deterministic (+Q8). Wired 395.
+
+## ABSTRACTION LADDER: L2 (structure lens) + L8 (identify_level) shipped
+
+L2 STRUCTURE LENS: added an order-INDEPENDENT lens (_structure_lens_promote) alongside the sequence lens, and
+refactored climb() to dispatch on lens={sequence,structure}. The structure lens promotes co-occurring SETS (a
+scene is a bag of parts; two scenes with the same parts in any order are the same scene) -- the canonical-element
+move, honoring the pinned negative that concatenation gives zero decomposability (promote sets, not strings).
+MEASURED: on an instanced scene with parts in SHUFFLED order, the structure lens compresses 86% (4 levels,
+5641->782 bits) while the SEQUENCE lens refuses immediately (0 gain) -- because the shuffle destroyed positional
+adjacency. Same data, opposite verdicts: the lens IS the choice of what counts as adjacent, never guessed.
+
+L8 identify_level: 'what am I looking at' -- classifies a corpus by which ladder ops pay, returning MEASUREMENTS
+not a label: compressible / gain_over_null / hit_rate / order_dependent / lens (picked, not guessed) / regime
+(repetitive / nested-structured / irreducible, Wolfram's taxonomy as a measurement) / compress_sensitivity
+(Quilez Q6 -- free derivative from a half-budget and full-budget pass). The step-0 question of a climb; wired as
+its own faculty (agents ask 'what is this' constantly).
+
+KEPT NEGATIVE (the plan's 'high-D noise has basins too', hit for real): the STRUCTURE lens over-compresses noise
+-- ~5 symbols drawn from an alphabet of 16 make many pairs co-occur BY CHANCE, so struct_gain on pure noise was
++0.177 (vs the sequence lens's honest -0.144). identify_level first tried a threshold on raw gain and called noise
+'nested/structured'. FIX: a SHUFFLE-NULL computed with the WINNING lens -- real structure survives the shuffle,
+chance co-occurrence cancels. After the fix, three noise seeds all read gain_over_null ~+0.01 (< the 0.05 floor)
+-> regime='irreducible'. A region counts as structure only above the matched random null.
+
+Also a test-bug caught: np.random.default_rng(seed) INSIDE a list comprehension re-seeds every iteration, making a
+degenerate low-entropy 'noise' corpus that legitimately compresses. Use one rng.
+
+Delta: +1 lens, +1 faculty (identify_level), +2 integration tests. Wired 395 (same module). Budgets 0/0/0, 42/42.
+Remaining: L5 sweep, L6 kit_gaps tool, L7 fuse-promotion, L9 obj×transform bank, L10 guide_structure, L11 shape
+registry+MI, L12 assemble_pipeline, L13 chart_space (+Q8), L14 fit_deterministic (+Q8).
+
+## ABSTRACTION LADDER: L6 (kit_gaps) shipped -- the invariant kit made real + enforced
+
+L6: every LEVEL now carries an invariant kit (§3a) via _level_kit -- 14 slots (delta/chunk/scale/decompose/
+cleanup/bake/seed/tile/lod/canonical/cache/fuse/superpose/guide), each either WIRED (names the primitive it
+delegates to) or a DECLARED NEGATIVE (a reason prefixed 'no ', e.g. structure-lens 'no lod: unordered set has no
+coarsening order'; small-alphabet 'no tile'; fuse->L7 and guide->L10 declared-negative until built). kit_report(
+level) classifies each slot WIRED / DECLARED-NEGATIVE / SILENT-GAP. New tools/kit_gaps.py (sibling of
+catalog_gaps.py) climbs representative corpora and exits non-zero on ANY silent gap. Target 0, achieved. This
+turns 'we also do X at every level' from a memory into an enforced budget, exactly as the reachability audit did
+for wiring. Wired mind.ladder_kit_report; +1 integration test (regression trap: 0 silent gaps).
+
+NICE PROPERTY the kit surfaced: the sequence lens offers progressive 'lod' (coarse alphabet first) but the
+STRUCTURE lens correctly declares 'no lod' -- an unordered set of parts has no natural coarsening order. The kit
+makes each lens's per-slot decisions explicit and reviewable rather than implicit.
+
+LADDER STATUS: L1 (runner + sequence lens + Q5 pre-gate + Q7 reservation + stable ids + isolation), L2 (structure
+lens), L3 (faculty + catalog), L4 (retrofit), L6 (kit_gaps), L8 (identify_level + Q6 + shuffle-null) all shipped
+and audited. Add tools/kit_gaps.py to the standard pre-zip audit battery. Wired 395. Budgets 0/0/0, 42/42.
+REMAINING: L5 sweep, L7 fuse-promotion, L9 obj×transform bank, L10 guide_structure, L11 shape registry+MI, L12
+assemble_pipeline, L13 chart_space (+Q8), L14 fit_deterministic (+Q8).
+
+## ABSTRACTION LADDER: L11 (mutual information) + L10 (guide_structure) shipped
+
+L11 MI: holographic_mutualinfo -- mutual_information(x,y) (histogram, quantile-binned) + mutual_information_vs_null
+(the honest one): raw MI is biased upward by finite samples (even independent signals show apparent MI), so the
+useful number is MI ABOVE A SHUFFLE NULL, reported as a z-score. MEASURED: a nonlinear dependence clears at z>400;
+an independent pair sits at z~-0.9; null_mean ~0.04 bits confirms the bias the null guards. Raw MI without its null
+is a Rorschach test. Wired mind.mutual_information + mind.mutual_information_vs_null. This is the gate L12's pipeline
+assembler needs (the plan flagged it as a first-class-citizen gap).
+
+L10 guide_structure: holographic_guide -- the LEVEL-GENERIC 'iterate a projection'. IK, PBD, PnP/RED, and the SBC
+resonator are all the same move (Macklin): repeatedly project a state onto a constraint set until it settles. The
+iterator already existed (meshik.project_onto_constraints); what was missing was the discoverable generic NAME plus
+constraint builders (guide_pin / guide_clamp_link / guide_snap). PROVEN cross-faculty: ONE solver drives an IK/PBD
+chain (root->target, links clamped, converges) AND a resonator-style codebook snap (residual 0). IK stops being an
+animation feature and becomes 'move this thing legally toward a goal'. Pure delegation -- no new solver.
+
+Both wired, cataloged (4/4 discoverable each), integration-tested. Wired 397 (two new modules). Budgets 0/0/0,
+42/42, kit_gaps clean. With MI + guide_structure both live, the two prerequisites for L12 (assemble_pipeline: FABRIK
+on the faculty graph + shuffled-baseline validation gate) are in place.
+REMAINING: L5 sweep, L7 fuse-promotion, L9 obj×transform bank, L11 shape-registry half, L12 assemble_pipeline, L13
+chart_space (+Q8), L14 fit_deterministic (+Q8).
+
+## ABSTRACTION LADDER: L12 (assemble_pipeline) shipped -- the honest gate, not the framework
+
+L12: holographic_assemble -- given an input x, a target output y, and a dict of candidate transforms, find which
+ACTUALLY connect them. Deliberately NOT a typed-graph framework (§7 forbids framework-chasing); the load-bearing
+part is the VALIDATION GATE: each candidate is scored on a HELD-OUT segment (search overfits its own tests) AND
+gated by MI-over-shuffle-null (does the REAL input drive the output more than a shuffled one?). A candidate passes
+only if it clears the null -- otherwise it's chance alignment. MEASURED: the true tanh transform found at z=82;
+a fixed random-projection DECOY rejected; an independent target yields no strong survivor. This is the
+'any random projection works' failure (the routing-'win' lesson, new hat) stopped by construction. Reuses L11's MI
+gate + would use L10's guide for parametric refinement. Wired mind.assemble_pipeline; cataloged; integration-tested.
+
+LADDER STATUS: L1 (runner+sequence lens), L2 (structure lens), L3 (faculty+catalog), L4 (retrofit), L6 (kit_gaps),
+L8 (identify_level), L10 (guide_structure), L11 (mutual_information), L12 (assemble_pipeline) all shipped. Plus
+iq's Q5 (pre-gate) and Q7 (reservation) folded in; Q6 (sensitivity) in identify_level. Wired 398. Budgets 0/0/0,
+42/42, skill_lint + kit_gaps clean. 10 ladder integration tests green together.
+REMAINING: L5 sweep, L7 fuse-promotion, L9 obj×transform bank, L11 shape-registry half, L13 chart_space (+Q8),
+L14 fit_deterministic (+Q8). The deterministic-fit (L14) and cartography (L13) are the last big conceptual pieces.
+
+## ABSTRACTION LADDER: L14 (fit_deterministic) shipped -- the inverse of the ladder, with Quilez Q8
+
+L14: holographic_fitgen -- given a noisy 1-D signal, recover the deterministic GENERATOR that made it. SNAP the
+data against a baked bank of generator families (sine/chirp/gauss/sawtooth) via band-limited correlation, then
+REFINE the winning family's params by local search (iterate-a-projection on the parameter axis). RESIDUAL GATE:
+if the regenerated signal explains the data (corr > 0.5) store (family, params) -- bytes not samples; else REFUSE
+('no deterministic structure' is a result). MEASURED: noisy sine -> 'sine' corr 0.99 freq recovered exactly; noisy
+chirp -> 'chirp' not sine; pure noise REFUSED 8/8 seeds (the rich-bank-fits-anything guard holds).
+
+QUILEZ Q8 BUILT IN (his analytic-prefiltering): signatures are BAND-LIMITED (low-passed to the coarse rate) before
+comparison, so two families that differ only above that rate tie honestly instead of one winning on aliased detail.
+The band-limited grain also fixed a real bug: a chirp's phase drifts over a long window, so point-wise correlation
+unfairly failed a near-correct fit -- verifying at the band-limited grain (the grain the snap trusts) is the honest
+check; fine phase is what a finer bank resolves, not a lucky point sample.
+
+LADDER STATUS -- 10 of 14 rungs shipped: L1 (runner+sequence lens), L2 (structure lens), L3 (faculty+catalog),
+L4 (retrofit), L6 (kit_gaps tool), L8 (identify_level), L10 (guide_structure), L11 (mutual_information),
+L12 (assemble_pipeline), L14 (fit_deterministic). iq's Q5 (pre-gate), Q6 (sensitivity in identify_level),
+Q7 (prior_tower reservation), Q8 (band-limited fit) all folded in. Wired 399. Budgets 0/0/0, 42/42, skill_lint +
+kit_gaps clean. REMAINING: L5 (up/down/sideways sweep -- analysis), L7 (fuse-promotion -- needs purity gate),
+L9 (obj×transform bank), L11 shape-registry half, L13 (chart_space cartography). These are the last pieces; L7 and
+L13 are the two remaining substantial builds.
+
+## ABSTRACTION LADDER: up/down/sideways sweep (L5) -- one real gap found and closed
+
+Ran the up/down/sideways sweep on the shipped ladder capabilities. Classified each direction honestly:
+
+DOWN (components of its own input/output) -- REAL GAP FOUND + CLOSED. The ladder compressed a corpus into a
+tower but had NO way to DECOMPRESS it. Worse, kit_report CLAIMED the 'decompose' slot 'round-trips by
+construction' with no function to prove it -- the sweep caught an unverified claim. Built reconstruct_corpus(tower)
+(faculty mind.reconstruct_tower): walks every level's child map, recursively expanding promoted ids to base
+symbols. MEASURED: sequence-lens tower round-trips EXACTLY (200/200 sequences, reconstruct(climb(corpus))==corpus).
+A tower you cannot decompress is useless; now it is the compress+decompress pair.
+  KEPT NEGATIVE surfaced: the STRUCTURE lens does NOT round-trip -- it dedupes groups to SETS on entry, so it
+  recovers the set of base part-TYPES, not order or multiplicity. My first docstring overclaimed 'set-expansion
+  preserving order'; corrected to state the true set-semantics loudly (the structure lens answers 'which parts',
+  not 'how many, in what order' -- its whole premise). Fixed the decompose kit slot to be honest per-lens.
+
+SIDEWAYS (field/program costumes) -- COVERED, do NOT build. Probed 'climb an image into patches': a tokenized
+field (64 patches with 2 repeating tiles) climbs to depth 1 via the EXISTING sequence lens, compressing 64->2.
+The ladder needs no 'field lens' -- that would reinvent the sequence lens in a costume. The only gap is a
+patch-tokenizer, which is a VISION concern, not a ladder concern. The sweep PREVENTED a redundant faculty.
+
+UP (input as a component of something larger) -- DEFERRED, correctly. Tower alignment (two corpora climbed
+separately -- do their levels correspond?) returns only fallbacks. This is structure-mapping / the model-
+assimilation question pointing inward. Bigger than a rung; the plan already deferred it and the sweep confirms:
+alignment must beat the §3i assembler baseline before it earns a module. Named, not silently skipped.
+
+NAME COLLISION caught by the audit: reconstruct() collided with holographic_ratedistortion.reconstruct (different
+op, same English word). Renamed the ladder function to reconstruct_corpus (faculty stays mind.reconstruct_tower).
+Collisions back to 42/42.
+
+Delta: +1 faculty (reconstruct_tower), +1 integration test, sweep verdict recorded (1 built, 1 covered, 1
+deferred). Wired 399. Budgets 0/0/0, 42/42, kit_gaps 0.
+
+## ADAPTIVE PIPELINE: the panel convergence -- ladder machinery utilized for denoise/demux/decompose dispatch
+
+Showed the ladder/lens/identify_level machinery to four panel seats (grounded in the roster) for how to utilize it
+in denoise/demux/decompose/adaptive-pipeline work. Review: ladder_integration_panel_review.md. All four converge
+on ONE build:
+- SETI (Tarter/Siemion): the shuffle-null IS the job -- refuse on null-indistinguishable input; a cleaned version
+  of noise is a fabricated signal. Report a novelty score in null-sigmas. (Continuous-signal upgrade named:
+  phase-randomized null preserving the power spectrum, not just a permutation.)
+- Puckette (audio): the lens IS the STFT window -- pick it per-signal, don't hard-code. fit_deterministic's
+  generator bank is a resynthesis codebook (analysis=resynthesis). Caution: band-limited snap misses transients;
+  keep the residual loud.
+- Milanfar (denoise, adjacent): a level's cleanup IS a denoiser for that level -- level-aware denoise strength
+  from the identified regime. Underlines the shared-kernel-is-not-a-shared-manifold negative.
+- Quilez (demoscene): the adaptive pipeline is his dispatch table -- regime -> method, with a cost overlay; the
+  four regimes identify_level reports ARE his taxonomy (repetitive->fold, nested->climb, irreducible->refuse).
+
+SHIPPED: adaptive_pipeline(corpus, null_margin=0.05) in holographic_ladder -- runs identify_level, then dispatches:
+ABSTAIN if gain_over_null < null_margin (SETI gate, never clean noise), FOLD if repetitive (Quilez cheap method),
+CLIMB if nested/structured with the lens PICKED per-signal (Puckette), store_raw for weak-but-above-null. Returns
+{method, regime, lens, gain_over_null, reason, tower/dominant} -- a readable, refusable dispatch on numbers already
+computed, no new learner. MEASURED: planted->climb/sequence, instanced scene->climb/structure, noise->abstain (with
+the gain_over_null on record), repetitive->fold. Wired mind.adaptive_pipeline; cataloged; integration-tested. 18
+ladder integration tests green together. Wired 399. Budgets 0/0/0, 42/42, skill_lint + kit_gaps clean.
+
+NAMED FOLLOW-ONS (per panel, each earns its baseline): phase-randomized null for continuous signals (SETI);
+oscillator/formant/noise-band families in the fit_deterministic bank + keep-the-transient-residual (Puckette);
+level-aware denoise strength from regime (Milanfar); cost overlay on the dispatch branches (Quilez).
+
+## CI FIX: exact-alias discoverability regression (find_capability ranking)
+
+CI failed on test_ascii_projection_renders_the_engines_own_raymarch_output: assert any('ascii_view' in c.name for
+c in find_capability('render image to terminal')) was False. Investigated with Rule 0 against the uploaded
+baseline repo.zip -- the test was ALREADY failing there (baseline returned render_frame_delta/mesh/scene; my
+catalog work had actually improved it to the ascii_* family, just not ascii_view specifically). So a pre-existing
+bug, not introduced this session.
+
+ROOT CAUSE (not a test patch -- fixed the scorer): 'render image to terminal' is an EXACT alias of ascii_view,
+but find_capability tokenizes the query into {render,image,terminal} and scores by word-overlap. All four ascii
+capabilities (view/animate/field/sdf) mention those words in their does, so ALL tied at score 3.0 with name_hits=0,
+and the alphabetical tie-break (animate<field<sdf<view) pushed ascii_view to position 4 -- off the default k=3.
+The exact-alias phrase token was kept in the haystack but the multi-word query never matches it as a single token.
+
+FIX: an EXACT-ALIAS BONUS (+5.0) in both find_capability and find_scored -- if the normalised whole query equals
+one of a cap's aliases, that is the strongest possible signal (a stranger typed the exact phrase we anticipated),
+so it wins decisively over siblings that merely scatter the same words. ADDITIVE: only raises exact matches, never
+demotes -- so no previously-findable capability became unfindable. MEASURED broadly: 'render image to terminal' ->
+ascii_view #0; and the ladder's own exact aliases ('build a tower of patterns'->ladder, 'decompress a
+tower'->reconstruct_tower, 'classify a corpus'->identify_level, 'preview an sdf in the terminal'->ascii_sdf) all
+now hit #0. 94 catalog/skill/capability tests + 17 ascii/ladder tests green; the one [0]-asserting test (widget
+job) is unaffected (its query is not an exact alias). Trapped as a regression test
+(test_exact_alias_phrase_ranks_into_top_k): exact-alias match must rank position 0 over tied siblings, and the
+bonus is surgical (a non-exact query fires no bonus). Budgets 0/0/0, 42/42.
+
+## FORECASTING: the compression<->prediction duality -- ladder machinery pointed at the future
+
+Consulted the panel on forecasting with the lens/ladder tech. Rule 0 first: forecasting is NOT greenfield -- the
+engine already has forecast/next_symbol/calibrate_forecast/conformal/anticipate. The real gap: NONE of that
+prediction machinery uses the ladder's learned HIERARCHICAL alphabet (next_symbol is a FLAT n-gram). Review:
+ladder_forecast_panel_review.md. Panel convergence (real published positions):
+- SETI (Tarter/Siemion): a forecast that can't beat PERSISTENCE above the null is a null result -- abstain. The
+  time-series null is NOT a shuffle (that destroys the autocorrelation persistence exploits); persistence +
+  phase-randomized null is the honest baseline. [continuous phase-randomized null: named follow-on, needed twice now]
+- Puckette (audio): prediction = phase-vocoder resynthesis one hop past the end; a predicted chunk should be
+  PLAYABLE. Wants extend_generator (a fitted oscillator evaluated at future t).
+- Quilez (demoscene): a fitted generator forecasts for free (evaluate at future t); a repetitive signal repeats
+  for free (domain-fold). Same dispatch as compression.
+- Plate (HRR): predict-next is trajectory-association over CHUNKS not raw symbols (shorter, cleaner cleanup).
+- Cranmer (particle physics): an uncalibrated forecast is not a measurement -- held-out beats_persistence is the
+  honest measured signal, and it composes with the existing conformal wrapper.
+
+SHIPPED:
+- ladder_predict(history, order=2, null_margin=0.02): hierarchical next-CHUNK predictor over the learned alphabet
+  (compression<->prediction duality). Predicts a whole learned pattern per step, backs off to shorter context on a
+  weak match. THE GATE: measures beats_persistence on a HELD-OUT tail and ABSTAINS to persistence when it can't
+  beat 'next = last' -- no fabricated trends. MEASURED: periodic [0,1,2,3]*40 -> ladder, beats persistence 100%
+  (persistence gets 0% since next != last on a cycle), predicts the correct next symbol; nested motifs -> beats 90%;
+  pure noise -> falls to persistence, beats_pers < 0 (honest).
+- extend_generator(fit, n_ahead, original_length): forecast by playing a fit_deterministic generator PAST its data
+  (store the formula, play the future). Carries the fit's validity window -- flags valid=False beyond t=2.0 (a
+  generator fit on [0,1] at t=100 is confident nonsense). MEASURED: fitted sine plays forward corr 1.00; far
+  extrapolation flagged invalid; refused fit not extended.
+
+KEPT NEGATIVE (a real bug fixed): compression wants MAXIMAL chunking but prediction wants MODERATE chunking -- a
+perfectly periodic signal collapses to ~4 giant BPE chunks, leaving nothing to model transitions over. ladder_predict
+caps merges by stream length and FALLS BACK to a raw-symbol (depth-0) n-gram when the encoded stream is too short.
+Their goals are OPPOSITE on periodic data; the same codebook serves both only with the right depth.
+
+Both wired + cataloged (5/5 discoverable each), integration-tested. 22 ladder+forecast tests green together. Wired
+399. Budgets 0/0/0, 42/42, skill_lint + kit_gaps clean.
+NAMED FOLLOW-ONS: phase-randomized continuous null (SETI, now needed in 2 places); wrap ladder_predict through the
+conformal interval wrapper for calibrated coverage (Cranmer -- the producer plumbing exists); oscillator/formant
+families in the fit bank so audio chunks are playable (Puckette).
+
+## ABSTRACTION LADDER: L13 (chart_space) shipped -- cartography of the holographic space
+
+Rule 0 first: found L10 (guide_structure), L11 (mutual_information), L12 (assemble_pipeline), L14
+(fit_deterministic), adaptive_pipeline ALREADY built and wired in prior sessions -- did NOT rebuild. Genuine gaps
+remaining: L7 (fuse-promotion), L9 (obj×transform bank), L13 (chart_space). Built L13.
+
+L13 chart_space(alphabet, rays, steps, margin, band_keep, seed): 'raytracing the holographic space, made
+measurable' (§3j). A RAY is a straight 1-param path between two atoms; a HIT is a point entering a cleanup BASIN.
+Reports hit_fraction, basins_per_ray, coverage (dead atoms never win), and the honest verdict structure_over_null
+= basin coverage MINUS a BAND-LIMITED random-alphabet null (Quilez Q8). Delegates the hit test to argmax-cosine
+(the op cleanup uses) -- no new math. mind.chart_space wired; 8 stranger-aliases resolve.
+
+KEPT NEGATIVE (measured, fixed): my first hit test used ABSOLUTE cosine >= margin. With a small alphabet in
+high-D, argmax-cosine ALWAYS has a winner above any fixed absolute threshold, so hit_fraction was 1.0 for
+EVERYTHING including the null -- the test could not discriminate. FIX: a SEPARATION margin (top cosine minus
+runner-up >= margin). A real basin means DISTINCTIVELY nearest ONE atom -- exactly the gap that makes cleanup
+unambiguous. After the fix: well-separated alphabet structure_over_null +0.26; clumped (near-identical atoms) -0.68
+(correctly below null -- no distinctive basins). Deterministic given seed; beats null across 5 seeds.
+
+L13 PAYOFF (integration): as atoms CROWD a fixed dimension (4->32 in dim 64), structure_over_null falls
+monotonically (0.42->0.02) -- the sqrt(N/D) capacity mortgage made visible in the atlas. Shrinking basins forecast
+an auto_scale trigger before collisions happen. Pinned as a regression test.
+
+Q8 band-limiting: the null is band-limited (SVD, keep top directions) to match the measurement's grain -- a
+real alphabet's fine detail must not flatter it against a null that never had any. Delta: +1 faculty (chart_space)
++2 tests. Wired 399. Budgets 0/0/0, 42/42, kit_gaps 0. REMAINING gaps: L7 (fuse-promotion), L9 (obj×transform bank).
+
+## ABSTRACTION LADDER: L9 (bank-vs-formula gate) shipped -- NOT a redundant object×transform bank
+
+Rule 0 + honest cost measurement changed the build. The plan's L9 was 'object×transform bank + bank-vs-formula
+gate'. Probed: transform_bank already exists; and measured HRR bind = ~24 us/op and REGENERABLE from (object,
+transform). By iq's own Q1 gate, banking object×transform products is usually NEGATIVE storage (a cheap
+regenerable formula beats a baked table unless heavily reused). So building the bank would have been building the
+thing the gate rejects. Built the GATE instead -- the reusable wheel.
+
+bank_or_formula(eval_cost_us, hit_rate, n_entries, bytes_per_entry, lookup_cost_us, regen_from_seed): the
+demoscene 'store the formula not the samples' economy as a MEASURED decision. Returns {bank, saving_us_per_query,
+storage_bytes, reason}. The reusable wheel the transform bank, generator bank (fit_deterministic), and any cache
+should consult before banking by reflex. mind.bank_or_formula wired; 8 aliases resolve.
+
+KEPT NEGATIVE (my own modeling bug, caught + fixed): first economics used saving = hit_rate*(eval-lookup). WRONG.
+Correct amortized model: WITHOUT bank every query pays eval; WITH bank a MISS builds the entry (eval+lookup) and a
+HIT pays only lookup, so mean = (1-H)*eval + lookup and saving = H*eval - lookup. The lookup is a flat per-query
+tax that does NOT scale with reuse -- only saved evals on hits amortize. Break-even hit rate = lookup/eval. Fixed;
+verified very-rare reuse (H=0.005) now correctly says 'formula wins' where the old formula wrongly banked.
+
+Integration: grounded on the engine's REAL measured bind cost -- rarely-reused products -> formula, heavily-reused
+-> bank, saving monotone in hit_rate. Delta: +1 faculty (bank_or_formula) +2 tests. Wired 399. Budgets 0/0/0,
+42/42, kit_gaps 0.
+
+LADDER STATUS: L1-L14 substantially COMPLETE. Shipped this arc: L1/L2/L3/L4/L5(reconstruct)/L6(kit_gaps)/
+L8(identify_level)/L13(chart_space)/L9(bank_or_formula). Already-built prior: L10(guide_structure)/
+L11(mutual_information)/L12(assemble_pipeline)/L14(fit_deterministic)/adaptive_pipeline. ONLY REMAINING gap:
+L7 (fuse-promotion -- compile a pure pipeline to one op, admit as an atom at k+1).
+
+## PHASE-RANDOMIZED CONTINUOUS NULL shipped -- the honest baseline the panel kept asking for
+
+The shuffle-null (permutation) recurred as the right DISCRETE null, but was flagged twice (adaptive pipeline +
+forecast gate) as TOO STRONG for continuous autocorrelated signals: a permutation destroys the autocorrelation
+that even persistence exploits, so any forecaster looks brilliant against it. Built the honest continuous null.
+
+holographic_surrogate (Theiler et al. 1992, surrogate data):
+- phase_randomize(x, seed): a surrogate with the SAME power spectrum (hence same autocorrelation, Wiener-Khinchin)
+  as x but random phases (kept antisymmetric so the inverse is real; DC + Nyquist stay real). Destroys
+  deterministic/nonlinear structure, preserves linear second-order stats EXACTLY.
+- surrogate_zscore(x, statistic, n_surrogates): measures any structure statistic on x against an ensemble of
+  surrogates -> z-score. High z = structure BEYOND linear autocorrelation. The continuous analogue of the discrete
+  shuffle-null z.
+
+MEASURED (the landmark demonstration): the logistic map at r=3.9 (deterministic chaos, BROADBAND spectrum that
+looks like noise) scores predictability z=14-20 against its phase-randomized null; a linear AR(1) scores z~0.8.
+Because the surrogate preserves the spectrum, only the deterministic structure the SPECTRUM ALONE HIDES is exposed.
+A permutation kills lag-1 autocorrelation 0.99->0.03; the surrogate keeps it at 0.99. Spectrum diff exactly 0.0.
+
+KEPT NEGATIVE (named, not silently over-claimed): basic phase-randomization assumes non-Gaussianity is not itself
+the structure of interest; for strongly non-Gaussian amplitudes the amplitude-adjusted variant (AAFT) is stricter.
+Shipped the basic (common) case; AAFT is the named follow-on.
+
+Both wired (mind.phase_randomize + mind.surrogate_zscore), cataloged (4/4 discoverable), integration-tested. This
+closes the SETI seat's continuous-null ask that appeared in the last TWO panel reviews. Wired 400. Budgets 0/0/0,
+42/42, skill_lint + kit_gaps clean. 23 ladder/forecast/surrogate integration tests green together.
+REMAINING named follow-ons: wrap ladder_predict through the conformal interval producer (Cranmer); AAFT surrogate
+for non-Gaussian amplitudes; oscillator/formant families in the fit bank (Puckette). Ladder rungs still open: L5
+sweep, L7 fuse-promotion, L9 obj×transform bank, L13 chart_space.
+
+## CAPABILITY URI NAMESPACE: names as addresses, browsable like a context menu
+
+Two-part request: (1) audit that nothing is buried / things are generalized+promoted; (2) design a hierarchy for
+semantically-colliding names -- reference a capability by a 'URI of menu choices' like branching context menus.
+
+AUDIT (part 1): reachability clean -- 401 wired, 0 undocumented, negatives/homes/superseded/import-only all
+DECLARED categories, not gaps. Spot-checked the 35 'import-only' modules: all findable via the catalog (sharpen,
+thinfilm, lightcache, photos, relations, reasoning, ...), so NOT buried -- discoverable, just not all curated
+(a known accepted state). kit_gaps 0, catalog_gaps 0.
+
+DESIGN (part 2): Rule 0 found holographic_uri ALREADY implements the S3-style idea -- flat namespace, keys with
+'/' delimiters, CommonPrefixes roll-up, tree() -- but SPECIALIZED to scene items (property triples like
+red/circle/smooth via make_key). The user's ask is the SAME pattern on a different substrate (capability names),
+so: generalize on contact.
+  * PROMOTED the roll-up: extracted FacetStore.common_prefixes -> a module-level common_prefixes(keys, prefix,
+    delim, counts) in holographic_uri that works on ANY flat keyspace; FacetStore now delegates to it. One
+    implementation, not a per-substrate copy.
+  * BUILT holographic_capuri: computes a URI 'family/module/name' for every public function by walking the source
+    tree with AST (never imports -- docgen discipline). 1832 URIs. The name IS the hierarchy, so the view can
+    never drift from the code. Three ops: resolve_uri (bare/partial name -> full URI(s), most specific first,
+    so 'sphere' -> [mesh_and_geometry/sdf/sphere, misc/codegen/sphere] and 'sdf/sphere' -> one); browse (context
+    menu: root -> families -> modules -> functions via the shared roll-up); menu_path (URI -> ordered choices,
+    like File > Export > PNG); collisions (the 42 name_collisions re-read through the URI lens -- a collision is
+    not a hazard to forbid but a name whose PATH you supply).
+  * Wired mind.resolve_capability_uri / browse_capabilities / capability_collisions; 9 aliases resolve.
+
+KEPT NEGATIVE (dogfooding caught it): holographic_capuri originally named its resolver resolve() -- which ADDED
+itself to the 'resolve' collision (4 modules -> 5), flagged NEW by name_collisions. The tool that makes collisions
+addressable must not create one: renamed to resolve_uri (faculty stays resolve_capability_uri). Collisions back to
+42/42.
+
+OBSERVATION for later (not acted on): browse('') shows misc/ holds 600 of 1832 functions -- the catch-all family
+is 3x the next largest (mesh 289). A future organizational pass could split misc/ by the URI branches it already
+implies. Filed, not built.
+
+Delta: +1 module (capuri) +3 faculties +1 promoted helper (common_prefixes) +1 integration test. Wired 401.
+Budgets 0/0/0, 42/42, kit_gaps 0.
+
+## CANDLES AS A WAVE shipped -- OHLC price candles are a sampled signal
+
+Moose's insight: a candlestick is not a single price point -- each bar is a SAMPLE of a continuous price wave, and
+O/H/L/C are four time-ordered facts (open=value at bar start, high/low=extremes reached in between, close=value at
+bar end). Most tooling plots close as a line and discards the within-bar excursions that are the whole point.
+
+holographic_candles (misc): keeps all four.
+- carrier(candles, kind): the one-value-per-bar wave -- typical (H+L+C)/3, close, median (H+L)/2, or ohlc4.
+- envelope(candles): the (upper, lower) = (highs, lows) band; band width = per-bar range = intra-bar swing amplitude.
+- intrabar_path(candles, steps_per_bar): a 4x-resolution reconstruction O -> {H,L in inferred order} -> C. The H/L
+  visiting order is inferred from bar DIRECTION (up bar dips to low then runs to high; down bar the reverse) --
+  the standard OHLC->path approximation, stated as a wave reconstruction. Hits every open/close exactly.
+- candle_range(candles): per-bar (range=H-L, body=|C-O|); big range + small body = swung but went nowhere.
+- resample_uniform: drop a carrier/path straight into fixed-length ops.
+Tolerant input: (N,4) OHLC, (N,5/6) [ts,OHLC(V)] (the market loader's format), or dicts.
+
+THE PAYOFF (composability): once price IS a wave, the engine's existing signal machinery applies directly.
+MEASURED: a cyclic price sampled into bars -> candle_carrier -> fit_deterministic recovers 'sine' at corr 0.99
+(the engine identified the underlying wave FROM the candles); the carrier feeds spectral_bandwidth, phase_randomize
+(is this more than autocorrelation?), and ladder_predict too.
+
+KEPT NEGATIVE: the intra-bar H/L order is an INFERENCE (OHLC doesn't record which extreme came first) -- the
+direction heuristic is right more often than not but is a MODEL. intrabar_path is a PLAUSIBLE path, not the true
+tick path; for anything depending on true order, use ticks, not candles.
+
+Four faculties wired (candle_carrier/envelope/intrabar_path/range), cataloged (5/5 discoverable), integration-tested
+(fit_deterministic recovers the underlying sine from candles). Wired 402. Budgets 0/0/0, 42/42, skill_lint +
+kit_gaps clean.
+
+## AAFT SURROGATE shipped -- the honest null for fat-tailed data (motivated by the candle work)
+
+The candle work made price returns first-class, and price returns are famously fat-tailed -- exactly the case
+where basic phase_randomize is too loose. Shipped the named follow-on: amplitude_adjusted_surrogate (AAFT, Theiler
+et al. 1992) in holographic_surrogate.
+
+Basic phase_randomize preserves the spectrum but GAUSSIANIZES the marginal (it is a sum of sinusoids -> CLT pulls
+the histogram to a bell curve), destroying fat tails so any tail-sensitive statistic falsely flags the surrogate.
+AAFT preserves BOTH the exact amplitude distribution AND (approximately) the power spectrum: phase-randomize a
+Gaussian-ranked copy, then map the original's sorted amplitudes back onto that surrogate's rank-order -> the result
+is a PERMUTATION of the original's own values (exact histogram) with randomized phase.
+
+MEASURED: a fat-tailed signal (cubed Gaussian, kurtosis 19.4) -> AAFT preserves kurtosis EXACTLY (19.4) while basic
+phase-randomization collapses it to 3.2 (near the Gaussian value of 3). AAFT still keeps most of the lag-1
+autocorrelation (>0.4), so it remains a real surrogate, not a shuffle.
+
+KEPT NEGATIVE: AAFT's spectrum match is APPROXIMATE (the rank-remapping perturbs it), unlike basic phase_randomize
+which is exact -- a known bias for strongly-coloured non-Gaussian signals. The iterated variant IAAFT tightens it,
+named as the next follow-on. Guidance in the docstring: basic when ~Gaussian and spectrum must match exactly; AAFT
+when the amplitude distribution matters (fat tails).
+
+Wired mind.amplitude_adjusted_surrogate, cataloged (4/4 discoverable), integration-tested against price returns.
+Wired 402. Budgets 0/0/0, 42/42, skill_lint + kit_gaps clean.
+
+## CALIBRATED LADDER FORECAST shipped -- Cranmer's wrap (an uncalibrated forecast is not a measurement)
+
+Shipped the named Cranmer follow-on: ladder_forecast_calibrated wraps ladder_predict in the EXISTING conformal
+interval machinery (ConformalForecaster) -- pure composition, no new calibration math. It rolls the predictor over
+a numeric series to gather (prediction, actual) residuals on data it did NOT fit, calibrates on those residuals,
+and returns the next-step point forecast PLUS an interval with MEASURED (empirical) coverage, not an assumed one.
+Falls back to point-only when the history is too short to calibrate honestly.
+
+MEASURED: clean periodic series -> perfect prediction -> tight interval, empirical coverage 100% (all residuals
+zero); a NOISY periodic series (15% perturbations) -> nonzero interval with empirical coverage in the 75-100% band
+around the 90% target (conformal guarantees marginal coverage). The point always sits inside its own interval.
+
+This closes the forecasting arc's honest-measurement spine: every ladder forecast now travels with (a) its
+improvement over persistence (the SETI gate), and (b) a conformal interval with MEASURED coverage (the Cranmer
+gate). Wired mind.ladder_forecast_calibrated, cataloged (5/5 discoverable), integration-tested. Wired 402.
+Budgets 0/0/0, 42/42, skill_lint + kit_gaps clean. 26 ladder/forecast/surrogate/candle tests green together.
+
+FORECAST ARC COMPLETE (this session's follow-on list, all done): phase-randomized continuous null (SETI); AAFT
+surrogate for fat tails (motivated by candles); calibrated ladder forecast (Cranmer). REMAINING named: IAAFT
+(iterated AAFT, tightens the spectrum match); oscillator/formant fit families (Puckette). Open ladder rungs: L5
+sweep, L7 fuse-promotion, L9 obj×transform bank, L13 chart_space.
+
+## IAAFT + PUCKETTE AUDIO FAMILIES shipped -- the last two forecast follow-ons
+
+IAAFT (holographic_surrogate.iaaft_surrogate, Schreiber & Schmitz 1996): the gold-standard null matching BOTH the
+exact amplitude distribution AND (to convergence) the exact power spectrum. AAFT only approximates the spectrum;
+IAAFT ITERATES two projections (impose target magnitudes / impose the amplitude distribution via rank mapping)
+until the ranks stop changing -- the same iterate-a-projection move as IK/PBD/resonator. MEASURED: on a coloured
+fat-tailed signal, IAAFT's spectrum rel err 0.03-0.05 vs AAFT's 0.30 (a ~6x improvement) while keeping the EXACT
+amplitude distribution. Wired mind.iaaft_surrogate, cataloged (4/4). KEPT NEGATIVE: when the two constraints
+conflict the ranks oscillate and it settles at a compromise (amplitude-exact, spectrum-approximate) -- reported,
+not hidden.
+
+PUCKETTE AUDIO FAMILIES (holographic_fitgen): added 'harmonic' (fundamental + decaying harmonics, a playable
+musical tone) and 'am' (amplitude-modulated carrier, the tremolo/formant case) to the generator bank -- analysis=
+resynthesis, so a fit of these IS a resynthesizable oscillator. MEASURED: harmonic tone -> 'harmonic' corr 0.999
+(both bright and mild); AM -> 'am' corr 0.99; existing sine/chirp/sawtooth/gauss unchanged; noise still refused;
+both compose with extend_generator (a fitted harmonic plays forward).
+
+KEPT NEGATIVE (Q8 tension made concrete): the harmonic/AM families carry their IDENTIFYING content at HIGH
+frequencies, which the coarse band-limited snap (keep_frac 0.25) ERASES -- so a bright harmonic tied a bare sine at
+the coarse grain. Fixed two ways: (a) per-family snap band -- harmonic/am get keep_frac 0.6 so their structure
+survives; (b) ties resolved by ORIGINAL-SPACE fit at a WIDE band (where harmonics are visible), with Occam breaking
+only genuine near-equal ties (a fundamental-dominated harmonic IS a sine -> report sine). Each family is compared at
+the grain where its own structure lives -- still honest, not smuggling fine detail into the coarse snap.
+
+Wired 402. Budgets 0/0/0, 42/42, skill_lint + kit_gaps clean. All forecast follow-ons now DONE (phase-random null,
+AAFT, calibrated forecast, IAAFT, audio families). NEXT: L13 chart_space (the last big ladder rung).
+
+## L5 UP/DOWN/SIDEWAYS SWEEP shipped -- the ladder is complete (all 14 rungs)
+
+sweep_directions(corpus) in holographic_ladder: the up/down/sideways completeness check (§6) made RUNNABLE, the
+way kit_gaps made the invariant kit runnable. A capability that works in only one direction is an incomplete
+faculty; this measures all three:
+- DOWN: does structure survive DECOMPOSITION? Climb, expand the top atoms to components (reconstruct_corpus),
+  confirm the parts still beat the null (they are themselves analyzable, not opaque).
+- UP: does it survive EMBEDDING? Splice the corpus among out-of-alphabet distractors in a larger corpus, confirm
+  the structure still beats the null when it's a component of something bigger.
+- SIDEWAYS: which lens COSTUMES does the data wear? Climb under each lens; report which fit above the null.
+Returns per-direction ok + gaps + complete + irreducible. NULL-AWARE (crucial): the structure lens over-compresses
+noise by chance co-occurrence, so raw compression is not enough -- an irreducible corpus flags ALL THREE directions
+and never fabricates structure.
+
+MEASURED: planted sequence -> complete, wears BOTH costumes (sequence+structure); instanced scene -> complete but
+wears ONLY the structure costume (the sequence lens can't see shuffled parts -- correct); noise -> irreducible, all
+three flagged as gaps. Wired mind.sweep_directions, cataloged (5/5 discoverable), integration-tested.
+
+LADDER STATUS -- ALL 14 RUNGS ACCOUNTED FOR: L1 (runner+sequence lens), L2 (structure lens), L3 (faculty+catalog),
+L4 (retrofit), L5 (sweep_directions, this entry), L6 (kit_gaps), L7 (kernel fusion -- verified already built),
+L8 (identify_level), L9 (transform bank + bank_or_formula -- verified already built), L10 (guide_structure),
+L11 (mutual_information), L12 (assemble_pipeline), L13 (chart_space -- verified already built), L14
+(fit_deterministic). iq's Q5/Q6/Q7/Q8 all folded in. Rule 0 correctly found L7/L9/L13 already complete this arc --
+the discipline preventing reinvention working as intended. Wired 402. Budgets 0/0/0, 42/42, skill_lint + kit_gaps
+clean. 29 ladder-arc integration tests green together.
+
+## ARCH-1 HARDENED -- recipe validator now catches build-time crashes pre-build
+
+Rule 0 found ARCH-1 (validate_recipe / holographic_recipeops.validate) already built in a prior session -- it
+checks the recipe build-graph is a DAG (no forward/dangling/out-of-range refs, in-range raw indices + repeat
+templates). Dogfooding found TWO genuine gaps: recipes that pass the DAG check but CRASH at build slipped through.
+- DANGLING OUTPUT: a recipe marking output #99 when only 1 result exists validated OK, then crashed outputs() with
+  IndexError. Now: validate checks every declared output points to a produced result.
+- EMPTY SET-OP: a bundle/superpose over an empty member list validated OK, then silently produced a DEGENERATE
+  ZERO VECTOR at build (worse than a crash -- it corrupts downstream computation invisibly). Now: validate rejects
+  an empty set-op member list.
+Both additive: all previously-accepted recipes still validate; only genuinely-broken ones now caught. Proved both
+cases fail downstream (IndexError / norm-0 vector) so the checks earn their place. Extended the selftest (rejects
+dangling output + empty set-op), added an integration test, updated the faculty docstring. No new wiring (extended
+an already-wired capability). Wired 402. Budgets 0/0/0, 42/42, skill_lint + kit_gaps clean.
+
+Rule 0 tally this arc: L7, L9, L13, and ARCH-1 all found ALREADY BUILT -- the probe-before-building discipline
+repeatedly preventing reinvention, and turning "build X" into "harden the real gap in the existing X".
+
+## WIRING SWEEP -- two import-only modules of core discipline machinery wired
+
+Ran a reachability sweep: 35 modules were IMPORT-ONLY (findable via catalog, not a mind faculty). Most are
+intentional infra (service/farm/toolclient) or consolidation homes. Two were genuine gaps -- CORE DISCIPLINE
+machinery that the constitution leans on but agents couldn't invoke:
+
+1. holographic_measure (the VARIANCE HARNESS): 'every headline number gets a mean, a spread, and a confidence'.
+   Wired mind.measure (mean/std/95% bootstrap CI across seeds), mind.assert_robust (LOWER CI bound must clear the
+   floor, not just the mean -- stops a lucky-seed point estimate), mind.is_fragile (spread large relative to the
+   margin -> a couple of unlucky seeds could sink it), mind.measure_report (one-line 'mean +/- std (CI, n) FRAGILE'
+   summary). The constitution's no-win-without-a-baseline discipline, now discoverable + invocable. This is the
+   machinery every measured claim in NOTES should have gone through -- it was import-only the whole time.
+
+2. holographic_regimegate (RegimeGate): the honest way to RE-ENABLE a shelved 'only good in a niche' method (a
+   kept negative) -- route to the superior method only when a cheap detector says you're in its regime, safe
+   fallback everywhere else, info records score/threshold/path. The adaptive-dispatch pattern as a reusable object.
+   Wired mind.regime_gate. Complements adaptive_pipeline (which dispatches by data regime); RegimeGate dispatches
+   ONE method behind ONE detector with a guaranteed fallback.
+
+Both cataloged (5/5 and 4/4 discoverable), integration-tested. Import-only count 35 -> 33. Wired 402 -> 404.
+Budgets 0/0/0, 42/42, skill_lint + kit_gaps clean.
+
+REMAINING import-only (33) reviewed: mostly intentional infra (service, farm, toolclient, sync, uri, workspace),
+render-internal (brdf, thinfilm, lights, lightcache, materialdata, pointsplat, sdfscene, backwardwarp), query-
+family internals (query_durable, queryfolder, querygraph, queryprog, querytime), and a few candidates for a later
+pass (relations = VSA analogy/relational reasoning, no selftest yet; sharpen/reanchor = niche image ops). None are
+silent correctness gaps; relations is the best candidate for a future wiring pass (it needs a selftest first).
+
+## FRAME-BUDGET CONTROLLER shipped -- the missing conductor for real-time frame serving
+
+GOAL (Moose): real-time output at 30 (preferably 60) fps to a front-end client, with controllable QUALITY for
+simulations so real-time SIMS can be displayed. Rule 0 found the PARTS all exist (render_adaptive = a resolution/
+sample knob; draft_vs_refine_simulation = a sim grid/substep knob; realtime_session = draft/refine; the LOD chains;
+adaptive_sample_budget) but NOTHING tied a target FRAME RATE to them -- each part had its own dial, no conductor.
+
+holographic_framebudget (scene_and_pipeline): the closed-loop controller.
+- frame_budget_ms(target_fps, headroom): fps -> per-frame ms budget minus headroom (a frame that exactly fills
+  1/fps has already missed vsync). 60fps -> 14.2ms usable, 30fps -> 28.3ms.
+- FrameBudgetController: a QUALITY LADDER (ordered presets, each naming render res+samples AND sim grid+substeps),
+  a budget, and a control loop. Each frame: current() -> the preset to render/sim with; report(frame_ms) -> feeds
+  back measured time. DROPS a level immediately on a budget miss (react fast -- a dropped frame is visible), CLIMBS
+  only after a streak of comfortable frames (hysteresis -- a slightly-low quality is not visible).
+- mind.frame_budget_controller + mind.frame_budget_ms wired.
+
+BUG FOUND + FIXED during the integration test (honest measurement caught it): with a large cost gap between an
+in-budget level and the next, the controller settled correctly but periodically RE-PROBED the too-expensive level
+(blow budget -> drop -> climb -> blow -> ...), churning ~1 frame in 6 (met_budget 0.825). Fixed with a
+_blocked_above memory: don't climb into a level we just dropped FROM until a clearly-cheaper frame proves new
+headroom. met_budget_frac 0.825 -> 0.983, level changes 40 -> 2. The re-probing churn was a real bug, not test
+noise.
+
+KEPT NEGATIVE (drives the design): from draft_vs_refine_simulation, a coarse RENDER is a draft of the fine one
+(refining sharpens toward the same image) but a coarse CHAOTIC SIM is a DIFFERENT trajectory (fluid grid 32 vs 48
+rel error 1.000). So the ladder exposes render and sim quality as SEPARATE knobs -- you may hold the sim grid fixed
+(one trajectory) and trade only render quality, or accept a different-but-real-time solve. Dropping sim quality
+buys frame rate but CHANGES the simulation; the controller never pretends it merely blurs it. MEASURED end-to-end:
+controller picks 'medium' (256x256, sim_grid 24), the real coarse fluid sim runs 5.62x faster with converges=False.
+
+Cataloged (5/5 discoverable), integration-tested (converges to the highest fitting level, meets budget >85%;
+looser 30fps target admits >= the quality of the tight 60fps target). Deterministic (decisions are a pure function
+of reported times -- no wall-clock in the logic). Wired 405. Budgets 0/0/0, 42/42, skill_lint + kit_gaps clean.
+
+REMAINING for a full real-time client story: a WEBSOCKET/streaming endpoint on the Standalone API service (Rule 0
+found NO websocket -- the service is request/response). The controller + realtime_session.payload() give the
+per-frame content; a push channel would let the client pull at fps without polling. Named as the next follow-on.
+
+## FRAME SERVER + /frame ENDPOINT shipped -- the real-time client story is now complete end-to-end
+
+The frame-budget controller decided quality; this ships the SERVING layer so a front-end client can actually pull
+frames. Rule 0 confirmed the Standalone API service has /tools, /invoke, /jobs, /bus, /sql, /graphql but NO frame
+or stream endpoint and NO websocket (stdlib http.server).
+
+holographic_framebudget.FrameServer: server-side frame serving, the request/response form of a frame stream (no
+websocket needed). Keeps one FrameBudgetController PER SESSION; next_frame(session, target_fps, last_frame_ms)
+reports the client's last frame time and returns the quality preset for the next frame, holding each client's
+target fps closed-loop. WHY per-session: two clients on one node may want different rates (phone 30, desktop 60)
+and have different hardware -- each needs its own budget + adaptation state. Deliberately STATELESS about pixels:
+it decides QUALITY, the mind's render/sim faculties provide CONTENT. Wired mind.frame_server.
+
+POST /frame endpoint on the Standalone API service (holographic_service.py): body {session, target_fps?,
+last_frame_ms?, drop?} -> {ok, preset, level, budget_ms, target_fps, stats}. Delegates to a lazily-built FrameServer
+on the Service. PROVEN FULL HTTP ROUND-TRIP (not just in-process): started the service on a real socket, POSTed
+/frame, a phone at 30fps got 'medium' + 28.3ms budget, a desktop at 60fps got the tighter 14.2ms budget, a reported
+slow frame dropped the level over the wire, drop-session worked, /frame shows in the API index.
+
+CLIENT LOOP (the whole real-time story): client POSTs /frame {session, last_frame_ms} -> gets a preset -> renders
+via /invoke render_adaptive at preset res/samples + simulates via /invoke draft_vs_refine_simulation at preset sim
+grid -> measures its frame time -> POSTs /frame again with that time. The server holds the target fps by adapting
+quality; render and sim quality are SEPARATE knobs (a coarse chaotic sim is a different run, not a blur).
+
+frame_server cataloged (5/5 discoverable), integration-tested (faculty + full HTTP round-trip). Wired 405. Budgets
+0/0/0, 42/42, skill_lint + kit_gaps clean.
+
+REMAINING (optional polish for the real-time story): a true PUSH channel (Server-Sent Events over http.server, or
+the existing /bus for out-of-band control messages) would let the client avoid even the pull latency; a convenience
+/frame variant that returns the actual rendered payload inline (currently the client fetches content via /invoke)
+would save a round-trip. Both are enhancements, not gaps -- the pull-based loop is complete and proven.
+
+## INLINE PAYLOAD + SSE PUSH shipped -- the real-time client story is now single-round-trip AND push-capable
+
+Two enhancements on top of the frame server, both proven over real HTTP:
+
+1. INLINE PAYLOAD (one round-trip instead of three). Added FrameServer.serve_frame(session, render_fn, target_fps):
+   the ONE-CALL loop -- pick quality, render via render_fn(preset), TIME the render, close the loop, return the
+   payload inline. The measured time is the time the render ACTUALLY took (not a client self-report), keeping the
+   loop truthful. Added demo_frame_payload(preset, t): a self-contained raymarched animated SDF (bobbing sphere +
+   ground plane) that renders at the preset resolution with NO client-supplied scene -- the built-in fallback so
+   POST /frame returns displayable content out of the box. MEASURED cost: potato 128x128 9.5ms (fits 60fps), low
+   19ms (fits 30fps), medium+ too slow -> the controller drops to a real-time level on its own. POST /frame now
+   accepts include_payload=true (+ optional t) and returns {preset, frame_ms, payload, ...} in one response.
+   Production clients render their OWN scene via serve_frame with their own callback; demo is the fallback.
+
+2. SSE PUSH CHANNEL (GET /frame/stream). A true push channel over stdlib http.server: the handler's do_GET holds
+   the socket open and streams 'data: {json}\n\n' events at the target rate, so a browser EventSource receives
+   frames WITHOUT polling. Paces itself to the frame interval, starts a fresh stream at the CHEAPEST level so the
+   first frame is already real-time (a stream must never open with a stall), and stops cleanly on a broken pipe
+   (client disconnect). PROVEN over a real threaded socket: 5 frames streamed in 141ms (target ~167ms for 5@30fps),
+   each at potato 6-8ms with the payload inline. Registered in the index; the route-table stub documents it (the
+   real streaming can't go through the request/response dispatch -- it must hold the socket).
+
+frame_server faculty covers serve_frame; demo_frame_payload + FrameServer.serve_frame tested. Wired 405. Budgets
+0/0/0, 42/42, skill_lint + kit_gaps clean. 3 real-time integration tests green together.
+
+THE COMPLETE REAL-TIME STORY (all proven over HTTP): POST /frame (preset only, client renders via /invoke) OR
+POST /frame include_payload (one round-trip, server renders) OR GET /frame/stream (SSE push, no polling). All hold
+the target fps by adapting quality; render and sim are separate knobs. Remaining is pure polish (client-supplied
+scene over HTTP; a binary payload codec instead of JSON int rows for bandwidth) -- not gaps.
+
+## REAL-TIME ENDPOINT: all output projections + workspace save/load + distributed rendering
+
+Three additions on the real-time frame endpoint, all Rule-0'd (the projection kinds, the render farm, and the
+workspace module all EXISTED; the gap was wiring them into the frame path), all proven over HTTP.
+
+1. ALL OUTPUT PROJECTIONS, selectable + simultaneous. demo_frame_payload now takes kinds= any subset of
+   ('pixels','mesh','splats','shader','lod') and returns MULTIPLE at once -- every projection is of the SAME demo
+   SDF (one _demo_sdf function: a bobbing sphere + ground plane), so outputs can't drift ('one scene, many
+   outputs'). pixels=raymarched grayscale; mesh={vertices,faces} on the surface; splats=[{position,scale}]
+   billboards; shader=WGSL map() for the SDF; lod=stream_encode descriptor of the field. POST /frame accepts
+   kinds=[...]; GET /frame/stream takes ?kinds=pixels&kinds=mesh. Unknown kinds rejected loudly. MEASURED: all
+   five delivered in one response (pixels 256x256, mesh 200v/198f, 120 splats, WGSL, lod descriptor).
+
+2. WORKSPACE/SCENE SAVE-LOAD. Rule 0 found holographic_workspace (WorkspaceManager: durable DB + transient scene
+   tiers, WS1-WS6) IMPORT-ONLY. Wired mind.workspace_manager(): new_workspace, switch_workspace,
+   export_workspace(name)->blob, import_workspace(blob) rebuilds BYTE-IDENTICALLY (the seed fixes every atom),
+   combine_workspaces, reset_to_default. MEASURED: export a scene, rebuild it in a FRESH mind, byte-identical
+   re-export. NOTE the existing m.workspace is a WorldSpace (fork/apply a shared world) -- a DIFFERENT thing;
+   workspace_manager is the durable-scene persistence layer, wired alongside without collision. Import-only 33->32,
+   wired 405->406.
+
+3. DISTRIBUTED (tiled) RENDERING. FrameServer.serve_frame_distributed(session, distribute_bricks, tiles=(r,c))
+   renders the frame's pixels as DISJOINT tiles across workers via the real distribute_bricks faculty, then places
+   them seamlessly. _demo_pixels_region renders each tile as a WINDOW into the same full-frame camera (absolute
+   pixel coords), so the distributed frame is BIT-IDENTICAL to a single-node render of the same preset -- proven
+   for 2x2 and 3x3 tilings with the REAL mind.distribute_bricks. The quality knob (preset resolution) and the
+   parallelism knob (tiles) are independent; the same budget controller holds the rate. POST /frame accepts
+   tiles=[r,c]. This lifts the single-node resolution cap while keeping the frame rate honest.
+
+THE COMPLETE REAL-TIME STORY: preset-only / inline-payload / SSE-push serving x pixels|mesh|splats|shader|lod (any
+combination) x single-node|distributed rendering, with per-session adaptive quality holding 30/60fps, and workspace
+save/load for the scene. All proven over real HTTP. Wired 406. Budgets 0/0/0, 42/42, skill_lint + kit_gaps clean.
+
+## 3D-MODELING-APP FOUNDATIONS: GLSL viewport + wireframe cage + picking + visibility
+
+Support for someone building a 3D-modeling app ON leCore. Rule 0: GLSL emission (sdf_dialect supports glsl+wgsl),
+ascii raymarch (ascii_sdf), and mesh editing (DCC) all EXISTED; the genuine gaps were the wireframe CAGE, viewport
+PICKING, and wiring GLSL/ascii into the frame projection kinds. All proven over HTTP.
+
+PROJECTION_KINDS expanded 5 -> 9: added 'glsl' (Shadertoy-style, the best fit for a WEB VIEWPORT), 'wgsl' (source,
+distinct from the 'shader' alias), 'ascii' (braille raymarch, the SSH/base-layer output), and 'wireframe' (the
+editable cage). Every projection is still of the SAME _demo_sdf, so outputs can't drift.
+
+WIREFRAME CAGE (_demo_wireframe): {vertices, edges, faces, normals} -- a quad-sphere so it looks like the grid a
+modeler expects. edges are DEDUPED [i,j] index pairs (shared edge once); faces are index quads; normals are
+per-vertex outward units for lit handles. This is the interaction surface a modeling app raycasts against.
+
+VIEWPORT PICKING (pick_element, mind.pick_element): given a wireframe cage + screen coord (u,v in -1..1),
+returns the nearest 'vertex'/'edge'/'face' with index + position. Projects the cage's own verts to the screen and
+finds the closest -- exact, deterministic, NO GPU pick buffer (the client already has the cage). MEASURED: screen
+centre picks the front pole (0,0,1) at distance 0; edge/face picks return valid elements; deterministic. POST /pick
+endpoint: {wireframe, u, v, want} -> {pick:{kind,index,distance,position/vertices}}. Stateless -- the client sends
+the cage it already holds, so no server scene state.
+
+VISIBILITY TOGGLE by layer selection: the client controls which layers it receives -> which are visible. Request
+kinds=['ascii','wireframe'] to show the cage overlay over ascii; kinds=['ascii'] to hide it. The server sends the
+requested layers; the client composites and toggles. This is the right split (server=layers, client=visibility)
+and needs no extra flag. MEASURED over HTTP: overlay ON has wireframe in the payload, overlay OFF omits it.
+
+THE MODELING-APP LOOP (all over HTTP): POST /frame include_payload kinds=[glsl,ascii,wireframe,...] -> get the web
+viewport shader + base layer + editable cage; POST /pick {wireframe,u,v,want} -> select a vert/edge/face; toggle
+overlays by changing kinds. Plus everything from before: adaptive quality holding 30/60fps, distributed tiling,
+SSE push, workspace save/load. pick_element wired + cataloged (5/5 discoverable). Wired 406. Budgets 0/0/0, 42/42,
+skill_lint + kit_gaps clean. FIXED a stale prior test (asserted all 9 PROJECTION_KINDS against a 5-kind request).
+
+REMAINING for a production modeling app (named, not gaps): wiring a CLIENT'S OWN scene (not the demo SDF) through
+these projections + pick, and an EDIT-COMMIT path (pick -> move vert -> re-emit the cage/SDF) -- the mesh DCC
+operators (mesh_split_edge, mesh_collapse_edge, etc.) already exist to back it.
+
+## DCC BACKEND BACKLOG (architecture review, panel-reviewed) -- planning deliverable, not a build
+
+Produced a backend/core work backlog for supporting a 3D-modeling app built ON leCore (front-end out of scope).
+Panel: Quilez (demoscene/SDF -- 'store the operation not the result'), Pharr (3D modeling/raytracing -- the four
+reference apps are backend state models wearing a UI; keep all four presentable), Macklin (tie-safe replay), Stam
+(sim field as a scene node), Drettakis (instancing = superposition).
+
+Reference-app read (user's): Blender=non-destructive modifier stack + modal state (pain=modality); C4D=uniform
+introspectable object/param graph (preferred, predictable); ZBrush=resolution-independent sculpt backend (strongest
+leCore coverage); Maya=construction-history DAG (powerful reach-back). Each pain traces to a BACKEND MODEL choice we
+get to pick without the UI.
+
+Rule-0 audit: mesh edit ops, sculpt (multires+dyntopo), modifier_stack, scene_graph, spatial_index, selection,
+mesh_csg, deform_mesh, timeline, curve_bezier, camera_controller etc. ALL PRESENT (17 present-claims verified live).
+The gaps are the INTERACTIVE STATE MODEL, not the operations.
+
+Backlog epics: A selection/topology model (loops/rings/soft/symmetry as first-class selections); B ray/spatial
+query (ray-vs-mesh via spatial_index, ray-vs-SDF, region select, retarget pick_element onto real geometry); C
+transform+space model (pivot/space/axis-constraint = the gizmo backend, snapping, soft-transform, bbox); D edit
+history + operation DAG (undo/redo transaction log, EDITABLE construction history extending the recipe DAG = the
+demoscene differentiator, workspace checkpoints); E animation+deformation (keyframe curves, pose blend, skin bind
+via deform_mesh, sim-as-source); F scene I/O (import round-trip fidelity, material/UV as scene state, instancing).
+
+Critical path: A -> B -> C -> D1 = the interactive edit spine (select -> pick real geometry -> transform with
+snapping -> undo), the unblock-everyone milestone. Then D2/D3 non-destructive power, then E/F production. All items
+additive/deterministic/NumPy-core, each ships headless with an /invoke faculty. Deliverable: dcc_backend_backlog.md.
+
+## DARK MODULE SWEEP (7 -> 0) + Milestone-1 edit-spine faculties (A/B/C confirmed, sdf_scene door)
+
+User flagged >=7 dark modules (import-only, capability with no door) -- flagged holographic_sdfscene and
+holographic_photos by name. Ran tools/wiring_report.py: exactly 7 dark. Triaged each to its honest disposition
+rather than force-wiring:
+
+REAL CAPABILITIES -> got a door (wired faculty + catalog, 5/5 discoverable each):
+  * holographic_sdfscene: added SDFScene.from_parts(parts, bounds) classmethod (build a scene WITHOUT subclassing --
+    the ergonomic door the base class lacked). Wired m.sdf_scene. This is the SDF-scene STATE MODEL for the DCC
+    backend (compose parts the way a splat scene bundles primitives): .eval (min over parts) / .part_ids /
+    .material_at (argmin) / .parts_near (spatial cull).
+  * holographic_extras (grab-bag): the three real concepts got doors -- m.residue_system (exact CRT modular integer
+    arithmetic in vectors, 20+30 mod105 == 50 exact), m.vsa_region (spherical-region SDF boolean algebra:
+    union/intersect/subtract/complement/contains, the set-algebra complement to sdf_scene), m.predictive_filter
+    (surprise-gated observation: observe->(is_novel, surprise), an event gate for a stream). The demo_* funcs stay
+    demos.
+
+EVIDENCE / DEMOS / SUPERSEDED -> annotated KEPT NEGATIVE in their own docstrings (leave KNOWN_DARK limbo, become
+self-documenting honest dead-ends the audit recognizes):
+  * holographic_photos: TEST HARNESS, imports PIL (outside NumPy/stdlib core) -- wiring would drag PIL into core.
+  * holographic_farm: R3 network-farm PROTOTYPE, superseded by coordinator.NetworkFarm (two doors to one room).
+  * holographic_creature_mind: reference DEMO meant to be READ (UnifiedMind instantiating a demo of itself = circular).
+  * holographic_lexicon: a CURRICULUM EXPERIMENT (dictionary-first word meaning), evidence not a library.
+  * holographic_reanchor: an AUDIT proving re-anchoring is load-bearing, evidence not a callable faculty.
+
+Then EMPTIED KNOWN_DARK in tools/wiring_report.py (was 7 entries) -- so a NEW dark module now fails --check loudly
+instead of being silently tolerated. wiring_report --check: exit 0, 0 dark, 0 catalog-only, 16 kept-negatives
+(was 11). reachability exit 0 (412 wired faculties, up from ~406; 0 undocumented). name_collisions 42/42.
+catalog_gaps 0. skill_lint 0 gaps.
+
+Also this session (Milestone-1 edit spine A->B->C, confirmed/rebuilt with full close-out): mesh_selection (+ loop/
+ring/boundary select, soft_selection_weights), raypick (ray_mesh_intersect Moller-Trumbore + AABB broad phase,
+ray_sdf_intersect sphere-trace, screen_ray, pick_mesh generalizing pick_element onto real geometry), transform_space
+(transform_selection = gizmo backend with pivot/space/axis-constraint + weights for proportional editing;
+pivot_point), snap (snap_to_grid/vertices/edge + snap_transform_delta). NOTE D1 (edit_history, vertex_move_command)
+already existed from a later session -- the full A->B->C->D1 spine test
+(test_interactive_edit_spine_select_pick_transform_undo) PASSES.
+
+Test delta: +1 integration test (test_dark_module_doors_sdfscene_and_extras -- regression trap: the 4 newly-wired
+doors stay callable AND discoverable). 18 new capabilities registered (242 total). docgen: 460 modules, 135837
+lines. capabilities.json regenerated (CI drift gate in sync).
+
+KEPT NEGATIVES (loud): PIL cannot enter core, so photos stays a harness. Two farms would be two doors to one room,
+so the R3 prototype stays negative. A mind instantiating a demo of itself is circular, so creature_mind stays a
+read-only example. Force-wiring a module to clear an audit is the wrong fix -- the honest dispositions are 'give it
+a door' (real capability) XOR 'annotate why it has none' (evidence); never a hollow method that reimplements or
+wraps nothing.
+
+## DE-DUP PASS + Milestone 2/3 (extend-don't-sibling discipline enforced)
+
+User directive: "make sure we don't duplicate functionality, and just promote, generalize, and integrate instead."
+Audited this session's own work for duplication first, then continued the backlog under that discipline.
+
+DUPLICATES FOUND & FIXED (mine, from the M1 build):
+  * soft_selection_weights re-implemented Dijkstra -- REFACTORED to DELEGATE to holographic_meshgeodesic
+    (geodesic_distances + _edge_graph). Kept only the dict-mesh input adapter + the multi-source min fold. One
+    geodesic engine, not two. Selftest still green.
+  * transform_space._axis_rotation re-implemented Rodrigues -- now DELEGATES to holographic_scenegraph.rotation
+    (the same primitive scene_rotation uses), taking its 3x3 block. One axis-angle rotation in the engine.
+  * Checked and CLEARED (genuinely distinct, not merged): snap_to_edge's perpendicular-foot (mesh_point_distance
+    returns a distance field, not a which-edge-and-where snap target); _ray_aabb (rayindex._rays_hit_box is a
+    batched render-damage query, different consumer); slab/grid-snap (no canonical primitive elsewhere).
+
+MILESTONE 2 (all EXTEND existing faculties):
+  * A4 select_symmetric -- selection-level mirror across a world axis plane (complement to mirror_mesh which mirrors
+    GEOMETRY). In holographic_meshselect. Kept negative: asymmetric meshes gain fewer partners, honestly.
+  * B3 select_in_box -- box/rubber-band + frustum region select (pass a projection matrix for screen-space). Reuses
+    to_mode's inclusive semantics so region-select and mode-conversion agree. In holographic_meshselect.
+  * D2 editable construction history -- EXTENDED EditHistory (not a parallel DAG): .rebuild(base) replays the recipe,
+    .replace_command(i,new,base) edits a past step and re-evaluates downstream (Maya/C4D reach-back), .commands()
+    lists the history. Deterministic replay = the property it rests on.
+  * D3 workspace checkpoints -- EXTENDED WorkspaceManager: checkpoint/restore_checkpoint/list_checkpoints as a
+    name->blob book over the existing byte-identical export/import. No new serialization.
+  * C4 -- CONFIRMED ALREADY-SERVED (no build): measure_bbox (metrology), pivot_point bbox-mode (C1), and
+    transform_selection returning baked points cover bbox + freeze. Building a freeze wrapper would be a hollow
+    method returning its input.
+
+MILESTONE 3:
+  * E1 timeline easing -- EXTENDED Timeline (holographic_anim) with per-key interp: linear(default,byte-identical)/
+    step/smooth/ease_in/ease_out. Only reshapes the [0,1] fraction before the same lerp. Channel tuple went 2->3
+    (ts,vs,modes); verified nothing else unpacks Timeline.channels. Step edge case fixed (frac==1 delivers v1).
+  * E3 skin_bind_weights -- ADDED the missing bind half to holographic_meshskin (skin_mesh already deformed given
+    weights; this computes them): inverse-distance to nearest bones, top-k, partition of unity so rigid motion is
+    exact. Kept negative: distance bind ignores the surface (can bind across a thin gap); geodesic refine is future.
+  * E2 blend_pose, E4 realtime sim-source -- CONFIRMED ALREADY-SERVED (no build).
+  * F1/F2/F3 -- CONFIRMED SUBSTANTIALLY SERVED: import/export faculties (F1), mesh_uv_unwrap + LSCM + layered/
+    channel materials (F2), Instancing shared-definition (F3). F1's remaining scope is a fidelity-audit pass, not a
+    build. Did NOT add siblings.
+
+Test delta: +1 integration test (test_milestone2_3_...), plus new contracts in 5 module selftests. 43 dedicated
+tests green (anim/skin/workspace/meshselect). New faculties: select_symmetric, select_in_box, skin_bind_weights,
+plus catalog entries for timeline (was auto-only) and extended edit_history/workspace_manager. docgen 460 modules,
+136179 lines. Audits: dark 0, catalog_gaps 0, collisions 42/42, reach 0, skill_lint 0.
+
+DISCIPLINE RECORDED: the win of this session is as much what was NOT built (C4, E2, E4, F1-F3 already served; two
+of my own M1 duplicates deleted) as what was. "Extend don't sibling" and "generalize on contact" caught two real
+duplications in freshly-written code -- the audit must include your OWN recent work, not just the legacy tree.
+
+## SEMANTIC HIERARCHY + SHAPE-FILTER BACKLOG (design deliverable, not a build)
+
+User idea: address the 44 name collisions with a HIERARCHY like a context menu (File->Export->PNG disambiguates PNG
+by its path; a lion is-a animal but not vice-versa). Also believed there's io/output-shape filtering by datatype.
+
+Rule 0 found the hierarchy LARGELY ALREADY BUILT in holographic_capuri (capability names as URIs): browse (context
+menu: root families -> modules -> leaf functions), resolve_uri ('rotation' -> both full paths), menu_path
+(breadcrumb), collisions (44, each with disambiguating URIs). capability_collisions faculty already states the
+thesis verbatim: "a collision is not a hazard to forbid but a name whose PATH you supply." browse_capabilities +
+capability_collisions ARE wired; resolve_uri is NOT a faculty yet (the S1.2 gap). register_capability is FLAT
+(name/does/example/native/aliases) -- no semantic/consumes/produces fields yet.
+
+TWO GENUINE GAPS (the two the user named): (1) the existing hierarchy is by CODE LOCATION (family/module/function),
+NOT semantic action -- the File->Export->PNG verb-category layer (transform/rotate/axis_angle) does not exist. (2)
+IO-SHAPE FILTERING does not exist at all -- user believed it did; closest is the `native` flag + ISA signature docs,
+neither queryable. No "what accepts a mesh" / "what produces points" filter.
+
+Backlog (semantic_hierarchy_backlog.md): three orthogonal indexes, one registry, all additive/default-off. S1 make
+the existing URI the front door (route collisions through find_capability, add resolve_uri faculty, reframe the
+collision gate from '42-name budget' to 'every collision RESOLVES to distinct URIs') -- solves the collision problem
+with almost no new code since capuri is built. S2 semantic action layer (optional `semantic=` tag, ~10 verb roots
+select/transform/create/modify/measure/convert/render/simulate/io/analyze, tag the 44 collisions FIRST, browse
+by='semantic'). S3 io-shape filtering (coarse kind vocab mesh/points/sdf/hypervector/image/transform/selection/...,
+optional consumes=/produces= on register_capability, find_capability(accepts=/produces=) filter, then pipeline
+suggestion by chaining produces->consumes = the render-graph idea over the whole catalog). S4 drift gates so
+semantic/kind tags can't reference undefined verbs/kinds (frozen-budget model like name_collisions).
+
+Principle recorded: the name IS the hierarchy (location URI can't drift, it's derived from code location); semantic
+sits ON TOP, doesn't replace. Ground the taxonomy in MEMBERS not aspiration -- an empty menu branch is the discovery
+equivalent of a dark module. All claims verified live before writing.
+
+## DEDUP SWEEP #2 (canonical_shape finder + semantic scan) -- 4 duplications consolidated total
+
+User: "use the leCore duplicate functionality finder tool ... find where we duplicated effort ... consolidate."
+The finder is holographic_pycontext.canonical_shape (erases identifiers+constants -> structural fingerprint;
+tests/test_duplication_audit.py is the executable budget). Ran it tree-wide: 0 shape-identical cross-module dups
+even at >=2 stmts (the fingerprint is control-flow-strict, so it misses SEMANTIC dups structured differently).
+Complemented with a SEMANTIC scan: for each function I added this arc, find_scored its own description and flag when
+a DIFFERENT capability outranks/ties it. That caught what the shape scan cannot.
+
+FOUND + FIXED this sweep (both real, both mine from earlier this arc):
+  * ray_sdf_intersect had its own scalar sphere-march -- canonical holographic_raymarch.sphere_trace is a VECTORISED
+    marcher (drops inactive rays, over-relaxation, as_eval adapter). Refactored to batch-adapt the single ray and
+    DELEGATE to sphere_trace, keeping only the normal (central differences) + hit-record. Faster AND single-sourced.
+    Subtlety: sphere_trace wants a BATCHED sdf(P:(M,3))->(M,); the pick API takes scalar sdf_fn(pt)->float, so a
+    small batching wrapper bridges them (one adapter, canonical march).
+  * ResidueSystem._crt reimplemented Chinese Remainder Theorem recomposition that holographic_rns.crt already owns.
+    Delegated: wrap scalar remainders as length-1 vectors, call rns.crt. One CRT in the engine. (The rest of
+    ResidueSystem -- add=bind, subtract=involution, arithmetic carried IN the hypervectors -- is genuinely distinct
+    from rns_matmul's phasor approach and stays. Only the shared CRT math consolidated.)
+
+CHECKED + CLEARED (not dups, distinction matters): transform_selection ranks below 'Transform (warp)'/'transform
+tower' but those are CONCEPTUAL catalog homes about the affine group, not a callable apply_matrix primitive --
+transform_selection is the gizmo-semantics layer (pivot+space+constraint+weights), and its actual Rodrigues already
+delegates to scenegraph.rotation. select_in_box vs mesh_box/measure_bbox: different jobs (region-select vs bbox).
+skin_bind_weights vs scatter/gather: unrelated. All confirmed distinct.
+
+RUNNING DEDUP TALLY this arc (extend-don't-sibling enforced on my OWN recent code): soft_selection_weights->
+geodesic engine; _axis_rotation->scenegraph.rotation; snap module->canonical snap (per-axis generalized in);
+ray_sdf_intersect->sphere_trace; ResidueSystem._crt->rns.crt. FIVE consolidations, all delegating to the canonical
+owner, none reimplementing.
+
+DISCIPLINE: the shape finder is necessary but not sufficient -- it catches copy-paste, not "same job, different
+structure." A find_scored self-description scan (does anything outrank a function for its OWN purpose?) is the
+semantic complement, and it's what surfaced the sphere-trace and CRT dups. Run BOTH on new code. Also: my Rule-0 for
+these was too shallow when I built them (searched one phrasing, missed the canonical home) -- the fix is to search
+the canonical PRIMITIVE's vocabulary ('sphere trace', 'chinese remainder'), not just the user-facing phrasing.
+
+## SEMANTIC CAPABILITY HIERARCHY -- S1 (URI front door) + S2 (verb layer) + S4 (drift gates) shipped
+
+User's picture: address name collisions with a File->Export->PNG hierarchy (a lion is-a animal). Rule 0 found the
+URI context-menu (holographic_capuri: browse/resolve_uri/menu_path/collisions) was LARGELY ALREADY BUILT; the gaps
+were (1) find_capability didn't surface it, and (2) grouping was by CODE LOCATION, not by user-facing ACTION.
+
+SHIPPED this arc:
+S1 -- URI as the front door:
+  * resolve_capability_uri faculty (bare name / partial path -> full URI(s); 'rotation' -> meshskin + scenegraph).
+  * find_capability_uris (Catalog + faculty): every search result annotated with its disambiguating URI(s), so an
+    agent never receives a bare ambiguous name. The collision fix AT THE DISCOVERY LAYER.
+  * tools/name_collisions.py --addressable + selftest contract: every one of the 42 collisions resolves to DISTINCT
+    URIs. Reframes the budget from "don't add collisions" to "every collision is addressable by path." A collision
+    is a path to supply, not a name to forbid.
+S2 -- the semantic (verb) layer, orthogonal to location:
+  * Capability + register_capability gained optional semantic=None (default-off; untagged = byte-identical).
+  * docs/SEMANTIC_TAXONOMY.md: 11 verb roots (create/select/transform/modify/measure/convert/render/simulate/
+    animate/analyze/io), GROUNDED IN MEMBERS (an empty menu branch is a dark module).
+  * Tagged 21 high-traffic modeling faculties (select/{element,loop,pick,region,soft,symmetry}, transform/{gizmo,
+    snap,pivot}, create/scene, animate/{keyframe,skin}, analyze/pipeline). The 34 internal-function collisions stay
+    addressable-by-URI but untagged (tag lazily).
+  * browse_capabilities(prefix, by='semantic'): walks the verb tree exactly like File->Export->PNG. Verified: root
+    -> {select,transform,create,animate,analyze}; transform/ -> {gizmo,snap,pivot}; select/ -> {loop,pick,region,
+    soft,symmetry}. by='location' still walks the physical family tree; the two indexes are distinct over ONE
+    registry.
+S4 -- un-rottable:
+  * catalog selftest DRIFT GATE: any semantic tag whose root isn't a taxonomy root fails loudly.
+  * catalog selftest DOUBLE-REGISTRATION GUARD (source scan for register_capability("name") appearing 2+ times) --
+    FOUND + FIXED TWO real dupes this way: snap_to_grid registered x3 (leftover from the S0.1 snap consolidation),
+    holographic_rayindex x2 (pre-existing; merged the unique 'bvh' alias into the richer entry). register updates by
+    name, so a double-registration silently overwrites -- dead prose + a confusing diff, now trapped.
+  * capdoc.py emits the semantic field into capabilities.json (21 tagged) -- the machine-readable contract carries it.
+
+KEY PRINCIPLE reaffirmed: three orthogonal indexes (location / semantic / shape) over ONE registry. The name IS the
+location hierarchy (can't drift from code); semantic sits ON TOP and groups by intent; neither replaces the other.
+A collision is a path to supply. Ground taxonomy in members, not aspiration. Additive/default-off throughout.
+
+NEXT: EPIC S3 (io-shape: consumes/produces kinds -> pipeline suggestion) -- the genuinely missing piece that turns
+discovery into pipeline-building (Pharr's render-graph idea over the whole catalog).
+
+## IO-SHAPE LAYER (EPIC S3) -- discovery becomes pipeline-building
+
+Rule 0 confirmed a GENUINE gap: every phrasing of "what runs on a mesh / what produces a mesh / chain a pipeline"
+returned only fallbacks (individual conversions like points_to_mesh, or unrelated shader-graph fusion). No
+catalog-level shape filter existed. Built it:
+
+S3.1 -- holographic_iokinds.py: a CLOSED, COARSE 12-kind vocabulary (mesh, points, sdf, sdf_scene, field, image,
+  hypervector, transform, selection, scalar, curve, skeleton) + is_kind/validate_kinds. Closed so tags form a shared
+  language (produces 'points' links to consumes 'points'); coarse so routing stays simple (fine distinctions live in
+  docstrings). Grounded in measured member counts (field 199, mesh 151, sdf 95, image 78, points 51, ...). docs/
+  IO_KINDS.md documents it. Exposed as the io_kinds faculty (gave the vocabulary module a real door rather than
+  force-wiring -- an agent asking "what datatypes exist?" is a real query).
+S3.2 -- consumes=()/produces=() on Capability + register_capability, VALIDATED against the vocabulary at
+  registration (a 'point'/'points' typo raises immediately, not silently at pipeline time when the mismatched kinds
+  never link). Default empty = unspecified. Tagged 18 modeling capabilities.
+S3.3 -- find_capability(accepts=kind, produces=kind): pre-filters ranked results by io shape. CRITICAL rule: an
+  UNTAGGED capability (empty consumes/produces) is unspecified and is NEVER filtered out -- tagging is additive, it
+  must not hide the untagged long tail. "What can I run on this mesh?" -> accepts='mesh'.
+S3.4 -- suggest_pipeline(start_kind, goal_kind): BFS over typed edges (each tagged capability is an edge from every
+  consumed kind to every produced kind), returns the SHORTEST chain of {name, consumes, produces} steps or None.
+  Deterministic (edges sorted by name, so an earlier-named capability wins an equal-length race). Verified: 1-step
+  mesh->selection (mesh_selection); multi-step transform->selection (transform_selection: transform->mesh, then
+  mesh_selection: mesh->selection); same-kind -> [] (empty pipeline, already there); impossible image->skeleton ->
+  None. This is Pharr's render-graph idea (nodes typed by what they consume/produce) applied to the WHOLE catalog:
+  the engine proposes a ROUTE, not just a capability. capdoc.py emits consumes/produces into capabilities.json.
+
+THREE ORTHOGONAL INDEXES over ONE registry now complete: LOCATION (the name is the path, can't drift from code) +
+SEMANTIC (verb tree, groups by intent) + IO-SHAPE (typed edges, routes a pipeline). find_capability now answers
+three different questions -- what's it called, what do I do with it, and how do I get from what I have to what I want.
+All additive/default-off: an untagged capability is byte-identical in every index.
+
+KEPT NEGATIVE / discipline: force-wiring holographic_iokinds to clear the dark-module audit would have been the
+wrong fix (it's a vocabulary module used THROUGH the catalog). The right fix was to give it a genuine door -- the
+io_kinds faculty, which lists the vocabulary and is a real agent query. Same lesson as always: earn the door or
+annotate the negative; never wire to silence an audit.
+
+## IO-SHAPE COVERAGE -- tagged the conversion edges so suggest_pipeline is actually useful
+
+Rule 0 after shipping S3: suggest_pipeline had only 18 of 1749 capabilities tagged, and critically the CONVERSION
+capabilities (points_to_mesh, mesh_from_sdf, voxelize_mesh, render_mesh/scene, sample_field, mesh_uv_unwrap) -- the
+exact edges a pipeline routes through -- were all UNTAGGED. A router with no edges is a feature built but not wired
+(a gap). Found that these are FACULTY-DERIVED capabilities (auto-registered by seed_from_mind from docstrings), so
+they can't carry consumes/produces from prose.
+
+Fix: added a declarative _IO_SHAPES map in holographic_catalog (one readable table, grounded in each faculty's real
+signature) that seed_from_mind applies -- to both auto-registered AND curated entries (stamping a curated entry's
+shape iff it has none). Tagged 8 conversion edges. Coverage 18 -> 26.
+
+PAYOFF measured live: suggest_pipeline now finds real multi-step geometry routes -- points->image = points_to_mesh
+-> render_mesh; sdf->image = mesh_from_sdf -> render_mesh; points->field = points_to_mesh -> voxelize_mesh; sdf->mesh
+= mesh_from_sdf. The router has substance now, not just the handful of select/transform edges.
+
+SUBTLETY / kept note: the bare default_catalog() (built WITHOUT a mind) has only the directly-registered io tags;
+the _IO_SHAPES conversion tags are applied by seed_from_mind, which needs a mind. So the catalog selftest pins a
+route through directly-registered tags (selection->mesh via transform_selection), while the INTEGRATION test (full
+mind, seeded) pins the real conversion route (points->image). Two different fixtures, two appropriate pins -- don't
+assert a seeded-only route in the bare-catalog selftest (caught this: AssertionError None on first run).
+
+## PIPELINE ROUTER -- broadened edges + require_step (session: "knock out what you can")
+
+Two planned items (ARCH-1 recipe validator, holographic_inpaint gap) were BOTH ALREADY DONE -- Rule 0 caught it:
+  * validate_recipe (holographic_recipeops, ARCH-1) already ships: is_manifold DAG check (no forward/dangling/
+    out-of-range refs), in-range indices/repeat templates, declared outputs point to produced results, non-empty
+    set-ops. Discoverable, invocable, cataloged, selftest green. A prior session built it correctly. Did NOT rebuild.
+  * holographic_inpaint already ships and is CLASSICAL (not NCA-derived): harmonic_fill (Laplace solve),
+    majority_fill (neighbour vote), inpaint (type dispatch), fill_report. Its own docstring shows a proper Rule-0
+    audit before building. The note's "gap" was already filled. Did NOT rebuild.
+
+Genuine open work found instead: the pipeline router (suggest_pipeline) was edge-sparse. Added 8 more pipeline-edge
+faculties to _IO_SHAPES (coverage 26->34): inpaint/harmonic_fill/majority_fill (field->field, repair a holed field
+mid-pipeline), mesh_to_field (mesh->field), mesh_subdivide/mesh_smooth (mesh->mesh refinement), sweep_tube
+(curve->mesh), skin_mesh (mesh+skeleton->mesh). New routes enabled and verified: curve->image = sweep_tube->
+render_mesh; curve->field = sweep_tube->mesh_to_field.
+
+NEW FEATURE require_step: a same-kind query ('mesh'->'mesh') returned [] ('already there') -- technically correct but
+useless for a user asking "refine this mesh". require_step=True demands >=1 transforming edge, so mesh->mesh returns
+mesh_smooth, field->field returns harmonic_fill (the inpaint answer). Implemented by NOT pre-marking start visited
+when start==goal&require_step, so the empty path is never accepted and the first self-edge is the shortest answer.
+The distinction: default asks "are these the same type?"; require_step asks "what can I DO to a mesh?". Cross-kind
+routes unaffected. (Cleaned up a sloppy always-true guard expression mid-edit -- the empty-path exclusion is handled
+by the visited-set init, not by a conditional at the goal check.)
+
+CORRECTLY NO ROUTE (not bugs): field->mesh returns None -- nothing consumes field and produces mesh (field only leads
+to field/scalar); image->skeleton None. The router is honest about unreachable goals.
+
+## MESH-FIRST vs NATIVE-FIRST FORK -- RESOLVED ON EVIDENCE (a false dichotomy)
+
+User: "knock out the mesh-first vs native-first stuff." Resolved it the way the engine decides everything: measured
+the live system (Rule 0), didn't argue.
+
+FINDING: the fork's whole premise -- that mesh-first means a from-scratch half-edge kernel -- is FALSE. The kernel
+already exists:
+  * holographic_mesh.py (FWD-1, 624 lines) = Mesh, a HALF-EDGE substrate (half_edges, _adjacency, euler_char,
+    is_manifold/is_closed/genus, validate_topology, vertex_normals, OBJ/buffer IO). Its own docstring: "holostuff is
+    mature on the implicit/native axis -- SDF fields, Gaussian splats" -- the mesh kernel was written to close the
+    EXPLICIT side.
+  * holographic_eulerops.py (FWD-7): flip_edge, split_edge, collapse_edge (link condition), split_face (MEF), + now
+    poke_face.
+  * 57 mesh_* faculties already wired (extrude/inset/bevel/bridge/collapse/dissolve/loop-cut/CSG/subdivide/QEM+
+    cluster decimate/LSCM UV/curvature/geodesic/LOD/softbody/glTF).
+  * Native axis is the MORE mature: 27 SDF modules, 12 splat modules, vectorised sphere-trace, orbit-trap, domain
+    ops, SDF-scene compositor, GLSL/WGSL emit.
+Both axes are real, already interoperate (mesh_to_sdf/mesh_from_sdf/points_to_mesh/voxelize_mesh/mesh_to_field), and
+the S3 pipeline router already chains across them. So the fork is retired: do NEITHER as a fork; fill the mesh-op
+gaps incrementally (mesh is the younger axis). Decision doc: /home/claude/out/mesh_vs_native_fork_decision.md, with
+an ordered gap backlog (poke, triangulate-ngon, symmetrize, solidify, multi-segment bevel, grid-fill, seam+smart-UV,
+rip-vertices).
+
+FIRST GAP-FILL SHIPPED (proving the pattern): poke_face / mesh_poke -- add a vertex at the face centroid (displaced
+along the Newell face normal by height) and fan the n-gon into n triangles. V+1/E+n/F+(n-1), chi unchanged (a legal
+Euler edit; numeric-invariant selftest: chi=2 on a poked cube, outward displacement, determinism). Wired mesh_poke,
+5/5 stranger-phrasing discoverability, semantic=modify/subdivide (POPULATED the previously-empty modify/ verb
+branch), io-shape mesh->mesh (now the shortest mesh->mesh edge suggest_pipeline returns under require_step).
+
+FINDING worth flagging (not fork-related, a scaling smell): holographic_unified.py crossed 1,000,048 bytes -- just
+past the codeedit tool's 1 MB limit, so file_python_check now REFUSES it (py_compile still passes, engine imports
+fine). Used py_compile to verify the edit instead. Argues for eventually splitting UnifiedMind's faculty methods
+across thin mix-in modules. Recorded so a future session doesn't hit it by surprise.

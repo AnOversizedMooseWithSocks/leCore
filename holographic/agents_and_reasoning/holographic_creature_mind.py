@@ -1,5 +1,10 @@
 """CreatureMind -- the reference DEMO of building a specialized mind ON the one UnifiedMind.
 
+KEPT NEGATIVE (no engine door on purpose): this is a WORKED EXAMPLE meant to be READ, not imported -- it shows how a
+caller composes a domain-specific mind on top of UnifiedMind's faculties. Wiring UnifiedMind to instantiate a demo
+of itself would be circular; the value is the pattern in the source, not a callable. The faculties it demonstrates
+(memory, recall, procedural generation) are each already wired on UnifiedMind directly.
+
 THE THREE MINDS -- one division of labour, so this never gets confusing again:
   - UnifiedMind     : THE ONE MIND (holographic_unified.py) -- every general faculty (the single encoder,
                       the memory, recall, planning, denoising, the decision machinery). Everything builds on

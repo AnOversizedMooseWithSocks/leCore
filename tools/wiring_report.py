@@ -44,15 +44,12 @@ EXEMPT = {
 
 # The dark modules that exist TODAY, each with an honest status. `--check` fails only on a module that is NOT here,
 # so the debt is frozen and cannot grow. Wiring one means deleting its line -- progress recorded, like PENDING.
-KNOWN_DARK = {
-    "holographic_creature_mind": "reference DEMO of building a specialised mind ON UnifiedMind -- meant to be read, not imported.",
-    "holographic_extras": "grab-bag; triage each function into a home, then delete the module.",
-    "holographic_farm": "superseded in practice by coordinator.NetworkFarm (R3 prototype); archive or fold in.",
-    "holographic_lexicon": "a curriculum EXPERIMENT (dictionary-first word meaning), not a library.",
-    "holographic_photos": "a testing harness against real photographs, not a library.",
-    "holographic_reanchor": "the AUDIT that proves re-anchoring is load-bearing; evidence, not a callable faculty.",
-    "holographic_sdfscene": "a documented BASE CLASS for SDF scenes -- meant to be subclassed by callers, not imported by the engine.",
-}
+# 2026-07: all 7 prior dark modules resolved. holographic_sdfscene got a door (SDFScene.from_parts -> m.sdf_scene)
+# and holographic_extras' three concepts got doors (m.residue_system / m.vsa_region / m.predictive_filter). The
+# other four (photos/farm/creature_mind/lexicon/reanchor) are now annotated KEPT NEGATIVE in their own docstrings
+# -- evidence/demos/superseded prototypes, honest dead-ends rather than KNOWN_DARK limbo. So this dict is empty:
+# a new dark module now fails --check loudly instead of being silently tolerated.
+KNOWN_DARK = {}
 
 
 # Every file this run could not parse. AN AUDIT THAT DEGRADES SILENTLY IS WORSE THAN NO AUDIT: `ast.parse` failing

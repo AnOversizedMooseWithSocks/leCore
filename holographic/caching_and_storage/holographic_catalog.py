@@ -34,15 +34,24 @@ def _tokens(text):
 
 class Capability:
     """One catalog entry: a named home, what it DOES (plain English), a copy-paste EXAMPLE, whether it is NATIVE
-    (True = batched / fusable / stays in the vector domain; False = crosses to Python), and search `aliases`
-    (extra words a problem might use for it -- e.g. 'knn', 'lookup' for the search index)."""
+    (True = batched / fusable / stays in the vector domain; False = crosses to Python), search `aliases`
+    (extra words a problem might use for it -- e.g. 'knn', 'lookup' for the search index), and an optional
+    `semantic` action path (the File->Export->PNG verb hierarchy -- e.g. 'transform/rotate', 'select/loop'). The
+    semantic path is orthogonal to the physical location URI: it groups a capability by what a USER does, not by
+    which module the code lives in. Default None -> the capability falls back to its location URI for grouping."""
 
-    def __init__(self, name, does, example="", native=True, aliases=()):
+    def __init__(self, name, does, example="", native=True, aliases=(), semantic=None, consumes=(), produces=()):
         self.name = str(name)
         self.does = str(does)
         self.example = str(example)
         self.native = bool(native)
         self.aliases = tuple(aliases)
+        self.semantic = str(semantic) if semantic else None
+        # io-shape kinds (S3): what datatype(s) this capability takes / returns, from the closed IO_KINDS vocabulary.
+        # Validated so a typo is caught here, not silently at pipeline time. Empty = unspecified ('always shown').
+        from holographic.caching_and_storage.holographic_iokinds import validate_kinds
+        self.consumes = validate_kinds(consumes, where="consumes of %r" % name)
+        self.produces = validate_kinds(produces, where="produces of %r" % name)
 
     def __repr__(self):
         return "Capability(%r, %s)" % (self.name, "native" if self.native else "python")
@@ -67,9 +76,14 @@ class Catalog:
     def __init__(self):
         self._by_name = {}                                           # name -> Capability (insertion order kept)
 
-    def register_capability(self, name, does, example="", native=True, aliases=()):
-        """Add (or replace) a capability. Returns the entry. Additive -- registering the same name again updates it."""
-        cap = Capability(name, does, example, native, aliases)
+    def register_capability(self, name, does, example="", native=True, aliases=(), semantic=None,
+                            consumes=(), produces=()):
+        """Add (or replace) a capability. Returns the entry. Additive -- registering the same name again updates it.
+        `semantic` (optional) is the File->Export->PNG verb path, e.g. 'transform/rotate'. `consumes`/`produces`
+        (optional, S3) are tuples of io kinds (holographic_iokinds) declaring the datatype(s) this takes/returns --
+        validated against the closed vocabulary, empty = unspecified. All default off -> byte-identical old entries."""
+        cap = Capability(name, does, example, native, aliases, semantic=semantic, consumes=consumes,
+                         produces=produces)
         self._by_name[name] = cap
         return cap
 
@@ -82,11 +96,15 @@ class Catalog:
     def __len__(self):
         return len(self._by_name)
 
-    def find_capability(self, problem, k=3):
+    def find_capability(self, problem, k=3, accepts=None, produces=None):
         """Return up to `k` capabilities whose description best matches `problem`, best first. The score is the
         number of shared content words, normalised by the query length so a short query isn't swamped -- plus a
         small bonus when a query word appears in the entry's NAME (a strong signal). Deterministic ties break by
         name so the result is stable run-to-run (the engine's determinism rule).
+
+        S3 io-shape filter: `accepts` (a kind) keeps only capabilities that CONSUME that kind -- "what can I run on
+        this mesh?" -> accepts='mesh'. `produces` keeps only those that PRODUCE that kind. A capability with NO
+        consumes/produces tag is unspecified and is NEVER filtered out (tagging is additive; untagged stays shown).
 
         Aliases are TOKENIZED into the haystack, not matched as whole strings. That was a real bug, measured: the
         haystack used to take each alias as one lowercased phrase, so a multi-word alias could only ever match a
@@ -97,14 +115,27 @@ class Catalog:
         q = set(_tokens(problem))
         if not q:
             return []
+        q_phrase = " ".join((problem or "").lower().split())        # normalised whole query, for exact-alias hits
         scored = []
         for cap in self._by_name.values():
+            # S3 pre-filter: skip a capability whose declared shape is incompatible. Untagged (empty) = always shown.
+            if accepts is not None and cap.consumes and accepts not in cap.consumes:
+                continue
+            if produces is not None and cap.produces and produces not in cap.produces:
+                continue
             name_words = set(_tokens(cap.name))
             hay = name_words | set(_tokens(cap.does)) | _alias_tokens(cap.aliases)
             overlap = len(q & hay)
             if overlap == 0:
                 continue
             score = overlap + 0.5 * len(q & name_words)              # a name-word hit counts extra
+            # EXACT-ALIAS bonus: if the whole query IS one of this cap's aliases, that is the strongest possible
+            # signal -- a stranger typed the exact phrase we anticipated. Without this, a cap with the exact alias
+            # ties with siblings that merely scatter the same words across their prose, and the alphabetical
+            # tie-break can bury it below k (measured: ascii_view, exact alias 'render image to terminal', lost to
+            # ascii_animate/field/sdf all tied at 3.0). Additive -- only raises exact matches, never demotes.
+            if any(q_phrase == a.lower() for a in cap.aliases):
+                score += 5.0
             scored.append((score, cap.name, cap))
         scored.sort(key=lambda s: (-s[0], s[1]))                     # best score first, then name (stable)
         return [cap for _, _, cap in scored[:k]]
@@ -115,6 +146,7 @@ class Catalog:
         q = set(_tokens(problem))
         if not q:
             return []
+        q_phrase = " ".join((problem or "").lower().split())        # normalised whole query, for exact-alias hits
         scored = []
         for cap in self._by_name.values():
             name_words = set(_tokens(cap.name))
@@ -123,28 +155,151 @@ class Catalog:
             if overlap == 0:
                 continue
             score = overlap + 0.5 * len(q & name_words)
+            if any(q_phrase == a.lower() for a in cap.aliases):     # exact-alias bonus (see find_capability)
+                score += 5.0
             scored.append((score, cap.name, cap))
         scored.sort(key=lambda s: (-s[0], s[1]))
         return [(cap, float(sc)) for sc, _, cap in scored[:k]]
+
+    def suggest_pipeline(self, start_kind, goal_kind, max_len=4, require_step=False):
+        """S3.4 -- propose a PIPELINE from `start_kind` to `goal_kind` by chaining capabilities whose `produces` feeds
+        the next's `consumes`. Returns the shortest chain as a list of {name, consumes, produces} steps (fewest
+        steps; deterministic tie-break by name), or None if no chain within `max_len`. This is the render-graph idea
+        (nodes typed by what they consume/produce) applied to the whole catalog: instead of a single capability, the
+        catalog proposes a *route* -- e.g. points -> mesh might be one step (points_to_mesh) or several.
+
+        When `start_kind == goal_kind`: by default returns [] (the empty pipeline -- you already have that kind). Set
+        `require_step=True` to instead demand at least one TRANSFORMING edge of that kind -- 'mesh -> mesh' then
+        returns e.g. mesh_smooth / mesh_subdivide, the answer a user asking "refine this mesh" actually wants. This
+        is the difference between 'are these the same type?' (default) and 'what can I DO to a mesh?' (require_step).
+
+        Only capabilities that declare BOTH a consumes and a produces participate (an untagged capability has no
+        typed edge to route through). A capability is a directed edge kind_in -> kind_out; this is breadth-first
+        over those edges, so the first chain found is a shortest one. `start_kind`/`goal_kind` must be io kinds."""
+        from holographic.caching_and_storage.holographic_iokinds import is_kind
+        if not is_kind(start_kind) or not is_kind(goal_kind):
+            raise ValueError("start_kind and goal_kind must be io kinds; got %r -> %r" % (start_kind, goal_kind))
+        if start_kind == goal_kind and not require_step:
+            return []                                            # already there; the empty pipeline
+        # build the typed edges: each tagged capability is an edge from every consumed kind to every produced kind.
+        # sorted by name so the BFS is deterministic (an earlier-named capability wins an equal-length race).
+        edges = []                                               # (consume_kind, produce_kind, cap)
+        for cap in sorted(self._by_name.values(), key=lambda c: c.name):
+            if not cap.consumes or not cap.produces:
+                continue
+            for ci in cap.consumes:
+                for po in cap.produces:
+                    edges.append((ci, po, cap))
+        # BFS from start_kind; frontier holds (current_kind, path_of_caps). Visited kinds prevent cycles.
+        # require_step subtlety: when start==goal we must NOT accept the empty path, so we don't mark start visited
+        # up front (we let the search take a real edge first); a self-edge (mesh->mesh) then satisfies the goal.
+        from collections import deque
+        frontier = deque([(start_kind, [])])
+        visited = set() if (start_kind == goal_kind and require_step) else {start_kind}
+        while frontier:
+            kind, path = frontier.popleft()
+            if len(path) >= max_len:
+                continue
+            for ci, po, cap in edges:
+                if ci != kind:
+                    continue
+                if po == goal_kind:
+                    # reached the goal kind by taking this edge -> a non-empty chain (>=1 step). When require_step and
+                    # start==goal, the empty path was never accepted because start wasn't pre-marked visited, so the
+                    # first self-edge (e.g. mesh->mesh via mesh_smooth) is the shortest valid answer.
+                    step = path + [cap]
+                    return [{"name": c.name, "consumes": list(c.consumes), "produces": list(c.produces)}
+                            for c in step]
+                if po not in visited:
+                    visited.add(po)
+                    frontier.append((po, path + [cap]))
+        return None                                              # no route within max_len
+
+    def find_capability_uris(self, problem, k=3):
+        """Like find_capability, but each result is annotated with its disambiguating capability URI(s) so a caller
+        NEVER gets a bare ambiguous name. Returns [{name, does, example, uris}] where `uris` is the list of full
+        paths the name resolves to (holographic_capuri) -- a single path for a unique name, several for a colliding
+        one (e.g. 'rotation' -> both meshskin and scenegraph). This is the collision fix at the discovery layer: the
+        agent sees the path to supply, not just the name. Falls back to the bare name if the URI index is
+        unavailable, so it degrades gracefully."""
+        try:
+            from holographic.caching_and_storage.holographic_capuri import resolve_uri
+        except Exception:
+            resolve_uri = None
+        out = []
+        for cap in self.find_capability(problem, k=k):
+            uris = []
+            if resolve_uri is not None:
+                try:
+                    uris = resolve_uri(cap.name)
+                except Exception:
+                    uris = []
+            out.append({"name": cap.name, "does": cap.does, "example": cap.example, "uris": uris or [cap.name]})
+        return out
 
     def to_rows(self):
         """Export entries as plain dict rows (name/does/native) -- e.g. to hand to the SQL capability table."""
         return [{"name": c.name, "does": c.does, "native": c.native} for c in self._by_name.values()]
 
 
+#: IO-SHAPE MAP for faculty-derived capabilities (S3). seed_from_mind auto-registers every public mind method from
+#: its docstring but can't read consumes/produces from prose, so the shapes for the high-value CONVERSION faculties
+#: (the pipeline edges) are declared here, in one readable table, and applied at seed time. Grounded in each
+#: faculty's real signature. Only conversion/geometry edges that a pipeline would route through are listed -- a
+#: faculty absent here is simply unspecified (always shown), which is the correct default. Keep coarse (IO_KINDS).
+_IO_SHAPES = {
+    # points/sdf/mesh interconversions -- the core geometry pipeline edges
+    "points_to_mesh":    (("points",), ("mesh",)),
+    "mesh_from_sdf":     (("sdf",), ("mesh",)),
+    "voxelize_mesh":     (("mesh",), ("field",)),
+    "mesh_sample_field": (("mesh", "points"), ("scalar",)),
+    "mesh_uv_unwrap":    (("mesh",), ("mesh",)),
+    # rendering edges -- geometry -> image
+    "render_mesh":       (("mesh",), ("image",)),
+    "render_scene":      (("sdf_scene",), ("image",)),
+    # field sampling
+    "sample_field":      (("field", "points"), ("scalar",)),
+    # field hole-filling (inpaint) -- field -> field, so a holed field can be repaired mid-pipeline
+    "inpaint":           (("field",), ("field",)),
+    "harmonic_fill":     (("field",), ("field",)),
+    "majority_fill":     (("field",), ("field",)),
+    # mesh <-> field, and mesh refinement (mesh -> mesh) so a raw mesh can be cleaned before use
+    "mesh_to_field":     (("mesh",), ("field",)),
+    "mesh_subdivide":    (("mesh",), ("mesh",)),
+    "mesh_smooth":       (("mesh",), ("mesh",)),
+    "mesh_poke":         (("mesh",), ("mesh",)),         # fan a face to triangles -- a mesh->mesh retopology edge
+    # generative edges: a profile/curve swept into a mesh; a mesh deformed by a skeleton
+    "sweep_tube":        (("curve",), ("mesh",)),
+    "skin_mesh":         (("mesh", "skeleton"), ("mesh",)),
+}
+
+
 def seed_from_mind(catalog, mind):
     """Reuse the faculty walk (as holographic_query.capability_registry does) to auto-register every public method
     of `mind` as a catalog entry, using its one-line docstring as `does`. Curated entries (registered explicitly)
-    win, because they carry better `does`/`example`/`native` -- we don't overwrite them here."""
+    win, because they carry better `does`/`example`/`native` -- we don't overwrite them here. The io-shape map
+    (_IO_SHAPES) is applied to both auto-registered AND curated entries, so the conversion faculties become pipeline
+    edges (S3) even though their consumes/produces can't be read from prose."""
     import inspect
     for name in dir(mind):
-        if name.startswith("_") or name in catalog._by_name:
+        if name.startswith("_"):
+            continue
+        cons, prod = _IO_SHAPES.get(name, ((), ()))
+        if name in catalog._by_name:
+            # curated entry already exists -- don't overwrite it, but DO stamp its io-shape if we know it and it
+            # doesn't already carry one (so a curated conversion becomes a pipeline edge too).
+            existing = catalog._by_name[name]
+            if (cons or prod) and not existing.consumes and not existing.produces:
+                from holographic.caching_and_storage.holographic_iokinds import validate_kinds
+                existing.consumes = validate_kinds(cons, where="_IO_SHAPES of %r" % name)
+                existing.produces = validate_kinds(prod, where="_IO_SHAPES of %r" % name)
             continue
         attr = getattr(type(mind), name, None)
         if not callable(attr):
             continue
         doc = (inspect.getdoc(attr) or "").strip().split("\n")[0][:160]
-        catalog.register_capability(name, doc or name, example="mind.%s(...)" % name, native=True)
+        catalog.register_capability(name, doc or name, example="mind.%s(...)" % name, native=True,
+                                    consumes=cons, produces=prod)
     return catalog
 
 
@@ -165,14 +320,12 @@ def default_catalog():
                           example="SpatialGrid(points).knn(query, k)", native=True, aliases=("spatial", "euclidean", "points", "knn"))
     c.register_capability("holographic_rayindex", "which pixels/objects a RAY touches (ray<->object index) -- not a "
                           "nearest(query,k); a distinct spatial ray structure", example="build_ray_index(ctx, camera, w, h)",
-                          native=True, aliases=("ray", "pixels", "reshade", "spatial"))
+                          native=True, aliases=("ray", "pixels", "reshade", "spatial", "bvh"))
     c.register_capability("holographic_tree.HoloForest", "sub-linear approximate nearest-neighbour search over many "
                           "vectors (random-projection forest) with cross-tree agreement", example="HoloForest(V).recall(q,k)",
                           native=True, aliases=("forest", "ann", "knn"))
     c.register_capability("holographic_pivot", "recursive pivot-tree index for nearest-neighbour search",
                           example="from holographic.misc.holographic_pivot import ...", native=True, aliases=("pivot", "index"))
-    c.register_capability("holographic_rayindex", "spatial index built for RAY queries (ray <-> object)",
-                          example="from holographic.rendering.holographic_rayindex import ...", native=True, aliases=("ray", "spatial", "bvh"))
     c.register_capability("holographic_archive", "content-addressable image memory (WHT plates), damage-tolerant",
                           example="from holographic.misc.holographic_archive import ...", native=True, aliases=("image", "store", "recall"))
 
@@ -335,6 +488,656 @@ def default_catalog():
                           native=True, aliases=("domain warped fbm", "warped noise", "turbulence noise", "flow noise",
                                                 "swirling noise", "marble texture", "smoke noise", "dfbm",
                                                 "fbm domain warp", "flowing procedural texture"))
+    c.register_capability("ladder_forecast_calibrated", "forecast a numeric series with the ladder predictor "
+                          "wrapped in a CALIBRATED prediction interval (holographic_ladder) -- an uncalibrated "
+                          "forecast is not a measurement. Rolls the predictor over the series to gather residuals "
+                          "on held-out data, calibrates a conformal forecaster, and returns the next point forecast "
+                          "plus an interval with MEASURED coverage (not assumed). Falls back to point-only when the "
+                          "history is too short to calibrate honestly",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "r=m.ladder_forecast_calibrated([0,1,2,3,4]*30); print(r['interval'] is not None)",
+                          native=True, aliases=("forecast with a confidence interval", "calibrated forecast",
+                                                "prediction interval for a series", "forecast with error bars",
+                                                "how sure is this forecast", "conformal forecast",
+                                                "forecast with measured coverage", "next value with an interval"))
+    c.register_capability("edit_history", "the UNDO/REDO log AND EDITABLE CONSTRUCTION HISTORY for an interactive "
+                          "edit session (holographic_edithistory) -- an EditHistory you thread scene state through: "
+                          "do(state, cmd) applies and records, undo/redo walk it bit-identically (tie-safe replay). "
+                          "Also .rebuild(base) replays the whole recipe, and .replace_command(i, new_cmd, base) "
+                          "edits a PAST operation's parameters and re-evaluates downstream (the Maya/C4D reach-back). "
+                          "Build commands with vertex_move_command / capture_edit_command",
+                          example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "h=m.edit_history(); P=[[0,0,0],[1,0,0]]; "
+                          "s=h.do(P,m.vertex_move_command([1],[0,1,0])); print(np.allclose(h.undo(s),P))",
+                          native=True, aliases=("undo redo", "undo a geometry edit", "edit history",
+                                                "command log for editing", "reversible edit stack",
+                                                "undo a mesh edit", "editable construction history",
+                                                "edit a past operation parameter", "parametric history",
+                                                "re-evaluate a recipe with changed parameters"))
+    c.register_capability("vertex_move_command", "a reversible VERTEX MOVE command (holographic_edithistory) for "
+                          "the undo log -- apply adds a delta to the given vertices, invert subtracts it "
+                          "(closed-form inverse, O(edit) memory). Feed to edit_history.do",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "print(m.vertex_move_command([1],[0,1,0]).name)",
+                          native=True, aliases=("reversible move command", "undoable vertex move",
+                                                "move command for undo", "record a vertex move",
+                                                "make a move undoable"))
+    c.register_capability("capture_edit_command", "wrap an ARBITRARY geometry edit into a reversible command "
+                          "(holographic_edithistory) by snapshotting before/after positions of just the touched "
+                          "vertices -- O(edit) memory, for edits with no cheap algebraic inverse (a bevel, a "
+                          "smooth). Feed to edit_history.do",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "print(m.capture_edit_command([0],[[9,9,9]],[[0,0,0]]).name)",
+                          native=True, aliases=("make any edit undoable", "record an arbitrary edit",
+                                                "snapshot inverse command", "wrap an edit for undo",
+                                                "undoable geometry edit"))
+    c.register_capability("residue_system", "exact integer arithmetic in vectors via a RESIDUE NUMBER SYSTEM "
+                          "(holographic_extras) -- encode integers in [0,M) as CRT residues carried in "
+                          "hypervectors, then add/subtract/scale with vector ops that are EXACT (no floating "
+                          "error), decoding back to the integer. The number-theoretic view of VSA bundling",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "rs=m.residue_system([3,5,7]); "
+                          "print(rs.decode(rs.add(rs.encode(20),rs.encode(30))))",
+                          native=True, aliases=("residue number system", "exact modular arithmetic",
+                                                "crt integer arithmetic", "modular arithmetic in vectors",
+                                                "exact integer math with hypervectors"))
+    c.register_capability("vsa_region", "a REGION of space as a signed-distance ball with boolean algebra "
+                          "(holographic_extras) -- union/intersect/subtract/complement of spherical regions, plus "
+                          "contains() and steer(). The set-algebra complement to sdf_scene: compose regions of "
+                          "interest for selection or routing",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "r=m.vsa_region([0,0,1.0],1.0).union(m.vsa_region([0,0,-1.0],1.0)); "
+                          "print(bool(r.contains([0,0,1.0])))",
+                          native=True, aliases=("region of space", "spherical region algebra",
+                                                "region of interest", "boolean region composition",
+                                                "combine regions of space"))
+    c.register_capability("predictive_filter", "a SURPRISE filter (holographic_extras) -- observe(vec) returns "
+                          "(is_novel, surprise); slow drift is absorbed by a moving prediction while an abrupt "
+                          "change fires once. Pass only surprising observations downstream, stay quiet on "
+                          "predictable ones -- an event gate for a stream",
+                          example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "pf=m.predictive_filter(); print(pf.observe(np.ones(64))[0] in (True,False))",
+                          native=True, aliases=("surprise filter", "novelty detector", "event gate for a stream",
+                                                "predictive novelty filter", "only report surprising observations"))
+    c.register_capability("sdf_scene", "build an SDF SCENE from parts (holographic_sdfscene) -- 'a scene is a set "
+                          "of SDF parts'. Pass (sdf_fn, material) pairs and optional (center,radius) bounds; get "
+                          ".eval (nearest-surface distance = min over parts, what a ray-marcher calls), .part_ids / "
+                          ".material_at (argmin, material lookup), .parts_near (spatial cull). The SDF-scene state "
+                          "model, composing parts the way a splat scene bundles primitives",
+                          example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "sc=m.sdf_scene([(lambda p: np.linalg.norm(np.asarray(p,float),axis=-1)-1.0,'red')]); "
+                          "print(float(sc.eval(np.array([[0,0,0.0]]))[0]))",
+                          native=True, aliases=("sdf scene", "compose sdf parts", "scene of sdf primitives",
+                                                "build a scene from signed distance functions",
+                                                "sdf scene with materials", "combine sdf shapes into a scene"),
+                          semantic="create/scene",
+                          consumes=("sdf",), produces=("sdf_scene",))
+    c.register_capability("snap_to_grid", "GEOMETRIC grid snap (holographic_snap) -- snap a 3-D point to the "
+                          "nearest grid node of spacing `increment` (scalar or per-axis; a zero axis is left "
+                          "alone). The 'snap to grid' a modeler holds Ctrl for. Distinct from guide_snap (VSA "
+                          "codebook cleanup)",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "print(m.snap_to_grid([0.4,0.6,-0.3],1.0))",
+                          native=True, aliases=("snap to grid", "round to grid increment", "grid snapping",
+                                                "snap a point to the grid", "quantize to grid"),
+                          semantic="transform/snap",
+                          consumes=("points",), produces=("points",))
+    c.register_capability("snap_to_vertices", "snap a point to the NEAREST vertex (holographic_snap) -- returns "
+                          "{index, position, distance} or None if beyond max_dist. The vertex-snap that makes two "
+                          "verts coincide exactly",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "print(m.snap_to_vertices([4.6,0.1,0.0],[[0,0,0],[5,0,0]])['index'])",
+                          native=True, aliases=("snap to nearest vertex", "snap a vertex to another",
+                                                "vertex snapping", "snap to a point", "find nearest vertex to snap"),
+                          semantic="transform/snap",
+                          consumes=("points",), produces=("points",))
+    c.register_capability("snap_transform_delta", "snap a TRANSFORM DELTA so the dragged point lands on a target "
+                          "(holographic_snap) -- target 'grid'/'vertex'/'edge'; returns {delta (corrected), "
+                          "snapped_to}. The form the gizmo uses: it has a raw delta and the point being dragged, and "
+                          "wants the delta adjusted so that point snaps. Keeps transform and snap layers separate",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "print(m.snap_transform_delta([0.4,0,0],'grid',1.0,moved_point=[0.4,0,0])['snapped_to'])",
+                          native=True, aliases=("snap a move to the grid", "snap while dragging",
+                                                "snap a transform", "constrain a move to a snap target",
+                                                "snap the gizmo delta"),
+                          semantic="transform/snap",
+                          consumes=("transform",), produces=("transform",))
+    c.register_capability("transform_selection", "the GIZMO BACKEND (holographic_transform_space) -- transform "
+                          "selected vertices about a PIVOT (median/active/cursor/bbox), in a SPACE "
+                          "(world/local/view), under an axis CONSTRAINT mask: the triple that turns a raw matrix "
+                          "into the move/rotate/scale a modeler expects. translate/rotate/scale about the pivot; "
+                          "pass weights for PROPORTIONAL editing. Non-destructive",
+                          example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "P=[[0,0,0],[1,0,0],[1,1,0],[0,1,0]]; "
+                          "print(m.transform_selection(P,[0,1,2,3],translate=[1,1,1],constraint=(1,0,0))[0])",
+                          native=True, aliases=("translate rotate scale a selection", "move a selection",
+                                                "gizmo transform", "axis constrained move", "transform in a space",
+                                                "rotate about a pivot", "proportional edit transform"),
+                          semantic="transform/gizmo",
+                          consumes=("mesh", "selection", "transform"), produces=("mesh",))
+    c.register_capability("pivot_point", "resolve the PIVOT for a transform (holographic_transform_space) -- "
+                          "'median' (centroid), 'bbox' (box centre), 'cursor' (a given point), or 'active' (a "
+                          "chosen vertex). The point a rotate/scale turns around",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "print(m.pivot_point([[0,0,0],[2,0,0]],[0,1],'bbox'))",
+                          native=True, aliases=("pivot point", "transform pivot", "center of a selection",
+                                                "rotation center", "where to rotate around"),
+                          semantic="transform/pivot",
+                          consumes=("mesh", "selection"), produces=("transform",))
+    c.register_capability("pick_mesh", "VIEWPORT PICK on a REAL mesh (holographic_raypick) -- from a cursor (u,v in "
+                          "-1..1) return the nearest 'face' or 'vertex' clicked, as {kind, index, position, "
+                          "distance} or index:None on a miss. The generalization of pick_element (demo cage) onto a "
+                          "user's arbitrary geometry -- one call from 'clicked here' to 'selected this'",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "mesh={'vertices':[[-1,-1,0],[1,-1,0],[1,1,0],[-1,1,0]],'faces':[[0,1,2,3]]}; "
+                          "print(m.pick_mesh(mesh,0.0,0.0)['index'])",
+                          native=True, aliases=("pick a face on a mesh", "click to select a mesh element",
+                                                "viewport pick real geometry", "select geometry under the cursor",
+                                                "pick mesh by screen position"),
+                          semantic="select/pick",
+                          consumes=("mesh",), produces=("selection",))
+    c.register_capability("ray_mesh_intersect", "RAY-VS-MESH picking (holographic_raypick) -- cast a ray at a mesh "
+                          "and return the NEAREST hit {face, position, distance, barycentric} or None. "
+                          "Moller-Trumbore per triangle with an AABB broad phase; quads report the original face. "
+                          "How viewport picking hits a user's real geometry",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "mesh={'vertices':[[-1,-1,0],[1,-1,0],[1,1,0],[-1,1,0]],'faces':[[0,1,2,3]]}; "
+                          "print(m.ray_mesh_intersect(mesh,[0,0,5],[0,0,-1])['face'])",
+                          native=True, aliases=("ray triangle intersection", "cast a ray at a mesh",
+                                                "ray hits a mesh face", "pick a face with a ray",
+                                                "moller trumbore", "ray mesh hit test"),
+                          semantic="select/pick",
+                          consumes=("mesh",), produces=("scalar",))
+    c.register_capability("ray_sdf_intersect", "RAY-VS-SDF picking (holographic_raypick) -- sphere-trace a ray into "
+                          "an SDF (any sdf_fn(pt)->distance) and return the hit {position, distance, normal, steps} "
+                          "or None. The native pick for the field/procedural half of a scene -- exact to the field, "
+                          "no triangulation",
+                          example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "sph=lambda p: float(np.linalg.norm(np.asarray(p,float))-1.0); "
+                          "print(round(m.ray_sdf_intersect(sph,[0,0,3],[0,0,-1])['distance'],1))",
+                          native=True, aliases=("ray march an sdf", "cast a ray into an sdf",
+                                                "sphere trace a ray", "sdf ray hit", "raymarch pick"),
+                          semantic="select/pick",
+                          consumes=("sdf",), produces=("scalar",))
+    c.register_capability("screen_ray", "build a world-space RAY from a screen coordinate (holographic_raypick) -- "
+                          "(u,v) in -1..1 under the cursor -> (origin, direction), so 'the user clicked here' "
+                          "becomes a geometry query for ray_mesh_intersect / ray_sdf_intersect",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "o,d=m.screen_ray(0.0,0.0); print(o)",
+                          native=True, aliases=("screen to world ray", "cursor to ray", "unproject a screen point",
+                                                "make a pick ray", "ray from a screen coordinate"),
+                          semantic="select/pick")
+    c.register_capability("skin_bind_weights", "AUTO-SKIN BINDING (holographic_meshskin) -- compute per-vertex bone "
+                          "weights from bone anchor points, the 'bind' step that produces the weights skin_mesh "
+                          "consumes. Inverse-distance falloff to the nearest bones, keeping max_influences and "
+                          "renormalizing to a PARTITION OF UNITY (rigid motion stays exact). The distance-based "
+                          "auto-bind a rig starts from",
+                          example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "w=m.skin_bind_weights([[0,0,0],[5,0,0.0]],[[0,0,0],[5,0,0.0]],max_influences=2); "
+                          "print(np.round(w.sum(axis=1),3).tolist())",
+                          native=True, aliases=("bind mesh to skeleton", "compute skin weights from bones",
+                                                "automatic skin weights", "rig bind weights",
+                                                "distance based skin binding", "skin binding"),
+                          semantic="animate/skin",
+                          consumes=("mesh", "skeleton"), produces=("scalar",))
+    c.register_capability("mesh_poke", "POKE a polygon face (holographic_eulerops, FWD-7) -- add a vertex at the "
+                          "face centroid (pushed out along the normal by height) and FAN the face into triangles, "
+                          "one per edge. An n-gon becomes n triangles. V+1/E+n/F+(n-1), chi unchanged. Fan a quad to "
+                          "triangles or raise a spike; the inverse of dissolving the center vertex",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "from holographic.mesh_and_geometry.holographic_mesh import box; "
+                          "print(m.mesh_poke(box(2,2,2),0,height=0.3).n_faces)",
+                          native=True, aliases=("poke a face", "fan a face into triangles", "raise a spike on a face",
+                                                "triangulate a face from its center", "add a center vertex to a polygon",
+                                                "poke faces", "center-split a polygon"),
+                          semantic="modify/subdivide", consumes=("mesh",), produces=("mesh",))
+    c.register_capability("io_kinds", "the closed vocabulary of io DATATYPE kinds a capability can consume/produce "
+                          "(holographic_iokinds) -- mesh, points, sdf, sdf_scene, field, image, hypervector, "
+                          "transform, selection, scalar, curve, skeleton. The kinds the accepts=/produces= filter "
+                          "and suggest_pipeline route over",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.io_kinds())",
+                          native=True, aliases=("what datatypes exist", "list io kinds", "capability datatypes",
+                                                "valid input output types", "what kinds can capabilities take"),
+                          semantic="analyze/pipeline")
+    c.register_capability("suggest_pipeline", "propose a PIPELINE from one datatype to another (holographic_catalog "
+                          "+ holographic_iokinds) by chaining capabilities whose produces feeds the next's consumes. "
+                          "Returns the shortest chain of {name, consumes, produces} steps, or None. The render-graph "
+                          "idea over the whole catalog: the engine proposes a ROUTE from what you have to what you "
+                          "want, not just one capability",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "print(m.suggest_pipeline('transform','selection'))",
+                          native=True, aliases=("how do I get from points to a mesh", "chain capabilities",
+                                                "build a pipeline", "route between datatypes",
+                                                "what steps turn X into Y"),
+                          semantic="analyze/pipeline")
+    c.register_capability("find_capability_uris", "like find_capability but each result carries its disambiguating "
+                          "capability URI(s) (holographic_catalog + holographic_capuri) so a caller NEVER gets a "
+                          "bare ambiguous name. Returns [{name, does, example, uris}] -- one path for a unique name, "
+                          "several for a colliding one. The collision fix at the discovery layer",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "print(m.find_capability_uris('snap to grid')[0]['uris'])",
+                          native=True, aliases=("search capabilities with paths", "find a capability and its uri",
+                                                "disambiguated capability search", "capability search with uris",
+                                                "find functionality with full paths"),
+                          semantic="analyze/pipeline")
+    c.register_capability("resolve_capability_uri", "resolve a bare capability NAME or partial path to the FULL "
+                          "capability URI(s) (holographic_capuri) -- 'rotation' -> both meshskin and scenegraph "
+                          "paths; 'sdf/sphere' narrows to one. The disambiguation step when a name collides: supply "
+                          "more of the path. Pairs with browse_capabilities (the menu) and capability_collisions",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "print(m.resolve_capability_uri('rotation'))",
+                          native=True, aliases=("resolve a capability name", "disambiguate a function name",
+                                                "full path of a capability", "which module has this function",
+                                                "capability uri for a name"),
+                          semantic="analyze/pipeline")
+    c.register_capability("timeline", "a keyframe TIMELINE (holographic_anim) -- key(channel, t, value, interp) "
+                          "then sample(channel, t) for the interpolated value at time t (vectorised over t). EASING "
+                          "per key: 'linear' (default), 'step' (hold), 'smooth' (ease in-out), 'ease_in', 'ease_out'. "
+                          "Key blendshape weights, deform params, or transforms and drive an animation from it",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "tl=m.timeline(); tl.key('x',0,0.0); tl.key('x',1,1.0,interp='ease_in'); "
+                          "print(round(float(tl.sample('x',0.5)),2))",
+                          native=True, aliases=("keyframe animation", "animation timeline", "ease in ease out",
+                                                "animation curve easing", "keyframe a value over time",
+                                                "interpolate keyframes", "keyframe with easing"),
+                          semantic="animate/keyframe",
+                          consumes=("scalar",), produces=("scalar",))
+    c.register_capability("select_symmetric", "SYMMETRY SELECTION (holographic_meshselect) -- add a selection's "
+                          "mirror-image elements across a world axis plane (axis 0/1/2 = x/y/z=0), so a symmetric "
+                          "edit hits both sides. The selection-level complement to mirror_mesh (which mirrors "
+                          "GEOMETRY): here nothing is created, we find the counterpart elements that already exist, "
+                          "paired by reflected position",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "g={'vertices':[[-1,0,0],[1,0,0]],'faces':[]}; "
+                          "print(len(m.select_symmetric(g,m.mesh_selection(g,'vertex').add([0]),axis=0)))",
+                          native=True, aliases=("symmetric selection", "mirror a selection across an axis",
+                                                "select the other side too", "select symmetric vertices",
+                                                "symmetry select"),
+                          semantic="select/symmetry",
+                          consumes=("mesh", "selection"), produces=("selection",))
+    c.register_capability("select_in_box", "REGION SELECT (holographic_meshselect) -- select every element inside "
+                          "an axis-aligned box [lo,hi], the box/rubber-band select of a viewport. Edge/face modes "
+                          "select if ANY vertex is in (inclusive). Pass a projection matrix or pt->(u,v) callable to "
+                          "test in SCREEN coords instead -- that is frustum/rectangle select from the camera. "
+                          "Returns a MeshSelection",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "g={'vertices':[[0,0,0],[5,5,0],[0.5,0.5,0]],'faces':[]}; "
+                          "print(len(m.select_in_box(g,[-1,-1,-1],[1,1,1])))",
+                          native=True, aliases=("box select", "region select vertices", "rubber band select",
+                                                "frustum selection", "rectangle select", "select points in a box"),
+                          semantic="select/region",
+                          consumes=("mesh",), produces=("selection",))
+    c.register_capability("soft_selection_weights", "SOFT SELECTION as a reusable per-vertex WEIGHT FIELD "
+                          "(holographic_meshselect) -- 1 on the selection, falling off to 0 at a radius along the "
+                          "surface (multi-source geodesic). Proportional editing: a transform moves each vertex by "
+                          "weight*delta, dragging neighbours smoothly. Takes a MeshSelection or a vertex-index "
+                          "list; falloff linear/smooth/sharp",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "g={'vertices':[[i,j,0] for j in range(3) for i in range(3)],"
+                          "'faces':[[0,1,4,3],[1,2,5,4],[3,4,7,6],[4,5,8,7]]}; "
+                          "print(round(float(m.soft_selection_weights(g,[4],2.0)[4]),2))",
+                          native=True, aliases=("soft selection falloff", "proportional editing weights",
+                                                "falloff weights for a transform", "soft select weights",
+                                                "smooth falloff selection"),
+                          semantic="select/soft",
+                          consumes=("mesh", "selection"), produces=("scalar",))
+    c.register_capability("select_edge_loop", "select the EDGE LOOP through a seed edge (holographic_meshselect) -- "
+                          "the ring of edges continuing straight across quads, the Alt-click loop-select users "
+                          "expect from Blender/Maya. Walks both ways, stops at a pole or boundary (loops are only "
+                          "well-defined on quads). Returns an edge-mode selection",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "g={'vertices':[[i,j,0] for j in range(3) for i in range(3)],"
+                          "'faces':[[0,1,4,3],[1,2,5,4],[3,4,7,6],[4,5,8,7]]}; "
+                          "print(len(m.select_edge_loop(g,0)))",
+                          native=True, aliases=("edge loop select", "loop select edges", "alt click edge loop",
+                                                "select a ring of edges", "select an edge loop"),
+                          semantic="select/loop",
+                          consumes=("mesh", "selection"), produces=("selection",))
+    c.register_capability("select_face_ring", "select the FACE RING from a seed face (holographic_meshselect) -- "
+                          "the band of quads a loop cut runs through, walking quad to quad across shared edges. "
+                          "Terminates at a non-quad or boundary. Returns a face-mode selection",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "g={'vertices':[[i,j,0] for j in range(3) for i in range(3)],"
+                          "'faces':[[0,1,4,3],[1,2,5,4],[3,4,7,6],[4,5,8,7]]}; "
+                          "print(len(m.select_face_ring(g,0)))",
+                          native=True, aliases=("face ring select", "select a ring of faces", "quad band select",
+                                                "ring select faces", "select a face loop"),
+                          semantic="select/loop",
+                          consumes=("mesh", "selection"), produces=("selection",))
+    c.register_capability("select_boundary_loops", "select the OPEN BOUNDARY edges of a mesh "
+                          "(holographic_meshselect) -- the edges used by exactly one face (a hole rim or "
+                          "open-surface border), the 'select the hole' step before filling or bridging. Returns an "
+                          "edge-mode selection",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "g={'vertices':[[0,0,0],[1,0,0],[1,1,0],[0,1,0]],'faces':[[0,1,2,3]]}; "
+                          "print(len(m.select_boundary_loops(g)))",
+                          native=True, aliases=("select boundary loop", "select the hole rim", "select open edges",
+                                                "find mesh boundary", "select the border of a mesh"),
+                          semantic="select/loop",
+                          consumes=("mesh",), produces=("selection",))
+    c.register_capability("mesh_selection", "a sub-object MESH SELECTION (holographic_meshselect) -- a persistent "
+                          "set of VERTS/EDGES/FACES with a mode and set algebra (add/remove/toggle/union/intersect/"
+                          "invert/select_all) plus mode CONVERSION (face->the verts it touches, verts->the faces "
+                          "around them). The edit-mode selection a modeling app operates every edit on, "
+                          "complementary to the object-level selection. Bind to a mesh so indices are validated",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "mesh={'vertices':[[0,0,0],[1,0,0],[1,1,0],[0,1,0]],'faces':[[0,1,2,3]]}; "
+                          "print(m.mesh_selection(mesh,'face').add([0]).to_mode('vertex').to_list())",
+                          native=True, aliases=("select mesh vertices", "vertex edge face selection",
+                                                "sub-object selection", "select geometry elements",
+                                                "edit mode selection", "convert selection between modes",
+                                                "selection set algebra"),
+                          semantic="select/element",
+                          consumes=("mesh",), produces=("selection",))
+    c.register_capability("pick_element", "VIEWPORT PICKING for a 3D-modeling app (holographic_framebudget) -- "
+                          "given a wireframe cage and a screen coordinate (-1..1 under the cursor), return which "
+                          "element the user is pointing at: the nearest 'vertex', 'edge', or 'face' with its index "
+                          "and position. Projects the cage's own verts to the screen and finds the closest -- "
+                          "exact, deterministic, no GPU pick buffer. The select step before editing a vert/edge/face "
+                          "in a viewport",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "from holographic.scene_and_pipeline.holographic_framebudget import demo_frame_payload; "
+                          "wf=demo_frame_payload({'width':64,'height':64},kinds=('wireframe',))['wireframe']; "
+                          "print(m.pick_element(wf,0.0,0.0,want='vertex')['index'] is not None)",
+                          native=True, aliases=("pick a vertex under the cursor", "select a vert edge or face",
+                                                "ray pick a face", "click to select geometry",
+                                                "which element is under the cursor", "viewport pick",
+                                                "select geometry by screen position"))
+    c.register_capability("workspace_manager", "a WORKSPACE MANAGER (holographic_workspace) -- durable user data "
+                          "coexisting with transient 3D/sim SCENES, each in its own namespace. SAVE/LOAD a scene: "
+                          "new_workspace, switch_workspace, export_workspace(name) -> a blob, import_workspace(blob) "
+                          "rebuilds it BYTE-IDENTICALLY, combine_workspaces, reset_to_default. Also named "
+                          "CHECKPOINTS: checkpoint(name,label) drops a save-point, restore_checkpoint rolls back to "
+                          "it byte-identically, list_checkpoints. The persistence + save-point layer for a scene",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); wm=m.workspace_manager(); "
+                          "wm.new_workspace('scene1'); print(wm.export_workspace('scene1')['name'])",
+                          native=True, aliases=("save a workspace", "load a scene", "save my work",
+                                                "persist a scene", "restore a workspace", "export a scene",
+                                                "workspace save and load", "manage scenes", "checkpoint a scene",
+                                                "named save point", "restore a checkpoint", "branch a workspace"))
+    c.register_capability("frame_server", "server-side REAL-TIME FRAME SERVING (holographic_framebudget) for "
+                          "front-end clients that PULL frames -- the request/response form of a frame stream (the "
+                          "HTTP service's POST /frame delegates to this). Keeps one frame-budget controller PER "
+                          "SESSION; next_frame(session, target_fps, last_frame_ms) returns the quality preset to "
+                          "render/simulate with, holding each client's target fps closed-loop. Two clients can run "
+                          "at different rates (a phone at 30, a desktop at 60)",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); fs=m.frame_server(); "
+                          "print(fs.next_frame('web', target_fps=60)['preset']['name'])",
+                          native=True, aliases=("serve frames to a client", "stream frames to a front end",
+                                                "per-session frame serving", "pull frames at a target rate",
+                                                "adaptive frame server", "real-time frame endpoint",
+                                                "serve real-time simulation frames"))
+    c.register_capability("frame_budget_controller", "the FRAME-BUDGET CONTROLLER (holographic_framebudget) -- one "
+                          "knob from a target FPS to concrete render + simulation quality, held closed-loop against "
+                          "MEASURED frame time. Each frame: current() gives the quality preset, report(frame_ms) "
+                          "feeds back the time; it DROPS a level on a budget miss and CLIMBS only after a streak of "
+                          "comfortable frames (hysteresis). The conductor tying render_adaptive / "
+                          "draft_vs_refine_simulation / LOD to a real-time target. Render and sim quality are "
+                          "SEPARATE knobs -- a coarse render is a draft, a coarse chaotic sim a DIFFERENT run",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "ctrl=m.frame_budget_controller(target_fps=60, start_level=4); "
+                          "ctrl.report(40.0); print(ctrl.current()['name'])",
+                          native=True, aliases=("hit a target fps", "pick quality to hit a frame rate",
+                                                "adapt quality to frame time", "real-time quality control",
+                                                "map fps to quality level", "degrade gracefully to keep frame rate",
+                                                "60 fps quality controller", "control quality for real-time display"))
+    c.register_capability("regime_gate", "build a REGIME GATE (holographic_regimegate) -- route to a "
+                          "superior-but-NICHE method only when a cheap detector says you are in its regime, and to "
+                          "a safe fallback everywhere else. The honest way to RE-ENABLE a shelved 'only good in a "
+                          "niche' method (a kept negative): the fallback stays the safe default, so a gate misfire "
+                          "costs at most the default, never worse than the shelved method. Returns a gate; .apply(x) "
+                          "gives (result, info) recording the score/threshold/path. The adaptive-dispatch pattern "
+                          "as a reusable object",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "g=m.regime_gate('sharp', lambda x: abs(x), 5.0, lambda x: ('hi',x*2), lambda x: ('lo',x)); "
+                          "print(g.apply(9.0)[1]['used'])",
+                          native=True, aliases=("re-enable a niche method", "route by regime with a fallback",
+                                                "gate a method behind a detector", "use a method only in its regime",
+                                                "conditional dispatch with safe default", "regime gate",
+                                                "shelved method behind a detector"))
+    c.register_capability("Variance harness (honest measurement)", "the VARIANCE HARNESS (holographic_measure) -- "
+                          "every headline number gets a mean, a spread, and a 95% bootstrap CI, not a lucky-seed "
+                          "point estimate. measure(run_once, seeds) runs a scored experiment across seeds; "
+                          "assert_robust passes only if the LOWER CI bound clears the floor (not just the mean); "
+                          "is_fragile flags a claim whose spread could sink it on a couple of unlucky seeds; "
+                          "measure_report formats it. The constitution's no-win-without-a-baseline discipline, "
+                          "made invocable",
+                          example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "s=m.measure(lambda seed: float(np.random.default_rng(seed).normal(0.7,0.1)), seeds=range(20)); "
+                          "print(m.measure_report('score', s, floor=0.5))",
+                          native=True, aliases=("measure across seeds", "mean spread and confidence interval",
+                                                "is this result robust", "is this claim fragile",
+                                                "bootstrap confidence interval", "variance harness",
+                                                "honest measurement", "does the lower ci bound clear the floor"))
+    c.register_capability("sweep_directions", "the UP/DOWN/SIDEWAYS completeness sweep (holographic_ladder) -- does "
+                          "a corpus's structure hold in all three directions, or only one? DOWN: survives "
+                          "DECOMPOSITION (are the parts analyzable)? UP: survives EMBEDDING in a larger corpus? "
+                          "SIDEWAYS: which lens COSTUMES (sequence/structure) does it wear? Returns per-direction "
+                          "ok + gaps + complete. Null-aware: irreducible data flags all three, never fabricating "
+                          "structure. A capability that works in only one direction is an INCOMPLETE faculty",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "from holographic.agents_and_reasoning.holographic_ladder import _make_planted_corpus; "
+                          "print(m.sweep_directions(_make_planted_corpus())['complete'])",
+                          native=True, aliases=("up down sideways sweep", "check a capability in all directions",
+                                                "does this work on components and wholes", "does structure survive embedding",
+                                                "which lenses does this data wear", "completeness check",
+                                                "is this faculty complete", "sweep the abstraction directions"))
+    c.register_capability("iaaft_surrogate", "IAAFT surrogate -- the gold-standard null matching BOTH the exact "
+                          "amplitude distribution AND (to convergence) the exact power spectrum (Schreiber & "
+                          "Schmitz 1996). AAFT only approximates the spectrum; IAAFT iterates two projections "
+                          "(impose target magnitudes / impose the amplitude distribution) until they agree -- the "
+                          "iterate-a-projection move. Prefer over AAFT for strongly-coloured non-Gaussian signals "
+                          "(fat-tailed autocorrelated data like price returns), at the cost of iterations",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "x=np.cumsum(np.random.default_rng(0).standard_normal(512)**3); "
+                          "print(bool(np.allclose(np.sort(m.iaaft_surrogate(x)), np.sort(x))))",
+                          native=True, aliases=("iaaft surrogate", "iterated surrogate",
+                                                "exact spectrum and distribution null", "gold standard surrogate",
+                                                "converged amplitude adjusted surrogate", "best surrogate for colored fat tails"))
+    c.register_capability("amplitude_adjusted_surrogate", "AAFT surrogate -- the stricter null for NON-GAUSSIAN "
+                          "signals (holographic_surrogate). Basic phase-randomization preserves the spectrum but "
+                          "GAUSSIANIZES the marginal, destroying the fat tails of e.g. price returns; AAFT preserves "
+                          "BOTH the exact amplitude distribution and (approximately) the spectrum. Use it when the "
+                          "amplitude distribution matters (fat-tailed data); use phase_randomize when the signal is "
+                          "~Gaussian and the spectrum must match exactly",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "x=np.random.default_rng(0).standard_normal(512)**3; "
+                          "print(bool(np.allclose(np.sort(m.amplitude_adjusted_surrogate(x)), np.sort(x))))",
+                          native=True, aliases=("aaft surrogate", "surrogate for fat tailed data",
+                                                "null preserving the amplitude distribution", "amplitude adjusted null",
+                                                "surrogate keeping the histogram", "non-gaussian surrogate",
+                                                "fat tail preserving null"))
+    c.register_capability("Candles as a wave", "represent and operate on OHLC price candles as the SAMPLED WAVE "
+                          "they actually are (holographic_candles): each bar is a sample of a continuous price "
+                          "wave, and Open/High/Low/Close are four time-ordered facts about where it went. "
+                          "candle_carrier gives the one-value-per-bar signal, candle_envelope the high/low band "
+                          "(the intra-bar swing a close-line discards), candle_intrabar_path a 4x-resolution "
+                          "reconstruction O->{H,L}->C. Once price IS a wave, spectrum / band-limit / phase-random "
+                          "null / fit_deterministic / ladder_predict all apply",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "ohlc=np.array([[10,12,9,11],[11,13,10,12]]); print(list(m.candle_intrabar_path(ohlc)))",
+                          native=True, aliases=("price candles as a wave", "ohlc as a signal",
+                                                "represent a candlestick series", "candle high low envelope",
+                                                "intrabar price path", "reconstruct a price wave from candles",
+                                                "treat candles as a sampled signal", "price wave from ohlc"))
+    c.register_capability("phase_randomized_null", "the honest NULL for a CONTINUOUS, autocorrelated signal "
+                          "(holographic_surrogate) -- a phase-randomized surrogate has the SAME power spectrum "
+                          "(same autocorrelation) as the signal but random phases, so deterministic/nonlinear "
+                          "structure is destroyed while linear second-order stats are preserved (Theiler 1992). "
+                          "Unlike a permutation, it does NOT destroy the autocorrelation a trivial forecaster "
+                          "exploits. surrogate_zscore measures any structure statistic against this null -- a high "
+                          "z means structure BEYOND autocorrelation",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "x=np.cumsum(np.random.default_rng(0).normal(size=512)); "
+                          "print(round(float(np.abs(np.fft.rfft(x)).sum() - np.abs(np.fft.rfft(m.phase_randomize(x))).sum()),3))",
+                          native=True, aliases=("phase randomized surrogate", "surrogate data null",
+                                                "null preserving autocorrelation", "continuous signal null model",
+                                                "is a time series more than autocorrelation",
+                                                "structure beyond the spectrum", "spectrum-preserving shuffle",
+                                                "honest baseline for a continuous signal"))
+    c.register_capability("ladder_predict", "predict what comes NEXT after a history using the ladder's learned "
+                          "HIERARCHICAL alphabet (holographic_ladder) -- the compression<->prediction duality (a "
+                          "good compressor is a good predictor). Predicts the next CHUNK and decodes it, so one "
+                          "step emits a whole learned pattern, not one flat symbol -- beats a flat n-gram on "
+                          "structured data. ABSTAINS to the persistence baseline ('next = last') when it can't beat "
+                          "persistence on held-out (a forecast that can't beat 'same as last' is a null result)",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "print(m.ladder_predict([0,1,2,3]*40)['prediction'])",
+                          native=True, aliases=("predict the next symbol", "forecast the next value",
+                                                "what comes next in this sequence", "continue a sequence",
+                                                "hierarchical prediction", "predict from a learned model",
+                                                "anticipate the future from history", "next chunk prediction"))
+    c.register_capability("extend_generator", "FORECAST by playing a fitted generator PAST its data "
+                          "(holographic_fitgen) -- store the formula, play the future. Given a fit_deterministic "
+                          "result, regenerate N samples beyond the end. Refuses beyond the validated window (a "
+                          "generator fit on [0,1] evaluated at t=100 is confident nonsense) -- flags valid=False "
+                          "when extrapolating too far. The demoscene economy applied to time",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "t=np.linspace(0,1,200); fit=m.fit_deterministic(np.sin(2*np.pi*5*t)); "
+                          "print(m.extend_generator(fit,10,200)['valid'])",
+                          native=True, aliases=("extrapolate a fitted generator", "play a formula forward",
+                                                "forecast from a fitted formula", "extend a generator past its data",
+                                                "regenerate future samples", "evaluate a generator at future time"))
+    c.register_capability("adaptive_pipeline", "MEASUREMENT-DRIVEN adaptive dispatcher (holographic_ladder) -- "
+                          "run identify_level, then route the data to the method its REGIME names instead of "
+                          "hard-coding one: ABSTAIN on null-indistinguishable input (the SETI gate -- never 'clean' "
+                          "noise into a fabricated signal), FOLD repetitive data (cheap, no climb), CLIMB nested "
+                          "structure with the lens picked per-signal (the lens is the analysis window). A readable, "
+                          "refusable dispatch on numbers already computed -- no black box",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "from holographic.agents_and_reasoning.holographic_ladder import _make_planted_corpus; "
+                          "print(m.adaptive_pipeline(_make_planted_corpus())['method'])",
+                          native=True, aliases=("adaptive pipeline for data", "pick the right method for this data",
+                                                "route data to the best method", "choose a strategy automatically",
+                                                "abstain if no structure", "dispatch by data regime",
+                                                "what should I do with this data", "structure gate"))
+    c.register_capability("fit_deterministic", "recover the deterministic GENERATOR that made a noisy 1-D signal "
+                          "(holographic_fitgen, the inverse of the ladder): SNAP the data against a baked bank of "
+                          "generator families (sine/chirp/gauss/sawtooth/harmonic/am -- harmonic and am are "
+                          "Puckette's playable audio tones) then REFINE the winner's params. Returns "
+                          "family + params + correlation + residual, or REFUSES when no generator beats the noise "
+                          "('no deterministic structure' is a result). Band-limited snap (Quilez Q8) so families "
+                          "differing only above the coarse rate tie honestly. If it fits, store bytes not samples",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "t=np.linspace(0,1,400); sig=np.sin(2*np.pi*7*t)+0.1*np.random.default_rng(0).normal(size=400); "
+                          "print(m.fit_deterministic(sig)['family'])",
+                          native=True, aliases=("which formula made this data", "fit a generator to a signal",
+                                                "reverse engineer a signal", "recover the program behind data",
+                                                "identify a generator", "what function produced this",
+                                                "compress a signal to a formula", "is this signal deterministic"))
+    c.register_capability("assemble_pipeline", "find which candidate transform(s) connect an input signal to a "
+                          "target output, VALIDATED against a shuffle null (holographic_assemble). Each candidate "
+                          "is scored on a HELD-OUT segment and gated by MI-over-shuffle-null: does the REAL input "
+                          "drive the output more than a shuffled one? Survivors are returned sorted by significance; "
+                          "a candidate passes only if it clears the null (else it is chance alignment, not a "
+                          "discovery). The gate that stops 'any random projection works' -- the synesthesia case, "
+                          "made honest",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "x=np.random.default_rng(0).normal(size=2000); y=np.tanh(2*x); "
+                          "print([s['name'] for s in m.assemble_pipeline(x,y,{'tanh':lambda z:np.tanh(2*z),'lin':lambda z:z})])",
+                          native=True, aliases=("assemble a pipeline", "find a transform from x to y",
+                                                "which transform connects these signals", "discover a mapping",
+                                                "build a path from input to output", "does this input drive that output",
+                                                "validate a discovered relationship", "find what drives a signal"))
+    c.register_capability("guide_structure", "guide a state toward a goal by ITERATING A PROJECTION "
+                          "(holographic_guide) -- the level-generic form of IK / PBD / denoise / resonator, which "
+                          "are all the SAME move: repeatedly project a state onto a constraint set until it settles "
+                          "(Macklin). Pass a list of projection callables (pin a root to a target, clamp a link "
+                          "length, snap to a codebook); the constraints ARE the structure of the space. One solver, "
+                          "many costumes -- move this thing legally toward a target",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "r=m.guide_structure(np.array([0.,5.,9.]), [m.guide_pin(0,3.0), m.guide_clamp_link(0,1,1.0)]); print(r['converged'])",
+                          native=True, aliases=("iterate a projection", "move a thing toward a target legally",
+                                                "constrained movement", "solve inverse kinematics generically",
+                                                "project onto constraints", "settle a state under constraints",
+                                                "reach a goal under constraints", "constraint satisfaction by projection"))
+    c.register_capability("mutual_information", "MUTUAL INFORMATION between two signals (holographic_mutualinfo) "
+                          "-- bits of shared information, zero iff independent (discrete or continuous, continuous "
+                          "quantile-binned). Raw MI is biased upward by finite samples, so mutual_information_vs_null "
+                          "reports MI ABOVE a SHUFFLE NULL as a z-score -- a dependence counts only when it clears "
+                          "the null (raw MI without its null is a Rorschach test). The honest dependence gate",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "x=np.random.default_rng(0).normal(size=2000); print(round(m.mutual_information_vs_null(x, x)['z'],1))",
+                          native=True, aliases=("mutual information between two signals", "how much does x tell me about y",
+                                                "dependence between two variables", "information shared between signals",
+                                                "are two signals related", "statistical dependence", "shared information",
+                                                "does one signal predict another"))
+    c.register_capability("Capability URI namespace", "address every public function by a URI "
+                          "'family/module/name' (holographic_capuri) so the 42 colliding short names disambiguate "
+                          "by PATH -- 'sphere' -> mesh_and_geometry/sdf/sphere vs misc/codegen/sphere. Browse the "
+                          "namespace like a context menu (root -> families -> modules -> functions) via prefix "
+                          "roll-up, the same S3-style machinery that addresses scene items. The name IS the "
+                          "hierarchy, so the view never drifts from the code",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "print(m.resolve_capability_uri('sphere')); print(list(m.browse_capabilities('')))",
+                          native=True, aliases=("disambiguate a capability name", "resolve a function by path",
+                                                "browse capabilities like a menu", "capability namespace",
+                                                "address a function by uri", "which module has this function",
+                                                "path for a colliding name", "menu of capabilities",
+                                                "list capabilities under a prefix"))
+    c.register_capability("bank_or_formula", "decide whether to BANK computed values or keep the FORMULA and "
+                          "regenerate on demand (holographic_ladder, Quilez Q1 'store the formula not the "
+                          "samples'). The demoscene economy as a measured gate: banking pays iff hit_rate*eval - "
+                          "lookup > 0 (a miss must build the entry, so only reused evals amortize; break-even = "
+                          "lookup/eval). A bank of things a cheap formula gives for free is negative storage",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "print(m.bank_or_formula(eval_cost_us=5000, hit_rate=0.9, n_entries=100, bytes_per_entry=4096)['bank'])",
+                          native=True, aliases=("should I cache or recompute", "is it worth precomputing this",
+                                                "bank versus formula decision", "when to store versus recompute",
+                                                "should I bake this or regenerate it", "amortize a precomputed bank",
+                                                "is precomputing worth it", "cache or regenerate decision"))
+    c.register_capability("chart_space", "chart a holographic ALPHABET as a measured atlas (holographic_ladder): "
+                          "march rays between atoms and record where they enter cleanup BASINS (nearest atom "
+                          "distinctively nearer than the runner-up). Reports basin coverage, dead zones, and the "
+                          "honest verdict structure_over_null (coverage minus a band-limited random null, Quilez "
+                          "Q8 -- high-D noise has basins too). For capacity forecasting and codebook placement",
+                          example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "A=np.random.default_rng(0).standard_normal((8,128)); "
+                          "print(m.chart_space(A)['structure_over_null'])",
+                          native=True, aliases=("map the basins of an alphabet", "atlas of a vector space",
+                                                "chart the holographic space", "measure cleanup basins",
+                                                "find dead zones in an alphabet", "map the structure of a space",
+                                                "raytrace the holographic space", "how well separated are these atoms"))
+    c.register_capability("reconstruct_tower", "expand a climbed ladder TOWER back to its ORIGINAL corpus of base "
+                          "symbols -- the INVERSE of climb_ladder (holographic_ladder.reconstruct). For a "
+                          "sequence-lens tower this is LOSSLESS (reconstruct(climb(corpus)) == corpus exactly); for "
+                          "a structure-lens tower it recovers the SET of base part-types (order and counts dropped "
+                          "by design). A tower you cannot decompress is useless -- this is the decompress half",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "from holographic.agents_and_reasoning.holographic_ladder import _make_planted_corpus as mk; "
+                          "c=mk(); print(m.reconstruct_tower(m.climb_ladder(c))==c)",
+                          native=True, aliases=("decompress a tower", "reconstruct the original from a tower",
+                                                "expand a tower to base symbols", "invert the abstraction ladder",
+                                                "undo a climb", "get the original data back from a tower",
+                                                "expand a promoted atom"))
+    c.register_capability("identify_level", "'what am I looking at?' -- classify a CORPUS by which ladder "
+                          "operations pay on it (holographic_ladder), returning MEASUREMENTS not a label: is there "
+                          "a level above it, does compression survive a shuffle-null (high-D noise has basins too, "
+                          "so only gain-over-null counts), which lens fits (sequence vs structure, picked not "
+                          "guessed), and the regime (repetitive / nested-structured / irreducible). The step-0 "
+                          "question of a climb",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "from holographic.agents_and_reasoning.holographic_ladder import _make_planted_corpus; "
+                          "print(m.identify_level(_make_planted_corpus())['regime'])",
+                          native=True, aliases=("what level of abstraction is this", "classify a corpus",
+                                                "is there structure in this data", "is there a level above this",
+                                                "what am i looking at", "does this data have hierarchy",
+                                                "which lens fits this data", "is this data compressible or noise"))
+    c.register_capability("Abstraction ladder (climb)", "climb a CORPUS into a TOWER of abstraction levels "
+                          "(holographic_ladder): consolidate -> find patterns -> promote to a new alphabet -> "
+                          "repeat, STOPPING when the MDL compression gain drops below a floor. The generic form of "
+                          "the seven-step loop run by hand for letters->words and verts->parts->scene. Returns a "
+                          "tower with stable hashlib atom ids and a loud terminal refusal (a shallow ceiling is a "
+                          "RESULT -- most data tops out fast). A zlib pre-gate prunes levels that cannot pay before "
+                          "the expensive pass (Quilez 'don't march empty space')",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "from holographic.agents_and_reasoning.holographic_ladder import _make_planted_corpus; "
+                          "print(m.ladder_summary(m.climb_ladder(_make_planted_corpus())))",
+                          native=True, aliases=("level up my representation", "find hierarchy in this data",
+                                                "automatic abstraction", "recursive chunking",
+                                                "build a tower of patterns", "keep compressing until it stops paying",
+                                                "climb a corpus into levels", "discover nested structure",
+                                                "hierarchical pattern discovery", "compress into an alphabet of patterns"))
     c.register_capability("Atmosphere (fog & light shafts)", "atmospheric post-effects over a rendered image "
                           "(holographic_atmosphere, W16): depth_fog fades pixels toward a fog colour by distance "
                           "(exponential Beer-Lambert -- the air of a scene in one pass), and light_shafts streaks "
@@ -3126,7 +3929,42 @@ def _selftest():
     assert c.find_capability("widget job")[0].name == "MyThing"
     # native flag is carried
     assert c.get("holographic_catalog").native is False and c.get("Index (search)").native is True
-    print("OK: holographic_catalog self-test passed (%d capabilities; 'search a big pile of vectors' -> %s)"
+    # NO ACCIDENTAL DOUBLE-REGISTRATION: a capability name registered twice in the source silently overwrites the
+    # first (register updates by name), leaving dead prose and a confusing diff. Scan the source for duplicate
+    # register_capability("name", ...) calls -- there must be none. (Found two this way: snap_to_grid x3, rayindex.)
+    import re as _re, collections as _co, pathlib as _pl
+    _src = _pl.Path(__file__).read_text()
+    _names = _re.findall(r'register_capability\(\s*"([^"]+)"', _src)
+    _dupes = [n for n, k in _co.Counter(_names).items() if k > 1]
+    assert not _dupes, "capability name(s) registered more than once (delete the redundant block): %s" % _dupes
+    # S4.1 SEMANTIC DRIFT GATE: every semantic= tag's ROOT verb must be one of the taxonomy roots (SEMANTIC_
+    # TAXONOMY.md). A tag under an unknown root is a menu branch nobody documented -- the discovery equivalent of a
+    # dark module. Roots are kept here in sync with the doc; adding a root is a deliberate edit in both places.
+    _ROOTS = {"create", "select", "transform", "modify", "measure", "convert", "render", "simulate",
+              "animate", "analyze", "io"}
+    _bad = [(cap.name, cap.semantic) for cap in c.all()
+            if getattr(cap, "semantic", None) and cap.semantic.split("/")[0] not in _ROOTS]
+    assert not _bad, "semantic tag(s) under an unknown root (add the root to SEMANTIC_TAXONOMY.md or fix): %s" % _bad
+    # S3 io-shape filter: accepts= keeps only mesh-consumers; an untagged capability is unspecified (still shown).
+    mesh_hits = c.find_capability("selection", accepts="mesh")
+    assert all((not h.consumes) or ("mesh" in h.consumes) for h in mesh_hits), [(h.name, h.consumes) for h in mesh_hits]
+    # S3.4 pipeline: a tagged edge chains produces->consumes; a known 1-step and a known multi-step both resolve.
+    one = c.suggest_pipeline("mesh", "selection")
+    assert one and one[0]["name"] == "mesh_selection", one
+    multi = c.suggest_pipeline("transform", "selection")               # transform->mesh->selection, 2 steps
+    assert multi and len(multi) == 2, multi
+    assert c.suggest_pipeline("mesh", "mesh") == []                    # already there -> empty pipeline
+    # NOTE: the conversion edges (points_to_mesh, render_mesh, ...) are faculty-derived and only get their io-shape
+    # via seed_from_mind(_IO_SHAPES); this bare default_catalog() has only the directly-registered tags, so we pin
+    # a route through THOSE (mesh -> selection -> mesh via transform_selection) rather than a seeded conversion.
+    round_trip = c.suggest_pipeline("selection", "mesh")
+    assert round_trip and round_trip[0]["name"] == "transform_selection", round_trip
+    # require_step turns a same-kind query into a transforming edge instead of the empty 'already there' pipeline.
+    assert c.suggest_pipeline("mesh", "mesh") == []                    # default: already there
+    same = c.suggest_pipeline("mesh", "mesh", require_step=True)       # forced: a real mesh->mesh edge
+    assert same and len(same) == 1 and "mesh" in c.get(same[0]["name"]).produces, same
+    print("OK: holographic_catalog self-test passed (%d capabilities; 'search a big pile of vectors' -> %s; "
+          "no double-registrations; every semantic tag under a known verb root; io-filter + pipeline route)"
           % (len(c), c.find_capability("search a big pile of vectors")[0].name))
 
 

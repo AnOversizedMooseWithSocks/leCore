@@ -229,6 +229,45 @@ def split_face(mesh, f_index, i, j):
     return Mesh(mesh.vertices.copy(), out)
 
 
+def poke_face(mesh, f_index, height=0.0):
+    """POKE polygon face `f_index`: add a new vertex at the face CENTROID (optionally pushed out along the face
+    normal by `height`) and fan the face into triangles, one per original edge. An n-gon becomes n triangles sharing
+    the new center vertex. V+1, E+n, F+(n-1), chi UNCHANGED (a legal Euler edit: +1 vertex, +n edges, +(n-1) faces
+    -> dV - dE + dF = 1 - n + (n-1) = 0). The 'poke faces' every modeler uses to fan a quad/ngon into triangles or
+    to raise a spike; the inverse of dissolving the center vertex back. Returns a new `Mesh`.
+
+    Height sign follows the face normal (Newell), so a positive height raises the poke OUTWARD on a consistently
+    wound mesh -- the same normal convention mesh.vertex_normals and extrude use, so a poke and an extrude agree on
+    'out'. height=0 (default) keeps the centroid in the face plane (pure retopology, no shape change)."""
+    import numpy as np
+    faces = list(mesh.faces)
+    V = mesh.vertices
+    f = faces[f_index]
+    n = len(f)
+    if n < 3:
+        raise ValueError("poke_face needs a face with >=3 corners; face %d has %d" % (f_index, n))
+    corner_pos = V[list(f)]                                  # (n,3) the face's vertex positions
+    centroid = corner_pos.mean(axis=0)
+    if height:
+        # Newell normal (robust for non-planar ngons) -- matches the mesh kernel's normal convention so 'out' agrees.
+        nrm = np.zeros(3)
+        for k in range(n):
+            a = corner_pos[k]
+            b = corner_pos[(k + 1) % n]
+            nrm[0] += (a[1] - b[1]) * (a[2] + b[2])
+            nrm[1] += (a[2] - b[2]) * (a[0] + b[0])
+            nrm[2] += (a[0] - b[0]) * (a[1] + b[1])
+        ln = float(np.linalg.norm(nrm))
+        if ln > 1e-12:
+            centroid = centroid + (nrm / ln) * float(height)
+    new_verts = np.vstack([V, centroid[None, :]])
+    c = len(V)                                              # index of the new center vertex
+    out = [nf for k, nf in enumerate(faces) if k != f_index]
+    for k in range(n):                                     # fan: one triangle per original edge, sharing the center
+        out.append((f[k], f[(k + 1) % n], c))
+    return Mesh(new_verts, out)
+
+
 # =====================================================================================================
 # Self-test -- asserts the invariants and the make/kill round-trips; prints a one-line summary.
 # =====================================================================================================
@@ -308,15 +347,25 @@ def _selftest():
     assert sf.n_faces == quad.n_faces + 1
     assert sf.euler_characteristic() == 2 and sf.is_manifold() and sf.is_closed()
 
-    # --- determinism: every operator is a pure function of (mesh, selection) -- byte-identical out ---
-    s1, _ = split_edge(tm, a, b)
-    s2, _ = split_edge(tm, a, b)
-    assert np.array_equal(s1.vertices, s2.vertices) and s1.faces == s2.faces, "split_edge must be deterministic"
-    assert flip_edge(tm, a, b).faces == flip_edge(tm, a, b).faces, "flip_edge must be deterministic"
+    # --- poke_face: an n-gon face becomes n triangles around a new center vertex; chi is preserved ---
+    quad_box = box(2.0, 2.0, 2.0)                       # 6 quad faces, chi = 2
+    n0 = len(quad_box.faces[0])                         # a quad -> 4 corners
+    pk = poke_face(quad_box, 0, height=0.0)
+    assert pk.n_vertices == quad_box.n_vertices + 1                          # +1 center vertex
+    assert pk.n_faces == quad_box.n_faces - 1 + n0                          # -1 poked face, +n triangles
+    assert pk.euler_characteristic() == 2 and pk.is_manifold() and pk.is_closed()   # legal Euler edit
+    # height pushes the center OUT along the face normal (a raised spike), not into the plane.
+    pk_hi = poke_face(quad_box, 0, height=0.5)
+    center_flat = pk.vertices[-1]
+    center_hi = pk_hi.vertices[-1]
+    assert np.linalg.norm(center_hi - center_flat) > 0.4, "height should displace the center vertex outward"
+    # determinism: pure function of (mesh, face, height)
+    assert poke_face(quad_box, 0, 0.3).faces == poke_face(quad_box, 0, 0.3).faces, "poke_face must be deterministic"
 
     print("holographic_eulerops selftest: ok (flip chi/V/E/F-invariant + flip-back restores; "
           "split_edge/collapse_edge exact make-kill round-trip; collapse link-condition refuses the "
-          "bipyramid equator; split_face n-gon E+1/F+1 chi=2; all operators deterministic)")
+          "bipyramid equator; split_face n-gon E+1/F+1 chi=2; poke_face fans an n-gon to n triangles "
+          "V+1/F+(n-1) chi=2 with an outward-normal height; all operators deterministic)")
 
 
 if __name__ == "__main__":

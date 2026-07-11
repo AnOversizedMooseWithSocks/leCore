@@ -96,3 +96,28 @@ def test_domain_homes_registered():
     homes = " ".join(x.name for x in default_catalog().all())
     for dom in ("Lighting", "Geometry", "Texture", "Simulation", "Physics & chemistry", "Denoise", "Query"):
         assert dom in homes, dom
+
+
+def test_exact_alias_phrase_ranks_into_top_k():
+    # Regression: a query that IS an exact alias of a capability must surface that capability, even when siblings
+    # scatter the same content words across their prose and tie on the word-overlap score. Before the exact-alias
+    # bonus, ascii_view (exact alias 'render image to terminal') tied at 3.0 with ascii_animate/field/sdf and lost
+    # the alphabetical tie-break, falling to position 4 and off the default k=3 list. The bonus makes an exact
+    # phrase match the strongest signal, so it wins decisively. Additive: only exact matches are boosted.
+    from holographic.caching_and_storage.holographic_catalog import Catalog
+    cat = Catalog()
+    # two entries that both mention the same words in their does; only one has the exact alias.
+    cat.register_capability("sibling_a", "render an image to the terminal as animation frames", aliases=("animate",))
+    cat.register_capability("the_target", "render an image somewhere", aliases=("render image to terminal",))
+    cat.register_capability("sibling_b", "render an image to the terminal from a field", aliases=("field",))
+    cat.register_capability("sibling_c", "render an image to the terminal from an sdf", aliases=("sdf",))
+    hits = cat.find_capability("render image to terminal", k=3)
+    assert hits[0].name == "the_target", [h.name for h in hits]     # exact-alias match wins position 0
+
+    # find_scored agrees (same scoring), and the exact match outscores the tied siblings by the bonus margin
+    scored = dict((c.name, s) for c, s in cat.find_scored("render image to terminal", k=6))
+    assert scored["the_target"] >= max(v for k, v in scored.items() if k != "the_target") + 4.0
+
+    # a NON-exact query still ranks by overlap only (no bonus fires) -- the bonus is surgical, not a blanket boost
+    hits2 = cat.find_capability("render an image", k=4)
+    assert "the_target" in [h.name for h in hits2] or len(hits2) == 4   # still findable, not specially boosted

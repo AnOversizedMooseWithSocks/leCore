@@ -14,10 +14,20 @@ import numpy as np
 
 def snap_to_grid(p, spacing, origin=0.0):
     """Snap a point to the nearest grid node -- round each coordinate to the lattice. The simplest cleanup: the
-    codebook is the infinite regular grid, so the nearest entry is just a rounding."""
+    codebook is the infinite regular grid, so the nearest entry is just a rounding. `spacing` may be a scalar
+    (uniform) OR a per-axis vector (each axis its own lattice); an axis whose spacing is <= 0 is left UNCHANGED
+    (no snap on that axis -- the 'lock this axis out of snapping' a gizmo wants). Returns the snapped point."""
     p = np.asarray(p, float)
     origin = np.asarray(origin, float)
-    return origin + np.round((p - origin) / spacing) * spacing
+    s = np.asarray(spacing, float)
+    if s.ndim == 0:                                          # uniform scalar spacing: the original fast path
+        if s <= 0:
+            return p.copy()
+        return origin + np.round((p - origin) / s) * s
+    # per-axis spacing: snap each axis by its own step; a non-positive step passes that axis through unchanged.
+    safe = np.where(s <= 0, 1.0, s)
+    snapped = origin + np.round((p - origin) / safe) * safe
+    return np.where(s <= 0, p, snapped)
 
 
 def snap_to_points(p, points, tol=None):

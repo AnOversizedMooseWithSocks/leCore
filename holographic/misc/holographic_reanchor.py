@@ -1,5 +1,10 @@
 """Re-anchoring is load-bearing for deep traversal -- the audit, and the contrast the other tests don't show.
 
+KEPT NEGATIVE (no engine door on purpose): this is an AUDIT that proves re-anchoring matters for deep linked-list
+traversal -- it builds a directed chain and shows the accuracy contrast with and without re-anchoring. It is
+EVIDENCE, run to demonstrate a property, not a callable faculty. The re-anchoring behaviour it audits is exercised
+by the wired traversal/recall paths; this module exists so the contrast stays on record.
+
 WHY THIS EXISTS (RAY-2)
 -----------------------
 In the FFT/phasor domain a `bind` is elementwise complex multiplication, so a chain of binds is a ray whose

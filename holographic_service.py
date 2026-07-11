@@ -51,6 +51,7 @@ class Service:
         self._jobs = self._make_job_manager()               # long-running job control (start/pause/resume/cancel)
         from holographic.misc.holographic_bus import MessageBus
         self._bus = MessageBus()                            # the message bus: person + agent both connected (push, no poll)
+        self._frames = None                                 # lazily-built FrameServer (per-session quality control)
         self._register()
         if persist_path:
             self._load_from_disk()                          # restore a previous session's data if the file exists
@@ -76,6 +77,9 @@ class Service:
         self._routes[("POST", "/capabilities/search")] = self._capabilities_search
         self._routes[("GET", "/tools")] = self._tools           # the standard tool manifest (name, description, params)
         self._routes[("POST", "/invoke")] = self._invoke         # run one faculty: {name, args} -> its result
+        self._routes[("POST", "/frame")] = self._frame           # real-time frame serving: adaptive quality per session
+        self._routes[("POST", "/pick")] = self._pick             # viewport picking: screen coord -> vert/edge/face
+        self._routes[("GET", "/frame/stream")] = self._frame_stream_doc  # SSE push: stream frames at a target rate
         self._routes[("POST", "/sql")] = self._sql
         self._routes[("POST", "/graphql")] = self._graphql       # GraphQL over nested documents
         self._routes[("POST", "/documents")] = self._set_documents
@@ -180,6 +184,83 @@ class Service:
             return {"ok": False, "error": "no such tool: %r" % name}
         result = fn(**args) if isinstance(args, dict) else fn(*args)
         return {"ok": True, "name": name, "result": _jsonable(result)}
+
+    def _frame_stream_doc(self, _payload):
+        """SSE PUSH channel (Server-Sent Events): GET /frame/stream?session=&target_fps=&frames= keeps the
+        connection open and PUSHES a frame at the target rate as 'data: {json}\\n\\n' events, so a browser
+        EventSource receives real-time frames WITHOUT polling. Each event is the same shape as POST /frame inline
+        mode: {session, preset, level, frame_ms, payload, stats}. This handler is only the doc stub for the index;
+        the actual streaming is done in the HTTP handler's do_GET (it must hold the socket open, which the normal
+        request/response route table can't). frames=0 streams until the client disconnects."""
+        return {"ok": True, "note": "GET /frame/stream is a streaming SSE endpoint; connect with an EventSource, "
+                "not a plain fetch. Query: session, target_fps, frames (0=unbounded)."}
+
+    def _frame(self, payload):
+        """REAL-TIME FRAME SERVING: adaptive quality per client, the request/response form of a frame stream (this
+        stdlib service has no websocket). Body: {session, target_fps?, last_frame_ms?, include_payload?, t?,
+        kinds?}. The service keeps one frame-budget controller PER SESSION. Two modes: WITHOUT include_payload it
+        reports the client's last frame time and returns the QUALITY PRESET to render with. WITH
+        include_payload=true it renders a real frame at the chosen quality and returns it inline -- one round-trip
+        per frame. `kinds` selects the OUTPUT PROJECTION(S): any subset of pixels/mesh/splats/shader/lod, MULTIPLE
+        at once (e.g. ["pixels","mesh"]) -- every projection is of the same scene, so they can't drift. Returns {ok,
+        session, preset, level, budget_ms, target_fps, stats, and (inline) frame_ms + payload}. {drop:true} forgets
+        a session. GET /frame/stream is the SSE push variant (?kinds=pixels&kinds=mesh for multiple)."""
+        payload = payload or {}
+        session = payload.get("session")
+        if not session:
+            return {"ok": False, "error": "POST /frame needs a JSON body {\"session\": \"...\"}"}
+        if self._frames is None:
+            from holographic.scene_and_pipeline.holographic_framebudget import FrameServer
+            self._frames = FrameServer()
+        if payload.get("drop"):
+            return {"ok": True, "dropped": self._frames.drop_session(session)}
+        # INLINE PAYLOAD MODE: render a real frame at the chosen quality and return the content in THIS response,
+        # so the client gets a displayable frame in one round-trip instead of three (decide quality, render, fetch).
+        # Uses the built-in demo renderer (a raymarched animated SDF) so it works with no client-supplied scene;
+        # a client with its own scene uses the faculty (frame_server.serve_frame) with its own render callback.
+        if payload.get("include_payload"):
+            from holographic.scene_and_pipeline.holographic_framebudget import demo_frame_payload, PROJECTION_KINDS
+            t = float(payload.get("t", 0.0))
+            kinds = payload.get("kinds") or ["pixels"]        # the client picks one or MORE output projections
+            if isinstance(kinds, str):
+                kinds = [kinds]
+            bad = [k for k in kinds if k not in PROJECTION_KINDS]
+            if bad:
+                return {"ok": False, "error": "unknown projection kind(s) %r; known: %s"
+                        % (bad, list(PROJECTION_KINDS))}
+            # DISTRIBUTED mode: render the frame's pixels tiled across workers (the render farm / distribute_bricks),
+            # lifting the single-node resolution cap while the same budget controller holds the rate. Pixels only
+            # (the tiled path renders the image); other projections stay single-node.
+            tiles = payload.get("tiles")
+            if tiles and kinds == ["pixels"]:
+                info = self._frames.serve_frame_distributed(session, self.mind.distribute_bricks,
+                                                            target_fps=payload.get("target_fps", 60),
+                                                            tiles=tuple(tiles), t=t)
+                info["ok"] = True
+                return info
+            info = self._frames.serve_frame(session, lambda preset: demo_frame_payload(preset, t=t, kinds=kinds),
+                                            target_fps=payload.get("target_fps", 60))
+            info["ok"] = True
+            return info
+        info = self._frames.next_frame(session, target_fps=payload.get("target_fps", 60),
+                                       last_frame_ms=payload.get("last_frame_ms"))
+        info["ok"] = True
+        return info
+
+    def _pick(self, payload):
+        """VIEWPORT PICKING for a 3D-modeling client: which vert/edge/face is under the cursor. Body: {wireframe,
+        u, v, want?}. `wireframe` is a cage {vertices, edges, faces} (from a /frame include_payload kinds=wireframe
+        response); `u`,`v` are the normalized screen coordinate (-1..1) under the cursor; `want` is 'vertex' (default),
+        'edge', or 'face'. Returns {ok, pick:{kind, index, distance, position/vertices}}. This is the select step
+        before an edit; the client sends the cage it already has, so no scene state is needed server-side."""
+        payload = payload or {}
+        wf = payload.get("wireframe")
+        if not wf or "vertices" not in wf:
+            return {"ok": False, "error": "POST /pick needs {wireframe:{vertices,edges,faces}, u, v, want?}"}
+        from holographic.scene_and_pipeline.holographic_framebudget import pick_element
+        pick = pick_element(wf, float(payload.get("u", 0.0)), float(payload.get("v", 0.0)),
+                            want=payload.get("want", "vertex"))
+        return {"ok": True, "pick": pick}
 
     def _sql(self, payload):
         """Run SQL against the store: CREATE/INSERT/SELECT/UPDATE/DELETE/JOIN/DROP (UPDATE and DELETE require a WHERE, as a safety guard). Body: {sql}. Returns: {ok, ...} (rows for SELECT, rowcount for writes)."""
@@ -436,7 +517,58 @@ def make_handler(service):
             self._reply(status, obj)
 
         def do_GET(self):
+            # SSE PUSH: /frame/stream keeps the connection open and PUSHES frames at the target rate, so the client
+            # (an EventSource) receives frames without polling -- a true push channel over stdlib http.server. Query
+            # ?session=&target_fps=&frames= (frames caps the count so the server doesn't stream forever in a test).
+            if self.path.split("?")[0] == "/frame/stream":
+                if not self._authorized():
+                    return self._reply(401, {"ok": False, "error": "missing or bad Authorization bearer token"})
+                return self._stream_frames()
             self._serve("GET")
+
+        def _stream_frames(self):
+            import time as _time
+            import urllib.parse as _up
+            q = _up.parse_qs(_up.urlparse(self.path).query)
+            session = (q.get("session", ["stream"]) or ["stream"])[0]
+            target_fps = float((q.get("target_fps", ["30"]) or ["30"])[0])
+            max_frames = int((q.get("frames", ["0"]) or ["0"])[0])        # 0 = unbounded (until disconnect)
+            kinds = q.get("kinds", ["pixels"]) or ["pixels"]              # ?kinds=pixels&kinds=mesh -> multiple outputs
+            if service._frames is None:
+                from holographic.scene_and_pipeline.holographic_framebudget import FrameServer
+                service._frames = FrameServer()
+            from holographic.scene_and_pipeline.holographic_framebudget import (demo_frame_payload,
+                                                                                FrameBudgetController)
+            # start a fresh stream session at the CHEAPEST level so the first pushed frame is already real-time
+            # (a stream should never open with a stall); the controller climbs from there if there's headroom.
+            if session not in service._frames._sessions:
+                service._frames._sessions[session] = FrameBudgetController(
+                    target_fps=target_fps, ladder=service._frames._ladder,
+                    headroom=service._frames._headroom, start_level=0)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")         # the SSE content type
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            period = 1.0 / target_fps
+            n = 0
+            t_anim = 0.0
+            try:
+                while max_frames == 0 or n < max_frames:
+                    start = _time.perf_counter()
+                    info = service._frames.serve_frame(session, lambda p: demo_frame_payload(p, t=t_anim, kinds=kinds),
+                                                        target_fps=target_fps)
+                    line = "data: " + json.dumps(info, default=_json_default) + "\n\n"
+                    self.wfile.write(line.encode())            # push this frame; a broken pipe ends the stream
+                    self.wfile.flush()
+                    n += 1
+                    t_anim += period
+                    # pace to the target rate: sleep off whatever time is left in the frame interval.
+                    elapsed = _time.perf_counter() - start
+                    if elapsed < period:
+                        _time.sleep(period - elapsed)
+            except (BrokenPipeError, ConnectionResetError):
+                pass                                           # the client closed the EventSource -- stop cleanly
 
         def do_POST(self):
             self._serve("POST")

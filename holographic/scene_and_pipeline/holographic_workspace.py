@@ -134,6 +134,44 @@ class WorkspaceManager:
                 self.db.namespaces[dst.ns]["tables"][name] = t
         return dst
 
+    # ---- WS7 (D3): named CHECKPOINTS over a workspace -- a save-point you can return to without leaving the
+    # ---- session. A checkpoint is just an export blob kept under a name; restoring re-imports it byte-identically.
+    # ---- This EXTENDS export/import (the byte-identical round-trip is already proven); it adds only the name->blob
+    # ---- book and the drop-then-reimport that makes restore in-place. No new serialization path.
+    def checkpoint(self, name, label=None):
+        """Snapshot the ACTIVE workspace under a checkpoint `label` (default: an auto-incrementing index) and return
+        the label. The save-point a modeler drops before a risky change -- kept in-memory as a byte-identical export
+        blob, restorable later with restore_checkpoint. Delegates to export_workspace (same portable, deterministic
+        blob); this just names and stores it."""
+        if name not in self.workspaces:
+            raise QueryError("no such workspace %r" % name)
+        if not hasattr(self, "_checkpoints"):
+            self._checkpoints = {}                             # name -> {label -> blob}, lazily created
+        book = self._checkpoints.setdefault(name, {})
+        if label is None:
+            label = "cp%d" % (len(book) + 1)                   # auto-name: cp1, cp2, ...
+        book[label] = self.export_workspace(name)              # the export blob IS the checkpoint
+        return label
+
+    def restore_checkpoint(self, name, label):
+        """Restore workspace `name` to the state saved under `label` -- drop the current workspace and re-import the
+        checkpoint blob, byte-identically. The 'go back to my save-point' that does not disturb other workspaces or
+        the persistent DB. Raises if the checkpoint is unknown."""
+        book = getattr(self, "_checkpoints", {}).get(name, {})
+        if label not in book:
+            raise QueryError("no checkpoint %r for workspace %r" % (label, name))
+        blob = book[label]
+        if name in self.workspaces:
+            self.clear_workspace(name)                         # drop the live workspace...
+        ws = self.import_workspace(blob)                       # ...and rebuild it from the checkpoint (byte-identical)
+        # clearing dropped the checkpoint book for this name via nothing (book lives on the manager), so re-attach it.
+        self._checkpoints.setdefault(name, {}).update(book)
+        return ws
+
+    def list_checkpoints(self, name):
+        """The checkpoint labels saved for a workspace, oldest first -- for a UI's save-point list."""
+        return list(getattr(self, "_checkpoints", {}).get(name, {}).keys())
+
 
 def _selftest():
     """Persistent data survives a reset; a workspace is isolated (clearing it leaves the persistent DB and a sibling
@@ -190,9 +228,27 @@ def _selftest():
     tables = set(db.namespaces["ws:both2"]["tables"])
     assert {"t_a", "t_b"} <= tables                                  # both kept, disambiguated
 
+    # WS7 (D3): named checkpoints -- snapshot, mutate, restore back to the save-point byte-identically.
+    mgr.reset_to_default()
+    mgr.new_workspace("scene")
+    db.create_table("ws:scene.obj", ["name"], dim=128, seed=0)
+    db.insert("ws:scene.obj", {"name": "sphere"})
+    cp = mgr.checkpoint("scene", "before-edit")                     # save-point
+    assert mgr.list_checkpoints("scene") == ["before-edit"]
+    db.insert("ws:scene.obj", {"name": "cube"})                     # mutate: add a second object
+    assert len(run_sql("SELECT name FROM obj", db.resolve("ws:scene.obj"))) == 2
+    mgr.restore_checkpoint("scene", cp)                             # roll back to the checkpoint
+    rows = run_sql("SELECT name FROM obj", db.resolve("ws:scene.obj"))
+    assert len(rows) == 1 and rows[0]["name"] == "sphere"          # exactly the saved state, byte-identical
+    try:
+        mgr.restore_checkpoint("scene", "nope"); raise AssertionError("unknown checkpoint not refused")
+    except QueryError:
+        pass
+
     print("holographic_workspace selftest OK: persistent data survives reset_to_default; clearing one workspace "
           "leaves the persistent DB and a sibling workspace intact; export/import round-trips a workspace; combine "
-          "unions two workspaces with an explicit collision policy (suffix -> t_a, t_b); deterministic")
+          "unions two workspaces with an explicit collision policy (suffix -> t_a, t_b); named checkpoints snapshot "
+          "and restore a workspace byte-identically; deterministic")
 
 
 if __name__ == "__main__":

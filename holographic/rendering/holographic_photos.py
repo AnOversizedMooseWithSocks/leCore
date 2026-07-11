@@ -1,5 +1,11 @@
 """Loading and testing the holographic image stack on REAL photographs.
 
+KEPT NEGATIVE (no engine door on purpose): this is a TEST/RESEARCH HARNESS, not a core faculty -- it imports PIL to
+load image files off disk (outside the NumPy/stdlib core contract) and measures the plate's PSNR-vs-erasure
+robustness curve. It is evidence about the image stack, run by hand against a photo folder, not a callable library
+capability. Wiring it would drag PIL into the core, so it stays a harness. The wired image capabilities live in
+holographic_image / the rendering faculties.
+
 Until now the image work was measured on GIF sprites -- palette images, <=88
 colours, where lossless shared-palette packing wins. Photographs are the
 opposite regime: thousands of colours, continuous tone, no palette. This module
