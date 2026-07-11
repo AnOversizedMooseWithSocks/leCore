@@ -288,6 +288,32 @@ def _b3_selftest():
     assert max(saved) < STEPS, saved                                # stopped before the cap on every seed
 
 
-if __name__ == "__main__":
+def _selftest():
+    """Canonical entry point for the CI walker (T6 backfill). The module already had `_b3_selftest` under a
+    non-standard name, so the coverage census counted it as missing. This runs it, then pins the headline
+    contract: dense (modern-Hopfield) cleanup pulls a heavily corrupted cue back onto its true codebook entry.
+    Cross-condition contrast (recovered cosine >> corrupted cosine), not an absolute threshold."""
+    import numpy as np
+
     _b3_selftest()
-    print("holographic_hopfield B3 adaptive-stop diffusion selftest passed")
+
+    d, K = 512, 8
+    rng = np.random.default_rng(0)
+    cb = rng.standard_normal((K, d))
+    cb /= np.linalg.norm(cb, axis=1, keepdims=True)
+    true = cb[3]
+    noisy = true + 0.5 * rng.standard_normal(d)                 # a genuinely corrupted cue, not a nudge
+
+    def _cos(a, b):
+        return float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+    cleaned = dense_cleanup(noisy, cb)
+    assert _cos(cleaned, true) > 0.95                           # snaps essentially onto the true entry
+    assert _cos(cleaned, true) > 3.0 * _cos(noisy, true)        # ... a dramatic improvement over the cue
+
+    print("OK: holographic_hopfield self-test passed (B3 adaptive-stop diffusion, and dense cleanup pulls a "
+          "0.5-noise cue from cos~0.1 back onto its true codebook entry at cos>0.95)")
+
+
+if __name__ == "__main__":
+    _selftest()

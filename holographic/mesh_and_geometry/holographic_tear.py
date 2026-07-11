@@ -136,32 +136,38 @@ class TearableCloth:
 
 def _selftest():
     """A pulled sheet snaps its links and separates into pieces; a stronger material tears less under the same
-    pull; a gentle load does not tear; deterministic."""
+    pull; a gentle load does not tear; deterministic.
+
+    PERF (slowest-tests pass): this ran five simulations on 8x8..14x14 grids for 50-150 steps each = ~25 s, one
+    of the heaviest selftests. Every contract here is a CONTRAST (paper tears-and-splits, rubber tears less,
+    gentle tears nothing, a real two-piece split, determinism), and all of them survive at a smaller scale:
+    measured 8x8/80 keeps paper at 52 torn / 3 pieces vs rubber's 24 -- a ~2x margin, no knife-edge. Grids and
+    step counts trimmed to the smallest that keep those margins, cutting the selftest to ~7 s."""
     # (1) yank a weak (paper) sheet hard: links snap and it separates into more than one piece
-    cloth = TearableCloth(rows=12, cols=12, material="paper", compliance=3e-3)
+    cloth = TearableCloth(rows=8, cols=8, material="paper", compliance=3e-3)
     n0 = cloth.n_constraints()
     assert cloth.connected_components() == 1                       # starts as one intact sheet
-    for _ in range(120):
+    for _ in range(80):
         cloth.step(pull=(0.0, -1200.0), gravity=(0.0, -9.8))       # grab the bottom edge and pull down hard
     assert cloth.torn > 0 and cloth.n_constraints() < n0           # links tore
     assert cloth.connected_components() > 1                        # the sheet came apart
 
     # (2) a STRONGER material (rubber, high tear strain) tears less under the SAME pull
-    tough = TearableCloth(rows=12, cols=12, material="rubber", compliance=3e-3)
-    for _ in range(120):
+    tough = TearableCloth(rows=8, cols=8, material="rubber", compliance=3e-3)
+    for _ in range(80):
         tough.step(pull=(0.0, -1200.0), gravity=(0.0, -9.8))
     assert tough.torn < cloth.torn                                 # rubber stretches instead of ripping
     assert tear_strength("rubber") > tear_strength("paper")
 
     # (3) a GENTLE load does not tear anything
-    calm = TearableCloth(rows=10, cols=10, material="cotton", compliance=1e-3)
+    calm = TearableCloth(rows=8, cols=8, material="cotton", compliance=1e-3)
     for _ in range(60):
         calm.step(gravity=(0.0, -0.5))                             # just hanging under light gravity
     assert calm.torn == 0 and calm.connected_components() == 1
 
     # (4) piece sizes: after a full tear the sheet is in two sizable pieces (not just chipped corners)
-    big = TearableCloth(rows=14, cols=14, material="wet_paper", compliance=4e-3)
-    for _ in range(150):
+    big = TearableCloth(rows=10, cols=10, material="wet_paper", compliance=4e-3)
+    for _ in range(110):
         big.step(pull=(0.0, -1500.0), gravity=(0.0, -9.8))
     sizes = big.piece_sizes()
     assert len(sizes) >= 2 and sizes[1] >= 5                       # a real split, second piece is substantial

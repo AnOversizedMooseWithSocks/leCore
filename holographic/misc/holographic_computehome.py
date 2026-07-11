@@ -17,6 +17,13 @@ THE LEVERS (already shipped; this home is the single door -- route, don't rewrit
   * WIDTH     -- holographic_superschedule: run independent work in parallel across the vector (breadth, not depth).
   * PROGRAM   -- holographic_machine: run logic as a VSA PROGRAM on the stored-program machine -- the fully native
                  path, with the interpreter itself in the vector domain (no Python loop between instructions).
+  * BANK      -- holographic_transformbank: `fuse` WITH THE LEAVES PRECOMPUTED. `fuse` does one forward transform
+                 per distinct leaf (9 rffts for an 8-bind chain) plus one inverse; a bank's operands are ALREADY
+                 spectra, so a chain costs one forward transform of the input and one inverse. Measured at D=4096,
+                 chain of 8: sequential 1,059.8 us, fuse 490.0 us, bank 117.2 us -- **4.2x over fuse**, agreeing to
+                 4e-15. Use `fuse` for a one-off expression; use a bank when the SAME operators recur. *The bank's
+                 own first write-up claimed 13.5x by comparing against sequential binds -- a strawman, because
+                 `fuse` had already beaten those.*
 
     Compute.leaf / bind / unbind / bundle / sum / permute   # build a fusable expression tree
     Compute.fuse(expr, cache)                                # collapse it into ~2 FFTs
@@ -78,6 +85,29 @@ class Compute:
         2*len(keys)+2 FFTs instead of ~3*len. Routes to holographic_fuse.fuse_record."""
         from holographic.misc.holographic_fuse import fuse_record
         return fuse_record(keys, values, spectrum_cache=spectrum_cache)
+
+    @staticmethod
+    def transform_bank(dim, seed=0):
+        """**`fuse` with the LEAVES PRECOMPUTED.**
+
+        `Compute.fuse` collapses a bind expression tree into one forward transform per distinct LEAF plus one
+        inverse -- 9 rffts for an 8-bind chain. A `TransformBank` holds its operands as spectra already, so applying
+        a chain costs ONE forward transform (of the input) and one inverse. Measured, a chain of 8 at D=4096:
+        sequential binds 1,059.8 us, `fuse` 490.0 us, `bank.apply_chain` **117.2 us** -- 4.2x over `fuse`, and all
+        three agree to 4e-15.
+
+        Use `fuse` for an arbitrary one-off expression; use a bank when the SAME operators are applied again and
+        again. Routes to holographic_transformbank.TransformBank; nothing here re-derives the algebra."""
+        from holographic.caching_and_storage.holographic_transformbank import TransformBank
+        return TransformBank(int(dim), seed=int(seed))
+
+    @staticmethod
+    def encode_many(encoder, points):
+        """Encode a BATCH of points in one pass. `bind` is a spectrum multiply, so a batch is one `rfft` per axis,
+        one product, one `irfft`. Only ~1.4x -- **the transforms dominate, not the loop** -- and not bit-identical
+        (5.6e-16: binding all axes at once reassociates what pairwise `bind` does in sequence). Routes to the
+        encoder's own `encode_many`."""
+        return encoder.encode_many(points)
 
     @staticmethod
     def reset_fft_counts():

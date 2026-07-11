@@ -10882,3 +10882,345 @@ def test_run_command_is_agent_reachable_but_the_allowlist_is_not():
         httpd.server_close()
 
     assert any("command" in c.name.lower() for c in mind.find_capability("run an external command"))
+
+
+def test_axis_role_analysis_is_a_faculty_and_recovers_a_market_schema():
+    # Cross-faculty integration: analyze_axes + comparability_cost through the mind
+    # on a market-like cube, recovering "time indexes, asset/field bind" and
+    # measuring the price of the wrong choice on the carrier axis.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    rng = np.random.default_rng(1)
+    T, A, F = 30, 5, 4
+    asset_sig = rng.standard_normal((A, F)) * 2.0
+    cube = np.stack([asset_sig + rng.standard_normal((A, F)) * 0.03 * t
+                     for t in range(T)], axis=0)
+
+    res = mind.analyze_axes(cube, categorical=[1, 2])
+    roles = {r["axis"]: r["role"] for r in res["per_axis"]}
+    assert roles[0] == "index"          # time is the boring carrier
+    assert roles[1] == "bind" and roles[2] == "bind"  # payload axes
+
+    # The measured cost of binding the carrier, through the mind.
+    cost = mind.comparability_cost(cube, 0, dim=128)
+    assert cost["collapse"] > 0.3       # binding time destroys real similarity
+
+    # Discoverable by the phrasing a user would type.
+    assert any("analyze_axes" in str(c.name)
+               for c in mind.find_capability("which axis is the carrier"))
+
+
+def test_analytic_signal_is_a_faculty_and_round_trips_through_the_mind():
+    # Cross-faculty integration: the sign-as-rotation framework end to end. The
+    # reversible round-trip is exact; the real-signal monotone cost reads ~0 reversal
+    # fraction (the theorem); a true complex phasor pays the monoid price.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    t = np.linspace(0, 1, 2048)
+    x = np.cos(2 * np.pi * 7 * t) + 0.4 * np.cos(2 * np.pi * 13 * t)
+    a = mind.analytic_signal(x)
+    recon = a["amplitude"] * np.cos(a["phase"])
+    assert np.max(np.abs(recon - x)) < 1e-9          # lossless re-coordinatisation
+
+    real_cost = mind.monotone_cost(x)
+    assert real_cost["reversal_fraction"] < 0.08     # real signal is one-way
+
+    steps = np.concatenate([np.full(512, 0.2), np.full(512, -0.2)])
+    z = np.exp(1j * np.cumsum(steps))
+    cx_cost = mind.phasor_monotone_cost(z)
+    assert cx_cost["excess"] > 0.5                   # the group-vs-monoid price
+
+    assert any("analytic_signal" in str(c.name)
+               for c in mind.find_capability("represent a value as rotation"))
+
+
+def test_dynamics_identification_is_a_faculty_with_all_three_doors():
+    # Cross-faculty: the three honest doors to mass through the mind, plus the
+    # refusal on trajectory-only (the gauge theorem enforced at the faculty level).
+    import numpy as np
+    import pytest as _pytest
+    import lecore
+    from holographic.sampling_and_signal.holographic_sysid import GaugeError
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # Door 3 (astronomy): weigh the Sun from a synthetic Earth orbit.
+    T, R = 3.156e7, 1.496e11
+    tt = np.linspace(0, 1.2 * T, 3000)
+    pos = np.stack([R * np.cos(2 * np.pi * tt / T),
+                    R * np.sin(2 * np.pi * tt / T)], axis=1)
+    est = mind.central_mass_from_orbit(pos, tt[1] - tt[0])
+    assert abs(est["central_mass"] - 1.989e30) / 1.989e30 < 0.01
+
+    # Door 2 (interaction): exact ratio.
+    r = mind.identify_dynamics(interaction={"v1_before": 1.0, "v1_after": 0.5,
+                                            "v2_before": 0.0, "v2_after": 1.5})
+    assert abs(r["mass_ratio"] - 3.0) < 1e-9
+
+    # Door 0: trajectory alone refuses.
+    with _pytest.raises(GaugeError):
+        mind.identify_dynamics(x=np.cos(np.arange(0, 2, 0.001) * 2), dt=0.001)
+
+    assert any("central_mass_from_orbit" in str(c.name)
+               for c in mind.find_capability("weigh a star from its orbit"))
+
+
+def test_scaling_diagnosis_is_a_faculty_and_rediscovers_the_dim_rule():
+    # Cross-faculty: the diagnostician through the mind, on the live bundle
+    # primitive, rediscovering "double dim -> discrimination error drops" -- and
+    # the wall verdict on a workload nothing helps.
+    import numpy as np
+    import lecore
+    from holographic.agents_and_reasoning.holographic_ai import random_vector, bundle
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    def workload(dim, seed=0):
+        dim = int(dim)
+        items = [random_vector(dim, np.random.default_rng(seed + 1 + i))
+                 for i in range(30)]
+        b = bundle(items)
+        nb = np.linalg.norm(b)
+        mcos = np.array([float(np.dot(b, it)) / (nb * np.linalg.norm(it)) for it in items])
+        dis = [random_vector(dim, np.random.default_rng(seed + 900 + i)) for i in range(30)]
+        dcos = np.array([float(np.dot(b, d)) / (nb * np.linalg.norm(d)) for d in dis])
+        return float(np.mean(dcos > np.min(mcos)))
+
+    d = mind.diagnose_scaling(workload, {"dim": 128})
+    assert d["verdict"] == "scale:dim"
+
+    r = mind.auto_scale(lambda dim: 0.42, {"dim": 64}, target_error=0.1, max_rounds=6)
+    assert r["wall"] and len(r["trajectory"]) == 0
+
+    assert any("diagnose_scaling" in str(c.name)
+               for c in mind.find_capability("which limit am i hitting"))
+
+
+def test_rectify_carrier_composes_with_axis_analysis_through_the_mind():
+    # The full pipeline the axis-role thread was building toward: a wobbling,
+    # irregular carrier is diagnosed as informative, repaired (arc-length lift +
+    # uniform resample), and re-diagnosed as an ideal index -- through the mind.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    rng = np.random.default_rng(7)
+    steps = rng.exponential(1.0, size=260)
+    steps[::41] = -0.2                                # irregular AND wobbling
+    t = np.cumsum(steps)
+    content = np.sin(0.08 * np.arange(260))
+
+    r = mind.rectify_carrier(t, content)
+    assert r["marginal_info_after"] == 0.0
+    assert np.all(np.diff(r["coords"]) > 0)
+    assert r["monotone_fraction"] < 1.0               # it genuinely needed the lift
+
+    rec = mind.analyze_axes(np.asarray(r["content"]))["per_axis"][0]
+    assert rec["role"] == "index"
+
+    assert any("rectify_carrier" in str(c.name)
+               for c in mind.find_capability("fix an irregular time axis"))
+
+
+def test_winding_map_completes_the_reversing_carrier_arc():
+    # The composition the axis-role thread pointed at: rectify_carrier reports a
+    # LOW monotone_fraction (a genuinely reversing sweep -- its declared "inspect
+    # by hand" regime), and winding_map is the inspection: it detects hysteresis,
+    # returns the per-direction branches, and refuses the fictitious merge.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    rng = np.random.default_rng(0)
+    xs = np.linspace(0, 1, 100)
+    F = lambda x: np.sin(2 * np.pi * x)
+    coords, content = [], []
+    for k in range(6):
+        up = (k % 2 == 0)
+        x = xs if up else xs[::-1]
+        coords.append(x)
+        content.append(F(x) + (0.35 if up else -0.35)
+                       + rng.standard_normal(100) * 0.03)
+    coords = np.concatenate(coords)
+    content = np.concatenate(content)
+
+    rect = mind.rectify_carrier(coords, content)
+    assert rect["monotone_fraction"] < 0.9        # the declared boundary trips
+
+    r = mind.winding_map(coords, content)
+    assert r["verdict"] == "hysteresis"
+    assert r["merged"] is None                    # refusal held through the mind
+    assert r["branches"] is not None
+
+    assert any("winding_map" in str(c.name)
+               for c in mind.find_capability("detect hysteresis in a sweep"))
+
+
+def test_explore_series_is_the_arc_end_to_end_through_the_mind():
+    # The whole thread, one call: an unlabeled 2-channel series on an irregular,
+    # slightly wobbling carrier. explore_series must find the scaffold among the
+    # candidates, rectify it (the arc-length lift + resample), decompose each
+    # channel into its law, and return residuals + a measured verdict.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    rng = np.random.default_rng(0)
+    steps = rng.exponential(1.0, size=220)
+    steps[::53] = -0.1                          # irregular AND occasionally negative
+    t = np.cumsum(steps)
+    u = (t - t.min()) / (t.max() - t.min())
+    series = np.stack([np.sin(2 * np.pi * 2 * u), 0.7 * u + 0.2], axis=1)
+
+    res = mind.explore_series(series, coords={0: t})
+    assert res["scaffold"] == 0
+    assert res["rectified"]["marginal_info_after"] == 0.0
+    assert res["rectified"]["monotone_fraction"] < 1.0   # the lift genuinely fired
+    assert res["verdict"] == "structured"
+    assert all(ch["explained_fraction"] > 0.8 for ch in res["channels"])
+
+    assert any("explore_series" in str(c.name)
+               for c in mind.find_capability("explore unlabeled data automatically"))
+
+
+def test_demux_completes_the_contact_protocol_through_the_mind():
+    # The layered-signal story, end to end: an interleaved stream of unlike
+    # sources -> demux_series finds the stride and recovers channels bit-exact ->
+    # explore_series decodes each channel's law separately -- one mind, one call
+    # chain, evidence at every step.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    n = 200
+    u = np.linspace(0, 1, n)
+    stream = np.empty(2 * n)
+    stream[0::2] = np.sin(2 * np.pi * 2 * u)
+    stream[1::2] = 0.8 * u + 0.1
+
+    d = mind.demux_series(stream)
+    assert d["stride"] == 2
+    assert np.array_equal(d["objects"][0][:, 0] if d["objects"][0].ndim > 1
+                          else d["objects"][0], stream[0::2])
+
+    for obj in d["objects"]:
+        arr = obj if obj.ndim > 1 else obj.reshape(-1, 1)
+        res = mind.explore_series(arr)
+        assert res["verdict"] == "structured"
+
+    assert any("demux_series" in str(c.name)
+               for c in mind.find_capability("separate interleaved channels"))
+
+
+def test_hands_free_pipeline_with_residual_links_through_the_mind():
+    # The complete hands-free story: a raw interleaved stream where one channel
+    # is lawful and another is a DELAYED COPY of a noise channel. auto_demux
+    # separates the sources with zero hints; cross_channel finds the residual
+    # link that per-channel decomposition cannot see. One call.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+
+    n = 300
+    u = np.linspace(0, 1, n)
+    lawful = np.sin(2 * np.pi * 2 * u)
+    noise = rng.standard_normal(n)
+    x = np.empty(2 * n)
+    x[0::2] = lawful
+    x[1::2] = noise
+    r = mind.explore_series(x, auto_demux=True, cross_channel=True)
+    assert r["demux"]["stride"] == 2
+    assert r["verdict"] == "structured"      # the lawful source carries it
+
+    # And the direct residual-link path through the faculty:
+    dst = np.zeros(n); dst[5:] = 0.9 * noise[:-5]
+    cx = mind.cross_channel_links(np.stack([noise, dst], axis=1))
+    assert cx["links"][0]["lag"] == 5
+
+    assert any("cross_channel_links" in str(c.name)
+               for c in mind.find_capability("delayed copy of another channel"))
+
+
+def test_packet_demux_extends_the_contact_protocol_to_burst_streams():
+    # The packetized Contact case through the mind: variable-length bursts, no
+    # cyclic stride -- boundaries found by statistics shifts, the lawful source's
+    # bursts reunited and decoded, honest single-source verdict on homogeneous.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(2)
+    stream = np.concatenate([0.5 * np.linspace(0, 1, 120),
+                             5.0 + rng.standard_normal(80),
+                             0.5 * np.linspace(0, 1, 100),
+                             5.0 + rng.standard_normal(90)])
+    pk = mind.packet_demux(stream, min_seg=24)
+    assert pk["assignment"][0] == pk["assignment"][2]      # ramps reunited
+    ramp = pk["sources"][pk["assignment"][0]]["stream"]
+    assert mind.explore_series(ramp.reshape(-1, 1))["verdict"] == "structured"
+
+    homo = mind.packet_demux(rng.standard_normal(400))
+    assert homo["n_sources"] == 1
+
+    assert any("packet_demux" in str(c.name)
+               for c in mind.find_capability("detect packet boundaries"))
+
+
+def test_continuation_closes_the_drift_negative_through_the_mind():
+    # The full story: a source that drifts across its bursts previously read as
+    # different levels (the declared bag-of-segments negative). continuation=True
+    # extrapolates the tail across the gap, reunites the bursts with evidence,
+    # and the reunited source decodes 'structured' -- while default-off remains
+    # the old behaviour.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(2)
+    t1 = 0.02 * np.arange(60)
+    burst = 8.0 + rng.standard_normal(120)
+    t2 = 0.02 * np.arange(180, 240)
+    x = np.concatenate([t1, burst, t2])
+
+    off = mind.packet_demux(x, min_seg=24)
+    on = mind.packet_demux(x, min_seg=24, continuation=True)
+    assert off["n_sources"] == 3 and on["n_sources"] == 2
+    ramp_src = on["sources"][on["assignment"][0]]
+    r = mind.explore_series(ramp_src["stream"].reshape(-1, 1))
+    assert r["verdict"] == "structured"
+
+
+def test_arc_adoptions_pay_measurably_through_the_mind():
+    # The promotion pass, verified end to end: (1) decompose_piecewise beats the
+    # global fit on a regime-built signal WITH the baseline attached; (2)
+    # handle_reversals routes a multi-pass scan through the winding merge and
+    # the decomposition improves; (3) the degenerate-axis fix holds through the
+    # mind. Each claim carries its number.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+
+    n = 100
+    y = np.concatenate([2.0 * np.linspace(0, 1, n),
+                        np.sin(2 * np.pi * 2 * np.linspace(0, 1, n)) + 3.0,
+                        -np.linspace(0, 1, n) + 1.0])
+    d = mind.decompose_piecewise(y, min_seg=24)
+    assert d["total_bits"] < d["baseline"]["mdl_bits"]
+    assert d["residual_rms"] < 0.1 * d["baseline"]["residual_rms"]
+
+    xs = np.linspace(0, 1, 120)
+    co, ct = [], []
+    for k in range(6):
+        c = xs if k % 2 == 0 else xs[::-1]
+        co.append(c)
+        ct.append(np.sin(2 * np.pi * 2 * c) + rng.standard_normal(120) * 0.15)
+    co = np.concatenate(co)
+    ct = np.concatenate(ct).reshape(-1, 1)
+    off = mind.explore_series(ct, coords={0: co})
+    on = mind.explore_series(ct, coords={0: co}, handle_reversals=True)
+    assert off["scaffold"] == 0 and off["n_channels"] == 1   # degenerate fix
+    assert on["winding"]["verdict"] == "function"
+    assert on["channels"][0]["explained_fraction"] >= \
+        off["channels"][0]["explained_fraction"]

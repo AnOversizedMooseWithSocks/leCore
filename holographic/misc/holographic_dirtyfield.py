@@ -19,12 +19,12 @@ the change strictly inside the moved collider's footprint, which is the whole po
 import numpy as np
 
 
-def _cell_centers(shape, lo, hi):
-    """World-space centre of every grid cell -> (prod(shape), D), matching holographic_ndfield's ordering."""
-    lo = np.asarray(lo, float); hi = np.asarray(hi, float)
-    axes = [(np.arange(s) + 0.5) / s * (hi[k] - lo[k]) + lo[k] for k, s in enumerate(shape)]
-    grids = np.meshgrid(*axes, indexing="ij")
-    return np.stack([g.ravel() for g in grids], axis=1)
+# `_cell_centers` lived here as a byte-for-byte copy of `holographic_ndfield`'s -- and its own docstring said so:
+# "matching holographic_ndfield's ordering". The author knew. A structural-duplicate scan, run with the engine's own
+# `canonical_shape` (names and constants erased), found the two bodies with one fingerprint. `dirtyfield` already
+# imported from `ndfield`, so there was no cycle and no reason for a second copy. **A comment that promises two
+# functions match is a promise nothing checks; an import is a promise the interpreter checks.**
+from holographic.misc.holographic_ndfield import _cell_centers   # noqa: E402  -- one home for the cell grid
 
 
 class DirtyField:

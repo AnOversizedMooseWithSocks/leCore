@@ -167,6 +167,38 @@ def statements(src):
     return [n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.stmt)]
 
 
+def selftest_census(root=None):
+    """Which engine modules have a real selftest, and which don't -- the AST fact behind the CI selftest walker,
+    made queryable so an agent driving the mind can ask 'is the engine covered?' without shelling out.
+
+    A module is `runnable` iff it has BOTH a `__main__` guard AND a `def _selftest` (the repo convention: a
+    `-m` run of that module executes its own contract). A module with a `__main__` but no `_selftest` -- a demo
+    or a server -- is `missing`: running it exits 0 while asserting nothing, a false green. Modules with NO
+    `__main__` at all are neither: they are libraries, not runnable entry points, so they are not counted here.
+    (The CLI walker `tools/run_selftests.py` keeps a WIDER 'not runnable' set for its own bookkeeping -- it must
+    know every module it cannot run -- but the actionable backfill worklist is exactly this `missing` set: a
+    module that already advertises an entry point but forgot to assert anything.) This is a pure AST scan (no
+    import, no subprocess), instant and safe from inside a served mind; the actual RUN is the CLI/CI tool.
+
+    Returns {runnable, missing, missing_modules, coverage} where coverage = runnable / (runnable + missing).
+    `missing_modules` is the exact backfill worklist (dotted module paths)."""
+    import pathlib
+    import re
+
+    root = pathlib.Path(root) if root else pathlib.Path(__file__).resolve().parent.parent
+    main_re = re.compile(r'__name__\s*==\s*[\'"]__main__[\'"]')
+    runnable, missing = 0, []
+    for p in sorted(root.rglob("holographic_*.py")):
+        s = p.read_text(errors="replace")
+        if main_re.search(s) and "def _selftest" in s:
+            runnable += 1
+        elif main_re.search(s):                          # has an entry point but nothing that asserts -- a false green
+            missing.append(".".join(p.with_suffix("").relative_to(root.parent).parts))
+    total = runnable + len(missing)
+    return {"runnable": runnable, "missing": len(missing), "missing_modules": missing,
+            "coverage": runnable / total if total else 1.0}
+
+
 def byte_report(src, level=9):
     """The codec comparison, carried WITH the capability so nobody has to trust the number: {raw, zlib_raw,
     codebook_bytes, delta_bytes, structure_bytes, ratio_vs_zlib, beats_zlib}.
@@ -238,6 +270,25 @@ def _selftest():
     rep = byte_report(src)
     assert rep["beats_zlib"] is False
     assert rep["structure_bytes"] > rep["zlib_raw"]
+
+    # 8. selftest_census: run against THIS very tree (a real input, not a toy -- the census is only useful on the
+    #    real module set). The invariants are structural, not absolute counts (which drift as modules land): the
+    #    partition is exhaustive and disjoint, coverage is a fraction, and the missing list is exactly the modules
+    #    with an entry point but no _selftest. A synthetic scratch tree proves classification without depending on
+    #    the live count -- the [BLIND-SPOT] discipline: assert on an input built to exercise BOTH branches.
+    import tempfile
+    import pathlib as _pl
+    cen2 = selftest_census()
+    assert cen2["runnable"] > 300 and 0.0 <= cen2["coverage"] <= 1.0
+    assert cen2["missing"] == len(cen2["missing_modules"])
+    with tempfile.TemporaryDirectory() as td:
+        pkg = _pl.Path(td) / "holographic"; pkg.mkdir()
+        (pkg / "holographic_good.py").write_text("def _selftest():\n    pass\nif __name__=='__main__':\n    _selftest()\n")
+        (pkg / "holographic_demo.py").write_text("print('a demo')\nif __name__=='__main__':\n    print('runs, asserts nothing')\n")
+        (pkg / "holographic_lib.py").write_text("X = 1\n")     # no __main__ at all -> neither runnable nor missing
+        c = selftest_census(root=td)
+        assert c["runnable"] == 1 and c["missing"] == 1
+        assert c["missing_modules"][0].endswith("holographic.holographic_demo")
 
     print("OK: holographic_codestructure self-test passed (every statement subtree reconstructs bit-exactly and the "
           "module rebuilds to the normalized source; `a + b` and `x + y` share a shape while `a * b` does not; a "

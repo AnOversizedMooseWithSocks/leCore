@@ -263,8 +263,13 @@ def _selftest():
     spread_tight = np.linalg.norm(np.array([s.points[-1] for s in tight]) - gt, axis=1).mean()
     assert spread_tight <= spread_loose + 1e-9
 
-    # (4) H7 curl-noise wind: divergence-free field, and it actually moves the hair
-    wind = CurlWind(strength=3.0, seed=2)
+    # (4) H7 curl-noise wind: divergence-free field, and it actually moves the hair.
+    # PERF (slowest-tests pass): the default CurlWind builds a 24^3 3-octave curl-noise field at construction --
+    # measured 37 s, which was the ENTIRE cost of this 39 s selftest. The contract here is only "the tip moves
+    # and does not balloon", which a far coarser field satisfies identically: res=12/octaves=2 builds in ~3 s and
+    # gives moved=0.126 (vs 0.127) with zero ballooning -- the same result 12x faster. The field's RESOLUTION is
+    # not what this test checks (holographic_curlnoise has its own tests for the field itself).
+    wind = CurlWind(strength=3.0, seed=2, res=12, octaves=2)
     calm = groom(s.eval, 1, bounds, length=0.8, n_pts=10, seed=5)
     blown = simulate_strands([calm[0]], steps=60, gravity=(0.0, -1.0, 0.0), wind=wind.force)
     assert np.linalg.norm(blown[0].points[-1] - calm[0].points[-1]) > 0.02   # the tip moved in the wind

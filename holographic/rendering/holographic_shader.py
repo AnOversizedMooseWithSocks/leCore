@@ -724,6 +724,24 @@ def translate_rule(bake, rule, dx):
 def bake_nd(grids, values, dim=8192, seed=0, margin=1.5):
     """H5 -- the texture unit in N dimensions: a gridded function baked into ONE hypervector.
 
+    KEPT NEGATIVE -- **"SAMPLE O(1)" MEANS O(1) IN THE NUMBER OF BAKED SAMPLES, NOT O(1) IN `dim`.** A `fetch_nd`
+    costs one O(dim log dim) transform per point. On a CPU that is far more than re-evaluating a procedural field.
+    Measured against a 5-octave fBm driving a material channel (24^3 grid, dim 2048), with the sample path fully
+    vectorised:
+
+        hits    direct resolve   fetch_nd   ratio
+         512        1.25 ms       207.6 ms   166x SLOWER
+        4,096       3.18 ms      2010.0 ms   632x SLOWER
+
+    ... and the bake does not even hold the field: correlation 0.252, max error 0.296 on a [0.05, 0.95] channel.
+    That is H5's bandwidth negative, not a tuning failure -- a 24^3 grid cannot carry five octaves.
+
+    **So do NOT bake a procedural material into the texture unit for a CPU renderer.** The primitive earns its keep
+    where the fetch is a parallel dot product and the field is genuinely expensive or unavailable in closed form --
+    that is the muscle side, the browser, where `exp` and a dot are free and a pattern graph is not. Bake for the
+    consumer that has the hardware, not for the one that has the source.
+
+
     `grids`  -- one 1-D array of UNIFORMLY spaced coordinates per axis.
     `values` -- the sampled function, shaped (len(grids[0]), len(grids[1]), ...).
 
@@ -783,7 +801,12 @@ def fetch_nd(bake, point, normalize=True):
     raised the margin or calibrated the gain."""
     enc = bake["encoder"]
     P = np.atleast_2d(np.asarray(point, float))
-    Z = np.stack([enc.encode(p) for p in P])
+    # "Bake once, sample O(1)" -- and the sample path was a Python loop over `encode`. `encode_many` is the same
+    # arithmetic, batched. It is not bit-identical (5.6e-16: binding all axes' spectra at once reassociates the
+    # products that pairwise `bind` performs in sequence), and it is only ~1.4x faster, because the cost of a
+    # sample is one O(dim log dim) transform per point and the loop was never the bottleneck. See the kept negative
+    # on `bake_nd`.
+    Z = enc.encode_many(P) if hasattr(enc, "encode_many") else np.stack([enc.encode(p) for p in P])
     out = Z @ bake["field"]
     if normalize:
         out = out / (Z @ bake["density"])

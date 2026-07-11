@@ -233,12 +233,13 @@ def _selftest():
     negatives hold -- a triangle cannot pay an affine delta, and the dividend scales with element size."""
     rng = np.random.default_rng(0)
 
+    # ONE Rodrigues generator in the engine. `holographic_equivariance.sample_transform` already builds a random
+    # rotation, and a structural-duplicate scan found this body copied into three selftests. Delegating is not a
+    # style preference: three copies of a rotation is three chances to disagree about what "a rotation" is.
+    from holographic.mesh_and_geometry.holographic_equivariance import sample_transform
+
     def _rot(r):
-        v = r.normal(size=3)
-        v /= np.linalg.norm(v)
-        th = r.uniform(0.2, 2.0)
-        K = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
-        return np.eye(3) + np.sin(th) * K + (1 - np.cos(th)) * K @ K
+        return sample_transform("rotate", r)[0]
 
     # 1. EXACT reconstruction, every family
     for family in FAMILIES:

@@ -26445,3 +26445,1624 @@ verbatim. reachability 42 / catalog_gaps 0 / skill_lint 0.
 
 *The lesson: `find_capability` proved every capability was reachable, and `file_grep` proved two of them were the
 same capability. **Discoverability is not the same audit as duplication**, and the engine had a tool for each.*
+
+
+## AUDIT, ROUND 2 -- the half of the governing rule I never checked
+
+> *"A capability that `find_capability` can't surface and `/invoke` can't call does not exist."*
+
+I checked the first clause all day. **I never once checked the second** for anything built this run. So I booted the
+service and tried.
+
+### `GET /tools`: 36/36. The introspection works.
+
+Every new `UnifiedMind` method appears in the manifest automatically. Nothing to do.
+
+### `POST /invoke`: 23 of 29 callable. Six took live Python objects.
+
+Twenty-one of the fifty-one new methods take a `mesh`, an `op`, a `ctx`, a `payload` or an `fn` -- **a live handle,
+which does not survive JSON.** `emit_kernel` was the exception, because it learned early that *the kernel is text*.
+
+Two fixes, both additive:
+
+  * **`_as_mesh`** -- every mesh faculty (`cross_field`, `field_report`, `mesh_lscm`, `mesh_uv_*`) now accepts a live
+    `Mesh`, a `{"vertices": ..., "faces": ...}` dict, or a `(vertices, faces)` pair. A mesh is buffers, however it
+    arrives.
+  * **`_as_operator`** -- `evaluate_elements` and `delta_cache_report` now accept the NAME of a registered operator
+    (`"area"`, `"centroid"`, ...) resolved against the equivariance table. A function cannot cross the wire, and
+    guessing one would be worse than refusing.
+
+All six now round-trip.
+
+### THE FINDING: a thing that *looks* serialised, and isn't
+
+`cross_field` returns `(phi, ctx)`. `ctx["rho"]` is keyed by `(face, face)` **tuples**. Over HTTP those keys come
+back as the **strings** `"(0, 1)"`. `json.dumps` succeeds. The agent receives 771 bytes that look exactly like a
+context -- and feeding it back gives `KeyError: (0, 1)`.
+
+**An object that serialises into something that looks right but cannot be used is worse than one that raises.** A
+loud failure is a bug report; a quiet one is a wrong answer waiting.
+
+*And I nearly missed it, because my first probe used `json.dumps(r, default=str)`. `default=str` stringifies
+anything. **I had written a test that could not fail.** Strict `json.dumps` is what an agent actually gets, and it
+was the only thing that showed the tuple keys.*
+
+Two remedies:
+  * `field_singularities(mesh)` -- the **stateless one-shot twin**: buffers in, plain data out
+    (`index`, `n_singularities`, `sum_index`, `euler`, `quarter_residual`, `energy`). Strict-JSON round-trip
+    asserted by a test. This is the `gather_samples` pattern, re-derived because I forgot to apply it.
+  * `singularity_index` now **detects a JSON-round-tripped ctx** -- its `rho` keys are strings, not tuples -- and
+    refuses by name, pointing at the twin. `is_deterministic` likewise refuses a non-callable and names
+    `evaluate_elements(op="area")` as the agent-facing door.
+
+### What remains in-process, honestly
+
+`memoize_pure` returns a **closure**; `is_deterministic` takes a **callable**. Neither can cross JSON in principle,
+and no amount of coercion changes that. They are in-process faculties, they say so in their docstrings, and their
+refusals name the agent-facing alternative rather than failing inside a stranger's `fn(sample)`.
+
+**Delta:** 4,710 -> 4,715 tests (+5). `field_singularities` added and wired; `_as_mesh` / `_as_operator` coercions on
+eight faculties; two named refusals; catalog entry rewritten to lead with the stateless twin. A test now performs the
+**full HTTP round-trip** -- `GET /tools`, `POST /invoke`, strict `json.dumps` -- because *"it works in-process" and
+"an agent can call it" are different claims.* reachability 42 / catalog_gaps 0 / skill_lint 0.
+
+*Two audits, two different tools, two different classes of gap: `find_capability` proved everything was reachable,
+`file_grep` proved two things were the same thing, and `/invoke` proved six of them could not actually be called.
+**Discoverable, non-duplicated, and callable are three separate properties, and the engine has a probe for each.***
+
+
+## THE REALTIME LOOP -- and the saving that had never been realised
+
+Moose asked whether the render and simulation pipelines actually use the new work. They did not. `RefreshRenderer`
+-- the information-rate render mode, "five times fewer shader evaluations" -- was imported by **nobody**. Not by
+`RenderSession`, not by anything.
+
+### THE MISSING HALF
+
+`RefreshRenderer.step(shade)` computes a budget, builds a mask, and calls `shade(mask)`. Its own docstring says:
+
+> *"`shade(mask)` must return the FULL correct frame; the loop reads only `frame[mask]` from it, **so a real
+> renderer would shade only those pixels** and the budget is the shader-evaluation count."*
+
+**Nothing was a real renderer.** `render_surface` traced every pixel, unconditionally. The famous 5x was an
+arithmetic statement about a mask -- a count of pixels the loop *would* have skipped -- and not one shader
+evaluation had ever been skipped.
+
+`render_surface(..., pixel_mask=, base=)` now traces only the mask and fills the rest from `base`:
+
+    mask fraction   time     speedup   shaded pixels bit-identical   base preserved
+    100% (no mask)  30 ms     1.0x       --                            --
+     20%             9 ms     3.2x       yes                           yes
+      5%             5 ms     6.2x       yes                           yes
+
+`pixel_mask=None` is bit-identical to before, so nothing that exists changes. A mask without a `base` **raises**:
+otherwise the result is a partial image pretending to be a whole one.
+
+### `holographic_realtime.RealtimeSession`
+
+`frame(camera, known_shift=)` is a DRAFT -- reproject the previous frame, shade the disocclusion border (new
+information; no warp can invent it) plus an exact-k oldest-age budget with a deterministic tie-break. `refine()`
+traces every pixel. `payload(kinds)` pushes the same scene as **pixels, mesh, splats, shader (WGSL), lod** -- every
+value plain data, strict-`json.dumps` safe. Six drifting frames at 64x64 hold **34.6 dB at 25.5% shaded**, no decay.
+
+### KEPT NEGATIVE 1: tell the loop how the camera moved
+
+W4 measured this before the module existed, and it reproduces in the live loop:
+
+    shift source           traced pixels   mean PSNR   tail slope
+    known_shift=(dy,dx)         5,658       34.6 dB     +0.16 dB   (stable)
+    recovered from pixels       7,938       30.9 dB     **-4.52 dB**  (DECAYS)
+
+The 2,280 extra traces are the coarse probe the estimator needs. The 3.7 dB and the negative slope are the loop
+warping its own output. `known_shift` is not an optimisation, it is the correct call; the estimator exists for the
+case where nobody knows -- a scene that moves under a static camera.
+
+### KEPT NEGATIVE 2: the contract's honest asymmetry
+
+**A draft frame converges to the refined frame. A draft simulation does not.**
+
+`run_simulation("fluid", ...)` at grid 32 against grid 48 has relative error **1.000**; at grid 24 it is **0.669**.
+**Non-monotonic.** The coarse run is not a blurred version of the fine one -- it is a different trajectory of a
+chaotic system. Refining a render *sharpens* it; refining a chaotic solve *replaces* it.
+
+So `draft_vs_refine_simulation` returns `converges: False` and the front end is **told**, rather than left to
+assume that a coarse fluid is a low-resolution preview of the fine one. Promising otherwise would promise the
+browser something the mathematics does not.
+
+### And the instrumentation pays for itself, visibly
+
+`measure=True` traces a full reference frame to report `psnr_vs_full`. It is counted as `measure_traces`, never as
+`traced_pixels`. *A saving that quietly pays for its own measurement is not a saving.*
+
+### CACHES
+
+Three, keyed and reported by `stats()`: the previous frame plus a per-pixel **age** buffer; **`scene_version`**,
+which keys the mesh/splat/lod payloads so a camera move rebuilds no geometry; and the `RenderSession`'s fat-margin
+preview cache, **deliberately left alone** -- it answers a different question (a drifting camera on a *static*
+frame), and serving a stale frame into a warp compounds the very decay negative 1 is about.
+
+**Delta:** 4,715 -> 4,733 tests (+18). New module `holographic_realtime` with `_selftest`; `render_surface` gains
+`pixel_mask`/`base` (additive, default-off, bit-identical when unused); two methods wired
+(`realtime_session`, `draft_vs_refine_simulation`, the latter JSON-callable over `/invoke`); catalog entry with an
+example run verbatim. `realtime_session` returns a live object and is therefore an in-process faculty -- it needs a
+live SDF -- and its JSON door is `payload()`, which the session owns. reachability 42 / catalog_gaps 0 /
+skill_lint 0.
+
+*The pattern, three audits running: the capability existed, was discoverable, was tested -- and was doing nothing.
+**"Wired to a faculty" and "used by the pipeline" are different claims**, and only one of them was ever checked.*
+
+
+## "Is the GPU stack fully used?" -- the premise needed auditing first
+
+**There is no GPU execution in leCore, and there is not supposed to be.** `cupy` and `numba` are opt-in
+accelerators; neither is installed, and the engine runs and passes every test without them. What exists is:
+
+  * a **CuPy backend switch** (`holographic_backend`), consumed by `fluid`, `memoryhome` and `unified` -- and
+    **not by the renderer**. Routing `render_surface` through it would be an unmeasured claim on a box with no GPU,
+    so it is recorded as a gap rather than "fixed" blind.
+  * the **brain/muscle protocol**: WGSL emitter (K8), splat export, progressive LOD stream (F8). *The browser is the
+    GPU.* And that is where the audit found something.
+
+### THE CONTRACT WAS NOT REALISED
+
+The backlog's claim: *"the compute shaders the three.js demos hand-write become a **projection of the authoritative
+Python kernel** -- one source of truth, two runtimes, no drift."*
+
+  * `holographic_sdf.SDF.to_glsl()` emitted GLSL for a tree.
+  * `holographic_emit` emitted WGSL, C and JS -- **but only from a scalar Python function's source text.**
+  * **The two emitters never met.**
+
+So `RealtimeSession.payload("shader")` carried whatever `kernel_src` the caller passed: *a shader written by hand,
+about a scene the engine never saw.* **That is drift by construction** -- the precise thing the contract exists to
+prevent, shipped inside the module that advertises it.
+
+New module `holographic_sdfemit.py`. `sdf_dialect(node, dialect)` walks the SAME tree `_eval` walks and emits
+`map(p) -> distance` in `wgsl` | `glsl` | `c_f64` | `c_f32`. `payload("shader")` now emits **the scene's own map()**.
+
+### THE BAR IS EXECUTED
+
+WGSL cannot be run here. The C twin can, and is: compiled with `cc`, run against the Python `_eval` on 200 random
+points, on a scaled smooth-union of a translated sphere and a rotated box.
+
+    dialect   max |emitted - python|
+    c_f64          6.7e-16     machine epsilon -- and NOT bit-identical
+    c_f32          2.3e-07     f32; this IS the tolerance a WGSL port is judged against
+
+**And that `c_f64` is not bit-identical, where K8's scalar kernel was.** K8 emitted the *same expression* the Python
+function evaluated. Here the Python side is numpy: `np.linalg.norm` rescales to avoid overflow, so it sums in a
+different order than `sqrt(x*x + y*y + z*z)`. The emitted C computes the same FUNCTION by a different summation.
+
+**Bit-identity is TREE-DEPENDENT**, which is why the module reports `max_abs_diff` and never a boolean: a bare
+`sphere` agrees at exactly 0.0; add a `rotate` and a `scale` and the multiplies reassociate to four ulp. *Asserting
+`bit_identical` would have been a bar that passes on a sphere and fails on a scene.*
+
+### THREE KEPT NEGATIVES
+
+**1. WGSL IS NOT C.** It infers a local's type with `let` and rejects `vec3<f32> name = ...` outright. **My first
+emitter wrote the C form for every dialect**, and the structural test -- which checked the signature and the brace
+balance -- passed the invalid WGSL. I caught it by *reading the output*. That is exactly the failure the module's own
+"the WGSL is not executed here" negative warns about, and it happened anyway, in the same hour I wrote the warning.
+
+**2. Coverage must be total.** `menger` and `repeat` fold the domain iteratively (unrolling makes the shader's size
+a parameter); `twist` and `displace` are inexact distance warps. All four are **refused by name**, and
+`sdf_emit_coverage()` asserts `emitted + refused == all 18 node kinds` -- because a gap there is a shader that
+**silently omits geometry**.
+
+**3. `scale` is `map(p / s) * s`, not `map(p / s)`.** Drop the outer factor and the shader renders the right SHAPE
+with wrong DISTANCES; a raymarcher oversteps and misses the surface. Pinned by a test at a point far from the
+surface, where the shape looks right and the distance does not.
+
+### And the standing honest scope
+
+An emitted shader is not a rendered image. This validates the **distance function** against the Python one to f32
+tolerance. It does not validate WGSL's precision rules, its fast-math latitude, whether the shader compiles, or
+whether the browser's raymarch loop matches the engine's. Those are the front end's tests, and saying so is cheaper
+than having someone discover it in a browser.
+
+**Delta:** 4,733 -> 4,742 tests (+9). New module `holographic_sdfemit` with `_selftest`; three methods wired
+(`sdf_dialect`, `sdf_validate_c`, `sdf_emit_coverage`); `RealtimeSession.payload("shader")` now projects the scene
+and refuses, by name, when the session holds no tree. reachability 42 / catalog_gaps 0 / skill_lint 0.
+
+**REMAINING GAP, RECORDED NOT PAPERED OVER:** the render path is NumPy-only and does not consult the CuPy backend
+switch. On a box with no GPU I cannot measure whether routing it there pays, and shipping an unmeasured "GPU render"
+would be the exact failure this program refuses. It is written down here for the session that has a GPU.
+
+
+## THE VIRTUAL GPU -- audited. It is not used by the renderer, and for one of its primitives that is correct.
+
+Moose clarified: the "GPU stack" means the *virtual* one -- the shader algebra, the texture unit, the view LUT,
+closed-form iteration, the bake-once/sample-O(1) shortcuts. Audited with `file_grep`:
+
+    primitive                                        render-path consumers
+    shader (Pipeline, bake_nd / fetch_nd)              -- NONE --
+    viewlut (pre-integrated view response)             -- NONE --
+    transfer (scatter / gather)                        -- NONE --
+    iterate (k steps = one closed form)                -- NONE --
+    heat (diffusion transfer)                          -- NONE --
+    postfx                                             -- NONE --
+    superposed (variant banks)                         -- NONE --
+    cachehome (MarginCache)                            session
+
+**The entire virtual GPU is unused by the render path, save one frame cache.** So I took the most obvious candidate
+-- `mat.resolve()` evaluates a pattern graph at every hit, every frame, which is exactly what a texture unit
+replaces -- and measured before wiring.
+
+### THE MEASUREMENT SAYS DO NOT WIRE IT
+
+Against a 5-octave fBm driving a material channel:
+
+    hits    direct resolve   fetch_nd    ratio
+     512        1.25 ms      207.6 ms    166x SLOWER
+    4,096       3.18 ms     2010.0 ms    632x SLOWER
+
+    accuracy: correlation 0.252, max error 0.296 on a [0.05, 0.95] channel
+
+**"Sample O(1)" means O(1) in the number of BAKED SAMPLES -- not O(1) in `dim`.** A `fetch_nd` costs one
+O(dim log dim) transform per point. On a CPU that is far more than re-evaluating the procedural field it replaced.
+And the bake does not even hold the field: a 24^3 grid cannot carry five octaves -- H5's bandwidth negative, on
+record, biting exactly where it said it would.
+
+*The texture unit earns its keep where the fetch is a parallel dot product and the field is expensive or has no
+closed form -- **the muscle side**, the browser, where `exp` and a dot are free and a pattern graph is not.* **Bake
+for the consumer that has the hardware, not for the one that has the source.** That is now the first kept negative
+in `bake_nd`'s docstring, with the numbers, so nobody re-derives it by wiring it into a renderer.
+
+### BUT THE MEASUREMENT ALSO FOUND A REAL DEFECT
+
+`fetch_nd`'s docstring promises *"one point, or an (M, n) array."* It accepted the array -- **and then called
+`encode` once per point in a Python loop.** The sample path of the bake-once/sample-O(1) primitive was O(M) Python.
+
+*(And I found it the way I find these: by calling `fetch_nd` in a loop myself, measuring 195x, and only then
+reading the signature. The same mistake as `optical_depth`'s per-ray `L`, in the same day. **Read the signature.**)*
+
+`ScalarEncoder.encode_many` and `VectorFunctionEncoder.encode_many` are the batch: `bind` is a spectrum multiply,
+so binding a whole batch's per-axis encodings is one `rfft` per axis, one product, one `irfft`. `fetch_nd` uses it.
+
+**It is 1.4x, not 100x** -- and that number is the finding. The loop was never the bottleneck: a sample costs one
+transform, and the transforms dominate whether you write them in a loop or a batch. **Not bit-identical either
+(5.6e-16): binding all axes at once reassociates the products pairwise `bind` performs in sequence** -- the same
+reassociation the emitted C twin showed this morning, and reported as `max_abs_diff` rather than a boolean.
+
+And a latent crash: I first reached for `self._warp_y`. The attribute is `_warp_u`. Harmless while no resolution
+warp is fitted, and a `TypeError` the moment one is. A test now fits one and checks the batch against the loop.
+
+**Delta:** 4,742 -> 4,748 tests (+6). `encode_many` on both encoders; `fetch_nd` batched; `bake_nd`'s docstring
+carries the CPU verdict with its numbers; `_warp_u` fixed. 118 tests green across the 21 modules that import `fpe`.
+reachability 42 / catalog_gaps 0 / skill_lint 0.
+
+**REMAINING, RECORDED:** `viewlut`, `Pipeline`, `transfer`, `iterate` and `superposed` are still unconsumed by the
+renderer. `viewlut` is the next honest probe -- `render_surface` evaluates `sky(refl_dir)` and a `pow(spec, shin)`
+per hit, and a pre-integrated view response is exactly that integral -- but it owes the same measurement this one
+got, and I will not wire it on the strength of the name.
+
+*Three audits, three shapes of gap: something built and never used; something used and never realised; and now
+something that **should not** be used, which only a measurement could establish. "Fully utilised" is not the goal.
+**Utilised where it pays** is.*
+
+
+## THE TRANSFORM BANK -- Moose's prebuilt map, measured. The idea is right; the payoff is not where it looks.
+
+*"A prebuilt map of hypervector patterns, transformations, rotations, and scaling."* Four things named. Three of
+them belong in the map, one cannot go in it at all, and the reason the map is worth building is none of the reasons
+it first appears to be.
+
+### WHERE A BIND'S TIME ACTUALLY GOES
+
+At D = 4096, one `bind(v, A)` costs 140.5 us, of which the operand's own `rfft(A)` is **39.3 us -- 28%**. So a
+prebuilt spectrum saves 28%: **1.42x**. Real, and not worth a module.
+
+### THE PAYOFF IS COMPOSITION
+
+Circular convolution is diagonal in the Fourier basis, so a **chain** of transforms is the **product** of their
+spectra, and `k` binds collapse into one:
+
+    8 sequential binds        1217.5 us
+    ONE composed spectrum       90.2 us     **13.5x**, exact to 5.7e-17
+
+That is `iterate.step_k`'s trick -- *"k = 1,000,000 costs the same as k = 1"* -- generalised from powers of ONE
+operator to a chain of DIFFERENT ones. And it is **DL11's group-closure argument, in the VSA algebra**: a chain of
+translations composes to a single translation, and the recoverable object is the group element, not the sequence.
+The bank is a **group representation, not a lookup table.**
+
+A cyclic ROTATION really is a bind (`bind(v, delta_k) == roll(v, k)` to 1.1e-15). A unitary's inverse is its
+conjugate spectrum, exactly -- and a Gaussian atom's is **refused**, because N11 measured it recovering its operand
+at cosine 0.744. A power is a power, fractional or huge, at constant cost.
+
+### AND SCALE CANNOT GO IN THE MAP
+
+A dilation is not shift-invariant, so it is **not diagonal in the Fourier basis** and no spectrum represents it.
+Fit the best "spectrum" of a 1.5x dilation on one vector and apply it to a second: **relative error 1.579.** *It is
+not a lossy fit; it is the wrong object.*
+
+DL11 said this already -- *"scale is not diagonal in the linear-frequency basis"* -- and gave the remedy: on a LOG
+axis a dilation becomes a SHIFT, so scale belongs to a **different bank over a different axis**, which
+`registration.mellin_scale` already is. `TransformBank` has no `add_scale`, a test asserts it never grows one, and
+`scale_is_not_a_bind()` returns the number so the refusal can be checked rather than believed.
+
+**Refusing the transforms the algebra does not diagonalise is the feature.** A bank that "supported" scale would
+return a confidently wrong vector -- the exact failure class the constitution names.
+
+### THREE MEASUREMENTS THAT CORRECTED ME
+
+  * **Batching one transform across M vectors pays only 1.6x (M=64) to 2.3x (M=512).** The transforms dominate, not
+    the loop -- the same thing `encode_many` found this morning, and the same reason its speedup was 1.4x and not
+    100x.
+  * **Composition is exact but NOT bit-identical** (5.7e-17): one inverse transform instead of k, so the products
+    reassociate. Reported as `max_abs_diff`, never as a boolean. *That is now the third time today the same
+    reassociation has appeared -- the emitted C twin, `encode_many`, and now `compose`. It is one fact about
+    floating point wearing three costumes.*
+  * **The bank costs 1.002x the bytes of its atoms, not 2x.** I wrote "about 2x" into the docstring, then counted:
+    an rfft of a real vector is Hermitian, so numpy stores D/2+1 complex128 -- the same bytes as D float64s. The
+    bank is free, in the only sense that matters. *A cache whose size you have not counted is a leak; a cache whose
+    size you have guessed is worse.*
+
+**Delta:** 4,748 -> 4,766 tests (+18). New module `holographic_transformbank` with `_selftest`; two methods wired
+(`transform_bank`, `scale_is_not_a_bind`); catalog entry with an example run verbatim, 5/5 stranger phrasings.
+reachability 42 / catalog_gaps 0 / skill_lint 0.
+
+**HONEST STANDING:** the bank is a leaf faculty -- nothing in the engine consumes it yet, and I am not going to wire
+it into `iterate` on the strength of a good number. `iterate.transfer(U)` recomputes `rfft(U)` on every call, and
+whether reading it from a bank pays depends on whether the same operator is reused across calls, which is a property
+of the caller and not of the operator. **That measurement belongs to the first caller who has a chain.**
+
+
+## THE TRANSFORM TOWER -- Moose's hierarchy is the Levi decomposition, and it predicts everything we measured
+
+Moose proposed the layering:
+
+    scale                central -- commutes with the whole linear part
+      ^  (dilates)
+    rotation, shear      the sl(2) part -- non-commuting peers
+      ^  (rotates / distorts)
+    translation          the abelian ideal -- the content
+      ^
+    hypervectors         the atoms
+
+**That is the Levi decomposition of the affine group**: `Aff(n) = GL(n) |x| R^n`, with `GL(n) = center x SL(n)`.
+It is not a picture. It makes predictions. New module `holographic_grouptower.py` checks every one.
+
+    [T,T']   translations with each other        0.00e+00    the ideal IS abelian
+    [S,R]    scale with rotation                 0.00e+00    scale IS central ...
+    [S,Sh]   scale with shear                    0.00e+00    ... in the whole linear part
+    [R,Sh]   rotation with shear                 2.34e-01    the peers do NOT commute
+    [Rx,Ry]  two rotations, in 3-D               5.05e-01
+    [S,T]    scale with translation              4.90e-01    central in GL, NOT in Aff
+    [R,T]    rotation with translation           2.49e-01    the semidirect action
+
+### TWO PRECISIONS THE DIAGRAM EARNS
+
+**Scale is central in the LINEAR part -- exactly as written -- and not in the affine group.** `[S,T] = 0.49`,
+because `s(x + t) = sx + st`, not `sx + t`. Scale *acts on* the ideal; it does not commute past it. The qualifier
+"the whole linear part" is load-bearing.
+
+**In two dimensions the rotations commute with each other** (SO(2) is abelian), so "non-commuting peers" is really
+rotation-vs-SHEAR there. It becomes rotation-vs-rotation only in 3-D and above.
+
+### THE IDEAL IS NORMAL, AND THAT IS THE WHOLE MECHANISM
+
+    A T(t) A^-1 == T(A t)      verified to 1.1e-16 for rotation, shear and scale
+
+**That single line is three things this program already found, wearing three costumes:**
+
+  * it is `equivariance.shade_adjoint` -- *"push the delta onto the other operand"* IS conjugation;
+  * it is DL11's group closure -- `x -> s2(s1 x + t1) + t2` collapses because the ideal is normal;
+  * it is why the equivariance table has the shape it has: **an operator's law under a delta is a statement about
+    which layer of this tower the delta lives in.** `area` is invariant under the ideal and equivariant under the
+    linear part; `max_x` reads a coordinate, so it is broken by anything that mixes axes.
+
+I have been building this tower all program, one floor at a time, without naming it.
+
+### WHICH LAYER CAN A TRANSFORM BANK HOLD? EXACTLY THE IDEAL.
+
+A bank entry is one fixed spectrum applied to any vector. Fit the best one on an encoded point, apply it to another:
+
+    translation  x -> x + t      relative error 3.8e-16     GENERALISES: it is a bind
+    rotation     x -> R x        relative error 5.4e-01     does not
+    scale        x -> 1.5 x      relative error 1.3e-01     does not
+
+**A convolution algebra is COMMUTATIVE, so it can only represent an abelian group** -- and the tower's only abelian
+layer is the ideal. The FPE law says it outright: `bind(encode(x), encode(t)) == encode(x + t)` to 3.3e-16.
+**Translation IS the group operation of the encoding.**
+
+So `TransformBank` is not a cache of arbitrary transforms. **It is a representation of the abelian ideal**, and
+yesterday's refusal to hold a scale was not a limitation I discovered -- it was the tower speaking, and I had not
+yet learned to hear it.
+
+*And the bank's own "rotation" -- a cyclic shift of the index axis -- is a **translation in index space**. It was
+never the tower's rotation layer. **The name was the bug, again.** A test now composes two of them and asserts the
+shifts ADD, which is what an abelian group does.*
+
+### HOW SCALE GETS IN: CHANGE THE AXIS, NOT THE ALGEBRA
+
+On a LOG axis a dilation becomes a translation, joins the ideal, and becomes a bind:
+
+    dilation, linear axis    relative error 2.81
+    dilation, log axis       relative error 1.0e-15
+
+That is Reddy-Chatterji's Fourier-Mellin lift, and `registration.mellin_scale` is the engine already doing it. DL11
+called it *"the lift diagonalizes the stubborn family"* and filed it as an estimator trick. **It is not a trick. It
+is the only move available**: scale cannot be diagonalised where it stands, so you relocate it to a layer where it
+can. *A layer you cannot diagonalise, you relocate.*
+
+**Delta:** 4,766 -> 4,785 tests (+19). New module `holographic_grouptower` with `_selftest`; four methods wired
+(`commutator_table`, `semidirect_law`, `is_diagonalisable`, `mellin_promotes_scale`); catalog entry with an example
+run verbatim, 5/5 stranger phrasings. reachability 42 / catalog_gaps 0 / skill_lint 0.
+
+*The tower is now the thing the equivariance table, the transform bank, the adjoint move and the Mellin lift were
+all consulting informally -- the same sentence I wrote about C2 two days ago, one level up. **The hierarchy was
+always there; what was missing was the sentence that says which floor you are standing on.***
+
+*Postscript: `skill_lint` failed the first close-out -- `rotation2`, which the catalog example references, had no
+docstring. **An undocumented function is undiscoverable, and the audit says so out loud.** Every constructor in the
+tower now carries the fact it demonstrates: `rotation2` warns that SO(2) is abelian; `scale` warns it is central in
+the linear part and not in the affine group. The audit caught what I had already written three paragraphs about.*
+
+
+## THE PROJECTIVE CEILING -- "is a 4-D transform a word?" The answer sharpens the question.
+
+Moose: *"we have transforms and rotations and stuff as letters, but then the 4d transformation as a whole, is a
+word? I'm not sure."* And: a texture-projection parameter as another letter.
+
+New module `holographic_projectivetower.py`. Two answers, one yes and one no, both measured.
+
+*(First, an honest boundary: **I did not assert SketchUp's API from memory.** Homogeneous texture coordinates are
+the standard mechanism for this problem; what a given tool calls its parameter is a question for its docs. The
+mathematics is checkable regardless, and that is what this module checks.)*
+
+### YES: the whole transform IS the composed group element
+
+Compose any chain of generators and you get **one 4x4**, exact to 3.3e-16 against applying the chain step by step.
+The composed matrix is the object; the generators are what it was built from.
+
+### NO: **a group is not a language**, and that is the interesting part
+
+In a language, a word is not a letter -- "cat" is not in the alphabet. In a group, **the composition of generators
+is another group element, drawn from the very same set.** Words and letters live in one alphabet. That is exactly
+what CLOSURE means, and it is why DL11's edit chain collapses to a single `(S, T)` rather than needing a sequence:
+***the recoverable object is the group element, not the spelling.***
+
+So the hierarchy is real, and it is **not** letters -> words -> sentences. It is a chain of subgroups ordered by
+**normality**:
+
+        translations   <|   Aff(3)   <   PGL(4)
+        (normal in Aff)      (NOT normal in PGL)
+
+*"Which layer am I standing on" is not a question about length. It is the question **"can I push a delta
+through?"** -- and the answer is yes exactly when the layer below is normal.*
+
+### THE CEILING, MEASURED
+
+A 4x4 is AFFINE when its bottom row is `[0,0,0,1]` -- when it **fixes the plane at infinity**.
+
+    A T(t) A^-1 == T(A t)     A a rotation / shear / scale:   1.1e-16    the law HOLDS
+    P T(t) P^-1               P a perspective:                           NOT EVEN AFFINE
+
+Conjugating a translation by a perspective produces a matrix whose bottom row comes back non-zero. **`Aff` is a
+subgroup of `PGL` and not a normal one.** The tower's entire mechanism -- push the delta onto the other operand,
+collapse the chain, read the equivariance table -- rests on normality, and it **stops here**.
+
+### AND THE CEILING IS VISIBLE IN A RENDERER
+
+Interpolating `(u, v)` linearly across a triangle in screen space assumes the triangle-to-texture map is affine.
+Under perspective it is not. Vertex depths `w = 1, 4, 1.5`:
+
+    affine UV (interpolate u, v)                      max error 0.3310   -- a THIRD of the texture
+    perspective-correct (interpolate u/w, v/w, 1/w)   max error 2.2e-16  -- exact
+
+**So the extra parameter is not another letter in the same alphabet. It is an extra COORDINATE** -- carried through
+the transform and divided out at the end, the `q` of a homogeneous `(u, v, q)`. It *enlarges the space the alphabet
+acts on*, and by doing so it breaks the affine group's normality. **That is why the fix is a divide and not a
+matrix**, and it is the same reason `menger` and `repeat` are unemittable and `scale` is not a bind: some things
+are not elements of the algebra you are standing in, and the move is to change the space, not to approximate them.
+
+*(With equal depths the affine map is exact -- a test asserts it. The ceiling only bites under perspective. The
+designed-for case cannot falsify you.)*
+
+**KEPT NEGATIVE -- a projective map is not "affine plus a bit."** It is linear on a HIGHER-dimensional homogeneous
+space whose shadow on the affine chart is nonlinear. `is_affine` is a **boolean** about the bottom row, not a
+tolerance on a distance, and a test asserts that a perspective with `1e-6` in its bottom row is still not affine.
+**`nearest_affine` deliberately does not exist**, because projecting a perspective onto the affine subgroup throws
+away the only thing that made it perspective.
+
+**Delta:** 4,785 -> 4,805 tests (+20). New module with `_selftest`; four methods wired (`is_affine_matrix`,
+`compose_word`, `affine_normality`, `texture_projection_error`); catalog entry with an example run verbatim, 5/5
+stranger phrasings. reachability 42 / catalog_gaps 0 / skill_lint 0.
+
+*Moose's instinct was right twice over: the 4-D transform IS the composed object, and the texture parameter IS
+something of a different kind. The mathematics names which kind. **The tower has three floors and a roof, and the
+roof is where you stop being able to push a delta through.***
+
+
+## UN-SILOING THE TOWER -- it was a fact you had to already know to find
+
+Moose: *"make sure the Levi decomposition stuff is wired up fully and not buried or siloed. It feels like it should
+be a method of the main hypervector class or something extremely visible."*
+
+He was right, and the audit was blunt about it. Before this pass:
+
+    grouptower       imported by: projectivetower
+    projectivetower  imported by: NOTHING
+
+Both were reachable through `UnifiedMind` and the catalog, so all three audits passed. **And the concept was still
+buried**: `equivariance`, `registration` and `transformbank` are all *explained by* the tower, and not one of them
+mentioned it. `find_capability` proved it was reachable; nothing proved it was *the reason the other modules look
+the way they do.*
+
+### THE ONE ENTRY POINT
+
+`classify_transform(fn)` -- hand it any callable on points, it MEASURES which floor it stands on and returns
+`{layer, name, diagonalisable, bankable, delta_pushable, why}`. A decision procedure, not a lookup:
+
+    x + t                    ->  1  translation                bind? True   bankable  push-delta True
+    R x                      ->  2  rotation / shear                 False            True
+    shear x                  ->  2  rotation / shear                 False            True
+    1.7 x                    ->  3  scale                            False            True
+    R x + t                  ->  2  rotation / shear                 False            True
+    x / (1 + 0.3 z)          ->  4  beyond the affine ceiling        False            **False**
+    x + x^2  (not a group)   ->  4  beyond the affine ceiling        False            **False**
+
+**`delta_pushable` is the question the tower exists to answer.** It is `shade_adjoint`'s licence, DL11's closure,
+and the equivariance table's shape, in one boolean.
+
+### ON THE MAIN CLASS
+
+`Hypervector.transform_layer()` -> **always the abelian ideal, and the algebra forbids anything else.**
+
+`bind` is a circular convolution, so the set of hypervector operators is closed, associative, COMMUTATIVE, has an
+identity (the delta at 0) and has inverses for unitary atoms -- **every axiom of an abelian group, verified on the
+class in a test.** A convolution algebra can only represent an abelian group, so **no hypervector operator can ever
+be a rotation or a shear.** `Hypervector.commutes_with(other)` measures it: 2.8e-17.
+
+And `permute` is not an exception: it is a translation in INDEX space. `v.permute(3).permute(5) == v.permute(8)`
+**exactly** -- the shifts ADD, which is what an abelian group does. *(The bank's entry named "rotation" was always
+in the ideal. The name was the bug; now the object says its own floor.)*
+
+`TransformBank.tower_layer()` says the bank IS that ideal, and `layer_of(name)` answers for any entry -- including
+the one called `rot7`.
+
+### AT THE TOP LEVEL
+
+`lecore` now exports `TOWER`, `classify_transform`, `commutator_table`, `semidirect_law`, `hypervector_layer`,
+`affine_normality`, `is_affine` and `texture_projection_error`. **A structural fact about the whole engine should
+not require knowing which family module it was filed under.**
+
+### AND THE MODULES IT EXPLAINS NOW SAY SO
+
+  * `equivariance` -- *"why the table has the shape it has"*: every verdict is a statement about which floor the
+    delta stands on, and a law exists exactly when the ideal below it is normal.
+  * `registration` -- the Mellin lift is no longer *"the lift diagonalizes the stubborn family"* as a trick; it is
+    **the only move available**, because scale sits in the centre and no spectrum represents it. *A layer you
+    cannot diagonalise, you relocate.*
+  * `transformbank` -- *"this bank IS the abelian ideal, and can be nothing else."*
+
+A test asserts all three docstrings name the tower, so the cross-links cannot rot.
+
+**Delta:** 4,805 -> 4,821 tests (+16). `classify_transform` and `hypervector_layer` added; two methods on the MAIN
+CLASS (`Hypervector.transform_layer`, `.commutes_with`); two on `TransformBank` (`tower_layer`, `layer_of`); two on
+`UnifiedMind`; eight names exported from `lecore`; three docstring cross-links pinned by a test. Tower referenced by
+7 modules, up from 1. reachability 42 / catalog_gaps 0 / skill_lint 0. 146 tests green across everything touched.
+
+*The audits measure whether a capability is reachable. **They do not measure whether an idea is FINDABLE by someone
+who does not already know its name.** Moose asked the question the tooling cannot ask, and the answer was no.*
+
+
+## AUDIT PASS (rev. 6) -- all six tools green, and two defects underneath them
+
+Ran every audit the engine has: `reachability_audit` (42 IMPORT-ONLY, unchanged baseline; **none of this program's
+17 modules is in it**), `catalog_gaps` 0, `skill_lint` 0, `unifiers` 17/17 wired, `audit_imports` 0 broken / 0 flat,
+plus the two CI guard suites. **All green.** Then the three audits no tool runs.
+
+**DEFECT 1 -- the two dialect tables disagreed, and one was wrong.** `emit`'s `c_f32` used the `f` literal suffix;
+`sdfemit`'s did not. An unsuffixed C literal is a **double**, so `float_expr * 0.25` evaluates the whole expression
+in double and truncates -- and `sdfemit`'s `c_f32`, *the executable stand-in for WGSL*, was not a pure-f32 twin.
+Compiled both ways, 400 points: unsuffixed 2.83e-07, suffixed **3.26e-07**, differing from each other by 4.77e-07.
+**The tolerance the module published as "what a WGSL port is judged against" was optimistic by 15%.** Fixed, and a
+test now pins the shared dialects to agree field by field. ***Two tables for one concept will disagree, and the
+disagreement will be a bug in one of them.***
+
+**DEFECT 2 -- two capabilities an agent could not call.** `/invoke` on the 20 newest methods: 14 callable, 5 not.
+`sdf_dialect` took a live tree -- but `parse_dsl(to_dsl(t))` round-trips to **0.0e+00**, so the scene has a text
+form, and it now accepts it. `classify_transform` took a callable -- but **a matrix is data**, and it now accepts
+`(n,n)`, `(n,n+1)` or `(n+1,n+1)` homogeneous (applied *with the divide*, so a perspective POSTed as a 4x4 still
+classifies as beyond the ceiling). *The kernel is text; so is the scene; so is a transform.*
+
+**CORRECTION -- I was wrong about the repr husk.** I flagged `transform_bank` for returning `{"type", "repr"}` over
+HTTP. Reading the service: that is deliberate -- *"a typed summary, not a crash."* **A handle that announces itself
+as a handle is a contract.** The `cross_field` ctx was a *lie*, because its `"(0, 1)"` string keys masqueraded as a
+usable dict. The distinction is whether the shape invites you to use it, and it is worth more than the bug I thought
+I had found.
+
+**RETRACTION -- the `wrap` duplication was a regex artefact.** The scan reported six homes for `def _?wrap(`;
+inspected, `conformal.wrap` is **conformal prediction**, `fuse.wrap` is unrelated, `hypervector` has none. Exactly
+one is an angle wrap. *The same over-report the backlog's own "77 bind sites" made, retracted to three.* **A scan
+proposes; only reading disposes.**
+
+**AND A NUMBER THAT IS NOT A PROPERTY OF THE CODE.** The f32 tolerance is sample-dependent: 2.76e-07 over 200 points,
+3.26e-07 over 400. My first test asserted a floor on it and failed, correctly. **A max over a random sample is a
+property of the sample.** The test now asserts what is sample-independent -- that the suffixed and unsuffixed builds
+are different programs.
+
+**Standing state:** 9 of the 17 modules are consumed by engine code, 8 are leaf faculties reachable through the mind,
+the catalog and `/invoke`. **15/15 capabilities surface on all five stranger phrasings.** `holographic_transformhome`
+-- the transform-representations facade -- is IMPORT-ONLY and does not point at the tower; filed for review rather
+than quietly rewired.
+
+**Delta:** 4,821 -> 4,828 tests (+7). Report updated to rev. 6.
+
+*All six audits were green while a published tolerance was 15% optimistic and two faculties could not be called at
+all. **The tools measure whether a capability is reachable. They do not measure whether a claim is true.***
+
+
+## ORGANISATION PASS (rev. 7) -- two silos joined, and one of my own headlines retracted
+
+rev. 6 asked *"is it reachable?"* This asks *"is it in the right place, and does its parent know it exists?"*
+
+**SILO 1 -- the transform home did not know about the transform tower.** `transformhome` calls itself "the one door"
+for move/rotate/warp, and it offered `Transform.bind` and `Transform.scaling` **side by side, as though they were the
+same kind of thing.** They are not: `bind` is the abelian IDEAL and `scaling` is the CENTRE of the linear part and is
+not a bind at all. *A door that omits a capability is a silo; a door that suggests a false symmetry is worse.* Joined:
+`Transform.layer / hypervector_layer / is_affine / compose_word / bank / adjoint`, and `transform_kinds()` now
+advertises the tower, the bank and the ceiling. A test asserts the home ROUTES -- its answers are identically the
+modules' answers.
+
+**SILO 2 -- and joining it retracted my own headline.** `computehome`'s rule is *"transform in once, do the algebra on
+the spectra, transform out once"*, and its levers already listed **`fuse`**: *"collapse a bind expression tree into
+~2 FFTs."* That is what `TransformBank.compose` does. **`fuse` existed, and I never compared against it.**
+
+    D       sequential binds   fuse (existing)   bank.apply_chain   vs seq   vs FUSE
+    1024         387.9 us          226.5 us           42.5 us       9.1x     5.3x
+    4096       1,059.8 us          490.0 us          117.2 us       9.0x     4.2x
+
+All three agree to 4e-15. **The bank is `fuse` with the leaves precomputed**: `fuse` does one forward transform per
+distinct LEAF (9 rffts for an 8-bind chain); the bank does one forward transform of the INPUT. The published **13.5x
+is retracted** -- it was measured against sequential binds, which `fuse` had already beaten. The honest number is
+**4.2x-5.3x over `fuse`**, and the module, its catalog entry, its self-test and a new test all say so.
+
+***A win without the strongest available baseline is not a result.*** The constitution says it. I wrote a module,
+benchmarked it against the naive loop, and shipped a 13.5x -- and the engine's own `computehome` had been listing the
+better baseline as a headline lever the whole time.
+
+**THE AUDIT ITSELF -- 42 never moved because it could not.** `reachability_audit`'s IMPORT-ONLY bucket held the 13
+consolidation HOMES -- facades that are import-only BY DESIGN -- filed next to seven genuinely failed ideas.
+***A number that never moves is a blind spot, not a baseline.*** The audit now has a `CONSOLIDATION HOMES` class,
+recognised by the `*home.py` convention **plus a docstring that says it is a facade** (naming alone is not the
+declaration; a test asserts a bare `holographic_fakehome` is not recognised). **42 -> 36**, and the bucket now means
+something.
+
+**NON-FINDINGS, stated so nobody forces them.** `cachehome` is the bake-a-grid lever, not memoization -- `deltacache`
+does not belong there. `samplinghome` owns QMC, not image registration. And the orphan scan over-reported for the
+**third** time: 24 "unreferenced" public functions are each module's own vocabulary, used internally and asserted by
+tests. *The "77 bind sites" became 3; the "6 wrap homes" became 1; the "24 orphans" became 1 (`face_frames`, which
+merely lacks a direct test). **A scan proposes; only reading disposes.***
+
+**Delta:** 4,828 -> 4,837 tests (+9). `Transform` gains 6 routes; `Compute` gains 2; `reachability_audit` gains a
+facade class; `transformbank`'s headline corrected in module, catalog and selftest. Report at rev. 7.
+
+
+## DUPLICATION AUDIT (rev. 8) -- and I was not reading the tool I was running
+
+Ran the engine's own `canonical_shape` (identifiers and constants erased) over **3,078 non-trivial function bodies
+in 428 modules**. **7 shapes appear in more than one module.** A shape match is a hypothesis; every one was read.
+
+**FIXED (2).** `_cell_centers` was byte-identical in `dirtyfield` and `ndfield` -- **and its own docstring said
+"matching holographic_ndfield's ordering."** The author knew. *A comment that promises two functions agree is a
+promise nothing checks; an import is a promise the interpreter checks.* And `_rot`, a Rodrigues generator I copied
+into two selftests, now calls `equivariance.sample_transform`: **three copies of a rotation is three chances to
+disagree about what a rotation is.**
+
+**OPEN (5), recorded with owners:** `_reply` (coordinator/distbus), `damage_mask` (archive/image), `_occlusion` and
+`_f1` (cosamp/iht -- and `_occlusion` is *matching pursuit*, not occlusion: the name is wrong), and
+`meshverbs._face_normal` == `meshcurvature._newell_normal`. Cross-module bodies I do not own; unifying them is an
+ownership judgement, not a thing to do quietly.
+
+**NOT a duplicate, and worse: `meshbridge._face_normal` is a DIFFERENT ALGORITHM under the SAME NAME.** First-three
+vertices' cross product, against Newell's method over all of them. Planar triangle: agree. Bent quad: `(0, -0.371,
+0.929)` vs `(-0.193, -0.193, 0.962)`. **The hazard is the name, not the copy** -- import the nearer one and nothing
+warns you. Pinned by a test.
+
+**NOT duplicates: `scatter_to_grid` CALLS `scatter`.** Two names, one body -- recorded so nobody "unifies" a
+delegation. And `bake_1d`/`bake_nd` are different constructions with 0.91-similar catalog titles: a naming hazard.
+
+**The audit is now executable.** `tests/test_duplication_audit.py` holds a `KNOWN_DUPLICATES` budget that **may
+shrink and must never grow**, plus the `_face_normal` collision and the aliases.
+
+### AND TWO CORRECTIONS TO MY OWN REPORTING
+
+**The IMPORT-ONLY count was never a constant.** I grepped one line and wrote "42, unchanged baseline" in every
+close-out this program. It is **36** -- six modules became reachable as this session's catalog entries landed. It
+moved, and I did not notice, because I was reading a number instead of the tool.
+
+**`holographic_transformhome` does not "deserve review", twice over.** I flagged it last pass. It is one of thirteen
+declared **CONSOLIDATION HOMES, import-only BY DESIGN** -- the tool says so *on the line above the one I was
+reading* -- **and the report's own rev. 7 had already joined it to the tower.** I raised, as an open question, a
+thing the document answered eighty lines earlier. The tool also says `misgen` and `probesweep` have **no public API
+and no importers**, which nobody has ever quoted.
+
+**And I numbered my section `rev. 7` while a `rev. 7 — ORGANISATION PASS` already existed.** The title edit that
+should have caught it failed silently, because it was matching a `rev. 6` string that no longer led the file.
+**A duplication audit that opens by duplicating a section number.** Renumbered to rev. 8. *The lesson is the scan's
+own: a name is not an identity, and nothing was checking.*
+
+*Rev. 6's lesson was "the tools measure whether a capability is reachable, not whether a claim is true." Rev. 7's is
+sharper and more embarrassing: **I was not reading the tools I was running.** Five of these facts were printed on
+`reachability_audit`'s summary, every time, three lines above the number I kept quoting.*
+
+**Delta:** 4,828 -> 4,844 tests (+16, incl. the executable duplicate budget). Report -> rev. 8.
+
+
+## DUPLICATE PASS (rev. 8) -- done with an AST hash, not a regex, and the catch was the non-merge
+
+The last three duplicate scans over-reported because they matched TEXT. This one hashed each function's **AST with
+identifiers and constants erased** (the engine's own `codestructure.canonical_shape`), across all 429 modules, then
+**measured** every match. 14 structural groups; 3 real, 1 dangerous look-alike, 10 false.
+
+**UNIFIED (0.0e+00, verified):** the trilinear reader (`cachehome` now OWNS `trilinear_sample`, `matbake`
+delegates -- the home's own docstring had ADMITTED it "mirrors matbake's reader", which is a home not doing its
+job); the quaternion product (`cosserat.qmul` -> `transform.quat_mul`); Newell's normal (`meshcurvature` ->
+`meshverbs.newell_normal`).
+
+**NOT UNIFIED -- the catch.** `meshbridge._face_normal` has the SAME AST SHAPE as Newell and is a DIFFERENT function:
+first-three-vertices cross product. On a bent quad they disagree by 0.47, on a pentagon by 1.25. A textual dedupe
+would have merged them and corrupted every non-planar normal through the bridge. Documented as distinct, divergence
+pinned by a test. **Structurally identical is a hypothesis; bit-identical is the finding; the gap between them is
+where the bugs live.**
+
+**THE BUG THIS PASS MADE AND KILLED.** Extracting the reader, I mis-indented the final `return` INTO the corner
+loop -- returning after 1 of 8 corners. `cachehome`'s selftest PASSED, because it checked only grid NODES, where the
+weights are 0/1. *The designed-for case cannot falsify you.* A real bit-identity check (off-node, anisotropic grids)
+caught it; the selftest now has an off-node assertion proven to fail on the buggy build. And when the edit chain
+broke mid-extraction, I restored matbake from the canonical zip rather than repairing blind.
+
+**Delta:** 4,837 -> 4,844 tests (+7). Three primitives given one owner each; one look-alike documented; one blind
+selftest strengthened. Report at rev. 8. reachability 36/36 / catalog_gaps 0 / skill_lint 0.
+
+*Four duplicate passes: a text scan over-proposes, an AST scan proposes more precisely, and only executing both
+candidates disposes. The most valuable output of this pass was the merge I did NOT make.*
+
+## ORGANIZATION & DISCOVERABILITY AUDIT (rev. 9) -- three pinned probes shipped RED, and they were one disease
+
+**The find:** the uploaded tree failed two pytest discoverability pins and the skills selftest (twice) --
+all PRE-EXISTING, verified against the pristine catalog. One disease, four faces, each measured and fixed:
+the automaton home lost a five-way 1.50 tie ALPHABETICALLY to two later entries (auto-seeded thin `does`);
+route("describe a scene and build it") died at 0.521 because the tokenizer STOPWORDS build/make/create;
+the job-control probe died at 0.565 because a CLIENT entry (cloud bake) legitimately shares the skill's
+vocabulary; and "qwzx nonsense zzzq" matched a real skill because an essay-length `does` contains the word
+"nonsense". Fixes: curate the automaton entry; move the verbs INTO the two skill names (the name bonus the
+generic titles gave away); reword one token. **CLASS R recorded in the backlog: essay `does` fields are token
+sponges; auto-seeded doors dilute their own curated homes; route() confidence decays MONOTONICALLY as the
+catalog grows (dominance vs runner-up -- a confidence pinned today is a regression scheduled for later);
+stopwording content verbs silently disables build-loop-style aliases; module selftests are not in CI.**
+
+**Alias superposition, paid for twice:** a first set of NINE transform-kit aliases flipped an unrelated pinned
+ranking. Every alias perturbs every query. Trimmed to four; the 316-test pinned cluster is the harness now.
+
+**Duplicates (name-collision scan, NEW -- the shape scan's complement):** 43 public cross-module name
+collisions, 13 read, 3 real. FIXED: `cosserat.quat_from_axis_angle` -> delegates to `transform`'s (rev. 8
+unified qmul and missed the sibling; the shape scan was BLIND to it -- `np.array([w,*v])` vs `np.concatenate`
+is two shapes, one math -- bit-identical over 2,000 draws + the degenerate axis, pinned). PINNED NOT MERGED:
+two `psnr`s disagree in the band 0 < mse < 1e-12 (`< 1e-12` vs `== 0.0` caps) -- bit-identity gate fails
+there, so the divergence is a pinned fact. DECLARED: `meshskin.rotation` is a third Rodrigues, <= 9.0e-12
+from both canonical builders; skinning bakes must not move, so the copy stays with its number.
+
+**CLASS O recorded:** misc/ = 146 of 429 modules, 44,653 lines (34% of the engine) incl. 12 of 13 HOMES;
+`unified.py` = 12,002 lines / one class / 1,016 methods (mixin split is the candidate, GET /tools
+bit-identity the bar); semantic/schema/scene_semantic filed under simulation_and_physics; lecore.py header
+still says "~280 flat modules". The misfiling bit THIS session: automaton's curated example was written with
+a simulation_and_physics path from memory and only skill_lint caught it.
+
+**Delta:** 4,850 -> 4,852 tests (+2 pins). Duplicate budget 5/5 unchanged. reachability 376 wired / 36 review /
+0 undocumented; catalog_gaps 0; skill_lint 0; audit_imports 0/0. capdoc + docgen regenerated. Backlog -> rev. 9.
+
+## T4 -- SELFTEST WALKER IN CI (tech-debt backlog, highest-scored item) -- and it caught two more silent reds on run 1
+
+Built `tools/run_selftests.py` + `tests/test_all_selftests.py` so CI runs every module's `_selftest()`, closing the
+hole that let `holographic_skills` (found rev. 9) sit red silently: CI ran pytest, pytest never ran the module
+selftests. The FIRST full walk immediately paid for itself -- it found TWO more selftests that were red and
+unnoticed, plus a THIRD that only fails under load:
+
+* **`holographic_lights` (genuinely red).** `assert a8.std() <= a1.std()` on an area-light penumbra, at 16 seeds.
+  All 16 one-sample draws happened to land fully shadowed, so `std(a1) == 0.0` EXACTLY and the honest 8-sample
+  estimator "had more variance" than a degenerate constant. The physics is true (std ratio 0.42 at 200 seeds); the
+  POPULATION was too small to falsify a fluke. Fixed: 200 seeds, an explicit `a1.std() > 0` non-degeneracy guard
+  (the exact failure mode), then the strict contrast. **[BLIND-SPOT SELFTEST], seed edition.**
+* **`holographic_machinemodel` (red ONLY under load).** `sheet["t5_cold_store"]["marginal_ns"] > 0.0` is a
+  DIFFERENCE of two ~900,000 ns wall-clock timings clamped at 0.0; under an 8-way parallel walk the noise
+  occasionally drove it negative -> clamped to 0.0 -> red under contention, green alone. A timing-fragile assertion
+  is a bug. Replaced with a CONTENTION-PROOF contrast: a cold inflate (~200,000 ns of real decompression) must
+  exceed a warm cached get (~110 ns no-op) by >20x -- a >1000x real gap no oversubscription closes -- measured
+  directly, no noisy subtraction. The spec-sheet number stays reported.
+* **Four false TIMEOUTs were the TOOL's bug, not the modules'.** `tear`/`groom`/`valuehead` run 17-26s each and
+  `farm`'s bare `-m` starts a daemon that serves forever. The walk oversubscribed cores (12 children x N BLAS
+  threads). Fixed IN THE TOOL before trusting it, per the backlog's "improve the tool before you use it" rule:
+  per-child BLAS pinning (mirrors CI's own env), a `_LAUNCHER_ARGS` table (farm's selftest is behind `--selftest`),
+  and a `_HEAVY` serial-first scheduler so genuinely-slow selftests get a full core. Re-ran green 3x under 8-way load.
+
+The walker itself has a `_selftest` that PROVES its OK/FAIL classification with a scratch red module (not assumed),
+and asserts deterministic report order. `_NO_SELFTEST_BUDGET` (76 modules with a `__main__` but no `_selftest`) is
+pinned to shrink-only -- that's a ready-made backlog: 76 modules to backfill, each removing its own budget line.
+
+**Delta:** 4,852 -> 4,854 tests (+2: the walk + the budget). Two silent-red selftests fixed, one load-fragile
+assertion de-flaked, one new CI-inherited walker. Full walk ~390s through pytest (both wrapper tests green).
+reachability 376/0-undoc; catalog_gaps 0; skill_lint 0; audit_imports 0/0. Backlog: T4 DONE.
+
+## TECH-DEBT BACKLOG, ITEM T4 (highest priority) -- selftest walker in CI, and what its FIRST run caught
+
+Built `tools/run_selftests.py` (parallel walker; BLAS-pinned per child; known-heavy modules serial-first;
+launcher mains via `--selftest`) + `tests/test_all_selftests.py` (green-walk + a 76-module NO_SELFTEST budget,
+shrink-only). The hole it closes: CI ran pytest, never the module selftests, so a red selftest was invisible.
+
+**The first full walk caught FIVE silent problems, none of which any pytest run would have surfaced:**
+1. `holographic_lights` RED -- a variance assertion at 16 seeds where all 16 one-sample draws landed in full
+   shadow (std==0), so the honest 8-sample estimator "had more variance." The designed-for case cannot falsify
+   you. Fixed: 200 seeds + a non-degeneracy guard asserting std(1-sample) > 0 (the exact failure mode).
+2-4. `transformbank` and `machinemodel` (x3 assertions) FLAKING on wall-clock ratios under load -- speedup>2,
+   speedup>5, a latency-ladder margin_ns>dense_ns, a gather-cost ratio. **New kept class [LOAD-FRAGILE TIMING]:
+   never assert a measured time or ratio -- either side spikes under scheduling pressure however large the gap
+   (the ladder flipped inside loaded pytest at a 20x nominal margin). Assert the STRUCTURAL cause: rfft-call
+   count (1 regardless of chain length, via a counting wrapper), compiled-rule operand length (dim for every N),
+   recorded O(D)-vs-O(1) complexity, the boolean placement decision. Timing kept as PRINTED evidence + a soft
+   non-gating note.** Verified robust at 10-16-way CPU pressure.
+5. Four "timeouts" (tear/groom/valuehead/farm) were pure CPU oversubscription -- a real 26s selftest crossing a
+   240s wall under 12 unpinned children -- fixed by the BLAS pin and heavy-first scheduling, not by loosening a
+   bar. farm's was a daemon __main__ whose selftest is behind --selftest.
+
+The walk is ~400s through pytest at 8 jobs; both wrapper tests green. Follow-on filed as backlog T6: backfill
+real selftests onto the 76 __main__-but-no-_selftest modules, shrinking the budget.
+
+**Delta:** 4,852 -> 4,854 tests (+2 wrapper tests). reachability 376 wired / 0 undocumented; catalog_gaps 0;
+skill_lint 0; audit_imports 0/0. Two genuine RED selftests fixed (skills earlier this session, lights now),
+three LOAD-FRAGILE timing selftests made structural.
+
+## ABOVE/BELOW SWEEP after T4 -- the walker had no mind door (T7)
+
+Swept the finished selftest walker three ways. DOWN and SIDEWAYS were already covered: `--only` filters to any
+subset, the machinemodel contrast fix holds 48x-29,000x across the whole payload-size range (not tuned to one
+case), and the walker's "run each module's own contract" costume is distinct from `skill_lint`'s "run each catalog
+example" -- no consolidation debt. UP was a real gap: the walker is a CLI/CI tool, so an agent driving the engine
+THROUGH THE MIND could not ask "which modules have a real selftest?" The mind had `conformance_report` (ISA
+correctness) and `audit_procedure` but no selftest-coverage door.
+
+Fixed as T7. The right shape is a COVERAGE QUERY, not the walk: `selftest_census()` is pure-AST and instant (44ms,
+no subprocess), whereas running 400s of subprocesses from inside a served HTTP mind would block the worker. So the
+engine-side census lives in `holographic_codestructure` (the AST-analysis home the duplication audit already uses --
+same costume: walk the tree, classify each module by an AST fact), the CLI walker's `discover()` shares its
+"has __main__ AND _selftest" rule (documented so the two can't drift), and `mind.selftest_coverage()` delegates to
+it. Registered with 5/5 stranger-phrasing discoverability ("which modules lack a selftest", "audit test coverage",
+"is the engine covered by tests" all hit). Auto-introspected into the tool manifest -> agent-callable via /invoke.
+
+The census reports the ACTIONABLE 33 (has an entry point but asserts nothing -- the T6 backfill worklist), while
+the walker's wider `missing` (76) also counts library modules with no `__main__` that it simply cannot run. Two
+questions, two numbers, both honest -- documented rather than "reconciled" into one.
+
+**Delta:** +1 mind faculty, +1 engine function (selftest_census, with a [BLIND-SPOT]-style scratch-tree selftest
+proving both classification branches), +1 catalog entry. 4,854 tests (census assertions ride codestructure's
+existing selftest). reachability 376 (codestructure already wired); catalog_gaps 0; skill_lint 0. Backlog: T7 DONE.
+
+## TECH-DEBT BACKLOG, ITEMS T2 + T1 -- alias-inertness lint, and the name-collision scan as a tool
+
+**T2 (alias lint).** Added `skill_lint.audit_aliases()`. INERT aliases (zero content words after stopwords ->
+find_capability can never match them) are a hard gap; the **5** measured (`"what can you do"`, `"how do i"`,
+`"is a"`, `"as of"`, `"o(n^2)"`) were reworded with content words that keep the intent (`list abilities`,
+`hypernym`, `point in time`, `quadratic cost`), each verified to now match, lint back to 0, pinned. **A
+[SCAN PROPOSES] correction in the code:** a naive "redundant alias" rule flagged **284**, but reading showed most
+are legitimate -- a lone word echoing a name word is FREE (cannot hurt ranking), and a multi-word phrase whose
+distinctive word was stopworded (`"build a scene"`->`["scene"]`) is a tokenizer CASUALTY worth keeping. So
+REDUNDANT is an advisory --strict note, never a gate. The routing cluster (137 tests) stayed green through the 5
+alias edits.
+
+**T1 (name-collision tool).** Built `tools/name_collisions.py` -- the complement of the shape scan: shape catches
+same-algorithm-two-names (it is blind to same-name-two-bodies, e.g. the `np.array([w,*v])` vs `np.concatenate`
+constructor); NAME catches the sharp hazard shape cannot even describe -- TWO FUNCTIONS, SAME NAME, DIFFERENT
+ANSWERS. Shrink-only `KNOWN_COLLISIONS` budget of all 42 current collisions (read + annotated), two CI budget
+tests, a selftest, and a `classify()` that reads DELEGATION from source but refuses to guess bit-identity
+(equality needs real inputs -- the over-confident move the scan exists to prevent).
+
+**The real find: `quat_rotate` is [SAME NAME, DIFFERENT ALGORITHM].** `cosserat` uses the sandwich product
+q*v*q_conj; `transform` builds a matrix. Measured: agree to 2e-15 on a UNIT quaternion, diverge COMPLETELY off it
+(matrix path normalizes internally, sandwich does not). A caller passing an unnormalized quaternion gets a silently
+different answer by import location. Not bit-identical even on unit q -> NOT merged; pinned with a divergence test
+and the normalization footgun documented.
+
+**Delta:** 4,854 -> 4,858 tests (+4: 2 alias pins, 2 collision-budget pins; quat_rotate divergence pin folded in).
+skill_lint gained an alias gate (5 inert -> 0). name_collisions is the shape scan's complement, both now executable
+budgets that may shrink and never grow. reachability 376 / 0 undocumented; catalog_gaps 0; imports 0/0. capdoc
+regenerated (5 alias rewordings).
+
+## T3 -- DOES-LENGTH LINT (essay does fields are token sponges)
+
+Added `audit_does_length()` to skill_lint: a catalog `does` over MAX_DOES_CHARS (600, ~5x the 113-char median) is
+flagged. WARNING tier, not a hard gate on all 58 -- length is a judgement call, not a defect like an inert alias.
+Measured cause it targets: an essay-length `does` carries enough incidental words to out-rank the entry that is
+actually the best match for a short query, purely by volume -- the mechanism behind two rev.9 routing failures.
+
+`_DOES_BUDGET` (the 58 entries already over 600 when T3 landed) is SHRINK-ONLY, same discipline as the duplicate
+and no-selftest budgets: a NEW over-length entry gates CI (`test_no_new_does_length_regressions`), and trimming a
+budgeted entry below threshold surfaces it as `budget_stale` for line removal. The gate is proven to BITE
+(`test_does_length_detector_actually_bites`): a synthetic 800-char un-budgeted entry is caught as a regression, a
+trimmed budgeted entry is flagged stale -- via a frozen catalog, since the builder rebuilds fresh each call. Not
+auto-fixing the 58: rewriting a search-index entry can shift what OTHER queries match (alias-perturbation rule), so
+each is a one-at-a-time R3 job with the routing cluster re-run. The 58 are now a concrete, gated backlog.
+
+**Delta:** +2 tests (4,858 -> 4,860). skill_lint TOTAL still 0 (58 over, 58 budgeted, 0 regressions). Backlog: T3 DONE.
+
+## T5 -- ROUTING REGRESSION HARNESS (freeze the rev.9 fixes before Phase 1 touches ranking)
+
+`tests/test_routing_pins.py`: 7 dedicated pins for find_capability/route decisions, consolidating the four rev.9
+routing fixes (+ T7 discoverability + the transform-kit query) into one place with the confidence MARGIN made
+explicit. WHY a separate file: ~130 test files pin routing INCIDENTALLY; this pins it ON PURPOSE, because route
+confidence decays monotonically as the catalog grows (dominance vs runner-up), so `act` at 0.667 can rot toward
+the 0.6 cliff and an incidental `decision=="act"` gives no warning. Each margin assertion carries the current
+measured value in its message, so a failure names the mechanism ("was 0.667; a ranking change eroded dominance").
+
+Proven to bite: deleting the curated automaton entry makes the discoverability pin fail; the 0.63 floor on
+describe-a-scene catches a drop to 0.61-0.62 before it flips. Includes a non-vacuity guard (a clear query acts, an
+ambiguous one doesn't collapse to the same decision). This is the safety net R1/R2 require -- they change ranking
+logic, and any decision flip now fails loudly here with the probe named.
+
+**Delta:** +7 tests (4,860 -> 4,867). Backlog: T5 DONE. Phase 0 now T1/T2/T3/T4/T5/T7 done; T6 (backfill 33-76
+selftests) remains.
+
+## T6 -- SELFTEST BACKFILL, first pass (8 modules, prioritized by import fan-in)
+
+The coverage census (T7) ranks the no-selftest modules by how many others import them -- a selftest on a
+heavily-depended-on module protects the most code. Worked the top of that list:
+
+* **holographic_ai (fan-in 183, the single most-imported module in the engine)** -- pinned the VSA primitives:
+  bind/unbind round-trips (>5x contrast vs an unrelated vector), unitary unbind near-exact (cos>0.99), bundle
+  membership, key->value recall picking the right value with a >3x margin, per-seed determinism.
+* **holographic_core (the "frozen core")** -- cleanup snaps noisy->'cat' at 0.96, save/load BIT-IDENTICAL per
+  symbol (the merge-gate standard applied to persistence), STATE_VERSION stamped for the loud-fail guard.
+* **holographic_tree** -- sub-linearity with recall: at N=3000 the tree touches <half the candidates an exhaustive
+  scan would while keeping recall>0.7; forest recalls the right index under noise >=25/30.
+* **holographic_encoders** -- ScalarEncoder locality is monotone-decreasing and spreads >0.1, decode recovers
+  0.42 within 0.05, TextEncoder learns recallable word vectors.
+* **holographic_splat / holographic_hopfield** -- already had sub-selftests under NON-STANDARD names
+  (`_c1_selftest`, `_b3_selftest`), so the census (which greps `def _selftest`) counted them missing. Added a
+  canonical `_selftest` that runs the existing ones AND pins the headline contract (splat PSNR rises with K;
+  hopfield pulls a 0.5-noise cue from cos~0.1 back to cos>0.95). LESSON: the census's string check is the
+  contract -- a selftest under another name is invisible to it, so canonical naming matters.
+* **holographic_schema / holographic_text** -- tokenizer round-trips (numbers within one bin, text exact);
+  n-gram predicts its training text at acc>0.5 vs ~0.04 chance, word vectors carry co-occurrence.
+
+Every backfill: measured the real numbers against live code FIRST (a selftest that asserts the implementation's
+own output back at it proves nothing), asserted CONTRAST not absolute thresholds, hit an off-designed-case input
+per [BLIND-SPOT], and -- for modules whose __main__ ran slow demos -- gated the demos behind `--demos` so `-m`
+runs just the fast contract check (ai/tree/schema/text; tree went 30s -> 0.8s). Each removed its line from the
+walker's _NO_SELFTEST_BUDGET (the budget test forces this).
+
+**Delta:** census 33 -> 25 missing (runnable 352 -> 360). Walker budget 76 -> 68. 172 related tests still green.
+Backlog: T6 IN PROGRESS (8 of 33 done, most-imported first). Remaining 25 are lower fan-in.
+
+## T6 -- SELFTEST BACKFILL, second pass (4 more; 12 of 33 done)
+
+Continued down the fan-in ranking:
+* **holographic_creature (fan-in 12)** -- had a good `_d2_selftest` (robust-returns winsorisation) but the
+  __main__ ran FIVE slow demos and never called it, so the census counted it missing AND the real check never
+  ran. Added canonical `_selftest` calling `_d2_selftest` + a value-learning contract (a mind values a +5
+  rewarded action clearly above a -5 punished one). Deliberately NO maze solve -- the slowest-tests report flags
+  creature simulations as the heaviest in the suite, so the selftest pins the learning contract cheaply.
+* **holographic_unified (fan-in 7, the 12k-line mind FACADE)** -- a WIRING smoke test, not a re-test of each
+  faculty: two same-seed minds encode a record BIT-IDENTICALLY (facade determinism), and representative faculties
+  across discovery/introspection/transforms resolve through the delegation boundary (the "shared kernel is not a
+  shared manifold" lesson -- delegation boundaries are where things silently break). Caught my own bug writing
+  it: scene_translation takes a vector, not 3 floats -- fixed before commit.
+* **holographic_vision (fan-in 6)** -- RGB<->HSV round-trips to <1e-6 (an inverse that doesn't invert corrupts
+  pixels), edge detector fires on a step and stays quiet on a flat field.
+* **holographic_field (fan-in 1)** -- a bump peaks at its centre, ascend() climbs from a low start uphill (the
+  universal-gradient navigation contract).
+
+**Delta:** census 25 -> 21 missing (runnable 360 -> 364). Walker budget 68 -> 64. 81 module tests green.
+T6: 12 of 33 done. Remaining 21 are fan-in <=6, mostly demos-only. Two more nonstd-selftest cases spotted for
+next pass (orchestrator, sbc -- existing coverage under wrong names, cheap to canonicalize).
+
+## AXIS-ROLE ANALYSIS -- which axis is the INDEX (carrier) vs the PAYLOAD (content)  [+15 tests, 4867->4882]
+
+Moose's theory, from thinking about how the Contact signal was layered: an axis that varies independently of
+the content and is LOW-INFORMATION (a constant delta, like time in audio/video/market bars) should be the
+INDEX/carrier, NOT bound into the content vector -- because binding it rotates every frame into a private
+subspace and destroys cross-frame comparability. The lower the axis's information, the more that rotation is
+pure cost. Wanted a test suite to see what the idea unlocks (auto-decomposition, schema discovery, "Arrival"-
+style structure discovery, etc.).
+
+RULE-0 AUDIT first (the theory names a mechanism the engine already has, so most of this was reuse): binding is
+already similarity-destroying (holographic_ai.bind, THEORY.md sec.1); FPE already indexes a continuous axis
+WITHOUT the damage (ScalarEncoder local-sim 0.981 at delta 0.1, 0.007 far -- the similarity-preserving
+alternative to naive per-value binding); spectral_bandwidth / fractal_dimension / self_affinity / manifold
+topology / holographic_schema all measure "how structured is this signal." The GENUINE GAP (confirmed with 6
+stranger phrasings, only unrelated fallbacks): NO capability measures the information content PER AXIS of a
+structured cube and RECOMMENDS index-vs-bind. That is what shipped.
+
+WHAT SHIPPED (holographic_axisrole.py; additive; two UnifiedMind faculties):
+  * analyze_axes(data, coords=None, categorical=None) -- per axis, measures MARGINAL INFO (delta-entropy-rate
+    for ordered axes: a constant dt reads exactly 0 = ideal carrier; irregular sampling raises it; label
+    entropy for categorical axes) and CONTENT COUPLING (1 - mean adjacent-slice cosine). Recommends INDEX
+    (marginal info < LOW_INFO_FRAC=0.35, the safe comparability-preserving default) or BIND (informative AND
+    content-coupled -- the conjunctive case where the axis-value is worth recovering). Burden of proof is on
+    binding.
+  * comparability_cost(data, axis) -- MEASURES the price of the wrong choice on the user's own data: adjacent
+    similarity INDEXED (raw slices) vs BOUND (each slice rotated by a distinct per-slice key). The thesis in
+    one number.
+
+MEASURED (the headline, on the engine's own bind): binding a boring time axis of a smooth video collapses
+adjacent-frame similarity 0.999 -> 0.049 -- destroys 0.950 of comparability. On a market-like cube
+[T,asset,field] with a per-asset signature, analyze_axes recovers the schema exactly once told which axes are
+categorical: "index [0] (carrier); bind [1,2] (payload)". The Arecibo/Arrival case: the correct 2-D reshape
+has smoother row-neighbours than the wrong (transposed) one (a data-driven way to prefer the right grid).
+
+KEPT NEGATIVES (loud):
+  * HEURISTIC, not a theorem. LOW_INFO_FRAC=0.35 is a tunable defaulted CONSERVATIVELY (prefer INDEX); borderline
+    axes are reported with a small MARGIN, loudly, not silently decided.
+  * The conjunctive-coding exception is REAL: if the task needs axis x content as one unit (a resonator factor,
+    "color-at-position"), you BIND even a low-info axis. The recommender returns the coupling number so you can
+    override -- it cannot read task intent.
+  * Coupling via cosine is a FIRST-ORDER probe; a high-frequency axis whose slices alias can read low coupling
+    spuriously (pair with spectral_bandwidth). Documented.
+  * NO invented structure: an i.i.d. noise cube honestly returns "index all -- nothing rewards binding" rather
+    than forcing a payload axis. Pinned (test_pure_noise_cube_rewards_no_binding).
+  * marginal_info defaults to 0 for ordered axes without supplied coords -- correct for the streaming case
+    (uniform sampling) but means asset/field axes must be marked categorical=[...] to be seen as payload. This
+    is the "did the user hand us the schema" boundary, by design (test shows both the un-marked and marked
+    verdicts).
+
+The research write-up (index-vs-payload across signal processing, FDA/Karhunen-Loeve, tensor decomposition,
+video coding, dynamic NeRF, VSA/HRR, disentanglement, MDL, neuroscience, and the Arecibo semiprime) found the
+MECHANISM and the PRACTICE well-established piecemeal, but the unified information-theoretic bind-vs-index rule
+stated in VSA terms appears genuinely under-explored -- so this is the engine's own small formalization of it,
+measured. Load-bearing citations if written up: Plate 1995; Kleyko et al. survey (arXiv:2111.06077);
+Rachkovskij & Kleyko (arXiv:2112.15475, "binding position does not preserve nearby-position similarity").
+
+Tests: +14 (4867 -> 4881). test_holographic_axisrole.py (+13): constant-delta boring; irregular raises info;
+label entropy bounds; video time indexes; binding video time destroys comparability (>0.7 collapse); market cube
+schema recovery; noise cube rewards no binding; flat-message column payload; correct-vs-wrong aspect ratio;
+borderline margin; droppable flat axis; determinism; selftest. test_integration.py (+1): market schema through
+the mind + discoverability. Faculties: analyze_axes, comparability_cost. reachability: axisrole wired (not in
+import-only list); catalog_gaps 0; skill_lint 0. Files: holographic_axisrole.py (new), test_holographic_axisrole.py
+(new), holographic_unified.py (2 faculties), holographic_catalog.py (2 entries), test_integration.py, NOTES,
+CAPABILITIES.md/capabilities.json/REFERENCE.md regenerated.
+
+## SIGN AS ROTATION -- the analytic signal, and the price of clockwise-only rotation  [+13 tests, 4882->4895]
+
+Moose's thread (continuing from axis-role): a signed value is the SHADOW of a point rotating on a circle --
+magnitude is the radius, sign is which half, "make it negative" is a rotation, time is the axis rotated around.
+Then the sharp follow-up: what if rotation can only go CLOCKWISE? Asked to build the framework and measure the cost.
+
+RULE-0 AUDIT: the raw pieces exist (FHRR phasors, Clifford rotors, Mobius axial encoder) but NO assembled
+analytic-signal / sign-as-rotation capability, and no hilbert/EMD/phase-unwrap (probed 5 phrasings, only fallbacks).
+Genuine build.
+
+WHAT SHIPPED (holographic_analytic.py; additive; three UnifiedMind faculties; NumPy-only Hilbert, no scipy):
+  * analytic_signal(x) -- z = x + i*Hilbert(x) = amplitude*exp(i*phase); returns amplitude (envelope/radius),
+    unwrapped phase (rotation angle), instantaneous frequency (how fast the sign turns). amplitude*cos(phase)
+    reconstructs x EXACTLY (Re(z)=x by construction) -- a lossless re-coordinatisation, not a model.
+  * monotone_cost(x) -- the price of clockwise-only rotation on a REAL series.
+  * phasor_monotone_cost(z) -- the price on a TRUE complex/I-Q rotation.
+
+THE ALGEBRA (the answer to "what if clockwise only"): two-way rotation is a GROUP (SO(2), every rotation
+invertible); clockwise-only is a MONOID (compose but can't invert) -- the algebra of irreversibility, the same
+group-vs-semigroup split as unitary-vs-diffusion evolution. Monotone phase lifts to a straight line (the covering
+R->S^1) = a clean monotone INDEX, so forcing one direction turns the wrap-around circle back into a carrier axis
+(the axis-role idea re-derived). The cost: a reversal can't be represented cheaply -- a ratchet under a reversing
+drive STALLS.
+
+THE SHARP FINDING (better than the plan predicted, and the reason the first test draft was wrong): a REAL scalar
+signal has a Hermitian-symmetric spectrum, so its analytic signal ALWAYS rotates one way -- instantaneous frequency
+is essentially non-negative BY CONSTRUCTION. A real series IS already a clockwise-only rotation; clamping it monotone
+costs ~0 (reversal_fraction measured ~0.00-0.04 on clean multitone, residual is envelope-NULL glitches not true
+reversals). A single real channel CANNOT EVEN REPRESENT a reversal. The group-vs-monoid price is real but lives on
+the COMPLEX / two-channel (I/Q) path: a phasor that genuinely reverses (forward then backward) reads reversal_fraction
+0.50 and excess ~1.0 when clamped one-way. This is the QUADRATURE ENCODER fact made rigorous -- you need the second
+channel for a reversal to exist at all; drop to one direction and either it costs nothing (real, no reversal to lose)
+or a lot (complex, reversal lost).
+
+MEASURED: H[cos]=sin (canonical quadrature); reversible round-trip exact to 1e-10; envelope recovered (mean err <0.05
+on AM); real multitone reversal_fraction <0.08 excess <0.3; complex reversing phasor reversal_fraction >0.3 excess
+>0.5 max_local 2.0; forward-only complex phasor excess ~0 (cost is about REVERSAL, not about being complex).
+
+KEPT NEGATIVES (loud):
+  * THE REAL-SIGNAL THEOREM as a first-class negative: monotone_cost on a real series honestly reads ~0 reversal and
+    small excess -- do NOT read that as "clockwise-only is free in general"; it means a real scalar channel has no
+    reversal to lose. The real price is on phasor_monotone_cost. Pinned both ways.
+  * Hilbert is a GLOBAL FFT -> edge effects at the ends; measurements trim an 8% margin. Meaningful mainly for
+    narrowband/monocomponent signals (Bedrosian/Nuttall); a high reversal fraction on a real signal is the honest
+    "not monocomponent" warning, not a reversal.
+  * Re-coordinatising returns as rotation is LOSSLESS, not predictive -- cannot manufacture structure (the SOL-returns
+    kept negative stands). Buys comparability and sign-aware decomposition, not prediction.
+
+Frameworks named (all classical, pre-cutoff): analytic signal (Gabor 1946), Hilbert transform, phasors (Steinmetz),
+geometric interpretation of complex numbers / negative-as-180-rotation (Wessel-Argand-Gauss), phase unwrapping
+(Itoh), monocomponent / instantaneous frequency (Boashash 1992), IMF/EMD/Hilbert-Huang (Huang 1998), winding/covering
+space, one-parameter semigroup / Hille-Yosida (irreversibility), quadrature rotary encoders (the concrete instance).
+
+Tests: +13 (4882 -> 4895). test_holographic_analytic.py (+12): hilbert=quadrature; Re(z)=x; reversible round-trip
+exact; amplitude=envelope; real reversal_fraction small; real monotone cost small & from nulls; complex reversal pays
+the monoid price; forward-only complex is free; enforce_monotone never decreases + stalls at reversals; leaves
+monotone input unchanged; determinism; selftest. test_integration.py (+1): all three through the mind + discoverability.
+Faculties: analytic_signal, monotone_cost, phasor_monotone_cost. reachability: analytic wired (not import-only);
+catalog_gaps 0; skill_lint 0; imports clean. Files: holographic_analytic.py (new), test_holographic_analytic.py (new),
+holographic_unified.py (3 faculties), holographic_catalog.py (3 entries), test_integration.py, NOTES,
+CAPABILITIES.md/capabilities.json/REFERENCE.md regenerated (431 modules). Ran on Moose's own market example: signed
+deltas recovered exactly, amplitude/phase reported per step.
+
+NEXT (integration candidates, not yet built): feed the (amplitude, phase) form into an FHRR phasor memory for
+sign-aware recall; an EMD/IMF decomposition (sift into monotone-phase components) so multicomponent signals get a
+per-component rotation; a monotone-phase-as-index bridge to axis-role (the covering-lift makes phase a carrier).
+
+## DYNAMICS IDENTIFICATION -- mass/momentum from measurements, gauge freedom enforced  [+14 tests, 4895->4909]
+
+Moose's follow-on from sign-as-rotation: "if rotation checks out, we can figure out momentum, velocity, and mass
+from a series of measurements, right?" -- generalized beyond markets on request (astronomy etc.). The honest answer
+is HALF: kinematics (velocity/acceleration/frequency) is fully observable (geometry of the path; the analytic
+signal reads omega directly). Mass/momentum are NOT observable from a trajectory alone -- a GAUGE FREEDOM, a
+theorem: scale mass and force together and the path is bit-identical (F=ma exposes only F/m; demonstrated:
+(m=2,k=8) vs (m=5,k=20) oscillators identical to 1e-10).
+
+WHAT SHIPPED (holographic_sysid.py; additive; faculties identify_dynamics + central_mass_from_orbit): the three
+honest doors that break the gauge, plus a LOUD REFUSAL when none is open:
+  * DOOR 1, force channel: fit m*a+c*v+k*x = F by least squares -> mass/damping/stiffness in the force's units +
+    the momentum ledger. MEASURED: (2.0, 0.4, 8.0) recovered to (0.01%, 5%, 0.01%) on a driven damped oscillator;
+    residual_rms returned as the honest wrong-model flag (cubic spring reads >10x the linear residual).
+  * DOOR 2, interaction: momentum conservation -> the mass RATIO m1/m2 = -dv2/dv1 (Mach's operational definition);
+    exact on an elastic collision; vector case projects on the exchange direction; no-interaction refused.
+  * DOOR 3, known force law + constant: Kepler's third law M = 4pi^2 a^3/(G T^2); semi-major axis from radius
+    extremes, PERIOD FROM THE UNWRAPPED BEARING -- the monotone-rotation/winding picture from holographic_analytic
+    on a genuine 2-channel signal, now doing astronomy. MEASURED: synthetic Earth orbit weighs the Sun 1.988e30 vs
+    1.989e30 (0.05%), 2-D and 30-degree-inclined 3-D (best-fit plane by SVD). Partial arc (<1 orbit) REFUSED via
+    GaugeError rather than extrapolating a period. Proven over HTTP: POST /invoke weighs the Sun.
+  * DOOR 0: trajectory alone raises GaugeError with the theorem stated and kinematics offered -- refuse-rather-
+    than-guess applied to physics. GaugeError is a dedicated type so callers can tell "fit failed" from "no fit
+    can ever succeed."
+
+KEPT NEGATIVES (loud): door 1 coefficients are in the FORCE'S units (unknown force scale re-opens the gauge) and
+assume the linear (m,c,k) form -- the residual is the warning, pinned by contrast test. Door 2 gives ratios only,
+and only from a genuine exchange. Door 3 needs the law + G known, central-body dominance (test mass), a bound
+Keplerian single orbit, and >= 1 full period observed. Numerical differentiation amplifies noise (~1/dt^2 on the
+second derivative); the residual reports it. Market mapping stated, not built: a market "mass" would be DOOR 1
+with order flow as the force channel -- from price alone the gauge stands.
+
+Tests: +14 (4895 -> 4909). test_holographic_sysid.py (+13): gauge demo; trajectory-only refusal; kinematics still
+offered; door-1 recovery + wrong-model residual contrast; door-2 exact ratio + vector projection + no-interaction
+refusal; door-3 Sun 2-D + inclined 3-D + partial-arc refusal; identify() routing; selftest. test_integration.py
+(+1): all doors through the mind + discoverability. reachability: sysid wired; catalog_gaps 0; skill_lint 0;
+imports clean; docs regenerated (432 modules). Files: holographic_sysid.py (new), test_holographic_sysid.py (new),
+holographic_unified.py (2 faculties), holographic_catalog.py (2 entries), test_integration.py, NOTES, generated docs.
+
+The three-session arc now composes: axis-role finds the carrier; the analytic signal reads the rotation's
+kinematics; sysid converts kinematics to dynamics exactly when (and only when) a gauge-breaking channel exists.
+
+## SCALING DIAGNOSIS -- detect WHICH limit binds, apply the right lever, automatically  [+12 tests, 4909->4921]
+
+Moose's consolidation ask: "whenever we hit a limit of any kind, it's because scaling is needed" -- generalize
+detection of WHEN something needs scaling and WHICH way, then scale it. RULE-0 AUDIT: the engine has many
+single-purpose instances (capacity_report diagnoses ONE limit -- the HRR cliff; adaptive_record gates ONE choice
+by load; the octree splits on ONE capacity), and the house dim-doubling rule existed only as PROSE in the notes.
+No general "probe the knobs, classify the limit, pick the lever" capability. Genuine build.
+
+WHAT SHIPPED (holographic_scalinglaw.py; faculties diagnose_scaling + auto_scale). The principle, made executable:
+  A LIMIT IS DIAGNOSED BY WHICH KNOB'S DOUBLING REDUCES THE ERROR. A WALL IS WHEN NO KNOB DOES.
+  * diagnose_scaling(eval_fn, knobs): double each knob in isolation, measure the error response, rank the levers.
+    Knob names map onto the five levers (dim/width -> dimensions; tiles/buckets -> orchestrated tiling; bits ->
+    precision; res/samples -> resolution) but the diagnosis is purely empirical -- it never needs to know what a
+    knob means, which is what makes it GENERAL. Returns the probe table (the evidence), ranked knobs, verdict
+    'scale:<knob>' or 'wall'.
+  * auto_scale(eval_fn, knobs, target): re-diagnose from the CURRENT point every round, double the winner, stop on
+    target met / WALL / budget. Every trajectory step carries the probe that justified it (no scaling decision
+    without its baseline).
+
+MEASURED:
+  * REAL workload: bundle discriminability vs distractors on the live primitives -- doubling dim drops the error
+    81% at dim=128, verdict scale:dim. The prose rule, now executable on the engine's own bind/bundle.
+  * SHIFTING LIMIT (the headline behavior): a workload whose binding constraint CHANGES as it scales (per-tile
+    capacity with a floor, then dim variance) is tracked round by round: trajectory tiles,tiles,tiles,dim,dim,
+    tiles,dim -> target met. One-shot diagnosis cannot do this; re-probing every round is the point.
+  * WALL honesty: a constant-error workload reads 'wall' with zero wasted doublings, and auto_scale returns the
+    probe table with the verdict. met=False/wall=False (budget ran out but the knob helps) is kept DISTINCT from
+    wall=True (nothing helps) -- the two failure modes must not be conflated.
+  * THE INSTRUMENT CAUGHT A BAD METRIC during its own build: the first "real workload" measured mean member-cosine,
+    which is ~1/sqrt(N) regardless of dim -- the diagnostician correctly called it a WALL, which is what forced the
+    correct discriminability metric. The tool debugging its own selftest is the best evidence it works.
+
+KEPT NEGATIVES (loud):
+  * First-order and LOCAL: one doubling from the current point. A knob that only pays at 4x reads unresponsive in
+    one diagnosis (auto_scale's re-probing recovers it); JOINT interactions (two knobs that only pay together) are
+    out of scope, stated not mis-ranked.
+  * eval_fn must be DETERMINISTIC (fixed seeds); a noisy instrument can fake or hide a response and we do not
+    launder it.
+  * 'wall' means "none of THESE knobs at THIS point," never "mathematically impossible" -- the NOT_APPLICABLE vs
+    DEFERRED ledger distinction, enforced in the return shape (the probe table travels with the verdict).
+  * Cost is REPORTED per step, not optimized -- error-vs-cost Pareto is the caller's tradeoff.
+  * HTTP scope: both faculties appear in /tools but take a CALLABLE eval_fn, which JSON cannot carry -- they are
+    in-process faculties; a bad /invoke fails with a typed 500, gracefully. Declared, not fudged.
+
+Tests: +12 (4909 -> 4921). test_holographic_scalinglaw.py (+11): variance->dim; capacity->tiles; wall honest;
+auto_scale target+evidence; wall stops early; budget vs wall distinct; integer knobs stay int; SHIFTING LIMIT
+tracked; real bundle workload -> dim; determinism; selftest. test_integration.py (+1): live-primitive rediscovery
+of the dim rule through the mind + wall + discoverability. reachability: scalinglaw wired; catalog_gaps 0;
+skill_lint 0; imports clean; docs regenerated (433 modules). Files: holographic_scalinglaw.py (new),
+test_holographic_scalinglaw.py (new), holographic_unified.py (2 faculties), holographic_catalog.py (2 entries),
+test_integration.py, NOTES, generated docs.
+
+NEXT (identified, not built): wire diagnose_scaling as the OCTREE/adaptive_record replacement policy (they are
+special cases of it); a joint-knob (pairwise) probe mode for interaction-limited workloads; cost-aware lever choice
+(double the knob with best drop-per-cost, not best drop).
+
+## CARRIER RECTIFICATION -- repair the boring axis when reality wobbles  [+7 tests, 4921->4928]
+
+Moose's synthesis question closing the rotation/axis-role arc: what happens when the most boring axis is NOT
+constant? His suggestions: (a) interpolate/normalize to constant spacing; (b) when it has little variation but
+SOMETIMES GOES NEGATIVE, use the new sign-as-rotation capabilities. Both are right and both are named math:
+(a) non-uniform-to-uniform RESAMPLING; (b) CUMULATIVE ARC-LENGTH reparametrization -- which IS the monotone/
+covering lift from holographic_analytic (a monotone phase is an odometer), absorbing small reversals into one-way
+progress. RULE-0: probed 6 phrasings; closest hit scatter_to_grid is a kernel DEPOSIT (superposition semantics),
+not an interpolating resampler -- genuine gap. Built as an EXTENSION of holographic_axisrole (the fix belongs
+beside the diagnosis), per prefer-extending-over-siblings.
+
+WHAT SHIPPED: rectify_carrier(coords, content, n_out) -- (1) arc-length lift s_i = sum|delta| (strictly monotone
+BY CONSTRUCTION; identity on an already-monotone axis, so one code path); tie-nudge for stalled steps rather than
+dropping payload samples; (2) uniform resample of every content channel by interpolation. Returns the uniform
+coords, resampled content, marginal_info BEFORE/AFTER (after = 0.0 by construction but MEASURED, making the repair
+auditable), and monotone_fraction (how much repair the axis needed).
+
+MEASURED: Poisson-irregular timestamps: boredom 0.657->0.000 (ideal carrier restored), smooth payload tracked to
+mean err <0.01 at modest gaps; occasionally-negative axis (rare -0.3 back-steps): output strictly monotone,
+monotone_fraction 0.97. THE COMPOSITION (the loop the whole arc was building): broken carrier -> analyze_axes reads
+the axis informative (0.7+) -> rectify_carrier -> re-analyze reads role=index, marginal 0.0, margin >0.3. Diagnose,
+repair, re-diagnose, one family, through the mind.
+
+KEPT NEGATIVES (loud):
+  * Interpolation INVENTS between samples; structure finer than local spacing is aliased, not recovered (measured:
+    max err 0.14 across large Poisson gaps on a fast sine). Index repair, never payload information.
+  * A LARGELY reversing axis makes content a PATH, not a function of the axis -- arc-length ordering is then a
+    modelling CHOICE. monotone_fraction below ~0.9 = inspect by hand; returned, not hidden.
+  * Zero-variation carrier refused (nothing to index by) rather than dividing by zero.
+
+Tests: +7 (4921 -> 4928). test_holographic_axisrole.py (+6): irregular->exactly boring; negative-dips->monotone
+lift; content tracks true function; multichannel; constant refused; rectify-then-analyze closes the loop.
+test_integration.py (+1): full pipeline (wobbling+irregular) through the mind + discoverability. Selftest extended
+(+2 contracts). Faculty: rectify_carrier. catalog_gaps 0; skill_lint 0; docs regenerated. Files:
+holographic_axisrole.py (extended), test_holographic_axisrole.py, holographic_unified.py (1 faculty),
+holographic_catalog.py (1 entry), test_integration.py, NOTES, generated docs.
+
+The arc is now closed end to end: analyze_axes finds the carrier -> rectify_carrier repairs it (using the
+sign-as-rotation monotone lift) -> the analytic signal reads kinematics along it -> sysid converts kinematics to
+dynamics when a gauge-breaking channel exists -> diagnose_scaling/auto_scale pick the lever when a limit binds.
+
+## WINDING MAP -- the reversing-carrier regime: function, hysteresis, or path  [+10 tests, 4928->4938]
+
+Moose asked to test out the regime past rectify_carrier's declared boundary (monotone_fraction well below ~0.9):
+a carrier that LARGELY reverses, revisiting coordinate ranges. There "content as a function of the axis" is a
+hypothesis to TEST, not assume. RULE-0: probed 6 phrasings, only fallbacks -- genuine build
+(holographic_winding.py; faculty winding_map).
+
+WHAT IT DOES: split the trajectory into monotone LAPS at direction reversals; interpolate each lap onto a shared
+grid over the revisited range; MEASURE lap agreement (normalized pairwise RMS, NaN-aware over shared support);
+verdict with the evidence attached:
+  * 'function'  -- all laps agree: the passes are FREE REPLICATION; merged profile returned. MEASURED: 6-lap noisy
+    sweep, merged err 0.0155 vs best single lap 0.0373 (~sqrt(#laps) averaging, win stated with its baseline).
+  * 'hysteresis' -- laps agree WITHIN a direction, disagree ACROSS: the covering lift x -> (x, direction), the
+    Mobius/orientation move on a real axis. Per-direction branches returned (recovered to <0.05 RMS of truth);
+    the MERGE IS REFUSED because the average is a curve NO pass traced (measured: it sits 0.40 from each branch).
+  * 'path'      -- laps disagree even within a direction (drift/aging): per-lap curves, no merge offered.
+
+TWO BUILD-TIME CORRECTIONS, kept loud:
+  * TURN-SAMPLE CONTAMINATION: laps originally shared the reversal sample, leaking one other-branch point into
+    each new lap -- measured as exactly 0.08 RMS on the branch estimate (one 0.8-offset point over a 100-point
+    grid; the arithmetic matched before the fix was trusted). Fix: the extremum belongs to the OUTGOING lap only.
+  * A WRONG TEST PREMISE, corrected by the module: "two disjoint ascending segments" were expected to read 'path'
+    (nothing revisited) -- but they are ONE monotone lap (no reversal ever occurs; the jump is a big forward step),
+    and the module correctly returned 'function'/1-lap. Monotonicity, not contiguity, defines a lap. Test rewritten
+    to pin the module's (correct) behavior.
+
+KEPT NEGATIVES: verdicts decided by an agreement THRESHOLD (0.15 of spread) -- a judgement, not a theorem; the raw
+disagreement numbers travel with every verdict so borderline calls are visible. Laps too short for the grid are
+dropped AND counted. 'function' merging low-passes any real drift slower than the threshold catches. The covering
+lift here is by DIRECTION (2 sheets); deeper hidden variables (lap number, temperature) surface as 'path' with the
+per-lap curves rather than a guessed variable.
+
+Tests: +10 (4928 -> 4938). test_holographic_winding.py (+9): lap segmentation + stalls; function verdict with the
+measured merge win; hysteresis verdict, branch accuracy, fictitious-average gap, refusal; drift -> path; single
+monotone lap trivially function; disagreement travels; determinism; selftest. test_integration.py (+1): the arc
+composition -- rectify_carrier trips its monotone_fraction boundary on a hysteresis sweep, winding_map IS the
+inspection: hysteresis detected, branches returned, merge refused, through the mind. Faculty: winding_map (5/5
+discoverable after one alias add; routing pins green through both alias edits). catalog_gaps 0; skill_lint 0
+(one does-length regression caught and trimmed); reachability wired; docs regenerated (434 modules).
+
+The axis-role arc is now complete across ALL carrier regimes: monotone (index directly) -> nearly-monotone
+(rectify_carrier lifts it) -> largely-reversing (winding_map: function / hysteresis / path, with merging refused
+exactly where it would fabricate).
+
+## AUTO-SCAFFOLD -- explore unlabeled data: find the axis, rectify, decompose, recompose  [+10 tests, 4938->4948]
+
+Moose's synthesis of the whole arc, stated as an ask: take an unlabeled series, automatically explore each axis
+as a potential scaffold, decompose until the boring axis is found, interpolate/normalize, find patterns "on at
+least some scope," then recompose using them to understand what remains. His architecture was right with ONE
+refinement: the best scaffold is not merely the most BORING axis but the axis that is boring AND ORGANISING
+(high adjacent-slice continuity after rectification) -- boredom says cheap to index, continuity says indexing it
+reveals structure. Both were already measurable; the genuine gap (RULE-0: 5 phrasings, only fallbacks) was the
+ORCHESTRATOR.
+
+WHAT SHIPPED (holographic_scaffold.py; faculty explore_series). Almost no new mathematics -- deliberate: it is
+the wiring of analyze_axes (scaffold scores = continuity * (1 - marginal_info), full table returned so near-ties
+are visible), rectify_carrier (the winner's wobbling coordinates repaired), decompose_signal (each channel along
+the carrier -> its MDL-gated generating law; probe-first found the real API is (Formula, info) with
+Formula.generate() as the recomposer, not the dict the first draft assumed), and plain variance accounting
+(explained fraction MEASURED against the recomposition, residual returned per channel -- the honest hand-off to
+the next level of analysis, "use what was found to help understand what remains"). Verdict structured / weakly
+structured / no structure found, decided by measured explained fractions.
+
+MEASURED: planted laws (freq-2 harmonic + linear trend) on a Poisson-irregular carrier: scaffold found among
+candidates, rectified to 0.0 boredom, explained fractions [1.0, 1.0]. Full-composition integration: an irregular
+AND occasionally-negative carrier -- the lift genuinely fires (monotone_fraction < 1.0) -- laws recovered >0.8 on
+both channels, verdict structured, through the mind. Mixed cube (one lawful + one noise channel): the lawful
+channel >0.9 explained, the noise channel honestly below the 0.5 bar, verdict weakly structured. Pure noise:
+'no structure found' -- with the no-scaffold exit firing when NO axis organises (all continuity ~ chance), so the
+pipeline refuses to crown the least-bad axis.
+
+KEPT NEGATIVES (loud):
+  * SCAFFOLD SCORE IS A HEURISTIC: continuity * (1 - marginal_info) prefers smooth carriers; a legitimately
+    rough-but-ordered axis (white-noise increments over a real time order) can lose to a smoother content axis.
+    The score table travels with every result.
+  * "Unexplained" means unexplained BY THE DICTIONARY: decompose_signal peels elementary functions under MDL;
+    measured during the build, sin(2pi*3u) over [0,1] lands OUTSIDE the dictionary (0 terms, residual = signal
+    RMS) while freq 1 and 2 decompose exactly -- chaotic flows and off-dictionary laws land in the residual,
+    correctly, but residual != random.
+  * Channels decomposed INDEPENDENTLY; joint cross-channel structure (one channel a delayed copy of another) is
+    not searched -- the residuals are returned precisely so a cross-channel pass can run on them.
+  * ONE level of recursion: deeper automatic recursion is the caller's loop over this faculty, kept out so each
+    level's verdict stays auditable.
+
+Tests: +10 (4938 -> 4948). test_holographic_scaffold.py (+9): carrier wins with a real margin; boring-but-
+disorganising does NOT win (no-scaffold exit); planted laws on irregular carrier recovered; residual ledger
+balances bit-exactly; mixed cube weakly structured; noise refused; score table travels; determinism; selftest.
+test_integration.py (+1): the whole arc in one call through the mind. Faculty: explore_series (5/5 discoverable).
+catalog_gaps 0; skill_lint 0; reachability wired; docs regenerated (435 modules). Files: holographic_scaffold.py
+(new), test_holographic_scaffold.py (new), holographic_unified.py (1 faculty), holographic_catalog.py (1 entry),
+test_integration.py, NOTES, generated docs.
+
+THE ARC, COMPLETE AND CALLABLE AS ONE FACULTY: explore_series = analyze_axes (find the carrier) + rectify_carrier
+(repair it; the sign-as-rotation monotone lift) + decompose_signal (the laws) + variance accounting (the
+leftovers). Beneath it, winding_map handles the largely-reversing regime, analytic_signal reads rotation
+kinematics, identify_dynamics converts to dynamics behind a gauge-breaking channel, and diagnose_scaling/
+auto_scale pick the lever when any stage hits a limit. Six sessions, one composable pipeline, every claim measured.
+
+## DEMUX -- one stream, many sources: separate the channels, group the objects  [+12 tests, 4948->4960]
+
+Moose's observation completing the exploration arc: a series can describe MULTIPLE objects/patterns -- a scene of
+animated meshes serialized as one delta stream should resolve into its meshes; and the Contact protocol was
+exactly this, separate the signal channels and decode each one on its own. RULE-0: probed 6 phrasings; the one
+name hit (group_objects) is a scene-graph feature (parent a node group), not signal grouping -- genuine gap.
+
+WHAT SHIPPED (holographic_demux.py; faculty demux_series). Two standard disguises, both handled:
+  * INTERLEAVED (time-division multiplexing, the Contact case): sample i belongs to channel i mod K. The stride K
+    is FOUND, not assumed, by DELTA-CONTINUITY (at the true K every strided sub-stream is consecutive readings of
+    one source; wrong strides mix sources and continuity collapses) -- the scaffold-score instrument pointed at
+    the demux question, and the Arecibo semiprime move in 1-D. Deinterleaving is a PERMUTATION, so recovery is
+    BIT-EXACT (pinned with array_equal, not approx). Smallest-K OCCAM rule over the m*K harmonic ladder (K=6 must
+    and does score above baseline on a K=3 mux -- each sub-stream is a further downsample -- and 3 still wins;
+    pinned). Honest K=1 on noise AND on a single smooth un-interleaved source (every K scores well on smooth, so
+    none clears the +0.15 margin over baseline; pinned separately -- two different ways to be "nothing to split").
+  * GROUPED (the multi-mesh case): channels clustered into objects by |Pearson correlation| of trajectories --
+    ABSOLUTE, because a mirrored axis of one rigid motion anti-correlates and still belongs to its mesh.
+    MEASURED: two "meshes" x three coordinate channels, one axis mirrored, recovered exactly [[0,1,2],[3,4,5]];
+    four unrelated channels stay four groups (no fictitious objects).
+
+THE COMPOSITION (the point): demux_series -> explore_series per recovered channel = the full Contact protocol.
+Pinned in-suite and through the mind: an interleaved 2-source stream -> stride 2 found -> each channel decoded
+separately -> both verdicts 'structured', laws recovered >0.9 explained.
+
+KEPT NEGATIVES (loud): CYCLIC interleaving only -- packetized/variable-length muxing scores no clean K (the table
+travels so a mushy maximum is visible). Delta-continuity, not raw correlation, is the instrument (a trending
+series' raw lag-1 is high even interleaved; deltas ask "are consecutive steps steps of ONE source?"). Grouping is
+linear |corr| with a threshold + greedy agglomeration: a time-varying axis mix can split an object, and greedy is
+order-stable/deterministic but not globally optimal -- matrix and threshold returned. A noise channel inside an
+interleave neither helps nor hurts stride detection.
+
+Tests: +12 (4948 -> 4960). test_holographic_demux.py (+11): K=3 found + bit-exact recovery; harmonics score well +
+Occam picks 3; K=2 case; noise K=1; smooth un-interleaved K=1; two objects with mirror; unrelated stay separate;
+demux->explore recovers each law; 2-D input skips stride; determinism; selftest. test_integration.py (+1): the
+Contact protocol through the mind. Faculty: demux_series (5/5 discoverable). catalog_gaps 0; skill_lint 0;
+reachability wired; docs regenerated (436 modules). Files: holographic_demux.py (new), test_holographic_demux.py
+(new), holographic_unified.py (1 faculty), holographic_catalog.py (1 entry), test_integration.py, NOTES,
+generated docs.
+
+The exploration stack, top to bottom: demux_series (how many sources?) -> explore_series (each source's scaffold +
+laws + residuals) -> winding_map / rectify_carrier (carrier regimes) -> analytic_signal (rotation kinematics) ->
+identify_dynamics (dynamics behind a gauge channel) -> diagnose_scaling/auto_scale (when a limit binds). NEXT
+identified, not built: residual cross-channel pass (delayed-copy detection -- the language-discovery direction);
+demux inside explore_series as an automatic pre-stage; packetized/burst demux (needs a segmentation model).
+
+## HANDS-FREE PIPELINE -- auto-demux pre-stage + residual cross-channel pass  [+7 tests, 4960->4967]
+
+The two items flagged at the demux close-out, knocked out on Moose's go-ahead. RULE-0: probed 5 phrasings for
+delayed-copy/lead-lag detection -- only fallbacks; genuine gaps both.
+
+WHAT SHIPPED:
+  * cross_channel_links(series, max_lag, threshold) (holographic_demux; own faculty): per ordered channel pair,
+    scan lags of the normalized cross-correlation; a peak at lag L with gain g reads "j ~ g * i delayed by L" --
+    structure INVISIBLE to per-channel decomposition (a delayed copy of noise decomposes to nothing on both
+    channels, yet the pair is lawful together). Direction falls out of which ordering peaks. MEASURED: lag-7
+    gain-0.8 copy found exactly; unrelated noise yields zero links.
+  * explore_series gains TWO DEFAULT-OFF flags (old calls byte-identical, pinned): auto_demux=True runs
+    demux_series first on a raw 1-D stream -- stride found, channels split, objects grouped, each explored
+    independently: THE CONTACT PROTOCOL WITH ZERO HINTS, one call. cross_channel=True runs the link pass on the
+    RESIDUALS; found links upgrade a bare 'no structure found' to 'weakly structured' (linked residuals ARE
+    structure, just not per-channel structure). The pass also runs on the NO-SCAFFOLD exit -- which is where it
+    matters most: a delayed noise copy has zero per-channel continuity (that exit fires) yet the pair is lawful.
+
+THE BUG THE HONESTY TEST CAUGHT (kept loud, regression-trapped): first cut, pure noise + cross_channel "found"
+89,700 links. Root cause was a COMPOUND failure: (a) the no-scaffold tie-break picked the SHORT axis, so
+_slices_along treated 300 SAMPLES as channels; (b) two mean-removed 2-sample vectors correlate at exactly +/-1,
+so every "pair" cleared the threshold. Two independent fixes, both principled: the no-scaffold cross pass lays
+samples along the LONGEST axis; and cross_channel_links gained a STATISTICAL SAMPLE GUARD -- |corr| of independent
+noise ~ 1/sqrt(N), so N must satisfy noise-floor <= threshold/3 (N >= ceil((3/threshold)^2)) or links are REFUSED
+with a note, never fabricated. Pinned as test_too_few_samples_refuses_links. After the fix: noise+cross reads
+'no structure found', 0 links; the lag-5 copy still found.
+
+KEPT NEGATIVES: linear, pairwise, single-lag -- time-varying delays, nonlinear couplings, and three-way shared
+sources no pair sees strongly are out of scope, stated. "i leads j" is a LAG statement, not a mechanism claim.
+auto_demux applies to 1-D streams only (a 2-D input already has its channels).
+
+Tests: +7 (4960 -> 4967). test_holographic_demux.py (+6): exact lag+gain; unrelated noise -> no links; the
+89,700-link REGRESSION TRAP (too-few-samples refusal with note); explore cross upgrade + default-off byte-
+identical; noise+cross stays refused; auto_demux hands-free Contact. test_integration.py (+1): the complete
+hands-free story through the mind (interleaved lawful+noise stream -> demuxed, decoded, verdict structured;
+residual link found at lag 5). Faculties: cross_channel_links (new, 5/5 discoverable), explore_series (extended,
+default-off). catalog_gaps 0; skill_lint 0; docs regenerated. Files: holographic_demux.py (extended),
+holographic_scaffold.py (extended), test files, holographic_unified.py (1 new + 1 extended faculty),
+holographic_catalog.py (1 entry), NOTES, generated docs.
+
+## PACKET DEMUX -- burst streams: change-point segmentation + noise-calibrated assignment  [+8 tests, 4967->4975]
+
+The last flagged demux item ("packetized/burst demux needs a segmentation model, not a stride scan"), built on
+Moose's go-ahead. RULE-0: probed 5 phrasings; holographic_segment is the DISCRETE costume (branching entropy over
+symbol streams, Harris/Saffran) -- same move, different costume; delegation would require lossy symbolization, so
+the CONTINUOUS costume lives beside it with the kinship stated in both docstrings.
+
+WHAT SHIPPED (holographic_demux extended; faculty packet_demux):
+  * segment_stream: binary segmentation with a BIC-style penalty on a PIECEWISE-LINEAR cost (linearly detrend the
+    candidate segment, then n*log(var(resid))). A homogeneous stream honestly returns NO boundaries.
+  * packet_demux: segments assigned to sources by a NOISE-CALIBRATED per-pair metric -- each segment's signature
+    (mean/std/delta-continuity/4 spectral bands) is measured twice via split-half; a pair is judged in ITS OWN
+    metric (features weighted by 1/max(pair noise, shrinkage floor)) against ITS OWN self-distances: "closer than
+    3x the measurement noise = same source", no magic threshold. Per-source REASSEMBLED streams returned, each
+    ready for explore_series (the Contact protocol for the burst case).
+
+FOUR MEASURED CORRECTIONS during the build, each kept loud (this module earned its cost function empirically):
+  1. Piecewise-CONSTANT cost shattered any DRIFTING source at its own drift: a sine split at half-cycles (mean
+     swings +/-0.6), a clean ramp into mean steps -- pieces that then genuinely differ, so assignment cannot
+     reunite them. Fix: piecewise-LINEAR detrend (a ramp = one cheap segment; a level STEP still splits because a
+     line fits a step badly). Boundaries after the fix land EXACTLY on truth ([120,200,300]; quiet/loud
+     [40,105,155,235,280]). Oscillation remains the declared negative (curvature still splits a sine) -- PINNED as
+     a regression trap on the documented behavior.
+  2. GLOBAL noise-median weighting crushed by the tightest segments: clean-ramp band noise ~0.002 gave huge
+     weights to features that genuinely fluctuate ~0.1 on noise bursts -- same-source noise bursts could never
+     merge. Fix: per-PAIR weighting.
+  3. DIVISION BY ZERO-NOISE: a deterministic segment's split halves are IDENTICAL in std/continuity/bands (noise
+     exactly 0), so 1/(0+eps) blew a 0.009 band difference between two IDENTICAL ramps up to a distance of
+     11 MILLION. Fix: shrinkage floor -- per-feature noise never below 0.1x that feature's cross-segment spread.
+  4. Assignment is CONSERVATIVE by design and documented: two bursts of one noisy source whose sampled statistics
+     differ ~2 sigma (measured: continuity -0.44 vs -0.69) may stay split -- under-merging fabricates nothing.
+     Contracts pinned as PURITY (no source ever mixes true populations) rather than exact source counts.
+
+KEPT NEGATIVES: a boundary needs a STATISTICS shift (same-mean same-power same-spectrum invisible); oscillating
+sources over-segment (model boundary, pinned); a source that DRIFTS ACROSS bursts (level continuing where it left
+off) reads as different levels -- sequence-continuation reasoning is out of a bag-of-segments scope, stated;
+identical-signature sources merge; greedy, deterministic, not globally optimal; bursts < min_seg absorbed.
+
+Tests: +8 (4967 -> 4975). test_holographic_demux.py (+7): boundaries on statistics shifts; sources by reassembled
+stats; homogeneous refused; same-power-different-spectrum assigned by signature; composition (ramp bursts reunited
++ decoded, conservative split tolerated); oscillating-source over-segmentation PINNED as the documented negative;
+determinism. test_integration.py (+1): the burst-stream Contact protocol through the mind. Faculty: packet_demux
+(5/5 discoverable). catalog_gaps 0; skill_lint 0; reachability wired; docs regenerated. Files: holographic_demux.py
+(extended), test_holographic_demux.py, holographic_unified.py (1 faculty), holographic_catalog.py (1 entry),
+test_integration.py, NOTES, generated docs.
+
+Demux is now complete across BOTH multiplexing disguises: cyclic (demux_series, stride found by continuity,
+bit-exact) and packetized (packet_demux, boundaries found by statistics shifts, noise-calibrated assignment) --
+plus the cross-channel residual pass linking what per-channel decoding cannot see.
+
+## CONTINUATION MERGES -- the drift-across-bursts negative, closed  [+5 tests, 4975->4980]
+
+The declared packet_demux negative ("a source that drifts across its bursts reads as different levels --
+sequence-continuation reasoning out of a bag-of-segments scope"), closed on Moose's go-ahead as a default-off
+Stage 3.
+
+WHAT SHIPPED (holographic_demux: _linear_tail + continuation_merges; packet_demux gains continuation=False):
+extrapolate each earlier segment's LINEAR TAIL across the gap; a later segment in a different source merges when
+it resumes at the predicted LEVEL and the predicted SLOPE with MATCHING RESIDUAL DYNAMICS, each gate calibrated
+by the fits' own residual noise. Union-find over merges (chains reunite transitively, each link judged on its own
+gap); every merge carries {predicted, observed, tolerance}. Model coherence, not shortcut: the segmenter's cost is
+piecewise-LINEAR, so the within-model continuation predictor is the same model -- holographic_forecast's
+calibrated producers are the stated upgrade path for non-linear sources.
+
+THREE MEASURED CORRECTIONS (kept loud):
+  1. NOISE-SWALLOW: a high-noise source's level gate is enormous (3 sigma of sigma=1 covers anything) -- it
+     swallowed a quiet ramp resuming at the WRONG level. Fix: the DYNAMICS gate -- tail and head residual scales
+     within 4x ("the continuation of a source must LOOK like the source"). Regression-trapped.
+  2. LIKE VS UNLIKE COMPARISON: predicted level at the segment START was compared against the head's MEAN (half a
+     window later) -- an EXACT continuation read 3.60 vs 3.91 and missed. Fix: compare against the head's own
+     linear fit evaluated at its start. After: predicted 3.600 = observed 3.600, merged.
+  3. A finding, not a bug: the signature pass ALREADY reunites gently-drifting sources -- a drifting segment's
+     split-half level difference inflates its own mean-noise, so "level is unreliable for this source" falls out
+     self-consistently. Continuation is needed for STEEP drift over LONG gaps, where level difference >> self-
+     drift and the signature correctly refuses.
+
+KEPT NEGATIVES: linear continuation only (curved sources match only as well as their tail is locally linear);
+per-gap links (chains via union-find); the IMPOSTOR case -- a genuinely new source starting exactly on another's
+extrapolation at its slope within noise merges, indistinguishable by construction, stated.
+
+Tests: +5 (4975 -> 4980). test_holographic_demux.py (+4): reunion with evidence (off=3 sources, on=2); wrong-level
+refusal; the noise-swallow regression trap; default-off byte-identical. test_integration.py (+1): the closed
+negative through the mind -- reunited source decodes 'structured'. Selftest: +2 contracts (reunion + wrong-level
+refusal). Faculty: packet_demux extended (default-off flag threaded). catalog_gaps 0; skill_lint 0; docs
+regenerated. Files: holographic_demux.py, test_holographic_demux.py, holographic_unified.py, test_integration.py,
+NOTES, generated docs.
+
+## PROMOTION + ADOPTION PASS -- the arc audited, documented, and put to work  [+6 tests, 4980->4986]
+
+Moose's directive: verify everything from the exploration arc is promoted/generalized/discoverable/documented,
+then adopt it across the stack where it measurably pays (speed, denoising, accuracy, compression).
+
+AUDIT RESULTS (instruments, not memory): reachability/catalog_gaps/skill_lint/wiring_report ALL CLEAN across the
+tree; every arc faculty 5/5 discoverable. ONE genuine gap found: the arc had NO FEATURE_GUIDE section (the ritual's
+guide step was shortchanged across eight sessions). FIXED: section 8 "Unlabeled data exploration" added with four
+snippets, EVERY ONE RUN AND VERIFIED (assertions, not eyeballs) before commit.
+
+ADOPTIONS (each proposed as a hypothesis, measured against a baseline before wiring):
+  * decompose_piecewise (new faculty, holographic_scaffold): segment at statistics shifts (segment_stream), fit a
+    law PER SEGMENT (decompose_signal). MEASURED on a 3-regime signal vs the global fit: residual RMS 0.5001 ->
+    0.0013 (385x) and MDL bits 2723 -> 588 (4.6x better compression). THE RESULT CARRIES ITS BASELINE -- and the
+    honesty contract is PINNED with a case where segmentation LOSES: a pure sine (the segmenter's documented
+    oscillation negative) shatters into 8 pieces and pays 1136 bits vs the 1-term global fit's 556; the attached
+    baseline makes the loss visible. A non-paying segmentation is reported, never hidden.
+  * explore_series gains handle_reversals=False (default off, byte-identical): a largely-reversing carrier
+    (monotone_fraction < 0.9, single channel) routes through winding_map; a 'function' verdict swaps in the merged
+    profile before decomposition (MEASURED: 6-pass noisy scan, profile RMS 0.112 single-lap -> 0.047 merged,
+    2.4x); 'hysteresis'/'path' verdicts are REPORTED with evidence and never merged -- winding_map's own refusal,
+    honoured inside the orchestrator. Pinned both ways (function adopts; hysteresis refuses).
+
+BUG THE ADOPTION PASS CAUGHT (the third degenerate-layout defect this arc; the family is now well-trapped): an
+(N,1) column let the LENGTH-1 axis win the scaffold score, laying N samples out as N one-sample "channels" --
+each trivially constant, each trivially "explained": a VACUOUS 'structured' verdict. Fix: axes shorter than
+MIN_AXIS_LEN=8 are excluded from candidacy ("a scaffold you cannot index along is not a scaffold"), with the
+exclusion visible in the score table. Regression-trapped.
+
+KEPT NEGATIVES: decompose_piecewise pays no cross-segment parameter sharing (a repeated regime is paid twice --
+recipe-level dedup is the named next rung); hard cuts at boundaries; handle_reversals applies to single-channel
+payloads (multi-channel winding = per-channel maps, a caller's loop for now).
+
+Tests: +6 (4980 -> 4986). test_holographic_scaffold.py (+5): degenerate-axis regression trap; handle_reversals
+adopts the merge (default-off pinned); hysteresis refusal honoured; piecewise beats global with baseline attached;
+the honest-loss case (sine) pinned. test_integration.py (+1): all three adoption claims through the mind, each
+with its number. Faculties: decompose_piecewise (new, 5/5), explore_series (extended). Selftest: +2 adoption
+contracts. FEATURE_GUIDE.md section 8 (snippets run). catalog_gaps 0; skill_lint 0; docs regenerated.
+
+DEFERRED WITH REASONS (audited, not built): octree/adaptive_record onto diagnose_scaling (a refactor, not an
+additive wire -- needs its own session with perf baselines); regime-aware forecasting (forecast fits only the
+last segment_stream regime -- promising, unmeasured); winding-merge for multi-channel scans (per-channel loop
+works today; a joint faculty only if a caller materialises).
+
+## BRANCH MERGE -- seven new signal-analysis modules integrated onto the mainline
+
+Merged an uploaded branch (forked after T4/T7, BEFORE the T6 backfills and the slow-test pass) into the working
+tree. The branch contributed 7 modules -- scalinglaw, analytic, axisrole, demux, scaffold, sysid, winding -- with
+7 test files (+107 tests), 16 new mind faculties (one contiguous 255-line block in unified.py), 216 lines of
+catalog registrations, 12 integration tests, a FEATURE_GUIDE section, and ~10 NOTES entries.
+
+Merge mechanics, for the record: classified every differing file by diff DIRECTION after normalizing line endings
+(the branch converted unified.py CRLF->LF, which made a 3-hunk diff look like a 12k-line rewrite). One-sided files
+took the newer side wholesale (catalog/test_integration/FEATURE_GUIDE from the branch; run_selftests/conftest/
+pyproject/ci.yml/creature_gauntlet/shader and all 12 backfilled selftests from the mainline -- verified the
+branch's "extra" lines in those were only pre-remediation originals). Two-sided files merged surgically: the
+branch's faculty block inserted at its anchor in MY unified.py (CRLF preserved, my _selftest and --demos gating
+kept); NOTES tails concatenated (independent appends, verified non-interleaved). test_all_selftests.py kept MINE:
+the branch's 12 extra budget lines were exactly the entries my backfills had earned the right to delete.
+
+Verification: all 7 new selftests green through the walker; all 16 faculties resolve and two ran end-to-end
+through the mind; discoverability probes hit (demux/analytic/sysid/scaffold top-1; axisrole top-2); ALL budgets
+held with zero growth -- name collisions 42/42, duplicate shapes 5/5, no-selftest 64 (all 7 new modules ship
+canonical _selftests), does-length 58/0 regressions; routing pins, skill_lint, catalog_gaps, audit_imports clean;
+merged integration file 448/448; the two-sided-merge regression cluster 245 green.
+
+**Delta:** 429 -> 436 modules; 376 -> 383 wired; 4,867 -> 4,986 tests (branch +119); docs regenerated. The
+branch's own close-out discipline held -- every new module arrived wired, cataloged, selftested, and documented,
+which is what made this merge mostly classification rather than surgery.

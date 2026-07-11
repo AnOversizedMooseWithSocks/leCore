@@ -134,17 +134,13 @@ def mean_curvature(mesh):
 # Creases: sharp edges, via the dihedral angle between adjacent faces.
 # =====================================================================================================
 def _newell_normal(verts, face):
-    """A robust face normal by Newell's method (works for non-planar polygons), unit-length."""
-    n = np.zeros(3)
-    m = len(face)
-    for k in range(m):
-        cur = verts[face[k]]
-        nxt = verts[face[(k + 1) % m]]
-        n[0] += (cur[1] - nxt[1]) * (cur[2] + nxt[2])
-        n[1] += (cur[2] - nxt[2]) * (cur[0] + nxt[0])
-        n[2] += (cur[0] - nxt[0]) * (cur[1] + nxt[1])
-    nn = float(np.linalg.norm(n))
-    return n / nn if nn > 1e-12 else n
+    """Unit normal of a possibly non-planar face by Newell's method.
+
+    **DELEGATES to `holographic_meshverbs.newell_normal`.** A structural duplicate scan found the two bodies
+    identical and a numeric check confirmed they agree bit for bit (0.0e+00). Two implementations of one algorithm
+    will eventually disagree on a winding, and the one that disagrees will be the one nobody is testing."""
+    from holographic.mesh_and_geometry.holographic_meshverbs import newell_normal
+    return newell_normal(verts, face)
 
 
 def dihedral_angles(mesh):

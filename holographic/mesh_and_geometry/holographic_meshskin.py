@@ -44,7 +44,13 @@ from holographic.mesh_and_geometry.holographic_mesh import Mesh
 
 
 def rotation(axis, angle):
-    """A 3x3 rotation matrix about `axis` by `angle` radians (Rodrigues' formula)."""
+    """A 3x3 rotation matrix about `axis` by `angle` radians (Rodrigues' formula).
+
+    KEPT SEPARATE, on purpose (rev. 9 organization audit): the engine's canonical builder is
+    `holographic_transform.rotation_axis_angle` (quaternion-based), and `holographic_scenegraph.rotation` keeps a
+    third, 4x4 Rodrigues. Measured: this one differs from BOTH by up to ~9.0e-12 (the `+1e-12` in the axis
+    normalization plus the quaternion round-trip). Bit-identity is the merge gate, it fails, and skinning weights
+    baked against this exact matrix must not move -- so the copy stays, DECLARED, with the number."""
     axis = np.asarray(axis, float)
     axis = axis / (np.linalg.norm(axis) + 1e-12)
     x, y, z = axis

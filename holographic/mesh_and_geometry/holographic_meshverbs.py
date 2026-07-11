@@ -55,9 +55,16 @@ import numpy as np
 from holographic.mesh_and_geometry.holographic_mesh import Mesh
 
 
-def _face_normal(V, face):
-    """Unit normal of a (possibly non-planar) face by Newell's method -- for a triangle this reduces to the edge
-    cross product, but Newell is robust if the face is a slightly bent polygon."""
+def newell_normal(V, face):
+    """Unit normal of a (possibly non-planar) face by **Newell's method** -- for a triangle this reduces to the edge
+    cross product, but Newell is robust if the face is a slightly bent polygon.
+
+    THE ONE NEWELL NORMAL. A structural duplicate scan found `meshcurvature._newell_normal` with an identical body,
+    agreeing bit for bit (0.0e+00); it now delegates here.
+
+    **`meshbridge._face_normal` is NOT a duplicate of this**, despite an identical AST shape: it takes the cross
+    product of the FIRST THREE vertices only. On a bent quad the two disagree by 0.47. *Structurally identical,
+    semantically different -- merging them would have been a bug.*"""
     n = np.zeros(3)
     m = len(face)
     for k in range(m):
@@ -68,6 +75,10 @@ def _face_normal(V, face):
         n[2] += (cur[0] - nxt[0]) * (cur[1] + nxt[1])
     ln = float(np.linalg.norm(n))
     return n / ln if ln > 1e-12 else n
+
+
+#: The private name this module used before the duplicate scan promoted it. Not a second implementation.
+_face_normal = newell_normal
 
 
 def _ring_walls(face, new_idx):

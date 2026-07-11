@@ -243,3 +243,74 @@ def test_wired_to_the_mind_and_discoverable():
     assert rep["poincare_hopf"] is True and rep["energy"] < 1e-20
 
     assert "Cross field" in str(m.find_capability("smoothest direction field")[:3])
+
+
+# ===========================================================================================
+# AGENT-FACING: a live handle does not survive JSON, and one that LOOKS like it survives is worse
+# ===========================================================================================
+
+def test_the_stateless_twin_returns_plain_data():
+    from holographic.mesh_and_geometry.holographic_crossfield import field_singularities
+
+    rep = field_singularities(tetrahedron())
+    assert rep["sum_index"] == 2.0 and rep["euler"] == 2
+    assert rep["n_singularities"] == 4 and rep["quarter_residual"] == 0.0
+    for v in rep.values():
+        assert isinstance(v, (int, float, list))               # nothing an agent cannot receive
+
+
+def test_it_survives_a_strict_json_round_trip():
+    import json
+
+    from holographic.mesh_and_geometry.holographic_crossfield import field_singularities
+
+    rep = field_singularities(tetrahedron())
+    back = json.loads(json.dumps(rep))                          # strict: no default=str
+    assert back == rep
+
+
+def test_a_json_round_tripped_ctx_is_refused_by_name():
+    # `cross_field`'s ctx has `rho` keyed by (face, face) TUPLES. Serialised, those become the strings "(0, 1)",
+    # so the payload LOOKS like a context and cannot be fed back. It used to die with `KeyError: (0, 1)`.
+    with pytest.raises(ValueError, match="through JSON"):
+        singularity_index([0.1], {"rho": {"(0, 1)": 1.0}})
+
+    with pytest.raises(ValueError, match="cross_field"):
+        singularity_index([0.1], {"not": "a ctx"})
+
+
+def test_the_mesh_faculties_accept_buffers_not_only_a_live_handle():
+    import lecore
+    m = lecore.UnifiedMind(dim=256, seed=0)
+
+    tet = tetrahedron()
+    as_dict = {"vertices": np.asarray(tet.vertices, float).tolist(),
+               "faces": np.asarray(tet.faces, int).tolist()}
+    as_pair = [as_dict["vertices"], as_dict["faces"]]
+
+    a = m.field_singularities(tet)
+    b = m.field_singularities(as_dict)
+    c = m.field_singularities(as_pair)
+    assert a == b == c                                          # a mesh is buffers, however it arrives
+
+    with pytest.raises(ValueError, match="expected a Mesh"):
+        m.field_singularities("a mesh, honest")
+
+
+def test_the_full_http_round_trip():
+    # "It works in-process" and "an agent can call it" are different claims. This is the second one.
+    import json
+
+    from holographic_service import Service
+
+    app = Service()
+    invoke = app._routes[("POST", "/invoke")]
+    tools = {t["name"] for t in app._routes[("GET", "/tools")]({})["tools"]}
+    assert "field_singularities" in tools
+
+    tet = tetrahedron()
+    payload = {"name": "field_singularities",
+               "args": {"mesh": {"vertices": np.asarray(tet.vertices, float).tolist(),
+                                 "faces": np.asarray(tet.faces, int).tolist()}}}
+    result = json.loads(json.dumps(invoke(payload)))["result"]
+    assert result["sum_index"] == 2.0 and result["euler"] == 2

@@ -85,6 +85,22 @@ class ScalarEncoder:
         n = np.linalg.norm(v)
         return v / n if n > 0 else v
 
+    def encode_many(self, xs):
+        """Encode MANY numbers at once, as an `(M, dim)` array. **Bit-identical to stacking `encode`, and vectorised.**
+
+        `_phase_encode` is `real(ifft(exp(1j * scale * u * phases)))`, normalised. Nothing in it is sequential: the
+        phases are the same for every `u`, so the whole batch is one outer product and one `ifft` along an axis.
+        The scalar path stayed a loop only because nobody had asked it for a batch."""
+        xs = np.atleast_1d(np.asarray(xs, float))
+        if xs.size:
+            self._check_range(float(xs.ravel()[0]))           # warn once on the first, not once per point
+        wx = getattr(self, "_warp_x", None)
+        u = xs if wx is None else np.interp(xs, wx, self._warp_u)   # the A3 warp, vectorised; identity if unfitted
+        spectrum = np.exp(1j * self.scale * u[:, None] * self.phases[None, :])
+        v = np.real(np.fft.ifft(spectrum, axis=1))
+        n = np.linalg.norm(v, axis=1, keepdims=True)
+        return np.where(n > 0, v / np.where(n > 0, n, 1.0), v)
+
     @classmethod
     def for_values(cls, values, dim, seed=0, margin=0.05, **kw):
         """Build an encoder whose range is taken FROM THE DATA (the `range='auto'` case), with a small margin so the
@@ -473,7 +489,43 @@ def _a3_selftest():
     assert uf < uu * 1.25 + 1e-6, (uf, uu)               # uniform control: ties (no meaningful penalty)
 
 
+def _selftest():
+    """Regression trap for the data front-ends (T6 backfill; demos only, no assertion). Pins the contract each
+    encoder exists to provide: a ScalarEncoder is LOCALITY-PRESERVING (nearby numbers -> similar vectors,
+    monotonically) and INVERTIBLE (decode recovers the number), and a TextEncoder learns word vectors it can
+    recall. Numbers measured against the live encoders first, asserted as a monotone RELATION (robust) rather
+    than absolute cosines (which shift with bandwidth)."""
+    import numpy as np
+
+    def _cos(a, b):
+        return float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+    # 1. LOCALITY: similarity to encode(0.5) decreases monotonically as the value moves away. This is the
+    #    property that makes a scalar usable as a graded VSA filler; a non-monotone encoder is silently broken.
+    se = ScalarEncoder(dim=1024, lo=0.0, hi=1.0, seed=0)
+    anchor = se.encode(0.5)
+    sims = [_cos(anchor, se.encode(x)) for x in (0.5, 0.6, 0.7, 0.9)]
+    assert sims[0] > 0.99                                        # self-similarity is ~1
+    assert all(sims[i] >= sims[i + 1] - 1e-6 for i in range(len(sims) - 1)), sims   # monotone non-increasing
+    assert sims[0] - sims[-1] > 0.1                              # and it genuinely spreads, not a flat line
+
+    # 2. INVERTIBILITY: decode recovers the encoded value closely -- an off-designed-case point (0.42 is not a
+    #    grid node the encoder was built around), per [BLIND-SPOT SELFTEST].
+    assert abs(float(se.decode(se.encode(0.42))) - 0.42) < 0.05
+
+    # 3. TEXT: a TextEncoder learns a vocabulary and returns a real vector for a seen word, nothing for an unseen.
+    te = TextEncoder(dim=1024, seed=0)
+    te.learn("the cat sat on the mat")
+    assert te.wordvec("cat") is not None
+
+    print("OK: holographic_encoders self-test passed (ScalarEncoder similarity decays monotonically with distance "
+          "and spreads >0.1, decode recovers 0.42 within 0.05, and TextEncoder learns recallable word vectors)")
+
+
 if __name__ == "__main__":
-    demo_scalar()
-    demo_text()
-    demo_record()
+    import sys
+    _selftest()
+    if "--demos" in sys.argv:
+        demo_scalar()
+        demo_text()
+        demo_record()

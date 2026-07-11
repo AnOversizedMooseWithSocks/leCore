@@ -654,11 +654,19 @@ def _selftest():
     occluder = sphere(0.5).translate((0.0, 1.5, 0.0))                    # sits between the panel and the point
     Pp = np.array([[0.35, 0.0, 0.0]])                                    # in the soft edge of the sphere's shadow
     Np = np.array([[0.0, 1.0, 0.0]]); Vp = np.array([[0.0, 0.0, 1.0]])
+    # WHY 200 seeds and not 16: at 16 seeds this assertion shipped RED and sat silent until the selftest walker
+    # first ran it in CI -- all 16 one-sample draws happened to land fully shadowed, so std(a1) measured EXACTLY 0.0
+    # and the honest 8-sample estimator (which sometimes catches lit panel) "had more variance" than a degenerate
+    # constant. The physics claim is true (measured at 200 seeds: std ratio 0.42), the POPULATION was too small to
+    # falsify a fluke. So: enough seeds that the 1-sample estimator is provably non-degenerate, an explicit guard
+    # asserting it (std > 0 -- the exact failure mode that fooled the 16-seed version), THEN the contrast.
+    seeds = range(200)
     a1 = np.array([direct_lighting(occluder, Pp, Np, Vp, np.full((1, 3), 0.8), np.zeros(1), np.full(1, 0.5),
-                                   [rectL], np.random.default_rng(s), area_samples=1).sum() for s in range(16)])
+                                   [rectL], np.random.default_rng(s), area_samples=1).sum() for s in seeds])
     a8 = np.array([direct_lighting(occluder, Pp, Np, Vp, np.full((1, 3), 0.8), np.zeros(1), np.full(1, 0.5),
-                                   [rectL], np.random.default_rng(s), area_samples=8).sum() for s in range(16)])
-    assert a8.std() <= a1.std()                                         # more samples -> no more variance (usually less)
+                                   [rectL], np.random.default_rng(s), area_samples=8).sum() for s in seeds])
+    assert a1.std() > 0.0, "1-sample estimator degenerate: every seed landed in full shadow/light -- move Pp"
+    assert a8.std() < a1.std()                                          # more samples -> less variance, non-degenerately
 
     print("OK: holographic_lights self-test passed "
           "(point/dir/ambient/spot/rect/disk/sphere/mesh/IES/dome + fields + gobo + multi-sample)")

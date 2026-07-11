@@ -103,7 +103,7 @@ class SurfaceMaterial:
 
 
 def render_surface(sdf, camera, width, height, materials, light_dir=(0.45, 0.75, 0.35),
-                   sky=None, ambient=0.12, background=(0.55, 0.65, 0.82)):
+                   sky=None, ambient=0.12, background=(0.55, 0.65, 0.82), pixel_mask=None, base=None):
     """Render an SDF scene with PER-HIT Param-channel resolution -- the render call the SurfaceMaterial exists for.
     `materials` maps object id -> SurfaceMaterial (or a single SurfaceMaterial for the whole SDF). Shading: Lambert
     diffuse * resolved color, Blinn specular sharpened by (1 - roughness), an environment reflection mixed in by
@@ -116,6 +116,23 @@ def render_surface(sdf, camera, width, height, materials, light_dir=(0.45, 0.75,
 
     eye, dirs = camera.ray_dirs(width, height)
     O = np.broadcast_to(eye, (width * height, 3)).astype(float); D = dirs.reshape(-1, 3)
+
+    # PARTIAL SHADING (the information-rate render mode's missing half). `pixel_mask` is an (H, W) boolean of the
+    # pixels to actually trace; everything else is taken from `base`. Without this, `RefreshRenderer`'s budget was a
+    # COUNTED claim -- its `shade(mask)` callback received `None` and returned a full frame, so the "5x fewer shader
+    # evaluations" was an arithmetic statement about a mask, not a saving anyone had realised.
+    #
+    # `pixel_mask=None` is the default and traces every pixel, bit-identically to before.
+    sel = None
+    if pixel_mask is not None:
+        sel = np.asarray(pixel_mask, bool).reshape(-1)
+        if sel.shape[0] != width * height:
+            raise ValueError("pixel_mask must be (height, width); got %r for %dx%d"
+                             % (np.shape(pixel_mask), height, width))
+        if base is None:
+            raise ValueError("a pixel_mask needs a `base` frame to fill the unshaded pixels from -- otherwise the "
+                             "result is a partial image pretending to be a whole one")
+        O, D = O[sel], D[sel]
 
     def shade_hits(Ph, Dh, ids):
         """Resolve each hit's material channels AT the hit point and shade -- grouped per material id so each
@@ -141,7 +158,7 @@ def render_surface(sdf, camera, width, height, materials, light_dir=(0.45, 0.75,
         return out, alpha
 
     hit, t, P = sphere_trace(sdf, O, D)
-    frame = np.zeros((width * height, 3))
+    frame = np.zeros((len(O), 3))
     frame[~hit] = np.clip(np.asarray(sky(D[~hit]), float), 0, 1) * 0.5 + np.asarray(background) * 0.5
     if hit.any():
         Ph = P[hit]; Dh = D[hit]; ids = np.asarray(sdf.ids(Ph))
@@ -157,7 +174,11 @@ def render_surface(sdf, camera, width, height, materials, light_dir=(0.45, 0.75,
                 b2, _ = shade_hits(P2[h2], Dh[transp][h2], ids2)     # what is behind, shaded with ITS material
                 bt = behind[transp]; bt[h2] = b2; behind[transp] = bt
         frame[hit] = front * alpha[:, None] + behind * (1 - alpha[:, None])
-    return np.clip(frame.reshape(height, width, 3), 0, 1)
+    if sel is None:
+        return np.clip(frame.reshape(height, width, 3), 0, 1)
+    out = np.array(base, float, copy=True).reshape(-1, 3)
+    out[sel] = np.clip(frame, 0, 1)
+    return out.reshape(height, width, 3)
 
 
 def _selftest():

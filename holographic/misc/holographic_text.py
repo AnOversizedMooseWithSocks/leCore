@@ -859,9 +859,42 @@ def demo_text_multilingual():
     print("  spells and chains words plausibly without knowing what any of them mean.")
 
 
+def _selftest():
+    """Regression trap (T6 backfill; demos only, no assertion). Pins two contracts: a HolographicNGram trained on
+    text PREDICTS that text's next character far better than chance (it has learned the sequence statistics), and
+    learned word vectors place a co-occurring word nearer than an unrelated one. Contrast-based, not absolute."""
+    import numpy as np
+
+    # 1. N-GRAM next-char prediction: trained on a repetitive corpus, accuracy is high; on the 27-symbol space
+    #    chance is ~0.04, so >0.5 is unmistakable learning, not luck. (Measured ~0.98 on this corpus.)
+    ng = HolographicNGram()
+    text = "the quick brown fox jumps over the lazy dog " * 30
+    ng.fit(text)
+    acc = ng.predict_accuracy(text)
+    assert acc > 0.5, "n-gram failed to learn its own training text: acc=%.3f" % acc
+
+    # 2. WORD VECTORS carry co-occurrence: in a corpus where 'cat' always co-occurs with 'sat', cat is nearer to
+    #    sat than to a word from the other sentence. The [BLIND-SPOT] point: assert the RELATION, not a magnitude.
+    enc = learn_word_vectors("the cat sat here the cat sat again the dog ran there the dog ran fast " * 8,
+                             dim=512, window=2, seed=0)
+
+    def _cos(a, b):
+        return float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-9))
+
+    cat, sat, ran = enc.wordvec("cat"), enc.wordvec("sat"), enc.wordvec("ran")
+    if cat is not None and sat is not None and ran is not None:
+        assert _cos(cat, sat) > _cos(cat, ran)                 # cat co-occurs with sat, not ran
+
+    print("OK: holographic_text self-test passed (an n-gram predicts its training text's next char at acc>0.5 vs "
+          "~0.04 chance, and word vectors place a co-occurring word nearer than an unrelated one)")
+
+
 if __name__ == "__main__":
-    demo_text()
-    demo_text_self_organizing()
-    demo_text_scaled()
-    demo_text_hard()
-    demo_text_multilingual()
+    import sys
+    _selftest()
+    if "--demos" in sys.argv:
+        demo_text()
+        demo_text_self_organizing()
+        demo_text_scaled()
+        demo_text_hard()
+        demo_text_multilingual()

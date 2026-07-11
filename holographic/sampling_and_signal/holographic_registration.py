@@ -8,7 +8,12 @@ the gap, and this module ships them:
      by the affine composition law. Order changes *which* `(S, T)` you get; every order gives *some* single
      `(S, T)`. The recoverable object is the GROUP ELEMENT, not the factor sequence. `affine_compose` is exact
      (measured, max|diff| ~1e-16 over a 4-edit chain).
-  2. **THE LIFT DIAGONALIZES THE STUBBORN FAMILY.** `|FFT|` discards translation; resampling the magnitude
+  2. **THE LIFT DIAGONALIZES THE STUBBORN FAMILY** -- and the transform tower (`holographic_grouptower`) says why
+     it must. A convolution algebra is commutative, so only the abelian IDEAL of the affine group can be
+     diagonalised; scale sits in the CENTRE of the linear part and no spectrum represents it (measured: relative
+     error 1.579). ***A layer you cannot diagonalise, you RELOCATE*** -- on a log axis a dilation becomes a
+     translation, joins the ideal, and becomes a bind. This is not an estimator trick; it is the only move
+     available. `|FFT|` discards translation; resampling the magnitude
      spectrum onto a LOG-frequency axis turns dilation into a SHIFT (Reddy & Chatterji's Fourier-Mellin move). The
      estimator is then the same cross-correlation-with-a-parabola that `holographic_reproject.est_dx` uses on
      images. Scale becomes translation; the engine already knew how to find a translation.

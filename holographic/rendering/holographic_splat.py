@@ -675,11 +675,33 @@ def _h8_selftest():
           "because a Gabor atom is a BANDPASS primitive and an edge is every band at once)" % (d_stripes, d_disk))
 
 
-if __name__ == "__main__":
+def _selftest():
+    """Canonical entry point for the CI walker (T6 backfill). The module already had well-named sub-selftests
+    (`_c1_selftest`, `_c3_selftest`, `_h8_selftest`) but not the conventional `_selftest`, so the coverage census
+    counted it as missing. This runs them, then pins the ONE headline contract they didn't state outright: a
+    Gaussian-splat fit reconstructs its target, and MORE splats reconstruct it BETTER (the monotonicity a fitter
+    must have; a fit that doesn't improve with capacity is broken). Numbers measured on the live fitter first."""
+    import numpy as np
+
     _c1_selftest()
     _c3_selftest()
     _h8_selftest()
-    print("holographic_splat C1 densify + C3 early-stop selftests passed")
+
+    # fit->render->PSNR, and PSNR RISES with the splat budget K. The contrast (more capacity, better fit) is the
+    # contract; the absolute dB is incidental and would be brittle to assert directly.
+    target = np.zeros((32, 32))
+    target[8:24, 8:24] = 1.0                                    # a sharp square: a real target, not smooth noise
+    p_lo = psnr(target, splat_render(splat_fit(target, K=5), target.shape))
+    p_hi = psnr(target, splat_render(splat_fit(target, K=40), target.shape))
+    assert p_hi > p_lo + 1.0, ("more splats did not improve the fit -- fitter regressed: K5=%.2f K40=%.2f"
+                               % (p_lo, p_hi))
+
+    print("OK: holographic_splat self-test passed (C1 densify + C3 early-stop + H8 Gabor sub-tests, and a "
+          "%d-splat fit reconstructs a sharp square %.1f dB better than a 5-splat fit)" % (40, p_hi - p_lo))
+
+
+if __name__ == "__main__":
+    _selftest()
 
 
 # ---------------------------------------------------------------------------------------------------------------

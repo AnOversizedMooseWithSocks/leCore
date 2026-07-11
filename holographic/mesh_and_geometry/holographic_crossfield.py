@@ -206,6 +206,12 @@ def singularity_index(phi, ctx):
 
     **`sum(index) == chi` -- and it says nothing about the field.** The matching is antisymmetric, so its
     contribution cancels around every dual edge, leaving a mesh-only quantity. See kept negative 1."""
+    if not isinstance(ctx, dict) or "rho" not in ctx:
+        raise ValueError("ctx must come from cross_field(); got %r" % (type(ctx),))
+    if ctx["rho"] and not isinstance(next(iter(ctx["rho"])), tuple):
+        raise ValueError("this ctx has been through JSON: its `rho` keys are strings like '(0, 1)', not (0, 1) "
+                         "tuples, so it cannot be used. A live handle does not survive serialisation. Use the "
+                         "stateless twin `field_singularities(mesh)`, which takes data and returns data.")
     rho, rings, defect = ctx["rho"], ctx["rings"], ctx["defect"]
     phi = np.asarray(phi, float)
 
@@ -222,6 +228,30 @@ def singularity_index(phi, ctx):
         match = sum(p[e] for e in pairs)
         idx[v] = int(np.round((defect[v] + turn) / (2.0 * np.pi))) + match / 4.0
     return idx
+
+
+def field_singularities(mesh, phi=None):
+    """The STATELESS one-shot twin of `cross_field` + `singularity_index`: takes a mesh, returns plain data.
+
+    `{index, n_singularities, sum_index, euler, quarter_residual, energy}` -- lists and numbers, nothing an agent
+    cannot receive over JSON and nothing it has to hand back.
+
+    WHY THIS EXISTS. `cross_field` returns `(phi, ctx)`, and `ctx` carries `rho`, a dict keyed by `(face, face)`
+    TUPLES. Serialised, those keys become the strings `"(0, 1)"`, so the payload *looks* like a context and cannot
+    be fed back: `singularity_index` dies with `KeyError: (0, 1)`. **An object that serialises into something that
+    looks right but cannot be used is worse than one that raises.** The remedy is the pattern this engine already
+    knows: an agent-facing faculty is a stateless one-shot that takes data and returns data."""
+    phi_local, ctx = cross_field(mesh)
+    if phi is not None:
+        phi_local = np.asarray(phi, float)
+    idx = singularity_index(phi_local, ctx)
+    quarters = idx * 4.0
+    return {"index": [float(v) for v in idx],
+            "n_singularities": int((np.abs(idx) > 1e-9).sum()),
+            "sum_index": float(idx.sum()),
+            "euler": int(mesh.euler_characteristic()),
+            "quarter_residual": float(np.abs(quarters - np.round(quarters)).max()),
+            "energy": field_energy(phi_local, ctx)}
 
 
 def field_report(mesh, phi=None, ctx=None):

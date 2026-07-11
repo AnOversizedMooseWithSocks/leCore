@@ -73,7 +73,14 @@ def is_deterministic(fn, sample, trials=3):
     """Does `fn` return a bit-identical result for a repeated input? C4's gate.
 
     A cache over a non-deterministic evaluator is unsound: it serves its first draw forever while the uncached path
-    keeps drawing. The failure surfaces as a cache/brute disagreement, and the cache gets blamed."""
+    keeps drawing. The failure surfaces as a cache/brute disagreement, and the cache gets blamed.
+
+    IN-PROCESS ONLY. `fn` is a callable, and a callable does not cross JSON -- so this faculty is not agent-callable
+    over `/invoke`, and saying so is better than accepting a string and failing inside `fn(sample)`. The agent-facing
+    twin is `evaluate_elements(..., op="area")`, which names an operator from a registry instead of passing one."""
+    if not callable(fn):
+        raise ValueError("is_deterministic needs a CALLABLE, and a callable does not survive JSON. This faculty is "
+                         "in-process only; over /invoke, name a registered operator with evaluate_elements instead.")
     first = fn(sample)
     for _ in range(int(trials) - 1):
         again = fn(sample)
@@ -336,12 +343,12 @@ def _selftest():
     from holographic.mesh_and_geometry.holographic_equivariance import centroid as _centroid
     from holographic.mesh_and_geometry.holographic_equivariance import max_x as _max_x
 
+    # ONE Rodrigues generator. `sample_transform("rotate", rng)` is already imported in this module's namespace by
+    # the equivariance table; a duplicate scan found this body in three selftests. See holographic_canonmesh.
+    from holographic.mesh_and_geometry.holographic_equivariance import sample_transform
+
     def _rot(r):
-        v = r.normal(size=3)
-        v /= np.linalg.norm(v)
-        th = r.uniform(0.2, 2.0)
-        K = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
-        return np.eye(3) + np.sin(th) * K + (1 - np.cos(th)) * K @ K
+        return sample_transform("rotate", r)[0]
 
     r2 = np.random.default_rng(0)
     bases = [r2.normal(size=(3, 3)) for _ in range(5)]

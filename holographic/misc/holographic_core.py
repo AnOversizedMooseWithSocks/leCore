@@ -394,5 +394,48 @@ def _demo():
           f"reloaded, decides identically: {same}")
 
 
+def _selftest():
+    """Regression trap for THE FROZEN CORE -- the stable kernel everything builds on (T6 backfill; it had a demo
+    but no assertion). Pins the three contracts build-on-top code depends on: cleanup snaps a noisy vector to the
+    right symbol, save/load round-trips an object bit-for-bit, and the version guard is present. Numbers measured
+    against the live kernel first."""
+    import numpy as np
+    import os
+    import tempfile
+    from holographic.agents_and_reasoning.holographic_ai import Vocabulary, random_vector
+
+    d = 512
+    vocab = Vocabulary(dim=d, seed=0)
+    for s in ("cat", "dog", "bird"):
+        vocab.get(s)
+
+    # 1. CLEANUP: a vector that is mostly "cat" plus real noise snaps back to "cat", not a neighbour -- and the
+    #    winning similarity clearly beats an unrelated symbol (the [BLIND-SPOT] discrimination point).
+    noisy = vocab.get("cat") + 0.3 * random_vector(d, np.random.default_rng(9))
+    name, sim = cleanup(noisy, vocab)
+    assert name == "cat" and sim > 0.7, (name, sim)
+
+    # 2. SAVE/LOAD is BIT-IDENTICAL (the merge-gate standard applied to persistence): a reloaded object mints the
+    #    exact same vectors. A round-trip that is merely "close" would silently drift a creature's trajectory.
+    tmp = tempfile.mktemp(suffix=".npz")
+    try:
+        save(vocab, tmp)
+        reloaded = load(tmp)
+        for s in ("cat", "dog", "bird"):
+            assert np.array_equal(vocab.get(s), reloaded.get(s)), s
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+    # 3. the VERSION GUARD exists and is stamped into every snapshot -- the mechanism that makes an old save fail
+    #    loudly instead of loading into a subtly wrong object.
+    assert isinstance(CORE_VERSION, int) and isinstance(STATE_VERSION, int)
+    assert STATE_VERSION == to_state(vocab).get("state_version", to_state(vocab).get("version"))
+
+    print("OK: holographic_core self-test passed (cleanup snaps noisy->'cat' at sim>0.7, save/load round-trips "
+          "bit-identically for every symbol, and every snapshot carries STATE_VERSION for the loud-fail guard)")
+
+
 if __name__ == "__main__":
+    _selftest()
     _demo()

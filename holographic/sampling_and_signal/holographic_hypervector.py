@@ -105,6 +105,30 @@ class Hypervector:
         return Hypervector(mat[i], encoder=self.encoder, tag="atom%d" % i)
 
     # --- READ: readouts ---
+    # --- WHICH FLOOR OF THE TRANSFORM TOWER AM I ON? (holographic_grouptower) ---
+    def transform_layer(self):
+        """**A hypervector used as an operator is ALWAYS the abelian ideal. The algebra forbids anything else.**
+
+        `bind` is a circular convolution, so the set of hypervector operators is closed, associative, COMMUTATIVE,
+        has an identity (the delta at 0), and has inverses for unitary atoms -- every axiom of an abelian group.
+        A convolution algebra can only represent an abelian group, so **no hypervector operator can ever be a
+        rotation or a shear.** `permute` is not an exception: it is a translation in INDEX space, and two permutes
+        compose by adding their shifts, exactly.
+
+        Returns the tower's level-1 record. This one fact is why `TransformBank` refuses a scale, why
+        `iterate.step_k` can jump a million steps in one evaluation, and why DL11's affine edit chain collapses to
+        a single group element. See `holographic_grouptower` for the whole tower, and `holographic_projectivetower`
+        for its ceiling."""
+        from holographic.mesh_and_geometry.holographic_grouptower import hypervector_layer
+        return hypervector_layer()
+
+    def commutes_with(self, other):
+        """`max |bind(self, other) - bind(other, self)|` -- **zero**, always, because circular convolution is
+        commutative. The tower's floor-1 property, measurable on the object itself rather than believed."""
+        a, b = self.array, np.asarray(getattr(other, "array", other), float)
+        return float(np.abs(np.fft.irfft(np.fft.rfft(a) * np.fft.rfft(b), n=self.dim)
+                            - np.fft.irfft(np.fft.rfft(b) * np.fft.rfft(a), n=self.dim)).max())
+
     def cosine(self, other):
         """Cosine similarity to another hypervector or raw array."""
         from holographic.agents_and_reasoning.holographic_ai import cosine

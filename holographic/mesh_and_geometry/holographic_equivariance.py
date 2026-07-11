@@ -12,6 +12,14 @@ knowing which one applies to which (operator, transform) pair:
 This module does not assert that table. It MEASURES it: `classify` runs the operator on transformed inputs across
 seeds and returns the strongest verdict that holds to a stated tolerance.
 
+**WHY THE TABLE HAS THE SHAPE IT HAS.** Every verdict here is a statement about which floor of the transform tower
+(`holographic_grouptower`) the delta is standing on. `Aff(n) = GL(n) |x| R^n`: the translations are an abelian
+IDEAL, rotation and shear are the non-commuting peers, scale is the CENTRE of the linear part. An operator's law
+under a delta exists exactly when the ideal below it is NORMAL -- the single identity `A T(t) A^-1 = T(A t)`, which
+is also `shade_adjoint`'s licence to push the delta onto the light. `lecore.classify_transform(fn)` names the floor
+for any transform; `lecore.affine_normality()` is where the mechanism stops, because conjugating a translation by a
+PERSPECTIVE leaves the affine group entirely and nothing pushes through it.
+
 THE MEASURED TABLE (affine transforms x triangle operators, 1e-9 tolerance, 12 trials each):
 
     operator   translate    rotate      uniform     nonuniform   shear       reflect

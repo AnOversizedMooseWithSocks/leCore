@@ -617,8 +617,37 @@ def _demo():
     print(f"\ntree shape: {t.stats()}")
 
 
+def _selftest():
+    """Regression trap for the sub-linear index (T6 backfill; it had a demo but no assertion). Pins the two
+    contracts callers rely on: an approximate tree/forest still RECALLS the right item, and it does so touching
+    FEWER than all candidates (the whole reason a tree exists over a flat scan). Uses the module's own
+    nn_benchmark at a scale where sub-linearity is visible -- numbers measured against the live code first."""
+    import numpy as np
+
+    # 1. SUB-LINEARITY with high recall: at N=3000 the tree touches far fewer than 3000 candidates while still
+    #    finding the true nearest neighbour most of the time. The exact scan is the honest baseline it beats.
+    r = nn_benchmark(N=3000, dim=512, seed=0)
+    assert r["exact_recall"] == 1.0                          # the baseline is exhaustive, so exact
+    assert r["tree_recall"] > 0.7                            # approximate, but reliably finds the target
+    assert r["tree_cmp"] < r["exact_cmp"] / 2               # and does it touching <half the candidates (measured ~375/3000)
+
+    # 2. DIRECT recall: a forest returns the INDEX of the stored item nearest a noisy cue -- the [BLIND-SPOT]
+    #    point is a NOISY query (not the exact stored vector, which any scheme trivially matches).
+    rng = np.random.default_rng(0)
+    items = rng.standard_normal((300, 512))
+    forest = HoloForest(dim=512, seed=0).build(items)
+    hits = sum(forest.recall(items[i] + 0.25 * rng.standard_normal(512)) == i for i in range(0, 300, 10))
+    assert hits >= 25                                        # of 30 noisy probes, the vast majority land right
+
+    print("OK: holographic_tree self-test passed (forest recalls the right item under noise >=25/30, and the tree "
+          "index touches <half the candidates an exhaustive scan would at N=3000 while keeping recall>0.7)")
+
+
 if __name__ == "__main__":
-    _demo()
+    import sys
+    _selftest()                                     # fast: the contract check the CI walker runs
+    if "--demos" in sys.argv:                         # the benchmarks print and are slow -- opt-in
+        _demo()
 
 # ---------------------------------------------------------------------------
 # ReflexCache: the slime-mould fast path in front of ANY index

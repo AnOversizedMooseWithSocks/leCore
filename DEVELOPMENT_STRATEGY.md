@@ -108,9 +108,17 @@ of at import time.
 python3 tools/reachability_audit.py     # is anything unwired / undocumented / buried?
 python3 tools/catalog_gaps.py           # capability without a home / example?
 python3 tools/skill_lint.py             # every catalog example still resolves + runs?
+python3 tools/run_selftests.py          # does EVERY module's own _selftest() still pass? (also runs in CI)
 ```
 
-Target state: 0 missing docstrings, 0 catalog gaps, 0 invocation gaps. If your new module shows up under
+`run_selftests.py` walks every `holographic_*.py`, runs its `_selftest()` in a BLAS-pinned subprocess, and reports
+red/green — the hole that let two module selftests sit red and silent (CI ran pytest, pytest never ran the module
+selftests). `tests/test_all_selftests.py` wraps it so CI inherits it, and holds a budget of modules that have a
+`__main__` but no `_selftest` which **may shrink and must never grow** — ship a module without a selftest and that
+test fails with its name. Use `--only <substr>` for a quick local check of just what you touched, and
+`--list-missing` to see the budget.
+
+Target state: 0 missing docstrings, 0 catalog gaps, 0 invocation gaps, all selftests green. If your new module shows up under
 "IMPORT-ONLY, not a declared negative", go back to step 2 — it isn't wired. If it's a *deliberate* non-faculty,
 record it as a declared negative so the audit stays meaningful.
 

@@ -40,27 +40,45 @@ class BakedGrid:
         self.res = np.array(self.grid.shape[:3])
 
     def sample(self, P):
-        P = np.asarray(P, float)
-        frac = (P - self.lo) / np.maximum(self.hi - self.lo, 1e-12)
-        coord = np.clip(frac * (self.res - 1), 0.0, self.res - 1)
-        i0 = np.floor(coord).astype(int)
-        i1 = np.minimum(i0 + 1, self.res - 1)
-        w = coord - i0
-        out = None
-        for dx in (0, 1):                                          # accumulate the 8 surrounding corners (same order
-            for dy in (0, 1):                                      # as matbake.BakedField, so results agree)
-                for dz in (0, 1):
-                    wx = w[:, 0] if dx else 1.0 - w[:, 0]
-                    wy = w[:, 1] if dy else 1.0 - w[:, 1]
-                    wz = w[:, 2] if dz else 1.0 - w[:, 2]
-                    ix = i1[:, 0] if dx else i0[:, 0]
-                    iy = i1[:, 1] if dy else i0[:, 1]
-                    iz = i1[:, 2] if dz else i0[:, 2]
-                    corner = self.grid[ix, iy, iz]
-                    wgt = wx * wy * wz
-                    contrib = wgt[:, None] * corner if corner.ndim > 1 else wgt * corner
-                    out = contrib if out is None else out + contrib
-        return out
+        """Trilinearly sample the grid at world points `P` (M, 3), clamping out-of-box points to the nearest edge.
+        Delegates to `trilinear_sample`, which is the ONE reader this home owns."""
+        return trilinear_sample(self.grid, self.lo, self.hi, self.res, P)
+
+
+def trilinear_sample(grid, lo, hi, res, P):
+    """**The one trilinear reader.** `grid` is `(res, res, res)` or `(res, res, res, C)`; `P` is `(M, 3)` in world
+    coordinates; points outside the box clamp to the nearest edge.
+
+    THIS HOME EXISTS TO OWN THIS FUNCTION. Its own docstring said it "mirrors matbake.BakedField's reader so results
+    agree" -- and a structural duplicate scan found the two bodies identical, agreeing bit for bit (0.0e+00) over 300
+    points including out-of-box clamping. **A consolidation home that MIRRORS is not a home that OWNS**, and
+    "route, don't rewrite" is the homes' own stated rule. `matbake.BakedField.sample` now calls this."""
+    grid = np.asarray(grid)
+    lo = np.asarray(lo, float)
+    hi = np.asarray(hi, float)
+    P = np.asarray(P, float)
+    frac = (P - lo) / np.maximum(hi - lo, 1e-12)
+    coord = np.clip(frac * (res - 1), 0.0, res - 1)                # continuous grid coords, clamped in-box
+    i0 = np.floor(coord).astype(int)
+    i1 = np.minimum(i0 + 1, res - 1)
+    w = coord - i0                                                 # per-axis interpolation weight in [0, 1]
+    out = None
+    # accumulate the 8 surrounding corners. The ORDER is part of the contract: floating addition is not
+    # associative, and both callers must sum the corners identically or their results drift at 1e-16.
+    for dx in (0, 1):
+        for dy in (0, 1):
+            for dz in (0, 1):
+                wx = w[:, 0] if dx else 1.0 - w[:, 0]
+                wy = w[:, 1] if dy else 1.0 - w[:, 1]
+                wz = w[:, 2] if dz else 1.0 - w[:, 2]
+                ix = i1[:, 0] if dx else i0[:, 0]
+                iy = i1[:, 1] if dy else i0[:, 1]
+                iz = i1[:, 2] if dz else i0[:, 2]
+                corner = grid[ix, iy, iz]
+                wgt = wx * wy * wz
+                contrib = wgt[:, None] * corner if corner.ndim > 1 else wgt * corner
+                out = contrib if out is None else out + contrib
+    return out
 
 
 class Cache:
@@ -306,6 +324,20 @@ def cache_backends():
 
 
 def _selftest():
+    # THE REGRESSION THIS SELFTEST MISSED. It only checked exactness AT GRID NODES, where the trilinear weights are
+    # 0 or 1 -- so an extraction that returned after the FIRST of the eight corner groups still passed. The
+    # designed-for case cannot falsify you. Check an OFF-NODE point, where all eight corners must contribute.
+    _g = np.zeros((3, 3, 3))
+    _g[0, 0, 0] = 1.0                                            # a single corner: only trilinear weighting can read it
+    _mid = trilinear_sample(_g, np.zeros(3), np.ones(3), np.array([3, 3, 3]), np.array([[0.25, 0.25, 0.25]]))
+    assert abs(float(_mid[0]) - 0.125) < 1e-12, float(_mid[0])   # (1-0.5)^3 = 0.125, and it needs all 8 corners
+
+    _all = np.ones((3, 3, 3))
+    _any = trilinear_sample(_all, np.zeros(3), np.ones(3), np.array([3, 3, 3]),
+                            np.random.default_rng(0).uniform(0, 1, (50, 3)))
+    assert np.abs(_any - 1.0).max() < 1e-12                      # the 8 weights sum to 1 everywhere, or they do not
+
+
     lo = np.array([-1.0, -1.0, -1.0]); hi = np.array([1.0, 1.0, 1.0]); res = 8
 
     # the shared grid generator matches the inline np.linspace/meshgrid the bakes used

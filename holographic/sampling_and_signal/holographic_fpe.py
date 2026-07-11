@@ -112,6 +112,23 @@ class VectorFunctionEncoder:
             k *= ax.kernel_at(float(d))
         return float(k)
 
+    def encode_many(self, points):
+        """The n-D FPE vectors for MANY points, as an `(M, dim)` array. **Bit-identical to stacking `encode`.**
+
+        `bind` is a circular convolution, i.e. a spectrum multiply, so binding the per-axis encodings of a whole
+        batch is one `rfft` per axis, one elementwise product, and one `irfft`. The loop was never necessary.
+
+        WHY IT MATTERS: `fetch_nd` -- the texture unit's "bake once, sample O(1)" -- accepted an `(M, n)` array and
+        then called `encode` once per point. The sample path of the O(1) primitive was an O(M) Python loop, and it
+        was the reason a baked material measured 195x SLOWER than evaluating the pattern directly."""
+        P = np.atleast_2d(np.asarray(points, float))
+        if P.shape[1] != self.n_dims:
+            raise ValueError("points must have %d coordinates; got %r" % (self.n_dims, P.shape))
+        spec = np.fft.rfft(self.axes[0].encode_many(P[:, 0]), axis=1)
+        for k in range(1, self.n_dims):
+            spec = spec * np.fft.rfft(self.axes[k].encode_many(P[:, k]), axis=1)
+        return np.fft.irfft(spec, n=self.dim, axis=1)
+
     def bundle(self, points, weights=None):
         """Represent a function f: R^n -> R as a weighted superposition of encoded points,
         f = sum_i w_i encode(p_i). With RBF axes, querying f is a holographic kernel-density estimate."""

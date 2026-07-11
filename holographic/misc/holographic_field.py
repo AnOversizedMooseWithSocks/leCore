@@ -264,9 +264,30 @@ def demo_concentration_note():
     print("  seed grows a world; the world is the neighborhoods of the seeds.\n")
 
 
+def _selftest():
+    """Regression trap (T6 backfill; demos only). Pins the scalar-field contract: a bump PEAKS at its centre, and
+    ascend() CLIMBS from a low point toward that peak (the 'universal gradient' the brain uses to navigate any
+    field). Measured against the live field first; asserted as a relation (climbed higher), not an absolute."""
+    import numpy as np
+
+    centre = np.array([0.3, 0.7])
+    f = bump(centre)
+    assert f.sample(centre) > f.sample(np.array([0.9, 0.1])) + 0.2      # the peak is at the centre, clearly
+
+    start = np.array([0.9, 0.1])                                        # a genuinely low, off-centre start
+    peak = ascend(f, start, steps=40, seed=0)
+    assert f.sample(peak) > f.sample(start) + 0.2                       # ascent climbed meaningfully uphill
+
+    print("OK: holographic_field self-test passed (a bump peaks at its centre and ascend() climbs from a low "
+          "off-centre start meaningfully uphill toward it)")
+
+
 if __name__ == "__main__":
-    demo_one_field_many_roles()
-    demo_smooth_composition()
-    demo_universal_gradient()
-    demo_space_becomes_time()
-    demo_concentration_note()
+    import sys
+    _selftest()
+    if "--demos" in sys.argv:
+        demo_one_field_many_roles()
+        demo_smooth_composition()
+        demo_universal_gradient()
+        demo_space_becomes_time()
+        demo_concentration_note()

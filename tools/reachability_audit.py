@@ -53,6 +53,21 @@ _KNOWN_NEGATIVES = {
 }
 
 
+def _is_facade(name, src):
+    """A CONSOLIDATION HOME (`holographic_*home.py`) is a library facade -- "one door, route don't rewrite" -- and
+    is import-only BY DESIGN. It is not a failed idea and it is not a gap.
+
+    Before this distinction existed, all 13 homes sat in the IMPORT-ONLY "review" bucket forever, indistinguishable
+    from real gaps. **A number that never moves is a blind spot, not a baseline.** A facade must still SAY it is one:
+    the naming convention alone is not the declaration."""
+    if not name.endswith("home"):
+        return False
+    head = src[:1200].lower()
+    return ("home (consolidation" in head or "one facade" in head or "the one door" in head
+            or "single door" in head or "route, don't rewrite" in head or "one place for" in head
+            or "scaffold" in head)
+
+
 def audit(root):
     # holographic_unified.py moved into the package (holographic/misc/); find it wherever it lives.
     _unified = glob.glob(os.path.join(root, "holographic", "**", "holographic_unified.py"), recursive=True) \
@@ -61,6 +76,7 @@ def audit(root):
 
     modules = _engine_modules(root)
     no_doc, no_public, import_only, kept_neg, documents_neg, superseded = [], [], [], [], [], []
+    facades = []
     referenced = 0
     for path in modules:
         name = os.path.basename(path)[:-3]
@@ -75,6 +91,7 @@ def audit(root):
         api = _public_api(tree)
         dl = doc.lower()
         is_neg = name in _KNOWN_NEGATIVES                        # deliberately-unwired (explicit list)
+        is_facade = _is_facade(name, src)                        # a consolidation home: import-only BY DESIGN
         is_superseded = "superseded by" in dl                    # an older twin, declared and pointed at the wired one
         if ("kept negative" in dl) or ("recorded negative" in dl):
             documents_neg.append(name)                          # merely DOCUMENTS a negative -- honest, good
@@ -88,9 +105,11 @@ def audit(root):
             kept_neg.append(name)
         if is_superseded:
             superseded.append(name)
+        if is_facade:
+            facades.append(name)
         if in_mind:
             referenced += 1
-        elif not is_neg and not is_superseded:                   # superseded twins are declared, not unexplained
+        elif not is_neg and not is_superseded and not is_facade:  # facades are import-only BY DESIGN
             import_only.append(name)
 
     n = len([p for p in modules if os.path.basename(p)[:-3] != "holographic_unified"])
@@ -99,6 +118,7 @@ def audit(root):
     print("  deliberately NOT wired (recorded negatives):               %d  %s" % (len(kept_neg), sorted(kept_neg)))
     print("  modules that DOCUMENT a kept negative (honest measurement): %d" % len(documents_neg))
     print("  SUPERSEDED by a wired twin (declared, use the twin):        %d  %s" % (len(superseded), sorted(superseded)))
+    print("  CONSOLIDATION HOMES (one door, import-only BY DESIGN):      %d  %s" % (len(facades), sorted(facades)))
     print()
     print("  NO DOCSTRING -> UNDISCOVERABLE by find_capability (FIX these): %d" % len(no_doc))
     for m in sorted(no_doc):

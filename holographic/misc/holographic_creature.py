@@ -2165,12 +2165,44 @@ def _d2_selftest():
     assert b2.robust_returns is True                                # the flag survives save/load
 
 
+def _selftest():
+    """Canonical entry point for the CI walker (T6 backfill). The module had a good `_d2_selftest` but the
+    `__main__` ran five slow DEMOS and never called it -- so the census counted it missing AND the real check
+    never ran. This runs `_d2_selftest` and adds the headline contract: a HolographicMind LEARNS to value a
+    rewarded action over a punished one. Kept deliberately small (no maze solve) -- the slowest-tests report flags
+    creature simulations as the heaviest in the suite, so the selftest pins the learning contract cheaply."""
+    import numpy as np
+
+    _d2_selftest()
+
+    # value learning: one fixed state, action 0 always rewarded (+5), action 1 always punished (-5). The mind's
+    # value estimate must separate them cleanly -- the [BLIND-SPOT] point is asserting the DISCRIMINATION, the
+    # thing the creature exists to do, not merely "it ran".
+    brain = HolographicMind(256, ["left", "right"], merge=0.8)
+    rng = np.random.default_rng(0)
+    s = rng.standard_normal(256)
+    s /= np.linalg.norm(s) + 1e-12
+    for _ in range(60):
+        brain.remember([s], [0], [5.0])
+        brain.remember([s], [1], [-5.0])
+    v_good, _ = brain.value(s, 0)
+    v_bad, _ = brain.value(s, 1)
+    assert v_good > v_bad + 5.0, ("mind failed to separate rewarded from punished action: %.2f vs %.2f"
+                                  % (v_good, v_bad))
+
+    print("OK: holographic_creature self-test passed (D2 robust-returns winsorisation holds, and a mind learns to "
+          "value a rewarded action (+5.0) clearly above a punished one (-5.0) for the same state)")
+
+
 if __name__ == "__main__":
-    demo_creature()
-    demo_memory()
-    demo_obstacles()
-    demo_introspect()
-    demo_self_maintaining()
+    import sys
+    _selftest()
+    if "--demos" in sys.argv:
+        demo_creature()
+        demo_memory()
+        demo_obstacles()
+        demo_introspect()
+        demo_self_maintaining()
 
 
 def capture_route(world_factory, encoder, mind, mem=2, max_steps=300, trials=8):

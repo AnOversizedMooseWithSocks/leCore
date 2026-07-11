@@ -30,6 +30,17 @@ import numpy as np
 # --- quaternion helpers (unit quaternions [w, x, y, z]; small, readable, no dependency) --------------------------
 
 def qmul(a, b):
+    """Hamilton quaternion product `(w, x, y, z)`. **DELEGATES to `holographic_transform.quat_mul`** -- the engine's
+    canonical quaternion kit, which `transformhome.Transform` already routes to.
+
+    A structural duplicate scan found the two bodies identical, and a numeric check confirmed they agree bit for bit
+    (0.0e+00). Two implementations of one convention will eventually disagree on a sign, and the one that disagrees
+    will be the one nobody is testing."""
+    from holographic.misc.holographic_transform import quat_mul
+    return quat_mul(a, b)
+
+
+def _qmul_original(a, b):
     """Hamilton product a (x) b -- compose two rotations."""
     aw, ax, ay, az = a; bw, bx, by, bz = b
     return np.array([
@@ -52,12 +63,14 @@ def qnorm(q):
 
 
 def quat_from_axis_angle(axis, angle):
-    """Rotation of `angle` radians about (a normalized) `axis`."""
-    axis = np.asarray(axis, float); n = np.linalg.norm(axis)
-    if n < 1e-12:
-        return np.array([1.0, 0.0, 0.0, 0.0])
-    axis = axis / n; h = 0.5 * angle
-    return np.array([np.cos(h), *(np.sin(h) * axis)])
+    """Rotation of `angle` radians about (a normalized) `axis`. **DELEGATES to
+    `holographic_transform.quat_from_axis_angle`** -- the same unification rev. 8 made for `qmul`, finished for its
+    sibling constructor. The rev. 9 organization audit found the two bodies structurally identical and a numeric
+    check confirmed bit-identity (`np.array_equal`) over 2,000 random (axis, angle) draws AND the degenerate
+    zero-axis branch. Two copies of one convention will eventually disagree, and the copy that disagrees will be
+    the one nobody is testing."""
+    from holographic.misc.holographic_transform import quat_from_axis_angle as _canonical
+    return _canonical(axis, angle)
 
 
 def quat_rotate(q, v):
