@@ -63,10 +63,15 @@ import numpy as np
 
 from holographic.mesh_and_geometry.holographic_sdf import SDF
 
-#: Nodes the emitter refuses. `menger` and `repeat` fold the domain ITERATIVELY (their unrolled size depends on a
-#: parameter); `twist` and `displace` are `holographic_sdf.INEXACT` -- domain warps that are not exact distances, so
-#: a raymarcher must shorten its steps and the shader needs a warning the emitter cannot enforce.
-UNEMITTABLE = ("menger", "repeat", "twist", "displace")
+#: Nodes the multi-dialect emitter refuses. `menger` folds the domain ITERATIVELY (its unrolled size depends on a
+#: parameter); `twist`, `displace`, `bend`, and `ellipsoid` are `holographic_sdf.INEXACT` -- not exact distances,
+#: so a raymarcher must shorten its steps and the shader needs a warning the emitter cannot enforce. `mirror` (an
+#: exact isometry) and `repeat` (infinite tiling) ARE emittable in all four dialects. `capsule`/`cone`/
+#: `octahedron` are EXACT and emit via the GLSL Shadertoy path (holographic_sdf.to_glsl); they are refused HERE
+#: (the 4-dialect WGSL/C emitter) only because their branch-heavy forms (cone's caps, octahedron's face select)
+#: are not yet ported to the dialect table -- a filed follow-up, not a mathematical limit. capsule is a clamp
+#: away and is the first to add when the table grows a general clamp(lo,hi).
+UNEMITTABLE = ("menger", "twist", "displace", "bend", "ellipsoid", "capsule", "cone", "octahedron", "elongate")
 
 DIALECTS = {
     "wgsl": {"scalar": "f32", "vec3": "vec3<f32>", "infer_types": True, "suffix": "f",
@@ -75,6 +80,7 @@ DIALECTS = {
              "len2": lambda a, b: "length(vec2<f32>(%s, %s))" % (a, b), "len3": lambda v: "length(%s)" % v,
              "max3": lambda v: "max(max(%s.x, %s.y), %s.z)" % (v, v, v),
              "maxv0": lambda v: "max(%s, vec3<f32>(0.0f))" % v,
+             "mod": lambda x, y: "(%s - %s * floor((%s) / (%s)))" % (x, y, x, y),   # WGSL has no mod(); floor form
              "abs": lambda v: "abs(%s)" % v, "clamp": lambda e: "clamp(%s, 0.0f, 1.0f)" % e},
     "glsl": {"scalar": "float", "vec3": "vec3", "infer_types": False, "suffix": "",
              "sig": "float map(vec3 p)", "swz": lambda v, c: "%s.%s" % (v, c),
@@ -82,6 +88,7 @@ DIALECTS = {
              "len2": lambda a, b: "length(vec2(%s, %s))" % (a, b), "len3": lambda v: "length(%s)" % v,
              "max3": lambda v: "max(max(%s.x, %s.y), %s.z)" % (v, v, v),
              "maxv0": lambda v: "max(%s, vec3(0.0))" % v,
+             "mod": lambda x, y: "mod(%s, %s)" % (x, y),                            # GLSL builtin (floor-based)
              "abs": lambda v: "abs(%s)" % v, "clamp": lambda e: "clamp(%s, 0.0, 1.0)" % e},
 }
 
@@ -98,6 +105,9 @@ static {s} max3(v3 a) {{ {s} m = a.x > a.y ? a.x : a.y; return m > a.z ? m : a.z
 static {s} fmaxs({s} a, {s} b) {{ return a > b ? a : b; }}
 static {s} fmins({s} a, {s} b) {{ return a < b ? a : b; }}
 static {s} clamp01({s} a) {{ return a < 0 ? 0 : (a > 1 ? 1 : a); }}
+/* GLSL/WGSL mod(x,y) = x - y*floor(x/y): sign follows y (non-negative for y>0), NOT C's fmod which follows x.
+   Domain `repeat` needs the floor-based one to centre cells symmetrically, so C emits this, never fmod. */
+static {s} modf_({s} x, {s} y) {{ return x - y * {fl}(x / y); }}
 """
 
 # THE `f` SUFFIX IS NOT COSMETIC. An unsuffixed C literal is a DOUBLE, so `float_expr * 3.0` promotes the whole
@@ -106,7 +116,8 @@ static {s} clamp01({s} a) {{ return a < 0 ? 0 : (a > 1 ? 1 : a); }}
 # suffixed one 3.26e-07, and they differ from each other by 4.77e-07. **The unsuffixed number was OPTIMISTIC by 15%,
 # and it was the number this module published as "the tolerance a WGSL port is judged against."** A duplication scan
 # found it: `holographic_emit`'s table already used "f" for c_f32, and the two tables disagreed.
-for _d, _s, _sq, _fa, _suf in (("c_f64", "double", "sqrt", "fabs", ""), ("c_f32", "float", "sqrtf", "fabsf", "f")):
+for _d, _s, _sq, _fa, _suf, _fl in (("c_f64", "double", "sqrt", "fabs", "", "floor"),
+                                    ("c_f32", "float", "sqrtf", "fabsf", "f", "floorf")):
     DIALECTS[_d] = {
         "scalar": _s, "vec3": "v3", "infer_types": False, "suffix": _suf,
         "sig": "%s map(v3 p)" % _s,
@@ -115,7 +126,8 @@ for _d, _s, _sq, _fa, _suf in (("c_f64", "double", "sqrt", "fabs", ""), ("c_f32"
         "len2": lambda a, b: "len2(%s, %s)" % (a, b), "len3": lambda v: "v3len(%s)" % v,
         "max3": lambda v: "max3(%s)" % v, "maxv0": lambda v: "v3max0(%s)" % v,
         "abs": lambda v: "v3abs(%s)" % v, "clamp": lambda e: "clamp01(%s)" % e,
-        "_header": _C_HEADER.format(s=_s, sq=_sq, fa=_fa),
+        "mod": lambda x, y: "modf_(%s, %s)" % (x, y),          # floor-based, matches GLSL mod (see C header)
+        "_header": _C_HEADER.format(s=_s, sq=_sq, fa=_fa, fl=_fl),
         "_min": "fmins", "_max": "fmaxs",
     }
 
@@ -258,6 +270,42 @@ def _emit(node, pvar, d, ctr):
         sc, ec = _emit(ch[0], q, d, ctr)
         return stmts + sc, ec
 
+    if k == "mirror":
+        # reflect one axis across a plane: q.<axis> = plane + abs(p.<axis> - plane); other two pass through.
+        # `_eval` does exactly this. A reflection is an ISOMETRY, so no distance correction is needed (unlike
+        # twist/bend, which is why mirror emits and they do not). Build a whole new vec3 so the one rule works
+        # in C (no swizzle assignment) as well as WGSL/GLSL -- the dialect table's `vec` and component reads.
+        axis, plane = int(p[0]), p[1]
+        comp = ("x", "y", "z")[axis]
+        pl = _lit(plane, d)
+        folded = "(%s + %s)" % (pl, _abs_s("(%s - %s)" % (d["swz"](pvar, comp), pl), d))
+        parts = [folded if a == axis else d["swz"](pvar, ("x", "y", "z")[a]) for a in range(3)]
+        q = nv("p")
+        stmts = [_decl(d, d["vec3"], q, d["vec"](*parts))]
+        sc, ec = _emit(ch[0], q, d, ctr)
+        return stmts + sc, ec
+
+    if k == "repeat":
+        # INFINITE domain repetition: per axis with period c>0, q.<axis> = mod(p.<axis> + c/2, c) - c/2. This is a
+        # single fixed-size warp (three mod expressions), NOT an iterative fold -- the old refusal conflated it
+        # with menger (which truly iterates) and repeat_limited (finite unroll). One mod per axis, exactly as
+        # `_eval` and the GLSL `to_glsl` path do. The dialect `mod` is floor-based in every backend (GLSL builtin,
+        # WGSL/C floor form) so cells centre symmetrically and the four emissions agree.
+        parts = []
+        for a in range(3):
+            c = float(p[a])
+            comp = ("x", "y", "z")[a]
+            src = d["swz"](pvar, comp)
+            if c > 0:
+                half = _lit(0.5 * c, d)
+                parts.append("(%s - %s)" % (d["mod"]("(%s + %s)" % (src, half), _lit(c, d)), half))
+            else:
+                parts.append(src)                            # period 0 on this axis = no repetition
+        q = nv("p")
+        stmts = [_decl(d, d["vec3"], q, d["vec"](*parts))]
+        sc, ec = _emit(ch[0], q, d, ctr)
+        return stmts + sc, ec
+
     raise SdfEmitError("no dialect rule for node %r" % (k,))
 
 
@@ -274,10 +322,12 @@ def _div_vec(a, s, d):
 
 
 def _abs_s(e, d):
-    if d["scalar"] == "double":
-        return "fabs(%s)" % e
-    if d["scalar"] == "float":
-        return "fabsf(%s)" % e
+    # WHY key on vec3=="v3" and not scalar=="float": GLSL's scalar is ALSO "float", so keying on the scalar name
+    # wrongly emits C's fabsf into a GLSL shader. Only C uses the v3 vector type, so that is the honest C test;
+    # within C, f64 wants fabs and f32 wants fabsf (the suffix distinguishes the precision). GLSL and WGSL both
+    # spell scalar abs as abs().
+    if d["vec3"] == "v3":
+        return ("fabsf(%s)" if d["scalar"] == "float" else "fabs(%s)") % e
     return "abs(%s)" % e
 
 
@@ -416,12 +466,35 @@ def _selftest():
 
     # 5a. EVERY node kind is either emitted or refused. A gap is a shader that silently omits geometry.
     cov = coverage()
-    assert cov["complete"] is True and cov["total"] == 18
+    assert cov["complete"] is True and cov["total"] == 25
     assert set(cov["refused"]) == set(UNEMITTABLE)
 
     # 5b. the ones that ARE emittable: onion and rounded, checked against the Python _eval
     for node in (S.sphere(1.0).onion(0.1), S.box(0.5, 0.5, 0.5).rounded(0.1)):
         assert validate_c(node, P[:20], "c_f64")["max_abs_diff"] < 1e-14
+
+    # 5c. MIRROR emits in all four dialects and matches _eval (an isometry -- exact, no distance correction). A
+    #     nested double-mirror (an octant fold on two axes) is the real test: the handler must compose.
+    mir = S.sphere(0.4).translate([0.6, 0, 0]).mirror(axis=0, plane=0.1).mirror(axis=2, plane=0.0)
+    assert validate_c(mir, P[:40], "c_f64")["max_abs_diff"] < 1e-5     # emitter's baseline literal precision
+    for dia in ("wgsl", "glsl", "c_f64", "c_f32"):
+        code = sdf_dialect(mir, dia)
+        assert "abs" in code                                          # the fold's reflection is present
+
+    # 5c2. REPEAT (infinite tiling) emits in all four dialects and matches _eval. This is the browser win: an
+    #      infinite lattice reaches WGSL, not just GLSL. mod is floor-based in every backend so the four agree --
+    #      cross-checked here against the CPU eval, composed WITH a mirror (the demoscene kaleidoscope-tile combo).
+    lat = S.box(0.2, 0.2, 0.2).rounded(0.05).repeat((1.0, 1.0, 1.0)).mirror(axis=0, plane=0.0)
+    assert validate_c(lat, P[:40], "c_f64")["max_abs_diff"] < 1e-5
+    for dia in ("wgsl", "glsl", "c_f64", "c_f32"):
+        code = sdf_dialect(lat, dia)
+        assert ("mod(" in code) or ("floor(" in code) or ("modf_" in code)  # the per-axis tiling is present
+    # 5d. REGRESSION (real bug this handler exposed): GLSL's scalar abs is `abs`, NOT C's `fabsf`. _abs_s used to
+    #     key on scalar=="float", which GLSL shares with c_f32, so it wrongly emitted fabsf into GLSL. onion and
+    #     cylinder (which take a scalar abs) were silently affected. Pin that GLSL never contains a C abs.
+    for node in (S.sphere(1.0).onion(0.1), S.cylinder(1.0, 0.5), mir):
+        gl = sdf_dialect(node, "glsl")
+        assert "fabs" not in gl and "fabsf" not in gl, "GLSL must use abs(), not C's fabs/fabsf"
 
     for bad in (lambda: sdf_dialect(tree, "hlsl"), lambda: sdf_dialect("not a tree", "wgsl"),
                 lambda: validate_c(tree, P, "wgsl")):

@@ -100,16 +100,13 @@ def _f1(rec, true_set):
 
 
 def _occlusion(cue, cb, m):
-    cb = np.asarray(cb, float)
-    resid = np.asarray(cue, float).copy()
-    out = []
-    for _ in range(m):
-        a = cb @ resid
-        j = int(np.argmax(a))
-        w = float(a[j])
-        out.append((j, w))
-        resid = resid - w * cb[j]
-    return out
+    """The greedy matching-pursuit BASELINE cosamp is compared against -- now a DELEGATION to the shipped
+    holographic_occlusion.occlusion_recall (measured bit-identical on selection order AND weights before the
+    switch), instead of a private copy of its loop. WHY delegate (consolidation principle): a baseline that is a
+    drifting copy silently stops being the thing it claims to beat; delegating keeps the comparison honest and
+    lets any improvement to the real algorithm propagate here for free."""
+    from holographic.rendering.holographic_occlusion import occlusion_recall
+    return occlusion_recall(cue, cb, m=m)
 
 
 def _make(coherence, seed, N=200, D=512, M=12):

@@ -106,25 +106,21 @@ def nucleus_sample(dist, rng, temperature=0.6, top_p=0.9, recent="", rep_penalty
     sample within it. This trims the unlikely tail that produces garbage while leaving
     real diversity intact. An optional repetition penalty downweights symbols seen in the
     `recent` window before sampling (off by default -- this n-gram does not loop, so it
-    is a knob, not a fix). Returns the chosen symbol."""
-    syms = list(dist)
-    w = np.clip(np.array([dist[s] for s in syms], dtype=float), 0, None)
-    if rep_penalty > 0 and recent:
-        for k, s in enumerate(syms):
-            if s in recent:
-                w[k] *= (1.0 - rep_penalty)
-    w = w ** (1.0 / max(temperature, 1e-6))
-    tot = w.sum()
-    if tot <= 0:
+    is a knob, not a fix). Returns the chosen symbol.
+
+    DELEGATES the tempered-nucleus draw to holographic_tokensample.sample_from_distribution
+    (proven bit-identical). The repetition penalty is applied HERE, to the distribution,
+    before delegating -- it is a text-decoding concern, not a property of the general
+    sampler, so it stays local while the core draw is shared. See that primitive for the
+    temperature/nucleus semantics."""
+    from holographic.agents_and_reasoning.holographic_tokensample import sample_from_distribution
+    if rep_penalty > 0 and recent:                       # downweight recently-seen symbols (a text knob)
+        dist = {s: (w * (1.0 - rep_penalty) if s in recent else w) for s, w in dist.items()}
+    out = sample_from_distribution(dist, temperature=temperature, top_p=top_p, rng=rng)
+    if out is None:                                      # degenerate all-zero mass: uniform fallback (as before)
+        syms = list(dist)
         return syms[int(rng.integers(len(syms)))]
-    p = w / tot
-    order = np.argsort(p)[::-1]
-    cum = np.cumsum(p[order])
-    keep = order[:max(1, int(np.searchsorted(cum, top_p)) + 1)]
-    masked = np.zeros_like(p)
-    masked[keep] = p[keep]
-    masked /= masked.sum()
-    return syms[int(rng.choice(len(syms), p=masked))]
+    return out
 
 
 def generate_text(ngram, seed_text, length=300, temperature=0.6, top_p=0.9,

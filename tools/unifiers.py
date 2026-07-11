@@ -427,7 +427,17 @@ NOT_APPLICABLE = {
         "functions and one `Kinematics` class) that demonstrates encode(a+b) == bind(encode(a), encode(b)). It holds "
         "no constraint graph, no islands, and no per-frame stepper over many bodies -- there is nothing to put to "
         "sleep. The stepper with islands is `softbody`, and it is wired.",
-    ("cachehome.MarginCache (fat margin for a drifting query)", "holographic_lightcache/holographic_domecache"):
+    # These two were named as MarginCache clients in the first wiring audit, then retired together for one reason.
+    # Split into per-cache entries (matching the REGISTRY clients list) so each retirement is independently
+    # queryable -- the shared reason is stated once and referenced by both.
+    (("cachehome.MarginCache (fat margin for a drifting query)", "holographic_lightcache")):
+        "CLOSED BY STRUCTURE, not by measurement. `lightcache` and `domecache` are STATELESS per-frame SCREEN-SPACE "
+        "stride caches: they bake every Nth pixel of one frame and interpolate the rest. There is no query STREAM to "
+        "drift -- the query is a pixel grid, regenerated whole on every call, and the functions hold no state between "
+        "frames. A fat margin needs a drifting query and a cache that outlives it. The state lives one level up, in "
+        "`RenderSession`, whose camera IS the drifting query -- and that is where MarginCache is now wired. Naming "
+        "these two as clients was an error in the first wiring audit.",
+    (("cachehome.MarginCache (fat margin for a drifting query)", "holographic_domecache")):
         "CLOSED BY STRUCTURE, not by measurement. `lightcache` and `domecache` are STATELESS per-frame SCREEN-SPACE "
         "stride caches: they bake every Nth pixel of one frame and interpolate the rest. There is no query STREAM to "
         "drift -- the query is a pixel grid, regenerated whole on every call, and the functions hold no state between "

@@ -47,13 +47,19 @@ import numpy as np
 # Per-kind arity: (number of scalar params, number of child SDFs). Drives DSL parsing and validation.
 ARITY = {
     "sphere": (1, 0), "box": (3, 0), "torus": (2, 0), "cylinder": (2, 0), "plane": (1, 0),
+    "capsule": (2, 0), "cone": (2, 0), "ellipsoid": (3, 0), "octahedron": (1, 0),
     "union": (0, 2), "intersect": (0, 2), "subtract": (0, 2), "smooth_union": (1, 2),
     "translate": (3, 1), "scale": (1, 1), "rotate": (4, 1), "repeat": (3, 1),
     "round": (1, 1), "onion": (1, 1), "displace": (2, 1), "twist": (1, 1),
+    "mirror": (2, 1), "bend": (2, 1),
+    "elongate": (3, 1),
     "menger": (2, 0),
 }
-# Domain-warp kinds whose output is NOT an exact distance (a raymarcher must take shorter steps).
-INEXACT = {"twist", "displace"}
+# Domain-warp kinds whose output is NOT an exact distance (a raymarcher must take shorter steps). mirror is an
+# isometry (reflection) and stays exact; bend/twist/displace stretch space and do not. `ellipsoid` has no exact
+# closed-form SDF -- iq's k1*(k1-1)/k2 is a tight BOUND (never oversteps), so it is INEXACT too: correct to
+# raymarch, but the emitter refuses it (a shader consumer needs the shorter-step warning we cannot bake in).
+INEXACT = {"twist", "displace", "bend", "ellipsoid"}
 
 
 def as_eval(sdf):
@@ -127,6 +133,24 @@ class SDF:
     def onion(self, thickness):       return SDF("onion", (thickness,), [self])
     def displace(self, amount, freq): return SDF("displace", (amount, freq), [self])
     def twist(self, k):               return SDF("twist", (k,), [self])
+    def elongate(self, hx=0.0, hy=0.0, hz=0.0):
+        """Stretch this shape by pulling it apart along the axes by half-extents (`hx`,`hy`,`hz`) -- iq's
+        opElongate. A sphere becomes a capsule, a box a longer box, a torus an oval track. EXACT (it splits the
+        shape and inserts a straight run, no distance distortion), so it raymarches cleanly and emits to GLSL.
+        The clean way to make a family of shapes from one primitive."""
+        return SDF("elongate", (float(hx), float(hy), float(hz)), [self])
+    def mirror(self, axis=0, plane=0.0):
+        """Fold space across a plane on one axis (kaleidoscopic symmetry from abs()). A DSL-tree node so it
+        round-trips to GLSL; the same warp as holographic_domain.domain_mirror, here as an authorable modifier."""
+        return SDF("mirror", (float(axis), float(plane)), [self])
+    def fold(self, plane=0.0):
+        """Mirror all three axes about `plane` -- map the world into one octant (an 8-fold kaleidoscope). Composes
+        three `mirror` nodes so it emits to GLSL like any other warp. See holographic_domain.fold."""
+        return self.mirror(0, plane).mirror(1, plane).mirror(2, plane)
+    def bend(self, k, axis=0):
+        """Bend space by `k` radians per unit along `axis` (iq's opCheapBend) -- curl a straight beam into an arc.
+        A DSL node so it round-trips to GLSL. Cheap bend: warps distance slightly (fine for silhouettes)."""
+        return SDF("bend", (float(k), float(axis)), [self])
 
     # ----- holographic representation: the (op, *children) tree typed.tree_to_recipe consumes ----
     def to_tree(self):
@@ -143,6 +167,58 @@ class SDF:
         inner = " ".join([self.kind] + [f"{p:.6g}" for p in self.params]
                          + [c.to_dsl() for c in self.children])
         return "(" + inner + ")"
+
+    def cost(self):
+        """Estimate the per-ray evaluation COST of this SDF tree (W2) -- a machine-model annotation for deciding
+        if a scene is cheap enough to raymarch in real time. Returns a dict: `alu` (approximate arithmetic ops
+        per map() call, the dominant term), `nodes` (tree size), `depth` (nesting), `iterative` (True if it
+        contains a menger/repeat-style loop whose cost scales with a parameter), and `verdict` (a plain-language
+        band). The ALU weights are RELATIVE (a sqrt/length is ~7 flops, a trig call ~8, a min/max ~1) -- honest
+        as ratios, not absolute nanoseconds, because the real number depends on the GPU. iq's ask: know the price
+        before you ship the scene."""
+        # WHY these weights: a length()/sqrt is the expensive leaf op; trig (twist/bend) is worse; boolean ops are
+        # nearly free. Grounded in the _eval / _GLSL_PRIM bodies -- e.g. a torus does two length()s (~14), a box
+        # one length + a max (~8). Menger/repeat carry a LOOP whose body repeats `iterations` times.
+        LEAF = {"sphere": 7, "box": 9, "torus": 14, "cylinder": 12, "plane": 1,
+                "capsule": 8, "cone": 16, "octahedron": 12, "ellipsoid": 14}
+        WARP = {"translate": 3, "scale": 2, "rotate": 12, "repeat": 6, "round": 1, "onion": 2,
+                "displace": 10, "twist": 10, "mirror": 2, "bend": 12, "elongate": 6}
+        COMBINE = {"union": 1, "intersect": 1, "subtract": 2, "smooth_union": 6}
+
+        iterative = [False]
+
+        def walk(node, depth):
+            k = node.kind
+            here = LEAF.get(k, WARP.get(k, COMBINE.get(k, 4)))
+            if k == "menger":                                    # a real for-loop: body ~9 ALU x iterations
+                iters = int(node.params[0])
+                here = 9 * iters + 9
+                iterative[0] = True
+            if k == "repeat":
+                iterative[0] = True                              # a mod per axis, cheap but domain-scaling
+            sub = sum(walk(c, depth + 1) for c in node.children)
+            return here + sub
+
+        def count(node):
+            return 1 + sum(count(c) for c in node.children)
+
+        def treedepth(node):
+            return 1 + (max((treedepth(c) for c in node.children), default=0))
+
+        alu = walk(self, 0)
+        n = count(self)
+        d = treedepth(self)
+        # verdict bands: rough, but useful. A 60fps 1080p budget is ~a few hundred ALU per map() at typical march
+        # step counts; these bands assume ~64-128 steps per ray.
+        if iterative[0] and alu > 120:
+            verdict = "expensive (iterative/fractal) -- fine for a hero shot, budget carefully for realtime"
+        elif alu <= 40:
+            verdict = "cheap -- comfortable at realtime resolutions"
+        elif alu <= 120:
+            verdict = "moderate -- realtime at 1080p on a modern GPU, watch the march step count"
+        else:
+            verdict = "heavy -- likely offline or low-res realtime; consider baking or simplifying"
+        return {"alu": alu, "nodes": n, "depth": d, "iterative": iterative[0], "verdict": verdict}
 
     def to_glsl(self, name="map"):
         """Emit a complete Shadertoy-ready fragment shader for this SDF (see _emit_shader)."""
@@ -186,6 +262,33 @@ def menger(iterations=3, size=1.0):
     return SDF("menger", (iterations, size))
 
 
+# W8 -- the primitive PACK. iq asked for the everyday SDF leaves a scene actually needs (his own articles give the
+# exact closed forms). Each is an EXACT distance (not INEXACT), so they raymarch cleanly and emit to every dialect.
+def capsule(h=1.0, r=0.3):
+    """A capsule (a cylinder with hemispherical caps) along Y: segment from -h to +h on the Y axis, radius `r`.
+    The exact distance to a line segment offset by r -- the primitive for limbs, pills, rounded rods. Returns an SDF."""
+    return SDF("capsule", (h, r))
+
+
+def cone(h=1.0, r=0.5):
+    """A capped cone along Y: height `h` (apex at +h/2, base at -h/2), base radius `r`. iq's exact cone distance
+    (a 2-D distance in the (radial, y) half-plane). Returns an SDF -- spikes, funnels, party hats."""
+    return SDF("cone", (h, r))
+
+
+def ellipsoid(ax=1.0, ay=0.7, az=0.5):
+    """An ellipsoid with semi-axes (`ax`,`ay`,`az`). Uses iq's BOUNDED APPROXIMATION k1*(k1-1)/k2 -- the ellipsoid
+    has no exact closed-form SDF, but this is a tight bound that raymarches correctly (never oversteps). Returns
+    an SDF. Marked APPROX so a caller knows to step conservatively near it."""
+    return SDF("ellipsoid", (ax, ay, az))
+
+
+def octahedron(s=1.0):
+    """A regular octahedron of 'radius' `s` (vertex distance along each axis). iq's exact octahedron distance.
+    Returns an SDF -- crystals, gems, dice, the dual of the cube. Exact, emits to every dialect."""
+    return SDF("octahedron", (s,))
+
+
 # ---------------------------------------------------------------------------
 # Evaluation handlers (vectorized). Primitives read P; ops recurse into children.
 # ---------------------------------------------------------------------------
@@ -217,6 +320,52 @@ def _eval(node, P):
         return np.minimum(np.maximum(d_xz, d_y), 0.0) + np.sqrt(dx * dx + dy * dy)
     if k == "plane":
         return P[:, 1] - p[0]
+    if k == "capsule":             # exact distance to a Y-axis segment [-h,h], inflated by r (iq's sdCapsule)
+        h, r = p
+        py = np.clip(P[:, 1], -h, h)                              # nearest point on the segment (only Y varies)
+        d = P.copy(); d[:, 1] = P[:, 1] - py
+        return np.linalg.norm(d, axis=1) - r
+    if k == "cone":                # capped cone along Y, iq's exact 2-D form in the (radial, y) half-plane
+        h, r = p
+        qr = np.linalg.norm(P[:, [0, 2]], axis=1)                # radial distance from the Y axis
+        # work in 2-D q=(qr, y). Cone from apex (0, h/2) to base rim (r, -h/2).
+        y = P[:, 1]
+        q2 = np.stack([qr, y], axis=1)
+        # tip and base points of the slanted edge
+        k1 = np.array([r, -h / 2.0])
+        k2 = np.array([r, -h / 2.0]) - np.array([r, h])          # direction reference; use iq's sdCappedCone form
+        # ca: distance to the caps; cb: distance to the side; combine with sign
+        ca = np.stack([qr - np.minimum(qr, np.where(y < 0, r, 0.0)), np.abs(y) - h / 2.0], axis=1)
+        e = k1 - np.array([0.0, h / 2.0])                         # slant edge vector (rim minus apex)
+        t = np.clip(((q2 - np.array([0.0, h / 2.0])) @ e) / (e @ e), 0.0, 1.0)
+        cb = (q2 - np.array([0.0, h / 2.0])) - t[:, None] * e
+        s = np.where((cb[:, 0] < 0) & (ca[:, 1] < 0), -1.0, 1.0)
+        return s * np.sqrt(np.minimum(np.sum(ca * ca, axis=1), np.sum(cb * cb, axis=1)))
+    if k == "ellipsoid":           # iq's bounded ellipsoid approximation k1*(k1-1)/k2 (no exact SDF exists)
+        rr = np.array(p)
+        k1 = np.linalg.norm(P / rr, axis=1)
+        k2 = np.linalg.norm(P / (rr * rr), axis=1)
+        return k1 * (k1 - 1.0) / (k2 + 1e-12)
+    if k == "octahedron":          # iq's exact regular octahedron
+        s = p[0]
+        pabs = np.abs(P)
+        m = pabs[:, 0] + pabs[:, 1] + pabs[:, 2] - s
+        out = np.empty(len(P))
+        # iq's branch: pick the face region, else fall back to the plane distance
+        for axis in range(3):
+            pass
+        # vectorised version of iq's sdOctahedron
+        px, py, pz = pabs[:, 0], pabs[:, 1], pabs[:, 2]
+        cond1 = 3.0 * px < m
+        cond2 = 3.0 * py < m
+        cond3 = 3.0 * pz < m
+        q = np.where(cond1[:, None], np.stack([px, py, pz], axis=1),
+             np.where(cond2[:, None], np.stack([py, pz, px], axis=1),
+              np.where(cond3[:, None], np.stack([pz, px, py], axis=1), np.full((len(P), 3), np.nan))))
+        kk = np.clip(0.5 * (q[:, 2] - q[:, 1] + s), 0.0, s)
+        planar = m * 0.57735027                                   # 1/sqrt(3): distance when no face region matches
+        edge = np.linalg.norm(np.stack([q[:, 0], q[:, 1] - s + kk, q[:, 2] - kk], axis=1), axis=1)
+        return np.where(np.isnan(q[:, 0]), planar, edge)
     if k == "menger":          # Inigo Quilez's recursive Menger sponge: a box minus crosses at every scale
         iters, size = int(p[0]), p[1]
         q = np.abs(P) - size
@@ -272,6 +421,27 @@ def _eval(node, P):
         q[:, 0] = c * P[:, 0] - s * P[:, 2]
         q[:, 2] = s * P[:, 0] + c * P[:, 2]
         return ch[0].eval(q)
+    if k == "mirror":
+        axis, plane = int(p[0]), p[1]
+        q = P.copy()
+        q[:, axis] = plane + np.abs(P[:, axis] - plane)     # reflect the far side onto the near side
+        return ch[0].eval(q)
+    if k == "elongate":            # iq's opElongate: split the shape, insert a straight run along each axis. EXACT.
+        h = np.array(p)
+        q = P - np.clip(P, -h, h)                            # subtract the clamped part -> a "hole" of size 2h
+        inner = ch[0].eval(q)
+        # the correction handles the interior of the stretched region (all three |q|==0 there)
+        return inner + np.minimum(np.max(q, axis=1), 0.0)
+    if k == "bend":
+        kk, axis = p[0], int(p[1])
+        # rotate the OTHER two axes by an angle proportional to position along `axis` (a bend, not a spin)
+        a, b = (1, 2) if axis == 0 else (0, 2) if axis == 1 else (0, 1)
+        ang = kk * P[:, axis]
+        c, s = np.cos(ang), np.sin(ang)
+        q = P.copy()
+        q[:, a] = c * P[:, a] - s * P[:, b]
+        q[:, b] = s * P[:, a] + c * P[:, b]
+        return ch[0].eval(q)
     raise ValueError(f"no eval for {k}")
 
 
@@ -322,6 +492,9 @@ _GLSL_PRIM = {
     "torus":    "float sdTorus(vec3 p, float R, float r){ vec2 q=vec2(length(p.xz)-R,p.y); return length(q)-r; }",
     "cylinder": "float sdCyl(vec3 p, float h, float r){ vec2 d=vec2(length(p.xz)-r, abs(p.y)-h); return min(max(d.x,d.y),0.0)+length(max(d,0.0)); }",
     "plane":    "float sdPlane(vec3 p, float h){ return p.y-h; }",
+    "capsule":  "float sdCapsule(vec3 p, float h, float r){ p.y-=clamp(p.y,-h,h); return length(p)-r; }",
+    "cone":     "float sdCone(vec3 p, float h, float r){ vec2 q=vec2(length(p.xz), p.y); vec2 tip=vec2(0.0,h*0.5); vec2 e=vec2(r,-h*0.5)-tip; vec2 ca=vec2(q.x-min(q.x,(q.y<0.0)?r:0.0), abs(q.y)-h*0.5); float t=clamp(dot(q-tip,e)/dot(e,e),0.0,1.0); vec2 cb=q-tip-e*t; float s=((cb.x<0.0)&&(ca.y<0.0))?-1.0:1.0; return s*sqrt(min(dot(ca,ca),dot(cb,cb))); }",
+    "octahedron": "float sdOcta(vec3 p, float s){ p=abs(p); float m=p.x+p.y+p.z-s; vec3 q; if(3.0*p.x<m)q=p.xyz; else if(3.0*p.y<m)q=p.yzx; else if(3.0*p.z<m)q=p.zxy; else return m*0.57735027; float k=clamp(0.5*(q.z-q.y+s),0.0,s); return length(vec3(q.x,q.y-s+k,q.z-k)); }",
     "smin":     "float opSmin(float a, float b, float k){ float h=clamp(0.5+0.5*(b-a)/k,0.0,1.0); return mix(b,a,h)-k*h*(1.0-h); }",
 }
 
@@ -348,13 +521,19 @@ def _emit_body(node, pvar, ctr, helpers):
         ctr[0] += 1
         return f"{prefix}{ctr[0]}"
 
-    if k in ("sphere", "box", "torus", "cylinder", "plane"):
+    if k in ("sphere", "box", "torus", "cylinder", "plane", "capsule", "cone", "octahedron"):
         helpers[k] = _GLSL_PRIM[k]
         if k == "sphere":   return stmts, f"sdSphere({pvar},{p[0]:.6g})"
         if k == "box":      return stmts, f"sdBox({pvar},vec3({p[0]:.6g},{p[1]:.6g},{p[2]:.6g}))"
         if k == "torus":    return stmts, f"sdTorus({pvar},{p[0]:.6g},{p[1]:.6g})"
         if k == "cylinder": return stmts, f"sdCyl({pvar},{p[0]:.6g},{p[1]:.6g})"
         if k == "plane":    return stmts, f"sdPlane({pvar},{p[0]:.6g})"
+        if k == "capsule":  return stmts, f"sdCapsule({pvar},{p[0]:.6g},{p[1]:.6g})"
+        if k == "cone":     return stmts, f"sdCone({pvar},{p[0]:.6g},{p[1]:.6g})"
+        if k == "octahedron": return stmts, f"sdOcta({pvar},{p[0]:.6g})"
+        if k == "capsule":  return stmts, f"sdCapsule({pvar},{p[0]:.6g},{p[1]:.6g})"
+        if k == "cone":     return stmts, f"sdCone({pvar},{p[0]:.6g},{p[1]:.6g})"
+        if k == "octahedron": return stmts, f"sdOcta({pvar},{p[0]:.6g})"
 
     if k == "menger":
         iters = int(p[0])
@@ -407,6 +586,31 @@ def _emit_body(node, pvar, ctr, helpers):
                      f"vec3 {q}=vec3(cos(a{ctr[0]})*{pvar}.x-sin(a{ctr[0]})*{pvar}.z,{pvar}.y,"
                      f"sin(a{ctr[0]})*{pvar}.x+cos(a{ctr[0]})*{pvar}.z);")
         sc, ec = _emit_body(ch[0], q, ctr, helpers); return stmts + sc, ec
+    if k == "mirror":
+        # fold across a plane on one axis: q.<axis> = plane + abs(p.<axis> - plane)  (the kaleidoscope abs())
+        axis, plane = int(p[0]), p[1]
+        comp = ("x", "y", "z")[axis]
+        q = newvar("q")
+        stmts.append(f"vec3 {q}={pvar}; {q}.{comp}={plane:.6g}+abs({pvar}.{comp}-{plane:.6g});")
+        sc, ec = _emit_body(ch[0], q, ctr, helpers); return stmts + sc, ec
+    if k == "bend":
+        # rotate the two axes other than `axis` by an angle proportional to position along `axis`
+        kk, axis = p[0], int(p[1])
+        a, b = ((1, 2) if axis == 0 else (0, 2) if axis == 1 else (0, 1))
+        ca, cb, cc = ("x", "y", "z")[a], ("x", "y", "z")[b], ("x", "y", "z")[axis]
+        q = newvar("q"); an = f"a{ctr[0]}"; ctr[0] += 1
+        stmts.append(f"float {an}={kk:.6g}*{pvar}.{cc}; vec3 {q}={pvar}; "
+                     f"{q}.{ca}=cos({an})*{pvar}.{ca}-sin({an})*{pvar}.{cb}; "
+                     f"{q}.{cb}=sin({an})*{pvar}.{ca}+cos({an})*{pvar}.{cb};")
+        sc, ec = _emit_body(ch[0], q, ctr, helpers); return stmts + sc, ec
+    if k == "elongate":
+        # iq's opElongate: q = p - clamp(p, -h, h); dist = child(q) + min(max(q.x,q.y,q.z), 0.0). EXACT stretch.
+        hx, hy, hz = p
+        q = newvar("q")
+        stmts.append(f"vec3 {q}={pvar}-clamp({pvar},vec3(-{hx:.6g},-{hy:.6g},-{hz:.6g}),"
+                     f"vec3({hx:.6g},{hy:.6g},{hz:.6g}));")
+        sc, ec = _emit_body(ch[0], q, ctr, helpers)
+        return stmts + sc, f"({ec}+min(max({q}.x,max({q}.y,{q}.z)),0.0))"
     raise ValueError(f"no GLSL for {k}")
 
 
@@ -468,6 +672,39 @@ def _selftest():
     t = torus(1.0, 0.25)
     assert abs(t.eval([[1.0, 0.0, 0.0]])[0] + 0.25) < 1e-9     # on the ring centerline -> -r
 
+    # (1b) W8 PRIMITIVE PACK: capsule / cone / octahedron are EXACT (surface distance ~0, sign correct);
+    #      ellipsoid is iq's bounded APPROX (0 on surface, right sign away from the centre degeneracy).
+    cap = capsule(1.0, 0.3)
+    assert abs(cap.eval([[0.3, 0.0, 0.0]])[0]) < 1e-9          # on the tube surface -> 0
+    assert cap.eval([[0.0, 0.0, 0.0]])[0] < 0 < cap.eval([[0.0, 2.0, 0.0]])[0]   # inside/outside
+    oct_ = octahedron(1.0)
+    assert abs(oct_.eval([[1.0, 0.0, 0.0]])[0]) < 1e-9        # a vertex is on the surface
+    assert oct_.eval([[0.0, 0.0, 0.0]])[0] < 0                # centre inside
+    cn = cone(1.0, 0.5)
+    assert cn.eval([[0.0, -0.3, 0.0]])[0] < 0 < cn.eval([[3.0, 3.0, 0.0]])[0]
+    el = ellipsoid(1.0, 0.7, 0.5)
+    assert abs(el.eval([[1.0, 0.0, 0.0]])[0]) < 1e-6          # on the surface along x -> 0
+    assert el.eval([[0.4, 0.0, 0.0]])[0] < 0 < el.eval([[2.0, 0.0, 0.0]])[0]
+    # the three exact ones EMIT to GLSL (the Shadertoy path); ellipsoid is INEXACT and refused there.
+    for prim, fn in ((cap, "sdCapsule"), (cn, "sdCone"), (oct_, "sdOcta")):
+        assert fn in prim.to_glsl()
+
+    # (1c) W9 ELONGATE: stretching a sphere along an axis is EXACT -- the end cap and the side both sit on the
+    #      surface, the interior of the run is inside, and it emits to GLSL (a clamp warp).
+    el_s = sphere(0.5).elongate(1.0, 0.0, 0.0)
+    assert abs(el_s.eval([[1.5, 0.0, 0.0]])[0]) < 1e-9        # end cap on the surface (0.5 past the +1 run)
+    assert abs(el_s.eval([[0.0, 0.5, 0.0]])[0]) < 1e-9        # side on the surface
+    assert el_s.eval([[0.5, 0.0, 0.0]])[0] < 0               # inside the straight run
+    assert "clamp(" in el_s.to_glsl()
+
+    # (1d) W2 scene.cost(): a bare sphere is cheap, a menger is iterative + pricier, and a compound scene costs
+    #      MORE than any of its parts (the walk accumulates). The numbers are relative ALU, not nanoseconds.
+    assert sphere(1.0).cost()["alu"] < menger(3, 1.0).cost()["alu"]      # a fractal costs more than a sphere
+    assert menger(3, 1.0).cost()["iterative"] is True
+    compound_cost = sphere(0.5).union(box(1, 1, 1)).union(torus(1, 0.3)).cost()
+    assert compound_cost["alu"] > sphere(0.5).cost()["alu"]             # the whole exceeds a part
+    assert compound_cost["nodes"] == 5                                  # 3 leaves + 2 unions
+
     # (2) CSG ops: union is the min; subtract carves.
     a, c = sphere(1.0), sphere(1.0).translate([1.5, 0, 0])
     u = a.union(c)
@@ -484,6 +721,20 @@ def _selftest():
     # (4) DOMAIN REPETITION tiles: value at p equals value at p + period.
     rep = sphere(0.3).repeat([2.0, 0.0, 0.0])
     assert abs(rep.eval([[0.4, 0, 0]])[0] - rep.eval([[2.4, 0, 0]])[0]) < 1e-9
+
+    # (4b) DOMAIN WARPS mirror/fold/bend (DEMO-1, iq): eval works AND emits GLSL (round-trips to Shadertoy).
+    #      mirror is an isometry (a reflected query is exact); fold folds all axes into one octant; bend curls.
+    m0 = sphere(0.3).translate([1.0, 0, 0]).mirror(axis=0, plane=0.0)
+    # the mirrored copy: a point at x=-1 sees the sphere reflected from x=+1 (distance ~0 near the mirror image)
+    assert abs(m0.eval([[-1.0, 0, 0]])[0] - m0.eval([[1.0, 0, 0]])[0]) < 1e-9   # symmetric about the plane
+    fld = torus(0.5, 0.15).fold(0.0).repeat([1.3, 1.3, 1.3])
+    bnt = box(0.3, 1.0, 0.3).bend(0.5, axis=1)
+    for warped in (m0, fld, bnt):
+        g = warped.to_glsl()
+        assert "map(" in g and "no GLSL" not in g                              # the whole point: it emits
+    assert "abs(" in fld.to_glsl()                                             # the fold's kaleidoscope abs()
+    # DSL round-trips (one source of truth drives eval, GLSL, and parse)
+    assert np.allclose(fld.eval([[0.5, 0.5, 0.5]]), parse_dsl(fld.to_dsl()).eval([[0.5, 0.5, 0.5]]), atol=1e-12)
 
     # (5) renders to a watertight mesh through the existing bridge (a sphere -> closed surface).
     from holographic.mesh_and_geometry.holographic_meshbridge import sample_field, marching_tetrahedra_vec

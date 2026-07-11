@@ -168,6 +168,81 @@ def auto_scale(eval_fn, knobs, target_error, max_rounds=8, factor=2.0):
             "final_knobs": current, "trajectory": trajectory}
 
 
+def diagnose_bake(grids, values, queries=None, dim=4096, margin=1.5, seed=0):
+    """Answer the engine's most-repeated tuning question for an n-D bake: for THIS field, do I raise the
+    DIMENSION or the BANDWIDTH (margin)? -- automatically, by measurement instead of by the tribal 'double D'
+    rule in the shader docstrings.
+
+    WHY THIS EXISTS: bake_nd makes the caller pick `dim` and `margin` blind, and the right choice is
+    data-dependent -- a bias-limited field (kernel too wide) ignores more dimension entirely, while a
+    variance-limited field (kernel too narrow for the budget) is fixed only by more dimension. Getting it
+    backwards wastes a 2x-16x dimension bake for nothing (measured: at a bias-limited point, doubling dim drops
+    error ~5% while doubling margin drops it ~70%). This is exactly the 'if error drops when you double D you
+    are variance-limited, else raise the bandwidth' diagnostic -- so it delegates to diagnose_scaling with the
+    bake wired in as the workload, on a HELD-OUT query set (generalization error, the honest baseline, not the
+    training grid).
+
+    grids, values: as bake_nd. queries: (M, ndim) held-out points; if None, a seeded uniform sample inside the
+    grid bounds is used (the honest default -- never score on the baked grid itself). Returns diagnose_scaling's
+    dict, whose `verdict` is 'scale:dim' (variance-limited -- more dimension pays) or 'scale:margin'
+    (bias-limited -- widen/narrow the kernel; more dimension is wasted), with the measured per-knob error drops
+    so the recommendation carries its own evidence."""
+    import numpy as np
+    from holographic.rendering.holographic_shader import bake_nd, fetch_nd
+
+    grids = [np.asarray(g, float) for g in grids]
+    values = np.asarray(values, float)
+    if queries is None:
+        # held-out points strictly inside the grid bounds (edges are where the kernel is least trustworthy)
+        rng = np.random.default_rng(seed)
+        lo = np.array([float(g.min()) for g in grids])
+        hi = np.array([float(g.max()) for g in grids])
+        span = hi - lo
+        queries = lo + rng.uniform(0.05, 0.95, (200, len(grids))) * span
+    queries = np.asarray(queries, float)
+
+    # ground truth at the query points by multilinear interpolation of the baked grid values -- the same field
+    # the bake is trying to reproduce, sampled where we will score it.
+    truth = _grid_interp(grids, values, queries)
+
+    def _eval_bake(dim, margin):
+        bake = bake_nd(grids, values, dim=int(dim), seed=seed, margin=margin)
+        pred = fetch_nd(bake, queries)
+        return float(np.sqrt(np.mean((np.asarray(pred) - truth) ** 2)))
+
+    return diagnose_scaling(_eval_bake, {"dim": dim, "margin": margin})
+
+
+def _grid_interp(grids, values, queries):
+    """Multilinear interpolation of a regular-grid field at arbitrary points -- the ground truth a bake is
+    approximating, so diagnose_bake can score generalization without a separate analytic function. Pure NumPy;
+    clamps to the grid bounds (queries are generated inside them, so clamping only guards float edge cases)."""
+    import numpy as np
+
+    queries = np.atleast_2d(np.asarray(queries, float))
+    ndim = len(grids)
+    # per-axis fractional index of each query coordinate
+    idx0 = np.empty((queries.shape[0], ndim), dtype=int)
+    frac = np.empty((queries.shape[0], ndim), dtype=float)
+    for d in range(ndim):
+        g = grids[d]
+        pos = np.interp(queries[:, d], g, np.arange(len(g)))     # continuous index along a (possibly non-uniform) axis
+        i0 = np.clip(np.floor(pos).astype(int), 0, len(g) - 2)
+        idx0[:, d] = i0
+        frac[:, d] = pos - i0
+    # accumulate the 2^ndim corners weighted by the multilinear weights
+    out = np.zeros(queries.shape[0])
+    for corner in range(1 << ndim):
+        w = np.ones(queries.shape[0])
+        gather = [None] * ndim
+        for d in range(ndim):
+            bit = (corner >> d) & 1
+            gather[d] = idx0[:, d] + bit
+            w *= frac[:, d] if bit else (1.0 - frac[:, d])
+        out += w * values[tuple(gather)]
+    return out
+
+
 def _selftest():
     """Assert the contracts on three synthetic limit types + one REAL engine workload.
 
@@ -244,8 +319,25 @@ def _selftest():
     b = diagnose_scaling(fn2, {"dim": 256, "tiles": 2})
     assert a == b
 
+    # (6) diagnose_bake on the REAL n-D texture bake: the verdict must FLIP with the regime -- a wide-kernel
+    #     (bias-limited) field says raise the margin, a high-frequency dimension-starved field says raise the
+    #     dimension. This is the whole point (the wrong lever wastes a 2-16x bake), so it is a cross-condition
+    #     CONTRAST, not an absolute -- the honest way to pin a diagnostic.
+    ax = np.linspace(0.0, 1.0, 40)
+    P = np.stack(np.meshgrid(ax, ax, indexing="ij"), -1)
+    smooth = np.sin(2 * np.pi * P[..., 0]) * np.cos(2 * np.pi * P[..., 1])       # low freq
+    busy = np.sin(2 * np.pi * 3 * P[..., 0]) * np.cos(2 * np.pi * 3 * P[..., 1])  # high freq: needs dimension
+    bias = diagnose_bake([ax, ax], smooth, dim=4096, margin=1.5)
+    var = diagnose_bake([ax, ax], busy, dim=1024, margin=2.5)
+    assert bias["verdict"] == "scale:margin", bias["verdict"]     # wide kernel on a smooth field -> widen/narrow it
+    assert var["verdict"] == "scale:dim", var["verdict"]          # starved dimension on a busy field -> more D
+    # and the recommendation carries its evidence: the winning knob's measured drop is the larger one
+    assert dict((p["knob"], p["drop"]) for p in var["probes"])["dim"] > \
+           dict((p["knob"], p["drop"]) for p in var["probes"])["margin"]
+
     print("holographic_scalinglaw selftest OK (real bundle workload: doubling dim "
-          "drops recall error %.1f%% -- the prose rule, now executable)"
+          "drops recall error %.1f%%; diagnose_bake flips margin->dim between a smooth and a busy field -- "
+          "the prose rule, now executable)"
           % (100 * d4["probes"][0]["drop"]))
 
 

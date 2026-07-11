@@ -866,6 +866,34 @@ class UnifiedMind:
         return packet_demux(x, min_seg=min_seg, penalty=penalty, noise_k=noise_k,
                             continuation=continuation)
 
+    def detect_regimes(self, x, min_seg=16, penalty=3.0):
+        """WHERE does a recorded series change behaviour? Located change-point detection over a whole batch
+        (holographic_demux.segment_stream): binary segmentation with a BIC-style penalty returns the exact
+        boundary indices where the statistics shift, plus each segment's (start, stop, mean, std, length). A
+        homogeneous stream honestly returns NO boundaries; a drifting ramp does not shatter.
+
+        Complements regime_detector, it does NOT duplicate it: regime_detector is a CAUSAL ONLINE detector (sees
+        one sample at a time, commits to a new layer when a fast/slow divergence persists -- for a live stream);
+        detect_regimes is the OFFLINE batch twin (given the whole recording, locate every boundary at once). Use
+        this to find where a query stream's statistics shifted so a cache margin can be re-fit per regime, to
+        split a forecast at its regime boundaries instead of fitting one global model, or to segment any recorded
+        engine signal (a trajectory, an error curve, an access trace) into homogeneous spans.
+
+        Returns {boundaries: [int], n_segments: int, segments: [{start, stop, mean, std, length}]}. See
+        holographic_demux.segment_stream."""
+        import numpy as np
+        from holographic.sampling_and_signal.holographic_demux import segment_stream
+        x = np.asarray(x, float).ravel()
+        seg = segment_stream(x, min_seg=min_seg, penalty=penalty)
+        # enrich the raw (start, stop) spans with per-segment statistics -- the WHAT-changed alongside the WHERE,
+        # so a caller (re-fit this cache regime, split this forecast) has the numbers without a second pass.
+        segments = [{"start": int(a), "stop": int(b), "length": int(b - a),
+                     "mean": float(x[a:b].mean()) if b > a else 0.0,
+                     "std": float(x[a:b].std()) if b > a else 0.0}
+                    for (a, b) in seg["segments"]]
+        return {"boundaries": [int(bd) for bd in seg["boundaries"]],
+                "n_segments": int(seg["n_segments"]), "segments": segments}
+
     def cross_channel_links(self, series, max_lag=None, threshold=0.6):
         """Find DELAYED-COPY / shared-component links between channels
         (holographic_demux): for every ordered pair, scan lags of the normalized
@@ -990,6 +1018,17 @@ class UnifiedMind:
         load-gated record) generalised to any workload with declared knobs."""
         from holographic.misc.holographic_scalinglaw import auto_scale
         return auto_scale(eval_fn, knobs, target_error, max_rounds=max_rounds, factor=factor)
+
+    def diagnose_bake(self, grids, values, queries=None, dim=4096, margin=1.5, seed=0):
+        """For an n-D texture bake of THIS field, should you raise the DIMENSION or the BANDWIDTH (margin)? --
+        measured, not guessed (holographic_scalinglaw). Wires diagnose_scaling to bake_nd on a held-out query set,
+        so the engine's most-repeated tuning rule ('double D: if error drops you are variance-limited, else raise
+        the bandwidth') becomes one call. Returns diagnose_scaling's dict, whose `verdict` is 'scale:dim' (more
+        dimension pays) or 'scale:margin' (widen/narrow the kernel; more dimension is wasted), each carrying the
+        measured per-knob error drop as its own evidence. Use before committing to an expensive high-dim bake.
+        See holographic_scalinglaw.diagnose_bake."""
+        from holographic.misc.holographic_scalinglaw import diagnose_bake
+        return diagnose_bake(grids, values, queries=queries, dim=dim, margin=margin, seed=seed)
 
 
     def fractal_confidence(self, x, tol=0.15):
@@ -3558,6 +3597,44 @@ class UnifiedMind:
         return _r(shade_at, n_frames=int(n_frames), budget=float(budget), known_shift=known_shift)
 
     # -- the brain/muscle contract, realised: the SCENE's SDF, emitted --------------------------------------
+    def four_surface_demo(self, sdf_node, camera=None):
+        """ONE KERNEL, FOUR SURFACES (W19): given a single SDF scene (node or DSL text), return its FOUR
+        backend representations proving they are the same field -- {'glsl': Shadertoy source, 'wgsl': browser-GPU
+        source, 'ascii': a braille raymarch, 'dsl': the canonical scene text}. The PNG path uses the same CPU eval
+        the ascii path marches, and sdf_validate_c proves the emitted C matches that eval, so all four agree. The
+        demo that explains the engine in one screen: author once, render everywhere. See sdf_dialect / to_glsl /
+        ascii_sdf.
+
+        `camera` is (eye (3,), forward (3,)); if omitted, an angled view from OUTSIDE the origin is used. WHY not
+        the ascii default camera: a scene with `repeat` is an INFINITE lattice, and a camera embedded in it stares
+        at a uniform wall (constant depth -> a flat, featureless ascii grid that does NOT show the scene -- the
+        'camera inside an infinite lattice' trap). The default here sits back and looks in, so the ascii actually
+        depicts the geometry."""
+        import numpy as _np
+        from holographic.mesh_and_geometry.holographic_sdf import parse_dsl, SDF
+        from holographic.mesh_and_geometry.holographic_sdfemit import sdf_dialect as _sd
+        node = sdf_node if isinstance(sdf_node, SDF) else parse_dsl(sdf_node)
+        dsl = node.to_dsl()
+        if camera is None:
+            eye = _np.array([1.6, 1.2, 2.6])                    # outside, angled -- reads as a clear silhouette
+            camera = (eye, -eye / _np.linalg.norm(eye))
+        # WHY ramp, not braille: braille packs 2x4 dots per cell, which turns a busy scene into high-frequency
+        # noise a human cannot read. A tonal `ramp` (light->dark chars) shows large-scale SHAPE, which is what an
+        # ASCII surface is for. (The PNG carries fine detail; the ASCII carries silhouette.)
+        return {"dsl": dsl,
+                "glsl": node.to_glsl(),
+                "wgsl": _sd(dsl, "wgsl"),
+                "ascii": self.ascii_sdf(dsl, width=48, mode="ramp", camera=camera, fov=0.85)}
+
+    def scene_cost(self, sdf_node):
+        """Estimate the per-ray evaluation COST of an SDF scene (W2) -- an ALU/machine-model annotation for
+        deciding if a scene raymarches in real time. Accepts an SDF node or DSL text. Returns a dict with `alu`
+        (approx arithmetic ops per map() call), `nodes`, `depth`, `iterative` (contains a fractal/tiling loop),
+        and a plain-language `verdict`. Know the price before you ship the scene. See holographic_sdf.SDF.cost."""
+        from holographic.mesh_and_geometry.holographic_sdf import parse_dsl, SDF
+        node = sdf_node if isinstance(sdf_node, SDF) else parse_dsl(sdf_node)
+        return node.cost()
+
     def sdf_dialect(self, sdf_node, dialect="wgsl"):
         """Emit the SDF TREE's own `map(p) -> distance` in `wgsl` | `glsl` | `c_f64` | `c_f32` -- so the browser
         runs a PROJECTION of the authoritative Python scene, not a hand-written shader about a scene the engine
@@ -5236,6 +5313,151 @@ class UnifiedMind:
         closed mesh a closed manifold; the cap moves exactly `distance` along the normal. Returns a new Mesh."""
         from holographic.mesh_and_geometry.holographic_meshverbs import extrude_face
         return extrude_face(mesh, face_index, distance)
+
+    def curve_bezier(self, control, u):
+        """Evaluate a BEZIER curve of any degree at parameter(s) u in [0,1] by de Casteljau (numerically stable).
+        `control` is (k, dim). Returns the point(s). Passes through the first/last control point. Use for a smooth
+        segment, a camera ease, or a tube centreline. See holographic_curves.bezier."""
+        from holographic.mesh_and_geometry.holographic_curves import bezier
+        return bezier(control, u)
+
+    def curve_catmull_rom(self, control, n, alpha=0.5, closed=False):
+        """Sample a CATMULL-ROM spline that INTERPOLATES `control` (passes through every point) -- the right
+        curve for a camera path or a scatter path that must hit its keyframes. `alpha=0.5` (centripetal) avoids
+        cusps on sharp turns. Returns (n, dim). See holographic_curves.catmull_rom."""
+        from holographic.mesh_and_geometry.holographic_curves import catmull_rom
+        return catmull_rom(control, n, alpha=alpha, closed=closed)
+
+    def curve_bspline(self, control, n, degree=3, closed=False):
+        """Sample a uniform B-SPLINE (default cubic) over `control` -- the smoothest (C^(degree-1)) of the
+        splines, approximating not interpolating. The flowing-camera-move curve. Returns (n, dim). See
+        holographic_curves.bspline."""
+        from holographic.mesh_and_geometry.holographic_curves import bspline
+        return bspline(control, n, degree=degree, closed=closed)
+
+    def curve_frame(self, points, closed=False, minimizing=True):
+        """Orthonormal FRAME (tangent, normal, binormal) at each point of a 3-D curve. `minimizing=True` gives
+        the ROTATION-MINIMIZING frame (stable on straight and inflecting curves -- what a tube sweep / spline
+        camera wants); False gives the true FRENET frame (flips at inflections, undefined on straight runs).
+        Returns (T, N, B). See holographic_curves.rotation_minimizing_frame / frenet_frame."""
+        from holographic.mesh_and_geometry.holographic_curves import rotation_minimizing_frame, frenet_frame
+        return rotation_minimizing_frame(points, closed=closed) if minimizing else frenet_frame(points, closed=closed)
+
+    def curve_resample_arc_length(self, points, n):
+        """Resample a curve to `n` points spaced by EQUAL ARC LENGTH (evenly along the curve, not the parameter)
+        -- what a tube wants so its rings are uniform, or a scatter wants for even spacing. See
+        holographic_curves.resample_by_arc_length."""
+        from holographic.mesh_and_geometry.holographic_curves import resample_by_arc_length
+        return resample_by_arc_length(points, n)
+
+    def sweep_tube(self, points, profile=None, radius=0.1, closed=False):
+        """Sweep a 2-D `profile` (default a circle of `radius`) along a 3-D curve into a watertight TUBE mesh,
+        oriented by the rotation-minimizing frame so it does not twist/tear. Returns (vertices, faces) -- pass to
+        Mesh(). The curve->geometry bridge: a bezier/knot/helix becomes hair, cable, vine, neon, a knotted
+        sculpture. `closed=True` welds a looped curve (a torus knot). See holographic_curves.sweep_tube."""
+        from holographic.mesh_and_geometry.holographic_curves import sweep_tube
+        return sweep_tube(points, profile=profile, radius=radius, closed=closed)
+
+    def torus_knot(self, n=400, p=2, q=3, R=1.0, r=0.4):
+        """A (p, q) TORUS KNOT curve: winds p times around the axis, q through the hole (p=2,q=3 = trefoil).
+        Returns (n, 3) points -- sweep_tube it for the demoscene classic. See holographic_curves.torus_knot."""
+        from holographic.mesh_and_geometry.holographic_curves import torus_knot
+        return torus_knot(n=n, p=p, q=q, R=R, r=r)
+
+    def trefoil_knot(self, n=400, scale=1.0):
+        """The TREFOIL knot (simplest non-trivial knot) as (n, 3) points. See holographic_curves.trefoil."""
+        from holographic.mesh_and_geometry.holographic_curves import trefoil
+        return trefoil(n=n, scale=scale)
+
+    def helix(self, n=200, radius=1.0, pitch=0.3, turns=3.0):
+        """A HELIX curve: n points spiralling `turns` times at `radius`, rising `pitch` per turn. (n, 3). Sweep
+        it for a spring, a screw, a DNA strand. See holographic_curves.helix."""
+        from holographic.mesh_and_geometry.holographic_curves import helix
+        return helix(n=n, radius=radius, pitch=pitch, turns=turns)
+
+    def superellipsoid(self, nu=48, nv=48, e1=0.5, e2=0.5, a=1.0, b=1.0, c=1.0):
+        """A SUPERELLIPSOID surface as a point grid: `e1,e2` squareness (1,1)=ellipsoid, ->0=box, >1=star; `a,b,c`
+        semi-axes. Barr's rounded-solid family from two exponents. See holographic_curves.superellipsoid."""
+        from holographic.mesh_and_geometry.holographic_curves import superellipsoid
+        return superellipsoid(nu=nu, nv=nv, e1=e1, e2=e2, a=a, b=b, c=c)
+
+    def gyroid_field(self, points, scale=1.0):
+        """The GYROID triply-periodic minimal surface as an implicit FIELD (surface at f=0): sin x cos y + ... .
+        Returns f at each point -- mesh the zero set, or use as an SDF-like field for infinite seamless lattice
+        art. See holographic_curves.gyroid_field."""
+        from holographic.mesh_and_geometry.holographic_curves import gyroid_field
+        return gyroid_field(points, scale=scale)
+
+    def klein_bottle(self, nu=48, nv=48, scale=1.0):
+        """A KLEIN BOTTLE (figure-8 immersion) as a point grid -- the classic non-orientable surface showpiece.
+        See holographic_curves.klein_bottle."""
+        from holographic.mesh_and_geometry.holographic_curves import klein_bottle
+        return klein_bottle(nu=nu, nv=nv, scale=scale)
+
+    def voxelize_mesh(self, vertices, faces, res=32, pad=0.1, threshold=0.5):
+        """VOXELISE a triangle mesh into an occupancy grid via the generalised WINDING NUMBER (Jacobson 2013) --
+        robust to NON-watertight and self-intersecting meshes, unlike ray-parity. `res` voxels along the longest
+        axis; a voxel is solid where |winding| >= threshold. Returns (occupancy (nx,ny,nz) bool, origin, spacing).
+        O(voxels x triangles) -- for a heavy mesh use voxelize_sdf or decimate first. See
+        holographic_voxelize.voxelize_mesh."""
+        from holographic.mesh_and_geometry.holographic_voxelize import voxelize_mesh
+        return voxelize_mesh(vertices, faces, res=res, pad=pad, threshold=threshold)
+
+    def voxelize_sdf(self, sdf, lo, hi, res=32, iso=0.0):
+        """VOXELISE an SDF / field into an occupancy grid: solid where field <= iso. O(voxels), no winding number
+        -- the fast path for an implicit. `lo`,`hi` are box corners. Returns (occupancy, origin, spacing), the
+        same layout as voxelize_mesh so they are interchangeable. See holographic_voxelize.voxelize_sdf."""
+        from holographic.mesh_and_geometry.holographic_voxelize import voxelize_sdf
+        return voxelize_sdf(sdf, lo, hi, res=res, iso=iso)
+
+    def voxel_centres(self, occ, origin, spacing):
+        """World-space centres (m, 3) of the SOLID voxels of an occupancy grid -- a point cloud of the volume,
+        for instancing, point rendering, or feeding a mesher. See holographic_voxelize.voxel_centres."""
+        from holographic.mesh_and_geometry.holographic_voxelize import voxel_centres
+        return voxel_centres(occ, origin, spacing)
+
+    def occupancy_to_mesh(self, occ, origin, spacing):
+        """Extract a surface MESH (vertices, quads) from an occupancy grid via surface_nets -- closes the round
+        trip mesh -> voxels -> mesh (a voxel-resolution resample of the input). See
+        holographic_voxelize.occupancy_to_mesh."""
+        from holographic.mesh_and_geometry.holographic_voxelize import occupancy_to_mesh
+        return occupancy_to_mesh(occ, origin, spacing)
+
+    def mesh_winding_number(self, points, vertices, faces):
+        """Generalised WINDING NUMBER of each query point w.r.t. a triangle mesh: ~1 inside a closed surface, ~0
+        outside, fractional near boundaries (robust inside/outside test for non-watertight meshes). Returns (n,)
+        in turns. See holographic_voxelize.winding_number."""
+        from holographic.mesh_and_geometry.holographic_voxelize import winding_number
+        return winding_number(points, vertices, faces)
+
+    def nurbs_curve(self, control, weights=None, n=100, degree=3, knots=None):
+        """Evaluate a NURBS (rational B-spline) CURVE: `control` (k,dim) with per-point `weights` (default 1 -> a
+        plain B-spline). Weights are what let a NURBS hold a CONIC exactly (a circle/arc), which a polynomial
+        B-spline only approximates. Returns (n, dim). See holographic_nurbs.nurbs_curve."""
+        from holographic.mesh_and_geometry.holographic_nurbs import nurbs_curve
+        return nurbs_curve(control, weights=weights, n=n, degree=degree, knots=knots)
+
+    def nurbs_surface(self, control_grid, weights=None, nu=40, nv=40, degree_u=3, degree_v=3,
+                      knots_u=None, knots_v=None):
+        """Evaluate a NURBS SURFACE (tensor-product rational B-spline): `control_grid` (ku,kv,3) control net with
+        per-point `weights` (ku,kv). Samples an (nu,nv) grid -> (nu*nv, 3) points. The CAD surface primitive -- a
+        rational patch that can be a sphere cap, cylinder, or a swoopy panel. See holographic_nurbs.nurbs_surface."""
+        from holographic.mesh_and_geometry.holographic_nurbs import nurbs_surface
+        return nurbs_surface(control_grid, weights=weights, nu=nu, nv=nv,
+                             degree_u=degree_u, degree_v=degree_v, knots_u=knots_u, knots_v=knots_v)
+
+    def nurbs_surface_mesh(self, control_grid, weights=None, nu=40, nv=40, degree_u=3, degree_v=3):
+        """Tessellate a NURBS surface into a triangle MESH (vertices, faces) -- the bridge from a CAD patch to the
+        engine's mesh pipeline (render / voxelise / DCC). See holographic_nurbs.nurbs_surface_mesh."""
+        from holographic.mesh_and_geometry.holographic_nurbs import nurbs_surface_mesh
+        return nurbs_surface_mesh(control_grid, weights=weights, nu=nu, nv=nv,
+                                  degree_u=degree_u, degree_v=degree_v)
+
+    def nurbs_circle(self, radius=1.0, n=100):
+        """A NURBS CIRCLE -- the canonical proof that NURBS represent conics EXACTLY (every point at `radius` to
+        ~1e-12, which a polynomial B-spline cannot do). Returns (n, 3). See holographic_nurbs.nurbs_circle."""
+        from holographic.mesh_and_geometry.holographic_nurbs import nurbs_circle
+        return nurbs_circle(radius=radius, n=n)
 
     def mesh_inset(self, mesh, face_index, ratio):
         """INSET a face (holographic_meshverbs, FWD-7): shrink face `face_index` toward its centroid by `ratio`,
@@ -8039,6 +8261,103 @@ class UnifiedMind:
         from holographic.misc.holographic_generate import crossfade_images
         return crossfade_images(image_a, image_b, steps=steps)
 
+    def image_edges(self, rgb, quantile=0.85):
+        """Boolean edge map of an image (classic CV, holographic_vision): Sobel gradient magnitude thresholded at
+        `quantile` of its own distribution -- self-calibrating, no magic pixel threshold. Accepts RGB (converted to
+        perceptual luma internally) or an already-gray 2-D array. See holographic_vision.edges."""
+        import numpy as np
+        from holographic.misc.holographic_vision import edges, to_gray
+        a = np.asarray(rgb, float)
+        return edges(to_gray(a) if a.ndim == 3 else a, quantile=quantile)
+
+    def image_corners(self, rgb, n=12, rel=0.05, min_dist=4):
+        """Top-n Harris corners of an image as (x, y) points, greedily spaced at least `min_dist` apart
+        (holographic_vision): corners are where the local gradient varies in TWO directions -- the classic
+        interest-point detector. Accepts RGB or gray. See holographic_vision.corners."""
+        import numpy as np
+        from holographic.misc.holographic_vision import corners, to_gray
+        a = np.asarray(rgb, float)
+        return corners(to_gray(a) if a.ndim == 3 else a, n=n, rel=rel, min_dist=min_dist)
+
+    def image_lines(self, rgb, top=5, quantile=0.85, ntheta=180, nms=10):
+        """Dominant straight lines in an image by the classic Hough transform (holographic_vision): every edge
+        pixel votes for the (theta, rho) lines through it; the peaks are the lines. Chains the self-calibrating
+        edge detector internally, so the input is just the image. Returns the `top` (theta, rho, votes) peaks.
+        See holographic_vision.hough_lines."""
+        import numpy as np
+        from holographic.misc.holographic_vision import edges, hough_lines, to_gray
+        a = np.asarray(rgb, float)
+        return hough_lines(edges(to_gray(a) if a.ndim == 3 else a, quantile=quantile), ntheta=ntheta, top=top, nms=nms)
+
+    def image_colours(self, rgb, k=4, seed=0):
+        """The k most common colours in an image (holographic_vision): k-means++ clustering over a pixel sample --
+        the palette / dominant-colour readout. Deterministic per seed. See holographic_vision.dominant_colours."""
+        from holographic.misc.holographic_vision import dominant_colours
+        return dominant_colours(rgb, k=k, seed=seed)
+
+    def image_signature(self, rgb):
+        """One fixed-length feature vector describing an image (holographic_vision.describe): colour histogram +
+        edge-orientation histogram + coarse layout, concatenated -- the classic-CV descriptor behind
+        image_classes. Two visually similar images get nearby signatures; use it for retrieval, dedup, or as a
+        cheap perceptual distance. See holographic_vision.describe."""
+        from holographic.misc.holographic_vision import describe
+        return describe(rgb)
+
+    def image_classes(self, images, k, seed=0, standardize=False):
+        """Cluster a set of images into k visual classes with NO labels (holographic_vision.emergent_classes):
+        describe() every image, k-means the descriptors -- classes EMERGE from appearance. Returns
+        (labels_per_image, class_centroids). Deterministic per seed. See holographic_vision.emergent_classes."""
+        from holographic.misc.holographic_vision import emergent_classes
+        return emergent_classes(images, k, seed=seed, standardize=standardize)
+
+    def ascii_view(self, image, width=80, mode="ramp", ansi=None, ramp=None, gamma=1.0,
+                   invert=False, cell_aspect=0.5):
+        """Render any image to TEXT at `width` characters -- the terminal/log/SSH projection backend
+        (holographic_ascii). Modes by detail-per-character: 'ramp' (luminance glyphs), 'edge' (oriented | / - \\
+        glyphs on strong gradients), 'braille' (2x4 dots = 8 pixels per char, Bayer-dithered -- the max-detail
+        mode), 'half' (2 full-color pixels per char; requires ansi). ansi='256'|'truecolor' colors any mode (the
+        256 path uses a baked colour codebook -- ~13x faster than per-cell formatting). ramp='short'|'long'|
+        'blocks'|'dots' or a custom glyph string picks the luminance codebook. gamma=2.2 brightens a linear
+        render; invert flips the ramp. Deterministic to the byte; fully vectorised (240^2 to 100-wide braille
+        ~5 ms). See holographic_ascii.ascii_render."""
+        from holographic.rendering.holographic_ascii import ascii_render
+        return ascii_render(image, width=width, mode=mode, ansi=ansi, ramp=ramp, gamma=gamma,
+                            invert=invert, cell_aspect=cell_aspect)
+
+    def ascii_sdf(self, sdf, width=80, mode="ramp", z=4.0, fov=0.8, camera=None, lit=True,
+                  ansi=None, ramp=None, cell_aspect=0.5):
+        """Preview a 3-D SDF scene as TEXT -- raymarch + shade + ASCII in one call (holographic_ascii.ascii_sdf),
+        the 'see my SDF over SSH' path with no manual render loop. `sdf` is a live SDF, a domain-warped scene, or
+        its DSL text. Default camera looks down -z from `z`; pass (origin, forward) as `camera` to override. lit
+        adds a lambert term. mode/ansi/ramp as ascii_view. Small by design (a preview); for a full frame use the
+        raymarcher and pass its image to ascii_view. See holographic_ascii.ascii_sdf."""
+        from holographic.rendering.holographic_ascii import ascii_sdf
+        return ascii_sdf(sdf, camera=camera, width=width, mode=mode, z=z, fov=fov, lit=lit,
+                         ansi=ansi, ramp=ramp, cell_aspect=cell_aspect)
+
+    def ascii_field(self, field, bounds=(-1.0, 1.0), res=None, width=80, mode="ramp",
+                    ansi=None, ramp=None, cell_aspect=0.5):
+        """Project a 2-D scalar FIELD sampler straight to TEXT (holographic_ascii.ascii_field) -- composability
+        past finished images. `field` is any callable f(P:(N,2))->(N,) (a bake_nd slice, a noise function, a
+        heightmap); it is sampled over [bounds]^2, self-normalised, and projected. This is the seam that lets the
+        ASCII backend consume the engine's native fields. mode/ansi/ramp as ascii_view. See
+        holographic_ascii.ascii_field."""
+        from holographic.rendering.holographic_ascii import ascii_field
+        return ascii_field(field, bounds=bounds, res=res, width=width, mode=mode,
+                           ansi=ansi, ramp=ramp, cell_aspect=cell_aspect)
+
+    def ascii_animate(self, frame, n, width=80, mode="ramp", ansi=None, ramp=None, cell_aspect=0.5, **kw):
+        """Render an ASCII ANIMATION to a list of `n` text frames (holographic_ascii.ascii_frames) -- the
+        demoscene 'kaleidoscope tunnel in a terminal' as data. `frame` is a callable frame(i, u) or frame(u)
+        (u = i/n normalised time) returning what to draw each frame: an image array (-> ascii_render), an SDF
+        node or DSL text (-> ascii_sdf, raymarched), or a 2-D field sampler f(P) (-> ascii_field). Returns a list
+        of strings (pure, deterministic -- diff them, write a .txt reel, or drive your own loop). For live
+        in-terminal playback with timing, call holographic_ascii.ascii_play directly (it does stdout I/O).
+        mode/ansi/ramp as ascii_view. See holographic_ascii.ascii_frames."""
+        from holographic.rendering.holographic_ascii import ascii_frames
+        return ascii_frames(frame, n, width=width, mode=mode, ansi=ansi, ramp=ramp,
+                            cell_aspect=cell_aspect, **kw)
+
     def auto_displace(self, mesh, rgb, amount=0.1, sigma=4.0, min_confidence=0.02):
         """Inverse-rendering IR5: promote an auto-bump height (IR1) from a shading bump to REAL geometry -- move a
         mesh's vertices along their normals by the derived height, but ONLY if the bump-confidence clears a
@@ -8357,6 +8676,64 @@ class UnifiedMind:
         the limit). See holographic_spectralfield.poisson_solve."""
         from holographic.sampling_and_signal.holographic_spectralfield import poisson_solve
         return poisson_solve(source, dx=dx, eps0=eps0)
+
+    def image_to_mesh(self, image, light=None, res=48, depth_scale=1.0, smooth=1.0):
+        """END-TO-END image -> watertight MESH: estimate depth by shape-from-shading, unproject to points, derive
+        oriented normals from the depth, and reconstruct a surface (points_to_mesh / dual-contour). Returns
+        (verts, quads, field, grids). HONEST: single-view + relative depth (shape-from-shading is ill-posed), so
+        this meshes the VISIBLE FRONT as a height-field surface, not a watertight solid object -- the back is
+        unobserved. For per-pixel splats instead of a mesh, use image_to_3d. Chains depth_from_image + unproject +
+        normal_from_height + points_to_mesh."""
+        import numpy as _np
+        from holographic.mesh_and_geometry.holographic_autobump import normal_from_height
+        img = _np.asarray(image, float)
+        H, W = img.shape[:2]
+        fx = fy = 0.9 * W; cx, cy = W / 2.0, H / 2.0
+        depth = self.depth_from_image(img, light=light, smooth=smooth)
+        z = (1.5 - depth) * depth_scale
+        pts = self.unproject_depth(z, fx, fy, cx, cy).reshape(-1, 3)     # (H*W, 3)
+        # normals from the depth height-field (the existing autobump wheel), flattened to match the points.
+        nmap = normal_from_height(z)                                     # (H, W, 3)
+        nrm = nmap.reshape(-1, 3)
+        lo = pts.min(axis=0) - 0.05; hi = pts.max(axis=0) + 0.05
+        return self.points_to_mesh(pts, nrm, lo.tolist(), hi.tolist(), int(res))
+
+    def depth_from_image(self, image, light=None, albedo=None, smooth=1.0):
+        """Estimate a relative DEPTH MAP from a single image by classical SHAPE FROM SHADING (C1 of photo-to-3D) --
+        no learned weights. Returns depth (H,W) normalised to [0,1] (1=nearest). This is the missing FRONT END for
+        photo_to_3d / unproject_depth, which both need a depth map. HONEST: shape-from-shading is ill-posed
+        (bas-relief ambiguity) so this is a PLAUSIBLE RELATIVE surface, not metric depth -- the confidence map in
+        photo_to_3d abstains where it is weak. Pass `light` (a 3-vector) if you know it. See
+        holographic_shapefromshading.shape_from_shading."""
+        from holographic.rendering.holographic_shapefromshading import shape_from_shading
+        return shape_from_shading(image, light=light, albedo=albedo, smooth=smooth)
+
+    def image_to_3d(self, image, fx=None, fy=None, cx=None, cy=None, light=None, depth_scale=1.0,
+                    confidence_floor=0.3, smooth=1.0):
+        """END-TO-END PHOTO-TO-3D from a single image (C1->C2->C3): estimate depth by shape-from-shading, unproject
+        to camera-space points, and fit per-pixel 3-D GAUSSIANS on the confident front-facing pixels (abstaining on
+        edges / grazing / the unobserved back). Returns the photo_to_3d result dict (positions, colours, radii,
+        confidences, abstain mask, coverage). `fx,fy,cx,cy` default to a reasonable pinhole for the image size;
+        `depth_scale` stretches the relative depth into camera Z. HONEST: the depth is relative (shape-from-shading
+        is ill-posed) and single-view, so this reconstructs the VISIBLE FRONT, not a watertight object. Chains
+        depth_from_image + unproject_depth + photo_to_3d."""
+        import numpy as _np
+        img = _np.asarray(image, float)
+        H, W = img.shape[:2]
+        # sensible default intrinsics: ~50 deg horizontal FOV, principal point at centre.
+        if fx is None:
+            fx = 0.9 * W
+        if fy is None:
+            fy = 0.9 * W
+        if cx is None:
+            cx = W / 2.0
+        if cy is None:
+            cy = H / 2.0
+        depth = self.depth_from_image(img, light=light, smooth=smooth)
+        # map normalised [0,1] (1=near) to a positive camera distance (near = small Z), scaled.
+        z = (1.5 - depth) * depth_scale                          # near pixels ~0.5, far ~1.5 (times scale)
+        colour = img if img.ndim == 3 else _np.stack([img] * 3, axis=2)
+        return self.photo_to_3d(z, colour, fx, fy, cx, cy, confidence_floor=confidence_floor)
 
     def photo_to_3d(self, depth, colour, fx, fy, cx, cy, confidence_floor=0.3):
         """Forecasting sweep (sec.5, depth delegation) / photo-to-3D: lift a depth map + image into per-pixel 3D
@@ -8835,6 +9212,18 @@ class UnifiedMind:
         from holographic.misc.holographic_audio import dominant_frequencies
         return dominant_frequencies(samples, rate, k=k)
 
+    def audio_param_bus(self, samples, rate, hop=1024, size=2048, bands=None, smooth=2):
+        """Build an audio -> parameter BUS: per-frame band-energy envelopes (bass/low-mid/high-mid/treble by
+        default, normalised 0..1) plus an onset/beat signal -- the wire that drives scene parameters from music
+        (W5'). Returns a ParamBus; in a render loop call `bus.subscribe(band, lo, hi, frame)` to map a band onto
+        a parameter range (e.g. metaball viscosity from the bass), or `bus.at(frame)` for all bands, or
+        `bus.onset` for beats. Reuses the existing STFT (audio_spectrum's holographic_audio.frames + spectrum) --
+        only the band binning is new. `bands` is a tuple of (lo_hz, hi_hz) pairs; `smooth` de-jitters the
+        envelopes. See holographic_parambus.param_bus."""
+        from holographic.misc.holographic_parambus import param_bus, DEFAULT_BANDS
+        return param_bus(samples, rate, hop=hop, size=size,
+                         bands=bands if bands is not None else DEFAULT_BANDS, smooth=smooth)
+
     def acoustic_impedance(self, material):
         """Characteristic acoustic impedance Z = rho * c (rayl) of a material, reused from its density x speed of
         sound -- the acoustic twin of a refractive index. Acoustics A2. See holographic_acoustic.impedance."""
@@ -9143,6 +9532,86 @@ class UnifiedMind:
         lo..hi by the pattern. See holographic_pattern."""
         from holographic.misc.holographic_pattern import make_pattern
         return make_pattern(name, **params)
+
+    def warped_noise(self, scale=2.0, octaves=4, seed=0, warp=0.4, warp_scale=1.0, gain=0.5, lacunarity=2.0):
+        """DOMAIN-WARPED fBm (W11, iq's warped noise / dFBM): fbm sampled at a point displaced by a vector of
+        other fbm fields -- the swirling, flowing, marbled look plain fbm cannot make (smoke, magma, wood grain).
+        Returns f(points)->[0,1]. `warp` is the displacement strength (0 = plain fbm). The single most
+        demoscene-recognisable noise. See holographic_pattern.domain_warped_fbm."""
+        from holographic.misc.holographic_pattern import domain_warped_fbm
+        return domain_warped_fbm(scale=scale, octaves=octaves, seed=seed, warp=warp,
+                                 warp_scale=warp_scale, gain=gain, lacunarity=lacunarity)
+
+    def domain_repeat(self, sdf, period, limit=None):
+        """Tile an SDF (or any .eval field) into an INFINITE lattice by folding the query domain (iq's opRep) --
+        one shape becomes a whole crystal, at O(1) cost, no stored copies. `period` is a scalar or per-axis
+        spacing; a 0/negative axis is not repeated (so [2,0,2] tiles a floor plane, leaving height alone).
+        `limit=(lo,hi)` (per-axis integer bounds) makes it FINITE -- an lo..hi block of copies instead of an
+        endless field (iq's opRepLim). Returns an object with .eval that raymarches straight away. KEPT NOTE:
+        exact distance only for a shape bounded inside its cell (a shape near the period wraps into itself).
+        See holographic_domain.repeat / repeat_limited / wrap_sdf."""
+        from holographic.mesh_and_geometry.holographic_domain import repeat, repeat_limited, wrap_sdf
+        if limit is None:
+            return wrap_sdf(sdf, lambda P: repeat(P, period))
+        lo, hi = limit
+        return wrap_sdf(sdf, lambda P: repeat_limited(P, period, lo, hi))
+
+    def domain_fold(self, sdf, axes=None, plane=0.0):
+        """Fold an SDF's domain into mirror symmetry (kaleidoscope from one abs(), iq's opMirror). Folding one
+        axis reflects space across a plane; folding all axes maps the whole world into one octant -- an instant
+        8-fold crystal from a single asymmetric primitive. `axes` selects which to fold (default: all). Returns
+        an object with .eval. Mirroring is an isometry, so the distance stays exact. See
+        holographic_domain.fold / wrap_sdf."""
+        from holographic.mesh_and_geometry.holographic_domain import fold, wrap_sdf
+        return wrap_sdf(sdf, lambda P: fold(P, axes=axes, plane=plane))
+
+    def domain_twist(self, sdf, k, axis=2, dist_scale=0.7):
+        """Twist an SDF's domain into a helix (iq's opTwist): rotate space by `k` radians per unit along `axis`,
+        turning a bar into a screw or a column into a spiral. `dist_scale` (<1) shrinks the reported distance to
+        keep a raymarcher from oversteping the stretched space (0.7 is a safe default; lower for stronger
+        twists). Returns an object with .eval. See holographic_domain.twist / wrap_sdf."""
+        from holographic.mesh_and_geometry.holographic_domain import domain_twist, wrap_sdf
+        return wrap_sdf(sdf, lambda P: domain_twist(P, k, axis=axis), dist_scale=dist_scale)
+
+    def domain_bend(self, sdf, k, axis=0, dist_scale=0.7):
+        """Bend an SDF's domain into an arc (iq's opCheapBend): curl a straight beam by `k` radians per unit
+        along `axis`. `dist_scale` (<1) keeps the march safe through the stretched domain. Returns an object
+        with .eval. KEPT NOTE: the cheap bend warps distances slightly (fine for silhouettes/shading, which is
+        what it is for). See holographic_domain.bend / wrap_sdf."""
+        from holographic.mesh_and_geometry.holographic_domain import domain_bend, wrap_sdf
+        return wrap_sdf(sdf, lambda P: domain_bend(P, k, axis=axis), dist_scale=dist_scale)
+
+    def smooth_min(self, a, b, k=0.1):
+        """The polynomial smooth-minimum (iq's smin): a soft min(a,b) that MELTS two distance fields together
+        over width `k` instead of creasing at a seam -- what turns two SDFs into one organic metaball blob. Its
+        partners: smooth_max(a,b,k) for a smooth intersection, smooth_max(a,-b,k) for a smooth subtraction. k->0
+        recovers the hard min. Vectorised over scalars or arrays. See holographic_domain.smin."""
+        from holographic.mesh_and_geometry.holographic_domain import smin
+        return smin(a, b, k=k)
+
+    def smooth_max(self, a, b, k=0.1):
+        """The smooth-maximum partner of smooth_min (iq): smooth_max(f,g,k) is a crease-free INTERSECTION of two
+        SDFs, smooth_max(f,-g,k) a crease-free SUBTRACTION. Same width `k`. See holographic_domain.smax."""
+        from holographic.mesh_and_geometry.holographic_domain import smax
+        return smax(a, b, k=k)
+
+    def cosine_palette(self, t, a=(0.5, 0.5, 0.5), b=(0.5, 0.5, 0.5),
+                       c=(1.0, 1.0, 1.0), d=(0.0, 0.33, 0.67)):
+        """iq's cosine gradient palette: turn a scalar `t` (a distance, an iteration count, an orbit trap) into
+        a smooth harmonious RGB colour via a + b*cos(2*pi*(c*t + d)) per channel -- no banding, no harsh clip.
+        a=base, b=contrast, c=cycles-per-channel, d=per-channel phase (the hue). Defaults are iq's rainbow;
+        `t` is a scalar or array, returns (*t.shape, 3) in [0,1]. Pair with random_palette for a seed-driven
+        scheme. See holographic_domain.cosine_palette."""
+        from holographic.mesh_and_geometry.holographic_domain import cosine_palette
+        return cosine_palette(t, a=a, b=b, c=c, d=d)
+
+    def random_palette(self, seed=0, contrast=0.5):
+        """A random-but-harmonious cosine palette from a seed -- the 'regenerate from seeds' lever for COLOUR
+        (iq). Returns the (a,b,c,d) tuple ready for cosine_palette, sampling the TASTEFUL subspace (mid base,
+        bounded amplitude, low frequencies, free phase) so a random seed gives a pleasing scheme, not noise.
+        Deterministic per seed. See holographic_domain.random_palette."""
+        from holographic.mesh_and_geometry.holographic_domain import random_palette
+        return random_palette(seed=seed, contrast=contrast)
 
     def radiance_transfer(self, sdf, points, normals, order=3, n=512):
         """PRECOMPUTED RADIANCE TRANSFER -- collapse the light-transport integral into a per-point transfer vector once,
@@ -9733,11 +10202,104 @@ class UnifiedMind:
                           sky=sky, ao=ao, shadows=shadows, reflect=reflect, refract=refract, ior=ior, sss=sss,
                           sss_color=sss_color, ambient=ambient)
 
+    def depth_fog(self, color, depth, density=0.15, fog_color=(0.55, 0.65, 0.82), start=0.0):
+        """Apply exponential DEPTH FOG (Beer-Lambert) to a rendered image (W16): fade each pixel toward
+        `fog_color` by 1 - exp(-density * depth). `color` (H,W,3) LINEAR, `depth` (H,W) per-pixel distance (the
+        raymarch t). Apply before gamma. The atmosphere of a scene in one pass. See
+        holographic_atmosphere.depth_fog."""
+        from holographic.rendering.holographic_atmosphere import depth_fog
+        return depth_fog(color, depth, density=density, fog_color=fog_color, start=start)
+
+    def light_shafts(self, color, light_uv=(0.5, 0.2), threshold=0.7, density=0.9, decay=0.92,
+                     weight=0.5, exposure=0.35, samples=48):
+        """Volumetric LIGHT SHAFTS / god rays by radial blur (W16, Mitchell GPU Gems 3): streak the bright pixels
+        (sky/light at `light_uv` screen coords) outward from the source. Returns the shaft glow (H,W,3) to ADD to
+        the scene. Screen-space -- only shafts a source on/near screen. See holographic_atmosphere.light_shafts."""
+        from holographic.rendering.holographic_atmosphere import light_shafts
+        return light_shafts(color, light_uv=light_uv, threshold=threshold, density=density, decay=decay,
+                            weight=weight, exposure=exposure, samples=samples)
+
+    def sphere_trace_trapped(self, sdf, O, D, trap=(0.0, 0.0, 0.0), trap_kind="origin",
+                             max_steps=96, max_dist=20.0, surf_eps=1e-3):
+        """Sphere-trace rays AND return each ray's ORBIT TRAP -- the closest approach of its march to a trap set
+        (Quilez's fractal-colouring scalar). Returns (hit, t, pos, trap_val); the hit/t/pos are identical to
+        sphere_trace (same march), and trap_val is the per-ray minimum distance to the trap. `trap_kind` in
+        {'point','origin','axis','plane'}; `trap` is the point / axis / plane-normal. Feed trap_val through
+        cosine_palette to colour a surface by how near its orbit came. See orbit_trap_render for the whole
+        render in one call, and holographic_raymarch.sphere_trace_trapped."""
+        from holographic.rendering.holographic_raymarch import sphere_trace_trapped
+        return sphere_trace_trapped(sdf, O, D, trap=trap, trap_kind=trap_kind,
+                                    max_steps=max_steps, max_dist=max_dist, surf_eps=surf_eps)
+
+    def orbit_trap_render(self, sdf, camera, width=256, height=256, trap=(0.0, 1.0, 0.0),
+                          trap_kind="axis", palette=None, trap_scale=1.4, light_dir=(0.4, 0.8, 0.3),
+                          ambient=0.25, background=(0.05, 0.06, 0.11), max_steps=110, max_dist=20.0):
+        """Render an SDF scene coloured by ORBIT TRAP -- the signature Quilez fractal look, in one call. Sphere-
+        traces every pixel, tracks each ray's closest approach to the trap set, and maps that scalar through a
+        cosine palette, lit by a simple Lambert term. `trap_kind` in {'point','origin','axis','plane'}; `palette`
+        is a (a,b,c,d) cosine_palette tuple (default: a harmonious random_palette). `trap_scale` stretches the
+        trap value into the palette's [0,1]. Returns (H,W,3) in [0,1] (sRGB). This is W3 -- orbit traps + cosine
+        palettes, the two halves finally meeting. Composes with any domain-warped SDF (fold/repeat/twist).
+        See holographic_raymarch.sphere_trace_trapped and holographic_domain.cosine_palette."""
+        import numpy as _np
+        from holographic.rendering.holographic_raymarch import sphere_trace_trapped, sdf_normal
+        from holographic.mesh_and_geometry.holographic_domain import cosine_palette, random_palette
+        eye, dirs = camera.ray_dirs(width, height)
+        O = _np.broadcast_to(eye, (width * height, 3)).astype(float)
+        D = dirs.reshape(-1, 3)
+        hit, t, pos, trap_val = sphere_trace_trapped(sdf, O, D, trap=trap, trap_kind=trap_kind,
+                                                     max_steps=max_steps, max_dist=max_dist)
+        img = _np.zeros((width * height, 3))
+        img[~hit] = _np.asarray(background)
+        if hit.any():
+            N = sdf_normal(sdf, pos[hit])
+            L = _np.asarray(light_dir, float); L = L / _np.linalg.norm(L)
+            lam = _np.clip(N @ L, 0, 1)[:, None]
+            pal = palette if palette is not None else random_palette(seed=7, contrast=0.6)
+            key = _np.clip(trap_val[hit] * trap_scale, 0, 1)
+            col = cosine_palette(key, *pal)
+            img[hit] = col * (ambient + (1.0 - ambient) * lam)
+        return _np.clip(img.reshape(height, width, 3), 0, 1) ** (1 / 2.2)
+
     def ambient_occlusion(self, sdf, points, normals, samples=6, step=0.06, k=1.6):
         """SDF ambient occlusion at `points` with `normals`: march the normal and read the field -- a near
         surface darkens the point. Field-native, no hemisphere rays. See holographic_raymarch.ambient_occlusion."""
         from holographic.rendering.holographic_raymarch import ambient_occlusion
         return ambient_occlusion(sdf, points, normals, samples=samples, step=step, k=k)
+
+    def sdf_extrude(self, sd2d, height=1.0):
+        """EXTRUDE a 2-D SDF into a 3-D prism along Z (W10, iq's opExtrusion) -- a logo becomes a badge, a gear
+        cross-section a gear. `sd2d` is a 2-D SDF callable f(Q:(n,2))->(n,) (from sdf2d.circle2d / box2d /
+        polygon2d / ...). Returns a 3-D SDF f(P)->dist that plugs into sphere_trace / the mesher / the voxelizer.
+        EXACT. See holographic_sdf2d.extrude."""
+        from holographic.mesh_and_geometry.holographic_sdf2d import extrude
+        return extrude(sd2d, height=height)
+
+    def sdf_revolve(self, sd2d, offset=0.0):
+        """REVOLVE a 2-D SDF around the Y axis into a solid of revolution (W10, a lathe) -- a vase, a bottle, a
+        turned leg; an offset circle becomes a torus. `sd2d` is a 2-D SDF callable; `offset` shifts the profile
+        off the axis. Returns a 3-D SDF f(P)->dist. See holographic_sdf2d.revolve."""
+        from holographic.mesh_and_geometry.holographic_sdf2d import revolve
+        return revolve(sd2d, offset=offset)
+
+    def sdf2d(self, name, **params):
+        """Build a 2-D SDF primitive by name (W10): 'circle' (r), 'box' (bx,by), 'rounded_box' (bx,by,r), 'ngon'
+        (sides,r), 'polygon' (vertices). Returns f(Q:(n,2))->(n,) -- draw a cross-section, then sdf_extrude or
+        sdf_revolve it into 3-D. See holographic_sdf2d."""
+        from holographic.mesh_and_geometry import holographic_sdf2d as s2
+        builders = {"circle": s2.circle2d, "box": s2.box2d, "rounded_box": s2.rounded_box2d,
+                    "ngon": s2.ngon2d, "polygon": s2.polygon2d}
+        if name not in builders:
+            raise ValueError("unknown 2-D SDF %r; try %s" % (name, sorted(builders)))
+        return builders[name](**params)
+
+    def sdf_curvature(self, sdf, points, eps=2e-3):
+        """MEAN CURVATURE of an SDF surface at `points` (W13) -- the field Laplacian (div of the unit gradient).
+        POSITIVE on convex edges/ridges, NEGATIVE in concave creases/cavities, ~0 on flat regions (a sphere of
+        radius r reads 2/r). Drives cavity darkening, edge highlighting, and curvature-aware LOD. See
+        holographic_raymarch.sdf_curvature."""
+        from holographic.rendering.holographic_raymarch import sdf_curvature
+        return sdf_curvature(sdf, points, eps=eps)
 
     def soft_shadow(self, sdf, points, light_dir, k=12.0):
         """SDF soft shadow: march each point toward the light; the closest approach to any surface is the
@@ -11892,6 +12454,62 @@ class UnifiedMind:
             op, operand = tok.split("|", 1)
             return op, operand, float(conf)
         return tok, None, float(conf)                   # a bare-opcode token (no operand)
+
+    def sample_from(self, distribution, temperature=1.0, top_p=1.0, seed_rng=None):
+        """Draw one symbol from a {symbol: weight} distribution with temperature + optional nucleus (top-p) --
+        the GENERAL stochastic-choice primitive (holographic_tokensample.sample_from_distribution), the same
+        draw the char generator, the topic generator, and the recipe grammar all now delegate to. weights may
+        be probabilities, similarities, or raw counts. temperature<1 sharpens (->argmax), >1 flattens; top_p<1
+        keeps only the smallest set of top symbols reaching that mass. Returns the chosen symbol, or None if the
+        distribution is empty / has no positive mass. Use this when you have a distribution in hand; use
+        sample_recipe / generate for full sequences. See holographic_tokensample.sample_from_distribution."""
+        import numpy as _np
+        from holographic.agents_and_reasoning.holographic_tokensample import sample_from_distribution
+        rng = _np.random.default_rng(seed_rng) if seed_rng is not None else None
+        return sample_from_distribution(distribution, temperature=temperature, top_p=top_p, rng=rng)
+
+    def sample_instruction(self, partial, temperature=1.0, top_p=1.0, rng=None):
+        """SAMPLE the next full instruction (the GENERATION dual of complete_instruction). Same learned
+        joint (opcode, operand) grammar, but drawn stochastically instead of argmax -- because a greedy
+        generator LIMIT-CYCLES (measured: greedy recipe generation gave MMD2 0.599 and ~15x the real
+        verbatim-copy rate, looping on the single top continuation; a sampled arm gave MMD2 0.011). Use
+        complete_instruction to PREDICT the next step; use this to GENERATE a diverse, distribution-faithful
+        continuation. Returns (opcode, operand); (None, None) if no grammar or the context is exhausted.
+
+        Delegates the temperature+nucleus draw to PredictiveMemory.sample -> holographic_tokensample, the
+        same primitive the character generator uses. See sample_recipe for a full-sequence generator.
+
+        KEPT NEGATIVES (measured on real physics traces): on HEAVY-TAILED token streams (one token at
+        ~98% marginal), top_p<1 or T<1 silently deletes the rare events -- default T=1.0/top_p=1.0 is the
+        safe setting there. And well-formedness is the CALLER's job: if the language alternates (e.g.
+        run/event), enforce it in the decode loop -- 18% ill-formed emissions measurably destroyed the
+        generated stream's autocorrelation until the caller enforced alternation."""
+        if getattr(self, "_recipe_grammar_joint", None) is None:
+            return None, None
+        toks = [self._instr_token(s) for s in partial]
+        tok, _ = self._recipe_grammar_joint.sample(toks, temperature=temperature, top_p=top_p, rng=rng)
+        if tok is None:
+            return None, None
+        if "|" in tok:                                  # split the joint token back into opcode + operand
+            op, operand = tok.split("|", 1)
+            return op, operand
+        return tok, None                                # a bare-opcode token (no operand)
+
+    def sample_recipe(self, seed, length=16, temperature=1.0, top_p=1.0, seed_rng=0):
+        """Generate a whole recipe by SAMPLING the learned grammar step by step (the non-limit-cycling
+        generator). `seed` is a short list of (opcode, operand) instructions to start from. Returns the
+        generated instructions (opcode, operand pairs) after the seed. This is the sampler the transform-
+        codebook program needed: the grammar can now be SPOKEN, not just predicted."""
+        import numpy as _np
+        rng_ = _np.random.default_rng(seed_rng)
+        out = list(seed)
+        for _ in range(length):
+            op, operand = self.sample_instruction(out[-self._recipe_grammar_joint.order:],
+                                                  temperature=temperature, top_p=top_p, rng=rng_)
+            if op is None:
+                break
+            out.append((op, operand))
+        return out[len(seed):]
 
     def decode_step(self, name_or_program, i):
         """Read the i-th instruction of a procedure as (opcode, operand) -- the program-as-DATA query

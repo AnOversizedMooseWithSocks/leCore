@@ -211,6 +211,252 @@ def default_catalog():
                                                 "downscale", "resize", "recolor", "colour transfer", "color transfer",
                                                 "crossfade", "morph", "sprite", "vector graphics", "svg", "procedural texture",
                                                 "picture", "photo", "raster", "pixels"))
+    c.register_capability("Image analysis (classic CV)", "SEE with arithmetic (holographic_vision, now mind doors): "
+                          "image_edges (self-calibrating Sobel edge map), image_corners (Harris interest points), "
+                          "image_lines (Hough dominant lines, edge detection chained in), image_colours (k-means "
+                          "palette + fractions), image_signature (one fixed-length descriptor per image -- colour + "
+                          "edge-orientation + layout, for retrieval/dedup/perceptual distance), image_classes "
+                          "(cluster unlabeled images into k visual classes). Pure NumPy, deterministic per seed",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "img=np.zeros((32,32,3)); img[:,12:20]=[0.9,0.2,0.1]; "
+                          "(m.image_edges(img).sum() > 0, m.image_colours(img, k=2)[1].tolist())",
+                          native=True, aliases=("find edges in an image", "detect corners in an image",
+                                                "find lines in an image", "dominant colors of an image",
+                                                "image palette", "cluster images by appearance",
+                                                "image feature vector", "perceptual image descriptor",
+                                                "analyze an image", "computer vision", "edge detection",
+                                                "corner detection", "hough transform", "image similarity"))
+    c.register_capability("ascii_view", "render any image to TEXT (holographic_ascii) -- the terminal / log / "
+                          "SSH projection backend with a real resolution knob (`width` in characters). Modes by "
+                          "detail-per-character: ramp (luminance glyphs, ~70 levels), edge (oriented | / - \\ "
+                          "glyphs where the gradient is strong), braille (2x4 dots = 8 pixels per character, "
+                          "Bayer-dithered -- the max-detail mode), half (2 full-color pixels per character via "
+                          "ANSI fg/bg). ansi='256'|'truecolor' colors any mode; deterministic to the byte and "
+                          "fully vectorised (240^2 to 100 columns of braille in ~5 ms)",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "print(m.ascii_view(np.tile(np.linspace(0,1,64),(64,1)), width=40, mode='braille'))",
+                          native=True, aliases=("ascii art from an image", "render image to terminal",
+                                                "print an image as characters", "text representation of an image",
+                                                "braille image", "ansi color image", "terminal graphics",
+                                                "view a render in the console", "image to text art",
+                                                "ascii projection", "console output of an image"))
+    c.register_capability("ascii_sdf", "preview a 3-D SDF scene as TEXT (holographic_ascii): raymarch + shade + "
+                          "ASCII in one call -- the 'see my SDF over SSH' path, no manual render loop. Takes a "
+                          "live SDF, a domain-warped scene, or its DSL text; default camera looks down -z, or "
+                          "pass (origin, forward). Modes ramp/edge/braille/half, ansi color, named ramps. Small "
+                          "by design (a preview) -- for a full frame, raymarch and pass the image to ascii_view",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "from holographic.mesh_and_geometry.holographic_sdf import sphere; "
+                          "print(m.ascii_sdf(sphere(1.0), width=40, mode='braille'))",
+                          native=True, aliases=("preview an sdf in the terminal", "ascii render an sdf",
+                                                "show a signed distance field as text", "raymarch to ascii",
+                                                "text preview of a 3d scene", "sdf to ascii", "console sdf preview"))
+    c.register_capability("ascii_field", "project a 2-D scalar FIELD straight to TEXT (holographic_ascii) -- "
+                          "composability past finished images: hand it any callable f(points)->values (a bake_nd "
+                          "slice, a noise function, a heightmap), it samples over a region, self-normalises, and "
+                          "renders. The seam that lets the ASCII backend consume the engine's native fields, not "
+                          "just image arrays. Modes ramp/edge/braille/half, ansi color, named ramps",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "print(m.ascii_field(lambda P: np.sin(6*P[:,0])*np.cos(6*P[:,1]), width=40, ramp='blocks'))",
+                          native=True, aliases=("ascii a field", "print a field as text", "visualize a field in the terminal",
+                                                "render a heightmap as ascii", "text plot of a 2d function",
+                                                "field to ascii", "console field plot"))
+    c.register_capability("depth_from_image", "SHAPE FROM SHADING: estimate a relative DEPTH MAP from a single "
+                          "image (C1 of photo-to-3D) -- no learned weights, no torch. The missing "
+                          "front end for photo_to_3d / unproject, which both need a depth map. Returns depth (H,W) "
+                          "normalised [0,1]. HONEST: shape-from-shading is ill-posed (bas-relief ambiguity), so "
+                          "this is a plausible RELATIVE surface, not metric depth",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "img=np.random.default_rng(0).uniform(0,1,(32,32)); print(m.depth_from_image(img).shape)",
+                          native=True, aliases=("estimate depth from a photo", "monocular depth map",
+                                                "depth from a single image", "shape from shading",
+                                                "depth map from an image", "guess depth from a picture",
+                                                "single image depth estimation", "relative depth from shading"))
+    c.register_capability("image_to_3d", "END-TO-END PHOTO-TO-3D from a single image (C1->C2->C3): estimate depth "
+                          "by shape-from-shading, unproject to camera-space points, and fit per-pixel 3-D GAUSSIANS "
+                          "on the confident front-facing pixels (abstaining on edges, grazing angles, and the "
+                          "unobserved back). Returns positions/colours/radii/confidences + abstain mask. Single "
+                          "view reconstructs the VISIBLE FRONT, not a watertight object",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "img=np.random.default_rng(0).uniform(0,1,(32,32,3)); r=m.image_to_3d(img); print(r['positions'].shape)",
+                          native=True, aliases=("3d gaussians from an image", "image to gaussian splats",
+                                                "photo to 3d", "picture to 3d points", "gaussian splatting from a photo",
+                                                "3d from a single photo", "image to point cloud", "photo to gaussians",
+                                                "3d from one image", "turn a photo into 3d", "photo to 3d model"))
+    c.register_capability("image_to_mesh", "END-TO-END image -> watertight MESH: shape-from-shading depth, "
+                          "unproject to points, oriented normals from the depth, then surface reconstruction "
+                          "(dual contouring). Returns (verts, quads, field, grids). Single-view + relative depth, "
+                          "so it meshes the VISIBLE FRONT as a height-field surface, not a solid object -- for "
+                          "splats instead use image_to_3d",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "img=np.random.default_rng(0).uniform(0,1,(24,24)); v,q,f,g=m.image_to_mesh(img,res=32); print(len(v)>0)",
+                          native=True, aliases=("mesh from a photo", "image to 3d mesh", "reconstruct a mesh from a picture",
+                                                "photo to mesh", "surface reconstruction from an image",
+                                                "3d model from a photo", "picture to mesh", "photogrammetry"))
+    c.register_capability("four_surface_demo", "ONE KERNEL, FOUR SURFACES (W19): given one SDF scene, return its "
+                          "four backend representations -- GLSL (Shadertoy), WGSL (browser GPU), a braille ASCII "
+                          "raymarch, and the canonical DSL text -- all provably the same field (the C emission "
+                          "matches the CPU eval that the ascii/PNG paths march). Author once, render everywhere; "
+                          "the demo that explains the whole engine in one screen",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "from holographic.mesh_and_geometry.holographic_sdf import box; "
+                          "d=m.four_surface_demo(box(0.4,0.4,0.4).rounded(0.1)); print(sorted(d.keys()))",
+                          native=True, aliases=("one kernel four surfaces", "same scene four ways",
+                                                "render a scene as glsl wgsl ascii", "author once render everywhere",
+                                                "all backends of a scene", "scene to every format"))
+    c.register_capability("2D SDF + extrude/revolve", "2-D signed distance shapes and the operators that lift them "
+                          "into 3-D (holographic_sdf2d, W10): draw a cross-section (circle, box, rounded_box, "
+                          "ngon, polygon) then EXTRUDE it into a prism along Z (a logo -> a badge, a gear profile "
+                          "-> a gear) or REVOLVE it around Y into a solid of revolution (a vase, a bottle; an "
+                          "offset circle -> a torus, exact). The result is a 3-D SDF that raymarches / meshes / "
+                          "voxelizes like any other",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "prism=m.sdf_extrude(m.sdf2d('ngon', sides=6, r=0.8), height=0.3); print(prism(__import__('numpy').zeros((1,3))).round(3))",
+                          native=True, aliases=("2d sdf", "2d sdf shape", "extrude a 2d profile", "revolve a profile",
+                                                "lathe a shape", "solid of revolution", "extrude a shape",
+                                                "spin a profile", "prism from a cross section", "polygon sdf",
+                                                "2d shape to 3d", "make a vase", "extrude a logo"))
+    c.register_capability("sdf_curvature", "MEAN CURVATURE of an SDF surface (W13) -- the field Laplacian "
+                          "(divergence of the unit gradient). POSITIVE on convex edges/ridges, NEGATIVE in "
+                          "concave creases/cavities, ~0 on flat regions (a sphere of radius r reads 2/r). Drives "
+                          "cavity darkening, edge highlighting, and curvature-aware LOD -- the shading cue behind "
+                          "the cavity/edge look",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "from holographic.mesh_and_geometry.holographic_sdf import sphere; print(m.sdf_curvature(sphere(1.0), np.array([[1.,0,0]])).round(2))",
+                          native=True, aliases=("sdf curvature", "mean curvature of a surface", "surface curvature",
+                                                "cavity shading", "edge detection on an sdf", "convexity of a shape",
+                                                "curvature shading", "ridge and valley detection"))
+    c.register_capability("warped_noise", "DOMAIN-WARPED fBm (W11, iq's warped noise / dFBM) -- fbm sampled at a "
+                          "point displaced by a vector of other fbm fields, giving the swirling, flowing, marbled "
+                          "look plain fbm cannot make: smoke, magma, wood grain, weather fronts. Returns "
+                          "f(points)->[0,1]; warp=0 reduces to plain fbm. The most demoscene-recognisable noise",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "f=m.warped_noise(scale=2.0,seed=0,warp=0.5); print(f(np.zeros((1,3))).round(3))",
+                          native=True, aliases=("domain warped fbm", "warped noise", "turbulence noise", "flow noise",
+                                                "swirling noise", "marble texture", "smoke noise", "dfbm",
+                                                "fbm domain warp", "flowing procedural texture"))
+    c.register_capability("Atmosphere (fog & light shafts)", "atmospheric post-effects over a rendered image "
+                          "(holographic_atmosphere, W16): depth_fog fades pixels toward a fog colour by distance "
+                          "(exponential Beer-Lambert -- the air of a scene in one pass), and light_shafts streaks "
+                          "god rays outward from an on-screen light/sky by radial blur (Mitchell GPU Gems 3). "
+                          "Cheap screen-space passes -- no volume marching. The atmosphere of iq's cathedral",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "img=np.full((32,32,3),0.3); d=np.full((32,32),5.0); print(m.depth_fog(img,d,density=0.2).shape)",
+                          native=True, aliases=("volumetric fog", "depth fog", "atmospheric fog", "light shafts",
+                                                "god rays", "sun rays", "crepuscular rays", "add fog to a render",
+                                                "hazy atmosphere", "volumetric light", "foggy scene"))
+    c.register_capability("scene_cost", "estimate the per-ray evaluation COST of an SDF scene (W2) -- an "
+                          "ALU/machine-model annotation for deciding if a scene raymarches in real time. Returns "
+                          "alu (approx ops per map() call), nodes, depth, iterative (has a fractal/tiling loop), "
+                          "and a plain-language verdict (cheap / moderate / heavy). Know the price before you ship "
+                          "the scene",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "from holographic.mesh_and_geometry.holographic_sdf import menger; print(m.scene_cost(menger(5,1.0))['verdict'])",
+                          native=True, aliases=("estimate shader cost", "cost of an sdf tree", "how expensive is this scene",
+                                                "is this scene realtime", "shader complexity", "raymarch budget",
+                                                "sdf performance estimate", "will this run at 60fps"))
+    c.register_capability("SDF primitive pack", "the everyday SDF PRIMITIVE leaves for building scenes "
+                          "(holographic_sdf): sphere, box, torus, cylinder, plane, menger -- and the W8 additions "
+                          "CAPSULE (a pill/limb), CONE (a spike/funnel), OCTAHEDRON (a crystal/gem, exact), and "
+                          "ELLIPSOID (iq's bounded approx). All are exact distances except ellipsoid; capsule/cone/"
+                          "octahedron emit to a GLSL shader. Compose with union/smooth_union/domain warps into any "
+                          "scene",
+                          example="from holographic.mesh_and_geometry.holographic_sdf import capsule, octahedron; "
+                          "s = octahedron(0.8).union(capsule(1.0, 0.2).translate([1.0,0,0])); print(s.eval([[0,0,0]]).round(3))",
+                          native=True, aliases=("capsule sdf", "cone sdf", "ellipsoid sdf", "octahedron sdf",
+                                                "pill shape", "crystal shape", "gem sdf", "sdf primitive",
+                                                "basic sdf shapes", "cylinder sdf", "sphere sdf", "box sdf",
+                                                "add a primitive to a scene", "sdf building blocks"))
+    c.register_capability("NURBS", "Non-Uniform Rational B-Splines (holographic_nurbs) -- the CAD/industrial-design "
+                          "surface primitive. nurbs_curve and nurbs_surface add per-control-point WEIGHTS to a "
+                          "B-spline, which is what lets a NURBS represent CONICS EXACTLY (a circle, sphere, "
+                          "cylinder) -- a polynomial B-spline only approximates them. nurbs_surface_mesh "
+                          "tessellates a patch into a mesh for the render/voxelise pipeline; nurbs_circle proves "
+                          "the exactness (radius to 1e-12). Built on the existing Cox-de Boor basis in homogeneous "
+                          "coordinates",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "import numpy as np; c=m.nurbs_circle(radius=2.0,n=100); print(round(float(np.linalg.norm(c[0,:2])),6))",
+                          native=True, aliases=("nurbs surface", "nurbs curve", "rational bspline",
+                                                "rational b-spline", "nurbs to mesh", "weighted control points",
+                                                "evaluate a nurbs patch", "cad surface", "exact circle spline",
+                                                "tensor product spline surface", "nurbs patch"))
+    c.register_capability("Voxelization", "turn a mesh or an SDF into a VOXEL occupancy grid (holographic_voxelize). "
+                          "voxelize_mesh uses the generalised WINDING NUMBER (Jacobson 2013) -- robust to "
+                          "non-watertight / self-intersecting meshes, unlike ray-parity; voxelize_sdf is the "
+                          "O(voxels) fast path for an implicit. Get solid-voxel centres as a point cloud, or run "
+                          "occupancy_to_mesh (surface_nets) to close the round trip mesh -> voxels -> mesh. Also "
+                          "exposes mesh_winding_number as a robust inside/outside test",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "from holographic.mesh_and_geometry.holographic_curves import torus_knot, sweep_tube; "
+                          "V,F=sweep_tube(torus_knot(120,2,3),radius=0.18,closed=True); occ,o,s=m.voxelize_mesh(V,F,res=24); print(int(occ.sum()))",
+                          native=True, aliases=("voxelize a mesh", "mesh to voxel grid", "occupancy grid from a mesh",
+                                                "sample an sdf onto a voxel grid", "dense voxel volume",
+                                                "point in mesh test", "inside outside mesh", "winding number",
+                                                "voxel point cloud", "mesh to voxels to mesh", "rasterize a mesh"))
+    c.register_capability("Curves, splines & knots", "parametric CURVES and geometry (holographic_curves): BEZIER "
+                          "(de Casteljau), CATMULL-ROM (interpolating, centripetal), B-SPLINE (Cox-de Boor); "
+                          "tangent + rotation-minimizing / Frenet FRAMES; arc-length resampling; SWEEP a profile "
+                          "along a curve into a watertight TUBE mesh; and parametric primitives -- TORUS KNOTS, "
+                          "TREFOIL, HELIX, SUPERELLIPSOID, GYROID field, KLEIN BOTTLE. A curve drives a camera "
+                          "path, a tube centreline, or a scatter path -- one abstraction, many uses",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "knot=m.torus_knot(n=200,p=2,q=3); V,F=m.sweep_tube(knot,radius=0.12,closed=True); print(V.shape,F.shape)",
+                          native=True, aliases=("bezier curve", "catmull rom spline", "b-spline", "bspline",
+                                                "evaluate a spline", "sample points along a curve", "curve tangent",
+                                                "frenet frame", "rotation minimizing frame", "arc length of a curve",
+                                                "sweep a profile along a curve", "tube along a path", "bezier tube",
+                                                "torus knot", "trefoil knot", "superellipsoid", "gyroid",
+                                                "klein bottle", "helix", "spline camera path", "parametric curve",
+                                                "knot geometry", "make a tube from a curve"))
+    c.register_capability("audio_param_bus", "drive scene PARAMETERS from audio (W5') -- build a per-frame bus of "
+                          "band-energy envelopes (bass / low-mid / high-mid / treble, normalised 0..1) plus an "
+                          "onset/beat signal, then subscribe a scene knob to a band. bus.subscribe(band, lo, hi, "
+                          "frame) maps a band onto a parameter range (metaball viscosity from the bass, palette "
+                          "phase from the treble); bus.onset gives beats. Reuses the existing STFT -- only the "
+                          "band binning is new. The wire that makes a demo react to music",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "t=np.linspace(0,1,22050,endpoint=False); sig=np.sin(2*np.pi*60*t); "
+                          "bus=m.audio_param_bus(sig, 22050); print(round(bus.subscribe(0,0.1,0.6,frame=5),2))",
+                          native=True, aliases=("audio reactive parameters", "drive parameters from audio",
+                                                "music reactive demo", "band energy envelope", "beat driven scene",
+                                                "onset to parameter", "sync visuals to audio", "audio param bus",
+                                                "frequency bands over time", "make a demo react to music"))
+    c.register_capability("orbit_trap_render", "render an SDF scene coloured by ORBIT TRAP -- the signature Quilez "
+                          "fractal look, in one call. Sphere-traces every pixel, tracks each ray's closest "
+                          "approach to a trap set (point / origin / axis / plane), and maps that scalar through a "
+                          "cosine palette, Lambert-lit. Composes with any domain-warped SDF (fold/repeat/twist). "
+                          "This is orbit traps + cosine palettes, the two halves meeting",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "from holographic.mesh_and_geometry.holographic_sdf import sphere; "
+                          "cam=m.camera(eye=(1.6,1.2,2.4)); img=m.orbit_trap_render(sphere(0.5).repeat((1.0,1.0,1.0)), cam, width=64, height=64); print(img.shape)",
+                          native=True, aliases=("orbit trap coloring", "fractal orbit trap render",
+                                                "color a raymarch by closest approach", "quilez orbit trap look",
+                                                "trap set coloring", "render with orbit traps",
+                                                "iq fractal colors", "closest-approach coloring"))
+    c.register_capability("sphere_trace_trapped", "sphere-trace rays AND return each ray's ORBIT TRAP -- the "
+                          "closest approach of its march to a trap set (the Quilez fractal-colouring scalar). "
+                          "Returns (hit, t, pos, trap_val); hit/t/pos are identical to sphere_trace, trap_val is "
+                          "the per-ray minimum distance to the trap (point/origin/axis/plane). Feed trap_val "
+                          "through a cosine palette. Use orbit_trap_render for the whole render in one call",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "from holographic.mesh_and_geometry.holographic_sdf import sphere; "
+                          "h,t,p,tv=m.sphere_trace_trapped(sphere(0.5), np.array([[0,0,3.]]), np.array([[0,0,-1.]]), trap_kind='origin'); print(round(float(tv[0]),2))",
+                          native=True, aliases=("closest approach along a ray", "orbit trap value per ray",
+                                                "raymarch with trap", "trap distance per pixel",
+                                                "nearest approach to a trap set"))
+    c.register_capability("ascii_animate", "render an ASCII ANIMATION to a list of text frames (holographic_ascii) "
+                          "-- the demoscene 'tunnel in a terminal' as data. Pass frame(i,u) or frame(u) (u = "
+                          "normalised time) returning an image, an SDF node / DSL text (raymarched), or a 2-D "
+                          "field sampler each frame; get back n deterministic strings to diff, write as a reel, "
+                          "or drive your own loop. For live in-terminal playback with timing use "
+                          "holographic_ascii.ascii_play",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "from holographic.mesh_and_geometry.holographic_sdf import torus; "
+                          "frames=m.ascii_animate(lambda u: torus(0.5,0.15).twist(u), n=8, width=40, mode='braille'); print(len(frames))",
+                          native=True, aliases=("animate ascii", "ascii animation", "text animation",
+                                                "animate in the terminal", "render an animation as text frames",
+                                                "ascii movie", "terminal animation", "play frames as ascii",
+                                                "animated ascii art", "render a sequence of frames to text"))
     c.register_capability("Text generation", "GENERATE text on the VSA substrate: generate(seed, length, temperature) "
                           "and generate_structured (n-gram / beam), respond(query) for a query-conditioned reply, and "
                           "answer(question) / answer_text for factual answers. The engine's write-a-sentence faculties",
@@ -1633,6 +1879,24 @@ def default_catalog():
                           native=True, aliases=("sdf", "signed distance field", "raymarch", "sphere trace", "sculpt",
                                                 "procedural terrain", "procedural geometry", "voxelize", "voxel", "octree",
                                                 "tile in space", "implicit surface", "marching"))
+    c.register_capability("Domain operators & cosine palette (demoscene)", "infinite procedural worlds from a tiny "
+                          "kernel (holographic_domain, Quilez/Shadertoy style): domain WARPS that pre-transform "
+                          "the query point of any SDF or field -- domain_repeat (tile into an infinite or finite "
+                          "lattice), domain_fold (kaleidoscopic mirror symmetry), domain_twist / domain_bend "
+                          "(helix / arc). smooth_min / smooth_max are the crease-free metaball union / intersection "
+                          "/ subtraction (iq's smin). cosine_palette turns one scalar into a smooth colour, "
+                          "random_palette makes a seed-driven scheme. One shape becomes a crystal; no assets",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "from holographic.mesh_and_geometry.holographic_sdf import sphere; "
+                          "lat=m.domain_repeat(sphere(0.3), 1.0); m.cosine_palette(0.5).tolist()",
+                          native=True, aliases=("domain repetition", "infinite tiling of a shape", "tile a shape",
+                                                "fold space for symmetry", "kaleidoscope", "mirror the domain",
+                                                "twist a shape", "bend a shape", "smooth minimum", "smin", "metaball",
+                                                "elongate a shape", "stretch a primitive along an axis",
+                                                "opelongate", "make a capsule from a sphere",
+                                                "blend two shapes smoothly", "cosine color palette", "cosine gradient",
+                                                "procedural palette", "random color palette", "iq palette", "demoscene",
+                                                "infinite lattice", "opRep", "smooth union of sdf"))
     c.register_capability("Navigation & planning", "find a way through a space or structure: A*/shortest-path route "
                           "planning (plan), slime-mould flow networks (flow), tree/graph navigation (navigator), and "
                           "maze solving. Pathfinding on the VSA substrate", example="from holographic.scene_and_pipeline.holographic_plan import ...; mind.solve_maze(world); from holographic.misc.holographic_flow import ...",
@@ -1778,6 +2042,20 @@ def default_catalog():
                           native=True, aliases=("automatic scaling", "scale until target met", "auto scale a workload",
                                                 "adaptive scaling loop", "keep doubling until it works",
                                                 "scale up automatically", "generic capacity adaptation"))
+    c.register_capability("diagnose_bake", "should you raise the DIMENSION or the BANDWIDTH for an n-D texture "
+                          "bake of THIS field? (holographic_scalinglaw): wires diagnose_scaling to bake_nd on a "
+                          "held-out query set, so the engine's most-repeated tuning rule ('double D -- if error "
+                          "drops you are variance-limited, else raise the bandwidth') becomes one call instead of "
+                          "a manual re-bake-and-eyeball. verdict is 'scale:dim' (more dimension pays) or "
+                          "'scale:margin' (widen/narrow the kernel; more dimension is wasted), each carrying its "
+                          "measured error drop -- run it before committing to an expensive high-dimension bake",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "ax=np.linspace(0,1,40); P=np.stack(np.meshgrid(ax,ax,indexing='ij'),-1); "
+                          "m.diagnose_bake([ax,ax], np.sin(2*np.pi*P[...,0])*np.cos(2*np.pi*P[...,1]))['verdict']",
+                          native=True, aliases=("tune the bake dimension", "raise dimension or bandwidth for a bake",
+                                                "is my bake variance limited", "diagnose a texture bake",
+                                                "should i raise dim or margin", "pick bake dimension",
+                                                "auto-tune bake parameters", "bias or variance limited bake"))
     c.register_capability("rectify_carrier", "REPAIR a nearly-boring carrier axis into a clean uniform index "
                           "(holographic_axisrole): a non-monotone axis (delta sometimes negative) is lifted by "
                           "cumulative ARC LENGTH -- the monotone/covering-lift from sign-as-rotation, absorbing "
@@ -1865,10 +2143,21 @@ def default_catalog():
                           "r=np.random.default_rng(0); x=np.concatenate([r.standard_normal(60)*0.1, "
                           "3+r.standard_normal(80), r.standard_normal(50)*0.1]); m.packet_demux(x)['n_sources']",
                           native=True, aliases=("packetized stream demux", "variable length bursts",
-                                                "change point detection", "detect packet boundaries",
-                                                "segment a stream where statistics shift", "burst segmentation",
-                                                "split stream into regimes", "piecewise segmentation",
-                                                "assign segments to sources", "statistics change boundaries"))
+                                                "detect packet boundaries", "burst segmentation",
+                                                "assign segments to sources", "demultiplex bursts to sources"))
+    c.register_capability("detect_regimes", "WHERE does a recorded series change behaviour? Located change-point "
+                          "detection over a whole batch (holographic_demux.segment_stream): returns the exact "
+                          "boundary indices where the statistics shift, plus each segment's start/stop/mean/std. A "
+                          "homogeneous stream honestly returns NO boundaries. The OFFLINE batch twin of "
+                          "regime_detector (which is causal/online) -- use it to re-fit a cache margin per regime, "
+                          "split a forecast at its boundaries, or segment any recorded engine signal into spans",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "r=np.random.default_rng(0); x=np.concatenate([r.normal(0,0.2,150), r.normal(2,0.2,150), "
+                          "r.normal(0,1.0,150)]); m.detect_regimes(x)['boundaries']",
+                          native=True, aliases=("where does the signal change", "find regime changes offline",
+                                                "locate change points in a recording", "segment a series into spans",
+                                                "where did the statistics shift", "batch change point detection",
+                                                "split a recorded stream at shifts", "find behaviour boundaries"))
     c.register_capability("decompose_piecewise", "decompose a PIECEWISE signal (holographic_scaffold): segment at "
                           "the statistics shifts first (segment_stream), then fit a law PER SEGMENT with "
                           "decompose_signal -- a regime-built signal fits a global formula badly (no 'switch at "
@@ -2717,6 +3006,22 @@ def default_catalog():
                           "time-travel/diff, durable + concurrent + graph + history query layers",
                           example="from holographic.agents_and_reasoning.holographic_query import run_sql, UserTable", native=False,
                           aliases=("query", "sql", "database", "table", "history", "diff", "time travel"))
+    c.register_capability("Token sampling (temperature + nucleus)",
+                          "stochastic next-symbol draw over any {symbol: weight} distribution -- the GENERATION dual "
+                          "of argmax prediction. Promoted from the char generator into one primitive; wired as "
+                          "PredictiveMemory.sample / generate_sampled and the mind's sample_instruction / "
+                          "sample_recipe over the recipe grammar. Measured reason: a greedy generator limit-cycles "
+                          "(MMD2 0.599 vs 0.011 sampled; 15x verbatim-copy) or flatlines on heavy-tailed streams. "
+                          "Kept negatives in the docstring: nucleus/low-T delete rare events on heavy-tailed "
+                          "alphabets; well-formedness (e.g. alternation) is the caller's decode-loop job",
+                          example="from holographic.agents_and_reasoning.holographic_tokensample import sample_from_distribution; sample_from_distribution({'a': 0.7, 'b': 0.3}, temperature=1.0, top_p=1.0)",
+                          native=True,
+                          aliases=("sample", "sampler", "temperature sampling", "nucleus sampling", "top p",
+                                   "stochastic generation", "sample the next token", "sample an instruction",
+                                   "generate without limit cycling", "draw from a distribution",
+                                   "instead of always picking the best", "stuck repeating in a loop",
+                                   "pick a symbol randomly by weight", "weighted random choice",
+                                   "roll a weighted die", "sample from a dict of scores"))
     return c
 
 

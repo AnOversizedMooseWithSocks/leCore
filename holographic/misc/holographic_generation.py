@@ -121,10 +121,14 @@ class ContextGenerator:
                 score = logp + topic_weight * align
             else:
                 score = logp
-            # temperature sample over the blended score
-            w = score / max(temperature, 1e-6)
-            w = np.exp(w - w.max())
-            choice = words[int(rng.choice(len(words), p=w / w.sum()))]
+            # SAMPLE over the blended log-score. Delegates to holographic_tokensample: exp(score) turns the
+            # log-space score (n-gram log-prob + topic alignment) into weights, and the primitive's weight**(1/T)
+            # is then exactly the softmax exp(score/T) this used to compute inline (proven bit-identical). Gains
+            # nucleus (top_p) for free; top_p=1.0 keeps the original plain-temperature behaviour.
+            from holographic.agents_and_reasoning.holographic_tokensample import sample_from_distribution
+            weights = np.exp(score - score.max())                    # log-score -> weights (max-shift for stability)
+            choice = sample_from_distribution({w: float(x) for w, x in zip(words, weights)},
+                                              temperature=temperature, top_p=1.0, rng=rng)
             out.append(choice)
             recent.append(choice)
             if choice not in STOPWORDS:                              # update topic

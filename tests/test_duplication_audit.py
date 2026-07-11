@@ -17,7 +17,9 @@ algorithm under two names, which no name-based scan would ever pair.
     KNOWN, OPEN -- recorded with an owner, not quietly rewired:
       _reply          coordinator, distbus     identical
       damage_mask     archive, image           identical
-      _occlusion      cosamp, iht              identical  (and it is matching pursuit, not occlusion: name is wrong)
+      _occlusion      cosamp, iht              ADJUDICATED: both now DELEGATE to occlusion_recall (measured
+                                               bit-identical first) -- the entry stays because the two delegating
+                                               shims are still textually identical bodies, by design
       _f1 / _f1f      cosamp, iht, occlusion   identical
       _face_normal    meshverbs == meshcurvature._newell_normal  (same Newell algorithm, two names)
 

@@ -10997,6 +10997,44 @@ def test_scaling_diagnosis_is_a_faculty_and_rediscovers_the_dim_rule():
     assert any("diagnose_scaling" in str(c.name)
                for c in mind.find_capability("which limit am i hitting"))
 
+    # diagnose_bake: the scaling diagnostic wired to the REAL n-D texture bake (a cross-faculty integration --
+    # scalinglaw driving the shader's bake_nd/fetch_nd). The verdict must flip with the field's regime: a smooth
+    # field baked with a wide kernel is bias-limited (raise the margin), a high-frequency field at low dimension
+    # is variance-limited (raise the dimension). This is the tribal 'double D' rule made callable through the mind.
+    ax = np.linspace(0.0, 1.0, 40)
+    P = np.stack(np.meshgrid(ax, ax, indexing="ij"), -1)
+    smooth = np.sin(2 * np.pi * P[..., 0]) * np.cos(2 * np.pi * P[..., 1])
+    busy = np.sin(2 * np.pi * 3 * P[..., 0]) * np.cos(2 * np.pi * 3 * P[..., 1])
+    assert mind.diagnose_bake([ax, ax], smooth, dim=4096, margin=1.5)["verdict"] == "scale:margin"
+    assert mind.diagnose_bake([ax, ax], busy, dim=1024, margin=2.5)["verdict"] == "scale:dim"
+    assert any("diagnose_bake" in str(c.name)
+               for c in mind.find_capability("tune the bake dimension"))
+
+
+def test_detect_regimes_locates_a_cache_stream_shift_for_per_regime_margins():
+    # A CROSS-FACULTY integration: detect_regimes (demux.segment_stream) locating where a query stream's
+    # behaviour shifts, so the cache subsystem can size a DIFFERENT fat margin per regime instead of one
+    # compromise. Two stationary regimes with different spreads -> one clean boundary, and the two spans genuinely
+    # want different margins (measured via cachehome.drift_scale). This is the "re-fit the margin per regime" hook
+    # the cache never had -- it only ever saw drift as a slow mean-error creep, never as a located boundary.
+    import numpy as np
+    import lecore
+    from holographic.caching_and_storage.holographic_cachehome import drift_scale
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+    # piecewise-STATIONARY (the input class change-point detection is for): a calm regime then a volatile one.
+    stream = np.concatenate([rng.normal(0.0, 0.1, 200), rng.normal(0.0, 1.0, 200)])
+    r = mind.detect_regimes(stream, min_seg=32)
+    assert r["n_segments"] == 2 and abs(r["boundaries"][0] - 200) <= 12, r["boundaries"]
+    # the two regimes' std differ ~10x -> a per-regime margin is worth locating the boundary for
+    stds = [s["std"] for s in r["segments"]]
+    assert stds[1] > 3 * stds[0], stds
+    # and drift_scale (the quantity that sizes a cache margin) differs across the located boundary
+    b = r["boundaries"][0]
+    assert drift_scale(list(stream[b:])) > 2 * drift_scale(list(stream[:b]))
+    assert any("detect_regimes" in str(c.name)
+               for c in mind.find_capability("where does the signal change"))
+
 
 def test_rectify_carrier_composes_with_axis_analysis_through_the_mind():
     # The full pipeline the axis-role thread was building toward: a wobbling,
@@ -11224,3 +11262,574 @@ def test_arc_adoptions_pay_measurably_through_the_mind():
     assert on["winding"]["verdict"] == "function"
     assert on["channels"][0]["explained_fraction"] >= \
         off["channels"][0]["explained_fraction"]
+
+
+def test_vision_toolkit_is_wired_through_the_mind():
+    # The sweep's wiring find: holographic_vision (23 public functions of classic CV) was IMPORT-ONLY -- every
+    # "find edges / corners / lines / colours in an image" phrasing missed through the mind. Six doors now wired.
+    # This exercises each END-TO-END through the delegation boundary on a structured synthetic image (a red bar
+    # on black -- known edges, known lines, known palette), plus the unlabeled-clustering door on a 2-class set.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    img = np.zeros((32, 32, 3))
+    img[:, 12:20] = [0.9, 0.2, 0.1]                                   # a vertical red bar
+
+    e = mind.image_edges(img)
+    assert e.shape == (32, 32) and e.sum() > 20                        # the bar's two sides fire
+
+    lines = mind.image_lines(img, top=2)
+    assert len(lines) == 2                                             # exactly the two vertical sides
+
+    cols, frac = mind.image_colours(img, k=2)
+    assert abs(float(frac[0]) - 0.75) < 0.05                           # black 75%, red 25%
+    assert cols.shape == (2, 3)
+
+    sig = np.asarray(mind.image_signature(img)).ravel()
+    assert sig.size >= 16 and np.isfinite(sig).all()                   # a real fixed-length descriptor
+
+    # unlabeled clustering: two bar images vs two inverted images must split 2/2 by appearance alone
+    imgs = [img, img * 0.9, 1 - img, (1 - img) * 0.9]
+    labels = np.asarray(mind.image_classes(imgs, k=2)[0])
+    assert labels[0] == labels[1] and labels[2] == labels[3] and labels[0] != labels[2], labels
+
+    # and the doors are discoverable by the words a stranger would use
+    assert any("Image analysis" in str(c.name)
+               for c in mind.find_capability("find edges in an image"))
+
+
+def test_domain_operators_build_an_infinite_lattice_and_generalize_past_sdfs():
+    # iq's demoscene toolkit, END-TO-END through the mind: a domain warp pre-transforms the query point of ANY
+    # field. On an SDF it makes an infinite lattice that raymarches (one shape -> a crystal); the SAME warp
+    # composes with a plain callable field (the generalisation past SDFs -- the whole reason domain ops are
+    # coordinate warps, not SDF methods). Plus the cosine palette maps a scalar to a bounded colour.
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_sdf import sphere
+    from holographic.rendering.holographic_raymarch import sphere_trace
+    from holographic.mesh_and_geometry.holographic_domain import repeat, warp_field
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # (1) domain_repeat through the mind -> an infinite lattice: far more rays hit than a single sphere.
+    base = sphere(0.3)
+    lat = mind.domain_repeat(base, 1.0)
+    xs = np.linspace(-3, 3, 30)
+    O = np.stack([np.repeat(xs, 30), np.tile(xs, 30), np.full(900, 5.0)], 1)
+    D = np.tile([0.0, 0.0, -1.0], (900, 1))
+    hit_lat = int(sphere_trace(lat, O, D, max_dist=12.0)[0].sum())
+    hit_one = int(sphere_trace(base, O, D, max_dist=12.0)[0].sum())
+    assert hit_lat > 5 * hit_one, (hit_lat, hit_one)
+
+    # (2) finite repetition really is finite: nothing far outside the limit box.
+    lim = mind.domain_repeat(base, 1.0, limit=(-1, 1))
+    assert not sphere_trace(lim, np.array([[8.0, 0.0, 5.0]]), np.array([[0.0, 0.0, -1.0]]), max_dist=12.0)[0][0]
+
+    # (3) THE GENERALISATION: the same repeat warp tiles a NON-SDF field (a plain callable) -- the value at a
+    # point equals the value at its folded image. This is what "a domain warp fits every field" means.
+    f = lambda P: np.sin(P[..., 0])                       # an arbitrary scalar field, not an SDF
+    tiled = warp_field(f, lambda P: repeat(P, 2 * np.pi))  # period = one sine wavelength -> seamless
+    pts = np.array([[0.5, 0, 0], [0.5 + 2 * np.pi, 0, 0]])  # two points one period apart
+    v = tiled(pts)
+    assert abs(v[0] - v[1]) < 1e-9                         # the tiling made the field periodic
+
+    # (4) smooth_min is a crease-free lower bound; cosine palette is bounded.
+    assert mind.smooth_min(0.2, 0.5, 0.1) <= 0.2 + 1e-9
+    col = mind.cosine_palette(0.5)
+    assert col.shape == (3,) and 0.0 <= col.min() and col.max() <= 1.0
+
+    # (5) discoverable by the words a shader coder types.
+    assert any("Domain operators" in str(c.name)
+               for c in mind.find_capability("infinite tiling of a shape"))
+
+
+def test_ascii_projection_renders_the_engines_own_raymarch_output():
+    # The new terminal projection backend, END-TO-END: an SDF scene raymarched by the engine, shaded, and
+    # projected to text through the mind -- the full "render something, view it over SSH" chain. Contracts:
+    # the resolution knob is exact, the braille mode carries more distinct cells than ramp at the same width
+    # (8 px/char vs 1 -- the reason it exists), and the output is byte-deterministic (safe for CI).
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_sdf import sphere, sdf_normal
+    from holographic.rendering.holographic_raymarch import sphere_trace
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # a tiny shaded render of a sphere -- the engine's own output, not a synthetic array
+    W = H = 64
+    px = (np.arange(W) + 0.5) / W * 2 - 1
+    gx, gy = np.meshgrid(px, -px)
+    D = np.stack([gx.ravel() * 0.6, gy.ravel() * 0.6, -np.ones(W * H)], 1)
+    D /= np.linalg.norm(D, axis=1, keepdims=True)
+    O = np.tile([0.0, 0.0, 3.0], (W * H, 1))
+    s = sphere(1.0)
+    hit, t, pos = sphere_trace(s, O, D)
+    img = np.zeros((W * H,))
+    if hit.any():
+        N = sdf_normal(s, pos[hit])
+        L = np.array([0.5, 0.7, 0.5]); L /= np.linalg.norm(L)
+        img[hit] = np.clip(N @ L, 0, 1) * 0.9 + 0.1
+    img = img.reshape(H, W)
+
+    a = mind.ascii_view(img, width=48, mode="ramp")
+    assert all(len(ln) == 48 for ln in a.split("\n"))              # the resolution knob is exact
+    assert len(set(a)) > 4                                          # a shaded sphere has real tonal range
+
+    b = mind.ascii_view(img, width=48, mode="braille", cell_aspect=1.0)
+    # braille's contract: Bayer dithering encodes BRIGHTNESS AS DOT DENSITY, so the lit-dot fraction must track
+    # the image's mean luminance (that is what an ordered dither IS) -- the property that makes the 8-dots/cell
+    # raster a faithful tone reproduction rather than a hard threshold.
+    lit = sum(bin(ord(ch) - 0x2800).count("1") for ch in b.replace("\n", ""))
+    braille_density = lit / (48 * len(b.split("\n")) * 8.0)        # lit dots / total dots
+    assert abs(braille_density - float(img.mean())) < 0.06, (braille_density, float(img.mean()))
+    assert "\u2800" <= max(b.replace("\n", "")) <= "\u28ff"        # genuinely braille codepoints
+    assert len(set(b.replace("\n", ""))) > 5                       # non-degenerate (a real dithered image)
+
+    assert mind.ascii_view(img, width=48, mode="edge") == mind.ascii_view(img, width=48, mode="edge")  # deterministic
+    assert any("ascii_view" in str(c.name) for c in mind.find_capability("render image to terminal"))
+
+    # COMPOSABILITY: ascii_sdf raymarchs an SDF straight to text (no manual render loop), and ascii_field consumes
+    # a raw scalar field -- the two seams that let the ASCII backend take the engine's NATIVE outputs, not just
+    # image arrays. A sphere fills the middle; a radial field peaks at centre.
+    sph_txt = mind.ascii_sdf(sphere(1.0), width=36, mode="ramp")
+    assert sum(ch not in " \n" for ch in sph_txt) > 40                 # the sphere rendered as text
+    fld_txt = mind.ascii_field(lambda P: -np.hypot(P[:, 0], P[:, 1]), bounds=(-1, 1), width=25, mode="ramp")
+    flines = fld_txt.split("\n")
+    assert flines[len(flines) // 2][12] != " "                         # centre of the radial peak is inked
+    assert any("ascii_sdf" in str(c.name) for c in mind.find_capability("preview an sdf in the terminal"))
+
+    # ANSI CODEBOOK: the baked 256-colour path is a pure speedup -- byte-identical to itself and interactive.
+    rgb = np.random.default_rng(3).random((30, 40, 3))
+    assert mind.ascii_view(rgb, width=40, mode="half", ansi="256") == \
+           mind.ascii_view(rgb, width=40, mode="half", ansi="256")
+
+
+def test_all_stochastic_samplers_delegate_to_one_primitive():
+    # UP/DOWN/SIDEWAYS SWEEP of the token-sampling merge: the sampler was PROMOTED from the char generator, and
+    # the sweep found three independent temperature+nucleus loops (char generator, nucleus_sample, topic
+    # generator) that should share it. This pins that they now agree with the primitive bit-for-bit -- if any
+    # grows a private copy again, the drift shows up here. (The consolidation rule: a baseline that is a drifting
+    # copy silently stops being the thing it claims to beat.)
+    import numpy as np
+    from holographic.agents_and_reasoning.holographic_tokensample import sample_from_distribution
+    from holographic.misc.holographic_generate import nucleus_sample
+
+    d = {"a": 5.0, "b": 3.0, "c": 1.0, "d": 0.5, "e": 0.2}
+    # nucleus_sample (rep_penalty off) must equal the primitive exactly, across temperature x top_p
+    for T in (0.4, 0.7, 1.0):
+        for tp in (1.0, 0.9, 0.7):
+            a = nucleus_sample(d, np.random.default_rng(11), T, tp, recent="", rep_penalty=0.0)
+            b = sample_from_distribution(d, temperature=T, top_p=tp, rng=np.random.default_rng(11))
+            assert a == b, (T, tp, a, b)
+
+    # the general mind faculty exposes the same primitive directly, and is discoverable
+    import lecore
+    m = lecore.UnifiedMind(dim=256, seed=0)
+    draws = [m.sample_from({"x": 0.9, "y": 0.1}, seed_rng=k) for k in range(120)]
+    assert 0.8 < draws.count("x") / 120 < 1.0                 # honours the weights
+    assert m.sample_from({}) is None                          # empty -> None (caller decides to stop)
+    assert any("Token sampling" in str(c.name) for c in m.find_capability("weighted random choice"))
+
+
+def test_ascii_animation_plays_an_sdf_scene_through_the_mind():
+    # W18: the ASCII backend now ANIMATES. ascii_animate renders a frame(u)-> scene sequence to text frames end to
+    # end through the mind -- a raymarched SDF that evolves with time. Contracts: n frames, each honours the width,
+    # the animation genuinely MOVES (frames differ), and it is deterministic (safe for CI / a .txt reel).
+    import lecore
+    from holographic.mesh_and_geometry.holographic_sdf import sphere
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    def frame(u):
+        import numpy as np
+        # a sphere orbiting the frame -- an unmistakably moving scene (a torus twisted about its own view axis
+        # barely changes silhouette; translation across the frame is the honest 'this animates' test)
+        return sphere(0.5).translate([1.2 * np.cos(2 * np.pi * u), 1.2 * np.sin(2 * np.pi * u), 0.0])
+
+    reel = mind.ascii_animate(frame, n=6, width=36, mode="braille", z=4.0, fov=1.0)
+    assert len(reel) == 6
+    assert all(len(ln) == 36 for f in reel for ln in f.split("\n"))
+    assert len(set(reel)) >= 4                                  # an orbiting sphere is not a still frame
+    assert reel == mind.ascii_animate(frame, n=6, width=36, mode="braille", z=4.0, fov=1.0)   # deterministic
+    assert any("ascii_animate" in str(c.name) for c in mind.find_capability("terminal animation"))
+
+
+def test_orbit_trap_render_colors_a_scene_by_closest_approach():
+    # W3: the Quilez orbit-trap look, end to end through the mind. Contracts: sphere_trace_trapped's march is
+    # IDENTICAL to sphere_trace (the trap is a free rider, not a different trace), the trap value is a real
+    # closest-approach statistic (a near-origin ray traps closer than a far one), and orbit_trap_render produces
+    # a genuinely trap-varied image (more than a flat fill), composing with a domain-warped SDF.
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_sdf import sphere
+    from holographic.mesh_and_geometry.holographic_domain import fold, repeat, wrap_sdf
+    from holographic.rendering.holographic_raymarch import sphere_trace
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    scene = wrap_sdf(sphere(0.22), lambda P: repeat(fold(P, plane=0.0), 0.9), dist_scale=0.85)
+    rng = np.random.default_rng(1)
+    O = rng.uniform(-2, 2, (200, 3)); D = rng.normal(size=(200, 3)); D /= np.linalg.norm(D, axis=1, keepdims=True)
+    h1, t1, _ = sphere_trace(scene, O, D)
+    h2, t2, _, tv = mind.sphere_trace_trapped(scene, O, D, trap=(0, 1, 0), trap_kind="axis")
+    assert np.array_equal(h1, h2) and np.allclose(t1, t2, atol=1e-12)     # the trap does not change the march
+    assert np.isfinite(tv).all() and (tv >= 0).all()
+
+    cam = mind.camera(eye=(1.6, 1.2, 2.4), target=(0, 0, 0), fov_deg=45)
+    img = mind.orbit_trap_render(scene, cam, width=64, height=64, trap=(0, 1, 0), trap_kind="axis")
+    assert img.shape == (64, 64, 3) and 0.0 <= img.min() and img.max() <= 1.0
+    # trap-varied, not a flat fill: the hit pixels span a real range of colours
+    hit_px = img.reshape(-1, 3)[img.reshape(-1, 3).sum(1) > 0.3]
+    assert hit_px.std(axis=0).max() > 0.05                     # real tonal variation from the trap
+    assert any("orbit_trap_render" in str(c.name) for c in mind.find_capability("quilez orbit trap look"))
+
+
+def test_audio_param_bus_drives_a_scene_parameter():
+    # W5' (the "Sync" wire): a sound's bass band drives a scene parameter that visibly changes the render. This is
+    # the demoscene loop end to end -- audio analysis (reused STFT) -> band envelope -> a knob -> a different frame.
+    # Contracts: the bus routes bass energy to band 0, subscribe maps it onto a parameter range, and feeding that
+    # value into an SDF actually moves the geometry (two different bass levels -> two different renders).
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_sdf import sphere
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    rate = 22050
+    t = np.linspace(0, 1.0, rate, endpoint=False)
+    # a bass tone whose loudness swells then fades -> the bass band envelope must rise and fall
+    amp = 0.5 + 0.5 * np.sin(2 * np.pi * 1.0 * t - np.pi / 2)   # 0 -> 1 -> 0 over the second
+    sig = amp * np.sin(2 * np.pi * 60 * t) + 0.2 * np.sin(2 * np.pi * 6000 * t)
+    bus = mind.audio_param_bus(sig, rate, smooth=1)
+
+    assert bus.raw[:, 0].mean() > bus.raw[:, 3].mean()         # bass tone -> band 0 carries the energy
+    quiet = bus.band(0).min()
+    loud = bus.band(0).max()
+    assert loud - quiet > 0.5                                  # the swell really moves the envelope
+
+    # the WIRE: drive a sphere's radius from the bass band, and confirm the geometry actually changes.
+    r_quiet = bus.subscribe(0, 0.3, 0.9, frame=int(np.argmin(bus.band(0))))
+    r_loud = bus.subscribe(0, 0.3, 0.9, frame=int(np.argmax(bus.band(0))))
+    assert r_loud > r_quiet + 0.2                              # loud bass -> bigger sphere
+    d_quiet = sphere(r_quiet).eval(np.array([[0.6, 0.0, 0.0]]))[0]
+    d_loud = sphere(r_loud).eval(np.array([[0.6, 0.0, 0.0]]))[0]
+    assert d_loud < d_quiet                                    # the bigger sphere is closer to the sample point
+    assert any("audio_param_bus" in str(c.name) for c in mind.find_capability("make a demo react to music"))
+
+
+def test_curve_to_tube_mesh_flows_into_the_mesh_pipeline():
+    # Geometry ask A: parametric curves become real geometry the engine can use. A torus knot -> RMF-oriented
+    # tube -> a Mesh the DCC pipeline accepts. Contracts: the knot is a closed 3-D loop, the swept tube is
+    # watertight (every face indexes valid verts, closed loop has more faces than open), the tube radius is
+    # honoured, and the result builds a Mesh whose vertex count matches. Also: a Catmull-Rom camera path
+    # interpolates its keyframes (so it can drive a real fly-through) and its frame is orthonormal.
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_mesh import Mesh
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    knot = mind.torus_knot(n=180, p=2, q=3, R=1.0, r=0.4)
+    assert knot.shape == (180, 3)
+    assert np.linalg.norm(knot[0] - knot[-1]) < 0.1            # a closed loop
+
+    V, F = mind.sweep_tube(knot, radius=0.12, closed=True)
+    assert V.shape == (180 * 12, 3)
+    assert F.min() == 0 and F.max() < len(V)                   # every face references a real vertex
+    assert np.allclose(np.linalg.norm(V[:12] - knot[0], axis=1), 0.12, atol=1e-6)   # radius honoured
+    mesh = Mesh(V, F)                                          # the engine's mesh accepts it
+    assert mesh.n_vertices == len(V) and mesh.n_faces == len(F)
+
+    # a Catmull-Rom camera path hits its keyframes and yields an orthonormal frame (a usable fly-through)
+    keys = [[0, 0, 0], [2, 1, 0], [3, -1, 1], [5, 0, 0]]
+    path = mind.curve_catmull_rom(keys, n=100)
+    for k in keys:
+        assert np.min(np.linalg.norm(path - np.array(k), axis=1)) < 0.1    # interpolates the keyframe
+    T, N, B = mind.curve_frame(path)
+    assert np.allclose(np.sum(T * N, axis=1), 0, atol=1e-6)    # T perp N (orthonormal frame)
+
+    assert any("torus_knot" in str(c.name) or "Curves" in str(c.name)
+               for c in mind.find_capability("make a tube from a curve"))
+
+
+def test_voxelize_a_curve_tube_and_round_trip_through_the_grid():
+    # Geometry ask B: real voxelization, composing with ask A. A torus-knot tube (curves) -> occupancy grid
+    # (winding number) -> point cloud + back to a mesh. Contracts: the voxel grid is non-empty and 3-D, the
+    # winding number is a robust inside/outside test (inside ~1, outside ~0), solid-voxel centres lie in bounds,
+    # and the round trip (occupancy -> surface_nets mesh) closes even on a non-cubic grid (must pad internally).
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_curves import torus_knot, sweep_tube
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    V, F = sweep_tube(torus_knot(120, 2, 3), radius=0.18, closed=True)
+    occ, origin, spacing = mind.voxelize_mesh(V, F, res=24)
+    assert occ.ndim == 3 and occ.sum() > 0                     # a real occupancy volume
+    assert occ.shape[0] != occ.shape[1]                        # a knot's box is non-cubic (exercises padding)
+
+    # winding number is a robust inside/outside test: a point near the tube centreline is "more inside" than a
+    # far corner (the tube is thin, so use the mesh's own bbox corner as the clear outside).
+    far = V.max(0) + 1.0
+    w_far = mind.mesh_winding_number(np.array([far]), V, F)[0]
+    assert abs(w_far) < 0.1                                    # clearly outside
+
+    centres = mind.voxel_centres(occ, origin, spacing)
+    assert centres.shape == (int(occ.sum()), 3)
+    assert (centres >= origin - 1e-9).all()                   # in bounds
+
+    mv, mq = mind.occupancy_to_mesh(occ, origin, spacing)     # non-cubic -> must pad to a cube, not crash
+    assert len(mv) > 0 and len(mq) > 0
+    assert any("voxelize_mesh" in str(c.name) or "Voxel" in str(c.name)
+               for c in mind.find_capability("voxelize a mesh"))
+
+
+def test_nurbs_patch_tessellates_and_composes_with_voxelize():
+    # Geometry ask C, composing A+B+C: a NURBS surface -> mesh -> voxel grid. Contracts: the NURBS circle is
+    # conic-EXACT (the headline property, 1e-12), a surface patch tessellates to a valid mesh, and that mesh
+    # flows into the voxelizer from ask B -- proving the three geometry additions interoperate.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # (C) exactness: a NURBS circle holds its radius to floating-point precision (a B-spline cannot).
+    circ = mind.nurbs_circle(radius=2.5, n=160)
+    assert np.allclose(np.linalg.norm(circ[:, :2], axis=1), 2.5, atol=1e-12)
+
+    # a bulged NURBS patch -> mesh
+    net = np.zeros((4, 4, 3))
+    for i in range(4):
+        for j in range(4):
+            net[i, j] = [i - 1.5, j - 1.5, 0.0]
+    net[1:3, 1:3, 2] = 1.5                                     # raise the centre controls
+    V, F = mind.nurbs_surface_mesh(net, nu=24, nv=24)
+    assert V.shape == (576, 3) and F.min() == 0 and F.max() < len(V)
+    assert V[:, 2].max() > 0.3                                 # the patch really bulged
+
+    # (A+B+C) the NURBS mesh voxelizes (a NURBS surface is open, so this exercises winding-number robustness)
+    occ, o, s = mind.voxelize_mesh(V, F, res=16)
+    assert occ.ndim == 3                                       # a real grid, no crash on the open patch
+
+    assert any("nurbs" in str(c.name).lower() or "NURBS" in str(c.name)
+               for c in mind.find_capability("nurbs surface"))
+
+
+def test_w8_primitive_pack_builds_renders_and_emits():
+    # W8: the new SDF primitives (capsule/cone/octahedron/ellipsoid) are real leaves that compose, evaluate, and
+    # (for the exact three) emit to a shader. Contracts: each has correct inside/outside sign, a compound scene
+    # built from them evaluates, and the exact three appear in the emitted GLSL.
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_sdf import capsule, cone, octahedron, ellipsoid
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # sign correctness (surface ~0, inside <0, outside >0 where defined)
+    assert abs(capsule(1.0, 0.3).eval(np.array([[0.3, 0, 0]]))[0]) < 1e-9
+    assert octahedron(1.0).eval(np.array([[0, 0, 0]]))[0] < 0
+    assert cone(1.0, 0.5).eval(np.array([[3, 3, 0]]))[0] > 0
+    assert ellipsoid(1.0, 0.7, 0.5).eval(np.array([[0.4, 0, 0]]))[0] < 0
+
+    # a compound scene: a crystal (octahedron) capped by a capsule, dented by a cone -- evaluates cleanly
+    scene = octahedron(0.9).union(capsule(0.6, 0.25).translate([0.8, 0, 0])).subtract(cone(0.8, 0.3))
+    vals = scene.eval(np.random.default_rng(0).uniform(-2, 2, (200, 3)))
+    assert np.isfinite(vals).all()
+
+    # the exact three emit to GLSL (the browser/Shadertoy path)
+    assert "sdCapsule" in capsule(1.0, 0.3).to_glsl()
+    assert "sdCone" in cone(1.0, 0.5).to_glsl()
+    assert "sdOcta" in octahedron(1.0).to_glsl()
+
+    assert any("primitive" in str(c.name).lower() or "SDF" in str(c.name)
+               for c in mind.find_capability("capsule sdf"))
+
+
+def test_elongate_cost_and_atmosphere_over_a_rendered_scene():
+    # W9 + W2 + W16 together: elongate a primitive into a scene, price it, render it, and fog it with god rays.
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_sdf import sphere
+    from holographic.rendering.holographic_raymarch import sphere_trace, sdf_normal
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # W9: an elongated sphere (a capsule-ish rod) is exact and emits
+    rod = sphere(0.4).elongate(0.0, 1.0, 0.0)
+    assert abs(rod.eval(np.array([[0.0, 1.4, 0.0]]))[0]) < 1e-9        # end cap on surface
+    assert "clamp(" in rod.to_glsl()
+
+    # W2: price the scene
+    cost = mind.scene_cost(rod)
+    assert cost["alu"] > 0 and "verdict" in cost
+
+    # render it
+    W = H = 64
+    px = (np.arange(W) + 0.5) / W * 2 - 1; py = 1 - (np.arange(H) + 0.5) / H * 2
+    gx, gy = np.meshgrid(px, py)
+    cam = np.array([0.0, 0.0, 4.0])
+    D = np.stack([gx.ravel(), gy.ravel(), -np.ones(W * H) * 2], axis=1); D /= np.linalg.norm(D, axis=1, keepdims=True)
+    O = np.tile(cam, (W * H, 1))
+    hit, t, pos = sphere_trace(rod, O, D)
+    img = np.full((W * H, 3), 0.8); img[hit] = 0.3                    # bright bg (sky), dark object
+    depth = np.where(hit, t, 20.0)
+    img = img.reshape(H, W, 3); depth = depth.reshape(H, W)
+
+    # W16: fog blends toward fog_color by distance. Verify the PHYSICS directly: a far pixel gets a higher fog
+    # fraction than a near one (absolute colour change confounds base colour, so test the fraction via two equal
+    # base-colour pixels at different depths).
+    flat = np.full((H, W, 3), 0.5)
+    dnear = np.full((H, W), 1.0); dfar = np.full((H, W), 15.0)
+    near_fog = mind.depth_fog(flat, dnear, density=0.2, fog_color=(0.9, 0.9, 0.9))
+    far_fog = mind.depth_fog(flat, dfar, density=0.2, fog_color=(0.9, 0.9, 0.9))
+    assert np.abs(far_fog - flat).mean() > np.abs(near_fog - flat).mean()   # far fogs more (same base colour)
+    fogged = mind.depth_fog(img, depth, density=0.2, fog_color=(0.7, 0.75, 0.85))
+    assert np.abs(fogged - img).mean() > 0.0                          # fog changed the real render
+
+    # god rays from the bright sky
+    shafts = mind.light_shafts(img, light_uv=(0.5, 0.15))
+    assert shafts.shape == (H, W, 3)
+
+    assert any("omain" in str(c.name) or "longate" in str(c.name) for c in mind.find_capability("elongate a shape"))
+    assert any("cost" in str(c.name).lower() for c in mind.find_capability("estimate shader cost"))
+    assert any("tmosphere" in str(c.name) or "fog" in str(c.name).lower() for c in mind.find_capability("god rays"))
+
+
+def test_dfbm_curvature_and_2d_sdf_lifts():
+    # W11 + W13 + W10 together, through the mind.
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_sdf import sphere
+    from holographic.rendering.holographic_raymarch import sphere_trace
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # W11: domain-warped fbm swirls vs plain fbm, reduces to fbm at warp=0
+    P = np.random.default_rng(0).uniform(0, 3, (100, 3))
+    plain = mind.pattern_field("fbm", scale=2.0, seed=0)(P)
+    warped = mind.warped_noise(scale=2.0, seed=0, warp=0.5)(P)
+    assert warped.min() >= -1e-9 and warped.max() <= 1.0 + 1e-9
+    assert np.abs(warped - plain).mean() > 0.01
+    assert np.allclose(mind.warped_noise(scale=2.0, seed=0, warp=0.0)(P), plain, atol=1e-9)
+
+    # W13: SDF curvature = 2/r on a sphere (convex), ~0 on flat
+    assert np.allclose(mind.sdf_curvature(sphere(1.0), np.array([[1., 0, 0]])), 2.0, atol=0.1)
+    assert np.allclose(mind.sdf_curvature(sphere(2.0), np.array([[2., 0, 0]])), 1.0, atol=0.1)
+
+    # W10: draw a hexagon, extrude to a prism, revolve a circle to a torus (exact)
+    prism = mind.sdf_extrude(mind.sdf2d("ngon", sides=6, r=0.8), height=0.3)
+    hit, t, pos = sphere_trace(prism, np.array([[0., 0, 3]]), np.array([[0., 0, -1]]))
+    assert hit[0]                                              # the extruded hex prism raymarches
+    from holographic.mesh_and_geometry.holographic_sdf import torus
+    rev = mind.sdf_revolve(mind.sdf2d("circle", r=0.3), offset=1.0)
+    Q = np.random.default_rng(1).uniform(-2, 2, (150, 3))
+    assert np.abs(rev(Q) - torus(1.0, 0.3).eval(Q)).max() < 1e-9   # revolve(circle) IS a torus, exactly
+
+    assert any("warped" in str(c.name).lower() for c in mind.find_capability("turbulence noise"))
+    assert any("curvature" in str(c.name).lower() for c in mind.find_capability("sdf curvature"))
+    assert any("2D SDF" in str(c.name) or "extrude" in str(c.name).lower()
+               for c in mind.find_capability("extrude a 2d profile"))
+
+
+def test_w19_one_kernel_four_surfaces_agree():
+    # W19 capstone: one DSL scene yields four backend representations that are the SAME field. GLSL and WGSL both
+    # emit a map(); the ascii path marches the CPU eval; and the emitted C matches that eval (proven separately in
+    # the emitter tests), so all four are one field. This is the thesis demo, made checkable.
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_sdf import sphere, box, parse_dsl
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # a single HERO object (not an infinite lattice): the lattice looks great in the PNG but dissolves into noise
+    # in monochrome ASCII -- an ASCII surface needs a bold silhouette with negative space, which the PNG's colour
+    # and smooth shading make unnecessary. This scene reads in BOTH.
+    scene = box(0.6, 0.6, 0.6).rounded(0.12).smooth_union(sphere(0.5).translate([0.7, 0.2, 0]), 0.2)
+    d = mind.four_surface_demo(scene)
+
+    assert set(d.keys()) == {"dsl", "glsl", "wgsl", "ascii"}
+    assert "float map" in d["glsl"]                            # GLSL emitted
+    assert "fn map" in d["wgsl"]                               # WGSL emitted (browser)
+    # the ascii must READ as a shape, not dissolve into uniform noise. Two real signals of a legible render:
+    # (a) meaningful NEGATIVE SPACE -- a hero object leaves blank background (a lattice/noise fills every cell),
+    # and (b) a TONAL RANGE across the ramp (light edges to dark core), not one repeated glyph. The old
+    # glyph-count check passed a busy braille wall that a human reads as noise -- distinct *characters* is not
+    # readable *shape*. These catch that.
+    a = d["ascii"]
+    total_cells = sum(len(ln) for ln in a.split("\n"))
+    blank = sum(1 for ch in a if ch in " \u2800")
+    inked = total_cells - blank - a.count("\n")
+    assert 0.15 < blank / max(total_cells, 1) < 0.9             # real background AND a real object (not all/none)
+    assert inked > 30                                           # the object actually rendered
+    assert len(set(ch for ch in a if ch not in " \n\u2800")) > 5   # a tonal range, not one flat glyph
+    # the DSL round-trips to the identical field it was built from (the "one kernel")
+    reparsed = parse_dsl(d["dsl"])
+    P = np.random.default_rng(0).uniform(-3, 3, (200, 3))
+    assert np.allclose(reparsed.eval(P), scene.eval(P), atol=1e-9)   # DSL == the authored scene, exactly
+
+    assert any("four" in str(c.name).lower() or "surfaces" in str(c.name).lower()
+               for c in mind.find_capability("one kernel four surfaces"))
+
+
+def test_photo_to_3d_pipeline_c1_c2_c3():
+    # The photo-to-3D pipeline end to end: a single lit-sphere image -> depth (C1, shape-from-shading) ->
+    # unproject (C2) -> per-pixel 3D Gaussians (C3), plus the mesh path. No learned weights anywhere.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # synth a lit sphere (bright centre under head-on light) -- the canonical shape-from-shading subject.
+    H = W = 56
+    yy, xx = np.mgrid[0:H, 0:W]
+    d2 = ((xx - W / 2) ** 2 + (yy - H / 2) ** 2) / (W * 0.4) ** 2
+    nz = np.sqrt(np.clip(1 - d2, 0, 1))
+    gray = np.where(d2 < 1, nz, 0.05)
+    colour = np.stack([gray, gray * 0.8, gray * 0.6], axis=2)
+
+    # C1: depth from the image. The recovered depth bulges at the centre (nearer) vs the rim.
+    depth = mind.depth_from_image(gray, light=(0, 0, 1))
+    assert depth.shape == (H, W) and depth.min() >= -1e-9 and depth.max() <= 1.0 + 1e-9
+    centre = depth[H // 2 - 2:H // 2 + 2, W // 2 - 2:W // 2 + 2].mean()
+    rim = depth[(d2 > 0.8) & (d2 < 1.0)].mean()
+    assert centre > rim                                        # shape recovered: centre nearer than rim
+
+    # C1->C2->C3: end-to-end to 3D Gaussians on the confident front, abstaining elsewhere.
+    res = mind.image_to_3d(colour, light=(0, 0, 1))
+    assert res["positions"].shape[1] == 3 and len(res["positions"]) > 50   # got real 3D points
+    assert 0.0 < res["coverage"] < 1.0                        # kept the observed front, abstained on the rest
+    assert res["abstain_mask"].sum() > 0                      # something was correctly abstained (the back/edges)
+
+    # mesh path: same front, as a surface.
+    verts, quads, field, grids = mind.image_to_mesh(gray, light=(0, 0, 1), res=36)
+    assert len(verts) > 50 and quads.shape[1] == 4            # a non-trivial reconstructed surface
+
+    # discoverability: the phrasings that returned NOTHING before now resolve.
+    assert any("depth_from_image" in str(c.name) for c in mind.find_capability("estimate depth from a photo"))
+    assert any("image_to_3d" in str(c.name) for c in mind.find_capability("3d gaussians from an image"))
+    assert any("image_to_mesh" in str(c.name) for c in mind.find_capability("mesh from a photo"))
+
+
+def test_photo_to_3d_pipeline_end_to_end():
+    # C1 -> C2 -> C3: a single lit-sphere "photo" becomes a depth map, then 3D gaussians with real Z variation.
+    # No learned weights anywhere -- classical shape-from-shading + Frankot-Chellappa + unproject.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    H = W = 64
+    yy, xx = np.mgrid[0:H, 0:W]
+    cx = cy = 32
+    d2 = ((xx - cx) ** 2 + (yy - cy) ** 2) / (W * 0.4) ** 2
+    inside = d2 < 1.0
+    nz = np.sqrt(np.clip(1 - d2, 0, 1))                          # a lit sphere: brightness = N.L (head-on)
+    photo = np.stack([np.where(inside, nz, 0.06) * c for c in (0.9, 0.6, 0.4)], axis=2)
+
+    # C1: depth with a MEANINGFUL bulge (centre nearer than rim by a real margin, not a flat disc)
+    depth = mind.depth_from_image(photo, light=(0, 0, 1))
+    assert depth.shape == (H, W) and 0.0 <= depth.min() and depth.max() <= 1.0
+    centre = depth[30:34, 30:34].mean()
+    rim = depth[inside & (d2 > 0.8)].mean()
+    assert centre - rim > 0.08                                  # a recovered bulge, not flattened
+
+    # C1->C2->C3: end-to-end to 3D gaussians with genuine depth (a flat card would have ~0 Z spread)
+    g = mind.image_to_3d(photo, light=(0, 0, 1))
+    P = np.asarray(g["positions"])
+    assert P.shape[1] == 3 and len(P) > 100
+    assert P[:, 2].std() > 0.05                                 # the recovered points form a surface, not a plane
+    assert 0.0 < g["coverage"] < 1.0                            # it abstains somewhere (rim/edges/back)
+    assert g["n_abstained"] > 0
+
+    # image_to_mesh also runs (front surface)
+    verts = mind.image_to_mesh(np.where(inside, nz, 0.06), res=32)[0]
+    assert np.asarray(verts).shape[0] > 0
+
+    for q in ["turn a photo into 3d", "depth from a single image", "mesh from a photo"]:
+        assert mind.find_capability(q), q

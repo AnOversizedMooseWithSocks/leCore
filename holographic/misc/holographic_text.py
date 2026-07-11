@@ -405,24 +405,23 @@ class HolographicNGram:
         switches on NUCLEUS decoding: at each step keep only the smallest set of
         likeliest characters whose probability sums to top_p, and sample within it --
         trimming the unlikely tail that breaks words. top_p=1.0 (the default) is the
-        original plain-temperature behaviour exactly, so existing callers are unchanged."""
+        original plain-temperature behaviour exactly, so existing callers are unchanged.
+
+        DELEGATES the per-step temperature+nucleus draw to holographic_tokensample.
+        sample_from_distribution -- the primitive PROMOTED from this very loop (proven
+        bit-identical across temperature x top_p x distributions before the switch). WHY
+        delegate: keeping a private copy here means the char generator and every other
+        sampler drift apart; one primitive keeps them honest and shares the T->0 argmax
+        guard the inline loop never had."""
+        from holographic.agents_and_reasoning.holographic_tokensample import sample_from_distribution
         rng = rng or np.random.default_rng(0)
         out = seed_text.lower() if self.fold_case else seed_text
         for _ in range(length):
             dist = self._distribution(out[-self.n:])
-            chars = list(dist)
-            weights = np.clip(np.array([dist[c] for c in chars]), 0, None) ** (1.0 / temperature)
-            if weights.sum() <= 0:
+            ch = sample_from_distribution(dist, temperature=temperature, top_p=top_p, rng=rng)
+            if ch is None:                               # no positive mass -- stop, as the inline loop did
                 break
-            p = weights / weights.sum()
-            if top_p < 1.0:                              # nucleus: keep the top-p mass only
-                order = np.argsort(p)[::-1]
-                cum = np.cumsum(p[order])
-                keep = order[:max(1, int(np.searchsorted(cum, top_p)) + 1)]
-                masked = np.zeros_like(p)
-                masked[keep] = p[keep]
-                p = masked / masked.sum()
-            out += chars[int(rng.choice(len(chars), p=p))]
+            out += ch
         return out
 
     def predict_accuracy(self, text):

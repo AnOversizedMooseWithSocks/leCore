@@ -19,7 +19,7 @@ import numpy as np
 import pytest
 
 from holographic.misc.holographic_scalinglaw import (
-    diagnose_scaling, auto_scale, RESPONSIVE_DROP,
+    diagnose_scaling, auto_scale, RESPONSIVE_DROP, diagnose_bake,
 )
 
 
@@ -144,6 +144,47 @@ def test_diagnosis_is_deterministic():
     fn = lambda dim, tiles: (8.0 / tiles) + (1.0 / np.sqrt(dim))
     assert diagnose_scaling(fn, {"dim": 64, "tiles": 4}) == \
            diagnose_scaling(fn, {"dim": 64, "tiles": 4})
+
+
+# ---------------------------------------------------------------------------
+# diagnose_bake: the scaling diagnostic wired to the real n-D texture bake
+# ---------------------------------------------------------------------------
+
+def _field(freq):
+    ax = np.linspace(0.0, 1.0, 40)
+    P = np.stack(np.meshgrid(ax, ax, indexing="ij"), -1)
+    return ax, np.sin(2 * np.pi * freq * P[..., 0]) * np.cos(2 * np.pi * freq * P[..., 1])
+
+
+def test_diagnose_bake_calls_margin_on_a_bias_limited_field():
+    # a smooth field baked with a wide kernel is BIAS-limited: widening/narrowing the kernel (margin) is the
+    # lever, and more dimension is nearly wasted. The verdict and the evidence must agree.
+    ax, vals = _field(1)
+    r = diagnose_bake([ax, ax], vals, dim=4096, margin=1.5)
+    assert r["verdict"] == "scale:margin"
+    drops = {p["knob"]: p["drop"] for p in r["probes"]}
+    assert drops["margin"] > drops["dim"]                     # the recommendation carries its own proof
+
+
+def test_diagnose_bake_calls_dim_on_a_variance_limited_field():
+    # a high-frequency field at low dimension is VARIANCE-limited: only more dimension resolves it.
+    ax, vals = _field(3)
+    r = diagnose_bake([ax, ax], vals, dim=1024, margin=2.5)
+    assert r["verdict"] == "scale:dim"
+    drops = {p["knob"]: p["drop"] for p in r["probes"]}
+    assert drops["dim"] > drops["margin"]
+
+
+def test_diagnose_bake_scores_on_held_out_points_not_the_grid():
+    # the honest-baseline guarantee: with no queries given, it scores on interior points it generates, never on
+    # the baked grid itself (which any bake reproduces trivially). Passing explicit queries must also work and be
+    # deterministic.
+    ax, vals = _field(1)
+    q = np.random.default_rng(0).uniform(0.1, 0.9, (50, 2))
+    a = diagnose_bake([ax, ax], vals, queries=q, dim=2048, margin=1.5)
+    b = diagnose_bake([ax, ax], vals, queries=q, dim=2048, margin=1.5)
+    assert a == b                                             # deterministic given the same held-out set
+    assert a["base_error"] > 0.0                              # a real generalization error, not a trivial 0
 
 
 def test_selftest_runs():

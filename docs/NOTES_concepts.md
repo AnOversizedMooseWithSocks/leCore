@@ -28066,3 +28066,717 @@ merged integration file 448/448; the two-sided-merge regression cluster 245 gree
 **Delta:** 429 -> 436 modules; 376 -> 383 wired; 4,867 -> 4,986 tests (branch +119); docs regenerated. The
 branch's own close-out discipline held -- every new module arrived wired, cataloged, selftested, and documented,
 which is what made this merge mostly classification rather than surgery.
+
+## INTEGRATION SWEEP of the 7 merged signal modules -- where do they plug into the stack?
+
+Ran an above/below/sideways + wiring sweep asking: can axisrole/scalinglaw/analytic/demux/sysid/winding/scaffold
+drive real improvements in the existing subsystems (GPU cache, denoise, storage, render, sim)? Probed each new
+capability against the live stack rather than guessing from names.
+
+**SHIPPED -- diagnose_bake (the highest-impact seam found).** The engine's most-repeated tribal rule -- "double D:
+if error drops when you double the dimension you are variance-limited, else raise the bandwidth" -- lived only in
+shader docstrings and test comments. `diagnose_scaling` could automate it but nobody would wire the eval_fn.
+Built `diagnose_bake(grids, values, ...)` in holographic_scalinglaw: wires diagnose_scaling to bake_nd on a
+HELD-OUT query set (generalization error, honest baseline -- never the baked grid), returns verdict 'scale:dim' or
+'scale:margin' with the measured per-knob drop. MEASURED it works both ways: a smooth wide-kernel field -> margin
+(dim drop 0.056 vs margin 0.736), a high-frequency dimension-starved field -> dim (dim drop 0.148 vs margin 0.027).
+Impact: before an expensive 2x-16x-dimension bake, one call says whether dimension will actually pay -- the wrong
+lever wastes the whole bake. Wired to the mind, cataloged (4/5 top-1 discoverability), agent-invocable, +3 pytest
+tests + 1 integration assertion. Added `_grid_interp` (pure-NumPy multilinear) as the held-out ground truth.
+
+**SURVEYED, deliberately NOT built (kept negatives -- the sweep's honest half):**
+* adaptive_fit ALREADY solves "how many splats" content-adaptively (residual-driven to a noise floor) -- auto_scale
+  would not beat it. A good existing mechanism is not a seam. [DON'T FORCE A FIT]
+* analyze_axes gives principled index/bind advice on real tensors (video [t,H,W,C] -> time=index) and IS wired, but
+  the encoders don't yet CONSUME it -- a real future seam (auto axis-role in encode_record/encode_scene), deferred
+  because it needs its own session with an encode-quality baseline, not a drive-by.
+* sysid.fit_second_order can identify (mass, damping, stiffness) from a trajectory and the cloth/softbody sims HAVE
+  the force channel it needs -- a genuine inverse-simulation capability the engine lacks. Deferred: needs a
+  force-instrumented sim recording harness to be more than a toy. Filed as PENDING.
+* demux/winding/analytic are strong for EXTERNAL signal analysis but have no current internal caller -- their home
+  is user-facing data exploration, not an engine hot path. Correctly left as leaf capabilities.
+
+Kept negative for the ledger: the machine model (holographic_machinemodel) is a DESCRIPTIVE benchmark layer, not a
+tuner -- diagnose_scaling does not belong wired into it; the real cache tunables (residency max_items, margin-cache
+hysteresis) are already content/size-driven, not blind constants. The GPU-cache "speedup" the sweep was asked to
+find is diagnose_bake choosing NOT to over-bake, not a new eviction policy.
+
+**Delta:** +1 faculty (diagnose_bake) + 1 helper (_grid_interp), +3 pytest + 1 integration assertion. Budgets
+unchanged (collisions 42/42, wired 383, no-selftest 64, does 58/0). scalinglaw selftest 5->6 contracts.
+
+## CONSOLIDATION AUDIT -- do the bespoke adaptive loops duplicate auto_scale? (measured: no)
+
+The principle (Moose): when a generic function (auto_scale) overlaps a bespoke one, switch the bespoke to the
+generic IF real-data results tie or improve -- so future improvements to the generic propagate everywhere instead
+of leaving parallel copies to rot. Ran that audit against auto_scale across every adaptive mechanism in the stack.
+Verdict: NO genuine duplicate exists -- each bespoke loop is a DIFFERENT, better-suited algorithm, and switching
+any of them to auto_scale MEASURABLY REGRESSES. The generic is the fallback for the unknown-lever case, not a
+replacement for a purpose-built optimizer. Recorded so no future session re-opens this and "consolidates" wrongly.
+
+Candidates examined and why each STAYS separate (kept negatives, pinned in each docstring):
+* **splat.adaptive_fit** -- matching pursuit (place one splat at the peak residual, subtract, stop at a noise
+  floor). auto_scale would re-fit the whole set at each power-of-2 K and overshoot. HEAD-TO-HEAD on a 6-blob
+  field: auto_scale used 1.5x the splats and 8x the wall time for equal PSNR. Bespoke wins decisively.
+* **cachehome.suggest_margin_for_error** -- BISECTION over a monotone margin-vs-error curve; converges to the
+  exact boundary in log steps. auto_scale only hits power-of-2 margins and can't bisect. Different problem shape.
+* **encoders.fit_resolution** -- a CDF density-warp (reallocate resolution by value density), not a knob search.
+* **adaptive_record** -- a discrete REPRESENTATION switch (real-HRR -> FHRR -> tensor) by load/fidelity threshold,
+  not a scale-a-knob loop. The auto_scale docstring's "generalises the capacity-adaptive pattern" is a conceptual
+  lineage note, NOT a claim they should share code.
+* **adaptive_sample_budget** -- closed-form extra-sample count from variance-of-the-mean, not iterative.
+* **resolution_profile** -- a measurement (where does a classification stabilise under truncation), not an optimizer.
+
+The one place the principle DID apply was the opposite direction: the "double D" rule was tribal knowledge with NO
+implementation, so it got the generic treatment -- diagnose_bake wires diagnose_scaling to the bake (shipped this
+sweep). Consolidation is right when there's a real duplicate OR a rule with no home; it is wrong when the bespoke
+code is a better algorithm, which -- measured, not assumed -- is the case for all six above.
+
+## FULL INTEGRATION SWEEP of the 7 merged modules -- consumer hunt across the whole stack
+
+Did the thorough version of the earlier sweep: read every module's real API, then probed EVERY named subsystem
+(codebook, caching, denoise, storage, text-gen, image, 3D/physics, render) for a consumer that either hand-rolls
+one of these primitives or lacks a capability one provides. Key structural finding: the 7 modules are a
+SELF-CONTAINED signal-analysis island -- internally only scaffold consumes the others (axisrole+demux+winding),
+and NOTHING in the rest of the engine calls any of them. The merge wired them to the mind but into zero
+subsystems. So the whole opportunity is "where SHOULD an existing workflow call one."
+
+Full ranked map delivered as leCore_new_module_integration_map.md. Tiers:
+* TIER 1 (build now): detect_regimes over demux.segment_stream [SHIPPED, below]; suggest_encoding over
+  analyze_axes [deferred -- needs an encode-quality baseline, a full session].
+* TIER 2 (own session each): sysid inverse-simulation (recover material params from motion -- measured the
+  softbody's XPBD is not a clean (m,c,k) oscillator, so it needs a force-instrumented rig, not a drive-by);
+  analytic_signal instantaneous-frequency (production-grade, no consumer asks yet); scaffold-as-denoiser (needs
+  a head-to-head vs the existing denoise family).
+* TIER 3 (validated NON-seams, kept negatives): auto_scale vs the bespoke adaptive loops (already audited --
+  adaptive_fit cost 1.5x splats/8x time); winding/demux full pipelines (no internal multi-source stream);
+  smooth_sharp_split (freq-layer) vs segment_stream (change-point) -- different problems, not duplicates.
+
+**SHIPPED -- detect_regimes.** Exposes demux.segment_stream (the located-change-point primitive packet_demux uses
+internally but never surfaced) as a mind faculty: given a whole recorded series, return the exact boundary indices
+where statistics shift + each segment's start/stop/mean/std. Measured: boundaries at 150/300 exact on a 3-regime
+signal, correct per-segment means AND catches a variance-only change; a homogeneous stream honestly returns NO
+boundaries. Explicitly the OFFLINE BATCH TWIN of the existing regime_detector (CAUSAL/online, .observe() one
+sample at a time) -- NOT a duplicate; an anti-consolidation test pins that both keep their distinct shapes. Real
+consumer proven in an integration test: locating where a query stream's drift-scale shifts (measured 7.7x
+different across the boundary) so the cache can size a per-regime margin -- a hook the cache never had (it saw
+drift only as a slow mean-error creep). My own T3 does-length lint CAUGHT the first catalog entry at 733 chars
+(>600) and I trimmed it -- the gate working as designed.
+
+**Delta:** +1 faculty (detect_regimes), +3 pytest + 1 integration test (4,986 -> 4,993). Budgets: collisions 42/42,
+wired 383, no-selftest 64, does 58/0 after the trim. Discoverability 5/5, agent-invocable. Map doc delivered.
+
+## FINAL WIRING SWEEP -- import-only triage, vision doors, the _occlusion consolidation
+
+One more pass over wiring/low-hanging/promotion, driven by the reachability audit's 36 IMPORT-ONLY list instead
+of ad-hoc probing.
+
+**SHIPPED -- the vision toolkit wired (the big gap).** holographic_vision: 23 public functions of classic CV
+(Sobel edges, Harris corners, Hough lines/circles, k-means palette, per-image descriptor, unlabeled clustering)
+had ZERO mind doors -- every "find edges / corners / lines / colours in an image" phrasing missed, in exactly the
+image-analysis area the sweep was asked about. Six ergonomic doors wired (image_edges, image_corners, image_lines,
+image_colours, image_signature, image_classes), each accepting RGB and chaining gray/edge conversion internally.
+Cataloged as "Image analysis (classic CV)", 6/6 stranger phrasings top-1. Integration test proves each end-to-end
+on a structured synthetic (bar image: 2 Hough lines found, palette 75/25 correct, 2-class clustering splits 2/2).
+Wired count 383 -> 384; import-only 36 -> 35.
+
+**SHIPPED -- _occlusion consolidation (the promotion principle applied).** cosamp and iht each carried a private
+copy of greedy matching pursuit as their comparison baseline, named _occlusion after the module it reimplements.
+MEASURED head-to-head first: bit-identical to holographic_occlusion.occlusion_recall (same selection order, same
+weights to 1e-9). Both now DELEGATE -- a baseline that is a drifting copy silently stops being the thing it claims
+to beat; delegation keeps the comparison honest and propagates improvements. Selftests re-ran with identical
+measured numbers (the delegation is a behavioral no-op); the duplication-audit entry stays (the two delegating
+shims are still identical bodies, by design) with the adjudication recorded.
+
+**Low-hanging fruit closed:** orchestrator + sbc selftests canonicalized (_optimize_selftest / _adapt2_selftest
+were invisible to the census; walker 64 -> 62 without-selftest, budget lines removed); lecore.py's stale "~280
+modules" header fixed to ~436; image_classes docstring corrected to its real (labels, centroids) return.
+
+**Triage of the remaining 35 import-only (recorded, not built):** brdf (14 pub) / lights (12) / thinfilm /
+lightcache are render-internals consumed by the shading pipeline -- doors only if a user-facing ask appears.
+querytime/queryprog/querygraph/queryfolder/query_durable are the query subsystem's internals behind the query()
+door. ratedistortion (10), reasoning (9), ablate (8), measure (5), determinism (5) are developer-facing harnesses
+-- candidates for a future "engineer's toolbox" catalog family rather than individual doors. The 4 SUPERSEDED
+query twins remain declared; retirement is a separate decision.
+
+**Delta:** +6 faculties, +1 integration test, 2 selftests canonicalized, 1 consolidation (2 copies -> delegation),
+tests 4,993 -> 4,994. Budgets: collisions 42/42, does 58/0, no-selftest 62 (-2), routing pins green.
+
+## DEMOSCENE SEAT (iq) — full toybox tour, wishlist, and W1 granted (SDF domain warps -> GLSL)
+
+Gave the demoscene panelist (Quilez) the full tour -- virtual machine + measured cost table, virtual GPU texture
+unit, hypervector codebook, L1/L2/L3/L4 memory hierarchy, GLSL/WGSL emitters, physics, the demux/analytic signal
+chain, bake/encode -- all probed live so his wishes are grounded, not fabricated. Delivered his two lists as
+iq_wishlist_and_demos.md: 7 wishes (each a BRIDGE between two existing systems, verified as genuine gaps -- e.g.
+sphere_trace has no orbit-trap return, SDF has no .cost(), the GLSL emitter had no palette/fold/bend) and a 7-demo
+reel (infinite city, orbit-trap cathedral, cost-budget sculptor, baked terrain, metaball fluid, audio-reactive
+"Sync", one-vector scene).
+
+**SHIPPED -- W1, his highest-payoff/smallest-gap wish: the SDF domain warps now round-trip to GLSL.** Added
+mirror / fold / bend as SDF DSL-tree methods (ARITY registered; bend marked INEXACT alongside twist/displace;
+mirror is an exact isometry) with eval handlers AND GLSL emit, so a scene authored in leCore -- twist + tile +
+kaleidoscopic fold -- emits a clean Shadertoy-ready map(vec3 p) with the mod() tiling and abs() folds. Verified:
+SDF.fold == domain.fold and SDF.bend == domain.bend to 1e-12 (single source of truth -- reconciled domain_bend's
+default bend_plane to "the two axes other than axis" so the two implementations agree exactly across all axes);
+DSL round-trips (to_dsl -> parse_dsl -> eval identical); the emitted map() prints correct GLSL. Pinned in the SDF
+selftest (fold/mirror/bend eval + emit + round-trip).
+
+KEPT NEGATIVE / follow-up recorded: the multi-dialect emitter (holographic_sdfemit, WGSL/C/JS) does NOT yet carry
+mirror/bend rules -- both added to its UNEMITTABLE list (bend is INEXACT; mirror is exact but needs a 4-dialect
+rule, a clean follow-up) and the coverage pin bumped 18 -> 20. The GLSL/Shadertoy path -- which is what the
+demoscene ask targeted -- is complete; WGSL/C mirror emit is the next increment, filed not rushed.
+
+**Delta:** +3 SDF DSL methods (mirror/fold/bend) with eval + GLSL emit; domain_bend default reconciled; coverage
+pin 18->20; SDF selftest extended. Budgets: collisions 42/42, does 58/0, no-selftest 62, walk 6/6 green,
+integration subset 18/18. Two deliverables: iq_wishlist_and_demos.md + the engine.
+
+## ASCII PROJECTION BACKEND (PROJ-A) -- the scratch "ascii output analysis" promoted to a faculty
+
+The session habit of eyeballing renders through throwaway ASCII loops is now a first-class output backend:
+holographic_ascii.ascii_render / mind.ascii_view -- image in, deterministic string out, `width` in characters as
+the resolution knob, pure NumPy, no image deps. Modes ranked by detail-per-character: ramp (70-level luminance
+glyphs), edge (oriented | / - \ glyphs where the cell-grid gradient is strong -- edges keep direction instead of
+dissolving into brightness), braille (U+2800 2x4 dot cells = 8 pixels/char, Bayer ORDERED dither -- chosen over
+Floyd-Steinberg because error diffusion is a serial recurrence and cannot vectorise), half (U+2580 with ANSI
+fg/bg = 2 full-color pixels/char). ansi='256'|'truecolor' wraps any mode; gamma knob for linear renders;
+cell_aspect corrects the ~2:1 terminal cell. MEASURED: 240^2 -> 100-wide braille in ~5 ms.
+
+Selftest pins (contrast-style): exact width contract; ramp monotone on a gradient; a one-pixel hairline SURVIVES
+braille at a char budget where coverage is never worse than ramp; edge mode fires '|' on a step edge where ramp
+has none; ANSI/half contracts (half refuses to run colorless); byte-determinism; speed floor. Integration test
+renders the engine's OWN raymarched sphere through the mind and pins the real dither contract -- lit-dot density
+tracks mean luminance (two earlier draft metrics were WRONG and instructive: glyph-variety loses to a 70-glyph
+ramp by construction, and dot-fraction tracks brightness, not silhouette coverage; the honest pin is the dither
+identity itself).
+
+Wired (ascii_view), cataloged with 6/6 stranger-phrasing discoverability (all previously MISSED), agent-invocable.
+**Delta:** +1 module (437->438 in next docgen count), wired 385->386, +1 integration test. Budgets all held:
+collisions 42/42, does 58/0, no-selftest 62.
+
+## MIRROR EMIT (all 4 dialects) + ASCII BAKE/CODEBOOK/COMPOSABILITY
+
+Two tasks. (1) The recorded follow-up: a full `mirror` handler across WGSL/GLSL/C-f32/C-f64.
+
+**mirror emit.** Added one rule to holographic_sdfemit that builds a fresh vec3 (mirrored component =
+plane+abs(p.axis-plane), other two pass through) so it works in C too, where there is no swizzle assignment. mirror
+is an exact ISOMETRY, so no distance correction (unlike twist/bend, still refused). Removed from UNEMITTABLE;
+coverage stays complete at total=20 (a kind moved refused->emitted, none added). CROSS-CHECKED: compiled the
+c_f64 emission with cc and matched .eval to the emitter's baseline literal precision (6.8e-6, IDENTICAL with and
+without mirror -- the error is the %.6g float formatting, not the handler; mirror adds zero). Nested double-mirror
+(octant fold) validated. Selftest pins mirror emit + the compile check.
+
+**Real bug this exposed and fixed (kept negative, pinned):** `_abs_s` (scalar abs) keyed on scalar=="float" to
+pick fabsf -- but GLSL's scalar is ALSO "float", so it emitted C's fabsf into GLSL shaders. onion and cylinder
+(which take a scalar abs) were silently affected. Fixed to key on vec3=="v3" (only C uses it); GLSL/WGSL now
+correctly emit abs(). Regression pinned: GLSL output must never contain fabs/fabsf.
+
+(2) ASCII bake/codebook/composability + wiring.
+
+**ANSI colour codebook (bake).** Colour mode was 19x slower than mono because it rebuilt "\x1b[38;5;Nm" per cell
+in a Python loop. Baked the 216-colour 6x6x6 cube into two escape-string codebooks (_ANSI256_FG/_BG), indexed
+vectorised. MEASURED: half/256 on a 240^2 frame 107 ms -> 8 ms (13x); the bake is a pure speedup, byte-identical
+output (pinned). truecolor stays per-entry (16.7M colours, no codebook possible).
+
+**Glyph-ramp codebook.** The luminance->char ramp is now a first-class swappable registry (RAMPS: short/long/
+blocks/dots + custom), resolved by name via resolve_ramp -- composable, not a magic literal.
+
+**Composability (the siloing fix).** ascii_render only took finished images; the engine's native output is SDFs
+and fields. Added ascii_field (any f(P:(N,2))->values -- a bake_nd slice, noise, a heightmap: sample, self-
+normalise, project) and ascii_sdf (raymarch+shade+ASCII in one call, accepts a live SDF OR its DSL text -- the
+'preview my SDF over SSH' path). Both wired as mind faculties, cataloged 6/6 discoverable, agent-invocable.
+
+Selftest extended to 10 contracts (codebook byte-match+speed, named ramps, ascii_field/ascii_sdf compose).
+**Delta:** +2 faculties (ascii_sdf, ascii_field), mirror emits in 4 dialects, 1 latent GLSL-abs bug fixed+pinned.
+Budgets all held: collisions 42/42, does 58/0, no-selftest 62, routing pins green. Module count 438 (ascii already
+counted). NOT siloed: three ascii doors + field/SDF composability wired where the engine's outputs live.
+
+## MERGE: token sampling branch (holographic_tokensample) — carefully merged, my work preserved
+
+Merged an uploaded branch whose feature is TOKEN SAMPLING (temperature + nucleus over any {symbol: weight}
+distribution). The branch was forked BEFORE the recent ascii/domain/mirror/sdf sessions, so a wholesale file swap
+would have reverted that work; the merge was surgical instead.
+
+WHAT THE BRANCH ADDED (taken):
+  * holographic_tokensample.sample_from_distribution -- temperature+nucleus, PROMOTED from the char generator's
+    inline sampler (not reinvented). +10 pytest (test_holographic_tokensample.py). New module.
+  * holographic_predictive.py: next_distribution / sample / generate_sampled + a novelty-gate refinement
+    (best_s >= novelty_threshold). Taken wholesale (I had no competing edits; 9 predictive tests green).
+  * mind faculties sample_instruction / sample_recipe (the GENERATION dual of complete_instruction) -- inserted
+    surgically after complete_instruction, preserving my later faculties. Agent-invocable confirmed.
+  * catalog "Token sampling (temperature + nucleus)" entry -- 5/5 stranger-phrasing discoverable.
+
+WHAT I KEPT (mine; the branch had only OLDER versions, no unique feature content):
+  * holographic_sdf.py, holographic_sdfemit.py -- my mirror-across-4-dialects + the _abs_s GLSL-fabsf bug fix +
+    INEXACT/UNEMITTABLE with bend + coverage pin 20. The branch's versions were pre-fix (INEXACT w/o bend, the
+    buggy scalar-keyed _abs_s, pin 18) -- taking them would have REVERTED the bug fix. Kept mine.
+  * holographic_cosamp.py / holographic_iht.py -- my consolidation (delegate to occlusion_recall). Branch had the
+    pre-consolidation private copies. Kept mine.
+  * holographic_orchestrator.py / holographic_sbc.py / holographic_cachehome.py / holographic_splat.py -- my
+    selftest canonicalization + kept-negative docstrings. Branch pre-dated them. Kept mine.
+  * test_integration.py -- branch added NOTHING here (its tokensample tests are standalone); kept my newer tests.
+  * holographic_scalinglaw.py -- kept my diagnose_bake version.
+
+MEASURED (from the branch, preserved): a deterministic predictor limit-cycles as a generator -- recipe corpus
+greedy MMD2 0.599 vs 0.011 sampled, 15x verbatim copy; real physics traces greedy emits the mode forever (0
+bounces on a 98.5%-'g' stream), sampled T=1.0 within 7%. Rule: prediction may argmax; generation must sample.
+KEPT NEGATIVES (in docstrings): nucleus/low-T delete rare events on heavy-tailed alphabets (default T=1.0,
+top_p=1.0 there); well-formedness (alternation) is the caller's decode-loop job; T->0 underflows, guarded by
+argmax fallback.
+
+Delta: +1 module (438->439), +1 faculty pair (sample_instruction/sample_recipe), +10 tokensample pytest (suite
+5006). Audit clean 0/0/0, collisions 42/42, wired 386->387. ALL prior-session work (ascii projection, mirror emit,
+domain warps) verified intact post-merge.
+
+## UP/DOWN/SIDEWAYS SWEEP of the token-sampling merge — 3 duplicate samplers consolidated, primitive wired up
+
+The branch NOTES said sample_from_distribution was "PROMOTED from the char generator... not reinvented" -- but the
+merge left the job half-done. The sweep found the promotion source STILL carried its private copy, plus two more
+independent temperature/nucleus loops. Fixed all three (bit-identical proven BEFORE each switch, per the
+consolidation rule):
+
+  * DOWN/UP -- holographic_text.HolographicNGram.generate (the promotion SOURCE) still had the full inline
+    temperature+nucleus loop. Now delegates to sample_from_distribution (proven identical across 60 combos of
+    T x top_p x distribution). Gains the T->0 argmax guard the inline loop lacked.
+  * SIDEWAYS -- holographic_generate.nucleus_sample: a superset (adds rep_penalty). "Generalize on contact"
+    decision: the repetition penalty is a TEXT-DECODING concern, not a property of the general sampler, so it
+    stays local -- applied to the distribution, THEN the core draw delegates. Bit-identical both with and
+    without penalty.
+  * SIDEWAYS -- holographic_generation.Generator.generate: sampled a log-space blended score (n-gram log-prob +
+    topic-alignment cosine). First looked like a correct NON-consolidation (logit-softmax vs weight**(1/T)) --
+    but exp(score/T) == exp(score)**(1/T) algebraically, so it delegates by passing {word: exp(score)} as
+    weights. Bit-identical (50/50), and gains nucleus for free.
+
+  * UP (wiring) -- the primitive was only reachable through sample_instruction/sample_recipe. Added a GENERAL
+    `sample_from` mind faculty (any {symbol: weight} distribution) -- agent-invocable, cataloged with weighted-
+    random-choice aliases, 4/4 discoverable. A promoted primitive that surfaces through only one caller is
+    half-wired.
+
+KEPT NEGATIVE (correct non-consolidation, recorded so no future sweep force-merges it): rep_penalty belongs to
+nucleus_sample, not the primitive -- pushing a text repetition penalty into the general sampler would be a
+costume mismatch (the primitive samples ANY distribution; recency is a text notion).
+
+Integration test pins that all three delegate to the primitive bit-for-bit + the sample_from faculty is
+discoverable. Delta: +1 faculty (sample_from), 3 duplicate sampler loops removed (~35 lines net), +1 integration
+test. Budgets: audit 0/0/0, collisions 42/42, wired 387. The merged feature is now fully generalized: ONE sampler,
+every generator delegates, directly callable.
+
+## CI FIX: two reported failures + one latent stale pin the merge carried in
+
+CI showed 2 failures (both pre-existing in the merged branch, not caused by recent work); fixing the second
+surfaced a third latent one from the mirror/bend work. All three were STALE PINS / flaky bars, not logic bugs:
+
+  1. test_holographic_margin_wired -- the ledger (tools/unifiers.py) had the two stateless caches under ONE
+     combined NOT_APPLICABLE key "holographic_lightcache/holographic_domecache", but the test asserts each
+     separately. Branch-internal inconsistency (its own ledger and test disagreed). FIX: split into two per-cache
+     entries (matching the REGISTRY clients list), each carrying the shared reason. 14/14 wired tests pass.
+
+  2. test_holographic_realtime::test_the_masked_shade_is_actually_faster -- a WALL-CLOCK ratio bar (t_part <
+     t_full/1.5) that flaked on a loaded CI runner (measured 1.31x vs ~3x idle). A load-fragile timing bar is a
+     flaky-CI bug (cf. the seed-fragile-CI rule). FIX: assert the DETERMINISTIC property the mask guarantees --
+     masked pixels equal `base`, mask is genuinely sparse (<30%) -- plus a generous non-regression floor (t_part
+     < t_full*1.05, "not slower", not "1.5x faster"). Speedup magnitude is a machine property, not a code
+     contract. 5x stable locally.
+
+  3. test_holographic_realtime::test_every_sdf_node_kind_is_emitted_or_refused -- a DUPLICATE of the sdfemit
+     coverage pin, hard-coding total==18 and refused={menger,repeat,twist,displace}. My mirror/bend work
+     correctly moved it to 20 with bend refused / mirror emitted (already fixed in sdfemit._selftest); this
+     mirror-copy was stale. FIX: updated to 20 + bend in refused, with a comment pointing to the authoritative
+     pin. (This test doesn't run in the fast local walk, so the mirror session didn't catch it -- CI did.)
+
+Swept for other copies of both stale pins: none remain. Audit clean 0/0/0, collisions 42/42, wired 387, suite
+collects 5007. No source logic changed -- three test/ledger reconciliations.
+
+## W17' GRANTED: `repeat` emits in all 4 dialects (WGSL/GLSL/C-f32/C-f64) — the infinite lattice reaches the browser
+
+iq's highest-leverage revised wish. His review said shipping the WGSL mirror "moved the target from Shadertoy to
+the browser" -- but an infinite lattice that emits to GLSL but not WGSL can't run there. The re-audit proved it:
+the same folded-lattice DSL emitted to GLSL and FAILED to WGSL on `repeat` being unemittable. Fixed.
+
+THE INSIGHT (iq was right): infinite `repeat` is NOT iterative. It is three `mod()` expressions -- a single
+fixed-size warp -- exactly as the GLSL `to_glsl` path already did. The old UNEMITTABLE refusal conflated it with
+`menger` (which truly iterates N folds) and `repeat_limited` (finite unroll). Removed `repeat` from UNEMITTABLE
+and added the handler to the multi-dialect walker.
+
+CROSS-DIALECT mod: GLSL/WGSL `mod(x,y)=x-y*floor(x/y)` (sign follows y) differs from C `fmod` (sign follows x).
+Domain repeat needs the floor-based one to centre cells symmetrically, so: GLSL uses its builtin `mod`, WGSL
+(which has NO mod builtin) emits the floor form inline, and C emits a `modf_` helper (x - y*floor(x/y), floor/
+floorf per precision). All four agree. CROSS-CHECKED: compiled the c_f64 emission of an infinite lattice composed
+WITH a mirror (the kaleidoscope-tile combo) and matched .eval to 6.1e-06 -- the emitter's %.6g literal-precision
+baseline, IDENTICAL with/without repeat, so repeat adds zero error. The browser lattice renders exactly what
+leCore renders.
+
+Coverage stays complete total=20 (repeat moved refused->emitted, none added; refused now {menger, twist,
+displace, bend}). Updated the sdfemit selftest (repeat+mirror emit validation) and the realtime-suite mirror pin.
+Fully wired: the `sdf_dialect` mind faculty emits repeat end-to-end; `sdf_emit_coverage` reports it. Delivered
+w17_infinite_lattice_cpu.png + .wgsl (one DSL scene, CPU render AND browser shader).
+
+UNBLOCKS iq's D1 "Infinite City" as a BROWSER demo (not a screenshot). Remaining W17' tail: `menger` to WGSL/C
+(bounded unroll) -- genuinely iterative, a separate harder item, filed not rushed.
+
+Delta: repeat emits in 4 dialects; UNEMITTABLE 5->4; +2 selftest validations; coverage pin refused-set updated in
+2 places. Budgets: audit 0/0/0, collisions 42/42, walk 5/5.
+
+## W18 GRANTED: ASCII animation (ascii_frames / ascii_play / mind.ascii_animate) — iq's "tunnel in a terminal"
+
+iq's review said W18 was "~90% shipped -- the rendering is done; the wish is the playback." Confirmed: ascii_sdf
+already raymarched a frame; only the loop was missing. Built it as TWO functions, split by purity:
+  * ascii_frames(frame, n, ...) -- renders a frame(i,u) or frame(u) sequence to a LIST of n text strings. Pure,
+    deterministic, no I/O. The frame callable's RETURN picks the renderer: image -> ascii_render, SDF node / DSL
+    text -> ascii_sdf (raymarched), callable f(P) -> ascii_field. This is the composable half tests use.
+  * ascii_play(frame, n, fps, loops, stream, ...) -- the ONLY I/O function: writes frames to stdout in place
+    (hide cursor, \x1b[H home + redraw per frame, sleep to hold fps, restore cursor; loops=0 = forever until
+    KeyboardInterrupt). Tested with an in-memory StringIO -- no real terminal needed.
+Wired mind.ascii_animate (the pure frames version -- ascii_play stays a module fn since it does terminal I/O),
+cataloged 5/5 discoverable, agent-invocable. Integration test pins the end-to-end SDF-animation path (orbiting
+sphere: 6 distinct frames, width-exact, deterministic). Delivered w18_terminal_tunnel.gif (24-frame braille
+kaleidoscope, orbiting camera). KEPT NOTE: a torus twisted about its own VIEW axis barely changes silhouette --
+the honest "this animates" test scene is translation across the frame, not an axis-aligned twist.
+
+Delta W17'+W18: repeat emits in 4 dialects (browser lattice); +1 faculty ascii_animate; +2 module fns
+(ascii_frames/ascii_play); +2 integration tests. Two of iq's wishes closed this session (D1 browser demo + D8
+terminal tunnel now buildable). Budgets: audit 0/0/0, collisions 42/42, walk clean, wired 387.
+
+## W3 GRANTED: orbit-trap colouring (sphere_trace_trapped / orbit_trap_render) — iq's #1 beauty wish
+
+The signature Quilez look: colour a raymarched surface by each ray's CLOSEST APPROACH to a trap set. Two halves
+that already existed (the marcher; cosine_palette) finally meet.
+
+DESIGN -- a SEPARATE function, not a flag on sphere_trace. The base marcher is tie-sensitive and widely called;
+threading an accumulator through it risks flipping a bit-identical decision. sphere_trace_trapped shares the EXACT
+step math (largest safe step, drop converged/escaped rays) and carries a running per-ray minimum. VERIFIED: its
+hit/t/pos are bit-identical to sphere_trace (np.array_equal on hit, 1e-12 on t) -- the trap is a free rider.
+Kept relax=1.0 only: over-relaxation skips points, which would corrupt a closest-approach statistic.
+
+Trap sets (Quilez's standard primitives): 'point' (distance to a point), 'origin', 'axis' (perpendicular
+distance to a line through the origin), 'plane' (|signed distance| to a plane). trap_val -> cosine_palette = the
+colour.
+
+Wired TWO faculties: sphere_trace_trapped (raw trap values) and orbit_trap_render (raymarch+trap+palette+Lambert
+in one call -- what iq actually calls). Both cataloged, 7/7 discoverable, agent-invocable. Composes with any
+domain-warped SDF (fold/repeat/twist). Selftest pins march-identity + trap-is-closeness + all four kinds
+well-formed; integration test pins the full path through the mind. Delivered w3_orbit_trap.png (folded
+kaleidoscope coloured by axis-trap distance -- iq's D2 "Orbit-Trap Cathedral").
+
+Delta W3: +2 faculties (orbit_trap_render, sphere_trace_trapped), +1 module fn family (_trap_distance), +1
+integration test, selftest extended. Budgets: audit 0/0/0, collisions 42/42, walk clean, wired 387. THREE iq
+wishes closed this session (W17', W18, W3).
+
+## W5' GRANTED: audio param bus (holographic_parambus / audio_param_bus) — a demo reacts to music
+
+iq's review shrank W5 from "build a ParamBus subsystem" to "just the wire" after the re-audit found audio_spectrum
+already shipped. Confirmed and built as the thin wire: holographic_parambus reuses holographic_audio.frames +
+spectrum (the existing STFT -- NO new FFT) and only adds the band binning, per-frame envelopes, onset, and the
+subscribe map.
+
+WHAT IT GIVES: param_bus(samples, rate) -> a ParamBus with .env (n_frames x n_bands, per-band normalised 0..1,
+bass/low-mid/high-mid/treble), .raw (un-normalised for metering), .onset (spectral-flux beat signal), and
+.subscribe(band, lo, hi, frame) -- the actual wire that maps a band envelope onto a scene parameter range
+(viscosity from bass, palette phase from treble). .at(frame) reads all bands; .fps aligns to wall-clock.
+
+KEPT NEGATIVE (in the module + measured): normalisation is PER-BAND, not global -- a loud-bass/quiet-hihat track
+still gives the hi-hat band a full 0..1 swing, or it would never move a knob. Correct for DRIVING (each knob uses
+its whole range), wrong for METERING -- so both env (driving) and raw (metering) are returned. Also: a moving
+average clips peaks by design, so the normalisation contract is on the raw envelope; smoothing is a separate
+de-jitter step (the selftest tests them separately -- an early version conflated them and failed).
+
+Wired mind.audio_param_bus, cataloged 5/5 discoverable, agent-invocable. Integration test drives a sphere radius
+from a swelling bass band and confirms the geometry moves. Delivered w5_sync.gif -- iq's D6' "Sync" finale:
+bass-pulsed radius + treble-driven palette phase + orbit-trap colour + kaleidoscope tiling, combining THREE wishes
+shipped this session (W5' + W3 + W17').
+
+Delta W5': +1 module (holographic_parambus), +1 faculty (audio_param_bus), +1 integration test. FOUR iq wishes
+closed this session (W17', W18, W3, W5'). Budgets: audit 0/0/0, collisions 42/42, walk clean, wired 388.
+
+## GEOMETRY ASK A GRANTED: curves, splines & parametric knots (holographic_curves)
+
+The interrupted-and-resumed request. Re-audited: mesh-op basics (csg/subdivide/solidify/extrude/scatter_surface)
+exist, but there was ZERO parametric curve/spline/knot eval anywhere (probes returned NOTHING or fallbacks).
+Built the whole family in one module, one abstraction (u in [0,1] -> point, sampled to points):
+
+SPLINES: bezier (de Casteljau -- stable, not Bernstein power basis), catmull_rom (interpolating, centripetal
+alpha=0.5 default to avoid cusps), bspline (Cox-de Boor, C^(degree-1) smooth). FRAMES: tangents,
+rotation_minimizing_frame (double-reflection, Wang 2008) AND frenet_frame. arc_length + resample_by_arc_length.
+SWEEP: sweep_tube (profile along a curve, RMF-oriented, watertight tube mesh -- the curve->geometry bridge, W15).
+PRIMITIVES: helix, torus_knot, trefoil, superellipsoid (Barr), gyroid_field (implicit minimal surface),
+klein_bottle.
+
+KEY NEGATIVE (measured + pinned): the ROTATION-MINIMIZING frame twists 2.87 vs the FRENET frame's 5.70 across an
+inflection (S-curve) -- HALF the twist. Frenet flips at inflections and is undefined on straight runs (zero
+curvature -> no normal), which tears a swept tube; RMF is stable everywhere. So sweep_tube and curve cameras use
+RMF; frenet_frame is offered but its instability is named in its docstring. This is why "a spline is a spline"
+generalises: the same sampled-points + RMF-frame drives a camera path, a tube centreline, AND a scatter path.
+
+Wired 11 faculties (curve_bezier/catmull_rom/bspline/frame/resample_arc_length, sweep_tube, torus_knot,
+trefoil_knot, helix, superellipsoid, gyroid_field, klein_bottle), cataloged 11/11 discoverable (every previously-
+missing probe now resolves), agent-invocable. Integration test: torus-knot -> tube -> Mesh flows into the DCC
+pipeline; Catmull-Rom camera path interpolates its keyframes. Delivered A_torus_knot_tube.png (a (3,4) knot swept
+to an interwoven tube).
+
+Delta A: +1 module (holographic_curves, 8-contract selftest), +11 faculties, +1 integration test, module count
+441. Budgets: audit 0/0/0, collisions 42/42 (no new name clashes), wired 388->389. NEXT in sequence: B
+voxelization, then C NURBS.
+
+## GEOMETRY ASK B GRANTED: real voxelization (holographic_voxelize)
+
+The "voxelize a mesh" probe was a mesh-DCC FALLBACK -- no real mesh->grid code. Built it. Reused what existed
+(bake_sdf pattern for the SDF path; surface_nets for the inverse) and added the genuinely missing piece:
+mesh -> occupancy.
+
+METHOD CHOICE (the real decision): GENERALISED WINDING NUMBER (Jacobson et al. 2013), not ray parity. Ray parity
+needs a watertight, consistently-oriented mesh and misclassifies on holes/boundaries/coplanar faces. The winding
+number sums each triangle's solid angle (Van Oosterom-Strackee) at the query point -- ~1 inside, ~0 outside, and
+DEGRADES GRACEFULLY on open/self-intersecting meshes. Verified in the selftest: an OPEN mesh (holes punched)
+still voxelises without crashing. KEPT NEGATIVE (filed, in the docstring): winding number is O(voxels x
+triangles) -- honest, not free; ray parity ("faster") is the fragile path NOT taken because it fails on exactly
+the non-watertight meshes this is most needed for. For heavy meshes: voxelize_sdf (O(voxels)) or decimate first.
+
+FUNCTIONS: winding_number (robust inside/outside), voxelize_mesh (occupancy via winding), voxelize_sdf (O(voxels)
+implicit path, same grid layout so interchangeable), voxel_centres (solid voxels -> point cloud), occupancy_to_mesh
+(round trip via surface_nets).
+
+BUG CAUGHT BY A BETTER TEST: surface_nets requires a CUBIC grid, but a voxelised mesh is rarely cube-shaped (a
+knot -> (36,14,36)). First version crashed on the non-cubic round trip; fixed occupancy_to_mesh to PAD to a cube
+(lossless, padding is "outside"), and added a non-cubic slab case to the selftest so CI catches it. This is the
+"static passed broken code" lesson again -- the cubic box selftest hid it; the oblong slab exposes it.
+
+Wired 5 faculties (voxelize_mesh, voxelize_sdf, voxel_centres, occupancy_to_mesh, mesh_winding_number),
+cataloged, discoverable ("voxelize a mesh" now hits voxelize_mesh, not the DCC fallback), agent-invocable.
+Integration test: torus-knot tube (ask A) -> voxels -> point cloud -> mesh round trip. Delivered
+B_voxelized_knot.png (a (3,4) knot as 1426 solid voxels). Composes with ask A directly.
+
+Delta B: +1 module (holographic_voxelize, 6-contract selftest incl. open-mesh + non-cubic), +5 faculties, +1
+integration test, module count 442, wired 389->390. Budgets: audit 0/0/0, collisions 42/42. NEXT: C NURBS.
+
+## GEOMETRY ASK C GRANTED: NURBS curves & surfaces (holographic_nurbs) — geometry sequence A+B+C COMPLETE
+
+The last of the three. Probe returned NOTHING real for nurbs. Built it by GENERALISING ON CONTACT: a NURBS is a
+B-spline in HOMOGENEOUS coordinates, so it reuses holographic_curves._deboor (the Cox-de Boor basis from ask A)
+verbatim -- lift (x,y,z) to (w*x,w*y,w*z,w), evaluate the ordinary B-spline in 4-D, project by dividing by w. The
+rational part IS the projective divide; no new basis. This is why NURBS is not a separate beast from B-spline.
+
+FUNCTIONS: nurbs_curve (rational curve), nurbs_surface (tensor-product patch -- two nested 1-D evaluations in
+homogeneous space, not a bespoke 2-D evaluator), nurbs_surface_mesh (tessellate to a mesh for the pipeline),
+nurbs_circle (the exactness demo).
+
+HEADLINE PROPERTY (the reason NURBS exist, pinned in the selftest): a NURBS CIRCLE is EXACT -- every sampled
+point at radius to 1e-12 (measured 2.000000000000..2.000000000000). A polynomial B-spline circle has visible
+radius error; the per-point WEIGHTS (the 9-point form with w=sqrt2/2 on the corners) make the conic exact. Also
+verified: unit weights reduce exactly to bspline; a heavier weight pulls the curve toward its control point; a
+flat control net gives a flat patch that touches its clamped corners; a raised net bulges.
+
+KEPT NEGATIVE: weights must be strictly POSITIVE -- a non-positive weight blows up / flips the projective divide
+(curve leaves its hull). Clipped to a floor with a WHY-comment, not silently.
+
+Wired 4 faculties (nurbs_curve, nurbs_surface, nurbs_surface_mesh, nurbs_circle), cataloged 7/7 discoverable
+(every previously-missing nurbs probe now resolves), agent-invocable. Integration test composes A+B+C: NURBS
+patch -> mesh -> voxelize (the open patch exercises winding-number robustness from ask B). Delivered
+C_nurbs_surface.png (a weighted wavy patch).
+
+=== GEOMETRY SEQUENCE COMPLETE (A curves/splines/knots, B voxelization, C NURBS) ===
+The full "voxel + NURBS + curves/splines + weird primitives/knots + geometry-node capabilities" request is now
+delivered. Mesh-op basics (csg/subdivide/solidify/extrude/scatter) already existed = the Blender-geometry-node
+core; A added the parametric curve/knot family; B added real voxelization; C added CAD NURBS. All three compose
+(knot->tube->voxels; nurbs->mesh->voxels). Delta C: +1 module (holographic_nurbs, 6-contract selftest),
++4 faculties, +1 integration test. Module count 443, wired 391. Budgets across all three: audit 0/0/0,
+collisions 42/42, walks clean.
+
+## W8 GRANTED: SDF primitive pack (capsule, cone, ellipsoid, octahedron)
+
+iq's everyday-leaf wish. Audited: sphere/box/torus/cylinder/plane/menger existed; capsule/cone/ellipsoid/
+octahedron were MISSING (probes returned "PDE solve" fallbacks). Added all four with iq's own published closed
+forms:
+  * capsule -- exact distance to a Y-segment inflated by r (clamp + length). EXACT.
+  * cone -- iq's capped-cone 2-D form in the (radial, y) half-plane. EXACT.
+  * octahedron -- iq's exact regular octahedron (face-region select). EXACT.
+  * ellipsoid -- iq's BOUNDED approx k1*(k1-1)/k2 (no exact SDF exists). Marked INEXACT: raymarches correctly
+    (never oversteps) but the emitter refuses it (needs the shorter-step warning). Known degeneracy: the exact
+    CENTRE reads 0 (k1=0) -- harmless, a ray approaches from outside.
+
+WIRING ACROSS THE STACK: added to ARITY (validation), _eval (vectorised), _GLSL_PRIM + the GLSL leaf dispatch +
+the helper-collection tuple (the exact three emit to a Shadertoy shader -- verified sdCapsule/sdCone/sdOcta in the
+output, incl. compound scenes). ellipsoid added to INEXACT. The 4-dialect emitter (sdfemit) REFUSES all four for
+now: ellipsoid because INEXACT, capsule/cone/octahedron because their branch-heavy forms are not yet ported to
+the WGSL/C dialect table -- a filed follow-up (capsule is a general clamp(lo,hi) away), NOT a math limit. Coverage
+stays complete (total 20->24; refused set grew by the four). Updated both coverage pins (sdfemit selftest via
+UNEMITTABLE, realtime mirror hardcoded set) to total==24.
+
+Cataloged as "SDF primitive pack", discoverable (capsule/cone/ellipsoid/octahedron sdf all resolve now, were
+fallbacks), example runs. Selftest pins surface-distance ~0 + sign + GLSL-emit for the exact three. Integration
+test builds a compound crystal scene and checks eval + emit. Delivered W8_primitive_pack.png (the four in a row).
+
+KEPT NEGATIVE: the 4-dialect WGSL/C emit for capsule/cone/octahedron is deferred (branch-heavy, needs table
+growth), not claimed. GLSL Shadertoy path (iq's primary target) works today.
+
+Delta W8: +4 primitives (constructor + eval + GLSL emit), ARITY 20->24, +1 integration test, selftest extended.
+Budgets: audit 0/0/0, collisions 42/42, wired 391. FIFTH wish-cluster this run (W17', W18, W3, W5', geometry
+A/B/C, now W8).
+
+## WISHLIST BATCH: W9, W2, W16, W11, W13, W10 all granted
+
+Knocked out the remaining buildable wishlist in one run (each full close-out):
+
+W9 elongate -- iq's opElongate as an EXACT SDF op (.elongate(hx,hy,hz)): stretch a primitive by inserting a
+straight run. A sphere becomes a capsule-rod. ARITY + eval + GLSL emit (clamp warp). Added to sdfemit UNEMITTABLE
+(4-dialect port deferred, GLSL works). Coverage pins 24->25. Discoverable via the domain-operators entry.
+
+W2 scene.cost() -- an SDF-tree ALU/machine-model annotation: walks the tree, weights each node (length~7, trig~8,
+bool~1, menger loop x iterations), returns {alu, nodes, depth, iterative, verdict}. Relative ALU, honest as
+ratios not nanoseconds. Wired mind.scene_cost (node or DSL).
+
+W16 atmosphere -- the genuine gap was LIGHT SHAFTS (render_fog existed but unwired and volume-only). New
+holographic_atmosphere: depth_fog (Beer-Lambert exponential fog off a depth buffer) + light_shafts (radial-blur
+god rays, Mitchell GPU Gems 3). KEPT NEGATIVE: shafts are screen-space (only an on-screen source). Wired both.
+
+W11 dFBM -- domain_warped_fbm: fbm sampled at a point displaced by THREE independent fbm fields (independent
+seeds so the displacement is a real 3-D vector, not a shear). The swirling smoke/magma/marble look. warp=0
+reduces exactly to fbm. Wired mind.warped_noise.
+
+W13 SDF curvature -- sdf_curvature: the field LAPLACIAN = mean curvature of the level set (2/r on a sphere,
+verified analytically; 0 on a plane). 6-point stencil. Convex+/concave-/flat~0 for cavity/edge shading. Wired.
+
+W10 2D SDF + extrude/revolve -- new holographic_sdf2d: circle2d/box2d/rounded_box2d/ngon2d/polygon2d, then
+extrude (opExtrusion along Z, exact) and revolve (lathe around Y). HEADLINE: revolve(offset circle) == the
+engine's torus to EXACTLY 0.0 -- a strong correctness proof. Wired mind.sdf2d/sdf_extrude/sdf_revolve.
+
+BUG CAUGHT: my first extrude test asserted extrude(circle)==cylinder, but the engine's cylinder is Y-axis while
+opExtrusion is Z-axis -- different fields. Fixed the test to validate extrude's own convention (caps+walls on
+surface) and kept the revolve==torus exactness as the strong check.
+
+Delta: +2 modules (holographic_atmosphere, holographic_sdf2d), +1 SDF op (elongate), +4 methods on SDF/raymarch/
+pattern, +9 faculties, +2 integration tests. Module count 445, wired 393. Budgets: audit 0/0/0, collisions 42/42,
+9 selftests clean. REMAINING wishlist: W17' menger->WGSL (deferred, genuinely iterative bounded-unroll) and W19
+(the capstone one-kernel-four-surfaces demo).
+
+## W19 GRANTED: one kernel, four surfaces (four_surface_demo) -- the capstone, wishlist COMPLETE
+
+iq's thesis demo: author ONE scene, show it as GLSL + WGSL + PNG + ASCII, provably identical. All four backends
+shipped over this session (GLSL to_glsl was there; WGSL/C via sdfemit incl. repeat this session; ASCII via
+ascii_sdf; PNG via sphere_trace). Wired mind.four_surface_demo(scene) -> {dsl, glsl, wgsl, ascii}. PROOF of
+sameness: GLSL and WGSL both emit a map(); the ascii+PNG paths march the CPU eval; and the emitted C matches that
+eval to 6e-06 (emitter literal precision), so all four are ONE field. Integration test also proves the DSL
+round-trips to the authored scene exactly (1e-9). Delivered W19_one_kernel_four_surfaces.png (PNG + ASCII side by
+side) + W19_scene.glsl + W19_scene.wgsl.
+
+=== iq WISHLIST COMPLETE ===
+Granted this session: W17' (repeat->4 dialects, browser lattice), W18 (ascii animation), W3 (orbit traps), W5'
+(audio param bus), geometry A/B/C (curves+knots / voxelization / NURBS), W8 (primitive pack), W9 (elongate), W2
+(scene.cost), W16 (fog+light shafts), W11 (dFBM), W13 (SDF curvature), W10 (2D SDF + extrude/revolve), W19
+(four-surface demo). Plus W12 (spline camera) and W15 (bezier tubes) fell out of the curves work.
+ONLY DEFERRED: W17' menger->WGSL/C -- genuinely iterative (bounded-unroll), filed honestly, not a math limit; the
+GLSL Shadertoy path for menger works today.
+
+Delta W19: +1 faculty (four_surface_demo), +1 integration test. Module count 445, wired 393. Budgets: audit
+0/0/0, collisions 42/42.
+
+## W19 FIX: the ascii panel was rendering a flat lattice wall (camera-inside-lattice bug)
+
+Caught by inspecting the delivered image, not the tests: the W19 "four surfaces" ascii panel showed a uniform
+repeating braille grid (3 distinct glyphs, 2 distinct rows) -- a flat wall, NOT the scene. Root cause: four_surface_
+demo called ascii_sdf with the DEFAULT camera, which sits INSIDE the infinite `repeat` lattice and stares at
+constant depth (the exact 'camera inside an infinite lattice = flat' negative recorded earlier this session). The
+field really WAS the same across backends (C-vs-eval 6e-06 holds); the ascii RENDER of it was just shot from a bad
+camera, so the deliverable's own visual contradicted its claim.
+
+FIX: four_surface_demo now takes a `camera` and defaults to one OUTSIDE the origin looking in (eye=[0.9,0.9,3.0]),
+so the ascii depicts the geometry. Strengthened the integration test to assert the ascii has REAL structure
+(>8 distinct glyphs AND >8 distinct rows) -- a flat wall now fails the test, so this cannot silently return. The
+'ink count > 20' check it replaced passed the broken wall (a full grid has lots of ink) -- a reminder that
+'something rendered' is not 'the right thing rendered'. Regenerated W19_one_kernel_four_surfaces.png with PNG and
+ascii sharing ONE camera; both now show the same lattice.
+
+Lesson reinforced: believe the picture over the label. The numeric field-parity proof was real but did not imply
+the visual demo was correct -- a rendering can be faithful to the field and still be shot from a useless angle.
+
+## PHOTO-TO-3D COMPLETE: C1 built (shape-from-shading), pipeline wired end-to-end + mesh path
+
+Revisited the photo-to-3D backlog with Rule 0. Found C2 (unproject) and C3 (photo_to_gaussians, with a real
+confidence/abstain map) ALREADY BUILT in holographic_photo3d -- but both needed a depth map handed in. C1 (estimate
+depth FROM a single image) was the missing front end. No learned weights allowed, so built the classical fit:
+SHAPE FROM SHADING.
+
+NEW holographic_shapefromshading: estimate_light (Pentland bootstrap) + shape_from_shading (Tsai-Shah linear SFS:
+brightness -> normals -> gradient -> height_from_gradient). REUSES the existing wheels: holographic_vision gradient,
+holographic_surfaceint.height_from_gradient (Frankot-Chellappa FFT integration), holographic_autobump.normal_from_
+height. Returns RELATIVE normalised depth [0,1]. Selftest proves a lit sphere recovers centre(0.78) > rim(0.65),
+flat image stays flat, albedo division survives a painted checker.
+
+KEPT NEGATIVE (loud): shape-from-shading is ILL-POSED -- bas-relief ambiguity (convex/concave and depth-scale are
+undetermined by one lit image), and albedo is assumed roughly uniform (textured surfaces read paint as shape). So
+the output is a PLAUSIBLE RELATIVE surface, NOT metric depth. Named in the docstring and the catalog description --
+we do not pretend it is metric. The downstream confidence map abstains where it is weak.
+
+WIRED three doors: depth_from_image (C1), image_to_3d (end-to-end C1->C2->C3 to per-pixel Gaussians, defaults
+sensible pinhole intrinsics), image_to_mesh (depth -> unproject -> normal_from_height -> points_to_mesh). All three
+compose EXISTING faculties rather than reinventing (unproject, photo_to_gaussians, points_to_mesh were all already
+there). Catalog phrasings that returned NOTHING before now resolve: 'estimate depth from a photo', 'monocular depth
+map', 'mesh from a photo', 'image to 3d mesh', 'photogrammetry', '3d gaussians from an image'. Demo delivered
+(photo_to_3d_demo.png: input -> depth -> rotated 12k-gaussian cloud, 63% coverage).
+
+Delta: +1 module (holographic_shapefromshading), +3 faculties (depth_from_image, image_to_3d, image_to_mesh),
++1 integration test. Module count 446, wired 394. Budgets: audit 0/0/0, collisions 42/42.
+
+## W19 ASCII, ROUND 2: the subject was wrong, not the camera
+
+The user flagged the W19 ascii STILL looked like a flat wall after the camera fix. Root cause was deeper: the
+DEMO SCENE (an infinite repeat-lattice) is the wrong SUBJECT for monochrome ascii -- braille packs 2x4 dots/cell,
+so a scene that fills every cell becomes high-frequency NOISE a human reads as uniform. My 'distinct glyphs' metric
+counted character-variety and mistook it for readable structure (25 distinct glyphs, still noise). Believe the
+picture, not the metric -- again.
+
+FIX: four_surface_demo now defaults to mode='ramp' (tonal light->dark, shows SILHOUETTE not fine detail) and the
+W19 test scene + deliverable use a single HERO object (rounded box smooth-unioned with a sphere) with negative
+space. The ascii now reads as the shape. Test rewritten to check READABILITY -- negative-space fraction in
+[0.15,0.9] AND a tonal range >5 glyphs AND inked>30 -- which the old 'ink>20' check (a full noise wall passes it)
+did not. LESSON reinforced: the color PNG carries fine detail; the ascii carries silhouette. Different subjects
+suit each. 'Something rendered' is not 'the right thing rendered'.
+
+## ASCII aspect: FOUR distinct bugs, all "believe the picture not the metric"
+
+The W19 ascii panel was wrong four times, each a different root cause, each caught by the user eyeballing it:
+1. SUBJECT: an infinite `repeat` lattice is gorgeous in a colour PNG but dissolves into high-frequency noise in
+   monochrome braille. Fix: a hero object + ramp mode. (Colour PNG carries detail; ASCII carries silhouette.)
+2. METRIC LIED: the regression test checked "distinct glyph count > 8", which a busy noise wall passes easily.
+   Distinct CHARACTERS is not readable SHAPE. Fix: test negative-space fraction (0.15-0.9) + tonal range.
+3. CAMERA DOUBLE-CORRECTION: ascii_sdf built a ~square buffer AND baked in the cell factor, then ascii_render
+   applied its own (correct) cell_aspect row-count correction on top -> stretched wide. Fix: ascii_sdf renders a
+   plain SQUARE buffer with EQUAL fov both axes; ascii_render does the single correction. Verified: a head-on
+   cube's front face (a world-square) renders at char-aspect EXACTLY 2.000 at large widths (integer rounding
+   makes it read 1.8-1.9 at width<=60, which is fine). Pinned a sphere-roundness regression in the ascii selftest.
+4. RASTERIZER LINE SPACING: when compositing ascii text into the deliverable PNG, lines were stacked 8px apart
+   while the glyph advance is 6.62px, giving a DRAWN cell aspect 0.83 (near-square). But the ascii is COMPUTED
+   for a 2:1 terminal cell (aspect 0.5), so it got squashed vertically = stretched wide in the image. Fix: line
+   spacing = char_advance / 0.5 ~= 13px. This bug was in the demo image, NOT the engine -- the ascii text itself
+   was correct all along.
+
+RULE for any ascii deliverable image: draw the acid-test primitive (cube head-on, sphere) and MEASURE the char
+bounding box; a world-square must be ~2.0 wide-per-tall, and the rasterizer's line spacing must equal
+char_advance / cell_aspect. Shipped W19_cube_calibration.png as the reference.
+
+## PHOTO-TO-3D pipeline COMPLETE (C1 built, chain verified end-to-end)
+
+The pipeline was two-thirds built: holographic_photo3d had C2 (unproject depth->points) and C3 (photo_to_gaussians
+depth+colour->per-pixel 3D gaussians with a confidence/abstain map), but both needed a depth map handed in. The
+missing front end was C1 -- estimate depth from ONE image -- with no learned weights allowed.
+
+C1 = holographic_shapefromshading (classical, NumPy-only): estimate_light (Pentland bootstrap) + shape_from_shading
+(brightness -> surface normals under a Lambertian light -> gradient -> INTEGRATE via the existing
+holographic_surfaceint.height_from_gradient, Frankot-Chellappa FFT). Returns RELATIVE normalised depth. Honest
+about bas-relief ambiguity; C3's confidence map abstains where weak.
+
+WIRED (a prior pass had already added these; verified live this session): depth_from_image (C1), image_to_3d
+(C1->C2->C3, photo->gaussians), image_to_mesh (photo->front surface). All discoverable (turn a photo into 3d /
+depth from a single image / image to gaussian splats / mesh from a photo).
+
+MEASURED BUG FOUND + FIXED (kept negative): the auto-albedo default FLATTENED shape on untextured input. Dividing
+out a low-pass of the image treats slowly-varying brightness as reflectance -- but on a lit untextured object the
+shading IS slowly-varying, so it removed the shape cue. MEASURED: a lit sphere's bulge collapsed from 0.78-vs-0.64
+to a near-flat 0.50-vs-0.49. FIX: albedo division is now OFF by default (the honest choice -- albedo/shading can't
+be separated from one lit image without a cue); albedo=True opts into a gentle GLOBAL divide (large radius) for
+textured input. Strengthened the sphere selftest contract to require centre-rim > 0.08 (a MEANINGFUL bulge), so
+the flattening cannot silently return. End-to-end verified: a synthetic lit-object photo -> 6452 gaussians with
+real Z-spread (0.289), rendered from a NOVEL angle to prove parallax. Delivered photo_to_3d_demo.png.
+
+Delta: +1 module (holographic_shapefromshading), pipeline faculties confirmed wired, +1 integration test. Wired
+394. Budgets: audit 0/0/0, collisions 42/42.
+
+Also this session: fixed the FOUR ascii aspect bugs (subject/metric/camera/rasterizer -- see the ascii-aspect NOTE
+above); pinned a sphere-roundness regression; shipped W19_cube_calibration.png as the ascii reference.

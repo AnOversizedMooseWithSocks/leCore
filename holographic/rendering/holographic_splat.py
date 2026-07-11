@@ -80,7 +80,16 @@ def adaptive_fit(target, noise_thresh=0.03, k_min=4, k_max=200, scales=(1.0, 2.0
 
     KEPT CAVEAT: the threshold gates the GREEDY residual, so quality is only APPROXIMATELY equalised; and a
     HARD-EDGED target never reaches a low residual with this smooth isotropic basis, so it simply runs to
-    k_max -- the adaptive count is meaningful for fields the Gaussian basis can actually represent."""
+    k_max -- the adaptive count is meaningful for fields the Gaussian basis can actually represent.
+
+    KEPT NEGATIVE -- DOES NOT delegate to auto_scale, on purpose. auto_scale is the generic "diagnose which knob
+    is most responsive, then double it" loop; it looks like a candidate to consolidate this onto, but it is the
+    WRONG algorithm here and switching MEASURABLY REGRESSES. This is single-knob matching pursuit: each iteration
+    does real O(1) placement work at the peak residual, so the total cost is ~k_used fits. auto_scale would
+    re-fit the WHOLE splat set from scratch at each power-of-2 K (4, 8, 16, ...) and overshoot the count.
+    Measured head-to-head on a 6-blob field: auto_scale used 1.5x the splats and 8x the wall time for equal PSNR.
+    A better matching-pursuit stop belongs HERE; improvements to auto_scale do not transfer to this problem and
+    should not be expected to. (See NOTES: INTEGRATION SWEEP consolidation audit.)"""
     target = np.asarray(target, float)
     span = float(target.max() - target.min()) or 1.0          # the residual is measured relative to the range
     R = target.copy()

@@ -1,6 +1,6 @@
 # lecore.py -- the friendly front door.
 #
-# The engine is a flat set of ~280 `holographic_*.py` modules. A newcomer shouldn't need to know which
+# The engine is ~436 `holographic_*.py` modules organized into family packages. A newcomer shouldn't need to know which
 # one holds `Scene` versus `RenderSession` versus `look_at`. This module gathers the handful of things
 # most callers actually want into five plain-English areas, so that after `pip install lecore` you can:
 #

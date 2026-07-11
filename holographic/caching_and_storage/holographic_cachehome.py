@@ -271,7 +271,12 @@ def suggest_margin_for_error(queries, values, max_mean_error, max_abs_error=None
     away. Its max error at that margin is 1.0: the cache serves a completely wrong answer, occasionally. That is the
     same shape as a rendered frame's silhouette edge, whose max error saturates at the very first reuse (0.5864)
     while its mean error creeps 0.0001 -> 0.0051. **Size a fat margin on the error you cannot tolerate, not on the
-    error you usually get.**"""
+    error you usually get.**
+
+    KEPT NEGATIVE -- uses BISECTION, not auto_scale, on purpose. margin-vs-error is MONOTONE (a bigger margin
+    never lowers error), so bisection converges on the exact largest safe margin in log steps. auto_scale's
+    diagnose-and-double loop would only hit power-of-2 margins and cannot bisect to a boundary -- it is for the
+    unknown-lever case, not a single monotone continuous knob. Do not consolidate this onto it."""
     qs = list(queries)
     sigma = drift_scale(qs, metric=metric)
     if sigma == 0.0 or len(qs) < 2:

@@ -379,3 +379,38 @@ def test_continuation_default_off_is_byte_identical():
     b = packet_demux(x, min_seg=24, continuation=False)
     assert a["assignment"] == b["assignment"]
     assert "continuation_merges" not in a and "continuation_merges" not in b
+
+
+def test_detect_regimes_faculty_locates_boundaries_with_stats():
+    # detect_regimes (mind faculty over segment_stream): the OFFLINE batch change-point finder. It must locate
+    # the boundaries of a piecewise-stationary signal exactly and report each segment's own statistics -- the
+    # WHERE plus the WHAT-changed, in one pass.
+    m = lecore.UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+    x = np.concatenate([rng.normal(0.0, 0.2, 150), rng.normal(2.0, 0.2, 150), rng.normal(0.0, 1.0, 150)])
+    r = m.detect_regimes(x)
+    assert r["n_segments"] == 3
+    # boundaries within a small tolerance of the true 150 / 300 (binary segmentation lands on the exact index here)
+    assert all(abs(b - t) <= 8 for b, t in zip(r["boundaries"], [150, 300])), r["boundaries"]
+    # the per-segment means recover the true levels 0, 2, 0 -- the WHAT-changed
+    means = [s["mean"] for s in r["segments"]]
+    assert abs(means[0]) < 0.3 and abs(means[1] - 2.0) < 0.3 and abs(means[2]) < 0.3, means
+
+
+def test_detect_regimes_is_honest_on_a_homogeneous_stream():
+    # the Occam guarantee: a stream with NO shift returns NO boundaries -- a change-point detector that always
+    # finds a change is useless. This is the [BLIND-SPOT] complement to the positive test above.
+    m = lecore.UnifiedMind(dim=256, seed=0)
+    flat = np.random.default_rng(1).normal(0.0, 1.0, 300)
+    assert m.detect_regimes(flat)["boundaries"] == []
+
+
+def test_detect_regimes_is_the_offline_twin_not_a_duplicate_of_regime_detector():
+    # detect_regimes (batch, locate-all-boundaries) and regime_detector (causal, one-sample-at-a-time) are
+    # DIFFERENT tools that must not be conflated: the batch one takes the whole array and returns a boundary list;
+    # the online one exposes .observe(). Assert both exist and have their distinct shapes, so a future consolidation
+    # cannot wrongly merge them.
+    m = lecore.UnifiedMind(dim=256, seed=0)
+    assert isinstance(m.detect_regimes(np.zeros(64))["boundaries"], list)   # batch: returns located boundaries
+    det = m.regime_detector()
+    assert hasattr(det, "observe")                                          # online: streams sample by sample
