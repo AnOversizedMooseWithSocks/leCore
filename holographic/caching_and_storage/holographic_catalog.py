@@ -680,6 +680,19 @@ def default_catalog():
                                                 "distance based skin binding", "skin binding"),
                           semantic="animate/skin",
                           consumes=("mesh", "skeleton"), produces=("scalar",))
+    c.register_capability("mesh_triangulate", "EAR-CLIP every face of a mesh into triangles "
+                          "(holographic_meshverbs2), returning an all-triangle Mesh. The CONCAVE-CORRECT triangulate "
+                          "(unlike the kernel's fan triangulate, which is convex-only): ear clipping (Meisters 1975) "
+                          "tiles a concave n-gon exactly instead of the overlapping triangles a fan gives. No new "
+                          "vertices, only the face list changes",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "from holographic.mesh_and_geometry.holographic_mesh import box; "
+                          "print(all(len(f)==3 for f in m.mesh_triangulate(box(2,2,2)).faces))",
+                          native=True, aliases=("triangulate a mesh", "triangulate ngon faces",
+                                                "ear clip a polygon", "convert quads to triangles",
+                                                "triangulate concave faces", "quad to triangle conversion",
+                                                "split polygons into triangles"),
+                          semantic="convert/emit", consumes=("mesh",), produces=("mesh",))
     c.register_capability("mesh_poke", "POKE a polygon face (holographic_eulerops, FWD-7) -- add a vertex at the "
                           "face centroid (pushed out along the normal by height) and FAN the face into triangles, "
                           "one per edge. An n-gon becomes n triangles. V+1/E+n/F+(n-1), chi unchanged. Fan a quad to "
@@ -990,7 +1003,7 @@ def default_catalog():
     c.register_capability("extend_generator", "FORECAST by playing a fitted generator PAST its data "
                           "(holographic_fitgen) -- store the formula, play the future. Given a fit_deterministic "
                           "result, regenerate N samples beyond the end. Refuses beyond the validated window (a "
-                          "generator fit on [0,1] evaluated at t=100 is confident nonsense) -- flags valid=False "
+                          "generator fit on [0,1] evaluated at t=100 is confidently wrong) -- flags valid=False "
                           "when extrapolating too far. The demoscene economy applied to time",
                           example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
                           "t=np.linspace(0,1,200); fit=m.fit_deterministic(np.sin(2*np.pi*5*t)); "

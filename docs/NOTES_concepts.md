@@ -29922,3 +29922,45 @@ FINDING worth flagging (not fork-related, a scaling smell): holographic_unified.
 past the codeedit tool's 1 MB limit, so file_python_check now REFUSES it (py_compile still passes, engine imports
 fine). Used py_compile to verify the edit instead. Argues for eventually splitting UnifiedMind's faculty methods
 across thin mix-in modules. Recorded so a future session doesn't hit it by surprise.
+
+## MESH-OP GAP #2: ear-clipping triangulation (mesh_triangulate)
+
+Backlog item 2 from the fork decision. Rule 0 found the exact gap with precision: the KERNEL'S OWN triangulate()
+(holographic_mesh.Mesh.triangulate) is fan-only and its docstring says verbatim "a concave n-gon needs ear-clipping
+(a later item)". "ear clipping triangulation" returned only ray_sdf_intersect (pure fallback). Genuine gap.
+
+Built triangulate_face (one face) + triangulate_ngons (whole mesh) in holographic_meshverbs2 (the FWD-7 modeler-verb
+home, alongside bevel/bridge/loop-cut). Ear clipping (Meisters 1975): project the face to its best-fit plane keeping
+the winding (Newell normal + in-plane basis with u x v = n), ensure CCW, then repeatedly clip an EAR -- a corner
+that turns CCW (convex) AND whose triangle contains no other vertex -- O(n^2), fine for modeler-sized faces.
+Degenerate (self-intersecting) faces fall back to a fan.
+
+MEASUREMENT BAR that proves it earns its keep (in the selftest, not just "no exception"): a concave L-hexagon
+ear-clips to 4 triangles whose areas sum EXACTLY to the polygon area (1e-9), while the naive fan from v0 OVERSHOOTS
+by >1e-6 -- the selftest asserts BOTH, so it pins the concave-correctness that distinguishes this from the kernel
+fan. Whole-mesh: a quad box -> 12 triangles, chi 2 preserved, no new vertices (unlike poke, which adds a center).
+
+Wired mesh_triangulate faculty, 5/5 stranger-phrasing discoverability, semantic=convert/emit, io-shape mesh->mesh.
+All audits green. Fork backlog now: symmetrize, solidify, multi-segment bevel, grid-fill, seam+smart-UV, rip-verts.
+
+Note: holographic_unified.py is over the 1 MB codeedit limit, so I verified the faculty edit with py_compile (the
+edit was small and additive). Still fine to import; the split-into-mixins idea stands for later.
+
+## CI FIX: 3 full-suite failures (caught by CI, not my targeted -k runs)
+
+Full CI (5032 passed, 3 failed) surfaced three failures my targeted -k sweeps missed. Two shared one root cause:
+  1+2. test_pure_nonsense_routes_to_unknown AND holographic_skills selftest (line 174) both route the garbage query
+       "qwzx nonsense zzzq" and demand decision=="unknown". It matched extend_generator because that entry's curated
+       does literally contained the word "nonsense" ("...evaluated at t=100 is confident nonsense"). This is the
+       exact regression the pin is designed to trap ("a canary for the T3 essay-does cleanup: if a long does
+       reintroduces an incidental match for a nonsense token, this fails"). Fix: reworded "confident nonsense" ->
+       "confidently wrong" -- one word, same meaning, no garbage-token collision. Both tests green. (Pre-existing
+       text, not from this arc's work, but the full suite hadn't been run to catch it.)
+  3.   test_service_md_is_in_sync: three live routes (/frame/stream, /frame, /pick -- the realtime-frame-serving and
+       viewport-picking endpoints from the DCC-backend sessions) were registered but undocumented in SERVICE.md. Fix:
+       added the three rows to the endpoint table. servicedoc.check() now returns ([], []).
+
+LESSON: run the FULL suite (or at least the pins: routing_pins, servicedoc, and a skills selftest) before declaring
+done -- targeted -k sweeps skip the cross-cutting pins that guard the routing corpus and the service-doc drift gate.
+The nonsense pin in particular fires on ANY does anywhere containing a rare token, so every does edit is a potential
+trip. capdoc regenerated (does text changed).

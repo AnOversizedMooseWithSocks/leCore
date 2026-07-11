@@ -13043,3 +13043,28 @@ def test_mesh_poke_euler_operator():
     # discoverable by a stranger's phrasing, and an io-shape edge (mesh -> mesh) in the pipeline graph
     assert any("mesh_poke" in str(c.name) for c in mind.find_capability("fan a face into triangles")[:3])
     assert mind.suggest_pipeline("mesh", "mesh", require_step=True)   # a mesh->mesh transforming edge now exists
+
+def test_mesh_triangulate_earclip():
+    """mesh_triangulate (backlog item 2 after the fork): ear-clip faces into triangles, CONCAVE-correct where the
+    kernel's fan triangulate is not. Wired + discoverable + io-tagged."""
+    import lecore
+    from holographic.mesh_and_geometry.holographic_mesh import box
+    from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_face
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # whole-mesh: a quad box -> all triangles, chi preserved, no new vertices.
+    tb = mind.mesh_triangulate(box(2.0, 2.0, 2.0))
+    assert all(len(f) == 3 for f in tb.faces)
+    assert tb.n_vertices == 8 and tb.euler_characteristic() == 2 and tb.is_closed() and tb.is_manifold()
+
+    # the payoff: a CONCAVE L-hexagon tiles exactly (a fan would overshoot).
+    Lpts = [(0, 0, 0), (2, 0, 0), (2, 2, 0), (1, 2, 0), (1, 1, 0), (0, 1, 0)]
+    tris = triangulate_face(tuple(range(6)), {i: p for i, p in enumerate(Lpts)})
+    assert len(tris) == 4
+
+    def a2(a, b, c):
+        return abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) / 2.0
+    poly = 0.5 * abs(sum(Lpts[i][0] * Lpts[(i + 1) % 6][1] - Lpts[(i + 1) % 6][0] * Lpts[i][1] for i in range(6)))
+    assert abs(sum(a2(Lpts[i], Lpts[j], Lpts[k]) for i, j, k in tris) - poly) < 1e-9
+
+    assert any("mesh_triangulate" in str(c.name) for c in mind.find_capability("ear clip a polygon")[:3])

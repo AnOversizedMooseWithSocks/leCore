@@ -5786,6 +5786,15 @@ class UnifiedMind:
         from holographic.misc.holographic_eulerops import poke_face
         return poke_face(mesh, f_index, height=height)
 
+    def mesh_triangulate(self, mesh):
+        """EAR-CLIP every face of `mesh` into triangles (holographic_meshverbs2), returning a new all-triangle Mesh.
+        The concave-correct counterpart of the kernel's Mesh.triangulate() (which fans -- correct for CONVEX faces
+        only). Ear clipping (Meisters 1975) repeatedly removes a convex corner whose triangle holds no other vertex,
+        so a concave n-gon tiles exactly instead of the flipped/overlapping triangles a fan gives. No new vertices
+        (unlike mesh_poke); only the face list changes. Deterministic. Returns a new Mesh."""
+        from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons
+        return triangulate_ngons(mesh)
+
     def mesh_smooth(self, mesh, lam=0.55, mu=-0.58, iters=8, weights="cotangent"):
         """Taubin lambda|mu no-shrink mesh smoothing / denoising (holographic_meshsmooth, FWD-4): the shipped
         `graphsignal.taubin_filter` WIRED onto explicit mesh geometry -- 3-D vertex positions as the signal,

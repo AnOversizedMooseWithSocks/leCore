@@ -970,6 +970,14 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); mesh={'vertices':[[0,0,0],[
 ```
 *Find it by:* select mesh vertices, vertex edge face selection, sub-object selection, select geometry elements, edit mode selection, convert selection between modes, selection set algebra
 
+### mesh_triangulate
+EAR-CLIP every face of a mesh into triangles (holographic_meshverbs2), returning an all-triangle Mesh. The CONCAVE-CORRECT triangulate (unlike the kernel's fan triangulate, which is convex-only): ear clipping (Meisters 1975) tiles a concave n-gon exactly instead of the overlapping triangles a fan gives. No new vertices, only the face list changes.
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); from holographic.mesh_and_geometry.holographic_mesh import box; print(all(len(f)==3 for f in m.mesh_triangulate(box(2,2,2)).faces))
+```
+*Find it by:* triangulate a mesh, triangulate ngon faces, ear clip a polygon, convert quads to triangles, triangulate concave faces, quad to triangle conversion, split polygons into triangles
+
 ### orbit_trap_render
 render an SDF scene coloured by ORBIT TRAP -- the signature Quilez fractal look, in one call. Sphere-traces every pixel, tracks each ray's closest approach to a trap set (point / origin / axis / plane), and maps that scalar through a cosine palette, Lambert-lit. Composes with any domain-warped SDF (fold/repeat/twist). This is orbit traps + cosine palettes, the two halves meeting.
 
@@ -1827,7 +1835,7 @@ import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); s=np.ra
 ```
 
 ### extend_generator
-FORECAST by playing a fitted generator PAST its data (holographic_fitgen) -- store the formula, play the future. Given a fit_deterministic result, regenerate N samples beyond the end. Refuses beyond the validated window (a generator fit on [0,1] evaluated at t=100 is confident nonsense) -- flags valid=False when extrapolating too far. The demoscene economy applied to time.
+FORECAST by playing a fitted generator PAST its data (holographic_fitgen) -- store the formula, play the future. Given a fit_deterministic result, regenerate N samples beyond the end. Refuses beyond the validated window (a generator fit on [0,1] evaluated at t=100 is confidently wrong) -- flags valid=False when extrapolating too far. The demoscene economy applied to time.
 
 ```python
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); t=np.linspace(0,1,200); fit=m.fit_deterministic(np.sin(2*np.pi*5*t)); print(m.extend_generator(fit,10,200)['valid'])
@@ -2031,4 +2039,4 @@ import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); x=np.li
 
 ---
 
-*251 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*252 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

@@ -175,6 +175,117 @@ def loop_cut(mesh, start_face, start_edge):
 
 
 # =====================================================================================================
+# Ear-clipping triangulation (the concave-correct triangulate the kernel's fan-only triangulate() deferred).
+# =====================================================================================================
+def _project_to_plane(pts):
+    """Project the (n,3) face vertices to 2-D on their best-fit plane, oriented so the 2-D winding matches the
+    face's 3-D winding (Newell normal). Returns (n,2) coords. Ear-clipping is a 2-D algorithm; a planar-enough
+    face projects without folding, and this keeps the winding so 'convex corner' means the same in 2-D as in 3-D."""
+    pts = np.asarray(pts, float)
+    c = pts.mean(axis=0)
+    q = pts - c
+    # Newell normal (robust for slightly non-planar n-gons -- the same normal poke_face uses).
+    nrm = np.zeros(3)
+    n = len(pts)
+    for k in range(n):
+        a, b = pts[k], pts[(k + 1) % n]
+        nrm[0] += (a[1] - b[1]) * (a[2] + b[2])
+        nrm[1] += (a[2] - b[2]) * (a[0] + b[0])
+        nrm[2] += (a[0] - b[0]) * (a[1] + b[1])
+    ln = float(np.linalg.norm(nrm))
+    nrm = nrm / ln if ln > 1e-12 else np.array([0.0, 0.0, 1.0])
+    # build an in-plane basis (u, v) with u x v = nrm, so (x=q.u, y=q.v) preserves the winding.
+    ref = np.array([1.0, 0.0, 0.0]) if abs(nrm[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    u = ref - nrm * float(ref @ nrm)
+    u = u / (np.linalg.norm(u) + 1e-12)
+    v = np.cross(nrm, u)
+    return np.column_stack([q @ u, q @ v])
+
+
+def _tri_area2(a, b, c):
+    """Twice the signed area of triangle (a,b,c) in 2-D -- positive iff the corner is a LEFT turn (CCW)."""
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+
+def _point_in_tri(p, a, b, c):
+    """True iff 2-D point p is strictly inside triangle (a,b,c) (used to reject a candidate ear that swallows
+    another vertex -- the second ear-clip condition)."""
+    d1 = _tri_area2(p, a, b)
+    d2 = _tri_area2(p, b, c)
+    d3 = _tri_area2(p, c, a)
+    has_neg = (d1 < 0) or (d2 < 0) or (d3 < 0)
+    has_pos = (d1 > 0) or (d2 > 0) or (d3 > 0)
+    return not (has_neg and has_pos)                          # all same sign -> inside
+
+
+def triangulate_face(face, positions):
+    """EAR-CLIP one polygon `face` (a tuple of vertex ids) using the 3-D `positions` of those ids, returning a list
+    of (i,j,k) vertex-id triangles. Unlike the kernel's fan triangulate(), this is correct for CONCAVE faces: it
+    repeatedly clips an 'ear' -- a corner that turns the polygon's way (convex) AND whose triangle contains no other
+    vertex -- which never produces the flipped/overlapping triangles a fan gives on a concave n-gon (ear clipping,
+    Meisters 1975; O(n^2), fine for the small faces a modeler makes). Falls back to a fan only for a degenerate face
+    where no ear can be found (self-intersecting input). A triangle is returned as-is; a quad clips to 2 triangles."""
+    ids = list(face)
+    n = len(ids)
+    if n < 3:
+        return []
+    if n == 3:
+        return [tuple(ids)]
+    P = _project_to_plane(np.asarray([positions[i] for i in ids], float))
+    # ensure CCW winding (positive total signed area) so 'convex' == positive turn; reverse if the face came CW.
+    area = 0.0
+    for k in range(n):
+        area += _tri_area2(P[0], P[k], P[(k + 1) % n])
+    order = list(range(n))
+    if area < 0:
+        order.reverse()
+    tris = []
+    guard = 0
+    while len(order) > 3 and guard < 4 * n:
+        guard += 1
+        clipped = False
+        m = len(order)
+        for a in range(m):
+            i0, i1, i2 = order[(a - 1) % m], order[a], order[(a + 1) % m]
+            if _tri_area2(P[i0], P[i1], P[i2]) <= 0:
+                continue                                       # reflex (or straight) corner -- not an ear tip
+            # an ear also requires no OTHER polygon vertex inside the candidate triangle.
+            bad = False
+            for b in order:
+                if b in (i0, i1, i2):
+                    continue
+                if _point_in_tri(P[b], P[i0], P[i1], P[i2]):
+                    bad = True
+                    break
+            if bad:
+                continue
+            tris.append((ids[i0], ids[i1], ids[i2]))           # clip the ear
+            order.pop(a)
+            clipped = True
+            break
+        if not clipped:
+            break                                              # no ear found (degenerate) -> fan the remainder
+    if len(order) == 3:
+        tris.append((ids[order[0]], ids[order[1]], ids[order[2]]))
+    elif len(order) > 3:
+        for k in range(1, len(order) - 1):                     # degenerate fallback: fan whatever is left
+            tris.append((ids[order[0]], ids[order[k]], ids[order[k + 1]]))
+    return tris
+
+
+def triangulate_ngons(mesh):
+    """Ear-clip EVERY face of `mesh` into triangles, returning a new all-triangle `Mesh`. The concave-correct
+    counterpart of Mesh.triangulate() (which fans, correct for convex faces only). Vertices are untouched (no new
+    geometry -- unlike poke_face, which adds a center vertex); only the face list changes. Deterministic. A mesh of
+    all triangles is returned unchanged in shape. Chi is preserved for convex faces; for a concave face the ear
+    triangulation has the same Euler count as any triangulation of it, so chi is preserved there too."""
+    out = []
+    for f in mesh.faces:
+        out.extend(triangulate_face(f, mesh.vertices))
+    return Mesh(mesh.vertices.copy(), out)
+
+
+# =====================================================================================================
 # Self-test -- bevel a corner, bridge two loops, loop-cut a box and a grid; chi preserved where it should be.
 # =====================================================================================================
 def _selftest():
@@ -215,10 +326,34 @@ def _selftest():
     assert np.array_equal(bevel_vertex(cube, 0, 0.3).vertices, bevel_vertex(cube, 0, 0.3).vertices)
     assert np.array_equal(loop_cut(cube, 0, (f0[0], f0[1])).vertices, loop_cut(cube, 0, (f0[0], f0[1])).vertices)
 
+    # --- TRIANGULATE: ear-clip is correct on CONCAVE faces where a fan is not ---
+    # an L-shaped hexagon (concave at one corner). Ear-clip must tile it EXACTLY; a fan from v0 would emit a
+    # triangle outside the polygon, so the fan's triangle areas would NOT sum to the polygon area.
+    Lpts = [(0, 0, 0), (2, 0, 0), (2, 2, 0), (1, 2, 0), (1, 1, 0), (0, 1, 0)]
+    Lface = tuple(range(6))
+    Ltris = triangulate_face(Lface, {i: p for i, p in enumerate(Lpts)})
+    assert len(Ltris) == 4, "an n=6 polygon triangulates to n-2=4 triangles"
+
+    def _a2(a, b, c):
+        return abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) / 2.0
+    poly_area = 0.5 * abs(sum(Lpts[i][0] * Lpts[(i + 1) % 6][1] - Lpts[(i + 1) % 6][0] * Lpts[i][1]
+                             for i in range(6)))
+    ear_area = sum(_a2(Lpts[i], Lpts[j], Lpts[k]) for i, j, k in Ltris)
+    assert abs(ear_area - poly_area) < 1e-9, "ear-clip triangles must tile the concave polygon exactly"
+    # the naive fan (v0,vk,vk+1) OVERSHOOTS on this concave shape -- proving ear-clip earns its keep.
+    fan_area = sum(_a2(Lpts[0], Lpts[k], Lpts[k + 1]) for k in range(1, 5))
+    assert abs(fan_area - poly_area) > 1e-6, "the fan should mis-tile the concave L (that's why ear-clip exists)"
+    # triangulate_ngons on a quad box -> all triangles, chi preserved, no new vertices.
+    tb = triangulate_ngons(cube)
+    assert all(len(f) == 3 for f in tb.faces) and tb.n_vertices == cube.n_vertices
+    assert tb.euler_characteristic() == 2 and tb.is_closed() and tb.is_manifold()
+    assert triangulate_ngons(cube).faces == triangulate_ngons(cube).faces, "triangulate_ngons deterministic"
+
     print(f"holographic_meshverbs2 selftest: ok (BEVEL a cube corner -> closed manifold, chi 2 preserved, faces "
           f"{sizes} (3 pentagons + triangle cap); BRIDGE two squares -> open tube ({tube.n_faces} quads, chi 0, 2 "
           f"boundaries); LOOP-CUT cube -> chi 2, +4 faces (ring of 4); LOOP-CUT grid -> chi 1, +3 faces (strip of 3); "
-          f"deterministic)")
+          f"TRIANGULATE ear-clips a concave L-hexagon to 4 triangles that tile it EXACTLY where a fan overshoots, and "
+          f"triangulates a quad box to all-triangles chi 2 with no new vertices; deterministic)")
 
 
 if __name__ == "__main__":
