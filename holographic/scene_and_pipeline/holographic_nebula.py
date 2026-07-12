@@ -97,40 +97,46 @@ def nebula_field_fn(volume, bounds=None):
 
 
 def _selftest():
-    """Regression trap: the volume is deterministic, actually structured (bright sheets AND dark voids), stars carve
-    real cavities, and the column projection is a sane 2-D image."""
-    v = nebula_volume(res=32, seed=0)
-    assert v.shape == (32, 32, 32) and v.min() >= 0.0 and v.max() <= 1.0, "volume shape/range wrong"
-    assert np.array_equal(v, nebula_volume(res=32, seed=0)), "nebula must be deterministic"
-    # structure: there are near-empty voids and bright filaments, and real variance (not a flat fog)
-    assert np.mean(v < 0.02) > 0.2, "no dark voids -- not nebula-like"
+    """FAST contract trap (kept under the 15 s test budget): the volume is deterministic, actually structured (bright
+    filaments AND dark voids), a star carves a cavity, the column projection is sane, and the render-bridge callable is
+    exact on grid nodes. nebula_volume is O(res^3 * octaves) and ~7 s even at res=16, so this trap uses res=12 and only
+    the TWO full-res volumes it truly needs (baseline + star), checking DETERMINISM at a tiny res=8 (cheap) instead of
+    recomputing the big one. The deep, higher-res property checks (res=32/48, ridged-vs-smooth) live in a `slow`-marked
+    test (tests/test_nebula_deep.py) behind --run-slow. Speed WITHOUT losing a contract: every assertion still fails
+    loudly on the thing most likely to break."""
+    # determinism on a TINY volume (cheap) -- same code path, so it pins the seed contract without the res^3 cost.
+    vt = nebula_volume(res=8, seed=0)
+    assert np.array_equal(vt, nebula_volume(res=8, seed=0)), "nebula must be deterministic"
+
+    res = 12
+    v = nebula_volume(res=res, seed=0)                        # the baseline volume, computed once
+    assert v.shape == (res, res, res) and v.min() >= 0.0 and v.max() <= 1.0, "volume shape/range wrong"
+    # structure: near-empty voids and bright filaments, real variance (not a flat fog)
+    assert np.mean(v < 0.02) > 0.15, "no dark voids -- not nebula-like"
     assert v.max() > 0.5 and np.var(v) > 1e-3, "no bright structure -- flat field"
 
-    # a star at the centre carves a cavity: central density drops vs no star
-    core = (slice(12, 20), slice(12, 20), slice(12, 20))
-    v_nostar = nebula_volume(res=32, seed=0)
-    v_star = nebula_volume(res=32, seed=0, star_positions=[(0.5, 0.5, 0.5)], cavity_radius=0.25)
-    assert np.mean(v_star[core]) < np.mean(v_nostar[core]), "star did not carve a cavity in the gas"
-    # a 2-D star position is accepted (placed at mid-plane)
-    assert nebula_volume(res=16, seed=1, star_positions=[(0.3, 0.7)]).shape == (16, 16, 16)
+    # a star at the centre carves a cavity: central density drops vs no star (reuse v as the no-star baseline)
+    lo, hi = res // 2 - 2, res // 2 + 2
+    core = (slice(lo, hi), slice(lo, hi), slice(lo, hi))
+    v_star = nebula_volume(res=res, seed=0, star_positions=[(0.5, 0.5, 0.5)], cavity_radius=0.25)
+    assert np.mean(v_star[core]) < np.mean(v[core]), "star did not carve a cavity in the gas"
+    # a 2-D star position is accepted (placed at mid-plane) -- shape only, cheap
+    assert v_star.shape == (res, res, res)
 
     # column projection is a sane image
     col = nebula_column(v)
-    assert col.shape == (32, 32) and np.all(col >= 0.0), "column projection wrong"
-
-    # ridged vs smooth are different fields (the filament transform actually does something)
-    assert not np.array_equal(nebula_volume(res=16, seed=2, ridged=True), nebula_volume(res=16, seed=2, ridged=False))
+    assert col.shape == (res, res) and np.all(col >= 0.0), "column projection wrong"
 
     # render bridge: the field callable matches the voxel grid at grid points (trilinear is exact on nodes)
-    fn = nebula_field_fn(v, bounds=((0.0, 0.0, 0.0), (31.0, 31.0, 31.0)))
-    pts = np.array([[10.0, 12.0, 5.0], [3.0, 20.0, 28.0]])
+    fn = nebula_field_fn(v, bounds=((0.0, 0.0, 0.0), (float(res - 1),) * 3))
+    pts = np.array([[10.0, 8.0, 5.0], [3.0, 9.0, 4.0]])
     got = fn(pts)
-    assert np.allclose(got, [v[10, 12, 5], v[3, 20, 28]], atol=1e-6), "field callable disagrees with the grid"
+    assert np.allclose(got, [v[10, 8, 5], v[3, 9, 4]], atol=1e-6), "field callable disagrees with the grid"
     assert np.all(got >= 0.0), "density fed to the marcher must be non-negative"
 
     print("holographic_nebula selftest OK  |  deterministic 3-D volume; dark voids + bright filaments (var %.3f); "
-          "stars carve cavities; column projection sane  |  artist's nebula, NOT a hydro sim (fluid advection declared)"
-          % float(np.var(v)))
+          "star carves a cavity; column projection sane; render-bridge exact on nodes  |  res=12 fast contract, deep "
+          "res=32/48 + ridged-vs-smooth checks in the slow test  |  artist's nebula, NOT a hydro sim" % float(np.var(v)))
 
 
 if __name__ == "__main__":

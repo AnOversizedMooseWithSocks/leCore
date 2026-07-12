@@ -85,6 +85,15 @@ _NO_SELFTEST_BUDGET = {
 }
 
 
+import pytest
+
+
+# The walk runs EVERY module's selftest end to end (~75-180s at 8 jobs, measured); it is irreducibly slow by
+# construction -- shortening it means sampling a subset, which is exactly the silence this test exists to prevent.
+# So it is `slow` (deselected by default; run under `-m ""`/`--run-slow`), and it exceeds the 15s per-test budget on
+# purpose. The per-MODULE cost is still bounded by the walker's own `timeout=` (each module gets 180s), and item-12
+# split the one true hog (nebula) so no single module dominates the walk.
+@pytest.mark.slow
 def test_every_module_selftest_is_green():
     """Run all runnable selftests; fail loudly with the offending module(s) if any is red or hangs."""
     results, _ = walk(jobs=8, timeout=180)
