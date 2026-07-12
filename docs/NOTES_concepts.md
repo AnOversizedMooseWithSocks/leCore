@@ -31318,3 +31318,57 @@ implied. Cavities are geometric spheres, not real ionization fronts. star_positi
 
 Tests: selftest green (voids+filaments var 0.189, cavities, trilinear bridge); REAL render_volume integration;
 compile clean; wiring 0 dark; catalog_gaps/skill_lint 0/0; capdoc/docgen regen (471 modules).
+
+## MERGE WIRING BACKLOG EXECUTION -- io tags, test-timeout policy, integration arc, service proof
+
+Executed the full merge-wiring backlog (merge_wiring_backlog.md) against the merged branch. The merge itself was
+disciplined (every new module had a selftest + faculty + NOTES entry); the backlog was the LAST steps of the loop.
+
+P0 CATALOG (items 1-3). Correction to the backlog: the 5 quantum modules were ALREADY cataloged (descriptive-title
+entries "Quantum field", "Schrodinger solver", ...); item 1 was a method-name-probe artifact. The real work was io/
+semantic TAGS: 28 merge-added entries had rich aliases/examples but EMPTY consumes/produces/semantic, so none routed
+in suggest_pipeline. Added them all via a paren-matched insertion script (safer than 28 str_replaces). VOCABULARY
+DECISION: added two io-kinds -- `timeseries` (lombscargle/nbody-energy/audio-param producers) and `spectrum` (stokes/
+observer/falsecolor/rmsynth) -- to holographic_iokinds; both grounded in >=4 real members (the module's "no dead menu
+entries" rule). Fixed 2 invalid semantic roots in my first mapping (explain->analyze, compute->simulate; the S4.1 gate
+only allows create/select/transform/modify/measure/convert/render/simulate/animate/analyze/io). 2 genuine
+discoverability misses fixed with aliases (particle-in-a-box->quantum_dot, "which file should I edit"->triage_code);
+re-probed 20 phrasings -> 0 misses. Routing pins 17/17 still green (adding produces= did NOT shift them here).
+
+TEST-TIMEOUT POLICY (items 11-12) -- the user's explicit ask, and the highest-leverage item. Added a DEPENDENCY-FREE
+15 s per-test watchdog in tests/conftest.py: pytest_runtest_call hookwrapper, SIGALRM on POSIX (interrupts even GIL-
+holding C loops) + a timer-thread fallback elsewhere, overrun -> pytest.skip (NOT fail) with an actionable message.
+Force with --run-slow OR LECORE_RUN_SLOW=1 (env, for CI) -- one switch that BOTH lifts the budget AND selects the
+`slow`-marked tests (config.option.markexpr=""). MEASURED it works: a 17 s probe test skips at exactly 15 s by default,
+runs to completion under either force switch. MEASURE-FIRST discipline (avoid a surprise mass-skip): the one true hog
+was the full-tree selftest walker test (test_all_selftests, ~75-180 s) -- marked it @pytest.mark.slow (it IS
+irreducible: shortening = sampling = the silence it exists to prevent). Item 12: the nebula selftest was already
+partly split (res=16, 19.5 s); trimmed it under budget (res=12 + determinism at res=8, 2 full volumes not 3) -> 10.1 s,
+every contract kept. KEPT NEGATIVE recorded: the thread-timer fallback can't interrupt a truly stuck call, so POSIX CI
+gets the hard guarantee; non-POSIX bounds reporting only.
+
+INTEGRATION ARC (items 4-10). 4 new integration files, 21 tests, all <15 s, proving the composition bridges the module
+selftests can't: (astronomy) nbody energy-bounded + orbits, nbody period == Kepler 2pi sqrt(a^3/GM) within 5% (two
+implementations of one physics agree), star_system->nbody stays bound, nbody trajectory scrubs through transport;
+(polarization) QWP linear->circular, faraday forward+rm_synthesis inverse recovers RM=42, skydata cube->faraday_rm_map
+recovers a per-pixel RM map exactly, skydata save/load round-trips, observer-on-Planck == blackbody_rgb byte-identical,
+mantis_view sees circular polarization; (scenegen->geometry) lombscargle recovers the nbody orbital period from the
+radius timeseries (a REAL in-engine producer), nebula density isosurfaces to a mesh, occupancy_to_mesh, star_cluster is
+a deterministic point field; (code+zig) kernel_from_description -> one IR -> Zig/WGSL/C from the SAME IR, emitter
+REFUSES unresolved types/unsupported ops (kept negative that makes "exact" mean something), triage/explain determinism,
+zig_batch_eval raises cleanly WITHOUT the ziglang wheel (opt-in accelerator contract, like numba).
+
+ITEM 16 (big changed files additive?): raw diffs looked huge (codeedit -520, render -626) but that was CRLF/reformat
+noise -- ignoring whitespace: render +35/-0, backend +58/-0, emit +134/-3 (the Zig dialect), codeedit +28/-6. The few
+real removals are benign (codeedit: max_bytes cap made configurable; emit: old 4-dialect list REPLACED by the 8-dialect
+list incl Zig). Confirmed additive/flag-gated. ITEM 17 (16 kept-negatives-no-callers): all pre-merge, declared
+(superseded query twins + consolidation homes, import-only BY DESIGN) -- none a new capability hiding behind the
+annotation. ITEM 18 (/invoke): proved GET /tools (1234 faculties) + POST /invoke round-trips through the REAL Service
+route handlers across 6 themes (triage_code, stokes_linear, circular_orbit_velocity, kernel_from_description,
+best_period, mueller_matrix, nebula_volume), each returning JSON-serializable results. ITEM 13: FEATURE_GUIDE section 9
+added (quantum/gravity/astronomy/polarization/code) -- every snippet runs. ITEM 15: README uses dynamic badges, no
+hardcoded count markers to update. ITEM 19: diag.log absent from the tree; added *.log to the zip-build exclusions.
+
+Audits clean (wiring 0 dark, catalog_gaps 0, skill_lint 0/0), catalog selftest 325 caps, capdoc/docgen regen (490
+modules). SCOPED-NEXT unchanged from the merge authors' own notes (barnes-hut nbody, hydro nebula, radial creature
+symmetry, self-collision).

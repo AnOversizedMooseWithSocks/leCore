@@ -30,6 +30,11 @@ IO_KINDS = (
     "scalar",      # a single number or small tuple of numbers: a measurement, a cost, a distance
     "curve",       # a 1-D curve/spline: control points + a parameterization (splines, knots, strokes)
     "skeleton",    # a bone hierarchy / armature: joints + parenting (drives skinning)
+    "timeseries",  # a sampled-in-TIME sequence: (t, y) samples or a value trace -- light curves, sim traces, audio
+                   #   param streams. Distinct from `field` (space) and `scalar` (one number); it is what a
+                   #   periodogram/phase-fold consumes and what nbody energy-over-time / audio_param_bus produce.
+    "spectrum",    # a per-WAVELENGTH / per-frequency reading: SED samples, Stokes-vs-lambda, receptor responses --
+                   #   what observe_spectrum / falsecolor_spectral / rm_synthesis take as their spectral axis.
 )
 
 _IO_KINDS_SET = frozenset(IO_KINDS)
