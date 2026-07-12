@@ -159,6 +159,104 @@ def bake_deformation(base, n_frames, frame_fn):
     return cache
 
 
+class Transport:
+    """A PLAYHEAD over a frame function -- the start / pause / step / seek / scrub / rewind / fast-forward the Timeline
+    (keyframes) and FrameCache (per-frame storage) did not provide. It holds a CURRENT FRAME and a play state, and
+    computes each frame on demand from `frame_fn(frame) -> state`, caching results in a FrameCache so revisiting a
+    frame (rewind, scrub back, replay) is O(1) and never recomputes. This is what makes an animation SCRUBBABLE.
+
+    `frame_fn(frame)` returns the state at an integer frame (a deformed mesh's vertices, a sim field, a parameter dict
+    packed as an array, ...). `n_frames` bounds the range; `fps` is metadata for time<->frame. Determinism: because
+    frame_fn is a pure function of the frame index, seeking to frame f gives the SAME state whether you got there by
+    playing, rewinding, or jumping -- no hidden accumulator drift (the classic scrub bug). A stateful sim that CANNOT
+    be evaluated at an arbitrary frame should be baked with bake_deformation first, then driven through a Transport
+    over the cache."""
+
+    def __init__(self, frame_fn, n_frames, fps=24.0, base=None):
+        self._fn = frame_fn
+        self.n_frames = int(n_frames)
+        self.fps = float(fps)
+        self.frame = 0
+        self.playing = False
+        self.speed = 1.0                                       # frames advanced per tick (negative = reverse)
+        self._acc = 0.0                                        # fractional-frame accumulator for non-integer speeds
+        # cache the frame states for O(1) revisits. The FrameCache stores (N,D) states as sparse deltas off a base
+        # (ideal for a deforming mesh -- most vertices are unchanged frame to frame); for any other shape (a param
+        # vector, a scalar) fall back to a plain dict, which is still O(1) and correct.
+        self._base = base if base is not None else np.asarray(self._fn(0))
+        self._twod = (self._base.ndim == 2)
+        self._cache = FrameCache(self._base) if self._twod else {}
+
+    def at(self, frame):
+        """The state at integer `frame` (clamped to [0, n_frames-1]). Cached: the first call computes via frame_fn,
+        every later call for the same frame is O(1). This is the scrub primitive."""
+        f = int(max(0, min(self.n_frames - 1, frame)))
+        if self._twod:
+            try:
+                return self._cache.get(f)                      # O(1) if already computed
+            except KeyError:
+                got = np.asarray(self._fn(f))                  # first visit: compute and cache
+                self._cache.put(f, got)
+                return got
+        if f not in self._cache:
+            self._cache[f] = np.asarray(self._fn(f))
+        return self._cache[f]
+
+    def seek(self, frame):
+        """Jump the playhead to `frame` and return its state. The seek/scrub operation -- same state no matter how
+        you arrived (deterministic)."""
+        self.frame = int(max(0, min(self.n_frames - 1, frame)))
+        return self.at(self.frame)
+
+    def seek_time(self, seconds):
+        """Seek by TIME (seconds) instead of frame index, via fps."""
+        return self.seek(int(round(seconds * self.fps)))
+
+    def play(self, speed=1.0):
+        """Start playback at `speed` frames/tick (1.0 = forward, -1.0 = reverse/rewind, 2.0 = fast-forward, 0.5 =
+        slow-mo). Call tick() to advance."""
+        self.playing = True
+        self.speed = float(speed)
+        return self
+
+    def pause(self):
+        """Pause -- the playhead holds its current frame."""
+        self.playing = False
+        return self
+
+    def rewind(self, speed=1.0):
+        """Play in REVERSE at `speed` (a convenience for play(-speed))."""
+        return self.play(-abs(speed))
+
+    def stop(self):
+        """Pause and rewind the playhead to frame 0."""
+        self.playing = False
+        self.frame = 0
+        self._acc = 0.0
+        return self
+
+    def tick(self, n=1):
+        """Advance playback by `n` ticks at the current speed (does nothing if paused). Wraps at the ends (loops).
+        Returns the state at the new frame. The play-loop step: call once per rendered frame."""
+        if self.playing:
+            self._acc += self.speed * n
+            step = int(self._acc)                              # integer frames to move; keep the remainder
+            self._acc -= step
+            self.frame = (self.frame + step) % self.n_frames   # loop at both ends (reverse wraps to the tail)
+        return self.at(self.frame)
+
+    def step(self, n=1):
+        """Advance the playhead by `n` frames REGARDLESS of play state (frame-by-frame stepping, e.g. the '.'/',' keys
+        in a DCC). Negative steps back. Returns the new frame's state."""
+        self.frame = int(max(0, min(self.n_frames - 1, self.frame + n)))
+        return self.at(self.frame)
+
+    @property
+    def time(self):
+        """The current playhead position in seconds (frame / fps)."""
+        return self.frame / self.fps
+
+
 def _selftest():
     from holographic.mesh_and_geometry.holographic_deform import twist
     # Timeline: lerp between two vector keys
@@ -184,8 +282,37 @@ def _selftest():
         assert np.allclose(cache.get(f), fr(base, f))         # exact reconstruction
     saving = cache.full_bytes() / cache.memory_bytes()
     assert saving > 1.5, saving                               # delta cache is smaller than store-every-frame
+
+    # TRANSPORT: play / pause / step / seek / rewind / fast-forward over a frame function, deterministically.
+    calls = [0]
+    def frame_state(f):
+        calls[0] += 1
+        return np.array([float(f), float(f) * 2.0])           # a simple ramp so we can check the exact frame
+    tr = Transport(frame_state, n_frames=10, fps=24.0)
+    assert np.allclose(tr.seek(5), [5.0, 10.0])               # seek jumps to a frame
+    assert tr.frame == 5
+    # PLAY forward: tick advances the playhead
+    tr.stop().play(1.0)
+    tr.tick(); tr.tick()
+    assert tr.frame == 2 and np.allclose(tr.at(2), [2.0, 4.0])
+    # PAUSE holds the frame
+    tr.pause(); held = tr.frame
+    tr.tick(); tr.tick()
+    assert tr.frame == held, "pause holds the playhead"
+    # STEP works regardless of play state (frame-by-frame)
+    tr.step(3); assert tr.frame == held + 3
+    tr.step(-1); assert tr.frame == held + 2
+    # REWIND (reverse play) and FAST-FORWARD (speed 2)
+    tr.seek(8); tr.play(-1.0); tr.tick(); assert tr.frame == 7        # reverse
+    tr.seek(0); tr.play(2.0); tr.tick(); assert tr.frame == 2         # fast-forward 2x
+    # DETERMINISM + CACHE: revisiting a frame gives the same state and does NOT recompute (O(1) scrub)
+    before = calls[0]
+    a = tr.seek(2); b = tr.seek(2)
+    assert np.array_equal(a, b) and calls[0] == before, "revisiting a cached frame is O(1), no recompute"
+
     print(f"anim selftest ok: timeline lerp exact; frame cache reconstructs exactly, "
-          f"{saving:.1f}x smaller than full-frame storage")
+          f"{saving:.1f}x smaller than full-frame storage; Transport plays/pauses/steps/seeks/rewinds/fast-forwards "
+          f"with O(1) cached scrub and deterministic frame states")
 
 
 if __name__ == "__main__":

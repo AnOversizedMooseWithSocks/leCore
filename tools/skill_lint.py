@@ -148,7 +148,7 @@ _DOES_BUDGET = {
     'Dependency-keyed cache (key on what the operator reads)',
     'Describe a scene (scene from description, semantic)',
     'Detrend before you bake (non-periodic functions)',
-    'Dialect emitters (WGSL / C / JS from the Python kernel)',
+    'Dialect emitters (WGSL / C / JS / Zig from the Python kernel)',
     'Dictionary + taxonomy (vendored)',
     'Encyclopedia (relational knowledge)',
     'Equivariance table (the cache policy, measured)',

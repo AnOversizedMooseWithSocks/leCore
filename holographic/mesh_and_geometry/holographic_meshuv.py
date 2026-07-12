@@ -354,6 +354,84 @@ def puncture(mesh, vertex=0):
     return Mesh(mesh.vertices[used], [tuple(remap[v] for v in f) for f in keep])
 
 
+def _mesh_components(mesh):
+    """Split `mesh` into its connected components (per FACE adjacency via shared vertices), returning a list of
+    (vertex-index array, remapped face list) for each. The 'find the UV islands' step: a mesh made of separate
+    pieces (or one cut open along seams) has one island per component. Deterministic (components ordered by their
+    smallest vertex id)."""
+    faces = [tuple(f) for f in mesh.faces]
+    # union-find over vertices joined by any shared face.
+    parent = {}
+    def find(x):
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[max(ra, rb)] = min(ra, rb)
+    for f in faces:
+        for v in f[1:]:
+            union(f[0], v)
+    groups = {}
+    for f in faces:
+        r = find(f[0])
+        groups.setdefault(r, []).append(f)
+    out = []
+    for r in sorted(groups):
+        gf = groups[r]
+        used = sorted({v for f in gf for v in f})
+        remap = {old: i for i, old in enumerate(used)}
+        out.append((np.asarray(used, int), [tuple(remap[v] for v in f) for f in gf]))
+    return out
+
+
+def pack_uv_islands(mesh, method="lscm", margin=0.02):
+    """SMART-UV-style island packing: unwrap each connected component (UV island) of `mesh` SEPARATELY, then lay the
+    islands out in a non-overlapping grid inside the unit UV square [0,1]^2. Returns a (n_vertices, 2) UV array, one
+    row per original vertex, so islands never overlap -- the 'pack islands' step LSCM/uv_unwrap alone skip (they solve
+    every component in one frame, so disconnected pieces land on top of each other).
+
+    method: 'lscm' (conformal, per island) or 'isomap' (uv_unwrap's geodesic MDS). Each island is unwrapped, shifted
+    to the origin, uniformly scaled to fit its cell (aspect preserved -- no UV stretch), and placed with a `margin`
+    gutter. The layout is a near-square grid of ceil(sqrt(k)) columns for k islands (deterministic). Composes the
+    existing per-chart unwrap (lscm / uv_unwrap) + connected-components split; it does NOT re-solve the unwrap."""
+    comps = _mesh_components(mesh)
+    k = len(comps)
+    uv = np.zeros((mesh.n_vertices, 2), float)
+    if k == 0:
+        return uv
+    cols = int(np.ceil(np.sqrt(k)))
+    rows = int(np.ceil(k / cols))
+    cell_w = 1.0 / cols
+    cell_h = 1.0 / rows
+    for idx, (used, faces) in enumerate(comps):
+        island = Mesh(mesh.vertices[used], faces)
+        if method == "isomap":
+            iuv = np.asarray(uv_unwrap(island))
+        else:
+            iuv = np.asarray(lscm(island))
+        # normalise the island to [0,1] preserving aspect (uniform scale by the larger extent), then fit its cell.
+        lo = iuv.min(axis=0)
+        span = np.ptp(iuv, axis=0)
+        scale = float(max(span[0], span[1]))
+        if scale < 1e-12:
+            scale = 1.0                                          # a degenerate (collapsed) island -> avoid /0
+        norm = (iuv - lo) / scale                               # in [0,1] for the larger axis, <=1 for the other
+        col = idx % cols
+        row = idx // cols
+        ox = col * cell_w + margin * cell_w
+        oy = row * cell_h + margin * cell_h
+        avail_w = cell_w * (1.0 - 2.0 * margin)
+        avail_h = cell_h * (1.0 - 2.0 * margin)
+        fit = min(avail_w, avail_h)                             # uniform fit -> no anisotropic UV stretch
+        placed = norm * fit + np.array([ox, oy])
+        uv[used] = placed
+    return uv
+
+
 # =====================================================================================================
 # Self-test -- developable (low distortion) vs curved (Gauss distortion) vs closed-needs-a-seam.
 # =====================================================================================================
@@ -384,9 +462,25 @@ def _selftest():
     # --- determinism: the UV is a pure function of the mesh ---
     assert np.array_equal(uv_unwrap(flat), uv_unwrap(flat))
 
+    # --- PACK_UV_ISLANDS: a 2-component mesh packs into NON-OVERLAPPING cells of the unit square ---
+    two_v = np.vstack([flat.vertices, flat.vertices + np.array([10.0, 0, 0])])   # two separate copies
+    nf = len(flat.vertices)
+    two = Mesh(two_v, [tuple(f) for f in flat.faces] +
+              [tuple(v + nf for v in f) for f in flat.faces])
+    puv = pack_uv_islands(two)
+    assert puv.shape == (two.n_vertices, 2)
+    assert puv.min() >= -1e-9 and puv.max() <= 1 + 1e-9, "packed UVs must lie in the unit square"
+    a, b = puv[:nf], puv[nf:]                                    # the two islands' UV bboxes must be disjoint
+    ax0, ax1, ay0, ay1 = a[:, 0].min(), a[:, 0].max(), a[:, 1].min(), a[:, 1].max()
+    bx0, bx1, by0, by1 = b[:, 0].min(), b[:, 0].max(), b[:, 1].min(), b[:, 1].max()
+    disjoint = (ax1 <= bx0 + 1e-9) or (bx1 <= ax0 + 1e-9) or (ay1 <= by0 + 1e-9) or (by1 <= ay0 + 1e-9)
+    assert disjoint, "packed islands must not overlap in UV space"
+    assert np.array_equal(pack_uv_islands(two), pack_uv_islands(two)), "packing is deterministic"
+
     print(f"holographic_meshuv selftest: ok (flat isotropic patch unwraps near-isometric, stretch spread "
           f"{dist_flat:.3f}; curved hemisphere cap {dist_cap:.3f} (Gauss -- unavoidable); punctured sphere "
-          f"{dist_punct:.3f} (closed needs a real seam -- the kept negative); UV non-degenerate + deterministic)")
+          f"{dist_punct:.3f} (closed needs a real seam -- the kept negative); pack_uv_islands lays 2 components into "
+          f"disjoint cells of the unit square; UV non-degenerate + deterministic)")
 
 
 if __name__ == "__main__":

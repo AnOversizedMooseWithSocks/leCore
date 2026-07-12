@@ -5,7 +5,16 @@ hand-written compute shader a **projection of the authoritative Python kernel**:
 no drift. `emit(fn, dialect)` walks the same AST that `holographic_codestructure` decomposes, and a dialect table
 supplies the type names, the intrinsic names, and the declaration syntax.
 
-Dialects: `c_f64`, `c_f32`, `wgsl`, `js`.
+Dialects: `c_f64`, `c_f32`, `wgsl`, `js`, `zig_f64`, `zig_f32`.
+
+KEPT NEGATIVE 4 (Zig) -- **Zig refuses unused locals and parameters at COMPILE time.** A Python kernel with a dead
+assignment or an unused parameter emits fine but will not compile as Zig. That is Zig's discipline, not ours, and
+we do not paper over it with `_ = x;` suppressions: a dead local in a kernel is a smell the compiler is right to
+name. KEPT NEGATIVE 5 (Zig) -- `-O ReleaseFast` licenses float reassociation, so it is NOT the deterministic mode;
+`run_zig` compiles `ReleaseSafe`, where zig_f64 is measured bit-identical to the Python original (same order of
+operations, same doubles -- same result as c_f64). KEPT NEGATIVE 6 (Zig) -- **std.math.pow is not libm pow**:
+measured 1-ulp disagreement (4.4e-16 abs on pow(1.3, 2.7)). zig_f64 bit-identity is a property of the BUILTIN
+intrinsics (@sqrt/@sin/...); a kernel calling pow is judged at f64-ulp tolerance, stated, not hidden.
 
 THE BAR, AND IT IS EXECUTED. The backlog asks for "a real leCore kernel emitted and validated against the Python
 original to float tolerance on the same inputs." WGSL cannot be run here -- there is no GPU and no browser -- so
@@ -53,8 +62,22 @@ INTRINSICS = {
     "abs": {"c_f64": "fabs", "c_f32": "fabsf", "wgsl": "abs", "js": "Math.abs"},
     "min": {"c_f64": "fmin", "c_f32": "fminf", "wgsl": "min", "js": "Math.min"},
     "max": {"c_f64": "fmax", "c_f32": "fmaxf", "wgsl": "max", "js": "Math.max"},
-    "pow": {"c_f64": "pow", "c_f32": "powf", "wgsl": "pow", "js": "Math.pow"},
+    "pow": {"c_f64": "pow", "c_f32": "powf", "wgsl": "pow", "js": "Math.pow",
+            # Zig's pow is type-parameterized -- std.math.pow(T, a, b) -- so a bare name cannot express it. An
+            # intrinsic entry containing "{args}" is a TEMPLATE; plain entries keep the old name(args) form. This
+            # is additive: no existing dialect entry contains braces, so their emission is byte-identical.
+            "zig_f64": "std.math.pow(f64, {args})", "zig_f32": "std.math.pow(f32, {args})"},
 }
+
+# Zig builtins cover the rest; @abs/@min/@max exist for floats since 0.12 (ziglang wheel ships >= 0.13).
+for _n, _z in (("sqrt", "@sqrt"), ("exp", "@exp"), ("log", "@log"), ("sin", "@sin"), ("cos", "@cos"),
+               ("abs", "@abs"), ("min", "@min"), ("max", "@max")):
+    INTRINSICS[_n]["zig_f64"] = _z
+    INTRINSICS[_n]["zig_f32"] = _z
+    # The same builtins accept @Vector operands, so the vector dialects reuse them verbatim. `pow` is ABSENT for
+    # zigv_* -- std.math.pow is scalar-only -- and the emitter refuses a missing intrinsic by name (K10).
+    INTRINSICS[_n]["zigv_f64"] = _z
+    INTRINSICS[_n]["zigv_f32"] = _z
 
 DIALECTS = {
     "c_f64": {"scalar": "double", "decl": "{s} {n} = {e};", "typed_decl": True,
@@ -63,6 +86,16 @@ DIALECTS = {
               "sig": "{s} {name}({params})", "param": "{s} {n}", "suffix": "f", "brace": True},
     "wgsl": {"scalar": "f32", "decl": "let {n} = {e};", "typed_decl": False,
              "sig": "fn {name}({params}) -> {s}", "param": "{n}: {s}", "suffix": "f", "brace": True},
+    "zig_f64": {"scalar": "f64", "decl": "const {n}: {s} = {e};", "typed_decl": True,
+                "sig": "fn {name}({params}) {s}", "param": "{n}: {s}", "suffix": "", "brace": True},
+    "zig_f32": {"scalar": "f32", "decl": "const {n}: {s} = {e};", "typed_decl": True,
+                "sig": "fn {name}({params}) {s}", "param": "{n}: {s}", "suffix": "", "brace": True},
+    "zigv_f64": {"scalar": "V", "decl": "const {n}: {s} = {e};", "typed_decl": True,
+                 "sig": "fn {name}({params}) {s}", "param": "{n}: {s}", "suffix": "",
+                 "const_fmt": "@as(V, @splat({v}))", "brace": True},
+    "zigv_f32": {"scalar": "V", "decl": "const {n}: {s} = {e};", "typed_decl": True,
+                 "sig": "fn {name}({params}) {s}", "param": "{n}: {s}", "suffix": "",
+                 "const_fmt": "@as(V, @splat({v}))", "brace": True},
     "js": {"scalar": "number", "decl": "const {n} = {e};", "typed_decl": False,
            "sig": "function {name}({params})", "param": "{n}", "suffix": "", "brace": True},
 }
@@ -88,6 +121,10 @@ def _expr(node, dialect):
     if isinstance(node, ast.Constant):
         if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
             raise EmitError("only float constants are emittable; got %r" % (node.value,))
+        if "const_fmt" in d:
+            # Vector dialects splat constants: Zig refuses mixed vector/scalar arithmetic, and an implicit
+            # broadcast the language forbids is exactly the guess the emitter must not make on its own.
+            return d["const_fmt"].format(v=repr(float(node.value)))
         return "%r%s" % (float(node.value), d["suffix"])
     if isinstance(node, ast.Call):
         if not isinstance(node.func, ast.Name) or node.func.id not in INTRINSICS:
@@ -95,7 +132,15 @@ def _expr(node, dialect):
             raise EmitError("unknown call %r: not in the intrinsic table for %r. A wrong intrinsic is a wrong "
                             "answer at no tolerance, so the emitter refuses." % (name, dialect))
         args = ", ".join(_expr(a, dialect) for a in node.args)
-        return "%s(%s)" % (INTRINSICS[node.func.id][dialect], args)
+        if dialect not in INTRINSICS[node.func.id]:
+            raise EmitError("intrinsic %r has no %r form (std.math.pow is scalar-only, e.g.); the emitter refuses "
+                            "rather than guessing a lowering" % (node.func.id, dialect))
+        entry = INTRINSICS[node.func.id][dialect]
+        if "{args}" in entry:
+            # Template intrinsic (Zig's type-parameterized pow). Plain entries keep the historic name(args) form,
+            # so every pre-existing dialect emits byte-identically.
+            return entry.format(args=args)
+        return "%s(%s)" % (entry, args)
     raise EmitError("unsupported expression %s" % type(node).__name__)
 
 
@@ -225,9 +270,80 @@ def run_c(kernel, calls, dialect="c_f64", timeout=60):
         exe = os.path.join(tmp, "k")
         with open(csrc, "w") as fh:
             fh.write(prog)
-        subprocess.run(["cc", csrc, "-o", exe, "-lm"], check=True, capture_output=True, timeout=timeout)
+        try:
+            subprocess.run(["cc", csrc, "-o", exe, "-lm"], check=True, capture_output=True, timeout=timeout)
+        except FileNotFoundError:
+            # Z6: no system compiler. The `ziglang` wheel ships `zig cc`, a hermetic clang -- one pip install gives
+            # the C validation path on any machine. Opt-in accelerator discipline: absent BOTH, run_c raises and the
+            # caller (selftest) skips LOUDLY rather than silently passing.
+            import sys
+            subprocess.run([sys.executable, "-m", "ziglang", "cc", csrc, "-o", exe, "-lm"],
+                           check=True, capture_output=True, timeout=timeout)
         out = subprocess.run([exe], check=True, capture_output=True, text=True, timeout=timeout).stdout
     return [float(x) for x in out.split()]
+
+
+def zig_available():
+    """True iff the `ziglang` PyPI wheel (or a system `zig`) can compile here. The wheel is an OPT-IN accelerator,
+    exactly like numba: every test must pass without it, and its absence is reported loudly, never silently."""
+    import importlib.util
+    import shutil
+    return importlib.util.find_spec("ziglang") is not None or shutil.which("zig") is not None
+
+
+def _zig_argv():
+    """Prefer the wheel (hermetic, version-pinned by pip) over a system zig."""
+    import importlib.util
+    import sys
+    if importlib.util.find_spec("ziglang") is not None:
+        return [sys.executable, "-m", "ziglang"]
+    return ["zig"]
+
+
+def run_zig(kernel, calls, dialect="zig_f64", timeout=180):
+    """Compile the emitted Zig kernel (`-O ReleaseSafe`) and RUN it on `calls` -- the executed bar, same as run_c.
+
+    ReleaseSafe is deliberate: ReleaseFast licenses float reassociation, and a reassociated sum is a different
+    program (Kept Negative 5). Printing uses Zig's `{d}` float format, which is shortest-round-trip -- the parsed
+    double is bit-identical to the printed one, so the comparison measures the ARITHMETIC, not the formatter.
+    Raises EmitError if no Zig toolchain is present; callers skip loudly."""
+    import os
+    import subprocess
+    import tempfile
+
+    if dialect not in ("zig_f64", "zig_f32"):
+        raise EmitError("run_zig only runs the Zig dialects; got %r" % (dialect,))
+    if not zig_available():
+        raise EmitError("no Zig toolchain: `pip install ziglang` (opt-in accelerator, like numba)")
+    node, _fn = _as_node_and_fn(kernel)
+    kernel_src = _emit_node(node, dialect)
+    name = node.name
+    # std.debug.print writes to stderr and has been API-stable across Zig versions, unlike stdout writers.
+    body = "".join('    std.debug.print("{d}\\n", .{%s(%s)});\n'
+                   % (name, ", ".join(repr(float(a)) for a in c)) for c in calls)
+    prog = ('const std = @import("std");\n' + kernel_src + "pub fn main() void {\n" + body + "}\n")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        zsrc = os.path.join(tmp, "k.zig")
+        exe = os.path.join(tmp, "k")
+        with open(zsrc, "w") as fh:
+            fh.write(prog)
+        subprocess.run(_zig_argv() + ["build-exe", "-O", "ReleaseSafe", zsrc, "-femit-bin=" + exe],
+                       check=True, capture_output=True, timeout=timeout, cwd=tmp)
+        out = subprocess.run([exe], check=True, capture_output=True, text=True, timeout=timeout).stderr
+    return [float(x) for x in out.split()]
+
+
+def validate_zig(kernel, calls, dialect="zig_f64"):
+    """Run the emitted Zig against the Python original on the same inputs (shape mirrors validate_c). zig_f64's
+    measured verdict is BIT-IDENTICAL; zig_f32's max-abs delta IS the f32 tolerance, measured, not asserted."""
+    _node, fn = _as_node_and_fn(kernel)
+    got = run_zig(kernel, calls, dialect=dialect)
+    want = [float(fn(*c)) for c in calls]
+    diffs = [abs(g - w) for g, w in zip(got, want)]
+    rels = [abs(g - w) / max(abs(w), 1e-30) for g, w in zip(got, want)]
+    return {"dialect": dialect, "n": len(calls), "max_abs_diff": max(diffs), "max_rel_diff": max(rels),
+            "bit_identical": all(g == w for g, w in zip(got, want))}
 
 
 def validate_c(kernel, calls, dialect="c_f64"):
@@ -311,6 +427,21 @@ def _selftest():
         raise AssertionError("an unknown dialect must raise")
 
     # 5. `emit_source` takes the text, so a kernel with no retrievable source still emits
+    # 6. ZIG, EXECUTED (opt-in): compiled ReleaseSafe and RUN when a toolchain exists; otherwise SKIPPED LOUDLY.
+    #    zig_f64 must be bit-identical (builtin intrinsics only -- pow is a declared 1-ulp negative, KN6);
+    #    zig_f32's delta is asserted against f32 epsilon scale, the same bar WGSL is judged by.
+    if zig_available():
+        zc = [(0.3 * i - 3.0, 0.7, 1.1 - 0.05 * i, 0.4) for i in range(24)]
+        z64 = validate_zig(sdf_sphere, zc, dialect="zig_f64")
+        assert z64["bit_identical"], "zig_f64 must be bit-identical on builtin-intrinsic kernels: %r" % z64
+        z32 = validate_zig(sdf_sphere, zc, dialect="zig_f32")
+        assert z32["max_abs_diff"] < 5e-6, "zig_f32 beyond f32-epsilon scale: %r" % z32
+        print("  zig executed: f64 bit-identical, f32 max_abs=%.3g" % z32["max_abs_diff"])
+    else:
+        print("  ZIG SKIPPED -- no toolchain (`pip install ziglang`); structural emission still asserted below")
+    zt = emit(sdf_sphere, "zig_f64")
+    assert "fn sdf_sphere(" in zt and "f64" in zt and "def " not in zt and "**" not in zt
+
     text = "def lerp(a: float, b: float, t: float) -> float:\n    return a + (b - a) * t\n"
     assert emit_source(text, "wgsl").startswith("fn lerp(a: f32, b: f32, t: f32) -> f32")
     assert emit_source(text, "c_f64").startswith("double lerp(double a")

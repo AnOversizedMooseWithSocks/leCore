@@ -4338,7 +4338,7 @@ class UnifiedMind:
 
     # -- K8: dialect emitters -- one source of truth, two runtimes, no drift -------------------------------
     def emit_kernel(self, fn, dialect="wgsl"):
-        """Emit a scalar, straight-line, float kernel into `wgsl` | `c_f64` | `c_f32` | `js`. The hand-written
+        """Emit a scalar, straight-line, float kernel into `wgsl` | `c_f64` | `c_f32` | `js` | `zig_f64` | `zig_f32`. The hand-written
         compute shader becomes a PROJECTION of the authoritative Python kernel. K10's rule: the emitter REFUSES
         rather than guesses -- an unannotated parameter, an unknown call, a loop, a missing return each raise with
         the construct named. See holographic_emit.emit."""
@@ -4352,9 +4352,139 @@ class UnifiedMind:
         max_abs_diff, max_rel_diff, bit_identical}. `c_f64` comes out BIT-IDENTICAL. `c_f32` cannot -- and its
         error (2.9e-07 on an SDF) IS the tolerance a WGSL port must be judged against, because WGSL is f32 and
         NumPy is f64. That is why `c_f32` exists: so the tolerance is MEASURED, not chosen.
-        See holographic_emit.validate_c."""
-        from holographic.io_and_interop.holographic_emit import validate_c
-        return validate_c(fn, [tuple(float(x) for x in c) for c in calls], dialect=str(dialect))
+        Zig dialects (`zig_f64` / `zig_f32`) route to validate_zig -- compiled `-O ReleaseSafe` with the OPT-IN
+        `ziglang` wheel (exactly numba's contract: everything passes without it, absence reported loudly).
+        Measured: zig_f64 BIT-IDENTICAL on builtin-intrinsic kernels; std.math.pow is a declared 1-ulp negative.
+        See holographic_emit.validate_c / validate_zig."""
+        from holographic.io_and_interop.holographic_emit import validate_c, validate_zig
+        calls = [tuple(float(x) for x in c) for c in calls]
+        if str(dialect).startswith("zig"):
+            return validate_zig(fn, calls, dialect=str(dialect))
+        return validate_c(fn, calls, dialect=str(dialect))
+
+    def zig_batch_eval(self, kernel, arrays, dtype="f64", simd=0, opt="safe"):
+        """Compile a scalar kernel to a native shared library (content-hash cached, `ziglang` wheel, OPT-IN like
+        numba) and batch-evaluate it over P same-length arrays. `opt='safe'` is deterministic (f64 scalar measured
+        BIT-IDENTICAL to the NumPy evaluation); `simd=8` with dtype='f32' is the measured throughput sweet spot.
+        Returns the results as a list. First call pays ~1-2 s of compiler, then ~0 -- a one-shot small-n call is a
+        LOSS and this method does not pretend otherwise. See holographic_zigrun.ZigKernel."""
+        from holographic.io_and_interop.holographic_zigrun import ZigKernel
+        import numpy as _np
+        cols = [_np.asarray(a, dtype=float) for a in arrays]
+        return [float(x) for x in ZigKernel(kernel, dtype=str(dtype), simd=int(simd), opt=str(opt))(*cols)]
+
+    def zig_regime_map(self, kernel, sizes=(1000, 100000, 1000000), repeats=5, seed=0, simd_width=8):
+        """Z3's honest measurement: race numpy / zig scalar f64 / zig simd f32 across sizes. Every row carries the
+        baseline, the spread, and a correctness max-abs-err -- a fast wrong answer is not a result. MEASURED verdict
+        on the round-box SDF: a modest real 2-5x, peaking near n=1e5, compressing to ~2x at n=1e6 where everything
+        goes memory-bandwidth bound. No order-of-magnitude win exists and none is claimed.
+        See holographic_zigrun.regime_map."""
+        from holographic.io_and_interop.holographic_zigrun import regime_map
+        return regime_map(kernel, sizes=tuple(int(s) for s in sizes), repeats=int(repeats),
+                          seed=int(seed), simd_width=int(simd_width))
+
+    def kernel_from_description(self, text, name="scene", dialect="python"):
+        """Generate a geometry KERNEL from a controlled-vocabulary description (C3): registered parametric SDF
+        forms (sphere, rounded box, plane -- iq's exact formulae) composed with union/intersect/subtract. Returns
+        Python source, or emit-ready source in any dialect if `dialect` names one (c_f64|c_f32|wgsl|js|zig_*).
+        This is NOT free-form NL->code (an LLM's job, out of scope): outside the vocabulary it REFUSES BY NAME,
+        and colour/material words are NOTED as ignored, not silently dropped -- an SDF has no colour. Closes the
+        loop C1 opened: a generated kernel emits and re-explains. See holographic_codecompose.describe_to_kernel."""
+        from holographic.io_and_interop.holographic_codecompose import describe_to_kernel
+        src = describe_to_kernel(str(text), name=str(name))
+        if str(dialect) != "python":
+            from holographic.io_and_interop.holographic_emit import emit_source
+            return emit_source(src, str(dialect))
+        return src
+
+    def register_geometry_form(self, name, aliases, params, body_fn, purpose, citation=""):
+        """Grow C3's controlled vocabulary: register a parametric SDF form whose `body_fn(params)` returns kernel
+        lines assigning the signed distance to `$d`. Additive; real published formulae + citation (panel
+        discipline). See holographic_codecompose.register_form."""
+        from holographic.io_and_interop.holographic_codecompose import register_form
+        return register_form(str(name), tuple(aliases), dict(params), body_fn, str(purpose), str(citation))
+
+    def translate_kernel(self, src, from_dialect, to_dialect):
+        """Translate a kernel between languages -- python | c_f64 | c_f32 | wgsl | js | zig_f64 | zig_f32 --
+        through the ONE shared IR (C2), so there are no pairwise paths to drift. The bar this rides on is
+        executed, not asserted: round-trip BYTE-IDENTITY over all 144 dialect pairs in the codeparse selftest,
+        and numeric equivalence via validate_kernel for the executable dialects. Refuses, by name, anything
+        outside the kernel grammar (K10). See holographic_codeparse.translate."""
+        from holographic.io_and_interop.holographic_codeparse import translate
+        return translate(str(src), str(from_dialect), str(to_dialect))
+
+    def triage_code(self, src, as_text=False):
+        """Triage code in an UNRECOGNIZED language (C5): honest structural OBSERVATIONS -- ranked identifier word
+        pieces (camelCase/snake_case split), literal inventory, nesting profile, and a WEAK language hint with
+        its evidence -- every field checkable against the source, none claiming to know what the code does. This
+        is triage, not comprehension: mind.explain_code parses and explains languages we know; this describes
+        the ones we don't (and explain_code falls back here automatically on an unknown dialect). `as_text=True`
+        returns the prose report. See holographic_codetriage.triage."""
+        from holographic.io_and_interop.holographic_codetriage import triage, triage_report
+        return triage_report(str(src)) if as_text else triage(str(src))
+
+    def explain_code(self, src, dialect="python"):
+        """Explain source in plain English -- DETERMINISTICALLY (C1): same code, same sentences, every
+        time. Four labeled layers per function, each derived from a distinct static analysis: signature,
+        per-variable data flow (computed-from / read-count / feeds-return), a control-flow census, and an idiom
+        layer that is the ONLY one allowed to speak of purpose -- and only on a shape-catalog match (names and
+        constants blanked, so iq's rounded box with different half-extents is still recognized). An unmatched
+        function gets 'not recognized', never a guess -- but a min()/max() of registered primitives IS recognized
+        as a named union/intersection/subtraction (C6 composition layer). Returns {summary, functions, text}.
+        `dialect` extends this beyond Python (C4): pass c_f64 | c_f32 | wgsl | js | zig_f64 | zig_f32 and the
+        source is first parsed back to the shared IR (holographic_codeparse), then verbalized by the SAME
+        verbalizer -- seven languages, one explainer, no per-language twin to drift.
+        See holographic_codeverbal.verbalize."""
+        from holographic.io_and_interop.holographic_codeverbal import verbalize
+        if str(dialect) not in ("python", "c_f64", "c_f32", "wgsl", "js", "zig_f64", "zig_f32"):
+            # a language we have no parser for -> honest triage (C5), never a guessed explanation
+            from holographic.io_and_interop.holographic_codetriage import triage
+            return triage(str(src))
+        if str(dialect) != "python":
+            from holographic.io_and_interop.holographic_codeparse import parse_kernel, ParseError
+            try:
+                return verbalize(parse_kernel(str(src), str(dialect)))
+            except ParseError:
+                # in-grammar dialect but the source is outside the kernel grammar -> triage rather than refuse
+                from holographic.io_and_interop.holographic_codetriage import triage
+                return triage(str(src))
+        return verbalize(str(src))
+
+    def register_code_idiom(self, name, example_src, purpose, citation=""):
+        """Grow the idiom catalog (C6): register a purpose-recognizer by EXAMPLE -- the example function's
+        blanked AST shape becomes the matcher. Returns the shape key so a test can assert recognition
+        immediately. Additive; real published sources only in `citation` (panel discipline).
+        See holographic_codeverbal.register_idiom."""
+        from holographic.io_and_interop.holographic_codeverbal import register_idiom
+        return register_idiom(str(name), str(example_src), str(purpose), str(citation))
+
+    def register_composition_primitive(self, name, distance_expr_src):
+        """Grow C6's COMPOSITION recognizer: register a primitive by its distance EXPRESSION (e.g. a sphere's
+        'sqrt(px*px+py*py+pz*pz) - r') so that a min()/max() of such primitives is explained as a named union /
+        intersection / subtraction rather than 'not recognized'. This is what closes the describe->emit->explain
+        loop for COMPOSITE scenes. See holographic_codeverbal.register_composition_form."""
+        from holographic.io_and_interop.holographic_codeverbal import register_composition_form
+        return register_composition_form(str(name), str(distance_expr_src))
+
+    def zig_dispatch_policy(self, n, calls_expected, min_calls_to_compile=3, min_n=4096):
+        """Z5: which backend (numpy | zig) the native-kernel dispatcher would choose for arrays of length `n`
+        called `calls_expected` times, WITH the reason -- the policy is data, sized to the measured 2-5x regime
+        and the ~1-2 s first-call compile. Compose with mind.zig_batch_eval to act on the answer.
+        See holographic_zigrun.dispatch_policy (AutoKernel enforces the same policy in-process, identity-gated:
+        a native result that is not bit-identical to numpy in safe mode refuses the substitution permanently)."""
+        from holographic.io_and_interop.holographic_zigrun import dispatch_policy
+        return dispatch_policy(int(n), int(calls_expected), int(min_calls_to_compile), int(min_n))
+
+    def zig_march_compare(self, kernel=None, width=96, height=72, max_steps=96, out_dir=None):
+        """Z4's executed bar: sphere-trace the SAME rays through the engine's Python marcher and a natively
+        compiled Zig loop (same scene SDF text, shared dialect table), shade both with the SAME code, and return
+        {t_max_abs_diff, hit_flips, bit_identical, frames_byte_identical}. MEASURED verdict on the demo scene:
+        f64 BIT-IDENTICAL, frames byte-identical, zig 3.8x on 110k rays x 96 steps -- and safe-vs-fast is a wash,
+        so determinism costs nothing here. Pass out_dir to also write both PPM frames.
+        See holographic_zigmarch.render_compare."""
+        from holographic.io_and_interop.holographic_zigmarch import DEMO_SCENE, render_compare
+        return render_compare(kernel if kernel is not None else DEMO_SCENE, width=int(width),
+                              height=int(height), max_steps=int(max_steps), out_dir=out_dir)
 
     # -- C3: canonical element + delta chain (instancing, generalised) --------------------------------------
     def canonical_form(self, V, family="similarity"):
@@ -5786,6 +5916,23 @@ class UnifiedMind:
         from holographic.misc.holographic_eulerops import poke_face
         return poke_face(mesh, f_index, height=height)
 
+    def mesh_rip_vertex(self, mesh, vertex):
+        """RIP a shared vertex apart (holographic_eulerops): give every face incident to `vertex` its OWN copy at the
+        same position, so the faces are no longer joined there -- the inverse of a weld at one vertex. Topology only,
+        positions unchanged (the mesh looks identical but is torn at that vertex); ripping a manifold interior vertex
+        opens the surface there. V rises by (incident_faces - 1). A no-op for a vertex used by <=1 face. Returns a
+        new Mesh. The 'rip' a modeler does before pulling the pieces apart."""
+        from holographic.misc.holographic_eulerops import rip_vertex
+        return rip_vertex(mesh, vertex)
+
+    def mesh_split_vertices(self, mesh):
+        """SPLIT every vertex per-face (holographic_eulerops): give each face its own private copies of its corners,
+        so no two faces share a vertex -- the full inverse of a weld (weld_mesh). The result is a 'polygon soup':
+        same geometry, every face topologically independent (flat/faceted shading, no shared normals). Positions
+        unchanged. weld_mesh(mesh_split_vertices(m)) recovers the welded mesh. Returns a new Mesh."""
+        from holographic.misc.holographic_eulerops import split_vertices
+        return split_vertices(mesh)
+
     def mesh_triangulate(self, mesh):
         """EAR-CLIP every face of `mesh` into triangles (holographic_meshverbs2), returning a new all-triangle Mesh.
         The concave-correct counterpart of the kernel's Mesh.triangulate() (which fans -- correct for CONVEX faces
@@ -5861,6 +6008,16 @@ class UnifiedMind:
         from holographic.mesh_and_geometry.holographic_meshuv import uv_unwrap
         return uv_unwrap(mesh, method=method)
 
+    def mesh_pack_uv(self, mesh, method="lscm", margin=0.02):
+        """PACK UV ISLANDS (holographic_meshuv): unwrap each connected component (UV island) of `mesh` SEPARATELY,
+        then lay the islands out in NON-OVERLAPPING cells of the unit UV square -- the 'pack islands' / smart-UV step
+        that mesh_lscm and mesh_uv_unwrap skip (they solve every component in one frame, so disconnected pieces land
+        on top of each other). `method`: 'lscm' (conformal per island) or 'isomap' (geodesic MDS). Each island is
+        scaled uniformly (no UV stretch) into its cell with a `margin` gutter. Returns a (V,2) UV array in [0,1]^2.
+        Composes the existing per-chart unwrap + a connected-components split; does not re-solve the unwrap."""
+        from holographic.mesh_and_geometry.holographic_meshuv import pack_uv_islands
+        return pack_uv_islands(mesh, method=method, margin=margin)
+
     def mesh_stable_uv(self, mesh, bounds=None, mode="triplanar", axis=2):
         """UVs that are a deterministic function of WORLD POSITION, so they DON'T move under local edits -- the
         stable counterpart to mesh_uv_unwrap (whose global MDS/eigenmap re-solves and can flip on any edit).
@@ -5911,6 +6068,16 @@ class UnifiedMind:
         vertex indices to hand to mesh_cut_seam."""
         from holographic.mesh_and_geometry.holographic_meshseam import shortest_seam
         return shortest_seam(mesh, a, b)
+
+    def mesh_auto_seam(self, mesh, threshold_deg=40.0, method="crease"):
+        """AUTO-MARK SEAMS for UV unwrapping (holographic_meshseam): choose which edges to cut WITHOUT naming a path.
+        Returns a sorted list of (lo,hi) seam edges -- the 'marked seams' (the red edges a modeler sees). Where
+        mesh_cut_seam / mesh_shortest_seam cut a GIVEN seam, this SELECTS one. method='crease' (default) seams along
+        the sharp edges (dihedral angle > threshold_deg), since an artist cuts where the surface already folds so the
+        cut is hidden. Composes mesh_creases. Kept negative: a smooth closed surface has no creases -> empty set
+        (honest, not an invented cut); use mesh_shortest_seam for a meridian there. Returns the edge list."""
+        from holographic.mesh_and_geometry.holographic_meshseam import auto_seam
+        return auto_seam(mesh, threshold_deg=threshold_deg, method=method)
 
     def mesh_extrude(self, mesh, face_index, distance):
         """EXTRUDE a face (holographic_meshverbs, FWD-7): lift face `face_index` along its outward normal by
@@ -6078,13 +6245,24 @@ class UnifiedMind:
         from holographic.mesh_and_geometry.holographic_meshverbs import dissolve_vertex
         return dissolve_vertex(mesh, vertex)
 
-    def mesh_bevel_vertex(self, mesh, vertex, ratio=0.25):
+    def mesh_bevel_vertex(self, mesh, vertex, ratio=0.25, segments=1):
         """BEVEL a corner (holographic_meshverbs2, FWD-7 remainder): pull each edge incident to `vertex` back toward
-        its neighbour by `ratio`, chamfer every incident face, and cap the hole with a new face -- the corner
-        becomes a small facet. Preserves chi + closed + manifold. Returns a Mesh. Kept negative: this is the VERTEX
-        bevel; the EDGE bevel (two-sided fan split) is deferred; ratio must be in (0,1)."""
-        from holographic.mesh_and_geometry.holographic_meshverbs2 import bevel_vertex
-        return bevel_vertex(mesh, vertex, ratio=ratio)
+        its neighbour by `ratio`, chamfer every incident face, and cap the hole. `segments=1` (default) caps with one
+        FLAT facet (byte-identical to the original bevel); `segments>=2` ROUNDS the corner into a smooth spherical
+        dome of that many rings -- the 'bevel with N segments' fillet. Preserves closed + manifold. Returns a Mesh.
+        Kept negative: this is the VERTEX bevel; the EDGE bevel (two-sided fan split) is deferred; ratio in (0,1)."""
+        from holographic.mesh_and_geometry.holographic_meshverbs2 import bevel_vertex_segments
+        return bevel_vertex_segments(mesh, vertex, ratio=ratio, segments=segments)
+
+    def mesh_fill_holes(self, mesh, mode="fan", max_sides=0):
+        """FILL open holes (boundary loops) of a mesh with faces (holographic_meshverbs2), returning a closed-up Mesh.
+        mode='fan' (default, always works) caps each loop with a centroid vertex + a triangle fan; mode='grid' bridges
+        a big-enough even loop with a coarser quad strip (Blender 'grid fill'), falling back to fan otherwise.
+        `max_sides` (Blender 'Sides') fills only loops with at most that many edges (0 = all) -- set it to close small
+        holes while leaving a large outer border open. Traces loops with face-consistent winding so the fill is
+        manifold. Returns a new Mesh."""
+        from holographic.mesh_and_geometry.holographic_meshverbs2 import fill_holes
+        return fill_holes(mesh, mode=mode, max_sides=max_sides)
 
     def mesh_bridge(self, verts, loop_a, loop_b, closed=True):
         """BRIDGE two edge loops (holographic_meshverbs2, FWD-7 remainder): join two equal-length ordered vertex
@@ -6410,6 +6588,54 @@ class UnifiedMind:
             chain = self._function_lod_chain(field, bounds, resolution, level)
         idx = self.mesh_select_lod(chain, distance, pixel_budget, screen_height_px=screen_height_px, fov_deg=fov_deg)
         return chain[idx].mesh
+
+    def sdf_to_mesh(self, sdf, bounds=None, resolution=48, level=None):
+        """FRACTAL / SDF -> MESH, the one-liner (holographic bridge). Marches an SDF OBJECT (from fold_fractal /
+        mandelbulb / menger / sphere / any .eval-having field) to a watertight Mesh ready for mesh_to_softbody and the
+        whole mesh + simulation pipeline. This exists because two sharp edges trip everyone: (1) an SDF object is NOT
+        a bare callable, so surface_mesh's `field=` rejects it -- we wrap `.eval` here; (2) a distance-ESTIMATOR
+        fractal (fold_fractal) is ALL-POSITIVE (its DE never dips below 0), so marching at level 0 finds no crossing
+        and returns 0 faces SILENTLY -- we detect an all-positive field and offset the iso `level` a hair into the
+        solid so it actually meshes. Pass an explicit `level` to override. `bounds` defaults to a symmetric box sized
+        to the field (probed), so `m.sdf_to_mesh(m.mandelbulb())` just works. Returns a Mesh.
+
+        KEPT NEGATIVE: an all-positive DE has no true zero surface -- the offset picks a near-surface isocontour, not
+        a canonical boundary; the mesh is 'the fractal at iso=eps', which is the honest thing a raymarcher shows too."""
+        import numpy as _np
+        if not hasattr(sdf, "eval"):
+            raise TypeError("sdf_to_mesh expects an SDF object with .eval(P); wrap a bare function yourself")
+        if bounds is None:
+            # probe a coarse box for the field's support: grow until the corners read clearly outside.
+            b = 1.0
+            for _ in range(6):
+                corners = _np.array([[s * b for s in c] for c in
+                                     [(1, 1, 1), (-1, -1, -1), (1, -1, 1), (-1, 1, -1)]], float)
+                if _np.min(sdf.eval(corners)) > 0.25 * b:      # corners comfortably outside -> box contains it
+                    break
+                b *= 1.6
+            bounds = ([-b, -b, -b], [b, b, b])
+        # auto-detect an all-positive distance estimator and offset the iso level into the solid (the 0-faces fix).
+        if level is None:
+            rng = _np.random.default_rng(0)
+            lo, hi = _np.asarray(bounds[0], float), _np.asarray(bounds[1], float)
+            probe = lo + (hi - lo) * rng.uniform(size=(4000, 3))
+            dvals = sdf.eval(probe)
+            if _np.min(dvals) >= 0.0:                          # never negative -> no zero crossing to march
+                level = float(_np.percentile(dvals, 20))       # a near-surface isocontour that DOES cross
+            else:
+                level = 0.0
+        return self.surface_mesh(lambda P: sdf.eval(_np.asarray(P)), bounds=bounds, resolution=resolution, level=level)
+
+    def field_displace(self, mesh, field, amount=0.1, weight=None, invert=False, bias=0.0):
+        """Displace a mesh's vertices along their normals by a SCALAR FIELD or SDF sampled at each vertex
+        (holographic_autodisplace) -- the general, field-driven modifier. `field` is any .eval-having SDF (mandelbulb,
+        fold_fractal) or a bare callable P->values, so a FRACTAL can drive the relief. `weight` is the per-vertex MASK
+        (an array or callable in [0,1], e.g. sampled from a texture map) so the detail grows only WHERE THE MAP PAINTS
+        it -- the 'per-face mandelbulb modifier from a texture' case. `invert` flips the sign, `bias` recenters.
+        Returns a new Mesh. Generalizes auto_displace (which only reads an RGB image) to any field. Kept negative:
+        displaces along existing normals (adds relief, no re-topology) -- mesh finely first for deep fractal detail."""
+        from holographic.mesh_and_geometry.holographic_autodisplace import field_displace
+        return field_displace(mesh, field, amount=amount, weight=weight, invert=invert, bias=bias)
 
     def _function_lod_chain(self, field, bounds, resolution, level):
         """Field-native LOD for a field FUNCTION: re-sample + march at decreasing resolutions (coarsen the source),
@@ -7270,6 +7496,184 @@ class UnifiedMind:
         marches to a mesh, AND emits a GLSL loop -- the demoscene fractal. Seat: Quilez."""
         from holographic.mesh_and_geometry.holographic_sdf import menger
         return menger(iterations, size)
+
+    def fold_fractal(self, iterations=12, scale=2.0, min_radius=0.5, fold_limit=1.0):
+        """The KALEIDOSCOPIC-IFS / MANDELBOX distance-estimator SDF -- the general FOLD ENGINE behind the fractal-
+        forums 3D fractals and the Yohei-Nishitsuji tweet-shader look (holographic_sdf). Iterates box-fold (conditional
+        reflection) + sphere-fold (inversion through nested spheres) + scale/translate, tracking the derivative for a
+        usable distance estimate. `scale` is the Mandelbox constant, `min_radius` sets where the sphere fold bites,
+        `fold_limit` the box-fold extent. All conformal transforms, so it raymarches and orbit-traps cleanly with the
+        existing renderer. A four-float recipe that regenerates megabytes of deterministic self-similar structure.
+        Returns an SDF. Kept negative: INEXACT (a distance ESTIMATE) -- the in-engine raymarcher steps conservatively,
+        but the GLSL emitter refuses it (a shader consumer must hand-tune the step size)."""
+        from holographic.mesh_and_geometry.holographic_sdf import fold_fractal
+        return fold_fractal(iterations, scale, min_radius, fold_limit)
+
+    def mandelbulb(self, power=8.0, iterations=8, bailout=2.0):
+        """The MANDELBULB distance-estimator SDF (holographic_sdf) -- White & Nylander's polar-power fractal, the 3D
+        Mandelbrot analogue. Iterates z -> z^power + c in spherical coords with the analytic DE 0.5*log(r)*r/dr.
+        power=8 is the classic bulb. Unlike fold_fractal (a Mandelbox FOLD engine), this is the ESCAPE-TIME family in
+        3D (the z^n+c that draws the Mandelbrot set, lifted to a triplex algebra). Raymarches + orbit-traps with the
+        existing renderer. Returns an SDF. Kept negative: INEXACT (a distance ESTIMATE); the GLSL emitter refuses it."""
+        from holographic.mesh_and_geometry.holographic_sdf import mandelbulb
+        return mandelbulb(power, iterations, bailout)
+
+    def escape_time(self, width=256, height=256, center=(-0.5, 0.0), span=3.0, max_iter=100,
+                    power=2.0, julia_c=None):
+        """The 2D ESCAPE-TIME fractal FIELD (holographic_sdf) -- Mandelbrot (julia_c=None) or Julia (julia_c=(re,im)),
+        the classic z -> z^power + c iteration in the complex plane. Returns a (height,width) float array of SMOOTH
+        (continuous) escape counts in [0, max_iter], ready to feed a palette. The 2D sibling of mandelbulb: same
+        z^n+c recurrence read as a field. center/span frame the view. Vectorised, deterministic."""
+        from holographic.mesh_and_geometry.holographic_sdf import escape_time
+        return escape_time(width=width, height=height, center=center, span=span, max_iter=max_iter,
+                           power=power, julia_c=julia_c)
+
+    def fold_fit(self, target, iterations=10, coarse=6, refine_steps=40):
+        """INFER a fold RECIPE from an observed structure (holographic_foldfit) -- the inverse of fold_fractal.
+        Recover the (scale, min_radius, fold_limit) whose Mandelbox fractal best fits the `target` (M,3) point cloud:
+        a deterministic coarse grid over recipe space, then a local refine with this mind's own `optimize` (composed).
+        Returns {recipe, loss, baseline, improved}. The pattern-recognition payoff -- self-similarity detection as
+        parameter estimation. Kept negative: the loss (mean distance-to-surface) is NECESSARY not SUFFICIENT (the DE
+        lower bound can score an over-large fractal that merely contains the points) -- so the baseline-improvement
+        RATIO, not the absolute loss, is the discriminative signal. Recovers A recipe consistent with the cloud."""
+        from holographic.mesh_and_geometry.holographic_foldfit import fold_fit
+        return fold_fit(target, iterations=iterations, coarse=coarse, refine_steps=refine_steps, mind=self)
+
+    def fit_shape(self, target, **kw):
+        """CLOSEST-FIT to a procedural formula + its SHADERTOY / GLSL (holographic_fitshape) -- the capstone. Given a
+        `target`, fit the closest procedural representation and return it with runnable code. Dispatches on the target:
+        an (M,3) POINT CLOUD -> a FRACTAL SDF recipe via fold_fit, reconstructed and emitted as a complete Shadertoy
+        raymarch shader (the strong path: good for self-similar/fractal 3-D structure, quality = fold_fit's baseline-
+        improvement ratio, >~3x is a real fit); a 2-D IMAGE / HEIGHT / TEXTURE -> a PROCEDURAL fBm matched to the
+        target's statistical signature + a GLSL fbm snippet. Returns a dict with `kind`, the fit, a measured `quality`
+        vs `baseline`, the emitted code (`shadertoy` or `glsl`), and a `note`. Honest by construction: KEPT NEGATIVE
+        -- the texture path is a family match (matched roughness+detail), NOT parameter recovery or a pixel match; it
+        does not fit arbitrary meshes or L-systems (a fern's true generator) -- those are scoped next fitters."""
+        from holographic.mesh_and_geometry.holographic_fitshape import fit_shape
+        return fit_shape(target, mind=self, **kw)
+
+    def to_shadertoy(self, sdf):
+        """Emit a complete, runnable SHADERTOY fragment shader for an SDF (holographic_sdf.sdf_shader) -- map() +
+        raymarch + normals + lighting + a mainImage entry point, ready to paste into shadertoy.com. Works for the
+        fractal SDFs too (fold_fractal, mandelbulb, menger): they emit their fold/polar-power loop with a header note
+        that a distance ESTIMATE needs conservative ray steps. The 'get the Shadertoy code for it' primitive. Alias of
+        sdf_shader with the conventional name."""
+        return self.sdf_shader(sdf)
+
+    def ifs_generate(self, name_or_ifs="barnsley_fern", n=20000, seed=0):
+        """Generate a plant/fractal point cloud from an AFFINE IFS via the chaos game (holographic_ifs). Pass a named
+        system ('barnsley_fern', 'culcita_fern', 'sierpinski', 'fractal_tree', 'dragon_curve') or an AffineIFS object;
+        get an (n,2) attractor point cloud. A fern/tree/sierpinski from a handful of 6-number affine maps -- the
+        botanical/branching model that fold_fractal (a Mandelbox fold) is not. Mesh it via sdf_from_points ->
+        sdf_to_mesh for geometry. Returns (n,2) points. Deterministic given `seed`."""
+        from holographic.mesh_and_geometry.holographic_ifs import ifs_library, AffineIFS
+        ifs = name_or_ifs
+        if isinstance(name_or_ifs, str):
+            lib = ifs_library()
+            if name_or_ifs not in lib:
+                raise ValueError("unknown IFS %r; known: %s" % (name_or_ifs, sorted(lib)))
+            ifs = lib[name_or_ifs]
+        return ifs.generate(n=n, seed=seed)
+
+    def ifs_fit(self, target, bins=28):
+        """Match a 2-D `target` point cloud to the CLOSEST NAMED affine-IFS system (holographic_ifs) -- the honest
+        'fit a fern/tree' -- by occupancy signature. Returns {name, ifs, distance, quality, baseline, ranking, note}.
+        `quality` beats `baseline` (the library mean) when the target really resembles a known system; a cloud unlike
+        anything scores near baseline. The botanical companion to fold_fit (Mandelbox) and fit_shape. Kept negative:
+        snaps to a LIBRARY, does not recover arbitrary IFS maps; not rotation-invariant."""
+        from holographic.mesh_and_geometry.holographic_ifs import ifs_fit
+        return ifs_fit(target, bins=bins)
+
+    def fit_primitives(self, target, k=6, auto_k=False, k_max=16, tol=0.05, primitives=("sphere", "box", "capsule")):
+        """Approximate a (M,3) point cloud with a UNION of PRIMITIVES, best-fit per cluster (holographic_primfit) --
+        the honest model for a HARD-SURFACE or NON-FRACTAL organic shape (a 'creature', a part) that fold_fractal and
+        the affine-IFS library can't represent. Clusters the points deterministically, then per cluster fits a SPHERE
+        (round parts), an ORIENTED BOX (blocky parts, via PCA), and a CAPSULE (elongated/rounded limbs) and keeps the
+        best-fitting one. All are EXACT SDFs, so the union raymarches / sdf_to_mesh's / to_shadertoy's. Returns {sdf,
+        parts, kinds, quality, baseline, residual, k}: `kinds` counts each primitive type chosen; `quality` is how
+        many times better than a single bounding sphere. `primitives` restricts the palette (('sphere',) = the old
+        sphere-only behaviour). auto_k=True grows K to the elbow. Kept negative: a cluster spanning two oriented parts
+        is fit by one loose primitive (raise K); approximates the surface, not a minimal CSG tree."""
+        from holographic.mesh_and_geometry.holographic_primfit import fit_primitives
+        return fit_primitives(target, k=k, auto_k=auto_k, k_max=k_max, tol=tol, primitives=primitives)
+
+    def humanoid(self, targets=None, scale=1.0, iters=30, skin=True, body=None,
+                 limb_radius=0.06, head_radius=0.11, torso_radius=0.10):
+        """Build a parametric biped HUMANOID with automatic IK rigging and CHARACTER-EDITOR body morphs
+        (holographic_humanoid). Starts in a T-pose; if `targets` (end_effector -> (x,y,z)) is given, each limb is posed
+        by IK (FABRIK) keeping bone lengths. `body` is a character-editor parameter block (see body_params /
+        default_body): global weight/muscle/fat sliders that distribute across the body by region, per-segment
+        muscle/fat/length overrides, and optional breast geometry (size/sag/separation/nipple_diameter/nipple_depth).
+        Returns the posed Humanoid; if `skin=True` also its morphed primitive-skin SDF (meshes, emits Shadertoy). All
+        morphs default to 0 -> the base build is byte-identical to the un-morphed figure. End-effectors: l_wrist,
+        r_wrist, l_ankle, r_ankle, head."""
+        from holographic.mesh_and_geometry.holographic_humanoid import Humanoid
+        h = Humanoid(scale=scale, body=body)
+        if targets:
+            h.pose_to(targets, iters=iters, mind=self)
+        if skin:
+            return h, h.skin(limb_radius=limb_radius, head_radius=head_radius, torso_radius=torso_radius)
+        return h
+
+    def body_params(self):
+        """The neutral character-editor parameter block for humanoid() (holographic_humanoid.default_body) -- every
+        slider at 0. Copy and adjust: global weight/muscle/fat in [-1,1]; segments[name] = {muscle, fat, length} for
+        torso/neck/shoulder/upper_arm/forearm/hip/thigh/shin; breasts = None or {size, sag, separation,
+        nipple_diameter, nipple_depth}. Pass the result as humanoid(body=...)."""
+        from holographic.mesh_and_geometry.holographic_humanoid import default_body
+        return default_body()
+
+    def fit_pose(self, keypoints, camera=None, iters=30, scale=1.0):
+        """Fit a HUMANOID rig to KEYPOINTS -- the honest 'approximate a pose' (holographic_humanoid). Pass 3-D
+        keypoints (a dict joint_name -> (x,y,z), e.g. from mocap) for a direct IK fit, OR 2-D image keypoints (dict
+        joint_name -> (u,v)) WITH a `camera` (needs .ray(uv) and .project(pts)) for a bone-length-constrained lift +
+        IK. Returns the posed Humanoid (2-D also returns the lifted keypoints). KEPT NEGATIVE, loud: this fits
+        KEYPOINTS, it does NOT detect them in an image (that needs a learned model, which the engine forbids); and a
+        monocular 2-D lift is depth-ambiguous, so it recovers A plausible pose, not THE unique one."""
+        from holographic.mesh_and_geometry.holographic_humanoid import fit_pose_3d, fit_pose_2d
+        if camera is not None:
+            return fit_pose_2d(keypoints, camera, iters=iters, mind=self, scale=scale)
+        return fit_pose_3d(keypoints, iters=iters, mind=self, scale=scale)
+
+    def solve_ik_limited(self, joints, target, limits, iters=20, root_ref=(0.0, 1.0, 0.0)):
+        """CONSTRAINED inverse kinematics (holographic_iklimit): reach `target` while keeping each joint within an
+        anatomical limit -- no hyperextended elbows/knees, ball joints within their cones. `joints` is (n+1,3);
+        `limits` is a list of len n, each None (free) or {'type':'hinge','axis','lo','hi'} / {'type':'cone','half',
+        'ref'?} in RADIANS. Alternates a FABRIK reach (solve_ik) with a root->tip limit projection (constrained
+        FABRIK, Aristidou-Lasenby). Returns (joints, reach_error) -- error>0 when the limits correctly prevent
+        reaching an out-of-range target. Bone lengths preserved; never returns an out-of-limit pose. Kept negative:
+        angle limits only, no self-collision."""
+        from holographic.mesh_and_geometry.holographic_iklimit import solve_ik_limited
+        return solve_ik_limited(joints, target, limits, iters=iters, root_ref=root_ref, mind=self)
+
+    def creature(self, spec, skin=True):
+        """Build a Spore-style non-humanoid CREATURE from a body-plan spec (holographic_creature) -- a spine with limbs
+        attached at fractional positions, bilateral symmetry, and generic organic joint constraints (a cone at each
+        limb mount, no-hyperextension hinges along it). `spec`: {spine:{length,segments,axis,curve,radius}, limbs:[{at,
+        dir,segments,length,radius,mirror,cone_deg,hinge_deg}], head:{at,radius}, body:<morph block>}. Returns the
+        Creature; if skin=True also its morph-aware primitive-skin SDF (meshes, emits Shadertoy). Pass mind.creature
+        (mind.quadruped_spec()) for a ready quadruped. Generalises the humanoid to arbitrary body plans."""
+        from holographic.mesh_and_geometry.holographic_creature import Creature
+        cre = Creature(spec)
+        if skin:
+            return cre, cre.skin()
+        return cre
+
+    def creature_pose(self, spec, targets, iters=30):
+        """Build a creature from `spec` and pose its limbs to `targets` ({chain_name: (x,y,z)}) via CONSTRAINED IK in
+        one deterministic call (holographic_creature). Chain names are 'L0','L0m','L1',... (m = the mirrored twin).
+        Returns (Creature, skin_sdf). Joint limits (and their muscle/fat tightening) are enforced, so limbs never
+        hyperextend."""
+        from holographic.mesh_and_geometry.holographic_creature import Creature
+        cre = Creature(spec)
+        cre.pose(targets, iters=iters, mind=self)
+        return cre, cre.skin()
+
+    def quadruped_spec(self, body=None):
+        """A ready-made creature body plan -- a quadruped (spine + two mirrored leg pairs + head)
+        (holographic_creature.quadruped_spec). A concrete starting spec to build on; pass to creature()."""
+        from holographic.mesh_and_geometry.holographic_creature import quadruped_spec
+        return quadruped_spec(body=body)
 
     def greeble(self, base_mesh, seed=None, density=0.7, max_height=0.15, footprint=0.5):
         """S2 -- cover a base mesh's faces with extruded greeble boxes (the G5 panel idea on any surface) ->
@@ -9847,6 +10251,76 @@ class UnifiedMind:
         from holographic.simulation_and_physics.holographic_wave import WaveField
         return WaveField(shape, c=c, dx=dx, damping=damping, absorb_border=absorb_border)
 
+    # -- QUANTUM faculties (complex wavefunction stack: field / solver / current / dot / interferometer) ---------
+    def quantum_field(self, shape, dx=1.0, mass=1.0, hbar=1.0, q=1.0):
+        """A COMPLEX wavefunction psi on a grid -- the central quantum object. `.gaussian_packet(center, sigma, k0)`
+        launches a wave packet, `.set_potential(V)` installs a well/wall, `.set_vector_potential([Ax,Ay])` threads
+        magnetic flux, `.probability_density()` is |psi|^2, `.normalize()` makes it integrate to 1. Hand it to
+        `quantum_solver(...)` to evolve. The quantum complement to wave_field (which carries a REAL acoustic field).
+        See holographic_quantum_field.QuantumField."""
+        from holographic.simulation_and_physics.holographic_quantum_field import QuantumField
+        return QuantumField(shape, dx=dx, mass=mass, hbar=hbar, q=q)
+
+    def quantum_solver(self, field, absorb_border=0):
+        """A split-operator (split-step Fourier) integrator for the time-dependent Schrodinger equation on a
+        QuantumField. `.step(dt)` / `.run(n, dt)` evolve psi in place, UNITARILY (norm conserved to machine
+        precision -- the kinetic step is spectral, the analytic continuation of the heat propagator). An
+        `absorb_border` sponge opens the boundary for scattering. Explicit Euler is unstable and is NOT used (a
+        recorded negative). See holographic_schrodinger.SplitStepSchrodinger."""
+        from holographic.simulation_and_physics.holographic_schrodinger import SplitStepSchrodinger
+        return SplitStepSchrodinger(field, absorb_border=absorb_border)
+
+    def probability_current(self, psi, A=None, mass=1.0, hbar=1.0, q=1.0, dx=1.0, bc="periodic"):
+        """The probability current j = (hbar/m) Im(psi* grad psi) - (q/m) A |psi|^2 of a wavefunction, as [jx, jy].
+        The flow of |psi|^2 -- streamlines of j are the glowing threads in an interferometer, and a loop with
+        circulation is a probability vortex. Returns real arrays. See holographic_probability_current.probability_current."""
+        from holographic.simulation_and_physics.holographic_probability_current import probability_current
+        return probability_current(psi, A=A, mass=mass, hbar=hbar, q=q, dx=dx, bc=bc)
+
+    def quantum_velocity(self, psi, A=None, mass=1.0, hbar=1.0, q=1.0, dx=1.0, bc="periodic"):
+        """The probability VELOCITY field v = j/|psi|^2 -- hand it straight to advect_field to carry glowing tracers
+        along the quantum flow (the SIDEWAYS reuse: the quantum current drives the existing advection). Returns
+        [vx, vy]. See holographic_probability_current.velocity_field."""
+        from holographic.simulation_and_physics.holographic_probability_current import velocity_field
+        return velocity_field(psi, A=A, mass=mass, hbar=hbar, q=q, dx=dx, bc=bc)
+
+    def quantum_dot_well(self, shape, center, depth, width):
+        """A narrow Gaussian potential well (the quantum dot) -- hand it to a QuantumField.set_potential. A negative
+        `depth` makes a repulsive barrier (a tunnelling scatterer). See holographic_quantum_dot.gaussian_well."""
+        from holographic.simulation_and_physics.holographic_quantum_dot import gaussian_well
+        return gaussian_well(shape, center, depth, width)
+
+    def quantum_transmission(self, k0, dot_V=None, shape=(256, 128), dx=0.2, sigma=10.0, x_start=40,
+                             cut=None, steps=600, dt=0.02, absorb_border=20):
+        """MEASURE the fraction of a packet (carrier k0) that crosses a cut plane past an optional dot potential --
+        the transmission. Sweep k0 with and without the dot to see the resonance/tunnelling emerge (measured, not
+        painted). See holographic_quantum_dot.measure_transmission."""
+        from holographic.simulation_and_physics.holographic_quantum_dot import measure_transmission
+        return measure_transmission(k0, dot_V=dot_V, shape=shape, dx=dx, sigma=sigma, x_start=x_start,
+                                    cut=cut, steps=steps, dt=dt, absorb_border=absorb_border)
+
+    def quantum_solenoid_A(self, shape, center, flux, core=1.0):
+        """The azimuthal vector potential of a thin solenoid carrying `flux` -- thread it through a ring with
+        QuantumField.set_vector_potential to get the Aharonov-Bohm phase. See holographic_quantum_scene.solenoid_vector_potential."""
+        from holographic.simulation_and_physics.holographic_quantum_scene import solenoid_vector_potential
+        return solenoid_vector_potential(shape, center, flux, core=core)
+
+    def aharonov_bohm_phase(self, flux, shape=(128, 128), dx=0.2, q=1.0, ring_radius=24):
+        """MEASURE the relative phase the two arms of a ring accumulate from enclosed magnetic `flux` -- the
+        Aharonov-Bohm interference shift, which equals q*Phi/hbar even though the field is zero on the arms. See
+        holographic_quantum_scene.measure_two_arm_phase."""
+        from holographic.simulation_and_physics.holographic_quantum_scene import measure_two_arm_phase
+        return measure_two_arm_phase(flux, shape=shape, dx=dx, q=q, ring_radius=ring_radius)
+
+    def quantum_two_slit(self, shape=(256, 256), dx=0.2, slit_axis=0, slit_pos=None, slit_gap=6, slit_sep=40,
+                         wall_height=400.0):
+        """Build a two-slit interferometer: a high-potential wall with two openings. Returns (QuantumField, V).
+        Launch a packet at it (quantum_solver) and the two slits become coherent sources -> an interference
+        pattern downstream. The canonical warm-up before the Aharonov-Bohm ring. See holographic_quantum_scene.two_slit."""
+        from holographic.simulation_and_physics.holographic_quantum_scene import two_slit
+        return two_slit(shape=shape, dx=dx, slit_axis=slit_axis, slit_pos=slit_pos, slit_gap=slit_gap,
+                        slit_sep=slit_sep, wall_height=wall_height)
+
     def read_wav(self, path):
         """Read a PCM WAV file -> (samples in [-1,1] mono, sample_rate). The front door for driving acoustics/
         cymatics from a real sound. Acoustics A1. See holographic_audio.read_wav."""
@@ -9870,6 +10344,24 @@ class UnifiedMind:
         from holographic.misc.holographic_parambus import param_bus, DEFAULT_BANDS
         return param_bus(samples, rate, hop=hop, size=size,
                          bands=bands if bands is not None else DEFAULT_BANDS, smooth=smooth)
+
+    def milk_parse(self, text):
+        """PARSE a Milkdrop `.milk` preset's TEXT into a MilkPreset (holographic_milkdrop) -- settings +
+        per_frame_init/per_frame/per_pixel equation families (compiled) + the captured warp/comp HLSL shaders. Then
+        `preset.initial_state()` and `preset.run_frame(state, audio={bass,mid,treb}, time, frame)` evaluate the
+        per-frame equations deterministically, driving the motion vars (q1..q32, zoom, rot, ...) from the audio
+        envelopes (pair with audio_param_bus). The EQUATION layer -- the per-pixel warp mesh + pixel shaders are
+        parsed and stored but run by the renderer, not here. Returns a MilkPreset."""
+        from holographic.io_and_interop.holographic_milkdrop import parse_milk
+        return parse_milk(text)
+
+    def milk_eval(self, expr, vars=None):
+        """Evaluate ONE ns-eel2 expression string (Milkdrop's equation language) against a variable dict
+        (holographic_milkdrop) -- SAFE (a whitelisted recursive-descent grammar, never Python eval) and
+        deterministic. Unknown vars read as 0; divide-by-zero is 0; an unsupported function raises. Returns a float;
+        `vars` is updated in place for assignments. The building block milk_parse compiles per equation."""
+        from holographic.io_and_interop.holographic_milkdrop import eval_expr
+        return eval_expr(expr, vars)
 
     def acoustic_impedance(self, material):
         """Characteristic acoustic impedance Z = rho * c (rayl) of a material, reused from its density x speed of
@@ -10320,9 +10812,12 @@ class UnifiedMind:
                              background=background)
 
     def save_render(self, path, rgb01):
-        """Write a render (an (H,W,3) image in [0,1]) to a PNG via the stdlib encoder. See holographic_render."""
-        from holographic.rendering.holographic_render import save_png
-        return save_png(path, rgb01)
+        """Write a render (an (H,W,3) image in [0,1]), routed by extension: .png via the stdlib encoder
+        (deterministic, always available); .jpg/.webp/... via Pillow when installed, otherwise a refusal naming
+        the install command (`pip install pillow`, extra: [images]) -- the standard opt-in contract.
+        See holographic_render.save_image."""
+        from holographic.rendering.holographic_render import save_image
+        return save_image(path, rgb01)
 
     def make_cloud(self, center=(0.0, 0.0, 0.0), radius=1.0, camera=None, width=384, height=384,
                    density=6.0, seed=0, grid=56, sky=(0.20, 0.42, 0.74), sun_dir=(-0.45, -0.55, -0.6),
@@ -10797,6 +11292,20 @@ class UnifiedMind:
         from holographic.misc.holographic_anim import Timeline
         return Timeline()
 
+    def transport(self, frame_fn, n_frames, fps=24.0, base=None):
+        """An animation TRANSPORT / playhead (holographic_anim) -- start/pause/step/seek/scrub/rewind/fast-forward
+        that the keyframe timeline and frame cache did not provide. `frame_fn(frame) -> state` computes any frame on
+        demand (a deformed mesh's vertices, a sim field, packed params); the Transport holds a current frame + play
+        state and caches computed frames so rewind / scrub-back / replay is O(1). Methods: play(speed) (1.0 forward,
+        -1.0 rewind, 2.0 fast-forward, 0.5 slow-mo), pause(), stop() (pause+rewind to 0), tick(n) (advance the play
+        loop), step(n) (frame-by-frame regardless of play state), seek(frame)/seek_time(sec) (scrub), at(frame)
+        (cached state), .frame/.time. Deterministic: seeking to a frame gives the same state however you arrived (no
+        scrub drift), because frame_fn is a pure function of the frame index. A stateful sim that can't be evaluated
+        at an arbitrary frame should be baked first (bake_deformation), then driven through a Transport over the cache.
+        Returns a Transport. See holographic_anim.Transport."""
+        from holographic.misc.holographic_anim import Transport
+        return Transport(frame_fn, n_frames, fps=fps, base=base)
+
     def frame_cache(self, base, hot=8, tol=1e-9):
         """A tiered delta FrameCache for playback: `.put(frame, state)` stores each frame as a sparse DELTA vs
         `base` (O(change) memory -- the engine's patch idea on the time axis), `.get(frame)` reconstructs it
@@ -10819,6 +11328,15 @@ class UnifiedMind:
         half. Vectorised. See holographic_meshtools.mirror."""
         from holographic.mesh_and_geometry.holographic_meshtools import mirror
         return mirror(mesh, axis=axis, plane=plane, weld=weld, tol=tol)
+
+    def mesh_symmetrize(self, mesh, axis=0, plane=0.0, side=1, tol=1e-5):
+        """SYMMETRIZE a mesh across the `axis`=const `plane` (holographic_meshtools): KEEP the half on `side` (+1 =
+        positive side, -1 = negative), MIRROR it back, and weld the seam -- a bilaterally-symmetric result. Unlike
+        mirror_mesh (which doubles the WHOLE mesh), this first discards the far side, so it FIXES an off-axis sculpt
+        instead of preserving the asymmetry. A face is kept iff its centroid is on `side`; near-plane vertices snap
+        onto the plane so the seam welds. Composes mirror + weld. Returns a new Mesh."""
+        from holographic.mesh_and_geometry.holographic_meshtools import symmetrize
+        return symmetrize(mesh, axis=axis, plane=plane, side=side, tol=tol)
 
     def weld_mesh(self, mesh, tol=1e-5):
         """Merge-by-distance: weld vertices within `tol` into one (mean position), remap faces, drop the faces
@@ -12433,6 +12951,14 @@ class UnifiedMind:
         CPU property. Falls back to NumPy silently when no GPU is available."""
         from holographic.misc.holographic_backend import enable_gpu
         return enable_gpu(enable)
+
+    def accelerator_report(self):
+        """Every optional dependency in one report: installed?, version, what it UNLOCKS (with the measured
+        numbers -- 'faster' without a number is advertising), and the exact pip command. NumPy is the only
+        required row; numba, ziglang (native 2-5x batch kernels, bit-identical in safe mode), cupy (GPU),
+        sympy, pillow, flask are all opt-in. See holographic_backend.accelerator_report."""
+        from holographic.misc.holographic_backend import accelerator_report
+        return accelerator_report()
 
     def backend_status(self):
         """A human-readable line describing the current compute backend (GPU enabled/available/unavailable)."""

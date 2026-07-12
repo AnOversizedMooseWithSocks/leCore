@@ -211,6 +211,23 @@ def _boundary_loop_count(mesh):
     return loops
 
 
+def auto_seam(mesh, threshold_deg=40.0, method="crease"):
+    """AUTO-MARK SEAMS: choose which edges to cut for UV unwrapping, WITHOUT the caller naming a path. Returns a
+    sorted list of (lo,hi) seam edges -- the 'marked seams' (the red edges a modeler sees), ready to feed a cut.
+    `mesh_cut_seam`/`shortest_seam` cut a GIVEN seam; this SELECTS one.
+
+    method='crease' (default): seam along the SHARP edges (interior edges whose dihedral angle exceeds
+    `threshold_deg`) -- the standard heuristic, since an artist cuts where the surface already folds, so the cut is
+    hidden and each side unwraps with little distortion. Composes holographic_meshcurvature.detect_creases (reuse,
+    don't reimplement the dihedral test). On a cube every 90-deg edge is marked; on a smooth sphere none are (the
+    kept negative: a smooth closed surface has no creases, so crease-seaming leaves it closed -- use a shortest_seam
+    meridian there instead; auto_seam reports the empty set honestly rather than inventing a cut)."""
+    if method != "crease":
+        raise ValueError("auto_seam: only method='crease' is implemented; a smooth surface needs shortest_seam")
+    from holographic.mesh_and_geometry.holographic_meshcurvature import detect_creases
+    return detect_creases(mesh, threshold_deg=threshold_deg)   # the sharp edges ARE the seam marks
+
+
 # =====================================================================================================
 # Self-test -- a meridian cut opens a sphere into a disk, and beats the crude puncture on unwrap distortion.
 # =====================================================================================================
@@ -252,11 +269,22 @@ def _selftest():
     # --- determinism ---
     assert np.array_equal(cut_seam(sphere, meridian).vertices, cut_seam(sphere, meridian).vertices)
 
+    # --- AUTO_SEAM: crease-based seam marking. A cube's 12 sharp edges get marked; a smooth sphere gets NONE ---
+    from holographic.mesh_and_geometry.holographic_mesh import box
+    cube = Mesh(box(2.0, 2.0, 2.0).vertices.copy(), [tuple(t) for t in box(2.0, 2.0, 2.0).triangulate()])
+    cube_seams = auto_seam(cube, threshold_deg=40.0)
+    assert len(cube_seams) >= 12, "a cube's 12 sharp (90-deg) edges must be auto-marked as seams"
+    assert auto_seam(cube) == auto_seam(cube), "auto_seam is deterministic"
+    sphere_seams = auto_seam(sphere, threshold_deg=40.0)      # the smooth sphere has no creases
+    assert sphere_seams == [], "KEPT NEGATIVE: a smooth closed surface has no creases -- auto_seam reports empty, " \
+                              "not an invented cut (use a shortest_seam meridian there)"
+
     print(f"holographic_meshseam selftest: ok (meridian cut opens the sphere into a DISK: chi=1, one boundary "
           f"loop, manifold, ALL {disk.n_faces} faces preserved (V {sphere.n_vertices}->{disk.n_vertices}, +{len(meridian) - 2} dup); "
           f"PAYBACK -- cut preserves geometry where puncture deletes {sphere.n_faces - punct.n_faces} faces, and a "
           f"well-chosen seam unwraps at {good_dist:.3f} < puncture {punct_dist:.3f}; KEPT NEGATIVE -- a full meridian "
-          f"({full_dist:.3f}) is a worse cut, seam choice matters; deterministic)")
+          f"({full_dist:.3f}) is a worse cut, seam choice matters; auto_seam marks {len(cube_seams)} crease edges on a "
+          f"cube, empty on a smooth sphere; deterministic)")
 
 
 if __name__ == "__main__":

@@ -67,6 +67,43 @@ def mirror(mesh, axis=0, plane=0.0, weld=True, tol=1e-5):
     return out
 
 
+def symmetrize(mesh, axis=0, plane=0.0, side=+1, tol=1e-5):
+    """SYMMETRIZE a (possibly asymmetric) mesh across the `axis`=const `plane`: KEEP the half on `side` (+1 = the
+    positive side of the plane, -1 = the negative), then MIRROR that half back across the plane and weld the seam,
+    producing a bilaterally-symmetric mesh. The 'symmetrize' a modeler runs to clean up a sculpt that drifted off
+    axis -- unlike `mirror` (which doubles the WHOLE mesh), this first discards the far side, so it fixes asymmetry
+    instead of preserving it.
+
+    A face is kept iff its CENTROID is on `side` of the plane (the robust, Blender-style rule -- no cutting of
+    straddling faces, which would need re-triangulation). Vertices within `tol` of the plane are SNAPPED exactly onto
+    it first, so the seam welds cleanly after the mirror. Returns a new `Mesh`. Composes the existing mirror + weld
+    (merge_by_distance) primitives -- symmetrize is 'keep one side, then mirror', not a new reflection kernel.
+
+    KEPT NEGATIVE: a face that lies IN the mirror direction (its centroid on the plane, e.g. the side faces of an
+    axis-aligned box mirrored across x=0) is kept and then mirrored, producing a coplanar duplicate -- so a box goes
+    6 -> 10 faces. The result is still SYMMETRIC (the contract), just not minimal; a proper fix would drop faces whose
+    supporting plane contains the mirror normal, deferred. For the intended use (an off-axis sculpt with faces that
+    genuinely pick a side) this does not arise."""
+    from holographic.mesh_and_geometry.holographic_mesh import Mesh
+    V = mesh.vertices.copy()
+    s = float(np.sign(side)) or 1.0
+    # snap near-plane vertices exactly onto the plane, so the mirrored copy's seam vertices coincide and weld.
+    near = np.abs(V[:, axis] - plane) <= tol
+    V[near, axis] = plane
+    kept_faces = []
+    for f in mesh.faces:
+        idx = list(f)
+        centroid_side = s * (V[idx, axis].mean() - plane)   # which side the face's centroid is on
+        # KEEP a face whose centroid is on the keep side OR on the plane (a straddling face belongs to both halves;
+        # keeping it and mirroring it produces the symmetric pair). Only faces whose centroid is clearly on the FAR
+        # side are discarded -- that is the asymmetry being cut away. (No cutting of straddling faces, Blender-style.)
+        if centroid_side >= -tol:
+            kept_faces.append(tuple(idx))
+    half = Mesh(V, kept_faces)
+    # mirror the kept half back across the plane and weld the on-plane seam -> the symmetric whole.
+    return mirror(half, axis=axis, plane=plane, weld=True, tol=tol)
+
+
 def _selftest():
     from holographic.mesh_and_geometry.holographic_mesh import Mesh, box
     # weld: duplicate every vertex of a box, then merge_by_distance should recover the original count
@@ -82,12 +119,38 @@ def _selftest():
     m = mirror(g, axis=0, plane=0.0, weld=True)
     assert m.n_vertices < g.n_vertices * 2                    # the seam welded (fewer than a naive double)
     assert np.allclose(m.vertices[:, 0].min(), -m.vertices[:, 0].max(), atol=1e-6)   # symmetric about x=0
+
+    # symmetrize an ASYMMETRIC mesh -> a bilaterally symmetric result (unlike mirror, which doubles the whole mesh).
+    g2 = grid(6, 6)
+    Va = g2.vertices.copy()
+    Va[Va[:, 0] > 0.0, 2] += 0.5                              # bump the +x half up in z -> asymmetric
+    asym = Mesh(Va, [tuple(f) for f in g2.faces])
+    sym = symmetrize(asym, axis=0, plane=0.0, side=+1)
+    Vs = sym.vertices
+    mirrored = Vs.copy(); mirrored[:, 0] = -mirrored[:, 0]    # every mirrored vertex must match an original one
+    ok_sym = all(np.linalg.norm(Vs - mv, axis=1).min() < 1e-4 for mv in mirrored)
+    assert ok_sym, "symmetrize must produce a mesh symmetric across the plane"
+    assert sym.n_faces == asym.n_faces, "keeping +x half (half the faces) then mirroring restores the face count"
+
+    # SOLIDIFY an open sheet -> a CLOSED, MANIFOLD watertight slab (this operator had no test, and shipped a
+    # non-manifold bridge: the rim quads traversed the boundary edge the SAME way as the outer wall, so a directed
+    # edge appeared twice. The bridge must traverse it the OTHER way. Pin closed+manifold+zero-boundary so it stays.)
+    sheet = grid(4, 4)
+    slab = solidify(sheet, thickness=0.2)
+    assert slab.is_closed() and slab.is_manifold(), "a solidified open sheet must be a closed manifold slab"
+    assert slab.euler_characteristic() == 2, "a thickened disk is a topological sphere (chi 2)"
+    from collections import defaultdict as _dd
+    _ec = _dd(int)
+    for _f in slab.faces:
+        for _k in range(len(_f)):
+            _ec[tuple(sorted((_f[_k], _f[(_k + 1) % len(_f)])))] += 1
+    assert not any(_n == 1 for _n in _ec.values()), "no boundary edges -- the slab is watertight"
+    assert abs(np.ptp(slab.vertices, axis=0)[2] - 0.2) < 1e-9, "the thickness is applied along the surface normal"
+
     print(f"meshtools selftest ok: weld {dup.n_vertices}->{w.n_vertices} verts; "
-          f"mirror is symmetric and welds the seam ({g.n_vertices*2} naive -> {m.n_vertices})")
-
-
-if __name__ == "__main__":
-    _selftest()
+          f"mirror is symmetric and welds the seam ({g.n_vertices*2} naive -> {m.n_vertices}); "
+          f"symmetrize turns an asymmetric grid into a bilaterally-symmetric mesh ({sym.n_faces} faces); "
+          f"solidify thickens an open sheet into a closed manifold slab ({slab.n_faces} faces, chi 2, watertight)")
 
 
 def _boundary_edges(faces):
@@ -123,6 +186,13 @@ def solidify(mesh, thickness, flip=False):
     inner = [tuple(reversed([vi + off for vi in f])) for f in faces]   # reversed winding for the back wall
     bridge = []
     for a, b in _boundary_edges(faces):                      # close the open rim with two triangles per edge
-        bridge.append((a, b, b + off))
-        bridge.append((a, b + off, a + off))
+        # _boundary_edges returns (a,b) in the direction the OUTER wall traverses it, so the bridge must traverse it
+        # the OTHER way (b->a) or the directed edge (a,b) would appear twice -> non-manifold. Winding: b, a, a+off,
+        # b+off makes a quad whose outer edge is (b,a), matching the reversed inner wall and closing the shell.
+        bridge.append((b, a, a + off))
+        bridge.append((b, a + off, b + off))
     return Mesh(Vall, faces + inner + bridge)
+
+
+if __name__ == "__main__":
+    _selftest()

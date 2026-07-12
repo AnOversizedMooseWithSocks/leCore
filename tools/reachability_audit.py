@@ -130,7 +130,26 @@ def audit(root):
           % len(import_only))
     for m in sorted(import_only):
         print("      %s" % m)
-    return {"no_doc": no_doc, "import_only": import_only, "kept_neg": kept_neg, "no_public": no_public}
+    # -- C7 canary: file-size census against the agent-facing read cap ------------------------------------
+    # codeedit's capped read (1 MB) exists to protect context windows; internal callers read uncapped. This
+    # census is a NON-GATING warning at 80% of the cap so the next crossing is seen approaching instead of
+    # discovered when a tool refuses -- which is exactly how holographic_unified.py's crossing was discovered.
+    cap = 1_000_000
+    watch = []
+    for dirpath, _dirs, files in os.walk(os.path.join(root, "holographic")):
+        for fn in files:
+            if fn.endswith(".py"):
+                sz = os.path.getsize(os.path.join(dirpath, fn))
+                if sz >= int(cap * 0.8):
+                    watch.append((sz, fn))
+    print()
+    print("  SIZE CANARY (>= 80%% of the 1 MB agent-read cap; non-gating heads-up): %d" % len(watch))
+    for sz, fn in sorted(watch, reverse=True):
+        over = " -- OVER the cap: agent read() refuses; python_check/read_lines still work (uncapped)" \
+               if sz > cap else ""
+        print("      %s  %d bytes (%.0f%%)%s" % (fn, sz, 100.0 * sz / cap, over))
+    return {"no_doc": no_doc, "import_only": import_only, "kept_neg": kept_neg, "no_public": no_public,
+            "size_watch": watch}
 
 
 if __name__ == "__main__":

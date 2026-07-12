@@ -564,6 +564,28 @@ def png_bytes(rgb01, level=6, filters=True):
     return sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", idat) + chunk(b"IEND", b"")
 
 
+def save_image(path, rgb01, level=6, filters=True):
+    """Save an (H,W,3) [0,1] image, routed by extension: .png uses the stdlib encoder (deterministic,
+    zero-dependency, always available); anything else (.jpg, .webp, .bmp, ...) uses Pillow when installed and
+    otherwise refuses with the install command -- the same opt-in contract as every accelerator
+    (`pip install pillow`, or the `images` extra). PNG stays stdlib ON PURPOSE: the deterministic path must
+    never grow a dependency, and lossy formats are a presentation choice, not an engine output."""
+    import os
+
+    import numpy as np
+    ext = os.path.splitext(str(path))[1].lower()
+    if ext in ("", ".png"):
+        return save_png(path, rgb01, level=level, filters=filters)
+    try:
+        from PIL import Image
+    except ImportError:
+        raise RuntimeError("saving %r needs Pillow (opt-in, like the other accelerators): "
+                           "pip install pillow   (or the `images` extra). PNG needs nothing." % ext)
+    arr = np.clip(np.asarray(rgb01, float) * 255.0 + 0.5, 0, 255).astype(np.uint8)
+    Image.fromarray(arr).save(str(path))
+    return str(path)
+
+
 def save_png(path, rgb01, level=6, filters=True):
     """Write an (H,W,3) image in [0,1] to a PNG file. Thin wrapper over `png_bytes` -- see it for the encoder
     details, the `level` argument (1 = fast preview, 6 = still, the default) and `filters`."""
@@ -618,6 +640,19 @@ def _selftest():
     assert alpha.max() > 0.5 and alpha.min() < 0.05           # dense centre, empty corners
     fire, _ = volume_render(blob, cam, (np.array([-1., -1, -1]), np.array([1., 1, 1])), 64, 64, steps=48, mode="fire")
     assert fire[..., 0].max() > fire[..., 2].max()            # fire is redder than it is blue
+    # save_image routing trap: PNG must ALWAYS work (stdlib); a lossy extension either saves (Pillow present)
+    # or refuses with the install command in the message -- never a bare ImportError, never a silent no-op.
+    import tempfile as _tf
+    with _tf.TemporaryDirectory() as _td:
+        _img = np.zeros((4, 4, 3)); _img[1:3, 1:3] = 0.7
+        save_image(_td + "/t.png", _img)
+        assert open(_td + "/t.png", "rb").read(4) == b"\x89PNG"
+        try:
+            _out = save_image(_td + "/t.jpg", _img)
+            assert str(_out).endswith(".jpg")
+        except RuntimeError as _e:
+            assert "pip install pillow" in str(_e), "the refusal must name the install command"
+
     print(f"render selftest ok: rasterised {M.n_faces} faces in {rt*1000:.0f} ms @128x128; "
           f"volume alpha max {alpha.max():.2f}; fire glows red")
 

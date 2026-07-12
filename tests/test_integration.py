@@ -13068,3 +13068,675 @@ def test_mesh_triangulate_earclip():
     assert abs(sum(a2(Lpts[i], Lpts[j], Lpts[k]) for i, j, k in tris) - poly) < 1e-9
 
     assert any("mesh_triangulate" in str(c.name) for c in mind.find_capability("ear clip a polygon")[:3])
+
+def test_mesh_symmetrize():
+    """mesh_symmetrize (backlog item 3 after the fork): keep one half, mirror it back, weld -> a bilaterally
+    symmetric mesh. Composes the existing mirror + weld primitives. Wired + discoverable + io-tagged."""
+    import lecore
+    import numpy as np
+    from holographic.mesh_and_geometry.holographic_mesh import grid, Mesh
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # an asymmetric grid (the +x half bumped up in z) becomes provably symmetric across x=0.
+    g = grid(6, 6)
+    V = g.vertices.copy()
+    V[V[:, 0] > 0.0, 2] += 0.5
+    asym = Mesh(V, [tuple(f) for f in g.faces])
+    sym = mind.mesh_symmetrize(asym, axis=0, plane=0.0, side=1)
+
+    Vs = sym.vertices
+    mir = Vs.copy(); mir[:, 0] = -mir[:, 0]                   # every mirrored vertex must match an original one
+    assert all(np.linalg.norm(Vs - mv, axis=1).min() < 1e-4 for mv in mir), "result must be symmetric across x=0"
+    assert sym.n_faces == asym.n_faces                       # keep half + mirror restores the face count
+
+    assert any("mesh_symmetrize" in str(c.name) for c in mind.find_capability("make a sculpt symmetric")[:3])
+
+def test_mesh_solidify_watertight():
+    """solidify_mesh (backlog item 4): thicken an open sheet into a CLOSED, MANIFOLD watertight slab. Regression
+    trap for the non-manifold-bridge bug (the rim quads traversed the boundary edge the wrong way). Wired +
+    discoverable + io-tagged."""
+    import lecore
+    import numpy as np
+    from holographic.mesh_and_geometry.holographic_mesh import grid
+    from collections import defaultdict
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    slab = mind.solidify_mesh(grid(4, 4), 0.2)
+    assert slab.is_closed() and slab.is_manifold(), "a solidified sheet must be a closed manifold slab"
+    assert slab.euler_characteristic() == 2                    # a thickened disk is a topological sphere
+    ec = defaultdict(int)
+    for f in slab.faces:
+        for k in range(len(f)):
+            ec[tuple(sorted((f[k], f[(k + 1) % len(f)])))] += 1
+    assert not any(n == 1 for n in ec.values()), "no boundary edges -- watertight"
+    assert abs(np.ptp(slab.vertices, axis=0)[2] - 0.2) < 1e-9   # thickness applied along the normal
+
+    assert any("solidify" in str(c.name).lower() for c in mind.find_capability("make a hollow shell")[:3])
+
+def test_mesh_bevel_multisegment():
+    """mesh_bevel_vertex segments (backlog item 5): segments=1 is byte-identical to the old flat bevel (backward-
+    compatible); segments>=2 rounds the corner into a spherical dome. Stays closed + manifold; discoverable."""
+    import lecore
+    import numpy as np
+    from holographic.mesh_and_geometry.holographic_mesh import box
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    cube = box(2.0, 2.0, 2.0)
+
+    # backward-compatible default: segments=1 unchanged (7 faces: 3 pentagons + 3 reshaped + 1 cap)
+    b1 = mind.mesh_bevel_vertex(cube, 0, ratio=0.3)
+    assert b1.is_manifold() and b1.is_closed() and b1.euler_characteristic() == 2
+    b1s = mind.mesh_bevel_vertex(cube, 0, ratio=0.3, segments=1)
+    assert b1s.faces == b1.faces                                # explicit segments=1 == default
+
+    # multi-segment rounds: more faces, still a closed manifold, dome verts on a sphere about the corner
+    for seg in (2, 3, 4):
+        bm = mind.mesh_bevel_vertex(cube, 0, ratio=0.3, segments=seg)
+        assert bm.is_manifold() and bm.is_closed() and bm.euler_characteristic() == 2
+        assert bm.n_faces > b1.n_faces
+    b3 = mind.mesh_bevel_vertex(cube, 0, ratio=0.3, segments=3)
+    dome = b3.vertices[cube.n_vertices:]
+    dd = np.linalg.norm(dome - cube.vertices[0], axis=1)
+    assert np.allclose(dd, dd[0], atol=1e-9)                    # rounded: on a sphere about the corner
+
+    assert any("bevel" in str(c.name).lower() for c in mind.find_capability("multi-segment bevel")[:3])
+
+def test_mesh_fill_holes():
+    """mesh_fill_holes (backlog item 6): close open boundary loops with faces. Fan (always works) + grid (coarser
+    quads on even loops). Regression trap for the fill-winding bug (fill faces must traverse the rim edge opposite
+    to the existing face). Wired + discoverable + io-tagged."""
+    import lecore
+    from holographic.mesh_and_geometry.holographic_mesh import box, Mesh
+    from collections import defaultdict
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    box_hole = Mesh(box(2.0, 2.0, 2.0).vertices, [tuple(f) for f in box(2.0, 2.0, 2.0).faces][1:])
+    for mode in ("fan", "grid"):
+        filled = mind.mesh_fill_holes(box_hole, mode=mode)
+        assert filled.is_closed() and filled.is_manifold()
+        assert filled.euler_characteristic() == 2
+        ec = defaultdict(int)
+        for f in filled.faces:
+            for k in range(len(f)):
+                ec[tuple(sorted((f[k], f[(k + 1) % len(f)])))] += 1
+        assert not any(n == 1 for n in ec.values())            # watertight
+
+    # an already-closed mesh is unchanged
+    assert mind.mesh_fill_holes(box(2.0, 2.0, 2.0)).n_faces == box(2.0, 2.0, 2.0).n_faces
+    assert any("fill_holes" in str(c.name) for c in mind.find_capability("patch a hole with quads")[:3])
+
+def test_mesh_fill_holes():
+    """mesh_fill_holes (backlog item 6): close open boundary loops. Fan (robust) + grid (quad) both make a box-minus-
+    face watertight; max_sides (Blender Sides) fills small holes but skips a big outer border. Regression trap for the
+    fill-winding bug (fill faces must traverse the rim edge opposite to the existing face)."""
+    import lecore
+    from holographic.mesh_and_geometry.holographic_mesh import box, grid, Mesh
+    from collections import defaultdict
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    def open_edges(mesh):
+        c = defaultdict(int)
+        for f in mesh.faces:
+            for k in range(len(f)):
+                c[tuple(sorted((f[k], f[(k + 1) % len(f)])))] += 1
+        return sum(1 for n in c.values() if n == 1)
+
+    b = box(2.0, 2.0, 2.0)
+    holed = Mesh(b.vertices, [tuple(f) for f in b.faces][1:])   # one square hole (4-loop)
+    for mode in ("fan", "grid"):
+        f = mind.mesh_fill_holes(holed, mode=mode)
+        assert f.is_closed() and f.is_manifold() and f.euler_characteristic() == 2
+        assert open_edges(f) == 0                                # watertight
+
+    # max_sides: on an open sheet, fill the 4-edge hole but leave the 16-edge outer rim open
+    g = grid(4, 4)
+    gf = [tuple(ff) for ff in g.faces]
+    sheet = Mesh(g.vertices, [ff for i, ff in enumerate(gf) if i != 5])
+    assert open_edges(mind.mesh_fill_holes(sheet, mode="fan", max_sides=8)) == 16
+
+    # a closed mesh is unchanged
+    assert mind.mesh_fill_holes(b).n_faces == b.n_faces
+    assert any("fill_holes" in str(c.name) for c in mind.find_capability("patch a hole with quads")[:3])
+
+def test_mesh_pack_uv_islands():
+    """mesh_pack_uv (backlog item 7): unwrap each connected component separately and pack the islands into non-
+    overlapping cells of the unit UV square -- the smart-UV/pack step lscm and uv_unwrap skip. Wired + discoverable."""
+    import lecore
+    import numpy as np
+    from holographic.mesh_and_geometry.holographic_mesh import grid, Mesh
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # two separate patches (a 2-component mesh) -> LSCM alone overlaps them; packing must not.
+    g = grid(3, 3)
+    V2 = g.vertices.copy(); V2[:, 0] += 10.0
+    f1 = [tuple(f) for f in g.faces]; off = len(g.vertices)
+    f2 = [tuple(i + off for i in f) for f in f1]
+    two = mind.mesh_triangulate(Mesh(np.vstack([g.vertices, V2]), f1 + f2))
+
+    uv = np.asarray(mind.mesh_pack_uv(two))
+    assert uv.shape == (two.n_vertices, 2)
+    assert uv.min() >= -1e-9 and uv.max() <= 1 + 1e-9            # inside the unit square
+
+    a, b = uv[:off], uv[off:]                                   # the two islands' bboxes must be disjoint
+    ax0, ax1, ay0, ay1 = a[:, 0].min(), a[:, 0].max(), a[:, 1].min(), a[:, 1].max()
+    bx0, bx1, by0, by1 = b[:, 0].min(), b[:, 0].max(), b[:, 1].min(), b[:, 1].max()
+    assert (ax1 <= bx0 + 1e-9) or (bx1 <= ax0 + 1e-9) or (ay1 <= by0 + 1e-9) or (by1 <= ay0 + 1e-9)
+
+    assert np.array_equal(mind.mesh_pack_uv(two), mind.mesh_pack_uv(two))   # deterministic
+    assert any("pack_uv" in str(c.name) for c in mind.find_capability("smart uv project")[:3])
+
+def test_mesh_rip_and_split_vertices():
+    """mesh_rip_vertex / mesh_split_vertices (backlog item 8): the inverse of weld. Rip gives each incident face its
+    own copy of a vertex; split makes a polygon soup; weld(split(m)) recovers the welded mesh. Wired + discoverable."""
+    import lecore
+    import numpy as np
+    from holographic.mesh_and_geometry.holographic_mesh import box, Mesh
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    cube = box(2.0, 2.0, 2.0)
+
+    # rip vertex 0 (shared by 3 cube faces) -> +2 copies at the same position; geometry unchanged.
+    n_inc = sum(1 for f in cube.faces if 0 in f)
+    r = mind.mesh_rip_vertex(cube, 0)
+    assert r.n_vertices == cube.n_vertices + (n_inc - 1)
+    assert np.allclose(r.vertices[cube.n_vertices:], cube.vertices[0])
+
+    # split all -> one vertex per face-corner (polygon soup)
+    s = mind.mesh_split_vertices(cube)
+    assert s.n_vertices == sum(len(f) for f in cube.faces)
+
+    # the inverse property: weld(split(m)) == m on vertex count
+    tri = Mesh(cube.vertices.copy(), [tuple(t) for t in cube.triangulate()])
+    welded = mind.weld_mesh(mind.mesh_split_vertices(tri), tol=1e-4)
+    assert welded.n_vertices == tri.n_vertices
+
+    assert any("rip_vertex" in str(c.name) for c in mind.find_capability("tear a mesh at a vertex")[:3])
+    assert any("split_vertices" in str(c.name) for c in mind.find_capability("make a polygon soup")[:3])
+
+def test_mesh_auto_seam():
+    """mesh_auto_seam (completes item 7): auto-select seam edges by crease (dihedral) -- the piece that turns
+    mesh_cut_seam (cuts a GIVEN seam) into a full auto-unwrap. Marks a cube's sharp edges; empty on a smooth sphere."""
+    import lecore
+    from holographic.mesh_and_geometry.holographic_mesh import box, Mesh
+    from holographic.mesh_and_geometry.holographic_meshsmooth import _icosphere
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    cube = Mesh(box(2.0, 2.0, 2.0).vertices.copy(), [tuple(t) for t in box(2.0, 2.0, 2.0).triangulate()])
+    seams = mind.mesh_auto_seam(cube, threshold_deg=40.0)
+    assert len(seams) >= 12                                     # the cube's 12 sharp edges
+    assert all(len(e) == 2 and e[0] < e[1] for e in seams)     # sorted (lo,hi) edges
+    assert mind.mesh_auto_seam(cube) == mind.mesh_auto_seam(cube)   # deterministic
+
+    # kept negative: a smooth sphere has no creases -> honest empty set (not an invented cut)
+    assert mind.mesh_auto_seam(_icosphere(2), threshold_deg=40.0) == []
+
+    assert any("auto_seam" in str(c.name) for c in mind.find_capability("where to place uv seams")[:3])
+
+def test_fold_fractal_kifs():
+    """fold_fractal (the GLSL-demoscene / KIFS keystone): a Mandelbox distance-estimator SDF that reuses the existing
+    raymarch/orbit-trap renderer. Usable DE (bounded Lipschitz), real structure, renders through orbit_trap_render."""
+    import lecore
+    import numpy as np
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    ff = mind.fold_fractal(iterations=10, scale=2.0, min_radius=0.5, fold_limit=1.0)
+
+    # usable distance estimate: never changes faster than the query point moves (raymarchable)
+    rng = np.random.default_rng(0)
+    A = rng.uniform(-4, 4, (2000, 3)); B = A + rng.normal(0, 0.005, (2000, 3))
+    ratio = np.abs(ff.eval(A) - ff.eval(B)) / np.maximum(np.linalg.norm(A - B, axis=1), 1e-9)
+    assert np.percentile(ratio, 99) < 3.0
+
+    # real spatial structure (not a constant field)
+    X, Z = np.meshgrid(np.linspace(-3, 3, 50), np.linspace(-3, 3, 50))
+    dg = ff.eval(np.column_stack([X.ravel(), np.zeros(X.size), Z.ravel()]))
+    assert dg.std() > 1e-3
+
+    # the payoff: it renders through the EXISTING orbit-trap raymarcher (pipeline reuse)
+    cam = mind.camera(eye=[3, 2, 3], target=[0, 0, 0])
+    img = np.asarray(mind.orbit_trap_render(ff, cam, width=48, height=48, max_steps=100))
+    assert img.shape == (48, 48, 3) and img.std() > 1e-3
+
+    assert np.array_equal(ff.eval(dg[:0].reshape(0, 3)), ff.eval(dg[:0].reshape(0, 3)))  # empty-safe + deterministic
+    assert any("fold_fractal" in str(c.name) for c in mind.find_capability("mandelbox fractal")[:3])
+
+def test_mandelbulb_and_escape_time():
+    """mandelbulb + escape_time (fractal zoo step 1): the escape-time family. Mandelbulb is a 3D DE SDF (analytic
+    0.5 log(r) r/dr) that renders through the existing raymarcher; escape_time is the 2D Mandelbrot/Julia field."""
+    import lecore
+    import numpy as np
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    mb = mind.mandelbulb(power=8.0, iterations=8)
+    assert mb.eval([[0.0, 0.0, 0.0]])[0] <= 0.01           # origin inside the bulb
+    assert mb.eval([[3.0, 3.0, 3.0]])[0] > 2.0             # far outside
+    X, Z = np.meshgrid(np.linspace(-1.3, 1.3, 40), np.linspace(-1.3, 1.3, 40))
+    d = mb.eval(np.column_stack([X.ravel(), np.zeros(X.size), Z.ravel()]))
+    assert d.min() < 0 < d.max()                           # real interior/exterior
+    cam = mind.camera(eye=[2, 1.5, 2], target=[0, 0, 0])
+    img = np.asarray(mind.orbit_trap_render(mb, cam, width=40, height=40, max_steps=100))
+    assert img.shape == (40, 40, 3) and img.std() > 1e-3   # renders through the existing pipeline
+
+    mset = mind.escape_time(width=80, height=80, center=(-0.5, 0.0), span=3.0, max_iter=60)
+    assert 0.05 < np.mean(mset >= 59.9) < 0.8              # Mandelbrot has interior + exterior
+    jset = mind.escape_time(width=60, height=60, max_iter=60, julia_c=(-0.8, 0.156))
+    assert jset.std() > 1.0                                # Julia has structure
+    assert np.array_equal(mind.escape_time(width=40, height=40), mind.escape_time(width=40, height=40))
+
+    assert any("mandelbulb" in str(c.name) for c in mind.find_capability("3d mandelbrot fractal")[:3])
+    assert any("escape_time" in str(c.name) for c in mind.find_capability("julia set")[:3])
+
+def test_milkdrop_preset_reader():
+    """milk_parse + milk_eval (Milkdrop step 2): a SAFE ns-eel2 evaluator + .milk preset reader. Parses the equation
+    families, runs per-frame equations deterministically driven by audio, and never uses Python eval."""
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # safe expression evaluator: math, functions, variables; rejects code injection
+    assert abs(mind.milk_eval("2 + 3 * 4") - 14.0) < 1e-12
+    assert abs(mind.milk_eval("sqrt(sqr(3) + sqr(4)) + bass", {"bass": 1.0}) - 6.0) < 1e-12
+    for evil in ("__import__(1)", "x @ y", "open(1)"):
+        try:
+            mind.milk_eval(evil)
+            assert False, "must reject %r" % evil
+        except ValueError:
+            pass
+
+    # a synthetic preset (written here, not copied): q1 counts frames, zoom reacts to bass
+    text = ("[preset00]\nzoom=1.0\nper_frame_init_1=q1 = 0\n"
+            "per_frame_1=q1 = q1 + 1\nper_frame_2=zoom = 1.0 + 0.05 * bass\n"
+            "per_pixel_1=rot = rot + 0.01\nwarp_1=`stored not run`\n")
+    p = mind.milk_parse(text)
+    assert len(p.frame) == 2 and len(p.init) == 1 and len(p.pixel) == 1
+    assert "stored not run" in p.warp_shader
+    s = p.initial_state()
+    assert s["q1"] == 0.0
+    p.run_frame(s, audio={"bass": 1.0}, frame=0)
+    assert s["q1"] == 1.0
+    z1 = s["zoom"]
+    p.run_frame(s, audio={"bass": 4.0}, frame=1)
+    assert s["q1"] == 2.0 and s["zoom"] > z1                # frame count + bass-driven zoom
+
+    assert any("milk_parse" in str(c.name) for c in mind.find_capability("read a .milk file")[:3])
+
+def test_fold_fit_inference():
+    """fold_fit (pattern-recognition step 3): the INVERSE of fold_fractal -- recover a fold recipe from a point cloud
+    via mind.optimize. The recovered fit must beat its baseline; the improvement RATIO is the discriminative signal."""
+    import lecore
+    from holographic.mesh_and_geometry.holographic_foldfit import surface_points
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    true_recipe = (2.1, 0.5, 1.0)
+    target = surface_points(true_recipe, n=250, iterations=10, seed=0)
+    assert len(target) > 100
+
+    res = mind.fold_fit(target, iterations=10, coarse=6, refine_steps=30)
+    assert res["improved"]                                  # beat the default-guess baseline
+    assert res["loss"] < 0.01                               # surface passes near the target
+    assert abs(res["recipe"][0] - true_recipe[0]) < 0.5     # scale (the sensitive param) recovered
+    # deterministic
+    assert mind.fold_fit(target, iterations=10, coarse=6, refine_steps=30)["recipe"] == res["recipe"]
+
+    # kept negative: the improvement RATIO discriminates (a sphere the DE contains improves little over baseline)
+    import numpy as np
+    rng = np.random.default_rng(1)
+    dirs = rng.normal(size=(250, 3)); dirs /= np.linalg.norm(dirs, axis=1, keepdims=True)
+    res_sphere = mind.fold_fit(dirs * 1.3, iterations=10, coarse=6, refine_steps=30)
+    assert res["baseline"] / max(res["loss"], 1e-9) > res_sphere["baseline"] / max(res_sphere["loss"], 1e-9)
+
+    assert any("fold_fit" in str(c.name) for c in mind.find_capability("inverse fractal problem")[:3])
+
+def test_fractal_pipeline_bridges():
+    """The three integration bridges (answering 'can fractals drive geometry/sim/animation?'): sdf_to_mesh (fractal ->
+    Mesh -> softbody), field_displace (per-face fractal modifier masked by a texture), transport (play/pause/scrub)."""
+    import lecore
+    import numpy as np
+    from holographic.mesh_and_geometry.holographic_mesh import grid
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # 1. FRACTAL -> STATIC MESH -> SIMULATION: mesh a mandelbulb (all-neg-crossing at level 0) and a fold_fractal
+    #    (all-positive DE -> auto iso offset), then hand both to the physics layer.
+    for sdf in (mind.mandelbulb(iterations=6), mind.fold_fractal(iterations=6, scale=2.0), mind.menger_fractal(3)):
+        mesh = mind.sdf_to_mesh(sdf, resolution=28)
+        assert mesh.n_faces > 100                              # a real mesh, not the silent-0-faces trap
+        sb = mind.mesh_to_softbody(mesh)                       # the whole physics layer now applies
+        assert sb is not None
+
+    # 2. PER-FACE FRACTAL MODIFIER FROM A TEXTURE: displace a plane by a mandelbulb, masked by a stripe texture --
+    #    the detail grows ONLY where the mask paints.
+    plane = grid(nx=40, ny=40, width=3.0, height=3.0)
+    tex_mask = (np.sin(plane.vertices[:, 0] * 3.0) > 0).astype(float)
+    disp = mind.field_displace(plane, mind.mandelbulb(iterations=6), amount=0.3, weight=tex_mask, bias=0.2)
+    moved = np.linalg.norm(disp.vertices - plane.vertices, axis=1)
+    painted = tex_mask > 0.5
+    assert moved[painted].max() > 1e-4                         # detail where the texture paints
+    assert moved[~painted].max() < 1e-9                        # untouched where it does not (per-face gating)
+
+    # 3. ANIMATION TRANSPORT: an animated fractal recipe, scrubbable. play/pause/step/seek/rewind/fast-forward.
+    def frame(f):
+        return np.array([[1.6 + 0.1 * f, 0.0, 0.0]])          # a param ramp (e.g. animating the fold scale)
+    tr = mind.transport(frame, n_frames=12, fps=24.0)
+    assert np.allclose(tr.seek(5), [[2.1, 0.0, 0.0]])         # scrub to frame 5
+    tr.stop(); tr.play(1.0); tr.tick(); tr.tick(); assert tr.frame == 2      # play forward
+    tr.pause(); held = tr.frame; tr.tick(); assert tr.frame == held         # pause holds
+    tr.seek(8); tr.play(-1.0); tr.tick(); assert tr.frame == 7              # rewind
+    tr.seek(0); tr.play(3.0); tr.tick(); assert tr.frame == 3              # fast-forward 3x
+    assert np.array_equal(tr.seek(4), tr.seek(4))                          # deterministic scrub
+
+    for nm, q in [("sdf_to_mesh", "mesh a fractal"), ("field_displace", "per face modifier from a texture"),
+                  ("transport", "scrub the timeline")]:
+        assert any(nm in str(c.name) for c in mind.find_capability(q)[:3])
+
+def test_fit_shape_to_shadertoy():
+    """fit_shape + to_shadertoy (the capstone): a target -> closest procedural formula -> runnable code. A 3-D fractal
+    point cloud fits to a fold recipe and emits a complete Shadertoy; the fractal SDFs now emit shaders too."""
+    import lecore
+    import numpy as np
+    from holographic.mesh_and_geometry.holographic_foldfit import surface_points
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # 3-D: point cloud -> fractal recipe -> complete Shadertoy raymarch shader
+    cloud = surface_points((2.1, 0.5, 1.0), n=250, iterations=10, seed=0)
+    res = mind.fit_shape(cloud)
+    assert res["kind"] == "pointcloud->fractal_sdf"
+    assert res["quality"] > 3.0                                # a real fractal fit
+    assert "mainImage" in res["shadertoy"] and "for(int" in res["shadertoy"]
+
+    # to_shadertoy: the fractal SDFs now emit complete, runnable shaders (previously refused as INEXACT)
+    for sdf in (mind.mandelbulb(iterations=6), mind.fold_fractal(iterations=8, scale=2.0), mind.menger_fractal(3)):
+        sh = mind.to_shadertoy(sdf)
+        assert "mainImage" in sh and "iResolution" in sh and "for(int" in sh
+
+    # 2-D: a texture routes to the fbm family fit and emits a GLSL snippet (fast, small res)
+    pn = mind.procedural_noise(n_dims=2, octaves=5, lacunarity=2.0, gain=0.5, base_bandwidth=3.0, seed=7)
+    tex = np.asarray(pn.sample_grid_fast(16))
+    from holographic.mesh_and_geometry.holographic_fitshape import fit_texture
+    tres = fit_texture(tex, mind=mind, res=12)
+    assert "fbm(" in tres["glsl"] and 0.0 <= tres["quality"] <= 1.0
+    assert "NOT parameter recovery" in tres["note"]            # the kept negative is loud
+
+    assert any("fit_shape" in str(c.name) for c in mind.find_capability("find the closest formula for a shape")[:3])
+    assert any("to_shadertoy" in str(c.name) for c in mind.find_capability("get the shadertoy code")[:3])
+
+def test_ifs_fern_fit():
+    """ifs_generate + ifs_fit (the honest fern/tree fitter): generate a Barnsley fern from affine maps, and match a
+    2-D point cloud to the closest NAMED IFS system. fit_shape routes a 2-D cloud here."""
+    import lecore
+    import numpy as np
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    fern = mind.ifs_generate("barnsley_fern", n=8000)
+    assert fern.shape == (8000, 2)
+    assert -3.0 < fern[:, 0].min() < 0.0 and 9.0 < fern[:, 1].max() < 11.0   # classic fern footprint
+    assert np.array_equal(mind.ifs_generate("barnsley_fern", n=1000),
+                          mind.ifs_generate("barnsley_fern", n=1000))          # deterministic
+
+    res = mind.ifs_fit(fern)
+    assert res["name"] == "barnsley_fern"
+    assert res["quality"] > res["baseline"]                                    # a real snap, beats library mean
+    # distinguishes families: a sierpinski cloud snaps to sierpinski, not a fern
+    tri = mind.ifs_generate("sierpinski", n=6000)
+    assert mind.ifs_fit(tri)["name"] == "sierpinski"
+
+    # fit_shape dispatches a 2-D cloud to the IFS path (a 3-D cloud still goes to the fractal SDF path)
+    assert mind.fit_shape(fern)["kind"] == "pointcloud2d->affine_ifs"
+
+    # kept negative reported: snap-to-library, not rotation-invariant
+    assert "not rotation-invariant" in res["note"] or "not arbitrary" in res["note"].lower()
+
+    assert any("ifs_fit" in str(c.name) for c in mind.find_capability("fit a fern")[:3])
+    assert any("ifs_generate" in str(c.name) for c in mind.find_capability("generate a fern")[:3])
+
+def test_fit_primitives_sphere_set():
+    """fit_primitives (the hard-surface/creature fitter): approximate a non-fractal shape with a union of spheres that
+    emits a real Shadertoy. fit_shape method='primitives' routes here; the default stays fractal (backward compatible)."""
+    import lecore
+    import numpy as np
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+
+    def ssurf(c, r, n):
+        d = rng.normal(size=(n, 3)); d /= np.linalg.norm(d, axis=1, keepdims=True)
+        return np.asarray(c) + r * d
+
+    # a two-blob peanut fits much better with 2 spheres than 1, and recovers the two blob centres
+    peanut = np.vstack([ssurf([-0.5, 0, 0], 0.6, 300), ssurf([0.5, 0, 0], 0.5, 300)])
+    r = mind.fit_primitives(peanut, k=2)
+    assert r["k"] == 2 and r["quality"] > 2.0
+    cxs = sorted(c[0] for c, _ in r["spheres"])
+    assert cxs[0] < -0.2 and cxs[1] > 0.2
+    assert mind.fit_primitives(peanut, k=2)["spheres"] == r["spheres"]         # deterministic
+
+    # the fitted union SDF is real: it meshes and emits a Shadertoy shader (spheres are exact)
+    assert mind.sdf_to_mesh(r["sdf"], resolution=24).n_faces > 50
+    assert "mainImage" in mind.to_shadertoy(r["sdf"])
+
+    # auto_k adapts: a single blob needs fewer spheres than a 3-part creature
+    creature = np.vstack([ssurf([0, 0, 0], 0.7, 300), ssurf([0.9, 0.3, 0], 0.35, 150), ssurf([-0.9, 0.3, 0], 0.35, 150)])
+    assert mind.fit_primitives(ssurf([0, 0, 0], 0.7, 400), auto_k=True, k_max=8)["k"] <= \
+           mind.fit_primitives(creature, auto_k=True, k_max=8)["k"]
+
+    # fit_shape routing: method='primitives' -> sphere set; default 3-D -> fractal (backward compatible)
+    assert mind.fit_shape(creature, method="primitives")["kind"] == "pointcloud->primitive_sdf"
+    assert mind.fit_shape(creature)["kind"] == "pointcloud->fractal_sdf"
+
+    assert any("fit_primitives" in str(c.name) for c in mind.find_capability("fit a creature with spheres")[:3])
+
+def test_fit_primitives_mixed():
+    """fit_primitives with boxes + capsules: an elongated limb is fit by a box/capsule (not a coarse sphere), a flat
+    slab by a box, and the mixed union still meshes + emits a Shadertoy shader with rotation."""
+    import lecore
+    import numpy as np
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(1)
+
+    # a rounded limb along a tilted axis
+    d = np.array([1.0, 1.0, 0.3]); d /= np.linalg.norm(d)
+    limb = []
+    for _ in range(500):
+        t = rng.uniform(-0.6, 0.6); off = rng.normal(size=3); off -= off.dot(d) * d; off /= np.linalg.norm(off)
+        limb.append(np.array([0.5, 0.2, 0.0]) + t * d + 0.18 * off)
+    limb = np.array(limb)
+
+    fit = mind.fit_primitives(limb, k=1)                        # one elongated primitive
+    assert fit["kinds"].get("capsule", 0) + fit["kinds"].get("box", 0) == 1   # not a sphere
+    sphere_only = mind.fit_primitives(limb, k=1, primitives=("sphere",))
+    assert fit["residual"] < sphere_only["residual"] * 0.6     # elongated primitive beats a sphere on a limb
+
+    # a flat slab is fit by a box (a capsule can't be flat)
+    slab = []
+    for _ in range(500):
+        f = rng.integers(0, 3); s = rng.choice([-1, 1]); p = rng.uniform(-1, 1, 3) * np.array([0.5, 0.5, 0.06])
+        p[f] = s * [0.5, 0.5, 0.06][f]; slab.append(p)
+    assert mind.fit_primitives(np.array(slab), k=1)["kinds"].get("box", 0) == 1
+
+    # the mixed union still meshes and emits a Shadertoy (rotated boxes/capsules emit)
+    assert mind.sdf_to_mesh(fit["sdf"], resolution=24).n_faces > 20
+    sh = mind.to_shadertoy(fit["sdf"])
+    assert "mainImage" in sh
+
+    # back-compat: primitives=('sphere',) reproduces sphere-only
+    assert all(k == "sphere" for k, _ in sphere_only["parts"])
+    assert mind.fit_primitives(limb, k=1)["parts"] == fit["parts"]            # deterministic
+
+def test_humanoid_ik_pose():
+    """humanoid + fit_pose: a biped rig with auto-IK that skins into a Shadertoy-emitting SDF, poses to targets keeping
+    bone lengths, and fits to 3-D and 2-D keypoints (the honest keypoints-in, posed-rig-out path)."""
+    import lecore
+    import numpy as np
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # build + skin: the skin is a real SDF (meshes + emits a Shadertoy shader)
+    h, body = mind.humanoid()
+    assert mind.sdf_to_mesh(body, resolution=32).n_faces > 200
+    assert "mainImage" in mind.to_shadertoy(body)
+
+    # IK posing reaches the target and preserves bone lengths
+    rest = [np.linalg.norm(h.joints["l_elbow"] - h.joints["l_shoulder"]),
+            np.linalg.norm(h.joints["l_wrist"] - h.joints["l_elbow"])]
+    h.pose_to({"l_wrist": (0.3, 1.0, 0.25)}, mind=mind)
+    assert np.linalg.norm(h.joints["l_wrist"] - np.array([0.3, 1.0, 0.25])) < 0.05
+    posed = [np.linalg.norm(h.joints["l_elbow"] - h.joints["l_shoulder"]),
+             np.linalg.norm(h.joints["l_wrist"] - h.joints["l_elbow"])]
+    assert np.allclose(rest, posed, atol=1e-3)                # bone lengths preserved
+
+    # 3-D pose fit: end-effectors reach their keypoints
+    kp = {"pelvis": (0, 0, 0), "l_wrist": (0.4, 0.9, 0.2), "r_wrist": (-0.5, 0.3, 0.1), "r_ankle": (-0.12, -0.7, 0.3)}
+    hp = mind.fit_pose(kp)
+    for tip in ("l_wrist", "r_wrist", "r_ankle"):
+        assert np.linalg.norm(hp.joints[tip] - np.asarray(kp[tip])) < 0.05
+
+    # 2-D pose fit round-trips through a pinhole camera (keypoints, not pixels)
+    class Cam:
+        def __init__(self): self.eye = np.array([0.0, 0.0, 3.0]); self.f = 1.0
+        def project(self, P):
+            P = np.atleast_2d(P); z = self.eye[2] - P[:, 2]
+            return np.column_stack([self.f * P[:, 0] / z, self.f * P[:, 1] / z])
+        def ray(self, uv):
+            return self.eye, np.array([uv[0], uv[1], -1.0])
+    cam = Cam()
+    truth = mind.fit_pose({"l_wrist": (0.3, 0.9, 0.2)})
+    from holographic.mesh_and_geometry.holographic_humanoid import _JOINT_NAMES
+    kp2d = {n: cam.project(truth.joints[n])[0] for n in _JOINT_NAMES}
+    h2, lifted = mind.fit_pose(kp2d, camera=cam)
+    reproj = np.array([cam.project(h2.joints[n])[0] for n in _JOINT_NAMES])
+    truth2d = np.array([kp2d[n] for n in _JOINT_NAMES])
+    assert float(np.mean(np.linalg.norm(reproj - truth2d, axis=1))) < 0.1
+
+    # deterministic + discoverable
+    assert np.allclose(mind.fit_pose(kp).joints_array(), hp.joints_array())
+    assert any("humanoid" in str(c.name) for c in mind.find_capability("make a humanoid")[:3])
+    assert any("fit_pose" in str(c.name) for c in mind.find_capability("fit a pose to keypoints")[:3])
+
+def test_humanoid_body_morphs():
+    """humanoid + body_params character-editor morphs: muscle/fat/length per segment, global weight distributed by
+    region, optional breast geometry -- the morphed body still meshes + emits a Shadertoy, and the base build is
+    unchanged."""
+    import lecore
+    import numpy as np
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    from holographic.mesh_and_geometry.holographic_humanoid import Humanoid, default_body
+
+    # base build is a hard union (byte-identical to the pre-morph skin -- additive)
+    assert mind.humanoid(skin=True)[1].kind == "union"
+
+    def forearm_thickness(body):
+        h = Humanoid(body=body); sdf = h.skin()
+        mid = (h.joints["l_elbow"] + h.joints["l_wrist"]) / 2.0
+        for r in np.linspace(0.02, 0.4, 200):
+            if sdf.eval(np.array([mid + [0, 0, r]]))[0] > 0:
+                return r
+        return 0.4
+    t0 = forearm_thickness(default_body())
+    bm = mind.body_params(); bm["muscle"] = 1.0
+    bf = mind.body_params(); bf["fat"] = 1.0
+    assert forearm_thickness(bm) > t0 and forearm_thickness(bf) > t0     # muscle + fat both thicken
+
+    # length slider lengthens the thigh (knee drops)
+    bl = mind.body_params(); bl["segments"] = {"thigh": {"length": 0.5}}
+    assert Humanoid(body=bl).joints["l_knee"][1] < Humanoid().joints["l_knee"][1] - 0.15
+
+    # optional breast geometry adds chest-front volume and still emits a Shadertoy
+    bb = mind.body_params()
+    bb["breasts"] = {"size": 1.0, "sag": 0.3, "separation": 0.4, "nipple_diameter": 0.03, "nipple_depth": 0.02}
+    h, sdf = mind.humanoid(body=bb)
+    probe = h.joints["chest"] + np.array([0.1, -0.02, 0.12])
+    assert sdf.eval(np.array([probe]))[0] < 0 <= Humanoid().skin().eval(np.array([probe]))[0]
+    assert "mainImage" in mind.to_shadertoy(sdf) and mind.sdf_to_mesh(sdf, resolution=28).n_faces > 200
+
+    # morphs compose with IK posing, and are deterministic
+    b2 = mind.body_params(); b2["muscle"] = 0.5
+    a = mind.humanoid(body=b2, targets={"l_wrist": (0.3, 0.9, 0.2)})[0].joints_array()
+    b = mind.humanoid(body=b2, targets={"l_wrist": (0.3, 0.9, 0.2)})[0].joints_array()
+    assert np.allclose(a, b)
+    assert any("body_params" in str(c.name) for c in mind.find_capability("character editor sliders")[:3])
+
+def test_humanoid_joint_limits():
+    """Anatomical joint limits + muscle/fat range-of-motion coupling: constrained IK prevents hyperextension and a
+    bulky limb can't curl as far as a lean one; solve_ik_limited is callable directly."""
+    import lecore
+    import numpy as np
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    from holographic.mesh_and_geometry.holographic_humanoid import Humanoid, default_body
+
+    def elbow_flex(h):
+        u = h.joints["l_elbow"] - h.joints["l_shoulder"]; v = h.joints["l_wrist"] - h.joints["l_elbow"]
+        u = u / np.linalg.norm(u); v = v / np.linalg.norm(v)
+        return float(np.degrees(np.arccos(np.clip(np.dot(u, v), -1.0, 1.0))))
+
+    # muscle/fat reduce range of motion: a muscular arm curls less than a lean one on a tight target
+    curl = {"l_wrist": (0.25, 0.55, 0.05)}
+    lean = Humanoid(); lean.pose_to(curl, mind=mind)
+    bm = default_body(); bm["muscle"] = 1.0; bm["segments"] = {"upper_arm": {"muscle": 1.0}}
+    musc = Humanoid(body=bm); musc.pose_to(curl, mind=mind)
+    assert elbow_flex(musc) < elbow_flex(lean) - 20.0            # muscle tightens the flex range
+    tgt = np.array([0.25, 0.55, 0.05])
+    assert np.linalg.norm(musc.joints["l_wrist"] - tgt) > np.linalg.norm(lean.joints["l_wrist"] - tgt)
+
+    # constrained IK stays in range and preserves bone lengths
+    assert 0.0 <= elbow_flex(lean) <= 151.0 and 0.0 <= elbow_flex(musc) <= 91.0
+    fresh = Humanoid()
+    assert np.allclose([np.linalg.norm(musc.joints["l_elbow"] - musc.joints["l_shoulder"]),
+                        np.linalg.norm(musc.joints["l_wrist"] - musc.joints["l_elbow"])],
+                       [np.linalg.norm(fresh.joints["l_elbow"] - fresh.joints["l_shoulder"]),
+                        np.linalg.norm(fresh.joints["l_wrist"] - fresh.joints["l_elbow"])], atol=1e-3)
+
+    # in-reach targets are still reached (limits don't over-restrict)
+    hh = Humanoid(); hh.pose_to({"l_wrist": (0.5, 0.55, 0.2)}, mind=mind)
+    assert np.linalg.norm(hh.joints["l_wrist"] - np.array([0.5, 0.55, 0.2])) < 0.08
+
+    # solve_ik_limited direct: from a hyperextended start, constrained flex stays valid; unconstrained can reverse
+    arm = np.array([[0, 0, 0.], [0.4, 0, 0], [0.6, 0, -0.35]])
+    lim = [None, {"type": "hinge", "axis": "auto", "lo": 0.0, "hi": np.radians(150)}]
+    p, err = mind.solve_ik_limited(arm, np.array([0.5, 0, -0.5]), lim)
+    fu = (p[1] - p[0]) / np.linalg.norm(p[1] - p[0]); fv = (p[2] - p[1]) / np.linalg.norm(p[2] - p[1])
+    assert 0.0 <= np.degrees(np.arccos(np.clip(np.dot(fu, fv), -1, 1))) <= 151.0
+
+    assert any("solve_ik_limited" in str(c.name) for c in mind.find_capability("prevent hyperextension")[:3])
+
+def test_creature_builder():
+    """creature + creature_pose: a Spore-style non-humanoid rig -- spine + attachable symmetric limbs, generic organic
+    joint constraints, a skin that meshes + emits Shadertoy, and constrained IK posing."""
+    import lecore
+    import numpy as np
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # a quadruped: spine + 4 legs (2 mirrored pairs) + head; skin meshes + emits a Shadertoy
+    cre, body = mind.creature(mind.quadruped_spec())
+    assert len(cre.chains) == 4
+    assert mind.sdf_to_mesh(body, resolution=32).n_faces > 300
+    assert "mainImage" in mind.to_shadertoy(body)
+
+    # bilateral symmetry: a leg and its mirror are x-symmetric
+    l0, l0m = cre.chains["L0"][-1], cre.chains["L0m"][-1]
+    assert np.allclose(cre.joints[l0][0], -cre.joints[l0m][0], atol=1e-6)
+    assert np.allclose(cre.joints[l0][1:], cre.joints[l0m][1:], atol=1e-6)
+
+    # constrained IK posing keeps bone lengths and joint flex in range (no hyperextension)
+    leg = cre.chains["L0"]
+    rest = [np.linalg.norm(cre.joints[leg[i + 1]] - cre.joints[leg[i]]) for i in range(len(leg) - 1)]
+    cre2, _ = mind.creature_pose(mind.quadruped_spec(), {"L0": tuple(cre.joints[leg[0]] + np.array([0.35, -0.3, 0.2]))})
+    leg2 = cre2.chains["L0"]
+    posed = [np.linalg.norm(cre2.joints[leg2[i + 1]] - cre2.joints[leg2[i]]) for i in range(len(leg2) - 1)]
+    assert np.allclose(rest, posed, atol=1e-4)
+    for i in range(1, len(leg2) - 1):
+        u = cre2.joints[leg2[i]] - cre2.joints[leg2[i - 1]]; v = cre2.joints[leg2[i + 1]] - cre2.joints[leg2[i]]
+        u = u / np.linalg.norm(u); v = v / np.linalg.norm(v)
+        assert 0.0 <= np.degrees(np.arccos(np.clip(np.dot(u, v), -1, 1))) <= 141.0
+
+    # arbitrary body plans: a hexapod (3 mirrored pairs) -> 6 legs; a non-mirrored tentacled thing
+    hexc = mind.creature({"spine": {"length": 1.0, "segments": 3},
+                          "limbs": [{"at": f, "dir": (1.0, -1.0, 0.0), "segments": 2, "length": 0.4, "mirror": True}
+                                    for f in (0.2, 0.5, 0.8)]}, skin=False)
+    assert len(hexc.chains) == 6
+
+    # muscle thickens the creature (morphs reused from the humanoid)
+    from holographic.mesh_and_geometry.holographic_humanoid import default_body
+    bm = default_body(); bm["muscle"] = 1.0
+    mid = (cre.joints["s2"] + cre.joints["s3"]) / 2.0
+    def thick(sdf):
+        for r in np.linspace(0.05, 0.6, 200):
+            if sdf.eval(np.array([mid + [r, 0, 0]]))[0] > 0:
+                return r
+        return 0.6
+    assert thick(mind.creature(mind.quadruped_spec(bm))[1]) > thick(mind.creature(mind.quadruped_spec())[1])
+
+    assert any("creature" in str(c.name) for c in mind.find_capability("build a creature from parts")[:3])

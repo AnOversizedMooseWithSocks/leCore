@@ -268,6 +268,46 @@ def poke_face(mesh, f_index, height=0.0):
     return Mesh(new_verts, out)
 
 
+def rip_vertex(mesh, vertex):
+    """RIP a shared vertex apart: give every face incident to `vertex` its OWN copy of it, at the same position, so
+    the faces are no longer joined there. The inverse of a weld at one vertex -- where merge_by_distance FUSES
+    coincident vertices into one, this SPLITS one vertex back into per-face duplicates. Topology only: V rises by
+    (incident_faces - 1), positions are unchanged (the copies sit exactly on the original), so the mesh looks
+    identical but is torn at that vertex (its 1-ring is cut). Returns a new `Mesh`. Ripping a manifold interior
+    vertex OPENS the surface there (adds boundary); ripping is what a modeler does before pulling the pieces apart.
+
+    A no-op (returns an equal mesh) for a vertex used by 0 or 1 faces -- there is nothing to separate."""
+    faces = [tuple(f) for f in mesh.faces]
+    verts = [v for v in mesh.vertices]
+    incident = [fi for fi, f in enumerate(faces) if vertex in f]
+    if len(incident) <= 1:
+        return Mesh(np.asarray(verts, float), faces)          # nothing shared -> unchanged
+    out = list(faces)
+    # keep the ORIGINAL vertex for the first incident face; every OTHER incident face gets a fresh copy.
+    for fi in incident[1:]:
+        dup = len(verts)
+        verts.append(np.array(mesh.vertices[vertex], float))  # a copy at the identical position (a pure topo rip)
+        out[fi] = tuple(dup if v == vertex else v for v in faces[fi])
+    return Mesh(np.asarray(verts, float), out)
+
+
+def split_vertices(mesh):
+    """SPLIT every vertex per-face: give each face its own private copies of all its corners, so no two faces share a
+    vertex -- the full inverse of a weld (merge_by_distance). The result is a 'polygon soup': same geometry, but every
+    face is topologically independent (flat/faceted shading, no shared normals; the state right after loading an
+    unindexed triangle list). V becomes sum(len(f) for f in faces). Positions unchanged, so it looks identical until
+    something moves a face. Returns a new `Mesh`. merge_by_distance(split_vertices(m)) recovers the welded mesh."""
+    verts = []
+    out = []
+    for f in mesh.faces:
+        nf = []
+        for v in f:
+            nf.append(len(verts))
+            verts.append(np.array(mesh.vertices[v], float))   # a private copy per face-corner
+        out.append(tuple(nf))
+    return Mesh(np.asarray(verts, float), out)
+
+
 # =====================================================================================================
 # Self-test -- asserts the invariants and the make/kill round-trips; prints a one-line summary.
 # =====================================================================================================
@@ -362,10 +402,25 @@ def _selftest():
     # determinism: pure function of (mesh, face, height)
     assert poke_face(quad_box, 0, 0.3).faces == poke_face(quad_box, 0, 0.3).faces, "poke_face must be deterministic"
 
+    # --- RIP / SPLIT vertices: the inverse of a weld. Positions unchanged, topology torn. ---
+    from holographic.mesh_and_geometry.holographic_meshtools import merge_by_distance
+    n_inc = sum(1 for f in quad_box.faces if 0 in f)            # vertex 0 is shared by 3 faces of a cube
+    rp = rip_vertex(quad_box, 0)
+    assert rp.n_vertices == quad_box.n_vertices + (n_inc - 1), "rip adds (incident_faces - 1) copies"
+    assert np.allclose(rp.vertices[quad_box.n_vertices:], quad_box.vertices[0]), "ripped copies sit on the original"
+    assert rip_vertex(quad_box, 0).faces == rip_vertex(quad_box, 0).faces, "rip_vertex must be deterministic"
+    # split_vertices -> polygon soup: one vertex per face-corner; and weld(split(m)) recovers the welded mesh.
+    sv = split_vertices(quad_box)
+    assert sv.n_vertices == sum(len(f) for f in quad_box.faces), "split gives each corner its own vertex"
+    tri = Mesh(quad_box.vertices.copy(), [tuple(t) for t in quad_box.triangulate()])
+    welded = merge_by_distance(split_vertices(tri), tol=1e-4)
+    assert welded.n_vertices == tri.n_vertices, "weld o split = identity on vertices (split IS the inverse of weld)"
+
     print("holographic_eulerops selftest: ok (flip chi/V/E/F-invariant + flip-back restores; "
           "split_edge/collapse_edge exact make-kill round-trip; collapse link-condition refuses the "
           "bipyramid equator; split_face n-gon E+1/F+1 chi=2; poke_face fans an n-gon to n triangles "
-          "V+1/F+(n-1) chi=2 with an outward-normal height; all operators deterministic)")
+          "V+1/F+(n-1) chi=2 with an outward-normal height; rip_vertex adds per-face copies and split_vertices is "
+          "the inverse of weld (weld o split = identity); all operators deterministic)")
 
 
 if __name__ == "__main__":

@@ -29964,3 +29964,1001 @@ LESSON: run the FULL suite (or at least the pins: routing_pins, servicedoc, and 
 done -- targeted -k sweeps skip the cross-cutting pins that guard the routing corpus and the service-doc drift gate.
 The nonsense pin in particular fires on ANY does anywhere containing a rare token, so every does edit is a potential
 trip. capdoc regenerated (does text changed).
+
+## MESH-OP GAP #3: symmetrize (mesh_symmetrize)
+
+Backlog item 3. Rule 0: symmetrize didn't exist (top hit "Mesh editing (DCC)" fallback), but its two component
+primitives -- mirror (holographic_meshtools.mirror) and weld (merge_by_distance) -- both did. Textbook compose-
+existing-wheels build: symmetrize = keep one half, mirror it back, weld the seam. Unlike mirror (which doubles the
+WHOLE mesh, preserving asymmetry), symmetrize DISCARDS the far side first, so it FIXES an off-axis sculpt.
+
+Built in holographic_meshtools alongside mirror/weld/solidify. Keep rule: a face is kept iff its CENTROID is on the
+keep side or on the plane (Blender-style, no cutting of straddling faces); near-plane vertices snap onto the plane
+so the seam welds. Verified: an asymmetric bumped grid becomes PROVABLY bilaterally symmetric (every mirrored vertex
+matches an original within 1e-4), face count preserved (36->36).
+
+CAUGHT + FIXED A RULE BUG mid-build (measurement over narrative): the first rule also required ALL vertices of a kept
+face on the keep side, which rejected every straddling face -- a centered box collapsed 6->2 faces (only the +x face
+survived). The correct rule is centroid-only (a straddling face belongs to both halves and should be kept+mirrored).
+After the fix: grid 36->36 clean, box 6->10, offset grid 36->60, all provably symmetric.
+
+KEPT NEGATIVE (loud, in the docstring): a face lying IN the mirror direction (centroid on the plane, e.g. a box's
+side faces) is kept then mirrored -> a coplanar duplicate, so a box goes 6->10 (still symmetric, just not minimal).
+Proper fix = drop faces whose supporting plane contains the mirror normal; deferred. Doesn't arise for the intended
+use (a sculpt whose faces genuinely pick a side).
+
+Wired mesh_symmetrize, 5/5 discoverability, semantic=modify/deform, io-shape mesh->mesh.
+
+RITUAL NOTE (applying last turn's CI lesson): ran the CI PINS this time before declaring done -- test_routing_pins
+(17) + test_servicedoc + holographic_skills selftest all green. mesh_symmetrize's does introduced no garbage-token
+collision. Fork backlog remaining: solidify (weak entry exists), multi-segment bevel, grid-fill, seam+smart-UV,
+rip-vertices.
+
+## MESH-OP GAP #4: solidify -- "reads weak" was a REAL BUG (non-manifold), caught by Rule 0 measurement
+
+Backlog item 4. The decision doc flagged solidify_mesh as "exists but reads weak." Rule 0 probed WHAT it does before
+assuming -- and found the "weak" was a genuine correctness bug: solidify on an open sheet produced a NON-MANIFOLD
+mesh (ValueError: directed edge (0,1) appears twice). The rim bridge built quads (a,b,b+off),(a,b+off,a+off) that
+traversed each boundary edge the SAME direction as the outer wall, so the directed edge appeared twice. The bridge
+must traverse it the OTHER way. Fixed to (b,a,a+off),(b,a+off,b+off). Now an open grid -> a CLOSED, MANIFOLD,
+watertight slab (chi 2, 0 boundary edges, thickness applied along the normal). Believe measurement over narrative:
+"reads weak" turned out to mean "silently ships broken topology," not "cosmetically thin."
+
+ROOT CAUSE was NO TEST: solidify had zero selftest coverage (grep found "solidify" only in a docstring + the def),
+which is exactly why a non-manifold operator shipped. Added a closed+manifold+zero-boundary+thickness contract to
+the meshtools selftest. ALSO fixed a structural bug this surfaced: _boundary_edges and solidify were defined AFTER
+the `if __name__=="__main__": _selftest()` block, so running the module ran _selftest before those names existed
+(NameError). Moved if-main to the end. (An untested operator that also couldn't be selftested from __main__ -- two
+smells that let the bug hide.)
+
+The catalog entry was also genuinely weak (3/5 discoverability misses: "thicken a surface", "make a hollow shell",
+"add thickness"; no semantic, no io-shape) because it was auto-registered from the docstring. Added a curated
+registration: 6/6 discoverability, semantic=modify/extrude, io-shape mesh->mesh.
+
+Ran the CI pins before declaring done (routing_pins 17, servicedoc, skills selftest -- all green). Fork backlog
+remaining: multi-segment bevel, grid-fill, seam+smart-UV, rip-vertices.
+
+## MESH-OP GAP #5: multi-segment (rounded) bevel
+
+Backlog item 5. Rule 0: bevel_vertex(mesh, vertex, ratio) existed but was SINGLE-SEGMENT only (caps the chamfer with
+one flat facet); "multi-segment bevel" returned pure fallbacks. Genuine gap.
+
+Built bevel_vertex_segments in holographic_meshverbs2. Reuses the chamfer-ring setup from bevel_vertex, then instead
+of a flat cap builds a spherical DOME: (segments-1) intermediate rings, each base direction slerped toward the dome
+axis and projected onto the sphere of radius r=ratio*edge about the corner, closed with quad bands + an apex fan.
+segments=1 DELEGATES to bevel_vertex (don't duplicate the chamfer rewrite; the flat-cap case IS the old operator ->
+byte-identical, the additive/backward-compat contract). Verified: seg=1 == bevel_vertex.faces exactly; seg 2/3/4 ->
+12/15/18 faces, all closed manifold chi 2; the dome vertices lie on a sphere about the corner to 1e-9 (the 'round').
+
+EXTEND-DON'T-SIBLING: exposed via the EXISTING mesh_bevel_vertex faculty with a new segments=1 default param (not a
+new mesh_bevel_round faculty) -- byte-identical old behavior, one faculty. Upgraded its auto-registered catalog entry
+to a curated one: 5/5 multi-segment discoverability (multi-segment bevel / rounded bevel / bevel with segments /
+...), semantic=modify/bevel, io-shape mesh->mesh.
+
+Ran CI pins before declaring done (routing_pins 17, servicedoc, skills selftest -- all green). Fork backlog
+remaining: grid-fill, seam+smart-UV, rip-vertices.
+
+## MESH-OP GAP #6: fill_holes (fan + grid)
+
+Backlog item 6. Rule 0: no mesh hole-filling existed (all phrasings -> field-inpaint or select_boundary_loops, which
+only FINDS the rim). Genuine gap. Built _boundary_loops (trace open edges into ordered face-consistent cycles) +
+fill_holes(mesh, mode) in holographic_meshverbs2. mode='fan' (default, always works): centroid + triangle fan per
+loop. mode='grid': bridge a big even loop with a quad strip (Blender grid fill), fall back to fan otherwise.
+
+THREE bugs caught by measurement (believe measurement over narrative), all before shipping:
+  1. WINDING (same class as solidify): fan/grid faces first traversed the rim edge the SAME way as the existing
+     face -> directed edge twice -> non-manifold (box-minus-face raised "directed edge (0,1) appears twice"). Fixed
+     to wind (b,a,c) so the rim edge appears once. box-minus-face -> closed manifold chi 2, 0 boundary.
+  2. GRID DEGENERACY on n=4: the opposite-half pairing made a[0]==b[0] and a[half]==b[half] (shared corners), so the
+     first quad was (1,0,0,3) -- a repeated vertex. Restricted grid to n>=6 and collapse any repeated-vertex quad to
+     a triangle; n=4 now falls back to fan (correct: a 4-loop grid fill IS 2 triangles). Verified a clean hexagon
+     face: grid -> 3 quads (4 faces), fan -> 6 tris + centroid (7 faces), both manifold chi 2.
+  3. (design, not a code bug) fill_holes fills EVERY open loop, so an OPEN sheet gets its OUTER BORDER filled too --
+     there is no topological difference between 'a hole' and 'the outer rim'. Chose to document this as the defined
+     behavior (KEPT NEGATIVE in the docstring: use on a mesh whose open loops are all holes; a size heuristic to tell
+     hole from border was considered and rejected as too fragile) rather than guess.
+
+Wired mesh_fill_holes, 5/5 discoverability, semantic=create/emit, io-shape mesh->mesh. CI pins run (17 + servicedoc
++ skills, green). Fork backlog remaining: seam+smart-UV, rip-vertices.
+
+## MESH-OP GAP #6: fill_holes (grid + fan) -- finished the in-flight item, resolved BOTH open questions
+
+Backlog item 6. Rule 0: no mesh hole-fill existed (all phrasings -> field-inpaint / select_boundary_loops fallbacks;
+the latter only FINDS the loop). A prior session had started fill_holes + _boundary_loops + mesh_fill_holes faculty
++ catalog entry but left two problems flagged in NOTES: (a) grid mode left 2 boundary edges on a 4-loop, (b)
+fill_holes filled the outer border too on an open sheet. Both now resolved.
+
+FIXED the WINDING BUG (same class as solidify, 3rd time this arc): fill faces must traverse each rim edge OPPOSITE to
+its existing face or the directed edge appears twice -> non-manifold. Fan now winds (loop[k+1], loop[k], c); grid
+winds its strip so the rim side runs opposite. Box-minus-face -> fan 9 faces / grid 9 faces (grid falls back to fan
+for n<6), both closed manifold chi 2, 0 boundary. A real 6-loop (hex hole) grid-fills to 2 quads + 4 pole triangles,
+manifold. GRID POLE HANDLING: the two facing half-chains share their two poles; at a shared pole the strip quad
+collapses, so emit a TRIANGLE there (that's the only way a small even loop closes cleanly) -- pole-aware zip.
+
+RESOLVED the outer-border question with max_sides (Blender's 'Sides' knob, the honest answer): fill only loops with
+<= max_sides edges; 0 = all. On an open sheet with a punched quad hole (rim 16 + hole 4), max_sides=8 fills the hole
+and leaves the 16-edge rim open. Verified through the faculty. "A hole is a loop small enough" -- ill-defined without
+a bound, so expose the bound rather than guess.
+
+Wired: extended the existing mesh_fill_holes faculty with the new max_sides param (extend-don't-sibling); catalog
+entry updated (does mentions max_sides), 5/5 discoverability, semantic=create/emit, io mesh->mesh.
+
+KEPT NEGATIVE (loud, in docstring): grid fill emits triangles at the two shared poles (not pure quads); true
+rectangular 4-corner grid fill needs corner detection, deferred. Fan remains the robust default.
+
+CI pins run before done (routing_pins 17, servicedoc, skills selftest -- green). Fork backlog remaining: seam+smart-UV
+(item 7), rip-vertices (item 8).
+
+## MESH-OP GAP #7 (partial): pack_uv_islands / mesh_pack_uv -- the smart-UV/packing half
+
+Backlog item 7 (mark-seam + smart-UV). Rule 0 mapped the UV surface: mesh_lscm (conformal), mesh_uv_unwrap (isomap),
+mesh_cut_seam/mesh_shortest_seam (cut a GIVEN seam), UV distortion metrics all exist. What's missing (all fallbacks):
+pack uv islands, smart uv project, lay out uv islands in the unit square. MEASURED the gap: mesh_lscm on a 2-component
+mesh solves both pieces in one frame -> the islands OVERLAP (island1 collapsed near 0, island2 spanning -0.29..1.0).
+
+Built pack_uv_islands in holographic_meshuv (+ a _mesh_components union-find split). Composes existing wheels: split
+into connected components, unwrap EACH island separately (lscm or isomap), normalise each preserving aspect (uniform
+scale, no UV stretch), pack into a ceil(sqrt(k))-column grid of the unit square with a margin gutter. Verified: 2
+components -> disjoint UV bboxes (left/right halves), all in [0,1]^2, deterministic. Dogfooded mesh_triangulate
+(lscm needs triangles) -- nice cross-use of this arc's item 2.
+
+Wired mesh_pack_uv, 5/5 discoverability (pack uv islands / smart uv project / lay out uv islands / ...),
+semantic=convert/emit, io mesh->points (no 'uv' io-kind; UVs are 2-D coords -> points is the honest match, NOT image
+-- caught and fixed a first-pass produces=image mistake).
+
+HONEST SCOPE (in the fork doc + docstring): this is the PACKING/smart-UV half of item 7. Automatic SEAM MARKING
+(auto-choosing where to cut a closed surface into disk charts) is still open -- mesh_cut_seam cuts a GIVEN seam, but
+selecting the seam is a separate build. Didn't claim item 7 fully done.
+
+CI pins run before done (routing_pins 17, servicedoc, skills selftest -- green). Fork backlog remaining: auto seam-mark
+(the other half of 7), rip-vertices (item 8).
+
+## MESH-OP GAP #8: rip_vertex / split_vertices -- the inverse of weld (completes the enumerated backlog)
+
+Backlog item 8. Rule 0: no rip/split-vertex existed (all phrasings -> bevel/dissolve fallbacks); weld_mesh
+(merge_by_distance) FUSES coincident vertices but had no inverse. Clean "inverse of an existing operator" build.
+
+Built in holographic_eulerops (alongside the other local vertex operators):
+  * rip_vertex(mesh, vertex): give each incident face its OWN copy of the vertex at the same position -> V += (inc-1),
+    positions unchanged (looks identical, torn topologically). No-op for a vertex in <=1 face. Inverse of a weld at
+    one vertex.
+  * split_vertices(mesh): every face gets private copies of all its corners -> polygon soup, V = sum(len(f)). The
+    full inverse of weld.
+PROVED THE INVERSE PROPERTY in the selftest (not just "runs"): weld_mesh(split_vertices(tri_cube)) recovers the
+original 8 vertices (8 -> 36 soup -> 8 welded). rip on cube vertex 0 (shared by 3 faces): 8 -> 10, copies on the
+original position (allclose).
+
+Wired mesh_rip_vertex (semantic=modify/deform) + mesh_split_vertices (semantic=convert/emit), both io mesh->mesh,
+5/5 discoverability each (rip a vertex / unweld / tear at a vertex / ... ; split all vertices / polygon soup /
+unindex a mesh / ...). CI pins green before done.
+
+FORK BACKLOG STATUS: the enumerated mesh-op backlog (items 1-8) is now COMPLETE except the auto-SEAM-MARKING half of
+item 7 (choosing where to cut a closed surface -- mesh_cut_seam cuts a GIVEN seam; auto-selection is a separate
+build, still open). The mesh axis now has: poke, ear-clip triangulate, symmetrize, solidify (fixed), multi-segment
+bevel, fill-holes (fan+grid+max_sides), uv island packing, rip/split. 8 of 8 enumerated items shipped (+ 1 CI fix
+batch), 1 sub-item (auto-seam) explicitly deferred with the reason recorded.
+
+## MESH-OP GAP #7 (completed): auto_seam / mesh_auto_seam -- the seam-marking half
+
+Finished the other half of item 7. Rule 0: "automatically mark seams" returned fallbacks (gap), but the pieces
+existed -- mesh_shortest_seam (Dijkstra path), mesh_cut_seam (cut a GIVEN seam), mesh_creases/detect_creases (sharp
+edges by dihedral angle). The classic auto-seam heuristic IS crease-marking: an artist cuts where the surface folds
+so the seam is hidden. Composed detect_creases -> the sharp edges ARE the seam marks.
+
+Built auto_seam in holographic_meshseam (alongside shortest_seam/cut_seam). method='crease' (default): return the
+sorted (lo,hi) sharp edges. Cube -> 12 crease edges marked; smooth icosphere -> [] (no creases). KEPT NEGATIVE (loud
+in docstring + selftest): a smooth closed surface has NO creases, so crease-seaming leaves it closed -- auto_seam
+reports the empty set HONESTLY rather than inventing a cut; use shortest_seam for a meridian there.
+
+Wired mesh_auto_seam, 5/5 discoverability, semantic=analyze/measure, io mesh->selection (the marked edge set is a
+selection).
+
+CROSS-CUTTING PIN CAUGHT + FIXED (a new produces=selection capability shifted a routing pin): the catalog selftest
+pinned suggest_pipeline('mesh','selection')[0]['name'] == 'mesh_selection', but now mesh_auto_seam ALSO produces a
+selection from a mesh and the 1-step BFS returns it. Both are valid mesh->selection edges, so the pin was over-strict
+-- relaxed it to assert the result is ONE of the known producers (mesh_selection OR mesh_auto_seam), not a specific
+one. Fixed the pin honestly (both edges ARE valid), not by gaming it. This is the same lesson as the nonsense-does
+pin: adding a capability can shift a routing/pipeline pin, so run them before done.
+
+CI pins run before done (routing_pins 17, servicedoc, skills selftest -- green). ITEM 7 NOW FULLY COMPLETE. The
+enumerated mesh-op backlog (items 1-8) is DONE -- no deferred sub-items remain. Mesh axis now: poke, ear-clip
+triangulate, symmetrize, solidify(fixed), multi-seg bevel, fill-holes, uv-pack, rip/split, auto-seam.
+
+## GLSL DEMOSCENE / FRACTAL SUPPORT: fold_fractal (Mandelbox/KIFS keystone)
+
+User asked whether leCore can handle the crazy GLSL-math demos (Yohei Nishitsuji tweet-shaders, Milkdrop3, fractal-
+forums KIFS/Mandelbox) -- for pattern recognition / deterministic structure / modeling / sim, not just the look.
+Researched (web) then RULE 0 audited. FINDING: leCore already supports ~80%. The whole family reduces to "iterated
+conformal maps (rotate/scale/fold) + a distance/accumulation readout." Already present + callable: domain_fold (iq
+opMirror, single fold), menger_fractal (a real fractal SDF), holographic_raymarch + orbit_trap_render +
+sphere_trace_trapped (the signature Quilez orbit-trap look), domain repeat, cosine palettes, procedural_noise (fBm
+field), warped_noise (iq dFBM), audio_param_bus (Milkdrop input model), GLSL/WGSL emit. Rule 0 corrected two probe
+false-negatives: procedural_noise IS fBm; fractal_* faculties are VSA-domain fractals, not geometric KIFS.
+
+REAL GAP (built): the ITERATED fold engine itself -- domain_fold does ONE mirror; the fractals come from ITERATING
+rotate->fold->scale. No general KIFS/Mandelbox distance-estimator SDF existed (mandelbox/kaleidoscopic/sierpinski all
+fell back). Built fold_fractal in holographic_sdf as a leaf SDF (like menger): box-fold (conditional reflection) +
+sphere-fold (inversion through nested spheres) + scale/translate, iterated, tracking the derivative dr so the readout
+|z|/|dr| is a usable DISTANCE ESTIMATE. Four floats (iterations, scale, min_radius, fold_limit) -> megabytes of
+deterministic self-similar structure ("determinism instead of storage", as geometry).
+
+MEASURED CONTRACT (selftest, not "runs"): DE is bounded-Lipschitz (p99 ratio 0.34 << 1 blow-up), has real spatial
+structure (std ~0.009, spread of percentiles, not constant), deterministic, marked iterative in cost(). THE PAYOFF:
+it plugs straight into the EXISTING orbit_trap_render raymarcher (rendered an 80x80 image, std 0.17) -- full pipeline
+reuse, no new renderer. KEPT NEGATIVE (loud): INEXACT (a distance ESTIMATE), so the GLSL emitter REFUSES it by policy
+(a shader consumer must hand-tune step size) -- consistent with the engine's INEXACT honesty guard; menger emits
+because it's iterative-but-exact, fold_fractal doesn't because it's a DE. Guarded the sphere-fold div-by-zero at the
+origin.
+
+Wired fold_fractal, 5/5 discoverability (mandelbox/kaleidoscopic ifs/nishitsuji/KIFS/demoscene), semantic=create/emit,
+io ->sdf. CI pins green. Doc: /home/claude/out/glsl_demoscene_fractal_support.md (findings + why it benefits the whole
+stack + next steps: mandelbulb escape-time, .milk preset reader, fold-recipe INFERENCE as the pattern-recognition
+payoff). REMAINING (scoped, not built): mandelbulb/escape-time field; Milkdrop .milk parser (a bridge, not a math gap).
+
+## FRACTAL ZOO: mandelbulb + escape_time + .milk reader + fold_fit (all 3 suggested steps)
+
+Built all three next-steps from the GLSL/fractal doc, full ritual each, Rule 0 each (all returned only fallbacks).
+
+STEP 1 -- mandelbulb + escape_time (holographic_sdf). mandelbulb: White-Nylander polar power z->z^n+c in spherical
+coords, analytic DE 0.5*log(r)*r/dr. Origin inside (d~0), far outside grows, slab has real interior(d<0)/exterior(d>0)
+sign change (min -0.18 max 0.57), DE p99-Lipschitz 0.80 (cleaner than the Mandelbox), renders through orbit_trap_render.
+ARITY (3,0), INEXACT (emitter refuses -- DE), marked iterative in cost. escape_time: 2D Mandelbrot(julia_c=None)/Julia
+field, smooth continuous escape count n+1-log2(log2|z|) (no staircase), vectorized over a complex grid; Mandelbrot 17%
+in-set + cardioid center in-set, Julia std 24.9. semantic=create/emit, io ->sdf and ->image.
+
+STEP 2 -- .milk preset reader (NEW MODULE holographic_milkdrop, io_and_interop). A preset is a TEXT file of MATH
+EQUATIONS (ns-eel2), not a shader blob. Built a SAFE evaluator: real tokenizer + recursive-descent parser + AST +
+whitelisted _FUNCS -- NEVER Python eval (hard constraint). Rejects __import__/illegal chars/unknown funcs (loud, not
+silent-0); divide-by-zero=0, rand()=0 for determinism. MilkExpr(compile once)/eval_expr(one-shot). parse_milk reads
+INI settings + per_frame_init/per_frame/per_pixel equation families (compiled, ordered) + captures warp/comp HLSL text
+(stored not run). run_frame evaluates per_frame eqns injecting bass/mid/treb from an audio dict (pairs with
+audio_param_bus) + time/frame -> drives q1..q32/zoom/rot deterministically. KEPT NEGATIVE: equation layer only; warp
+mesh + pixel shaders stored for the renderer, not executed. Tested with a SYNTHETIC preset (written in-house, NOT
+copied from any real .milk -- copyright). Faculties milk_parse (convert/parse) + milk_eval (measure/eval).
+
+STEP 3 -- fold_fit (NEW MODULE holographic_foldfit). Inverse IFS: recover fold recipe (scale,min_radius,fold_limit)
+from an observed (M,3) point cloud. surface_points() reject-samples a recipe's surface to build a target. fold_fit =
+coarse grid over recipe space + local refine via COMPOSED mind.optimize (finite-diff Adam, no autodiff). loss = mean
+|distance-to-surface|. RECOVERED scale 2.16 from truth 2.1, loss 0.0002 < baseline 0.00448 (23x), deterministic.
+KEPT NEGATIVE (fixed after honest measurement -- my first discriminativeness test FAILED and taught the real finding):
+the DE is a lower bound so "contains the points" scores low for many recipes (necessary not sufficient) -- a sphere
+the fractal can contain fits as low absolutely. The DISCRIMINATIVE signal is the baseline-IMPROVEMENT RATIO (real fold
+23x, sphere 1x), NOT the absolute loss. That correction is the landmark of this build: measurement overrode the
+convenient assertion. semantic=analyze/measure, io points->scalar.
+
+Believe-measurement-over-narrative struck twice this arc: fold_fit's discriminative signal, and mandelbulb being a
+cleaner DE than the Mandelbox. CI pins green (routing 17, servicedoc, skills selftest). 283 capabilities. The GLSL
+demoscene/fractal family is now genuinely two-way: generate (fold_fractal, mandelbulb, escape_time, menger), render
+(orbit_trap), import (milk_parse), and INFER (fold_fit).
+
+## FRACTAL INTEGRATION AUDIT + 3 BRIDGES (sdf_to_mesh, field_displace, transport)
+
+User asked: can the fractal/GLSL layer DRIVE geometry/sim/particles/fields? generate static meshes + apply the sim
+pipeline? play/pause/rewind/fast-forward? per-face mandelbulb modifier from a texture? RULE 0 audit across every axis
+(did NOT assume). FINDING: the consumers nearly all exist and are wired -- simulation (run_simulation, fluid/smoke/
+cloth/softbody/rigid/particles, mesh_to_softbody turns ANY mesh into a simulatable softbody), fields/forces
+(advect_field, curl_noise, attractor/buoyancy/drag force, enforce_solid = SDF-as-boundary, advance_particles takes a
+force array), meshing (surface_mesh field->Mesh). The fractals just weren't BRIDGED in. Three specific gaps, all built:
+
+BRIDGE 1 -- sdf_to_mesh (unified). The fractal/SDF -> Mesh one-liner. Fixes two silent traps a user WILL hit: (a) an
+SDF object isn't a bare callable so surface_mesh's field= rejects it (wrap .eval); (b) a distance-ESTIMATOR fractal
+(fold_fractal) is ALL-POSITIVE so marching at level 0 returns 0 faces SILENTLY -- detect all-positive and offset the
+iso a hair into the solid. bounds auto-probed. VERIFIED full chain: mandelbulb->58k faces, fold_fractal->23k,
+menger->91k, each -> mesh_to_softbody. KEPT NEGATIVE: an all-positive DE has no true zero surface; the offset picks a
+near-surface isocontour ('the fractal at iso=eps', what a raymarcher shows too). semantic=convert/emit, io sdf->mesh.
+
+BRIDGE 2 -- field_displace (holographic_autodisplace, generalizes auto_displace beyond RGB). Displace a mesh's verts
+along normals by ANY scalar field/SDF sampled at each vertex, with an optional per-vertex weight MASK -> the per-face
+fractal modifier from a texture (user's exact "mandelbulb modifier per face according to a texture map"). VERIFIED:
+plane + mandelbulb masked by a stripe texture displaces 820/1681 verts, ONLY where the mask paints (left-half test:
+masked side moves, unmasked side byte-identical). KEPT NEGATIVE: displaces along existing normals (adds relief, no
+re-topology) -- mesh finely first for deep detail. semantic=modify/deform, io mesh->mesh.
+
+BRIDGE 3 -- Transport playhead (holographic_anim). RULE 0: timeline was keyframes-only (.key/.sample), FrameCache was
+storage-only -- NO playhead. Built Transport: play(speed: 1 fwd/-1 rewind/2 ff/0.5 slow), pause, stop(pause+rewind0),
+tick(play loop), step(frame-by-frame regardless of play state), seek/seek_time (scrub), at (cached). Caches computed
+frames (FrameCache for 2D mesh states as sparse deltas 9x smaller; plain dict for non-2D param/scalar states) so
+rewind/scrub-back/replay is O(1). DETERMINISTIC scrub: seek(f) gives the same state however you arrived (frame_fn is
+pure of frame index) -- kills the classic scrub-drift bug. A stateful sim that can't eval at an arbitrary frame:
+bake_deformation first, then Transport over the cache. FIXED mid-build: FrameCache.get raises KeyError not None for
+uncached frames (try/except), and .put needs 2D (max(axis=1)) so non-2D states fall back to a dict. semantic=
+modify/transform.
+
+CRAZY STUFF NOW ONE WIRING AWAY (documented in the audit doc): fractal->mesh->softbody in fluid/gravity; fractal SDF
+gradient as a particle force (advance_particles already takes force=); smoke curling through a Menger via enforce_solid;
+Milkdrop/audio-driven fractal recipe scrubbed on the Transport; texture-masked fractal displacement. REMAINING (scoped,
+not built): an sdf_force gradient->particle-force one-liner (the only bridge of the five still hand-rolled). CI pins
+green (routing 17, servicedoc, skills). 286 capabilities. Doc: /home/claude/out/fractal_integration_audit.md.
+
+## SHAPE -> CLOSEST PROCEDURAL FIT -> SHADERTOY (fit_shape, to_shadertoy, fractal GLSL emit)
+
+User: "find the closest fit for a given shape and get the shadertoy code" (tree/fern/2D image/height/texture ->
+formula -> composable shadertoy object OR mesh/sdf). RULE 0 audit: sdf_shader ALREADY emits a complete Shadertoy-ready
+shader (map+raymarch+normals+light+mainImage, round-trips its DSL) -- but REFUSED the fractals (mandelbulb/fold_fractal)
+because... they simply had no GLSL dispatch case (the "no GLSL for mandelbulb" error), not an INEXACT block (INEXACT
+only adds a warning header; twist/bend emit fine). fold_fit already fits fold recipes with a measured baseline.
+
+BUILT 1 -- fractal GLSL emit (holographic_sdf). Added _foldfractal_glsl + _mandelbulb_glsl (1:1 translations of the
+NumPy _eval loops) + dispatch cases. Now fold_fractal/mandelbulb emit complete Shadertoy raymarch shaders WITH the
+INEXACT header ("not an exact SDF; shorten ray steps") -- honest: a DE needs conservative steps, a Shadertoy raymarcher
+handles that. Pinned in sdf selftest (sdFold8/sdBulb6 loops present).
+
+BUILT 2 -- fit_shape dispatcher (NEW MODULE holographic_fitshape). Target -> closest procedural formula + code. TWO
+HONEST PATHS: (a) (M,3) POINT CLOUD -> fold_fit recipe -> reconstruct SDF -> complete Shadertoy (the STRONG path;
+quality = fold_fit baseline-improvement ratio, measured 19.5x on a real fractal cloud vs 1.3x sphere). (b) 2D
+IMAGE/HEIGHT/TEXTURE -> procedural fBm matched to STATISTICAL SIGNATURE (spectral slope + gradient/detail energy) +
+a GLSL fbm snippet. Returns {kind,fit,quality,baseline,shadertoy|glsl,note}.
+
+KEPT NEGATIVES (loud, measured -- believe measurement over narrative struck HARD here):
+- 2D texture fit is STATISTICAL-SIMILARITY, NOT parameter recovery, NOT pixel match. MEASURED: fBm params are NOT
+  uniquely identifiable from low-order statistics -- my first prototype's "wrong" params scored LOWER than the truth
+  (radial spectrum alone 0.0 for wrong vs 0.00019 truth; slope+grad still non-discriminative). So the module returns
+  "a procedural texture in the same family (matched roughness+detail)" and SAYS SO in note=; does NOT claim recovery.
+- PERF: procedural_noise render is expensive (~0.5s/grid even via sample_grid_fast). FIXED the first cut (per-point
+  Python .query() loop = ~5min) by switching to sample_grid_fast + a compact 16-combo bank; still ~40s for the full
+  texture selftest (a fit op, not a hot loop). The 3D path is fast (0.2s).
+- SCOPE (honest): fit_shape does NOT fit arbitrary meshes to a minimal SDF-primitive tree (a CSG-search project), and
+  does NOT fit L-systems/Barnsley affine IFS -- a fern's TRUE generator is an affine IFS, not a Mandelbox fold. The
+  fold recipe is a fractal STAND-IN. Flagged Barnsley/L-system as the next fitter (Rule 0: barnsley fern = GAP).
+
+BUILT 3 -- to_shadertoy faculty (alias of sdf_shader, conventional name) -- "get the shadertoy code" primitive; works
+on the fractals now. Wired fit_shape (analyze/measure, points->scalar) + to_shadertoy (convert/emit, sdf->scalar),
+5/5 discoverable each. CI pins green. 288 capabilities. Deliverables: fitted_shape.frag + mandelbulb.frag (real
+runnable Shadertoy), fractal_fitting_shadertoy.md.
+
+## AFFINE IFS: the honest fern/tree fitter (ifs_generate, ifs_fit) -- fit_shape's flagged next step
+
+fit_shape flagged Barnsley/L-system as the RIGHT model for ferns/trees (fold_fractal is a Mandelbox fold, not a plant).
+RULE 0: barnsley/chaos/sierpinski/fern/dragon all GAP; found an EXISTING lsystem (grammar/turtle) + recover_affine
+(edit-history, not IFS) -- neither is an affine-IFS chaos game, so genuine gap. Built holographic_ifs.
+
+BUILT: AffineIFS (maps as (a,b,c,d,e,f,prob) Barnsley rows) + .generate (chaos game, deterministic seed, warmup
+discard). Named LIBRARY of published coefficients (mathematical facts, not copyrighted): barnsley_fern, culcita_fern,
+sierpinski, fractal_tree, dragon_curve. VERIFIED fern footprint x[-2.18,2.65] y[0.11,10.0] (the classic shape).
+
+FITTER: ifs_fit snaps a 2-D point cloud to the CLOSEST named system by a translation/scale-normalised OCCUPANCY
+signature (28x28 hist into the unit box, L1 distance), with baseline = library-mean distance. MEASURED: a fern cloud
+snaps to barnsley_fern (quality 0.9 > baseline 0.46), distinguishes the TWO fern variants (barnsley closer than
+culcita), a sierpinski cloud snaps to sierpinski. KEPT NEGATIVE (measured + loud): snap-to-LIBRARY, NOT arbitrary-IFS
+recovery (the general inverse-IFS problem is ill-posed); NOT rotation-invariant; random noise matches nothing (its
+best distance sits near baseline -- the baseline GAP is the discriminative signal, same lesson as fold_fit's ratio).
+
+WIRED ifs_generate (create/emit, ->points) + ifs_fit (analyze/measure, points->scalar). INTEGRATED into fit_shape as
+the 2-D (M,2) point-cloud path (3-D M,3 -> fold fractal; 2-D M,2 -> named IFS; 2-D grid -> fBm texture). Now fit_shape
+answers "fit a fern" honestly. 6/6 discoverable each. CI pins green. 290 capabilities. Point-set fractals (chaos game)
+are distinct from raymarched SDF fractals -- mesh via sdf_from_points -> sdf_to_mesh for geometry (no raymarch shader
+for a point-set attractor -- documented). Deliverable: barnsley_fern_demo.png.
+
+## PRIMITIVE-SET FITTER: approximate a hard-surface/creature with a union of spheres (fit_primitives)
+
+The last of fit_shape's three flagged fitters: fold_fractal (self-similar) and affine-IFS (plants) can't represent a
+HARD-SURFACE or NON-FRACTAL organic shape ('creature', part). Built holographic_primfit: a UNION OF SPHERES (sphere
+set / sphere tree). RULE 0: no primitive-set fitter, and NO general point clustering exists (no sklearn, constitution)
+-- so built a deterministic k-means (farthest-point SEEDING for reproducibility + Lloyd iters).
+
+fit_primitives: cluster target surface points into K, fit one sphere/cluster (centroid + mean radius), union (min of
+sphere SDFs) -> an EXACT SDF that raymarches, sdf_to_mesh's, AND emits a Shadertoy (spheres are exact). quality =
+single-bounding-sphere_residual / fit_residual (>1 = better than one sphere). auto_k grows K to an elbow (patience
+window of 3, since the residual is NON-monotonic in K -- over-segmentation briefly worsens it). MEASURED: a 2-blob
+peanut fits 3.6x better with 2 spheres than 1, centres recovered on both blobs; auto_k gives a single blob 1 sphere
+vs a peanut 2 (adapts).
+
+TWO MEASUREMENTS CORRECTED ASSUMPTIONS (believe-measurement-over-narrative, twice):
+1. My first kept-negative test asserted "a cube fits WORSE than a blob" -- FALSE. Measured: a round blob's quality is
+   LOW (0.2x) because ONE sphere already suffices (6 spheres over-segment); the cube's is HIGHER (0.77x) because it
+   genuinely needs several. So `quality` = improvement-over-one-sphere: HIGH when a shape needs multiple primitives,
+   ~1 when one suffices. Rewrote the test to that truth.
+2. I first added a fit_shape AUTO mode (fractal vs primitives by surface residual). REMOVED it after measuring that a
+   fold fractal's DE is a LOWER BOUND -> reads ~0 near ANY bounded cloud (it 'contains' the points), so a residual
+   compare ALWAYS flatters the fractal (creature: fractal 0.0000 vs primitives 0.0636). There is NO reliable auto
+   between them -- documented, and fit_shape now takes an explicit method= ('fractal' default for backward-compat,
+   'primitives' for the sphere set). Same DE-lower-bound kept negative as fold_fit's ratio.
+
+WIRED fit_primitives (analyze/measure, points->sdf) + fit_shape method='primitives' path (-> primitive_sdf + shadertoy).
+5/5 discoverable. CI pins green. 291 capabilities. fit_shape now covers all three families: self-similar (fold),
+plants (IFS), hard-surface/creature (sphere set). Deliverable: primitive_fit_demo.png. REMAINING scoped extension:
+box/capsule primitives (spheres suit round shapes; a blocky shape fits coarsely).
+
+## PRIMITIVE-SET FITTER, extended: oriented BOXES + CAPSULES (fit_primitives, mixed palette)
+
+The scoped extension flagged last session: spheres approximate round shapes well but blocky/elongated parts coarsely.
+Extended holographic_primfit from sphere-only to a MIXED palette -- per cluster it now fits a SPHERE (round), an
+ORIENTED BOX (blocky, via PCA principal axes), and a CAPSULE (elongated limb), and keeps the lowest-residual one. All
+three are EXACT SDFs, so the union still raymarches / sdf_to_mesh's / to_shadertoy's (rotated boxes/capsules emit).
+
+MECHANICS: _principal_axes (covariance eigenbasis, right-handed) gives the OBB frame; _mat_to_axis_angle converts the
+rotation matrix to the SDF `rotate` op's (axis, angle) with both singular cases (angle ~0, ~pi) guarded. Box: half-
+extents from max |projection| on each axis; +angle is the convention that aligns to the cluster (validated -- the SDF
+rotate evaluates ch(P @ Rm)). Capsule: half-height from the projection extent minus radius, radius from mean perp
+distance, rotated Y->dominant-axis. Chosen by FIT, not label.
+
+MEASURED: an elongated block/limb fits 7.14x tighter with a box/capsule than a sphere; a flat slab -> a box; a creature
+(round body + 4 limbs) -> 1 sphere + 4 CAPSULES (quality 6.2x), meshes 7792 faces, emits Shadertoy. Mixed vs sphere-
+only on that creature: 5 parts @ residual 0.027 vs 10 spheres @ 0.049 -- 1.8x tighter with HALF the parts.
+
+KEPT NEGATIVE (measured, corrected an assumption AGAIN): I asserted "an oriented box cluster -> box". FALSE -- a thin
+box (minor extents 0.1,0.1) is nearly a capsule, and the capsule fit the box points TIGHTER (0.0177 vs box 0.0303), so
+the fitter (correctly) chose capsule. The honest contract: an elongated cluster -> box OR capsule (whichever fits); a
+FLAT slab -> box (a capsule can't be flat). Test asserts that, not a label. Other kept negatives: a cluster spanning
+two oriented parts is fit by one loose primitive (raise K); surface approximation, not a minimal CSG tree.
+
+BACK-COMPAT: primitives=('sphere',) reproduces the old sphere-only behaviour exactly; the `spheres` result field is
+retained (sphere parts only); default palette is ('sphere','box','capsule'). fit_shape method='primitives' inherits
+the richer palette. WIRED (faculty + catalog updated, aliases 'sphere box capsule fit'), 4/4 discoverable. CI pins
+green. 291 capabilities. Deliverable: primitive_fit_demo.png (spheres-only vs sphere+capsules side by side).
+
+## HUMANOID: parametric biped + auto-IK rig + primitive skin + keypoint pose fitting (humanoid, fit_pose)
+
+User: a humanoid primitive with IK rigging auto-applied, to approximate pose from image/video. RULE 0: solve_ik HAVE
+(FABRIK, holographic_meshik), skin_bind_weights + blend_pose + kinematics exist -- but humanoid/biped/character/stick-
+figure ALL GAP. So IK exists; the humanoid TEMPLATE + pose-fitting didn't. Built holographic_humanoid composing them.
+
+THE HONEST BOUNDARY (stated up front, kept loud): pose DETECTION from raw pixels needs a LEARNED model (trained
+keypoint detector) -- forbidden by the constitution. So this module NEVER touches pixels. It fits the rig to KEYPOINTS
+(2-D or 3-D joint positions from an external detector / mocap / annotation). Keypoints-in, posed-rig-out is the honest
+core; pixel->keypoint is explicitly OUT and flagged so nobody mistakes this for a pose detector.
+
+BUILT: Humanoid class -- a T-pose biped (17 named joints pelvis..ankles, generic proportions not copied from any rig),
+a bone hierarchy, and 4 IK chains (arms/legs) + spine. .pose_to(targets) reaches named end-effectors (l_wrist,
+r_ankle, head, ...) via per-chain solve_ik (FABRIK: reaches target, KEEPS bone lengths, root fixed -- returns
+(joints, iters), unpack the tuple). .skin() builds a PRIMITIVE-SKIN SDF: a capsule per bone (the oriented-capsule
+trick from fit_primitives), sphere head, box pelvis -> a real SDF that meshes AND emits Shadertoy. This is where the
+mixed-primitive fitter ties into a poseable rig.
+
+fit_pose_3d(kp): anchor root joints + IK the limbs to their keypoints. fit_pose_2d(kp2d, camera): back-project each
+keypoint to its ray, pick the depth that keeps rest bone lengths (a CLASSICAL bone-length-constrained lift, NOT a
+learned lifter), then IK-clean. MEASURED: IK reaches wrist target to <0.05 keeping bone lengths exact; 3-D keypoints ->
+hands/feet reach them; 2-D pose round-trips through a pinhole camera at reproj err 0.000; deterministic.
+
+KEPT NEGATIVES (loud): (1) fits KEYPOINTS not pixels -- not a detector. (2) monocular 2-D lift is depth-ambiguous
+(forward/backward flip), resolves toward rest pose -> A plausible pose, not THE unique one. (3) per-chain FABRIK has
+NO joint limits / collision -- an extreme target can bend anatomically impossibly (joint limits = scoped extension).
+
+WIRED humanoid (create/emit, ->sdf) + fit_pose (analyze/measure, points->sdf; dispatches 2-D via camera= vs 3-D).
+7/7 discoverable. CI pins green. 293 capabilities. Deliverables: humanoid_pose_demo.png (IK skeleton + skinned body),
+humanoid_pose.frag (posed body as a Shadertoy). SCOPED NEXT: joint limits; a video path = per-frame fit_pose over a
+keypoint track (the transport faculty already scrubs frames); wiring to skin_bind_weights for a deforming mesh skin.
+
+## HUMANOID character-editor MORPHS: muscle/fat/length + global weight + optional breasts (humanoid body=, body_params)
+
+User: the humanoid should edit like a game character creator -- per-limb muscle/fat/length, a whole-body weight/fat/
+muscle control applied appropriately to all parts, and optional breasts with size/sag/separation/nipple diameter+depth.
+RULE 0: body-morph/muscle-fat/character-sliders ALL GAP; SDF ellipsoid + smooth_union + scale exist. Built onto
+holographic_humanoid (additive).
+
+FIRST fixed a prerequisite: ellipsoid had "no GLSL for ellipsoid" (same missing-dispatch-case as the fractals) --
+added the iq bounded-ellipsoid GLSL prim (k1*(k1-1)/k2) + dispatch + selftest pin, so the muscle-belly + breast
+ellipsoids EMIT to Shadertoy.
+
+MORPH MODEL (all additive, all default 0 -> base build byte-identical, a HARD union as before):
+- Region distribution: each bone maps to an anatomical SEGMENT (torso/neck/shoulder/upper_arm/forearm/hip/thigh/shin);
+  _FAT_GAIN + _MUSCLE_GAIN tables say how strongly a GLOBAL slider lands there (fat pools torso/thighs/hips, muscle
+  builds arms/thighs/chest). So ONE global weight/fat/muscle slider distributes across the body appropriately.
+- _segment_radius: bone radius scaled by global(fat+0.7*weight)*region_gain + per-segment overrides. Muscle also adds
+  a mid-belly ELLIPSOID bulge (_muscle_belly) elongated along the bone -- reads as muscular not just thick.
+- Fat softens joints: skin switches union->SMOOTH_union with a blend radius that grows with fat (rounder body).
+- length: per-segment slider scales the bone at rest-skeleton build (before IK), so proportions + IK stay consistent.
+- breasts (OPTIONAL, off by default = None): add_breasts places two ellipsoids on the chest front, controls size
+  (radius scale), sag (lowers centre + elongates lower -> teardrop), separation (x-gap), nipple_diameter (front
+  sphere), nipple_depth (protrusion). Mirrored L/R. Anatomical character-editor morph geometry, clinical.
+
+MEASURED: forearm base 0.060 -> muscle=1 0.073 -> fat=1 0.085; thigh length +50% drops the knee -0.45->-0.675 (exact
+1.5x); breast morph flips a chest-front probe +0.056 (outside) -> -0.045 (inside); global weight thickens torso more
+than forearm (region gains); morphed body meshes (base 5468 .. heavy 9956 faces) + emits Shadertoy; base build stays
+a hard union; deterministic; composes with IK posing.
+
+WIRED humanoid(body=) + body_params (neutral block, create/emit). 5/5 discoverable. CI pins green. 294 capabilities.
+Deliverable: humanoid_morph_demo.png (base | muscular | heavy | with breasts). SCOPED NEXT: asymmetry/handedness,
+per-side controls, face morphs, joint limits on IK.
+
+## HUMANOID joint limits: constrained FABRIK + muscle/fat range-of-motion coupling (solve_ik_limited, pose_to limited=)
+
+User: comprehensive anatomically-correct control + IK that PREVENTS unnatural poses + properly interacts with
+muscle/fat. RULE 0: joint-limit / constrained-IK / hyperextension / range-of-motion ALL GAP; solve_ik (FABRIK) exists
+but only bone-length constraints. Built holographic_iklimit (constrained FABRIK).
+
+BUILT solve_ik_limited: alternates a FABRIK reach (composes solve_ik) with a root->tip LIMIT PROJECTION (Aristidou-
+Lasenby constrained FABRIK). Two limit types, both length-preserving (rotate a bone dir only): HINGE (elbow/knee: bend
+about an axis, signed angle in [lo,hi]; lo>=0 blocks hyperextension) and CONE (shoulder/hip/neck: dir within a
+half-angle of a reference). Returns (joints, reach_error) -- error>0 when limits correctly block an out-of-range
+target (a real body can't reach everywhere either). NEVER returns an out-of-limit pose.
+
+KEY FIX (measured, two iterations): a FIXED world hinge axis OVER-CONSTRAINS a raised arm (locks the bend to one world
+plane -> couldn't reach up-and-forward targets, 18 in-reach targets failed). Added axis='auto': the bend plane is
+recomputed each projection as perpendicular to (incoming, outgoing) bones, so the elbow/knee bend plane FOLLOWS the
+limb. Then a sign bug (axis=-cross collapsed the bend to 0) -> fixed to axis=+cross so the current forward flex is
+preserved. After: 18/18 in-reach targets reached; hyperextension impossible BY CONSTRUCTION (auto-axis always makes
+the current bend the positive direction, clamped to [0,150]). Verified: from a hyperextended start reaching a back
+target, unconstrained FABRIK settles at -57deg (reverse-folded) while constrained holds a valid forward flex.
+
+MUSCLE/FAT <-> POSE COUPLING (the "interacts with muscle/fat" ask): _chain_limits TIGHTENS the hinge flex range by the
+muscle+fat+weight bulk on the flexing segment (soft-tissue apposition) -- hi shrinks up to ~55deg, cone narrows a bit.
+MEASURED: on a tight curl, lean elbow flexes 150deg (reaches) but a muscular arm caps at 90deg and CANNOT reach the
+target as closely (range of motion physically reduced). pose_to defaults to limited=True now (limited=False keeps the
+old FABRIK for back-compat).
+
+Also fixed a pre-existing dishonest test: (2) asserted exact reach of a target 0.531 from a shoulder with 0.49 reach
+-- unconstrained FABRIK "reached" it by cheating (over-stretch); switched to a genuinely reachable target.
+
+WIRED solve_ik_limited (analyze/measure, points->points) + pose_to limited=. 5/5 discoverable. CI pins green. 295
+capabilities. Deliverable: humanoid_jointlimit_demo.png (lean curl 150 | muscular curl 90 | unconstrained back-fold |
+constrained natural). KEPT NEGATIVE: angle limits only, NO self-collision (two limbs can still interpenetrate --
+scoped, heavier). SCOPED NEXT: self-collision, twist limits, per-side asymmetry.
+
+## CREATURE builder: Spore-style non-humanoid rig -- spine + attachable symmetric limbs + constraints (creature, creature_pose, quadruped_spec)
+
+User: for non-humanoid organic lifeforms, work like Spore, and impose joint constraints the best we can. RULE 0:
+procedural-creature / spine-with-limbs / part-attachment / spore-editor ALL GAP; humanoid is the closest. Built
+holographic_creature GENERALISING the humanoid (reuses _bone_sdf, _muscle_belly, _segment_radius, solve_ik_limited,
+the default_body morph block).
+
+BUILT Creature(spec): a declarative body-plan spec (deterministic, serialisable, /invoke-able) -> a spine chain (nodes
+s0..sN along an axis, optional arch `curve`) with LIMBS attached at fractional positions `at` in [0,1], each a
+segmented chain in a direction, with BILATERAL SYMMETRY (mirror=True adds the x-mirrored twin, Spore-style). skin() =
+morph-aware union of spine + limb capsules + optional head sphere (meshes + emits Shadertoy). pose_limb/pose = per-limb
+CONSTRAINED IK (solve_ik_limited) with the limb's joint limits, tightened by muscle/fat like the humanoid.
+
+JOINT CONSTRAINTS "the best we can" (honest framing kept loud): we can't know an arbitrary creature's anatomy, so we
+impose GENERIC ORGANIC DEFAULTS -- each limb MOUNT is a cone (ball joint, default 70deg), interior joints are auto-
+plane HINGES that flex one way only (no hyperextension, default cap 140deg), tip free. Overridable per limb
+(cone_deg/hinge_deg). NOT a claim of species-correct anatomy.
+
+MEASURED: quadruped_spec builds a spine + 4 legs (2 mirrored pairs) + head, meshes (3644 faces) + emits Shadertoy;
+mirrored legs are exactly x-symmetric; constrained IK poses a leg keeping bone lengths and flex in [0,140]; muscle
+thickens the body; arbitrary plans work (hexapod spec -> 6 legs; a 6-limb non-mirrored tentacled thing builds). Faculties
+creature (create/emit ->sdf), creature_pose (build+pose+skin one call), quadruped_spec (starter). 7/7 discoverable. CI
+pins green. 298 capabilities. Deliverables: creature_demo.png (quadruped|hexapod|tentacled), creature_quadruped.frag.
+
+KEPT NEGATIVES: generic organic limits not species anatomy; angle limits only, NO self-collision (limb can pass through
+body -- inherited from solve_ik_limited); bilateral symmetry only (radial = scoped); no procedural gait/animation and no
+feature-parts (mouths/eyes) -- structural rig only, scoped. SCOPED NEXT: procedural gait over creature_pose per frame
+(transport scrubs frames), feature-parts, self-collision, radial symmetry.
+
+## QUANTUM ARC: complex-wavefunction stack (Schrodinger split-operator, current, dot, Aharonov-Bohm)
+
+Merged into main 2026-07-12. Reviewed an external plan to add quantum capabilities; Rule 0 confirmed a genuine gap
+(find_capability on "schrodinger equation solver", "complex wavefunction", "probability current", "aharonov bohm",
+"interferometer" returned only classical fallbacks; the only 1j in simulation_and_physics was the FFT signal
+predictor). BUILT the full stack as five new family modules + one integration test, all wired.
+
+Merge delta: main 5072 -> 5077 collected. All three wiring audits clean (0 no-docstring / 0 catalog gaps / 0
+skill-lint). 9 faculties + 6 catalog entries, every one 5/5 stranger-phrasing discoverable. HTTP /invoke round-trip
+proven (aharonov_bohm_phase returns a clean JSON float). unified.py is over the 1 MB codeedit limit, so faculty
+edits were verified with py_compile (recorded constraint), edited in binary to preserve LF endings additively. Merge
+was surgical: the 5 new modules + laplacian (only-my-additions, deps present) copied in; faculty + catalog blocks
+INSERTED into main's current unified.py/catalog.py at stable anchors (main had diverged, so no whole-file copy).
+
+Modules (all holographic/simulation_and_physics/):
+  * holographic_quantum_field.QuantumField -- complex psi grid; gaussian_packet / set_potential /
+    set_vector_potential / probability_density / normalize / expectation_momentum.
+  * holographic_schrodinger.SplitStepSchrodinger -- split-operator (Strang) TDSE; unitary; Peierls minimal coupling;
+    optional absorbing sponge; free_packet_center baseline (public, not test-only).
+  * holographic_probability_current -- probability_current / velocity_field / divergence / circulation.
+  * holographic_quantum_dot -- gaussian_well / barrier_wall / measure_transmission / breit_wigner_dip.
+  * holographic_quantum_scene -- solenoid_vector_potential / loop_integral_A / two_slit / measure_two_arm_phase /
+    ab_phase_shift.
+
+GENERALIZATION ON CONTACT (the tech pushed back into the stack, not siloed in quantum):
+  * holographic_laplacian.laplacian is now COMPLEX-SAFE (was np.asarray(field,float), silently dropping the phase);
+    the REAL path is byte-identical (pinned in the selftest). Available to every caller, not just quantum.
+  * Added holographic_laplacian.gradient (central difference, same bc menu) -- shared by momentum, current, divergence.
+  * Added holographic_laplacian.free_schrodinger_transfer -- the free-particle kinetic propagator exp(-i hbar|k|^2 t/2m),
+    recognised as the ANALYTIC CONTINUATION of diffusion_transfer (heat's exp(-alpha|k|^2 t) with alpha -> i hbar/2m).
+    Same diagonal-in-Fourier structure, but |transfer|==1 (unitary) -- this is WHY the solver is spectral, and the
+    two sit side by side in the module so the kinship is on the page.
+  * SIDEWAYS reuse: the probability current's velocity_field feeds the EXISTING advect_field (holographic_fields.
+    advect); the cross-faculty integration test proves a tracer is carried downstream by the quantum flow (the
+    "shared kernel is not a shared manifold" seam, checked live).
+
+KEPT NEGATIVES (loud, so no future session reinvents them):
+  * Explicit Euler FDTD for the TDSE is NON-UNITARY -- measured: the norm drifts in 20 steps and blows up >1.5x at
+    200 (dt=0.1). That is the recorded reason the solver is split-operator. Pinned in the schrodinger selftest.
+  * The minimal-coupling CROSS-TERM expansion (grad - iqA/hbar)^2 via gradient() was rejected: the two cross terms
+    don't share an eigenbasis, so it breaks unitarity at O(dt). We use the Peierls position-phase instead.
+  * Do NOT subclass QuantumField from WavePacketField: that class is real-amplitude PARTICLE packets on a water
+    surface with omega=sqrt(g|k|); this is a GRID complex field with omega=hbar|k|^2/2m. Different dispersion,
+    nothing shared but a 3-line envelope.
+  * The quantum dot's "hand-inserted energy-dependent phase shift delta(E)" option (from the external plan) is
+    REJECTED as painting the answer on. The dot is a real potential well/barrier and the transmission dip/tunnelling
+    is MEASURED against a no-dot baseline (barrier removes >10% at low energy, ~0 at high E -- energy-dependent).
+    Breit-Wigner/Fano forms appear ONLY as reference curves, never as the mechanism. A full Fano ASYMMETRY needs a
+    double-barrier cavity -- declared as a later refinement, NOT claimed.
+  * Transmission by "snapshot density beyond the cut" was tried and is WRONG for a fast packet that already left
+    (gave 0.0006); replaced by accumulated FLUX through the cut plane (reuses probability_current).
+  * The AB two-arm phase had two real bugs kept as WHY comments: (a) an axis-pairing swap (x-component paired with
+    the y-step) that zeroed the loop integral; (b) a spurious *dx factor that rescaled the flux by dx (0.3 -> 0.06).
+    The gauge-invariance test uses a CONSTANT-gradient gauge (exact loop integral 0) because a high-curvature chi is
+    unresolvable by the nearest-cell loop integrator.
+  * The test vortex must be a SINGLE-VALUED field ((x-cx)+i(y-cy)), not arctan2 -- the 2pi branch cut injects a
+    spurious FD-gradient spike and corrupts the circulation.
+
+MEASURED CONTRACTS (the honest numbers each selftest pins):
+  * split-operator norm conserved to 1e-12 over 500 steps; free packet centre matches the exact spectral group
+    velocity hbar*k0/(m*dx^2) cells/time with NO lattice dispersion error (measured 60.00 vs 60.0); a stationary
+    packet disperses (width +>5%).
+  * plane-wave current = hbar*sin(k)/(m*dx)|psi|^2 exact to 1e-10 (the finite-difference contract, sin(k) not k).
+  * discrete continuity d|psi|^2/dt + div j = 0 holds to ~8% of the flow and DECREASES with resolution (0.084 ->
+    0.048 when dx halved) -- not machine-zero because the solver is spectral and the current is FD (honest, on record).
+  * FLAGSHIP: the Aharonov-Bohm two-arm phase = q*Phi/hbar to <0.15 rad across a flux sweep; gauge-invariant.
+  * two-slit end-to-end produces real interference downstream (6 fringe extrema, full contrast).
+
+ON THE HORIZON (declared, not built): double-barrier resonant cavity for a true Fano lineshape; Crank-Nicolson as
+an implicit alternative (needs a complex linear solve -- check if the CG faculty generalises); a build_quantum_
+interferometer ring scene that runs the full scattering (the AB invariant is currently measured via the direct
+line integral, which IS the physics the solver reproduces but is cheaper/cleaner for a selftest); VSA encoding of
+psi/j (Q8, deferred until it answers a real question with a baseline).
+
+
+====================================================================================================
+## SESSION: Zig codegen (Z1-Z6) + code<->English arc (C1-C7) -- merged from a parallel branch
+====================================================================================================
+## Zig dialect (Z1) + zig-cc backstop (Z6) -- fifth/sixth rows in the emit table, EXECUTED
+
+BUILT: `zig_f64` / `zig_f32` dialects in holographic_emit (table rows + one additive mechanism: an INTRINSICS entry
+containing "{args}" is a template, because Zig's pow is type-parameterized -- std.math.pow(T, a, b) -- and a bare
+name cannot express it; no pre-existing entry contains braces, so every old dialect emits byte-identically).
+`run_zig`/`validate_zig` compile `-O ReleaseSafe` via the `ziglang` PyPI wheel and RUN on the same inputs as the
+Python original -- the same executed bar as run_c. `zig_available()` gates it: OPT-IN accelerator, numba's exact
+contract, every test passes without it and its absence is printed loudly, never silently. Z6: run_c falls back to
+`zig cc` when no system compiler exists, so one pip install gives the C validation path on any machine.
+
+MEASURED (round-box SDF, 200 random inputs): zig_f64 BIT-IDENTICAL (max_abs 0.0); zig_f32 max_abs 7.0e-07 /
+max_rel 1.6e-06 -- f32 epsilon scale, measured not chosen. Full HTTP round-trip proven: POST /invoke
+validate_kernel with dialect=zig_f64 returns bit_identical=true through holographic_service.
+
+KEPT NEGATIVES (loud):
+- KN4: Zig REFUSES unused locals/params at COMPILE time. A dead assignment emits fine but will not build; we do
+  not suppress with `_ = x;` -- the compiler is right to name the smell.
+- KN5: `-O ReleaseFast` licenses float reassociation -> NOT the deterministic mode. ReleaseSafe is.
+- KN6: **std.math.pow is not libm pow** -- measured 1-ulp gap (4.4e-16 abs on pow(1.3, 2.7)). zig_f64 bit-identity
+  is a property of the BUILTIN intrinsics (@sqrt/@sin/@cos/@exp/@log/@abs/@min/@max) only; pow kernels are judged
+  at f64-ulp tolerance, stated.
+- Premise correction on record: Zig is a CPU-native target, NOT a GPU language. The GPU path remains the WGSL
+  dialect; Zig covers the no-GPU native sub-process case. Backlog Z3 gates all further Zig work on a measured
+  regime map vs the NumPy baseline -- no measured win over NumPy(+numba), no Z4/Z5.
+
+WIRING: emit_kernel covers the new dialects for free (table-driven); validate_kernel PARAMETERIZED (not a sibling)
+to route zig_* -> validate_zig. Catalog entry renamed to "Dialect emitters (WGSL / C / JS / Zig from the Python
+kernel)" with executed-bar description + 6 new aliases; discoverability 5/5 stranger phrasings. skill_lint
+_DOES_BUDGET entry renamed in step (budget did not grow). Audits: reachability 0 / catalog_gaps 0 / skill_lint 0.
+Test delta: +2 executed assertions inside holographic_emit._selftest (zig f64 bit-identity, zig f32 epsilon bound),
+skip-loudly when the wheel is absent.
+
+
+## Zig batch harness (Z2) + honest regime map (Z3) -- native sub-processes, measured not mythologized
+
+BUILT: holographic_zigrun -- a scalar kernel compiles ONCE to a shared library (`zig build-lib -dynamic`,
+content-addressed by hashlib.sha256 of source+opt+toolchain; a killed compile can never leave a half .so thanks to
+write-temp-then-rename) and is batch-called via ctypes on SoA NumPy buffers: zero per-call process cost, and Zig's
+version-churning std I/O is avoided entirely (export fn + C ABI is the stable surface). SIMD variant: new
+`zigv_f64`/`zigv_f32` dialect rows in the SHARED emit table (anti-silo) with a `const_fmt` splat mechanism --
+Zig refuses mixed vector/scalar arithmetic, so constants emit as @as(V, @splat(x)) -- and `pow` deliberately ABSENT
+for the vector dialects (std.math.pow is scalar-only; the emitter now refuses a missing intrinsic BY NAME instead
+of KeyError-ing). The SIMD tail splats scalars through the SAME vector kernel: one code path, nothing to drift.
+
+MEASURED (Z3, round-box SDF, 7 params, mean+-sd of 5, baseline = same kernel VECTORIZED in NumPy):
+  n=1e3: zig f64 2.0x (err 0) / simd f32 W=8 1.6x  |  n=1e5: 3.3x / 5.1x  |  n=1e6: 1.9x / 1.6x
+Verdict: a modest REAL 2-5x with a proper regime shape -- pass fusion wins while the working set fits cache,
+compresses to ~2x once DRAM is the bottleneck.
+
+KEPT NEGATIVES (loud):
+- **The first written estimate (10-40x) was WRONG** and stood in a docstring for one commit before measurement
+  corrected it. It is on record as wrong. Believe measurement over narrative -- again.
+- zig timings INCLUDE a per-call np.concatenate SoA copy; pre-packed input is a NAMED lever, not silently applied.
+- f32 SIMD is not like-for-like precision (half the traffic); the same-precision f64 column also wins, smaller.
+- First call pays ~1-2 s of compiler (then content-hash cached ~0): one-shot small-n is a LOSS. Z5's dispatcher
+  must respect the amortization, not hide it.
+- Backlog gate Z3 -> Z4/Z5: PASSED, but on a 2-5x basis. Z5's dispatch policy should be sized to that, not to a
+  fantasy: worth it for repeated medium-n kernel evaluation (SDF field sampling, per-pixel loops), not a general
+  NumPy replacement.
+
+WIRING: mind.zig_batch_eval + mind.zig_regime_map (thin, delegating; refuse loudly without the wheel). HTTP
+/invoke round-trip proven for zig_batch_eval. Catalog: "Native batch kernels (Zig shared library, on the fly)"
+with 10 aliases, discoverability 5/5, does-field kept under the 600-char lint cap (full story in the module
+docstring, where prose belongs). Selftest contracts: safe-f64 batch BIT-IDENTICAL to NumPy over prime n=10007
+(forces the SIMD tail), ReleaseFast reassociation delta measured (0 here) and bounded, cache identity asserted
+(same source+opt -> same .so, different opt -> different). Audits 0/0/0; targeted tests 83 passed.
+
+
+## Zig CPU raymarcher (Z4) -- one kernel, two runtimes, BIT-IDENTICAL, executed
+
+BUILT: holographic_zigmarch. The scene SDF is ONE Python text (iq's exact round-box form + sphere + floor),
+projected to zig_f64 by the shared dialect table; the ONLY dual implementation is the five-op march loop,
+mirrored op-for-op from sphere_trace's exact path (relax=1.0). Why bit-identity is a fair claim and not luck:
+NumPy does not contract mul+add and Zig's default float mode is strict (no FMA without @mulAdd), so the same
+doubles see the same roundings. Rays and shading are SHARED Python (canonical sdf_normal + lambert + sky) applied
+to both march outputs -- a frame pixel can differ only if (hit, t) differed, so the frame diff inherits the march
+claim rather than being a second experiment.
+
+MEASURED (384x288 = 110k rays, 96 steps): t max |delta| 0.0, hit masks identical, PPM frames BYTE-IDENTICAL.
+Speed on the same rays: sphere_trace 0.165 s, zig safe 0.044 s (3.8x), zig fast 0.043 s -- safe==fast, so
+DETERMINISM IS FREE for this workload; there is no reason to ever trade it. Pass fusion beat the Python marcher's
+active-set shrinking ON THIS SCENE; the verdict is per-scene and stated as such.
+
+KEPT NEGATIVES (loud):
+- **f32 marching is a DIFFERENT PROGRAM, not a lower-precision one.** A 1-ulp distance difference at the
+  `d < surf_eps` branch changes the ray's step COUNT; a branch divergence has no epsilon. The selftest MEASURES
+  (hit flips: 0/3072 on the demo scene; t delta on agreeing rays 5.9e-05 -- ~100x the single-eval f32 error,
+  which is exactly what 96 accumulated steps do) and refuses to assert a tolerance for a branched quantity. Same
+  lesson as the engine's tie-sensitive creature trajectories.
+- The march template's .format() must never see the emitted kernel (Zig braces); caught by the selftest on first
+  run and fixed by formatting the template alone. Trap class: templating around emitted code.
+
+WIRING: mind.zig_march_compare (delegating; DEMO_SCENE default). Catalog "One kernel, two runtimes: Zig
+raymarcher, bit-identical" with 8 aliases, discoverability 5/5, under the 600-char cap. Audits 0/0/0. Targeted
+tests 90 passed (incl. test_holographic_raymarch untouched-behavior check). Demo frames written (PPM via stdlib
+in-core; PNG conversion done outside core). W19 note: this IS the one-kernel-N-runtimes demo pattern; the
+remaining W19 surfaces (WGSL/JS) can reuse render_compare's shared-shading design verbatim.
+
+
+## Backend dispatcher (Z5) -- the Zig arc closed; and a Rule-0 lesson banked on Z4
+
+RULE-0 CATCH: Z4 (Zig raymarcher, frame-diff vs Python) ALREADY EXISTED as holographic_zigmarch -- selftest green,
+f64 march bit-identical, frames byte-identical, f32 branch-divergence measured (a branched quantity gets a
+measurement, not a tolerance). The backlog-time audit missed it because it searched codegen vocabulary ("zig code
+generation") and not the canonical primitive's ("raymarch", "sphere trace") -- the exact shallow-Rule-0 failure the
+previous NOTES entry warned about. Verified instead of rebuilt; zero new code for Z4.
+
+BUILT (Z5): holographic_nativedispatch -- KernelDispatcher routes each call to numpy / zig f64 / zig simd f32.
+Policy sized to Z3's measured reality, auditably small (_choose is ~15 lines):
+  - Compiler WITHHELD until the 2nd qualifying call (warmup_calls=2): a one-shot call can never amortize ~1-2 s of
+    compile, so the dispatcher refuses to spend it on one. Content-hash cache makes later sessions' compile ~free.
+  - mode='safe' admits only bit-identical backends -- asserted: results bit-EQUAL to numpy regardless of backend.
+  - mode='fast' admits simd f32 with its error RECORDED in every decision (measured 8.2e-07 on the round box).
+  - calibrate() measures THIS kernel's crossover with mean+spread kept; "numpy never beaten" is a valid verdict
+    the policy then respects.
+  - Every decision -> audit log {n, backend, reason}; calibration does NOT pollute the log (pinned by test).
+  - Without the wheel the dispatcher still WORKS: numpy always, says so in the log. Absence degrades speed, never
+    capability.
+Registry (get_dispatcher, sha256-keyed) shares one dispatcher per (kernel, mode) so the amortization policy works
+across HTTP /invoke calls -- proven: call 1 over HTTP -> numpy "qualifying 1/2", call 2 -> zig_f64.
+
+MEASURED KEPT NEGATIVE (new): the numpy/native crossover is PER-KERNEL, a function of the kernel's op count. The
+trivial 2-op kernel (sqrt(px*px)-r) calibrates to native_from_n=None -- numpy is NEVER beaten on it, because pass
+fusion needs passes to fuse and the SoA copy taxes native. The 20-op round box wins 2-5x. State what a number is a
+function of: the speedup is a function of expression-tree depth, not of n alone.
+
+WIRING: mind.dispatch_kernel_eval + mind.dispatch_kernel_calibrate (delegating). Catalog "Backend dispatcher
+(numpy / zig native, chosen per call)", 8 aliases, discoverability 5/5, does-field under the 600-char cap (took
+two trims; the cap is doing its job). NOTE: holographic_unified.py crossed 1 MB and file_python_check's
+max_bytes=1e6 read cap now refuses it -- worked around with py_compile this session; raising the editor cap or
+splitting unified is a near-term item (ARCH-2 candidate). Audits 0/0/0; targeted tests 80 passed.
+
+Zig backlog state: Z1 done, Z2 done, Z3 done (gate passed at 2-5x), Z4 pre-existing+verified, Z5 done, Z6 done.
+Remaining honest scope: pre-packed SoA input (the named copy lever) and wiring the dispatcher under long-bake job
+lifecycle -- both small, both optional, both only worth it on demonstrated demand.
+
+
+## Native dispatcher (Z5) -- the Zig backlog closed, sized to measurement
+
+BUILT: AutoKernel + dispatch_policy in holographic_zigrun (extension, not a sibling). Policy as data: numpy until
+call-count amortizes the ~1-2 s compile AND n >= 4096 (below that the measured win is ~2x of ~30 us -- noise);
+then compile once (content-hash cached) and switch, IDENTITY-GATED: the first native call in safe f64 mode is
+checked bit-identical against numpy, and a mismatch refuses the substitution PERMANENTLY with the reason on the
+object (`.refused`). Every call appends to `.backend_log` -- the audit trail is part of the contract. Selftest
+pins the exact policy trace ["numpy","numpy","numpy","zig"] and result equality. mind.zig_dispatch_policy exposes
+the decision JSON-ably; it lives inside the existing Native-batch catalog entry (one workflow, one entry).
+
+KEPT NEGATIVE / DISCOVERED DEBT: holographic_unified.py crossed codeedit's 1 MB read cap (1,002,099 bytes) --
+file_python_check now refuses the engine's own central module. Filed as C7 in the new code<->English backlog;
+verification fell back to py_compile this session.
+
+ZIG BACKLOG VERDICT (Z1-Z6 complete): the honest arc went estimate(10-40x, WRONG) -> measured regime (2-5x, real,
+peaks n~1e5) -> raymarch demo where determinism costs nothing (safe==fast, bit-identical frames) -> a dispatcher
+sized to those numbers. GPU remains WGSL's job; Zig covers the native-CPU sub-process case, which is what the
+measurements support.
+
+NEW BACKLOG FILED: BACKLOG_code_english.md (C1-C7) -- code->English verbalizer (deterministic, layered,
+idiom-catalog purpose matching with 'not recognized' as a first-class answer), reverse parsers making the emit
+grammar bidirectional (round-trip byte-identity as the bar), constrained NL->kernel over registered forms, and
+honest unknown-language triage. Declared non-goals: no general NL->code, no intent narration, no LLM in core.
+
+
+## C7 fixed -- the read cap guards context, not correctness
+
+FIX: codeedit's 1 MB read cap now applies ONLY to the agent-facing read() (its one job: keep a megabyte of source
+out of a context window). python_check and read_lines read UNCAPPED (max_bytes=None), because their OUTPUT is tiny
+regardless of file size -- a syntax checker that refuses the repo's largest module had a hole exactly where the
+risk was largest. Additive: read()'s default is unchanged; None is the new opt-out for internal callers.
+
+REGRESSION TRAP: the codeedit selftest now writes a ~1.2 MB Python file and asserts python_check ok, read_lines
+slices, AND capped read still refuses -- all three sides of the distinction pinned.
+
+CANARY: reachability_audit gained a non-gating file-size census at >= 80% of the cap, so the next crossing is
+seen approaching instead of discovered by a tool refusal (which is how this one was found). Current watch list:
+holographic_unified.py at 100% -- which is also a standing nudge that the mega-module keeps growing; splitting it
+is not this fix's job but the canary keeps the number in view every audit run.
+
+Verified: file_python_check passes on holographic_unified.py itself; codeedit selftest green; audits 0/0/0.
+
+
+## Code -> English verbalizer (C1) + idiom catalog seed (C6 start) -- deterministic, layered, honest
+
+BUILT: holographic_codeverbal. Four labeled layers per function, each from a distinct static analysis:
+SIGNATURE (name/params/annotations/return), DATA FLOW (per-variable computed-from sources with call targets
+EXCLUDED -- in max(abs(x) - hx, 0.0) the sources are x and hx, max/abs are operations, and narrating them as
+inputs is a category error, caught by the selftest on first run), CONTROL FLOW (loop/branch/return-site census
+with early-exit count), and IDIOM -- the ONLY layer allowed to speak of purpose, and only on a
+codestructure.shape_key match of the blanked FunctionDef (names AND constants are identity slots, so iq's
+rounded box under any renaming and any half-extents still matches). Unmatched shapes yield the LITERAL sentence
+"Purpose: not recognized (no registered idiom matches this shape)." -- a first-class answer; guessed intent is
+the failure mode the module exists to refuse.
+
+DETERMINISM IS THE CONTRACT: same code, same sentences; the selftest asserts EXACT strings (signature, dataflow
+lines, census line, idiom line) so any drift in phrasing is a test failure, which is what makes the verbalizer
+usable INSIDE other tests. Catalog seeded with three idioms by example (iq rounded-box SDF, sphere SDF, lerp --
+citations per panel discipline); mind.register_code_idiom grows it additively and returns the shape key for
+immediate recognition asserts.
+
+KEPT NEGATIVES (loud):
+- Shape matching is EXACT on the blanked template: semantically identical code with reordered independent
+  statements is a different shape and honestly will not match. Canonical statement reordering is future work and
+  RISKY -- reordering float ops is not meaning-preserving (the ReleaseFast lesson, again).
+- The data-flow layer narrates per-assignment, not per-path: no CFG, so a variable reassigned in one branch is
+  described assignment-by-assignment. The census line tells the reader how many branches exist -- the honest cue.
+- DEMO_SCENE (the Z4 composite) correctly reports "not recognized": the catalog knows primitives, not
+  compositions. Recognizing COMPOSITIONS of idioms is exactly C3's parse direction -- filed, not fudged.
+
+WIRING: mind.explain_code + mind.register_code_idiom (thin, delegating). Catalog entry with 9 aliases,
+discoverability 5/5, under the 600-char lint cap (took three trims; the prose belongs in the module docstring
+and now lives there). Audits 0/0/0; 51 targeted tests green; docs regenerated (464 modules).
+
+
+## Reverse parsers + exact translation (C2) and 7-language explanation (C4) -- the emit grammar goes bidirectional
+
+BUILT: holographic_codeparse. Six scalar dialects (c_f64/c_f32/wgsl/js/zig_f64/zig_f32) parse back to the SAME IR
+the emitter walks -- a Python FunctionDef, reconstructed as TEXT and handed to ast.parse, so the IR is built by
+Python's own parser or not at all. Anti-silo: the reverse intrinsic maps are INVERTED from holographic_emit's
+tables at import (a dialect added there gains a reverse map here automatically); Zig's template pow is recognized
+by its call head with the type argument dropped; only signature/declaration line shapes are per-dialect code.
+One tokenizer + one precedence climber shared by all dialects -- precedence matters for HAND-WRITTEN input, not
+our fully-parenthesized exhaust, and the selftest exercises a real hand-written C kernel to prove it.
+
+THE BAR, EXECUTED: round-trip BYTE-IDENTITY over all 144 dialect pairs (24 self + 120 cross), per pair, none
+sampled: emit(parse(emit(k,d1)),d2) == emit(k,d2), over 4 kernels covering plain/suffixed/dotted/template
+intrinsic classes. translate() routes everything through the one IR -- no pairwise paths exist to drift.
+
+C4 CAME FREE, as the backlog predicted: dialect= on mind.explain_code parses first, then the ONE verbalizer
+speaks. Demonstrated end-to-end: C source -> translate to Zig -> explain, with the lerp idiom RECOGNIZED through
+the round-trip (parentheses do not survive into the AST, so shape identity holds across re-parenthesization).
+
+KEPT NEGATIVES (loud):
+- zigv_* is NOT parsed: the vector form is exhaust DERIVED from the scalar IR by zigrun; parsing it would be
+  parsing our own output, and the scalar IR is the canonical form. Refused by name.
+- The grammar is the emit grammar. Loops, ints, unknown calls, foreign signatures: refused by name (K10) -- a
+  parser that guesses produces plausible wrong IR, which is worse than no IR.
+- First-run trap: Zig's @-prefixed builtins broke the tokenizer (name pattern lacked @); fixed, and the selftest
+  covers every intrinsic class since.
+
+WIRING: mind.translate_kernel (new) + dialect= parameter on mind.explain_code (parameterized, not a sibling).
+Catalog entry with 8 aliases, 5/5 discoverability, under the lint cap (two trims). Audits 0/0/0; targeted tests
+green after trim; docs regenerated. Backlog state: C1 done, C2 done, C4 done, C7 done; next C6 (catalog growth,
+ongoing) and C3 (constrained NL -> kernel -- the composite-recognition gap the DEMO_SCENE 'not recognized' answer
+points straight at); C5 (unknown-language triage) remains.
+
+
+## Optional-dependency polish: [zig] and [images] extras, accelerator_report, PIL-routed image saves
+
+BUILT (all additive, none required -- the numba contract throughout):
+- setup.py extras: NEW "zig": ["ziglang"] (with the measured pitch in the comment: 2-5x batch kernels, 3.8x
+  raymarch, bit-identical in safe mode, one ~45 MB wheel = whole toolchain, also backstops C validation via
+  `zig cc`) and NEW "images": ["pillow"] (image I/O without dragging in Flask -- a headless subset of [ui]).
+  ziglang added to [all] (it is a portable pure wheel, unlike CuPy which stays out for its CUDA coupling).
+  README extras block updated to match.
+- mind.accelerator_report() (holographic_backend.accelerator_report): every optional dep in one report --
+  installed?, version (ziglang's probed via `python -m ziglang version`), WHAT IT UNLOCKS with the measured
+  numbers ("faster" without a number is advertising), and the exact pip command. NumPy is the only row marked
+  required. This is the awareness surface: an agent or a person asks "how do I speed this up" / "install zig" /
+  "save a jpg" and lands here (aliases cover those phrasings; discoverability 5/5).
+- mind.save_render now routes by extension via NEW holographic_render.save_image: .png stays the stdlib encoder
+  (deterministic, zero-dependency, ON PURPOSE -- the deterministic path must never grow a dependency); .jpg/
+  .webp/.bmp use Pillow when installed, otherwise a RuntimeError NAMING the install command -- never a bare
+  ImportError, never a silent no-op. Selftest trap covers all three sides (png magic bytes, jpg save when PIL
+  present, refusal message content when absent).
+
+KEPT NEGATIVES / boundaries (loud):
+- PNG deliberately does NOT use PIL even when PIL is present: the stdlib encoder is deterministic and pinned;
+  swapping encoders on dependency presence would make output depend on the environment -- the exact failure mode
+  the determinism constraint exists to prevent. PIL is for formats stdlib cannot write, nothing else.
+- CuPy stays out of [all] (CUDA-version coupling, unchanged policy). ziglang goes IN: pure portable wheel.
+- lossy formats are a presentation choice, not an engine output; nothing in core round-trips through them.
+
+Audits 0/0/0; render selftest green with the new trap; 64 targeted tests pass; docs regenerated.
+
+
+## Constrained English -> kernel (C3) -- the describe/emit/explain loop closes
+
+BUILT: holographic_codecompose. A CONTROLLED VOCABULARY of registered parametric SDF forms (sphere, rounded box,
+plane -- iq's exact formulae), each of which emits its own Python kernel body given named params, composed with a
+three-op boolean grammar (union=min, intersect=max, subtract=max(a,-b)), left-folded. describe_to_kernel(text)
+matches clauses against the forms, fills params by role words (radius/at/size/height), composes, and returns a
+Python kernel that holographic_emit projects to any dialect. The whole arc now runs one call each direction:
+Z4's DEMO_SCENE, described in plain English, regenerates as a valid kernel and emits to Zig; and any generated
+kernel re-explains through holographic_codeverbal.
+
+This is explicitly NOT free-form NL->code (an LLM's job, out of scope, stated as loudly as holographic_lang states
+it): every kernel it makes is the REFERENCE implementation and is verifiable. It closes the loop C1 opened -- the
+DEMO_SCENE 'not recognized' answer was the primitive-vs-COMPOSITION gap, and composition is what this adds.
+
+KEPT NEGATIVES (loud):
+- Colour/material words are NOTED as ignored, never silently dropped -- an SDF kernel has no colour (that belongs
+  to mind.build_scene's SemanticScene surface, a different existing tool). "a red glass sphere" emits a sphere
+  with a "# NOTE: ignored: glass, red" line.
+- Unknown forms refused BY NAME ("no registered form for 'squircle'"), K10 discipline.
+- Only three boolean ops. Smooth-union/twist/repeat exist in the SDF pack as operators but are NOT wired into
+  this grammar yet -- named future work, not faked.
+- A composite kernel honestly re-explains as 'not recognized' by the codeverbal idiom layer: the idiom catalog
+  knows PRIMITIVES, not compositions. Recognizing compositions (matching a min() of two known shapes) is the
+  natural next idiom-layer extension -- filed, not fudged.
+- First-run trap: a lone hyphen from a negative literal was mis-flagged as an ignored 'word'; the ignored-word
+  filter now requires >=2 alpha chars. Pinned by the DEMO_SCENE regeneration having NO spurious NOTE.
+
+WIRING: mind.kernel_from_description (with dialect= to emit directly) + mind.register_geometry_form (grow the
+vocabulary). Catalog entry, 8 aliases, 5/5 discoverability, under the lint cap. Audits 0/0/0; 80 targeted tests
+green; docs regenerated (466 modules). Backlog: C1 C2 C3 C4 C7 done; C5 (unknown-language triage) and C6
+(ongoing catalog growth -- and now composition-idiom recognition) remain.
+
+
+## Unknown-language triage (C5) -- honest observations, no comprehension claimed. Code<->English arc COMPLETE.
+
+BUILT: holographic_codetriage. For code in a language leCore has no parser for (codeparse covers only the emit
+dialects), the honest move is NOT to induce a grammar from one sample -- that is a hallucination with statistics
+stapled on. Instead it reports language-agnostic STRUCTURAL OBSERVATIONS, each checkable against the bytes and
+each LABELLED an observation: line/char/comment counts (by convention); identifiers split on camelCase/snake_case/
+acronym runs into the words a programmer chose and ranked by frequency (Deissenboeck-Pizka 2006 -- names are the
+densest clue in unfamiliar code); literal inventory; a nesting-depth + bracket-balance profile; and a WEAK
+language hint offered only with its surface-token evidence, never as a parse.
+
+DEMONSTRATED on Haskell and SQL (neither has a leCore parser): quicksort/pivot surfaced as the top identifier
+clues, "no confident surface-token match" reported honestly rather than a fabricated guess.
+
+WIRING: mind.triage_code(src, as_text=) + explain_code now FALLS BACK to triage on an unknown dialect OR an
+in-grammar dialect whose source is outside the kernel grammar -- one entry point, comprehension where we can
+parse, honest observation where we cannot, never a crash and never a guess.
+
+KEPT NEGATIVES (loud, in the payload and the report):
+- is_observation_not_explanation=True is a field in the output: the contract is machine-visible, not just prose.
+- comment/identifier/string detection is CONVENTION-based; a language outside those conventions has its comments
+  counted as code or its identifiers mis-sliced -- each observation ships with the convention it assumed.
+- the language hint is explicitly WEAK, pattern-matching surface tokens with the evidence attached so a human
+  overrules it instantly. A confident guess from surface tokens is the exact overreach the module refuses.
+
+CODE<->ENGLISH BACKLOG COMPLETE: C1 (verbalize) C2 (reverse parsers, 144-pair byte-identity) C3 (constrained
+English->kernel) C4 (7-language explain) C5 (unknown-language triage) C7 (read-cap fix) all done. The three
+directions the user asked for -- code->English, code<->code, English->code -- are all live, composable through
+the mind, and honest at every boundary (refuse/ignore/observe-not-explain). C6 (idiom catalog growth, incl.
+composition-idiom recognition) remains as ongoing work, not a discrete gap.
+
+Audits 0/0/0; 51 targeted tests green; docs regenerated (467 modules).
+
+
+## C6 composition recognition -- the describe->emit->explain loop closes for COMPOSITE scenes
+
+BUILT: a composition layer in holographic_codeverbal. The idiom layer matched whole-FunctionDef shapes only, so a
+min(box, sphere) -- a real scene -- read as 'not recognized'. Now: a second catalog (_PRIMITIVE_SHAPES) keyed on
+the shape of a single primitive's DISTANCE EXPRESSION (return subgraph, locals INLINED, names/constants blanked),
+and _recognize_composition walks the return's boolean tree (min=union, max=intersection, max(a,-b)=subtraction),
+matches each operand's inlined subgraph against that catalog, and describes it: 'a union of 3 primitives -- a
+rounded box, a sphere, a plane'. Same shape_key engine as the idiom layer; the only new idea is matching a
+SUB-EXPRESSION instead of the whole function, which is exactly what a composition is.
+
+THE LOOP NOW CLOSES END TO END: Z4's DEMO_SCENE, described in English (C3) -> emitted -> re-explained (C1)
+correctly reports 'a union of 3 primitives -- a rounded box, a sphere, a plane', not 'not recognized'. Subtraction
+and intersection recognized too.
+
+KEPT NEGATIVES (loud, pinned by the selftest):
+- A single primitive is NOT a composition (needs >= 2 operands) -- it falls through to the idiom layer, which is
+  where a bare sphere belongs.
+- ONE unrecognized operand collapses the WHOLE answer to 'not recognized' -- never a partial guess like 'a union
+  of a sphere and <something>'. Honest all-or-nothing, asserted exactly.
+- A negative plane height emits as py - -0.0 (a UnaryOp), a genuinely DIFFERENT AST shape from py - 0.0, so both
+  are registered. This is honest: they are different shapes and both are legitimately 'a plane'. (The alternative,
+  constant-folding -0.0 in the matcher, would start down the road of normalizing arithmetic -- the ReleaseFast
+  lesson says don't.)
+- Inlining is straight-line only (the kernel grammar); a reassigned local is last-write-wins, which the census
+  layer already flags as branchy. Stated.
+
+WIRING: mind.register_composition_primitive grows the catalog; explain_code surfaces the recognition automatically
+(no new entry point -- composition is a better answer from the SAME explain_code, not a sibling). Catalog updated,
++4 composition aliases, 5/5 discoverability, under the lint cap. Audits 0/0/0; 51 targeted tests green; docs
+regenerated. C6 is now a shipped capability, not just 'ongoing' -- the code<->English arc (C1-C7) is fully closed.
