@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import html
+import importlib
 import json
 from pathlib import Path
 import re
@@ -325,7 +326,7 @@ class LocalAgentCore:
     @staticmethod
     def _c_kernel_status() -> Dict[str, Any]:
         try:
-            import holographic_c
+            holographic_c = importlib.import_module("holographic_c")
 
             return {
                 "available": bool(holographic_c.available()),
