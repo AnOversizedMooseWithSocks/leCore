@@ -75,16 +75,34 @@ def cycle_laplacian(n):
     return graph_laplacian(A)
 
 
-def knn_adjacency(points, k):
+def knn_adjacency(points, k, forest=None):
     """A symmetric k-nearest-neighbour adjacency on a point cloud -- the graph that turns sampled manifold
-    points into a connectivity the Laplacian can read. Mutual-or (a<->b if EITHER is in the other's kNN)."""
+    points into a connectivity the Laplacian can read. Mutual-or (a<->b if EITHER is in the other's kNN).
+
+    `forest` (a HoloForest already built over `points`) takes the neighbour search sub-linearly through its
+    `recall_k` -- the SAME index-reuse chart/graphsignal use, and the right one for the HIGH-DIMENSIONAL regime
+    this is actually called in (VSA vectors via simgraph). Default None = the dense O(N^2) distance sort, kept
+    byte-identical for the small-cloud / low-D case. MEASURED NEGATIVE (see NOTES G2): wiring this to
+    holographic_spatial.SpatialGrid instead was rejected -- a uniform grid is pathological above ~3 D (a single
+    high-D grid.knn query did not finish in 60 s; the ring search explodes over near-empty cells), and even in its
+    designed low-D regime it lost to the vectorised dense scan until N was very large (0.16x at N=300 D=2, ~tie at
+    N=4000 D=3). The forest is the correct shared index HERE; the grid is a different index for a different
+    (low-D geometric) regime, not a unification target."""
     P = np.asarray(points, float)
     n = len(P)
     if n < 2:
         return np.zeros((n, n))
-    D = np.sqrt(np.maximum(((P[:, None, :] - P[None, :, :]) ** 2).sum(-1), 0.0))
-    A = np.zeros((n, n))
     kk = min(k, n - 1)
+    A = np.zeros((n, n))
+    if forest is not None:
+        # sub-linear neighbours via the existing index (skip self, which recall_k may return); high-D regime.
+        for i in range(n):
+            idx, _ = forest.recall_k(P[i], k=kk + 1)
+            for j in idx:
+                if j != i:
+                    A[i, j] = 1.0
+        return np.maximum(A, A.T)
+    D = np.sqrt(np.maximum(((P[:, None, :] - P[None, :, :]) ** 2).sum(-1), 0.0))
     for i in range(n):
         nb = np.argsort(D[i])[1:kk + 1]                     # skip self
         A[i, nb] = 1.0

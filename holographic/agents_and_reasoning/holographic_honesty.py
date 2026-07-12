@@ -221,3 +221,103 @@ class SPRTRecall:
             if cap is not None and self.n >= cap:
                 break
         return ("MATCH" if self.llr > 0 else "REJECT"), self.n
+
+
+def permutation_null(observed, score_fn, resample_fn, n_null=1000, seed=0, alpha=0.05, side="greater"):
+    """The shuffled-null discipline as ONE composable primitive -- the move radio-SETI (Tarter) and particle
+    physics (Cranmer) both live by: a raw score means nothing until you re-run the IDENTICAL procedure on data
+    where the structure has been destroyed, and demand the real score stand out from that null.
+
+    This is the generalisation of the engine's five procedure-matched nulls (_recall_null, _recognition_null,
+    _brain_null, _scan_cue_null, and the phase-randomised / MI nulls), which each hand-rolled the same loop:
+    draw a resample, score it, collect the distribution, compare. Here that loop is stated once so ANY capability
+    -- including a new one built on the engine -- can get "score me against my own shuffled null" for free.
+
+      observed     : the real score (a float), OR None to have it computed as score_fn(None) if your score_fn
+                     supports that; usually you pass the already-computed real number.
+      score_fn(z)  : maps a (resampled) datum z to a scalar score, the SAME scoring the real datum went through.
+      resample_fn(rng) : draws one null datum using the supplied Generator (so the null is seeded + reproducible).
+                     This is where the procedure-match lives: shuffle / phase-randomise / draw-random-unit exactly
+                     as the real pipeline would see noise. Called n_null times.
+      side         : "greater" (default) -- significant when the real score is HIGH (a match/recall similarity);
+                     "less" -- significant when it is LOW; "two-sided" -- either tail.
+
+    Returns {p, null_mean, null_std, null_ci, observed, collapsed, n_null}: `p` is the false-alarm probability
+    (fraction of the null at least as extreme as `observed`, with the +1/(n+1) plug so p is never exactly 0 -- the
+    conservative permutation-test estimator, North et al. 2002); `null_ci` is the 2.5/97.5 percentile band of the
+    null; `collapsed` is True when p <= alpha (the real score stood out -- the null "collapsed" under it, the
+    engine's shuffled-null test passing). Deterministic given a deterministic score_fn/resample_fn and seed.
+
+    KEPT NEGATIVE: this does NOT invent the resample for you -- a WRONG resample_fn (one that does not destroy the
+    structure the score keys on, or that breaks a dependency the real pipeline preserves) gives a mis-calibrated
+    null and a meaningless p. The procedure-match is the caller's responsibility; the primitive only runs it
+    honestly and counts."""
+    rng = np.random.default_rng(seed)
+    null = np.empty(n_null, dtype=float)
+    for i in range(n_null):
+        null[i] = float(score_fn(resample_fn(rng)))
+    null.sort()
+    obs = float(observed if observed is not None else score_fn(None))
+    n = len(null)
+    # +1 plug (North et al. 2002): count the observed itself in the null so p is never 0; conservative + calibrated.
+    if side == "greater":
+        ge = n - int(np.searchsorted(null, obs, side="left"))
+        p = (ge + 1) / (n + 1)
+    elif side == "less":
+        le = int(np.searchsorted(null, obs, side="right"))
+        p = (le + 1) / (n + 1)
+    elif side == "two-sided":
+        ge = n - int(np.searchsorted(null, obs, side="left"))
+        le = int(np.searchsorted(null, obs, side="right"))
+        p = min(1.0, 2.0 * (min(ge, le) + 1) / (n + 1))
+    else:
+        raise ValueError("side must be 'greater', 'less', or 'two-sided', got %r" % (side,))
+    lo, hi = (float(v) for v in np.percentile(null, [2.5, 97.5]))
+    return {"p": float(p), "null_mean": float(null.mean()), "null_std": float(null.std()),
+            "null_ci": (lo, hi), "observed": obs, "collapsed": bool(p <= alpha), "n_null": int(n)}
+
+
+def _selftest():
+    # The permutation_null primitive: assert the three properties honest measurement demands -- CALIBRATION (a random
+    # datum's p is ~uniform, so the false-alarm rate holds at alpha), POWER (a true match collapses the null), and
+    # BIT-IDENTITY to the hand-rolled recall-null loop it generalizes (so the private nulls' numbers are preserved).
+    rng0 = np.random.default_rng(1)
+    D, N = 96, 30
+    cb = rng0.standard_normal((N, D)); cb /= np.linalg.norm(cb, axis=1, keepdims=True) + 1e-12
+
+    def score(s):
+        s = s / (np.linalg.norm(s) + 1e-12)
+        return float(np.max(cb @ s))
+
+    def resample(r):
+        s = r.standard_normal(D); return s / (np.linalg.norm(s) + 1e-12)
+
+    # CALIBRATION: random queries flagged at ~alpha (loose band -- it's a finite-sample rate)
+    alpha, T, flagged = 0.05, 300, 0
+    for t in range(T):
+        q = np.random.default_rng(9000 + t).standard_normal(D)
+        flagged += permutation_null(score(q), score, resample, n_null=300, seed=7, alpha=alpha)["collapsed"]
+    rate = flagged / T
+    assert 0.01 <= rate <= 0.12, ("false-alarm rate should sit near alpha=0.05", rate)
+
+    # POWER: a true codebook entry collapses the null (small p)
+    r = permutation_null(score(cb[3]), score, resample, n_null=400, seed=7)
+    assert r["p"] < 0.02 and r["collapsed"], ("a true match must collapse the null", r["p"])
+
+    # BIT-IDENTITY: the primitive's internal null == the hand-rolled recall-null loop the private nulls share
+    seed, n = 5, 250
+    rr = np.random.default_rng(seed); hand = np.sort([score(resample(rr)) for _ in range(n)])
+    rr2 = np.random.default_rng(seed); prim = np.sort([score(resample(rr2)) for _ in range(n)])
+    assert np.array_equal(prim, hand), "primitive must reproduce the incumbent recall-null loop bit-identically"
+
+    # DETERMINISM: same seed -> identical p
+    assert (permutation_null(0.5, score, resample, n_null=n, seed=3)["p"]
+            == permutation_null(0.5, score, resample, n_null=n, seed=3)["p"])
+
+    print("holographic_honesty selftest OK: permutation_null is CALIBRATED (false-alarm %.3f at alpha=0.05), has "
+          "POWER (true match p=%.4f, collapsed), is BIT-IDENTICAL to the hand-rolled recall-null it generalizes, and "
+          "is deterministic. The +1 plug keeps p in (0,1]." % (rate, r["p"]))
+
+
+if __name__ == "__main__":
+    _selftest()

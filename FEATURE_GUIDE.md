@@ -480,6 +480,97 @@ print("fn " in str(mind.translate_kernel(k, "python", "zig_f64")))     # True
 # Zig native kernels (zig_batch_eval) are OPT-IN like numba -- they raise a clear error without the ziglang wheel.
 ```
 
+## Building a game: the authoritative world shard
+
+Every ingredient of a game already lives in the engine (rigid bodies, CCD, spatial hashing, the
+distributed farm and bus, fork/merge worlds, durability). The `game_shard` faculty is the
+composition: an authoritative, **deterministic** fixed-tick world fed by an ordered player-command
+queue. Same command log, same sha256 digest -- deterministic lockstep verification for free.
+Clients pay only for what's near them (`snapshot(center, radius)`), sync with stateless
+`delta_since(baseline)` diffs, and a `region` box reports departing entities so a massive world
+can be sharded across the farm. `run_game_shard` is the same thing as one JSON-in/JSON-out call.
+
+```python
+import lecore
+m = lecore.UnifiedMind(dim=256, seed=0)
+shard = m.game_shard(seed=0, gravity=(0, -9.8, 0), region=((-50, -50, -50), (50, 50, 50)))
+shard.submit({"tick": 0, "player": "alice", "seq": 0, "op": "spawn", "id": 1, "pos": (0, 10, 0)})
+shard.submit({"tick": 0, "player": "bob",   "seq": 0, "op": "spawn", "id": 2, "pos": (0.4, 10.6, 0)})
+shard.submit({"tick": 5, "player": "alice", "seq": 1, "op": "impulse", "id": 1, "j": (3, 0, 0)})
+shard.step()
+base = shard.snapshot()
+for _ in range(29):
+    out = shard.step()
+print("tick", out["tick"], "digest", out["digest"][:12])
+print("alice sees", shard.snapshot(center=(0, 5, 0), radius=20)["ids"])
+print("moved since baseline:", [e["id"] for e in shard.delta_since(base)["moved"]])
+r = m.run_game_shard([{"tick": 0, "player": "a", "seq": 0, "op": "spawn", "id": 9, "pos": (0, 0, 0)}], ticks=3)
+r2 = m.run_game_shard([], ticks=3, state=r["state"])
+print("resumed to tick", r2["state"]["tick"])
+```
+
+### Scaling it: the sharded world
+
+`game_world` turns the single shard into a lazy grid of them -- cost tracks *occupied* cells, not
+world size. Entities that cross a cell boundary migrate deterministically (exact velocity and mass
+carried over), snapshots span the seams, and `tick(collect_only=True)` + `receive()` are the
+bus-transport pair for spreading shards across the distributed farm -- identical payloads either
+way.
+
+```python
+world = m.game_world(cell=4.0, dt=0.1, seed=0)
+world.spawn(1, (3.5, 1, 1), vel=(2, 0, 0))
+world.spawn(2, (1.0, 1, 1))
+migrated = []
+for _ in range(5):
+    out = world.tick()
+    migrated += out["migrated"]
+print("shards:", len(world.shards), "migrated:", migrated, "digest:", out["digest"][:12])
+print("seam-free AOI:", sorted(world.snapshot(center=(4, 1, 1), radius=6)["ids"]))
+```
+
+### Plugging into the distributed system (the layering)
+
+The distributed stack is the **data layer** -- the coordinator's own rule is that non-monoid
+feedback work (and a game tick is exactly that) runs *whole on one worker*; the bus moves
+messages; presence says who's alive. The game world is the **interaction layer**. `game_bus_host`
+is the entire handshake between them: each node owns a set of world cells and exchanges entity
+handoffs over per-cell bus topics. Local `MessageBus` and cross-machine `DistributedBus` are the
+same call -- swap the bus, keep the game.
+
+```python
+from holographic.scene_and_pipeline.holographic_distbus import MessageBus
+bus = MessageBus()
+wa, wb = m.game_world(cell=4.0, dt=0.1), m.game_world(cell=4.0, dt=0.1)
+node_a = m.game_bus_host(bus, wa, [(0, 0, 0)], world_id="demo")
+node_b = m.game_bus_host(bus, wb, [(1, 0, 0)], world_id="demo")
+wa.spawn(1, (3.5, 1, 1), vel=(2, 0, 0))
+for _ in range(6):
+    node_a.tick(); node_b.tick()
+print("entity 1 now lives on node B:", node_b.world.owner.get(1))
+```
+
+### Watching it from a browser (the three.js seam)
+
+`POST /game` creates a room and routes player commands; `GET /game/stream` is an SSE push of
+per-client **deltas** -- first event is the full area-of-interest as `added`, later events only
+what changed. That's the wire format a three.js client feeds straight into its scene graph:
+
+```js
+const es = new EventSource("/game/stream?world=demo&session=me&target_fps=30&cx=0&cy=0&cz=0&r=50");
+es.onmessage = (m) => {
+  const d = JSON.parse(m.data);
+  d.added.forEach(e => scene.add(makeSphere(e)));
+  d.moved.forEach(e => meshes[e.id].position.set(...e.pos));
+  d.removed.forEach(id => scene.remove(meshes[id]));
+};
+fetch("/game", {method: "POST", body: JSON.stringify({world: "demo",
+  cmds: [{player: "me", seq: 1, op: "impulse", id: 1, j: [5, 0, 0]}]})});
+```
+
+`advance=1` (default) makes the stream the world's designated clock; run extra viewers with
+`advance=0`. Start the service with `serve(threads=True)` -- an open stream must never block input.
+
 ## Where to look next
 
 - **`mind.find_capability("...")`** — ask the engine, in plain English, which call does what.

@@ -24,6 +24,17 @@ def test_capabilities_list_and_search():
     assert any("farm" in m["name"].lower() or "network" in m["name"].lower() for m in hit["matches"])
 
 
+def test_affected_tests_invokable_via_tool_protocol():
+    """The affected-test selector (mind.affected_tests) must be a real /tools + /invoke citizen, not just an
+    in-process method -- an agent driving leCore only ever sees it through this protocol."""
+    svc = Service()
+    tools = svc.dispatch("GET", "/tools", {})[1]["tools"]
+    assert any(t["name"] == "affected_tests" for t in tools)
+    status, body = svc.dispatch("POST", "/invoke",
+                                {"name": "affected_tests", "args": {"changed_paths": ["README.md"]}})
+    assert status == 200 and body["ok"] and body["result"] == []
+
+
 def test_sql_crud_over_the_api():
     svc = Service()
     assert svc.dispatch("POST", "/sql", {"sql": "CREATE TABLE user.t (id, color)"})[1]["ok"]
@@ -215,3 +226,34 @@ def test_jobs_bad_requests():
     svc = Service()
     assert svc.dispatch("POST", "/jobs/create", {"id": "x"})[0] == 400          # missing buckets/worker
     assert svc.dispatch("POST", "/jobs/status", {"id": "nope"})[0] == 400       # unknown job
+
+
+def test_game_room_deterministic_replay():
+    # /game is the game's HTTP face: the same POST sequence must replay to the same world digest
+    # (the interaction layer inherits the engine's determinism constitution over the wire too).
+    def play(svc):
+        svc.dispatch("POST", "/game", {"world": "t", "create": {"cell": 4.0, "dt": 0.1},
+                                        "cmds": [{"op": "spawn", "id": 1, "pos": [3.5, 1, 1], "vel": [2, 0, 0]},
+                                                 {"op": "spawn", "id": 2, "pos": [1.0, 2.5, 1]}]})
+        _, r = svc.dispatch("POST", "/game", {"world": "t", "ticks": 8,
+                                               "aoi": {"center": [3, 1, 1], "radius": 8}})
+        return r
+    a, b = play(Service()), play(Service())
+    assert a["digest"] == b["digest"] and a["migrated"] == b["migrated"] == [1]
+    assert sorted(a["aoi"]["ids"]) == [1, 2]          # AOI spans the shard seam over the wire
+
+
+def test_game_stream_deltas_first_full_then_changes():
+    # The SSE generator's payload contract, tested at the WorldStreamer seam the handler uses:
+    # first event = full AOI as 'added'; second = only what changed.
+    svc = Service()
+    svc.dispatch("POST", "/game", {"world": "s", "create": {"cell": 8.0, "dt": 0.1},
+                                    "cmds": [{"op": "spawn", "id": 1, "pos": [1, 1, 1], "vel": [2, 0, 0]},
+                                             {"op": "spawn", "id": 2, "pos": [1.5, 2.5, 1]}]})
+    world, streamer = svc._game_room("s")
+    world.tick()
+    e1 = streamer.next_event("c1", center=(1.5, 1, 1), radius=6.0)
+    assert sorted(x["id"] for x in e1["added"]) == [1, 2] and not e1["moved"]
+    world.tick()
+    e2 = streamer.next_event("c1", center=(1.5, 1, 1), radius=6.0)
+    assert [x["id"] for x in e2["moved"]] == [1] and not e2["added"] and not e2["removed"]

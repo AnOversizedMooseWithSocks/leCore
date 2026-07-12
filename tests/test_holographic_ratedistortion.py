@@ -61,3 +61,31 @@ def test_kept_negative_full_rank_data():
     code = geometry_preserving_code(X, target_cos=0.99)
     # to reach even 0.99 it must keep almost full rank, so bits/vector stays high (no big win)
     assert bits_per_vector(code) > 8 * X.shape[1] * 0.4
+
+
+def test_rate_distortion_report_faculty_is_honest():
+    # The wired faculty (mind.rate_distortion_report) must be discoverable AND honest: it reports bits/vector against
+    # the float32 baseline, and its `pays` flag distinguishes compressible from incompressible input -- the kept
+    # negative (random unit vectors do NOT pay) is visible in the return value, not hidden.
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # discoverability: a user's phrasing surfaces it in the top-3
+    names = [c.name for c in mind.find_capability("how many bits to store a vector at fidelity")[:3]]
+    assert any(n.startswith("Rate-distortion report") for n in names), names
+
+    rng = np.random.default_rng(0)
+
+    # low-rank vectors -> compresses, pays=True, baseline reported, fidelity held (mean)
+    B = rng.normal(size=(3, 64))
+    low = [(np.array([1.0, 0.4, -0.2]) + 0.05 * rng.normal(size=3)) @ B for _ in range(12)]
+    r = mind.rate_distortion_report(low, target_cos=0.999)
+    assert r["pays"] is True and r["ratio"] > 1.0, r
+    assert r["float32_bits_per_vector"] == 64 * 32
+    assert r["bits_per_vector"] < r["float32_bits_per_vector"]
+    assert r["achieved_cos_mean"] >= 0.999 - 5e-4, r["achieved_cos_mean"]
+
+    # incompressible random unit vectors -> does NOT pay; the report says so rather than dressing it as a win
+    rnd = [a / np.linalg.norm(a) for a in [rng.normal(size=48) for _ in range(6)]]
+    r2 = mind.rate_distortion_report(rnd, target_cos=0.999)
+    assert r2["pays"] is False and r2["ratio"] <= 1.0, r2

@@ -60,29 +60,16 @@ from holographic.mesh_and_geometry.holographic_mesh import Mesh
 def shortest_seam(mesh, a, b):
     """The shortest edge path from vertex `a` to vertex `b` (Dijkstra on the mesh edge graph with Euclidean
     weights), returned as an ordered list of vertex indices -- a seam to cut along (e.g. a meridian, pole to
-    antipode). Ties break on vertex index for determinism."""
-    V = mesh.vertices
-    adj = {v: [] for v in range(mesh.n_vertices)}
-    for (lo, hi) in mesh.edges():
-        d = float(np.linalg.norm(V[lo] - V[hi]))
-        adj[lo].append((hi, d))
-        adj[hi].append((lo, d))
-    dist = {a: 0.0}
-    prev = {}
-    pq = [(0.0, int(a))]
-    while pq:
-        d, u = heapq.heappop(pq)
-        if u == b:
-            break
-        if d > dist.get(u, np.inf):
-            continue
-        for (v, w) in adj[u]:
-            nd = d + w
-            if nd < dist.get(v, np.inf):
-                dist[v] = nd
-                prev[v] = u
-                heapq.heappush(pq, (nd, v))
-    # reconstruct
+    antipode). Ties break on vertex index for determinism.
+
+    Delegates the graph build and the shortest-path search to holographic_meshgeodesic (`_edge_graph` +
+    `_dijkstra`) -- the ONE mesh-edge-graph shortest-path kernel -- rather than carrying a second copy. The kernel's
+    (distance, vertex-index) heap gives the same vertex-index tie-break this function always documented, so the
+    returned path is byte-identical to the previous inline Dijkstra; here we only reconstruct it from `prev`."""
+    from holographic.mesh_and_geometry.holographic_meshgeodesic import _edge_graph, _dijkstra
+    adj = _edge_graph(mesh)
+    _dist, prev = _dijkstra(adj, a, mesh.n_vertices, target=b)
+    # reconstruct the a -> b path from the predecessor chain (unchanged)
     path = [int(b)]
     while path[-1] != a:
         path.append(prev[path[-1]])

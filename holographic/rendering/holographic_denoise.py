@@ -172,8 +172,21 @@ def soft_relaxation(hertz, zeta, dt):
     return float(dt * w / (2.0 * zeta + dt * w))
 
 
+def _constraint_residual(x, projections):
+    """The constraint residual at x: max_j ||proj_j(x) - x|| over the projections -- how far x still sits from
+    satisfying each constraint, in the units of x. Zero when x lies in the intersection (every projection is a
+    no-op there); grows as constraints are violated or fight. Read-only -- it projects a COPY and never mutates x,
+    so calling it does not advance the solve. Empty projection list -> 0.0."""
+    x = np.asarray(x, float)
+    worst = 0.0
+    for proj in projections:
+        px = np.asarray(proj(x), float)
+        worst = max(worst, float(np.linalg.norm(px - x)))
+    return worst
+
+
 def project_onto_constraints(x, projections, iters=30, tol=None, omega=1.0, sweep="sequential",
-                             average=False, stiffness=None, dt=None):
+                             average=False, stiffness=None, dt=None, return_residual=False):
     """Iterated projection -- satisfy a set of constraints by repeatedly projecting onto each in turn. This
     is the structure three things the engine grew separately all share (Macklin's observation -- the same
     object he builds in position-based dynamics):
@@ -208,7 +221,15 @@ def project_onto_constraints(x, projections, iters=30, tol=None, omega=1.0, swee
 
     `iters` sweeps; `tol` (if set) stops early once a full sweep moves x by less than tol (relative); `tol=None`
     runs all `iters` -- what the PnP loop wants. Returns (x, n_sweeps, converged) where `converged` is True only
-    when `tol` triggered an early stop. Deterministic given deterministic projections (no RNG of its own)."""
+    when `tol` triggered an early stop. Deterministic given deterministic projections (no RNG of its own).
+
+    `return_residual=True` appends the final CONSTRAINT RESIDUAL: (x, n_sweeps, converged, residual), where residual
+    is max_j ||proj_j(x) - x|| at the returned x -- how far the solution still sits from actually satisfying the
+    constraints, in the units of x. This is Macklin's XPBD discipline: `converged` is a BOOLEAN (did the early-stop
+    tol trigger), but a nearly-satisfied solve and a wildly-violated one both return converged=False when tol=None,
+    so a downstream consumer composing on the result needs the GRADED signal, not just yes/no. Matches the scalar
+    reach_error that solve_ik_limited already returns. Default off so every existing (x, n, converged) caller is
+    byte-for-byte unchanged; the residual costs one extra projection sweep (no state mutation) only when asked."""
     if sweep not in ("sequential", "simultaneous"):
         raise ValueError("sweep must be 'sequential' or 'simultaneous', got %r" % (sweep,))
     if stiffness is not None:
@@ -238,7 +259,11 @@ def project_onto_constraints(x, projections, iters=30, tol=None, omega=1.0, swee
                 delta /= m                                 # Cimmino averaged projections (convex sets)
             x = x + omega * delta
         if tol is not None and np.linalg.norm(x - prev) <= tol * (np.linalg.norm(prev) + 1e-12):
+            if return_residual:
+                return x, it + 1, True, _constraint_residual(x, projections)
             return x, it + 1, True
+    if return_residual:
+        return x, iters, False, _constraint_residual(x, projections)
     return x, iters, False
 
 
@@ -426,6 +451,18 @@ def _selftest():
             pass
         else:
             raise AssertionError("expected ValueError for %r" % (kw,))
+
+    # return_residual (Macklin's XPBD residual): the DEFAULT stays a 3-tuple (every existing caller unchanged);
+    # opt-in appends max_j ||proj_j(x)-x|| -- ~0 when satisfied, and the exact fighting distance when constraints
+    # cannot both hold (the graded signal a converged boolean loses).
+    _u = lambda v: v / (np.linalg.norm(v) + 1e-12)
+    assert len(project_onto_constraints(np.array([3.0, 4.0, 0.0]), [_u], iters=8)) == 3, "default must stay a 3-tuple"
+    _, _, _, r_ok = project_onto_constraints(np.array([3.0, 4.0, 0.0]), [_u], iters=8, return_residual=True)
+    assert r_ok < 1e-6, ("a satisfiable constraint must leave ~0 residual", r_ok)
+    _pa = lambda v: np.array([1.0, 0.0, 0.0])
+    _pb = lambda v: np.array([0.0, 1.0, 0.0])
+    _, _, _, r_fight = project_onto_constraints(np.zeros(3), [_pa, _pb], iters=20, return_residual=True)
+    assert abs(r_fight - np.sqrt(2.0)) < 1e-9, ("two disjoint targets: residual is their distance sqrt(2)", r_fight)
 
     print("OK: holographic_denoise self-test passed (soft constraints: hertz=inf is the hard projection "
           "exactly; (hertz, zeta) converges to 1-exp(-lambda*T) at first order (errors %s) where a fixed "

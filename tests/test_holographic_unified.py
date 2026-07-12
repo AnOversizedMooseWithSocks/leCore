@@ -4,6 +4,7 @@ substrate -- so one memory should classify several modalities at once, the recal
 should search the same vectors, and the same mind should be able to decide."""
 
 import numpy as np
+import pytest
 
 from holographic.misc.holographic_unified import UnifiedMind, _patterns
 
@@ -293,6 +294,8 @@ def test_absorb_with_sequences_assembles_a_complete_mind():
     assert mind.classify("the memory keeps each leaf inside capacity")[0] == "doc:lib"
 
 
+@pytest.mark.slow  # builds a full self-dataset then classifies it end to end; measured ~23s, exceeds the 15s
+                    # per-test budget (was silently skipped by the watchdog on every default run)
 def test_unified_app_self_dataset_builds_and_classifies():
     # The inception dataset: the app's build() learns this project's own source and
     # classifies which subsystem a snippet is from -- offline, no NLTK. Pins the

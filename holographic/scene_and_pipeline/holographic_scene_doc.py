@@ -216,7 +216,25 @@ class Scene:
     def set_parent(self, child, parent, _record=True):
         """Parent `child` under `parent` (both handles; parent=None for top level). The parent lives ON the child
         record, so re-parenting is an ordinary undoable edit. World transforms compose up the chain
-        (holographic_scenegraph builds the SceneNode tree when a renderer needs flattened world matrices)."""
+        (holographic_scenegraph builds the SceneNode tree when a renderer needs flattened world matrices).
+
+        REFUSES a parent that would create a CYCLE -- i.e. `parent` is `child` itself or a descendant of `child`.
+        WHY this is not optional: flatten_scene walks parent -> child recursively, so a cycle (A under B under A)
+        is an infinite recursion / stack overflow the first time anything asks for a world matrix. A modeling app
+        creates this constantly by mis-dragging a group into its own member, so the guard belongs in the one place
+        every re-parent goes through, not in each caller. (Regression-trapped: parenting a group under its own
+        descendant used to succeed and cycle.)"""
+        if parent is not None:
+            if parent == child:
+                raise ValueError("cannot parent an object under itself")
+            # walk UP from the proposed parent; if we reach `child`, `child` is an ancestor of `parent`, so
+            # making `child`'s parent = `parent` would close a loop.
+            p = parent
+            while p is not None:
+                if p == child:
+                    raise ValueError("cannot parent %r under its own descendant (would create a cycle)"
+                                     % self.objects[child].name)
+                p = self.objects[p].parent if p in self.objects else None
         obj = self.objects[child]
         before = self._snapshot(obj)
         obj.parent = parent
@@ -393,6 +411,18 @@ def _selftest():
     # hierarchy: parent one object under another
     scene.set_parent(a, b)
     assert a in scene.children_of(b)
+
+    # CYCLE GUARD (regression): b is now an ancestor of a, so parenting b under a must be refused (else flatten
+    # recurses forever). Self-parenting must be refused too. A legal re-parent still works.
+    try:
+        scene.set_parent(b, a); raise AssertionError("cycle should have been refused")
+    except ValueError:
+        pass
+    try:
+        scene.set_parent(a, a); raise AssertionError("self-parent should have been refused")
+    except ValueError:
+        pass
+    scene.set_parent(a, None); assert scene.parent_of(a) is None   # legal re-parent to top level still allowed
 
     # determinism: two scenes with the same seed mint the same identity atoms in order
     s2 = Scene(dim=256, seed=0); a2 = s2.add(name="wheel")

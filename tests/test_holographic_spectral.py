@@ -173,3 +173,36 @@ def test_tree_has_no_curl_or_harmonic():
     rng = np.random.default_rng(3)
     _, c, h = hodge_decomposition(V, E, rng.standard_normal(len(E)), [])
     assert np.linalg.norm(c) < 1e-12 and np.linalg.norm(h) < 1e-9
+
+
+def test_knn_adjacency_forest_hook_is_additive_and_correct():
+    """G2 (measured): knn_adjacency gained an optional forest= hook -- the SAME sub-linear index chart/graphsignal
+    already use, and the right one for its actual HIGH-D regime (VSA vectors via simgraph). Wiring it to
+    SpatialGrid was REJECTED by measurement (a uniform grid is pathological above ~3 D). This pins: (a) forest=None
+    is byte-identical to the prior dense implementation, (b) the forest path returns a valid symmetric adjacency."""
+    import numpy as np
+    from holographic.sampling_and_signal.holographic_spectral import knn_adjacency
+    from holographic.misc.holographic_tree import HoloForest
+
+    rng = np.random.default_rng(0)
+
+    # (a) default path byte-identical to the reference dense implementation, low-D AND high-D
+    def ref_dense(points, k):
+        P = np.asarray(points, float); n = len(P)
+        if n < 2:
+            return np.zeros((n, n))
+        D = np.sqrt(np.maximum(((P[:, None, :] - P[None, :, :]) ** 2).sum(-1), 0.0))
+        A = np.zeros((n, n)); kk = min(k, n - 1)
+        for i in range(n):
+            A[i, np.argsort(D[i])[1:kk + 1]] = 1.0
+        return np.maximum(A, A.T)
+    for D in (3, 64):
+        X = rng.standard_normal((60, D))
+        assert np.array_equal(knn_adjacency(X, 6), ref_dense(X, 6)), ("default path not byte-identical at D=%d" % D)
+
+    # (b) forest path: valid symmetric 0/1 adjacency of the right shape
+    X = rng.standard_normal((200, 96))
+    f = HoloForest(dim=96); f.build(X)
+    A = knn_adjacency(X, 8, forest=f)
+    assert A.shape == (200, 200) and np.allclose(A, A.T), "forest adjacency must be square + symmetric"
+    assert set(np.unique(A)).issubset({0.0, 1.0}), "adjacency must be binary"

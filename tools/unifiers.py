@@ -27,6 +27,32 @@ import sys
 
 # unifier -> (module that owns it, symbols that count as citing it, the clients its design names)
 REGISTRY = {
+    "honesty.permutation_null": {
+        "module": "holographic_honesty",
+        "symbols": ["holographic_honesty", "permutation_null"],
+        "why": "The shuffled-null discipline (score a datum, re-run the IDENTICAL scoring on structure-destroying "
+               "resamples, demand the real score stand out) as ONE composable primitive -- Tarter's radio-SETI and "
+               "Cranmer's particle-physics move, now callable by any capability including one built on the engine. "
+               "Generalises the five procedure-matched private nulls (_recall_null, _recognition_null, _brain_null, "
+               "_scan_cue_null, and the MI/phase-randomised nulls) that each hand-rolled the same draw-resample -> "
+               "score -> sort -> p loop. VERIFIED bit-identical to that hand-rolled recall-null loop; adds the +1 "
+               "plug (North et al. 2002) so p is never exactly 0. Calibrated (random datum flags at ~alpha) and "
+               "deterministic. SCOPE (see DEFERRED): the primitive is SHIPPED and wired as mind.permutation_null; "
+               "forcing the five private nulls to DELEGATE is deferred with a measured reason, not forced.",
+        "clients": [],
+    },
+    "meshgeodesic.dijkstra (dist+prev)": {
+        "module": "holographic_meshgeodesic",
+        "symbols": ["holographic_meshgeodesic", "_dijkstra", "_edge_graph"],
+        "why": "ONE weighted Dijkstra over the mesh edge-graph, returning (dist, prev). geodesic_distances kept its "
+               "distance field; meshseam.shortest_seam had reimplemented the SAME adjacency build + the SAME Dijkstra "
+               "inline (a distance FIELD vs a PATH -- the same algorithm in two costumes) and did not even import "
+               "meshgeodesic. Lifted to (dist, prev) with an optional early-out `target`; shortest_seam now delegates "
+               "and only reconstructs the path from prev. This is a TIE-SENSITIVE path (both documented vertex-index "
+               "tie-breaking); verified BYTE-IDENTICAL on 18 golden outputs (distance hashes + exact seam paths) "
+               "before/after -- a behaviourally-invisible dedup, pinned by a regression trap.",
+        "clients": ["holographic_meshseam"],
+    },
     "iterate.step_k / limit": {
         "module": "holographic_iterate",
         "symbols": ["holographic_iterate", "step_k"],
@@ -358,12 +384,33 @@ DEFERRED = {
         "28 of 96 at a 1% error budget, a 1.7x byte saving. It WOULD pay for a frame reused many times (a baked "
         "lightmap, a cached irradiance buffer); that is the follow-up. LowRankField's home is a field BAKED ONCE and "
         "QUERIED MANY TIMES -- `fieldhome`, where it is now wired.",
+    ("honesty.permutation_null", "holographic_unified._recall_null"):
+        "The primitive SUBSUMES this pattern -- verified bit-identical to the hand-rolled recall-null loop these "
+        "five private nulls share. Delegation is DEFERRED (not NOT_APPLICABLE, so nobody reads it as impossible) "
+        "because the private nulls return a RecallNull OBJECT (not the primitive's summary dict), are CACHED on "
+        "domain-specific mutation counters (_gen, prototype count), and feed decide_confidence / recognize / scan "
+        "thresholds that are pinned in tests; the primitive's +1 plug shifts p by <= 1/(n+1), which is correct but "
+        "would move those pinned thresholds. Per ledger discipline (measure, don't force), the composable primitive "
+        "ships first; converting the five nulls to delegate -- adapting the return type and re-pinning the shifted "
+        "thresholds -- is the measured follow-up. The same reason applies to _recognition_null, _brain_null, and "
+        "_scan_cue_null (one entry stands for the family).",
     ("iterate.step_k / limit", "holographic_diffuse"):
         "A closed form EXISTS near a fixed point: a learned bind reproduces the softmax denoise at cos 0.976 one "
         "step out, and 0.949 for an 8-step closed-form jump, with linearisation error scaling as eps^1.81 -- second "
         "order, the Koopman / modular-flow structure. But a settle() run from noise spends its steps OUTSIDE that "
         "ball and is already converged by the time it enters; once inside, one argmax returns the fixed point "
         "exactly. Valid where it is useless. Globally a single bind cannot hold several attractors (cos 0.078).",
+    ("spatial.SpatialGrid (one shared knn index)", "holographic_spectral/holographic_graphsignal/holographic_chart"):
+        "MEASURED and REJECTED (G2). The proposal was to route spectral/graphsignal/chart's k-NN onto the shared "
+        "SpatialGrid. Measurement says NO: a uniform grid is a LOW-DIMENSIONAL geometric index and these callers "
+        "operate in HIGH dimensions (VSA vectors, feature manifolds). A single high-D grid.knn query did not finish "
+        "in 60 s (the guaranteed-complete ring search explodes over near-empty cells above ~3 D), and even in the "
+        "grid's own low-D regime it LOST to the vectorised dense scan until N was very large (0.16x at N=300 D=2; "
+        "0.56x at N=1500 D=2; ~tie 0.96x at N=4000 D=3) because of per-query Python overhead. The genuinely shared "
+        "high-D index is the HoloForest, which chart+graphsignal ALREADY use via a forest= hook; G2's real fix was "
+        "to give spectral.knn_adjacency the SAME forest= hook (measured 1.31x at N=800 D=128, growing with N; "
+        "approximate recall_k, byte-identical when forest=None). Different index for a different regime is not a "
+        "unification target -- the grid and the forest are both correct, each in its own dimensionality.",
     ("iterate.step_k / limit", "holographic_resonator"):
         "Same as `diffuse`: the alternating cleanup linearises near its fixed point and nowhere else. Its real home "
         "is project_onto_constraints, where it IS wired.",

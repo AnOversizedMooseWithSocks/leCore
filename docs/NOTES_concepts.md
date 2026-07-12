@@ -31410,3 +31410,687 @@ caused each rather than blanket-fixing:
 LESSON (kept loud): io-tags are routing EDGES, not decoration -- a loose consumes/produces tag silently reroutes
 suggest_pipeline. Tag what a capability ACTUALLY takes/returns, and pin pipeline tests to the documented tie-break
 CONTRACT, never a hardcoded capability name. Audits clean; capdoc/docgen regen (490 modules); CI pins 17/17.
+
+## Geometry-kernel arc: the modeling-app backend gaps (K11, K1, K2, K3, K4, K8, K7) + a real parenting bug (+7 modules)
+
+The engine was audited hard for "backend of a Rhino/SketchUp/Grasshopper-class app". The app + parametric substrate
+already existed (scene_doc item 0, holographic_modifier C+D dep graph, grouping/instancing/parenting, fitting, LOD,
+codegen, physical materials). What was genuinely MISSING was a compact set of EXACT GEOMETRY-KERNEL ops. Built here,
+keystone-first, each with the full close-out ritual (selftest with numeric asserts + kept negatives, default-off
+delegating faculty, catalog entry with 5/5 stranger-phrasing discoverability, audits, docs).
+
+GROUPING ASK (user: "cover groups, instances, object parenting, nested groups"): AUDITED FIRST -- all four already
+exist (holographic_grouping group_objects/ungroup/group_members/is_group; holographic_instancing Definition/Instance
+/InstancedScene edit-once; scene_doc set_parent/parent_of/children_of; flatten_scene composes world transforms
+recursively so nested groups fall straight out). Verified end-to-end. The ONE real defect found and fixed:
+
+* FIX (real bug, regression-trapped): scene_doc.set_parent had NO CYCLE GUARD. Parenting a group under its own
+  descendant (a mis-drag every modeler does) created a parent cycle -> flatten_scene infinite-recurses the first
+  time anything asks for a world matrix. Added a guard: walk UP from the proposed parent; refuse if `child` is
+  reached (child is an ancestor of parent) or self-parent. Trapped in scene_doc._selftest (parent-under-descendant
+  and self-parent both refused; a legal re-parent still allowed). 264 scene/group/instance/hierarchy/parent tests
+  green after the fix.
+
+NEW GEOMETRY-KERNEL MODULES (all mesh_and_geometry unless noted):
+* holographic_geomkernel (K11): ONE ModelTolerance authority (abs/rel/ang; point_eq/length_eq/parallel) every
+  boolean/snap/intersection consults, + orient2d/orient3d EXACT-sign predicates. Float fast path + stdlib Fraction
+  exact fallback (Shewchuk adaptive idea, Fraction as the exact stage). A 1e-11 perturbation off a line/plane is NOT
+  swallowed -- exact, not a fuzzy epsilon. KEPT NEGATIVE: Fraction not RNS here (predicate inputs are arbitrary
+  rational coords, not the bounded integers RNS federates -- the honest tool for THIS job).
+* holographic_curveint (K1, curve keystone): robust polyline-polyline intersection, crossings decided by exact
+  orient2d (straddle test), + self_intersections + split_polyline_at. Two circles cross at exactly 2 analytic
+  points; a near-tangency (centres 1.99, radii 1) still resolves to 2. KEPT NEGATIVE: a self-crossing that lands on
+  a sample VERTEX is a separate endpoint-touch degeneracy (the test uses a clean mid-segment bowtie); precision =
+  polyline sampling.
+* holographic_surfint (K2, THE keystone): surface-surface intersection by FIELD MARCH -- tangent = grad f x grad g,
+  corrector = Newton projection onto both surfaces (min-norm delta = -J^+[f;g]). "One more iterate-a-projection."
+  Sphere-sphere traces the exact circle (x=0.5, r=sqrt(3)/2, both fields <1e-6 along it, loop closes). KEPT
+  NEGATIVES (loud): a TANGENCY has no 1-D curve -> reported degenerate (tiny stub, extent<0.3), NOT marched into
+  noise (distinguished by spatial EXTENT, not point count); precision is the corrector tol, not the grid, so a
+  curve thinner than the scan grid can be MISSED at seeding (scan res is a parameter).
+* holographic_trimsurf (K3): TrimmedSurface (surf_uv + outer/holes loops in param space), is_inside via exact
+  orient2d even-odd, trim-respecting tessellate, area_fraction, and trim_loop_from_curve (the K2->K3 bridge:
+  project a 3-D SSI curve to a (u,v) trim loop). Square-with-hole area 0.96, disc pi*r^2. KEPT NEGATIVE: tessellate
+  is a grid keep-inside (stair-stepped boundary); a boundary-fitted triangulation is a declared refinement.
+* holographic_region2d (K4): 2D region booleans (union/diff/intersection) by exact even-odd MEMBERSHIP (robust,
+  the boundary-trace is an optimization of it), matching analytic areas; offset_polyline (outward = right normal for
+  a CCW loop; positive grows) with concave folded-loop cleanup via K1 self-intersections. KEPT NEGATIVE: regions are
+  simple closed polygons (self-overlap is garbage-in flagged); offset accuracy = polyline sampling. NOTE the sign
+  fix: "left of travel" is INWARD for a CCW loop, so outward offset uses the RIGHT normal (caught by the area test).
+* holographic_sketch2d (K8): 2D geometric constraint solver by ITERATED PROJECTION (Gauss-Seidel), the same pattern
+  as IK/PBD/resonator (a PROMOTION, not a fresh build). fix/coincident/horizontal/vertical/distance/parallel/
+  perpendicular/point_on_line; a messy 4-point quad relaxes to an exact dimensioned rectangle (sides to 1e-6, right
+  angles). KEPT NEGATIVE: dof() is a COUNT heuristic, not a Jacobian rank -- a redundant set can misreport; the
+  residual after solve is the real truth.
+* holographic_cadexport (io_and_interop, K7): mesh_to_stl (ASCII STL, tris/quads/ngons, winding normals) +
+  polylines_to_dxf (DXF R12 POLYLINE/VERTEX, closed flagged). R12+POLYLINE chosen over LWPOLYLINE for "opens
+  everywhere". Pure strings (caller writes the file).
+
+FACULTIES (13, all default-off, delegating): model_tolerance, orient2d, orient3d, curve_intersect,
+curve_self_intersect, surface_intersect, trimmed_surface, trim_loop_from_curve, region_boolean_area,
+region_membership, offset_curve, sketch2d, mesh_to_stl, polylines_to_dxf. CATALOG: 7 new entries (331 total),
+registered WITHOUT consumes/produces tags per the io-tag lesson (geometry curves/surfaces aren't standard io-kinds;
+tagging them would create spurious routing edges -- they stay alias-discoverable). Audits clean:
+reachability (7 new modules wired, not import-only), catalog_gaps 0, skill_lint 0/0/0/0.
+
+STILL OPEN in the geometry backlog (dependency-ordered, build ON the above): K5 (analytic edge fillet as a blend
+surface trimmed against SSI curves -- needs K2/K3); K9 (on-surface Gaussian/mean curvature, draft angle, G-continuity
+-- mesh curvature exists, surface-analytic is the gap); K10 (object snap ADDITIONS: midpoint/intersection/tangent/
+perpendicular -- vertex+edge+grid already in holographic_snap); K6 (exact B-rep faces/loops/shells) explicitly LAST
+and OPTIONAL -- not on the Rhino/SketchUp/Grasshopper critical path (that world lives on mesh + trimmed surfaces).
+
+TEST DELTA: 7 new module selftests (auto-run by tests/test_all_selftests.py's tree walk, so covered in CI without
+new test files); scene_doc._selftest gained the cycle-guard regression. Baseline 5098 pytest tests unchanged (the
+selftests run inside the 2 walk tests). REFERENCE.md regen 497 modules.
+
+## Geometry-kernel arc, continued: K9 (surface analysis) + K10 (object-snap additions) (+2 modules extended/new)
+
+Two more backlog items, same ritual (selftest + kept negatives, default-off faculty, catalog 5/5, audits, integration).
+
+* holographic_surfanalysis (K9, NEW): curvature ON a parametric surface via the FIRST/SECOND FUNDAMENTAL FORMS --
+  distinct from the mesh (meshcurvature) and SDF (sdf_curvature) curvature already here. gaussian/mean/principal
+  curvature + draft_angle + is_developable. Ground truth: sphere K=1/R^2 with both principal curvatures 1/R;
+  cylinder K=0, principal {1/R,0}, reads developable; plane K=H=0; saddle K<0. Draft angle: vertical wall ~0,
+  mirror-slanted walls opposite signs at ~45deg. KEPT NEGATIVE (loud): the draft SIGN follows the parametrization
+  normal N=normalize(S_u x S_v) -- a bare surf_uv callable has no inherent outward; flip_normal lets a doc that
+  knows the face's outward orientation fix it. The orientation-INDEPENDENT truths (vertical ~0; mirror slants
+  opposite) hold regardless. Faculties: surface_curvature, draft_angle.
+
+* holographic_snap (K10, EXTENDED additively): added snap_to_midpoints (nearest edge midpoint) and
+  snap_to_intersections (nearest 2-D polyline crossing, via the K1 robust intersector) on top of the existing
+  vertex/edge/grid snap. Returns the same hit-record shape. Gate is idx<0 (the canonical _canon_points tol gate),
+  NOT pos-is-None -- a bug caught in the selftest (a far query with max_dist must return None). Faculties:
+  snap_to_midpoints, snap_to_intersections.
+
+CATALOG: 2 new entries (333 total). Audits clean (catalog_gaps 0, skill_lint 0/0/0/0, reachability: surfanalysis
+wired, snap already wired). Integration test grew to 7 (added surface-curvature+draft and midpoint/intersection
+osnap checks). REFERENCE.md regen 498 modules.
+
+GEOMETRY BACKLOG STATE after this arc: K11/K1/K2/K3/K4/K7/K8/K9/K10 all DONE + the grouping cycle-guard fix. Only
+K5 (analytic edge fillet as a rolling-ball blend surface trimmed against SSI curves -- the hardest, depends on
+K2/K3) and K6 (exact B-rep faces/loops/shells -- explicitly LAST and OPTIONAL, off the Rhino/SketchUp/Grasshopper
+critical path) remain open.
+
+## Geometry-kernel arc, K5: EXACT constant-radius fillet/chamfer (the field-native rolling-ball) (+1 module)
+
+holographic_fillet (K5, NEW): the constant-radius edge fillet done in the FIELD, not a B-rep rolling-ball. A fillet
+between two implicit surfaces IS iq's rounded-boolean operator: fillet_union (opUnionRound, convex crease),
+fillet_intersection (opIntersectionRound, concave pocket), fillet_difference, chamfer_union (flat 45deg bevel). Each
+returns an SDF callable, so it raymarches/meshes/emits a shader for free.
+
+WHY IT EARNS ITS PLACE (measured baseline, the key point): holographic_sdf.smooth_union already exists but is the
+POLYNOMIAL smin -- a SOFT blend whose k is NOT a radius. A CAD fillet is a dimensioned promise ("r=3mm" = a 3mm arc).
+The selftest MEASURES the crease of two perpendicular planes: fillet_union produces a true circle of radius r centred
+at (r,r) -- measured radius within 1%, arc spread <1%. The same measurement on smooth_union(k=r) does NOT match
+(different radius / non-circular) -- the honest baseline showing a soft blend and a dimensioned fillet are different
+requests. fillet_union is also LOCAL (byte-equals the sharp union min(a,b) away from the crease, asserted <1e-9).
+
+KEPT NEGATIVE (loud, measured): at a TRIHEDRAL vertex where three filleted edges meet, pairwise implicit rounding is
+only approximately r -- the three fillets interpenetrate and the vertex blend is not a constant-radius sphere. The
+operators are EXACT for a single two-surface crease (the fillet a modeler dimensions); a true G1 vertex blend is a
+separate construction, stated not hidden.
+
+FACULTIES: fillet_union, fillet_intersection, fillet_difference, chamfer_union. CATALOG: 1 new entry (334 total),
+5/5 discoverability. Audits clean; integration test grew to 8 (exact-radius + locality checks).
+
+GEOMETRY BACKLOG STATE: K11/K1/K2/K3/K4/K5/K7/K8/K9/K10 all DONE + the grouping cycle-guard fix + an 8-check cross-
+faculty integration test. ONLY K6 remains -- exact B-rep faces/loops/shells, explicitly LAST and OPTIONAL, off the
+Rhino/SketchUp/Grasshopper critical path (that world lives on mesh + trimmed surfaces + field-native fillets, all now
+present). The practical geometry kernel for a Rhino/SketchUp/Grasshopper backend is complete.
+
+## Geometry-kernel arc, K6: the B-rep topology foundation (+1 module) -- backlog COMPLETE
+
+holographic_brep (K6, NEW): the boundary-representation foundation -- vertex/edge/loop/face/shell topology of an
+exact solid, with the generalized Euler-Poincare validity law V-E+F-R = 2(S-H), genus, closed-2-manifold checking,
+and the K3 bridge (a BFace can carry a TrimmedSurface, so a B-rep face is a trimmed analytic surface, NOT a polygon
+-- the difference between this and holographic_mesh/holographic_eulerops, which edit a polygon mesh). box_brep builds
+the canonical valid cube (V,E,F,R,S=8,12,6,0,1, genus 0). Selftest witnesses: cube valid+genus0; the law computes
+genus 1 for torus counts (7,21,14); an edge used by 3 faces fails the manifold test; a face-hole increments the ring
+count R; a face carries a K3 TrimmedSurface and tessellates.
+
+HONEST SCOPE (loud): this is the TOPOLOGY + VALIDITY + FACE-GEOMETRY layer. B-rep BOOLEANS (merge two solids by
+tracing K2 SSI curves into new trim loops and re-stitching the topology) are the DECLARED next step -- they depend
+on exactly the K2/K3 pieces now in place, and are not claimed here. Built native-first on the same topology the mesh
+half-edge kernel proves out. Faculties: brep_box, brep_validate, brep_from_faces. Catalog: 1 new entry (335 total),
+5/5 discoverability. Audits clean; integration test grew to 9.
+
+GEOMETRY BACKLOG COMPLETE: K1 (curve-curve), K2 (SSI keystone), K3 (trimmed surfaces), K4 (2D boolean+offset),
+K5 (exact fillet/chamfer), K6 (B-rep topology foundation), K7 (STL/DXF), K8 (constraint solver), K9 (surface
+analysis), K10 (object snap), K11 (tolerance+predicates) -- ALL DONE, plus the grouping cycle-guard fix and a
+9-check cross-faculty integration test. The remaining declared next step is B-rep booleans (K2-SSI-driven re-stitch),
+noted for a future arc. Every item shipped with the full ritual: numeric selftest + measured kept negatives, default-
+off delegating faculty, catalog 5/5 discoverability, reachability/catalog_gaps/skill_lint clean, docs regenerated.
+
+## Toward K6 booleans: B-rep membership + coarse boolean face classification (+1 module)
+
+holographic_brepbool (NEW, the first bounded step of B-rep booleans): the CLASSIFICATION half of a solid boolean.
+* point_in_brep(brep, points): is a point inside the solid? DELEGATES to the existing generalized winding number
+  (holographic_voxelize.winding_number, surfaced as mesh_winding_number) after bridging the B-rep to triangles --
+  anti-silo, reuse the wheel rather than a second ray-parity test. >95% agreement with the analytic box on 200
+  random points; cube centre inside, far/above outside.
+* brep_boolean_faces(A, B, op): which whole FACES of A survive (keep outside-B faces for union/difference, inside-B
+  for intersection). Faces that STRADDLE the B boundary (vertices disagree on membership) are FLAGGED as needing a
+  K2-SSI split, not silently mis-kept. Verified on cleanly-overlapping cubes (left face survives difference, right
+  survives intersection, spanning faces flagged).
+
+HONEST SCOPE (loud): this is whole-FACE classification. A complete B-rep boolean must also SPLIT the straddling
+faces along the K2 SSI curves (-> K3 trim loops) and RE-STITCH the surviving pieces + intersection loops into a
+watertight B-rep. That split+re-stitch is the remaining step; all its dependencies (K2 SSI, K3 trim, K6 topology,
+this classifier) are now in place. KEPT NEGATIVE (measured): membership uses the winding number, so a query exactly
+ON the other solid's boundary is ambiguous (~0.5) -- the self-test avoids shared boundary planes; a boundary-robust
+classification needs the SSI split, which is exactly the declared next step.
+
+FACULTIES: point_in_brep, brep_boolean_faces. CATALOG: 1 new entry (336 total), 5/5 discoverability. Audits clean;
+integration test grew to 10.
+
+## Node-editor backend: the unifying node-graph shell (+1 module)
+
+Question raised: "does the backend support a node-based editor (materials/textures/geometry/fields/sdf volumes)?"
+AUDITED (Rule 0): every node KIND already exists as a mature subsystem -- SDF/CSG trees (holographic_sdf: union/
+intersect/subtract/smooth_union/rounded + parse_dsl + WGSL/GLSL emit), texture graphs (holographic_texturegraph:
+Const/FieldLeaf/Map, typed inputs), material socket graphs (matcompile), geometry modifier dep-graphs
+(holographic_modifier, O(change) re-eval) -- plus the hard infra: dirty propagation (dirty_field), dependency-keyed
+cache, topo-sort + cycle detection (shader-graph compiler), typed structures. The MISSING piece was a single generic
+graph shell holding HETEROGENEOUS typed nodes with cross-kind connection validation + topological dirty-eval +
+serialization. Built it (NOT a from-scratch engine -- a shell that DELEGATES each node's compute to the existing
+subsystem).
+
+holographic_nodegraph (NEW): SocketType (scalar/vector/color/field/sdf/mesh/material/texture/any; connect allowed iff
+equal or either is 'any'); NodeType (registered kind: named typed input/output sockets + an evaluate(params,inputs)
+fn that delegates); NodeRegistry (the palette); NodeGraph (add / connect [type-checked + cycle-checked] / evaluate
+[topological, memoized] / set_param [dirty-propagates only downstream] / to_dict+from_dict [JSON]). default_registry
+wires REAL ops as node types: sdf_sphere/box/union/subtract, sdf_fillet (K5), texture_const/mix (texturegraph),
+scalar -- so a graph built here DRIVES the actual compute (sphere UNION box == min of children; fillet blends; texture
+mix samples a colour), proving the shell is not a stub.
+
+BUG CAUGHT + FIXED in the selftest: connect() dropped the existing wire into a socket BEFORE the cycle check, so a
+REFUSED cyclic connect still mutated the graph (removed the old wire). Reordered: type-check -> cycle-check -> then
+mutate, so a refused connect is a true no-op. Regression pinned by the cycle test (which then evaluates the graph and
+would crash on the orphaned input if the wire were wrongly dropped).
+
+FACULTIES: node_graph, node_registry. CATALOG: 1 new entry (337 total), 5/5 discoverability. Audits clean;
+integration test grew to 11 (nodegraph drives SDF, type-checks, serializes). REFERENCE.md regen 502 modules.
+
+ANSWER ON RECORD: yes -- the backend supports a node editor. The compute for every node kind was already there; this
+module is the unifying editor contract (typed heterogeneous graph + connection validation + dirty eval + JSON) that
+an editor UI binds to. Declared next step (not claimed): registering the full palette (all texture ops, material
+sockets, geometry modifiers, field generators) as node types, and a bake-vs-live evaluation policy per subgraph
+(holographic_rendergraph already makes that decision for textures and can be reused).
+
+## Node-editor backend, continued: the full palette + bake-vs-live (registry expanded)
+
+The declared next step (register the full palette + a bake-vs-live policy) done. holographic_nodegraph.default_registry
+grew from 2 toy nodes to a 26-node editor palette, every node DELEGATING to the existing subsystem:
+  * SDF PRIMITIVES: sphere, box, torus, cylinder, plane, capsule, cone (holographic_sdf constructors).
+  * SDF BOOLEANS: union, intersect, subtract, smooth_union (k), fillet (K5 exact radius).
+  * SDF TRANSFORMS/DOMAIN: translate, scale, rotate, repeat, twist, elongate, onion (SDF methods).
+  * BAKE (the bake-vs-live policy as a NODE): sdf_bake freezes an SDF subgraph to a grid (bake_sdf_grid -> GridSDF)
+    for O(1) repeated sampling; selftest checks baked==analytic within a grid cell. Same decision holographic_
+    rendergraph already makes for textures, now exposed as an editor node ("bake this branch").
+  * FIELD: field_gyroid outputs a varying field callable (holographic_curves.gyroid_field).
+  * TEXTURE: const, mix (t), add, multiply (holographic_texturegraph Map ops).
+All wire through the same typed/cycle-checked/dirty-propagating/serializable shell. No new faculties (node_graph/
+node_registry already expose the whole registry). Catalog description updated (kept UNDER the 600-char does-budget --
+a first over-long draft tripped skill_lint's does-length regression and was tightened, discipline held). Audits clean;
+integration test at 11 (adds a transform + palette-size check). Discoverability 5/5.
+
+Declared next step from here (not claimed): material-socket nodes (matcompile) and geometry-modifier nodes
+(holographic_modifier) as node types, and an sdf_to_mesh output node (isosurface) so a graph terminates in renderable
+geometry. The shell + palette + bake policy are in place.
+
+## Node-editor backend, continued: OUTPUT nodes -- a graph now terminates in renderable geometry (palette -> 29)
+
+Added the terminating nodes so a node graph goes END-TO-END, primitives -> CSG -> mesh -> +material -> renderable:
+  * sdf_to_mesh (OUTPUT): sample the SDF via as_eval (robust to both SDF objects AND the bare callables fillet/
+    transform emit) on a grid, polygonise with marching_tetrahedra -> a watertight Mesh. The node that ends a CSG
+    graph in real geometry.
+  * material_lib: a glTF-standard PBRMaterial (+ physical properties) from holographic_matlib by name.
+  * assign_material: pair a mesh + material into the renderable object a viewport draws (typed 'mesh', still
+    geometry, now carrying a material). Type-check holds at the output stage too (a texture cannot feed the material
+    slot -- asserted refused).
+Default palette now 29 node types. Selftest proves the full chain: sphere UNION box -> sdf_to_mesh (real verts+faces)
+-> assign_material -> {mesh, material}. No new faculties (node_graph/node_registry expose it). Catalog does-field
+rewrote CONCISE (556 chars, under the 600 budget -- a first over-long draft tripped skill_lint's does-length
+regression twice this arc; tightened both times, discipline held). Audits clean; integration test at 11 (adds the
+terminating chain). Discoverability 5/5. REFERENCE.md 502 modules.
+
+Node-editor backend status: shell + 29-node palette (SDF/CSG, transforms, bake-vs-live, field, textures, mesh+
+material OUTPUT) + typed/cycle-checked/dirty/serializable + end-to-end to renderable geometry. Declared next step
+(not claimed): geometry-modifier nodes (holographic_modifier ops need a named-op registry to wire cleanly) and
+material-SOCKET nodes (matcompile graph, beyond the library presets). The core node editor a 3-D package needs is in
+place.
+
+## Node-editor backend, continued: GEOMETRY-MODIFIER nodes + mesh->sdf loop-closer (palette -> 33)
+
+Added the "geometry nodes" side (mesh -> mesh), so a modeler can chain modifiers on geometry the same way as SDF ops:
+  * mesh_subdivide (loop_subdivide -- adds detail), mesh_smooth (laplacian_smooth, cotangent -- preserves topology),
+    mesh_decimate (qem_decimate -- removes faces).
+  * mesh_to_sdf (LOOP CLOSER): mesh_distance_grid -> GridSDF, turning geometry back into a sampleable SDF so it can
+    re-enter a CSG/boolean graph. Note mesh_distance_grid is BANDED (valid near the surface; far points clamp), so
+    the selftest checks a near-SURFACE point, not the interior (kept negative, stated).
+Each unwraps a materialed renderable ({mesh,material}) if one is piped in. Default palette now 33 node types. No new
+faculties. Catalog does-field kept concise (545 chars, under the 600 budget -- the running does-length discipline).
+Audits clean; integration test at 11 (adds subdivide+smooth; decimate omitted from the FAST test, see below).
+
+KEPT NEGATIVE / PERF BUG FOUND (loud, pre-existing, NOT mine): holographic_meshqem.qem_decimate is ~O(F^2) -- MEASURED
+61.5 s to decimate a 2472-face mesh to 988 (subdivide 0.0 s, smooth 0.3 s, mesh_distance_grid 0.1 s by contrast). It
+forced the nodegraph selftest onto a tiny res=10 mesh (600 faces, 3.1 s) and kept decimate out of the fast pytest
+integration test. This is a real optimization target in an existing module (a proper QEM with a binary heap is
+O(F log F)); flagged for its own fix, not touched here.
+
+Node-editor backend status: shell + 33-node palette spanning SDF/CSG, transforms, bake-vs-live, fields, textures,
+mesh+material OUTPUT, and geometry modifiers with a mesh<->sdf round-trip -- the full node-editor a 3-D package needs,
+end-to-end from primitives to renderable geometry and back. Declared next step (not claimed): material-SOCKET nodes
+(matcompile graph beyond library presets) and a faster QEM.
+
+## Node-editor backend: SHADER + AUDIO as generic DRIVERS (drive-everything-they-can) + two enablers (palette 37)
+
+User ask: Shadertoy-style shaders and audio should be usable as MAP/DRIVER types that plug in and drive EVERYTHING
+they can, without enumerating what. AUDITED (Rule 0): the driver substrate already existed -- holographic_parambus
+(ParamBus: audio -> per-band 0..1 envelopes over time + onset; subscribe maps a band onto ANY [lo,hi] range),
+holographic_domain (iq cosine_palette + domain ops = Shadertoy-in-NumPy), holographic_audio (STFT/spectrum),
+holographic_milkdrop (audio-reactive visuals). What was missing was exposing them in the node graph GENERICALLY. Two
+enablers built into holographic_nodegraph, then the sources wired:
+
+ENABLER 1 -- TIME-AWARE EVALUATION: evaluate(nid, t=0.0) threads a clock; when t changes the memo clears so time-
+varying sources re-read it. A node fn may take an optional 3rd ctx arg (arity-detected, so the existing 2-arg static
+nodes are untouched -- backward compatible, verified). This is what makes audio/shader make the graph REACTIVE.
+
+ENABLER 2 -- DRIVABLE PARAMS: a NodeType may declare param_inputs (params that are ALSO optional typed input sockets).
+Wire a compatible source into one and it OVERRIDES the static knob at eval. connect() accepts param-input sockets;
+evaluate() splits wired values into regular inputs vs param overrides. This is the mechanism that lets a source
+"drive everything it can" WITHOUT enumerating targets -- the socket TYPE decides. Made drivable (scalar): sphere.
+radius, cylinder.r, torus.r, smooth_union.k, fillet.radius, palette.t.
+
+DRIVER SOURCE NODES (all delegating): shader_field (a time-animated procedural FIELD in NumPy, leCore domain-op
+substrate; emittable to real Shadertoy GLSL via the SDF dialect); palette (iq cosine_palette scalar->color, t
+drivable); audio_clip (a SIGNAL -- supplied samples or a synthesized tremolo tone so a graph is self-contained);
+audio_band (ParamBus band envelope at time t mapped to [lo,hi] -> a SCALAR, no new FFT -- THE audio driver).
+
+PROVEN (selftest + integration): ONE audio band scalar drives a sphere radius AND a fillet radius -- same source,
+different targets, by WIRING ALONE; advancing t makes the geometry audio-reactive; a shader_field animates with time;
+a palette colour is audio-driven; type safety holds (an sdf CANNOT drive a scalar param -- refused at connect). New
+socket type 'signal'. Palette now 37 node types. No new faculties (node_graph exposes it). Catalog does tightened
+UNDER the 600 budget (over-long draft tripped the does-length regression a 3rd time this arc; held). Audits clean;
+integration test at 12; discoverability 5/5. REFERENCE.md regen.
+
+ANSWER ON RECORD: yes -- shaders and audio drive things generically. They are SOURCE nodes emitting standard types
+(field/color/scalar); time-aware eval + drivable-any-param + the socket-type system let them plug into everything
+compatible with no per-target code. Declared next (not claimed): more shader-field families (FBM/worley/orbit-trap),
+audio onset/beat as a trigger type, and a vector 'driver' for full transforms.
+
+## QEM decimate: the O(F^2) hot spot fixed (default-off fast path, bit-identical default preserved)
+
+The perf bug flagged last arc, fixed the constitution-compliant way. PROFILED the O(F^2): the per-edge ranking loop
+runs once per collapse (O(F) collapses) and each pass was MEASURED ~11x the collapse cost (F=1536: one ranking pass
+0.068s x ~384 collapses = 26s vs collapse ~2.3s total). So ranking, not collapse, was the hot spot.
+
+FIX: _rank_edges_vectorized -- batch the QEM solve over ALL edges in one np.linalg.solve (b reshaped to (n,3,1))
+instead of a Python loop, singular edges falling back to the identical scalar path, ranked by the SAME lexsort on
+(cost,i,j). Exposed as an OPT-IN qem_decimate(mesh, target, fast=False) and threaded through the mesh_qem_decimate
+faculty (fast=False default).
+
+WHY OPT-IN, NOT A DEFAULT SWAP (the constitution): the vectorized path is NOT bit-identical to the per-edge default --
+batched LAPACK det/solve differ at the last ULP, and QEM is TIE-SENSITIVE (a 1e-12 cost difference reorders a
+borderline collapse). Same face COUNT, near-identical surface (measured mean deviation 0.043 on an icosphere -> 64F),
+but not byte-for-byte. Per "existing decisions must never flip / bit-identical to 1e-12 has still flipped a
+trajectory", the DEFAULT stays the canonical per-edge loop (VERIFIED bit-identical to the pre-change baseline by
+sha256 of vertices+faces) and fast=True is the opt-in. MEASURED speedup: 4.3x (F=1536: 21.9s default -> 5.1s fast),
+same face count. The remaining cost is now collapse_edge's O(F) rebuild per collapse (the next bottleneck, a separate
+future fix). Node-editor mesh_decimate node uses fast=True (preview/interactive context); pass fast=False to force
+canonical. KEPT NEGATIVE (loud): fast != default byte-for-byte, by design.
+
+Selftest pins it: default deterministic + bit-identical; fast deterministic, same face count, surface deviation
+<0.1 from canonical (not broken, just tie-reordered). meshqem tests 13 pass; nodegraph + integration green;
+audits clean; REFERENCE.md regen.
+
+## Node-editor backend: PBR MATERIAL SOCKET nodes (the last named frontier)
+
+Added the material-socket side so a material is BUILT from driven channels, not just picked from the library:
+  * color: a constant RGBA -> 'color' output that drives a material/texture socket.
+  * material_pbr: a PBR material whose base_color/metallic/roughness/emissive are INPUT SOCKETS (fall back to params
+    when unconnected) -- the shader-editor pattern. A color node drives base_color, scalar nodes drive roughness/
+    metallic; type-check refuses a scalar into the color socket. Delegates to holographic_materialio.PBRMaterial.
+    (Kept negative/next step: a texture-DRIVEN base colour needs the procedural material tier; base_color is a
+    constant colour here.)
+Palette now 39 node types (the file had already grown past the 33 in the prior note -- audio-reactive/animated
+drivers, iq cosine palette, drivable params via param_inputs, and a time ctx were added in earlier turns; the live
+module is the source of truth and this reconciles the catalog does-field to it, 529 chars, under budget). Selftest +
+integration (12) green; audits clean; discoverability 5/5.
+
+Node-editor backend: COMPLETE for the named scope -- shell + 39-node palette (SDF/CSG, transforms, bake-vs-live,
+fields, textures, geometry modifiers, mesh+material OUTPUT, PBR material sockets, audio/animated drivers), typed +
+cycle-checked + dirty + JSON-serializable, every param drivable, end-to-end from primitives to a materialed
+renderable and back. Declared next steps (not claimed): texture-driven material channels (procedural material tier)
+and a faster collapse_edge (the remaining O(F) rebuild inside qem_decimate).
+
+## Node-editor backend: TEXTURE-DRIVEN materials (procedural tier) -- the last frontier closed (palette -> 40)
+
+material_textured (NEW node): a texture drives the base ALBEDO, which becomes a CALLABLE socket f(points)->(M,3) rgb
+-- exactly what the procedural material path / a RegionField consumes (holographic_matlib TIER 2/3). This is how a
+spatially-varying texture paints a surface, vs material_pbr's constant colour. Wires a texture node into the material,
+type-checked (an sdf into the tex socket is refused). Selftest: red+blue texture_mix(t=0.5) -> a purple albedo the
+socket returns at any points. KEPT NEGATIVE (loud): point->uv is a simple xy-planar projection; proper UV/triplanar
+mapping is the declared refinement.
+
+Palette now 40 node types. Catalog does-field updated (537 chars, under budget). Audits clean; integration test 12;
+discoverability 5/5. Both declared material-tier next steps are now DONE: PBR sockets (last arc) + texture-driven
+albedo (this one).
+
+NODE-EDITOR BACKEND: fully complete for the named scope -- shell + 40-node palette (SDF/CSG, transforms, bake-vs-live,
+fields, textures, geometry modifiers, mesh+material OUTPUT, PBR + texture-driven MATERIAL SOCKETS, audio/animated
+drivers), typed + cycle-checked + dirty + JSON-serializable, every param drivable, end-to-end primitives -> materialed
+renderable and back. Sole remaining perf item (not a feature gap): a faster collapse_edge (the O(F) mesh rebuild that
+now dominates qem_decimate after the ranking vectorization).
+
+## QEM decimate: the O(F^2) collapse_edge rebuild fixed -- STABLE-INDEX + HEAP fast path (72x MEASURED)
+
+The remaining half of the QEM perf story (last arc fixed the ranking; collapse_edge's per-call full-mesh rebuild was
+the other O(F^2)). Replaced the fast=True path entirely with _qem_decimate_fast: a stable-index + heap decimator.
+  * INCIDENCE (vertex->face sets) makes each collapse O(degree) -- only the faces around the merged vertex are
+    repointed, no full Mesh rebuild. Compact to a fresh Mesh once, at the end.
+  * LAZY-INVALIDATION HEAP (heapq, key (cost,u,v) for deterministic ties, a per-vertex version stamp) re-ranks only
+    the edges incident to each merged vertex; stale entries (an endpoint changed version, or died) are skipped on
+    pop. So ranking is incremental, not a full re-scan each step.
+  * MANIFOLD-SAFE: the same LINK CONDITION collapse_edge enforces is checked incrementally from incidence before
+    every collapse; a refused edge is dropped until a neighbouring collapse re-pushes it.
+
+MEASURED (F=1536 sphere -> 768): canonical 14.7s -> fast 0.20s = 72x. Closed 2-manifold preserved, chi=2 preserved,
+surface deviation from canonical mean 0.0000/max 0.0000 (identical surface on this mesh), deterministic. (Earlier
+vectorized-ranking fast path was 4.3x; this replaces it -- the vectorized ranker _rank_edges_vectorized was removed
+as dead code.) Default fast=False UNCHANGED (canonical per-edge loop + collapse_edge, still bit-identical -- verified
+by the meshqem test suite, 14 pass). Node-editor mesh_decimate node uses fast=True, so the nodegraph selftest that
+was forced onto a tiny res=10 mesh (decimate 61s -> now ~0.2s) runs in 1s and the integration test re-includes a
+decimate check.
+
+KEPT NEGATIVE (loud): fast=True is NOT guaranteed bit-identical to the default (tie-sensitive greedy order can differ
+from the full-re-rank canonical), though it matched exactly on the test mesh; same face count, closed manifold, chi
+preserved, surface deviation bounded (<0.1, measured 0.0 here). Selftest pins manifold + chi + determinism + deviation.
+
+Both QEM O(F^2) hot spots (ranking + collapse rebuild) are now fixed on the opt-in fast path; the canonical default
+stays the exact reference. Sole geometry perf work remaining: none flagged.
+
+## B-rep booleans FINISHED: the SSI-driven re-stitch (K2/K3/K6 -> full solid modeling)
+
+The declared next step after K6 -- and the classification-only step in holographic_brepbool -- is now the finished
+boolean. brep_boolean(A, B, op) in holographic_brepbool: union/difference/intersection of two solids into one
+WATERTIGHT B-rep.
+
+ANTI-SILO (reuse, don't rewrite): the seam where two solids cross IS the surface-surface intersection (K2), and
+combining across it is exactly what the SDF route does -- so brep_boolean DELEGATES the heavy lifting to route_csg
+(mesh -> SDF -> min/max/max-with-negation -> marching, the same field-native boolean mesh_csg ships), then WRAPS the
+watertight result as a B-rep and VALIDATES it with K6: closed 2-manifold, Euler, and a VOLUME check against
+inclusion-exclusion. No second boolean written.
+
+VERIFIED (the correctness witness is volume, not narrative): P=[-1,1]^3 (vol 8) and Q=[0,2]^3 (vol 8), overlap
+[0,1]^3 (vol 1) -> union 14.98~=15, intersection ~=1, difference ~=7, each a closed 2-manifold. Generality shown: a
+sphere-UNION-box merges into one watertight solid whose volume exceeds the sphere alone (topology changed -- a mesh
+cannot do that to itself). brep_volume via the divergence theorem is the witness. Deterministic.
+
+KEPT NEGATIVE (loud): the result's FACES are the marching triangulation (a valid B-rep -- BFaces, closed manifold,
+Euler-correct, verified), NOT the input solids' original ANALYTIC faces. Preserving those (keep whole faces via
+brep_boolean_faces, split ONLY the straddling ones along the K2 SSI curves via K3 trim, re-stitch analytic pieces) is
+the analytic refinement on top of this functional boolean. Resolution is the marching grid's (sharp seams round at
+low res; raise res). Both are the field-boolean's standing kept negatives.
+
+FACULTY: brep_boolean (default-off validate=True). CATALOG: 1 new entry (338 total), 5/5 discoverability. Audits
+clean; integration test adds a volume-verified union/intersection/difference check. REFERENCE.md regen.
+
+GEOMETRY KERNEL STATE: K1-K11 done, grouping fix, exact-radius fillets, fast QEM (72x heap path), the full 40-node
+node editor, AND now B-rep booleans (functional/field-native, K6-validated). The one remaining refinement is
+analytic-face-preserving boolean re-stitch (keep input NURBS/planar faces through the boolean instead of
+triangulating) -- declared, not claimed. leCore now does functional solid modeling end to end.
+
+## B-rep boolean: the ANALYTIC-FACE re-stitch (recover polygons, not triangles)
+
+The refinement flagged after brep_boolean: analytic=True. Rather than a from-scratch face-splitter, RECOVER the
+analytic faces from the field-boolean result by MERGING COPLANAR TRIANGLES back into polygons (merge_coplanar_faces):
+group the marching triangles by their ORIENTED plane key, cancel interior shared directed edges, trace the boundary
+loop of each group, drop collinear runs -> polygonal BFaces. The flat regions that survived from the inputs' planar
+faces come back as polygons; the cut edges are the SSI seam. Anti-silo: reuses the already-proven field boolean +
+a standard planar-region-from-triangle-soup pass, no second boolean.
+
+MEASURED (box-box, res 56): union 64176 tris -> 144 polygonal faces; intersection 9072 -> 48; difference 36960 ->
+102 -- a ~200-450x face reduction, VOLUME PRESERVED EXACTLY (14.99/1.00/6.99), deterministic. Faces are real
+polygons (up to 10-gons), not triangles.
+
+KEPT NEGATIVE (loud): recovery is EXACT for PLANAR faces, but marching grid-stepping means a "flat" analytic face is
+approximated by triangles that wobble slightly off the true plane and don't land exactly on it -- so a flat face
+fragments into several coplanar PATCHES (a box's 6 faces come back as ~8x that, not exactly 6). Perfect face
+minimality needs grid-aligned bounds or higher res (or a plane-snapping post-pass); and a genuinely CURVED input face
+stays faceted (grouped per near-coplanar triangle). T-junctions between a long merged edge and shorter neighbour
+edges mean the strict edge-2-manifold count may not hold even though the solid is watertight by VOLUME -- volume +
+boundary closure is the honest witness, not the exact edge count.
+
+FACULTY: brep_boolean gains analytic=False (default triangulated, backward-compatible; analytic=True recovers
+polygons). CATALOG entry updated (481 chars, under budget). Audits clean; integration test adds the analytic
+polygon-recovery + volume check. REFERENCE.md regen.
+
+B-REP BOOLEANS COMPLETE: functional field-native boolean (arbitrary solids, K6-validated, volume-exact) + analytic
+polygonal-face recovery for the polyhedral case. Remaining deeper refinement (declared, not claimed): exact
+plane-snapped / grid-aligned face minimality, and true curved-face (NURBS) preservation through the boolean.
+
+## MERGE: B-rep boolean finished (branch update; verified superset, nothing lost)
+
+Second small update from the geometry branch. Diffed before adopting: 0 files added/removed, 8 changed -- only 4 real
+code/test files (brepbool, unified, catalog, test_geometry_kernel_integration), rest generated docs/NOTES. unified/
+catalog/test had ZERO current-only lines (strict additions). brepbool had 5 current-only lines -- an EVOLUTION not a
+loss: they were the old selftest scope caveat ("classification half; SSI re-stitch is the declared next step"), and the
+branch IMPLEMENTED that next step. Module grew 6 -> 13 functions.
+
+NEW: brep_boolean -- the FINISHED B-rep boolean (union/difference/intersection): routes two solids through the SDF
+(K2-SSI seam + field combine + marching, reusing route_csg), wraps the watertight result as a B-rep, VALIDATES it
+(two overlapping boxes hit inclusion-exclusion volumes 15/1/7 as closed 2-manifolds), and offers analytic=True to
+re-stitch marching triangles back into ~10-150 POLYGONAL faces. HONEST SCOPE (kept): analytic recovery is exact for
+PLANAR faces; a curved input face stays faceted -- the deeper refinement. +1 catalog capability (338 -> 339).
+
+MERGE REFINEMENT I ADDED: the new test_k6_brep_boolean_is_watertight_and_volume_correct runs ~30s (SDF marching), over
+the 15s budget -- the branch author didn't mark it (the timeout policy is my addition). Marked it @pytest.mark.slow +
+added the top-level pytest import, so the geometry suite deselects it cheaply by default (4.7s) and runs it under
+--run-slow (13/13 pass, 35s). Consistent with the measure-first policy.
+
+VERIFIED: boots (1977 caps live / 339 cataloged); all my prior work intact (creature/iklimit/nbody/quantum/meshqem +
+astronomy/polarization/code integration, 21 green; watchdog trap); conftest untouched; audits 0/0/0; CI pins 17/17;
+capabilities.json in sync. Pre-merge tree backed up at work/repo_prev2.
+
+## RE-MERGE onto updated main (2 changes, re-applied against a codebase that grew 490->502 modules)  [+7 tests net; -7 collected-by-default]
+
+Main was updated with none of my prior two changes present; re-merged both. Anchors re-verified against the NEW
+tree before every edit (line numbers all shifted -- unified.py's file_import_check moved 11090->11429, the catalog
+anchor 3559->3575 -- but the adjacencies I depend on were byte-identical, and the delegation targets
+tools/select_tests.affected_tests + tools/test_changed.changed_files were unchanged in signature). Rule-0 re-
+audited on the new main FIRST: find_capability still returned only fallbacks for the 7 test-selection phrasings,
+so the gap was still real, not silently closed by main.
+
+CHANGE 1 -- affected-test selection wired as a mind faculty (re-applied): mind.affected_tests(changed_paths=None,
+since=None) on UnifiedMind, delegating to the existing tools (never reimplementing). unified.py is >1MB so edited
+in binary mode with CRLF-exact anchors + py_compile (not file_python_check); catalog entry re-registered ('Affected-
+test selection', aliases from the user's own words incl 'duplicate tests'/'too many tests'). New test file
+test_wiring_affected_tests.py (6 tests) copied over + re-run green against the new graph; +1 HTTP-protocol test
+re-inserted into test_holographic_service.py (18/18 green). Re-verified end-to-end: render change -> 413 files
+(was 412; main added a test), docs-only -> [], unknown binary -> 'ALL'. Discoverability restored (#1 hit on all
+phrasings incl 'our testing is too excessive').
+
+CHANGE 2 -- 7 always-timeout tests marked @pytest.mark.slow (re-applied): before re-applying, RE-MEASURED 3 of the
+7 against the new main with LECORE_RUN_SLOW=1 (code they exercise could have changed) -- still genuinely over
+budget (bootstrap_rescue ~43s, gap_tool ~24s, sequentiality ~18s), all passing, so the markings remain warranted,
+not stale narrative. The binary-mode import-insertion caught a real trap the assertion surfaced: 'import numpy as
+np' occurs 10x in test_holographic_market.py (re-imported inside test bodies) -- a naive replace would have
+corrupted a nested import; switched to unique docstring-anchored insertions per file. All 7 now deselect in 0.31s
+by default; the 5 touched files' fast tests re-run green (61 passed, 6 deselected, no regressions).
+
+VERIFIED (merged tree): audits 0/0/0 (audit_imports/reachability/catalog_gaps/skill_lint); capdoc+docgen regen
+(502 modules, 150495 loc); test_capdoc drift gate green; capabilities.json in sync. Collect count: main's default
+-7 (the 7 newly-slow deselected) +7 new (6 wiring + 1 service) = same total, correctly classified. Clean-extract
+verified from the rebuilt zip.
+
+## MERGE: GAME-1..3 replayed onto refreshed main (503 modules)
+
+Merged the game arc (GameShard / ShardWorld / BusShardHost / WorldStreamer + service /game
++/game/stream + serve(threads=)) onto an updated main that had itself grown unified.py, the
+catalog, and the service. Done as an ANCHOR REPLAY, not a file copy, because main had moved: e.g.
+the doppler alias tail I'd chained catalog entries onto now appears TWICE on main (a new sibling
+capability shares it), so all five catalog entries were re-anchored on the unique full doppler
+register-call and inserted at its statement end. The new module holographic_gameshard.py had no
+conflict (new file); its 11 selftest contracts pass unchanged against main's distbus/ShardWorld.
+Every service anchor (_frames init, /frame route, _pick, /frame/stream do_GET branch, do_POST,
+HTTPServer ctor, serve sig) was byte-identical on main -> clean replay. Audits 0/0/0; service +
+servicedoc tests 30 passed; all 4 FEATURE_GUIDE snippets re-run clean; capdoc/docgen/servicedoc
+regenerated from the live tree (503 modules, 33 endpoints in sync). No main decision flipped;
+purely additive.
+
+## BACKLOG P1 DONE -- ratedistortion wired (Duda's ANS/RD module, was import-only)
+
+The panel's P1 (Duda): holographic_ratedistortion was a COMPLETE rate-distortion module -- rANS entropy coding
+(rans_encode/decode = Duda's ANS), geometry_preserving_code (auto-KLT-rank + coarsest quantization meeting a target
+MEAN cosine), bits_per_vector, save_rd/load_rd -- with 0 references in unified.py and unfindable by any natural
+phrasing. Rule-0 re-audited FIRST on the live tree: 7 stranger phrasings all missed, no faculty existed. License to
+build confirmed.
+
+BUILT: mind.rate_distortion_report(arrays, target_cos=0.9999) -> {bits_per_vector, float32_bits_per_vector, ratio,
+achieved_cos_mean, achieved_cos_min, rank, pays}. Delegates to geometry_preserving_code + bits_per_vector (detectable
+dotted import; never reimplements). Reports EVERY number against the float32 baseline -- the Duda discipline -- and a
+`pays` flag. KEPT NEGATIVE kept LOUD and VISIBLE IN THE RETURN VALUE: incompressible near-orthogonal vectors do NOT pay
+(the code can be LARGER than float32, pays=False). Measured: low-rank ~2.96x (691 vs 2048 b/vec, pays=True); random
+unit vectors 0.95x (1619 vs 1536, pays=False).
+
+ALSO FIXED (the module had neither): added a real _selftest() + __main__ guard to holographic_ratedistortion asserting
+the MEAN-cosine contract (an individual vector can sit slightly under target -- target_cos is the mean, per the live
+docstring; my first assert wrongly checked the per-vector MIN and the selftest CAUGHT it, which is the selftest working),
+the exact pack/unpack round-trip, that low-rank input beats float32, AND that random input does NOT (the negative pinned).
+
+CLOSE-OUT (full loop): file_python_check after every edit; catalog entry with runnable example + 10 Duda-flavoured
+aliases, does-field trimmed 731->549 under the 600 budget (skill_lint caught the overflow); discoverability RESTORED
+(all 7 previously-missing phrasings now top-3). Faculty integration test added to test_holographic_ratedistortion.py
+(6/6 green). Audits: wiring 0 dark, catalog_gaps 0, skill_lint 0/0/0/0; reachability reachable-by-UnifiedMind 454->455,
+IMPORT-ONLY review bucket 30->29 (ratedistortion left it). capdoc/docgen regen (503 modules); test_capdoc drift gate
+green; CI pins 17/17; catalog 345->346 caps. unified.py edited binary-mode/CRLF via unique anchor + py_compile (>1MB).
+
+## BACKLOG G1 DONE -- mesh shortest-path lifted to one shared Dijkstra kernel (meshseam -> meshgeodesic)
+
+The generalization sweep's G1: meshseam.shortest_seam had reimplemented the SAME mesh-edge-graph Dijkstra that
+meshgeodesic already owns -- it rebuilt a byte-equivalent adjacency inline and ran its own heapq loop, and did not
+import meshgeodesic. Same algorithm, two costumes (a distance FIELD vs a PATH). Rule-0 re-audited: no shared
+dijkstra/shortest_path kernel existed for the mesh edge-graph (creature/query_graph have their own for DIFFERENT graph
+types -- correctly out of scope).
+
+LIFTED: new meshgeodesic._dijkstra(adj, source, n_vertices, target=None) -> (dist, prev), the ONE mesh-edge-graph
+kernel. geodesic_distances now delegates and keeps only `dist` (unchanged public contract). shortest_seam now delegates
+(via _edge_graph + _dijkstra with target=b early-out) and only reconstructs the path from `prev`. The inline adjacency
+build + inline Dijkstra are gone from meshseam.
+
+TIE-SENSITIVE PATH DISCIPLINE (the load-bearing part): both functions documented vertex-index tie-breaking, so the
+refactor had to be BYTE-IDENTICAL, not just correct. Captured 18 GOLDEN outputs BEFORE (geodesic distance md5s across
+3 sources x 3 meshes + exact seam paths across 3 vertex pairs x 3 meshes), refactored, replayed: 0 mismatches,
+BIT-IDENTICAL. The heap's (distance, vertex-index) ordering gives the same tie-break both callers relied on. Also
+proved the target= early-out yields the same path as the full single-source run (target finalised the moment it is
+popped), and the downstream consumer meshuv.uv_unwrap(isomap) -> geodesic_matrix still works.
+
+CLOSE-OUT (full loop): file_python_check after every edit; both module selftests green; existing tests green
+(meshgeodesic+meshseam 18->; +1 delegation regression trap pinning the golden paths + kernel (dist,prev) contract +
+early-out equivalence); mesh consumers + geometry integration 40 passed. Registered as a UNIFIER: tools/unifiers.py
+REGISTRY 'meshgeodesic.dijkstra (dist+prev)' (client: holographic_meshseam) + docs/UNIFIERS.md ledger entry;
+unaccounted()=0. Audits 0/0/0; docgen/capdoc regen (503 modules); drift gate + routing pins green. No public contract
+changed; purely a dedup. KEPT NEGATIVE: creature/query_graph Dijkstras are on DIFFERENT graph types and are NOT clients.
+
+## BACKLOG D1 DONE -- the 39 dark method-capabilities aliased (0 dark, structural fix)
+
+The self-audit's #1 finding: 39 capabilities were auto-registered from public mind methods by seed_from_mind using the
+method's docstring as `does` but with NO aliases -- so bare generic names (agent, scene, query, material, light,
+measure, route, surface_mesh, ...) were shadowed in find_capability by a descriptively-titled sibling and did not appear
+even in the top-40 for their OWN exact name. Rule-0 re-audited on the live tree: still exactly 39 dark (0 alias + not in
+top-15 for own name); all 39 confirmed to have a catalog home, so aliases are the fix (no code/behaviour change).
+
+STRUCTURAL FIX (not 39 one-off edits): added a _METHOD_ALIASES table beside _IO_SHAPES and passed
+aliases=_METHOD_ALIASES.get(name, ()) into the ONE seed_from_mind auto-registration call. This fixes the systemic root
+(auto-registration assigned no aliases) and makes it extensible -- a future bare-name faculty just adds a row. Aliases
+are 5-6 stranger-phrasings each, written from the USER's mouth and grounded in each capability's actual `does` (e.g.
+material -> 'physically based material'/'surface material'; measure -> 'variance harness'/'report a metric with
+variance'; surface_mesh -> 're-extract a mesh from a field'/'remesh from a field').
+
+VERIFIED: TOTAL dark capabilities 39 -> 0 (full re-audit); 39/39 surface in top-3 via a user phrasing; catalog selftest
+green (346 caps, no double-registration); skill_lint 0 inert / 0 invocation gaps (net +2 redundant notes only, non-
+gating); reachability 455, 0 undiscoverable. Regression traps added to test_buried_audit.py: test_no_dark_method_
+capabilities (fails CI if any alias-less bare-name faculty is registered) + a spot-check of 6 once-dark names. CI pins +
+catalog tests 29 passed; capdoc/docgen regen (capabilities.json machine contract now carries the 39 alias sets); drift
+gate green. Purely additive -- no does/example/behaviour changed, only aliases added.
+
+## BACKLOG P3 DONE -- project_onto_constraints exposes the constraint RESIDUAL (Macklin's XPBD discipline)
+
+The panel's P3 (Macklin): project_onto_constraints returned (x, n_sweeps, converged) where converged is a BOOLEAN
+(did the early-stop tol trigger) -- so with tol=None a nearly-satisfied solve and a wildly-violated one are
+INDISTINGUISHABLE to a downstream consumer (both converged=False). XPBD reports the residual MAGNITUDE, not yes/no.
+solve_ik_limited already returns a scalar reach_error; the general projection faculty did not match it. Rule-0
+audited: many callers (meshik, blendpose, softbody, dynamics, collide, resonator, iterate, refine, fieldeffect, guide)
+unpack the 3-tuple, so the fix MUST be additive.
+
+BUILT: opt-in return_residual=False on project_onto_constraints (core in holographic_denoise + the mind faculty). When
+True, returns (x, n_sweeps, converged, residual) where residual = max_j ||proj_j(x) - x|| at the answer -- how far x
+still sits from satisfying each constraint, in x's units. New read-only helper _constraint_residual projects a COPY
+(never mutates x, does not advance the solve); costs one extra sweep only when asked. Default off -> every existing
+3-tuple caller is byte-for-byte unchanged.
+
+VERIFIED: residual is 0.0 when satisfied (x on the unit sphere) and EXACTLY sqrt(2) for two disjoint fighting targets
+(their distance) -- the graded signal the boolean lost. Default call still a 3-tuple with the identical solve.
+Backward compat proven across the projection family: blendpose/softbody/meshik/resonator/denoise/unifier_adoption 67
+passed + dynamics/collide/iterate/refine 20 passed. denoise selftest extended with the residual contract (0 when
+satisfied, sqrt(2) fighting, default stays 3-tuple); faculty integration test added to test_unifier_adoption.py.
+Audits 0/0/0; docgen/capdoc regen; drift gate + routing pins green. Purely additive.
+
+## BACKLOG P2 DONE -- permutation_null: the shuffled-null discipline as ONE composable primitive (Tarter/Siemion/Cranmer)
+
+The panel's flagship P2: the shuffled-null test (score a datum, re-run the IDENTICAL scoring on structure-destroying
+resamples, demand the real score stand out) was re-implemented FIVE times as procedure-matched private nulls
+(_recall_null, _recognition_null, _brain_null, _scan_cue_null, + the MI/phase-randomised nulls) -- each hand-rolling
+the same draw-resample -> score -> sort -> p loop, with NO single primitive an EXTERNAL capability could call. Rule-0
+audited: no general permutation-null faculty existed; generic phrasings ("score against a shuffled null", "p value from
+a null distribution", "is my result better than chance") all missed.
+
+BUILT (in holographic_honesty, beside RecallNull/bh_fdr/SPRTRecall): permutation_null(observed, score_fn, resample_fn,
+n_null=1000, seed=0, alpha=0.05, side='greater') -> {p, null_mean, null_std, null_ci, observed, collapsed, n_null}.
+p carries the +1 plug (North et al. 2002) so it is never exactly 0. Wired as mind.permutation_null. VERIFIED: CALIBRATED
+(random datum flags at 0.043-0.060 ~ alpha=0.05 -- Cranmer's false-alarm-rate requirement holds), has POWER (true match
+p=0.0025, collapsed), DETERMINISTIC (same seed identical p), and BIT-IDENTICAL to the hand-rolled recall-null loop the
+five private nulls share (np.array_equal on the internal null; p agrees with RecallNull.pvalue within the +1 plug).
+
+DELEGATION DECISION (honest, per ledger discipline -- measure, don't force): the primitive SUBSUMES the pattern bit-
+identically, BUT the five private nulls return a RecallNull OBJECT (not the summary dict), are CACHED on domain-specific
+mutation counters (_gen, prototype count), and feed decide_confidence/recognize/scan thresholds pinned in tests; the +1
+plug shifts p by <= 1/(n+1), correct but would move those pins. So P2 SHIPS the composable primitive (the primary ask
+-- external capabilities inherit honest measurement) and records the private-null delegation as a MEASURED DEFERRAL in
+DEFERRED (tools/unifiers.py + docs/UNIFIERS.md), NOT forced. The 5 private nulls were left UNTOUCHED (grep confirms).
+
+CLOSE-OUT: catalog entry "Shuffled-null test (score vs its own null)" with 10 aliases; does-field trimmed 749->582;
+5 previously-weak phrasings now top-3. Module _selftest + __main__ added (calibration/power/bit-identity/determinism).
+Faculty integration test in test_holographic_honesty.py (7/7). Unifier registered honesty.permutation_null (REGISTRY +
+DEFERRED). Audits 0/0/0, unaccounted()=0; catalog 346->347; reachable-by-UnifiedMind 455; CI pins 17/17; skills selftest
+832 caps; capdoc/docgen regen; drift gate green. unified.py edited via unique anchor + py_compile (>1MB).
+
+## BACKLOG G2 DONE -- spatial k-NN: grid-unification MEASURED & REJECTED; spectral got the forest hook instead
+
+The generalization sweep's G2, explicitly flagged MEASURE-FIRST ("different index structures; do NOT blind-wire").
+Rule-0 audited the 4 k-NN sites: spatial.SpatialGrid.knn (grid), spectral.knn_adjacency (dense O(N^2)),
+chart.knn_graph_euclidean (Euclidean, ALREADY has forest= hook), graphsignal.knn_graph (COSINE, ALREADY has forest=
+hook). So it was never a clean 4x dup -- different metrics, and 2 of 4 already reuse the shared high-D index.
+
+MEASURED (the whole point): benchmarked SpatialGrid vs vectorised dense scan across regimes, with correctness.
+  LOW-D (grid's designed home): grid LOSES to dense -- 0.16x at N=300 D=2, 0.56x at N=1500 D=2, ~tie 0.96x at
+    N=4000 D=3 (per-query Python overhead: ring search, dict lookups, itertools.product beat only at very large N).
+  HIGH-D (spectral/graphsignal regime): PATHOLOGICAL -- a SINGLE grid.knn query did not finish in 60 s at D=32/128
+    (the guaranteed-complete ring radius explodes over near-empty cells; curse of dimensionality).
+VERDICT: wiring spectral/graphsignal to SpatialGrid REJECTED -- it would make them slower, often catastrophically.
+Recorded as NOT_APPLICABLE (measured) in tools/unifiers.py + docs/UNIFIERS.md. The grid and the forest are BOTH
+correct indices, each for its own dimensionality; that is not a unification target.
+
+THE REAL FIX (measurement-justified): spectral.knn_adjacency was the ONE site with no sub-linear path (its own
+docstring named the "one O(n^2) cost that remains is the distance sort"), and it is called on high-D VSA vectors
+(via simgraph). Gave it the SAME optional forest= hook chart/graphsignal already have -- Euclidean neighbours via
+HoloForest.recall_k when a forest is supplied, dense fallback otherwise. Additive/default-off: forest=None is
+BYTE-IDENTICAL to the prior dense implementation (asserted at D=3 AND D=64). Forest path measured 1.31x at N=800
+D=128 (grows with N; approximate recall_k, symmetric 0/1 adjacency). Regression trap in test_holographic_spectral.py
+pins both (byte-identical default + valid symmetric forest adjacency); spectral+simgraph 23 tests green; selftest OK;
+audits 0/0/0; unaccounted()=0; docgen/capdoc regen; drift gate + routing pins green.
+
+KEPT NEGATIVE (loud): SpatialGrid is NOT a general k-NN index -- it is a low-D geometric index, pathological above
+~3 D. Do not reach for it on feature vectors or hypervectors. The forest is the high-D index; the grid is the low-D
+geometric one.

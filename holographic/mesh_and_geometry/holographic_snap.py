@@ -40,6 +40,41 @@ def snap_to_vertices(point, vertices, max_dist=None):
     return {"index": int(idx), "position": np.asarray(pos, float).tolist(), "distance": float(dist)}
 
 
+def snap_to_midpoints(point, vertices, edges, max_dist=None):
+    """Snap a point to the nearest EDGE MIDPOINT, returned as {edge, position, distance}, or None if beyond max_dist.
+    The classic 'midpoint' object-snap. Midpoints are derived from the edge endpoints (no new state); the nearest is
+    delegated to the same canonical nearest-point search the vertex snap uses."""
+    V = np.asarray(vertices, float)
+    mids = np.array([0.5 * (V[a] + V[b]) for (a, b) in edges])
+    if len(mids) == 0:
+        return None
+    pos, idx, dist = _canon_points(np.asarray(point, float), mids, tol=max_dist)
+    if idx < 0:
+        return None
+    return {"edge": int(idx), "position": np.asarray(pos, float).tolist(), "distance": float(dist)}
+
+
+def snap_to_intersections(point, polylines, max_dist=None, tol=None):
+    """Snap a point to the nearest INTERSECTION of a set of 2-D polylines -- the 'intersection' object-snap. Computes
+    the crossings with the robust curve-curve intersector (holographic_curveint, exact-sign straddle) and returns the
+    nearest as {position, distance}, or None. Polylines are (n,2) arrays; each pair is intersected."""
+    from holographic.mesh_and_geometry.holographic_curveint import intersect_polylines
+    p = np.asarray(point, float)[:2]
+    pts = []
+    for i in range(len(polylines)):
+        for j in range(i + 1, len(polylines)):
+            for h in intersect_polylines(polylines[i], polylines[j], tol=tol):
+                pts.append(np.asarray(h["point"], float))
+    if not pts:
+        return None
+    pts = np.array(pts)
+    d = np.linalg.norm(pts - p, axis=1)
+    k = int(np.argmin(d))
+    if max_dist is not None and d[k] > max_dist:
+        return None
+    return {"position": pts[k].tolist(), "distance": float(d[k])}
+
+
 def snap_to_edge(point, vertices, edges, max_dist=None):
     """Snap a point to the nearest point ON any edge, returned as {edge, position, distance, t}, or None if beyond
     max_dist. DELEGATES the per-segment perpendicular-foot to the canonical snap_to_segment; this only loops the
@@ -125,9 +160,23 @@ def _selftest():
     final = np.array([4.9, 0.05, 0]) + np.asarray(res2["delta"])
     assert np.allclose(final, V[1]) and res2["snapped_to"] == {"vertex": 1}
 
+    # (5) midpoint osnap: nearest edge midpoint. Edge 0 (v0->v1) has midpoint (2.5,0,0).
+    mp = snap_to_midpoints([2.4, 0.2, 0.0], V, edges)
+    assert mp["edge"] == 0 and abs(mp["position"][0] - 2.5) < 1e-6 and abs(mp["position"][1]) < 1e-6
+    assert snap_to_midpoints([100, 100, 100], V, edges, max_dist=1.0) is None
+
+    # (6) intersection osnap: two crossing 2-D polylines meet at the origin; a query near it snaps there.
+    A = np.array([[-1.0, 0.0], [1.0, 0.0]]); B = np.array([[0.0, -1.0], [0.0, 1.0]])
+    xi = snap_to_intersections([0.1, 0.1], [A, B])
+    assert xi is not None and abs(xi["position"][0]) < 1e-9 and abs(xi["position"][1]) < 1e-9
+    # parallel lines -> no intersection to snap to
+    assert snap_to_intersections([0.0, 0.0], [np.array([[0, 0], [1, 0]]), np.array([[0, 1], [1, 1]])]) is None
+
     print("holographic_snap selftest OK (grid snap rounds to the nearest node, per-axis increment and a zero-axis "
           "no-op; vertex snap finds the nearest and respects max_dist; edge snap lands the perpendicular foot at "
-          "t=0.5; snap_transform_delta corrects a delta so the dragged point lands on grid/vertex; deterministic)")
+          "t=0.5; MIDPOINT osnap lands on the edge midpoint; INTERSECTION osnap lands on a polyline crossing (robust "
+          "curve intersector) and returns None when parallel; snap_transform_delta corrects a delta so the dragged "
+          "point lands on grid/vertex; deterministic)")
 
 
 if __name__ == "__main__":

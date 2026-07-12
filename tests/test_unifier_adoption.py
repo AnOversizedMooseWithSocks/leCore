@@ -277,3 +277,30 @@ def test_subdivision_has_a_closed_form_and_subdivcurve_uses_it():
     for _ in range(2):
         ref = chaikin_subdivide(ref, closed=False)
     assert np.allclose(subdivide_sequence(openP, levels=2, closed=False), ref)
+
+
+def test_project_onto_constraints_returns_residual_optin():
+    """P3 (Macklin XPBD): project_onto_constraints exposes the constraint RESIDUAL as an opt-in, matching
+    solve_ik_limited's reach_error -- a nearly-satisfied and a wildly-violated solve are otherwise indistinguishable
+    (both converged=False when tol=None). Default off, so every existing (x, n, converged) caller is unchanged."""
+    import numpy as np
+    import lecore
+    m = lecore.UnifiedMind(dim=64, seed=0)
+
+    unit = lambda v: v / (np.linalg.norm(v) + 1e-12)
+    x0 = np.array([3.0, 4.0, 0.0])
+
+    # default contract preserved: a 3-tuple, and the SAME solve as before
+    base = m.project_onto_constraints(x0, [unit], iters=10)
+    assert len(base) == 3, "default must stay a 3-tuple (backward compatible)"
+
+    # opt-in: a 4-tuple whose first three fields match the default exactly
+    xr, n, conv, res = m.project_onto_constraints(x0, [unit], iters=10, return_residual=True)
+    assert np.allclose(xr, base[0]) and n == base[1] and conv == base[2], "residual must not change the solve"
+    assert res < 1e-6, ("a satisfiable constraint leaves ~0 residual", res)
+
+    # fighting constraints: two disjoint target points -> residual is exactly their distance (sqrt 2), not a boolean
+    pa = lambda v: np.array([1.0, 0.0, 0.0])
+    pb = lambda v: np.array([0.0, 1.0, 0.0])
+    _, _, conv2, res2 = m.project_onto_constraints(np.zeros(3), [pa, pb], iters=20, return_residual=True)
+    assert conv2 is False and abs(res2 - np.sqrt(2.0)) < 1e-9, ("fighting residual = sqrt(2)", res2)

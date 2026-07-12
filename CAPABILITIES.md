@@ -522,6 +522,14 @@ b = mind.bake_field_nd([xs, ys], V); v = mind.fetch_field_nd(b, [0.3, 0.7])
 ```
 *Find it by:* bake a 2d function, n-d texture unit, bake a volume, multivariate lookup table, encode a 2d point, bake a grid, n dimensional function encoding, bake a field over a grid
 
+### CAD export: STL + DXF
+write geometry OUT in the two open exchange formats a modeler needs (K7): mesh_to_stl (ASCII STL for 3-D meshes, tris/quads/ngons, per-facet normals) and polylines_to_dxf (minimal DXF R12 for 2-D drawings, POLYLINE/VERTEX, closed loops flagged -- the format Rhino/AutoCAD read). Pure strings; the caller writes the file. See holographic_cadexport..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(); m.mesh_to_stl(np.array([[0.,0,0],[1,0,0],[0,1,0]]), [(0,1,2)])[:5]
+```
+*Find it by:* export STL, write STL file, export DXF, write a 2d drawing, save mesh for 3d printing, dxf export, stl export, export a drawing to autocad
+
 ### Cloud stack (closed-form shadow rays)
 single-scattered volumetric clouds assembled from shipped parts: volint's CLOSED-FORM line integral over an FPE density field, plus the renderer's Henyey-Greenstein phase. mind.cloud_transmittance is Beer-Lambert on a tau that costs ONE inner product per ray -- no marching. mind.cloud_single_scatter marches the VIEW ray (it must: the integrand contains the transmittance being accumulated) and evaluates every SHADOW ray in closed form. THE CLOSED FORM PAYS ON THE SHADOW RAY, and it is not a speed-for-accuracy trade: MEASURED at 64 rays x 32 view steps against a 64-step marched shadow, the closed form uses 32 density evaluations against 2,080 (65x fewer), runs 52x faster, and is 13x MORE ACCURATE (3.03e-07 vs a 16-step march's 3.94e-06) -- because it is the exact integral and the march is the one carrying error. mind.cloud_report carries the comparison. HONEST SCOPE: the view integral still marches (volint's own note: absorption does not want marching, scattering still does); multiple scattering is not here; and the closed form's physical SCALE is a fitted constant whose accuracy is that of the short march it was calibrated against (3.5e-05 at calibration_steps=24, 5.1e-07 at 256). `optical_depth` takes a PER-RAY L -- passing a median instead is a 1000x accuracy loss..
 
@@ -762,6 +770,14 @@ from holographic.misc.holographic_farm import WorkerDaemon, NetworkFarm; Coordin
 ```
 *Find it by:* render farm, distributed, network, seti, worker daemon, remote, cluster, node
 
+### Node-graph editor backend
+the unifying NODE-GRAPH a 3-D node editor binds to: one heterogeneous graph of TYPED nodes (scalar/color/field/sdf/mesh/material/texture), 40-node palette -- SDF primitives/booleans/transforms, bake-to-grid, fields, textures, geometry modifiers, sdf_to_mesh, PBR + TEXTURE-DRIVEN MATERIAL SOCKETS (driven or procedural albedo), and audio-reactive drivers. ANY param is DRIVABLE (a typed input overrides the knob). Connections type/cycle-checked; eval topological+memoized; dirty-propagating; JSON serializable. See holographic_nodegraph..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(); g=m.node_graph(); s=g.add('sdf_sphere',{'radius':1.0}); b=g.add('sdf_box',{'size':(0.8,0.8,0.8)}); u=g.add('sdf_union'); g.connect(s,'out',u,'a'); g.connect(b,'out',u,'b'); type(g.evaluate(u)['out']).__name__
+```
+*Find it by:* node editor, node based editor, node graph editor, wire nodes together, shader node graph, geometry nodes, material node graph, connect nodes with typed sockets
+
 ### One kernel, two runtimes: Zig raymarcher, bit-identical
 the demoscene bar, EXECUTED (Z4): a scene SDF written once in Python is sphere-traced by sphere_trace AND a Zig loop compiled on the fly from the SAME text. mind.zig_march_compare marches the same rays through both, shades both with the same code, reports. MEASURED: f64 t/hit BIT-IDENTICAL over 110k rays x 96 steps, frames BYTE-IDENTICAL, zig 3.8x (safe==fast: determinism is free here). Kept negative: the f32 march is a DIFFERENT PROGRAM -- a 1-ulp hit-branch flip changes the step count, so it gets a measurement, never a tolerance. See holographic_zigmarch..
 
@@ -817,6 +833,14 @@ a COMPLEX wavefunction psi on a grid -- the central quantum object; gaussian_pac
 import lecore; m=lecore.UnifiedMind(); qf=m.quantum_field((128,128),dx=0.2); qf.gaussian_packet((30,64),6.0,(0.8,0.0)); qf.norm()
 ```
 *Find it by:* quantum, wavefunction, complex field, psi, quantum state, electron wave, quantum simulation, wave function on a grid
+
+### Rate-distortion report (bits per vector at a fidelity)
+mind.rate_distortion_report(arrays, target_cos): the cheapest bit budget that stores vectors while keeping their GEOMETRY (pairwise similarity), not just bits -- auto-KLT-rank + coarsest quantization, rANS entropy-coded (Duda's ANS). Reports bits_per_vector against the float32 baseline, the ratio, achieved cosine (mean+min), rank, and a `pays` flag. KEPT NEGATIVE (loud): incompressible near-orthogonal vectors do NOT pay -- the code can be LARGER than float32 and pays=False. Measured: low-rank ~3x (691 vs 2048 b/vec); random unit vectors 0.95x..
+
+```python
+import numpy as np; rng=np.random.default_rng(0); B=rng.normal(size=(3,64)); A=[(np.array([1,.4,-.2])+.05*rng.normal(size=3))@B for _ in range(12)]; r=mind.rate_distortion_report(A, target_cos=0.999); print(r['ratio'], r['pays'])
+```
+*Find it by:* bits per vector, how many bits to store a vector, rate distortion, compress a codebook, entropy code vectors, geometry preserving compression, cheapest bit budget, will these vectors compress
 
 ### Render graph (bake vs live)
 the PIPELINE composing the texture/material/scene graphs: mind.render_graph() registers texture graphs (static or dynamic) + a CMP4 instanced scene, then plan() shows what it will do and WHY and prepare() runs it. The adaptive decision it adds is BAKE a static texture graph to a grid (O(1) bilinear lookup, mind.bake_texture) vs SAMPLE it live -- baking amortises a deep graph over many hits, live avoids re-baking a changing map every frame. Trade: memory + interpolation error. CMP5.
@@ -1290,6 +1314,22 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); wm=m.workspace_manager(); w
 
 *step a solver forward -- fluids, smoke, cloth, soft bodies, collisions, reaction-diffusion.*
 
+### Authoritative game world shard (fixed-tick, deterministic)
+build a GAME on the engine (holographic_gameshard.GameShard): authoritative fixed-dt world tick fed by an ordered player-command queue, deterministic by construction (same command log -> identical sha256 digest: free lockstep verification). Collision culls via spatial_hash_pairs; richer dynamics delegate to rigid_body. AOI snapshot() + stateless delta_since() for clients; region departures for handoff over the distributed bus (massive-world sharding). save/load digest-identical; negatives in the module docstring..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); s=m.game_shard(seed=0); s.submit({'tick':0,'player':'a','seq':0,'op':'spawn','id':1,'pos':(0,0,0)}); print(s.step()['n'])
+```
+*Find it by:* build a video game, game server, multiplayer game world, authoritative server tick, game loop, fixed timestep game, deterministic lockstep, player input command queue
+
+### Massive sharded game world (deterministic migration)
+scale a game to a MASSIVE world (holographic_gameshard.ShardWorld): a lazy grid of authoritative shards -- cost tracks occupied cells, not world size. Entities crossing a cell boundary migrate deterministically with exact velocity/mass carried over; snapshots span shard seams; a world-level sha256 digest gives lockstep verification across the whole grid. collect_only handoffs + receive() are the bus-transport seam: identical payloads in-process or across the distributed farm. run_game_world is the JSON /invoke face..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); r=m.run_game_world([{'op':'spawn','id':1,'pos':(3.5,1,1),'vel':(2,0,0)}], 5, cell=4.0, dt=0.1); print(r['migrated'])
+```
+*Find it by:* massive game world, massively multiplayer world, shard entities across regions, entity migration between shards, cross shard snapshot, world scale simulation, distribute a game world across machines, open world game backend
+
 ### Modal jump solver (skip the substeps)
 advance a LINEAR physics island in closed form instead of substepping it: within a contact mode a soft-constraint system is the affine recurrence s <- A s + b, so N substeps are ONE eigendecomposition and t=10s costs the same as t=1s. mind.affine_jump(state, A, b, k) is the stateless jump; mind.modal_solver(...) keeps a per-mode factorization and re-diagonalizes only at contact-mode SWITCHES; mind.should_jump(dim, k) is the measured gate (jump pays at k >= 20*dim); mind.escalation_plan(dim, k, energy=...) is THE ESCALATION LADDER (X11) that picks {sleep | jump | substep} per island per frame -- Catto's '4 substeps' dial and our closed form are two ends of one axis, and the descriptor chooses the rung. mind.soft_chain_bank + mind.advance_bank are the TUNING BANK (X8): M stiffness/damping variants advanced in ONE batched eigendecomposition (M=32 x 1,920 substeps: 4.3x over substepping the batch, exact to 1.9e-12). KEPT NEGATIVE: that is NOT a superposition -- a trajectory is linear in the FORCING (blend exactly, mind.blend_forcings, 1.1e-16) and nonlinear in the OPERATOR (blending stiffness gives 2.9e-01 of error), so variants batch as arrays and there is no capacity budget to spend; the backlog's 'M <= D/256' came from the retracted sqrt(M/D) law. MEASURED: a 12-body chain (hertz=15, zeta=0.7) matches 3,840 substeps to 2.5e-12 at 8x the speed. HONEST SCOPE: the win is where contact topology is STABLE (machinery, ragdolls at rest, suspensions); where contacts churn, substepping is still the right tool and the gate says so -- it degrades to stepping, never worse. Kept negative: a free-body island is a Jordan block with no eigenbasis; it is REFUSED and stepped, not silently jumped..
 
@@ -1418,6 +1458,14 @@ run the HTTP service (holographic_service.serve) and any harness, LLM, or anothe
 from holographic_service import serve; serve(host='127.0.0.1', port=8080, token='secret')  # GET /tools ; POST /invoke {name,args}
 ```
 *Find it by:* serve as a tool, tool server, /tools, /invoke, expose faculties, http api, call leCore remotely, function calling
+
+### run_game_shard
+one-shot JSON game-world run (holographic_gameshard.run_shard): the agent-invokable face of the game shard -- pass a command list, tick count, and optionally a saved state blob; returns final state, per-tick lockstep digests, region departures, and an optional area-of-interest snapshot. Stateless on the wire: the state travels with the caller, so any distributed farm worker can serve the next call..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); r=m.run_game_shard([{'tick':0,'player':'a','seq':0,'op':'spawn','id':1,'pos':(0,0,0)}], 3); print(len(r['digests']))
+```
+*Find it by:* run a game tick over http, invoke game world remotely, stateless game step, agent playable world, step a game world with json, resume a saved game world
 
 ## Data analysis & signals
 
@@ -1873,13 +1921,63 @@ from holographic.scene_and_pipeline.holographic_workspace import WorkspaceManage
 ```
 *Find it by:* workspace, session, scratch tables, transient tables, isolate session, reset keep data, export workspace, combine workspaces
 
+### game_bus_host
+run a game world ON the existing distributed system (holographic_gameshard.BusShardHost): each farm node owns a set of world cells and exchanges entity handoffs over the message/distributed bus -- one topic per cell, so ownership can move without topology re-learning. The interaction layer's handshake with the data layer (bus/coordinator/presence); duplicates none of it, per the coordinator's own monoid rule (a game tick is non-monoid feedback: it runs whole on one worker). Rounds are barriered (publish R, join R+1); pinned equal to the single-process world to 1e-12..
+
+```python
+from holographic.scene_and_pipeline.holographic_distbus import MessageBus; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); bus=MessageBus(); w=m.game_world(cell=4.0,dt=0.1); h=m.game_bus_host(bus,w,[(0,0,0)]); w.spawn(1,(1,1,1)); print(h.tick()['n'])
+```
+*Find it by:* run game shards on the farm, game world over the message bus, connect game to distributed system, multiplayer across machines, node owns world regions, handoff entities over the bus
+
 ## More capabilities
+
+### 2D constraint sketch solver
+a parametric 2-D sketch solved by ITERATED PROJECTION (K8, the SketchUp-inference / dimensioned-drawing engine): add points, declare constraints (fix/coincident/horizontal/vertical/distance/parallel/perpendicular/point-on-line), solve to a fixed point (Gauss-Seidel relaxation, the same iterate-a-projection pattern as IK/PBD/resonator), and read under/well/over-constrained. See holographic_sketch2d..
+
+```python
+import lecore; m=lecore.UnifiedMind(); s=m.sketch2d(); a=s.add_point(0,0); b=s.add_point(3,0.3); s.fix(a); s.horizontal(a,b); s.distance(a,b,4.0); s.solve()['satisfied']
+```
+
+### 2D region boolean + curve offset
+union/difference/intersection of two closed polygonal regions by exact even-odd membership (K4, the SketchUp-face/drafting layer), plus parallel-curve OFFSET with the folded loops a concave offset makes cleaned up via self-intersection removal. See holographic_region2d..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(); A=np.array([[0,0],[1,0],[1,1],[0,1]]); B=np.array([[0.5,0],[1.5,0],[1.5,1],[0.5,1]]); round(m.region_boolean_area(A,B,'intersection'),2)
+```
+
+### Affected-test selection (which tests does my change need)
+answers 'why do thousands of tests run on every small commit?' -- a static import-graph selector (pure ast, no execution/coverage tracing) that picks only the tests reachable from changed files, or auto-detects the change from git. Fails SAFE: an unscopable change widens to the WHOLE suite; a docs-only change selects nothing. The same selection CI already runs on push/PR -- previously CLI-only, now a mind faculty. See mind.affected_tests's own docstring for the full contract.
+
+```python
+mind.set_file_root('.'); mind.affected_tests(changed_paths=['holographic/rendering/holographic_render.py'])  # or mind.affected_tests() alone to auto-detect from git
+```
 
 ### Aharonov-Bohm ring (magnetic flux phase)
 thread magnetic flux through a ring interferometer and MEASURE the Aharonov-Bohm phase the two arms accumulate -- equal to q*Phi/hbar even though the field is zero on the arms (only the enclosed flux is physical). quantum_solenoid_A builds the vector potential.
 
 ```python
 import lecore; m=lecore.UnifiedMind(); m.aharonov_bohm_phase(1.0,ring_radius=30)
+```
+
+### B-rep boolean (finished solid modeling)
+the FINISHED B-rep boolean -- union/difference/intersection of two solids into one watertight B-rep (the SSI-driven re-stitch turning K2/K3/K6 into full solid modeling). Routes both solids through the SDF (intersection seam + field combine + marching, reusing route_csg), wraps the watertight result as a B-rep, VALIDATED with K6 (closed 2-manifold, Euler, volume vs inclusion-exclusion). analytic=True recovers POLYGONAL faces (~100x fewer, same volume). See holographic_brepbool..
+
+```python
+import lecore; m=lecore.UnifiedMind(); a=m.brep_box(lo=(-1,-1,-1),hi=(1,1,1)); b=m.brep_box(lo=(0,0,0),hi=(2,2,2)); r=m.brep_boolean(a,b,'union',bounds=((-1.5,-1.5,-1.5),(2.5,2.5,2.5))); r._boolean_report['closed_manifold']
+```
+
+### B-rep membership + boolean face classification
+the classification half of a solid boolean (toward K6 booleans): point_in_brep tests whether points are inside a B-rep solid (delegates to the generalized winding number), and brep_boolean_faces decides which whole faces of A survive a union/difference/intersection with B, flagging faces that straddle the B boundary (which need a K2-SSI split). HONEST SCOPE: whole-face granularity; the SSI face-split + re-stitch is the declared next step. See holographic_brepbool..
+
+```python
+import lecore; m=lecore.UnifiedMind(); c=m.brep_box(); bool(m.point_in_brep(c, [[0,0,0]])[0])
+```
+
+### B-rep solid topology (Euler-Poincare validity)
+the boundary-representation foundation (K6): the vertex/edge/loop/face/shell topology of an exact solid, with Euler-Poincare validity (V-E+F-R=2(S-H)), genus, closed-2-manifold checking, and a bridge that lets each FACE carry a trimmed analytic surface (K3). A B-rep face is a trimmed surface, not a polygon -- that is what distinguishes this from the mesh Euler ops. HONEST SCOPE: topology+validity+face-geometry; B-rep booleans (SSI re-stitch) are the declared next step. See holographic_brep..
+
+```python
+import lecore; m=lecore.UnifiedMind(); m.brep_validate(m.brep_box())['genus']
 ```
 
 ### Blend (combine)
@@ -1896,6 +1994,13 @@ address every public function by a URI 'family/module/name' (holographic_capuri)
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.resolve_capability_uri('sphere')); print(list(m.browse_capabilities('')))
 ```
 
+### Curve-curve intersection
+where two curves cross (K1): all intersections of two polylines as records {point, segment indices, parameters}, crossings decided by the exact orient2d so a near-tangency is not swallowed; plus self-intersections (what an offset curve must clean up) and split-at-crossing. See holographic_curveint..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(); m.curve_intersect(np.array([[-1.,0],[1,0]]), np.array([[0,-1.],[0,1]]))
+```
+
 ### Denoise (domain)
 clean a render or signal with one home: image SVGF (variance-guided a-trous) or demodulated (divide albedo out), sharpen, and the signal manifold denoisers (adaptive/manifold/codebook/trajectory).
 
@@ -1910,11 +2015,25 @@ B7: make the query store survive a crash. Take a durable SNAPSHOT of the persist
 from holographic.agents_and_reasoning.holographic_query_durable import save_snapshot, Journal, recover; recover(snap_path, journal_path)
 ```
 
+### Edge fillet + chamfer (exact radius)
+round or bevel the crease where two implicit surfaces meet (K5), the field-native fillet: fillet_union/intersection/difference give an EXACT constant-radius circular arc at the edge (iq rounded booleans) -- a true dimensioned radius, unlike smooth_union whose k is a soft blend, not a radius; chamfer_union gives the flat 45-degree bevel. Result is an SDF that raymarches/meshes/emits. KEPT NEGATIVE: a 3-way vertex is only approximately r. See holographic_fillet..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(); px=lambda P: np.asarray(P,float)[:,0]; py=lambda P: np.asarray(P,float)[:,1]; f=m.fillet_union(px,py,0.3); float(f(np.array([[0.,0.3,0]]))[0])
+```
+
 ### False-discovery gate over an ablation table
 one claim gets an honest CI from measure(); a TABLE of ablations is a scan, and scanning enough subsystems means one clears its bar by luck. measure.fdr_gate(rows, alpha) applies Benjamini-Yekutieli across the whole family (paired permutation p-values, dependent=True) and reports how many survive..
 
 ```python
 aug, n_load_bearing, n_survive = measure.fdr_gate(rows, alpha=0.1)
+```
+
+### Game world SSE streaming (per-client deltas)
+watch or drive a game world from a BROWSER (holographic_gameshard.WorldStreamer + service /game + /game/stream): POST /game creates a room, routes player commands, and advances the authoritative clock; GET /game/stream is an SSE push of per-client DELTAS -- first event is the full area-of-interest as 'added', later events only what changed, the wire format a three.js client feeds straight into its scene graph. advance=1 makes a stream the designated clock; a lock keeps mid-tick command POSTs replayable. Needs serve(threads=True) so an open stream never blocks input..
+
+```python
+import lecore; from holographic.simulation_and_physics.holographic_gameshard import ShardWorld, WorldStreamer; w=ShardWorld(cell=8.0,dt=0.1); w.spawn(1,(1,1,1)); st=WorldStreamer(w); print(len(st.next_event('c1', center=(1,1,1), radius=5)['added']))
 ```
 
 ### Gather N lookups in one dot product (superposed gather)
@@ -1959,6 +2078,13 @@ mind.merge_forks(forks, policy, tol) reconciles several forked copies of a world
 res = mind.merge_forks([mine, theirs], policy='select'); apply(res['merged']); resolve(res['conflicts'])
 ```
 
+### Model tolerance + exact geometric predicates
+the geometry kernel foundation: ONE ModelTolerance authority (abs/rel/angular) every boolean/snap/intersection consults so they agree on equal, plus orient2d/orient3d EXACT-sign predicates (float fast path, Fraction exact fallback) that decide collinear/coplanar ties deterministically instead of by a fuzzy epsilon. See holographic_geomkernel..
+
+```python
+import lecore; m=lecore.UnifiedMind(); m.orient2d((0,0),(1,0),(0,1))
+```
+
 ### N filter passes in one evaluation (shader algebra)
 a circular convolution is diagonal in the Fourier basis, so applying it N times is just the transfer raised to the N-th power. mind.filter_passes(field, kernel, N) costs the same whether N is 1 or 1,000,000 (measured 1,824x faster at N=4096, exact to 2.3e-14). Two things a GPU cannot do: N may be FRACTIONAL (half a blur pass; two halves compose to one), and N may be INFINITE -- mind.filter_limit returns the steady state as an idempotent projection, where a literal loop can need 200,000 passes..
 
@@ -1973,11 +2099,25 @@ compile a scalar Python kernel ONCE to a native .so (content-hash cached), batch
 src = 'def k(px: float, r: float) -> float:\n    return sqrt(px * px) - r\n'; print(mind.zig_batch_eval(src, [[1.5, 2.0, -0.7], [0.5, 0.5, 0.5]]))
 ```
 
+### Object snap: midpoint + intersection
+modeling object-snaps (K10) on top of the existing vertex/edge/grid snap: snap a dragged point to the nearest EDGE MIDPOINT, or to the nearest INTERSECTION of 2-D polylines (crossings found by the robust curve intersector). Returns hit records for the picking layer. See holographic_snap..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(); V=np.array([[0.,0,0],[5,0,0]]); m.snap_to_midpoints([2.4,0.2,0], V, [[0,1]])['position'][0]
+```
+
 ### Optional accelerators & extras (what's installed, what it buys)
 mind.accelerator_report() lists every optional dependency with installed-or-not, version, WHAT IT UNLOCKS with the measured numbers, and the exact pip command. NumPy is the only required row. Highlights: ziglang [zig] -- native batch kernels, measured 2-5x over vectorised NumPy, 3.8x on the raymarch demo, BIT-IDENTICAL in safe mode, one wheel, whole toolchain; pillow [images] -- jpg/webp via mind.save_render (PNG stays stdlib on purpose); numba [jit], cupy [gpu], sympy [symbolic], flask [ui]. All opt-in: the engine runs and passes every test with none of them..
 
 ```python
 import json; print(json.dumps(mind.accelerator_report(), indent=1))
+```
+
+### Parametric surface analysis (curvature + draft)
+curvature ON a parametric surface (K9), not sampled off a mesh: Gaussian/mean/principal curvature at (u,v) via the first and second fundamental forms (sphere K=1/R^2, cylinder K=0, saddle K<0), plus the moldability DRAFT ANGLE for a pull direction (positive drafts, ~0 vertical wall, negative undercut) and a developable test. See holographic_surfanalysis..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(); sph=lambda u,v: np.array([2*np.cos(u)*np.sin(v),2*np.sin(u)*np.sin(v),2*np.cos(v)]); round(m.surface_curvature(sph,0.7,1.0)['gaussian'],3)
 ```
 
 ### Polarized light (Stokes state)
@@ -2067,6 +2207,13 @@ which engine modules carry a real _selftest and which advertise a __main__ but a
 c = mind.selftest_coverage(); print(round(c['coverage'], 3), c['missing'])
 ```
 
+### Shuffled-null test (score vs its own null)
+mind.permutation_null(observed, score_fn, resample_fn, n_null, alpha, side): the SETI/particle-physics discipline as one composable primitive -- score your real datum, re-run the IDENTICAL scoring on resamples that destroy the structure, and report whether it stands out. Returns {p, null_mean, null_std, null_ci, observed, collapsed, n_null}; p carries the +1 plug (never exactly 0). Generalises the engine's five procedure-matched private nulls. KEPT NEGATIVE: a wrong resample_fn gives a mis-calibrated null -- the procedure-match is the caller's job. Calibrated + deterministic..
+
+```python
+import numpy as np; cb=np.random.default_rng(0).standard_normal((20,64)); cb/=np.linalg.norm(cb,axis=1,keepdims=True); sc=lambda q: float(np.max(cb@(q/np.linalg.norm(q)))); rs=lambda r: r.standard_normal(64); print(mind.permutation_null(sc(cb[3]), sc, rs, n_null=200)['collapsed'])
+```
+
 ### Sky observation (cube + world axes)
 a SKY OBSERVATION as first-class data (holographic_skydata): a data cube + WORLD AXES (WCS-lite -- linear RA/Dec/freq/wavelength via crval/crpix/cdelt), plus meta. Convert pixel<->world, get an axis' real coordinates, turn a frequency axis into the lambda^2 the Faraday tools want, and reshape to (...,nchan,4) ready for faraday_rm_map. Deterministic save/load (json header + npy, no pickle). No astropy/FITS parser in core; header-dict + npy is the ingest contract. make_skydata / sky_world_coords / sky_lambda2 / sky_stokes_cube / save_skydata / load_skydata.
 
@@ -2088,6 +2235,13 @@ mind.mesh_limit_surface(mesh) returns where infinite Loop subdivision would put 
 positions, normals = mind.mesh_limit_surface(mesh)
 ```
 
+### Surface-surface intersection (SSI)
+trace the intersection curve of two implicit surfaces f=0, g=0 (K2, the kernel keystone) by a predict-correct FIELD MARCH: tangent = grad f x grad g, corrector = Newton projection onto both surfaces (one more iterate-a-projection). Returns polylines; fit a NURBS for a trim loop. Tangencies reported degenerate, not marched into noise. See holographic_surfint..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(); sA=lambda P: np.linalg.norm(np.asarray(P,float),axis=1)-1.0; sB=lambda P: np.linalg.norm(np.asarray(P,float)-np.array([1.,0,0]),axis=1)-1.0; len(m.surface_intersect(sA,sB,(-1.5,-1.5,-1.5),(2,1.5,1.5)))
+```
+
 ### Token sampling (temperature + nucleus)
 stochastic next-symbol draw over any {symbol: weight} distribution -- the GENERATION dual of argmax prediction. Promoted from the char generator into one primitive; wired as PredictiveMemory.sample / generate_sampled and the mind's sample_instruction / sample_recipe over the recipe grammar. Measured reason: a greedy generator limit-cycles (MMD2 0.599 vs 0.011 sampled; 15x verbatim-copy) or flatlines on heavy-tailed streams. Kept negatives in the docstring: nucleus/low-T delete rare events on heavy-tailed alphabets; well-formedness (e.g. alternation) is the caller's decode-loop job.
 
@@ -2107,6 +2261,13 @@ mind.triage_code(src) reports honest STRUCTURAL OBSERVATIONS about code in a lan
 
 ```python
 print(mind.triage_code('fn quicksort(xs: List) { let pivot = xs[0]; }', as_text=True))
+```
+
+### Trimmed surface
+a surface restricted to trim loops in parameter space (K3): inside an outer loop and outside holes -- how Rhino represents a trimmed face. Robust point-in-trim (exact orient2d), trim-respecting tessellation, and a bridge that projects a 3-D SSI curve to a (u,v) trim loop. See holographic_trimsurf..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(); flat=lambda u,v: np.array([u,v,0.0]); ts=m.trimmed_surface(flat, [[0,0],[1,0],[1,1],[0,1]]); ts.is_inside(0.5,0.5)
 ```
 
 ### Two-slit interferometer (quantum)
@@ -2461,4 +2622,4 @@ import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); x=np.li
 
 ---
 
-*308 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*330 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

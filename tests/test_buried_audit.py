@@ -80,3 +80,36 @@ def test_no_module_is_buried():
             continue
         buried.append(m)
     assert buried == [], "buried (unwired, unhomed, not declared): %s" % buried
+
+
+def test_no_dark_method_capabilities():
+    """D1 regression trap: a public mind method auto-registered as a capability must be DISCOVERABLE -- surface in the
+    top-15 for its own name, OR carry aliases (a bare generic name like 'scene'/'material'/'query' is otherwise
+    shadowed by a descriptively-titled sibling and becomes unreachable via find_capability). This pins the fix and
+    fails CI if a new bare-name faculty is registered without aliases."""
+    from holographic.misc.holographic_unified import UnifiedMind
+    m = UnifiedMind(dim=128, seed=0)
+    c = m._capability_catalog()
+    dark = []
+    for cap in c.all():
+        top15 = [x.name for x in m.find_capability(cap.name)[:15]]
+        if cap.name not in top15 and not (getattr(cap, "aliases", ()) or ()):
+            dark.append(cap.name)
+    assert not dark, "dark (undiscoverable, alias-less) capabilities regressed: %r" % dark[:20]
+
+
+def test_previously_dark_bare_names_are_now_discoverable():
+    """Spot-check several of the 39 once-dark bare method-names: a user phrasing now surfaces each in the top-3."""
+    from holographic.misc.holographic_unified import UnifiedMind
+    m = UnifiedMind(dim=256, seed=0)
+    checks = {
+        "reinforcement learning agent": "agent",
+        "physically based material": "material",
+        "run a sql query": "query",
+        "add a light to a scene": "light",
+        "variance harness": "measure",
+        "re-extract a mesh from a field": "surface_mesh",
+    }
+    for phrasing, name in checks.items():
+        top3 = [x.name for x in m.find_capability(phrasing)[:3]]
+        assert name in top3, (phrasing, "->", top3)

@@ -27,6 +27,27 @@
     },
     {
       "aliases": [
+        "2d constraint solver",
+        "sketch constraint solver",
+        "parametric sketch",
+        "solve a dimensioned drawing",
+        "make lines parallel or perpendicular",
+        "constrain distance between points",
+        "coincident constraint",
+        "geometric constraint solver",
+        "under or over constrained sketch"
+      ],
+      "consumes": [],
+      "does": "a parametric 2-D sketch solved by ITERATED PROJECTION (K8, the SketchUp-inference / dimensioned-drawing engine): add points, declare constraints (fix/coincident/horizontal/vertical/distance/parallel/perpendicular/point-on-line), solve to a fixed point (Gauss-Seidel relaxation, the same iterate-a-projection pattern as IK/PBD/resonator), and read under/well/over-constrained. See holographic_sketch2d.",
+      "example": "import lecore; m=lecore.UnifiedMind(); s=m.sketch2d(); a=s.add_point(0,0); b=s.add_point(3,0.3); s.fix(a); s.horizontal(a,b); s.distance(a,b,4.0); s.solve()['satisfied']",
+      "name": "2D constraint sketch solver",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "2d",
         "image",
         "edit an image",
@@ -63,6 +84,28 @@
       "produces": [],
       "semantic": null,
       "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
+        "2d boolean",
+        "region boolean",
+        "union of two polygons",
+        "polygon difference",
+        "clip polygons",
+        "offset a curve",
+        "parallel curve",
+        "inset a polygon",
+        "curve offset",
+        "2d region union"
+      ],
+      "consumes": [],
+      "does": "union/difference/intersection of two closed polygonal regions by exact even-odd membership (K4, the SketchUp-face/drafting layer), plus parallel-curve OFFSET with the folded loops a concave offset makes cleaned up via self-intersection removal. See holographic_region2d.",
+      "example": "import numpy as np, lecore; m=lecore.UnifiedMind(); A=np.array([[0,0],[1,0],[1,1],[0,1]]); B=np.array([[0.5,0],[1.5,0],[1.5,1],[0.5,1]]); round(m.region_boolean_area(A,B,'intersection'),2)",
+      "name": "2D region boolean + curve offset",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
     },
     {
       "aliases": [
@@ -125,6 +168,36 @@
       "produces": [],
       "semantic": null,
       "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
+        "affected tests",
+        "which tests to run",
+        "select tests",
+        "test selection",
+        "run only affected tests",
+        "skip unrelated tests",
+        "reduce test count",
+        "test suite too slow",
+        "avoid full test suite",
+        "only run changed tests",
+        "which tests does this touch",
+        "impacted tests",
+        "test impact analysis",
+        "fewer tests per commit",
+        "why do so many tests run",
+        "cut down tests",
+        "duplicate tests",
+        "too many tests"
+      ],
+      "consumes": [],
+      "does": "answers 'why do thousands of tests run on every small commit?' -- a static import-graph selector (pure ast, no execution/coverage tracing) that picks only the tests reachable from changed files, or auto-detects the change from git. Fails SAFE: an unscopable change widens to the WHOLE suite; a docs-only change selects nothing. The same selection CI already runs on push/PR -- previously CLI-only, now a mind faculty. See mind.affected_tests's own docstring for the full contract",
+      "example": "mind.set_file_root('.'); mind.affected_tests(changed_paths=['holographic/rendering/holographic_render.py'])  # or mind.affected_tests() alone to auto-detect from git",
+      "name": "Affected-test selection (which tests does my change need)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
     },
     {
       "aliases": [
@@ -261,6 +334,96 @@
     },
     {
       "aliases": [
+        "build a video game",
+        "game server",
+        "multiplayer game world",
+        "authoritative server tick",
+        "game loop",
+        "fixed timestep game",
+        "deterministic lockstep",
+        "player input command queue",
+        "area of interest snapshot",
+        "interest management",
+        "state delta sync",
+        "shard a massive world",
+        "massively multiplayer world",
+        "world region handoff",
+        "entity simulation for a game",
+        "mmo world shard"
+      ],
+      "consumes": [],
+      "does": "build a GAME on the engine (holographic_gameshard.GameShard): authoritative fixed-dt world tick fed by an ordered player-command queue, deterministic by construction (same command log -> identical sha256 digest: free lockstep verification). Collision culls via spatial_hash_pairs; richer dynamics delegate to rigid_body. AOI snapshot() + stateless delta_since() for clients; region departures for handoff over the distributed bus (massive-world sharding). save/load digest-identical; negatives in the module docstring.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); s=m.game_shard(seed=0); s.submit({'tick':0,'player':'a','seq':0,'op':'spawn','id':1,'pos':(0,0,0)}); print(s.step()['n'])",
+      "name": "Authoritative game world shard (fixed-tick, deterministic)",
+      "native": true,
+      "produces": [],
+      "semantic": "simulate/step",
+      "theme": "Simulation & physics"
+    },
+    {
+      "aliases": [
+        "b-rep boolean",
+        "boolean of two solids",
+        "union two solids",
+        "subtract one solid from another",
+        "intersect two solids",
+        "solid modeling boolean",
+        "csg on solids",
+        "merge two solids",
+        "re-stitch solids"
+      ],
+      "consumes": [],
+      "does": "the FINISHED B-rep boolean -- union/difference/intersection of two solids into one watertight B-rep (the SSI-driven re-stitch turning K2/K3/K6 into full solid modeling). Routes both solids through the SDF (intersection seam + field combine + marching, reusing route_csg), wraps the watertight result as a B-rep, VALIDATED with K6 (closed 2-manifold, Euler, volume vs inclusion-exclusion). analytic=True recovers POLYGONAL faces (~100x fewer, same volume). See holographic_brepbool.",
+      "example": "import lecore; m=lecore.UnifiedMind(); a=m.brep_box(lo=(-1,-1,-1),hi=(1,1,1)); b=m.brep_box(lo=(0,0,0),hi=(2,2,2)); r=m.brep_boolean(a,b,'union',bounds=((-1.5,-1.5,-1.5),(2.5,2.5,2.5))); r._boolean_report['closed_manifold']",
+      "name": "B-rep boolean (finished solid modeling)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "is a point inside a solid",
+        "point in solid",
+        "point inside a brep",
+        "solid membership",
+        "boolean of two solids",
+        "classify faces for a boolean",
+        "inside outside test for a solid",
+        "solid boolean classification"
+      ],
+      "consumes": [],
+      "does": "the classification half of a solid boolean (toward K6 booleans): point_in_brep tests whether points are inside a B-rep solid (delegates to the generalized winding number), and brep_boolean_faces decides which whole faces of A survive a union/difference/intersection with B, flagging faces that straddle the B boundary (which need a K2-SSI split). HONEST SCOPE: whole-face granularity; the SSI face-split + re-stitch is the declared next step. See holographic_brepbool.",
+      "example": "import lecore; m=lecore.UnifiedMind(); c=m.brep_box(); bool(m.point_in_brep(c, [[0,0,0]])[0])",
+      "name": "B-rep membership + boolean face classification",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "b-rep",
+        "boundary representation",
+        "solid topology",
+        "euler poincare validity",
+        "is this a valid solid",
+        "faces edges loops shells",
+        "genus of a solid",
+        "closed manifold check",
+        "exact solid representation"
+      ],
+      "consumes": [],
+      "does": "the boundary-representation foundation (K6): the vertex/edge/loop/face/shell topology of an exact solid, with Euler-Poincare validity (V-E+F-R=2(S-H)), genus, closed-2-manifold checking, and a bridge that lets each FACE carry a trimmed analytic surface (K3). A B-rep face is a trimmed surface, not a polygon -- that is what distinguishes this from the mesh Euler ops. HONEST SCOPE: topology+validity+face-geometry; B-rep booleans (SSI re-stitch) are the declared next step. See holographic_brep.",
+      "example": "import lecore; m=lecore.UnifiedMind(); m.brep_validate(m.brep_box())['genus']",
+      "name": "B-rep solid topology (Euler-Poincare validity)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "bake cloud",
         "background render",
         "resumable render",
@@ -371,6 +534,27 @@
       "produces": [],
       "semantic": null,
       "theme": "Data analysis & signals"
+    },
+    {
+      "aliases": [
+        "export STL",
+        "write STL file",
+        "export DXF",
+        "write a 2d drawing",
+        "save mesh for 3d printing",
+        "dxf export",
+        "stl export",
+        "export a drawing to autocad",
+        "write geometry to a file"
+      ],
+      "consumes": [],
+      "does": "write geometry OUT in the two open exchange formats a modeler needs (K7): mesh_to_stl (ASCII STL for 3-D meshes, tris/quads/ngons, per-facet normals) and polylines_to_dxf (minimal DXF R12 for 2-D drawings, POLYLINE/VERTEX, closed loops flagged -- the format Rhino/AutoCAD read). Pure strings; the caller writes the file. See holographic_cadexport.",
+      "example": "import numpy as np, lecore; m=lecore.UnifiedMind(); m.mesh_to_stl(np.array([[0.,0,0],[1,0,0],[0,1,0]]), [(0,1,2)])[:5]",
+      "name": "CAD export: STL + DXF",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
     },
     {
       "aliases": [
@@ -848,6 +1032,29 @@
     },
     {
       "aliases": [
+        "curve curve intersection",
+        "intersect two curves",
+        "where do two curves cross",
+        "spline intersection",
+        "where do two splines cross",
+        "do these curves cross",
+        "find where curves meet",
+        "self intersection of a curve",
+        "polyline intersection",
+        "segment intersection",
+        "curve crossing points"
+      ],
+      "consumes": [],
+      "does": "where two curves cross (K1): all intersections of two polylines as records {point, segment indices, parameters}, crossings decided by the exact orient2d so a near-tangency is not swallowed; plus self-intersections (what an offset curve must clean up) and split-at-crossing. See holographic_curveint.",
+      "example": "import numpy as np, lecore; m=lecore.UnifiedMind(); m.curve_intersect(np.array([[-1.,0],[1,0]]), np.array([[0,-1.],[0,1]]))",
+      "name": "Curve-curve intersection",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "bezier curve",
         "catmull rom spline",
         "b-spline",
@@ -1321,6 +1528,27 @@
     },
     {
       "aliases": [
+        "fillet an edge",
+        "round an edge",
+        "constant radius fillet",
+        "chamfer an edge",
+        "bevel an edge",
+        "round the corner between two surfaces",
+        "edge blend",
+        "rolling ball fillet",
+        "fillet between two solids"
+      ],
+      "consumes": [],
+      "does": "round or bevel the crease where two implicit surfaces meet (K5), the field-native fillet: fillet_union/intersection/difference give an EXACT constant-radius circular arc at the edge (iq rounded booleans) -- a true dimensioned radius, unlike smooth_union whose k is a soft blend, not a radius; chamfer_union gives the flat 45-degree bevel. Result is an SDF that raymarches/meshes/emits. KEPT NEGATIVE: a 3-way vertex is only approximately r. See holographic_fillet.",
+      "example": "import numpy as np, lecore; m=lecore.UnifiedMind(); px=lambda P: np.asarray(P,float)[:,0]; py=lambda P: np.asarray(P,float)[:,1]; f=m.fillet_union(px,py,0.3); float(f(np.array([[0.,0.3,0]]))[0])",
+      "name": "Edge fillet + chamfer (exact radius)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "encode",
         "encoder",
         "number to vector",
@@ -1685,6 +1913,25 @@
       "produces": [],
       "semantic": null,
       "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
+        "stream game to browser",
+        "watch the world live",
+        "server sent events game",
+        "three.js game client feed",
+        "push world deltas to client",
+        "live multiplayer view over http",
+        "game room http api"
+      ],
+      "consumes": [],
+      "does": "watch or drive a game world from a BROWSER (holographic_gameshard.WorldStreamer + service /game + /game/stream): POST /game creates a room, routes player commands, and advances the authoritative clock; GET /game/stream is an SSE push of per-client DELTAS -- first event is the full area-of-interest as 'added', later events only what changed, the wire format a three.js client feeds straight into its scene graph. advance=1 makes a stream the designated clock; a lock keeps mid-tick command POSTs replayable. Needs serve(threads=True) so an open stream never blocks input.",
+      "example": "import lecore; from holographic.simulation_and_physics.holographic_gameshard import ShardWorld, WorldStreamer; w=ShardWorld(cell=8.0,dt=0.1); w.spawn(1,(1,1,1)); st=WorldStreamer(w); print(len(st.next_event('c1', center=(1,1,1), radius=5)['added']))",
+      "name": "Game world SSE streaming (per-client deltas)",
+      "native": true,
+      "produces": [],
+      "semantic": "simulate/step",
+      "theme": "More capabilities"
     },
     {
       "aliases": [
@@ -2344,6 +2591,27 @@
     },
     {
       "aliases": [
+        "massive game world",
+        "massively multiplayer world",
+        "shard entities across regions",
+        "entity migration between shards",
+        "cross shard snapshot",
+        "world scale simulation",
+        "distribute a game world across machines",
+        "open world game backend",
+        "seamless world regions"
+      ],
+      "consumes": [],
+      "does": "scale a game to a MASSIVE world (holographic_gameshard.ShardWorld): a lazy grid of authoritative shards -- cost tracks occupied cells, not world size. Entities crossing a cell boundary migrate deterministically with exact velocity/mass carried over; snapshots span shard seams; a world-level sha256 digest gives lockstep verification across the whole grid. collect_only handoffs + receive() are the bus-transport seam: identical payloads in-process or across the distributed farm. run_game_world is the JSON /invoke face.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); r=m.run_game_world([{'op':'spawn','id':1,'pos':(3.5,1,1),'vel':(2,0,0)}], 5, cell=4.0, dt=0.1); print(r['migrated'])",
+      "name": "Massive sharded game world (deterministic migration)",
+      "native": true,
+      "produces": [],
+      "semantic": "simulate/step",
+      "theme": "Simulation & physics"
+    },
+    {
+      "aliases": [
         "material",
         "channels",
         "albedo",
@@ -2585,6 +2853,30 @@
     },
     {
       "aliases": [
+        "model tolerance",
+        "geometric tolerance",
+        "orient2d",
+        "orient3d",
+        "robust predicate",
+        "exact sign of a determinant",
+        "is a point left of a line",
+        "collinear test",
+        "are three points collinear",
+        "which side of a line is a point",
+        "coplanar test",
+        "tolerance authority"
+      ],
+      "consumes": [],
+      "does": "the geometry kernel foundation: ONE ModelTolerance authority (abs/rel/angular) every boolean/snap/intersection consults so they agree on equal, plus orient2d/orient3d EXACT-sign predicates (float fast path, Fraction exact fallback) that decide collinear/coplanar ties deterministically instead of by a fuzzy epsilon. See holographic_geomkernel.",
+      "example": "import lecore; m=lecore.UnifiedMind(); m.orient2d((0,0),(1,0),(0,1))",
+      "name": "Model tolerance + exact geometric predicates",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "multi-material",
         "multimaterial",
         "blend materials",
@@ -2819,6 +3111,36 @@
     },
     {
       "aliases": [
+        "node editor",
+        "node based editor",
+        "node graph editor",
+        "wire nodes together",
+        "shader node graph",
+        "geometry nodes",
+        "material node graph",
+        "connect nodes with typed sockets",
+        "visual node graph",
+        "node graph backend",
+        "dataflow node editor",
+        "audio reactive",
+        "audio drives parameters",
+        "shader as a map",
+        "drive a parameter with a signal",
+        "time varying node graph",
+        "make geometry react to music",
+        "music reactive visuals"
+      ],
+      "consumes": [],
+      "does": "the unifying NODE-GRAPH a 3-D node editor binds to: one heterogeneous graph of TYPED nodes (scalar/color/field/sdf/mesh/material/texture), 40-node palette -- SDF primitives/booleans/transforms, bake-to-grid, fields, textures, geometry modifiers, sdf_to_mesh, PBR + TEXTURE-DRIVEN MATERIAL SOCKETS (driven or procedural albedo), and audio-reactive drivers. ANY param is DRIVABLE (a typed input overrides the knob). Connections type/cycle-checked; eval topological+memoized; dirty-propagating; JSON serializable. See holographic_nodegraph.",
+      "example": "import numpy as np, lecore; m=lecore.UnifiedMind(); g=m.node_graph(); s=g.add('sdf_sphere',{'radius':1.0}); b=g.add('sdf_box',{'size':(0.8,0.8,0.8)}); u=g.add('sdf_union'); g.connect(s,'out',u,'a'); g.connect(b,'out',u,'b'); type(g.evaluate(u)['out']).__name__",
+      "name": "Node-graph editor backend",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
         "nystrom",
         "landmark",
         "low rank",
@@ -2837,6 +3159,26 @@
       "produces": [],
       "semantic": null,
       "theme": "Data analysis & signals"
+    },
+    {
+      "aliases": [
+        "midpoint snap",
+        "snap to midpoint",
+        "intersection snap",
+        "snap to intersection",
+        "object snap",
+        "osnap",
+        "snap to where lines cross",
+        "snap to edge midpoint"
+      ],
+      "consumes": [],
+      "does": "modeling object-snaps (K10) on top of the existing vertex/edge/grid snap: snap a dragged point to the nearest EDGE MIDPOINT, or to the nearest INTERSECTION of 2-D polylines (crossings found by the robust curve intersector). Returns hit records for the picking layer. See holographic_snap.",
+      "example": "import numpy as np, lecore; m=lecore.UnifiedMind(); V=np.array([[0.,0,0],[5,0,0]]); m.snap_to_midpoints([2.4,0.2,0], V, [[0,1]])['position'][0]",
+      "name": "Object snap: midpoint + intersection",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
     },
     {
       "aliases": [
@@ -2937,6 +3279,28 @@
         "scalar"
       ],
       "semantic": "analyze/describe",
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "surface curvature",
+        "gaussian curvature of a surface",
+        "mean curvature",
+        "principal curvatures",
+        "draft angle",
+        "moldability analysis",
+        "is a surface developable",
+        "curvature of a nurbs surface",
+        "fundamental forms",
+        "undercut detection"
+      ],
+      "consumes": [],
+      "does": "curvature ON a parametric surface (K9), not sampled off a mesh: Gaussian/mean/principal curvature at (u,v) via the first and second fundamental forms (sphere K=1/R^2, cylinder K=0, saddle K<0), plus the moldability DRAFT ANGLE for a pull direction (positive drafts, ~0 vertical wall, negative undercut) and a developable test. See holographic_surfanalysis.",
+      "example": "import numpy as np, lecore; m=lecore.UnifiedMind(); sph=lambda u,v: np.array([2*np.cos(u)*np.sin(v),2*np.sin(u)*np.sin(v),2*np.cos(v)]); round(m.surface_curvature(sph,0.7,1.0)['gaussian'],3)",
+      "name": "Parametric surface analysis (curvature + draft)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
       "theme": "More capabilities"
     },
     {
@@ -3369,6 +3733,28 @@
       "produces": [],
       "semantic": null,
       "theme": "Run it as a service / distributed"
+    },
+    {
+      "aliases": [
+        "bits per vector",
+        "how many bits to store a vector",
+        "rate distortion",
+        "compress a codebook",
+        "entropy code vectors",
+        "geometry preserving compression",
+        "cheapest bit budget",
+        "will these vectors compress",
+        "ans entropy coding",
+        "quantize a codebook honestly"
+      ],
+      "consumes": [],
+      "does": "mind.rate_distortion_report(arrays, target_cos): the cheapest bit budget that stores vectors while keeping their GEOMETRY (pairwise similarity), not just bits -- auto-KLT-rank + coarsest quantization, rANS entropy-coded (Duda's ANS). Reports bits_per_vector against the float32 baseline, the ratio, achieved cosine (mean+min), rank, and a `pays` flag. KEPT NEGATIVE (loud): incompressible near-orthogonal vectors do NOT pay -- the code can be LARGER than float32 and pays=False. Measured: low-rank ~3x (691 vs 2048 b/vec); random unit vectors 0.95x.",
+      "example": "import numpy as np; rng=np.random.default_rng(0); B=rng.normal(size=(3,64)); A=[(np.array([1,.4,-.2])+.05*rng.normal(size=3))@B for _ in range(12)]; r=mind.rate_distortion_report(A, target_cos=0.999); print(r['ratio'], r['pays'])",
+      "name": "Rate-distortion report (bits per vector at a fidelity)",
+      "native": true,
+      "produces": [],
+      "semantic": "analyze/measure",
+      "theme": "Geometry, modeling & rendering"
     },
     {
       "aliases": [
@@ -3900,6 +4286,28 @@
     },
     {
       "aliases": [
+        "permutation test",
+        "shuffled null",
+        "score against a null",
+        "p value from a null distribution",
+        "is my result better than chance",
+        "significance test",
+        "monte carlo p value",
+        "prove it isn't noise",
+        "false alarm probability",
+        "null hypothesis test"
+      ],
+      "consumes": [],
+      "does": "mind.permutation_null(observed, score_fn, resample_fn, n_null, alpha, side): the SETI/particle-physics discipline as one composable primitive -- score your real datum, re-run the IDENTICAL scoring on resamples that destroy the structure, and report whether it stands out. Returns {p, null_mean, null_std, null_ci, observed, collapsed, n_null}; p carries the +1 plug (never exactly 0). Generalises the engine's five procedure-matched private nulls. KEPT NEGATIVE: a wrong resample_fn gives a mis-calibrated null -- the procedure-match is the caller's job. Calibrated + deterministic.",
+      "example": "import numpy as np; cb=np.random.default_rng(0).standard_normal((20,64)); cb/=np.linalg.norm(cb,axis=1,keepdims=True); sc=lambda q: float(np.max(cb@(q/np.linalg.norm(q)))); rs=lambda r: r.standard_normal(64); print(mind.permutation_null(sc(cb[3]), sc, rs, n_null=200)['collapsed'])",
+      "name": "Shuffled-null test (score vs its own null)",
+      "native": true,
+      "produces": [],
+      "semantic": "analyze/measure",
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "signal processing",
         "fft",
         "spectral",
@@ -4195,6 +4603,26 @@
       "does": "mind.mesh_limit_surface(mesh) returns where infinite Loop subdivision would put every vertex, plus the EXACT limit normal there -- in O(V), performing no subdivision at all. The ring-to-ring block of the local Loop operator is exactly a CIRCULANT, i.e. a bind operator, so iterate.transfer diagonalises it for free: mode 0 (eigenvalue 5/8 at every valence) gives the limit position, modes +-1 span the tangent plane so the normal is exact rather than area-weighted (0.0000 degrees against a 6x-subdivided icosphere), and Warren's beta is read off the spectrum instead of hard-coded. Deep subdivision converges to it: 6.0e-4 -> 3.7e-5 -> 2.3e-6 at k=4/6/8. HONEST SCOPE: this is the k -> infinity case; a FINITE number of levels on an irregular mesh still needs the full Stam evaluation, so use mind.mesh_subdivide(mesh, k) there.",
       "example": "positions, normals = mind.mesh_limit_surface(mesh)",
       "name": "Subdivision limit surface (closed form)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "surface surface intersection",
+        "SSI",
+        "intersect two surfaces",
+        "intersection curve of two surfaces",
+        "trim curve from two surfaces",
+        "where two surfaces meet",
+        "solid intersection curve",
+        "implicit surface intersection"
+      ],
+      "consumes": [],
+      "does": "trace the intersection curve of two implicit surfaces f=0, g=0 (K2, the kernel keystone) by a predict-correct FIELD MARCH: tangent = grad f x grad g, corrector = Newton projection onto both surfaces (one more iterate-a-projection). Returns polylines; fit a NURBS for a trim loop. Tangencies reported degenerate, not marched into noise. See holographic_surfint.",
+      "example": "import numpy as np, lecore; m=lecore.UnifiedMind(); sA=lambda P: np.linalg.norm(np.asarray(P,float),axis=1)-1.0; sB=lambda P: np.linalg.norm(np.asarray(P,float)-np.array([1.,0,0]),axis=1)-1.0; len(m.surface_intersect(sA,sB,(-1.5,-1.5,-1.5),(2,1.5,1.5)))",
+      "name": "Surface-surface intersection (SSI)",
       "native": true,
       "produces": [],
       "semantic": null,
@@ -4544,6 +4972,25 @@
         "scalar"
       ],
       "semantic": "analyze/measure",
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "trimmed surface",
+        "trim a surface",
+        "surface with a hole",
+        "trimmed nurbs face",
+        "cut a region from a surface",
+        "trim loop",
+        "bounded surface patch"
+      ],
+      "consumes": [],
+      "does": "a surface restricted to trim loops in parameter space (K3): inside an outer loop and outside holes -- how Rhino represents a trimmed face. Robust point-in-trim (exact orient2d), trim-respecting tessellation, and a bridge that projects a 3-D SSI curve to a (u,v) trim loop. See holographic_trimsurf.",
+      "example": "import numpy as np, lecore; m=lecore.UnifiedMind(); flat=lambda u,v: np.array([u,v,0.0]); ts=m.trimmed_surface(flat, [[0,0],[1,0],[1,1],[0,1]]); ts.is_inside(0.5,0.5)",
+      "name": "Trimmed surface",
+      "native": true,
+      "produces": [],
+      "semantic": null,
       "theme": "More capabilities"
     },
     {
@@ -5687,6 +6134,24 @@
     },
     {
       "aliases": [
+        "run game shards on the farm",
+        "game world over the message bus",
+        "connect game to distributed system",
+        "multiplayer across machines",
+        "node owns world regions",
+        "handoff entities over the bus"
+      ],
+      "consumes": [],
+      "does": "run a game world ON the existing distributed system (holographic_gameshard.BusShardHost): each farm node owns a set of world cells and exchanges entity handoffs over the message/distributed bus -- one topic per cell, so ownership can move without topology re-learning. The interaction layer's handshake with the data layer (bus/coordinator/presence); duplicates none of it, per the coordinator's own monoid rule (a game tick is non-monoid feedback: it runs whole on one worker). Rounds are barriered (publish R, join R+1); pinned equal to the single-process world to 1e-12.",
+      "example": "from holographic.scene_and_pipeline.holographic_distbus import MessageBus; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); bus=MessageBus(); w=m.game_world(cell=4.0,dt=0.1); h=m.game_bus_host(bus,w,[(0,0,0)]); w.spawn(1,(1,1,1)); print(h.tick()['n'])",
+      "name": "game_bus_host",
+      "native": true,
+      "produces": [],
+      "semantic": "simulate/step",
+      "theme": "Run it as a service / distributed"
+    },
+    {
+      "aliases": [
         "iterate a projection",
         "move a thing toward a target legally",
         "constrained movement",
@@ -6597,6 +7062,24 @@
     },
     {
       "aliases": [
+        "run a game tick over http",
+        "invoke game world remotely",
+        "stateless game step",
+        "agent playable world",
+        "step a game world with json",
+        "resume a saved game world"
+      ],
+      "consumes": [],
+      "does": "one-shot JSON game-world run (holographic_gameshard.run_shard): the agent-invokable face of the game shard -- pass a command list, tick count, and optionally a saved state blob; returns final state, per-tick lockstep digests, region departures, and an optional area-of-interest snapshot. Stateless on the wire: the state travels with the caller, so any distributed farm worker can serve the next call.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); r=m.run_game_shard([{'tick':0,'player':'a','seq':0,'op':'spawn','id':1,'pos':(0,0,0)}], 3); print(len(r['digests']))",
+      "name": "run_game_shard",
+      "native": true,
+      "produces": [],
+      "semantic": "simulate/step",
+      "theme": "Learning & agents"
+    },
+    {
+      "aliases": [
         "estimate shader cost",
         "cost of an sdf tree",
         "how expensive is this scene",
@@ -7212,6 +7695,6 @@
       "theme": "Scenes you can describe & adjust"
     }
   ],
-  "count": 308,
+  "count": 330,
   "schema_version": "1.0"
 }
