@@ -360,10 +360,10 @@ def test_every_sdf_node_kind_is_emitted_or_refused():
     from holographic.mesh_and_geometry.holographic_sdfemit import coverage
 
     cov = coverage()
-    # 20 node kinds now (mirror + bend added as domain warps). mirror is an exact isometry and EMITS in all four
-    # dialects; bend is INEXACT (a domain warp) and is refused alongside twist/displace. The authoritative pin
-    # lives in holographic_sdfemit._selftest; this is the realtime-suite mirror of it.
-    assert cov["complete"] is True and cov["total"] == 25
+    # 27 node kinds: 18 emitted + 9 refused. mirror is an exact isometry and EMITS in all four dialects; bend is
+    # INEXACT (a domain warp) and is refused alongside twist/displace. The authoritative pin lives in
+    # holographic_sdfemit._selftest; this is the realtime-suite mirror of it (both must move together).
+    assert cov["complete"] is True and cov["total"] == 27
     assert set(cov["refused"]) == {"menger", "twist", "displace", "bend", "ellipsoid", "capsule", "cone", "octahedron", "elongate"}
 
 

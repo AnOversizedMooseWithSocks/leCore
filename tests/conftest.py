@@ -49,7 +49,13 @@ def pytest_addoption(parser):
     )
 
 
-class _Timeout(Exception):
+class _Timeout(BaseException):
+    # BaseException, NOT Exception, on purpose: the alarm fires INSIDE the code under test, and a lot of that code
+    # (Flask request handlers, broad `try/except Exception` blocks) would otherwise CATCH the timeout and turn a clean
+    # skip into a confusing downstream failure (a swallowed timeout -> a malformed response -> a KeyError three frames
+    # later). Inheriting from BaseException means only code that explicitly catches BaseException/KeyboardInterrupt can
+    # intercept it -- so it propagates out to the hookwrapper below and becomes a skip, the same way KeyboardInterrupt
+    # and SystemExit are designed to pass through `except Exception`.
     pass
 
 

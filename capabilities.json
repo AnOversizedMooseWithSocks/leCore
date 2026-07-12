@@ -2878,16 +2878,12 @@
         "native sdf render",
         "march an sdf natively"
       ],
-      "consumes": [
-        "sdf"
-      ],
+      "consumes": [],
       "does": "the demoscene bar, EXECUTED (Z4): a scene SDF written once in Python is sphere-traced by sphere_trace AND a Zig loop compiled on the fly from the SAME text. mind.zig_march_compare marches the same rays through both, shades both with the same code, reports. MEASURED: f64 t/hit BIT-IDENTICAL over 110k rays x 96 steps, frames BYTE-IDENTICAL, zig 3.8x (safe==fast: determinism is free here). Kept negative: the f32 march is a DIFFERENT PROGRAM -- a 1-ulp hit-branch flip changes the step count, so it gets a measurement, never a tolerance. See holographic_zigmarch.",
       "example": "print(mind.zig_march_compare(width=64, height=48))",
       "name": "One kernel, two runtimes: Zig raymarcher, bit-identical",
       "native": true,
-      "produces": [
-        "image"
-      ],
+      "produces": [],
       "semantic": "simulate/run",
       "theme": "Geometry, modeling & rendering"
     },
@@ -5215,9 +5211,7 @@
         "pose a non-humanoid",
         "put a creature in a pose"
       ],
-      "consumes": [
-        "points"
-      ],
+      "consumes": [],
       "does": "Build a CREATURE from a spec and pose its limbs to targets via CONSTRAINED IK in one deterministic call (holographic_creature). targets = {chain_name: (x,y,z)}; chain names are 'L0','L0m','L1',... (m = mirrored twin). Joint limits (muscle/fat tightened) are enforced so limbs never hyperextend. Returns (Creature, skin_sdf)",
       "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); cre,body=m.creature_pose(m.quadruped_spec(), {'L0':(0.3,-0.5,0.4)}); print('mainImage' in m.to_shadertoy(body))",
       "name": "creature_pose",
@@ -5225,7 +5219,7 @@
       "produces": [
         "sdf"
       ],
-      "semantic": "analyze/measure",
+      "semantic": "animate/pose",
       "theme": "More capabilities"
     },
     {

@@ -31372,3 +31372,41 @@ hardcoded count markers to update. ITEM 19: diag.log absent from the tree; added
 Audits clean (wiring 0 dark, catalog_gaps 0, skill_lint 0/0), catalog selftest 325 caps, capdoc/docgen regen (490
 modules). SCOPED-NEXT unchanged from the merge authors' own notes (barnes-hut nbody, hydro nebula, radial creature
 symmetry, self-collision).
+
+## CI FAILURES AFTER THE BACKLOG -- watchdog swallowing bug + merge-drift pins + my io-tag pollution
+
+CI surfaced 6 failures (the full 5081-test suite is heavier than what ran locally, exactly the risk flagged). Root-
+caused each rather than blanket-fixing:
+
+1. WATCHDOG SWALLOWING (the worst, and MINE) -- 3 failures (plan endpoint NoneType, image_vault _Timeout, cumulative
+   KeyError). The 15 s watchdog raised `_Timeout(Exception)`; the alarm fires INSIDE the code under test, and Flask's
+   `except Exception` (and other broad handlers) CAUGHT it -> returned a malformed response -> the test failed three
+   frames later on a confusing KeyError/NoneType instead of skipping. FIX: `_Timeout(BaseException)` -- same design as
+   KeyboardInterrupt/SystemExit, so `except Exception` can't intercept it; it propagates to the hookwrapper and becomes
+   a clean skip. Verified: plan endpoint now skips at 15 s, runs+passes (24 s) under --run-slow. Added
+   tests/test_timeout_watchdog.py pinning the load-bearing property (issubclass BaseException, NOT Exception; a broad
+   except does not swallow it) so this exact bug can't come back.
+
+2. MEASURE-FIRST FOLLOW-THROUGH: marked the genuinely-slow endpoint tests @pytest.mark.slow (plan endpoint ~24 s FFT
+   permutation null; two stacked-training curriculum tests >15 s) so they DESELECT cheaply (no 15 s waste) and run in
+   the full/nightly pass. image_vault is only conditionally slow (CI load) -> left to the watchdog safety net.
+
+3. STALE MERGE PINS (NOT mine) -- the SDF node-kind count pin was 25 in TWO places (sdfemit selftest + realtime
+   mirror) but the merge added 2 emitted kinds -> 27. Updated both together (the "two coverage pins" hazard on record)
+   with corrected comments. Confirmed the failure pre-dated my edits on the pristine merged repo.
+
+4. MY IO-TAG POLLUTION (mine, from the backlog's item-2 tagging) -- test_io_shape_pipeline_hierarchy broke because my
+   tags created spurious routing edges: creature_pose was tagged consumes=('points',) (WRONG -- it consumes a spec+
+   targets, not a point cloud), and the Zig-raymarcher BENCHMARK carried a routable sdf->image edge. Together they beat
+   the real points->mesh->image route. FIXES: creature_pose -> consumes=() (semantic animate/pose); the Zig benchmark
+   -> no io edges (still discoverable by aliases, just not a routing node). Also two mesh->selection / field->field
+   assertions hardcoded a winner name that the merge's new producers (mesh_auto_seam) and my correct quantum field->
+   field tags legitimately shifted under the DOCUMENTED alphabetical tie-break -> rewrote them to assert the CONTRACT
+   (the alphabetically-first producer of that edge) instead of a name that rots on every merge.
+
+5. FLAKY-VIA-SWALLOW (#3 skills/route KeyError) -- passed deterministically locally; the CI KeyError was the same
+   swallowed-timeout corruption, fixed by the BaseException change.
+
+LESSON (kept loud): io-tags are routing EDGES, not decoration -- a loose consumes/produces tag silently reroutes
+suggest_pipeline. Tag what a capability ACTUALLY takes/returns, and pin pipeline tests to the documented tie-break
+CONTRACT, never a hardcoded capability name. Audits clean; capdoc/docgen regen (490 modules); CI pins 17/17.

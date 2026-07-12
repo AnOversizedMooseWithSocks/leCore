@@ -725,7 +725,7 @@ def default_catalog():
                           "cre,body=m.creature_pose(m.quadruped_spec(), {'L0':(0.3,-0.5,0.4)}); print('mainImage' in m.to_shadertoy(body))",
                           native=True, aliases=("pose a creature", "animate creature limbs", "reach a creature leg",
                                                 "pose a non-humanoid", "put a creature in a pose"),
-                          semantic="analyze/measure", consumes=("points",), produces=("sdf",))
+                          semantic="animate/pose", consumes=(), produces=("sdf",))
     c.register_capability("quadruped_spec", "A ready-made creature body plan -- a quadruped (spine + two mirrored leg "
                           "pairs + head) (holographic_creature). A concrete starting spec for creature(); copy + edit "
                           "the dict to change proportions, add limbs, or attach a head",
@@ -2083,7 +2083,7 @@ def default_catalog():
                           example="print(mind.zig_march_compare(width=64, height=48))",
                           native=True, aliases=("zig raymarcher", "native sphere trace", "compare two renders",
                                                 "one kernel two runtimes", "bit identical render",
-                                                "cpu shader", "native sdf render", "march an sdf natively"), semantic="simulate/run", consumes=("sdf",), produces=("image",))
+                                                "cpu shader", "native sdf render", "march an sdf natively"), semantic="simulate/run")
     c.register_capability("Explain code in English (deterministic, layered)", "mind.explain_code(src) turns "
                           "Python source into plain English under a strict honesty contract (C1): four labeled "
                           "layers per function: signature; data flow; a control-flow census; and an idiom "

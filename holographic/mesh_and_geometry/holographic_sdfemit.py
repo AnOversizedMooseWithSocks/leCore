@@ -465,8 +465,10 @@ def _selftest():
             raise AssertionError("%s must be refused" % name)
 
     # 5a. EVERY node kind is either emitted or refused. A gap is a shader that silently omits geometry.
+    # 27 node kinds: 18 emitted + 9 refused (the two most-recent additions both EMIT, so the refused set is unchanged
+    # but the total rose 25 -> 27). Keep this in sync with the realtime-suite mirror in test_holographic_realtime.
     cov = coverage()
-    assert cov["complete"] is True and cov["total"] == 25
+    assert cov["complete"] is True and cov["total"] == 27
     assert set(cov["refused"]) == set(UNEMITTABLE)
 
     # 5b. the ones that ARE emittable: onion and rounded, checked against the Python _eval

@@ -12988,11 +12988,17 @@ def test_io_shape_pipeline_hierarchy():
     for h in hits:
         assert (not h.consumes) or ("mesh" in h.consumes), (h.name, h.consumes)
 
-    # S3.4 -- a 1-step and a multi-step pipeline both resolve; an impossible route is None.
+    # S3.4 -- a 1-step and a multi-step pipeline both resolve; an impossible route is None. The winning step is the
+    # documented DETERMINISTIC TIE-BREAK: among equal-length routes the alphabetically-first capability wins, so the
+    # exact name shifts when a new mesh->selection producer is added -- assert the CONTRACT (a valid single mesh->
+    # selection edge = the alphabetically-first such producer), not a hardcoded name that rots on every merge.
+    mesh_sel_producers = sorted(cap.name for cap in c.all()
+                                if cap.consumes and cap.produces and "mesh" in cap.consumes and "selection" in cap.produces)
     one = mind.suggest_pipeline("mesh", "selection")
-    assert one and one[0]["name"] == "mesh_selection"
+    assert one and len(one) == 1 and one[0]["name"] == mesh_sel_producers[0], (one, mesh_sel_producers[:3])
     multi = mind.suggest_pipeline("transform", "selection")               # transform->mesh->selection
-    assert multi and len(multi) == 2 and [s["name"] for s in multi] == ["transform_selection", "mesh_selection"]
+    assert multi and len(multi) == 2 and multi[0]["name"] == "transform_selection" \
+        and multi[1]["name"] == mesh_sel_producers[0], multi
     assert mind.suggest_pipeline("mesh", "mesh") == []                    # already there
     assert mind.suggest_pipeline("image", "skeleton") is None             # no route
 
@@ -13012,8 +13018,15 @@ def test_io_shape_pipeline_hierarchy():
     assert mind.suggest_pipeline("mesh", "mesh") == []                    # default: already there
     refine = mind.suggest_pipeline("mesh", "mesh", require_step=True)
     assert refine and len(refine) == 1 and "mesh" in mind._capability_catalog().get(refine[0]["name"]).produces
+    # field -> field via a transforming edge: the winner is again the alphabetically-first field->field producer
+    # (deterministic tie-break). More field->field ops now exist than just the fill trio (e.g. the quantum solvers
+    # legitimately map a field to a field), so assert the CONTRACT, not a fixed shortlist -- and separately confirm
+    # the classical fill ops are still reachable field->field producers.
+    ff_producers = sorted(cap.name for cap in c.all()
+                          if cap.consumes and cap.produces and "field" in cap.consumes and "field" in cap.produces)
     fill = mind.suggest_pipeline("field", "field", require_step=True)
-    assert fill and fill[0]["name"] in ("harmonic_fill", "inpaint", "majority_fill"), fill
+    assert fill and fill[0]["name"] == ff_producers[0], (fill, ff_producers[:3])
+    assert {"harmonic_fill", "inpaint", "majority_fill"} & set(ff_producers), "the classical fill ops must still route field->field"
 
     # a bad kind is rejected loudly (the closed vocabulary catches typos).
     import pytest
