@@ -24,8 +24,10 @@ from dataclasses import dataclass, field
 import html
 import importlib
 import json
+import os
 from pathlib import Path
 import re
+import tempfile
 from typing import Any, Dict, Iterable, List, Optional
 
 import numpy as np
@@ -105,6 +107,15 @@ class LocalAgentCore:
         """A copy of the stored entries, in insertion order."""
         return list(self._entries)
 
+    def memory_summary(self) -> Dict[str, Any]:
+        """Return constant-time memory status without running evidence probes."""
+        return {
+            "entries": len(self._entries),
+            "dim": self.dim,
+            "index_method": self._index.method if self._index is not None else None,
+            "query_mutates_store": False,
+        }
+
     def remember(
         self,
         text: Any,
@@ -143,6 +154,15 @@ class LocalAgentCore:
         return an empty list instead of a guess.
         """
         if not self._entries or self._index is None:
+            return []
+        if isinstance(k, bool) or not isinstance(k, (int, np.integer)) or int(k) < 1:
+            raise ValueError("k must be a positive integer")
+        if abstain is not None:
+            if isinstance(abstain, bool) or not isinstance(abstain, (int, float, np.number)):
+                raise ValueError("abstain must be a number between 0 and 1")
+            if not 0.0 <= float(abstain) <= 1.0:
+                raise ValueError("abstain must be between 0 and 1")
+        if not _tokens(query):
             return []
         q = self._encode_text(query)
         hits = self._index.nearest(q, k=min(int(k), len(self._entries)), abstain=abstain)
@@ -284,9 +304,23 @@ class LocalAgentCore:
         return core
 
     def save(self, path: Any) -> str:
-        """Write the product state to JSON and return the path."""
+        """Atomically write the product state to JSON and return the path."""
         p = Path(path)
-        p.write_text(json.dumps(self.to_state(), indent=2, sort_keys=True), encoding="utf-8")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(self.to_state(), indent=2, sort_keys=True)
+        fd, temporary = tempfile.mkstemp(prefix=".%s." % p.name, suffix=".tmp", dir=str(p.parent))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, p)
+        except Exception:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+            raise
         return str(p)
 
     @classmethod

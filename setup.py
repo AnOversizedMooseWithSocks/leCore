@@ -61,7 +61,7 @@ setup(
         "gpu":      ["cupy"],             # GPU backend (holographic_backend). NOTE: CuPy is tied to your CUDA
                                           #   version -- you often need a specific wheel like `cupy-cuda12x`
                                           #   instead, so it is best installed by hand (and left out of `all`).
-        "x402":     ["x402[fastapi,evm]", "uvicorn"],  # paid API publishing (holographic_x402_api)
+        "x402":     ["x402[fastapi,evm]>=2.15,<3", "uvicorn>=0.51,<1"],  # paid API publishing
         # -- optional tooling --
         "ui":       ["flask", "pillow"],  # the browser UI (app.py) + image load/save
         "images":   ["pillow"],           # image I/O beyond stdlib PNG (jpg/webp/... via mind.save_render) --

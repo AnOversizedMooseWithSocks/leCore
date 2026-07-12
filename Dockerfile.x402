@@ -8,7 +8,8 @@ WORKDIR /app
 COPY . /app
 
 RUN python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip install --no-cache-dir ".[x402]"
+    && python -m pip install --no-cache-dir -r requirements-x402.txt \
+    && python -m pip install --no-cache-dir .
 
 EXPOSE 4021
 

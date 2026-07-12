@@ -17,7 +17,8 @@ shared memory store just because they paid for one request.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
 import hashlib
 import hmac
 from html import escape
@@ -38,10 +39,15 @@ DEFAULT_PRICE = "$0.0011"
 LEOS_SITE_URL = "https://discoverleos.com/"
 LEOS_TOKEN_CA = "5xgsnby6P9zqGK71J7H4yJLxzqPvNbC7rDZxNzjHmj7e"
 LEOS_TOKEN_PRICE = "$0.0010"
+LEOS_ACCESS_HEADER = "X-leCore-leOS-Access"
 DEFAULT_TENANT_ID = "public"
 TENANT_HEADER = "X-leCore-Tenant"
 TENANT_TOKEN_HEADER = "X-leCore-Tenant-Token"
 _TENANT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,63}$")
+MAX_QUERY_CHARS = 8192
+MAX_TASK_CHARS = 8192
+MAX_MEMORY_CHARS = 65536
+MAX_RECALL_K = 100
 
 
 @dataclass(frozen=True)
@@ -123,7 +129,7 @@ asset: USDC</pre></aside>
 </section>
 <section class="strip" aria-label="Live deployment details"><div><strong>Endpoint</strong><span>https://lecore.rati.foundation</span></div><div><strong>Payment</strong><span>x402 exact scheme</span></div><div><strong>Buyer shape</strong><span>inspect, pay, call</span></div></section>
 <section id="why" class="section split"><div><p class="eyebrow">Why you would buy it</p><h2>Because most agents do not need a platform. They need a few reliable cognitive calls.</h2></div><div class="reason-list"><p>You pay for an answerable primitive, not a monthly seat.</p><p>The API is narrow enough to trust: read/compute routes are paid, memory writes stay admin-gated.</p><p>It exposes the useful part of leCore first: local agent memory plus capability routing.</p><p>The implementation is deployed, health-checked, and already returning x402 payment challenges.</p></div></section>
-<section id="leos" class="section token-offer"><div class="heading"><p class="eyebrow">leOS token offer</p><h2>A slightly cheaper CA-only price for the leOS token.</h2></div><div class="token-panel" aria-label="leOS token CA offer"><div><span>Token price</span><strong>$leos_token_price</strong></div><div><span>CA</span><code>$leos_token_ca</code></div><a class="button primary" href="$leos_site_url" target="_blank" rel="noopener">leOS website</a></div></section>
+<section id="leos" class="section token-offer"><div class="heading"><p class="eyebrow">leOS token offer</p><h2>A slightly cheaper price for eligible leOS buyers.</h2></div><div class="token-panel" aria-label="leOS token offer"><div><span>Offer price</span><strong>$leos_token_price</strong></div><div><span>CA</span><code>$leos_token_ca</code></div><a class="button primary" href="$leos_site_url" target="_blank" rel="noopener">leOS website</a></div></section>
 <section id="routes" class="section"><div class="heading"><p class="eyebrow">What the payment unlocks</p><h2>Three paid routes, each small enough to understand.</h2></div><div class="routes"><article class="card"><p class="method">POST</p><h3>Recall</h3><code>/v1/recall</code><p>Pull nearest memories from a compact local agent core without shipping a whole application stack.</p></article><article class="card"><p class="method">POST</p><h3>Route</h3><code>/v1/route</code><p>Send a plain-language task and get the leCore capability it should use, with evidence attached.</p></article><article class="card"><p class="method">GET</p><h3>Dashboard</h3><code>/v1/dashboard</code><p>Read the readiness surface: memory counts, capability map, abstention behavior, and route coverage.</p></article></div></section>
 <section class="section use"><div class="heading"><p class="eyebrow">Good first buyers</p><h2>Teams who want the leCore idea without adopting the whole repo.</h2></div><div class="cases"><article class="case"><span aria-hidden="true">+</span><p>Agent memory for prototypes that should remember without a database rollout.</p></article><article class="case"><span aria-hidden="true">+</span><p>Capability routing for tools that need to pick the right leCore subsystem before doing work.</p></article><article class="case"><span aria-hidden="true">+</span><p>Evidence dashboards for teams deciding whether a local vector system is ready to productize.</p></article><article class="case"><span aria-hidden="true">+</span><p>A working x402 seller endpoint to copy when you want pay-per-call APIs instead of subscriptions.</p></article></div></section>
 <section id="proof" class="section proof"><div class="proof-copy"><p class="eyebrow">Proof it is real</p><h2>It is already deployed, priced, and protected.</h2><p>The free endpoints show health and pricing. Paid endpoints return a real x402 payment challenge. The receiving address is public, while admin writes stay out of the paid customer path.</p></div><div class="proof-panel"><dl><div><dt>Price</dt><dd>$price</dd></div><div><dt>Network</dt><dd>$network_name</dd></div><div><dt>Receiver</dt><dd>$pay_to_short</dd></div><div><dt>Status</dt><dd>Healthy</dd></div></dl></div></section>
@@ -209,7 +215,11 @@ def _network_name(network: str) -> str:
 
 def normalize_tenant_id(value: Optional[Any]) -> str:
     """Return a path-safe tenant id for private memory routing."""
-    tenant_id = str(value or DEFAULT_TENANT_ID).strip().lower()
+    if value is None:
+        return DEFAULT_TENANT_ID
+    if not isinstance(value, str):
+        raise ValueError("tenant id must be a string")
+    tenant_id = value.strip().lower()
     if not tenant_id:
         tenant_id = DEFAULT_TENANT_ID
     if not _TENANT_ID_RE.match(tenant_id):
@@ -221,6 +231,42 @@ def tenant_access_token(tenant_id: str, secret: str) -> str:
     """Deterministic tenant bearer token derived from a server-side secret."""
     normalized = normalize_tenant_id(tenant_id)
     return hmac.new(secret.encode("utf-8"), normalized.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+@contextmanager
+def _process_file_lock(path: Path) -> Any:
+    """Hold an exclusive process lock for one persisted tenant state file."""
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(lock_path, "a+b")
+    try:
+        if os.name == "nt":  # pragma: no cover - exercised on Windows CI/users
+            import msvcrt
+
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"\0")
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            if os.name == "nt":  # pragma: no cover - exercised on Windows CI/users
+                import msvcrt
+
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
 
 
 class TenantCoreStore:
@@ -235,68 +281,146 @@ class TenantCoreStore:
         self._default_seed = default_core.seed
         self._default_route_threshold = default_core.route_threshold
         self._cores: Dict[str, LocalAgentCore] = {DEFAULT_TENANT_ID: default_core}
-        self._lock = threading.RLock()
+        self._versions: Dict[str, Tuple[int, int, int]] = {}
+        self._tenant_locks: Dict[str, threading.RLock] = {DEFAULT_TENANT_ID: threading.RLock()}
+        self._registry_lock = threading.RLock()
         self._state_dir = Path(state_dir) if state_dir else None
         if self._state_dir is not None:
             self._state_dir.mkdir(parents=True, exist_ok=True)
+            public_path = self._path_for(DEFAULT_TENANT_ID)
+            if public_path is not None and public_path.exists():
+                with _process_file_lock(public_path):
+                    self._cores[DEFAULT_TENANT_ID] = LocalAgentCore.load(public_path)
+                    self._versions[DEFAULT_TENANT_ID] = self._version(public_path)
 
     def loaded_tenants(self) -> List[str]:
         """Return tenant ids currently loaded in memory."""
-        with self._lock:
+        with self._registry_lock:
             return sorted(self._cores)
+
+    def summary(self, tenant_id: str) -> Dict[str, Any]:
+        """Return a cheap cached status summary without probing capabilities."""
+        normalized = normalize_tenant_id(tenant_id)
+        with self._lock_for(normalized):
+            core = self._get_cached(normalized)
+            return core.memory_summary()
 
     def read(self, tenant_id: str, fn: Any) -> Any:
         """Run a read-style operation while holding the tenant lock."""
-        with self._lock:
-            return fn(self._get_locked(tenant_id))
+        normalized = normalize_tenant_id(tenant_id)
+        with self._lock_for(normalized):
+            return fn(self._get_fresh(normalized))
 
     def write(self, tenant_id: str, fn: Any) -> Any:
         """Run a mutating operation, then persist that tenant if configured."""
-        with self._lock:
-            normalized = normalize_tenant_id(tenant_id)
-            core = self._get_locked(normalized)
-            result = fn(core)
-            self._save_locked(normalized, core)
-            return result
-
-    def _get_locked(self, tenant_id: str) -> LocalAgentCore:
         normalized = normalize_tenant_id(tenant_id)
-        core = self._cores.get(normalized)
-        if core is not None:
+        with self._lock_for(normalized):
+            path = self._path_for(normalized)
+            if path is None:
+                core = self._get_cached(normalized)
+                return fn(core)
+            with _process_file_lock(path):
+                core = (
+                    LocalAgentCore.load(path)
+                    if path.exists()
+                    else LocalAgentCore.from_state(self._get_cached(normalized).to_state())
+                )
+                result = fn(core)
+                core.save(path)
+                with self._registry_lock:
+                    self._cores[normalized] = core
+                    self._versions[normalized] = self._version(path)
+                return result
+
+    def _lock_for(self, tenant_id: str) -> threading.RLock:
+        with self._registry_lock:
+            lock = self._tenant_locks.get(tenant_id)
+            if lock is None:
+                lock = threading.RLock()
+                self._tenant_locks[tenant_id] = lock
+            return lock
+
+    def _get_cached(self, tenant_id: str) -> LocalAgentCore:
+        with self._registry_lock:
+            core = self._cores.get(tenant_id)
+            if core is None:
+                core = LocalAgentCore(
+                    dim=self._default_dim,
+                    seed=self._default_seed,
+                    route_threshold=self._default_route_threshold,
+                )
+                self._cores[tenant_id] = core
             return core
-        path = self._path_for(normalized)
+
+    def _get_fresh(self, tenant_id: str) -> LocalAgentCore:
+        path = self._path_for(tenant_id)
         if path is not None and path.exists():
-            core = LocalAgentCore.load(path)
-        else:
-            core = LocalAgentCore(
-                dim=self._default_dim,
-                seed=self._default_seed,
-                route_threshold=self._default_route_threshold,
-            )
-        self._cores[normalized] = core
-        return core
+            version = self._version(path)
+            with self._registry_lock:
+                cached_version = self._versions.get(tenant_id)
+            if cached_version != version:
+                with _process_file_lock(path):
+                    core = LocalAgentCore.load(path)
+                    version = self._version(path)
+                with self._registry_lock:
+                    self._cores[tenant_id] = core
+                    self._versions[tenant_id] = version
+                return core
+        return self._get_cached(tenant_id)
+
+    @staticmethod
+    def _version(path: Path) -> Tuple[int, int, int]:
+        stat = path.stat()
+        return stat.st_ino, stat.st_mtime_ns, stat.st_size
 
     def _path_for(self, tenant_id: str) -> Optional[Path]:
         if self._state_dir is None:
             return None
         return self._state_dir / ("%s.json" % normalize_tenant_id(tenant_id))
 
-    def _save_locked(self, tenant_id: str, core: LocalAgentCore) -> None:
-        path = self._path_for(tenant_id)
-        if path is not None:
-            core.save(path)
-
-
-def leos_token_offer() -> Dict[str, Any]:
-    """Public metadata for the leOS CA-only offer."""
+def leos_token_offer(access_required: bool = True, enabled: bool = True) -> Dict[str, Any]:
+    """Return public metadata for the credential-gated leOS offer."""
     return {
         "name": "leOS CA offer",
         "site": LEOS_SITE_URL,
         "ca": LEOS_TOKEN_CA,
         "price": LEOS_TOKEN_PRICE,
+        "access_header": LEOS_ACCESS_HEADER,
+        "access_required": bool(access_required),
+        "enabled": bool(enabled),
         "discount_routes": [route.key for route in LEOS_PAID_ROUTES],
-        "note": "Only the CA is needed for this token offer.",
+        "note": "The CA identifies the offer; eligible buyers also receive an operator-issued access credential.",
     }
+
+
+def _required_text(payload: Dict[str, Any], key: str, maximum: int) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("%s must be a non-empty string" % key)
+    if len(value) > maximum:
+        raise ValueError("%s must be at most %d characters" % (key, maximum))
+    return value
+
+
+def _recall_k(payload: Dict[str, Any]) -> int:
+    value = payload.get("k", 3)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("k must be an integer")
+    if not 1 <= value <= MAX_RECALL_K:
+        raise ValueError("k must be between 1 and %d" % MAX_RECALL_K)
+    return value
+
+
+def _abstain_threshold(payload: Dict[str, Any]) -> Optional[float]:
+    value = payload.get("abstain")
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("abstain must be a number between 0 and 1")
+    threshold = float(value)
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError("abstain must be between 0 and 1")
+    return threshold
 
 
 def landing_page_html(config: X402Config) -> str:
@@ -385,8 +509,9 @@ def create_app(
     admin_token: Optional[str] = None,
     tenant_secret: Optional[str] = None,
     tenant_state_dir: Optional[Any] = None,
+    leos_access_token: Optional[str] = None,
 ) -> Any:
-    """Create the FastAPI app.
+    """Create the FastAPI application for paid or local serving.
 
     With `paid=True`, the public `/v1/*` read/compute routes are protected by
     x402 middleware. Set `paid=False` for local development smoke tests.
@@ -405,6 +530,13 @@ def create_app(
     store = TenantCoreStore(core, state_dir=tenant_state_dir)
     config = config or (X402Config.from_env(require_pay_to=paid) if paid else X402Config.from_env(require_pay_to=False))
     tenant_secret = tenant_secret or os.environ.get("LECORE_X402_TENANT_SECRET")
+    leos_access_token = leos_access_token or os.environ.get("LECORE_X402_LEOS_ACCESS_TOKEN")
+    active_config = config
+    if not leos_access_token:
+        active_config = replace(
+            config,
+            routes=tuple(route for route in config.routes if not route.path.startswith("/leos/")),
+        )
 
     if paid:
         try:
@@ -413,15 +545,21 @@ def create_app(
             raise RuntimeError(optional_dependency_help()) from exc
         app.add_middleware(
             PaymentMiddlewareASGI,
-            routes=x402_route_configs(config),
-            server=x402_resource_server(config),
+            routes=x402_route_configs(active_config),
+            server=x402_resource_server(active_config),
         )
 
     def require_admin(header_value: Optional[str]) -> None:
         if not admin_token:
             raise HTTPException(status_code=403, detail="admin writes are disabled")
-        if header_value != admin_token:
+        if not header_value or not hmac.compare_digest(header_value, admin_token):
             raise HTTPException(status_code=401, detail="invalid admin token")
+
+    def require_leos_access(header_value: Optional[str]) -> None:
+        if not leos_access_token:
+            raise HTTPException(status_code=503, detail="leOS discount access is not configured")
+        if not header_value or not hmac.compare_digest(header_value, leos_access_token):
+            raise HTTPException(status_code=401, detail="invalid leOS discount credential")
 
     def require_tenant_access(tenant_id: str, token: Optional[str]) -> None:
         normalized = normalize_tenant_id(tenant_id)
@@ -441,7 +579,18 @@ def create_app(
 
     def tenant_from_payload(payload: Dict[str, Any], header_value: Optional[str]) -> str:
         try:
-            return normalize_tenant_id(payload.get("tenant") or header_value)
+            payload_value = payload.get("tenant")
+            payload_tenant = normalize_tenant_id(payload_value) if payload_value is not None else None
+            header_tenant = normalize_tenant_id(header_value) if header_value is not None else None
+            if payload_tenant is not None and header_tenant is not None and payload_tenant != header_tenant:
+                raise ValueError("tenant id in payload does not match %s" % TENANT_HEADER)
+            return payload_tenant or header_tenant or DEFAULT_TENANT_ID
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    def validated(callable_: Any, *args: Any) -> Any:
+        try:
+            return callable_(*args)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -454,17 +603,16 @@ def create_app(
         }
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-    async def landing() -> str:
+    def landing() -> str:
         return landing_page_html(config)
 
     @app.get("/health")
-    async def health() -> Dict[str, Any]:
-        default_evidence = store.read(DEFAULT_TENANT_ID, lambda tenant_core: tenant_core.evidence())
+    def health() -> Dict[str, Any]:
         return {
             "ok": True,
             "name": "leCore x402 API",
             "paid": bool(paid),
-            "memory": default_evidence["memory"],
+            "memory": store.summary(DEFAULT_TENANT_ID),
             "tenancy": {
                 "default_tenant": DEFAULT_TENANT_ID,
                 "loaded_tenants": len(store.loaded_tenants()),
@@ -473,30 +621,28 @@ def create_app(
         }
 
     @app.get("/pricing")
-    async def pricing() -> Dict[str, Any]:
+    def pricing() -> Dict[str, Any]:
         return {
             "ok": True,
             "x402": config.to_public_dict(),
-            "token_offer": leos_token_offer(),
+            "token_offer": leos_token_offer(enabled=bool(leos_access_token)),
             "tenancy": tenancy_public_dict(),
-            "routes": payment_manifest(config),
+            "routes": payment_manifest(active_config),
         }
 
-    @app.post("/v1/recall")
-    @app.post("/leos/v1/recall")
-    async def recall(
+    def recall_response(
         payload: Dict[str, Any],
-        x_lecore_tenant: Optional[str] = Header(default=None, alias=TENANT_HEADER),
-        x_lecore_tenant_token: Optional[str] = Header(default=None, alias=TENANT_TOKEN_HEADER),
+        x_lecore_tenant: Optional[str],
+        x_lecore_tenant_token: Optional[str],
     ) -> Dict[str, Any]:
         tenant_id = tenant_from_payload(payload, x_lecore_tenant)
         require_tenant_access(tenant_id, x_lecore_tenant_token)
-        query = payload.get("query")
-        if query is None:
-            raise HTTPException(status_code=400, detail="POST /v1/recall needs {query}")
+        query = validated(_required_text, payload, "query", MAX_QUERY_CHARS)
+        k = validated(_recall_k, payload)
+        abstain = validated(_abstain_threshold, payload)
         hits = store.read(
             tenant_id,
-            lambda tenant_core: tenant_core.recall(query, k=int(payload.get("k", 3)), abstain=payload.get("abstain")),
+            lambda tenant_core: tenant_core.recall(query, k=k, abstain=abstain),
         )
         return {
             "ok": True,
@@ -505,46 +651,96 @@ def create_app(
             "hits": hits,
         }
 
-    @app.post("/v1/route")
-    @app.post("/leos/v1/route")
-    async def route(
+    @app.post("/v1/recall")
+    def recall(
         payload: Dict[str, Any],
         x_lecore_tenant: Optional[str] = Header(default=None, alias=TENANT_HEADER),
         x_lecore_tenant_token: Optional[str] = Header(default=None, alias=TENANT_TOKEN_HEADER),
     ) -> Dict[str, Any]:
-        tenant_id = tenant_from_payload(payload, x_lecore_tenant)
-        require_tenant_access(tenant_id, x_lecore_tenant_token)
-        task = payload.get("task")
-        if task is None:
-            raise HTTPException(status_code=400, detail="POST /v1/route needs {task}")
-        routed = store.read(tenant_id, lambda tenant_core: tenant_core.route(str(task)))
-        return {"ok": True, "tenant": tenant_id, "route": routed}
+        return recall_response(payload, x_lecore_tenant, x_lecore_tenant_token)
 
-    @app.get("/v1/dashboard")
-    @app.get("/leos/v1/dashboard")
-    async def dashboard(
+    @app.post("/leos/v1/recall")
+    def leos_recall(
+        payload: Dict[str, Any],
+        x_lecore_leos_access: Optional[str] = Header(default=None, alias=LEOS_ACCESS_HEADER),
         x_lecore_tenant: Optional[str] = Header(default=None, alias=TENANT_HEADER),
         x_lecore_tenant_token: Optional[str] = Header(default=None, alias=TENANT_TOKEN_HEADER),
+    ) -> Dict[str, Any]:
+        require_leos_access(x_lecore_leos_access)
+        return recall_response(payload, x_lecore_tenant, x_lecore_tenant_token)
+
+    def route_response(
+        payload: Dict[str, Any],
+        x_lecore_tenant: Optional[str],
+        x_lecore_tenant_token: Optional[str],
+    ) -> Dict[str, Any]:
+        tenant_id = tenant_from_payload(payload, x_lecore_tenant)
+        require_tenant_access(tenant_id, x_lecore_tenant_token)
+        task = validated(_required_text, payload, "task", MAX_TASK_CHARS)
+        routed = store.read(tenant_id, lambda tenant_core: tenant_core.route(task))
+        return {"ok": True, "tenant": tenant_id, "route": routed}
+
+    @app.post("/v1/route")
+    def route(
+        payload: Dict[str, Any],
+        x_lecore_tenant: Optional[str] = Header(default=None, alias=TENANT_HEADER),
+        x_lecore_tenant_token: Optional[str] = Header(default=None, alias=TENANT_TOKEN_HEADER),
+    ) -> Dict[str, Any]:
+        return route_response(payload, x_lecore_tenant, x_lecore_tenant_token)
+
+    @app.post("/leos/v1/route")
+    def leos_route(
+        payload: Dict[str, Any],
+        x_lecore_leos_access: Optional[str] = Header(default=None, alias=LEOS_ACCESS_HEADER),
+        x_lecore_tenant: Optional[str] = Header(default=None, alias=TENANT_HEADER),
+        x_lecore_tenant_token: Optional[str] = Header(default=None, alias=TENANT_TOKEN_HEADER),
+    ) -> Dict[str, Any]:
+        require_leos_access(x_lecore_leos_access)
+        return route_response(payload, x_lecore_tenant, x_lecore_tenant_token)
+
+    def dashboard_response(
+        x_lecore_tenant: Optional[str],
+        x_lecore_tenant_token: Optional[str],
     ) -> Dict[str, Any]:
         tenant_id = tenant_from_header(x_lecore_tenant)
         require_tenant_access(tenant_id, x_lecore_tenant_token)
         data = store.read(tenant_id, lambda tenant_core: tenant_core.dashboard())
         return {"ok": True, "tenant": tenant_id, "dashboard": data}
 
+    @app.get("/v1/dashboard")
+    def dashboard(
+        x_lecore_tenant: Optional[str] = Header(default=None, alias=TENANT_HEADER),
+        x_lecore_tenant_token: Optional[str] = Header(default=None, alias=TENANT_TOKEN_HEADER),
+    ) -> Dict[str, Any]:
+        return dashboard_response(x_lecore_tenant, x_lecore_tenant_token)
+
+    @app.get("/leos/v1/dashboard")
+    def leos_dashboard(
+        x_lecore_leos_access: Optional[str] = Header(default=None, alias=LEOS_ACCESS_HEADER),
+        x_lecore_tenant: Optional[str] = Header(default=None, alias=TENANT_HEADER),
+        x_lecore_tenant_token: Optional[str] = Header(default=None, alias=TENANT_TOKEN_HEADER),
+    ) -> Dict[str, Any]:
+        require_leos_access(x_lecore_leos_access)
+        return dashboard_response(x_lecore_tenant, x_lecore_tenant_token)
+
     @app.post("/admin/remember")
-    async def remember(
+    def remember(
         payload: Dict[str, Any],
         x_admin_token: Optional[str] = Header(default=None),
         x_lecore_tenant: Optional[str] = Header(default=None, alias=TENANT_HEADER),
     ) -> Dict[str, Any]:
         require_admin(x_admin_token)
         tenant_id = tenant_from_payload(payload, x_lecore_tenant)
-        text = payload.get("text")
-        if text is None:
-            raise HTTPException(status_code=400, detail="POST /admin/remember needs {text}")
+        text = validated(_required_text, payload, "text", MAX_MEMORY_CHARS)
+        label = payload.get("label")
+        metadata = payload.get("metadata")
+        if label is not None and not isinstance(label, str):
+            raise HTTPException(status_code=400, detail="label must be a string")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise HTTPException(status_code=400, detail="metadata must be an object")
         memory = store.write(
             tenant_id,
-            lambda tenant_core: tenant_core.remember(text, label=payload.get("label"), metadata=payload.get("metadata")),
+            lambda tenant_core: tenant_core.remember(text, label=label, metadata=metadata),
         )
         return {
             "ok": True,
@@ -553,7 +749,7 @@ def create_app(
         }
 
     @app.post("/admin/tenant-token")
-    async def issue_tenant_token(payload: Dict[str, Any], x_admin_token: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    def issue_tenant_token(payload: Dict[str, Any], x_admin_token: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         require_admin(x_admin_token)
         if not tenant_secret:
             raise HTTPException(status_code=403, detail="tenant tokens require LECORE_X402_TENANT_SECRET")
@@ -589,6 +785,7 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
     p.add_argument("--admin-token", default=os.environ.get("LECORE_X402_ADMIN_TOKEN"))
     p.add_argument("--tenant-secret", default=os.environ.get("LECORE_X402_TENANT_SECRET"))
     p.add_argument("--tenant-state-dir", default=os.environ.get("LECORE_X402_TENANT_STATE_DIR"))
+    p.add_argument("--leos-access-token", default=os.environ.get("LECORE_X402_LEOS_ACCESS_TOKEN"))
     p.add_argument("--unpaid-dev", action="store_true", help="Disable x402 middleware for local development only")
     args = p.parse_args(list(argv) if argv is not None else None)
 
@@ -606,6 +803,7 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
         admin_token=args.admin_token,
         tenant_secret=args.tenant_secret,
         tenant_state_dir=args.tenant_state_dir,
+        leos_access_token=args.leos_access_token,
     )
     try:
         import uvicorn

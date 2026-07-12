@@ -78,7 +78,7 @@ pip install "leos-core[symbolic]"           # pip install .[symbolic]  design-ti
 pip install "leos-core[zig]"                # pip install .[zig]       native batch kernels, 2-5x     (ziglang -- whole
                                             #                          toolchain in one wheel, bit-identical in safe mode)
 pip install "leos-core[images]"             # pip install .[images]    jpg/webp/... image I/O         (Pillow, no Flask)
-pip install "leos-core[x402]"               # pip install .[x402]      paid API publishing           (x402, FastAPI)
+pip install "leos-core[x402]"               # pip install .[x402]      paid API publishing, Python 3.10+ (x402, FastAPI)
 pip install "leos-core[dev]"                # pip install .[dev]       run the tests and make plots  (pytest, matplotlib)
 pip install "leos-core[all]"                # pip install .[all]       everything portable, one shot
 pip install "leos-core[ui,jit]"             # pip install .[ui,jit]    ...or combine whichever you want
