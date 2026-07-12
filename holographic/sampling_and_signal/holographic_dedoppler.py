@@ -99,6 +99,46 @@ def detect_drifting(waterfall, drifts=None, alpha=0.01, off=None, off_z=4.0):
     return out
 
 
+_C = 299792458.0  # speed of light in vacuum (m/s) -- the constant that turns a spectral shift into a velocity
+
+
+def redshift(lambda_obs, lambda_rest):
+    """Redshift z = lambda_obs/lambda_rest - 1 from an observed vs rest wavelength (positive = red / receding).
+    Field-native (broadcasts over arrays)."""
+    return np.asarray(lambda_obs, float) / np.asarray(lambda_rest, float) - 1.0
+
+
+def doppler_velocity(lambda_obs, lambda_rest, relativistic=False):
+    """Line-of-sight VELOCITY from a spectral shift (m/s, positive = receding). Classical v = c*z (z = redshift);
+    with relativistic=True, v = c*((1+z)^2 - 1)/((1+z)^2 + 1), which stays below c for any z. This is the physical
+    reading of what dedoppler / detect_drifting locate -- a shifted line means the source is moving. Field-native."""
+    z = redshift(lambda_obs, lambda_rest)
+    if not relativistic:
+        return _C * z
+    r = (1.0 + z) ** 2
+    return _C * (r - 1.0) / (r + 1.0)
+
+
+def doppler_shift(lambda_rest, velocity, relativistic=False):
+    """FORWARD model: the observed wavelength when a source at `lambda_rest` recedes at `velocity` (m/s). Classical
+    lambda_obs = lambda_rest*(1 + v/c); relativistic uses the sqrt((1+b)/(1-b)) factor (b = v/c). The exact inverse
+    of doppler_velocity, so the two round-trip (asserted). Field-native."""
+    beta = np.asarray(velocity, float) / _C
+    lr = np.asarray(lambda_rest, float)
+    if not relativistic:
+        return lr * (1.0 + beta)
+    return lr * np.sqrt((1.0 + beta) / (1.0 - beta))
+
+
+def drift_acceleration(drift_rate, freq):
+    """Line-of-sight ACCELERATION (m/s^2) from a narrowband frequency DRIFT RATE (Hz/s) at observing frequency
+    `freq` (Hz): a = -c * (df/dt) / f. A drifting tone -- exactly what detect_drifting finds -- means the emitter
+    is ACCELERATING relative to us (Earth's spin, or a transmitter on a rotating body); this says how much. A
+    rising frequency (df/dt > 0) is an approaching acceleration (a < 0 in the receding-positive convention).
+    This is the physical payoff of the SETI drift search. Field-native."""
+    return -_C * np.asarray(drift_rate, float) / np.asarray(freq, float)
+
+
 def _selftest():
     """Reproduce every measured claim: recovery, look-elsewhere control, ROC at the field's bar, cadence."""
     T, F, noise = 24, 96, 1.0
@@ -166,7 +206,24 @@ def _selftest():
     d1 = detect_drifting(wf, drifts, alpha=0.01); d2 = detect_drifting(wf, drifts, alpha=0.01)
     assert d1 == d2, "detect_drifting must be deterministic"
 
-    print("holographic_dedoppler selftest OK")
+    # --- doppler physics (B1): shift <-> velocity round-trip, relativistic sanity, drift -> acceleration ---
+    lr = 656.28e-9                                                  # H-alpha rest wavelength (m)
+    lo = doppler_shift(lr, 3.0e5)                                   # source receding at 300 km/s
+    assert abs(doppler_velocity(lo, lr) - 3.0e5) < 1e-3, "classical doppler round-trip failed"
+    assert abs(redshift(lr, lr)) < 1e-15 and abs(doppler_velocity(lr, lr)) < 1e-6, "zero shift -> zero velocity"
+    v = 0.5 * _C
+    assert abs(doppler_velocity(doppler_shift(lr, v, relativistic=True), lr, relativistic=True) - v) < 1.0, "relativistic round-trip failed"
+    # relativistic stays sub-luminal where the classical reading would exceed c (the reason it exists)
+    fast = doppler_velocity(doppler_shift(lr, 0.9 * _C, relativistic=True), lr, relativistic=True)
+    assert abs(fast) < _C, "relativistic velocity must stay below c"
+    los = doppler_shift(lr, 100.0, relativistic=True)              # at small v, classical ~= relativistic
+    assert abs(doppler_velocity(los, lr) - doppler_velocity(los, lr, relativistic=True)) < 1e-3, "small-v mismatch"
+    a = drift_acceleration(1.0, 1.4e9)                             # a 1 Hz/s drift at 1.4 GHz (the SETI reading)
+    assert abs(a - (-_C / 1.4e9)) < 1e-12 and a < 0, "drift acceleration wrong"
+    arr = doppler_velocity(doppler_shift(lr, np.array([1e4, 2e4, 3e4])), lr)   # field-native + determinism
+    assert arr.shape == (3,) and np.array_equal(arr, doppler_velocity(doppler_shift(lr, np.array([1e4, 2e4, 3e4])), lr))
+
+    print("holographic_dedoppler selftest OK  |  + doppler: shift<->velocity round-trip, relativistic<c, drift->acceleration (SETI reading)")
 
 
 if __name__ == "__main__":

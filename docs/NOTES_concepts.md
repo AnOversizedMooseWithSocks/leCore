@@ -30962,3 +30962,359 @@ WIRING: mind.register_composition_primitive grows the catalog; explain_code surf
 (no new entry point -- composition is a better answer from the SAME explain_code, not a sibling). Catalog updated,
 +4 composition aliases, 5/5 discoverability, under the lint cap. Audits 0/0/0; 51 targeted tests green; docs
 regenerated. C6 is now a shipped capability, not just 'ongoing' -- the code<->English arc (C1-C7) is fully closed.
+
+
+## ASTRO/POLAR ARC -- P1/P2: polarized light state + Mueller optics (BUILD, spine cores)
+
+First two items of BACKLOG_master.md, the from-scratch cores the whole telescope+mantis arc hangs on.
+Rule 0 on the fresh repo confirmed the gap: every phrasing (stokes vector, mueller matrix, degree of
+polarization, circular polarization handedness, rotation measure) returned ONLY fallbacks. Genuine.
+
+P1 holographic_stokes (rendering/): light as a Stokes vector [S0,S1,S2,S3] -- intensity + linear (Q,U)
++ CIRCULAR (V/handedness). Chose Stokes over Jones on purpose: real 4-vector, handles PARTIAL/unpolarised
+light (what real sensors have), and every element becomes a real 4x4 Mueller (transport stays plain numpy).
+Field-native: everything broadcasts over (...,4), so a lone vector and a whole image use ONE code path
+(up==down, pinned by a field-vs-per-vector selftest to 1e-12). CONVERGENCE wiring baked in (backlog
+section 9-1): complex_linear returns P = Q + iU, the phasor whose FFT over lambda^2 IS rotation-measure
+synthesis -- so X1 (Faraday depth) becomes a one-liner later and the mantis arc + telescope arc share one
+operator (U1). BACKWARD COMPAT is exact: from_radiance/to_radiance round-trips a scalar radiance
+BYTE-IDENTICALLY (np.array_equal asserted) -- polarization is purely additive; the old scalar path is
+untouched. DECLARED NEGATIVE: no decomposition below one lambda (Stokes vector is the atom).
+
+P2 holographic_mueller (rendering/): the 4x4 element matrices. polarizer, retarder, quarter_wave,
+half_wave, rotator, depolarizer, and polarizing dielectric fresnel_reflection. LOAD-BEARING selftest
+(not a smoke test): QWP@45deg turns linear@0 into FULLY circular (docp==1 to 1e-12) and back -- that IS
+the mantis R8 mechanism (Chiou 2008: a biological quarter-wave plate feeding linear detectors). rotator ==
+Faraday rotation (the U1 tie); rotators AND retardances ADD, verified via power()==matrix_power (the
+closed-form iterate lever, the UP/monoid direction). Brewster reflection fully polarises (dolp==1). apply()
+handles one-matrix-over-a-field AND a per-pixel matrix-field (birefringence map). KEPT NEGATIVE: fresnel
+is REAL-index dielectrics only; complex-index metals/TIR (a genuine s-p reflection phase) is a declared
+later item, NOT silently approximated. (holographic_thinfilm already exists, import-only -- the home for
+the interference/iridescence negative when that lands.)
+
+Wired 11 delegating UnifiedMind doors (default-nothing-changed, lazy imports): stokes_unpolarized/linear/
+circular, stokes_report (all derived in one call), stokes_complex_linear, radiance_to_stokes/
+stokes_to_radiance (the compat bridge), mueller_matrix(kind=...), apply_mueller, compose_mueller. Two
+catalog capabilities ("Polarized light (Stokes state)", "Optical elements (Mueller matrices)") with
+generous aliases -- discoverability 6/6 including "mantis shrimp polarization vision" and "faraday rotation
+matrix". reachability_audit: neither module flagged import-only (correctly seen as faculties). catalog_gaps
+0, skill_lint 0 (both examples run). capdoc+docgen regenerated (capabilities.json carries both, 463 modules).
+Cross-cutting pins green: routing/servicedoc/skill_lint/catalog/mixture_drift = 44 passed.
+
+NEXT (backlog section 11 order): O1 holographic_observer -- the sensor abstraction, whose human-eye mode
+must reproduce existing spectral->RGB BYTE-IDENTICALLY (the regression gate) before O2 mantis. Convergence
+9-3: run the observer over a FIELD via scatter/gather so pixel/image/telescope-cube are one implementation.
+
+## Faraday depth: RM synthesis (the sequence costume of Stokes -- U1 convergence)
+
+BUILT holographic_rmsynth (holographic/rendering/): rotation-measure synthesis, Brentjens & de Bruyn
+2005. F(phi) = (1/K) sum_j w_j P_j exp(-2i phi (lambda2_j - lambda2_0)) -- a DIRECT SUM (not FFT,
+because real bands sample lambda^2 unevenly with gaps). Reuses the Q+iU phasor that holographic_stokes
+already exposed (complex_linear); this is why the mantis-eye state and the radio dish share one core.
+Also a concrete 'lift to the linear rung' (Faraday rotation is nonlinear in lambda, linear in lambda^2).
+
+Wired 6 delegating mind doors: rm_synthesis, rmtf, rm_resolution, rm_phi_grid, rm_peak, and the
+CONVERGENCE bridge stokes_faraday_depth (Stokes field -> Faraday spectrum in one call). Cataloged
+'Rotation-measure synthesis (Faraday depth)', 5/5 stranger-phrasing discoverability, runnable example.
+Field-native (UP): P (...,nchan) -> F (...,nphi), image cubes in one call. peak_rm parabolic-refines
+the RM sub-bin and (given lambda2_0) de-rotates angle0 to the true intrinsic angle at lambda^2=0.
+
+KEPT NEGATIVES (loud):
+  * Recovered amplitude is biased LOW by RMTF sidelobes on the DIRTY spectrum (selftest tol ~3% is that
+    bias, not slop). Fixing needs RM-CLEAN (deconvolve the RMTF) -- the same plug-and-play inverse loop
+    as CLEAN/RML (U2). DECLARED future extension, not silently implied.
+  * angle0 from F is referenced to lambda2_0, NOT lambda^2=0, by construction. Corrected a naive selftest
+    that assumed otherwise (was off by exactly phi0*lambda2_0 ~ -36.85 deg -- the module was right).
+  * program (shader) costume DECLARED NEGATIVE: reduction is over an irregular axis, not emit-friendly.
+
+RULE-0 CATCH worth recording: holographic_stokes AND holographic_mueller already existed and were fully
+wired (7 + 3 doors). The master-backlog 'BUILD P1/P2' verdict was WRONG -- earlier audit phrasings
+('stokes parameters','polarization state vector') missed them; 'stokes vector polarization' surfaces them.
+Only RM synthesis and the observer (O1) were genuine gaps. Backlog verdicts are hypotheses until the
+live find_capability confirms them at build time.
+
+Tests: module selftest green (single source + field/UP + determinism + RMTF(0)==1 exact). Static compile
+clean (464 modules). reachability/catalog_gaps/skill_lint 0/0/0. capdoc/docgen regenerated.
+
+## Observer: spectrum -> sensor readings (O1; the sensor-over-a-field convergence)
+
+BUILT holographic_observer (holographic/rendering/): an observer = (wavelengths_nm, S, names); observe()
+integrates a spectrum against each sensitivity row -> readings (...,nchan). A human eye (3 CIE curves), a
+mantis eye (~12 receptors), a telescope bandpass are ONE core with different channels. Wired 6 doors:
+human_observer, make_observer, observer_receptor_bank, observe_spectrum, spectrum_to_rgb, xyz_to_srgb.
+Cataloged 'Observer (spectrum to sensor readings)', 5/5 discoverability, runnable example.
+
+PROMOTE gate (proven): the human observer REUSES blackbody's own CIE curves / XYZ->sRGB matrix / gamma
+(imported, not copied), so spectrum_to_rgb(planck(T)) == blackbody_rgb(T) BYTE-IDENTICAL (4 temps x 2
+modes asserted). blackbody_rgb is now literally this observer applied to a hot body; blackbody untouched.
+UP: field-native, hyperspectral image (...,nlam)->(...,nchan) in one call, drift-free vs the scalar path
+to ~2e-16. DOWN: works on a single channel; receptor_bank builds the multi-band parts (O2 mantis is next).
+
+KEPT NEGATIVES / lessons (loud):
+  * BYTE-IDENTICAL was ULP-fragile: np.einsum reduction != blackbody's np.sum(B*bar) accumulation order.
+    Switched observe() to np.sum(spec[...,None,:]*S, axis=-1) to match blackbody's summation exactly.
+  * A measured 0.128 'drift' turned out to be a TEST BUG (reshape(2,3) row-major put T=5000 at [0,2], not
+    [1,0]); real per-pixel drift is 2.2e-16. Believe measurement -> caught the test, not the code.
+  * 'program' (shader) costume DECLARED not-yet-emitted (the integral is a matmul; emit later).
+
+Tests: selftest green; compile clean (465 modules); reachability/catalog_gaps/skill_lint 0/0/0;
+capdoc/docgen regenerated.
+
+## Mantis-shrimp vision (O2): 12-band UV..red + linear/circular polarization
+
+EXTENDED holographic_observer (not a new module -- 'extend the faculty over a sibling'): mantis_receptors
+(12 narrow receptors, deep UV ~315nm to far red ~660nm, via receptor_bank + colored-filter narrowing),
+polarization_readout (linear detectors at 0/45/90/135 + CIRCULAR detectors via a quarter-wave retarder =
+the R8 rhabdomere, Chiou 2008), and mantis_view (spectral-Stokes (...,nlam,4) -> 12 spectral + pol channels
+in one call). Wired 3 doors: mantis_receptors, polarization_readout, mantis_view. Cataloged 'Mantis-shrimp
+vision (12-band + polarization)', 5/5 discoverability.
+
+COMPOSITION win: O2 is O1 (observe, for the 12 spectral bands off S0) + P2 (mueller quarter_wave +
+linear_polarizer, for the pol channels). Circular-polarization vision -- the thing that makes the mantis
+unique -- cost almost nothing once Stokes+Mueller existed: QWP(0) then polarizer(+/-45) gives RCP->(1,0),
+LCP->(0,1); their difference is handedness (~S3). Verified physics first (the naive QWP(0)+pol(0/90) gives
+0.5/0.5 -- no separation; +/-45 is required), THEN built.
+
+KEPT NEGATIVES (loud, pinned by tests):
+  * Thoen et al. 2014: mantis colour discrimination is COARSE, no evidence of colour-opponency. mantis_view
+    returns the raw 12 channels as a DIRECT readout and deliberately does NOT compute opponent differences;
+    selftest asserts spectral == observe(S0, mantis_receptors) exactly (no hidden processing). The popular
+    '12 channels = superb colour vision' story is what the measurement overturned.
+  * The 12 lambda-max centres are ILLUSTRATIVE (species vary, debated); we model the SHAPE (many narrow
+    bands incl. deep UV), not a species-specific fit. Declared.
+  * Achromatic retarder (Roberts 2009) modelled as a single QWP -- achromatic-enough here. Declared.
+
+Selftest payoffs (all green): RCP vs LCP distinguished + unpolarized reads zero handedness; e-vector angle
+recovered from channels to <0.5 deg; UV vs red receptors separate; direct-readout identity holds; determinism.
+Module count still 465 (extended, not added). reachability/catalog_gaps/skill_lint 0/0/0. capdoc/docgen regen.
+
+## False colour (O3): see what the mantis sees
+
+BUILT holographic_falsecolor (holographic/rendering/): map the invisible channels onto R/G/B so a human can
+look at them. hsv_to_rgb (vectorised), wavelength_to_rgb (reuses blackbody CIE curves + observer to_srgb; a
+monochromatic light's XYZ = its CMF value; UV/IR -> black = correctly invisible), band_display_colors,
+spectral_falsecolor (UV bands overridden to a chosen hue so UV becomes VISIBLE), polarization_falsecolor
+(hue=e-vector angle, sat=degree-of-linear-pol, val=intensity -- the standard polarization imaging map),
+handedness_falsecolor (right->red / left->blue diverging), and mantis_falsecolor (a mantis_view -> three
+images: colour, polarization, handedness). Wired 6 doors; cataloged 'See what the mantis sees (false colour)',
+5/5 discoverability. Reuses the CIE colour path (no forked colour). Field-native (UP); a new module (466 total)
+because display != sensing (not 80% the same as the observer -> justified sibling, not a forced extend).
+
+ENO DISSENT baked in (loud, in every docstring): every map is a CHOICE, not true colour or the mantis' percept.
+UV->violet, angle->hue, right->red are arbitrary conventions; each function states what its output is a FUNCTION
+OF and which knob is arbitrary. We cannot show a human a UV or handedness qualia, only re-map it into channels a
+human has -- the module never pretends otherwise.
+
+Selftest (green): HSV corners exact; wavelength colours (UV=black true-colour); UV band becomes visible under
+false colour (the whole point); e-vector angle->distinct hues, unpolarised->grey; handedness right->red/left->
+blue/none->white; field-native image; mantis_view end-to-end (UV-bright glows, RCP reads red). Determinism.
+
+CAUGHT: catalog does-string was 628 chars (>600 budget) -> assert fired, entry silently NOT registered, so
+discoverability showed 5/5 MISS until trimmed to 533. The length gate is load-bearing; watch it on every entry.
+
+ARC COMPLETE (polarized-light + vision): Stokes(P1) + Mueller(P2) [pre-existing] -> RM synthesis (Faraday) ->
+Observer(O1, blackbody byte-identical) -> Mantis(O2, RCP/LCP + 12 UV-red, Thoen direct readout) -> False colour
+(O3). reachability/catalog_gaps/skill_lint 0/0/0. capdoc/docgen regen.
+
+## X1: Faraday sky map -- telescope as observer (one core spans bug-eye and radio dish)
+
+EXTENDED holographic_rmsynth with the sky-cube pair: faraday_rotate (FORWARD -- rotate an intrinsic Stokes
+signal by rm*lambda^2 across a band; the polarized sky a dish receives; S0/S3 untouched, only the linear
+plane turns; = a per-wavelength Mueller rotator done field-native) and faraday_rm_map (INVERSE -- sky Stokes
+cube (...,nchan,4) -> per-pixel RM/angle map in one call, composing rmsynth+peak). Wired 2 doors; cataloged
+'Faraday sky map (telescope as observer)', 5/5 discoverability.
+
+RULE-0 CATCH: rm_synthesis was ALREADY field-native over a 2D sky cube -- a (2,2,120) cube -> (2,2,596)
+Faraday cube and peak recovers the exact per-pixel RM map. So the INVERSE was reuse; the genuine gap was the
+FORWARD model (faraday_rotate). faraday_rm_map is a thin, discoverable convenience over existing field-native
+pieces (worth it: a cube->RM-map wasn't surfaceable as one capability before).
+
+THE UNIFIER, proven end-to-end: forward-rotate a 3x3 sky with an RM gradient, recover the RM map to <0.25
+resolution and intrinsic angle to <3deg; S0/S3 unchanged; deterministic. The same Stokes+Mueller+rmsynth core
+that reads the mantis eye reads the radio dish -- 'telescope as a polarization observer' surfaces BOTH in the
+catalog. This is the astro<->vision bridge (U1) made concrete.
+
+KEPT NEGATIVE (inherited): faraday_rm_map amplitude is dirty-spectrum biased low (needs RM-CLEAN, U2); the
+RM/angle recovery is unbiased, the polarized-intensity is not. Simple Faraday model: no internal depolarization
+or multiple RM components along the line of sight (Faraday-thin only). Declared.
+
+Tests: rmsynth selftest green incl. the X1 round-trip; compile clean (466 modules); catalog_gaps/skill_lint
+0/0; capdoc/docgen regen.
+
+## A1: Sky observation container (WCS-lite) -- ingest for the astro arc
+
+BUILT holographic_skydata (holographic/io_and_interop/): a SkyData is {data, axes, meta}; axes carry WCS-lite
+LINEAR world mappings (crval/crpix/cdelt, crpix 0-based -- stated, since FITS is 1-based). pix<->world exact
+inverse; world_coords; spectral_axis/stokes_axis detection by name; lambda2_axis (freq via c/f then squared,
+or wavelength squared) = the observation->Faraday bridge; stokes_cube reshapes to (...,nchan,4) for
+faraday_rm_map; carrier_axis REUSES holographic_axisrole.analyze_axes; save/load via json header + npy in one
+npz (no pickle, deterministic round-trip). Wired 9 doors; cataloged 'Sky observation (cube + world axes)', 5/5.
+
+INTEGRATION (proven end-to-end): paint a known RM gradient into a (3,3,nfreq,4) cube via faraday_rotate, wrap
+as SkyData, then sky_lambda2 + sky_stokes_cube + faraday_rm_map recovers the RM map to <0.3 resolution. The
+astro pipeline now runs ingest -> analysis on a real container, not bare arrays -- through the mind too.
+
+SCOPE / kept negatives (loud):
+  * WCS-LITE: LINEAR axes only (no spherical projection). Full WCS / a FITS binary parser live OUTSIDE core;
+    the ingest contract is header-dict + npy. Declared, not a hidden limitation.
+  * crpix is 0-based here (FITS is 1-based) -- documented to prevent an off-by-one on real FITS headers.
+  * Real continuous-tone photographs are holographic_photos' job (still dark, W2); this container is the
+    array/npy contract. W2 wiring remains on the backlog.
+
+Tests: selftest green (coords exact, lambda2 bridge, ingest->RM map, save/load); compile clean (467 modules);
+catalog_gaps/skill_lint 0/0; capdoc/docgen regen.
+
+## Wiring honesty: 5 dark modules -> 0 (an audit blind spot, and the house import convention)
+
+CAUGHT by tools/wiring_report: holographic_stokes/mueller-adjacent cluster (stokes, observer, falsecolor,
+rmsynth, skydata) read as DARK ('zero engine references -- capability with no door') even though all have
+working mind doors and find_capability surfaces them. stokes was left dark by a PRIOR session too.
+
+ROOT CAUSE (worth remembering): wiring_report._imports credits an ImportFrom by node.module's last component.
+So 'from holographic.rendering import holographic_observer as _ob' records 'rendering', NOT 'holographic_
+observer' -- the module is never counted as imported. The house convention that IS detected is the dotted /
+symbol form, e.g. 'from holographic.simulation_and_physics.holographic_heat import diffuse_heat' or
+'import holographic.rendering.holographic_observer as _ob'. My lazy-import style deviated.
+
+FIX (behavior-identical, my side not the tool's): converted 43 facade lazy-imports in holographic_unified from
+'from PKG import MODULE as X' to 'import PKG.MODULE as X'. Both bind the module object to X (calls unchanged),
+but ast.Import records the basename so the audit sees the faculty. Result: DARK 5 -> 0 (also cleared the
+prior-session stokes). Chose to conform to the convention rather than patch the tool (smaller blast radius; the
+tool's --check baseline and other modules' classification stay put).
+
+LESSON (pinned): when wiring a NEW faculty into holographic_unified, use 'import holographic.FAMILY.MODULE as _x'
+(dotted) so wiring_report counts it. A working door is not enough -- the audit must SEE it, or per the governing
+rule the capability 'does not exist'. Verified: all 6 family selftests pass, every door byte-identical
+(observer==blackbody, mantis handedness, RM=42.0, skydata lambda2), compile clean, catalog_gaps/skill_lint 0/0.
+
+## B1: Doppler velocity & drift acceleration (completes the dedoppler faculty)
+
+EXTENDED holographic_dedoppler (not a sibling -- the drift SEARCH and its VELOCITY reading are one faculty):
+doppler_velocity (classical v=c*z or relativistic ((1+z)^2-1)/((1+z)^2+1), sub-luminal for any z), redshift,
+doppler_shift (forward model, exact inverse), drift_acceleration (a=-c*(df/dt)/f -- turns a detect_drifting
+drift rate into the emitter's acceleration, the SETI reading of a drifting tone). Wired 4 doors (detectable
+dotted-symbol style per the wiring lesson); cataloged 'Doppler velocity & drift acceleration', 5/5.
+
+Selftest (green): 300 km/s shift round-trips; zero shift -> zero velocity; relativistic recovers 0.5c and stays
+<c where classical would exceed it; small-v classical~=relativistic; 1 Hz/s @1.4GHz -> -0.214 m/s^2; field-
+native + deterministic. Ties to detect_drifting: find the drift, then say what velocity/acceleration it means.
+
+Kept negative: simple line-of-sight kinematics only -- no cosmological-vs-peculiar velocity distinction at high
+z (the relativistic formula is special-relativistic doppler, not a cosmology model). Declared.
+
+Tests: dedoppler selftest green (incl. original SETI cadence tests + new doppler); compile clean; wiring 0 dark;
+catalog_gaps/skill_lint 0/0; capdoc/docgen regen.
+
+## C1: Star system from parameters -- the 'plug data in, see a system' keystone
+
+BUILT holographic_starsystem (holographic/scene_and_pipeline/): star_system(params, seed) -> a deterministic,
+JSON-serializable RECIPE. Star = blackbody colour at origin + radius/mass; each planet = biome-by-temperature +
+closed-form Kepler orbit (star at a FOCUS, perihelion a(1-e)) + position + a per-planet seed to regenerate its
+surface via fractal_planet ON DEMAND (never baked -- descend-the-recipe). Plus kepler_ellipse, kepler_position,
+solve_kepler (Newton on M=E-e*sinE), temperature_to_biome. Wired 5 doors (detectable style); cataloged 'Star
+system from parameters', 5/5.
+
+ASSEMBLES BY DELEGATION (the keystone discipline): star colour <- holographic_blackbody (shared path), surfaces
+<- fractal_planet (referenced by seed, regenerated on demand), orbits <- Kepler geometry. build_scene is NL-only
+so C1 emits a STRUCTURED recipe instead; the renderer/scene builder draws it. No planet/scene geometry reinvented.
+
+Selftest (green): e=0 orbit is a unit circle about the focus; peri/apo distances a(1-e)/a(1+e) exact; Kepler's
+equation solved to 1e-10; biomes bucket (100K frozen, 288K temperate, 1200K molten); recipe deterministic and
+JSON round-trips; star colour == blackbody_rgb; planet surface really delegates to fractal_planet.
+
+Kept negatives (loud): temperature_to_biome thresholds are a documented CHOICE, not a climate model; orbits are
+2-D coplanar Kepler ellipses (no inclination/precession/n-body -- D1 nbody is the dynamics path); the recipe is
+the deliverable, rendering is downstream. This is C1; C2 (cluster: many systems in a field) is the up-direction.
+
+Tests: selftest green; compile clean; wiring 0 dark; catalog_gaps/skill_lint 0/0; capdoc/docgen regen.
+
+## D1: N-body gravity -- the 'run simulations' dynamics (and it agrees with C1)
+
+BUILT holographic_nbody (holographic/simulation_and_physics/): softened Newtonian gravity, O(N^2) direct sum,
+VELOCITY-VERLET (symplectic -> energy BOUNDED, orbits close instead of spiralling). nbody_accel (the one
+physical kernel), nbody_energy, nbody_step (reuses the half-step force -> one accel eval/step), nbody_simulate
+(runs it, reports honest energy drift + optional trajectory), circular_orbit_velocity. Wired 5 doors
+(detectable style); cataloged 'N-body gravity simulation', 5/5.
+
+CROSS-FACULTY (the payoff): an n-body sim of a 2-body system reproduces the CLOSED-FORM Kepler orbit C1 draws --
+circular orbit closes to <3% after one Kepler period, energy drift ~1e-8. The dynamics and the geometry agree,
+so C1 (place) and D1 (evolve) are two views of the same physics. Momentum conserved to 1e-8 (no external force);
+softening keeps coincident bodies finite; deterministic.
+
+Kept negatives (loud): O(N^2) is the honest baseline -- Barnes-Hut octree (down: decompose the force sum) and a
+particle-mesh Poisson-field via solve_poisson_periodic (sideways: potential is a field) are DECLARED accelerator
+paths, not silently implied. Softening is a stated fudge (trades accuracy near close passes for no blow-up).
+Newtonian only (no GR / relativistic precession).
+
+PROCESS NOTE (pinned, 3rd occurrence): catalog does-strings keep landing 610-640 chars and tripping the 600
+budget assert -> the entry silently DOESN'T register -> 5/5 MISS until trimmed. HABIT: draft does-strings at
+~540 chars, not up to the limit. The assert is the safety net, but budgeting low avoids the round-trip.
+
+Tests: selftest green; compile clean; wiring 0 dark; catalog_gaps/skill_lint 0/0; capdoc/docgen regen (469 modules).
+
+## B2: Lomb-Scargle period finding -- closes the raw-data -> star_system loop
+
+BUILT holographic_lombscargle (holographic/sampling_and_signal/): Lomb-Scargle periodogram for UNEVENLY-sampled
+data (Lomb 1976, Scargle 1982) -- the least-squares sinusoid fit per trial frequency a plain FFT can't do on
+gappy observations. lomb_scargle (Scargle's tau makes it shift-invariant, field-native over freqs), freq_grid
+(data-derived), best_period, phase_fold, false_alarm_probability. Wired 5 doors; cataloged 'Period of a signal
+(Lomb-Scargle)', 5/5 (does budgeted at 537 chars).
+
+HONESTY NULL (reuse-reasoned): false_alarm_probability re-runs the search on PERMUTED values (times fixed) --
+the standard LS bootstrap FAP. Chose permutation over phase_randomize deliberately: phase_randomize assumes EVEN
+sampling; permutation preserves the uneven WINDOW + value set, which is the right null here. Documented why the
+sibling doesn't fit (honest anti-silo). Selftest: real signal fap 0.000, pure noise fap 0.633 -- cleanly separated.
+
+THE LOOP CLOSED (the payoff): uneven+gapped light curve -> best_period recovers the period to <2% -> Kepler's
+third law -> semi-major axis -> star_system places the planet with the right biome. End-to-end through the mind:
+period 3.416 (true 3.4), fap 0.000 -> a=0.044 AU -> hot world. 'Plug data in, see a system' now runs from RAW DATA.
+
+Kept negative: pseudo-Nyquist for uneven sampling is heuristic (median spacing); aliases beyond it aren't chased.
+First-harmonic sinusoid model (no eccentric-orbit RV shape) -- eccentricity fitting is out of v1 scope, declared.
+
+Tests: selftest green; compile clean; wiring 0 dark; catalog_gaps/skill_lint 0/0; capdoc/docgen regen (470 modules).
+
+## C2: Star cluster -- the UP direction (many systems in a field)
+
+EXTENDED holographic_starsystem (not a sibling -- a cluster is the up-aggregation of the same 'assemble systems'
+faculty): sample_imf (Salpeter 1955 power-law inverse-CDF, exact/deterministic, bottom-heavy), mass_to_temperature
+(rough MS scaling T~5772*M^0.525, monotonic, Sun-anchored), star_cluster (place n systems; each star IMF-mass ->
+MS temp -> blackbody colour, so the population looks real: red dwarfs common, blue giants rare). Wired 3 doors;
+cataloged 'Star cluster (many systems)', 5/5 (does 527 chars, budgeted low).
+
+REUSE: even placement via low_discrepancy (Roberts' sequence, holographic_lowdiscrepancy) rather than a fresh
+sampler. COSMIC-WEB TIE: pass a density_field and systems are rejection-sampled to cluster where density is high
+(Burchett 2020 MCPM -- slime mould reconstructs the cosmic web; the maze/Physarum solver can generate that field).
+Verified: a blob density field pulls the cluster mean toward it (<0.45 vs 0.5 uniform). Bilinear field read
+inlined (a few lines) to keep the scene module free of a cross-family import -- documented, mirrors sample_field.
+
+Kept negatives (loud): mass_to_temperature is a CHOICE of simple MS relation, not a stellar-evolution model;
+3-D placement / true Physarum-3-D cosmic web are declared future (density_field is 2-D here); per-system planets
+are optional and schematic. star_cluster is C2; C1 (one system) and D1 (evolve) sit below it.
+
+Tests: starsystem selftest green (C1 + C2); compile clean; wiring 0 dark; catalog_gaps/skill_lint 0/0;
+capdoc/docgen regen (470 modules, no new module -- C2 extended C1's module).
+
+## C3: Nebula -- volumetric gas/dust (the gas counterpart to the cluster)
+
+BUILT holographic_nebula (holographic/scene_and_pipeline/): nebula_volume -> a deterministic 3-D density field
+(res^3, [0,1]) with wispy filaments + dark voids: fBm -> ridged transform (filaments) -> threshold/contrast
+(voids). star_positions carve spherical CAVITIES (stars blow bubbles) -- ties to star_cluster. nebula_field_fn
+wraps the volume as the callable render_volume marches (trilinear); nebula_column is the cheap projection. Wired
+3 doors; cataloged 'Nebula (volumetric gas & dust)', 5/5.
+
+RULE-0 DODGED TWO DECOYS: 'holographic_gas' (top hit) is THERMODYNAMICS (ideal gas law), and 'fractal_volume' is
+VSA inception -- neither is a nebula (superficial name matches). The real reuse: the engine's FractalNoise
+(n_dims=3).sample_grid(res) for a 3-D scalar fBm (no private noise copy), and volume_render for the marcher.
+
+RENDER BRIDGE (the correctness catch): volume_render's `field` is a CALLABLE points(N,3)->density, NOT a voxel
+array; and its bounds are (lo_xyz, hi_xyz) two 3-vectors, NOT per-axis pairs. First attempt used the wrong bounds
+shape and broadcast-failed. nebula_field_fn now matches the renderer's convention exactly -> a REAL render_volume
+integration through the mind produces a non-blank marched image. The field callable is trilinear and exact on nodes.
+
+Kept negatives (loud): it is an ARTIST'S nebula -- a legible procedural density field, NOT a solution of the HII-
+region equations. A true fluid nebula would advect this with the Stam solver (fluid_step_3d) -- DECLARED, not
+implied. Cavities are geometric spheres, not real ionization fronts. star_positions accept 2-D (placed mid-plane).
+
+Tests: selftest green (voids+filaments var 0.189, cavities, trilinear bridge); REAL render_volume integration;
+compile clean; wiring 0 dark; catalog_gaps/skill_lint 0/0; capdoc/docgen regen (471 modules).

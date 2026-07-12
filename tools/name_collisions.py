@@ -54,7 +54,9 @@ KNOWN_COLLISIONS = {
     # -- different-domain homonyms: same English word, unrelated jobs. Read, benign. --
     "resolve": frozenset({"graphql", "machinemodel", "overrides", "superposed"}),
     "box": frozenset({"codegen", "mesh", "sdf"}),                 # an SDF box, a mesh box, a codegen box literal
-    "divergence": frozenset({"curlnoise", "fields", "opponent"}), # vector divergence vs opponent-process divergence
+    "divergence": frozenset({"curlnoise", "fields", "opponent", "probability_current"}),  # three vector-field
+    # divergences under different discretizations (finite-diff / spectral / bc-aware central-diff) plus
+    # opponent's unrelated angular-disagreement homonym. Read; each serves its own data layout.
     "route": frozenset({"extras", "pivot", "skills"}),
     "agree": frozenset({"hardening", "opponent"}),
     "ball": frozenset({"extras", "field"}),
@@ -72,7 +74,8 @@ KNOWN_COLLISIONS = {
     "gather": frozenset({"shader", "transfer"}),                 # deliberate aliases (recorded in dup audit)
     "generate": frozenset({"diffuse", "hopfield"}),
     "geodesic_distances": frozenset({"chart", "meshgeodesic"}),
-    "gradient": frozenset({"pattern", "vision"}),
+    "gradient": frozenset({"laplacian", "pattern", "vision"}),   # N-dim central-diff gradient vs an image
+    # gradient (magnitude+orientation) vs a linear ramp field -- three domains, same English word. Read.
     "leaf": frozenset({"fuse", "schedule"}),
     "manifest": frozenset({"dictionary", "skills"}),
     "pack": frozenset({"pack", "superposed"}),
@@ -88,7 +91,17 @@ KNOWN_COLLISIONS = {
     "validate_c": frozenset({"emit", "sdfemit"}),
     # -- the transform kit: canonical builders in `transform`, with declared/delegating copies elsewhere. --
     "translation": frozenset({"grouptower", "scenegraph", "transform"}),
-    "rotation": frozenset({"meshskin", "scenegraph"}),           # meshskin's ~9e-12 copy is DECLARED, not merged
+    "rotation": frozenset({"meshskin", "mueller", "scenegraph"}),  # meshskin's ~9e-12 copy is DECLARED, not
+    # merged; mueller's is a THIRD ANSWER -- a Mueller REFERENCE-FRAME rotation with the 2*phi polarization
+    # convention, not a spatial Rodrigues matrix. Must never be unified. Read and pinned.
+    "compose": frozenset({"mueller", "transform"}),  # both fold matrices but with OPPOSITE order conventions:
+    # transform is plain M0@M1@... (rightmost applied first); mueller takes elements IN THE ORDER LIGHT
+    # PASSES THROUGH and reverses internally. Same hazard class as rotation; read and pinned.
+    "hsv_to_rgb": frozenset({"falsecolor", "vision"}),  # the same hexcone under two conventions: vision
+    # takes a packed (...,3) array with H in DEGREES; falsecolor takes separate broadcastable h,s,v in
+    # [0,1]. A delegation would be a signature-adapting shim of equal size -- recorded, not rewired.
+    "identity": frozenset({"mueller", "scenegraph"}),  # two trivial np.eye(4) one-liners in different
+    # domains (a 4x4 transform vs the Mueller composition unit). Read; nothing to unify.
     "scaling": frozenset({"scenegraph", "transform"}),           # scenegraph delegates to transform
     "quat_from_axis_angle": frozenset({"cosserat", "transform"}),# cosserat delegates to transform (rev.9 fix)
     "refract_dir": frozenset({"raydiff", "raymarch"}),

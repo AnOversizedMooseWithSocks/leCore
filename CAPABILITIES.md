@@ -100,6 +100,14 @@ import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); img=np.
 ```
 *Find it by:* find edges in an image, detect corners in an image, find lines in an image, dominant colors of an image, image palette, cluster images by appearance, image feature vector, perceptual image descriptor
 
+### Optical elements (Mueller matrices)
+how optical elements TRANSFORM polarized light, as real 4x4 Mueller matrices (holographic_mueller): polarizer, wave plate / retarder (a quarter-wave plate converts linear<->circular -- the mantis R8 mechanism), optical ROTATOR (= Faraday rotation), depolarizer, and polarizing dielectric (Fresnel) reflection. Elements COMPOSE (a light path folds to one matrix) and apply to a Stokes vector or a whole field.
+
+```python
+import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.stokes_report(m.apply_mueller(m.mueller_matrix('quarter_wave', angle=np.pi/4), m.stokes_linear(1.0, 0.0)))['docp'])
+```
+*Find it by:* mueller matrix, polarizer, wave plate, quarter wave plate, half wave plate, retarder, optical rotator, faraday rotation
+
 ### The projective ceiling (where the transform tower stops)
 compose any chain of transform generators and you get ONE 4x4, exactly (3.3e-16 against applying the chain step by step). So the whole transform IS the composed group element. **BUT A GROUP IS NOT A LANGUAGE**: in a language a word is not a letter, while in a group the composition of generators is another group element drawn from the SAME set. Words and letters live in one alphabet -- that is what CLOSURE means, and it is why DL11's edit chain collapses to a single (S,T) instead of needing a sequence: the recoverable object is the group element, not the spelling. So the hierarchy is real and it is NOT letters -> words -> sentences. It is a chain of subgroups ordered by NORMALITY: translations <| Aff(3) < PGL(4). 'Which layer am I on' is not a question about length; it is the question 'can I push a delta through?', and the answer is yes exactly when the layer below is normal. THE CEILING: a 4x4 is AFFINE when its bottom row is [0,0,0,1] -- when it fixes the plane at infinity. mind.is_affine_matrix is that boolean. Conjugating a translation by a ROTATION gives T(A t) to 1.1e-16, but conjugating it by a PERSPECTIVE gives a matrix that is not a translation and NOT EVEN AFFINE (mind.affine_normality measures both). **Aff is a subgroup of PGL but NOT a normal one**, and the tower's whole mechanism -- push the delta onto the other operand, collapse the chain, read the equivariance table -- rests on normality and stops here. TEXTURE PROJECTION IS THAT CEILING IN A RENDERER: interpolating (u,v) linearly in screen space assumes the triangle-to-texture map is affine, and under perspective it is not. mind.texture_projection_error, at vertex depths (1, 4, 1.5): affine max error 0.3310 -- A THIRD OF THE TEXTURE -- against 2.2e-16 for the homogeneous (u/w, v/w, 1/w) divide. **The extra parameter is not another letter in the same alphabet. It is an extra COORDINATE**, carried through the transform and divided out at the end -- the `q` of a homogeneous (u,v,q) texture coordinate. It enlarges the space the alphabet acts on, and by doing so breaks the affine group's normality. That is why the fix is a divide and not a matrix. KEPT NEGATIVE: a projective map is not 'affine plus a bit' -- it is linear on a HIGHER-dimensional homogeneous space whose shadow on the affine chart is nonlinear, and `nearest_affine` deliberately does not exist, because projecting a perspective onto the affine subgroup throws away the only thing that made it perspective. With equal depths the affine map is exact: the ceiling only bites under perspective..
 
@@ -594,6 +602,14 @@ print(mind.explain_code('def lerp(a: float, b: float, t: float) -> float:\n    r
 ```
 *Find it by:* explain code, explain what code does in english, summarize a function, describe the logic flow of a program, find variables in source code, what does this code do, code to english, verbalize code
 
+### Faraday sky map (telescope as observer)
+the TELESCOPE AS OBSERVER: Faraday rotation on a whole sky (holographic_rmsynth). faraday_rotate is the forward model -- rotate an intrinsic polarized signal by rm*lambda^2 across a band, the sky a radio dish receives (intensity + circular untouched). faraday_rm_map is the inverse -- recover a per-pixel Faraday-depth (line-of-sight magnetism) MAP from a sky Stokes cube (...,nchan,4) in one call, by rm synthesis over the whole field. The SAME polarization core reads a mantis eye and a radio telescope (the sensor unifier). faraday_rotate / faraday_rm_map.
+
+```python
+import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); L=np.linspace(0.03,0.24,140); s0=np.zeros((2,2,4)); s0[...,0]=1; s0[...,1]=1; cube=m.faraday_rotate(s0,L,np.array([[15.,-40.],[70.,-5.]])); print(np.round(m.faraday_rm_map(L,cube)['rm']).tolist())
+```
+*Find it by:* faraday rotation, faraday rotate a sky, rotation measure map, RM map, line of sight magnetism map, recover magnetic field per pixel, polarization sky cube to RM, simulate faraday rotation
+
 ### Field
 sample a scalar/vector field at points with ONE interface (field.sample(points)); the backend is chosen by cost: callable/oracle, dense grid, narrow-band sparse (spectral/FPE/region/dirty are backends too).
 
@@ -730,6 +746,14 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); import numpy as np; c=m.nur
 ```
 *Find it by:* nurbs surface, nurbs curve, rational bspline, rational b-spline, nurbs to mesh, weighted control points, evaluate a nurbs patch, cad surface
 
+### Nebula (volumetric gas & dust)
+a NEBULA -- turbulent volumetric gas/dust you can render (holographic_nebula). nebula_volume builds a 3-D density field (res^3, [0,1]) with wispy filaments and dark voids from the engine's own FractalNoise; pass star positions to carve CAVITIES where stars blow bubbles (ties to star_cluster). nebula_field_fn wraps it as the callable render_volume marches (trilinear), so it drops into the ray-marcher; nebula_column is the cheap column-density look. An artist's nebula, not a hydro sim (fluid advection declared). nebula_volume / nebula_field_fn / nebula_column.
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); v=m.nebula_volume(res=24,seed=0); print(v.shape==(24,24,24))
+```
+*Find it by:* nebula, gas cloud volume, interstellar dust cloud, emission nebula, volumetric gas, turbulent gas field, star forming cloud, 3d density volume nebula
+
 ### Network render farm
 run the coordinator's monoid workers on OTHER machines: a worker daemon per node (stdlib http/json), the read-only cache shipped ONCE by content hash and reused, buckets dispatched concurrently and reduced -- the same Coordinator.run as the local pool. Buckets are data, workers are registered code; a node runs only its registered workers.
 
@@ -810,6 +834,14 @@ mind.path_trace(scene); mind.camera(); from holographic.rendering.holographic_ra
 ```
 *Find it by:* render a scene, path trace, ray tracing, global illumination, camera, depth of field, lens, volumetric render
 
+### Rotation-measure synthesis (Faraday depth)
+recover the FARADAY DEPTH of polarized light -- the line-of-sight magnetic field a radio telescope reads from a galaxy's polarized glow (holographic_rmsynth; Brentjens & de Bruyn 2005). Transforms complex polarization P=Q+iU over wavelength^2 into a spectrum over Faraday depth phi, peaked to {rm, polarized_intensity, angle0}. Field-native over an image cube; handles unevenly-sampled bands with gaps. The SEQUENCE costume of the Stokes state (U1). rm_synthesis / rmtf / rm_peak / rm_phi_grid / rm_resolution / stokes_faraday_depth.
+
+```python
+import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); L=np.linspace(0.03,0.24,200); P=2.0*np.exp(2j*(0.5+42.0*L)); g=m.rm_phi_grid(L); print(round(m.rm_peak(m.rm_synthesis(L,g,P=P),g)['rm'],1))
+```
+*Find it by:* rotation measure synthesis, faraday depth, faraday rotation measure, RM synthesis, line of sight magnetic field, polarization angle vs wavelength, magnetic field from polarization, faraday dispersion function
+
 ### SDF & procedural geometry
 implicit + procedural geometry: signed distance fields (sdf), sphere-trace raymarching with ambient occlusion (raymarch), sculpting, procedural terrain (procgen), spatial tiling + octree, and voxelization. Native-first shape building.
 
@@ -857,6 +889,22 @@ full-3DGS anisotropic refinement composed coarse-first: fit cheap isotropic spla
 from holographic.rendering.holographic_splat import fit_coarse_first; fit_coarse_first(target, K_iso, K_aniso)
 ```
 *Find it by:* splat refine, anisotropic splat, 3dgs, gaussian splat, coarse first splat, aniso fit, residual refine, gradient refine
+
+### Star cluster (many systems)
+a STAR CLUSTER -- many star systems in a field (holographic_starsystem; the UP direction of star_system). Masses come from a Salpeter IMF (mostly red dwarfs, a few blue giants) and colour each star by its main-sequence temperature, so it looks like a real population. Even low-discrepancy placement by default, or pass a density_field (e.g. a cosmic-web map from the maze/Physarum solver) to cluster systems along large-scale structure (Burchett 2020 MCPM). Deterministic recipe. star_cluster / sample_imf / mass_to_temperature.
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); c=m.star_cluster(30,seed=0,extent=2.0); print(c['n']==30)
+```
+*Find it by:* star cluster, galaxy cluster, many star systems, population of stars, cluster of stars, initial mass function, salpeter imf, distribute stars in a field
+
+### Star system from parameters
+PLUG DATA IN, GET A STAR SYSTEM (holographic_starsystem): assemble parameters -- a star's temperature/radius/mass and each planet's orbit (a,e), radius, temperature -- into a deterministic, JSON-serializable scene RECIPE. Star gets a blackbody colour; each planet a biome by temperature, a closed-form Kepler orbit (star at a focus), a position, and a seed to regenerate its surface via fractal_planet on demand. Same params+seed = byte-identical. Delegates to blackbody + fractal_planet + Kepler geometry. star_system / kepler_ellipse / kepler_position / temperature_to_biome / planet_field.
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); r=m.star_system({'star':{'temp_K':5772},'planets':[{'a':1.0,'e':0.02,'radius':0.09,'temp_K':288}]}); print(r['planets'][0]['biome'])
+```
+*Find it by:* build a star system, star system from parameters, procedural solar system, assemble a planetary system, plug data in to see a system, planets on kepler orbits, make a solar system, star with planets
 
 ### Store a multi-way array (tensor-train file)
 holographic_tucker.save_tensor(X, path) writes a volume / frame stack / BRDF table as a Tensor-Train code, and load_tensor reads it back. Measured on a real (24,32,32) field: 4,433 bytes at rel-err 3.9e-5, against int8's 24,576 bytes at 9.5e-3 -- 5.6x smaller AND 244x more accurate. The bar is INT8 (1 byte/element), not float64: on data with no cross-mode structure the TT code is bigger, and the file falls back to storing the array RAW and exact. core.save(quant='rd'/'auto') carries the same decision for 3+ mode state arrays..
@@ -1250,6 +1298,14 @@ A, b, h = mind.soft_chain_matrices(12, hertz=15.0, zeta=0.7); s = mind.affine_ju
 ```
 *Find it by:* modal jump, closed form physics, skip substeps, skip thousands of physics substeps, substepping too slow, my machinery sim is too slow, fast forward a simulation, fast forward a ragdoll to where it settles
 
+### N-body gravity simulation
+N-BODY GRAVITY (holographic_nbody): integrate bodies pulling on each other under softened Newtonian gravity, O(N^2) direct sum, with a VELOCITY-VERLET symplectic integrator so total energy stays bounded (orbits close instead of spiralling). nbody_simulate runs it and reports the honest energy drift + an optional trajectory; circular_orbit_velocity seeds a stable orbit. The dynamics counterpart to star_system's closed-form orbits (they agree). Barnes-Hut / Poisson-field are declared accelerator paths. nbody_simulate / nbody_accel / nbody_energy / nbody_step.
+
+```python
+import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); p=np.array([[0.,0.],[1.,0.]]); v=np.array([[0.,0.],[0.,m.circular_orbit_velocity(1000,1,1.0)]]); print(m.nbody_simulate(p,v,np.array([1000.,1.]),0.001,50,G=1.0,softening=1e-3)['energy_drift']<0.01)
+```
+*Find it by:* n-body simulation, nbody gravity, gravitational simulation, simulate orbits, planets orbiting, verlet integrator, symplectic integrator, gravity between bodies
+
 ### Physics & chemistry (domain)
 physical/chemical PROPERTIES and their evolution: the matter model (Mixture/matter_step: smoke->oil separation), diffusion, equilibrium propagation, thin-film iridescence, oxidation/weathering.
 
@@ -1417,6 +1473,14 @@ b = mind.bake_field(xs, ys, detrend=True); y = mind.fetch_field(b, 0.37, normali
 ```
 *Find it by:* detrend, bake a lookup table, bake sqrt, non-periodic bake, endpoint jump, spectral leakage, lut, near singular function
 
+### Doppler velocity & drift acceleration
+read VELOCITY and ACCELERATION out of a spectral shift or drift (holographic_dedoppler). doppler_velocity turns an observed vs rest wavelength into a line-of-sight velocity (classical v=c*z, or relativistic, which stays below c); redshift gives z; doppler_shift is the forward model (velocity -> observed wavelength). drift_acceleration turns a narrowband frequency drift rate (Hz/s -- what detect_drifting finds) into the emitter's acceleration a=-c*(df/dt)/f: the SETI reading of a drifting tone. Field-native. doppler_velocity / redshift / doppler_shift / drift_acceleration.
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); lr=656.28e-9; print(round(float(m.doppler_velocity(m.doppler_shift(lr,3e5),lr))/1e3,1))
+```
+*Find it by:* doppler velocity, redshift to velocity, radial velocity from wavelength, relativistic doppler, doppler shift, wavelength shift to speed, drift rate to acceleration, how fast is it moving
+
 ### Exact periodic PDE solve (spectral Laplace)
 on a PERIODIC grid the Laplacian is a circular convolution, so it is DIAGONAL in the Fourier basis and the solve is closed form. mind.solve_poisson_periodic(f) inverts laplacian(u)=f in one FFT; mind.diffuse_periodic(T, alpha, t) evolves the heat equation to ANY time t in one evaluation (each mode decays by exp(-alpha k^2 t)) -- no time step, no stability limit, no substepping. Measured exact to 6.7e-16 where 1000 iterative steps sit at 1.5e-4. Periodic only: the Neumann/edge-replicated Laplacian is NOT circular..
 
@@ -1432,6 +1496,22 @@ apply a kernel-weighted field in O(N*m) instead of exact O(N^2), gated by a low-
 from holographic.sampling_and_signal.holographic_nystrom import apply_kernel_gated; apply_kernel_gated(points, sources, weights, sigma)
 ```
 *Find it by:* nystrom, landmark, low rank, kernel, rbf field, large field, spectral embedding, quadratic cost
+
+### Observer (spectrum to sensor readings)
+an OBSERVER: turn a spectrum into sensor readings by integrating it against sensitivity curves (holographic_observer). A human eye (3 CIE curves), a mantis eye (~12 receptors), or a telescope bandpass are all the same object with different channels -- one core, many sensors. Field-native: a hyperspectral image (...,nlam) gives per-pixel readings (...,nchan) in one call. The human observer reproduces blackbody_rgb byte-identically (blackbody is this observer on a Planck spectrum). human_observer / make_observer / observe_spectrum / spectrum_to_rgb / observer_receptor_bank / xyz_to_srgb.
+
+```python
+import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); from holographic.misc import holographic_blackbody as bb; L=np.linspace(380,780,90); print(np.array_equal(m.spectrum_to_rgb(bb.planck_radiance(L*1e-9,5000.0)), bb.blackbody_rgb(5000.0)))
+```
+*Find it by:* observer, custom sensor, sensor response, spectrum to color, spectrum to rgb, color matching functions, CIE observer, what the eye sees
+
+### Period of a signal (Lomb-Scargle)
+find the PERIOD of an unevenly-sampled signal (holographic_lombscargle; Lomb 1976, Scargle 1982) -- what a plain FFT can't do on gappy real observations. best_period searches a data-derived frequency grid and returns {period, power, fap}; false_alarm_probability runs a permutation null (times fixed) so a peak's significance is measured, not assumed; phase_fold shows a period is real by folding coherently. Closes the loop: a light curve -> a period -> Kepler -> star_system. best_period / lomb_scargle / lomb_scargle_auto / phase_fold.
+
+```python
+import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); rng=np.random.default_rng(0); t=np.sort(rng.uniform(0,20,120)); y=np.sin(2*np.pi*t/2.5); print(round(m.best_period(t,y,min_period=0.5,max_period=8)['period'],1))
+```
+*Find it by:* lomb scargle, lomb scargle periodogram, period of a light curve, find period unevenly sampled, periodogram irregular sampling, detect periodicity with gaps, orbital period from radial velocity, phase fold a time series
 
 ### Scale (distribute)
 make something bigger than one box / one pass can hold: partition a job, run the pieces independently, reassemble with a commutative monoid -- map_reduce, load-balanced partition, image tiles / volume bricks; strategies tiling/octree/multires/superposed/sparsefield.
@@ -1865,6 +1945,13 @@ quantize a unit normal on its own manifold (octahedral mapping) instead of packi
 from holographic.mesh_and_geometry.holographic_octnormal import oct_quantize, oct_dequantize; codes = oct_quantize(normals, bits=8)
 ```
 
+### Mantis-shrimp vision (12-band + polarization)
+see as a MANTIS SHRIMP does: 12 spectral receptors from deep UV to far red PLUS linear and CIRCULAR polarization (holographic_observer.mantis_view). The circular channels use a quarter-wave retarder (the R8 rhabdomere, Chiou 2008) before linear detectors -- the sense mantis shrimp uniquely have. Composes the observer (O1) and Mueller elements (P2). Field-native. KEPT NEGATIVE (Thoen 2014): a DIRECT per-receptor readout, NOT colour-opponent -- mantis colour discrimination is measured coarse. mantis_receptors / polarization_readout / mantis_view.
+
+```python
+import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); L=np.linspace(300,720,140); b=np.exp(-0.5*((L-500)/60)**2); S=np.zeros(L.shape+(4,)); S[...,0]=b; S[...,3]=b; print(m.mantis_view(S,L)['handedness_sign'])
+```
+
 ### Merge forked worlds (fork/merge)
 mind.merge_forks(forks, policy, tol) reconciles several forked copies of a world, each a {slot: vector} delta. Slots the forks AGREE on merge conflict-free into the consensus (pairwise opponent divergence below tol, matching leOS's pairwise convention); slots they DISAGREE on are handled by policy: 'select' surfaces the conflict for a human, 'auto' keeps only agreements, 'left'/'right'/callable resolve it. Because a world is a seed + deltas, forking to single-player and merging back is cheap. Returns {merged, conflicts}..
 
@@ -1891,6 +1978,13 @@ mind.accelerator_report() lists every optional dependency with installed-or-not,
 
 ```python
 import json; print(json.dumps(mind.accelerator_report(), indent=1))
+```
+
+### Polarized light (Stokes state)
+the STATE of polarized light as a Stokes vector [S0,S1,S2,S3] (holographic_stokes): total intensity plus linear (Q,U) and CIRCULAR (V / handedness) polarization. Field-native (a whole image is (...,4)); reports degree-of-polarization, e-vector angle and handedness; scalar radiance lifts/round-trips byte-identically. The circular channel is the one the mantis shrimp uniquely sees.
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.stokes_report(m.stokes_circular(1.0, handedness=1))['docp'])
 ```
 
 ### Probability current (quantum flow)
@@ -1959,11 +2053,25 @@ evolve a quantum wavefunction in time by the time-dependent Schrodinger equation
 import lecore; m=lecore.UnifiedMind(); qf=m.quantum_field((128,128),dx=0.2); qf.gaussian_packet((30,64),6.0,(0.8,0.0)); m.quantum_solver(qf).run(50,0.02); qf.norm()
 ```
 
+### See what the mantis sees (false colour)
+FALSE COLOUR: show a human what a non-human sensor sees (holographic_falsecolor). Map invisible channels onto R/G/B -- ULTRAVIOLET becomes a chosen hue, e-vector ANGLE becomes hue (strength = saturation), circular HANDEDNESS becomes a red/blue diverging map. mantis_falsecolor turns a mantis_view into three images (colour, polarization, handedness). Field-native. EVERY map is a CHOICE (Eno), not true colour. wavelength_to_rgb / hsv_to_rgb / falsecolor_spectral / falsecolor_polarization / falsecolor_handedness / mantis_falsecolor.
+
+```python
+import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); L=np.linspace(300,720,140); S=np.zeros(L.shape+(4,)); S[...,0]=np.exp(-0.5*((L-330)/20)**2); S[...,3]=S[...,0]; fc=m.mantis_falsecolor(m.mantis_view(S,L)); print(float(fc['color'].max())>0)
+```
+
 ### Selftest coverage census (which modules have a real _selftest)
 which engine modules carry a real _selftest and which advertise a __main__ but assert nothing (a false green -- and the exact backfill worklist). mind.selftest_coverage() returns {runnable, missing, missing_modules, coverage} by a pure AST scan (no import, no subprocess), so an agent driving the engine can ask 'is the codebase covered by its own selftests?' without shelling out. The actual RUN of every selftest is the CLI/CI tool tools/run_selftests.py; this is the instant census behind it, and it exists because an above/below sweep found the walker had no mind door..
 
 ```python
 c = mind.selftest_coverage(); print(round(c['coverage'], 3), c['missing'])
+```
+
+### Sky observation (cube + world axes)
+a SKY OBSERVATION as first-class data (holographic_skydata): a data cube + WORLD AXES (WCS-lite -- linear RA/Dec/freq/wavelength via crval/crpix/cdelt), plus meta. Convert pixel<->world, get an axis' real coordinates, turn a frequency axis into the lambda^2 the Faraday tools want, and reshape to (...,nchan,4) ready for faraday_rm_map. Deterministic save/load (json header + npy, no pickle). No astropy/FITS parser in core; header-dict + npy is the ingest contract. make_skydata / sky_world_coords / sky_lambda2 / sky_stokes_cube / save_skydata / load_skydata.
+
+```python
+import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); ax=[m.make_sky_axis('freq',5,'Hz',crval=1e9,cdelt=2e8)]; sky=m.make_skydata(np.zeros((5,)),ax); print(round(float(m.sky_lambda2(sky)[0]),4))
 ```
 
 ### Soft constraints (hertz + damping ratio)
@@ -2353,4 +2461,4 @@ import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); x=np.li
 
 ---
 
-*294 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*308 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

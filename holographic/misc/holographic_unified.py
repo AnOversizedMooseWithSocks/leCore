@@ -13926,6 +13926,458 @@ class UnifiedMind:
         from holographic.misc.holographic_core import load as _load
         return _load(path)
 
+    def doppler_velocity(self, lambda_obs, lambda_rest, relativistic=False):
+        """Line-of-sight velocity (m/s, positive = receding) from a spectral shift: classical v=c*z, or set
+        relativistic=True (stays below c for any redshift). The physical reading of a shifted line. Field-native.
+        See holographic_dedoppler.doppler_velocity."""
+        from holographic.sampling_and_signal.holographic_dedoppler import doppler_velocity as _f
+        return _f(lambda_obs, lambda_rest, relativistic=relativistic)
+
+    def redshift(self, lambda_obs, lambda_rest):
+        """Redshift z = lambda_obs/lambda_rest - 1 (positive = receding). Field-native. See
+        holographic_dedoppler.redshift."""
+        from holographic.sampling_and_signal.holographic_dedoppler import redshift as _f
+        return _f(lambda_obs, lambda_rest)
+
+    def doppler_shift(self, lambda_rest, velocity, relativistic=False):
+        """Forward model: observed wavelength when a source at `lambda_rest` recedes at `velocity` (m/s). The exact
+        inverse of doppler_velocity. See holographic_dedoppler.doppler_shift."""
+        from holographic.sampling_and_signal.holographic_dedoppler import doppler_shift as _f
+        return _f(lambda_rest, velocity, relativistic=relativistic)
+
+    def drift_acceleration(self, drift_rate, freq):
+        """Line-of-sight acceleration (m/s^2) from a narrowband frequency drift rate (Hz/s) at frequency `freq`:
+        a = -c*(df/dt)/f. Turns a detect_drifting result into the emitter's acceleration -- the SETI reading. See
+        holographic_dedoppler.drift_acceleration."""
+        from holographic.sampling_and_signal.holographic_dedoppler import drift_acceleration as _f
+        return _f(drift_rate, freq)
+
+    def stokes_unpolarized(self, intensity=1.0):
+        """Unpolarised light of `intensity` as a Stokes vector [I,0,0,0] -- also what a scalar radiance IS
+        in Stokes terms. `intensity` may be a scalar or a field (a trailing length-4 axis is added). See
+        holographic_stokes.unpolarized."""
+        import holographic.rendering.holographic_stokes as _stk
+        return _stk.unpolarized(intensity)
+
+    def stokes_linear(self, intensity=1.0, angle=0.0, dop=1.0):
+        """Linearly polarised light: e-vector at `angle` RADIANS, degree-of-linear-polarization `dop` in
+        [0,1]. Field-native (all args broadcast). See holographic_stokes.linear."""
+        import holographic.rendering.holographic_stokes as _stk
+        return _stk.linear(intensity, angle, p=dop)
+
+    def stokes_circular(self, intensity=1.0, handedness=1, dop=1.0):
+        """Circularly polarised light: `handedness` +1=right / -1=left, degree-of-circular-polarization
+        `dop`. The channel the mantis shrimp uniquely detects. See holographic_stokes.circular."""
+        import holographic.rendering.holographic_stokes as _stk
+        return _stk.circular(intensity, handedness=handedness, p=dop)
+
+    def stokes_report(self, stokes):
+        """Read a Stokes vector/field OUT in one call: {intensity, dop, dolp, docp, evector_angle,
+        handedness}. All broadcast over a field. See holographic_stokes."""
+        import holographic.rendering.holographic_stokes as _stk
+        return {"intensity": _stk.intensity(stokes), "dop": _stk.dop(stokes),
+                "dolp": _stk.dolp(stokes), "docp": _stk.docp(stokes),
+                "evector_angle": _stk.evector_angle(stokes), "handedness": _stk.handedness(stokes)}
+
+    def stokes_complex_linear(self, stokes):
+        """The complex linear polarization P = Q + iU as a phasor. Sampled over wavelength^2, its FFT is
+        rotation-measure synthesis (Faraday depth) -- the telescope arc reuses this. See
+        holographic_stokes.complex_linear."""
+        import holographic.rendering.holographic_stokes as _stk
+        return _stk.complex_linear(stokes)
+
+    def radiance_to_stokes(self, radiance):
+        """Lift a scalar/RGB radiance to UNPOLARISED Stokes (S0=value, rest 0). Round-trips byte-identically
+        via stokes_to_radiance -- polarization is purely additive. See holographic_stokes.from_radiance."""
+        import holographic.rendering.holographic_stokes as _stk
+        return _stk.from_radiance(radiance)
+
+    def stokes_to_radiance(self, stokes):
+        """Collapse a Stokes field to plain intensity S0 -- the byte-identical 'polarization off' path. See
+        holographic_stokes.to_radiance."""
+        import holographic.rendering.holographic_stokes as _stk
+        return _stk.to_radiance(stokes)
+
+    def mueller_matrix(self, kind, angle=0.0, delta=None, rho=0.0, factor=0.0, n1=1.0, n2=1.5, theta=0.0):
+        """Build the 4x4 Mueller matrix of an optical element by `kind`: 'identity', 'polarizer' (at
+        `angle`), 'retarder' (`delta` rad at `angle`), 'quarter_wave'/'half_wave' (at `angle`), 'rotator'
+        (`rho` rad -- an optical / Faraday rotator), 'depolarizer' (`factor` in [0,1]), or 'fresnel'
+        (dielectric reflection n1->n2 at incidence `theta`). Feed it to apply_mueller. See
+        holographic_mueller."""
+        import holographic.rendering.holographic_mueller as _mu
+        if kind == "identity": return _mu.identity()
+        if kind == "polarizer": return _mu.linear_polarizer(angle)
+        if kind == "retarder": return _mu.retarder(np.pi / 2 if delta is None else delta, angle)
+        if kind == "quarter_wave": return _mu.quarter_wave(angle)
+        if kind == "half_wave": return _mu.half_wave(angle)
+        if kind == "rotator": return _mu.rotator(rho)
+        if kind == "depolarizer": return _mu.depolarizer(factor)
+        if kind == "fresnel": return _mu.fresnel_reflection(n1, n2, theta)
+        raise ValueError("unknown mueller element kind: %r" % (kind,))
+
+    def apply_mueller(self, element, stokes):
+        """Transform a Stokes vector/field by a Mueller matrix (or a per-pixel matrix-field). See
+        holographic_mueller.apply."""
+        import holographic.rendering.holographic_mueller as _mu
+        return _mu.apply(element, stokes)
+
+    def compose_mueller(self, *elements):
+        """Fold a light path (elements IN THE ORDER LIGHT PASSES THROUGH) into one Mueller matrix. See
+        holographic_mueller.compose."""
+        import holographic.rendering.holographic_mueller as _mu
+        return _mu.compose(*elements)
+
+    def rm_synthesis(self, lambda2, phi, P=None, Q=None, U=None, weights=None, lambda2_0=None):
+        """Rotation-measure synthesis: the Faraday-depth spectrum F(phi) of polarized light vs wavelength^2
+        (Brentjens & de Bruyn 2005). Pass complex P (from stokes_complex_linear) or real Q and U, each
+        (...,nchan); returns (...,nphi), field-native over an image cube. This is the SEQUENCE costume of the
+        Stokes state -- the telescope's magnetic-field probe, reusing the engine's phasor. See
+        holographic_rmsynth.rmsynth."""
+        import holographic.rendering.holographic_rmsynth as _rm
+        return _rm.rmsynth(lambda2, phi, P=P, Q=Q, U=U, weights=weights, lambda2_0=lambda2_0)
+
+    def rmtf(self, lambda2, phi, weights=None, lambda2_0=None):
+        """The rotation-measure transfer function (the 'dirty beam' in Faraday space) for a given wavelength^2
+        sampling -- its width is the resolution, its sidelobes are the artefacts a raw F(phi) carries. See
+        holographic_rmsynth.rmtf."""
+        import holographic.rendering.holographic_rmsynth as _rm
+        return _rm.rmtf(lambda2, phi, weights=weights, lambda2_0=lambda2_0)
+
+    def rm_resolution(self, lambda2):
+        """Faraday-depth resolution (FWHM, rad/m^2) from the wavelength^2 coverage: 2*sqrt(3)/span. Wider
+        band -> finer RM separable. See holographic_rmsynth.resolution_fwhm."""
+        import holographic.rendering.holographic_rmsynth as _rm
+        return _rm.resolution_fwhm(lambda2)
+
+    def rm_phi_grid(self, lambda2, oversample=5.0, extent=None):
+        """Build a sensible grid of Faraday depths to evaluate, derived from the wavelength^2 sampling itself
+        (no magic numbers to guess). See holographic_rmsynth.phi_grid."""
+        import holographic.rendering.holographic_rmsynth as _rm
+        return _rm.phi_grid(lambda2, oversample=oversample, extent=extent)
+
+    def rm_peak(self, F, phi, lambda2_0=None):
+        """Reduce a Faraday spectrum (or image cube of them) to its brightest source: {rm, polarized_intensity,
+        angle0}, with sub-bin parabolic RM. Pass lambda2_0 to get the true intrinsic angle at lambda^2=0. See
+        holographic_rmsynth.peak_rm."""
+        import holographic.rendering.holographic_rmsynth as _rm
+        return _rm.peak_rm(F, phi, lambda2_0=lambda2_0)
+
+    def stokes_faraday_depth(self, lambda2, stokes, phi=None, weights=None):
+        """CONVERGENCE door: from a Stokes field + its wavelength^2 axis straight to the Faraday-depth spectrum,
+        in one call. Forms P = Q + iU (stokes_complex_linear) and runs rm_synthesis; if `phi` is None a grid is
+        chosen from the data. This is the single step from 'polarization state' to 'line-of-sight magnetism'.
+        Delegates to holographic_stokes.complex_linear + holographic_rmsynth.rmsynth."""
+        import holographic.rendering.holographic_stokes as _stk
+        import holographic.rendering.holographic_rmsynth as _rm
+        P = _stk.complex_linear(stokes)               # Q + iU per channel, field-native
+        if phi is None:
+            phi = _rm.phi_grid(lambda2)
+        return {"phi": phi, "F": _rm.rmsynth(lambda2, phi, P=P, weights=weights)}
+
+    def faraday_rotate(self, stokes0, lambda2, rm):
+        """FORWARD Faraday model -- the polarized sky a telescope receives: rotate an intrinsic Stokes signal
+        (...,4) by rm*lambda^2 across a band (nchan) -> (...,nchan,4). Intensity and circular are untouched;
+        only the linear plane turns. Field-native over a whole sky; its output is what rm_synthesis inverts. See
+        holographic_rmsynth.faraday_rotate."""
+        import holographic.rendering.holographic_rmsynth as _rm
+        return _rm.faraday_rotate(stokes0, lambda2, rm)
+
+    def faraday_rm_map(self, lambda2, stokes_cube, phi=None, weights=None):
+        """TELESCOPE-AS-OBSERVER: recover a per-pixel Faraday-depth (line-of-sight magnetism) MAP from a sky
+        Stokes cube (...,nchan,4), in one call. Composes rm synthesis + peak over the whole field. Returns
+        {rm, polarized_intensity, angle0, phi, F}. The same polarization core that reads a mantis eye reads a
+        radio dish. See holographic_rmsynth.faraday_rm_map."""
+        import holographic.rendering.holographic_rmsynth as _rm
+        return _rm.faraday_rm_map(lambda2, stokes_cube, phi=phi, weights=weights)
+
+    def make_sky_axis(self, name, n=None, unit="", crval=0.0, crpix=0.0, cdelt=1.0):
+        """One WCS-lite axis descriptor (world = crval + (pixel-crpix)*cdelt, crpix 0-based) for a sky cube. See
+        holographic_skydata.make_axis."""
+        import holographic.io_and_interop.holographic_skydata as _sd
+        return _sd.make_axis(name, n=n, unit=unit, crval=crval, crpix=crpix, cdelt=cdelt)
+
+    def make_skydata(self, data, axes, meta=None):
+        """Assemble a sky observation: a data cube + one world axis per data dim (+ freeform meta). The container
+        the astro tools ingest. See holographic_skydata.make_skydata."""
+        import holographic.io_and_interop.holographic_skydata as _sd
+        return _sd.make_skydata(data, axes, meta=meta)
+
+    def sky_world_coords(self, sky, axis):
+        """The world-coordinate array (RA/Dec/freq...) along one axis of a sky cube, by index or name. See
+        holographic_skydata.world_coords."""
+        import holographic.io_and_interop.holographic_skydata as _sd
+        return _sd.world_coords(sky, axis)
+
+    def sky_pix_to_world(self, sky, axis, pix):
+        """Pixel -> world coordinate on one sky axis (linear). See holographic_skydata.pix_to_world."""
+        import holographic.io_and_interop.holographic_skydata as _sd
+        return _sd.pix_to_world(sky, axis, pix)
+
+    def sky_world_to_pix(self, sky, axis, world):
+        """World -> pixel on one sky axis (exact inverse). See holographic_skydata.world_to_pix."""
+        import holographic.io_and_interop.holographic_skydata as _sd
+        return _sd.world_to_pix(sky, axis, world)
+
+    def sky_lambda2(self, sky, axis=None):
+        """The lambda^2 (m^2) vector of a cube's spectral axis -- the input Faraday RM synthesis wants (frequency
+        is converted via c/f then squared). Auto-finds the spectral axis. The observation->Faraday bridge. See
+        holographic_skydata.lambda2_axis."""
+        import holographic.io_and_interop.holographic_skydata as _sd
+        return _sd.lambda2_axis(sky, axis=axis)
+
+    def sky_stokes_cube(self, sky, spectral=None, stokes=None):
+        """Reshape a sky observation into (...,nchan,4) -- spatial, then spectral channel, then Stokes -- ready for
+        faraday_rm_map. Auto-finds the spectral and Stokes axes. See holographic_skydata.stokes_cube."""
+        import holographic.io_and_interop.holographic_skydata as _sd
+        return _sd.stokes_cube(sky, spectral=spectral, stokes=stokes)
+
+    def save_skydata(self, sky, path):
+        """Persist a sky observation deterministically (JSON header + .npy cube in one .npz, no pickle). See
+        holographic_skydata.save_skydata."""
+        import holographic.io_and_interop.holographic_skydata as _sd
+        return _sd.save_skydata(sky, path)
+
+    def load_skydata(self, path):
+        """Load a sky observation saved by save_skydata (exact round-trip, no pickle). See
+        holographic_skydata.load_skydata."""
+        import holographic.io_and_interop.holographic_skydata as _sd
+        return _sd.load_skydata(path)
+
+    def star_system(self, params, seed=0):
+        """PLUG DATA IN, GET A STAR SYSTEM: assemble physical parameters (star temp/radius/mass; planets a/e/radius/
+        temp) into a deterministic, JSON-serializable scene RECIPE -- star (blackbody colour at the origin) + planets
+        (biome by temperature, Kepler orbit, position, seed to regenerate the surface). Delegates to blackbody,
+        fractal_planet, and Kepler geometry. See holographic_starsystem.star_system."""
+        from holographic.scene_and_pipeline.holographic_starsystem import star_system as _f
+        return _f(params, seed=seed)
+
+    def kepler_ellipse(self, a, e, n=128):
+        """A whole orbit as n (x,y) points with the star at a focus (perihelion a(1-e), aphelion a(1+e)); uniform in
+        phase so points bunch near aphelion as a real planet does. See holographic_starsystem.kepler_ellipse."""
+        from holographic.scene_and_pipeline.holographic_starsystem import kepler_ellipse as _f
+        return _f(a, e, n=n)
+
+    def kepler_position(self, a, e, mean_anomaly):
+        """Position (x,y) on a Kepler orbit at a given phase (mean anomaly, radians), star at a focus. Field-native
+        over an array of phases. See holographic_starsystem.kepler_position."""
+        from holographic.scene_and_pipeline.holographic_starsystem import kepler_position as _f
+        return _f(a, e, mean_anomaly)
+
+    def temperature_to_biome(self, temp_K):
+        """Map a planet's equilibrium temperature (K) to a surface regime (frozen/cold/temperate/hot/molten) -- the
+        biome class its surface is painted with. A documented CHOICE of thresholds. See
+        holographic_starsystem.temperature_to_biome."""
+        from holographic.scene_and_pipeline.holographic_starsystem import temperature_to_biome as _f
+        return _f(temp_K)
+
+    def planet_field(self, planet_spec, dim=256):
+        """Regenerate a planet's actual surface field from its star_system recipe entry, via fractal_planet (the
+        world is never stored, only its seed+knobs -> reproduced on demand). See holographic_starsystem.planet_field."""
+        from holographic.scene_and_pipeline.holographic_starsystem import planet_field as _f
+        return _f(planet_spec, dim=dim)
+
+    def star_cluster(self, n, seed=0, extent=1.0, density_field=None, planets_per_star=0):
+        """Place `n` star systems in a field -- the UP direction of star_system (a cluster is many systems). Masses
+        from a Salpeter IMF, coloured by main-sequence temperature (blue giants, red dwarfs). Even low-discrepancy
+        placement, or pass a density_field (e.g. a cosmic-web map) to cluster them along structure. Deterministic
+        recipe. See holographic_starsystem.star_cluster."""
+        from holographic.scene_and_pipeline.holographic_starsystem import star_cluster as _f
+        return _f(n, seed=seed, extent=extent, density_field=density_field, planets_per_star=planets_per_star)
+
+    def sample_imf(self, n, seed=0, m_low=0.1, m_high=50.0, alpha=2.35):
+        """Draw `n` stellar masses (solar units) from a Salpeter initial mass function (p(m)~m^-alpha, alpha=2.35).
+        Bottom-heavy: mostly red dwarfs, few blue giants. Closed-form inverse-CDF. See holographic_starsystem.sample_imf."""
+        from holographic.scene_and_pipeline.holographic_starsystem import sample_imf as _f
+        return _f(n, seed=seed, m_low=m_low, m_high=m_high, alpha=alpha)
+
+    def mass_to_temperature(self, mass):
+        """A star's main-sequence temperature (K) from its mass (solar units): T ~ 5772*M^0.525 (1 Msun -> Sun). A
+        rough MS scaling, monotonic. See holographic_starsystem.mass_to_temperature."""
+        from holographic.scene_and_pipeline.holographic_starsystem import mass_to_temperature as _f
+        return _f(mass)
+
+    def nebula_volume(self, res=48, seed=0, level=0.5, gain=3.0, ridged=True, star_positions=None, cavity_radius=0.16, dim=256, octaves=5):
+        """Build a 3-D NEBULA density volume (res^3, [0,1]) -- turbulent gas/dust with wispy filaments and dark
+        voids, from the engine's FractalNoise. Pass star_positions to carve cavities where stars blow bubbles (ties
+        to star_cluster). Feeds the volume renderer via nebula_field_fn. See holographic_nebula.nebula_volume."""
+        from holographic.scene_and_pipeline.holographic_nebula import nebula_volume as _f
+        return _f(res=res, seed=seed, level=level, gain=gain, ridged=ridged, star_positions=star_positions, cavity_radius=cavity_radius, dim=dim, octaves=octaves)
+
+    def nebula_column(self, volume, axis=2):
+        """Column density: sum a nebula volume along one axis -> a 2-D image (looking through the cloud), the cheap
+        look without a full ray-march. See holographic_nebula.nebula_column."""
+        from holographic.scene_and_pipeline.holographic_nebula import nebula_column as _f
+        return _f(volume, axis=axis)
+
+    def nebula_field_fn(self, volume, bounds=None):
+        """Wrap a nebula volume as the callable points(N,3)->density the volume renderer marches (trilinear). Drop a
+        nebula straight into render_volume. See holographic_nebula.nebula_field_fn."""
+        from holographic.scene_and_pipeline.holographic_nebula import nebula_field_fn as _f
+        return _f(volume, bounds=bounds)
+
+    def nbody_simulate(self, positions, velocities, masses, dt, steps, G=6.674e-11, softening=0.0, record_every=0):
+        """Integrate an N-BODY gravity system forward `steps` velocity-Verlet steps (symplectic -> energy stays
+        bounded). Returns final positions/velocities, the honest energy DRIFT, and optionally a trajectory. Softened
+        Newtonian, O(N^2). The dynamics counterpart to star_system's closed-form orbits. See holographic_nbody.nbody_simulate."""
+        from holographic.simulation_and_physics.holographic_nbody import nbody_simulate as _f
+        return _f(positions, velocities, masses, dt, steps, G=G, softening=softening, record_every=record_every)
+
+    def nbody_step(self, positions, velocities, masses, dt, G=6.674e-11, softening=0.0):
+        """One velocity-Verlet step of N-body gravity -> (positions, velocities, accel). See holographic_nbody.nbody_step."""
+        from holographic.simulation_and_physics.holographic_nbody import nbody_step as _f
+        return _f(positions, velocities, masses, dt, G=G, softening=softening)
+
+    def nbody_accel(self, positions, masses, G=6.674e-11, softening=0.0):
+        """Softened Newtonian acceleration on each body from all others (the O(N^2) direct sum). See
+        holographic_nbody.nbody_accel."""
+        from holographic.simulation_and_physics.holographic_nbody import nbody_accel as _f
+        return _f(positions, masses, G=G, softening=softening)
+
+    def nbody_energy(self, positions, velocities, masses, G=6.674e-11, softening=0.0):
+        """Total mechanical energy KE + PE of an N-body system -- the quantity a good integrator keeps bounded. See
+        holographic_nbody.nbody_energy."""
+        from holographic.simulation_and_physics.holographic_nbody import nbody_energy as _f
+        return _f(positions, velocities, masses, G=G, softening=softening)
+
+    def circular_orbit_velocity(self, central_mass, radius, G=6.674e-11):
+        """The speed for a circular orbit at `radius` around `central_mass`: sqrt(G*M/r). Seeds a stable orbit. See
+        holographic_nbody.circular_orbit_velocity."""
+        from holographic.simulation_and_physics.holographic_nbody import circular_orbit_velocity as _f
+        return _f(central_mass, radius, G=G)
+
+    def best_period(self, times, values, min_period=None, max_period=None, samples_per_peak=5.0, n_null=0, seed=0):
+        """Find the PERIOD of an unevenly-sampled series (Lomb-Scargle): returns {period, frequency, power, fap}.
+        fap (false-alarm probability) is filled when n_null>0. Closes the loop: a light curve -> a period -> Kepler
+        -> star_system. See holographic_lombscargle.best_period."""
+        from holographic.sampling_and_signal.holographic_lombscargle import best_period as _f
+        return _f(times, values, min_period=min_period, max_period=max_period, samples_per_peak=samples_per_peak, n_null=n_null, seed=seed)
+
+    def lomb_scargle(self, times, values, freqs):
+        """The Lomb-Scargle normalised power at each trial frequency (cycles/time) for unevenly-sampled data --
+        the periodogram a plain FFT can't do. Field-native over freqs. See holographic_lombscargle.lomb_scargle."""
+        from holographic.sampling_and_signal.holographic_lombscargle import lomb_scargle as _f
+        return _f(times, values, freqs)
+
+    def lomb_scargle_auto(self, times, values, min_period=None, max_period=None, samples_per_peak=5.0):
+        """Give me the periodogram of this light curve: builds the frequency grid from the data and returns
+        (freqs, power). See holographic_lombscargle.lomb_scargle_auto."""
+        from holographic.sampling_and_signal.holographic_lombscargle import lomb_scargle_auto as _f
+        return _f(times, values, min_period=min_period, max_period=max_period, samples_per_peak=samples_per_peak)
+
+    def phase_fold(self, times, values, period, t0=0.0):
+        """Fold a series on `period` -> (phase in [0,1), values) sorted by phase. Coherent on the true period,
+        scattered on a wrong one -- the way to SEE a period is right. See holographic_lombscargle.phase_fold."""
+        from holographic.sampling_and_signal.holographic_lombscargle import phase_fold as _f
+        return _f(times, values, period, t0=t0)
+
+    def period_false_alarm(self, times, values, observed_power, freqs, n_null=200, seed=0):
+        """The chance a peak this strong comes from the sampling window alone, via a permutation null (times fixed).
+        Low => the period is real. The honesty gate on a periodicity detection. See
+        holographic_lombscargle.false_alarm_probability."""
+        from holographic.sampling_and_signal.holographic_lombscargle import false_alarm_probability as _f
+        return _f(times, values, observed_power, freqs, n_null=n_null, seed=seed)
+
+    def human_observer(self, samples=90):
+        """The human eye as an OBSERVER (CIE 1931 colour-matching functions on 380-780 nm). Feed it a spectrum
+        with observe_spectrum; blackbody_rgb is exactly this observer applied to a Planck spectrum. See
+        holographic_observer.human_cie."""
+        import holographic.rendering.holographic_observer as _ob
+        return _ob.human_cie(samples)
+
+    def make_observer(self, wavelengths_nm, sensitivities, names=None):
+        """Assemble a custom sensor from a wavelength grid + per-channel sensitivity curves ((nchan,nlam)).
+        A human eye, a mantis eye, or a telescope bandpass are all just different channel sets. See
+        holographic_observer.make_observer."""
+        import holographic.rendering.holographic_observer as _ob
+        return _ob.make_observer(wavelengths_nm, sensitivities, names=names)
+
+    def observer_receptor_bank(self, wavelengths_nm, centers_nm, widths_nm, gains=None):
+        """Build a bank of Gaussian receptor sensitivities (the generic shape of biological cones) on a
+        wavelength grid -- the parts a multi-band eye is made of. See holographic_observer.receptor_bank."""
+        import holographic.rendering.holographic_observer as _ob
+        return _ob.receptor_bank(wavelengths_nm, centers_nm, widths_nm, gains=gains)
+
+    def observe_spectrum(self, spectrum, observer):
+        """Integrate a spectrum (sampled on the observer's wavelengths) against each channel -> readings
+        (...,nchan). Field-native: a hyperspectral image (...,nlam) yields a per-pixel reading image in one
+        call (the observer-over-a-field convergence). See holographic_observer.observe."""
+        import holographic.rendering.holographic_observer as _ob
+        return _ob.observe(spectrum, observer)
+
+    def spectrum_to_rgb(self, spectrum, mode="hue", samples=90):
+        """What the HUMAN eye sees from a spectrum, as sRGB -- the general spectrum->colour door (blackbody_rgb
+        is the special case for a Planck spectrum, reproduced byte-identically). mode 'hue' lifts chromaticity,
+        'none' keeps luminance. See holographic_observer.human_rgb."""
+        import holographic.rendering.holographic_observer as _ob
+        return _ob.human_rgb(spectrum, mode=mode, samples=samples)
+
+    def xyz_to_srgb(self, xyz, mode="hue"):
+        """Convert CIE XYZ readings (from the human observer) to sRGB, matching blackbody's exact conversion.
+        Field-native over an image of readings. See holographic_observer.to_srgb."""
+        import holographic.rendering.holographic_observer as _ob
+        return _ob.to_srgb(xyz, mode=mode)
+
+    def mantis_receptors(self, wavelengths_nm):
+        """The mantis shrimp's ~12 spectral receptors (deep UV to far red) as an observer on the given wavelength
+        grid. Pass a grid reaching into the UV (e.g. 300-720 nm). See holographic_observer.mantis_receptors."""
+        import holographic.rendering.holographic_observer as _ob
+        return _ob.mantis_receptors(wavelengths_nm)
+
+    def polarization_readout(self, stokes):
+        """Read polarization from a Stokes field the mantis way: linear detectors + circular detectors via a
+        quarter-wave retarder (the R8 mechanism). Returns linear_*/circular_* channels, e-vector angle and
+        handedness -- the last is the circular-polarization sense the mantis uniquely sees. See
+        holographic_observer.polarization_readout."""
+        import holographic.rendering.holographic_observer as _ob
+        return _ob.polarization_readout(stokes)
+
+    def mantis_view(self, spectral_stokes, wavelengths_nm):
+        """See a spectral-Stokes signal (...,nlam,4) as a mantis shrimp does: 12 spectral bands + linear +
+        circular polarization, in one call. Spectral channels are a DIRECT readout (no colour-opponent
+        processing -- Thoen et al. 2014). See holographic_observer.mantis_view."""
+        import holographic.rendering.holographic_observer as _ob
+        return _ob.mantis_view(spectral_stokes, wavelengths_nm)
+
+    def wavelength_to_rgb(self, nm):
+        """The approximate sRGB a human sees for a monochromatic light at wavelength `nm` (UV/IR map to black --
+        invisible). Field-native. Reuses the CIE curves. See holographic_falsecolor.wavelength_to_rgb."""
+        import holographic.rendering.holographic_falsecolor as _fc
+        return _fc.wavelength_to_rgb(nm)
+
+    def hsv_to_rgb(self, h, s, v):
+        """Vectorised HSV->RGB (all args in [0,1], hue wraps) -- the natural map for cyclic quantities like a
+        polarization angle. See holographic_falsecolor.hsv_to_rgb."""
+        import holographic.rendering.holographic_falsecolor as _fc
+        return _fc.hsv_to_rgb(h, s, v)
+
+    def falsecolor_spectral(self, readings, centers_nm, uv_hue=0.80):
+        """False-colour N spectral-band readings (...,nchan) into an RGB image, with UV bands made VISIBLE in a
+        chosen hue -- 'what a multi-band eye sees'. A CHOICE, not true colour. See
+        holographic_falsecolor.spectral_falsecolor."""
+        import holographic.rendering.holographic_falsecolor as _fc
+        return _fc.spectral_falsecolor(readings, centers_nm, uv_hue=uv_hue)
+
+    def falsecolor_polarization(self, evector_angle, dolp, value=1.0):
+        """Standard polarization false-colour: hue=e-vector angle, saturation=degree of linear polarization,
+        value=intensity (unpolarised -> grey). Field-native; a CHOICE of mapping. See
+        holographic_falsecolor.polarization_falsecolor."""
+        import holographic.rendering.holographic_falsecolor as _fc
+        return _fc.polarization_falsecolor(evector_angle, dolp, value=value)
+
+    def falsecolor_handedness(self, circular_R, circular_L):
+        """Diverging false-colour for circular polarization sense: right-handed->red, left-handed->blue,
+        unpolarised->white -- the channel the mantis uniquely sees. A CHOICE of convention. See
+        holographic_falsecolor.handedness_falsecolor."""
+        import holographic.rendering.holographic_falsecolor as _fc
+        return _fc.handedness_falsecolor(circular_R, circular_L)
+
+    def mantis_falsecolor(self, view, centers_nm=None):
+        """SEE WHAT THE MANTIS SEES: turn a mantis_view() reading into three human-viewable RGB images -- color
+        (12 bands incl. UV made visible), polarization (angle+strength), and handedness (circular sense). Every
+        image is a false-colour CHOICE, not the mantis' percept. See holographic_falsecolor.mantis_falsecolor."""
+        import holographic.rendering.holographic_falsecolor as _fc
+        return _fc.mantis_falsecolor(view, centers_nm=centers_nm)
+
 
 # ---------------------------------------------------------------------------
 # DEMO: one mind, many modalities, one memory -- measured against separate ones

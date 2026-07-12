@@ -46,6 +46,11 @@ KNOWN_DUPLICATES = {
     (frozenset({"_occlusion"}), frozenset({"cosamp", "iht"})),
     (frozenset({"_f1", "_f1f"}), frozenset({"cosamp", "iht", "occlusion"})),
     (frozenset({"_face_normal", "_newell_normal"}), frozenset({"meshcurvature", "meshverbs"})),
+    # READ, NOT A REAL DUPLICATE: filemap.FileEntry.__init__ (relpath/path/size/mtime/sha256/kind) vs
+    # milkdrop.MilkPreset.__init__ (settings/init/frame/pixel/warp_shader/comp_shader). Two unrelated plain
+    # record classes; canonical_shape erases identifiers, so ANY two six-field `self.x = x` constructors
+    # collide. Boilerplate fingerprint, not copied logic -- nothing to rewire.
+    (frozenset({"__init__"}), frozenset({"filemap", "milkdrop"})),
 }
 
 

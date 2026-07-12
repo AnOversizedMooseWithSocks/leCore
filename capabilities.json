@@ -1262,6 +1262,32 @@
     },
     {
       "aliases": [
+        "doppler velocity",
+        "redshift to velocity",
+        "radial velocity from wavelength",
+        "relativistic doppler",
+        "doppler shift",
+        "wavelength shift to speed",
+        "drift rate to acceleration",
+        "how fast is it moving",
+        "recession velocity",
+        "line of sight velocity",
+        "SETI drift acceleration",
+        "how fast is a star moving",
+        "speed of a source from its spectrum",
+        "velocity from a spectral line"
+      ],
+      "consumes": [],
+      "does": "read VELOCITY and ACCELERATION out of a spectral shift or drift (holographic_dedoppler). doppler_velocity turns an observed vs rest wavelength into a line-of-sight velocity (classical v=c*z, or relativistic, which stays below c); redshift gives z; doppler_shift is the forward model (velocity -> observed wavelength). drift_acceleration turns a narrowband frequency drift rate (Hz/s -- what detect_drifting finds) into the emitter's acceleration a=-c*(df/dt)/f: the SETI reading of a drifting tone. Field-native. doppler_velocity / redshift / doppler_shift / drift_acceleration",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); lr=656.28e-9; print(round(float(m.doppler_velocity(m.doppler_shift(lr,3e5),lr))/1e3,1))",
+      "name": "Doppler velocity & drift acceleration",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Data analysis & signals"
+    },
+    {
+      "aliases": [
         "durability",
         "crash recovery",
         "journal",
@@ -1448,6 +1474,29 @@
       "produces": [],
       "semantic": null,
       "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "faraday rotation",
+        "faraday rotate a sky",
+        "rotation measure map",
+        "RM map",
+        "line of sight magnetism map",
+        "recover magnetic field per pixel",
+        "polarization sky cube to RM",
+        "simulate faraday rotation",
+        "telescope polarization observer",
+        "galaxy magnetic field map",
+        "radio polarization sky"
+      ],
+      "consumes": [],
+      "does": "the TELESCOPE AS OBSERVER: Faraday rotation on a whole sky (holographic_rmsynth). faraday_rotate is the forward model -- rotate an intrinsic polarized signal by rm*lambda^2 across a band, the sky a radio dish receives (intensity + circular untouched). faraday_rm_map is the inverse -- recover a per-pixel Faraday-depth (line-of-sight magnetism) MAP from a sky Stokes cube (...,nchan,4) in one call, by rm synthesis over the whole field. The SAME polarization core reads a mantis eye and a radio telescope (the sensor unifier). faraday_rotate / faraday_rm_map",
+      "example": "import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); L=np.linspace(0.03,0.24,140); s0=np.zeros((2,2,4)); s0[...,0]=1; s0[...,1]=1; cube=m.faraday_rotate(s0,L,np.array([[15.,-40.],[70.,-5.]])); print(np.round(m.faraday_rm_map(L,cube)['rm']).tolist())",
+      "name": "Faraday sky map (telescope as observer)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
     },
     {
       "aliases": [
@@ -2248,6 +2297,29 @@
     },
     {
       "aliases": [
+        "mantis shrimp vision",
+        "mantis shrimp eye",
+        "see ultraviolet and polarization",
+        "circular polarization vision",
+        "twelve band eye",
+        "twelve photoreceptors",
+        "see what a mantis shrimp sees",
+        "UV plus polarization sensor",
+        "handedness of light detector",
+        "stomatopod vision",
+        "many band eye readings"
+      ],
+      "consumes": [],
+      "does": "see as a MANTIS SHRIMP does: 12 spectral receptors from deep UV to far red PLUS linear and CIRCULAR polarization (holographic_observer.mantis_view). The circular channels use a quarter-wave retarder (the R8 rhabdomere, Chiou 2008) before linear detectors -- the sense mantis shrimp uniquely have. Composes the observer (O1) and Mueller elements (P2). Field-native. KEPT NEGATIVE (Thoen 2014): a DIRECT per-receptor readout, NOT colour-opponent -- mantis colour discrimination is measured coarse. mantis_receptors / polarization_readout / mantis_view",
+      "example": "import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); L=np.linspace(300,720,140); b=np.exp(-0.5*((L-500)/60)**2); S=np.zeros(L.shape+(4,)); S[...,0]=b; S[...,3]=b; print(m.mantis_view(S,L)['handedness_sign'])",
+      "name": "Mantis-shrimp vision (12-band + polarization)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "material",
         "channels",
         "albedo",
@@ -2575,6 +2647,30 @@
     },
     {
       "aliases": [
+        "n-body simulation",
+        "nbody gravity",
+        "gravitational simulation",
+        "simulate orbits",
+        "planets orbiting",
+        "verlet integrator",
+        "symplectic integrator",
+        "gravity between bodies",
+        "orbital dynamics",
+        "evolve a star system",
+        "galaxy dynamics",
+        "run a gravity simulation"
+      ],
+      "consumes": [],
+      "does": "N-BODY GRAVITY (holographic_nbody): integrate bodies pulling on each other under softened Newtonian gravity, O(N^2) direct sum, with a VELOCITY-VERLET symplectic integrator so total energy stays bounded (orbits close instead of spiralling). nbody_simulate runs it and reports the honest energy drift + an optional trajectory; circular_orbit_velocity seeds a stable orbit. The dynamics counterpart to star_system's closed-form orbits (they agree). Barnes-Hut / Poisson-field are declared accelerator paths. nbody_simulate / nbody_accel / nbody_energy / nbody_step",
+      "example": "import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); p=np.array([[0.,0.],[1.,0.]]); v=np.array([[0.,0.],[0.,m.circular_orbit_velocity(1000,1,1.0)]]); print(m.nbody_simulate(p,v,np.array([1000.,1.]),0.001,50,G=1.0,softening=1e-3)['energy_drift']<0.01)",
+      "name": "N-body gravity simulation",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Simulation & physics"
+    },
+    {
+      "aliases": [
         "nurbs surface",
         "nurbs curve",
         "rational bspline",
@@ -2646,6 +2742,29 @@
     },
     {
       "aliases": [
+        "nebula",
+        "gas cloud volume",
+        "interstellar dust cloud",
+        "emission nebula",
+        "volumetric gas",
+        "turbulent gas field",
+        "star forming cloud",
+        "3d density volume nebula",
+        "molecular cloud",
+        "make a nebula",
+        "gas and dust cloud"
+      ],
+      "consumes": [],
+      "does": "a NEBULA -- turbulent volumetric gas/dust you can render (holographic_nebula). nebula_volume builds a 3-D density field (res^3, [0,1]) with wispy filaments and dark voids from the engine's own FractalNoise; pass star positions to carve CAVITIES where stars blow bubbles (ties to star_cluster). nebula_field_fn wraps it as the callable render_volume marches (trilinear), so it drops into the ray-marcher; nebula_column is the cheap column-density look. An artist's nebula, not a hydro sim (fluid advection declared). nebula_volume / nebula_field_fn / nebula_column",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); v=m.nebula_volume(res=24,seed=0); print(v.shape==(24,24,24))",
+      "name": "Nebula (volumetric gas & dust)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
         "render farm",
         "distributed",
         "network",
@@ -2689,6 +2808,31 @@
     },
     {
       "aliases": [
+        "observer",
+        "custom sensor",
+        "sensor response",
+        "spectrum to color",
+        "spectrum to rgb",
+        "color matching functions",
+        "CIE observer",
+        "what the eye sees",
+        "multi-band receptor",
+        "camera spectral response",
+        "integrate spectrum through filters",
+        "hyperspectral to color",
+        "mantis shrimp eye"
+      ],
+      "consumes": [],
+      "does": "an OBSERVER: turn a spectrum into sensor readings by integrating it against sensitivity curves (holographic_observer). A human eye (3 CIE curves), a mantis eye (~12 receptors), or a telescope bandpass are all the same object with different channels -- one core, many sensors. Field-native: a hyperspectral image (...,nlam) gives per-pixel readings (...,nchan) in one call. The human observer reproduces blackbody_rgb byte-identically (blackbody is this observer on a Planck spectrum). human_observer / make_observer / observe_spectrum / spectrum_to_rgb / observer_receptor_bank / xyz_to_srgb",
+      "example": "import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); from holographic.misc import holographic_blackbody as bb; L=np.linspace(380,780,90); print(np.array_equal(m.spectrum_to_rgb(bb.planck_radiance(L*1e-9,5000.0)), bb.blackbody_rgb(5000.0)))",
+      "name": "Observer (spectrum to sensor readings)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Data analysis & signals"
+    },
+    {
+      "aliases": [
         "zig raymarcher",
         "native sphere trace",
         "compare two renders",
@@ -2706,6 +2850,30 @@
       "produces": [],
       "semantic": null,
       "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
+        "mueller matrix",
+        "polarizer",
+        "wave plate",
+        "quarter wave plate",
+        "half wave plate",
+        "retarder",
+        "optical rotator",
+        "faraday rotation",
+        "fresnel polarization",
+        "birefringence",
+        "transform polarized light",
+        "polarizing filter"
+      ],
+      "consumes": [],
+      "does": "how optical elements TRANSFORM polarized light, as real 4x4 Mueller matrices (holographic_mueller): polarizer, wave plate / retarder (a quarter-wave plate converts linear<->circular -- the mantis R8 mechanism), optical ROTATOR (= Faraday rotation), depolarizer, and polarizing dielectric (Fresnel) reflection. Elements COMPOSE (a light path folds to one matrix) and apply to a Stokes vector or a whole field",
+      "example": "import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.stokes_report(m.apply_mueller(m.mueller_matrix('quarter_wave', angle=np.pi/4), m.stokes_linear(1.0, 0.0)))['docp'])",
+      "name": "Optical elements (Mueller matrices)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Core algebra & datatypes"
     },
     {
       "aliases": [
@@ -2762,6 +2930,29 @@
       "produces": [],
       "semantic": null,
       "theme": "Run it as a service / distributed"
+    },
+    {
+      "aliases": [
+        "lomb scargle",
+        "lomb scargle periodogram",
+        "period of a light curve",
+        "find period unevenly sampled",
+        "periodogram irregular sampling",
+        "detect periodicity with gaps",
+        "orbital period from radial velocity",
+        "phase fold a time series",
+        "false alarm probability",
+        "period finding",
+        "how long is the period"
+      ],
+      "consumes": [],
+      "does": "find the PERIOD of an unevenly-sampled signal (holographic_lombscargle; Lomb 1976, Scargle 1982) -- what a plain FFT can't do on gappy real observations. best_period searches a data-derived frequency grid and returns {period, power, fap}; false_alarm_probability runs a permutation null (times fixed) so a peak's significance is measured, not assumed; phase_fold shows a period is real by folding coherently. Closes the loop: a light curve -> a period -> Kepler -> star_system. best_period / lomb_scargle / lomb_scargle_auto / phase_fold",
+      "example": "import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); rng=np.random.default_rng(0); t=np.sort(rng.uniform(0,20,120)); y=np.sin(2*np.pi*t/2.5); print(round(m.best_period(t,y,min_period=0.5,max_period=8)['period'],1))",
+      "name": "Period of a signal (Lomb-Scargle)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Data analysis & signals"
     },
     {
       "aliases": [
@@ -2859,6 +3050,29 @@
       "produces": [],
       "semantic": null,
       "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
+        "polarization",
+        "polarisation",
+        "stokes vector",
+        "degree of polarization",
+        "e-vector angle",
+        "circular polarization",
+        "linearly polarized light",
+        "unpolarized light",
+        "handedness of light",
+        "polarized reflection",
+        "polarized light state"
+      ],
+      "consumes": [],
+      "does": "the STATE of polarized light as a Stokes vector [S0,S1,S2,S3] (holographic_stokes): total intensity plus linear (Q,U) and CIRCULAR (V / handedness) polarization. Field-native (a whole image is (...,4)); reports degree-of-polarization, e-vector angle and handedness; scalar radiance lifts/round-trips byte-identically. The circular channel is the one the mantis shrimp uniquely sees",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.stokes_report(m.stokes_circular(1.0, handedness=1))['docp'])",
+      "name": "Polarized light (Stokes state)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
     },
     {
       "aliases": [
@@ -3256,6 +3470,30 @@
     },
     {
       "aliases": [
+        "rotation measure synthesis",
+        "faraday depth",
+        "faraday rotation measure",
+        "RM synthesis",
+        "line of sight magnetic field",
+        "polarization angle vs wavelength",
+        "magnetic field from polarization",
+        "faraday dispersion function",
+        "radio polarization analysis",
+        "recover rotation measure",
+        "stokes q u fft",
+        "polarization over wavelength"
+      ],
+      "consumes": [],
+      "does": "recover the FARADAY DEPTH of polarized light -- the line-of-sight magnetic field a radio telescope reads from a galaxy's polarized glow (holographic_rmsynth; Brentjens & de Bruyn 2005). Transforms complex polarization P=Q+iU over wavelength^2 into a spectrum over Faraday depth phi, peaked to {rm, polarized_intensity, angle0}. Field-native over an image cube; handles unevenly-sampled bands with gaps. The SEQUENCE costume of the Stokes state (U1). rm_synthesis / rmtf / rm_peak / rm_phi_grid / rm_resolution / stokes_faraday_depth",
+      "example": "import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); L=np.linspace(0.03,0.24,200); P=2.0*np.exp(2j*(0.5+42.0*L)); g=m.rm_phi_grid(L); print(round(m.rm_peak(m.rm_synthesis(L,g,P=P),g)['rm'],1))",
+      "name": "Rotation-measure synthesis (Faraday depth)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
         "run a command",
         "external program",
         "shell out",
@@ -3455,6 +3693,30 @@
     },
     {
       "aliases": [
+        "false color",
+        "false colour",
+        "see what the mantis sees",
+        "visualize polarization as color",
+        "map invisible channels to rgb",
+        "see ultraviolet as visible color",
+        "polarization angle to hue",
+        "handedness color map",
+        "wavelength to rgb",
+        "make UV visible",
+        "visualize a non-human sensor",
+        "hsv to rgb"
+      ],
+      "consumes": [],
+      "does": "FALSE COLOUR: show a human what a non-human sensor sees (holographic_falsecolor). Map invisible channels onto R/G/B -- ULTRAVIOLET becomes a chosen hue, e-vector ANGLE becomes hue (strength = saturation), circular HANDEDNESS becomes a red/blue diverging map. mantis_falsecolor turns a mantis_view into three images (colour, polarization, handedness). Field-native. EVERY map is a CHOICE (Eno), not true colour. wavelength_to_rgb / hsv_to_rgb / falsecolor_spectral / falsecolor_polarization / falsecolor_handedness / mantis_falsecolor",
+      "example": "import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); L=np.linspace(300,720,140); S=np.zeros(L.shape+(4,)); S[...,0]=np.exp(-0.5*((L-330)/20)**2); S[...,3]=S[...,0]; fc=m.mantis_falsecolor(m.mantis_view(S,L)); print(float(fc['color'].max())>0)",
+      "name": "See what the mantis sees (false colour)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "selftest coverage",
         "which modules lack a selftest",
         "test coverage census",
@@ -3638,6 +3900,29 @@
     },
     {
       "aliases": [
+        "sky data cube",
+        "telescope observation container",
+        "world coordinate axes",
+        "WCS lite",
+        "pixel to sky coordinate",
+        "radio image cube",
+        "frequency axis to lambda squared",
+        "load a telescope cube",
+        "gridded sky observation",
+        "observation with RA Dec freq",
+        "ingest a sky map"
+      ],
+      "consumes": [],
+      "does": "a SKY OBSERVATION as first-class data (holographic_skydata): a data cube + WORLD AXES (WCS-lite -- linear RA/Dec/freq/wavelength via crval/crpix/cdelt), plus meta. Convert pixel<->world, get an axis' real coordinates, turn a frequency axis into the lambda^2 the Faraday tools want, and reshape to (...,nchan,4) ready for faraday_rm_map. Deterministic save/load (json header + npy, no pickle). No astropy/FITS parser in core; header-dict + npy is the ingest contract. make_skydata / sky_world_coords / sky_lambda2 / sky_stokes_cube / save_skydata / load_skydata",
+      "example": "import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); ax=[m.make_sky_axis('freq',5,'Hz',crval=1e9,cdelt=2e8)]; sky=m.make_skydata(np.zeros((5,)),ax); print(round(float(m.sky_lambda2(sky)[0]),4))",
+      "name": "Sky observation (cube + world axes)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "soft constraint",
         "soft constraints",
         "stiffness",
@@ -3720,6 +4005,53 @@
       "produces": [],
       "semantic": null,
       "theme": "Run it as a service / distributed"
+    },
+    {
+      "aliases": [
+        "star cluster",
+        "galaxy cluster",
+        "many star systems",
+        "population of stars",
+        "cluster of stars",
+        "initial mass function",
+        "salpeter imf",
+        "distribute stars in a field",
+        "cosmic web of stars",
+        "simulate a star cluster",
+        "field of stars"
+      ],
+      "consumes": [],
+      "does": "a STAR CLUSTER -- many star systems in a field (holographic_starsystem; the UP direction of star_system). Masses come from a Salpeter IMF (mostly red dwarfs, a few blue giants) and colour each star by its main-sequence temperature, so it looks like a real population. Even low-discrepancy placement by default, or pass a density_field (e.g. a cosmic-web map from the maze/Physarum solver) to cluster systems along large-scale structure (Burchett 2020 MCPM). Deterministic recipe. star_cluster / sample_imf / mass_to_temperature",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); c=m.star_cluster(30,seed=0,extent=2.0); print(c['n']==30)",
+      "name": "Star cluster (many systems)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
+        "build a star system",
+        "star system from parameters",
+        "procedural solar system",
+        "assemble a planetary system",
+        "plug data in to see a system",
+        "planets on kepler orbits",
+        "make a solar system",
+        "star with planets",
+        "orbit geometry",
+        "kepler orbit",
+        "planet temperature to biome",
+        "simulate a star system"
+      ],
+      "consumes": [],
+      "does": "PLUG DATA IN, GET A STAR SYSTEM (holographic_starsystem): assemble parameters -- a star's temperature/radius/mass and each planet's orbit (a,e), radius, temperature -- into a deterministic, JSON-serializable scene RECIPE. Star gets a blackbody colour; each planet a biome by temperature, a closed-form Kepler orbit (star at a focus), a position, and a seed to regenerate its surface via fractal_planet on demand. Same params+seed = byte-identical. Delegates to blackbody + fractal_planet + Kepler geometry. star_system / kepler_ellipse / kepler_position / temperature_to_biome / planet_field",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); r=m.star_system({'star':{'temp_K':5772},'planets':[{'a':1.0,'e':0.02,'radius':0.09,'temp_K':288}]}); print(r['planets'][0]['biome'])",
+      "name": "Star system from parameters",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
     },
     {
       "aliases": [
@@ -6790,6 +7122,6 @@
       "theme": "Scenes you can describe & adjust"
     }
   ],
-  "count": 294,
+  "count": 308,
   "schema_version": "1.0"
 }
