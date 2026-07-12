@@ -2,9 +2,10 @@
 #
 # The engine is ~436 `holographic_*.py` modules organized into family packages. A newcomer shouldn't need to know which
 # one holds `Scene` versus `RenderSession` versus `look_at`. This module gathers the handful of things
-# most callers actually want into five plain-English areas, so that after `pip install lecore` you can:
+# most callers actually want into plain-English areas, so that after `pip install lecore` you can:
 #
 #     import lecore
+#     core = lecore.product.LocalAgentCore()            # local memory + routing + dashboard
 #     doc = lecore.scene.Scene(dim=1024, seed=0)      # build a scene
 #     img = lecore.render.path_trace(sdf, camera)     # render it
 #     M   = lecore.transform.look_at(eye, target)     # aim a camera
@@ -29,7 +30,7 @@ except Exception:                        # pragma: no cover
 
 
 # ---------------------------------------------------------------------------------------------------
-# The five curated areas.
+# The curated areas.
 #
 # Each area is imported here and packed into a SimpleNamespace below. We keep the imports grouped by
 # area (not alphabetised) so it reads as "here is everything the `scene` builder needs", etc. If any
@@ -39,6 +40,9 @@ except Exception:                        # pragma: no cover
 
 # scene -- author and store a scene document (objects, handles, transforms, undo snapshots).
 from holographic.scene_and_pipeline.holographic_scene_doc import Scene, SceneObject
+
+# product -- the narrowed first-user surface: local agent memory, skill routing, and readiness evidence.
+from holographic_product import LocalAgentCore
 
 # model -- edit geometry: the modifier stack, object description, SDF primitives, key mesh verbs.
 from holographic.misc.holographic_modifier import ModifierStack, describe_object
@@ -80,8 +84,10 @@ def _area(**members):
     return types.SimpleNamespace(**members)
 
 
-# The five areas. These are the ONLY place a member is listed; areas() reads its map straight off these
+# The areas. These are the ONLY place a member is listed; areas() reads its map straight off these
 # namespaces (see below) so the docs and the objects can never drift out of sync.
+product = _area(LocalAgentCore=LocalAgentCore)
+
 scene = _area(Scene=Scene, SceneObject=SceneObject)
 
 model = _area(
@@ -111,9 +117,10 @@ transform = _area(
 )
 
 
-# The names of the five areas, in the order a builder meets them (author -> model -> render -> sim ->
-# aim). Kept as a tuple so `areas()` and any future __all__ share one source of truth.
-_AREA_NAMES = ("scene", "model", "render", "sim", "transform")
+# The names of the areas, in the order a product user tends to meet them (product wedge first, then
+# author -> model -> render -> sim -> aim). Kept as a tuple so `areas()` and any future __all__ share
+# one source of truth.
+_AREA_NAMES = ("product", "scene", "model", "render", "sim", "transform")
 
 
 def areas():

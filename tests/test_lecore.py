@@ -4,8 +4,9 @@ import lecore
 
 
 def test_facade_namespaces_exist():
-    for area in ("scene", "model", "render", "sim", "transform"):
+    for area in ("product", "scene", "model", "render", "sim", "transform"):
         assert hasattr(lecore, area)
+    assert hasattr(lecore.product, "LocalAgentCore")
     assert hasattr(lecore.scene, "Scene") and hasattr(lecore.model, "ModifierStack")
     assert hasattr(lecore.render, "CancelToken") and hasattr(lecore.sim, "MPMSnow")
     assert hasattr(lecore.transform, "look_at")
@@ -22,4 +23,4 @@ def test_facade_operations_work_end_to_end():
 
 def test_areas_map():
     a = lecore.areas()
-    assert set(a) == {"scene", "model", "render", "sim", "transform"} and all(len(v) for v in a.values())
+    assert set(a) == {"product", "scene", "model", "render", "sim", "transform"} and all(len(v) for v in a.values())
