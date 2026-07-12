@@ -22,11 +22,12 @@ from datetime import date
 
 # ----------------------------------------------------------------------------------------------------------
 # THE CURATED SURFACE. Edit this list to change what the quick reference covers. Grouped by the job a builder
-# is doing, in the order they meet it: author a scene -> model geometry -> aim a camera -> render -> ship.
+# is doing, in the order they meet it: product wedge -> author a scene -> model geometry -> aim a camera -> render -> ship.
 # Kept deliberately SHORT -- the point is a page you can scan, not a full index (that is REFERENCE.md).
 # ----------------------------------------------------------------------------------------------------------
 
 CURATED = [
+    ("Product wedge", ["holographic_product", "holographic_x402_api"]),
     ("Scene authoring", ["holographic_scene_doc", "holographic_modifier"]),
     ("Geometry / SDF",  ["holographic_sdf", "holographic_sdfscene", "holographic_mesh"]),
     ("Transforms",      ["holographic_transform"]),

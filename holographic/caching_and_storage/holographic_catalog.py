@@ -3117,6 +3117,23 @@ def default_catalog():
                                                 "llm bridge", "notify the agent", "push notification", "on render done",
                                                 "connect an agent", "send message to agent", "mailbox", "inbox",
                                                 "trigger the llm", "watch for events", "task done event"))
+    # --- product and paid API publishing --------------------------------------------------------------------
+    c.register_capability("Local agent core (memory + routing)", "the PRODUCT-FACING wedge: LocalAgentCore gives a "
+                          "local agent deterministic text memory (remember/recall), skill routing over the live "
+                          "capability catalog, JSON persistence, and a readiness dashboard with C-kernel status. "
+                          "This is the small stable door for embedding leCore without learning the whole research "
+                          "surface first.",
+                          example="from holographic_product import LocalAgentCore; core = LocalAgentCore(); core.remember('local agent memory'); core.recall('agent memory')",
+                          native=True, aliases=("product", "productization", "agent memory", "local memory",
+                                                "durable memory", "recall", "skill routing", "dashboard",
+                                                "first user", "facade", "local agent core"))
+    c.register_capability("x402 paid API publisher", "publish the LocalAgentCore product wedge as a paid HTTP API: "
+                          "FastAPI routes for recall, task routing, and the evidence dashboard protected by x402 "
+                          "middleware, with free health/pricing routes and admin-token-gated memory writes.",
+                          example="from holographic_x402_api import create_app, X402Config; app = create_app(config=X402Config(pay_to='0x...'))",
+                          native=False, aliases=("x402", "paid api", "payment required", "402", "monetize api",
+                                                 "micropayment", "agent payments", "pay per request", "fastapi",
+                                                 "api publishing", "sell api", "paid route"))
     # --- agent-friendly discovery: describe / suggest / route / autocomplete over the whole engine ---
     c.register_capability("Agent skills (discover & route)", "the AGENT-FRIENDLY layer: mind.skills() lists every "
                           "capability + method with how to CALL it (skill descriptions, real signatures); "

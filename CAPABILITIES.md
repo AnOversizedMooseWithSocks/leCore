@@ -288,6 +288,14 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.suggest_pipeline('t
 ```
 *Find it by:* how do I get from points to a mesh, chain capabilities, build a pipeline, route between datatypes, what steps turn X into Y
 
+### x402 paid API publisher
+publish the LocalAgentCore product wedge as a paid HTTP API: FastAPI routes for recall, task routing, and the evidence dashboard protected by x402 middleware, with free health/pricing routes and admin-token-gated memory writes..
+
+```python
+from holographic_x402_api import create_app, X402Config; app = create_app(config=X402Config(pay_to='0x...'))
+```
+*Find it by:* x402, paid api, payment required, 402, monetize api, micropayment, agent payments, pay per request
+
 ## Memory, search & recall
 
 *store things and get them back by CONTENT, not by exact key.*
@@ -389,6 +397,14 @@ hit = mind.navigator_find(cue)          # {'index':..., 'comparisons':...}
 mind.navigator_benchmark()              # recall + the fixed-beam baseline
 ```
 *Find it by:* navigator, adaptive search, learned search, search a tree, nearest neighbour search, beam search, spend less effort on easy queries, reflex cache
+
+### Local agent core (memory + routing)
+the PRODUCT-FACING wedge: LocalAgentCore gives a local agent deterministic text memory (remember/recall), skill routing over the live capability catalog, JSON persistence, and a readiness dashboard with C-kernel status. This is the small stable door for embedding leCore without learning the whole research surface first..
+
+```python
+from holographic_product import LocalAgentCore; core = LocalAgentCore(); core.remember('local agent memory'); core.recall('agent memory')
+```
+*Find it by:* product, productization, agent memory, local memory, durable memory, recall, skill routing, dashboard
 
 ### Memoize a pure function (the purity gate is the point)
 skip re-execution of PURE work whose inputs repeat. mind.memoize_pure(fn) keys on (the function's EXACT canonical source, its arguments) and REFUSES a function that is not pure -- is_pure rejects the clock, RNG, IO, global writes, and transitive impurity through a call-graph fixpoint, while accepting a locally-allocated container. A cache over an impure function returns a stale answer silently, so the gate raises instead. MEASURED: 36x on a repeated 256x256 SVD, bit-identical. THE BACKLOG CALLS THIS 'shape-keyed memoization', AND THAT NAME IS A BUG: a canonical shape erases identifiers and constants, so `def f(x): return x + 1` and `def g(x): return x + 2` have the SAME shape and would share a cache entry. mind.canonical_shape(fn) exists, and is a COMPRESSION primitive, never a cache key. KEPT NEGATIVE: the key costs O(input bytes) -- fingerprinting a 512x512 array costs 1.747 ms while A.sum() costs 0.084 ms, so a cheap function of a large array loses 21x; ask mind.machine_place with the function's own cost as the baseline. TWO BACKLOG NUMBERS DID NOT REPRODUCE: shape reuse is 1.13x (node type + depth) or 1.87x (control flow), not 2.36x -- it is a property of the equivalence relation, not the code; and tree purity is 35.4% (781 of 2,188 module-level functions), not 76%. HONEST SCOPE: the gate resolves callees within ONE module, so a function that calls an IMPORTED helper is refused as unresolved (sound, and why tucker.rank_gate is rejected -- it reaches fix_eigvec_signs from another module). Cross-module resolution wants types..
@@ -2461,4 +2477,4 @@ import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); x=np.li
 
 ---
 
-*308 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*310 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
