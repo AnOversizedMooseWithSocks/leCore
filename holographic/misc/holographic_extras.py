@@ -93,11 +93,13 @@ class ResidueSystem:
         return self._crt(residues)
 
     def _crt(self, residues):
-        n = 0
-        for m, r in zip(self.moduli, residues):
-            Mj = self.M // m
-            n += r * Mj * pow(Mj, -1, m)     # modular inverse of Mj mod m
-        return n % self.M
+        """Chinese Remainder Theorem recomposition of the per-modulus remainders back to the integer. DELEGATES to
+        the canonical holographic_rns.crt (which does the same standard recomposition, vectorised) by wrapping each
+        scalar remainder as a length-1 vector -- one CRT implementation in the engine, not two."""
+        from holographic.misc.holographic_rns import crt as _canon_crt
+        res_vectors = [[int(r)] for r in residues]             # scalar remainders -> length-1 residue vectors
+        x, _P = _canon_crt(res_vectors, list(self.moduli))
+        return int(x[0])                                        # % M is already applied by canon crt (mod product)
 
     # --- arithmetic, all carried out on the vectors themselves ---
     def add(self, va, vb):

@@ -1,6 +1,6 @@
 # lecore.py -- the friendly front door.
 #
-# The engine is a flat set of ~280 `holographic_*.py` modules. A newcomer shouldn't need to know which
+# The engine is ~436 `holographic_*.py` modules organized into family packages. A newcomer shouldn't need to know which
 # one holds `Scene` versus `RenderSession` versus `look_at`. This module gathers the handful of things
 # most callers actually want into five plain-English areas, so that after `pip install lecore` you can:
 #
@@ -43,6 +43,16 @@ from holographic.scene_and_pipeline.holographic_scene_doc import Scene, SceneObj
 # model -- edit geometry: the modifier stack, object description, SDF primitives, key mesh verbs.
 from holographic.misc.holographic_modifier import ModifierStack, describe_object
 from holographic.mesh_and_geometry.holographic_sdf import sphere, box                       # SDF primitives  more live in holographic_sdf
+
+# The TRANSFORM TOWER, at the top level, because it is not a geometry detail -- it is the sentence that says which
+# floor every transform in the engine is standing on, and whether a delta can be pushed through it. Aff(n) = GL(n)
+# semidirect R^n: translations are the abelian ideal, rotation and shear the non-commuting peers, scale the centre
+# of the linear part. `classify_transform(fn)` answers "which floor" for anything; `TOWER` is the declared ladder;
+# `affine_normality` is where the mechanism stops, at the projective ceiling.
+from holographic.mesh_and_geometry.holographic_grouptower import (   # noqa: E402  -- the transform tower
+    TOWER, classify_transform, commutator_table, hypervector_layer, semidirect_law)
+from holographic.mesh_and_geometry.holographic_projectivetower import (   # noqa: E402  -- and its ceiling
+    affine_normality, is_affine, texture_projection_error)
 from holographic.mesh_and_geometry.holographic_meshverbs import extrude_face, inset_face, dissolve_vertex
 
 # render -- turn a scene into pixels, with a config and a cooperative cancel handle.

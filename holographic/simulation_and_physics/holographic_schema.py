@@ -808,6 +808,28 @@ def demo_hier():
     cmp(to_symbols(np.tile(motif, (10, 10)), "image"), "image (tiled motif)")
 
 
+def _selftest():
+    """Regression trap (T6 backfill; demos only, no assertion). Pins the modality-agnostic tokenizer's core
+    contract: to_symbols -> from_symbols ROUND-TRIPS for the modalities callers depend on. A tokenizer that
+    doesn't invert is silently lossy. Off-designed-case inputs (mid-bin numbers, a real word) per [BLIND-SPOT]."""
+    import numpy as np
+
+    # numbers: quantised to `bins`, so recovery is within one bin width -- assert that bound, not exact equality.
+    vals = [0.1, 0.5, 0.9]
+    back = from_symbols(to_symbols(vals, "numbers", bins=16, num_range=(0, 1)),
+                        "numbers", bins=16, num_range=(0, 1))
+    assert all(abs(float(b) - v) < 1.0 / 16 for b, v in zip(back, vals)), (back, vals)
+
+    # text: a lossless round-trip -- the string comes back exactly.
+    assert from_symbols(to_symbols("hello world", "text"), "text") == "hello world"
+
+    print("OK: holographic_schema self-test passed (numbers round-trip within one bin width, text round-trips "
+          "exactly through the modality-agnostic tokenizer)")
+
+
 if __name__ == "__main__":
-    demo_schema()
-    demo_hier()
+    import sys
+    _selftest()
+    if "--demos" in sys.argv:
+        demo_schema()
+        demo_hier()

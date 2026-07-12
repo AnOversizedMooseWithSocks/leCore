@@ -28,6 +28,27 @@ def sdf_normal(sdf, P, eps=1e-3):
     return _canonical(sdf, P, eps=eps)
 
 
+def sdf_curvature(sdf, P, eps=2e-3):
+    """MEAN CURVATURE of an SDF's surface at points `P` (W13). For a signed distance field the gradient is unit,
+    so the mean curvature of the level set equals the LAPLACIAN of the field: div(grad(d)) = d_xx + d_yy + d_zz.
+    Estimated by a 6-point finite-difference stencil. Returns (n,): POSITIVE on convex bumps (edges/ridges),
+    NEGATIVE in concave creases (cavities), ~0 on flat/cylindrical regions. Drives cavity darkening, edge
+    highlighting, and curvature-aware LOD -- the shading cue iq's cavity/edge looks are built on.
+
+    WHY the Laplacian and not the full shape operator: for shading you want a single scalar (how bumpy is it
+    here), and for a true SDF the Laplacian IS twice the mean curvature on the surface -- the cheap right answer.
+    Away from the surface it is still a smooth convexity signal, which is what a screen-space pass uses."""
+    from holographic.mesh_and_geometry.holographic_sdf import as_eval
+    ev = as_eval(sdf)
+    P = np.asarray(P, float)
+    d0 = ev(P)
+    lap = np.zeros(len(P))
+    for axis in range(P.shape[1]):
+        e = np.zeros(P.shape[1]); e[axis] = eps
+        lap += ev(P + e) + ev(P - e) - 2.0 * d0                  # second difference along this axis
+    return lap / (eps * eps)
+
+
 def sphere_trace(sdf, O, D, max_steps=96, max_dist=20.0, surf_eps=1e-3, relax=1.0):
     """Sphere-trace rays (O, D both (M,3), D unit) through an SDF: at each step the SDF value is a SAFE distance to
     advance (the largest step that cannot overshoot a surface). Vectorised over all rays; the loop is over steps.
@@ -46,6 +67,13 @@ def sphere_trace(sdf, O, D, max_steps=96, max_dist=20.0, surf_eps=1e-3, relax=1.
     O = np.asarray(O, float); D = np.asarray(D, float)
     M = len(D)
     t = np.zeros(M); hit = np.zeros(M, bool)
+    # accept a node object OR a bare callable -- the engine has both conventions; one adapter, not a shim per site
+    from holographic.mesh_and_geometry.holographic_sdf import as_eval as _as_eval
+    _ev = _as_eval(sdf)
+
+    class _E:                                                     # keep the body below reading `sdf.eval(...)`
+        eval = staticmethod(_ev)
+    sdf = _E()
     if relax <= 1.0:
         active = np.arange(M)                                     # indices of the rays still marching
         for _ in range(max_steps):
@@ -86,6 +114,67 @@ def sphere_trace(sdf, O, D, max_steps=96, max_dist=20.0, surf_eps=1e-3, relax=1.
         keep = (~conv) & (t[a] < max_dist)
         active = a[keep]
     return hit, t, O + t[:, None] * D
+
+
+def _trap_distance(P, trap, kind):
+    """Distance from each marched point P (N,3) to a trap SET, for orbit-trap colouring. `kind`:
+    'point' -> Euclidean distance to the point `trap` (a 3-vector);
+    'origin' -> distance to (0,0,0) (trap ignored);
+    'axis'  -> distance to the line through the origin along unit `trap` (perpendicular distance);
+    'plane' -> |signed distance| to the plane through the origin with unit normal `trap`.
+    These are Quilez's standard trap primitives -- the scalar that a palette maps to a colour."""
+    P = np.asarray(P, float)
+    if kind == "origin":
+        return np.linalg.norm(P, axis=1)
+    if kind == "point":
+        return np.linalg.norm(P - np.asarray(trap, float), axis=1)
+    if kind == "axis":
+        a = np.asarray(trap, float); a = a / (np.linalg.norm(a) + 1e-12)
+        proj = (P @ a)[:, None] * a                              # component along the axis
+        return np.linalg.norm(P - proj, axis=1)                 # perpendicular distance to the line
+    if kind == "plane":
+        n = np.asarray(trap, float); n = n / (np.linalg.norm(n) + 1e-12)
+        return np.abs(P @ n)
+    raise ValueError("trap kind must be 'point', 'origin', 'axis', or 'plane'; got %r" % (kind,))
+
+
+def sphere_trace_trapped(sdf, O, D, trap=(0.0, 0.0, 0.0), trap_kind="origin",
+                         max_steps=96, max_dist=20.0, surf_eps=1e-3):
+    """Sphere-trace rays AND accumulate an ORBIT TRAP per ray: the closest approach of the marched path to a
+    trap set (Quilez's fractal-colouring trick). Returns (hit (M,), t (M,), pos (M,3), trap_val (M,)). trap_val
+    is the minimum `_trap_distance` seen along each ray's march -- feed it through cosine_palette to colour the
+    surface by how near the ray's orbit came to the trap, the iq look. `trap_kind` in {'point','origin','axis',
+    'plane'}; `trap` is the point/axis/normal for the non-origin kinds.
+
+    WHY a SEPARATE function and not a flag on sphere_trace: the base marcher is tie-sensitive and widely called;
+    threading an accumulator through it risks flipping a decision on a bit-identical path. This shares the exact
+    step math (largest safe step, drop converged/escaped rays) but carries the running per-ray minimum. Kept the
+    default (relax=1.0) marcher only -- over-relaxation skips points, which would corrupt a closest-approach
+    statistic; orbit traps want every point the ray actually visited."""
+    O = np.asarray(O, float); D = np.asarray(D, float)
+    M = len(D)
+    t = np.zeros(M); hit = np.zeros(M, bool)
+    trap_val = np.full(M, np.inf)                                # running closest approach per ray
+    from holographic.mesh_and_geometry.holographic_sdf import as_eval as _as_eval
+    _ev = _as_eval(sdf)
+
+    active = np.arange(M)
+    for _ in range(max_steps):
+        if active.size == 0:
+            break
+        P = O[active] + t[active, None] * D[active]
+        # update the trap BEFORE stepping: this point is on the ray's path
+        td = _trap_distance(P, trap, trap_kind)
+        trap_val[active] = np.minimum(trap_val[active], td)
+        d = _ev(P)
+        conv = d < surf_eps
+        hit[active[conv]] = True
+        t[active] = t[active] + np.where(conv, 0.0, np.clip(d, 0.0, None))
+        keep = (~conv) & (t[active] < max_dist)
+        active = active[keep]
+    # rays that never marched (empty) keep inf; clamp to max_dist so a palette gets a finite value
+    trap_val = np.where(np.isfinite(trap_val), trap_val, max_dist)
+    return hit, t, O + t[:, None] * D, trap_val
 
 
 def ambient_occlusion(sdf, P, N, samples=6, step=0.06, k=1.6):
@@ -271,8 +360,37 @@ def _selftest():
     lit = soft_shadow(scene, np.array([[3.0, -0.79, 0.0]]), np.array([0., 1, 0]))[0]
     shad = soft_shadow(scene, np.array([[0.0, -0.79, 0.0]]), np.array([0., 1, 0]))[0]
     assert shad < lit
+
+    # ORBIT TRAP (W3): sphere_trace_trapped's hit/t must be IDENTICAL to sphere_trace (same march, no flipped
+    # decisions), and the trap value must be a meaningful closest-approach -- a ray aimed near the origin traps
+    # closer than one aimed away, and every trap kind returns finite non-negative values.
+    from holographic.mesh_and_geometry.holographic_sdf import sphere as _sph
+    ts = _sph(0.5)
+    rng = np.random.default_rng(0)
+    O = rng.uniform(-2, 2, (120, 3)); Dr = rng.normal(size=(120, 3)); Dr /= np.linalg.norm(Dr, axis=1, keepdims=True)
+    h1, t1, _ = sphere_trace(ts, O, Dr)
+    h2, t2, _, tv = sphere_trace_trapped(ts, O, Dr, trap_kind="origin")
+    assert np.array_equal(h1, h2) and np.allclose(t1, t2, atol=1e-12)     # identical march
+    assert np.isfinite(tv).all() and (tv >= 0).all()
+    near = sphere_trace_trapped(ts, np.array([[0, 0, 3.0]]), np.array([[0, 0, -1.0]]), trap_kind="origin")[3][0]
+    far = sphere_trace_trapped(ts, np.array([[4, 4, 3.0]]), np.array([[0, 0, -1.0]]), trap_kind="origin")[3][0]
+    assert near < far                                            # the trap actually measures closeness
+    for kind, tp in (("point", (0.3, 0, 0)), ("axis", (0, 1, 0)), ("plane", (0, 0, 1))):
+        v = sphere_trace_trapped(ts, O[:10], Dr[:10], trap=tp, trap_kind=kind)[3]
+        assert np.isfinite(v).all() and (v >= 0).all()          # every trap kind is well-formed
+
+    # CURVATURE (W13): the SDF Laplacian is the mean curvature of the level set. A sphere of radius r has mean
+    # curvature 2/r (convex, positive); a plane is flat (zero). These are the analytic values, not fudge factors.
+    from holographic.mesh_and_geometry.holographic_sdf import plane as _plane
+    curv_sphere = sdf_curvature(_sph(1.0), np.array([[1.0, 0, 0], [0, 1.0, 0]]))
+    assert np.allclose(curv_sphere, 2.0, atol=0.1)              # 2/r = 2 for r=1, convex
+    curv_r2 = sdf_curvature(_sph(2.0), np.array([[2.0, 0, 0]]))
+    assert np.allclose(curv_r2, 1.0, atol=0.1)                 # 2/r = 1 for r=2 (curvature falls with size)
+    curv_plane = sdf_curvature(_plane(0.0), np.array([[0.5, 0.0, 0.3]]))
+    assert abs(curv_plane[0]) < 0.05                           # flat -> ~0
+
     print(f"raymarch selftest ok: render {img.shape}, AO crease {ao_crease:.2f} < open {ao_open:.2f}, "
-          f"shadow under-sphere {shad:.2f} < open {lit:.2f}")
+          f"shadow under-sphere {shad:.2f} < open {lit:.2f}, orbit-trap march identical + near {near:.2f} < far {far:.2f}")
 
 
 if __name__ == "__main__":

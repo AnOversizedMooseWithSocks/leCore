@@ -38,6 +38,8 @@ def test_compare_endpoint_explains_and_sees():
         A._COMPARE.update(comp)
 
 
+@pytest.mark.slow  # /api/plan runs discover_sequential -> a full FFT-based permutation null; ~20-25s, exceeds the
+                   # 15s budget in CI. Deselected by default; runs under --run-slow. (Passes when run: verified 24s.)
 def test_plan_endpoint_discovers_proves_executes():
     # The app's plan panel exposes the full sequence pipeline end-to-end:
     # discover which classes are ordered, prove them, recover canonical order,

@@ -1,6 +1,7 @@
 """The curriculum is wired into the live app, not just the library: the dataset
 loads a UnifiedMind taught a dictionary then an encyclopedia, and the query
 endpoint returns meaning neighbours and an is_a chain over that one mind."""
+import pytest
 import tools.unified_app as ua
 
 
@@ -403,6 +404,8 @@ def test_trained_status_endpoint():
     assert s["prototypes"] > 0
 
 
+@pytest.mark.slow  # trains a base brain then STACKS a second dataset on it (two full absorb passes); >15s, exceeds
+                   # the per-test budget. Deselected by default; runs under --run-slow.
 def test_cumulative_training_stacks_datasets():
     # The core feature: train a base, then add another dataset ON TOP of the same
     # brain. The stack is tracked, and prototypes accumulate (the second layer adds,
@@ -418,6 +421,7 @@ def test_cumulative_training_stacks_datasets():
     assert stacked["prototypes"] >= base_protos           # layered on, not replaced
 
 
+@pytest.mark.slow  # same stacked-training cost as test_cumulative_training (two absorb passes over cached base); >15s.
 def test_add_on_top_does_not_corrupt_cached_base():
     # Adding a dataset on top must not mutate the cached base stack (deep-copy safety).
     import tools.unified_app as ua

@@ -10882,3 +10882,2874 @@ def test_run_command_is_agent_reachable_but_the_allowlist_is_not():
         httpd.server_close()
 
     assert any("command" in c.name.lower() for c in mind.find_capability("run an external command"))
+
+
+def test_axis_role_analysis_is_a_faculty_and_recovers_a_market_schema():
+    # Cross-faculty integration: analyze_axes + comparability_cost through the mind
+    # on a market-like cube, recovering "time indexes, asset/field bind" and
+    # measuring the price of the wrong choice on the carrier axis.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    rng = np.random.default_rng(1)
+    T, A, F = 30, 5, 4
+    asset_sig = rng.standard_normal((A, F)) * 2.0
+    cube = np.stack([asset_sig + rng.standard_normal((A, F)) * 0.03 * t
+                     for t in range(T)], axis=0)
+
+    res = mind.analyze_axes(cube, categorical=[1, 2])
+    roles = {r["axis"]: r["role"] for r in res["per_axis"]}
+    assert roles[0] == "index"          # time is the boring carrier
+    assert roles[1] == "bind" and roles[2] == "bind"  # payload axes
+
+    # The measured cost of binding the carrier, through the mind.
+    cost = mind.comparability_cost(cube, 0, dim=128)
+    assert cost["collapse"] > 0.3       # binding time destroys real similarity
+
+    # Discoverable by the phrasing a user would type.
+    assert any("analyze_axes" in str(c.name)
+               for c in mind.find_capability("which axis is the carrier"))
+
+
+def test_analytic_signal_is_a_faculty_and_round_trips_through_the_mind():
+    # Cross-faculty integration: the sign-as-rotation framework end to end. The
+    # reversible round-trip is exact; the real-signal monotone cost reads ~0 reversal
+    # fraction (the theorem); a true complex phasor pays the monoid price.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    t = np.linspace(0, 1, 2048)
+    x = np.cos(2 * np.pi * 7 * t) + 0.4 * np.cos(2 * np.pi * 13 * t)
+    a = mind.analytic_signal(x)
+    recon = a["amplitude"] * np.cos(a["phase"])
+    assert np.max(np.abs(recon - x)) < 1e-9          # lossless re-coordinatisation
+
+    real_cost = mind.monotone_cost(x)
+    assert real_cost["reversal_fraction"] < 0.08     # real signal is one-way
+
+    steps = np.concatenate([np.full(512, 0.2), np.full(512, -0.2)])
+    z = np.exp(1j * np.cumsum(steps))
+    cx_cost = mind.phasor_monotone_cost(z)
+    assert cx_cost["excess"] > 0.5                   # the group-vs-monoid price
+
+    assert any("analytic_signal" in str(c.name)
+               for c in mind.find_capability("represent a value as rotation"))
+
+
+def test_dynamics_identification_is_a_faculty_with_all_three_doors():
+    # Cross-faculty: the three honest doors to mass through the mind, plus the
+    # refusal on trajectory-only (the gauge theorem enforced at the faculty level).
+    import numpy as np
+    import pytest as _pytest
+    import lecore
+    from holographic.sampling_and_signal.holographic_sysid import GaugeError
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # Door 3 (astronomy): weigh the Sun from a synthetic Earth orbit.
+    T, R = 3.156e7, 1.496e11
+    tt = np.linspace(0, 1.2 * T, 3000)
+    pos = np.stack([R * np.cos(2 * np.pi * tt / T),
+                    R * np.sin(2 * np.pi * tt / T)], axis=1)
+    est = mind.central_mass_from_orbit(pos, tt[1] - tt[0])
+    assert abs(est["central_mass"] - 1.989e30) / 1.989e30 < 0.01
+
+    # Door 2 (interaction): exact ratio.
+    r = mind.identify_dynamics(interaction={"v1_before": 1.0, "v1_after": 0.5,
+                                            "v2_before": 0.0, "v2_after": 1.5})
+    assert abs(r["mass_ratio"] - 3.0) < 1e-9
+
+    # Door 0: trajectory alone refuses.
+    with _pytest.raises(GaugeError):
+        mind.identify_dynamics(x=np.cos(np.arange(0, 2, 0.001) * 2), dt=0.001)
+
+    assert any("central_mass_from_orbit" in str(c.name)
+               for c in mind.find_capability("weigh a star from its orbit"))
+
+
+def test_scaling_diagnosis_is_a_faculty_and_rediscovers_the_dim_rule():
+    # Cross-faculty: the diagnostician through the mind, on the live bundle
+    # primitive, rediscovering "double dim -> discrimination error drops" -- and
+    # the wall verdict on a workload nothing helps.
+    import numpy as np
+    import lecore
+    from holographic.agents_and_reasoning.holographic_ai import random_vector, bundle
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    def workload(dim, seed=0):
+        dim = int(dim)
+        items = [random_vector(dim, np.random.default_rng(seed + 1 + i))
+                 for i in range(30)]
+        b = bundle(items)
+        nb = np.linalg.norm(b)
+        mcos = np.array([float(np.dot(b, it)) / (nb * np.linalg.norm(it)) for it in items])
+        dis = [random_vector(dim, np.random.default_rng(seed + 900 + i)) for i in range(30)]
+        dcos = np.array([float(np.dot(b, d)) / (nb * np.linalg.norm(d)) for d in dis])
+        return float(np.mean(dcos > np.min(mcos)))
+
+    d = mind.diagnose_scaling(workload, {"dim": 128})
+    assert d["verdict"] == "scale:dim"
+
+    r = mind.auto_scale(lambda dim: 0.42, {"dim": 64}, target_error=0.1, max_rounds=6)
+    assert r["wall"] and len(r["trajectory"]) == 0
+
+    assert any("diagnose_scaling" in str(c.name)
+               for c in mind.find_capability("which limit am i hitting"))
+
+    # diagnose_bake: the scaling diagnostic wired to the REAL n-D texture bake (a cross-faculty integration --
+    # scalinglaw driving the shader's bake_nd/fetch_nd). The verdict must flip with the field's regime: a smooth
+    # field baked with a wide kernel is bias-limited (raise the margin), a high-frequency field at low dimension
+    # is variance-limited (raise the dimension). This is the tribal 'double D' rule made callable through the mind.
+    ax = np.linspace(0.0, 1.0, 40)
+    P = np.stack(np.meshgrid(ax, ax, indexing="ij"), -1)
+    smooth = np.sin(2 * np.pi * P[..., 0]) * np.cos(2 * np.pi * P[..., 1])
+    busy = np.sin(2 * np.pi * 3 * P[..., 0]) * np.cos(2 * np.pi * 3 * P[..., 1])
+    assert mind.diagnose_bake([ax, ax], smooth, dim=4096, margin=1.5)["verdict"] == "scale:margin"
+    assert mind.diagnose_bake([ax, ax], busy, dim=1024, margin=2.5)["verdict"] == "scale:dim"
+    assert any("diagnose_bake" in str(c.name)
+               for c in mind.find_capability("tune the bake dimension"))
+
+
+def test_detect_regimes_locates_a_cache_stream_shift_for_per_regime_margins():
+    # A CROSS-FACULTY integration: detect_regimes (demux.segment_stream) locating where a query stream's
+    # behaviour shifts, so the cache subsystem can size a DIFFERENT fat margin per regime instead of one
+    # compromise. Two stationary regimes with different spreads -> one clean boundary, and the two spans genuinely
+    # want different margins (measured via cachehome.drift_scale). This is the "re-fit the margin per regime" hook
+    # the cache never had -- it only ever saw drift as a slow mean-error creep, never as a located boundary.
+    import numpy as np
+    import lecore
+    from holographic.caching_and_storage.holographic_cachehome import drift_scale
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+    # piecewise-STATIONARY (the input class change-point detection is for): a calm regime then a volatile one.
+    stream = np.concatenate([rng.normal(0.0, 0.1, 200), rng.normal(0.0, 1.0, 200)])
+    r = mind.detect_regimes(stream, min_seg=32)
+    assert r["n_segments"] == 2 and abs(r["boundaries"][0] - 200) <= 12, r["boundaries"]
+    # the two regimes' std differ ~10x -> a per-regime margin is worth locating the boundary for
+    stds = [s["std"] for s in r["segments"]]
+    assert stds[1] > 3 * stds[0], stds
+    # and drift_scale (the quantity that sizes a cache margin) differs across the located boundary
+    b = r["boundaries"][0]
+    assert drift_scale(list(stream[b:])) > 2 * drift_scale(list(stream[:b]))
+    assert any("detect_regimes" in str(c.name)
+               for c in mind.find_capability("where does the signal change"))
+
+
+def test_rectify_carrier_composes_with_axis_analysis_through_the_mind():
+    # The full pipeline the axis-role thread was building toward: a wobbling,
+    # irregular carrier is diagnosed as informative, repaired (arc-length lift +
+    # uniform resample), and re-diagnosed as an ideal index -- through the mind.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    rng = np.random.default_rng(7)
+    steps = rng.exponential(1.0, size=260)
+    steps[::41] = -0.2                                # irregular AND wobbling
+    t = np.cumsum(steps)
+    content = np.sin(0.08 * np.arange(260))
+
+    r = mind.rectify_carrier(t, content)
+    assert r["marginal_info_after"] == 0.0
+    assert np.all(np.diff(r["coords"]) > 0)
+    assert r["monotone_fraction"] < 1.0               # it genuinely needed the lift
+
+    rec = mind.analyze_axes(np.asarray(r["content"]))["per_axis"][0]
+    assert rec["role"] == "index"
+
+    assert any("rectify_carrier" in str(c.name)
+               for c in mind.find_capability("fix an irregular time axis"))
+
+
+def test_winding_map_completes_the_reversing_carrier_arc():
+    # The composition the axis-role thread pointed at: rectify_carrier reports a
+    # LOW monotone_fraction (a genuinely reversing sweep -- its declared "inspect
+    # by hand" regime), and winding_map is the inspection: it detects hysteresis,
+    # returns the per-direction branches, and refuses the fictitious merge.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    rng = np.random.default_rng(0)
+    xs = np.linspace(0, 1, 100)
+    F = lambda x: np.sin(2 * np.pi * x)
+    coords, content = [], []
+    for k in range(6):
+        up = (k % 2 == 0)
+        x = xs if up else xs[::-1]
+        coords.append(x)
+        content.append(F(x) + (0.35 if up else -0.35)
+                       + rng.standard_normal(100) * 0.03)
+    coords = np.concatenate(coords)
+    content = np.concatenate(content)
+
+    rect = mind.rectify_carrier(coords, content)
+    assert rect["monotone_fraction"] < 0.9        # the declared boundary trips
+
+    r = mind.winding_map(coords, content)
+    assert r["verdict"] == "hysteresis"
+    assert r["merged"] is None                    # refusal held through the mind
+    assert r["branches"] is not None
+
+    assert any("winding_map" in str(c.name)
+               for c in mind.find_capability("detect hysteresis in a sweep"))
+
+
+def test_explore_series_is_the_arc_end_to_end_through_the_mind():
+    # The whole thread, one call: an unlabeled 2-channel series on an irregular,
+    # slightly wobbling carrier. explore_series must find the scaffold among the
+    # candidates, rectify it (the arc-length lift + resample), decompose each
+    # channel into its law, and return residuals + a measured verdict.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    rng = np.random.default_rng(0)
+    steps = rng.exponential(1.0, size=220)
+    steps[::53] = -0.1                          # irregular AND occasionally negative
+    t = np.cumsum(steps)
+    u = (t - t.min()) / (t.max() - t.min())
+    series = np.stack([np.sin(2 * np.pi * 2 * u), 0.7 * u + 0.2], axis=1)
+
+    res = mind.explore_series(series, coords={0: t})
+    assert res["scaffold"] == 0
+    assert res["rectified"]["marginal_info_after"] == 0.0
+    assert res["rectified"]["monotone_fraction"] < 1.0   # the lift genuinely fired
+    assert res["verdict"] == "structured"
+    assert all(ch["explained_fraction"] > 0.8 for ch in res["channels"])
+
+    assert any("explore_series" in str(c.name)
+               for c in mind.find_capability("explore unlabeled data automatically"))
+
+
+def test_demux_completes_the_contact_protocol_through_the_mind():
+    # The layered-signal story, end to end: an interleaved stream of unlike
+    # sources -> demux_series finds the stride and recovers channels bit-exact ->
+    # explore_series decodes each channel's law separately -- one mind, one call
+    # chain, evidence at every step.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    n = 200
+    u = np.linspace(0, 1, n)
+    stream = np.empty(2 * n)
+    stream[0::2] = np.sin(2 * np.pi * 2 * u)
+    stream[1::2] = 0.8 * u + 0.1
+
+    d = mind.demux_series(stream)
+    assert d["stride"] == 2
+    assert np.array_equal(d["objects"][0][:, 0] if d["objects"][0].ndim > 1
+                          else d["objects"][0], stream[0::2])
+
+    for obj in d["objects"]:
+        arr = obj if obj.ndim > 1 else obj.reshape(-1, 1)
+        res = mind.explore_series(arr)
+        assert res["verdict"] == "structured"
+
+    assert any("demux_series" in str(c.name)
+               for c in mind.find_capability("separate interleaved channels"))
+
+
+def test_hands_free_pipeline_with_residual_links_through_the_mind():
+    # The complete hands-free story: a raw interleaved stream where one channel
+    # is lawful and another is a DELAYED COPY of a noise channel. auto_demux
+    # separates the sources with zero hints; cross_channel finds the residual
+    # link that per-channel decomposition cannot see. One call.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+
+    n = 300
+    u = np.linspace(0, 1, n)
+    lawful = np.sin(2 * np.pi * 2 * u)
+    noise = rng.standard_normal(n)
+    x = np.empty(2 * n)
+    x[0::2] = lawful
+    x[1::2] = noise
+    r = mind.explore_series(x, auto_demux=True, cross_channel=True)
+    assert r["demux"]["stride"] == 2
+    assert r["verdict"] == "structured"      # the lawful source carries it
+
+    # And the direct residual-link path through the faculty:
+    dst = np.zeros(n); dst[5:] = 0.9 * noise[:-5]
+    cx = mind.cross_channel_links(np.stack([noise, dst], axis=1))
+    assert cx["links"][0]["lag"] == 5
+
+    assert any("cross_channel_links" in str(c.name)
+               for c in mind.find_capability("delayed copy of another channel"))
+
+
+def test_packet_demux_extends_the_contact_protocol_to_burst_streams():
+    # The packetized Contact case through the mind: variable-length bursts, no
+    # cyclic stride -- boundaries found by statistics shifts, the lawful source's
+    # bursts reunited and decoded, honest single-source verdict on homogeneous.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(2)
+    stream = np.concatenate([0.5 * np.linspace(0, 1, 120),
+                             5.0 + rng.standard_normal(80),
+                             0.5 * np.linspace(0, 1, 100),
+                             5.0 + rng.standard_normal(90)])
+    pk = mind.packet_demux(stream, min_seg=24)
+    assert pk["assignment"][0] == pk["assignment"][2]      # ramps reunited
+    ramp = pk["sources"][pk["assignment"][0]]["stream"]
+    assert mind.explore_series(ramp.reshape(-1, 1))["verdict"] == "structured"
+
+    homo = mind.packet_demux(rng.standard_normal(400))
+    assert homo["n_sources"] == 1
+
+    assert any("packet_demux" in str(c.name)
+               for c in mind.find_capability("detect packet boundaries"))
+
+
+def test_continuation_closes_the_drift_negative_through_the_mind():
+    # The full story: a source that drifts across its bursts previously read as
+    # different levels (the declared bag-of-segments negative). continuation=True
+    # extrapolates the tail across the gap, reunites the bursts with evidence,
+    # and the reunited source decodes 'structured' -- while default-off remains
+    # the old behaviour.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(2)
+    t1 = 0.02 * np.arange(60)
+    burst = 8.0 + rng.standard_normal(120)
+    t2 = 0.02 * np.arange(180, 240)
+    x = np.concatenate([t1, burst, t2])
+
+    off = mind.packet_demux(x, min_seg=24)
+    on = mind.packet_demux(x, min_seg=24, continuation=True)
+    assert off["n_sources"] == 3 and on["n_sources"] == 2
+    ramp_src = on["sources"][on["assignment"][0]]
+    r = mind.explore_series(ramp_src["stream"].reshape(-1, 1))
+    assert r["verdict"] == "structured"
+
+
+def test_arc_adoptions_pay_measurably_through_the_mind():
+    # The promotion pass, verified end to end: (1) decompose_piecewise beats the
+    # global fit on a regime-built signal WITH the baseline attached; (2)
+    # handle_reversals routes a multi-pass scan through the winding merge and
+    # the decomposition improves; (3) the degenerate-axis fix holds through the
+    # mind. Each claim carries its number.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+
+    n = 100
+    y = np.concatenate([2.0 * np.linspace(0, 1, n),
+                        np.sin(2 * np.pi * 2 * np.linspace(0, 1, n)) + 3.0,
+                        -np.linspace(0, 1, n) + 1.0])
+    d = mind.decompose_piecewise(y, min_seg=24)
+    assert d["total_bits"] < d["baseline"]["mdl_bits"]
+    assert d["residual_rms"] < 0.1 * d["baseline"]["residual_rms"]
+
+    xs = np.linspace(0, 1, 120)
+    co, ct = [], []
+    for k in range(6):
+        c = xs if k % 2 == 0 else xs[::-1]
+        co.append(c)
+        ct.append(np.sin(2 * np.pi * 2 * c) + rng.standard_normal(120) * 0.15)
+    co = np.concatenate(co)
+    ct = np.concatenate(ct).reshape(-1, 1)
+    off = mind.explore_series(ct, coords={0: co})
+    on = mind.explore_series(ct, coords={0: co}, handle_reversals=True)
+    assert off["scaffold"] == 0 and off["n_channels"] == 1   # degenerate fix
+    assert on["winding"]["verdict"] == "function"
+    assert on["channels"][0]["explained_fraction"] >= \
+        off["channels"][0]["explained_fraction"]
+
+
+def test_vision_toolkit_is_wired_through_the_mind():
+    # The sweep's wiring find: holographic_vision (23 public functions of classic CV) was IMPORT-ONLY -- every
+    # "find edges / corners / lines / colours in an image" phrasing missed through the mind. Six doors now wired.
+    # This exercises each END-TO-END through the delegation boundary on a structured synthetic image (a red bar
+    # on black -- known edges, known lines, known palette), plus the unlabeled-clustering door on a 2-class set.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    img = np.zeros((32, 32, 3))
+    img[:, 12:20] = [0.9, 0.2, 0.1]                                   # a vertical red bar
+
+    e = mind.image_edges(img)
+    assert e.shape == (32, 32) and e.sum() > 20                        # the bar's two sides fire
+
+    lines = mind.image_lines(img, top=2)
+    assert len(lines) == 2                                             # exactly the two vertical sides
+
+    cols, frac = mind.image_colours(img, k=2)
+    assert abs(float(frac[0]) - 0.75) < 0.05                           # black 75%, red 25%
+    assert cols.shape == (2, 3)
+
+    sig = np.asarray(mind.image_signature(img)).ravel()
+    assert sig.size >= 16 and np.isfinite(sig).all()                   # a real fixed-length descriptor
+
+    # unlabeled clustering: two bar images vs two inverted images must split 2/2 by appearance alone
+    imgs = [img, img * 0.9, 1 - img, (1 - img) * 0.9]
+    labels = np.asarray(mind.image_classes(imgs, k=2)[0])
+    assert labels[0] == labels[1] and labels[2] == labels[3] and labels[0] != labels[2], labels
+
+    # and the doors are discoverable by the words a stranger would use
+    assert any("Image analysis" in str(c.name)
+               for c in mind.find_capability("find edges in an image"))
+
+
+def test_domain_operators_build_an_infinite_lattice_and_generalize_past_sdfs():
+    # iq's demoscene toolkit, END-TO-END through the mind: a domain warp pre-transforms the query point of ANY
+    # field. On an SDF it makes an infinite lattice that raymarches (one shape -> a crystal); the SAME warp
+    # composes with a plain callable field (the generalisation past SDFs -- the whole reason domain ops are
+    # coordinate warps, not SDF methods). Plus the cosine palette maps a scalar to a bounded colour.
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_sdf import sphere
+    from holographic.rendering.holographic_raymarch import sphere_trace
+    from holographic.mesh_and_geometry.holographic_domain import repeat, warp_field
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # (1) domain_repeat through the mind -> an infinite lattice: far more rays hit than a single sphere.
+    base = sphere(0.3)
+    lat = mind.domain_repeat(base, 1.0)
+    xs = np.linspace(-3, 3, 30)
+    O = np.stack([np.repeat(xs, 30), np.tile(xs, 30), np.full(900, 5.0)], 1)
+    D = np.tile([0.0, 0.0, -1.0], (900, 1))
+    hit_lat = int(sphere_trace(lat, O, D, max_dist=12.0)[0].sum())
+    hit_one = int(sphere_trace(base, O, D, max_dist=12.0)[0].sum())
+    assert hit_lat > 5 * hit_one, (hit_lat, hit_one)
+
+    # (2) finite repetition really is finite: nothing far outside the limit box.
+    lim = mind.domain_repeat(base, 1.0, limit=(-1, 1))
+    assert not sphere_trace(lim, np.array([[8.0, 0.0, 5.0]]), np.array([[0.0, 0.0, -1.0]]), max_dist=12.0)[0][0]
+
+    # (3) THE GENERALISATION: the same repeat warp tiles a NON-SDF field (a plain callable) -- the value at a
+    # point equals the value at its folded image. This is what "a domain warp fits every field" means.
+    f = lambda P: np.sin(P[..., 0])                       # an arbitrary scalar field, not an SDF
+    tiled = warp_field(f, lambda P: repeat(P, 2 * np.pi))  # period = one sine wavelength -> seamless
+    pts = np.array([[0.5, 0, 0], [0.5 + 2 * np.pi, 0, 0]])  # two points one period apart
+    v = tiled(pts)
+    assert abs(v[0] - v[1]) < 1e-9                         # the tiling made the field periodic
+
+    # (4) smooth_min is a crease-free lower bound; cosine palette is bounded.
+    assert mind.smooth_min(0.2, 0.5, 0.1) <= 0.2 + 1e-9
+    col = mind.cosine_palette(0.5)
+    assert col.shape == (3,) and 0.0 <= col.min() and col.max() <= 1.0
+
+    # (5) discoverable by the words a shader coder types.
+    assert any("Domain operators" in str(c.name)
+               for c in mind.find_capability("infinite tiling of a shape"))
+
+
+def test_ascii_projection_renders_the_engines_own_raymarch_output():
+    # The new terminal projection backend, END-TO-END: an SDF scene raymarched by the engine, shaded, and
+    # projected to text through the mind -- the full "render something, view it over SSH" chain. Contracts:
+    # the resolution knob is exact, the braille mode carries more distinct cells than ramp at the same width
+    # (8 px/char vs 1 -- the reason it exists), and the output is byte-deterministic (safe for CI).
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_sdf import sphere, sdf_normal
+    from holographic.rendering.holographic_raymarch import sphere_trace
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # a tiny shaded render of a sphere -- the engine's own output, not a synthetic array
+    W = H = 64
+    px = (np.arange(W) + 0.5) / W * 2 - 1
+    gx, gy = np.meshgrid(px, -px)
+    D = np.stack([gx.ravel() * 0.6, gy.ravel() * 0.6, -np.ones(W * H)], 1)
+    D /= np.linalg.norm(D, axis=1, keepdims=True)
+    O = np.tile([0.0, 0.0, 3.0], (W * H, 1))
+    s = sphere(1.0)
+    hit, t, pos = sphere_trace(s, O, D)
+    img = np.zeros((W * H,))
+    if hit.any():
+        N = sdf_normal(s, pos[hit])
+        L = np.array([0.5, 0.7, 0.5]); L /= np.linalg.norm(L)
+        img[hit] = np.clip(N @ L, 0, 1) * 0.9 + 0.1
+    img = img.reshape(H, W)
+
+    a = mind.ascii_view(img, width=48, mode="ramp")
+    assert all(len(ln) == 48 for ln in a.split("\n"))              # the resolution knob is exact
+    assert len(set(a)) > 4                                          # a shaded sphere has real tonal range
+
+    b = mind.ascii_view(img, width=48, mode="braille", cell_aspect=1.0)
+    # braille's contract: Bayer dithering encodes BRIGHTNESS AS DOT DENSITY, so the lit-dot fraction must track
+    # the image's mean luminance (that is what an ordered dither IS) -- the property that makes the 8-dots/cell
+    # raster a faithful tone reproduction rather than a hard threshold.
+    lit = sum(bin(ord(ch) - 0x2800).count("1") for ch in b.replace("\n", ""))
+    braille_density = lit / (48 * len(b.split("\n")) * 8.0)        # lit dots / total dots
+    assert abs(braille_density - float(img.mean())) < 0.06, (braille_density, float(img.mean()))
+    assert "\u2800" <= max(b.replace("\n", "")) <= "\u28ff"        # genuinely braille codepoints
+    assert len(set(b.replace("\n", ""))) > 5                       # non-degenerate (a real dithered image)
+
+    assert mind.ascii_view(img, width=48, mode="edge") == mind.ascii_view(img, width=48, mode="edge")  # deterministic
+    assert any("ascii_view" in str(c.name) for c in mind.find_capability("render image to terminal"))
+
+    # COMPOSABILITY: ascii_sdf raymarchs an SDF straight to text (no manual render loop), and ascii_field consumes
+    # a raw scalar field -- the two seams that let the ASCII backend take the engine's NATIVE outputs, not just
+    # image arrays. A sphere fills the middle; a radial field peaks at centre.
+    sph_txt = mind.ascii_sdf(sphere(1.0), width=36, mode="ramp")
+    assert sum(ch not in " \n" for ch in sph_txt) > 40                 # the sphere rendered as text
+    fld_txt = mind.ascii_field(lambda P: -np.hypot(P[:, 0], P[:, 1]), bounds=(-1, 1), width=25, mode="ramp")
+    flines = fld_txt.split("\n")
+    assert flines[len(flines) // 2][12] != " "                         # centre of the radial peak is inked
+    assert any("ascii_sdf" in str(c.name) for c in mind.find_capability("preview an sdf in the terminal"))
+
+    # ANSI CODEBOOK: the baked 256-colour path is a pure speedup -- byte-identical to itself and interactive.
+    rgb = np.random.default_rng(3).random((30, 40, 3))
+    assert mind.ascii_view(rgb, width=40, mode="half", ansi="256") == \
+           mind.ascii_view(rgb, width=40, mode="half", ansi="256")
+
+
+def test_all_stochastic_samplers_delegate_to_one_primitive():
+    # UP/DOWN/SIDEWAYS SWEEP of the token-sampling merge: the sampler was PROMOTED from the char generator, and
+    # the sweep found three independent temperature+nucleus loops (char generator, nucleus_sample, topic
+    # generator) that should share it. This pins that they now agree with the primitive bit-for-bit -- if any
+    # grows a private copy again, the drift shows up here. (The consolidation rule: a baseline that is a drifting
+    # copy silently stops being the thing it claims to beat.)
+    import numpy as np
+    from holographic.agents_and_reasoning.holographic_tokensample import sample_from_distribution
+    from holographic.misc.holographic_generate import nucleus_sample
+
+    d = {"a": 5.0, "b": 3.0, "c": 1.0, "d": 0.5, "e": 0.2}
+    # nucleus_sample (rep_penalty off) must equal the primitive exactly, across temperature x top_p
+    for T in (0.4, 0.7, 1.0):
+        for tp in (1.0, 0.9, 0.7):
+            a = nucleus_sample(d, np.random.default_rng(11), T, tp, recent="", rep_penalty=0.0)
+            b = sample_from_distribution(d, temperature=T, top_p=tp, rng=np.random.default_rng(11))
+            assert a == b, (T, tp, a, b)
+
+    # the general mind faculty exposes the same primitive directly, and is discoverable
+    import lecore
+    m = lecore.UnifiedMind(dim=256, seed=0)
+    draws = [m.sample_from({"x": 0.9, "y": 0.1}, seed_rng=k) for k in range(120)]
+    assert 0.8 < draws.count("x") / 120 < 1.0                 # honours the weights
+    assert m.sample_from({}) is None                          # empty -> None (caller decides to stop)
+    assert any("Token sampling" in str(c.name) for c in m.find_capability("weighted random choice"))
+
+
+def test_ascii_animation_plays_an_sdf_scene_through_the_mind():
+    # W18: the ASCII backend now ANIMATES. ascii_animate renders a frame(u)-> scene sequence to text frames end to
+    # end through the mind -- a raymarched SDF that evolves with time. Contracts: n frames, each honours the width,
+    # the animation genuinely MOVES (frames differ), and it is deterministic (safe for CI / a .txt reel).
+    import lecore
+    from holographic.mesh_and_geometry.holographic_sdf import sphere
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    def frame(u):
+        import numpy as np
+        # a sphere orbiting the frame -- an unmistakably moving scene (a torus twisted about its own view axis
+        # barely changes silhouette; translation across the frame is the honest 'this animates' test)
+        return sphere(0.5).translate([1.2 * np.cos(2 * np.pi * u), 1.2 * np.sin(2 * np.pi * u), 0.0])
+
+    reel = mind.ascii_animate(frame, n=6, width=36, mode="braille", z=4.0, fov=1.0)
+    assert len(reel) == 6
+    assert all(len(ln) == 36 for f in reel for ln in f.split("\n"))
+    assert len(set(reel)) >= 4                                  # an orbiting sphere is not a still frame
+    assert reel == mind.ascii_animate(frame, n=6, width=36, mode="braille", z=4.0, fov=1.0)   # deterministic
+    assert any("ascii_animate" in str(c.name) for c in mind.find_capability("terminal animation"))
+
+
+def test_orbit_trap_render_colors_a_scene_by_closest_approach():
+    # W3: the Quilez orbit-trap look, end to end through the mind. Contracts: sphere_trace_trapped's march is
+    # IDENTICAL to sphere_trace (the trap is a free rider, not a different trace), the trap value is a real
+    # closest-approach statistic (a near-origin ray traps closer than a far one), and orbit_trap_render produces
+    # a genuinely trap-varied image (more than a flat fill), composing with a domain-warped SDF.
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_sdf import sphere
+    from holographic.mesh_and_geometry.holographic_domain import fold, repeat, wrap_sdf
+    from holographic.rendering.holographic_raymarch import sphere_trace
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    scene = wrap_sdf(sphere(0.22), lambda P: repeat(fold(P, plane=0.0), 0.9), dist_scale=0.85)
+    rng = np.random.default_rng(1)
+    O = rng.uniform(-2, 2, (200, 3)); D = rng.normal(size=(200, 3)); D /= np.linalg.norm(D, axis=1, keepdims=True)
+    h1, t1, _ = sphere_trace(scene, O, D)
+    h2, t2, _, tv = mind.sphere_trace_trapped(scene, O, D, trap=(0, 1, 0), trap_kind="axis")
+    assert np.array_equal(h1, h2) and np.allclose(t1, t2, atol=1e-12)     # the trap does not change the march
+    assert np.isfinite(tv).all() and (tv >= 0).all()
+
+    cam = mind.camera(eye=(1.6, 1.2, 2.4), target=(0, 0, 0), fov_deg=45)
+    img = mind.orbit_trap_render(scene, cam, width=64, height=64, trap=(0, 1, 0), trap_kind="axis")
+    assert img.shape == (64, 64, 3) and 0.0 <= img.min() and img.max() <= 1.0
+    # trap-varied, not a flat fill: the hit pixels span a real range of colours
+    hit_px = img.reshape(-1, 3)[img.reshape(-1, 3).sum(1) > 0.3]
+    assert hit_px.std(axis=0).max() > 0.05                     # real tonal variation from the trap
+    assert any("orbit_trap_render" in str(c.name) for c in mind.find_capability("quilez orbit trap look"))
+
+
+def test_audio_param_bus_drives_a_scene_parameter():
+    # W5' (the "Sync" wire): a sound's bass band drives a scene parameter that visibly changes the render. This is
+    # the demoscene loop end to end -- audio analysis (reused STFT) -> band envelope -> a knob -> a different frame.
+    # Contracts: the bus routes bass energy to band 0, subscribe maps it onto a parameter range, and feeding that
+    # value into an SDF actually moves the geometry (two different bass levels -> two different renders).
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_sdf import sphere
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    rate = 22050
+    t = np.linspace(0, 1.0, rate, endpoint=False)
+    # a bass tone whose loudness swells then fades -> the bass band envelope must rise and fall
+    amp = 0.5 + 0.5 * np.sin(2 * np.pi * 1.0 * t - np.pi / 2)   # 0 -> 1 -> 0 over the second
+    sig = amp * np.sin(2 * np.pi * 60 * t) + 0.2 * np.sin(2 * np.pi * 6000 * t)
+    bus = mind.audio_param_bus(sig, rate, smooth=1)
+
+    assert bus.raw[:, 0].mean() > bus.raw[:, 3].mean()         # bass tone -> band 0 carries the energy
+    quiet = bus.band(0).min()
+    loud = bus.band(0).max()
+    assert loud - quiet > 0.5                                  # the swell really moves the envelope
+
+    # the WIRE: drive a sphere's radius from the bass band, and confirm the geometry actually changes.
+    r_quiet = bus.subscribe(0, 0.3, 0.9, frame=int(np.argmin(bus.band(0))))
+    r_loud = bus.subscribe(0, 0.3, 0.9, frame=int(np.argmax(bus.band(0))))
+    assert r_loud > r_quiet + 0.2                              # loud bass -> bigger sphere
+    d_quiet = sphere(r_quiet).eval(np.array([[0.6, 0.0, 0.0]]))[0]
+    d_loud = sphere(r_loud).eval(np.array([[0.6, 0.0, 0.0]]))[0]
+    assert d_loud < d_quiet                                    # the bigger sphere is closer to the sample point
+    assert any("audio_param_bus" in str(c.name) for c in mind.find_capability("make a demo react to music"))
+
+
+def test_curve_to_tube_mesh_flows_into_the_mesh_pipeline():
+    # Geometry ask A: parametric curves become real geometry the engine can use. A torus knot -> RMF-oriented
+    # tube -> a Mesh the DCC pipeline accepts. Contracts: the knot is a closed 3-D loop, the swept tube is
+    # watertight (every face indexes valid verts, closed loop has more faces than open), the tube radius is
+    # honoured, and the result builds a Mesh whose vertex count matches. Also: a Catmull-Rom camera path
+    # interpolates its keyframes (so it can drive a real fly-through) and its frame is orthonormal.
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_mesh import Mesh
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    knot = mind.torus_knot(n=180, p=2, q=3, R=1.0, r=0.4)
+    assert knot.shape == (180, 3)
+    assert np.linalg.norm(knot[0] - knot[-1]) < 0.1            # a closed loop
+
+    V, F = mind.sweep_tube(knot, radius=0.12, closed=True)
+    assert V.shape == (180 * 12, 3)
+    assert F.min() == 0 and F.max() < len(V)                   # every face references a real vertex
+    assert np.allclose(np.linalg.norm(V[:12] - knot[0], axis=1), 0.12, atol=1e-6)   # radius honoured
+    mesh = Mesh(V, F)                                          # the engine's mesh accepts it
+    assert mesh.n_vertices == len(V) and mesh.n_faces == len(F)
+
+    # a Catmull-Rom camera path hits its keyframes and yields an orthonormal frame (a usable fly-through)
+    keys = [[0, 0, 0], [2, 1, 0], [3, -1, 1], [5, 0, 0]]
+    path = mind.curve_catmull_rom(keys, n=100)
+    for k in keys:
+        assert np.min(np.linalg.norm(path - np.array(k), axis=1)) < 0.1    # interpolates the keyframe
+    T, N, B = mind.curve_frame(path)
+    assert np.allclose(np.sum(T * N, axis=1), 0, atol=1e-6)    # T perp N (orthonormal frame)
+
+    assert any("torus_knot" in str(c.name) or "Curves" in str(c.name)
+               for c in mind.find_capability("make a tube from a curve"))
+
+
+def test_voxelize_a_curve_tube_and_round_trip_through_the_grid():
+    # Geometry ask B: real voxelization, composing with ask A. A torus-knot tube (curves) -> occupancy grid
+    # (winding number) -> point cloud + back to a mesh. Contracts: the voxel grid is non-empty and 3-D, the
+    # winding number is a robust inside/outside test (inside ~1, outside ~0), solid-voxel centres lie in bounds,
+    # and the round trip (occupancy -> surface_nets mesh) closes even on a non-cubic grid (must pad internally).
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_curves import torus_knot, sweep_tube
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    V, F = sweep_tube(torus_knot(120, 2, 3), radius=0.18, closed=True)
+    occ, origin, spacing = mind.voxelize_mesh(V, F, res=24)
+    assert occ.ndim == 3 and occ.sum() > 0                     # a real occupancy volume
+    assert occ.shape[0] != occ.shape[1]                        # a knot's box is non-cubic (exercises padding)
+
+    # winding number is a robust inside/outside test: a point near the tube centreline is "more inside" than a
+    # far corner (the tube is thin, so use the mesh's own bbox corner as the clear outside).
+    far = V.max(0) + 1.0
+    w_far = mind.mesh_winding_number(np.array([far]), V, F)[0]
+    assert abs(w_far) < 0.1                                    # clearly outside
+
+    centres = mind.voxel_centres(occ, origin, spacing)
+    assert centres.shape == (int(occ.sum()), 3)
+    assert (centres >= origin - 1e-9).all()                   # in bounds
+
+    mv, mq = mind.occupancy_to_mesh(occ, origin, spacing)     # non-cubic -> must pad to a cube, not crash
+    assert len(mv) > 0 and len(mq) > 0
+    assert any("voxelize_mesh" in str(c.name) or "Voxel" in str(c.name)
+               for c in mind.find_capability("voxelize a mesh"))
+
+
+def test_nurbs_patch_tessellates_and_composes_with_voxelize():
+    # Geometry ask C, composing A+B+C: a NURBS surface -> mesh -> voxel grid. Contracts: the NURBS circle is
+    # conic-EXACT (the headline property, 1e-12), a surface patch tessellates to a valid mesh, and that mesh
+    # flows into the voxelizer from ask B -- proving the three geometry additions interoperate.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # (C) exactness: a NURBS circle holds its radius to floating-point precision (a B-spline cannot).
+    circ = mind.nurbs_circle(radius=2.5, n=160)
+    assert np.allclose(np.linalg.norm(circ[:, :2], axis=1), 2.5, atol=1e-12)
+
+    # a bulged NURBS patch -> mesh
+    net = np.zeros((4, 4, 3))
+    for i in range(4):
+        for j in range(4):
+            net[i, j] = [i - 1.5, j - 1.5, 0.0]
+    net[1:3, 1:3, 2] = 1.5                                     # raise the centre controls
+    V, F = mind.nurbs_surface_mesh(net, nu=24, nv=24)
+    assert V.shape == (576, 3) and F.min() == 0 and F.max() < len(V)
+    assert V[:, 2].max() > 0.3                                 # the patch really bulged
+
+    # (A+B+C) the NURBS mesh voxelizes (a NURBS surface is open, so this exercises winding-number robustness)
+    occ, o, s = mind.voxelize_mesh(V, F, res=16)
+    assert occ.ndim == 3                                       # a real grid, no crash on the open patch
+
+    assert any("nurbs" in str(c.name).lower() or "NURBS" in str(c.name)
+               for c in mind.find_capability("nurbs surface"))
+
+
+def test_w8_primitive_pack_builds_renders_and_emits():
+    # W8: the new SDF primitives (capsule/cone/octahedron/ellipsoid) are real leaves that compose, evaluate, and
+    # (for the exact three) emit to a shader. Contracts: each has correct inside/outside sign, a compound scene
+    # built from them evaluates, and the exact three appear in the emitted GLSL.
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_sdf import capsule, cone, octahedron, ellipsoid
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # sign correctness (surface ~0, inside <0, outside >0 where defined)
+    assert abs(capsule(1.0, 0.3).eval(np.array([[0.3, 0, 0]]))[0]) < 1e-9
+    assert octahedron(1.0).eval(np.array([[0, 0, 0]]))[0] < 0
+    assert cone(1.0, 0.5).eval(np.array([[3, 3, 0]]))[0] > 0
+    assert ellipsoid(1.0, 0.7, 0.5).eval(np.array([[0.4, 0, 0]]))[0] < 0
+
+    # a compound scene: a crystal (octahedron) capped by a capsule, dented by a cone -- evaluates cleanly
+    scene = octahedron(0.9).union(capsule(0.6, 0.25).translate([0.8, 0, 0])).subtract(cone(0.8, 0.3))
+    vals = scene.eval(np.random.default_rng(0).uniform(-2, 2, (200, 3)))
+    assert np.isfinite(vals).all()
+
+    # the exact three emit to GLSL (the browser/Shadertoy path)
+    assert "sdCapsule" in capsule(1.0, 0.3).to_glsl()
+    assert "sdCone" in cone(1.0, 0.5).to_glsl()
+    assert "sdOcta" in octahedron(1.0).to_glsl()
+
+    assert any("primitive" in str(c.name).lower() or "SDF" in str(c.name)
+               for c in mind.find_capability("capsule sdf"))
+
+
+def test_elongate_cost_and_atmosphere_over_a_rendered_scene():
+    # W9 + W2 + W16 together: elongate a primitive into a scene, price it, render it, and fog it with god rays.
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_sdf import sphere
+    from holographic.rendering.holographic_raymarch import sphere_trace, sdf_normal
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # W9: an elongated sphere (a capsule-ish rod) is exact and emits
+    rod = sphere(0.4).elongate(0.0, 1.0, 0.0)
+    assert abs(rod.eval(np.array([[0.0, 1.4, 0.0]]))[0]) < 1e-9        # end cap on surface
+    assert "clamp(" in rod.to_glsl()
+
+    # W2: price the scene
+    cost = mind.scene_cost(rod)
+    assert cost["alu"] > 0 and "verdict" in cost
+
+    # render it
+    W = H = 64
+    px = (np.arange(W) + 0.5) / W * 2 - 1; py = 1 - (np.arange(H) + 0.5) / H * 2
+    gx, gy = np.meshgrid(px, py)
+    cam = np.array([0.0, 0.0, 4.0])
+    D = np.stack([gx.ravel(), gy.ravel(), -np.ones(W * H) * 2], axis=1); D /= np.linalg.norm(D, axis=1, keepdims=True)
+    O = np.tile(cam, (W * H, 1))
+    hit, t, pos = sphere_trace(rod, O, D)
+    img = np.full((W * H, 3), 0.8); img[hit] = 0.3                    # bright bg (sky), dark object
+    depth = np.where(hit, t, 20.0)
+    img = img.reshape(H, W, 3); depth = depth.reshape(H, W)
+
+    # W16: fog blends toward fog_color by distance. Verify the PHYSICS directly: a far pixel gets a higher fog
+    # fraction than a near one (absolute colour change confounds base colour, so test the fraction via two equal
+    # base-colour pixels at different depths).
+    flat = np.full((H, W, 3), 0.5)
+    dnear = np.full((H, W), 1.0); dfar = np.full((H, W), 15.0)
+    near_fog = mind.depth_fog(flat, dnear, density=0.2, fog_color=(0.9, 0.9, 0.9))
+    far_fog = mind.depth_fog(flat, dfar, density=0.2, fog_color=(0.9, 0.9, 0.9))
+    assert np.abs(far_fog - flat).mean() > np.abs(near_fog - flat).mean()   # far fogs more (same base colour)
+    fogged = mind.depth_fog(img, depth, density=0.2, fog_color=(0.7, 0.75, 0.85))
+    assert np.abs(fogged - img).mean() > 0.0                          # fog changed the real render
+
+    # god rays from the bright sky
+    shafts = mind.light_shafts(img, light_uv=(0.5, 0.15))
+    assert shafts.shape == (H, W, 3)
+
+    assert any("omain" in str(c.name) or "longate" in str(c.name) for c in mind.find_capability("elongate a shape"))
+    assert any("cost" in str(c.name).lower() for c in mind.find_capability("estimate shader cost"))
+    assert any("tmosphere" in str(c.name) or "fog" in str(c.name).lower() for c in mind.find_capability("god rays"))
+
+
+def test_dfbm_curvature_and_2d_sdf_lifts():
+    # W11 + W13 + W10 together, through the mind.
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_sdf import sphere
+    from holographic.rendering.holographic_raymarch import sphere_trace
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # W11: domain-warped fbm swirls vs plain fbm, reduces to fbm at warp=0
+    P = np.random.default_rng(0).uniform(0, 3, (100, 3))
+    plain = mind.pattern_field("fbm", scale=2.0, seed=0)(P)
+    warped = mind.warped_noise(scale=2.0, seed=0, warp=0.5)(P)
+    assert warped.min() >= -1e-9 and warped.max() <= 1.0 + 1e-9
+    assert np.abs(warped - plain).mean() > 0.01
+    assert np.allclose(mind.warped_noise(scale=2.0, seed=0, warp=0.0)(P), plain, atol=1e-9)
+
+    # W13: SDF curvature = 2/r on a sphere (convex), ~0 on flat
+    assert np.allclose(mind.sdf_curvature(sphere(1.0), np.array([[1., 0, 0]])), 2.0, atol=0.1)
+    assert np.allclose(mind.sdf_curvature(sphere(2.0), np.array([[2., 0, 0]])), 1.0, atol=0.1)
+
+    # W10: draw a hexagon, extrude to a prism, revolve a circle to a torus (exact)
+    prism = mind.sdf_extrude(mind.sdf2d("ngon", sides=6, r=0.8), height=0.3)
+    hit, t, pos = sphere_trace(prism, np.array([[0., 0, 3]]), np.array([[0., 0, -1]]))
+    assert hit[0]                                              # the extruded hex prism raymarches
+    from holographic.mesh_and_geometry.holographic_sdf import torus
+    rev = mind.sdf_revolve(mind.sdf2d("circle", r=0.3), offset=1.0)
+    Q = np.random.default_rng(1).uniform(-2, 2, (150, 3))
+    assert np.abs(rev(Q) - torus(1.0, 0.3).eval(Q)).max() < 1e-9   # revolve(circle) IS a torus, exactly
+
+    assert any("warped" in str(c.name).lower() for c in mind.find_capability("turbulence noise"))
+    assert any("curvature" in str(c.name).lower() for c in mind.find_capability("sdf curvature"))
+    assert any("2D SDF" in str(c.name) or "extrude" in str(c.name).lower()
+               for c in mind.find_capability("extrude a 2d profile"))
+
+
+def test_w19_one_kernel_four_surfaces_agree():
+    # W19 capstone: one DSL scene yields four backend representations that are the SAME field. GLSL and WGSL both
+    # emit a map(); the ascii path marches the CPU eval; and the emitted C matches that eval (proven separately in
+    # the emitter tests), so all four are one field. This is the thesis demo, made checkable.
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_sdf import sphere, box, parse_dsl
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # a single HERO object (not an infinite lattice): the lattice looks great in the PNG but dissolves into noise
+    # in monochrome ASCII -- an ASCII surface needs a bold silhouette with negative space, which the PNG's colour
+    # and smooth shading make unnecessary. This scene reads in BOTH.
+    scene = box(0.6, 0.6, 0.6).rounded(0.12).smooth_union(sphere(0.5).translate([0.7, 0.2, 0]), 0.2)
+    d = mind.four_surface_demo(scene)
+
+    assert set(d.keys()) == {"dsl", "glsl", "wgsl", "ascii"}
+    assert "float map" in d["glsl"]                            # GLSL emitted
+    assert "fn map" in d["wgsl"]                               # WGSL emitted (browser)
+    # the ascii must READ as a shape, not dissolve into uniform noise. Two real signals of a legible render:
+    # (a) meaningful NEGATIVE SPACE -- a hero object leaves blank background (a lattice/noise fills every cell),
+    # and (b) a TONAL RANGE across the ramp (light edges to dark core), not one repeated glyph. The old
+    # glyph-count check passed a busy braille wall that a human reads as noise -- distinct *characters* is not
+    # readable *shape*. These catch that.
+    a = d["ascii"]
+    total_cells = sum(len(ln) for ln in a.split("\n"))
+    blank = sum(1 for ch in a if ch in " \u2800")
+    inked = total_cells - blank - a.count("\n")
+    assert 0.15 < blank / max(total_cells, 1) < 0.9             # real background AND a real object (not all/none)
+    assert inked > 30                                           # the object actually rendered
+    assert len(set(ch for ch in a if ch not in " \n\u2800")) > 5   # a tonal range, not one flat glyph
+    # the DSL round-trips to the identical field it was built from (the "one kernel")
+    reparsed = parse_dsl(d["dsl"])
+    P = np.random.default_rng(0).uniform(-3, 3, (200, 3))
+    assert np.allclose(reparsed.eval(P), scene.eval(P), atol=1e-9)   # DSL == the authored scene, exactly
+
+    assert any("four" in str(c.name).lower() or "surfaces" in str(c.name).lower()
+               for c in mind.find_capability("one kernel four surfaces"))
+
+
+def test_photo_to_3d_pipeline_c1_c2_c3():
+    # The photo-to-3D pipeline end to end: a single lit-sphere image -> depth (C1, shape-from-shading) ->
+    # unproject (C2) -> per-pixel 3D Gaussians (C3), plus the mesh path. No learned weights anywhere.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # synth a lit sphere (bright centre under head-on light) -- the canonical shape-from-shading subject.
+    H = W = 56
+    yy, xx = np.mgrid[0:H, 0:W]
+    d2 = ((xx - W / 2) ** 2 + (yy - H / 2) ** 2) / (W * 0.4) ** 2
+    nz = np.sqrt(np.clip(1 - d2, 0, 1))
+    gray = np.where(d2 < 1, nz, 0.05)
+    colour = np.stack([gray, gray * 0.8, gray * 0.6], axis=2)
+
+    # C1: depth from the image. The recovered depth bulges at the centre (nearer) vs the rim.
+    depth = mind.depth_from_image(gray, light=(0, 0, 1))
+    assert depth.shape == (H, W) and depth.min() >= -1e-9 and depth.max() <= 1.0 + 1e-9
+    centre = depth[H // 2 - 2:H // 2 + 2, W // 2 - 2:W // 2 + 2].mean()
+    rim = depth[(d2 > 0.8) & (d2 < 1.0)].mean()
+    assert centre > rim                                        # shape recovered: centre nearer than rim
+
+    # C1->C2->C3: end-to-end to 3D Gaussians on the confident front, abstaining elsewhere.
+    res = mind.image_to_3d(colour, light=(0, 0, 1))
+    assert res["positions"].shape[1] == 3 and len(res["positions"]) > 50   # got real 3D points
+    assert 0.0 < res["coverage"] < 1.0                        # kept the observed front, abstained on the rest
+    assert res["abstain_mask"].sum() > 0                      # something was correctly abstained (the back/edges)
+
+    # mesh path: same front, as a surface.
+    verts, quads, field, grids = mind.image_to_mesh(gray, light=(0, 0, 1), res=36)
+    assert len(verts) > 50 and quads.shape[1] == 4            # a non-trivial reconstructed surface
+
+    # discoverability: the phrasings that returned NOTHING before now resolve.
+    assert any("depth_from_image" in str(c.name) for c in mind.find_capability("estimate depth from a photo"))
+    assert any("image_to_3d" in str(c.name) for c in mind.find_capability("3d gaussians from an image"))
+    assert any("image_to_mesh" in str(c.name) for c in mind.find_capability("mesh from a photo"))
+
+
+def test_photo_to_3d_pipeline_end_to_end():
+    # C1 -> C2 -> C3: a single lit-sphere "photo" becomes a depth map, then 3D gaussians with real Z variation.
+    # No learned weights anywhere -- classical shape-from-shading + Frankot-Chellappa + unproject.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    H = W = 64
+    yy, xx = np.mgrid[0:H, 0:W]
+    cx = cy = 32
+    d2 = ((xx - cx) ** 2 + (yy - cy) ** 2) / (W * 0.4) ** 2
+    inside = d2 < 1.0
+    nz = np.sqrt(np.clip(1 - d2, 0, 1))                          # a lit sphere: brightness = N.L (head-on)
+    photo = np.stack([np.where(inside, nz, 0.06) * c for c in (0.9, 0.6, 0.4)], axis=2)
+
+    # C1: depth with a MEANINGFUL bulge (centre nearer than rim by a real margin, not a flat disc)
+    depth = mind.depth_from_image(photo, light=(0, 0, 1))
+    assert depth.shape == (H, W) and 0.0 <= depth.min() and depth.max() <= 1.0
+    centre = depth[30:34, 30:34].mean()
+    rim = depth[inside & (d2 > 0.8)].mean()
+    assert centre - rim > 0.08                                  # a recovered bulge, not flattened
+
+    # C1->C2->C3: end-to-end to 3D gaussians with genuine depth (a flat card would have ~0 Z spread)
+    g = mind.image_to_3d(photo, light=(0, 0, 1))
+    P = np.asarray(g["positions"])
+    assert P.shape[1] == 3 and len(P) > 100
+    assert P[:, 2].std() > 0.05                                 # the recovered points form a surface, not a plane
+    assert 0.0 < g["coverage"] < 1.0                            # it abstains somewhere (rim/edges/back)
+    assert g["n_abstained"] > 0
+
+    # image_to_mesh also runs (front surface)
+    verts = mind.image_to_mesh(np.where(inside, nz, 0.06), res=32)[0]
+    assert np.asarray(verts).shape[0] > 0
+
+    for q in ["turn a photo into 3d", "depth from a single image", "mesh from a photo"]:
+        assert mind.find_capability(q), q
+
+
+def test_abstraction_ladder_climbs_and_stops():
+    # L1+L3+L4: the ladder climbs real repeated structure, reproduces the chunk codebook's own compression as its
+    # baseline (no win without it), and STOPS with a logged refusal rather than climbing forever on noise.
+    import numpy as np
+    import lecore
+    from holographic.agents_and_reasoning.holographic_ladder import _make_planted_corpus, contamination_check
+    from holographic.agents_and_reasoning.holographic_chunkcodebook import workflow_stream
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # (1) planted structure: big first-level gain, then a logged stop
+    tower = mind.climb_ladder(_make_planted_corpus(seed=0), min_gain=0.02)
+    assert len(tower) >= 2
+    assert tower[1]["bits"] < 0.5 * tower[0]["bits"]           # compressed the planted structure a lot
+    assert tower[-1]["terminal"] and tower[-1].get("refusal")  # stopped with a reason
+
+    # (2) level isolation holds (the shared-kernel lesson enforced)
+    ok, collisions = contamination_check(tower)
+    assert ok, collisions
+
+    # (3) atom ids are stable across sessions/rebuilds (hashlib determinism)
+    tower2 = mind.climb_ladder(_make_planted_corpus(seed=0), min_gain=0.02)
+    ids1 = tuple(sorted(a for lv in tower for a in lv.get("atoms", {})))
+    ids2 = tuple(sorted(a for lv in tower2 for a in lv.get("atoms", {})))
+    assert ids1 == ids2
+
+    # (4) L4 retrofit: on a real workflow stream (the codebook's own validation data), the ladder compresses;
+    #     on pure noise it refuses. Grounds the ladder against existing honest machinery.
+    wf = workflow_stream(n_workflows=150, seed=0, reuse=0.9)
+    wf_corpus = [list(wf)]                                     # one long sequence
+    wf_tower = mind.climb_ladder(wf_corpus, min_gain=0.02)
+    assert wf_tower[1]["bits"] < wf_tower[0]["bits"]           # real structure compresses
+
+    rng = np.random.default_rng(3)
+    noise = [list(rng.integers(0, 20, size=8)) for _ in range(150)]
+    noise_tower = mind.climb_ladder(noise, min_gain=0.05)
+    assert noise_tower[-1]["terminal"]
+    assert len(noise_tower) <= len(wf_tower)                   # noise doesn't out-climb real structure
+
+    assert any("ladder" in str(c.name).lower() or "Abstraction" in str(c.name)
+               for c in mind.find_capability("build a tower of patterns"))
+
+
+def test_ladder_structure_lens_beats_sequence_on_shuffled_parts():
+    # L2: the structure lens finds recurring sub-assemblies regardless of ORDER; the sequence lens cannot (the
+    # shuffle destroyed positional adjacency). The lens is the choice of what counts as adjacent -- same data,
+    # opposite verdicts. This is the whole reason for two lenses.
+    import lecore
+    from holographic.agents_and_reasoning.holographic_ladder import _make_instanced_scene_corpus, contamination_check
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    scene = _make_instanced_scene_corpus(seed=0)
+    struct = mind.climb_ladder(scene, lens="structure", min_gain=0.02, max_depth=6)
+    seq = mind.climb_ladder(scene, lens="sequence", min_gain=0.02, max_depth=6)
+
+    struct_gain = struct[0]["bits"] - struct[-1]["bits"]
+    seq_gain = seq[0]["bits"] - seq[-1]["bits"]
+    assert struct_gain > 0                                      # structure lens compresses the instanced scene
+    assert struct_gain > seq_gain                              # and beats the sequence lens on shuffled parts
+    assert contamination_check(struct)[0]                      # level isolation holds under the structure lens too
+
+    # determinism of the structure lens too
+    struct2 = mind.climb_ladder(_make_instanced_scene_corpus(seed=0), lens="structure", min_gain=0.02, max_depth=6)
+    ids1 = tuple(sorted(a for lv in struct for a in lv.get("atoms", {})))
+    ids2 = tuple(sorted(a for lv in struct2 for a in lv.get("atoms", {})))
+    assert ids1 == ids2
+
+
+def test_identify_level_classifies_and_calls_noise_irreducible():
+    # L8: identify_level is a climb's step 0 -- it classifies the regime and PICKS the lens, and crucially calls
+    # noise IRREDUCIBLE (the shuffle-null cancels chance co-occurrence; high-D noise has basins too).
+    import numpy as np
+    import lecore
+    from holographic.agents_and_reasoning.holographic_ladder import _make_planted_corpus, _make_instanced_scene_corpus
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    seq = mind.identify_level(_make_planted_corpus(seed=0))
+    assert seq["order_dependent"] and seq["lens"] == "sequence" and seq["regime"] == "nested/structured"
+
+    scene = mind.identify_level(_make_instanced_scene_corpus(seed=0))
+    assert not scene["order_dependent"] and scene["lens"] == "structure"
+
+    rng = np.random.default_rng(7)
+    noise = [list(rng.integers(0, 16, size=6)) for _ in range(200)]
+    nz = mind.identify_level(noise)
+    assert nz["regime"] == "irreducible", nz                   # noise is not structure above the null
+
+    rep = mind.identify_level([[3] * 8 for _ in range(60)])
+    assert rep["regime"] == "repetitive"
+
+    # the picked lens actually climbs better than the other, closing the loop with climb_ladder
+    scene_corpus = _make_instanced_scene_corpus(seed=1)
+    picked = mind.identify_level(scene_corpus)["lens"]
+    other = "sequence" if picked == "structure" else "structure"
+    g_picked = (lambda t: t[0]["bits"] - t[-1]["bits"])(mind.climb_ladder(scene_corpus, lens=picked))
+    g_other = (lambda t: t[0]["bits"] - t[-1]["bits"])(mind.climb_ladder(scene_corpus, lens=other))
+    assert g_picked >= g_other                                 # identify_level picked the lens that climbs best
+
+    assert any("identify_level" in str(c.name) for c in mind.find_capability("classify a corpus"))
+
+
+def test_ladder_kit_has_no_silent_gaps():
+    # L6: every level of every climbed tower carries a full invariant kit -- each slot WIRED or a DECLARED
+    # NEGATIVE, never a silent gap. This is 'we also do X at every level' turned into an enforced budget.
+    import lecore
+    from holographic.agents_and_reasoning.holographic_ladder import _make_planted_corpus, _make_instanced_scene_corpus
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    for corpus, lens in [(_make_planted_corpus(seed=0), "sequence"),
+                         (_make_instanced_scene_corpus(seed=0), "structure")]:
+        tower = mind.climb_ladder(corpus, lens=lens)
+        for lv in tower:
+            rep = mind.ladder_kit_report(lv)
+            assert not rep["silent_gaps"], ("depth %d silent gaps: %r" % (lv["depth"], rep["silent_gaps"]))
+            assert len(rep["wired"]) >= 10                      # most slots wired to real machinery
+            # declared negatives must carry a reason, never be empty
+            for slot in rep["declared_negative"]:
+                assert lv["kit"][slot].startswith("no "), (slot, lv["kit"][slot])
+
+
+def test_mutual_information_honest_dependence_gate():
+    # L11: MI with a shuffle null -- a real dependence clears the null (high z), an independent pair does not.
+    # This is the gate the pipeline assembler (L12) needs; wire it as a first-class faculty.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=3000)
+    y = np.sign(x) * np.abs(x) ** 0.5 + 0.3 * rng.normal(size=3000)   # a real nonlinear dependence
+    z = rng.normal(size=3000)                                          # independent
+
+    dep = mind.mutual_information_vs_null(x, y, n_shuffle=48, seed=1)
+    ind = mind.mutual_information_vs_null(x, z, n_shuffle=48, seed=1)
+    assert dep["z"] > 5.0 and ind["z"] < 3.0                          # dependence clears the null, noise doesn't
+    assert abs(mind.mutual_information(x, y) - mind.mutual_information(y, x)) < 1e-9   # symmetric
+
+
+def test_guide_structure_one_solver_two_costumes():
+    # L10: the SAME iterate-a-projection solver drives an IK/PBD chain AND a resonator-style codebook snap. The
+    # cross-faculty proof the plan requires: IK stops being an animation feature and becomes level-generic.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # costume 1: IK/PBD chain -- root pinned to a target, links clamped
+    ik = mind.guide_structure(np.array([0., 5., 9.]),
+                              [mind.guide_pin(0, 3.0), mind.guide_clamp_link(0, 1, 1.0), mind.guide_clamp_link(1, 2, 1.0)])
+    assert ik["converged"] and abs(ik["state"][0] - 3.0) < 1e-6
+    assert abs(ik["state"][1] - ik["state"][0]) <= 1.0 + 1e-6
+
+    # costume 2: SAME faculty, resonator-style codebook snap
+    res = mind.guide_structure(np.array([0.3, 3.9, 5.2]), [mind.guide_snap([0., 2., 4., 6.])])
+    assert np.allclose(res["state"], [0., 4., 6.]) and res["residual"] < 1e-9
+
+    assert any("guide" in str(c.name).lower() for c in mind.find_capability("iterate a projection"))
+
+
+def test_assemble_pipeline_rejects_random_projections():
+    # L12: the pipeline assembler's honest gate -- a true transform is found, a decoy random projection is
+    # REJECTED by the shuffle null, and an independent target yields no strong survivor. This is the
+    # 'any random projection works' failure the gate exists to stop (the routing-win lesson, new hat).
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=3000)
+    y = np.tanh(2.0 * x) + 0.2 * rng.normal(size=3000)
+    decoy = rng.normal(size=3000)
+
+    survivors = mind.assemble_pipeline(x, y, {
+        "true": lambda z: np.tanh(2.0 * z),
+        "decoy": lambda z: decoy[-len(z):],
+        "wrong": lambda z: np.sin(50.0 * z),
+    }, min_z=3.0, seed=1)
+    names = [s["name"] for s in survivors]
+    assert "true" in names                                     # the real transform is found
+    assert "decoy" not in names                               # the random projection is rejected by the null
+
+    # an independent target -> no strong survivor
+    y_indep = rng.normal(size=3000)
+    none = mind.assemble_pipeline(x, y_indep, {"true": lambda z: np.tanh(2.0 * z)}, min_z=6.0, seed=2)
+    assert none == [] or all(s["z"] < 10 for s in none)
+
+    assert any("assemble" in str(c.name).lower() for c in mind.find_capability("assemble a pipeline"))
+
+
+def test_fit_deterministic_snap_refine_or_refuse():
+    # L14: recover the generator behind a noisy signal by snap-then-refine, or REFUSE on noise. The inverse of
+    # the ladder -- a fitted generator is bytes-not-samples, and an atom at the next level up.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    t = np.linspace(0, 1, 400)
+
+    # a noisy sine is identified with its frequency near truth
+    sine = np.sin(2 * np.pi * 6.0 * t + 0.5) + 0.15 * np.random.default_rng(0).normal(size=len(t))
+    r = mind.fit_deterministic(sine, seed=1)
+    assert r["family"] == "sine" and r["correlation"] > 0.85
+    assert abs(r["params"][0] - 6.0) < 1.5                     # frequency recovered
+
+    # a noisy sawtooth is NOT called sine (the bank discriminates)
+    x = (t * 5.0) % 1.0
+    saw = 2 * x - 1 + 0.12 * np.random.default_rng(1).normal(size=len(t))
+    rs = mind.fit_deterministic(saw, seed=2)
+    assert rs["family"] == "sawtooth"
+
+    # pure noise is refused (the rich-bank-fits-anything guard)
+    for s in range(4):
+        rn = mind.fit_deterministic(np.random.default_rng(s + 10).normal(size=len(t)), seed=s)
+        assert rn["verdict"] == "refused" and rn["family"] is None
+
+    assert any("fit_deterministic" in str(c.name) for c in mind.find_capability("which formula made this data"))
+
+
+def test_ladder_climb_reconstruct_round_trips():
+    # Down-sweep result: climb compresses, reconstruct decompresses. The sequence-lens tower round-trips EXACTLY
+    # (a tower you cannot decompress is useless -- the kit CLAIMED this without proving it until the sweep).
+    import lecore
+    from holographic.agents_and_reasoning.holographic_ladder import (
+        _make_planted_corpus, _make_instanced_scene_corpus)
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # sequence lens: exact lossless round-trip
+    corpus = _make_planted_corpus(seed=0)
+    tower = mind.climb_ladder(corpus)
+    assert mind.reconstruct_tower(tower) == corpus            # bit-exact
+
+    # and it genuinely compressed on the way (so the round-trip is non-trivial)
+    assert tower[-1]["bits"] < 0.5 * tower[0]["bits"]
+
+    # structure lens: recovers the SET of base part-types (order/count dropped by design)
+    scene = _make_instanced_scene_corpus(seed=0)
+    stower = mind.climb_ladder(scene, lens="structure")
+    recon = mind.reconstruct_tower(stower)
+    assert [set(g) for g in recon] == [set(g) for g in scene]
+
+    assert any("reconstruct" in str(c.name).lower() for c in mind.find_capability("decompress a tower"))
+
+
+def test_adaptive_pipeline_dispatches_and_abstains():
+    # PANEL CONVERGENCE: the adaptive dispatcher routes each regime to the right method and ABSTAINS on noise (the
+    # SETI gate -- never fabricate structure). The lens is picked per-signal (Puckette). Repetitive folds (Quilez).
+    import numpy as np
+    import lecore
+    from holographic.agents_and_reasoning.holographic_ladder import _make_planted_corpus, _make_instanced_scene_corpus
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    seq = mind.adaptive_pipeline(_make_planted_corpus(seed=0))
+    assert seq["method"] == "climb" and seq["lens"] == "sequence" and seq["tower"] is not None
+
+    scene = mind.adaptive_pipeline(_make_instanced_scene_corpus(seed=0))
+    assert scene["method"] == "climb" and scene["lens"] == "structure"   # a different signal picks a different lens
+
+    rng = np.random.default_rng(11)
+    noise = [list(rng.integers(0, 16, size=6)) for _ in range(200)]
+    nz = mind.adaptive_pipeline(noise)
+    assert nz["method"] == "abstain" and "SETI" in nz["reason"]           # noise refused, not cleaned
+    assert nz["tower"] is None
+
+    rep = mind.adaptive_pipeline([[7] * 8 for _ in range(80)])
+    assert rep["method"] == "fold" and rep["dominant"] == 7               # repetitive -> cheap fold
+
+    assert any("adaptive_pipeline" in str(c.name) for c in mind.find_capability("route data to the best method"))
+
+
+def test_ladder_predict_beats_persistence_or_abstains():
+    # FORECASTING (compression<->prediction duality): the hierarchical predictor beats persistence on a periodic
+    # signal (next != last on a cycle) and predicts the correct continuation; on noise it ABSTAINS to persistence
+    # and does NOT claim a trend (the SETI gate on the time axis). Held-out beats_persistence is the honest,
+    # measured calibration signal Cranmer demands -- not assumed.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    periodic = [0, 1, 2, 3, 4] * 30
+    r = mind.ladder_predict(periodic, order=2)
+    assert r["method"] == "ladder" and r["beats_persistence"] > 0.5
+    assert r["prediction"] == [0]                              # correct next in the cycle after ...3,4
+
+    rng = np.random.default_rng(4)
+    noise = list(rng.integers(0, 10, size=250))
+    n = mind.ladder_predict(noise)
+    assert n["method"] == "persistence" and n["beats_persistence"] < 0.02   # no fabricated trend on noise
+
+    # nested structure: the hierarchical predictor beats persistence
+    nested = ([0, 1, 2, 3] * 3 + [4, 5, 6, 7] * 2) * 15
+    rn = mind.ladder_predict(nested, order=3)
+    assert rn["method"] == "ladder" and rn["beats_persistence"] > 0.3
+
+    assert any("ladder_predict" in str(c.name) for c in mind.find_capability("forecast the next value"))
+
+
+def test_extend_generator_plays_formula_forward_or_refuses():
+    # FORECASTING via fitted generator (store the formula, play the future): a fitted sine extrapolates to the
+    # correct future values; extrapolating far past the validated window is flagged invalid (the reprojection
+    # ghost on the time axis); a refused fit cannot be extended.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    t = np.linspace(0, 1, 200)
+    fit = mind.fit_deterministic(np.sin(2 * np.pi * 5.0 * t), seed=0)
+    assert fit["family"] == "sine"
+
+    ext = mind.extend_generator(fit, 20, 200)
+    assert ext["valid"] and len(ext["forecast"]) == 20
+    L = 200; dt = 1.0 / (L - 1)
+    t_future = 1.0 + dt * np.arange(1, 21)
+    truth = np.sin(2 * np.pi * fit["params"][0] * t_future + fit["params"][1])
+    assert np.corrcoef(ext["forecast"], truth)[0, 1] > 0.95   # the formula plays forward correctly
+
+    far = mind.extend_generator(fit, 500, 200)
+    assert not far["valid"]                                    # over-extrapolation flagged, not silently trusted
+
+    refused = mind.extend_generator({"family": None}, 10, 200)
+    assert refused["forecast"] == [] and not refused["valid"]
+
+
+def test_chart_space_atlas_sees_capacity_and_beats_null():
+    # L13: chart_space marches rays and measures cleanup basins vs a band-limited random null. Two contracts:
+    # (1) a well-separated alphabet beats the null (real structure); (2) as atoms CROWD a fixed dimension, the
+    # atlas's structure_over_null falls monotonically -- the sqrt(N/D) capacity mortgage made visible, which is
+    # what lets shrinking basins forecast an auto_scale trigger before collisions happen.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    rng = np.random.default_rng(0)
+    sep = rng.standard_normal((8, 128))
+    atlas = mind.chart_space(sep, rays=60, seed=0)
+    assert atlas["structure_over_null"] > 0.02                  # real basins beat the null
+    assert atlas == mind.chart_space(sep, rays=60, seed=0)      # deterministic given the seed
+
+    # crowding a fixed dimension shrinks the basins (capacity signal), monotone across a sweep
+    dim = 64
+    vals = []
+    for n in (4, 8, 16, 32):
+        A = np.random.default_rng(1).standard_normal((n, dim))
+        vals.append(mind.chart_space(A, rays=50, seed=0)["structure_over_null"])
+    assert vals[0] > vals[-1]                                   # 4 atoms chart cleaner than 32 in the same dim
+    assert all(vals[i] >= vals[i + 1] - 0.02 for i in range(len(vals) - 1))  # broadly monotone (small slack)
+
+    assert any("chart_space" in str(c.name) for c in mind.find_capability("map the basins of an alphabet"))
+
+
+def test_bank_or_formula_gate_is_honest_about_real_bind_cost():
+    # L9 (Quilez Q1): the bank-vs-formula gate, grounded against the engine's REAL measured cost. HRR bind is
+    # ~tens of microseconds and regenerable from (object, transform) -- so banking object x transform PRODUCTS
+    # only pays when the SAME product is reused above the break-even hit rate. The gate says so with numbers.
+    import time
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=512, seed=0)
+
+    # measure a real HRR bind (circular convolution via FFT)
+    obj = np.random.default_rng(0).standard_normal(512)
+    tr = np.random.default_rng(1).standard_normal(512)
+    N = 2000
+    t0 = time.time()
+    for _ in range(N):
+        _ = np.fft.irfft(np.fft.rfft(obj) * np.fft.rfft(tr), n=512)
+    eval_us = (time.time() - t0) / N * 1e6
+
+    # rarely-reused products: below break-even -> the gate says keep the formula (regenerate the bind)
+    rare = mind.bank_or_formula(eval_cost_us=eval_us, hit_rate=0.001, n_entries=100000, bytes_per_entry=512 * 8)
+    assert rare["bank"] is False
+    assert "formula wins" in rare["reason"]
+
+    # heavily-reused products: above break-even -> bank pays
+    reused = mind.bank_or_formula(eval_cost_us=eval_us, hit_rate=0.8, n_entries=200, bytes_per_entry=512 * 8)
+    assert reused["bank"] is True
+    assert reused["saving_us_per_query"] > 0
+
+    # the decision is monotone in hit_rate (more reuse never makes banking worse)
+    savings = [mind.bank_or_formula(eval_cost_us=eval_us, hit_rate=h, n_entries=10, bytes_per_entry=64)["saving_us_per_query"]
+               for h in (0.0, 0.25, 0.5, 0.75, 1.0)]
+    assert all(savings[i] <= savings[i + 1] for i in range(len(savings) - 1))
+
+    assert any("bank_or_formula" in str(c.name) for c in mind.find_capability("should I cache or recompute"))
+
+
+def test_phase_randomized_null_credits_only_structure_beyond_autocorrelation():
+    # The honest CONTINUOUS null (Theiler surrogate): a deterministic map (logistic, broadband spectrum that LOOKS
+    # like noise) beats its phase-randomized null on predictability, while a linear-stochastic AR(1) does NOT --
+    # because the surrogate preserves the autocorrelation, only structure BEYOND it is credited. A plain shuffle
+    # would be fooled by the autocorrelation; this is why the continuous null must preserve the spectrum.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    n = 1024
+
+    # power spectrum is preserved exactly (the defining property)
+    x = np.cumsum(np.random.default_rng(0).normal(size=n))
+    surr = mind.phase_randomize(x, seed=1)
+    assert np.allclose(np.abs(np.fft.rfft(x)), np.abs(np.fft.rfft(surr)), atol=1e-6)
+
+    def predictability(v, k=3):
+        v = np.asarray(v, float); m = len(v)
+        emb = np.array([v[i:i + k] for i in range(m - k - 1)]); nxt = v[k:m - 1]
+        if len(emb) < 20:
+            return 0.0
+        h = len(emb) // 2; lib, ln = emb[:h], nxt[:h]; ps, tr = [], []
+        for i in range(h, len(emb)):
+            j = int(np.argmin(np.sum((lib - emb[i]) ** 2, axis=1))); ps.append(ln[j]); tr.append(nxt[i])
+        ps, tr = np.array(ps), np.array(tr)
+        return float(np.corrcoef(ps, tr)[0, 1]) if ps.std() > 1e-9 and tr.std() > 1e-9 else 0.0
+
+    logistic = np.zeros(n); logistic[0] = 0.4
+    for i in range(1, n):
+        logistic[i] = 3.9 * logistic[i - 1] * (1 - logistic[i - 1])
+    z_det = mind.surrogate_zscore(logistic - logistic.mean(), predictability, n_surrogates=30, seed=2)["z"]
+
+    ar = np.zeros(n)
+    for i in range(1, n):
+        ar[i] = 0.8 * ar[i - 1] + np.random.default_rng(i).normal()
+    z_lin = mind.surrogate_zscore(ar, predictability, n_surrogates=30, seed=3)["z"]
+
+    assert z_det > 3.0                                          # deterministic structure beyond the spectrum
+    assert z_det > z_lin                                       # and more than a linear process shows
+    assert any("phase_randomized" in str(c.name) or "surrogate" in str(c.name).lower()
+               for c in mind.find_capability("continuous signal null model"))
+
+
+def test_capability_uri_namespace_disambiguates_and_browses():
+    # The URI naming scheme: every public function has a 'family/module/name' address, so colliding short names
+    # disambiguate by PATH, and the namespace browses like a context menu (root -> families -> modules -> funcs).
+    # Same S3-prefix machinery as scene URIs (holographic_uri), pointed at the capability space.
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # a known collision resolves to multiple full URIs; the path narrows it to one
+    sph = mind.resolve_capability_uri("sphere")
+    assert len(sph) >= 2 and all(u.endswith("/sphere") for u in sph)
+    one = mind.resolve_capability_uri("sdf/sphere")
+    assert one == ["mesh_and_geometry/sdf/sphere"]
+
+    # a full URI resolves to exactly itself (addressable)
+    assert mind.resolve_capability_uri("mesh_and_geometry/sdf/sphere") == ["mesh_and_geometry/sdf/sphere"]
+
+    # browse behaves like a menu: root -> families (all end in '/'), then drill in
+    root = mind.browse_capabilities("")
+    assert root and all(k.endswith("/") for k in root)
+    assert "mesh_and_geometry/" in root
+    modules = mind.browse_capabilities("mesh_and_geometry/")
+    assert any(k.startswith("mesh_and_geometry/") for k in modules) and all(v > 0 for v in modules.values())
+
+    # collisions surfaced through the URI lens: every colliding name is addressable
+    coll = mind.capability_collisions()
+    assert "sphere" in coll and len(coll["sphere"]) >= 2
+    for name, uris in coll.items():
+        assert len(uris) >= 2
+        for u in uris:
+            assert mind.resolve_capability_uri(u) == [u]      # each full path is unambiguous
+
+    # deterministic
+    assert mind.browse_capabilities("") == mind.browse_capabilities("")
+    assert any("Capability URI" in str(c.name) for c in mind.find_capability("disambiguate a capability name"))
+
+
+def test_candles_are_a_wave_and_compose_with_signal_ops():
+    # A price candle series is a SAMPLED WAVE. The carrier tracks the underlying wave, the envelope brackets it,
+    # the intrabar path is higher-resolution, and -- the whole point -- once price IS a wave, the engine's signal
+    # machinery applies directly: fit_deterministic recovers the underlying generator FROM the candles.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # a cyclic 'price' sampled into OHLC bars
+    t = np.linspace(0, 6 * np.pi, 4000)
+    underlying = 100 + 8 * np.sin(t)
+    bar = 40
+    ohlc = []
+    for i in range(0, len(underlying) - bar, bar):
+        seg = underlying[i:i + bar]
+        ohlc.append([seg[0], seg.max(), seg.min(), seg[-1]])
+    ohlc = np.array(ohlc)
+
+    # carrier tracks the underlying; envelope brackets the carrier
+    car = mind.candle_carrier(ohlc, "typical")
+    up, lo = mind.candle_envelope(ohlc)
+    assert np.all(up >= car - 1e-9) and np.all(lo <= car + 1e-9)
+
+    # intrabar path is 4x resolution, hits endpoints
+    path = mind.candle_intrabar_path(ohlc, steps_per_bar=4)
+    assert len(path) == 4 * len(ohlc)
+    assert abs(path[0] - ohlc[0, 0]) < 1e-9 and abs(path[3] - ohlc[0, 3]) < 1e-9
+
+    # THE PAYOFF: fit_deterministic recovers the underlying sine FROM the candles
+    fit = mind.fit_deterministic(car)
+    assert fit["family"] == "sine" and fit["correlation"] > 0.9
+
+    # range/body: a big-range small-body bar is a bar that swung but went nowhere
+    ranges, bodies = mind.candle_range(ohlc)
+    assert len(ranges) == len(ohlc) and np.all(ranges >= bodies - 1e-9)   # range always >= body
+
+    assert any("Candles as a wave" in str(c.name) for c in mind.find_capability("price candles as a wave"))
+
+
+def test_aaft_surrogate_preserves_fat_tails_for_price_returns():
+    # AAFT is the honest null for NON-GAUSSIAN data. Price returns are famously fat-tailed -- basic phase-
+    # randomization Gaussianizes them (destroying the tails), so a tail-sensitive test would falsely flag the
+    # surrogate as different. AAFT preserves the exact amplitude distribution AND approximately the spectrum.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # a fat-tailed 'returns' series (cubed Gaussian ~ heavy tails)
+    rng = np.random.default_rng(0)
+    returns = rng.standard_normal(1024) ** 3
+
+    aaft = mind.amplitude_adjusted_surrogate(returns, seed=1)
+    basic = mind.phase_randomize(returns, seed=1)
+
+    # AAFT is a permutation of the original -> identical amplitude distribution (exact histogram match)
+    assert np.allclose(np.sort(aaft), np.sort(returns))
+
+    def kurt(v):
+        v = (v - v.mean()) / (v.std() + 1e-12)
+        return float(np.mean(v ** 4))
+    k0, ka, kb = kurt(returns), kurt(aaft), kurt(basic)
+    assert abs(ka - k0) < abs(kb - k0)                         # AAFT keeps the fat tails; basic Gaussianizes them
+    assert kb < k0 * 0.5                                       # basic really did collapse the kurtosis
+
+    # determinism
+    assert np.array_equal(mind.amplitude_adjusted_surrogate(returns, seed=2),
+                          mind.amplitude_adjusted_surrogate(returns, seed=2))
+
+    assert any("amplitude_adjusted" in str(c.name) for c in mind.find_capability("surrogate for fat tailed data"))
+
+
+def test_ladder_forecast_calibrated_has_measured_coverage():
+    # Cranmer: an uncalibrated forecast is not a measurement. The ladder predictor wrapped in a conformal interval
+    # achieves close to its target coverage on held-out data -- a MEASURED coverage, not an assumed one. A noisy
+    # periodic signal gives a nonzero interval; the empirical coverage lands near the 90% target.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # a noisy periodic integer series: predictable pattern + occasional perturbation
+    rng = np.random.default_rng(0)
+    base = ([0, 1, 2, 3, 4] * 40)
+    noisy = [(v if rng.random() > 0.15 else int(rng.integers(0, 5))) for v in base]
+    r = mind.ladder_forecast_calibrated(noisy, order=2, alpha=0.1)
+
+    assert r["interval"] is not None and r["n_calibration"] > 20
+    lo, hi = r["interval"]
+    assert lo <= r["point"] <= hi                              # the point sits in its own interval
+    # empirical coverage should be reasonably near the 90% target (conformal guarantees marginal coverage)
+    assert 0.75 <= r["empirical_coverage"] <= 1.0, r["empirical_coverage"]
+
+    # a clean periodic series -> perfect prediction -> tight (near-zero) interval, still valid
+    clean = mind.ladder_forecast_calibrated([0, 1, 2, 3, 4] * 30, order=2)
+    assert clean["interval"] is not None and clean["empirical_coverage"] >= 0.9
+
+    # too-short history -> honest point-only, no interval
+    short = mind.ladder_forecast_calibrated([1, 2, 3, 4], order=2)
+    assert short["interval"] is None
+
+    assert any("ladder_forecast_calibrated" in str(c.name) for c in mind.find_capability("calibrated forecast"))
+
+
+def test_iaaft_matches_spectrum_better_than_aaft():
+    # IAAFT is the gold-standard surrogate: exact amplitude distribution AND (to convergence) exact spectrum. On a
+    # coloured fat-tailed signal (autocorrelation + fat tails, like price levels), IAAFT's spectrum is much closer
+    # to the target than AAFT's, while both keep the exact amplitude distribution.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+    x = np.cumsum(rng.standard_normal(1024) ** 3)             # fat-tailed increments + autocorrelation
+    x -= x.mean()
+
+    ia = mind.iaaft_surrogate(x, n_iter=100, seed=1)
+    aa = mind.amplitude_adjusted_surrogate(x, seed=1)
+    tgt = np.abs(np.fft.rfft(x))
+    err_ia = np.linalg.norm(np.abs(np.fft.rfft(ia)) - tgt) / np.linalg.norm(tgt)
+    err_aa = np.linalg.norm(np.abs(np.fft.rfft(aa)) - tgt) / np.linalg.norm(tgt)
+
+    assert err_ia < err_aa                                     # IAAFT's spectrum is closer
+    assert np.allclose(np.sort(ia), np.sort(x))               # exact amplitude distribution preserved
+    assert np.array_equal(mind.iaaft_surrogate(x, seed=2), mind.iaaft_surrogate(x, seed=2))   # deterministic
+    assert any("iaaft" in str(c.name).lower() for c in mind.find_capability("gold standard surrogate"))
+
+
+def test_sweep_directions_finds_incomplete_faculties():
+    # L5: the up/down/sideways completeness sweep. Structured data is COMPLETE in all three directions; a shuffled
+    # scene wears only the STRUCTURE costume (the sequence lens can't see it); NOISE is irreducible with all three
+    # flagged as gaps. Null-aware, so noise never reports fabricated structure.
+    import numpy as np
+    import lecore
+    from holographic.agents_and_reasoning.holographic_ladder import _make_planted_corpus, _make_instanced_scene_corpus
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    seq = mind.sweep_directions(_make_planted_corpus(seed=0))
+    assert seq["complete"] and not seq["gaps"]
+    assert seq["down"]["ok"] and seq["up"]["ok"] and seq["sideways"]["ok"]
+
+    scene = mind.sweep_directions(_make_instanced_scene_corpus(seed=0))
+    assert scene["sideways"]["lenses_that_fit"] == ["structure"]   # one costume only -- sequence lens fails
+
+    rng = np.random.default_rng(5)
+    noise = [list(rng.integers(0, 16, size=6)) for _ in range(200)]
+    nz = mind.sweep_directions(noise)
+    assert nz["irreducible"] and set(nz["gaps"]) == {"down", "up", "sideways"}   # no fabricated structure anywhere
+
+    # deterministic
+    assert mind.sweep_directions(_make_planted_corpus(seed=0))["complete"] == seq["complete"]
+    assert any("sweep_directions" in str(c.name) for c in mind.find_capability("up down sideways sweep"))
+
+
+def test_validate_recipe_catches_dangling_output_and_empty_setop():
+    # ARCH-1 hardening: validate_recipe must catch recipes that pass the DAG-reference check but crash at build --
+    # a dangling output (crashes outputs() with IndexError) and an empty bundle (silently produces a degenerate
+    # zero vector, worse than a crash). Previously-valid recipes still validate.
+    import lecore
+    from holographic.misc import holographic_recipe as R
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # a well-formed recipe still validates
+    r = R.StructureRecipe(dim=64, seed=0)
+    a = r.atom("x"); b = r.atom("y"); c = r.bind(a, b); r.mark_output(c)
+    ok, probs = mind.validate_recipe(r)
+    assert ok and not probs
+
+    # dangling output -> rejected (and would crash outputs() at build)
+    dangling = R.StructureRecipe(dim=64, seed=0)
+    dangling.atom("x")
+    dangling._outputs = [99]
+    d_ok, d_probs = mind.validate_recipe(dangling)
+    assert not d_ok and any("dangling output" in p for p in d_probs)
+
+    # empty bundle -> rejected (and would produce a degenerate zero vector at build)
+    empty = R.StructureRecipe(dim=64, seed=0)
+    empty.atom("x")
+    empty._ops.append(("bundle", []))
+    empty._outputs = [len(empty._ops) - 1]
+    e_ok, e_probs = mind.validate_recipe(empty)
+    assert not e_ok and any("empty member list" in p for p in e_probs)
+
+    # forward reference still caught (no regression)
+    fwd = R.StructureRecipe(dim=64, seed=0)
+    fwd.atom("x")
+    fwd._ops.append(("bind", 0, 5))
+    assert not mind.validate_recipe(fwd)[0]
+
+
+def test_variance_harness_measures_and_flags_fragile():
+    # Wiring sweep: the honest-measurement harness (holographic_measure) was import-only -- core constitutional
+    # discipline that wasn't invocable. Now wired: measure gives mean/std/CI across seeds, assert_robust checks the
+    # LOWER CI bound clears the floor (not the mean), is_fragile flags a spread that could sink the claim.
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    stats = mind.measure(lambda seed: float(np.random.default_rng(seed).normal(0.7, 0.1)), seeds=range(30))
+    assert 0.6 < stats["mean"] < 0.8 and stats["n"] == 30
+    lo, hi = stats["ci"]
+    assert lo < stats["mean"] < hi                            # CI brackets the mean
+
+    # a claim comfortably above a low floor is robust; one barely above a high floor is fragile
+    assert mind.is_fragile(stats, 0.68)                       # floor near the mean -> spread could sink it
+    assert not mind.is_fragile(stats, 0.0)                    # floor far below -> safe
+    report = mind.measure_report("score", stats, floor=0.5)
+    assert "95% CI" in report and "score" in report
+
+    assert any("Variance harness" in str(c.name) for c in mind.find_capability("bootstrap confidence interval"))
+
+
+def test_regime_gate_routes_and_keeps_fallback():
+    # Wiring sweep: RegimeGate (holographic_regimegate) was import-only. It re-enables a niche-superior method only
+    # in its regime, with a safe fallback everywhere else -- the honest way to un-shelve a kept negative.
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    gate = mind.regime_gate("sharpen", lambda x: abs(x), 5.0,
+                            superior=lambda x: ("sharp", x * 2), fallback=lambda x: ("smooth", x))
+    r_hi, info_hi = gate.apply(9.0)
+    r_lo, info_lo = gate.apply(2.0)
+    assert r_hi == ("sharp", 18.0) and info_hi["used"] == "superior"   # in-regime -> superior method
+    assert r_lo == ("smooth", 2.0) and info_lo["used"] == "fallback"   # out-of-regime -> safe fallback
+    assert info_hi["score"] == 9.0 and info_hi["threshold"] == 5.0     # measurable: score + threshold recorded
+
+    assert any("regime_gate" in str(c.name) for c in mind.find_capability("regime gate"))
+
+
+def test_frame_budget_controller_holds_a_target_fps():
+    # Real-time serving: the frame-budget controller maps a target FPS to concrete render+sim quality and holds it
+    # closed-loop against measured frame time. Uses a DETERMINISTIC cost model (cost scales with the ladder knobs)
+    # rather than wall-clock timing, so the test is reproducible -- the controller's decisions are a pure function
+    # of the reported times. Contract: from any start it converges to the highest quality that fits the budget and
+    # meets the budget on the vast majority of frames.
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    ctrl = mind.frame_budget_controller(target_fps=60, start_level=4, climb_after=5)
+    budget = ctrl.budget_ms                                    # ~14.2 ms for 60 fps
+
+    # a deterministic cost model: frame_ms grows with resolution and sim grid of the chosen preset.
+    def cost_of(preset):
+        px = preset["width"] * preset["height"]
+        sim = preset["sim_grid"] ** 2 * preset["sim_substeps"]
+        return px / 12000.0 + sim / 400.0                      # tuned so a mid level fits 14.2 ms, top does not
+
+    for _ in range(120):
+        preset = ctrl.current()
+        ctrl.report(cost_of(preset))
+
+    st = ctrl.stats()
+    assert st["met_budget_frac"] > 0.85, st                    # holds the target on most frames
+    # the settled level must actually fit the budget, and be the HIGHEST such (can't climb one more without missing)
+    assert cost_of(ctrl.current()) <= budget
+    if ctrl.level < len(ctrl.ladder) - 1:
+        nxt = dict(ctrl.ladder[ctrl.level + 1])
+        assert cost_of(nxt) > budget                           # the next level up would blow the budget
+
+    # a looser target (30 fps) admits a higher quality level than the tight 60 fps target
+    ctrl30 = mind.frame_budget_controller(target_fps=30, start_level=0, climb_after=5)
+    for _ in range(120):
+        ctrl30.report(cost_of(ctrl30.current()))
+    assert ctrl30.level >= ctrl.level                          # more time -> at least as much quality
+
+    # render and sim quality are separate knobs in the preset (honest: a coarse chaotic sim is a different run)
+    assert "width" in ctrl.current() and "sim_grid" in ctrl.current()
+    assert any("frame_budget" in str(c.name) for c in mind.find_capability("hit a target fps"))
+
+
+def test_frame_server_serves_adaptive_frames_over_http():
+    # Real-time serving over the network: the /frame endpoint gives a front-end client adaptive quality per session
+    # (the request/response form of a frame stream -- this stdlib service has no websocket). Covers the FrameServer
+    # faculty AND the full HTTP round-trip, so 'it works in-process' and 'a client can call it' are both proven.
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # faculty: per-session controllers, different budgets, closed loop
+    fs = mind.frame_server()
+    a0 = fs.next_frame("phone", target_fps=30)                # first contact
+    a1 = fs.next_frame("phone", last_frame_ms=50.0)           # slow frame -> drop
+    assert a1["level"] == a0["level"] - 1
+    b0 = fs.next_frame("desktop", target_fps=60)
+    assert b0["budget_ms"] < a0["budget_ms"]                  # 60fps tighter than 30fps
+    assert set(fs.sessions().keys()) == {"phone", "desktop"}
+
+    # full HTTP round-trip through the /frame endpoint
+    import holographic_service as svc
+    from http.server import HTTPServer
+    import threading, json, urllib.request
+    s = svc.Service()
+    httpd = HTTPServer(("127.0.0.1", 0), svc.make_handler(s))
+    port = httpd.server_address[1]
+    t = threading.Thread(target=httpd.serve_forever, daemon=True); t.start()
+    try:
+        def post(path, body):
+            req = urllib.request.Request(f"http://127.0.0.1:{port}{path}",
+                                         data=json.dumps(body).encode(),
+                                         headers={"Content-Type": "application/json"}, method="POST")
+            return json.loads(urllib.request.urlopen(req, timeout=5).read())
+        r1 = post("/frame", {"session": "web", "target_fps": 60})
+        assert r1["ok"] and "preset" in r1 and "width" in r1["preset"] and "sim_grid" in r1["preset"]
+        lvl = r1["level"]
+        r2 = post("/frame", {"session": "web", "last_frame_ms": 40.0})   # slow -> drop over the wire
+        assert r2["level"] == lvl - 1
+        r3 = post("/frame", {"session": "web", "drop": True})
+        assert r3["ok"] and r3["dropped"]
+    finally:
+        httpd.shutdown()
+
+    assert any("frame_server" in str(c.name) for c in mind.find_capability("real-time frame endpoint"))
+
+
+def test_frame_inline_payload_and_sse_stream():
+    # Two real-time enhancements: (1) POST /frame with include_payload renders a real frame at the chosen quality
+    # and returns it INLINE (one round-trip instead of three); (2) GET /frame/stream is an SSE PUSH channel that
+    # streams frames at the target rate to an EventSource client without polling. Both proven over real HTTP.
+    import json
+    import lecore
+    from holographic.scene_and_pipeline.holographic_framebudget import demo_frame_payload, DEFAULT_LADDER
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # the built-in demo renderer: a real raymarch, JSON-safe, cost scales with resolution, animates with t
+    lo = demo_frame_payload(DEFAULT_LADDER[0], t=0.0)
+    assert lo["width"] == 128 and len(lo["pixels"]) == 128 and all(0 <= p <= 255 for p in lo["pixels"][64])
+    assert demo_frame_payload(DEFAULT_LADDER[0], t=0.0) != demo_frame_payload(DEFAULT_LADDER[0], t=1.0)
+
+    # serve_frame faculty: one call renders + times + closes the loop, payload inline
+    fs = mind.frame_server()
+    out = fs.serve_frame("c", lambda preset: demo_frame_payload(preset), target_fps=30)
+    assert "payload" in out and out["payload"]["width"] == out["preset"]["width"]
+    assert out["frame_ms"] >= 0.0
+
+    import holographic_service as svc
+    from http.server import HTTPServer
+    from socketserver import ThreadingMixIn
+    import threading, urllib.request
+
+    class _TS(ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+
+    s = svc.Service()
+    httpd = _TS(("127.0.0.1", 0), svc.make_handler(s))
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        # (1) inline payload over HTTP
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/frame",
+                                     data=json.dumps({"session": "web", "target_fps": 30,
+                                                      "include_payload": True, "t": 0.0}).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        r = json.loads(urllib.request.urlopen(req, timeout=10).read())
+        assert r["ok"] and "payload" in r and "frame_ms" in r and r["payload"]["width"] == r["preset"]["width"]
+
+        # (2) SSE push stream: read a few pushed frames, bounded by frames=
+        resp = urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/frame/stream?session=live&target_fps=30&frames=4", timeout=15)
+        assert "text/event-stream" in resp.headers.get("Content-Type", "")
+        frames = []
+        for raw in resp:
+            line = raw.decode().strip()
+            if line.startswith("data: "):
+                frames.append(json.loads(line[6:]))
+                if len(frames) >= 4:
+                    break
+        assert len(frames) == 4 and all("payload" in f for f in frames)
+        # the stream opens at the cheapest level so the first frame is already real-time (no opening stall)
+        assert frames[0]["preset"]["name"] == DEFAULT_LADDER[0]["name"]
+    finally:
+        httpd.shutdown()
+
+    assert any("frame_server" in str(c.name) for c in mind.find_capability("stream frames to a front end"))
+
+
+def test_frame_all_projections_workspace_and_distributed():
+    # Three additions to the real-time endpoint: (1) ALL output projection types selectable + simultaneous;
+    # (2) workspace/scene save-load; (3) distributed (tiled) rendering, bit-identical to single-node.
+    import lecore, numpy as np
+    from holographic.scene_and_pipeline.holographic_framebudget import demo_frame_payload, PROJECTION_KINDS
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # (1) every projection kind, and MULTIPLE at once, all of the same scene
+    multi = demo_frame_payload({"width": 128, "height": 128, "samples": 1},
+                               kinds=("pixels", "mesh", "splats", "shader", "lod"))
+    assert all(k in multi for k in ("pixels", "mesh", "splats", "shader", "lod"))
+    assert "vertices" in multi["mesh"] and multi["shader"]["language"] == "wgsl"
+    assert isinstance(multi["splats"], list) and "position" in multi["splats"][0]
+    # a single kind works too, and unknown kinds raise
+    assert "mesh" in demo_frame_payload({"width": 64, "height": 64}, kinds=("mesh",))
+    try:
+        demo_frame_payload({"width": 64, "height": 64}, kinds=("nope",)); assert False
+    except ValueError:
+        pass
+
+    # (2) workspace save/load: export a scene, rebuild it byte-identically in a fresh mind
+    wm = mind.workspace_manager()
+    wm.new_workspace("scene_a")
+    blob = wm.export_workspace("scene_a")
+    assert blob["name"] == "scene_a"
+    fresh = lecore.UnifiedMind(dim=256, seed=0)
+    fresh.workspace_manager().import_workspace(blob)
+    assert fresh.workspace_manager().export_workspace("scene_a") == blob   # byte-identical round-trip
+    assert any("workspace_manager" in str(c.name) for c in mind.find_capability("save a workspace"))
+
+    # (3) distributed tiled render == single-node render of the same preset (real distribute_bricks faculty)
+    fs = mind.frame_server()
+    dist = fs.serve_frame_distributed("d", mind.distribute_bricks, target_fps=30, tiles=(2, 2), t=0.5)
+    single = demo_frame_payload(dist["preset"], t=0.5, kinds=("pixels",))
+    assert dist["payload"]["pixels"] == single["pixels"]      # bit-identical
+    assert dist["tiles_ran"] == 4
+    dist9 = fs.serve_frame_distributed("d2", mind.distribute_bricks, target_fps=30, tiles=(3, 3), t=0.5)
+    assert dist9["tiles_ran"] == 9
+    assert dist9["payload"]["pixels"] == demo_frame_payload(dist9["preset"], t=0.5)["pixels"]
+
+    # over HTTP: distributed frame + multi-projection both work end to end
+    import holographic_service as svc
+    from http.server import HTTPServer
+    from socketserver import ThreadingMixIn
+    import threading, json, urllib.request
+
+    class _TS(ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+    s = svc.Service()
+    httpd = _TS(("127.0.0.1", 0), svc.make_handler(s)); port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        def post(body):
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/frame", data=json.dumps(body).encode(),
+                                         headers={"Content-Type": "application/json"}, method="POST")
+            return json.loads(urllib.request.urlopen(req, timeout=10).read())
+        rmulti = post({"session": "w", "include_payload": True, "kinds": ["pixels", "mesh"]})
+        assert rmulti["ok"] and "mesh" in rmulti["payload"] and "pixels" in rmulti["payload"]
+        rdist = post({"session": "w2", "include_payload": True, "kinds": ["pixels"], "tiles": [2, 2]})
+        assert rdist["ok"] and rdist["tiles_ran"] == 4
+    finally:
+        httpd.shutdown()
+
+
+def test_modeling_app_glsl_wireframe_pick_and_visibility():
+    # Foundations for a 3D-modeling app on leCore: GLSL output for the web viewport, ascii output, an editable
+    # WIREFRAME CAGE (verts/edges/faces) for interaction, viewport PICKING (screen coord -> element), and layer
+    # VISIBILITY toggling (request a kind to show it, omit to hide it). All of the same scene, proven over HTTP.
+    import lecore
+    from holographic.scene_and_pipeline.holographic_framebudget import demo_frame_payload, pick_element, PROJECTION_KINDS
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    assert set(PROJECTION_KINDS) >= {"glsl", "wgsl", "ascii", "wireframe"}
+
+    # every modeling output, all of the same scene
+    p = demo_frame_payload({"width": 128, "height": 128}, kinds=("glsl", "ascii", "wireframe", "pixels"))
+    assert p["glsl"]["language"] == "glsl" and "map(" in p["glsl"]["source"]     # web viewport shader
+    assert "\n" in p["ascii"]["ascii"]                                            # ascii base layer
+    wf = p["wireframe"]
+    assert len(wf["vertices"]) and len(wf["edges"]) and len(wf["faces"])
+    assert all(0 <= i < len(wf["vertices"]) for e in wf["edges"] for i in e)      # edges index into verts
+    assert len(wf["normals"]) == len(wf["vertices"])
+
+    # picking: centre picks the front pole; edge/face pick return valid elements; deterministic
+    pv = mind.pick_element(wf, 0.0, 0.0, want="vertex")
+    assert pv["index"] is not None and abs(pv["position"][2] - 1.0) < 0.3
+    assert mind.pick_element(wf, 0.2, -0.1, want="edge")["index"] is not None
+    assert mind.pick_element(wf, 0.2, -0.1, want="face")["index"] is not None
+    assert mind.pick_element(wf, 0.0, 0.0, want="vertex")["index"] == pv["index"]
+
+    # over HTTP: frame with layers, /pick, and visibility toggling
+    import holographic_service as svc
+    from http.server import HTTPServer
+    from socketserver import ThreadingMixIn
+    import threading, json, urllib.request
+
+    class _TS(ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+    s = svc.Service()
+    httpd = _TS(("127.0.0.1", 0), svc.make_handler(s)); port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        def post(path, body):
+            req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=json.dumps(body).encode(),
+                                         headers={"Content-Type": "application/json"}, method="POST")
+            return json.loads(urllib.request.urlopen(req, timeout=10).read())
+        # overlay ON: ascii + wireframe both present
+        on = post("/frame", {"session": "m", "include_payload": True, "kinds": ["ascii", "wireframe", "glsl"]})
+        assert on["ok"] and "wireframe" in on["payload"] and "glsl" in on["payload"]
+        # pick over HTTP using the cage the client just received
+        pk = post("/pick", {"wireframe": on["payload"]["wireframe"], "u": 0.0, "v": 0.0, "want": "vertex"})
+        assert pk["ok"] and pk["pick"]["index"] is not None
+        # overlay OFF: request only the base layer -> wireframe absent (visibility toggled by layer selection)
+        off = post("/frame", {"session": "m2", "include_payload": True, "kinds": ["ascii"]})
+        assert "wireframe" not in off["payload"]
+    finally:
+        httpd.shutdown()
+
+    assert any("pick_element" in str(c.name) for c in mind.find_capability("viewport pick"))
+
+
+def test_interactive_edit_spine_select_pick_transform_undo():
+    """Milestone 1 end-to-end: the interactive edit spine A->B->C->D1. A user selects a loop, picks real geometry
+    with a ray, transforms the selection with grid snapping, then undoes it -- proving the whole spine composes
+    through the mind, deterministically. This is the 'a front end can build an editor' guarantee."""
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # a 4x4 quad grid mesh.
+    n = 4
+    verts = [[float(i), float(j), 0.0] for j in range(n + 1) for i in range(n + 1)]
+    faces = []
+    for j in range(n):
+        for i in range(n):
+            a = j * (n + 1) + i
+            faces.append([a, a + 1, a + 1 + (n + 1), a + (n + 1)])
+    mesh = {"vertices": verts, "faces": faces}
+
+    # A -- SELECT: a sub-object selection with set algebra, plus a boundary-loop query.
+    sel = mind.mesh_selection(mesh, "vertex").add([0, 1, 2])
+    assert sel.to_list() == [0, 1, 2]
+    bnd = mind.select_boundary_loops(mesh)
+    assert len(bnd) == 4 * n                                   # the rim of a 4x4 grid = 16 edges
+
+    # A -- soft weights over the selection (proportional editing field).
+    w = mind.soft_selection_weights(mesh, sel, radius=2.0)
+    assert w.shape[0] == len(verts) and abs(float(w[0]) - 1.0) < 1e-9
+
+    # B -- PICK real geometry with a ray: cast straight at face 0's centre region.
+    P = np.asarray(verts, float)
+    # aim a ray down -z through a point above the grid interior.
+    hit = mind.ray_mesh_intersect(mesh, [1.5, 1.5, 5.0], [0, 0, -1])
+    assert hit is not None and hit["face"] in range(len(faces))
+    assert abs(hit["position"][2]) < 1e-6                      # lands on the z=0 plane
+
+    # C -- TRANSFORM the selection in world space, constrained to +z, about the median pivot.
+    moved = mind.transform_selection(P, sel.to_list(), translate=[0, 0, 0.37], constraint=(0, 0, 1))
+    assert np.allclose(moved[sel.to_list(), 2], 0.37) and np.allclose(moved[:, :2], P[:, :2])
+
+    # C -- SNAP: the moved point [1.5,1.5,0.37] snaps onto the 0.25 grid; applying the corrected delta from the
+    # origin lands z exactly on the nearest node (0.25).
+    snap = mind.snap_transform_delta([0, 0, 0.37], target="grid", increment=0.25,
+                                     moved_point=[1.5, 1.5, 0.37])
+    final_z = 0.0 + snap["delta"][2]                           # apply corrected delta from z=0
+    assert abs(final_z - 0.25) < 1e-9, final_z                 # lands on the nearest 0.25 node
+
+    # D1 -- UNDO: record the move in an edit history and undo it back to the exact start.
+    hist = mind.edit_history()
+    state = np.asarray(verts, float)
+    cmd = mind.vertex_move_command(sel.to_list(), [0, 0, 0.5], "raise the corner")
+    state = hist.do(state, cmd)
+    assert np.allclose(state[sel.to_list(), 2], 0.5)
+    state = hist.undo(state)
+    assert np.allclose(state, np.asarray(verts, float))       # bit-identical restore
+    state = hist.redo(state)                                   # redo works too
+    assert np.allclose(state[sel.to_list(), 2], 0.5)
+
+    # the whole spine is discoverable through find_capability (the front-end contract).
+    for phrase, expect in [("edit mode selection", "mesh_selection"),
+                           ("pick a face on a mesh", "pick_mesh"),
+                           ("gizmo transform", "transform_selection"),
+                           ("snap to grid", "snap_to_grid"),
+                           ("undo a geometry edit", "edit_history")]:
+        assert any(expect in str(c.name) for c in mind.find_capability(phrase)[:3]), (phrase, expect)
+
+
+def test_dark_module_doors_sdfscene_and_extras():
+    """Regression trap for the dark-module wiring pass: the capabilities that used to be import-only (a base class
+    or a grab-bag with no door) are now callable faculties AND discoverable. If any of these regresses to dark, this
+    test fails alongside the wiring_report --check gate. Covers sdf_scene (holographic_sdfscene) and the three
+    holographic_extras concepts (residue_system / vsa_region / predictive_filter)."""
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # sdf_scene: build a scene from parts without subclassing, evaluate the field + materials.
+    scene = mind.sdf_scene([(lambda p: np.linalg.norm(np.asarray(p, float) - [-1, 0, 0], axis=-1) - 0.5, "red"),
+                            (lambda p: np.linalg.norm(np.asarray(p, float) - [1, 0, 0], axis=-1) - 0.5, "blue")])
+    pts = np.array([[-1, 0, 0], [1, 0, 0]], float)
+    assert np.allclose(scene.eval(pts), [-0.5, -0.5])           # inside each ball
+    assert list(scene.material_at(pts)) == ["red", "blue"]      # material follows the argmin
+
+    # residue_system: exact modular arithmetic through vectors (no float error).
+    rs = mind.residue_system([3, 5, 7])                          # M = 105
+    assert rs.decode(rs.add(rs.encode(20), rs.encode(30))) == 50
+
+    # vsa_region: boolean algebra of spherical regions.
+    reg = mind.vsa_region([0, 0, 1.0], 1.0).union(mind.vsa_region([0, 0, -1.0], 1.0))
+    assert bool(reg.contains([0, 0, 1.0]))
+
+    # predictive_filter: observe returns a (is_novel, surprise) pair.
+    pf = mind.predictive_filter()
+    novel, surprise = pf.observe(np.ones(64))
+    assert isinstance(bool(novel), bool) and surprise >= 0.0
+
+    # all four are discoverable through find_capability (the door is real, not just the method).
+    for phrase, expect in [("compose sdf parts", "sdf_scene"),
+                           ("exact modular arithmetic", "residue_system"),
+                           ("boolean region composition", "vsa_region"),
+                           ("surprise filter", "predictive_filter")]:
+        assert any(expect in str(c.name) for c in mind.find_capability(phrase)[:3]), (phrase, expect)
+
+
+def test_milestone2_3_editable_history_checkpoints_selection_easing_skin():
+    """Milestone 2/3 coverage: editable construction history (edit a past step, recompute), workspace checkpoints
+    (save-point + byte-identical restore), symmetry + region selection, timeline easing, and auto-skin binding.
+    Each of these EXTENDS an existing faculty rather than adding a sibling -- this test pins that the extensions are
+    live and discoverable, so a later de-dup pass can't quietly drop them."""
+    import numpy as np
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # D2 -- editable construction history: two moves, then re-parameterize step 0 and recompute downstream.
+    h = mind.edit_history()
+    P = np.array([[0, 0, 0], [1, 0, 0.0]])
+    s = h.do(P, mind.vertex_move_command([1], [0, 1, 0]))
+    s = h.do(s, mind.vertex_move_command([1], [0, 0, 2]))
+    assert np.allclose(s[1], [1, 1, 2])
+    s2 = h.replace_command(0, mind.vertex_move_command([1], [0, 5, 0]), P)
+    assert np.allclose(s2[1], [1, 5, 2])                        # the past edit propagated through step 1
+
+    # D3 -- workspace checkpoints: snapshot, mutate, restore byte-identically.
+    from holographic.agents_and_reasoning.holographic_query import run_sql
+    wm = mind.workspace_manager()
+    wm.new_workspace("scn")
+    wm.db.create_table("ws:scn.o", ["n"], dim=128, seed=0)
+    wm.db.insert("ws:scn.o", {"n": "a"})
+    cp = wm.checkpoint("scn", "save1")
+    wm.db.insert("ws:scn.o", {"n": "b"})
+    wm.restore_checkpoint("scn", cp)
+    assert len(run_sql("SELECT n FROM o", wm.db.resolve("ws:scn.o"))) == 1  # rolled back to the save-point
+
+    # A4 -- symmetry selection: on a mesh symmetric about x=0, selecting one side grabs the mirror.
+    sym_mesh = {"vertices": [[-1, 0, 0], [1, 0, 0]], "faces": []}
+    sym = mind.select_symmetric(sym_mesh, mind.mesh_selection(sym_mesh, "vertex").add([0]), axis=0)
+    assert len(sym) == 2
+
+    # B3 -- region select: a box picks only the verts inside.
+    box_mesh = {"vertices": [[0, 0, 0], [9, 9, 0], [0.5, 0.5, 0]], "faces": []}
+    assert len(mind.select_in_box(box_mesh, [-1, -1, -1], [1, 1, 1])) == 2
+
+    # E1 -- timeline easing: ease_in at the midpoint is 0.25 (f^2), while default linear stays 0.5.
+    tl = mind.timeline(); tl.key("x", 0, 0.0); tl.key("x", 1, 1.0, interp="ease_in")
+    assert abs(float(tl.sample("x", 0.5)) - 0.25) < 1e-9
+
+    # E3 -- auto-skin bind: weights are a partition of unity favouring the nearest bone.
+    w = mind.skin_bind_weights([[0, 0, 0], [5, 0, 0.0]], [[0, 0, 0], [5, 0, 0.0]], max_influences=2)
+    assert np.allclose(np.asarray(w).sum(axis=1), 1.0)
+
+    # every extension is discoverable (the door is real).
+    for phrase, expect in [("editable construction history", "edit_history"),
+                           ("checkpoint a scene", "workspace_manager"),
+                           ("symmetric selection", "select_symmetric"),
+                           ("rubber band select", "select_in_box"),
+                           ("ease in ease out", "timeline"),
+                           ("automatic skin weights", "skin_bind_weights")]:
+        assert any(expect in str(c.name) for c in mind.find_capability(phrase)[:3]), (phrase, expect)
+
+def test_semantic_capability_hierarchy():
+    """The semantic capability hierarchy (S1 + S2): a colliding name resolves to distinct URIs (disambiguable by
+    path), find_capability_uris annotates results with those paths, and browse_capabilities(by='semantic') walks the
+    File->Export->PNG verb tree. This is the collision fix at the discovery layer -- a collision is a path to supply,
+    not a name to forbid."""
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # S1.2 -- a collision resolves to its distinct full paths.
+    uris = mind.resolve_capability_uri("rotation")
+    assert len(uris) >= 2 and len(set(uris)) == len(uris)      # distinct homes
+    assert all("/rotation" in u for u in uris)
+    assert mind.resolve_capability_uri(uris[0]) == [uris[0]]   # a full path narrows to exactly one
+
+    # S1.1 -- find_capability_uris carries the path so the agent never gets a bare ambiguous name.
+    res = mind.find_capability_uris("snap to grid")
+    assert res and "uris" in res[0] and res[0]["uris"]
+
+    # S2.4 -- the semantic verb tree browses like a context menu.
+    root = mind.browse_capabilities("", by="semantic")
+    assert root and all("/" in k for k in root)               # root entries are verb branches
+    assert any(k.startswith("select/") for k in root)
+    tsub = mind.browse_capabilities("transform/", by="semantic")
+    assert any("snap" in k for k in tsub), tsub                # transform/snap is populated
+
+    # the location view still works and is distinct from the semantic view.
+    loc_root = mind.browse_capabilities("", by="location")
+    assert "mesh_and_geometry/" in loc_root and "mesh_and_geometry/" not in root
+
+def test_io_shape_pipeline_hierarchy():
+    """The io-shape layer (S3): capabilities declare consumes/produces kinds, find_capability filters by them, and
+    suggest_pipeline chains produces->consumes into a route. This turns capability discovery into pipeline-building
+    -- 'what can I run on a mesh?' and 'how do I get from A to B?' become catalog queries."""
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # S3.1 -- the kind vocabulary is a closed list exposed as a faculty.
+    kinds = mind.io_kinds()
+    assert "mesh" in kinds and "selection" in kinds and "point" not in kinds   # coarse, closed
+
+    # S3.3 -- accepts= filters to mesh-consumers; untagged capabilities are unspecified (never filtered out).
+    hits = mind.find_capability("selection", accepts="mesh")
+    c = mind._capability_catalog()
+    for h in hits:
+        assert (not h.consumes) or ("mesh" in h.consumes), (h.name, h.consumes)
+
+    # S3.4 -- a 1-step and a multi-step pipeline both resolve; an impossible route is None. The winning step is the
+    # documented DETERMINISTIC TIE-BREAK: among equal-length routes the alphabetically-first capability wins, so the
+    # exact name shifts when a new mesh->selection producer is added -- assert the CONTRACT (a valid single mesh->
+    # selection edge = the alphabetically-first such producer), not a hardcoded name that rots on every merge.
+    mesh_sel_producers = sorted(cap.name for cap in c.all()
+                                if cap.consumes and cap.produces and "mesh" in cap.consumes and "selection" in cap.produces)
+    one = mind.suggest_pipeline("mesh", "selection")
+    assert one and len(one) == 1 and one[0]["name"] == mesh_sel_producers[0], (one, mesh_sel_producers[:3])
+    multi = mind.suggest_pipeline("transform", "selection")               # transform->mesh->selection
+    assert multi and len(multi) == 2 and multi[0]["name"] == "transform_selection" \
+        and multi[1]["name"] == mesh_sel_producers[0], multi
+    assert mind.suggest_pipeline("mesh", "mesh") == []                    # already there
+    assert mind.suggest_pipeline("image", "skeleton") is None             # no route
+
+    # the SEEDED conversion edges (_IO_SHAPES, applied by seed_from_mind) give real geometry pipelines: a full mind
+    # can route points -> mesh -> image and sdf -> mesh. This is the payoff -- the router has real edges, not just
+    # the handful of directly-tagged select/transform capabilities.
+    p2i = mind.suggest_pipeline("points", "image")
+    assert p2i and [s["name"] for s in p2i] == ["points_to_mesh", "render_mesh"], p2i
+    assert mind.suggest_pipeline("sdf", "mesh")[0]["name"] == "mesh_from_sdf"
+
+    # the added edges (inpaint/fill, mesh refine, sweep, skin) enable more routes.
+    assert mind.suggest_pipeline("curve", "image") == [{"name": "sweep_tube", "consumes": ["curve"],
+                                                        "produces": ["mesh"]},
+                                                       {"name": "render_mesh", "consumes": ["mesh"],
+                                                        "produces": ["image"]}]
+    # require_step turns a same-kind query into a transforming edge: 'refine this mesh' / 'fill this field'.
+    assert mind.suggest_pipeline("mesh", "mesh") == []                    # default: already there
+    refine = mind.suggest_pipeline("mesh", "mesh", require_step=True)
+    assert refine and len(refine) == 1 and "mesh" in mind._capability_catalog().get(refine[0]["name"]).produces
+    # field -> field via a transforming edge: the winner is again the alphabetically-first field->field producer
+    # (deterministic tie-break). More field->field ops now exist than just the fill trio (e.g. the quantum solvers
+    # legitimately map a field to a field), so assert the CONTRACT, not a fixed shortlist -- and separately confirm
+    # the classical fill ops are still reachable field->field producers.
+    ff_producers = sorted(cap.name for cap in c.all()
+                          if cap.consumes and cap.produces and "field" in cap.consumes and "field" in cap.produces)
+    fill = mind.suggest_pipeline("field", "field", require_step=True)
+    assert fill and fill[0]["name"] == ff_producers[0], (fill, ff_producers[:3])
+    assert {"harmonic_fill", "inpaint", "majority_fill"} & set(ff_producers), "the classical fill ops must still route field->field"
+
+    # a bad kind is rejected loudly (the closed vocabulary catches typos).
+    import pytest
+    with pytest.raises(ValueError):
+        mind.suggest_pipeline("mesh", "meshes")
+
+def test_mesh_poke_euler_operator():
+    """mesh_poke (the first mesh-op gap-fill after resolving the mesh-vs-native fork): fan a face into triangles
+    around a new center vertex, a legal Euler edit (V+1, E+n, F+(n-1), chi unchanged), wired + discoverable +
+    io-tagged so it joins the pipeline graph."""
+    import lecore
+    import numpy as np
+    from holographic.mesh_and_geometry.holographic_mesh import box
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    qb = box(2.0, 2.0, 2.0)                                   # 6 quad faces, chi = 2
+    n0 = len(qb.faces[0])                                     # a quad
+    pk = mind.mesh_poke(qb, 0, height=0.0)
+    assert pk.n_vertices == qb.n_vertices + 1                 # +1 center
+    assert pk.n_faces == qb.n_faces - 1 + n0                  # -1 poked face, +n triangles
+    assert pk.euler_characteristic() == 2 and pk.is_manifold() and pk.is_closed()
+
+    # height displaces the center outward along the face normal
+    hi = mind.mesh_poke(qb, 0, height=0.5)
+    assert np.linalg.norm(hi.vertices[-1] - pk.vertices[-1]) > 0.4
+
+    # discoverable by a stranger's phrasing, and an io-shape edge (mesh -> mesh) in the pipeline graph
+    assert any("mesh_poke" in str(c.name) for c in mind.find_capability("fan a face into triangles")[:3])
+    assert mind.suggest_pipeline("mesh", "mesh", require_step=True)   # a mesh->mesh transforming edge now exists
+
+def test_mesh_triangulate_earclip():
+    """mesh_triangulate (backlog item 2 after the fork): ear-clip faces into triangles, CONCAVE-correct where the
+    kernel's fan triangulate is not. Wired + discoverable + io-tagged."""
+    import lecore
+    from holographic.mesh_and_geometry.holographic_mesh import box
+    from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_face
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # whole-mesh: a quad box -> all triangles, chi preserved, no new vertices.
+    tb = mind.mesh_triangulate(box(2.0, 2.0, 2.0))
+    assert all(len(f) == 3 for f in tb.faces)
+    assert tb.n_vertices == 8 and tb.euler_characteristic() == 2 and tb.is_closed() and tb.is_manifold()
+
+    # the payoff: a CONCAVE L-hexagon tiles exactly (a fan would overshoot).
+    Lpts = [(0, 0, 0), (2, 0, 0), (2, 2, 0), (1, 2, 0), (1, 1, 0), (0, 1, 0)]
+    tris = triangulate_face(tuple(range(6)), {i: p for i, p in enumerate(Lpts)})
+    assert len(tris) == 4
+
+    def a2(a, b, c):
+        return abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) / 2.0
+    poly = 0.5 * abs(sum(Lpts[i][0] * Lpts[(i + 1) % 6][1] - Lpts[(i + 1) % 6][0] * Lpts[i][1] for i in range(6)))
+    assert abs(sum(a2(Lpts[i], Lpts[j], Lpts[k]) for i, j, k in tris) - poly) < 1e-9
+
+    assert any("mesh_triangulate" in str(c.name) for c in mind.find_capability("ear clip a polygon")[:3])
+
+def test_mesh_symmetrize():
+    """mesh_symmetrize (backlog item 3 after the fork): keep one half, mirror it back, weld -> a bilaterally
+    symmetric mesh. Composes the existing mirror + weld primitives. Wired + discoverable + io-tagged."""
+    import lecore
+    import numpy as np
+    from holographic.mesh_and_geometry.holographic_mesh import grid, Mesh
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # an asymmetric grid (the +x half bumped up in z) becomes provably symmetric across x=0.
+    g = grid(6, 6)
+    V = g.vertices.copy()
+    V[V[:, 0] > 0.0, 2] += 0.5
+    asym = Mesh(V, [tuple(f) for f in g.faces])
+    sym = mind.mesh_symmetrize(asym, axis=0, plane=0.0, side=1)
+
+    Vs = sym.vertices
+    mir = Vs.copy(); mir[:, 0] = -mir[:, 0]                   # every mirrored vertex must match an original one
+    assert all(np.linalg.norm(Vs - mv, axis=1).min() < 1e-4 for mv in mir), "result must be symmetric across x=0"
+    assert sym.n_faces == asym.n_faces                       # keep half + mirror restores the face count
+
+    assert any("mesh_symmetrize" in str(c.name) for c in mind.find_capability("make a sculpt symmetric")[:3])
+
+def test_mesh_solidify_watertight():
+    """solidify_mesh (backlog item 4): thicken an open sheet into a CLOSED, MANIFOLD watertight slab. Regression
+    trap for the non-manifold-bridge bug (the rim quads traversed the boundary edge the wrong way). Wired +
+    discoverable + io-tagged."""
+    import lecore
+    import numpy as np
+    from holographic.mesh_and_geometry.holographic_mesh import grid
+    from collections import defaultdict
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    slab = mind.solidify_mesh(grid(4, 4), 0.2)
+    assert slab.is_closed() and slab.is_manifold(), "a solidified sheet must be a closed manifold slab"
+    assert slab.euler_characteristic() == 2                    # a thickened disk is a topological sphere
+    ec = defaultdict(int)
+    for f in slab.faces:
+        for k in range(len(f)):
+            ec[tuple(sorted((f[k], f[(k + 1) % len(f)])))] += 1
+    assert not any(n == 1 for n in ec.values()), "no boundary edges -- watertight"
+    assert abs(np.ptp(slab.vertices, axis=0)[2] - 0.2) < 1e-9   # thickness applied along the normal
+
+    assert any("solidify" in str(c.name).lower() for c in mind.find_capability("make a hollow shell")[:3])
+
+def test_mesh_bevel_multisegment():
+    """mesh_bevel_vertex segments (backlog item 5): segments=1 is byte-identical to the old flat bevel (backward-
+    compatible); segments>=2 rounds the corner into a spherical dome. Stays closed + manifold; discoverable."""
+    import lecore
+    import numpy as np
+    from holographic.mesh_and_geometry.holographic_mesh import box
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    cube = box(2.0, 2.0, 2.0)
+
+    # backward-compatible default: segments=1 unchanged (7 faces: 3 pentagons + 3 reshaped + 1 cap)
+    b1 = mind.mesh_bevel_vertex(cube, 0, ratio=0.3)
+    assert b1.is_manifold() and b1.is_closed() and b1.euler_characteristic() == 2
+    b1s = mind.mesh_bevel_vertex(cube, 0, ratio=0.3, segments=1)
+    assert b1s.faces == b1.faces                                # explicit segments=1 == default
+
+    # multi-segment rounds: more faces, still a closed manifold, dome verts on a sphere about the corner
+    for seg in (2, 3, 4):
+        bm = mind.mesh_bevel_vertex(cube, 0, ratio=0.3, segments=seg)
+        assert bm.is_manifold() and bm.is_closed() and bm.euler_characteristic() == 2
+        assert bm.n_faces > b1.n_faces
+    b3 = mind.mesh_bevel_vertex(cube, 0, ratio=0.3, segments=3)
+    dome = b3.vertices[cube.n_vertices:]
+    dd = np.linalg.norm(dome - cube.vertices[0], axis=1)
+    assert np.allclose(dd, dd[0], atol=1e-9)                    # rounded: on a sphere about the corner
+
+    assert any("bevel" in str(c.name).lower() for c in mind.find_capability("multi-segment bevel")[:3])
+
+def test_mesh_fill_holes():
+    """mesh_fill_holes (backlog item 6): close open boundary loops with faces. Fan (always works) + grid (coarser
+    quads on even loops). Regression trap for the fill-winding bug (fill faces must traverse the rim edge opposite
+    to the existing face). Wired + discoverable + io-tagged."""
+    import lecore
+    from holographic.mesh_and_geometry.holographic_mesh import box, Mesh
+    from collections import defaultdict
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    box_hole = Mesh(box(2.0, 2.0, 2.0).vertices, [tuple(f) for f in box(2.0, 2.0, 2.0).faces][1:])
+    for mode in ("fan", "grid"):
+        filled = mind.mesh_fill_holes(box_hole, mode=mode)
+        assert filled.is_closed() and filled.is_manifold()
+        assert filled.euler_characteristic() == 2
+        ec = defaultdict(int)
+        for f in filled.faces:
+            for k in range(len(f)):
+                ec[tuple(sorted((f[k], f[(k + 1) % len(f)])))] += 1
+        assert not any(n == 1 for n in ec.values())            # watertight
+
+    # an already-closed mesh is unchanged
+    assert mind.mesh_fill_holes(box(2.0, 2.0, 2.0)).n_faces == box(2.0, 2.0, 2.0).n_faces
+    assert any("fill_holes" in str(c.name) for c in mind.find_capability("patch a hole with quads")[:3])
+
+def test_mesh_fill_holes():
+    """mesh_fill_holes (backlog item 6): close open boundary loops. Fan (robust) + grid (quad) both make a box-minus-
+    face watertight; max_sides (Blender Sides) fills small holes but skips a big outer border. Regression trap for the
+    fill-winding bug (fill faces must traverse the rim edge opposite to the existing face)."""
+    import lecore
+    from holographic.mesh_and_geometry.holographic_mesh import box, grid, Mesh
+    from collections import defaultdict
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    def open_edges(mesh):
+        c = defaultdict(int)
+        for f in mesh.faces:
+            for k in range(len(f)):
+                c[tuple(sorted((f[k], f[(k + 1) % len(f)])))] += 1
+        return sum(1 for n in c.values() if n == 1)
+
+    b = box(2.0, 2.0, 2.0)
+    holed = Mesh(b.vertices, [tuple(f) for f in b.faces][1:])   # one square hole (4-loop)
+    for mode in ("fan", "grid"):
+        f = mind.mesh_fill_holes(holed, mode=mode)
+        assert f.is_closed() and f.is_manifold() and f.euler_characteristic() == 2
+        assert open_edges(f) == 0                                # watertight
+
+    # max_sides: on an open sheet, fill the 4-edge hole but leave the 16-edge outer rim open
+    g = grid(4, 4)
+    gf = [tuple(ff) for ff in g.faces]
+    sheet = Mesh(g.vertices, [ff for i, ff in enumerate(gf) if i != 5])
+    assert open_edges(mind.mesh_fill_holes(sheet, mode="fan", max_sides=8)) == 16
+
+    # a closed mesh is unchanged
+    assert mind.mesh_fill_holes(b).n_faces == b.n_faces
+    assert any("fill_holes" in str(c.name) for c in mind.find_capability("patch a hole with quads")[:3])
+
+def test_mesh_pack_uv_islands():
+    """mesh_pack_uv (backlog item 7): unwrap each connected component separately and pack the islands into non-
+    overlapping cells of the unit UV square -- the smart-UV/pack step lscm and uv_unwrap skip. Wired + discoverable."""
+    import lecore
+    import numpy as np
+    from holographic.mesh_and_geometry.holographic_mesh import grid, Mesh
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # two separate patches (a 2-component mesh) -> LSCM alone overlaps them; packing must not.
+    g = grid(3, 3)
+    V2 = g.vertices.copy(); V2[:, 0] += 10.0
+    f1 = [tuple(f) for f in g.faces]; off = len(g.vertices)
+    f2 = [tuple(i + off for i in f) for f in f1]
+    two = mind.mesh_triangulate(Mesh(np.vstack([g.vertices, V2]), f1 + f2))
+
+    uv = np.asarray(mind.mesh_pack_uv(two))
+    assert uv.shape == (two.n_vertices, 2)
+    assert uv.min() >= -1e-9 and uv.max() <= 1 + 1e-9            # inside the unit square
+
+    a, b = uv[:off], uv[off:]                                   # the two islands' bboxes must be disjoint
+    ax0, ax1, ay0, ay1 = a[:, 0].min(), a[:, 0].max(), a[:, 1].min(), a[:, 1].max()
+    bx0, bx1, by0, by1 = b[:, 0].min(), b[:, 0].max(), b[:, 1].min(), b[:, 1].max()
+    assert (ax1 <= bx0 + 1e-9) or (bx1 <= ax0 + 1e-9) or (ay1 <= by0 + 1e-9) or (by1 <= ay0 + 1e-9)
+
+    assert np.array_equal(mind.mesh_pack_uv(two), mind.mesh_pack_uv(two))   # deterministic
+    assert any("pack_uv" in str(c.name) for c in mind.find_capability("smart uv project")[:3])
+
+def test_mesh_rip_and_split_vertices():
+    """mesh_rip_vertex / mesh_split_vertices (backlog item 8): the inverse of weld. Rip gives each incident face its
+    own copy of a vertex; split makes a polygon soup; weld(split(m)) recovers the welded mesh. Wired + discoverable."""
+    import lecore
+    import numpy as np
+    from holographic.mesh_and_geometry.holographic_mesh import box, Mesh
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    cube = box(2.0, 2.0, 2.0)
+
+    # rip vertex 0 (shared by 3 cube faces) -> +2 copies at the same position; geometry unchanged.
+    n_inc = sum(1 for f in cube.faces if 0 in f)
+    r = mind.mesh_rip_vertex(cube, 0)
+    assert r.n_vertices == cube.n_vertices + (n_inc - 1)
+    assert np.allclose(r.vertices[cube.n_vertices:], cube.vertices[0])
+
+    # split all -> one vertex per face-corner (polygon soup)
+    s = mind.mesh_split_vertices(cube)
+    assert s.n_vertices == sum(len(f) for f in cube.faces)
+
+    # the inverse property: weld(split(m)) == m on vertex count
+    tri = Mesh(cube.vertices.copy(), [tuple(t) for t in cube.triangulate()])
+    welded = mind.weld_mesh(mind.mesh_split_vertices(tri), tol=1e-4)
+    assert welded.n_vertices == tri.n_vertices
+
+    assert any("rip_vertex" in str(c.name) for c in mind.find_capability("tear a mesh at a vertex")[:3])
+    assert any("split_vertices" in str(c.name) for c in mind.find_capability("make a polygon soup")[:3])
+
+def test_mesh_auto_seam():
+    """mesh_auto_seam (completes item 7): auto-select seam edges by crease (dihedral) -- the piece that turns
+    mesh_cut_seam (cuts a GIVEN seam) into a full auto-unwrap. Marks a cube's sharp edges; empty on a smooth sphere."""
+    import lecore
+    from holographic.mesh_and_geometry.holographic_mesh import box, Mesh
+    from holographic.mesh_and_geometry.holographic_meshsmooth import _icosphere
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    cube = Mesh(box(2.0, 2.0, 2.0).vertices.copy(), [tuple(t) for t in box(2.0, 2.0, 2.0).triangulate()])
+    seams = mind.mesh_auto_seam(cube, threshold_deg=40.0)
+    assert len(seams) >= 12                                     # the cube's 12 sharp edges
+    assert all(len(e) == 2 and e[0] < e[1] for e in seams)     # sorted (lo,hi) edges
+    assert mind.mesh_auto_seam(cube) == mind.mesh_auto_seam(cube)   # deterministic
+
+    # kept negative: a smooth sphere has no creases -> honest empty set (not an invented cut)
+    assert mind.mesh_auto_seam(_icosphere(2), threshold_deg=40.0) == []
+
+    assert any("auto_seam" in str(c.name) for c in mind.find_capability("where to place uv seams")[:3])
+
+def test_fold_fractal_kifs():
+    """fold_fractal (the GLSL-demoscene / KIFS keystone): a Mandelbox distance-estimator SDF that reuses the existing
+    raymarch/orbit-trap renderer. Usable DE (bounded Lipschitz), real structure, renders through orbit_trap_render."""
+    import lecore
+    import numpy as np
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    ff = mind.fold_fractal(iterations=10, scale=2.0, min_radius=0.5, fold_limit=1.0)
+
+    # usable distance estimate: never changes faster than the query point moves (raymarchable)
+    rng = np.random.default_rng(0)
+    A = rng.uniform(-4, 4, (2000, 3)); B = A + rng.normal(0, 0.005, (2000, 3))
+    ratio = np.abs(ff.eval(A) - ff.eval(B)) / np.maximum(np.linalg.norm(A - B, axis=1), 1e-9)
+    assert np.percentile(ratio, 99) < 3.0
+
+    # real spatial structure (not a constant field)
+    X, Z = np.meshgrid(np.linspace(-3, 3, 50), np.linspace(-3, 3, 50))
+    dg = ff.eval(np.column_stack([X.ravel(), np.zeros(X.size), Z.ravel()]))
+    assert dg.std() > 1e-3
+
+    # the payoff: it renders through the EXISTING orbit-trap raymarcher (pipeline reuse)
+    cam = mind.camera(eye=[3, 2, 3], target=[0, 0, 0])
+    img = np.asarray(mind.orbit_trap_render(ff, cam, width=48, height=48, max_steps=100))
+    assert img.shape == (48, 48, 3) and img.std() > 1e-3
+
+    assert np.array_equal(ff.eval(dg[:0].reshape(0, 3)), ff.eval(dg[:0].reshape(0, 3)))  # empty-safe + deterministic
+    assert any("fold_fractal" in str(c.name) for c in mind.find_capability("mandelbox fractal")[:3])
+
+def test_mandelbulb_and_escape_time():
+    """mandelbulb + escape_time (fractal zoo step 1): the escape-time family. Mandelbulb is a 3D DE SDF (analytic
+    0.5 log(r) r/dr) that renders through the existing raymarcher; escape_time is the 2D Mandelbrot/Julia field."""
+    import lecore
+    import numpy as np
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    mb = mind.mandelbulb(power=8.0, iterations=8)
+    assert mb.eval([[0.0, 0.0, 0.0]])[0] <= 0.01           # origin inside the bulb
+    assert mb.eval([[3.0, 3.0, 3.0]])[0] > 2.0             # far outside
+    X, Z = np.meshgrid(np.linspace(-1.3, 1.3, 40), np.linspace(-1.3, 1.3, 40))
+    d = mb.eval(np.column_stack([X.ravel(), np.zeros(X.size), Z.ravel()]))
+    assert d.min() < 0 < d.max()                           # real interior/exterior
+    cam = mind.camera(eye=[2, 1.5, 2], target=[0, 0, 0])
+    img = np.asarray(mind.orbit_trap_render(mb, cam, width=40, height=40, max_steps=100))
+    assert img.shape == (40, 40, 3) and img.std() > 1e-3   # renders through the existing pipeline
+
+    mset = mind.escape_time(width=80, height=80, center=(-0.5, 0.0), span=3.0, max_iter=60)
+    assert 0.05 < np.mean(mset >= 59.9) < 0.8              # Mandelbrot has interior + exterior
+    jset = mind.escape_time(width=60, height=60, max_iter=60, julia_c=(-0.8, 0.156))
+    assert jset.std() > 1.0                                # Julia has structure
+    assert np.array_equal(mind.escape_time(width=40, height=40), mind.escape_time(width=40, height=40))
+
+    assert any("mandelbulb" in str(c.name) for c in mind.find_capability("3d mandelbrot fractal")[:3])
+    assert any("escape_time" in str(c.name) for c in mind.find_capability("julia set")[:3])
+
+def test_milkdrop_preset_reader():
+    """milk_parse + milk_eval (Milkdrop step 2): a SAFE ns-eel2 evaluator + .milk preset reader. Parses the equation
+    families, runs per-frame equations deterministically driven by audio, and never uses Python eval."""
+    import lecore
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # safe expression evaluator: math, functions, variables; rejects code injection
+    assert abs(mind.milk_eval("2 + 3 * 4") - 14.0) < 1e-12
+    assert abs(mind.milk_eval("sqrt(sqr(3) + sqr(4)) + bass", {"bass": 1.0}) - 6.0) < 1e-12
+    for evil in ("__import__(1)", "x @ y", "open(1)"):
+        try:
+            mind.milk_eval(evil)
+            assert False, "must reject %r" % evil
+        except ValueError:
+            pass
+
+    # a synthetic preset (written here, not copied): q1 counts frames, zoom reacts to bass
+    text = ("[preset00]\nzoom=1.0\nper_frame_init_1=q1 = 0\n"
+            "per_frame_1=q1 = q1 + 1\nper_frame_2=zoom = 1.0 + 0.05 * bass\n"
+            "per_pixel_1=rot = rot + 0.01\nwarp_1=`stored not run`\n")
+    p = mind.milk_parse(text)
+    assert len(p.frame) == 2 and len(p.init) == 1 and len(p.pixel) == 1
+    assert "stored not run" in p.warp_shader
+    s = p.initial_state()
+    assert s["q1"] == 0.0
+    p.run_frame(s, audio={"bass": 1.0}, frame=0)
+    assert s["q1"] == 1.0
+    z1 = s["zoom"]
+    p.run_frame(s, audio={"bass": 4.0}, frame=1)
+    assert s["q1"] == 2.0 and s["zoom"] > z1                # frame count + bass-driven zoom
+
+    assert any("milk_parse" in str(c.name) for c in mind.find_capability("read a .milk file")[:3])
+
+def test_fold_fit_inference():
+    """fold_fit (pattern-recognition step 3): the INVERSE of fold_fractal -- recover a fold recipe from a point cloud
+    via mind.optimize. The recovered fit must beat its baseline; the improvement RATIO is the discriminative signal."""
+    import lecore
+    from holographic.mesh_and_geometry.holographic_foldfit import surface_points
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    true_recipe = (2.1, 0.5, 1.0)
+    target = surface_points(true_recipe, n=250, iterations=10, seed=0)
+    assert len(target) > 100
+
+    res = mind.fold_fit(target, iterations=10, coarse=6, refine_steps=30)
+    assert res["improved"]                                  # beat the default-guess baseline
+    assert res["loss"] < 0.01                               # surface passes near the target
+    assert abs(res["recipe"][0] - true_recipe[0]) < 0.5     # scale (the sensitive param) recovered
+    # deterministic
+    assert mind.fold_fit(target, iterations=10, coarse=6, refine_steps=30)["recipe"] == res["recipe"]
+
+    # kept negative: the improvement RATIO discriminates (a sphere the DE contains improves little over baseline)
+    import numpy as np
+    rng = np.random.default_rng(1)
+    dirs = rng.normal(size=(250, 3)); dirs /= np.linalg.norm(dirs, axis=1, keepdims=True)
+    res_sphere = mind.fold_fit(dirs * 1.3, iterations=10, coarse=6, refine_steps=30)
+    assert res["baseline"] / max(res["loss"], 1e-9) > res_sphere["baseline"] / max(res_sphere["loss"], 1e-9)
+
+    assert any("fold_fit" in str(c.name) for c in mind.find_capability("inverse fractal problem")[:3])
+
+def test_fractal_pipeline_bridges():
+    """The three integration bridges (answering 'can fractals drive geometry/sim/animation?'): sdf_to_mesh (fractal ->
+    Mesh -> softbody), field_displace (per-face fractal modifier masked by a texture), transport (play/pause/scrub)."""
+    import lecore
+    import numpy as np
+    from holographic.mesh_and_geometry.holographic_mesh import grid
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # 1. FRACTAL -> STATIC MESH -> SIMULATION: mesh a mandelbulb (all-neg-crossing at level 0) and a fold_fractal
+    #    (all-positive DE -> auto iso offset), then hand both to the physics layer.
+    for sdf in (mind.mandelbulb(iterations=6), mind.fold_fractal(iterations=6, scale=2.0), mind.menger_fractal(3)):
+        mesh = mind.sdf_to_mesh(sdf, resolution=28)
+        assert mesh.n_faces > 100                              # a real mesh, not the silent-0-faces trap
+        sb = mind.mesh_to_softbody(mesh)                       # the whole physics layer now applies
+        assert sb is not None
+
+    # 2. PER-FACE FRACTAL MODIFIER FROM A TEXTURE: displace a plane by a mandelbulb, masked by a stripe texture --
+    #    the detail grows ONLY where the mask paints.
+    plane = grid(nx=40, ny=40, width=3.0, height=3.0)
+    tex_mask = (np.sin(plane.vertices[:, 0] * 3.0) > 0).astype(float)
+    disp = mind.field_displace(plane, mind.mandelbulb(iterations=6), amount=0.3, weight=tex_mask, bias=0.2)
+    moved = np.linalg.norm(disp.vertices - plane.vertices, axis=1)
+    painted = tex_mask > 0.5
+    assert moved[painted].max() > 1e-4                         # detail where the texture paints
+    assert moved[~painted].max() < 1e-9                        # untouched where it does not (per-face gating)
+
+    # 3. ANIMATION TRANSPORT: an animated fractal recipe, scrubbable. play/pause/step/seek/rewind/fast-forward.
+    def frame(f):
+        return np.array([[1.6 + 0.1 * f, 0.0, 0.0]])          # a param ramp (e.g. animating the fold scale)
+    tr = mind.transport(frame, n_frames=12, fps=24.0)
+    assert np.allclose(tr.seek(5), [[2.1, 0.0, 0.0]])         # scrub to frame 5
+    tr.stop(); tr.play(1.0); tr.tick(); tr.tick(); assert tr.frame == 2      # play forward
+    tr.pause(); held = tr.frame; tr.tick(); assert tr.frame == held         # pause holds
+    tr.seek(8); tr.play(-1.0); tr.tick(); assert tr.frame == 7              # rewind
+    tr.seek(0); tr.play(3.0); tr.tick(); assert tr.frame == 3              # fast-forward 3x
+    assert np.array_equal(tr.seek(4), tr.seek(4))                          # deterministic scrub
+
+    for nm, q in [("sdf_to_mesh", "mesh a fractal"), ("field_displace", "per face modifier from a texture"),
+                  ("transport", "scrub the timeline")]:
+        assert any(nm in str(c.name) for c in mind.find_capability(q)[:3])
+
+def test_fit_shape_to_shadertoy():
+    """fit_shape + to_shadertoy (the capstone): a target -> closest procedural formula -> runnable code. A 3-D fractal
+    point cloud fits to a fold recipe and emits a complete Shadertoy; the fractal SDFs now emit shaders too."""
+    import lecore
+    import numpy as np
+    from holographic.mesh_and_geometry.holographic_foldfit import surface_points
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # 3-D: point cloud -> fractal recipe -> complete Shadertoy raymarch shader
+    cloud = surface_points((2.1, 0.5, 1.0), n=250, iterations=10, seed=0)
+    res = mind.fit_shape(cloud)
+    assert res["kind"] == "pointcloud->fractal_sdf"
+    assert res["quality"] > 3.0                                # a real fractal fit
+    assert "mainImage" in res["shadertoy"] and "for(int" in res["shadertoy"]
+
+    # to_shadertoy: the fractal SDFs now emit complete, runnable shaders (previously refused as INEXACT)
+    for sdf in (mind.mandelbulb(iterations=6), mind.fold_fractal(iterations=8, scale=2.0), mind.menger_fractal(3)):
+        sh = mind.to_shadertoy(sdf)
+        assert "mainImage" in sh and "iResolution" in sh and "for(int" in sh
+
+    # 2-D: a texture routes to the fbm family fit and emits a GLSL snippet (fast, small res)
+    pn = mind.procedural_noise(n_dims=2, octaves=5, lacunarity=2.0, gain=0.5, base_bandwidth=3.0, seed=7)
+    tex = np.asarray(pn.sample_grid_fast(16))
+    from holographic.mesh_and_geometry.holographic_fitshape import fit_texture
+    tres = fit_texture(tex, mind=mind, res=12)
+    assert "fbm(" in tres["glsl"] and 0.0 <= tres["quality"] <= 1.0
+    assert "NOT parameter recovery" in tres["note"]            # the kept negative is loud
+
+    assert any("fit_shape" in str(c.name) for c in mind.find_capability("find the closest formula for a shape")[:3])
+    assert any("to_shadertoy" in str(c.name) for c in mind.find_capability("get the shadertoy code")[:3])
+
+def test_ifs_fern_fit():
+    """ifs_generate + ifs_fit (the honest fern/tree fitter): generate a Barnsley fern from affine maps, and match a
+    2-D point cloud to the closest NAMED IFS system. fit_shape routes a 2-D cloud here."""
+    import lecore
+    import numpy as np
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    fern = mind.ifs_generate("barnsley_fern", n=8000)
+    assert fern.shape == (8000, 2)
+    assert -3.0 < fern[:, 0].min() < 0.0 and 9.0 < fern[:, 1].max() < 11.0   # classic fern footprint
+    assert np.array_equal(mind.ifs_generate("barnsley_fern", n=1000),
+                          mind.ifs_generate("barnsley_fern", n=1000))          # deterministic
+
+    res = mind.ifs_fit(fern)
+    assert res["name"] == "barnsley_fern"
+    assert res["quality"] > res["baseline"]                                    # a real snap, beats library mean
+    # distinguishes families: a sierpinski cloud snaps to sierpinski, not a fern
+    tri = mind.ifs_generate("sierpinski", n=6000)
+    assert mind.ifs_fit(tri)["name"] == "sierpinski"
+
+    # fit_shape dispatches a 2-D cloud to the IFS path (a 3-D cloud still goes to the fractal SDF path)
+    assert mind.fit_shape(fern)["kind"] == "pointcloud2d->affine_ifs"
+
+    # kept negative reported: snap-to-library, not rotation-invariant
+    assert "not rotation-invariant" in res["note"] or "not arbitrary" in res["note"].lower()
+
+    assert any("ifs_fit" in str(c.name) for c in mind.find_capability("fit a fern")[:3])
+    assert any("ifs_generate" in str(c.name) for c in mind.find_capability("generate a fern")[:3])
+
+def test_fit_primitives_sphere_set():
+    """fit_primitives (the hard-surface/creature fitter): approximate a non-fractal shape with a union of spheres that
+    emits a real Shadertoy. fit_shape method='primitives' routes here; the default stays fractal (backward compatible)."""
+    import lecore
+    import numpy as np
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(0)
+
+    def ssurf(c, r, n):
+        d = rng.normal(size=(n, 3)); d /= np.linalg.norm(d, axis=1, keepdims=True)
+        return np.asarray(c) + r * d
+
+    # a two-blob peanut fits much better with 2 spheres than 1, and recovers the two blob centres
+    peanut = np.vstack([ssurf([-0.5, 0, 0], 0.6, 300), ssurf([0.5, 0, 0], 0.5, 300)])
+    r = mind.fit_primitives(peanut, k=2)
+    assert r["k"] == 2 and r["quality"] > 2.0
+    cxs = sorted(c[0] for c, _ in r["spheres"])
+    assert cxs[0] < -0.2 and cxs[1] > 0.2
+    assert mind.fit_primitives(peanut, k=2)["spheres"] == r["spheres"]         # deterministic
+
+    # the fitted union SDF is real: it meshes and emits a Shadertoy shader (spheres are exact)
+    assert mind.sdf_to_mesh(r["sdf"], resolution=24).n_faces > 50
+    assert "mainImage" in mind.to_shadertoy(r["sdf"])
+
+    # auto_k adapts: a single blob needs fewer spheres than a 3-part creature
+    creature = np.vstack([ssurf([0, 0, 0], 0.7, 300), ssurf([0.9, 0.3, 0], 0.35, 150), ssurf([-0.9, 0.3, 0], 0.35, 150)])
+    assert mind.fit_primitives(ssurf([0, 0, 0], 0.7, 400), auto_k=True, k_max=8)["k"] <= \
+           mind.fit_primitives(creature, auto_k=True, k_max=8)["k"]
+
+    # fit_shape routing: method='primitives' -> sphere set; default 3-D -> fractal (backward compatible)
+    assert mind.fit_shape(creature, method="primitives")["kind"] == "pointcloud->primitive_sdf"
+    assert mind.fit_shape(creature)["kind"] == "pointcloud->fractal_sdf"
+
+    assert any("fit_primitives" in str(c.name) for c in mind.find_capability("fit a creature with spheres")[:3])
+
+def test_fit_primitives_mixed():
+    """fit_primitives with boxes + capsules: an elongated limb is fit by a box/capsule (not a coarse sphere), a flat
+    slab by a box, and the mixed union still meshes + emits a Shadertoy shader with rotation."""
+    import lecore
+    import numpy as np
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    rng = np.random.default_rng(1)
+
+    # a rounded limb along a tilted axis
+    d = np.array([1.0, 1.0, 0.3]); d /= np.linalg.norm(d)
+    limb = []
+    for _ in range(500):
+        t = rng.uniform(-0.6, 0.6); off = rng.normal(size=3); off -= off.dot(d) * d; off /= np.linalg.norm(off)
+        limb.append(np.array([0.5, 0.2, 0.0]) + t * d + 0.18 * off)
+    limb = np.array(limb)
+
+    fit = mind.fit_primitives(limb, k=1)                        # one elongated primitive
+    assert fit["kinds"].get("capsule", 0) + fit["kinds"].get("box", 0) == 1   # not a sphere
+    sphere_only = mind.fit_primitives(limb, k=1, primitives=("sphere",))
+    assert fit["residual"] < sphere_only["residual"] * 0.6     # elongated primitive beats a sphere on a limb
+
+    # a flat slab is fit by a box (a capsule can't be flat)
+    slab = []
+    for _ in range(500):
+        f = rng.integers(0, 3); s = rng.choice([-1, 1]); p = rng.uniform(-1, 1, 3) * np.array([0.5, 0.5, 0.06])
+        p[f] = s * [0.5, 0.5, 0.06][f]; slab.append(p)
+    assert mind.fit_primitives(np.array(slab), k=1)["kinds"].get("box", 0) == 1
+
+    # the mixed union still meshes and emits a Shadertoy (rotated boxes/capsules emit)
+    assert mind.sdf_to_mesh(fit["sdf"], resolution=24).n_faces > 20
+    sh = mind.to_shadertoy(fit["sdf"])
+    assert "mainImage" in sh
+
+    # back-compat: primitives=('sphere',) reproduces sphere-only
+    assert all(k == "sphere" for k, _ in sphere_only["parts"])
+    assert mind.fit_primitives(limb, k=1)["parts"] == fit["parts"]            # deterministic
+
+def test_humanoid_ik_pose():
+    """humanoid + fit_pose: a biped rig with auto-IK that skins into a Shadertoy-emitting SDF, poses to targets keeping
+    bone lengths, and fits to 3-D and 2-D keypoints (the honest keypoints-in, posed-rig-out path)."""
+    import lecore
+    import numpy as np
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # build + skin: the skin is a real SDF (meshes + emits a Shadertoy shader)
+    h, body = mind.humanoid()
+    assert mind.sdf_to_mesh(body, resolution=32).n_faces > 200
+    assert "mainImage" in mind.to_shadertoy(body)
+
+    # IK posing reaches the target and preserves bone lengths
+    rest = [np.linalg.norm(h.joints["l_elbow"] - h.joints["l_shoulder"]),
+            np.linalg.norm(h.joints["l_wrist"] - h.joints["l_elbow"])]
+    h.pose_to({"l_wrist": (0.3, 1.0, 0.25)}, mind=mind)
+    assert np.linalg.norm(h.joints["l_wrist"] - np.array([0.3, 1.0, 0.25])) < 0.05
+    posed = [np.linalg.norm(h.joints["l_elbow"] - h.joints["l_shoulder"]),
+             np.linalg.norm(h.joints["l_wrist"] - h.joints["l_elbow"])]
+    assert np.allclose(rest, posed, atol=1e-3)                # bone lengths preserved
+
+    # 3-D pose fit: end-effectors reach their keypoints
+    kp = {"pelvis": (0, 0, 0), "l_wrist": (0.4, 0.9, 0.2), "r_wrist": (-0.5, 0.3, 0.1), "r_ankle": (-0.12, -0.7, 0.3)}
+    hp = mind.fit_pose(kp)
+    for tip in ("l_wrist", "r_wrist", "r_ankle"):
+        assert np.linalg.norm(hp.joints[tip] - np.asarray(kp[tip])) < 0.05
+
+    # 2-D pose fit round-trips through a pinhole camera (keypoints, not pixels)
+    class Cam:
+        def __init__(self): self.eye = np.array([0.0, 0.0, 3.0]); self.f = 1.0
+        def project(self, P):
+            P = np.atleast_2d(P); z = self.eye[2] - P[:, 2]
+            return np.column_stack([self.f * P[:, 0] / z, self.f * P[:, 1] / z])
+        def ray(self, uv):
+            return self.eye, np.array([uv[0], uv[1], -1.0])
+    cam = Cam()
+    truth = mind.fit_pose({"l_wrist": (0.3, 0.9, 0.2)})
+    from holographic.mesh_and_geometry.holographic_humanoid import _JOINT_NAMES
+    kp2d = {n: cam.project(truth.joints[n])[0] for n in _JOINT_NAMES}
+    h2, lifted = mind.fit_pose(kp2d, camera=cam)
+    reproj = np.array([cam.project(h2.joints[n])[0] for n in _JOINT_NAMES])
+    truth2d = np.array([kp2d[n] for n in _JOINT_NAMES])
+    assert float(np.mean(np.linalg.norm(reproj - truth2d, axis=1))) < 0.1
+
+    # deterministic + discoverable
+    assert np.allclose(mind.fit_pose(kp).joints_array(), hp.joints_array())
+    assert any("humanoid" in str(c.name) for c in mind.find_capability("make a humanoid")[:3])
+    assert any("fit_pose" in str(c.name) for c in mind.find_capability("fit a pose to keypoints")[:3])
+
+def test_humanoid_body_morphs():
+    """humanoid + body_params character-editor morphs: muscle/fat/length per segment, global weight distributed by
+    region, optional breast geometry -- the morphed body still meshes + emits a Shadertoy, and the base build is
+    unchanged."""
+    import lecore
+    import numpy as np
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    from holographic.mesh_and_geometry.holographic_humanoid import Humanoid, default_body
+
+    # base build is a hard union (byte-identical to the pre-morph skin -- additive)
+    assert mind.humanoid(skin=True)[1].kind == "union"
+
+    def forearm_thickness(body):
+        h = Humanoid(body=body); sdf = h.skin()
+        mid = (h.joints["l_elbow"] + h.joints["l_wrist"]) / 2.0
+        for r in np.linspace(0.02, 0.4, 200):
+            if sdf.eval(np.array([mid + [0, 0, r]]))[0] > 0:
+                return r
+        return 0.4
+    t0 = forearm_thickness(default_body())
+    bm = mind.body_params(); bm["muscle"] = 1.0
+    bf = mind.body_params(); bf["fat"] = 1.0
+    assert forearm_thickness(bm) > t0 and forearm_thickness(bf) > t0     # muscle + fat both thicken
+
+    # length slider lengthens the thigh (knee drops)
+    bl = mind.body_params(); bl["segments"] = {"thigh": {"length": 0.5}}
+    assert Humanoid(body=bl).joints["l_knee"][1] < Humanoid().joints["l_knee"][1] - 0.15
+
+    # optional breast geometry adds chest-front volume and still emits a Shadertoy
+    bb = mind.body_params()
+    bb["breasts"] = {"size": 1.0, "sag": 0.3, "separation": 0.4, "nipple_diameter": 0.03, "nipple_depth": 0.02}
+    h, sdf = mind.humanoid(body=bb)
+    probe = h.joints["chest"] + np.array([0.1, -0.02, 0.12])
+    assert sdf.eval(np.array([probe]))[0] < 0 <= Humanoid().skin().eval(np.array([probe]))[0]
+    assert "mainImage" in mind.to_shadertoy(sdf) and mind.sdf_to_mesh(sdf, resolution=28).n_faces > 200
+
+    # morphs compose with IK posing, and are deterministic
+    b2 = mind.body_params(); b2["muscle"] = 0.5
+    a = mind.humanoid(body=b2, targets={"l_wrist": (0.3, 0.9, 0.2)})[0].joints_array()
+    b = mind.humanoid(body=b2, targets={"l_wrist": (0.3, 0.9, 0.2)})[0].joints_array()
+    assert np.allclose(a, b)
+    assert any("body_params" in str(c.name) for c in mind.find_capability("character editor sliders")[:3])
+
+def test_humanoid_joint_limits():
+    """Anatomical joint limits + muscle/fat range-of-motion coupling: constrained IK prevents hyperextension and a
+    bulky limb can't curl as far as a lean one; solve_ik_limited is callable directly."""
+    import lecore
+    import numpy as np
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+    from holographic.mesh_and_geometry.holographic_humanoid import Humanoid, default_body
+
+    def elbow_flex(h):
+        u = h.joints["l_elbow"] - h.joints["l_shoulder"]; v = h.joints["l_wrist"] - h.joints["l_elbow"]
+        u = u / np.linalg.norm(u); v = v / np.linalg.norm(v)
+        return float(np.degrees(np.arccos(np.clip(np.dot(u, v), -1.0, 1.0))))
+
+    # muscle/fat reduce range of motion: a muscular arm curls less than a lean one on a tight target
+    curl = {"l_wrist": (0.25, 0.55, 0.05)}
+    lean = Humanoid(); lean.pose_to(curl, mind=mind)
+    bm = default_body(); bm["muscle"] = 1.0; bm["segments"] = {"upper_arm": {"muscle": 1.0}}
+    musc = Humanoid(body=bm); musc.pose_to(curl, mind=mind)
+    assert elbow_flex(musc) < elbow_flex(lean) - 20.0            # muscle tightens the flex range
+    tgt = np.array([0.25, 0.55, 0.05])
+    assert np.linalg.norm(musc.joints["l_wrist"] - tgt) > np.linalg.norm(lean.joints["l_wrist"] - tgt)
+
+    # constrained IK stays in range and preserves bone lengths
+    assert 0.0 <= elbow_flex(lean) <= 151.0 and 0.0 <= elbow_flex(musc) <= 91.0
+    fresh = Humanoid()
+    assert np.allclose([np.linalg.norm(musc.joints["l_elbow"] - musc.joints["l_shoulder"]),
+                        np.linalg.norm(musc.joints["l_wrist"] - musc.joints["l_elbow"])],
+                       [np.linalg.norm(fresh.joints["l_elbow"] - fresh.joints["l_shoulder"]),
+                        np.linalg.norm(fresh.joints["l_wrist"] - fresh.joints["l_elbow"])], atol=1e-3)
+
+    # in-reach targets are still reached (limits don't over-restrict)
+    hh = Humanoid(); hh.pose_to({"l_wrist": (0.5, 0.55, 0.2)}, mind=mind)
+    assert np.linalg.norm(hh.joints["l_wrist"] - np.array([0.5, 0.55, 0.2])) < 0.08
+
+    # solve_ik_limited direct: from a hyperextended start, constrained flex stays valid; unconstrained can reverse
+    arm = np.array([[0, 0, 0.], [0.4, 0, 0], [0.6, 0, -0.35]])
+    lim = [None, {"type": "hinge", "axis": "auto", "lo": 0.0, "hi": np.radians(150)}]
+    p, err = mind.solve_ik_limited(arm, np.array([0.5, 0, -0.5]), lim)
+    fu = (p[1] - p[0]) / np.linalg.norm(p[1] - p[0]); fv = (p[2] - p[1]) / np.linalg.norm(p[2] - p[1])
+    assert 0.0 <= np.degrees(np.arccos(np.clip(np.dot(fu, fv), -1, 1))) <= 151.0
+
+    assert any("solve_ik_limited" in str(c.name) for c in mind.find_capability("prevent hyperextension")[:3])
+
+def test_creature_builder():
+    """creature + creature_pose: a Spore-style non-humanoid rig -- spine + attachable symmetric limbs, generic organic
+    joint constraints, a skin that meshes + emits Shadertoy, and constrained IK posing."""
+    import lecore
+    import numpy as np
+    mind = lecore.UnifiedMind(dim=256, seed=0)
+
+    # a quadruped: spine + 4 legs (2 mirrored pairs) + head; skin meshes + emits a Shadertoy
+    cre, body = mind.creature(mind.quadruped_spec())
+    assert len(cre.chains) == 4
+    assert mind.sdf_to_mesh(body, resolution=32).n_faces > 300
+    assert "mainImage" in mind.to_shadertoy(body)
+
+    # bilateral symmetry: a leg and its mirror are x-symmetric
+    l0, l0m = cre.chains["L0"][-1], cre.chains["L0m"][-1]
+    assert np.allclose(cre.joints[l0][0], -cre.joints[l0m][0], atol=1e-6)
+    assert np.allclose(cre.joints[l0][1:], cre.joints[l0m][1:], atol=1e-6)
+
+    # constrained IK posing keeps bone lengths and joint flex in range (no hyperextension)
+    leg = cre.chains["L0"]
+    rest = [np.linalg.norm(cre.joints[leg[i + 1]] - cre.joints[leg[i]]) for i in range(len(leg) - 1)]
+    cre2, _ = mind.creature_pose(mind.quadruped_spec(), {"L0": tuple(cre.joints[leg[0]] + np.array([0.35, -0.3, 0.2]))})
+    leg2 = cre2.chains["L0"]
+    posed = [np.linalg.norm(cre2.joints[leg2[i + 1]] - cre2.joints[leg2[i]]) for i in range(len(leg2) - 1)]
+    assert np.allclose(rest, posed, atol=1e-4)
+    for i in range(1, len(leg2) - 1):
+        u = cre2.joints[leg2[i]] - cre2.joints[leg2[i - 1]]; v = cre2.joints[leg2[i + 1]] - cre2.joints[leg2[i]]
+        u = u / np.linalg.norm(u); v = v / np.linalg.norm(v)
+        assert 0.0 <= np.degrees(np.arccos(np.clip(np.dot(u, v), -1, 1))) <= 141.0
+
+    # arbitrary body plans: a hexapod (3 mirrored pairs) -> 6 legs; a non-mirrored tentacled thing
+    hexc = mind.creature({"spine": {"length": 1.0, "segments": 3},
+                          "limbs": [{"at": f, "dir": (1.0, -1.0, 0.0), "segments": 2, "length": 0.4, "mirror": True}
+                                    for f in (0.2, 0.5, 0.8)]}, skin=False)
+    assert len(hexc.chains) == 6
+
+    # muscle thickens the creature (morphs reused from the humanoid)
+    from holographic.mesh_and_geometry.holographic_humanoid import default_body
+    bm = default_body(); bm["muscle"] = 1.0
+    mid = (cre.joints["s2"] + cre.joints["s3"]) / 2.0
+    def thick(sdf):
+        for r in np.linspace(0.05, 0.6, 200):
+            if sdf.eval(np.array([mid + [r, 0, 0]]))[0] > 0:
+                return r
+        return 0.6
+    assert thick(mind.creature(mind.quadruped_spec(bm))[1]) > thick(mind.creature(mind.quadruped_spec())[1])
+
+    assert any("creature" in str(c.name) for c in mind.find_capability("build a creature from parts")[:3])

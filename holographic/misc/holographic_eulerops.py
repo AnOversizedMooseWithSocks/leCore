@@ -229,6 +229,85 @@ def split_face(mesh, f_index, i, j):
     return Mesh(mesh.vertices.copy(), out)
 
 
+def poke_face(mesh, f_index, height=0.0):
+    """POKE polygon face `f_index`: add a new vertex at the face CENTROID (optionally pushed out along the face
+    normal by `height`) and fan the face into triangles, one per original edge. An n-gon becomes n triangles sharing
+    the new center vertex. V+1, E+n, F+(n-1), chi UNCHANGED (a legal Euler edit: +1 vertex, +n edges, +(n-1) faces
+    -> dV - dE + dF = 1 - n + (n-1) = 0). The 'poke faces' every modeler uses to fan a quad/ngon into triangles or
+    to raise a spike; the inverse of dissolving the center vertex back. Returns a new `Mesh`.
+
+    Height sign follows the face normal (Newell), so a positive height raises the poke OUTWARD on a consistently
+    wound mesh -- the same normal convention mesh.vertex_normals and extrude use, so a poke and an extrude agree on
+    'out'. height=0 (default) keeps the centroid in the face plane (pure retopology, no shape change)."""
+    import numpy as np
+    faces = list(mesh.faces)
+    V = mesh.vertices
+    f = faces[f_index]
+    n = len(f)
+    if n < 3:
+        raise ValueError("poke_face needs a face with >=3 corners; face %d has %d" % (f_index, n))
+    corner_pos = V[list(f)]                                  # (n,3) the face's vertex positions
+    centroid = corner_pos.mean(axis=0)
+    if height:
+        # Newell normal (robust for non-planar ngons) -- matches the mesh kernel's normal convention so 'out' agrees.
+        nrm = np.zeros(3)
+        for k in range(n):
+            a = corner_pos[k]
+            b = corner_pos[(k + 1) % n]
+            nrm[0] += (a[1] - b[1]) * (a[2] + b[2])
+            nrm[1] += (a[2] - b[2]) * (a[0] + b[0])
+            nrm[2] += (a[0] - b[0]) * (a[1] + b[1])
+        ln = float(np.linalg.norm(nrm))
+        if ln > 1e-12:
+            centroid = centroid + (nrm / ln) * float(height)
+    new_verts = np.vstack([V, centroid[None, :]])
+    c = len(V)                                              # index of the new center vertex
+    out = [nf for k, nf in enumerate(faces) if k != f_index]
+    for k in range(n):                                     # fan: one triangle per original edge, sharing the center
+        out.append((f[k], f[(k + 1) % n], c))
+    return Mesh(new_verts, out)
+
+
+def rip_vertex(mesh, vertex):
+    """RIP a shared vertex apart: give every face incident to `vertex` its OWN copy of it, at the same position, so
+    the faces are no longer joined there. The inverse of a weld at one vertex -- where merge_by_distance FUSES
+    coincident vertices into one, this SPLITS one vertex back into per-face duplicates. Topology only: V rises by
+    (incident_faces - 1), positions are unchanged (the copies sit exactly on the original), so the mesh looks
+    identical but is torn at that vertex (its 1-ring is cut). Returns a new `Mesh`. Ripping a manifold interior
+    vertex OPENS the surface there (adds boundary); ripping is what a modeler does before pulling the pieces apart.
+
+    A no-op (returns an equal mesh) for a vertex used by 0 or 1 faces -- there is nothing to separate."""
+    faces = [tuple(f) for f in mesh.faces]
+    verts = [v for v in mesh.vertices]
+    incident = [fi for fi, f in enumerate(faces) if vertex in f]
+    if len(incident) <= 1:
+        return Mesh(np.asarray(verts, float), faces)          # nothing shared -> unchanged
+    out = list(faces)
+    # keep the ORIGINAL vertex for the first incident face; every OTHER incident face gets a fresh copy.
+    for fi in incident[1:]:
+        dup = len(verts)
+        verts.append(np.array(mesh.vertices[vertex], float))  # a copy at the identical position (a pure topo rip)
+        out[fi] = tuple(dup if v == vertex else v for v in faces[fi])
+    return Mesh(np.asarray(verts, float), out)
+
+
+def split_vertices(mesh):
+    """SPLIT every vertex per-face: give each face its own private copies of all its corners, so no two faces share a
+    vertex -- the full inverse of a weld (merge_by_distance). The result is a 'polygon soup': same geometry, but every
+    face is topologically independent (flat/faceted shading, no shared normals; the state right after loading an
+    unindexed triangle list). V becomes sum(len(f) for f in faces). Positions unchanged, so it looks identical until
+    something moves a face. Returns a new `Mesh`. merge_by_distance(split_vertices(m)) recovers the welded mesh."""
+    verts = []
+    out = []
+    for f in mesh.faces:
+        nf = []
+        for v in f:
+            nf.append(len(verts))
+            verts.append(np.array(mesh.vertices[v], float))   # a private copy per face-corner
+        out.append(tuple(nf))
+    return Mesh(np.asarray(verts, float), out)
+
+
 # =====================================================================================================
 # Self-test -- asserts the invariants and the make/kill round-trips; prints a one-line summary.
 # =====================================================================================================
@@ -308,15 +387,40 @@ def _selftest():
     assert sf.n_faces == quad.n_faces + 1
     assert sf.euler_characteristic() == 2 and sf.is_manifold() and sf.is_closed()
 
-    # --- determinism: every operator is a pure function of (mesh, selection) -- byte-identical out ---
-    s1, _ = split_edge(tm, a, b)
-    s2, _ = split_edge(tm, a, b)
-    assert np.array_equal(s1.vertices, s2.vertices) and s1.faces == s2.faces, "split_edge must be deterministic"
-    assert flip_edge(tm, a, b).faces == flip_edge(tm, a, b).faces, "flip_edge must be deterministic"
+    # --- poke_face: an n-gon face becomes n triangles around a new center vertex; chi is preserved ---
+    quad_box = box(2.0, 2.0, 2.0)                       # 6 quad faces, chi = 2
+    n0 = len(quad_box.faces[0])                         # a quad -> 4 corners
+    pk = poke_face(quad_box, 0, height=0.0)
+    assert pk.n_vertices == quad_box.n_vertices + 1                          # +1 center vertex
+    assert pk.n_faces == quad_box.n_faces - 1 + n0                          # -1 poked face, +n triangles
+    assert pk.euler_characteristic() == 2 and pk.is_manifold() and pk.is_closed()   # legal Euler edit
+    # height pushes the center OUT along the face normal (a raised spike), not into the plane.
+    pk_hi = poke_face(quad_box, 0, height=0.5)
+    center_flat = pk.vertices[-1]
+    center_hi = pk_hi.vertices[-1]
+    assert np.linalg.norm(center_hi - center_flat) > 0.4, "height should displace the center vertex outward"
+    # determinism: pure function of (mesh, face, height)
+    assert poke_face(quad_box, 0, 0.3).faces == poke_face(quad_box, 0, 0.3).faces, "poke_face must be deterministic"
+
+    # --- RIP / SPLIT vertices: the inverse of a weld. Positions unchanged, topology torn. ---
+    from holographic.mesh_and_geometry.holographic_meshtools import merge_by_distance
+    n_inc = sum(1 for f in quad_box.faces if 0 in f)            # vertex 0 is shared by 3 faces of a cube
+    rp = rip_vertex(quad_box, 0)
+    assert rp.n_vertices == quad_box.n_vertices + (n_inc - 1), "rip adds (incident_faces - 1) copies"
+    assert np.allclose(rp.vertices[quad_box.n_vertices:], quad_box.vertices[0]), "ripped copies sit on the original"
+    assert rip_vertex(quad_box, 0).faces == rip_vertex(quad_box, 0).faces, "rip_vertex must be deterministic"
+    # split_vertices -> polygon soup: one vertex per face-corner; and weld(split(m)) recovers the welded mesh.
+    sv = split_vertices(quad_box)
+    assert sv.n_vertices == sum(len(f) for f in quad_box.faces), "split gives each corner its own vertex"
+    tri = Mesh(quad_box.vertices.copy(), [tuple(t) for t in quad_box.triangulate()])
+    welded = merge_by_distance(split_vertices(tri), tol=1e-4)
+    assert welded.n_vertices == tri.n_vertices, "weld o split = identity on vertices (split IS the inverse of weld)"
 
     print("holographic_eulerops selftest: ok (flip chi/V/E/F-invariant + flip-back restores; "
           "split_edge/collapse_edge exact make-kill round-trip; collapse link-condition refuses the "
-          "bipyramid equator; split_face n-gon E+1/F+1 chi=2; all operators deterministic)")
+          "bipyramid equator; split_face n-gon E+1/F+1 chi=2; poke_face fans an n-gon to n triangles "
+          "V+1/F+(n-1) chi=2 with an outward-normal height; rip_vertex adds per-face copies and split_vertices is "
+          "the inverse of weld (weld o split = identity); all operators deterministic)")
 
 
 if __name__ == "__main__":

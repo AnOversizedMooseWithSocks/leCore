@@ -80,7 +80,16 @@ def adaptive_fit(target, noise_thresh=0.03, k_min=4, k_max=200, scales=(1.0, 2.0
 
     KEPT CAVEAT: the threshold gates the GREEDY residual, so quality is only APPROXIMATELY equalised; and a
     HARD-EDGED target never reaches a low residual with this smooth isotropic basis, so it simply runs to
-    k_max -- the adaptive count is meaningful for fields the Gaussian basis can actually represent."""
+    k_max -- the adaptive count is meaningful for fields the Gaussian basis can actually represent.
+
+    KEPT NEGATIVE -- DOES NOT delegate to auto_scale, on purpose. auto_scale is the generic "diagnose which knob
+    is most responsive, then double it" loop; it looks like a candidate to consolidate this onto, but it is the
+    WRONG algorithm here and switching MEASURABLY REGRESSES. This is single-knob matching pursuit: each iteration
+    does real O(1) placement work at the peak residual, so the total cost is ~k_used fits. auto_scale would
+    re-fit the WHOLE splat set from scratch at each power-of-2 K (4, 8, 16, ...) and overshoot the count.
+    Measured head-to-head on a 6-blob field: auto_scale used 1.5x the splats and 8x the wall time for equal PSNR.
+    A better matching-pursuit stop belongs HERE; improvements to auto_scale do not transfer to this problem and
+    should not be expected to. (See NOTES: INTEGRATION SWEEP consolidation audit.)"""
     target = np.asarray(target, float)
     span = float(target.max() - target.min()) or 1.0          # the residual is measured relative to the range
     R = target.copy()
@@ -675,11 +684,33 @@ def _h8_selftest():
           "because a Gabor atom is a BANDPASS primitive and an edge is every band at once)" % (d_stripes, d_disk))
 
 
-if __name__ == "__main__":
+def _selftest():
+    """Canonical entry point for the CI walker (T6 backfill). The module already had well-named sub-selftests
+    (`_c1_selftest`, `_c3_selftest`, `_h8_selftest`) but not the conventional `_selftest`, so the coverage census
+    counted it as missing. This runs them, then pins the ONE headline contract they didn't state outright: a
+    Gaussian-splat fit reconstructs its target, and MORE splats reconstruct it BETTER (the monotonicity a fitter
+    must have; a fit that doesn't improve with capacity is broken). Numbers measured on the live fitter first."""
+    import numpy as np
+
     _c1_selftest()
     _c3_selftest()
     _h8_selftest()
-    print("holographic_splat C1 densify + C3 early-stop selftests passed")
+
+    # fit->render->PSNR, and PSNR RISES with the splat budget K. The contrast (more capacity, better fit) is the
+    # contract; the absolute dB is incidental and would be brittle to assert directly.
+    target = np.zeros((32, 32))
+    target[8:24, 8:24] = 1.0                                    # a sharp square: a real target, not smooth noise
+    p_lo = psnr(target, splat_render(splat_fit(target, K=5), target.shape))
+    p_hi = psnr(target, splat_render(splat_fit(target, K=40), target.shape))
+    assert p_hi > p_lo + 1.0, ("more splats did not improve the fit -- fitter regressed: K5=%.2f K40=%.2f"
+                               % (p_lo, p_hi))
+
+    print("OK: holographic_splat self-test passed (C1 densify + C3 early-stop + H8 Gabor sub-tests, and a "
+          "%d-splat fit reconstructs a sharp square %.1f dB better than a 5-splat fit)" % (40, p_hi - p_lo))
+
+
+if __name__ == "__main__":
+    _selftest()
 
 
 # ---------------------------------------------------------------------------------------------------------------

@@ -68,6 +68,49 @@ def auto_displace(mesh, rgb, amount=0.1, sigma=4.0, min_confidence=0.02):
     return out, {**res, "displaced": not abstained}
 
 
+def field_displace(mesh, field, amount=0.1, weight=None, invert=False, bias=0.0):
+    """Displace a mesh's vertices along their normals by a SCALAR FIELD or SDF sampled AT EACH VERTEX -- the general,
+    field-driven modifier (auto_displace only reads an RGB image; this reads any field, so a FRACTAL can drive the
+    displacement). `field` is anything with `.eval(P)` (an SDF like mandelbulb/fold_fractal) or a bare callable
+    P(N,3)->values(N,). Each vertex v moves along its normal by `amount * (field(v) - bias) * weight[v]`.
+
+    `weight` is the per-face / per-vertex MASK -- a per-vertex array (or a callable P->w) in [0,1], e.g. sampled from
+    a texture map, so the fractal detail only grows WHERE THE MAP PAINTS IT (the 'per-face mandelbulb modifier from a
+    texture' case). `invert` flips the field sign; `bias` recenters it (subtract the field's mean to displace both
+    in and out). Returns a NEW Mesh; the input is unchanged.
+
+    KEPT NEGATIVE: this displaces along EXISTING normals -- it adds surface relief, it does not re-topologize, so very
+    high `amount` self-intersects (as any displacement modifier does); mesh finely first if you want deep fractal
+    detail (the field is defined everywhere, the resolution is the base mesh's)."""
+    import numpy as _np
+    from holographic.mesh_and_geometry.holographic_mesh import Mesh
+
+    V = _np.asarray(mesh.vertices, float)
+    sample = (lambda P: field.eval(P)) if hasattr(field, "eval") else field
+    h = _np.asarray(sample(V), float).reshape(-1)                # the field value at every vertex
+    if invert:
+        h = -h
+    h = h - bias
+    if weight is not None:
+        w = weight(V) if callable(weight) else _np.asarray(weight, float).reshape(-1)
+        h = h * w                                               # the texture / mask gates the displacement per vertex
+
+    # per-vertex normals: average the incident triangle face normals (the direction each vertex moves).
+    N = _np.zeros_like(V)
+    for (i, j, k) in mesh.triangulate():
+        fn = _np.cross(V[j] - V[i], V[k] - V[i])
+        nrm = _np.linalg.norm(fn)
+        if nrm > 1e-12:
+            fn = fn / nrm
+            N[i] += fn; N[j] += fn; N[k] += fn
+    lens = _np.linalg.norm(N, axis=1, keepdims=True)
+    N = _np.where(lens > 1e-12, N / _np.maximum(lens, 1e-12), 0.0)
+
+    V2 = V + N * (amount * h)[:, None]
+    return Mesh(V2, [tuple(f) for f in mesh.faces],
+                uvs=mesh.uvs if getattr(mesh, "uvs", None) is not None else None)
+
+
 def _selftest():
     """A confident bumpy height moves a flat grid's vertices in z (real relief, following the height); a low-
     confidence height ABSTAINS and leaves the mesh untouched; auto_displace applies on a bumpy image and abstains
@@ -112,9 +155,27 @@ def _selftest():
     d2, _ = displace_from_height(plane, hmap, amount=0.3, confidence=0.2)
     assert np.array_equal(d1.vertices, d2.vertices)
 
+    # (5) FIELD_DISPLACE: a fractal SDF drives displacement, and a per-vertex mask gates it (per-face texture case).
+    from holographic.mesh_and_geometry.holographic_sdf import sphere
+    sph_mesh = grid(nx=N, ny=N, width=2.0, height=2.0)
+    fld = sphere(0.5)                                          # any .eval field; a sphere SDF is a clean test signal
+    out = field_displace(sph_mesh, fld, amount=0.5, bias=0.0)
+    moved = np.linalg.norm(out.vertices - sph_mesh.vertices, axis=1)
+    assert moved.max() > 0.05, "field_displace moves vertices by the field value at each vertex"
+    # a MASK that is 1 on the left half and 0 on the right must displace ONLY the left half (per-face texture gating)
+    mask = (sph_mesh.vertices[:, 0] < 0.0).astype(float)
+    masked = field_displace(sph_mesh, fld, amount=0.5, weight=mask)
+    left = sph_mesh.vertices[:, 0] < 0.0
+    dmoved = np.linalg.norm(masked.vertices - sph_mesh.vertices, axis=1)
+    assert dmoved[left].max() > 0.01 and dmoved[~left].max() < 1e-9, \
+        "a per-vertex mask gates the displacement (the fractal detail grows only where the map paints it)"
+    assert np.array_equal(field_displace(sph_mesh, fld, amount=0.5).vertices,
+                          field_displace(sph_mesh, fld, amount=0.5).vertices), "field_displace deterministic"
+
     print("holographic_autodisplace selftest OK: a confident bumpy height moves a flat grid's vertices into real "
           "relief (max z %.2f, centre rises more than a corner, following the height); a low-confidence height "
           "ABSTAINS and leaves the mesh flat; auto_displace applies on a bumpy image and abstains on a flat one; "
+          "field_displace drives displacement from an SDF field and a per-vertex mask gates it (left half only); "
           "deterministic" % float(disp.vertices[:, 2].max()))
 
 

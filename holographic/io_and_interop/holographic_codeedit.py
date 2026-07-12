@@ -49,12 +49,18 @@ class Editor:
 
     # -- read / inspect -------------------------------------------------------------------------------------
     def read(self, relpath, max_bytes=1_000_000):
-        """Return a file's text (utf-8). Raises EditError if it's missing or larger than max_bytes."""
+        """Return a file's text (utf-8). Raises EditError if it's missing or larger than max_bytes.
+
+        THE CAP'S ONE JOB is protecting agent-facing reads from flooding a context window with a megabyte of
+        source. It is NOT a correctness limit: internal callers whose OUTPUT is small regardless of file size
+        (python_check -> a tiny dict, read_lines -> just the slice) pass max_bytes=None and read uncapped.
+        The lesson that forced this distinction: holographic_unified.py crossed 1 MB and file_python_check
+        started refusing to syntax-check the engine's own central module (C7)."""
         full = self._resolve(relpath)
         if not os.path.isfile(full):
             raise EditError("no such file: %r" % relpath)
         size = os.path.getsize(full)
-        if size > max_bytes:
+        if max_bytes is not None and size > max_bytes:
             raise EditError("file %r is %d bytes (> max_bytes=%d); read a slice or raise the limit"
                             % (relpath, size, max_bytes))
         with open(full, "r", encoding="utf-8", errors="replace") as f:
@@ -62,8 +68,10 @@ class Editor:
 
     def read_lines(self, relpath, start=1, end=None):
         """Return lines [start, end] (1-based, inclusive) of a file as a list of strings (newlines stripped).
-        `end=None` reads to the end. Handy for an agent to look at just a region before editing it."""
-        text = self.read(relpath)
+        `end=None` reads to the end. Handy for an agent to look at just a region before editing it.
+        Uncapped read: the returned SLICE is what enters context, so the file's total size is irrelevant here --
+        capping it would defeat this method's whole purpose on exactly the large files it exists for."""
+        text = self.read(relpath, max_bytes=None)
         lines = text.splitlines()
         s = max(1, int(start)) - 1
         e = len(lines) if end is None else min(len(lines), int(end))
@@ -122,11 +130,20 @@ class Editor:
                     out.append(self._rel(os.path.join(base, name)))
         return sorted(out)
 
-    def grep(self, pattern, relpath=".", suffix=".py", max_hits=200):
-        """Plain-substring search across files under `relpath` (filtered by `suffix`). Returns a list of
-        {file, line, text} for each match -- the 'find where X is used' an agent reaches for constantly."""
+    def grep(self, pattern, relpath=".", suffix=".py", max_hits=200, regex=False):
+        """Search across files under `relpath` (filtered by `suffix`). Returns a list of {file, line, text} for each
+        match -- the 'find where X is used' an agent reaches for constantly.
+
+        `regex=False` (the default) is a plain SUBSTRING match, so a pattern full of `(`, `*` and `.` means exactly
+        what it looks like. `regex=True` compiles the pattern with `re` -- additive, default-off, and the reason it
+        exists is that the substring-only signature cost a wasted call while dogfooding (NCA backlog B7). An invalid
+        pattern raises `re.error` rather than silently matching nothing."""
         base = self._resolve(relpath)
         hits = []
+        matches = None
+        if regex:
+            import re as _re
+            matches = _re.compile(pattern).search        # compiled ONCE, and an invalid pattern raises here
         walk_root = base if os.path.isdir(base) else os.path.dirname(base)
         for dp, dns, fns in os.walk(walk_root):
             dns[:] = [d for d in dns if d != "__pycache__" and not d.startswith(".")]
@@ -137,7 +154,7 @@ class Editor:
                 try:
                     with open(full, "r", encoding="utf-8", errors="replace") as f:
                         for i, line in enumerate(f, 1):
-                            if pattern in line:
+                            if (matches(line) if matches else (pattern in line)):
                                 hits.append({"file": self._rel(full), "line": i, "text": line.rstrip("\n")[:300]})
                                 if len(hits) >= max_hits:
                                     return hits
@@ -398,9 +415,11 @@ class Editor:
     def python_check(self, relpath):
         """Parse a .py file with the ast module and report whether it's syntactically valid -- the check to run
         RIGHT AFTER editing a Python file, so a broken edit is caught immediately instead of at import time.
-        Returns {ok: bool, error: None | "line L: message"}. (Syntax only; it does not import or execute.)"""
+        Returns {ok: bool, error: None | "line L: message"}. (Syntax only; it does not import or execute.)
+        Uncapped read: the output is a tiny dict whatever the file size, and a syntax checker that refuses the
+        repo's largest module is a checker with a hole exactly where the risk is largest."""
         import ast
-        src = self.read(relpath)
+        src = self.read(relpath, max_bytes=None)
         try:
             ast.parse(src)
             return {"ok": True, "error": None}
@@ -502,6 +521,18 @@ def _selftest():
     # move
     ed.write("old_name.py", "keep\n"); ed.move("old_name.py", "sub/new_name.py")
     assert not ed.exists("old_name.py") and ed.read("sub/new_name.py") == "keep\n"
+
+    # C7 regression trap: a >1 MB Python file must be python_check-able and read_lines-able, while the
+    # agent-facing capped read still refuses it -- the cap guards context, not correctness.
+    big = "x = 0\n" * 200_000                            # ~1.2 MB of trivially valid Python
+    ed.write("big.py", big)
+    assert ed.python_check("big.py") == {"ok": True, "error": None}, "python_check must not be size-capped"
+    assert ed.read_lines("big.py", 5, 6) == ["x = 0", "x = 0"], "read_lines must not be size-capped"
+    try:
+        ed.read("big.py")
+        raise AssertionError("capped read must still refuse a >1 MB file")
+    except EditError:
+        pass
 
     print("OK: holographic_codeedit self-test passed (root sandbox blocks escapes; unique/all replace; insert/"
           "delete_lines/read_lines; grep+list; archive reversible + delete final; move) -- root=%s" % root)

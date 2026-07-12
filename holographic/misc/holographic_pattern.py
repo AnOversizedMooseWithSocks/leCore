@@ -80,6 +80,29 @@ def fbm(scale=2.0, octaves=4, seed=0, gain=0.5, lacunarity=2.0):
     return field
 
 
+def domain_warped_fbm(scale=2.0, octaves=4, seed=0, warp=0.4, warp_scale=1.0, gain=0.5, lacunarity=2.0):
+    """DOMAIN-WARPED fBm (iq's "warped noise" / dFBM): sample fbm at a point that has itself been DISPLACED by a
+    vector of other fbm fields. f(P) = fbm(P + warp * [fbm_x(P), fbm_y(P), fbm_z(P)]). The displacement swirls the
+    iso-contours into the flowing, turbulent, marbled look plain fbm cannot make -- smoke, magma, wood grain,
+    weather fronts. `warp` is the displacement strength; `warp_scale` the frequency of the warp field. Returns
+    f(P) -> [0,1]. This is the single most demoscene-recognisable noise (iq's "clouds" and "warping" articles).
+
+    WHY three warp fields: each output axis needs its OWN noise or the displacement is diagonal (all axes move
+    together) and the swirl collapses to a shear. Independent seeds give a true 3-D flow."""
+    base = fbm(scale, octaves, seed, gain, lacunarity)
+    # three INDEPENDENT warp fields (different seeds) so the displacement is a real 3-D vector, not a shear.
+    wx = fbm(scale * warp_scale, max(1, octaves - 1), seed + 101, gain, lacunarity)
+    wy = fbm(scale * warp_scale, max(1, octaves - 1), seed + 211, gain, lacunarity)
+    wz = fbm(scale * warp_scale, max(1, octaves - 1), seed + 331, gain, lacunarity)
+
+    def field(P):
+        P = np.atleast_2d(np.asarray(P, float))
+        # centre the warp fields to ~[-0.5, 0.5] so the displacement pushes both ways, not just positive.
+        disp = np.stack([wx(P) - 0.5, wy(P) - 0.5, wz(P) - 0.5], axis=1)
+        return base(P + warp * disp)
+    return field
+
+
 # ---------------------------------------------------------------------------------------------------------------
 # Exact (non-noise) patterns: checker, stripes, gradient, dots. Deterministic by construction.
 # ---------------------------------------------------------------------------------------------------------------
@@ -159,7 +182,16 @@ def _selftest():
     # a channel driven lo..hi by a pattern stays within [lo,hi]
     g = field_lerp(make_pattern("checker", scale=2.0), 0.1, 0.9)
     gv = g(P); assert gv.min() >= 0.1 - 1e-9 and gv.max() <= 0.9 + 1e-9
-    print("holographic_pattern selftest OK")
+
+    # W11 dFBM: domain-warped fbm stays in [0,1], DIFFERS from plain fbm (the warp swirled it), reduces EXACTLY to
+    # fbm at warp=0 (clean degradation), and is deterministic.
+    plain = fbm(scale=2.0, seed=0)(P)
+    warped = domain_warped_fbm(scale=2.0, seed=0, warp=0.5)(P)
+    assert warped.min() >= -1e-9 and warped.max() <= 1.0 + 1e-9
+    assert np.abs(warped - plain).mean() > 0.01                       # the warp actually changed the field
+    assert np.allclose(domain_warped_fbm(scale=2.0, seed=0, warp=0.0)(P), plain, atol=1e-9)   # warp=0 == fbm
+    assert np.allclose(domain_warped_fbm(scale=2.0, seed=0)(P), domain_warped_fbm(scale=2.0, seed=0)(P))
+    print("holographic_pattern selftest OK (dFBM in [0,1], swirls vs fbm, warp=0 reduces to fbm, deterministic)")
 
 
 if __name__ == "__main__":

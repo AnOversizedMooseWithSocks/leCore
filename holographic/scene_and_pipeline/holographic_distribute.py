@@ -159,6 +159,150 @@ def reduce_sum_exact(parts, bits=40):
     return total.astype(np.float64) / scale
 
 
+# ---- PARTITION-INVARIANT accumulation (backlog X6) -------------------------------------------------------------------
+#
+# `reduce_sum_exact` above is order-independent: shuffle the SAME parts list and the answer is bit-identical. It is NOT
+# partition-independent, and the distinction cost a measurement to see. Its quantization `scale` is derived from the
+# peak and the COUNT of the parts it is handed, so if a farm float-sums inside each bucket and then hands the bucket
+# sums here, a 4-way split and a 7-way split present different parts, with different peaks, different counts, and --
+# fatally -- different float rounding already baked in.
+#
+# MEASURED (700 contributions, magnitudes spanning 16 orders):
+#     plain float, 4-way vs 7-way            max|diff| 2.98e-08   bit-identical: NO
+#     reduce_sum_exact on the BUCKET SUMS    bit-identical: NO      <- the float pre-sum already diverged
+#     reduce_sum_exact on the raw contribs   bit-identical: YES
+#
+# So exactness has to reach the LEAVES. The functions below make that practical on a farm: fix one global scale (from
+# the global peak and the global count -- both order- and partition-independent, since max and len are), quantize each
+# contribution against it, and let each bucket reduce to an int64 accumulator locally. Integer addition is exact,
+# associative and commutative, so the accumulators form a MONOID: merge them in any order, from any number of buckets,
+# and the result is bit-identical. That is the invariance Catto's cross-platform determinism does not claim -- his is
+# same-computation-everywhere by discipline; this survives RE-PARTITIONING a running farm.
+
+def exact_scale(peak, n_parts, bits=40):
+    """The fixed-point scale for a partition-invariant accumulation. Depends only on the GLOBAL peak magnitude and the
+    GLOBAL number of contributions -- `max` and `len` are both order- and partition-independent, so every bucket
+    derives the identical scale without talking to any other bucket. Returns 0.0 for an all-zero input."""
+    import math
+    peak = float(peak)
+    if peak == 0.0:
+        return 0.0
+    b = int(bits)
+    if int(n_parts) * (2.0 ** b) >= 2.0 ** 62:                  # same overflow guard as reduce_sum_exact
+        b = max(1, int(62 - math.ceil(math.log2(max(1, int(n_parts))))))
+    return (2.0 ** b) / peak
+
+
+def exact_partial(parts, scale):
+    """Reduce one bucket's contributions to an int64 fixed-point accumulator at the given global `scale`. This is the
+    bucket-local half of the monoid: it runs on a farm node, alone, with no coordination."""
+    total = None
+    for p in parts:
+        ints = np.rint(np.asarray(p, float) * scale).astype(np.int64)
+        total = ints if total is None else total + ints          # exact, commutative, associative
+    return total
+
+
+def exact_merge(accumulators):
+    """Merge bucket accumulators. Integer addition, so ANY order and ANY grouping give the identical int64 result."""
+    total = None
+    for a in accumulators:
+        if a is None:
+            continue
+        total = a.copy() if total is None else total + a
+    return total
+
+
+def reduce_sum_exact_partitioned(buckets, bits=40):
+    """Sum a list of BUCKETS (each a list/array of contributions) so the result is bit-identical under ANY bucketing --
+    4-way, 7-way, one bucket, or a bucket per contribution. This is the property `reduce_sum_exact` does NOT have when
+    a farm pre-sums inside its buckets (see the note above; measured).
+
+    Two passes, both partition-invariant: (1) the global peak and count fix one scale, (2) each bucket integer-sums
+    locally and the accumulators merge exactly. Deterministic; no RNG. The trade is `reduce_sum_exact`'s trade -- a
+    uniform quantization at `bits` and a bounded dynamic range -- plus one extra pass over the data to find the peak."""
+    flat = [np.asarray(c, float) for b in buckets for c in b]
+    if not flat:
+        return 0.0
+    peak = max((float(np.abs(c).max()) for c in flat if c.size), default=0.0)
+    if peak == 0.0:
+        return flat[0].copy()
+    scale = exact_scale(peak, len(flat), bits=bits)
+    accs = [exact_partial([np.asarray(c, float) for c in b], scale) for b in buckets]
+    return exact_merge(accs).astype(np.float64) / scale
+
+
+def scan_exact(x, bits=40):
+    """The PREFIX SUM (scan), computed so the answer is BIT-IDENTICAL however the work is blocked.
+
+    THE PROBLEM, and it is the GPU workhorse's problem. `np.cumsum` is sequential and deterministic, so a single
+    call is reproducible. But nobody parallelises a scan sequentially: the standard blocked scan computes a cumsum
+    per block, sums each block, and adds the exclusive prefix of those block sums. Float addition is not
+    associative, so **the answer depends on the block count**. Measured over 4,096 elements:
+
+        data                       seq vs 4-block   4-block vs 7-block
+        uniform [0, 1)                  2.05e-12            1.14e-12
+        16 orders of magnitude          6.26e-07            3.87e-07
+        [1e16, 1.0, -1e16] repeated     0.00e+00            **9.20e+01**
+
+    Two different blockings of the same array disagree by NINETY-TWO. Read that honestly: the amplitude there is
+    1e16, so 92.0 is 9.2e-15 RELATIVE -- both blockings are accurate, they just disagree. Absolute disagreement is
+    what matters when the prefix sum is a ledger, a counter, or a checkpoint hash; relative accuracy is what matters
+    when it is a physical quantity. This function is for the first case.
+
+    THE FIX is the same integer monoid `reduce_sum_exact_partitioned` uses: one global scale from the global peak
+    and count (`max` and `len` are partition-invariant), quantize once, and scan in int64 -- where addition IS
+    associative, so ANY blocking gives the identical prefix sums. `scan_exact_blocked` computes it block-wise and
+    is bit-identical to this, for every block count from 1 to N.
+
+    KEPT NEGATIVE, and it is the thing to say first: **this is not more ACCURATE than `np.cumsum`. It is more
+    REPRODUCIBLE.** Measured against an exact `math.fsum` prefix reference, relative error:
+
+        data                    scan_exact     np.cumsum (sequential)   blocked float scan
+        uniform [0, 1)            6.54e-15               7.83e-16             4.47e-16
+        16 orders of magnitude    3.71e-12               2.03e-15             1.43e-15
+        catastrophic cancel.      1.37e-13               1.36e-13             1.36e-13
+
+    The quantization at `bits` costs real precision, and a sequential `np.cumsum` beats it every time. What a
+    sequential cumsum cannot do is run on eight blocks and give the same bits. Choose the denominator that matches
+    the job: if you are not blocking the scan, do not use this.
+
+    Trade: a uniform fixed-point quantization at `bits`, and a bounded dynamic range -- values below the scale's
+    resolution round to zero. Deterministic; no RNG."""
+    x = np.asarray(x, float).ravel()
+    if x.size == 0:
+        return x.copy()
+    peak = float(np.abs(x).max())
+    if peak == 0.0:
+        return np.zeros_like(x)
+    scale = exact_scale(peak, x.size, bits=bits)
+    ints = np.rint(x * scale).astype(np.int64)
+    return np.cumsum(ints).astype(np.float64) / scale
+
+
+def scan_exact_blocked(x, n_blocks, bits=40):
+    """`scan_exact`, computed the way a GPU or a farm would: a cumsum per block, then the exclusive prefix of the
+    block sums added in. Returns BIT-IDENTICAL results to `scan_exact` for ANY `n_blocks`, because the carries are
+    int64 and integer addition is associative.
+
+    This is the function that makes the claim testable: a blocked FLOAT scan disagrees with itself across block
+    counts (by 92.0 on the cancellation case above); a blocked EXACT scan does not, ever."""
+    x = np.asarray(x, float).ravel()
+    if x.size == 0:
+        return x.copy()
+    peak = float(np.abs(x).max())
+    if peak == 0.0:
+        return np.zeros_like(x)
+    scale = exact_scale(peak, x.size, bits=bits)
+    ints = np.rint(x * scale).astype(np.int64)
+    blocks = np.array_split(ints, max(1, int(n_blocks)))
+    local = [np.cumsum(b) for b in blocks]                     # per-block scan, exact
+    sums = np.array([int(b.sum()) for b in blocks], dtype=np.int64)
+    carry = np.concatenate([[np.int64(0)], np.cumsum(sums)[:-1]]) if len(sums) > 1 else np.array([0], np.int64)
+    out = np.concatenate([l + c for l, c in zip(local, carry)])
+    return out.astype(np.float64) / scale
+
+
 def reduce_bundle(parts):
     """VSA scene reassembly: bundle (superposition) the partial scene hypervectors. A normalised sum -- the same
     commutative superposition holostuff already uses to combine parts of a structure."""
@@ -178,6 +322,57 @@ def distribute(buckets, worker, reduce=reduce_sum, cache=None):
     parts = [worker(b, cache) for b in buckets]
     info = {"buckets": len(buckets), "sizes": [int(len(b)) for b in buckets]}
     return reduce(parts), info
+
+
+def distribute_exact(buckets, worker, cache=None, bits=40):
+    """`distribute`, but the answer is BIT-IDENTICAL under any bucketing -- 4-way, 7-way, or one bucket per item.
+
+    THE BUG THIS FIXES, measured. `distribute`'s default `reduce=reduce_sum` is a FLOAT sum, so a 4-way and a 7-way
+    split of the same work disagree by 2.98e-08 (700 contributions spanning 16 orders of magnitude). Worse, the
+    obvious repair -- swapping in `reduce_sum_exact` -- does NOT fix it, because by the time the reduce sees the
+    parts each worker has already float-summed inside its own bucket and the rounding has diverged.
+    **Exactness has to reach the leaves.**
+
+    So the contract changes, and that IS the fix: `worker(bucket, cache)` must return the bucket's **contributions**
+    (an (n_i, ...) array), not their sum. The reduction then runs as an integer monoid:
+
+      1. one global scale from the global peak and the global count -- `max` and `len` are both order- AND
+         partition-invariant, so every bucket derives the identical scale without talking to any other bucket;
+      2. each bucket quantizes and integer-sums locally (`exact_partial`) -- this is the part that runs on a node;
+      3. the int64 accumulators merge in ANY order or grouping (`exact_merge`), because integer addition is exact,
+         associative and commutative.
+
+    Verified bit-identical across 1-, 2-, 4-, 7-, 13- and N-way splits and under row shuffles. This is determinism
+    that survives RE-PARTITIONING a running farm mid-job -- the invariance Box3D's cross-platform determinism does
+    not claim.
+
+    ON A REAL FARM this is two rounds, not one: round 1 each node returns its local `(peak, count)` (two scalars);
+    the coordinator takes `max` and `sum`; round 2 each node returns its `exact_partial` int64 accumulator. Both
+    rounds are order-independent. In-process the workers run once and their contributions are held, which is why
+    this function calls `worker` exactly once per bucket. `exact_scale` / `exact_partial` / `exact_merge` are public
+    so a real farm can run the two-round protocol itself.
+
+    Trade (the same one `reduce_sum_exact` makes): a uniform fixed-point quantization at `bits`, and a bounded
+    dynamic range. Returns (total, info) with `info` carrying the scale actually used, so the result is auditable."""
+    parts = [np.asarray(worker(b, cache), float) for b in buckets]
+    flat = [p.reshape(-1) if p.ndim <= 1 else p.reshape(p.shape[0], -1) for p in parts]
+    counts = [int(p.shape[0]) if p.ndim else 1 for p in flat]
+    peak = max((float(np.abs(p).max()) for p in flat if p.size), default=0.0)
+    n_total = int(sum(counts))
+    info = {"buckets": len(buckets), "sizes": [int(len(b)) for b in buckets],
+            "contributions": n_total, "peak": peak, "bits": int(bits)}
+    if peak == 0.0 or n_total == 0:
+        info["scale"] = 0.0
+        zero = np.zeros_like(parts[0][0]) if (parts and parts[0].ndim > 1) else 0.0
+        return zero, info
+
+    scale = exact_scale(peak, n_total, bits=bits)
+    info["scale"] = scale
+    accs = [exact_partial(list(p) if p.ndim > 1 else [p], scale) for p in flat]
+    total = exact_merge(accs).astype(np.float64) / scale
+    if parts and parts[0].ndim > 1:
+        total = total.reshape(parts[0].shape[1:])
+    return total, info
 
 
 def distribute_scatter(out_shape, buckets, worker, cache=None, fill=0.0):

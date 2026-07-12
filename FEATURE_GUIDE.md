@@ -371,6 +371,115 @@ targets; it uses the first skin and moves positions (normals aren't re-skinned).
 
 ---
 
+## 8. Unlabeled data exploration: demux, scaffold, decompose, reunite
+
+Hand the engine a raw stream -- no labels, no schema -- and get back the sources,
+the primary axis, the generating laws, and the leftovers. Every stage returns its
+evidence (score tables, correlation matrices, merge tolerances), and every verdict
+is decided by measurement: noise is never dressed as law.
+
+```python
+import numpy as np
+import lecore
+
+mind = lecore.UnifiedMind(dim=256, seed=0)
+
+# --- One interleaved stream, two sources (the "Contact" protocol, zero hints).
+u = np.linspace(0, 1, 200)
+stream = np.empty(400)
+stream[0::2] = np.sin(2 * np.pi * 2 * u)      # a lawful harmonic
+stream[1::2] = 0.8 * u + 0.1                  # a lawful trend
+report = mind.explore_series(stream, auto_demux=True)
+print(report["demux"]["stride"], report["verdict"])   # 2 structured
+```
+
+The stride is FOUND, not assumed: at the true interleave every strided sub-stream
+is smooth; deinterleaving is a permutation, so recovery is bit-exact.
+
+```python
+# --- A multi-channel series: which channels move together (which are one object)?
+motion = np.sin(2 * np.pi * 1.5 * u)
+series = np.stack([motion, 0.7 * motion, -0.4 * motion,   # one "mesh" (mirror incl.)
+                   np.cumsum(np.random.default_rng(0).standard_normal(200)) * 0.1],
+                  axis=1)                                   # an unrelated walker
+d = mind.demux_series(series)
+print(d["groups"])                            # [[0, 1, 2], [3]]
+```
+
+```python
+# --- Packetized bursts (no cyclic stride): boundaries by statistics shifts,
+#     sources by noise-calibrated assignment, drift reunited by continuation.
+rng = np.random.default_rng(2)
+x = np.concatenate([0.02 * np.arange(60),               # a ramp...
+                    8.0 + rng.standard_normal(120),      # ...a loud burst...
+                    0.02 * np.arange(180, 240)])         # ...the ramp resumes on trend
+pk = mind.packet_demux(x, min_seg=24, continuation=True)
+print(pk["n_sources"], pk["continuation_merges"][0]["predicted"])  # 2 3.6
+```
+
+```python
+# --- The full loop on a bare cube: scaffold -> rectify -> decompose -> residuals.
+t_irr = np.cumsum(np.random.default_rng(0).exponential(1.0, size=200))
+uu = (t_irr - t_irr[0]) / (t_irr[-1] - t_irr[0])
+cube = np.stack([np.sin(2 * np.pi * 2 * uu), 0.8 * uu + 0.1], axis=1)
+res = mind.explore_series(cube, coords={0: t_irr})
+print(res["scaffold"], res["verdict"],
+      [round(c["explained_fraction"], 2) for c in res["channels"]])  # 0 structured [1.0, 1.0]
+```
+
+Beneath the orchestrator, each stage is its own faculty: `analyze_axes` (which
+axis is the carrier -- boring AND organising), `rectify_carrier` (repair a
+wobbling axis by the arc-length lift), `winding_map` (a largely-reversing carrier:
+function / hysteresis / path, with merging refused exactly where it would
+fabricate), `analytic_signal` (rotation kinematics), `identify_dynamics` (masses
+and force laws behind a gauge-breaking channel), `cross_channel_links` (delayed
+copies the per-channel view cannot see), and `diagnose_scaling` / `auto_scale`
+(which knob to double when a stage hits a limit). Ask
+`mind.find_capability("explore unlabeled data")` for the live menu.
+
+## 9. Physics, astronomy, polarization & code (the merged arc)
+
+A later merge added five families. Each is field-native, deterministic, and wired into `mind`; ask
+`mind.find_capability("...")` for the live menu. Every snippet below runs as written.
+
+```python
+import numpy as np, lecore
+mind = lecore.UnifiedMind(dim=256, seed=0)
+
+# --- Quantum: a wavefunction evolved UNITARILY by the split-operator Schrodinger solver.
+qf = mind.quantum_field((64, 64)); qf.gaussian_packet((20, 32), (4, 4), (2.0, 0.0))
+sol = mind.quantum_solver(qf); sol.run(5, 0.1)          # norm is conserved to machine precision
+# quantum_dot_well / quantum_solenoid_A build a scatterer or an Aharonov-Bohm ring;
+# probability_current gives the flow (and quantum_velocity feeds advect_field -- the sideways reuse).
+
+# --- Gravity: an N-body sim with a symplectic integrator (energy stays bounded) + closed-form Kepler orbits.
+vc = mind.circular_orbit_velocity(1000.0, 1, 1.0)
+r = mind.nbody_simulate(np.array([[0., 0.], [1., 0.]]), np.array([[0., 0.], [0., vc]]),
+                        np.array([1000., 1.]), 0.001, 500, G=1.0, softening=1e-4, record_every=10)
+print(r["energy_drift"])                                 # ~0; r["trajectory"] scrubs through mind.transport(...)
+
+# --- Astronomy: assemble a star system, a cluster (Salpeter IMF), or a volumetric nebula.
+sy = mind.star_system({"star": {"temp_K": 5772}, "planets": [{"a": 1.0, "e": 0.02, "radius": 0.09, "temp_K": 288}]})
+print(sy["planets"][0]["biome"])                         # 'temperate'
+vol = mind.nebula_volume(res=16, seed=0)                 # a 3-D density field; mind.nebula_field_fn feeds render_volume
+
+# --- Period finding on gappy data (Lomb-Scargle) -- what a plain FFT cannot do.
+rng = np.random.default_rng(0); t = np.sort(rng.uniform(0, 20, 120)); y = np.sin(2 * np.pi * t / 2.5)
+print(mind.best_period(t, y, min_period=0.5, max_period=8)["period"])   # 2.5
+
+# --- Polarization: the SAME Stokes core reads a mantis eye AND a radio telescope.
+lam2 = np.linspace(0.03, 0.24, 160); P = 2.0 * np.exp(2j * (0.3 + 42.0 * lam2)); phi = mind.rm_phi_grid(lam2)
+print(mind.rm_peak(mind.rm_synthesis(lam2, phi, P=P), phi)["rm"])       # 42.0 (Faraday depth recovered)
+# stokes_linear/mueller_matrix/apply_mueller do the optics; observe_spectrum turns a spectrum into sensor
+# readings (a human eye reproduces blackbody_rgb exactly); mantis_view + mantis_falsecolor show 12 bands + handedness.
+
+# --- Code: describe a kernel in English -> one Python IR -> emit Zig / WGSL / C from the SAME IR.
+k = mind.kernel_from_description("a sphere of radius 1", dialect="python")
+print("fn " in str(mind.translate_kernel(k, "python", "zig_f64")))     # True
+# triage_code makes honest structural observations of unknown code; explain_code is a deterministic description.
+# Zig native kernels (zig_batch_eval) are OPT-IN like numba -- they raise a clear error without the ziglang wheel.
+```
+
 ## Where to look next
 
 - **`mind.find_capability("...")`** — ask the engine, in plain English, which call does what.

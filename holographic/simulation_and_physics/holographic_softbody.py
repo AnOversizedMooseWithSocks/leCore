@@ -67,6 +67,42 @@ class SoftBody:
         self.w[i] = 0.0
         return self
 
+    def islands(self):
+        """The body's ISLANDS: connected components of its distance-constraint graph. A cloth is one island; a TORN
+        cloth is several; a pile of separate bodies in one SoftBody is several. Recomputed when the constraint count
+        changes, cached otherwise. Delegates to holographic_island.connected_components -- a mesh shell, a physics
+        island and a farm bucket are the same flood fill."""
+        from holographic.simulation_and_physics.holographic_island import connected_components
+        n_c = len(self.constraints)
+        if getattr(self, "_island_cache", None) is None or self._island_cache[0] != n_c:
+            comps = connected_components(self.N, [(i, j) for (i, j, _r, _c) in self.constraints])
+            self._island_cache = (n_c, comps)
+        return self._island_cache[1]
+
+    def wake_all(self):
+        """Wake every island for AT LEAST the next step. A sleeping island cannot wake itself -- its velocity is
+        never integrated, so nothing inside it can change -- and an external event (a new collider, an applied
+        force, a user grab) must say so. That is Catto's design: contact-begin is what wakes a sleeping body.
+
+        THE FORCED FRAME IS NOT A DETAIL. The sleep decision is taken BEFORE integration, from the current
+        velocity. A body woken at rest has zero kinetic energy, so the probe would put it straight back to sleep
+        and gravity would never touch it -- `wake()` alone would be a no-op. Measured: with `sleep_frames=1` the
+        island re-slept the same frame and never moved again. So a woken island is FORCED awake for one step,
+        which gives it a velocity, after which the probe keeps it awake on its own merits."""
+        self._force_awake = set(range(len(self.islands())))
+        if getattr(self, "_sleep_tracker", None) is not None:
+            for i in self._force_awake:
+                self._sleep_tracker.wake(i)
+        return self
+
+    def wake(self, island):
+        """Wake ONE island for at least the next step. See `wake_all` for why the forced frame is required."""
+        i = int(island)
+        self._force_awake = getattr(self, "_force_awake", set()) | {i}
+        if getattr(self, "_sleep_tracker", None) is not None:
+            self._sleep_tracker.wake(i)
+        return self
+
     def add_distance(self, i, j, rest=None, compliance=0.0):
         """Link particles i, j with a distance constraint (rest defaults to their current separation).
         compliance=0 is a rigid link; larger compliance is a softer spring (inverse stiffness)."""
@@ -271,15 +307,26 @@ class SoftBody:
 
     # -- the two solver back-ends -------------------------------------------------------------------
 
-    def _solve_xpbd(self, h, iterations):
+    def _solve_xpbd(self, h, iterations, skip_nodes=None):
         """XPBD Gauss-Seidel solve: per-constraint compliance with an accumulated Lagrange multiplier, so the
         stiffness is physical and time-step/iteration independent. This is the piece the generic projection
-        sweeper does not carry."""
+        sweeper does not carry.
+
+        `skip_nodes` (bool mask) omits every constraint whose endpoints are asleep -- and because a constraint
+        never crosses an island boundary (an island IS a connected component of this graph), skipping is exact.
+        `self.last_step_stats["constraints_solved"]` counts what actually ran, so the saving is COUNTED, not
+        asserted. Passing None is today's behaviour, bit-identically."""
         lam = np.zeros(len(self.constraints))                  # one multiplier per constraint, reset each step
         lam_b = np.zeros(len(self.bending))
         lam_v = np.zeros(len(self.volumes))
+        _skip = None if skip_nodes is None else np.asarray(skip_nodes, bool)
+        if _skip is not None and hasattr(self, "last_step_stats"):
+            solved = sum(1 for (i, j, _r, _c) in self.constraints if not (_skip[i] and _skip[j]))
+            self.last_step_stats["constraints_solved"] = solved
         for _ in range(iterations):
             for c, (i, j, rest, compliance) in enumerate(self.constraints):
+                if _skip is not None and _skip[i] and _skip[j]:
+                    continue                                   # both endpoints asleep: this constraint is at rest
                 n = self.x[i] - self.x[j]
                 d = float(np.linalg.norm(n))
                 if d < 1e-12:
@@ -354,18 +401,57 @@ class SoftBody:
         return projs
 
     def step(self, dt=1.0 / 60.0, gravity=None, iterations=20, substeps=1, solver="xpbd",
-             external_force=None, floor=None, restitution=0.0, damping=0.0, collider=None, collide_radius=0.0):
+             external_force=None, floor=None, restitution=0.0, damping=0.0, collider=None, collide_radius=0.0,
+             continuous=False, sleep=None, stiffness=None):
         """Advance the body one frame. solver='xpbd' (compliant, recommended) or 'pbd' (delegates the sweep to
-        the shipped project_onto_constraints engine). `external_force` is an (N, D) force array (e.g. from a
+        the shipped project_onto_constraints engine). `stiffness=(hertz, zeta)` makes the PBD path's constraints
+        SOFT in physical units (Catto's Soft Step); `stiffness=(inf, zeta)` is bit-identical to the rigid default,
+        and the XPBD path ignores it because its per-constraint `compliance` already IS that idea. NB the unrelated
+        `RigidBody.step(stiffness=...)` is a scalar spring constant in a different class -- that name collision is
+        what once fooled the adoption lint into reporting this module as wired.
+        `continuous=True` adds a SWEPT collider test (CCD): a node
+        that crossed a thin collider between substeps is caught even though neither endpoint samples its interior.
+        Default-off and strictly additive -- nodes the sweep does not catch are bit-identical to today. Measured: a
+        node moving 0.5 m per frame passes clean through a 0.1 m wall without it, and is stopped exactly on the
+        wall with it. `external_force` is an (N, D) force array (e.g. from a
         fluid field) -- it becomes acceleration via the inverse mass. `floor` (scalar) is a y=floor half-space
         with `restitution`. `collider` (a callable P->signed distance) is an ENVIRONMENT collision surface: any
         node inside it is pushed out to `collide_radius` -- so the body drapes over a scene SDF, using the same
         positional (iterate-a-projection) contact resolve as self-collision. Returns self."""
         g = _as_gravity(gravity, self.D)
         movable = self.w > 0
+
+        # -- ISLAND SLEEP (backlog C1). A sleeping island is AT ITS FIXED POINT; skipping it is bit-identical to
+        #    stepping it, and the saving is exactly the awake fraction. `sleep` is a SleepTracker (or None = today).
+        #    The sleeping rows are CARRIED THROUGH at the end of every substep, so no downstream stage (collision,
+        #    floor, velocity readback) can perturb them. Correctness by construction, not by auditing each stage.
+        self._sleep_tracker = sleep
+        asleep_nodes = np.zeros(self.N, bool)
+        awake_ids, asleep_ids = list(range(len(self.islands()))), []
+        if sleep is not None:
+            comps = self.islands()
+            frame_v = self.v
+            awake_ids, asleep_ids = [], []
+            forced = getattr(self, "_force_awake", set())
+            for k, idx in enumerate(comps):
+                from holographic.simulation_and_physics.holographic_island import island_energy
+                e = island_energy(np.zeros((len(idx), self.D)), frame_v[idx])   # kinetic energy alone
+                slept = sleep.update(k, e)
+                if k in forced:                                 # a woken island gets ONE forced frame (see wake_all)
+                    sleep.wake(k)
+                    slept = False
+                (asleep_ids if slept else awake_ids).append(k)
+            self._force_awake = set()                           # the forced frame is spent
+            for k in asleep_ids:
+                asleep_nodes[comps[k]] = True
+            movable = movable & ~asleep_nodes
+        self.last_step_stats = {"islands": len(self.islands()), "awake": len(awake_ids), "asleep": len(asleep_ids),
+                                "constraints_total": len(self.constraints)}
+
         for _ in range(max(1, substeps)):
             h = dt / max(1, substeps)
             x_prev = self.x.copy()
+            _v_prev = self.v.copy() if sleep is not None else None
             # 1. integrate velocity by external acceleration (gravity is mass-independent; forces use 1/m = w)
             acc = np.tile(g, (self.N, 1))
             if external_force is not None:
@@ -377,10 +463,17 @@ class SoftBody:
             self.x[movable] += h * self.v[movable]
             # 3. project onto the constraints (the iterate-a-projection step)
             if solver == "xpbd":
-                self._solve_xpbd(h, iterations)
+                self._solve_xpbd(h, iterations, skip_nodes=asleep_nodes if sleep is not None else None)
             else:
-                flat, _, _ = project_onto_constraints(self.x.ravel(), self._pbd_projections(),
-                                                      iters=iterations, omega=1.0)
+                # SOFT CONSTRAINTS (backlog C3): stiffness=(hertz, zeta) is Catto's dial in physical units, and
+                # stiffness=(inf, zeta) is BIT-IDENTICAL to the rigid omega=1.0 default. Only the PBD path takes it;
+                # the XPBD path already carries physical compliance per constraint, which is the same idea.
+                _kw = dict(iters=iterations)
+                if stiffness is None:
+                    _kw["omega"] = 1.0
+                else:
+                    _kw.update(stiffness=stiffness, dt=h)
+                flat, _, _ = project_onto_constraints(self.x.ravel(), self._pbd_projections(), **_kw)
                 self.x = flat.reshape(self.N, self.D)
             # 3b. self-collision: non-bonded nodes repel (another iterate-a-projection), if enabled. Collision
             #     is a POSITIONAL contact resolve -- we record its displacement and subtract it from the
@@ -396,6 +489,13 @@ class SoftBody:
             if collider is not None:
                 from holographic.simulation_and_physics.holographic_collide import resolve_sdf_collision
                 _x_pre_env = self.x.copy()
+                if continuous:
+                    # CONTINUOUS COLLISION, opt-in and default-off. A node that crossed a thin collider between
+                    # x_prev and x is never seen by the discrete resolve below: neither endpoint samples the
+                    # interior (measured: 0.5 m/frame through a 0.1 m wall). Sweep first, then resolve -- the sweep
+                    # only touches nodes whose segment actually hit, so nodes it does not catch are bit-identical.
+                    from holographic.simulation_and_physics.holographic_collide import resolve_swept_collision
+                    self.x = resolve_swept_collision(x_prev, self.x, collider, radius=collide_radius)
                 self.x = resolve_sdf_collision(self.x, collider, radius=collide_radius)
                 env_dx = self.x - _x_pre_env
                 collision_dx = env_dx if collision_dx is None else collision_dx + env_dx
@@ -411,6 +511,11 @@ class SoftBody:
             if floor is not None and restitution >= 0.0:
                 hit = self.x[:, 1] <= floor + 1e-9
                 self.v[hit, 1] = -restitution * self.v[hit, 1]
+            if sleep is not None and asleep_nodes.any():
+                # THE CORRECTNESS CONTRACT: a sleeping island's state is carried through BIT-IDENTICALLY. Restoring
+                # here (rather than masking every stage) means no future stage can quietly perturb it.
+                self.x[asleep_nodes] = x_prev[asleep_nodes]
+                self.v[asleep_nodes] = _v_prev[asleep_nodes]
         return self
 
     def constraint_residual(self):

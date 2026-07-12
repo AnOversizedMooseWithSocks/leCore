@@ -590,10 +590,16 @@ def test_the_nd_library_default_bandwidth_carries_no_information():
     assert p1 < d1, (p1, d1)                                # probing wins at both frequencies
 
 
+@pytest.mark.slow
 def test_nd_bandwidth_is_a_bias_variance_dial_and_dim_is_the_variance_budget():
     """At the default margin the error is a BIAS floor: 16x the dimension buys nothing (0.1179 -> 0.1191). Raise the
     margin and the bias falls but crosstalk rises -- which is what dim pays for. Pinned because a previous docstring
-    claimed 'error falls with D' at the default margin, and it does not."""
+    claimed 'error falls with D' at the default margin, and it does not.
+
+    SLOW, and irreducibly so (slowest-tests pass): the variance win only clears its `hi_big < lo_big / 2` bar at a
+    16x dimension ratio. Measured: dim 4096->32768 (8x) leaves only 1.2% headroom on that assertion (0.0575 vs the
+    0.0582 threshold) -- a numeric knife-edge that would flake. dim=65536 is where the margin is safe, and that bake
+    is ~34 s. Shrinking it would trade a real contract for a fragile one, so it is marked slow instead."""
     from holographic.rendering.holographic_shader import bake_nd, fetch_nd
     ax, V = _nd_setup()
     Q = np.random.default_rng(0).uniform(0.05, 0.95, (200, 2))
@@ -606,11 +612,16 @@ def test_nd_bandwidth_is_a_bias_variance_dial_and_dim_is_the_variance_budget():
     assert hi_big < lo_big / 2.0                                            # wide kernel, big D: much better
 
 
+@pytest.mark.slow
 def test_the_causal_variable_is_the_bandwidth_not_the_margin():
     """Two tables in this codebase once disagreed about whether dimension helps the n-D bake. Both were right about
     their own signal. `margin` is a RATIO -- B = margin * w_max -- so the same margin is a different kernel on
     different data. Hold B fixed and the confound disappears: two different signals at the same B behave the same,
-    and one signal at two different B's does not."""
+    and one signal at two different B's does not.
+
+    SLOW, irreducibly (slowest-tests pass): the variance win is a high-dimension effect. Measured at the halved
+    D=16384 the cycle-1 variance assertion keeps only ~5% headroom (0.0645 vs 0.0678) -- too thin to trust against
+    numeric jitter -- so the safe D=32768 (~25 s) stays and the test is marked slow rather than made fragile."""
     from holographic.rendering.holographic_shader import fetch_nd
     from holographic.sampling_and_signal.holographic_fpe import VectorFunctionEncoder
     ax = np.linspace(0.0, 1.0, 40)

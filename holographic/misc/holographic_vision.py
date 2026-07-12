@@ -578,5 +578,29 @@ def _demo():
           f"(bundle prototypes + cosine)")
 
 
+def _selftest():
+    """Regression trap (T6 backfill; demo only). Pins two classic-CV contracts: the RGB<->HSV transform is a true
+    INVERSE (round-trips exactly), and the edge detector FINDS a step edge where one exists (and the [BLIND-SPOT]
+    complement: reports far fewer on a flat field). Numbers measured against the live functions first."""
+    import numpy as np
+
+    # 1. rgb_to_hsv / hsv_to_rgb are exact inverses on [0,1] colour -- a colour-space transform that doesn't
+    #    round-trip is silently corrupting pixels.
+    rng = np.random.default_rng(0)
+    rgb = rng.random((8, 8, 3))
+    assert np.abs(hsv_to_rgb(rgb_to_hsv(rgb)) - rgb).max() < 1e-6
+
+    # 2. edges() fires on a real vertical step and stays quiet on a flat field -- assert the DISCRIMINATION.
+    step = np.zeros((16, 16, 3)); step[:, 8:] = 1.0
+    flat = np.full((16, 16, 3), 0.5)
+    assert edges(to_gray(step)).sum() > 5 * (edges(to_gray(flat)).sum() + 1)
+
+    print("OK: holographic_vision self-test passed (RGB<->HSV round-trips to <1e-6, and the edge detector fires "
+          "on a vertical step while staying quiet on a flat field)")
+
+
 if __name__ == "__main__":
-    _demo()
+    import sys
+    _selftest()
+    if "--demos" in sys.argv:
+        _demo()

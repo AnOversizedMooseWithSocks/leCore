@@ -44,7 +44,13 @@ from holographic.mesh_and_geometry.holographic_mesh import Mesh
 
 
 def rotation(axis, angle):
-    """A 3x3 rotation matrix about `axis` by `angle` radians (Rodrigues' formula)."""
+    """A 3x3 rotation matrix about `axis` by `angle` radians (Rodrigues' formula).
+
+    KEPT SEPARATE, on purpose (rev. 9 organization audit): the engine's canonical builder is
+    `holographic_transform.rotation_axis_angle` (quaternion-based), and `holographic_scenegraph.rotation` keeps a
+    third, 4x4 Rodrigues. Measured: this one differs from BOTH by up to ~9.0e-12 (the `+1e-12` in the axis
+    normalization plus the quaternion round-trip). Bit-identity is the merge gate, it fails, and skinning weights
+    baked against this exact matrix must not move -- so the copy stays, DECLARED, with the number."""
     axis = np.asarray(axis, float)
     axis = axis / (np.linalg.norm(axis) + 1e-12)
     x, y, z = axis
@@ -91,6 +97,37 @@ def skin_mesh(mesh, transforms, weights):
     return Mesh(linear_blend_skin(mesh.vertices, transforms, weights), [tuple(f) for f in mesh.faces])
 
 
+def skin_bind_weights(vertices, bones, falloff=2.0, max_influences=4):
+    """AUTO-SKIN BINDING: compute per-vertex bone weights from bone positions -- the 'bind' step that produces the
+    weights `linear_blend_skin` / `skin_mesh` consume. Each bone is a point (a joint, or a segment midpoint);
+    each vertex is weighted toward the nearest bones by an inverse-distance falloff, keeping the `max_influences`
+    strongest and renormalizing to a PARTITION OF UNITY (weights sum to 1) so rigid motion is reproduced exactly.
+
+    `vertices` is (V,3), `bones` is (B,3) bone anchor points. `falloff` is the inverse-distance power (higher =
+    tighter binding to the nearest bone). Returns a (V,B) weight matrix. This is the distance-based auto-bind every
+    rig starts from before hand-painting -- deterministic, NumPy only. (Kept honest: a distance bind ignores the
+    surface -- it can bind across a thin gap two bones straddle; the geodesic refinement is a future step, flagged
+    here so nobody assumes this is heat-diffusion binding.)"""
+    V = np.asarray(vertices, float)
+    B = np.asarray(bones, float)
+    nV, nB = len(V), len(B)
+    if nB == 0:
+        return np.zeros((nV, 0))
+    # inverse-distance weights: w_vb = 1 / (dist(v,b)^falloff + eps).
+    d = np.linalg.norm(V[:, None, :] - B[None, :, :], axis=2)  # (V,B) distances
+    w = 1.0 / (d ** falloff + 1e-9)
+    # keep only the max_influences strongest bones per vertex (the rest zeroed) -- a sparse, riggable bind.
+    k = min(max_influences, nB)
+    if k < nB:
+        keep = np.argsort(-w, axis=1)[:, :k]                   # indices of the top-k bones per vertex
+        mask = np.zeros_like(w, dtype=bool)
+        np.put_along_axis(mask, keep, True, axis=1)
+        w = np.where(mask, w, 0.0)
+    # renormalize to a partition of unity so LBS reproduces rigid motion exactly.
+    w = w / (w.sum(axis=1, keepdims=True) + 1e-12)
+    return w
+
+
 # =====================================================================================================
 # Self-test -- rigid reproduction (partition of unity), single-bone exactness, and the candy-wrapper collapse.
 # =====================================================================================================
@@ -128,10 +165,22 @@ def _selftest():
     # --- determinism ---
     assert np.array_equal(linear_blend_skin(pts, transforms, weights), linear_blend_skin(pts, transforms, weights))
 
+    # --- E3 AUTO-BIND: distance-based bind weights are a partition of unity, favour the nearest bone, and feed LBS.
+    bones3 = np.array([[-5, 0, 0], [0, 0, 0], [5, 0, 0]], float)      # three joints along x
+    bverts = np.array([[-5, 0.1, 0], [0.2, 0, 0], [4.9, -0.1, 0]], float)  # one vertex near each bone
+    bw = skin_bind_weights(bverts, bones3, max_influences=2)
+    assert np.allclose(bw.sum(axis=1), 1.0)                          # partition of unity
+    assert bw[0].argmax() == 0 and bw[1].argmax() == 1 and bw[2].argmax() == 2  # each binds to its nearest bone
+    assert np.count_nonzero(bw[0]) <= 2                              # max_influences respected
+    # bound weights drive LBS: with all-identity bones the mesh is unchanged (rigid reproduction via the bind).
+    idw = skin_bind_weights(pts, np.array([[0, 0, 0], [1, 0, 0.0]]), max_influences=2)
+    assert np.allclose(linear_blend_skin(pts, np.stack([np.eye(4), np.eye(4)]), idw), pts, atol=1e-12)
+
     print(f"holographic_meshskin selftest: ok (linear blend skinning as a soft mixture of expert bone-transforms: "
           f"shared rigid transform reproduced EXACTLY for any weights (partition of unity); single-bone exact; "
           f"CANDY-WRAPPER negative measured to closed form -- a 50/50 twist collapses the radius to cos(theta/2), "
-          f"reaching {collapse_180:.3f} at 180 degrees; deterministic)")
+          f"reaching {collapse_180:.3f} at 180 degrees; auto-bind weights are a partition of unity favouring the "
+          f"nearest bone and feed LBS; deterministic)")
 
 
 if __name__ == "__main__":

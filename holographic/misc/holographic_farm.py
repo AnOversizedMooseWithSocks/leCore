@@ -1,6 +1,11 @@
 """holographic_farm.py -- R3: the network backend (render farm / SETI@home). Run the coordinator's workers on OTHER
 machines. Stdlib only: http.server + json + base64. No framework, no broker.
 
+KEPT NEGATIVE (no engine door on purpose): this is the R3 PROTOTYPE of a network render farm, SUPERSEDED IN PRACTICE
+by coordinator.NetworkFarm which is the wired path. It is kept as the readable reference for the SETI@home-style
+worker/coordinator split (and so nobody re-invents it), not as a live faculty -- wiring a second farm alongside the
+coordinator's would be two doors to one room. Use the coordinator's distribute_bricks / NetworkFarm instead.
+
 THE SHAPE
 ---------
   WorkerDaemon  -- runs ON each node. Holds a registry of NAMED workers (YOUR code, present on the node) and a cache

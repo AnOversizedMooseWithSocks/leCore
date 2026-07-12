@@ -62,9 +62,16 @@ _GROWTH_LIMIT = 1e12
 
 def transfer(kernel, shape=None):
     """The kernel's eigenvalues: its (n-D) FFT. A circular convolution is diagonal in this basis, so this IS the
-    eigendecomposition -- free, no dense O(n^3) work."""
+    eigendecomposition -- free, no dense O(n^3) work.
+
+    `axes` is passed explicitly whenever `s` is: NumPy 2.0 deprecates `axes=None` with a non-None `s`, and in a
+    future release `s[i]` will bind to `axes[i]` instead of to the leading axes. Silent re-binding of a transfer's
+    axes is exactly the kind of change that would not raise and would not be caught."""
     k = np.asarray(kernel, float)
-    return np.fft.fftn(k, s=shape)
+    if shape is None:
+        return np.fft.fftn(k)
+    axes = tuple(range(len(np.atleast_1d(shape))))
+    return np.fft.fftn(k, s=tuple(shape), axes=axes)
 
 
 def _check(H, n_passes):
@@ -177,12 +184,54 @@ class Pipeline:
     Every method returns `self`, so stages chain. `transfer` is the composed operator; `apply(field)` runs it. All
     stages must share the field's `shape`, because a transfer is defined on a fixed grid."""
 
-    def __init__(self, shape):
+    def __init__(self, shape, real=False):
+        """`real=True` builds the pipeline on the HALF-SPECTRUM (`rfftn`), which is what a real-valued field wants
+        (backlog G8). The transfer then has shape `shape[:-1] + (shape[-1]//2 + 1,)`, and `apply` uses
+        `irfftn(rfftn(f) * H)`.
+
+        WHY IT MATTERS. `Pipeline`'s original transfer lives on the FULL `fftn` grid, which costs ~2x on a real
+        image: measured 3.48 ms vs 1.00 ms for one 256x256 round trip. That 2.2x is precisely why `postfx`
+        hand-composed its own rfft2 transfer instead of delegating here. Both modes give identical results (7.8e-16
+        on a real field); `real=True` is the one to use when the input is real, and it is default-OFF so every
+        existing pipeline is bit-identical."""
         self.shape = tuple(int(n) for n in np.atleast_1d(shape))
-        self.transfer = np.ones(self.shape, dtype=complex)      # identity
+        self.real = bool(real)
+        self.axes = tuple(range(len(self.shape)))               # explicit: numpy deprecates axes=None with s=
+        self.tshape = (self.shape[:-1] + (self.shape[-1] // 2 + 1,)) if self.real else self.shape
+        self.transfer = np.ones(self.tshape, dtype=complex)     # identity
+
+    @classmethod
+    def from_transfer(cls, shape, H, real=False):
+        """A Pipeline whose transfer IS `H` -- no identity array, no composing multiply. The zero-overhead entry
+        point for a caller that already holds a composed transfer, which is what `postfx.apply_transfer` does. The
+        long way round (`Pipeline(shape).stage(H)`) allocates a complex `ones` and multiplies it: measured, that
+        turned a 1.04 ms call into 1.48 ms, a 42% regression paid for nothing."""
+        p = cls(shape, real=real)
+        H = np.asarray(H)
+        if H.shape != p.tshape:
+            raise ValueError("transfer shape %s does not match the pipeline's %s (real=%s)"
+                             % (H.shape, p.tshape, p.real))
+        p.transfer = H.astype(complex, copy=False)
+        return p
+
+    def _fwd(self, f):
+        return np.fft.rfftn(f, axes=self.axes) if self.real else np.fft.fftn(f, axes=self.axes)
+
+    def _inv(self, F):
+        if self.real:
+            return np.fft.irfftn(F, s=self.shape, axes=self.axes)
+        return np.real(np.fft.ifftn(F, axes=self.axes))
+
+    def _freq(self, axis):
+        """The frequency grid for `axis` -- HALVED on the last axis when `real=True`, because that is where rfftn
+        folds the conjugate-symmetric half away."""
+        if self.real and axis == len(self.shape) - 1:
+            return np.fft.rfftfreq(self.shape[axis])
+        return np.fft.fftfreq(self.shape[axis])
 
     def _kernel_transfer(self, kernel, n_passes=1):
-        H = transfer(kernel, shape=self.shape)
+        H = (np.fft.rfftn(np.asarray(kernel, float), s=self.shape, axes=self.axes)
+             if self.real else transfer(kernel, shape=self.shape))
         n = float(n_passes)
         if abs(n - round(n)) > 1e-12:
             if np.max(np.abs(H.imag)) > 1e-9 or np.min(H.real) < -1e-9:
@@ -205,11 +254,11 @@ class Pipeline:
         shifts = np.atleast_1d(np.asarray(shift, float))
         if shifts.size == 1:
             shifts = np.repeat(shifts, len(self.shape))
-        ramp = np.ones(self.shape, dtype=complex)
+        ramp = np.ones(self.tshape, dtype=complex)
         for axis, d in enumerate(shifts):
-            w = 2.0 * np.pi * np.fft.fftfreq(self.shape[axis])
+            w = 2.0 * np.pi * self._freq(axis)
             shape = [1] * len(self.shape)
-            shape[axis] = self.shape[axis]
+            shape[axis] = self.tshape[axis]
             ramp = ramp * np.exp(-1j * w * float(d)).reshape(shape)
         self.transfer = self.transfer * ramp
         return self
@@ -222,8 +271,24 @@ class Pipeline:
     def unsharp(self, kernel, alpha=0.5):
         """Unsharp mask against `kernel`: out = (1 + a)*x - a*blur(x). A LINEAR COMBINATION of two branches, so it
         stays a single transfer -- which is why a whole graph, not just a chain, collapses to one multiply."""
-        K = transfer(kernel, shape=self.shape)
+        K = (np.fft.rfftn(np.asarray(kernel, float), s=self.shape, axes=self.axes)
+             if self.real else transfer(kernel, shape=self.shape))
         self.transfer = (1.0 + alpha) * self.transfer - alpha * self.transfer * K
+        return self
+
+    def stage(self, transfer):
+        """Compose an arbitrary PRECOMPUTED transfer into the graph. The general injection point: any operator that
+        is diagonal in the Fourier basis has one, and multiplying transfers is how they compose.
+
+        This is what lets a non-graphics operator join the algebra without pretending to be a blur kernel. The heat
+        equation's exact solution on a periodic domain is `exp(-alpha |k|^2 t)` -- a transfer -- and
+        `holographic_laplacian.diffusion_operator` builds a Pipeline from it. The transfer must match the field's
+        shape, because a transfer is defined on a fixed grid."""
+        H = np.asarray(transfer)
+        if H.shape != self.tshape:
+            raise ValueError("transfer shape %s does not match the pipeline's %s (real=%s)"
+                             % (H.shape, self.tshape, self.real))
+        self.transfer = self.transfer * H.astype(complex)
         return self
 
     def apply(self, field):
@@ -231,7 +296,7 @@ class Pipeline:
         f = np.asarray(field, float)
         if f.shape != self.shape:
             raise ValueError("field shape %s does not match the pipeline's %s" % (f.shape, self.shape))
-        return np.real(np.fft.ifftn(np.fft.fftn(f) * self.transfer))
+        return self._inv(self._fwd(f) * self.transfer)
 
 
 def combine(pipelines, weights=None):
@@ -659,6 +724,24 @@ def translate_rule(bake, rule, dx):
 def bake_nd(grids, values, dim=8192, seed=0, margin=1.5):
     """H5 -- the texture unit in N dimensions: a gridded function baked into ONE hypervector.
 
+    KEPT NEGATIVE -- **"SAMPLE O(1)" MEANS O(1) IN THE NUMBER OF BAKED SAMPLES, NOT O(1) IN `dim`.** A `fetch_nd`
+    costs one O(dim log dim) transform per point. On a CPU that is far more than re-evaluating a procedural field.
+    Measured against a 5-octave fBm driving a material channel (24^3 grid, dim 2048), with the sample path fully
+    vectorised:
+
+        hits    direct resolve   fetch_nd   ratio
+         512        1.25 ms       207.6 ms   166x SLOWER
+        4,096       3.18 ms      2010.0 ms   632x SLOWER
+
+    ... and the bake does not even hold the field: correlation 0.252, max error 0.296 on a [0.05, 0.95] channel.
+    That is H5's bandwidth negative, not a tuning failure -- a 24^3 grid cannot carry five octaves.
+
+    **So do NOT bake a procedural material into the texture unit for a CPU renderer.** The primitive earns its keep
+    where the fetch is a parallel dot product and the field is genuinely expensive or unavailable in closed form --
+    that is the muscle side, the browser, where `exp` and a dot are free and a pattern graph is not. Bake for the
+    consumer that has the hardware, not for the one that has the source.
+
+
     `grids`  -- one 1-D array of UNIFORMLY spaced coordinates per axis.
     `values` -- the sampled function, shaped (len(grids[0]), len(grids[1]), ...).
 
@@ -718,7 +801,12 @@ def fetch_nd(bake, point, normalize=True):
     raised the margin or calibrated the gain."""
     enc = bake["encoder"]
     P = np.atleast_2d(np.asarray(point, float))
-    Z = np.stack([enc.encode(p) for p in P])
+    # "Bake once, sample O(1)" -- and the sample path was a Python loop over `encode`. `encode_many` is the same
+    # arithmetic, batched. It is not bit-identical (5.6e-16: binding all axes' spectra at once reassociates the
+    # products that pairwise `bind` performs in sequence), and it is only ~1.4x faster, because the cost of a
+    # sample is one O(dim log dim) transform per point and the loop was never the bottleneck. See the kept negative
+    # on `bake_nd`.
+    Z = enc.encode_many(P) if hasattr(enc, "encode_many") else np.stack([enc.encode(p) for p in P])
     out = Z @ bake["field"]
     if normalize:
         out = out / (Z @ bake["density"])

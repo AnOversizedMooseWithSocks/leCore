@@ -79,7 +79,9 @@ jobs:
           set -e
           EVENT="${{ github.event_name }}"
 
-          run_full () { echo "== FULL suite ($1) =="; pytest -q -n auto --durations=15; }
+          # The FULL safety net runs EVERYTHING, slow tests included: `-m ""` overrides the default `-m 'not slow'`
+          # (set in pyproject.toml) that keeps per-change and local runs fast. See tests/conftest.py.
+          run_full () { echo "== FULL suite ($1) =="; pytest -q -n auto -m "" --durations=15; }
 
           # --- the safety net: weekly schedule, manual run, or a version tag -> run EVERYTHING ---
           case "$EVENT" in

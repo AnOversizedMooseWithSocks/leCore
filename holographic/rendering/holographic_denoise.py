@@ -121,8 +121,59 @@ def codebook_denoise(x, codebook, beta=25.0, steps=3, readout="softmax"):
     return dense_cleanup(x, codebook, beta=beta, steps=steps, readout=readout)
 
 
+def soft_relaxation(hertz, zeta, dt):
+    """The per-substep relaxation factor of a SOFT constraint of stiffness `hertz` and damping ratio `zeta`,
+    stepped at `dt`. Feed it to `project_onto_constraints(omega=...)`, or just pass `stiffness=(hertz, zeta)`
+    there and let it call this. Returns a factor in [0, 1]: 0 = the constraint does nothing, 1 = it snaps hard.
+
+    WHY this exists: `omega` (under-relaxation) is a PER-SWEEP number, so the same omega means different
+    physics at different substep counts -- measured, a chain solved with omega=0.30 lands at 0.942 after 8
+    sweeps and 1.000 after 64. A constraint should be specified by how STIFF it is, not by how many times you
+    happen to sweep it. This is Catto's Soft Step parameterization (Box2D v3 / Solver2D): a constraint is a
+    damped harmonic oscillator, and you dial it in physical units -- `hertz` is its natural frequency, `zeta`
+    its damping ratio (1.0 = critically damped, no overshoot).
+
+    THE DERIVATION, because the coefficient is not obvious. A projection solver carries POSITIONS, not
+    velocities, so it can only realise the oscillator's overdamped mode: with x'' + 2*zeta*w*x' + w^2*x = 0 and
+    w = 2*pi*hertz, dropping x'' leaves x' = -lambda*x with lambda = w/(2*zeta). Backward Euler on THAT (which
+    is unconditionally stable, the reason Catto's solver is) gives x_{n+1} = x_n / (1 + lambda*dt), i.e. the
+    fraction of the constraint error removed per substep is
+
+        alpha = lambda*dt / (1 + lambda*dt) = dt*w / (2*zeta + dt*w)
+
+    which is exactly `dt * bias_rate` in Catto's notation. MEASURED: N substeps over a fixed horizon T then
+    converge to the continuous 1 - exp(-lambda*T) at first order (error halves as N doubles; observed order
+    1.00), so the SAME (hertz, zeta) means the same physics at every substep count -- which fixed omega does
+    not (it converges to the wrong answer, 1.0). The substep count becomes an accuracy dial, not a physics dial.
+
+    KEPT NEGATIVE, measured and discarded: Catto's `mass_scale` (a2/(1+a2), a2 = dt*w*(2*zeta+dt*w)) belongs to
+    the VELOCITY/impulse half of Soft Step. Folding it in here as alpha = dt*bias_rate*mass_scale makes alpha
+    O(dt^2), so N*alpha -> 0 and the total relaxation VANISHES as substeps rise -- the exact substep-invariance
+    the parameterization exists to buy. Measured: x(T) drifted 0.9997 (N=8) -> 0.9539 (N=256). A projection
+    solver takes the bias term ALONE. (At zeta=0 that discarded form does reduce exactly to XPBD's compliance
+    factor (dt*w)^2/(1+(dt*w)^2) -- a real identity, for a quantity we do not want here.)
+
+    KEPT NEGATIVE, structural: being position-level, this CANNOT ring. `zeta` is a rate dial, not an overshoot
+    dial -- zeta < 1 approaches faster, it does not oscillate, because there is no velocity state to overshoot
+    with. Underdamped bounce needs the velocity solver (`dynamics`), not this. zeta=0 degenerates to alpha=1
+    (the hard projection) rather than to a perpetual oscillation, and hertz=inf is the hard projection exactly.
+    """
+    dt = float(dt)
+    if dt <= 0.0:
+        raise ValueError("dt must be > 0, got %r" % (dt,))
+    hertz, zeta = float(hertz), float(zeta)
+    if hertz < 0.0 or zeta < 0.0:
+        raise ValueError("hertz and zeta must be >= 0, got (%r, %r)" % (hertz, zeta))
+    if hertz == 0.0:
+        return 0.0                       # zero stiffness: the constraint is inert, x never moves
+    if not np.isfinite(hertz):
+        return 1.0                       # infinite stiffness IS the hard projection (omega=1.0), exactly
+    w = 2.0 * np.pi * hertz
+    return float(dt * w / (2.0 * zeta + dt * w))
+
+
 def project_onto_constraints(x, projections, iters=30, tol=None, omega=1.0, sweep="sequential",
-                             average=False):
+                             average=False, stiffness=None, dt=None):
     """Iterated projection -- satisfy a set of constraints by repeatedly projecting onto each in turn. This
     is the structure three things the engine grew separately all share (Macklin's observation -- the same
     object he builds in position-based dynamics):
@@ -145,11 +196,31 @@ def project_onto_constraints(x, projections, iters=30, tol=None, omega=1.0, swee
         x, as in the resonator, where each factor is cleaned against its own codebook -- summing the moves
         reproduces the block update EXACTLY, which is why the resonator can delegate here.
 
+    `stiffness=(hertz, zeta)` is the SOFT-CONSTRAINT mode (Catto's Soft Step, and the reason `omega` exists at
+    all): instead of hand-tuning the per-sweep `omega`, state the constraint in PHYSICAL units -- its natural
+    frequency in hertz and its damping ratio zeta -- and pass the substep `dt`. omega is then derived by
+    `soft_relaxation`, and the same (hertz, zeta) means the same physics at ANY substep count, which a
+    hand-tuned omega does not (measured; see soft_relaxation's docstring for the derivation and two kept
+    negatives). This is what folds soft constraints into the projection family: a soft constraint is just a
+    WEIGHTED projection, so PBD, FABRIK/IK, the resonator and the PnP denoise loop all gain Catto's softness
+    from one parameterization. `stiffness=(inf, zeta)` is the hard projection exactly. Requires `dt`; it is an
+    error to pass both `stiffness` and a non-default `omega`, since they are two names for the same dial.
+
     `iters` sweeps; `tol` (if set) stops early once a full sweep moves x by less than tol (relative); `tol=None`
     runs all `iters` -- what the PnP loop wants. Returns (x, n_sweeps, converged) where `converged` is True only
     when `tol` triggered an early stop. Deterministic given deterministic projections (no RNG of its own)."""
     if sweep not in ("sequential", "simultaneous"):
         raise ValueError("sweep must be 'sequential' or 'simultaneous', got %r" % (sweep,))
+    if stiffness is not None:
+        # Two names for one dial -- refuse to guess which the caller meant rather than silently pick.
+        if omega != 1.0:
+            raise ValueError("pass either omega=%r or stiffness=%r, not both" % (omega, stiffness))
+        if dt is None:
+            raise ValueError("stiffness=(hertz, zeta) needs the substep dt= to convert to a relaxation factor")
+        _hertz, _zeta = stiffness
+        omega = soft_relaxation(_hertz, _zeta, dt)
+    elif dt is not None:
+        raise ValueError("dt= is only meaningful with stiffness=(hertz, zeta)")
     x = np.asarray(x, float).copy()
     m = max(len(projections), 1)
     for it in range(iters):
@@ -305,3 +376,62 @@ def denoise_gated(x, basis, mean, threshold=0.6):
                       superior=lambda z, b, m: manifold_denoise(z, b, m),   # the shelved aggressive projection
                       fallback=lambda z, b, m: np.asarray(z, float))        # safe default: leave it alone
     return gate.apply(x, basis, mean)
+
+def _selftest():
+    """Regression trap for the soft-constraint parameterization (X2). Asserts the NUMERIC contract, not
+    'no exception': the hard-projection limit is exact, the substep-invariance bar is met against the
+    continuous reference, and both kept negatives stay pinned."""
+    # 1. hertz -> inf IS the hard projection, exactly. Not 'close to' -- omega must be 1.0 bit-for-bit,
+    #    or every existing caller's behaviour has quietly shifted.
+    assert soft_relaxation(np.inf, 1.0, 1 / 60.0) == 1.0
+    assert soft_relaxation(0.0, 1.0, 1 / 60.0) == 0.0          # zero stiffness: inert
+    assert soft_relaxation(5.0, 0.0, 1 / 60.0) == 1.0          # zeta=0 degenerates to hard, never to ringing
+
+    # 2. the coefficient is dt*bias_rate = dt*w/(2*zeta + dt*w), to machine precision
+    w = 2.0 * np.pi * 5.0
+    assert abs(soft_relaxation(5.0, 1.0, 0.01) - 0.01 * w / (2.0 + 0.01 * w)) < 1e-15
+
+    # 3. THE BAR: the same (hertz, zeta) must mean the same physics at any substep count. Sweep N over a
+    #    fixed horizon T and converge to the continuous 1-exp(-lambda*T) at FIRST order. A fixed omega
+    #    cannot do this -- it is the honest baseline and it converges to the wrong answer (1.0).
+    target, x0, T, hz, ze = np.array([1.0]), np.array([0.0]), 0.2, 1.0, 2.0
+    proj = lambda _x: target.copy()
+    lam = 2.0 * np.pi * hz / (2.0 * ze)
+    exact = 1.0 - np.exp(-lam * T)
+    errs = []
+    for N in (16, 32, 64):
+        x, _, _ = project_onto_constraints(x0, [proj], iters=N, stiffness=(hz, ze), dt=T / N, tol=None)
+        errs.append(abs(float(x[0]) - exact))
+    assert errs[0] < 3e-3 and errs[-1] < 7e-4, errs
+    for a, b in zip(errs, errs[1:]):
+        assert 1.8 < a / b < 2.2, ("first-order convergence lost", errs)   # error halves as N doubles
+    xo, _, _ = project_onto_constraints(x0, [proj], iters=64, omega=0.30, tol=None)
+    assert abs(float(xo[0]) - exact) > 0.5    # the baseline: fixed omega lands somewhere else entirely
+
+    # 4. KEPT NEGATIVE: mass_scale folded in makes alpha O(dt^2), so the relaxation VANISHES as N rises.
+    #    Pinned so nobody "improves" soft_relaxation back into Catto's velocity coefficients.
+    def _wrong(hz_, ze_, dt_):
+        w_ = 2.0 * np.pi * hz_
+        a1 = 2.0 * ze_ + dt_ * w_
+        a2 = dt_ * w_ * a1
+        return (dt_ * w_ / a1) * (a2 / (1.0 + a2))
+    coarse, fine = _wrong(5.0, 1.0, 1 / 8.0), _wrong(5.0, 1.0, 1 / 256.0)
+    assert fine * 256 < coarse * 8, "the discarded mass_scale form is supposed to vanish with substeps"
+
+    # 5. stiffness and omega are two names for one dial -- refuse to guess, and dt must accompany stiffness
+    for kw in (dict(omega=0.5, stiffness=(5.0, 1.0), dt=0.01), dict(stiffness=(5.0, 1.0)), dict(dt=0.01)):
+        try:
+            project_onto_constraints(x0, [proj], iters=1, **kw)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("expected ValueError for %r" % (kw,))
+
+    print("OK: holographic_denoise self-test passed (soft constraints: hertz=inf is the hard projection "
+          "exactly; (hertz, zeta) converges to 1-exp(-lambda*T) at first order (errors %s) where a fixed "
+          "omega=0.30 lands at the wrong answer; the mass_scale form is pinned as the kept negative that "
+          "vanishes with substeps)" % ["%.2e" % e for e in errs])
+
+
+if __name__ == "__main__":
+    _selftest()

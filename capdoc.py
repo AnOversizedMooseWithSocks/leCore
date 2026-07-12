@@ -200,6 +200,9 @@ def generate_json(root=None):
             "example": c.example or "",
             "aliases": list(c.aliases),
             "native": bool(c.native),
+            "semantic": getattr(c, "semantic", None) or None,  # the File->Export->PNG verb path (None if untagged)
+            "consumes": list(getattr(c, "consumes", ()) or ()),  # S3 io-shape: datatype(s) consumed (empty if untagged)
+            "produces": list(getattr(c, "produces", ()) or ()),  # S3 io-shape: datatype(s) produced
             "theme": _theme_for(c) or "More capabilities",
         })
 

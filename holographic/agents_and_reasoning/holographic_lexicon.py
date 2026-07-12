@@ -1,6 +1,11 @@
 """A dictionary-first curriculum for word meaning -- testing the intuition that a
 brain should learn definitions before reading prose.
 
+KEPT NEGATIVE (no engine door on purpose): this is a CURRICULUM EXPERIMENT -- a hypothesis test about whether
+dictionary-first training beats prose-first, not a reusable library. It is evidence for a design question, kept so
+the experiment (and its result) is not re-run from scratch. The wired language faculties live elsewhere; this stays
+a standalone study.
+
 THE QUESTION (the user's): feed the brain a DICTIONARY first (word meanings),
 then GRAMMAR (sentence structure), then an ENCYCLOPEDIA (world facts), before any
 other reading. Does foundational structured knowledge bootstrap meaning better

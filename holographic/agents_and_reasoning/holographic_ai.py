@@ -131,6 +131,15 @@ def bind(a, b):
     exact (not approximate) for real input, matching the old complex-fft bind to
     machine epsilon (~7e-17). involution-based unbind is unchanged.
     """
+    # SHAPE GUARD (NCA backlog B4). `n=a.shape[0]` is the transform length, which is only the vector length when
+    # `a` is 1-D. Handed an (N, D) batch this silently returned an (N, N) array -- a confident wrong answer that
+    # raised nothing, exactly the failure class the constitution names. `bind_batch` / `bind_fixed` are the correct
+    # batched forms and always were; this is a missing guard, not a missing capability.
+    a = np.asarray(a, float)
+    b = np.asarray(b, float)
+    if a.ndim != 1 or b.ndim != 1:
+        raise ValueError("bind is 1-D (got shapes %r and %r); use bind_batch(A, B) for an (N, D) batch, or "
+                         "bind_fixed(v, B) to bind one vector against many." % (a.shape, b.shape))
     return _irfft(_rfft(a) * _rfft(b), n=a.shape[0])
 
 
@@ -489,7 +498,9 @@ def recall_all(trace, keys, codebook, iterative=True):
         return j, float(sims[j])
 
     if not iterative:
-        return [best_match(unbind(trace, k))[0] for k in keys]
+        # BATCHED (backlog B3): K unbinds of ONE trace is one batched transform. `bind_fixed` with the involution
+        # stack IS `recover_all`; bit-identical to the loop, measured 3.8x at D=1024/K=8.
+        return [best_match(s)[0] for s in bind_fixed(trace, involution_batch(np.asarray(keys, float)))]
 
     residual = np.array(trace, dtype=float)
     remaining = set(range(len(keys)))
@@ -1124,10 +1135,64 @@ def demo_learning():
     print("  training loop, just shared (feature,value) structure.\n")
 
 
+def _selftest():
+    """Regression trap for the engine's most-imported foundation module (183 modules depend on it, and it had NO
+    selftest -- T6 backfill). Asserts the VSA primitives' numeric contracts on non-trivial inputs, using cross-seed
+    CONTRAST (a bound pair recovers its operand FAR better than an unrelated vector) rather than fragile absolute
+    thresholds, so a CI box's numeric jitter cannot flip it. Every number here was measured against the live code
+    before it was written -- a self-test that asserts the implementation's own output back at it proves nothing."""
+    import numpy as np
+
+    d = 1024
+    rng = np.random.default_rng(0)
+    a, b = random_vector(d, rng), random_vector(d, rng)
+
+    # 1. BIND/UNBIND round-trip: unbind(bind(a,b), a) recovers b, and does so DRAMATICALLY better than it
+    #    resembles an unrelated vector. The contrast is the contract; the absolute (~0.69) is incidental.
+    rec = unbind(bind(a, b), a)
+    other = random_vector(d, rng)
+    assert cosine(rec, b) > 0.4                                  # recovered
+    assert cosine(rec, b) > 5.0 * abs(cosine(rec, other))       # ... and unmistakably, not by luck
+
+    # 2. UNITARY keys make unbind (near-)EXACT -- the reason unitary vectors exist. This is a tight bar on purpose.
+    u = unitary_vector(d, rng)
+    assert cosine(unbind(bind(a, u), u), a) > 0.99
+
+    # 3. BUNDLE preserves membership: every bundled vector is clearly present, a non-member clearly absent.
+    c = random_vector(d, rng)
+    bun = bundle([a, b, c])
+    assert min(cosine(bun, a), cosine(bun, b), cosine(bun, c)) > 0.3     # all members present
+    assert cosine(bun, random_vector(d, rng)) < 0.2                     # a stranger is not
+
+    # 4. HolographicMemory key->value: recall returns the RIGHT value by a clean nearest-neighbour margin
+    #    (an off-key value must not win) -- the [BLIND-SPOT] point: assert the DISCRIMINATION, not just "close".
+    mem = HolographicMemory(dim=d)
+    vocab = Vocabulary(dim=d, seed=1)
+    pairs = [("name", "alice"), ("age", "thirty"), ("city", "paris")]
+    kv = {(k, v): (vocab.get(k), vocab.get(v)) for k, v in pairs}
+    for (k, v), (kvec, vvec) in kv.items():
+        mem.learn(kvec, vvec)
+    r = mem.recall(vocab.get("name"))
+    hit = cosine(r, vocab.get("alice"))
+    miss = max(cosine(r, vocab.get("thirty")), cosine(r, vocab.get("paris")))
+    assert hit > 0.3 and hit > 3.0 * miss                       # right value wins with margin
+
+    # 5. DETERMINISM (the repo's non-negotiable): the same seed mints the same vector, bit for bit.
+    assert np.array_equal(Vocabulary(dim=d, seed=7).get("z"), Vocabulary(dim=d, seed=7).get("z"))
+    assert np.array_equal(derived_atom(0, "x", d), derived_atom(0, "x", d))
+
+    print("OK: holographic_ai self-test passed (bind/unbind round-trips with a >5x contrast, unitary unbind is "
+          "near-exact at cos>0.99, bundle preserves membership, key->value recall picks the right value with a "
+          ">3x margin, and every vector is deterministic per seed)")
+
+
 if __name__ == "__main__":
-    demo_keyvalue()
-    demo_partitioning()
-    demo_cancellation()
-    demo_learning()
-    demo_reflex()
-    demo_drift()
+    import sys
+    _selftest()                                     # always: the fast contract check (what the CI walker runs)
+    if "--demos" in sys.argv:                        # the readable demos are opt-in -- they print, they don't assert
+        demo_keyvalue()
+        demo_partitioning()
+        demo_cancellation()
+        demo_learning()
+        demo_reflex()
+        demo_drift()

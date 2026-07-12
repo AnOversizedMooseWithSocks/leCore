@@ -511,10 +511,20 @@ def demo_execution():
     print()
 
 
-if __name__ == "__main__":
-    demo_orchestrator()
-    demo_execution()
+def _selftest():
+    """Canonical entry point for the CI walker (T6 backfill): the module's real contract lives in
+    `_optimize_selftest` under a non-standard name, invisible to the coverage census. This runs it; the two
+    demos (which print and assert nothing) are gated behind --demos so `-m` stays a fast contract check."""
     _optimize_selftest()
+    print("holographic_orchestrator optimize selftest passed")
+
+
+if __name__ == "__main__":
+    import sys
+    _selftest()
+    if "--demos" in sys.argv:
+        demo_orchestrator()
+        demo_execution()
 
 
 class Orchestrator:

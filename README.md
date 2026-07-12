@@ -50,7 +50,7 @@ You don't have to use all of it. Each capability works on its own; the point is 
 
 ## How do you use it?
 
-It's a plain Python library. The core needs **only NumPy** — nothing else is ever required. Everything beyond that (the web UI, image I/O, tests and plots, and the `numba`/CuPy/SymPy accelerators) is **opt-in**, and you pull in exactly what you want with pip "extras."
+It's a plain Python library. The core needs **only NumPy** — nothing else is ever required. Everything beyond that (the web UI, image I/O, tests and plots, and the `numba`/CuPy/SymPy/Zig accelerators) is **opt-in**, and you pull in exactly what you want with pip "extras."
 
 **The quick way — install from PyPI.** The package is published as **`leos-core`** (the core of the larger **leOS** project); the import name stays `lecore`:
 
@@ -75,6 +75,9 @@ python app.py                      # then open the browser UI and click "Run ful
 pip install "leos-core[ui]"                 # pip install .[ui]        the browser UI + image I/O   (Flask, Pillow)
 pip install "leos-core[jit]"                # pip install .[jit]       numba-compiled fast paths     (numba)
 pip install "leos-core[symbolic]"           # pip install .[symbolic]  design-time gradients         (SymPy)
+pip install "leos-core[zig]"                # pip install .[zig]       native batch kernels, 2-5x     (ziglang -- whole
+                                            #                          toolchain in one wheel, bit-identical in safe mode)
+pip install "leos-core[images]"             # pip install .[images]    jpg/webp/... image I/O         (Pillow, no Flask)
 pip install "leos-core[dev]"                # pip install .[dev]       run the tests and make plots  (pytest, matplotlib)
 pip install "leos-core[all]"                # pip install .[all]       everything portable, one shot
 pip install "leos-core[ui,jit]"             # pip install .[ui,jit]    ...or combine whichever you want

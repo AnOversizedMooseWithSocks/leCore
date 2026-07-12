@@ -405,24 +405,23 @@ class HolographicNGram:
         switches on NUCLEUS decoding: at each step keep only the smallest set of
         likeliest characters whose probability sums to top_p, and sample within it --
         trimming the unlikely tail that breaks words. top_p=1.0 (the default) is the
-        original plain-temperature behaviour exactly, so existing callers are unchanged."""
+        original plain-temperature behaviour exactly, so existing callers are unchanged.
+
+        DELEGATES the per-step temperature+nucleus draw to holographic_tokensample.
+        sample_from_distribution -- the primitive PROMOTED from this very loop (proven
+        bit-identical across temperature x top_p x distributions before the switch). WHY
+        delegate: keeping a private copy here means the char generator and every other
+        sampler drift apart; one primitive keeps them honest and shares the T->0 argmax
+        guard the inline loop never had."""
+        from holographic.agents_and_reasoning.holographic_tokensample import sample_from_distribution
         rng = rng or np.random.default_rng(0)
         out = seed_text.lower() if self.fold_case else seed_text
         for _ in range(length):
             dist = self._distribution(out[-self.n:])
-            chars = list(dist)
-            weights = np.clip(np.array([dist[c] for c in chars]), 0, None) ** (1.0 / temperature)
-            if weights.sum() <= 0:
+            ch = sample_from_distribution(dist, temperature=temperature, top_p=top_p, rng=rng)
+            if ch is None:                               # no positive mass -- stop, as the inline loop did
                 break
-            p = weights / weights.sum()
-            if top_p < 1.0:                              # nucleus: keep the top-p mass only
-                order = np.argsort(p)[::-1]
-                cum = np.cumsum(p[order])
-                keep = order[:max(1, int(np.searchsorted(cum, top_p)) + 1)]
-                masked = np.zeros_like(p)
-                masked[keep] = p[keep]
-                p = masked / masked.sum()
-            out += chars[int(rng.choice(len(chars), p=p))]
+            out += ch
         return out
 
     def predict_accuracy(self, text):
@@ -859,9 +858,42 @@ def demo_text_multilingual():
     print("  spells and chains words plausibly without knowing what any of them mean.")
 
 
+def _selftest():
+    """Regression trap (T6 backfill; demos only, no assertion). Pins two contracts: a HolographicNGram trained on
+    text PREDICTS that text's next character far better than chance (it has learned the sequence statistics), and
+    learned word vectors place a co-occurring word nearer than an unrelated one. Contrast-based, not absolute."""
+    import numpy as np
+
+    # 1. N-GRAM next-char prediction: trained on a repetitive corpus, accuracy is high; on the 27-symbol space
+    #    chance is ~0.04, so >0.5 is unmistakable learning, not luck. (Measured ~0.98 on this corpus.)
+    ng = HolographicNGram()
+    text = "the quick brown fox jumps over the lazy dog " * 30
+    ng.fit(text)
+    acc = ng.predict_accuracy(text)
+    assert acc > 0.5, "n-gram failed to learn its own training text: acc=%.3f" % acc
+
+    # 2. WORD VECTORS carry co-occurrence: in a corpus where 'cat' always co-occurs with 'sat', cat is nearer to
+    #    sat than to a word from the other sentence. The [BLIND-SPOT] point: assert the RELATION, not a magnitude.
+    enc = learn_word_vectors("the cat sat here the cat sat again the dog ran there the dog ran fast " * 8,
+                             dim=512, window=2, seed=0)
+
+    def _cos(a, b):
+        return float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-9))
+
+    cat, sat, ran = enc.wordvec("cat"), enc.wordvec("sat"), enc.wordvec("ran")
+    if cat is not None and sat is not None and ran is not None:
+        assert _cos(cat, sat) > _cos(cat, ran)                 # cat co-occurs with sat, not ran
+
+    print("OK: holographic_text self-test passed (an n-gram predicts its training text's next char at acc>0.5 vs "
+          "~0.04 chance, and word vectors place a co-occurring word nearer than an unrelated one)")
+
+
 if __name__ == "__main__":
-    demo_text()
-    demo_text_self_organizing()
-    demo_text_scaled()
-    demo_text_hard()
-    demo_text_multilingual()
+    import sys
+    _selftest()
+    if "--demos" in sys.argv:
+        demo_text()
+        demo_text_self_organizing()
+        demo_text_scaled()
+        demo_text_hard()
+        demo_text_multilingual()

@@ -736,6 +736,479 @@ class UnifiedMind:
         from holographic.misc.holographic_bandwidth import spectral_bandwidth
         return spectral_bandwidth(x, energy_fraction=energy_fraction)
 
+    def mutual_information(self, x, y, bins=16):
+        """Mutual information I(X;Y) in BITS between two equal-length signals (discrete or continuous, continuous
+        quantile-binned). Zero iff independent; higher = more shared information. This is the RAW estimate --
+        biased upward by finite samples, so for a significance-aware number use mutual_information_vs_null. See
+        holographic_mutualinfo.mutual_information."""
+        from holographic.sampling_and_signal.holographic_mutualinfo import mutual_information
+        return mutual_information(x, y, bins=bins)
+
+    def mutual_information_vs_null(self, x, y, bins=16, n_shuffle=64, seed=0):
+        """Mutual information ABOVE its SHUFFLE NULL -- the honest dependence measure. Computes raw MI, then a null
+        of MI with `y` shuffled (real dependence destroyed, only finite-sample bias left), and reports the excess
+        as a z-score. A dependence counts as REAL only when z clears a few sigma; raw MI without its null is a
+        Rorschach test. Returns {mi, null_mean, null_std, excess, z}. The gate the pipeline assembler needs. See
+        holographic_mutualinfo.mutual_information_vs_null."""
+        from holographic.sampling_and_signal.holographic_mutualinfo import mutual_information_vs_null
+        return mutual_information_vs_null(x, y, bins=bins, n_shuffle=n_shuffle, seed=seed)
+
+    def measure(self, run_once, seeds=range(0, 10), n_boot=2000, boot_seed=0):
+        """The VARIANCE HARNESS (holographic_measure) -- every headline number gets a mean, a spread, and a
+        confidence interval, not a lucky-seed point estimate. Runs `run_once(seed)` (a callable returning a scalar
+        score) across `seeds` and returns {mean, std, ci (95% bootstrap), n, scores}. The constitution's honest-
+        measurement discipline made invocable: a claim without this is not a result. See holographic_measure.measure."""
+        from holographic.misc.holographic_measure import measure
+        return measure(run_once, seeds=seeds, n_boot=n_boot, boot_seed=boot_seed)
+
+    def measure_report(self, name, stats, floor=None):
+        """Format a stats dict from `measure` as 'name: mean +/- std (95% CI [lo, hi], n)', flagging FRAGILE when
+        the spread is large relative to the margin above `floor`. The honest one-line summary of a measured claim.
+        See holographic_measure.report."""
+        from holographic.misc.holographic_measure import report
+        return report(name, stats, floor=floor)
+
+    def assert_robust(self, stats, floor):
+        """Pass only if the LOWER CI bound of a `measure` result clears `floor` -- not just the mean. This is what
+        stops a lucky-seed point estimate from passing as a real result. Returns None (raises on failure). The
+        no-win-without-a-baseline gate made invocable. See holographic_measure.assert_robust."""
+        from holographic.misc.holographic_measure import assert_robust
+        return assert_robust(stats, floor)
+
+    def is_fragile(self, stats, margin_floor):
+        """Is a measured claim FRAGILE? True if its spread is large relative to how far its mean sits above the
+        floor it must clear (std >= half the margin -- a couple of unlucky seeds could sink it). Flags a result
+        that looks fine on the mean but rests on luck. See holographic_measure.is_fragile."""
+        from holographic.misc.holographic_measure import is_fragile
+        return is_fragile(stats, margin_floor)
+
+    def regime_gate(self, name, detect, threshold, superior, fallback, above=True):
+        """Build a REGIME GATE (holographic_regimegate) -- route to a superior-but-NICHE method only when a cheap
+        detector says you are in its regime, and to a safe fallback everywhere else. Returns a RegimeGate; call
+        `.apply(x, *a, **k)` to get (result, info) where info records the score, threshold, and which path ran.
+        `detect(x)->score`, `above=True` uses `superior` when score>=threshold. The honest way to re-enable a
+        shelved 'only good in a niche' method: the fallback stays the safe default, so a misfire costs at most the
+        default. The adaptive-dispatch pattern as a reusable object. See holographic_regimegate.RegimeGate."""
+        from holographic.misc.holographic_regimegate import RegimeGate
+        return RegimeGate(name, detect, threshold, superior, fallback, above=above)
+
+    def phase_randomize(self, x, seed=0):
+        """A PHASE-RANDOMIZED surrogate of a 1-D signal: same power spectrum (same autocorrelation) as `x` but
+        random phases, so deterministic/nonlinear structure is destroyed while the linear second-order statistics
+        are preserved EXACTLY (Theiler et al. 1992). The honest null for a CONTINUOUS, autocorrelated signal --
+        unlike a permutation, it does not destroy the autocorrelation a trivial forecaster exploits. See
+        holographic_surrogate.phase_randomize."""
+        from holographic.sampling_and_signal.holographic_surrogate import phase_randomize
+        return phase_randomize(x, seed=seed)
+
+    def surrogate_zscore(self, x, statistic, n_surrogates=64, seed=0):
+        """Measure a structure `statistic(x)` against an ensemble of PHASE-RANDOMIZED surrogates and report how
+        far the real value exceeds the null, in null std devs (a z-score). Because the surrogates share the real
+        signal's autocorrelation, a high z means structure BEYOND linear autocorrelation -- the honest continuous
+        analogue of the discrete shuffle-null. The gate for a continuous forecast/structure test. See
+        holographic_surrogate.surrogate_zscore."""
+        from holographic.sampling_and_signal.holographic_surrogate import surrogate_zscore
+        return surrogate_zscore(x, statistic, n_surrogates=n_surrogates, seed=seed)
+
+    def amplitude_adjusted_surrogate(self, x, seed=0):
+        """AAFT surrogate -- the STRICTER null for NON-GAUSSIAN signals (holographic_surrogate). Basic
+        phase_randomize preserves the spectrum but GAUSSIANIZES the marginal (destroying fat tails, e.g. of price
+        returns); AAFT preserves BOTH the exact amplitude DISTRIBUTION and (approximately) the power spectrum, by
+        phase-randomizing a Gaussian-ranked copy and mapping the original's sorted amplitudes back on. Use this
+        when the amplitude distribution matters (fat tails); use phase_randomize when the signal is ~Gaussian and
+        the spectrum must match exactly. See holographic_surrogate.amplitude_adjusted_surrogate."""
+        from holographic.sampling_and_signal.holographic_surrogate import amplitude_adjusted_surrogate
+        return amplitude_adjusted_surrogate(x, seed=seed)
+
+    def iaaft_surrogate(self, x, n_iter=100, tol=1e-8, seed=0):
+        """IAAFT surrogate -- the gold-standard null matching BOTH the exact amplitude distribution AND (to
+        convergence) the exact power spectrum (Schreiber & Schmitz 1996). AAFT only approximates the spectrum;
+        IAAFT ITERATES two projections (impose target magnitudes / impose the amplitude distribution) until they
+        agree -- the same iterate-a-projection move as IK/PBD/the resonator. Prefer over AAFT for strongly-coloured
+        non-Gaussian signals (e.g. fat-tailed price returns with real autocorrelation), at the cost of iterations.
+        See holographic_surrogate.iaaft_surrogate."""
+        from holographic.sampling_and_signal.holographic_surrogate import iaaft_surrogate
+        return iaaft_surrogate(x, n_iter=n_iter, tol=tol, seed=seed)
+
+    def candle_carrier(self, candles, kind="typical"):
+        """Turn OHLC candles into the one-value-per-bar WAVE they sample (holographic_candles): a price candle is a
+        SAMPLE of a continuous wave, and this returns the carrier signal -- 'typical' price (H+L+C)/3, 'close',
+        'median' (H+L)/2, or 'ohlc4'. Feed the result to any signal op (spectrum, band-limit, phase_randomize,
+        fit_deterministic, ladder_predict). Accepts (N,4) OHLC, (N,5/6) [ts,OHLC(V)], or dicts. See
+        holographic_candles.carrier."""
+        from holographic.misc.holographic_candles import carrier
+        return carrier(candles, kind=kind)
+
+    def candle_envelope(self, candles):
+        """The high/low BAND around a candle series' carrier (holographic_candles) -- how far the price wave swung
+        INTRA-bar, which a close-only line throws away. Returns (upper, lower) = (highs, lows). The band width is
+        the per-bar range, the amplitude of the wave's within-sample excursion. See holographic_candles.envelope."""
+        from holographic.misc.holographic_candles import envelope
+        return envelope(candles)
+
+    def candle_intrabar_path(self, candles, steps_per_bar=4):
+        """Reconstruct a HIGHER-RESOLUTION wave from OHLC candles (holographic_candles): each bar becomes O ->
+        {High,Low in the inferred order} -> C, so within-bar excursions enter the signal. The H/L order is inferred
+        from bar direction (up bar dips to the low then runs to the high; down bar the reverse). Honest about being
+        a PLAUSIBLE path -- OHLC doesn't record the true order. Hits every open/close exactly. See
+        holographic_candles.intrabar_path."""
+        from holographic.misc.holographic_candles import intrabar_path
+        return intrabar_path(candles, steps_per_bar=steps_per_bar)
+
+    def candle_range(self, candles):
+        """Per-bar RANGE (High-Low, the within-bar swing amplitude) and BODY (|Close-Open|) of a candle series
+        (holographic_candles). A small body inside a big range is a bar that went nowhere despite swinging --
+        the range/body ratio is a classic noise-vs-trend measure. Returns (ranges, bodies). See
+        holographic_candles.candle_range."""
+        from holographic.misc.holographic_candles import candle_range
+        return candle_range(candles)
+
+    def guide_structure(self, state, constraints, iters=50, tol=1e-6, omega=1.0):
+        """Guide a `state` toward a goal by ITERATING A PROJECTION -- the level-generic form of IK / PBD / denoise
+        / resonator (all 'iterate a projection', Macklin). `constraints` is a list of projection callables (pin a
+        root to a target, clamp a link length, snap to a codebook, ...) applied in turn until the state settles.
+        Returns {state, iters_used, converged, residual}. The constraints ARE the structure of the space;
+        iterating them is legal movement through it. Builders: guide_pin / guide_clamp_link / guide_snap. See
+        holographic_guide.guide_structure."""
+        from holographic.misc.holographic_guide import guide_structure
+        return guide_structure(state, constraints, iters=iters, tol=tol, omega=omega)
+
+    def guide_pin(self, index, value):
+        """Constraint builder for guide_structure: pin state[index] to `value` (an IK end-effector target / a
+        boundary condition). See holographic_guide.pin."""
+        from holographic.misc.holographic_guide import pin
+        return pin(index, value)
+
+    def guide_clamp_link(self, i, j, length):
+        """Constraint builder for guide_structure: clamp the distance between state[i] and state[j] to at most
+        `length` (a bone/edge length limit -- the PBD distance constraint). See holographic_guide.clamp_link."""
+        from holographic.misc.holographic_guide import clamp_link
+        return clamp_link(i, j, length)
+
+    def guide_snap(self, book):
+        """Constraint builder for guide_structure: snap every state entry to its nearest value in `book` (the
+        resonator's codebook cleanup as a projection). See holographic_guide.snap_to_codebook."""
+        from holographic.misc.holographic_guide import snap_to_codebook
+        return snap_to_codebook(book)
+
+    def assemble_pipeline(self, x, y, candidates, min_z=3.0, holdout=0.3, bins=16, n_shuffle=48, seed=0):
+        """Find which candidate transform(s) connect input `x` to output `y`, VALIDATED against a shuffle null
+        (the honest pipeline assembler). `candidates` is a dict name -> callable (x -> y_hat). Each is scored on a
+        HELD-OUT segment (search overfits its own tests) AND gated by MI-over-shuffle-null (does the REAL input
+        drive the output more than a shuffled one?). Returns survivors sorted by z; a candidate passes only if
+        z >= min_z, else it is chance alignment, not a discovery. An empty list is an honest 'nothing connects
+        these'. The gate that stops 'any random projection works'. See holographic_assemble.assemble_pipeline."""
+        from holographic.agents_and_reasoning.holographic_assemble import assemble_pipeline
+        return assemble_pipeline(x, y, candidates, min_z=min_z, holdout=holdout, bins=bins,
+                                 n_shuffle=n_shuffle, seed=seed)
+
+    def fit_deterministic(self, data, coarse=64, keep_frac=0.25, refine_steps=12, tie_tol=0.02, seed=0):
+        """Recover the deterministic GENERATOR that best explains a 1-D `data` signal (the inverse of the ladder):
+        SNAP the data against a baked generator bank (sine/chirp/gauss/sawtooth), then REFINE the winning family's
+        params. Returns {family, params, correlation, residual_frac, ties, verdict}. Q8: the snap compares
+        BAND-LIMITED signatures, so families differing only above the coarse rate TIE honestly rather than one
+        winning on aliased detail. REFUSES (family=None) when no generator beats the noise -- 'no deterministic
+        structure' is a result. If it fits, store (family, params) -- bytes, not samples. See
+        holographic_fitgen.fit_deterministic."""
+        from holographic.agents_and_reasoning.holographic_fitgen import fit_deterministic
+        return fit_deterministic(data, coarse=coarse, keep_frac=keep_frac, refine_steps=refine_steps,
+                                 tie_tol=tie_tol, seed=seed)
+
+    def analyze_axes(self, data, coords=None, categorical=None):
+        """Which axis of a tensor is the INDEX (carrier) vs the PAYLOAD (content)?
+        (holographic_axisrole). Measures, per axis, its marginal information (how
+        boring/regular it is) and its content coupling (how much the content varies
+        along it), then recommends INDEX (keep it as an enumeration/carrier -- the
+        cheap, comparability-preserving default) or BIND (fold its value into the
+        content vector -- only when the axis is informative AND its conjunction with
+        content is the meaningful unit). This is the auto-schema / auto-decomposition
+        entry point: hand it a cube, get back which axes are boring scaffolding and
+        which carry the payload. `coords={axis: values}` supplies real coordinates
+        (e.g. timestamps) so irregular sampling can raise an axis's information;
+        `categorical=[axes]` marks unordered-label axes. Kept negative: a HEURISTIC
+        recommender with a conservative threshold (prefers INDEX) -- override BIND in
+        the conjunctive-coding case, which it flags via the coupling number."""
+        from holographic.sampling_and_signal.holographic_axisrole import analyze_axes
+        return analyze_axes(data, coords=coords, categorical=categorical)
+
+    def comparability_cost(self, data, axis, dim=256, seed=0):
+        """MEASURE the price of binding a boring axis into content (holographic_axisrole):
+        compares adjacent-slice similarity when the axis is INDEXED (raw slices) vs
+        BOUND (each slice rotated by a distinct per-slice key, as folding the axis in
+        would do). Returns {indexed_sim, bound_sim, collapse}: on a boring carrier
+        the indexed similarity is high and the bound similarity collapses toward 0
+        (private-subspace rotation), so `collapse` is the concrete similarity
+        destroyed by the wrong role choice -- the thesis in one number, on your own
+        data, against the strongest honest baseline (raw indexed similarity)."""
+        from holographic.sampling_and_signal.holographic_axisrole import comparability_cost
+        return comparability_cost(data, axis, dim=dim, seed=seed)
+
+    def rectify_carrier(self, coords, content, n_out=None):
+        """REPAIR a nearly-boring carrier axis into a clean uniform index
+        (holographic_axisrole): a non-monotone axis (delta occasionally negative)
+        is lifted by CUMULATIVE ARC LENGTH -- the monotone/covering-lift move from
+        the sign-as-rotation work, absorbing small reversals into one-way progress;
+        an irregular axis is then RESAMPLED onto a uniform grid by interpolation.
+        Returns the uniform coords, resampled content, and the measured
+        marginal-info before/after (after is 0.0 -- ideal carrier -- by
+        construction, and returning both makes the repair auditable). Kept
+        negatives: interpolation invents between samples (index repair, not
+        payload information); a LARGELY reversing axis makes content a path, not
+        a function of the axis -- monotone_fraction is returned so that regime is
+        visible (below ~0.9: inspect by hand)."""
+        from holographic.sampling_and_signal.holographic_axisrole import rectify_carrier
+        return rectify_carrier(coords, content, n_out=n_out)
+
+    def winding_map(self, coords, content, grid_size=100, agree_tol=0.15):
+        """When a carrier LARGELY reverses (rectify_carrier's monotone_fraction well
+        below ~0.9), is content a FUNCTION of the axis or a PATH over it?
+        (holographic_winding). Splits the trajectory into monotone LAPS at
+        reversals, interpolates each onto a shared grid over the revisited range,
+        and measures lap agreement. Verdicts: 'function' (all laps agree -> merged,
+        noise-averaged profile: multi-pass scanning is free denoise, ~sqrt(#laps));
+        'hysteresis' (laps agree within a direction, differ across -> per-direction
+        branches, the covering lift x -> (x, direction); merging REFUSED because
+        the average is a curve no pass traced); 'path' (laps differ even within a
+        direction: drift/aging -> per-lap curves, no merge). The disagreement
+        numbers travel with every verdict. Completes the axis-role arc's declared
+        boundary: the honest structure for a genuinely revisiting carrier."""
+        from holographic.sampling_and_signal.holographic_winding import winding_map
+        return winding_map(coords, content, grid_size=grid_size, agree_tol=agree_tol)
+
+    def explore_series(self, data, coords=None, max_terms=6, auto_demux=False, cross_channel=False, handle_reversals=False):
+        """AUTO-EXPLORE an unlabeled multi-axis series (holographic_scaffold): try
+        every axis as the candidate scaffold (boring AND organising: score =
+        continuity * (1 - marginal_info), full table returned); rectify the
+        winner's coordinates when they wobble (rectify_carrier); decompose each
+        payload channel along the carrier into its generating law
+        (decompose_signal, MDL-gated); recompose and account variance -- each
+        channel returns its explained fraction AND its residual, the honest
+        hand-off to the next level of analysis. Verdict 'structured' / 'weakly
+        structured' / 'no structure found' decided by measured explained
+        fractions; noise is never dressed as law. Two default-off stages (old
+        calls byte-identical): auto_demux=True runs demux_series first on a raw
+        1-D stream (find the interleave stride, split, group into objects,
+        explore each independently -- the Contact protocol with zero hints);
+        cross_channel=True runs cross_channel_links on the RESIDUALS (delayed-
+        copy structure per-channel decomposition cannot see; found links upgrade
+        a bare 'no structure found' to 'weakly structured'); handle_reversals=
+        True routes a largely-reversing carrier through winding_map (measured:
+        multi-pass merge cuts profile RMS 2.4x; hysteresis/path verdicts are
+        reported, never merged). Pure orchestration
+        of shipped faculties -- hand the engine a raw stream, get back the
+        sources, the schema, the laws, and the leftovers."""
+        from holographic.sampling_and_signal.holographic_scaffold import explore_series
+        return explore_series(data, coords=coords, mind=self, max_terms=max_terms,
+                              auto_demux=auto_demux, cross_channel=cross_channel,
+                              handle_reversals=handle_reversals)
+
+    def decompose_piecewise(self, y, min_seg=16, penalty=3.0, max_terms=6):
+        """Decompose a PIECEWISE signal (holographic_scaffold): segment at the
+        statistics shifts first (segment_stream, the packet_demux instrument),
+        then fit a law PER SEGMENT with decompose_signal. A regime-built signal
+        fits a global formula badly (no 'switch at t' atom in the dictionary);
+        per-regime fitting puts each law in its own house. MEASURED vs the
+        global-fit baseline on a 3-regime signal: residual RMS 0.5001 -> 0.0013,
+        MDL bits 2723 -> 588 (4.6x better compression). The result CARRIES its
+        baseline (global residual + bits), so a signal where segmentation does
+        not pay is visible as such. Kept scope: regime changes need a statistics
+        shift; repeated regimes are paid for twice (no cross-segment parameter
+        sharing); hard cuts at boundaries."""
+        from holographic.sampling_and_signal.holographic_scaffold import decompose_piecewise
+        return decompose_piecewise(y, mind=self, min_seg=min_seg, penalty=penalty,
+                                   max_terms=max_terms)
+
+    def packet_demux(self, x, min_seg=16, penalty=3.0, noise_k=3.0, continuation=False):
+        """Demultiplex a PACKETIZED stream (holographic_demux): variable-length
+        bursts from different sources -- the case the cyclic interleave scan
+        (demux_series) declares out of scope. Stage 1: change-point segmentation
+        by binary segmentation with a BIC-style penalty on a PIECEWISE-LINEAR
+        cost (a homogeneous stream honestly returns no boundaries; drifting
+        ramps do not shatter). Stage 2: NOISE-CALIBRATED assignment -- split-half
+        signatures estimate each pair's own noise, features weighted by 1/noise
+        with a shrinkage floor, segments merge within noise_k (3) times the
+        pair's own self-distance: no magic threshold. Optional Stage 3
+        (continuation=True, default OFF, old results byte-identical): reunite
+        sources that DRIFT ACROSS bursts -- extrapolate each source's linear
+        tail across the gap and merge when the later burst resumes at the
+        predicted level AND slope AND with matching residual dynamics; every
+        merge carries {predicted, observed, tolerance}. Returns boundaries,
+        assignment, per-source REASSEMBLED streams ready for explore_series.
+        Kept scope: a boundary needs a statistics shift; oscillating sources
+        over-segment (model boundary); assignment is conservative (under-merging
+        fabricates nothing); an impostor starting exactly on another source's
+        extrapolation at its slope is indistinguishable by construction. The
+        continuous costume of holographic_segment's discrete branching-entropy
+        move."""
+        from holographic.sampling_and_signal.holographic_demux import packet_demux
+        return packet_demux(x, min_seg=min_seg, penalty=penalty, noise_k=noise_k,
+                            continuation=continuation)
+
+    def detect_regimes(self, x, min_seg=16, penalty=3.0):
+        """WHERE does a recorded series change behaviour? Located change-point detection over a whole batch
+        (holographic_demux.segment_stream): binary segmentation with a BIC-style penalty returns the exact
+        boundary indices where the statistics shift, plus each segment's (start, stop, mean, std, length). A
+        homogeneous stream honestly returns NO boundaries; a drifting ramp does not shatter.
+
+        Complements regime_detector, it does NOT duplicate it: regime_detector is a CAUSAL ONLINE detector (sees
+        one sample at a time, commits to a new layer when a fast/slow divergence persists -- for a live stream);
+        detect_regimes is the OFFLINE batch twin (given the whole recording, locate every boundary at once). Use
+        this to find where a query stream's statistics shifted so a cache margin can be re-fit per regime, to
+        split a forecast at its regime boundaries instead of fitting one global model, or to segment any recorded
+        engine signal (a trajectory, an error curve, an access trace) into homogeneous spans.
+
+        Returns {boundaries: [int], n_segments: int, segments: [{start, stop, mean, std, length}]}. See
+        holographic_demux.segment_stream."""
+        import numpy as np
+        from holographic.sampling_and_signal.holographic_demux import segment_stream
+        x = np.asarray(x, float).ravel()
+        seg = segment_stream(x, min_seg=min_seg, penalty=penalty)
+        # enrich the raw (start, stop) spans with per-segment statistics -- the WHAT-changed alongside the WHERE,
+        # so a caller (re-fit this cache regime, split this forecast) has the numbers without a second pass.
+        segments = [{"start": int(a), "stop": int(b), "length": int(b - a),
+                     "mean": float(x[a:b].mean()) if b > a else 0.0,
+                     "std": float(x[a:b].std()) if b > a else 0.0}
+                    for (a, b) in seg["segments"]]
+        return {"boundaries": [int(bd) for bd in seg["boundaries"]],
+                "n_segments": int(seg["n_segments"]), "segments": segments}
+
+    def cross_channel_links(self, series, max_lag=None, threshold=0.6):
+        """Find DELAYED-COPY / shared-component links between channels
+        (holographic_demux): for every ordered pair, scan lags of the normalized
+        cross-correlation; a strong peak at lag L with gain g means channel j ~
+        g * channel i delayed by L -- structure invisible to per-channel
+        decomposition (a delayed copy of noise decomposes to nothing on both
+        channels, yet the pair is lawful together). The residual pass
+        explore_series's leftovers were returned for. Direction falls out of
+        which ordering carries the peak. Kept negatives: linear, pairwise,
+        single-lag (time-varying delays, nonlinear couplings, three-way sources
+        out of scope); a lag statement, not a mechanism claim."""
+        from holographic.sampling_and_signal.holographic_demux import cross_channel_links
+        return cross_channel_links(series, max_lag=max_lag, threshold=threshold)
+
+    def demux_series(self, x, max_k=12, group_threshold=0.6):
+        """ONE stream, MANY sources (holographic_demux): separate the channels,
+        group the objects. A 1-D stream is tested for round-robin INTERLEAVING
+        (the Contact move: sample i belongs to channel i mod K) -- the stride K is
+        FOUND by delta-continuity (at the true K every strided sub-stream is a
+        smooth single source; deinterleaving is a permutation, so recovery is
+        bit-exact), with the smallest-K Occam rule over the m*K harmonic ladder
+        and an honest K=1 when nothing separates. The channels (or an already
+        multi-channel series) are then GROUPED into objects by |correlation| of
+        their trajectories (absolute: a mirrored axis of one rigid motion still
+        belongs to its mesh) -- a multi-object animated-mesh delta stream resolves
+        into its meshes. Each returned object is ready for explore_series: decode
+        each channel separately. Score table and correlation matrix travel as
+        evidence. Kept scope: cyclic interleaving only (packetized muxing won't
+        score a clean K); linear |corr| grouping (a time-varying axis mix can
+        split an object -- the matrix is returned so it's visible)."""
+        from holographic.sampling_and_signal.holographic_demux import demux_series
+        return demux_series(x, max_k=max_k, group_threshold=group_threshold)
+
+    def analytic_signal(self, x):
+        """Decompose a signed series into its ROTATION (holographic_analytic): the
+        analytic signal z = x + i*Hilbert(x), returned as amplitude (the instantaneous
+        envelope / circle radius), unwrapped phase (how far it has rotated), and
+        instantaneous frequency (how fast the sign turns over). A*cos(phase)
+        reconstructs x exactly -- a lossless re-coordinatisation, not a model. NumPy-
+        only Hilbert transform (no scipy). Use to get sign-aware, comparable
+        coordinates for a signed signal, or to feed a phasor memory. Kept negative:
+        edge effects near the ends (global FFT); meaningful mainly for narrowband /
+        monocomponent signals."""
+        from holographic.sampling_and_signal.holographic_analytic import analytic_signal
+        return analytic_signal(x)
+
+    def monotone_cost(self, x, direction=1):
+        """MEASURE the price of clockwise-only (one-way) rotation on a REAL signed
+        series (holographic_analytic). Reconstructs the signal with the full
+        (reversible) phase vs a phase clamped to advance one way, and reports the
+        excess error, the reversal fraction, and where the error concentrates. Kept
+        finding (sharp): a real scalar signal is ALREADY a one-way rotation (its
+        spectrum is symmetric, so instantaneous frequency is non-negative), so this
+        honestly reads ~0 reversal fraction and small excess -- a single real channel
+        cannot even carry a reversal. The real group-vs-monoid price lives on the
+        complex/I-Q path: see phasor_monotone_cost."""
+        from holographic.sampling_and_signal.holographic_analytic import monotone_cost
+        return monotone_cost(x, direction=direction)
+
+    def phasor_monotone_cost(self, z, direction=1):
+        """MEASURE the group-vs-monoid price where it actually lives: a TRUE complex
+        rotation (holographic_analytic). A complex/I-Q series carries a genuine
+        rotation DIRECTION in its two channels and can truly reverse; clamping it
+        clockwise-only then loses the reversal, at a large well-defined cost. This is
+        the quadrature encoder with both channels present -- drop to one direction and
+        you pay. Returns reversal_fraction, monotone_rmse, excess, max_local_error.
+        The complement to monotone_cost (which reads ~0 on real signals, by the
+        symmetric-spectrum theorem)."""
+        from holographic.sampling_and_signal.holographic_analytic import phasor_monotone_cost
+        return phasor_monotone_cost(z, direction=direction)
+
+    def identify_dynamics(self, x=None, dt=None, force=None, positions=None, G=None, interaction=None):
+        """Identify MASS / MOMENTUM / dynamics from measurements (holographic_sysid),
+        via whichever honest door the supplied channels open: a FORCE channel (fit
+        m*a + c*v + k*x = F -> mass, damping, stiffness, momentum, in the force's
+        units); an INTERACTION (momentum conservation -> the mass RATIO, Mach's
+        operational definition); or a KNOWN FORCE LAW with its constant (positions of
+        a bound orbit + G -> the central mass by Kepler's third law -- how astronomy
+        weighs stars with no force sensor). A trajectory ALONE raises GaugeError with
+        the theorem: scaling mass and force together leaves the path bit-identical
+        (F=ma exposes only F/m), so mass is unidentifiable -- kinematics (velocity,
+        acceleration) is offered instead. Refuse-rather-than-guess, applied to
+        physics. General across fields: lab carts (force), collider events
+        (interaction), orbits (force law)."""
+        from holographic.sampling_and_signal.holographic_sysid import identify
+        return identify(x=x, dt=dt, force=force, positions=positions, G=G, interaction=interaction)
+
+    def central_mass_from_orbit(self, positions, dt, G=6.674e-11):
+        """Weigh a central body from a bound orbit (holographic_sysid): Kepler's
+        third law M = 4*pi^2*a^3/(G*T^2), with the semi-major axis from the radius
+        extremes and the period from the unwrapped bearing (the monotone-rotation /
+        winding picture on a genuine 2-channel signal). Works for 2-D or inclined
+        3-D orbits (best-fit plane by SVD). Refuses (GaugeError) on less than one
+        full observed orbit rather than extrapolating a period. Kept scope: central
+        body dominant (test mass), single body, Keplerian."""
+        from holographic.sampling_and_signal.holographic_sysid import central_mass_from_orbit
+        return central_mass_from_orbit(positions, dt, G=G)
+
+    def diagnose_scaling(self, eval_fn, knobs, factor=2.0):
+        """Detect WHICH limit a workload is hitting (holographic_scalinglaw): scale
+        each declared knob (dim, tiles, bits, resolution, samples -- anything) by
+        `factor` in isolation, measure the error response, and rank the levers. The
+        house dim-doubling rule generalised to every resource and made executable:
+        a limit is diagnosed by which knob's doubling reduces the error; a WALL is
+        when no knob does (verdict 'wall' -- scaling is the wrong tool here, walk
+        the five levers for a different approach instead). eval_fn(**knobs) must be
+        deterministic and return error (float) or {'error','cost'}. Returns the
+        probe table (the evidence), ranked knobs, and the verdict. Kept negative:
+        first-order and local -- a knob that only pays at 4x or only jointly with
+        another reads unresponsive here (auto_scale's re-probing recovers the
+        first case)."""
+        from holographic.misc.holographic_scalinglaw import diagnose_scaling
+        return diagnose_scaling(eval_fn, knobs, factor=factor)
+
+    def auto_scale(self, eval_fn, knobs, target_error, max_rounds=8, factor=2.0):
+        """Automatic scaling (holographic_scalinglaw): repeatedly diagnose from the
+        CURRENT operating point and double the most responsive knob, until the
+        target error is met, a WALL is diagnosed (no knob helps -- stop and say so
+        rather than burn the budget), or max_rounds is spent. Every step in the
+        returned trajectory carries the probe that justified it -- no scaling
+        decision without its baseline. The capacity-adaptive pattern (octree /
+        load-gated record) generalised to any workload with declared knobs."""
+        from holographic.misc.holographic_scalinglaw import auto_scale
+        return auto_scale(eval_fn, knobs, target_error, max_rounds=max_rounds, factor=factor)
+
+    def diagnose_bake(self, grids, values, queries=None, dim=4096, margin=1.5, seed=0):
+        """For an n-D texture bake of THIS field, should you raise the DIMENSION or the BANDWIDTH (margin)? --
+        measured, not guessed (holographic_scalinglaw). Wires diagnose_scaling to bake_nd on a held-out query set,
+        so the engine's most-repeated tuning rule ('double D: if error drops you are variance-limited, else raise
+        the bandwidth') becomes one call. Returns diagnose_scaling's dict, whose `verdict` is 'scale:dim' (more
+        dimension pays) or 'scale:margin' (widen/narrow the kernel; more dimension is wasted), each carrying the
+        measured per-knob error drop as its own evidence. Use before committing to an expensive high-dim bake.
+        See holographic_scalinglaw.diagnose_bake."""
+        from holographic.misc.holographic_scalinglaw import diagnose_bake
+        return diagnose_bake(grids, values, queries=queries, dim=dim, margin=margin, seed=seed)
+
+
     def fractal_confidence(self, x, tol=0.15):
         """A singularity CROSS-CHECK for a 1-D signal's fractal dimension (holographic_bandwidth): two independent
         slope estimators -- the power-spectrum slope D=(5-gamma)/2 and an increment-variance estimator -- and
@@ -2506,8 +2979,10 @@ class UnifiedMind:
     def validate_recipe(self, recipe):
         """Check a StructureRecipe is WELL-FORMED (holographic_recipeops, ARCH-1) -- the recipe's is_manifold():
         every op references only EARLIER existing results (a DAG, no forward/dangling/out-of-range refs), raw
-        indices and repeat templates in range. Returns (ok, problems). Pairs with the recipe EDIT operators below
-        -- the recipe equivalent of the mesh Euler operators (validate + local invariant-preserving edits)."""
+        indices and repeat templates in range, every DECLARED OUTPUT points to a produced result, and set-ops
+        (bundle/superpose) have a non-empty member list. Returns (ok, problems). Catches recipes that pass the DAG
+        check but crash at build (a dangling output -> IndexError; an empty bundle -> a degenerate zero vector).
+        Pairs with the recipe EDIT operators below -- the recipe equivalent of the mesh Euler operators."""
         from holographic.misc.holographic_recipeops import validate
         return validate(recipe)
 
@@ -3177,18 +3652,1938 @@ class UnifiedMind:
 
         raise ValueError(f"unknown denoise method: {method!r}")
 
-    def project_onto_constraints(self, x, projections, iters=30, tol=None, omega=1.0):
+    # -- CCD: speculative margins + conservative advancement, both free from the SDF (Box3D B4 / backlog X4) --
+    def sdf_offset(self, sdf_eval, margin):
+        """The SPECULATIVE CONTACT MARGIN, and it costs one subtraction: enlarging a collider by `margin` is just
+        `sdf(P) - margin`. Returns the offset callable. Kept negative: a margin DETECTS proximity, it does not
+        PREVENT tunnelling -- a body that crossed a thin wall in one step is resolved out the WRONG side, because a
+        point sample has no memory of the swept path. Use time_of_impact for that. See holographic_collide.sdf_offset."""
+        from holographic.simulation_and_physics.holographic_collide import sdf_offset as _so
+        return _so(sdf_eval, margin)
+
+    def time_of_impact(self, X, V, dt, sdf_eval, radius=0.0):
+        """CONTINUOUS COLLISION DETECTION by conservative advancement: (hit, toi, contact) for points X moving at V
+        over dt against `sdf_eval` offset by `radius`. The core query -- 'how far can I move without hitting
+        anything?' -- IS the SDF value, so this is sphere tracing, and it DELEGATES to the renderer's
+        raymarch.sphere_trace. Same march that renders a pixel; same distance query Walk-on-Spheres steps by. There
+        is no dedicated CCD pass. See holographic_collide.time_of_impact."""
+        from holographic.simulation_and_physics.holographic_collide import time_of_impact as _toi
+        return _toi(X, V, dt, sdf_eval, radius=radius)
+
+    def advance_ccd(self, X, V, dt, sdf_eval, radius=0.0, restitution=0.0):
+        """Advance points one step WITHOUT tunnelling: sweep to first contact, stop there, cancel the into-surface
+        velocity (`restitution` bounces). Measured: a 30 m/s body stepping 0.5 m per frame passes clean through a
+        0.1 m wall under discrete resolution and is stopped exactly on it here. See holographic_collide.advance_ccd."""
+        from holographic.simulation_and_physics.holographic_collide import advance_ccd as _acc
+        return _acc(X, V, dt, sdf_eval, radius=radius, restitution=restitution)
+
+    # -- PURITY & EFFECT ANALYSIS from the stdlib (backlog K6): the gate a shape-keyed cache needs -----------
+    def function_purity(self, source, name):
+        """Is the module-level function `name` in `source` provably PURE? CONSERVATIVE: unknown means False. A
+        wrong 'impure' costs a cache miss; a wrong 'pure' silently corrupts a cache and everything downstream, so
+        an unresolved callee, an unrecognised method and an attribute write are all impure.
+        See holographic_pycontext.is_pure."""
+        from holographic.io_and_interop.holographic_pycontext import is_pure
+        return bool(is_pure(str(source), str(name)))
+
+    def purity_report(self, source):
+        """Purity verdicts for every module-level function in `source`, closed over the CALL GRAPH: a function that
+        calls an impure function is impure, however clean its own body. Returns {pure, impure, total, fraction,
+        local_only_fraction, verdicts, reasons}.
+
+        `local_only_fraction` is what a rule that IGNORES calls would have reported -- carried beside the sound
+        number so the flattering half cannot be quoted alone. Measured on this tree: local 54.3%, sound 32.1% (the
+        backlog's 76% is a local-rule figure, and a local purity rule is unsound for a cache).
+        See holographic_pycontext.purity_report."""
+        from holographic.io_and_interop.holographic_pycontext import purity_report as _pr
+        return _pr(str(source))
+
+    def purity_scan(self, root="holographic"):
+        """Run the purity analysis over a whole tree, merging every module's functions into ONE call graph so a
+        call to another module's pure helper resolves. Same shape as purity_report.
+        See holographic_pycontext.scan_tree."""
+        from holographic.io_and_interop.holographic_pycontext import scan_tree
+        return scan_tree(str(root))
+
+    # -- RECURSIVE FACTORING over learned chunk levels (backlog R2; R3's second consumer of the codebook) -----
+    def map_codebook(self, n_codes, dim, seed=0):
+        """A deterministic codebook of `n_codes` random bipolar (+/-1) vectors of length `dim`. Regenerated from
+        the seed, so an agent ships a SEED rather than a megabyte of vectors -- determinism instead of storage.
+        See holographic_resonator.map_codebook."""
+        from holographic.misc.holographic_resonator import map_codebook as _mc
+        return _mc(int(n_codes), int(dim), int(seed))
+
+    def map_bind(self, *vectors):
+        """MAP binding: elementwise product. Commutative AND self-inverse (bind(x, x) is the all-ones vector),
+        which is what makes stable factorization possible -- and what makes the recoverable object a multiset
+        modulo cancelling pairs. See holographic_resonator.map_bind."""
+        from holographic.misc.holographic_resonator import map_bind as _mb
+        return _mb(*[np.asarray(v, float) for v in vectors])
+
+    def climb_ladder(self, corpus, lens="sequence", max_depth=8, min_gain=0.02):
+        """Climb a CORPUS into a TOWER of abstraction levels (the abstraction ladder): consolidate -> find
+        patterns -> promote to a new alphabet -> repeat, STOPPING when the MDL gain drops below `min_gain` (a
+        fraction of current bits). Returns the tower (level dicts with depth, alphabet size, bits, gain, stable
+        hashlib atom ids, and the terminal refusal reason). The generic form of the seven-step loop run by hand
+        (letters->words, verts->parts->scene, transforms->grammar). `lens` picks adjacency: 'sequence' = position
+        (ordered streams), 'structure' = shared group (order-INDEPENDENT set promotion -- recurring
+        sub-assemblies in any order, the instanced-scene case). The lens is the choice of what counts as adjacent,
+        never guessed: shuffled parts are structureless to 'sequence' but highly compressible to 'structure'. A
+        ladder that tops out shallow is a RESULT (most data does), logged loudly. See holographic_ladder.climb."""
+        from holographic.agents_and_reasoning.holographic_ladder import climb
+        return climb(corpus, lens=lens, max_depth=max_depth, min_gain=min_gain)
+
+    def ladder_summary(self, tower):
+        """A compact human-readable summary of a climbed tower (from climb_ladder): per level its depth, alphabet
+        size, bits, and gain over the previous level, plus the terminal refusal reason. For logging a climb result
+        honestly. See holographic_ladder.tower_summary."""
+        from holographic.agents_and_reasoning.holographic_ladder import tower_summary
+        return tower_summary(tower)
+
+    def identify_level(self, corpus, max_merges=100, min_count=2):
+        """'What am I looking at?' -- classify a CORPUS by which ladder operations pay on it, returning a
+        signature of MEASUREMENTS (not a label): `compressible` (is there a level above?), `gain_over_null`
+        (compression that survives a shuffle -- high-D noise has basins too, so only this counts), `lens`
+        (sequence vs structure, PICKED not guessed by which adjacency compresses more), `regime`
+        (repetitive / nested-structured / irreducible -- Wolfram's taxonomy as a measurement), and
+        `compress_sensitivity` (Quilez Q6: how hard the structure resists, free from two passes). The step-0
+        question of a climb, and a faculty of its own -- agents ask 'what is this' constantly. See
+        holographic_ladder.identify_level."""
+        from holographic.agents_and_reasoning.holographic_ladder import identify_level
+        return identify_level(corpus, max_merges=max_merges, min_count=min_count)
+
+    def ladder_kit_report(self, level):
+        """Report a ladder LEVEL's invariant-kit slots (from a climb_ladder tower) as WIRED, DECLARED-NEGATIVE, or
+        SILENT-GAP. Returns {'wired', 'declared_negative', 'silent_gaps'}. Every level should have 0 silent gaps --
+        each of delta/chunk/scale/decompose/cleanup/bake/seed/tile/lod/canonical/cache/fuse/superpose/guide is
+        either wired to a primitive or a declared negative with a reason. See holographic_ladder.kit_report."""
+        from holographic.agents_and_reasoning.holographic_ladder import kit_report
+        return kit_report(level)
+
+    def adaptive_pipeline(self, corpus, null_margin=0.05, max_depth=8, min_gain=0.02):
+        """MEASUREMENT-DRIVEN adaptive dispatcher: run identify_level, then route the data to the method its
+        REGIME names instead of hard-coding one. ABSTAINS on null-indistinguishable input (the SETI gate -- never
+        'clean' noise into a fabricated signal); FOLDS repetitive data (Quilez -- cheap, never pay for a climb);
+        CLIMBS nested structure with the lens picked per-signal (Puckette -- the lens is the analysis window).
+        Returns {method: abstain|fold|climb|store_raw, regime, lens, gain_over_null, reason, tower/dominant}. A
+        readable, refusable dispatch on numbers already computed -- no new learner. See
+        holographic_ladder.adaptive_pipeline."""
+        from holographic.agents_and_reasoning.holographic_ladder import adaptive_pipeline
+        return adaptive_pipeline(corpus, null_margin=null_margin, max_depth=max_depth, min_gain=min_gain)
+
+    def sweep_directions(self, corpus, max_depth=6, min_gain=0.02):
+        """The UP / DOWN / SIDEWAYS completeness sweep (holographic_ladder): does the ladder's structure-finding
+        hold in all three directions, or only one? DOWN -- does structure survive DECOMPOSITION (are the parts
+        themselves analyzable)? UP -- does it survive EMBEDDING in a larger corpus? SIDEWAYS -- which lens COSTUMES
+        (sequence/structure) does the data wear? Returns a per-direction ok flag with the measurement behind it,
+        plus `gaps` (failed directions) and `complete`. Null-aware: an irreducible corpus flags all three, never
+        fabricating structure. A capability that works in only one direction is an INCOMPLETE faculty -- this makes
+        that check runnable, like kit_gaps did for the invariant kit. See holographic_ladder.sweep_directions."""
+        from holographic.agents_and_reasoning.holographic_ladder import sweep_directions
+        return sweep_directions(corpus, max_depth=max_depth, min_gain=min_gain)
+
+    def ladder_predict(self, history, order=2, max_merges=200, min_count=2, null_margin=0.02, seed=0):
+        """Predict what comes NEXT after `history` using the ladder's learned HIERARCHICAL alphabet (the
+        compression<->prediction duality -- a good compressor is a good predictor). Learns a chunk codebook over
+        the history, predicts the next CHUNK by matching the context against continuation counts over the promoted
+        alphabet, and decodes it to raw symbols -- so one step can emit a whole learned pattern, not one flat
+        symbol. THE GATE (SETI, on the time axis): abstains to the persistence baseline ('next = last') when the
+        ladder does not beat persistence on held-out continuations -- a forecast that cannot beat 'same as last' is
+        a null result, said loudly. Returns {prediction, confidence, method, beats_persistence, reason}. See
+        holographic_ladder.ladder_predict."""
+        from holographic.agents_and_reasoning.holographic_ladder import ladder_predict
+        return ladder_predict(history, order=order, max_merges=max_merges, min_count=min_count,
+                              null_margin=null_margin, seed=seed)
+
+    def ladder_forecast_calibrated(self, series, order=2, alpha=0.1, min_history=12, seed=0):
+        """Forecast the next value of a numeric `series` with the ladder predictor, wrapped in a CALIBRATED
+        prediction interval (an uncalibrated forecast is not a measurement). Rolls ladder_predict over the series
+        to gather residuals on data it did not fit, calibrates a conformal forecaster on them, and returns the
+        next-step POINT forecast plus an interval with MEASURED coverage -- not an assumed one. Returns {point,
+        interval, half_width, coverage, empirical_coverage, n_calibration, reason}. Falls back to point-only when
+        the history is too short to calibrate honestly. See holographic_ladder.ladder_forecast_calibrated."""
+        from holographic.agents_and_reasoning.holographic_ladder import ladder_forecast_calibrated
+        return ladder_forecast_calibrated(series, order=order, alpha=alpha, min_history=min_history, seed=seed)
+
+    def extend_generator(self, fit_result, n_ahead, original_length):
+        """FORECAST by playing a fitted generator PAST its data (store the formula, play the future). Given a
+        fit_deterministic result and the original data length, regenerate `n_ahead` samples beyond the end.
+        Returns {forecast, t_range, valid}; `valid` is False (samples still returned) when extrapolating far past
+        the fit's validated window -- a generator fit on [0,1] evaluated at t=100 is confident nonsense, so it
+        refuses beyond where it was validated. A refused fit cannot be extended. See
+        holographic_fitgen.extend_generator."""
+        from holographic.agents_and_reasoning.holographic_fitgen import extend_generator
+        return extend_generator(fit_result, n_ahead, original_length)
+
+    def reconstruct_tower(self, tower):
+        """Expand a climbed ladder TOWER back to its ORIGINAL corpus of base symbols -- the inverse of
+        climb_ladder (found by the down-sweep: a tower you cannot decompress is useless). For a SEQUENCE-lens
+        tower this is LOSSLESS: reconstruct_tower(climb_ladder(corpus)) == corpus exactly. For a STRUCTURE-lens
+        tower it recovers the SET of base part-types per group (order and duplicate counts are dropped by design --
+        the structure lens's premise). See holographic_ladder.reconstruct."""
+        from holographic.agents_and_reasoning.holographic_ladder import reconstruct_corpus
+        return reconstruct_corpus(tower)
+
+    def chart_space(self, alphabet, rays=64, steps=24, margin=0.1, band_keep=0.5, seed=0):
+        """Chart a holographic ALPHABET as a measured atlas -- march rays between atoms and record where they
+        enter cleanup BASINS (nearest atom distinctively nearer than the runner-up by `margin`). Returns
+        hit_fraction, basins_per_ray, coverage (dead atoms never win), and the honest verdict structure_over_null
+        (basin coverage MINUS a band-limited random-alphabet null, Quilez Q8). A region is structure only ABOVE
+        the matched null -- high-D noise has basins too, so an atlas without its null is a Rorschach test. Uses for
+        the number: capacity forecasting (shrinking coverage predicts an auto_scale trigger) and codebook
+        placement (put new atoms in dead zones). See holographic_ladder.chart_space."""
+        from holographic.agents_and_reasoning.holographic_ladder import chart_space
+        return chart_space(alphabet, rays=rays, steps=steps, margin=margin, band_keep=band_keep, seed=seed)
+
+    def bank_or_formula(self, eval_cost_us, hit_rate, n_entries, bytes_per_entry, lookup_cost_us=0.5,
+                        regen_from_seed=True):
+        """Decide whether to BANK computed values or keep the FORMULA and regenerate on demand (Quilez Q1, 'store
+        the formula not the samples'). The demoscene economy as a MEASURED gate: banking pays iff
+        hit_rate*eval_cost - lookup_cost > 0 (a miss must BUILD the entry, so only reused evals amortize the bake;
+        break-even hit_rate = lookup/eval). A bank of things a cheap formula gives you for free is NEGATIVE
+        storage. Returns {bank, saving_us_per_query, storage_bytes, reason}. The reusable wheel the transform bank,
+        the generator bank, and any cache should consult before banking by reflex. See
+        holographic_ladder.bank_or_formula."""
+        from holographic.agents_and_reasoning.holographic_ladder import bank_or_formula
+        return bank_or_formula(eval_cost_us, hit_rate, n_entries, bytes_per_entry,
+                               lookup_cost_us=lookup_cost_us, regen_from_seed=regen_from_seed)
+
+    def resolve_capability_uri(self, query):
+        """Resolve a bare function name or a partial path to its FULL capability URI(s) 'family/module/name', most
+        specific first. A colliding bare name returns every match ('sphere' -> mesh_and_geometry/sdf/sphere AND
+        misc/codegen/sphere); supplying more of the path narrows it ('sdf/sphere' -> one). Makes the 42 semantic
+        name collisions addressable by path instead of ambiguous. See holographic_capuri.resolve."""
+        from holographic.caching_and_storage.holographic_capuri import resolve_uri
+        return resolve_uri(query)
+
+    def browse_capabilities(self, prefix="", by="location"):
+        """Browse the capability namespace like a CONTEXT MENU. `by='location'` (default) walks the physical family
+        tree: browse('') -> families, 'mesh_and_geometry/' -> modules, 'mesh_and_geometry/sdf/' -> leaf functions
+        (the name IS the hierarchy, so it can't drift from the code). `by='semantic'` walks the File->Export->PNG
+        VERB tree instead (select/ transform/ create/ ...) -- grouped by what a user DOES, not where the code lives;
+        only capabilities with a semantic tag appear (see SEMANTIC_TAXONOMY.md). Returns {branch: leaf_count}. See
+        holographic_capuri.browse / browse_semantic."""
+        if by == "semantic":
+            from holographic.caching_and_storage.holographic_capuri import browse_semantic
+            return browse_semantic(prefix)
+        from holographic.caching_and_storage.holographic_capuri import browse
+        return browse(prefix)
+
+    def capability_collisions(self):
+        """Every bare function name that resolves to more than one capability URI -- the semantic collisions, each
+        with its disambiguating full paths. The name_collisions audit re-read through the URI lens: a collision is
+        not a hazard to forbid but a name whose PATH you supply. See holographic_capuri.collisions."""
+        from holographic.caching_and_storage.holographic_capuri import collisions
+        return collisions()
+
+    def resolve_capability_uri(self, name):
+        """Resolve a bare capability name or a partial path to the FULL capability URI(s) that match
+        (holographic_capuri) -- 'rotation' -> ['mesh_and_geometry/meshskin/rotation',
+        'scene_and_pipeline/scenegraph/rotation']; 'sdf/sphere' narrows to one. The disambiguation step when a name
+        collides: supply more of the path. Pairs with browse_capabilities (the menu) and capability_collisions (the
+        collision list). See holographic_capuri.resolve_uri."""
+        from holographic.caching_and_storage.holographic_capuri import resolve_uri
+        return resolve_uri(name)
+
+    def chunk_levels(self, codebook, vocab):
+        """The chunk depths a learned codebook can factor against, DEEPEST FIRST -- the ladder recursive_factor
+        descends. See holographic_resonator.available_levels."""
+        from holographic.misc.holographic_resonator import available_levels
+        return [int(d) for d in available_levels(self.chunk_codebook(codebook), np.asarray(vocab, float))]
+
+    def recursive_factor(self, composite, codebook, vocab, arity=2, restarts=10, iters=300):
+        """Factor a DEEP composite by solving a SHALLOW problem over composed chunks, then expanding by lookup.
+        Tries each chunk level deepest-first, verifies each candidate by RE-COMPOSITION, and falls back one level
+        on failure -- so the answer is verified correct or reported unsolved, never a silent guess.
+
+        MEASURED (D=4096, 32 symbols, MAP): the flat resonator falls off a cliff -- 60% at depth 4, 0% at depth 5
+        and beyond. With PROMOTED chunks (62 pairs -> 64 quads) a depth-8 composite factors at 90.0% here versus
+        0.0% flat, and 3x faster besides. Below the cliff recursion is a modest gain at 5x the cost (depth 4:
+        93.3% vs 86.7% flat), so use it past the cliff. The condition is R1's: no structure, no dividend --
+        mind.structure_score(stream) measures it first. `codebook` is a plain-data chunk codebook from
+        mind.learn_chunks: R3's one codebook family, second consumer. See holographic_resonator.recursive_factor."""
+        from holographic.misc.holographic_resonator import recursive_factor as _rf
+        return _rf(np.asarray(composite, float), self.chunk_codebook(codebook), np.asarray(vocab, float),
+                   arity=int(arity), restarts=int(restarts), iters=int(iters))
+
+    def reduce_involution(self, leaves):
+        """Reduce a leaf multiset modulo MAP's self-inverse binding: a leaf appearing twice CANCELS. Measured --
+        factoring bind(v3, v7) against a pair codebook legitimately returns [0, 0, 3, 7], because
+        bind(v0,v3)*bind(v0,v7) == v3*v7. Correct and non-minimal are different things.
+        See holographic_resonator.reduce_involution."""
+        from holographic.misc.holographic_resonator import reduce_involution as _ri
+        return _ri(list(leaves))
+
+    # -- W4: information-rate rendering -- shade the news, reproject the rest -------------------------------
+    def refresh_renderer(self, first_frame, budget=0.20):
+        """The reproject-and-refresh loop as a render mode: warp the previous frame forward and shade only the
+        disocclusion border plus the OLDEST k pixels. MEASURED on a parallax-free procedural scene, 12 frames, 20%
+        budget: 57.5 dB mean / 55.9 dB worst with a KNOWN camera shift -- five times fewer shader evaluations at
+        visually-indistinguishable quality, tail slope +0.22 dB (stable). Pass `known_shift=` to `step`; recovering
+        it from pixels costs a measured 10.5 dB and turns the tail slope to -9.52 (decay), because the loop warps
+        its own output. See holographic_refresh.RefreshRenderer."""
+        from holographic.rendering.holographic_refresh import RefreshRenderer
+        return RefreshRenderer(np.asarray(first_frame, float), budget=float(budget))
+
+    def exact_k_oldest(self, age, k):
+        """Select EXACTLY k pixels with the greatest age, ties broken deterministically on the flat index. The
+        threshold rule it replaces ("age >= the k-th largest") selects the WHOLE FRAME when ages are tied -- which
+        they are on frame 0 -- reporting a perfect PSNR because it shaded everything. `argmax_tiebreak`'s lesson in
+        a new place: a selection rule is an observable decision and its ties must be named.
+        See holographic_refresh.exact_k_oldest."""
+        from holographic.rendering.holographic_refresh import exact_k_oldest as _e
+        return _e(np.asarray(age, float), int(k))
+
+    def refresh_report(self, shade_at, n_frames=12, budget=0.20, known_shift=None):
+        """Run the refresh loop and report {shaded_fraction, psnr_mean, psnr_worst, psnr_first, psnr_last,
+        tail_slope, psnrs}. STABILITY IS `tail_slope`, not first-minus-last: frame 1 warps a PERFECT frame 0 and
+        scores ~80 dB for free. See holographic_refresh.refresh_report."""
+        from holographic.rendering.holographic_refresh import refresh_report as _r
+        return _r(shade_at, n_frames=int(n_frames), budget=float(budget), known_shift=known_shift)
+
+    # -- the brain/muscle contract, realised: the SCENE's SDF, emitted --------------------------------------
+    def four_surface_demo(self, sdf_node, camera=None):
+        """ONE KERNEL, FOUR SURFACES (W19): given a single SDF scene (node or DSL text), return its FOUR
+        backend representations proving they are the same field -- {'glsl': Shadertoy source, 'wgsl': browser-GPU
+        source, 'ascii': a braille raymarch, 'dsl': the canonical scene text}. The PNG path uses the same CPU eval
+        the ascii path marches, and sdf_validate_c proves the emitted C matches that eval, so all four agree. The
+        demo that explains the engine in one screen: author once, render everywhere. See sdf_dialect / to_glsl /
+        ascii_sdf.
+
+        `camera` is (eye (3,), forward (3,)); if omitted, an angled view from OUTSIDE the origin is used. WHY not
+        the ascii default camera: a scene with `repeat` is an INFINITE lattice, and a camera embedded in it stares
+        at a uniform wall (constant depth -> a flat, featureless ascii grid that does NOT show the scene -- the
+        'camera inside an infinite lattice' trap). The default here sits back and looks in, so the ascii actually
+        depicts the geometry."""
+        import numpy as _np
+        from holographic.mesh_and_geometry.holographic_sdf import parse_dsl, SDF
+        from holographic.mesh_and_geometry.holographic_sdfemit import sdf_dialect as _sd
+        node = sdf_node if isinstance(sdf_node, SDF) else parse_dsl(sdf_node)
+        dsl = node.to_dsl()
+        if camera is None:
+            eye = _np.array([1.6, 1.2, 2.6])                    # outside, angled -- reads as a clear silhouette
+            camera = (eye, -eye / _np.linalg.norm(eye))
+        # WHY ramp, not braille: braille packs 2x4 dots per cell, which turns a busy scene into high-frequency
+        # noise a human cannot read. A tonal `ramp` (light->dark chars) shows large-scale SHAPE, which is what an
+        # ASCII surface is for. (The PNG carries fine detail; the ASCII carries silhouette.)
+        return {"dsl": dsl,
+                "glsl": node.to_glsl(),
+                "wgsl": _sd(dsl, "wgsl"),
+                "ascii": self.ascii_sdf(dsl, width=48, mode="ramp", camera=camera, fov=0.85)}
+
+    def scene_cost(self, sdf_node):
+        """Estimate the per-ray evaluation COST of an SDF scene (W2) -- an ALU/machine-model annotation for
+        deciding if a scene raymarches in real time. Accepts an SDF node or DSL text. Returns a dict with `alu`
+        (approx arithmetic ops per map() call), `nodes`, `depth`, `iterative` (contains a fractal/tiling loop),
+        and a plain-language `verdict`. Know the price before you ship the scene. See holographic_sdf.SDF.cost."""
+        from holographic.mesh_and_geometry.holographic_sdf import parse_dsl, SDF
+        node = sdf_node if isinstance(sdf_node, SDF) else parse_dsl(sdf_node)
+        return node.cost()
+
+    def sdf_dialect(self, sdf_node, dialect="wgsl"):
+        """Emit the SDF TREE's own `map(p) -> distance` in `wgsl` | `glsl` | `c_f64` | `c_f32` -- so the browser
+        runs a PROJECTION of the authoritative Python scene, not a hand-written shader about a scene the engine
+        never saw. `sdf.to_glsl()` already shipped and `emit_kernel` already shipped; THE TWO NEVER MET, so
+        `payload('shader')` used to carry whatever text the caller passed. See holographic_sdfemit.sdf_dialect."""
+        from holographic.mesh_and_geometry.holographic_sdfemit import sdf_dialect as _sd
+        return _sd(sdf_node, dialect=str(dialect))
+
+    def sdf_validate_c(self, sdf_node, points, dialect="c_f64"):
+        """Compile the emitted C `map()` with `cc`, RUN it, and compare to the Python `_eval`. MEASURED on a compound
+        tree over 200 points: c_f64 agrees to 6.7e-16 -- machine epsilon, and NOT bit-identical, because
+        `np.linalg.norm` rescales to avoid overflow and sums in a different order than `sqrt(x*x+y*y+z*z)`; c_f32
+        differs by 2.3e-07, which IS the tolerance a WGSL port is judged against.
+        See holographic_sdfemit.validate_c."""
+        from holographic.mesh_and_geometry.holographic_sdfemit import validate_c
+        return validate_c(sdf_node, np.asarray(points, float), dialect=str(dialect))
+
+    def sdf_emit_coverage(self):
+        """Which SDF node kinds the dialect emitter handles and which it refuses. `emitted + refused == every kind`
+        -- a gap here is a shader that silently omits geometry. `menger` and `repeat` fold the domain iteratively;
+        `twist` and `displace` are inexact distance warps. See holographic_sdfemit.coverage."""
+        from holographic.mesh_and_geometry.holographic_sdfemit import coverage
+        return coverage()
+
+    # -- realtime: draft frames, a refine pass, and a multi-format payload ----------------------------------
+    def realtime_session(self, session, budget=0.20, shade_kwargs=None):
+        """A reprojecting viewport over a `RenderSession`: `frame()` is a DRAFT that shades only the news,
+        `refine()` traces every pixel, `payload(kinds)` pushes the same scene as pixels / mesh / splats / shader /
+        lod, all JSON-safe. MEASURED: a 20% mask shades 3.2x faster and is BIT-IDENTICAL on the pixels it touches.
+        KEPT NEGATIVE: pass `known_shift=(dy, dx)` -- recovering it from the pixels costs 2,280 extra traces, 3.7 dB,
+        and a **-4.52 dB tail slope** (the loop warps its own output). See holographic_realtime.RealtimeSession."""
+        from holographic.scene_and_pipeline.holographic_realtime import RealtimeSession
+        return RealtimeSession(session, budget=float(budget), shade_kwargs=shade_kwargs)
+
+    def frame_budget_controller(self, target_fps=60, ladder=None, headroom=0.15, start_level=None,
+                                climb_after=8, climb_margin=0.6):
+        """Build a FRAME-BUDGET CONTROLLER (holographic_framebudget) -- the one knob from a target FPS to concrete
+        render + sim quality, held closed-loop against MEASURED frame time. Each frame call `.current()` for the
+        quality preset to render/simulate with, then `.report(frame_ms)` with the measured time; the controller
+        DROPS a quality level on a budget miss (react fast) and CLIMBS only after a streak of comfortable frames
+        (hysteresis, so quality doesn't oscillate). This is the missing conductor tying render_adaptive,
+        draft_vs_refine_simulation, and the LOD chains to a target frame rate for a front-end client. The ladder
+        exposes render and sim quality SEPARATELY -- a coarse render is a draft of the fine one, but a coarse
+        chaotic sim is a DIFFERENT trajectory (see draft_vs_refine_simulation), so you may hold the sim fixed and
+        trade only render quality. See holographic_framebudget.FrameBudgetController."""
+        from holographic.scene_and_pipeline.holographic_framebudget import FrameBudgetController
+        return FrameBudgetController(target_fps=target_fps, ladder=ladder, headroom=headroom,
+                                     start_level=start_level, climb_after=climb_after, climb_margin=climb_margin)
+
+    def frame_budget_ms(self, target_fps, headroom=0.15):
+        """Convert a target frame rate to a per-frame millisecond BUDGET, minus a headroom fraction (a frame that
+        exactly fills 1/fps has already missed the vsync interval). 60 fps -> ~14.2 ms usable, 30 fps -> ~28.3 ms.
+        See holographic_framebudget.frame_budget_ms."""
+        from holographic.scene_and_pipeline.holographic_framebudget import frame_budget_ms
+        return frame_budget_ms(target_fps, headroom=headroom)
+
+    def workspace_manager(self):
+        """A WORKSPACE MANAGER (holographic_workspace) over this mind's database -- durable user data coexisting
+        with transient 3D/sim SCENES, each in its own namespace so they don't step on each other. Use it to SAVE
+        and LOAD a workspace/scene: new_workspace(name), switch_workspace(name), export_workspace(name) -> a JSON
+        blob, import_workspace(blob) -> rebuilds it BYTE-IDENTICALLY (the seed fixes every atom), combine_workspaces,
+        reset_to_default (drop transient scenes, keep the durable tier). The persistence layer for a real-time
+        client's scene. See holographic_workspace.WorkspaceManager."""
+        from holographic.scene_and_pipeline.holographic_workspace import WorkspaceManager
+        if getattr(self, "_workspace_manager", None) is None:
+            self._workspace_manager = WorkspaceManager(self.db)
+        return self._workspace_manager
+
+    def frame_server(self, ladder=None, headroom=0.15):
+        """Build a FRAME SERVER (holographic_framebudget) -- server-side real-time frame serving for front-end
+        clients that PULL frames (the request/response form of a frame stream). Keeps one frame-budget controller
+        PER SESSION; call `.next_frame(session, target_fps, last_frame_ms)` each frame to get the quality preset to
+        render/simulate with, holding each client's target fps closed-loop. Two clients can run at different rates
+        (a phone at 30, a desktop at 60). This is what the HTTP service's POST /frame endpoint delegates to. See
+        holographic_framebudget.FrameServer."""
+        from holographic.scene_and_pipeline.holographic_framebudget import FrameServer
+        return FrameServer(ladder=ladder, headroom=headroom)
+
+    def pick_element(self, wireframe, screen_u, screen_v, want="vertex", cam_z=3.0, fov_scale=1.6):
+        """VIEWPORT PICKING for a 3D-modeling app (holographic_framebudget): given a wireframe cage and a screen
+        coordinate (screen_u, screen_v in -1..1 under the cursor), return which element the user is pointing at --
+        {kind, index, distance, position/vertices} for the nearest 'vertex', 'edge', or 'face'. Projects the cage's
+        own verts to the screen and finds the closest (exact, deterministic, no GPU pick buffer needed). The select
+        step a modeling app needs before editing a vert/edge/face. See holographic_framebudget.pick_element."""
+        from holographic.scene_and_pipeline.holographic_framebudget import pick_element
+        return pick_element(wireframe, screen_u, screen_v, want=want, cam_z=cam_z, fov_scale=fov_scale)
+
+    def mesh_selection(self, mesh, mode="vertex", indices=None):
+        """A sub-object MESH SELECTION (holographic_meshselect) -- a persistent set of VERTS / EDGES / FACES with a
+        mode and set algebra (add/remove/toggle/union/intersect/invert/select_all) plus mode CONVERSION
+        (face->verts, verts->faces, ...). This is the edit-mode selection a modeling app operates every edit on,
+        complementary to the object-level `selection` (which picks whole objects). Bind to a mesh {vertices, faces}
+        so indices are validated. See holographic_meshselect.MeshSelection."""
+        from holographic.mesh_and_geometry.holographic_meshselect import MeshSelection
+        return MeshSelection(mesh, mode=mode, indices=indices)
+
+    def select_edge_loop(self, mesh, seed_edge):
+        """Select the EDGE LOOP through `seed_edge` (holographic_meshselect) -- the ring of edges continuing
+        'straight' across quads, the Alt-click primitive users expect from Blender/Maya. Walks both ways from the
+        seed, stopping at a pole or boundary (honest -- loops are only well-defined on quads). Returns an edge-mode
+        MeshSelection. See holographic_meshselect.select_edge_loop."""
+        from holographic.mesh_and_geometry.holographic_meshselect import select_edge_loop
+        return select_edge_loop(mesh, seed_edge)
+
+    def select_face_ring(self, mesh, seed_face):
+        """Select the FACE RING from `seed_face` (holographic_meshselect) -- the band of quads a loop cut runs
+        through, walking quad to quad across shared edges. Terminates at a non-quad or boundary. Returns a
+        face-mode MeshSelection. See holographic_meshselect.select_face_ring."""
+        from holographic.mesh_and_geometry.holographic_meshselect import select_face_ring
+        return select_face_ring(mesh, seed_face)
+
+    def select_boundary_loops(self, mesh):
+        """Select the OPEN BOUNDARY edges of a mesh (holographic_meshselect) -- the edges used by exactly one face
+        (a hole rim or open-surface border), the 'select the hole' step before filling or bridging. Returns an
+        edge-mode MeshSelection. See holographic_meshselect.select_boundary_loops."""
+        from holographic.mesh_and_geometry.holographic_meshselect import select_boundary_loops
+        return select_boundary_loops(mesh)
+
+    def soft_selection_weights(self, mesh, selection, radius, falloff="smooth"):
+        """SOFT SELECTION as a reusable per-vertex WEIGHT FIELD (holographic_meshselect) -- 1 on the selection,
+        falling off to 0 at `radius` along the surface (multi-source geodesic). This is proportional editing: a
+        transform reads these weights and moves each vertex by weight*delta, dragging neighbours smoothly. Takes a
+        MeshSelection or a raw vertex-index list; falloff is 'linear'/'smooth'/'sharp'. See
+        holographic_meshselect.soft_selection_weights."""
+        from holographic.mesh_and_geometry.holographic_meshselect import soft_selection_weights
+        return soft_selection_weights(mesh, selection, radius, falloff=falloff)
+
+    def select_symmetric(self, mesh, selection, axis=0, tol=1e-4):
+        """SYMMETRY SELECTION (holographic_meshselect) -- add a selection's mirror-image elements across a world
+        axis plane (axis 0/1/2 = x/y/z=0), so a symmetric edit can be applied to both sides. The selection-level
+        complement to mirror_mesh (which mirrors GEOMETRY); here nothing is created, we find the counterpart
+        elements that already exist, paired by reflected position within tol. See holographic_meshselect.select_symmetric."""
+        from holographic.mesh_and_geometry.holographic_meshselect import select_symmetric
+        return select_symmetric(mesh, selection, axis=axis, tol=tol)
+
+    def select_in_box(self, mesh, lo, hi, mode="vertex", project=None):
+        """REGION SELECT (holographic_meshselect) -- select every element inside the axis-aligned box [lo,hi], the
+        box/rubber-band select of a viewport. Edge/face modes select if ANY vertex is in (inclusive, matching
+        to_mode). Pass `project` (a view-projection matrix or a pt->(u,v) callable) to test in SCREEN coords instead
+        -- that is frustum/rectangle select from the camera. Returns a MeshSelection. See
+        holographic_meshselect.select_in_box."""
+        from holographic.mesh_and_geometry.holographic_meshselect import select_in_box
+        return select_in_box(mesh, lo, hi, mode=mode, project=project)
+
+    def ray_mesh_intersect(self, mesh, origin, direction, cull_backface=False):
+        """RAY-VS-MESH picking (holographic_raypick) -- cast a ray at a mesh {vertices, faces} and return the
+        NEAREST hit {face, position, distance, barycentric, triangle} or None. Moller-Trumbore per triangle with an
+        AABB broad phase; quads/n-gons are fan-triangulated but report the ORIGINAL face. This is how viewport
+        picking hits a user's real geometry (not just the demo cage). See holographic_raypick.ray_mesh_intersect."""
+        from holographic.mesh_and_geometry.holographic_raypick import ray_mesh_intersect
+        return ray_mesh_intersect(mesh, origin, direction, cull_backface=cull_backface)
+
+    def ray_sdf_intersect(self, sdf_fn, origin, direction, max_dist=50.0, max_steps=128, eps=1e-3):
+        """RAY-VS-SDF picking (holographic_raypick) -- sphere-trace a ray into an SDF (any sdf_fn(pt)->distance) and
+        return the hit {position, distance, normal, steps} or None. The native pick for the field/procedural half
+        of a scene -- exact to the field, no triangulation. See holographic_raypick.ray_sdf_intersect."""
+        from holographic.mesh_and_geometry.holographic_raypick import ray_sdf_intersect
+        return ray_sdf_intersect(sdf_fn, origin, direction, max_dist=max_dist, max_steps=max_steps, eps=eps)
+
+    def screen_ray(self, screen_u, screen_v, cam_eye=(0.0, 0.0, 3.0), cam_z=-1.6):
+        """Build a world-space RAY from a normalized screen coordinate (holographic_raypick) -- (screen_u, screen_v)
+        in -1..1 under the cursor -> (origin, direction) for the intersect functions, so 'the user clicked here'
+        becomes a geometry query. See holographic_raypick.screen_ray."""
+        from holographic.mesh_and_geometry.holographic_raypick import screen_ray
+        return screen_ray(screen_u, screen_v, cam_eye=cam_eye, cam_z=cam_z)
+
+    def pick_mesh(self, mesh, screen_u, screen_v, cam_eye=(0.0, 0.0, 3.0), cam_z=-1.6, want="face"):
+        """VIEWPORT PICK on a REAL mesh (holographic_raypick) -- from a cursor (screen_u, screen_v in -1..1), build
+        the ray and return the nearest 'face' or 'vertex' the user clicked, as {kind, index, position, distance} or
+        {index:None} on a miss. The generalization of pick_element (which works on the demo cage) onto a user's
+        arbitrary geometry -- one call from 'clicked here' to 'selected this'. See holographic_raypick.pick_mesh."""
+        from holographic.mesh_and_geometry.holographic_raypick import pick_mesh
+        return pick_mesh(mesh, screen_u, screen_v, cam_eye=cam_eye, cam_z=cam_z, want=want)
+
+    def transform_selection(self, points, selection_idx, translate=None, rotate=None, scale=None,
+                            pivot="median", space="world", constraint=(1, 1, 1),
+                            cursor=None, active=None, view_matrix=None, local_matrix=None, weights=None):
+        """The GIZMO BACKEND (holographic_transform_space): transform selected vertices about a PIVOT
+        (median/active/cursor/bbox), in a SPACE (world/local/view), under an axis CONSTRAINT mask -- the triple that
+        turns a raw matrix into the move/rotate/scale a modeler expects. `translate` (masked 3-vector), `rotate`
+        (axis, angle), `scale` (scalar or 3-vector) about the pivot. Pass `weights` (e.g. soft_selection_weights) for
+        PROPORTIONAL editing -- neighbours drag by their falloff. Non-destructive (returns new points). See
+        holographic_transform_space.transform_selection."""
+        from holographic.mesh_and_geometry.holographic_transform_space import transform_selection
+        return transform_selection(points, selection_idx, translate=translate, rotate=rotate, scale=scale,
+                                   pivot=pivot, space=space, constraint=constraint, cursor=cursor, active=active,
+                                   view_matrix=view_matrix, local_matrix=local_matrix, weights=weights)
+
+    def pivot_point(self, points, selection_idx, mode="median", cursor=None, active=None):
+        """Resolve the PIVOT for a transform (holographic_transform_space) -- 'median' (centroid), 'bbox' (box
+        centre), 'cursor' (a given point), or 'active' (a chosen vertex). The point a rotate/scale turns around.
+        See holographic_transform_space.pivot_point."""
+        from holographic.mesh_and_geometry.holographic_transform_space import pivot_point
+        return pivot_point(points, selection_idx, mode=mode, cursor=cursor, active=active)
+
+    def snap_to_grid(self, point, increment=1.0, origin=(0.0, 0.0, 0.0)):
+        """GEOMETRIC grid snap (caching_and_storage/holographic_snap) -- snap a 3-D point to the nearest grid node
+        of spacing `increment` (scalar OR per-axis; an axis with spacing <= 0 is left alone). The 'snap to grid' a
+        modeler holds Ctrl for. Distinct from guide_snap (which is VSA codebook cleanup). See
+        holographic_snap.snap_to_grid (the canonical geometric snap: 'snapping IS cleanup')."""
+        from holographic.caching_and_storage.holographic_snap import snap_to_grid
+        r = snap_to_grid(point, increment, origin)
+        return r.tolist() if hasattr(r, "tolist") else r
+
+    def snap_to_vertices(self, point, vertices, max_dist=None):
+        """Snap a point to the NEAREST vertex (holographic_snap) -- returns {index, position, distance} or None if
+        beyond max_dist. The vertex-snap that makes two verts coincide exactly. See
+        holographic_snap.snap_to_vertices."""
+        from holographic.mesh_and_geometry.holographic_snap import snap_to_vertices
+        return snap_to_vertices(point, vertices, max_dist=max_dist)
+
+    def snap_transform_delta(self, delta, target="grid", increment=1.0, moved_point=None, vertices=None,
+                             edges=None, origin=(0.0, 0.0, 0.0), max_dist=None):
+        """Snap a TRANSFORM DELTA so the dragged point lands on a target (holographic_snap) -- target
+        'grid'/'vertex'/'edge'; returns {delta (corrected), snapped_to}. The form the gizmo uses: it has a raw delta
+        and the point being dragged, and wants the delta adjusted so that point snaps. Keeps transform and snap
+        layers separate -- transform_selection just adds the returned delta. See holographic_snap.snap_transform_delta."""
+        from holographic.mesh_and_geometry.holographic_snap import snap_transform_delta
+        return snap_transform_delta(delta, target=target, increment=increment, moved_point=moved_point,
+                                    vertices=vertices, edges=edges, origin=origin, max_dist=max_dist)
+
+    def sdf_scene(self, parts, bounds=None):
+        """Build an SDF SCENE from parts (holographic_sdfscene) -- 'a scene is a set of SDF parts'. Pass a list of
+        (sdf_fn, material_name) and optional (center, radius) bounds; get back a scene with .eval (nearest-surface
+        distance = min over parts, what a ray-marcher calls), .part_ids / .material_at (argmin, for material
+        lookup), and .parts_near (spatial cull). The SDF-scene state model for a modeling app, composing parts the
+        way a splat scene bundles primitives. See holographic_sdfscene.SDFScene.from_parts."""
+        from holographic.mesh_and_geometry.holographic_sdfscene import SDFScene
+        return SDFScene.from_parts(parts, bounds=bounds)
+
+    def residue_system(self, moduli=(7, 11, 13), dim=2048, seed=0):
+        """Exact integer arithmetic in vectors via a RESIDUE NUMBER SYSTEM (holographic_extras) -- encode integers
+        in [0,M) as CRT residues carried in hypervectors, then add/subtract/scale with vector ops that are exact
+        (no floating error), decoding back to the integer. The number-theoretic view of VSA bundling. See
+        holographic_extras.ResidueSystem."""
+        from holographic.misc.holographic_extras import ResidueSystem
+        return ResidueSystem(moduli=moduli, dim=dim, seed=seed)
+
+    def vsa_region(self, center, radius):
+        """A REGION of space as a signed-distance ball with boolean algebra (holographic_extras) -- union /
+        intersect / subtract / complement of spherical regions, plus contains() and steer(). The set-algebra
+        complement to sdf_scene: compose regions of interest for selection or routing. See holographic_extras.ball
+        (and Region for the operators)."""
+        from holographic.misc.holographic_extras import ball
+        return ball(center, radius)
+
+    def predictive_filter(self, momentum=0.5, base_decay=0.9, k=4.0, warmup=6):
+        """A SURPRISE filter (holographic_extras) -- observe(vec) returns (is_novel, surprise); slow drift is
+        absorbed by a moving prediction while an abrupt change fires once. Pass only surprising observations
+        downstream, stay quiet on predictable ones -- an event gate for a stream. See
+        holographic_extras.PredictiveFilter."""
+        from holographic.misc.holographic_extras import PredictiveFilter
+        return PredictiveFilter(momentum=momentum, base_decay=base_decay, k=k, warmup=warmup)
+
+    def edit_history(self, max_depth=256):
+        """The UNDO/REDO log for an interactive edit session (holographic_edithistory) -- an EditHistory you thread
+        scene state through: `h.do(state, cmd)` applies and records, `h.undo(state)` / `h.redo(state)` walk it, all
+        bit-identical (tie-safe replay). Build commands with `vertex_move_command` / `capture_edit_command`. This is
+        what makes a modeling session undoable. See holographic_edithistory.EditHistory."""
+        from holographic.mesh_and_geometry.holographic_edithistory import EditHistory
+        return EditHistory(max_depth=max_depth)
+
+    def vertex_move_command(self, indices, delta, name="move"):
+        """A reversible VERTEX MOVE command (holographic_edithistory) for the undo log -- apply adds `delta` to the
+        given vertices, invert subtracts it (closed-form inverse, O(edit) memory). Feed to EditHistory.do. See
+        holographic_edithistory.vertex_move."""
+        from holographic.mesh_and_geometry.holographic_edithistory import vertex_move
+        return vertex_move(indices, delta, name=name)
+
+    def capture_edit_command(self, indices, new_positions, prev_positions, name="edit"):
+        """Wrap an ARBITRARY geometry edit into a reversible command (holographic_edithistory) by snapshotting the
+        before/after positions of just the touched vertices -- O(edit) memory, for edits with no cheap algebraic
+        inverse (a bevel, a smooth). Feed to EditHistory.do. See holographic_edithistory.capture_inverse."""
+        from holographic.mesh_and_geometry.holographic_edithistory import capture_inverse
+        return capture_inverse(indices, new_positions, prev_positions, name=name)
+
+    def draft_vs_refine_simulation(self, kind="fluid", steps=30, draft_grid=16, refine_grid=32, seed=0):
+        """MEASURE whether a coarse simulation is a draft of the fine one. Returns {draft_ms, refine_ms, speedup,
+        rel_error, converges}. **`converges` is False for a chaotic solver** -- `fluid` at grid 32 against 48 has
+        relative error 1.000 and at grid 24 has 0.669, NON-MONOTONIC. A draft render converges to its refinement; a
+        draft simulation does not. Refining a chaotic solve replaces it rather than sharpening it.
+        See holographic_realtime.draft_vs_refine_simulation."""
+        from holographic.scene_and_pipeline.holographic_realtime import draft_vs_refine_simulation as _d
+        return _d(self, kind=str(kind), steps=int(steps), draft_grid=int(draft_grid),
+                  refine_grid=int(refine_grid), seed=int(seed))
+
+    # -- agent-facing: a live Mesh handle does not survive JSON, so accept its buffers ----------------------
+    @staticmethod
+    def _as_mesh(mesh):
+        """Coerce `mesh` to a live `Mesh`. Accepts one already, or the plain data an agent can POST:
+        `{"vertices": [[x,y,z],...], "faces": [[a,b,c],...]}` or the `(vertices, faces)` pair.
+
+        THE LESSON, RE-LEARNED: a live object handle does not survive JSON serialisation, so a faculty that only
+        takes one cannot be called over `/invoke` -- and by this engine's own rule a capability an agent cannot call
+        does not exist. `emit_kernel` learned this first (the kernel is text); the mesh faculties learn it here (a
+        mesh is buffers)."""
+        import numpy as _np
+
+        from holographic.mesh_and_geometry.holographic_mesh import Mesh
+        if hasattr(mesh, "vertices") and hasattr(mesh, "faces"):
+            return mesh
+        if isinstance(mesh, dict):
+            return Mesh(_np.asarray(mesh["vertices"], float), _np.asarray(mesh["faces"], int))
+        if isinstance(mesh, (tuple, list)) and len(mesh) == 2:
+            return Mesh(_np.asarray(mesh[0], float), _np.asarray(mesh[1], int))
+        raise ValueError("expected a Mesh, {vertices, faces}, or (vertices, faces); got %r" % (type(mesh),))
+
+    @staticmethod
+    def _as_operator(op):
+        """Coerce `op` to a callable. A NAME resolves against the equivariance table's registered operators, which
+        is how an agent names an operator over JSON -- a function cannot cross the wire, and guessing one would be
+        worse than refusing."""
+        from holographic.mesh_and_geometry.holographic_equivariance import OPERATORS
+        if callable(op):
+            return op
+        if isinstance(op, str) and op in OPERATORS:
+            return OPERATORS[op]["fn"]
+        raise ValueError("op must be a callable, or the name of a registered operator (%s); got %r"
+                         % (", ".join(sorted(OPERATORS)), op))
+
+    # -- F2: the smoothest 4-RoSy cross field, and the bar that was vacuous --------------------------------
+    def cross_field(self, mesh):
+        """The smoothest 4-RoSy field on a CLOSED, ORIENTED surface: per-face angles, as the eigenvector of the
+        smallest eigenvalue of the complex connection Laplacian (Knoppel, Crane, Pinkall & Schroder, SIGGRAPH 2013).
+        It is a SOLVE, not an iteration -- Jacobi smoothing oscillates (a torus's energy fell to 2788 by 50 sweeps
+        and ROSE to 2866 by 400). Returns (phi, ctx). See holographic_crossfield.cross_field."""
+        from holographic.mesh_and_geometry.holographic_crossfield import cross_field as _cf
+        return _cf(self._as_mesh(mesh))
+
+    def field_singularities(self, mesh, phi=None):
+        """The STATELESS one-shot twin of `cross_field` + `singularity_index`: mesh in, plain data out
+        (`index`, `n_singularities`, `sum_index`, `euler`, `quarter_residual`, `energy`).
+
+        USE THIS OVER HTTP. `cross_field` returns a `ctx` whose `rho` is keyed by `(face, face)` TUPLES; serialised,
+        those become the strings `"(0, 1)"`, so the payload looks like a context and cannot be fed back --
+        `singularity_index` dies with `KeyError: (0, 1)`. An object that serialises into something that looks right
+        but cannot be used is worse than one that raises. See holographic_crossfield.field_singularities."""
+        from holographic.mesh_and_geometry.holographic_crossfield import field_singularities as _fs
+        return _fs(self._as_mesh(mesh), phi=phi)
+
+    def singularity_index(self, phi, ctx):
+        """The per-vertex singularity index, EXACTLY a multiple of 1/4. sum(index) == the Euler characteristic --
+        and that says NOTHING about the field: the matching integers are antisymmetric, so they cancel around every
+        dual edge and what remains is mesh-only. A random field satisfies it just as exactly.
+        See holographic_crossfield.singularity_index."""
+        from holographic.mesh_and_geometry.holographic_crossfield import singularity_index as _si
+        return _si(np.asarray(phi, float), ctx)
+
+    def field_report(self, mesh, phi=None, ctx=None):
+        """{lambda_min, energy, n_singularities, sum_index, euler, quarter_residual, poincare_hopf}. JUDGE A FIELD
+        BY `n_singularities` AND `energy`, not by `poincare_hopf` -- measured, the smoothest field has 49
+        singularities and energy 54.7 where a random one has 127 and 1542.2, and BOTH satisfy Poincare-Hopf
+        exactly. A bar that passes for every input is not a bar. See holographic_crossfield.field_report."""
+        from holographic.mesh_and_geometry.holographic_crossfield import field_report as _fr
+        return _fr(self._as_mesh(mesh), phi=phi, ctx=ctx)
+
+    # -- K8: dialect emitters -- one source of truth, two runtimes, no drift -------------------------------
+    def emit_kernel(self, fn, dialect="wgsl"):
+        """Emit a scalar, straight-line, float kernel into `wgsl` | `c_f64` | `c_f32` | `js` | `zig_f64` | `zig_f32`. The hand-written
+        compute shader becomes a PROJECTION of the authoritative Python kernel. K10's rule: the emitter REFUSES
+        rather than guesses -- an unannotated parameter, an unknown call, a loop, a missing return each raise with
+        the construct named. See holographic_emit.emit."""
+        from holographic.io_and_interop.holographic_emit import emit, emit_source
+        if isinstance(fn, str):
+            return emit_source(fn, dialect=str(dialect))     # the kernel is text; a string is a valid kernel
+        return emit(fn, dialect=str(dialect))
+
+    def validate_kernel(self, fn, calls, dialect="c_f64"):
+        """Compile the emitted C with `cc`, RUN it on `calls`, and compare to the Python original: {dialect, n,
+        max_abs_diff, max_rel_diff, bit_identical}. `c_f64` comes out BIT-IDENTICAL. `c_f32` cannot -- and its
+        error (2.9e-07 on an SDF) IS the tolerance a WGSL port must be judged against, because WGSL is f32 and
+        NumPy is f64. That is why `c_f32` exists: so the tolerance is MEASURED, not chosen.
+        Zig dialects (`zig_f64` / `zig_f32`) route to validate_zig -- compiled `-O ReleaseSafe` with the OPT-IN
+        `ziglang` wheel (exactly numba's contract: everything passes without it, absence reported loudly).
+        Measured: zig_f64 BIT-IDENTICAL on builtin-intrinsic kernels; std.math.pow is a declared 1-ulp negative.
+        See holographic_emit.validate_c / validate_zig."""
+        from holographic.io_and_interop.holographic_emit import validate_c, validate_zig
+        calls = [tuple(float(x) for x in c) for c in calls]
+        if str(dialect).startswith("zig"):
+            return validate_zig(fn, calls, dialect=str(dialect))
+        return validate_c(fn, calls, dialect=str(dialect))
+
+    def zig_batch_eval(self, kernel, arrays, dtype="f64", simd=0, opt="safe"):
+        """Compile a scalar kernel to a native shared library (content-hash cached, `ziglang` wheel, OPT-IN like
+        numba) and batch-evaluate it over P same-length arrays. `opt='safe'` is deterministic (f64 scalar measured
+        BIT-IDENTICAL to the NumPy evaluation); `simd=8` with dtype='f32' is the measured throughput sweet spot.
+        Returns the results as a list. First call pays ~1-2 s of compiler, then ~0 -- a one-shot small-n call is a
+        LOSS and this method does not pretend otherwise. See holographic_zigrun.ZigKernel."""
+        from holographic.io_and_interop.holographic_zigrun import ZigKernel
+        import numpy as _np
+        cols = [_np.asarray(a, dtype=float) for a in arrays]
+        return [float(x) for x in ZigKernel(kernel, dtype=str(dtype), simd=int(simd), opt=str(opt))(*cols)]
+
+    def zig_regime_map(self, kernel, sizes=(1000, 100000, 1000000), repeats=5, seed=0, simd_width=8):
+        """Z3's honest measurement: race numpy / zig scalar f64 / zig simd f32 across sizes. Every row carries the
+        baseline, the spread, and a correctness max-abs-err -- a fast wrong answer is not a result. MEASURED verdict
+        on the round-box SDF: a modest real 2-5x, peaking near n=1e5, compressing to ~2x at n=1e6 where everything
+        goes memory-bandwidth bound. No order-of-magnitude win exists and none is claimed.
+        See holographic_zigrun.regime_map."""
+        from holographic.io_and_interop.holographic_zigrun import regime_map
+        return regime_map(kernel, sizes=tuple(int(s) for s in sizes), repeats=int(repeats),
+                          seed=int(seed), simd_width=int(simd_width))
+
+    def kernel_from_description(self, text, name="scene", dialect="python"):
+        """Generate a geometry KERNEL from a controlled-vocabulary description (C3): registered parametric SDF
+        forms (sphere, rounded box, plane -- iq's exact formulae) composed with union/intersect/subtract. Returns
+        Python source, or emit-ready source in any dialect if `dialect` names one (c_f64|c_f32|wgsl|js|zig_*).
+        This is NOT free-form NL->code (an LLM's job, out of scope): outside the vocabulary it REFUSES BY NAME,
+        and colour/material words are NOTED as ignored, not silently dropped -- an SDF has no colour. Closes the
+        loop C1 opened: a generated kernel emits and re-explains. See holographic_codecompose.describe_to_kernel."""
+        from holographic.io_and_interop.holographic_codecompose import describe_to_kernel
+        src = describe_to_kernel(str(text), name=str(name))
+        if str(dialect) != "python":
+            from holographic.io_and_interop.holographic_emit import emit_source
+            return emit_source(src, str(dialect))
+        return src
+
+    def register_geometry_form(self, name, aliases, params, body_fn, purpose, citation=""):
+        """Grow C3's controlled vocabulary: register a parametric SDF form whose `body_fn(params)` returns kernel
+        lines assigning the signed distance to `$d`. Additive; real published formulae + citation (panel
+        discipline). See holographic_codecompose.register_form."""
+        from holographic.io_and_interop.holographic_codecompose import register_form
+        return register_form(str(name), tuple(aliases), dict(params), body_fn, str(purpose), str(citation))
+
+    def translate_kernel(self, src, from_dialect, to_dialect):
+        """Translate a kernel between languages -- python | c_f64 | c_f32 | wgsl | js | zig_f64 | zig_f32 --
+        through the ONE shared IR (C2), so there are no pairwise paths to drift. The bar this rides on is
+        executed, not asserted: round-trip BYTE-IDENTITY over all 144 dialect pairs in the codeparse selftest,
+        and numeric equivalence via validate_kernel for the executable dialects. Refuses, by name, anything
+        outside the kernel grammar (K10). See holographic_codeparse.translate."""
+        from holographic.io_and_interop.holographic_codeparse import translate
+        return translate(str(src), str(from_dialect), str(to_dialect))
+
+    def triage_code(self, src, as_text=False):
+        """Triage code in an UNRECOGNIZED language (C5): honest structural OBSERVATIONS -- ranked identifier word
+        pieces (camelCase/snake_case split), literal inventory, nesting profile, and a WEAK language hint with
+        its evidence -- every field checkable against the source, none claiming to know what the code does. This
+        is triage, not comprehension: mind.explain_code parses and explains languages we know; this describes
+        the ones we don't (and explain_code falls back here automatically on an unknown dialect). `as_text=True`
+        returns the prose report. See holographic_codetriage.triage."""
+        from holographic.io_and_interop.holographic_codetriage import triage, triage_report
+        return triage_report(str(src)) if as_text else triage(str(src))
+
+    def explain_code(self, src, dialect="python"):
+        """Explain source in plain English -- DETERMINISTICALLY (C1): same code, same sentences, every
+        time. Four labeled layers per function, each derived from a distinct static analysis: signature,
+        per-variable data flow (computed-from / read-count / feeds-return), a control-flow census, and an idiom
+        layer that is the ONLY one allowed to speak of purpose -- and only on a shape-catalog match (names and
+        constants blanked, so iq's rounded box with different half-extents is still recognized). An unmatched
+        function gets 'not recognized', never a guess -- but a min()/max() of registered primitives IS recognized
+        as a named union/intersection/subtraction (C6 composition layer). Returns {summary, functions, text}.
+        `dialect` extends this beyond Python (C4): pass c_f64 | c_f32 | wgsl | js | zig_f64 | zig_f32 and the
+        source is first parsed back to the shared IR (holographic_codeparse), then verbalized by the SAME
+        verbalizer -- seven languages, one explainer, no per-language twin to drift.
+        See holographic_codeverbal.verbalize."""
+        from holographic.io_and_interop.holographic_codeverbal import verbalize
+        if str(dialect) not in ("python", "c_f64", "c_f32", "wgsl", "js", "zig_f64", "zig_f32"):
+            # a language we have no parser for -> honest triage (C5), never a guessed explanation
+            from holographic.io_and_interop.holographic_codetriage import triage
+            return triage(str(src))
+        if str(dialect) != "python":
+            from holographic.io_and_interop.holographic_codeparse import parse_kernel, ParseError
+            try:
+                return verbalize(parse_kernel(str(src), str(dialect)))
+            except ParseError:
+                # in-grammar dialect but the source is outside the kernel grammar -> triage rather than refuse
+                from holographic.io_and_interop.holographic_codetriage import triage
+                return triage(str(src))
+        return verbalize(str(src))
+
+    def register_code_idiom(self, name, example_src, purpose, citation=""):
+        """Grow the idiom catalog (C6): register a purpose-recognizer by EXAMPLE -- the example function's
+        blanked AST shape becomes the matcher. Returns the shape key so a test can assert recognition
+        immediately. Additive; real published sources only in `citation` (panel discipline).
+        See holographic_codeverbal.register_idiom."""
+        from holographic.io_and_interop.holographic_codeverbal import register_idiom
+        return register_idiom(str(name), str(example_src), str(purpose), str(citation))
+
+    def register_composition_primitive(self, name, distance_expr_src):
+        """Grow C6's COMPOSITION recognizer: register a primitive by its distance EXPRESSION (e.g. a sphere's
+        'sqrt(px*px+py*py+pz*pz) - r') so that a min()/max() of such primitives is explained as a named union /
+        intersection / subtraction rather than 'not recognized'. This is what closes the describe->emit->explain
+        loop for COMPOSITE scenes. See holographic_codeverbal.register_composition_form."""
+        from holographic.io_and_interop.holographic_codeverbal import register_composition_form
+        return register_composition_form(str(name), str(distance_expr_src))
+
+    def zig_dispatch_policy(self, n, calls_expected, min_calls_to_compile=3, min_n=4096):
+        """Z5: which backend (numpy | zig) the native-kernel dispatcher would choose for arrays of length `n`
+        called `calls_expected` times, WITH the reason -- the policy is data, sized to the measured 2-5x regime
+        and the ~1-2 s first-call compile. Compose with mind.zig_batch_eval to act on the answer.
+        See holographic_zigrun.dispatch_policy (AutoKernel enforces the same policy in-process, identity-gated:
+        a native result that is not bit-identical to numpy in safe mode refuses the substitution permanently)."""
+        from holographic.io_and_interop.holographic_zigrun import dispatch_policy
+        return dispatch_policy(int(n), int(calls_expected), int(min_calls_to_compile), int(min_n))
+
+    def zig_march_compare(self, kernel=None, width=96, height=72, max_steps=96, out_dir=None):
+        """Z4's executed bar: sphere-trace the SAME rays through the engine's Python marcher and a natively
+        compiled Zig loop (same scene SDF text, shared dialect table), shade both with the SAME code, and return
+        {t_max_abs_diff, hit_flips, bit_identical, frames_byte_identical}. MEASURED verdict on the demo scene:
+        f64 BIT-IDENTICAL, frames byte-identical, zig 3.8x on 110k rays x 96 steps -- and safe-vs-fast is a wash,
+        so determinism costs nothing here. Pass out_dir to also write both PPM frames.
+        See holographic_zigmarch.render_compare."""
+        from holographic.io_and_interop.holographic_zigmarch import DEMO_SCENE, render_compare
+        return render_compare(kernel if kernel is not None else DEMO_SCENE, width=int(width),
+                              height=int(height), max_steps=int(max_steps), out_dir=out_dir)
+
+    # -- C3: canonical element + delta chain (instancing, generalised) --------------------------------------
+    def canonical_form(self, V, family="similarity"):
+        """Split an element into (canonical, delta) with `V = canonical @ A.T + b`, EXACTLY (1e-12). `family` is
+        rigid | similarity | affine, and choosing it is the whole decision: too small and nothing is recognised,
+        too large and the delta costs more than the thing it describes.
+        See holographic_canonmesh.canonical_form."""
+        from holographic.mesh_and_geometry.holographic_canonmesh import canonical_form as _cf
+        return _cf(np.asarray(V, float), family=str(family))
+
+    def recognize_elements(self, elements, family="similarity", tol=6):
+        """Instancing GENERALISED: two elements share a class when they are the same thing modulo the family's
+        deltas, not when they happen to be the same array. Returns {canonicals, instances}.
+        See holographic_canonmesh.recognize."""
+        from holographic.mesh_and_geometry.holographic_canonmesh import recognize
+        return recognize([np.asarray(V, float) for V in elements], family=str(family), tol=int(tol))
+
+    def canon_storage_report(self, elements, family="similarity", tol=6):
+        """{classes, raw_floats, total_floats, ratio, zlib_ratio, beats_zlib}. The honest baseline is zlib on the raw
+        vertex buffer, which manages ~1.04x on float64 coordinates. KEPT NEGATIVE: a TRIANGLE cannot pay -- its hull
+        is rank 2, so an affine delta is 9 floats for a 9-float triangle. The dividend scales with the ELEMENT
+        against an O(1) delta: 0.75x at 3 vertices, 143x at 2000. Per-triangle canonicalisation is a RECOGNISER, not
+        a compressor; its dividend is the C1 compute cache. See holographic_canonmesh.storage_report."""
+        from holographic.mesh_and_geometry.holographic_canonmesh import storage_report
+        return storage_report([np.asarray(V, float) for V in elements], family=str(family), tol=int(tol))
+
+    # -- the tower's CEILING: projective is not "affine plus a bit" -----------------------------------------
+    def is_affine_matrix(self, M, tol=1e-12):
+        """Does the 4x4 `M` fix the plane at infinity -- is its bottom row [0,0,0,*]? A BOOLEAN, not a tolerance on
+        a distance: a perspective that is *nearly* affine still divides, and the divide is the whole difference.
+        See holographic_projectivetower.is_affine."""
+        from holographic.mesh_and_geometry.holographic_projectivetower import is_affine
+        return is_affine(np.asarray(M, float), tol=float(tol))
+
+    def compose_word(self, chain):
+        """Compose a chain of 4x4 transforms into ONE. **A group is CLOSED, so the "word" IS a "letter"** -- drawn
+        from the same set as the generators it was built from. That is exactly why DL11's edit history collapses to
+        a single group element rather than a sequence. See holographic_projectivetower.compose_word."""
+        from holographic.mesh_and_geometry.holographic_projectivetower import compose_word as _cw
+        return _cw([np.asarray(M, float) for M in chain])
+
+    def affine_normality(self, t=(0.3, -0.7, 0.2), seed=0):
+        """**Where the transform tower's mechanism stops.** {in_affine, in_projective, conjugate_is_affine}.
+        Conjugating a translation by a ROTATION gives T(A t) to 1.1e-16 -- the ideal is normal in Aff. Conjugating
+        it by a PERSPECTIVE gives a matrix that is not a translation and NOT EVEN AFFINE. So Aff is a subgroup of
+        PGL and not a NORMAL one, and no delta can be pushed through a perspective the way it is pushed through a
+        rotation. See holographic_projectivetower.affine_normality."""
+        from holographic.mesh_and_geometry.holographic_projectivetower import affine_normality as _an
+        return _an(t=tuple(t), seed=int(seed))
+
+    def texture_projection_error(self, depths=(1.0, 4.0, 1.5), n=2000, seed=0):
+        """The ceiling, in a renderer. Interpolating (u,v) linearly in SCREEN space assumes the triangle-to-texture
+        map is affine; under perspective it is not. MEASURED at depths (1, 4, 1.5): affine max error **0.3310** --
+        a third of the texture -- against **2.2e-16** for the homogeneous (u/w, v/w, 1/w) divide. The extra `q` is
+        not another letter in the alphabet; it is an extra COORDINATE that enlarges the space the alphabet acts on,
+        and by doing so breaks the affine group's normality. See holographic_projectivetower.texture_projection_error."""
+        from holographic.mesh_and_geometry.holographic_projectivetower import texture_projection_error as _te
+        return _te(depths=tuple(depths), n=int(n), seed=int(seed))
+
+    # -- the transform TOWER: which layer of the affine group a thing lives in -----------------------------
+    def classify_transform(self, fn, dim=3, n=64, tol=1e-9, seed=0):
+        """**THE ONE ENTRY POINT: which floor of the transform tower is this on?** Give it any callable on points;
+        it MEASURES and returns {layer, name, diagonalisable, bankable, delta_pushable, why}.
+
+        1 = translation (the abelian ideal): one Fourier spectrum represents it, so it is a bind and it goes in a
+        TransformBank. 2 = rotation / shear (the sl(n) peers): not a bind, but a delta still pushes through by
+        conjugation, because the ideal is NORMAL. 3 = scale (the centre of GL): commutes with the whole linear part
+        and not with translation. 4 = beyond the affine ceiling (projective, or not a group action): NO delta pushes
+        through, because Aff is not normal in PGL.
+
+        `delta_pushable` is the question the tower exists to answer -- it is `shade_adjoint`'s licence, DL11's
+        closure, and the equivariance table's shape, in one boolean. See holographic_grouptower.classify_transform."""
+        from holographic.mesh_and_geometry.holographic_grouptower import classify_transform as _ct
+        return _ct(fn, dim=int(dim), n=int(n), tol=float(tol), seed=int(seed))
+
+    def hypervector_layer(self):
+        """**A hypervector used as an operator is ALWAYS the abelian ideal, and the algebra forbids anything else.**
+        `bind` is a circular convolution, hence commutative; a convolution algebra can only represent an abelian
+        group. `Hypervector.transform_layer()` says the same thing on the object.
+        See holographic_grouptower.hypervector_layer."""
+        from holographic.mesh_and_geometry.holographic_grouptower import hypervector_layer as _hl
+        return _hl()
+
+    def commutator_table(self):
+        """Every claim of the transform tower, as a number. `Aff(n) = GL(n) |x| R^n`: translations are the abelian
+        IDEAL ([T,T'] = 0), scale is CENTRAL in the linear part ([S,R] = [S,Sh] = 0) and NOT in the affine group
+        ([S,T] = 0.49, because it acts on the ideal), and rotation-vs-shear are non-commuting PEERS ([R,Sh] = 0.23).
+        In 2-D the rotations commute with each other -- SO(2) is abelian -- so the peers only become
+        rotation-vs-rotation in 3-D ([Rx,Ry] = 0.50). See holographic_grouptower.commutator_table."""
+        from holographic.mesh_and_geometry.holographic_grouptower import commutator_table
+        return commutator_table()
+
+    def semidirect_law(self, linear, t):
+        """`max |A T(t) A^-1 - T(A t)|` -- zero, because the ideal is NORMAL. **One line, three costumes**: it is
+        `shade_adjoint`'s 'push the delta onto the other operand'; it is why DL11's affine chain collapses to one
+        group element; and it is why the equivariance table has the shape it has.
+        See holographic_grouptower.semidirect_law."""
+        from holographic.mesh_and_geometry.holographic_grouptower import semidirect_law as _sl
+        return float(_sl(np.asarray(linear, float), np.asarray(t, float)))
+
+    def is_diagonalisable(self, transform, seed=0):
+        """Can ONE Fourier spectrum represent `transform`? Fit it on an encoded point, apply to another, return the
+        relative error. Near zero -> it is a BIND and belongs in a TransformBank. **Only the abelian IDEAL is
+        diagonalisable**, because a convolution algebra is commutative: translation 3.8e-16, rotation 5.4e-01,
+        scale 1.3e-01. See holographic_grouptower.diagonalisable."""
+        from holographic.mesh_and_geometry.holographic_grouptower import diagonalisable
+        return float(diagonalisable(transform, seed=int(seed)))
+
+    def mellin_promotes_scale(self, n=1024, s=1.4, seed=0):
+        """**A layer you cannot diagonalise, you relocate.** On a LOG axis a dilation becomes a translation, joins
+        the abelian ideal, and becomes a bind. Returns {linear_axis, log_axis} relative errors: ~2.8 against 1e-15.
+        That is Reddy-Chatterji, and `mellin_scale` is the engine's use of it.
+        See holographic_grouptower.mellin_promotes_scale."""
+        from holographic.mesh_and_geometry.holographic_grouptower import mellin_promotes_scale as _mp
+        return _mp(n=int(n), s=float(s), seed=int(seed))
+
+    # -- a prebuilt map of hypervector transforms: a group representation, not a lookup table ----------------
+    def transform_bank(self, dim=None, seed=0):
+        """A prebuilt map of named hypervector transforms, held as their Fourier spectra. `add_random_unitary`,
+        `add_rotation(k)`, `apply`, `apply_batch`, `apply_chain`, `power`, `inverse_spectrum`, `stats`.
+
+        CACHING A SPECTRUM SAVES 28% (1.42x). **COMPOSITION IS THE PAYOFF**: circular convolution is diagonal in the
+        Fourier basis, so a CHAIN of k transforms is the PRODUCT of their spectra and collapses into ONE bind --
+        13.5x on a chain of 8, exact to 5.7e-17. SCALE IS NOT IN THE BANK: a dilation is not shift-invariant, so no
+        spectrum represents it (fit one on a vector, apply it to another: relative error 1.579). That is DL11's
+        finding; the Mellin lift makes scale a SHIFT on a log axis, which is a different bank over a different axis.
+        See holographic_transformbank.TransformBank."""
+        from holographic.caching_and_storage.holographic_transformbank import TransformBank
+        return TransformBank(int(dim if dim is not None else self.dim), seed=int(seed))
+
+    def scale_is_not_a_bind(self, dim=256, s=1.5, seed=0):
+        """MEASURE, do not assume, that a dilation is not diagonal in the Fourier basis: fit its 'spectrum' on one
+        vector, apply it to another, return the relative error. 1.579 -- the wrong object, not a lossy fit.
+        See holographic_transformbank.scale_is_not_a_bind."""
+        from holographic.caching_and_storage.holographic_transformbank import scale_is_not_a_bind as _s
+        return float(_s(dim=int(dim), s=float(s), seed=int(seed)))
+
+    # -- C1/C4: the dependency-key layer -- key on what the operator READS ----------------------------------
+    def delta_cache(self, op, canonical, policy="read_set", op_name=None, transform_family=None):
+        """A cache whose key is (operator, canonical class, the delta-IDs the operator READS). A material delta
+        cannot change a geometric quantity, so it never enters the key. `policy="equivariant"` additionally drops the
+        shape delta when the operator is MEASURED invariant under that delta's family (see mind.equivariance_table).
+        REFUSES a non-deterministic evaluator -- a cache serves its first draw forever while the uncached path keeps
+        drawing (backlog D1/C4). See holographic_deltacache.DeltaCache."""
+        from holographic.caching_and_storage.holographic_deltacache import DeltaCache
+        return DeltaCache(op, np.asarray(canonical, float), policy=str(policy),
+                          op_name=op_name, transform_family=transform_family)
+
+    def delta_cache_report(self, op, canonical, scene, deltas, op_name=None, transform_family=None):
+        """Every keying policy against the brute baseline: {policy: {computes, speedup, max_abs_diff,
+        bit_identical}}. MEASURED on 400 triangles (rotations x materials): brute 400 computes, read_set 50 (8.0x,
+        BIT-IDENTICAL), equivariant 1 (400x). KEPT NEGATIVE: the equivariant path is NOT bit-identical (8.3e-17) --
+        rotating a triangle and re-integrating accumulates round-off the canonical evaluation never incurs, so the
+        CACHE is the one that is right, and `max_abs_diff` is reported rather than a boolean.
+        See holographic_deltacache.cache_report."""
+        from holographic.caching_and_storage.holographic_deltacache import cache_report
+        return cache_report(self._as_operator(op), np.asarray(canonical, float), list(scene), list(deltas),
+                            op_name=op_name, transform_family=transform_family)
+
+    def evaluate_elements(self, elements, op, op_name, family="similarity", tol=6):
+        """**Part C, end to end.** Hand it RAW point sets with no shape ids: `canonmesh.recognize` derives the
+        canonical classes (C3), `equivariance_table` says what the operator reads (C2), and the cache keys on that
+        (C1). Returns (values, {classes, computes, verdict, family}). MEASURED on 200 raw triangles from 5 base
+        shapes: `area` under `similarity` is 5 classes, 5 computes, exact to 1.4e-14 -- 40x. A COMPOSITE FAMILY'S
+        VERDICT IS THE WEAKEST OF ITS PARTS (`area` is invariant under `rigid`, equivariant under `similarity`,
+        because a uniform scale moves it), and RECOGNITION ALONE IS NOT ENOUGH: reusing the canonical's area
+        directly under `similarity` is wrong by 8.54. See holographic_deltacache.evaluate_elements."""
+        from holographic.caching_and_storage.holographic_deltacache import evaluate_elements as _ee
+        return _ee([np.asarray(e, float) for e in elements], self._as_operator(op), str(op_name),
+                   family=str(family), tol=int(tol))
+
+    def family_verdict(self, op_name, family):
+        """The verdict for a composite canonicalisation family (`rigid` | `similarity` | `affine`): the WEAKEST of
+        its elementary parts, each measured by `classify_equivariance`. Taking the strongest instead would produce a
+        cache that reuses a value the delta actually changed. See holographic_deltacache.family_verdict."""
+        from holographic.caching_and_storage.holographic_deltacache import family_verdict as _fv
+        return _fv(str(op_name), str(family))
+
+    def is_deterministic(self, fn, sample, trials=3):
+        """Does `fn` return a bit-identical result for a repeated input? The gate a cache needs, and D1's
+        coordinate-keyed-sampling rule one level up. See holographic_deltacache.is_deterministic."""
+        from holographic.caching_and_storage.holographic_deltacache import is_deterministic as _id
+        return bool(_id(fn, sample, trials=int(trials)))
+
+    # -- DL11: canonical affine recovery (Fourier-Mellin coarse + continuous refine) ------------------------
+    def recover_affine(self, before, after, refine=True):
+        """Recover the canonical (S, T) of an arbitrary translate/scale edit history: `after(x) = before((x-T)/S)`.
+        A chain of such edits does not commute, but it CLOSES -- every order collapses to some single group element,
+        which is the recoverable object. Coarse Fourier-Mellin (|FFT| kills the translation; a log-frequency
+        resample turns the dilation into a SHIFT, and the estimator is `est_dx` again) then a shrinking-grid refine
+        on the (s, t) manifold. Returns {scale, shift, alignment, coarse_scale}. MEASURED: 3.7e-04 scale error on a
+        4-edit chain at alignment 0.9995. See holographic_registration.recover_affine."""
+        from holographic.sampling_and_signal.holographic_registration import recover_affine as _ra
+        return _ra(np.asarray(before, float), np.asarray(after, float), refine=bool(refine))
+
+    def affine_compose(self, chain):
+        """Collapse a chain of (s, t) edits into ONE canonical (S, T) by the affine group law -- exact, not an
+        approximation. `x -> s2(s1 x + t1) + t2 = (s2 s1) x + (s2 t1 + t2)`. Order changes WHICH (S, T) you get;
+        every order gives some single (S, T). See holographic_registration.affine_compose."""
+        from holographic.sampling_and_signal.holographic_registration import affine_compose as _ac
+        return _ac(list(chain))
+
+    def mellin_scale(self, before, after, use_log=True):
+        """Recover the DILATION alone, via the Fourier-Mellin lift. KEPT NEGATIVE: the SUPPORT BAND is the gate,
+        not log-vs-plain. A constant amplitude factor cannot move a correlation's argmax (verified), so the
+        backlog's stated reason for log magnitudes is not the operative one -- but on a narrowband spectrum `log`
+        amplifies the noise floor and the peak pins at zero shift for every true scale.
+        See holographic_registration.mellin_scale."""
+        from holographic.sampling_and_signal.holographic_registration import mellin_scale as _ms
+        return float(_ms(np.asarray(before, float), np.asarray(after, float), use_log=bool(use_log)))
+
+    # -- F1: LSCM -- the angle-preserving unwrap, and the metric that sees folds -----------------------------
+    def mesh_lscm(self, mesh, pins=None):
+        """LEAST-SQUARES CONFORMAL MAP (Levy et al., SIGGRAPH 2002): the angle-preserving unwrap, as ONE linear
+        least-squares solve on the mesh -- no iteration, no autodiff. Exact on a developable surface (quasi-conformal
+        ratio 1.000000) and best on angle everywhere measured. KEPT NEGATIVE: it buys angles with AREA (0.4420 spread
+        on a hemisphere cap against isomap's 0.2957) and it does not guarantee a FOLD-FREE map. See
+        holographic_meshuv.lscm."""
+        from holographic.mesh_and_geometry.holographic_meshuv import lscm
+        return lscm(self._as_mesh(mesh), pins=pins)
+
+    def mesh_uv_angle_distortion(self, mesh, uv):
+        """The metric LSCM optimises: per-face quasi-conformal ratio sigma1/sigma2. Returns {mean, median, max,
+        flipped, n_faces}; 1.0 is conformal. **Report the MEDIAN** -- the mean is unbounded (one near-degenerate
+        face sends it to infinity: 398.0 mean against a 4.8 median on a stretched cap). **And report `flipped`** --
+        neither the stretch metric nor the mean ratio can see a FOLD, and a fold is a MINORITY orientation, not a
+        negative determinant (a globally mirrored chart has every det < 0 and no folds at all).
+        See holographic_meshuv.uv_angle_distortion."""
+        from holographic.mesh_and_geometry.holographic_meshuv import uv_angle_distortion
+        return uv_angle_distortion(self._as_mesh(mesh), np.asarray(uv, float))
+
+    def mesh_uv_area_distortion(self, mesh, uv):
+        """The log-spread of (UV face area / 3-D face area); 0 = area-preserving. The price a conformal map pays.
+        See holographic_meshuv.uv_area_distortion."""
+        from holographic.mesh_and_geometry.holographic_meshuv import uv_area_distortion
+        return uv_area_distortion(self._as_mesh(mesh), np.asarray(uv, float))
+
+    def mesh_uv_report(self, mesh, methods=("lscm", "isomap", "planar")):
+        """Every chart on every metric -- {method: {angle, area, stretch}} -- so nobody compares two charts on a
+        functional only one of them optimises. See holographic_meshuv.uv_report."""
+        from holographic.mesh_and_geometry.holographic_meshuv import uv_report
+        return uv_report(self._as_mesh(mesh), methods=tuple(methods))
+
+    # -- F8: the brain/muscle format contract -- rank-ordered TT cores as a progressive LOD stream ----------
+    def stream_encode(self, X, tol=1e-10, max_rank=None):
+        """Encode a field as a PROGRESSIVE payload: {descriptor, levels}. Every byte prefix is itself a valid,
+        coarser field. The descriptor is plain data a front end reads BEFORE fetching: shape, dtype, full_ranks,
+        per-level `bytes`, `rel_rms`, `rel_max`, and `monotone_in`. That is the whole contract -- the brain
+        publishes what each prefix costs and what it is worth; the muscle chooses.
+        See holographic_stream.stream_encode."""
+        from holographic.io_and_interop.holographic_stream import stream_encode as _se
+        return _se(np.asarray(X, float), tol=float(tol), max_rank=max_rank)
+
+    def stream_decode(self, payload, level=-1):
+        """Reconstruct the field from one level. Every level decodes to the FULL shape -- a coarse level is a
+        SMOOTHED field, not a small one. Rank is not resolution. See holographic_stream.stream_decode."""
+        from holographic.io_and_interop.holographic_stream import stream_decode as _sd
+        return _sd(payload, level=int(level))
+
+    def stream_prefix(self, payload, max_bytes):
+        """The richest level that fits in `max_bytes`, or None. Decided from the descriptor alone.
+        See holographic_stream.stream_prefix."""
+        from holographic.io_and_interop.holographic_stream import stream_prefix as _sp
+        return _sp(payload, int(max_bytes))
+
+    def stream_report(self, X, payload):
+        """The ladder, with both norms: {levels, monotone_rms, monotone_max, dense_bytes, best_ratio_at_10pct}.
+        THE GUARANTEE IS IN RMS, not max-abs: TT truncation is Frobenius-optimal, so adding a rank always lowers
+        the L2 error and can still make one voxel worse -- measured, the max-abs error rises at 4 of 15 levels on
+        white noise while the RMS falls at every one. A progressive format must publish which norm its monotonicity
+        is in. See holographic_stream.stream_report."""
+        from holographic.io_and_interop.holographic_stream import stream_report as _sr
+        return _sr(np.asarray(X, float), payload)
+
+    # -- C2: the equivariance table -- the whole cache policy, measured not declared -------------------------
+    def equivariance_table(self, trials=12, tol=1e-9, seed=0):
+        """MEASURE which of {invariant, equivariant, recompute} holds for each (operator, affine family) pair.
+        Returns {operator: {transform: verdict}}. Regenerate it on your box; a table that cannot re-measure itself
+        is a rumour. See holographic_equivariance.equivariance_table."""
+        from holographic.mesh_and_geometry.holographic_equivariance import equivariance_table as _et
+        return _et(trials=int(trials), tol=float(tol), seed=int(seed))
+
+    def cache_policy(self, op_name, transform, trials=12, tol=1e-9, seed=0):
+        """The cache-key consequence of the verdict: {verdict, key_includes_delta, read_set, note}. `invariant`
+        means the delta leaves the key entirely; `equivariant` means one compute per canonical class, but the law
+        needs the operator's READ-SET cached alongside it -- and every non-rigid law here reads the NORMAL.
+        See holographic_equivariance.cache_policy."""
+        from holographic.mesh_and_geometry.holographic_equivariance import cache_policy as _cp
+        return _cp(str(op_name), str(transform), trials=int(trials), tol=float(tol), seed=int(seed))
+
+    def classify_equivariance(self, op_name, transform, trials=12, tol=1e-9, seed=0):
+        """The strongest verdict that holds, measured. A `recompute` result means the REGISTERED law failed -- which
+        may mean no law exists, or that the law is wrong. Two cells of this table read `recompute` until the laws
+        were derived properly: when you see recompute, derive before you believe.
+        See holographic_equivariance.classify."""
+        from holographic.mesh_and_geometry.holographic_equivariance import classify as _c
+        return _c(str(op_name), str(transform), trials=int(trials), tol=float(tol), seed=int(seed))
+
+    def shade_adjoint(self, tri, light, A):
+        """The ADJOINT move done correctly for ANY affine: shade(A x, L) == max(0, n . (A^-1 L) / ||A^-T n||).
+        Part C states it as 'unrotate the light', shade(A x, L) == shade(x, A^-1 L) -- exact for a ROTATION
+        (3.9e-16) and wrong for everything else, including a plain uniform scale, by 0.38. The factor above is what
+        the naive statement drops. See holographic_equivariance.shade_adjoint."""
+        from holographic.mesh_and_geometry.holographic_equivariance import shade_adjoint as _sa
+        return _sa(np.asarray(tri, float), np.asarray(light, float), np.asarray(A, float))
+
+    # -- F4: the cloud stack -- the closed form pays on the SHADOW ray ---------------------------------------
+    def cloud_transmittance(self, volume, O, D, L, sigma_t=1.0):
+        """Beer-Lambert transmittance exp(-sigma_t * tau) with `tau` from ONE closed-form integral -- O(1) in march
+        steps, because there are none. `L` is scalar or PER-RAY (R,), and it matters: a shadow ray's length to the
+        medium boundary varies per sample, and passing a median instead costs three orders of magnitude of accuracy.
+        See holographic_cloud.transmittance."""
+        from holographic.rendering.holographic_cloud import transmittance as _t
+        return _t(volume, np.asarray(O, float), np.asarray(D, float), L, sigma_t=float(sigma_t))
+
+    def cloud_single_scatter(self, volume, O, D, L, sun_dir, ceiling, view_steps=32, shadow_steps=0,
+                             sigma_t=1.0, sigma_s=0.9, g=0.4):
+        """Single-scattered radiance, returning (radiance, density_evals). The VIEW ray must march -- its integrand
+        contains the transmittance being accumulated -- but every SHADOW ray is one closed-form integral.
+        MEASURED (64 rays, 32 view steps): 32 density evaluations against a 64-step marched shadow's 2,080 -- 65x
+        fewer, 52x faster, and 13x MORE accurate (3.03e-07 vs 3.94e-06), because the closed form is the exact
+        integral and the march is the one carrying error. See holographic_cloud.single_scatter."""
+        from holographic.rendering.holographic_cloud import single_scatter as _ss
+        return _ss(volume, np.asarray(O, float), np.asarray(D, float), float(L), sun_dir, float(ceiling),
+                   view_steps=int(view_steps), shadow_steps=int(shadow_steps),
+                   sigma_t=float(sigma_t), sigma_s=float(sigma_s), g=float(g))
+
+    def cloud_report(self, volume, O, D, L, sun_dir, ceiling, view_steps=32, reference_shadow_steps=64):
+        """The bar, carried with the capability: {evals_closed, evals_reference, eval_ratio, max_error, mean_error}.
+        The reference is a HEAVILY marched shadow -- a coarse one would flatter the closed form by being wrong in the
+        same direction. See holographic_cloud.cloud_report."""
+        from holographic.rendering.holographic_cloud import cloud_report as _cr
+        return _cr(volume, np.asarray(O, float), np.asarray(D, float), float(L), sun_dir, float(ceiling),
+                   view_steps=int(view_steps), reference_shadow_steps=int(reference_shadow_steps))
+
+    # -- F3: the points -> SDF -> mesh path (the inverse of sdf_surface_points) -----------------------------
+    def sdf_from_points(self, points, normals, lo, hi, res, chunk=4096):
+        """A signed distance grid from an ORIENTED point cloud: distance to the nearest sample, signed by that
+        sample's normal. ACCURACY IS SET BY THE CLOUD, NOT THE GRID -- the near-surface error tracks the sample
+        spacing at ~1.3-1.7x, so refining the grid under a sparse cloud buys nothing. `chunk` bounds the distance
+        matrix; without it a 24^3 grid against 9,600 points allocates 133M floats and the process is killed.
+        See holographic_isosurface.sdf_from_points."""
+        from holographic.mesh_and_geometry.holographic_isosurface import sdf_from_points as _sp
+        return _sp(np.asarray(points, float), np.asarray(normals, float), lo, hi, int(res), chunk=int(chunk))
+
+    def surface_nets(self, field, grids, iso=0.0):
+        """DUAL isosurface extraction: (vertices, quads) from a scalar field. One vertex per sign-changing cell at
+        the mean of its edge crossings; one quad per sign-changing grid edge. A closed surface comes out WATERTIGHT.
+        HONEST SCOPE: naive surface nets, not Dual Contouring -- averaging the crossings rounds off SHARP features,
+        which DC's QEF solve recovers. Smooth surfaces only. See holographic_isosurface.surface_nets."""
+        from holographic.mesh_and_geometry.holographic_isosurface import surface_nets as _sn
+        return _sn(np.asarray(field, float), list(grids), iso=float(iso))
+
+    def points_to_mesh(self, points, normals, lo, hi, res, chunk=4096):
+        """The whole path: oriented points -> SDF grid -> watertight quad mesh. Returns (verts, quads, field, grids)
+        so the intermediate field can be inspected rather than trusted. MEASURED on a unit sphere (600 samples,
+        32^3 grid, cell 0.1032): 1,804 verts, 1,802 quads, watertight, max vertex error 0.0454 = 0.44 cells -- and
+        the MESH is 4.7x more accurate than the FIELD it came from, because averaging the twelve edge crossings
+        cancels per-sample noise. See holographic_isosurface.points_to_mesh."""
+        from holographic.mesh_and_geometry.holographic_isosurface import points_to_mesh as _pm
+        return _pm(np.asarray(points, float), np.asarray(normals, float), lo, hi, int(res), chunk=int(chunk))
+
+    def mesh_is_oriented(self, quads):
+        """Is every DIRECTED edge traversed exactly once? The property a half-edge structure, a normal, and any
+        field solver actually need -- and the one `watertight` cannot see. A watertight-but-unoriented mesh has each
+        undirected edge in two faces that wind the SAME way, so half its normals point inward.
+        See holographic_isosurface.is_oriented."""
+        from holographic.mesh_and_geometry.holographic_isosurface import is_oriented
+        return bool(is_oriented(np.asarray(quads, int)))
+
+    def mesh_report(self, vertices, quads, sdf=None):
+        """{n_vertices, n_quads, watertight, euler, surface_error}. The honest baseline for `surface_error` is the
+        CELL SIZE -- a dual extractor cannot place a vertex better than the cell it lives in.
+        See holographic_isosurface.mesh_report."""
+        from holographic.mesh_and_geometry.holographic_isosurface import mesh_report as _mr
+        return _mr(np.asarray(vertices, float), np.asarray(quads, int), sdf=sdf)
+
+    # -- B1: fill the gaps in a field (harmonic / majority, dispatched on type) -----------------------------
+    def inpaint(self, field, known, kind="auto", periodic=False):
+        """Fill the unknown cells of a field. `known` is a boolean mask, True where the value is trusted.
+        `kind="auto"` sends an integer array to a majority vote and a float array to a harmonic (Laplace) solve --
+        a discrete field has no mean, so averaging it is a category error.
+
+        MEASURED (48x48, 59% erased, 8 seeds): harmonic MAE 0.0015 mean; majority accuracy 0.9653 mean, and 0.9990
+        in region interiors -- nearly all the error is boundary error. THE BOUNDARY CONDITION IS THE GATE:
+        `periodic=False` (edge-clamped) is the default, because wrapping a non-periodic field with np.roll solves a
+        different problem and costs 5.4x. See holographic_inpaint.inpaint."""
+        from holographic.sampling_and_signal.holographic_inpaint import inpaint as _ip
+        return _ip(np.asarray(field), np.asarray(known, bool), kind=kind, periodic=periodic)
+
+    def harmonic_fill(self, field, known, periodic=False, iters=2000, tol=1e-9):
+        """Fill a CONTINUOUS field's holes by a Laplace solve: each hole relaxes to the mean of its four neighbours,
+        known cells pinned bit-for-bit. The minimal-energy interpolant. See holographic_inpaint.harmonic_fill."""
+        from holographic.sampling_and_signal.holographic_inpaint import harmonic_fill as _hf
+        return _hf(np.asarray(field, float), np.asarray(known, bool), periodic=periodic, iters=iters, tol=tol)
+
+    def majority_fill(self, labels, known, periodic=False, iters=1000):
+        """Fill a CATEGORICAL field's holes by neighbour vote, one ring per sweep. Ties break toward the lowest
+        label index -- stated, not accidental. See holographic_inpaint.majority_fill."""
+        from holographic.sampling_and_signal.holographic_inpaint import majority_fill as _mf
+        return _mf(np.asarray(labels), np.asarray(known, bool), periodic=periodic, iters=iters)
+
+    def fill_report(self, truth, filled, known):
+        """Score a fill ON THE HOLES ONLY: {n_holes, hole_fraction, mae, accuracy}. Scoring the known cells would
+        flatter every method equally. See holographic_inpaint.fill_report."""
+        from holographic.sampling_and_signal.holographic_inpaint import fill_report as _fr
+        return _fr(np.asarray(truth), np.asarray(filled), np.asarray(known, bool))
+
+    # -- F7: frame-to-frame motion by ONE UNBIND (TAA's reprojection velocity) ------------------------------
+    def est_dx(self, a, b, normalize=False, subpixel=True):
+        """The (dy, dx) translation of frame `b` relative to `a`, recovered by ONE unbind: cross-correlation in the
+        Fourier domain is `conj(F(a)) * F(b)`, and its peak is the shift. Sub-pixel by parabolic interpolation.
+        MEASURED on a real rendered frame warped by a known amount: 0.0705 px mean, 0.1087 px worst.
+        KEPT NEGATIVE: `normalize=True` (textbook PHASE correlation) is 2.3x WORSE at sub-pixel -- it sharpens the
+        peak toward a delta, which a parabola cannot fit. See holographic_reproject.est_dx."""
+        from holographic.rendering.holographic_reproject import est_dx as _e
+        return _e(np.asarray(a, float), np.asarray(b, float), normalize=normalize, subpixel=subpixel)
+
+    def reproject(self, a, b, tile=None):
+        """Predict frame `b` from frame `a` by warping it with the recovered motion. `tile=None` uses one global
+        shift; an int uses a per-tile field. MEASURED on real 192x192 frames: a lateral pan gives 40.46 dB global
+        against 36.67-40.67 dB tiled (tiling LOSES), while a dolly gives 34.82 dB global against 37.43 dB at tile 48
+        (tiling WINS). Tiling pays only on a non-uniform flow field. See holographic_reproject.reproject."""
+        from holographic.rendering.holographic_reproject import reproject as _r
+        return _r(np.asarray(a, float), np.asarray(b, float), tile=tile)
+
+    def reproject_report(self, a, b, tiles=(32, 48, 64)):
+        """The comparison carried WITH the capability: {no_warp, global, tiled, uniformity, best}. `no_warp` is the
+        honest baseline. `best` needs the TRUE next frame, so this is an OFFLINE mode-chooser, not a runtime gate --
+        at runtime the camera knows how it moved. KEPT NEGATIVE: the per-tile shift SPREAD does not separate the
+        regimes (a pure translation has the largest spread and global still wins by 22 dB), so F7's 'one unbind per
+        tile INSTEAD of motion vectors from geometry' does not hold. See holographic_reproject.reproject_report."""
+        from holographic.rendering.holographic_reproject import reproject_report as _rr
+        return _rr(np.asarray(a, float), np.asarray(b, float), tiles=tuple(tiles))
+
+    # -- K1/K2: code as canonical shape + name delta (exact decomposition, not a compressor) ----------------
+    def code_decompose(self, node_or_src):
+        """Split a statement into (shape_template, delta): the AST with every identity slot blanked, and the ordered
+        names/attributes/constants that were in them. Part C's triangle, applied to code. MEASURED: 63,121 of 63,121
+        statement subtrees across 421 modules reconstruct bit-exactly. See holographic_codestructure.decompose."""
+        import ast as _ast
+        from holographic.io_and_interop.holographic_codestructure import decompose
+        node = _ast.parse(node_or_src).body[0] if isinstance(node_or_src, str) else node_or_src
+        return decompose(node)
+
+    def code_recompose(self, template, delta):
+        """The exact inverse of code_decompose. Raises on a delta of the wrong length -- a silent short-read would
+        produce plausible, wrong code. See holographic_codestructure.recompose."""
+        from holographic.io_and_interop.holographic_codestructure import recompose
+        return recompose(template, list(delta))
+
+    def code_structure(self, src):
+        """A module's top-level statements as (codebook, stream): shape_key -> template, and [(key, delta), ...].
+        `mind.code_rebuild` inverts it -- MEASURED, 421/421 modules rebuild to a byte-identical normalized source.
+        See holographic_codestructure.module_structure."""
+        from holographic.io_and_interop.holographic_codestructure import module_structure
+        return module_structure(str(src))
+
+    def code_rebuild(self, codebook, stream):
+        """Rebuild normalized source from (codebook, stream). "Normalized" is precise, not a hedge: `ast.unparse` is
+        a FIXED POINT on all 421 modules here and the reparsed AST is identical, so only formatting and comments --
+        which the AST never carried -- are discarded. See holographic_codestructure.rebuild_source."""
+        from holographic.io_and_interop.holographic_codestructure import rebuild_source
+        return rebuild_source(codebook, list(stream))
+
+    def code_shape_census(self, src):
+        """{statements, distinct_kept, distinct_erased, reuse_kept, reuse_erased, singleton_fraction} over a source's
+        STATEMENT subtrees -- the unit the backlog's 2.36x is measured on (this tree: 2.34x erased vs 1.19x kept,
+        83.2% singletons). At FUNCTION granularity the same census reads 1.13x. State the unit with the number.
+        See holographic_codestructure.shape_census."""
+        from holographic.io_and_interop.holographic_codestructure import shape_census, statements
+        return shape_census(statements(str(src)))
+
+    def code_byte_report(self, src):
+        """The codec comparison, carried WITH the capability: {raw, zlib_raw, codebook_bytes, delta_bytes,
+        structure_bytes, ratio_vs_zlib, beats_zlib}. On the whole tree the structure is 1.12x LARGER than zlib --
+        an exact decomposition is not a compressor, and 83.2% of shapes occur exactly once.
+        See holographic_codestructure.byte_report."""
+        from holographic.io_and_interop.holographic_codestructure import byte_report
+        return byte_report(str(src))
+
+    # -- K3: content-keyed memoization of PURE functions (the purity gate is the point) ---------------------
+    def memoize_pure(self, fn, cache=None, maxsize=128):
+        """Memoize `fn` on (its exact canonical source, its arguments) -- and REFUSE if `fn` is not pure.
+        `is_pure` rejects the clock, RNG, IO, global writes, and transitive impurity, so the cache cannot return a
+        stale answer. Measured 36x on a repeated 256x256 SVD, bit-identical.
+
+        KEYED ON THE EXACT SOURCE, NOT ON A CANONICAL SHAPE. The backlog calls this "shape-keyed memoization"; a
+        shape erases constants, so `x + 1` and `x + 2` share one and would share a cache entry. KEPT NEGATIVE: the
+        key costs O(input bytes) -- fingerprinting a 512x512 array costs 1.747 ms while `A.sum()` costs 0.084 ms,
+        so a cheap function of a large array LOSES 21x. See holographic_pycontext.memoize_pure."""
+        from holographic.io_and_interop.holographic_pycontext import memoize_pure as _mp
+        return _mp(fn, cache=cache, maxsize=int(maxsize))
+
+    def canonical_shape(self, fn_or_src, name=None):
+        """The structural fingerprint of a function -- node types and nesting depth, identifiers and constants
+        ERASED. A COMPRESSION primitive, never a cache key: `x + 1` and `x + 2` share a shape. Measured reuse: 1.13x
+        at FUNCTION granularity and 2.34x at STATEMENT granularity -- the backlog's 2.36x is the statement number and
+        it reproduces. State the unit with the number. See holographic_pycontext.canonical_shape and
+        holographic_codestructure.shape_census."""
+        from holographic.io_and_interop.holographic_pycontext import canonical_shape as _cs
+        return _cs(fn_or_src, name=name)
+
+    # -- G2: the GENERIC scatter -- any rank, any kernel, exact on demand ------------------------------------
+    def scatter(self, points, values, shape, kernel="bilinear", periodic=False):
+        """SCATTER = the BUNDLE: deposit each point's value onto a grid of any RANK through a kernel. `points`
+        (N, D) in grid-cell units, `values` (N,) or (N, C). Rank-agnostic (verified 1-D through 4-D), mass
+        preserving (a partition-of-unity kernel's weights sum to 1), `periodic=False` clamps at the edges.
+
+        `kernel="nearest"` is the GPU's scatter -- an atomic add at an index, ties rounding up -- and scattering
+        ones at integer coordinates IS `np.bincount`. `scatter_to_field` / `scatter_to_field_3d` are the graphics
+        doors onto this same function. See holographic_transfer.scatter."""
+        from holographic.misc.holographic_transfer import scatter as _sc
+        return _sc(np.asarray(points, float), np.asarray(values, float), tuple(shape),
+                   kernel=kernel, periodic=periodic)
+
+    def scatter_exact(self, points, values, shape, kernel="bilinear", periodic=False, bits=40):
+        """`scatter`, PERMUTATION-INVARIANT: the grid is bit-identical however the points are ordered or split.
+
+        A scatter is a REDUCE PER CELL, and `np.add.at` accumulates in point order -- so a float scatter of the same
+        points in a different order gives a different grid. MEASURED, 4,000 points onto 16x16 with weights spanning
+        16 orders of magnitude: the float scatter differs by 1.12e-08 under a permutation; this does not differ at
+        all. With `kernel="nearest"` it is a permutation-invariant HISTOGRAM (float: 9.31e-09).
+        See holographic_transfer.scatter_exact."""
+        from holographic.misc.holographic_transfer import scatter_exact as _se
+        return _se(np.asarray(points, float), np.asarray(values, float), tuple(shape),
+                   kernel=kernel, periodic=periodic, bits=int(bits))
+
+    def gather(self, grid, points, kernel="bilinear", periodic=False):
+        """GATHER: sample a grid of any rank at continuous `points`, through the SAME kernel `scatter` deposits
+        with -- which is what makes them adjoint. See holographic_transfer.gather."""
+        from holographic.misc.holographic_transfer import gather as _g
+        return _g(np.asarray(grid, float), np.asarray(points, float), kernel=kernel, periodic=periodic)
+
+    # -- G1: the shader algebra doing non-graphics work (the heat propagator as a Pipeline) -----------------
+    def diffusion_operator(self, shape, alpha, t, dx=1.0):
+        """The heat equation's exact PERIODIC propagator as a composable shader-algebra Pipeline: `exp(-alpha|k|^2 t)`
+        held once and applied many times. Bit-identical to `diffuse_spectral` (max|diff| 0.0e+00) and ~1.9x faster on
+        reuse, because the transfer is composed once rather than re-exponentiated per call -- and it COMPOSES: two
+        half-steps multiply into one full step, exact to 1.1e-15.
+
+        Nothing in `Pipeline` knows what a pixel is. SCOPE, the same gate everywhere: the operator must be LINEAR
+        *and* CIRCULAR. Applying this to a Neumann (edge-replicated) problem is measured 4.76e-02 wrong, and
+        `diffuse_heat` keeps stepping there. See holographic_laplacian.diffusion_operator."""
+        from holographic.simulation_and_physics.holographic_laplacian import diffusion_operator as _do
+        return _do(tuple(shape), float(alpha), float(t), dx=float(dx))
+
+    def diffusion_transfer(self, shape, alpha, t, dx=1.0):
+        """The heat propagator's Fourier transfer, `exp(-alpha|k|^2 t)`, as a plain array. Every mode decays; the DC
+        mode's transfer is exactly 1, which is why periodic diffusion conserves total heat.
+        See holographic_laplacian.diffusion_transfer."""
+        from holographic.simulation_and_physics.holographic_laplacian import diffusion_transfer as _dt
+        return _dt(tuple(shape), float(alpha), float(t), dx=float(dx))
+
+    # -- C1/C2: island sleep in the softbody solver, and the coordinator's colour schedule ------------------
+    def softbody_sleep_tracker(self, sleep_energy=1e-8, sleep_frames=4, wake_energy=None):
+        """A SleepTracker sized for a SoftBody's islands. Pass it as `body.step(..., sleep=tracker)`: islands at
+        their fixed point are skipped, their state carried through BIT-IDENTICALLY, and the saving is exactly the
+        awake fraction (`body.last_step_stats` counts it). A sleeping island cannot wake itself -- its velocity is
+        never integrated -- so `body.wake_all()` (or an external event) must say so, which is Catto's design.
+        See holographic_island.SleepTracker and holographic_softbody.SoftBody.step."""
+        from holographic.simulation_and_physics.holographic_island import SleepTracker
+        return SleepTracker(sleep_energy=sleep_energy, sleep_frames=sleep_frames, wake_energy=wake_energy)
+
+    def run_waves(self, items, keys_of, worker, cache=None, coordinator=None):
+        """Schedule CONFLICTING work into lock-free WAVES: two items in one wave never touch a shared resource, so
+        a wave runs with no locks and no atomics, in a deterministic order. Returns (results in ITEM order, info)
+        with info = {waves, wave_sizes, parallelism}. MEASURED: 2,000 transactions over 300 keys -> 24 waves, 83.3x
+        lock-free parallelism, every wave conflict-free. Colouring cannot invent parallelism: if everything
+        conflicts it honestly serialises. See holographic_coordinator.Coordinator.run_waves."""
+        from holographic.scene_and_pipeline.holographic_coordinator import Coordinator
+        own = coordinator is None
+        c = Coordinator() if own else coordinator
+        try:
+            return c.run_waves(list(items), keys_of, worker, cache=cache)
+        finally:
+            if own:
+                c.close()
+
+    # -- B1: kernel fusion over the linear post-effects (postfx on the shader algebra) ----------------------
+    def postfx_fuse_transfers(self, shape, steps):
+        """Compose a RUN of linear, shift-invariant post-effects (denoise, sharpen) into ONE transfer -- the
+        elementwise product of theirs, because diagonal operators commute and multiply. Returns None if any step is
+        not fusable (`motion_blur` and `glare` clamp their edges, so they have no exact transfer). This is
+        holographic_shader.Pipeline in image space. See holographic_postfx.fuse_transfers."""
+        from holographic.rendering.holographic_postfx import fuse_transfers
+        return fuse_transfers(tuple(shape), list(steps))
+
+    def postfx_apply_transfer(self, img, transfer):
+        """Evaluate a composed transfer: ONE FFT pair per channel, whatever the run length was. Measured on a
+        3-stage run: 14.76 ms sequential vs 5.03 ms fused, max|diff| 4.44e-16. See holographic_postfx.apply_transfer."""
+        from holographic.rendering.holographic_postfx import apply_transfer
+        return apply_transfer(np.asarray(img, float), np.asarray(transfer))
+
+    def postfx_fusable_runs(self, steps):
+        """Split a post-chain's steps into maximal [(is_fused, [steps])] runs. MEASURED: the shipped chains have NO
+        adjacent linear stages -- every blur is separated by a nonlinear tone curve -- so fusion is a capability for
+        chains that HAVE such runs, not a speedup of default_chain. See holographic_postfx.fusable_runs."""
+        from holographic.rendering.holographic_postfx import fusable_runs
+        return [(bool(f), [(n, dict(p)) for n, p in g]) for f, g in fusable_runs(list(steps))]
+
+    # -- A1/A2: the two correctness fixes -- partition-invariant reduction, and swept collision --------------
+    def distribute_exact(self, buckets, worker, cache=None, bits=40):
+        """`distribute`, but BIT-IDENTICAL under any bucketing. `worker(bucket, cache)` must return the bucket's
+        CONTRIBUTIONS, not their sum -- that contract change IS the fix. The default float reduce disagrees by
+        2.98e-08 between a 4-way and a 7-way split, and swapping in reduce_sum_exact does NOT repair it, because
+        each worker already float-summed inside its bucket. Exactness has to reach the leaves. Returns
+        (total, info) with the scale used, so the result is auditable. See holographic_distribute.distribute_exact."""
+        from holographic.scene_and_pipeline.holographic_distribute import distribute_exact as _de
+        return _de(list(buckets), worker, cache=cache, bits=int(bits))
+
+    def resolve_swept_collision(self, X_prev, X, sdf_eval, radius=0.0):
+        """Positional CCD for a PBD-style solver: a node that MOVED from X_prev to X must not have crossed the
+        collider on the way, even if neither endpoint is inside it. Nodes whose segment does not hit are returned
+        BIT-IDENTICALLY, so this is a strict addition to resolve_sdf_collision. Measured: 0.5 m/frame through a
+        0.1 m wall is caught. See holographic_collide.resolve_swept_collision."""
+        from holographic.simulation_and_physics.holographic_collide import resolve_swept_collision as _rs
+        return _rs(X_prev, X, sdf_eval, radius=radius)
+
+    # -- THE MACHINE MODEL: leCore's hardware units and memory tiers, named and measured --------------------
+    def machine_map(self, kind=None):
+        """THE SPEC SHEET: every hardware unit this engine has, as plain data -- {name, gpu_name, kind, module,
+        symbol, setup, marginal, scaling, use_when, do_not_use_when, why}. `kind` filters to 'compute' or 'memory'.
+        Read it before building anything that smells like a cache, a kernel, a scheduler or a lookup: the odds are
+        the unit already exists and has a measured cost model. See holographic_machinemodel.machine_map."""
+        from holographic.misc.holographic_machinemodel import machine_map as _mm
+        return _mm(kind)
+
+    def machine_unit(self, name):
+        """One unit's full record, including the conditions under which it must NOT be used.
+        See holographic_machinemodel.unit."""
+        from holographic.misc.holographic_machinemodel import unit as _u
+        return _u(name)
+
+    def machine_units(self, kind=None):
+        """The unit names, optionally filtered to 'compute' or 'memory'. The discovery door.
+        See holographic_machinemodel.units."""
+        from holographic.misc.holographic_machinemodel import units as _un
+        return _un(kind)
+
+    def machine_place(self, baseline_ns, n_calls, setup_ns, marginal_ns):
+        """Should this work go on a unit, or stay on the baseline? Pure arithmetic over a measured cost model:
+        {use_unit, break_even_n, unit_total_ns, baseline_total_ns, speedup}. `break_even_n` is `inf` when the
+        unit's marginal cost is not below the baseline -- it can NEVER pay, and saying so is the answer. This is
+        `should_jump` and `worth_factoring`, stated once. See holographic_machinemodel.place."""
+        from holographic.misc.holographic_machinemodel import place as _p
+        return _p(float(baseline_ns), int(n_calls), float(setup_ns), float(marginal_ns))
+
+    def machine_place_unit(self, name, baseline_ns, n_calls, sheet=None):
+        """`machine_place` on MEASURED numbers: look the unit's (setup, marginal) up in a spec sheet instead of
+        supplying them. Returns the placement plus {unit, note, setup_ns, marginal_ns}. Pass a cached `sheet` from
+        machine_spec_sheet() to avoid re-measuring.
+
+        `baseline_ns` must be the cost of what the unit REPLACES, per call. Priced against a raw array read (130 ns)
+        almost every unit correctly reports break_even_n = inf -- they replace an expensive evaluator, not an array
+        index. If everything says never, check the denominator. See holographic_machinemodel.place_unit."""
+        from holographic.misc.holographic_machinemodel import place_unit as _pu
+        return _pu(str(name), float(baseline_ns), int(n_calls), sheet=sheet)
+
+    def machine_spec_sheet(self, quick=True):
+        """MEASURE the units on THIS machine, now, rather than trusting a comment: {unit: {setup_ns, marginal_ns,
+        note}}. A spec sheet that cannot re-measure itself is a rumour. See holographic_machinemodel.spec_sheet."""
+        from holographic.misc.holographic_machinemodel import spec_sheet as _ss
+        return _ss(quick=bool(quick))
+
+    # -- W1: COMPRESSED-DOMAIN COMPUTE -- operate on the factors, never form the field ------------------------
+    def low_rank_field(self, X, rank=None, energy=0.99):
+        """Factor a 2-D field into a LowRankField and operate on it WITHOUT ever materialising it: .blur(k) (a
+        SEPARABLE kernel), .add(other), .scale(a), .query(i,j), .to_dense(). MEASURED (1024^2, rank 3): 171x fewer
+        bytes; blur 2.53 ms / 0.049 MB vs 66.60 ms / 8.4 MB dense at 3.1e-15 error; a point query touches 72 bytes.
+        You do not out-bandwidth a GPU -- you never touch the decompressed data.
+        See holographic_tucker.LowRankField."""
+        from holographic.caching_and_storage.holographic_tucker import LowRankField
+        return LowRankField.from_dense(np.asarray(X, float), rank=rank, energy=energy)
+
+    def worth_factoring(self, X, energy=0.99, max_error=None):
+        """Would factoring this field actually save bytes? {worth_factoring, factored_bytes, dense_bytes}.
+
+        WITHOUT `max_error` this is an ENERGY gate: it declines white noise, but it will bless a field whose
+        99%-energy reconstruction is badly wrong. MEASURED on real 128x128 fields: a sphere SDF slice at 99% energy
+        is rank 2 and **7.45% wrong**; a box SDF 18.19%; fbm noise passes at rank 5 with 28.54% error. An SDF that
+        wrong does not sphere-trace.
+
+        WITH `max_error` (an absolute max-abs budget) it is an ERROR gate, and that is what a consumer of the
+        RECONSTRUCTION needs. At 1% of amplitude: sphere SDF rank 4 (16x fewer bytes, pays), box SDF rank 12 (5.3x),
+        fbm rank 50 (1.27x, marginal), white noise rank 124 (refused).
+        See holographic_tucker.LowRankField.worth_factoring."""
+        from holographic.caching_and_storage.holographic_tucker import LowRankField
+        ok, fb, db = LowRankField.worth_factoring(np.asarray(X, float), energy=energy, max_error=max_error)
+        return {"worth_factoring": bool(ok), "factored_bytes": int(fb), "dense_bytes": int(db)}
+
+    def rank_for_error(self, X, max_abs_error):
+        """The SMALLEST rank whose truncated SVD reconstructs `X` to within `max_abs_error` in the MAX-ABS norm.
+        `rank_gate`'s 99% ENERGY criterion is not this: 99% of the energy is not a small error. Measured on real
+        fields, the energy rank leaves 7.45% (sphere SDF), 18.19% (box SDF) and 28.54% (fbm noise) of the amplitude
+        as residual. Size on error. See holographic_tucker.rank_for_error."""
+        from holographic.caching_and_storage.holographic_tucker import rank_for_error as _rfe
+        r = _rfe(np.asarray(X, float), float(max_abs_error))
+        return None if r is None else int(r)
+
+    def factored_field_report(self, X, kernel, rank=None):
+        """The W1 comparison, carried WITH the capability: run a separable blur dense and factored, and report
+        {rank, dense_bytes, factored_bytes, byte_ratio, max_error}. Plain data, so an agent can re-run the claim
+        rather than trust it. See holographic_tucker.LowRankField."""
+        import numpy as _np
+        from holographic.caching_and_storage.holographic_tucker import LowRankField
+        X = _np.asarray(X, float)
+        k = _np.asarray(kernel, float)
+        f = LowRankField.from_dense(X, rank=rank)
+        dense = _np.apply_along_axis(lambda c: _np.convolve(c, k, "same"), 1,
+                                     _np.apply_along_axis(lambda c: _np.convolve(c, k, "same"), 0, X))
+        got = f.blur(k).to_dense()
+        return {"rank": f.rank, "dense_bytes": int(X.nbytes), "factored_bytes": int(f.nbytes()),
+                "byte_ratio": float(X.nbytes / f.nbytes()), "max_error": float(_np.abs(got - dense).max())}
+
+    # -- W5: HIERARCHICAL SUPERPOSITION with a mid-level cleanup (R3's third codebook consumer) --------------
+    def hierarchical_pack(self, group_keys, chunk_vectors):
+        """Superpose G group-keyed CHUNKS into one vector, each chunk itself a pack of its leaves. Deliberately just
+        `pack`: the hierarchy is NOT in the packing (superposition is linear, so nesting alone IS the flat bundle --
+        measured to 2.78e-16) but in the recall, which cleans up between levels.
+        See holographic_superposed.hierarchical_pack."""
+        from holographic.misc.holographic_superposed import hierarchical_pack as _hp
+        return _hp(np.asarray(group_keys, float), np.asarray(chunk_vectors, float))
+
+    def hierarchical_recall(self, S, group_key, leaf_key, chunk_codebook, item_codebook,
+                            min_chunk_similarity=None):
+        """Descend a hierarchical superposition with a CLEANUP at the middle level: unbind the group key, snap the
+        noisy chunk to its exact pattern in `chunk_codebook` (the crosstalk reset), then unbind the leaf and snap to
+        `item_codebook`. Returns {item_index, item, chunk_index, chunk_similarity, item_similarity, abstained}.
+
+        MEASURED at D=2048, 64 groups x 8 leaves: 100% here vs 18.3% for flat_recall. Capacity is bounded by the
+        WORST SINGLE LEVEL, not by the product of levels.
+
+        `min_chunk_similarity` is the ABSTAIN GATE, and it exists because of a measured failure: if the group being
+        recalled is NOT in `chunk_codebook`, the mid-level cleanup snaps to the nearest entry -- the WRONG chunk --
+        and returns an item with every appearance of success. Measured: uncovered 0.036, covered 0.502; a 0.15
+        threshold separates them. Default None keeps the historical behaviour exactly.
+        See holographic_superposed.hierarchical_recall."""
+        from holographic.misc.holographic_superposed import hierarchical_recall as _hr
+        return _hr(np.asarray(S, float), np.asarray(group_key, float), np.asarray(leaf_key, float),
+                   np.asarray(chunk_codebook, float), np.asarray(item_codebook, float),
+                   min_chunk_similarity=min_chunk_similarity)
+
+    def chunk_codebook_vectors(self, codebook, item_codebook, leaf_keys):
+        """THE R3 BRIDGE: realize a LEARNED chunk codebook (mind.learn_chunks, R1) as the chunk vectors the
+        hierarchy cleans up against. Returns (chunk_vectors, chunk_ids, leaf_lists). R1 learns WHICH chunks recur;
+        R2 realizes each as a map_bind PRODUCT; this realizes each as a pack SUPERPOSITION. Same identities,
+        different vectors -- that is what "one codebook family" means. See holographic_superposed."""
+        from holographic.misc.holographic_superposed import chunk_codebook_vectors as _ccv
+        v, ids, leaves = _ccv(codebook, np.asarray(item_codebook, float), np.asarray(leaf_keys, float))
+        return v, [int(i) for i in ids], [[int(x) for x in ls] for ls in leaves]
+
+    def chunk_coverage(self, codebook, groups, n_leaves):
+        """What fraction of the groups actually used are PRESENT in the learned chunk codebook?
+        {covered, total, fraction, missing}. Not bookkeeping: an uncovered group's mid-level cleanup snaps to the
+        wrong chunk, so coverage is the precondition of the capacity claim, and it is set by how many merges R1 was
+        allowed (measured: 60 merges covered 8 of 16 groups; 150 covered all 16).
+        See holographic_superposed.chunk_coverage."""
+        from holographic.misc.holographic_superposed import chunk_coverage as _cc
+        return _cc(codebook, groups, int(n_leaves))
+
+    def flat_recall(self, S, group_key, leaf_key, item_codebook):
+        """The BASELINE hierarchical_recall must beat: unbind both roles and clean up ONCE at the bottom, with no
+        mid-level snap. Shipped beside its competitor so the comparison can be re-run, not taken on trust.
+        See holographic_superposed.flat_recall."""
+        from holographic.misc.holographic_superposed import flat_recall as _fr
+        return _fr(np.asarray(S, float), np.asarray(group_key, float), np.asarray(leaf_key, float),
+                   np.asarray(item_codebook, float))
+
+    # -- LEARNED CHUNK CODEBOOKS: iterated pair promotion (backlog R1; the ONE codebook family, R3) -----------
+    # Every method here takes and returns PLAIN DATA (lists of ints, a dict codebook), so a codebook crosses an
+    # HTTP boundary and a long-lived service hands the SAME one to the resonator (R2), a chunked store (W5) and
+    # the edit codec (DL8). A live ChunkCodebook object is available via chunk_codebook() for in-process use.
+    def learn_chunks(self, stream, max_merges=200, min_count=2):
+        """Learn a CHUNK CODEBOOK from a symbol stream by iterated pair promotion (BPE -- Gage 1994; Sennrich et
+        al. 2016), where the merged chunks are factoring and storage codebooks rather than tokenizer vocabulary.
+        Returns plain data {merges, depth}. Deterministic: ties on count break on the pair, never on dict order.
+        KEPT NEGATIVE: this is NOT a byte compressor -- zlib beats it on the same stream (measured 1,820 vs 3,578
+        bytes). Its value is the codebook it leaves behind. See holographic_chunkcodebook.learn_chunks."""
+        from holographic.agents_and_reasoning.holographic_chunkcodebook import learn_chunks as _lc
+        return _lc(list(stream), max_merges=int(max_merges), min_count=int(min_count)).to_dict()
+
+    def chunk_codebook(self, codebook):
+        """Rehydrate a plain-data codebook into a live ChunkCodebook (with .encode/.decode/.stats). The in-process
+        twin of the plain-data methods. See holographic_chunkcodebook.ChunkCodebook."""
+        from holographic.agents_and_reasoning.holographic_chunkcodebook import ChunkCodebook
+        return ChunkCodebook.from_dict(codebook)
+
+    def chunk_encode(self, stream, codebook):
+        """Tokenize `stream` against a learned codebook by replaying its merges in learning order. Returns a token
+        list. See holographic_chunkcodebook.ChunkCodebook.encode."""
+        return [int(t) for t in self.chunk_codebook(codebook).encode(list(stream))]
+
+    def chunk_decode(self, tokens, codebook):
+        """Expand chunk tokens back to base symbols. LOSSLESS: chunk_decode(chunk_encode(s)) == s exactly.
+        See holographic_chunkcodebook.ChunkCodebook.decode."""
+        return [int(s) for s in self.chunk_codebook(codebook).decode(list(tokens))]
+
+    def chunk_stats(self, stream, codebook):
+        """{n_symbols, n_tokens, token_ratio, mean_depth, max_depth, n_merges, covered}. `token_ratio` is a TOKEN
+        count ratio, not byte compression. See holographic_chunkcodebook.ChunkCodebook.stats."""
+        return self.chunk_codebook(codebook).stats(list(stream))
+
+    def structure_score(self, stream, max_merges=200, min_count=2):
+        """Does this stream have REUSABLE STRUCTURE? The mean chunk depth of its own learned tokenization: 1.0 =
+        nothing merged. Measured 4.31 on a workflow stream, 1.34 on a uniform control. This is the gate on the
+        recursion dividend -- R2's recursive factoring, W5's hierarchical superposition and DL8's edit codec all
+        pay off only when a stream is made of reused chunks. See holographic_chunkcodebook.structure_score."""
+        from holographic.agents_and_reasoning.holographic_chunkcodebook import structure_score as _ss
+        return float(_ss(list(stream), max_merges=int(max_merges), min_count=int(min_count)))
+
+    def chunk_byte_report(self, stream, codebook):
+        """The codec comparison, carried WITH the capability because the token ratio invites a claim the bytes do
+        not support: {raw, zlib_raw, bpe_bytes, zlib_bpe_bytes, beats_zlib}. beats_zlib is False by design.
+        See holographic_chunkcodebook.byte_report."""
+        from holographic.agents_and_reasoning.holographic_chunkcodebook import byte_report
+        return byte_report(list(stream), self.chunk_codebook(codebook))
+
+    # -- PHYSICS EVENT CODEC: a trace as base + interruptions (Box3D B8 / backlog X7) -------------------------
+    def record_physics_trace(self, n=16, frames=600, seed=0, dt=1.0 / 120.0, gravity=-9.81,
+                             restitution=0.8, box=2.0, speed=2.0):
+        """Record the reference bouncing-box trace: `n` bodies under gravity in a restitution box. Returns
+        (trace (frames,n,6), EventTrace). Deterministic -- fixed integrator, fixed clamp, fixed event order.
+        See holographic_eventcodec.bouncing_box_trace."""
+        from holographic.simulation_and_physics.holographic_eventcodec import bouncing_box_trace
+        return bouncing_box_trace(n=n, frames=frames, seed=seed, dt=dt, gravity=gravity,
+                                  restitution=restitution, box=box, speed=speed)
+
+    def replay_physics_trace(self, ev, dt=None, gravity=None, box=None):
+        """Regenerate a full trace from base + events, BIT-IDENTICALLY (measured max|diff| exactly 0.0). Between
+        events physics is a deterministic function of the state, so the states were never data. Bit-exactness is
+        required, not a nicety: a contact sequence is a chaotic map. See holographic_eventcodec.replay_bouncing_box."""
+        from holographic.simulation_and_physics.holographic_eventcodec import replay_bouncing_box
+        return replay_bouncing_box(ev, dt=dt, gravity=gravity, box=box)   # None => the trace's own parameters
+
+    def physics_compression_report(self, trace, ev):
+        """The event codec's size AND every baseline it claims to beat, computed together so an agent can re-run
+        the comparison instead of trusting the number: {raw, zlib_raw, zlib_frame_deltas, deltachain, event_codec,
+        ratio_vs_frame_deltas, events, rows}. MEASURED: 6,360 bytes vs zlib(frame deltas) 87,057 -- 13.7x, lossless.
+        See holographic_eventcodec.compression_report."""
+        from holographic.simulation_and_physics.holographic_eventcodec import compression_report
+        return compression_report(trace, ev)
+
+    # -- MODAL JUMP: a linear island advanced in closed form within a contact mode (Box3D B1 / backlog X1) ----
+    def soft_chain_matrices(self, n_bodies, hertz=15.0, zeta=0.7, mass=1.0, gravity=-9.81,
+                            dt=1.0 / 60.0, substeps=64):
+        """Build an anchored soft-constraint chain's implicit-Euler substep as the affine map `s <- A s + b`
+        (s = [positions; velocities]). Parameterized in Catto's units (hertz, zeta), like soft_relaxation.
+        Returns (A, b, h). The reference scene for the modal jump. See holographic_modal.soft_chain_matrices."""
+        from holographic.simulation_and_physics.holographic_modal import soft_chain_matrices as _scm
+        A, b, h = _scm(n_bodies, hertz=hertz, zeta=zeta, mass=mass, gravity=gravity, dt=dt, substeps=substeps)
+        return A, b, h
+
+    def affine_jump(self, state, A, b, k):
+        """THE MODAL JUMP, stateless: advance the affine recurrence `s <- A s + b` by k substeps in ONE
+        eigendecomposition. Within a contact mode a soft-constraint island IS this recurrence, so 3,840 substeps
+        cost one solve -- and so do 38,400. Measured: matches the substepped reference to 2.5e-12 on a 12-body
+        chain. Raises if the operator is DEFECTIVE (a free-body Jordan block has no eigenbasis: step it instead).
+        The stateless one-shot twin of modal_solver, so an agent can call it over HTTP.
+        See holographic_iterate.affine_step_k."""
+        from holographic.misc.holographic_iterate import affine_step_k
+        return affine_step_k(np.asarray(state, float), np.asarray(A, float), np.asarray(b, float), int(k))
+
+    def affine_limit(self, A, b):
+        """The k -> infinity fixed point of `s <- A s + b` (a settled island), computed per-mode so it can refuse
+        honestly: raises if any |eigenvalue| >= 1, because a marginal or divergent island never settles and a
+        number there would be a fabrication. The dense twin of settle_island. See holographic_iterate.affine_limit."""
+        from holographic.misc.holographic_iterate import affine_limit as _al
+        return _al(np.asarray(A, float), np.asarray(b, float))
+
+    def should_jump(self, dim, k):
+        """Does jumping k substeps of a dim-dimensional island beat stepping them? True when k >= 20*dim --
+        MEASURED, since an eigendecomposition is O(dim^3) and a substep is O(dim^2). The descriptor's jump-vs-step
+        gate. See holographic_modal.should_jump."""
+        from holographic.simulation_and_physics.holographic_modal import should_jump as _sj
+        return bool(_sj(int(dim), int(k)))
+
+    def modal_solver(self, state, breakeven=20.0, cache_modes=True):
+        """A stateful ModalSolver: set_mode(key, A, b) on every contact-mode switch, advance(k) to jump within a
+        mode, report() for the economics (switches, substeps_per_switch, fallbacks). Re-diagonalizes only at
+        switches and caches each mode's factorization, so a cycling machine pays per mode once, ever. Factorizes
+        LAZILY -- a mode below the break-even is stepped and never pays for an eigendecomposition it declines.
+        A live handle: use affine_jump for the stateless/HTTP path. See holographic_modal.ModalSolver."""
+        from holographic.simulation_and_physics.holographic_modal import ModalSolver
+        return ModalSolver(state, breakeven=breakeven, cache_modes=cache_modes)
+
+    def soft_chain_bank(self, n_bodies, hertz, zeta, mass=1.0, gravity=-9.81, dt=1.0 / 60.0, substeps=64):
+        """A TUNING BANK (X8): M variants of one soft-constraint chain differing in stiffness/damping (`hertz` and
+        `zeta` scalar or length-M). Returns (As, bs, h) for advance_bank. NOT a superposition -- a trajectory is
+        nonlinear in the operator, so stiffness variants cannot be summed into one vector at any dimension; they are
+        batched as arrays, which is exact and has no capacity budget. See holographic_modal.soft_chain_bank."""
+        from holographic.simulation_and_physics.holographic_modal import soft_chain_bank as _scb
+        As, bs, h = _scb(n_bodies, hertz, zeta, mass=mass, gravity=gravity, dt=dt, substeps=substeps)
+        return As, bs, h
+
+    def advance_bank(self, S0, As, bs, k):
+        """Advance M island variants k substeps in ONE batched closed form: (M,2n) -> (M,2n). Measured, M=32 x 1,920
+        substeps: 13.20 ms substepped vs 3.10 ms here (4.3x), max|diff| 1.86e-12, horizon free. Raises naming the
+        variant if any member is defective. See holographic_modal.advance_bank."""
+        from holographic.simulation_and_physics.holographic_modal import advance_bank as _ab
+        return _ab(np.asarray(S0, float), np.asarray(As, float), np.asarray(bs, float), int(k))
+
+    def blend_forcings(self, s0, A, forcings, weights, k):
+        """The one thing that DOES superpose exactly: variants differing only in their FORCING. `s_k = A^k s0 +
+        G(A,k) b` is linear in b, so a weighted blend of forcings is the blend of trajectories (measured 1.11e-16).
+        One eigendecomposition serves every forcing variant and every blend -- gravity, wind, a load dial. Blending
+        OPERATORS instead is nonsense (measured 2.94e-01). See holographic_modal.blend_forcings."""
+        from holographic.simulation_and_physics.holographic_modal import blend_forcings as _bf
+        return _bf(np.asarray(s0, float), np.asarray(A, float), np.asarray(forcings, float),
+                   np.asarray(weights, float), int(k))
+
+    def escalation_plan(self, dim, k, energy=None, sleep_energy=0.0, diagonalizable=True, breakeven=20.0):
+        """THE ESCALATION LADDER (X11): pick {sleep | jump | substep} for one island, per frame. Catto's "4
+        substeps" dial and leCore's closed form are two ends of ONE axis and the descriptor chooses the rung --
+        sleep if the island is at its fixed point, jump if it is linear and k amortizes an O(dim^3)
+        eigendecomposition, substep otherwise (churning contacts, small k, or a defective operator with no
+        eigenbasis). Returns {rung, why, substeps}: a pure decision, inspectable before anything runs, like
+        plan_render. See holographic_modal.escalation_plan."""
+        from holographic.simulation_and_physics.holographic_modal import escalation_plan as _ep
+        return _ep(int(dim), int(k), energy=energy, sleep_energy=sleep_energy,
+                   diagonalizable=diagonalizable, breakeven=breakeven)
+
+    def mode_key(self, active_constraints):
+        """A deterministic signature for a contact mode (the active-constraint set), so the same mode reached by
+        different orders is recognised as the same mode. See holographic_modal.mode_key."""
+        from holographic.simulation_and_physics.holographic_modal import mode_key as _mk
+        return _mk(active_constraints)
+
+    # -- ISLANDS: connected components of a constraint graph + the sleep probe (Box3D B3 / backlog X3) --------
+    def islands(self, n_nodes, edges):
+        """Partition n_nodes into ISLANDS -- the connected components of a constraint graph, under an undirected
+        list of (u, v) edges. Returns sorted index lists ordered by smallest member (deterministic, independent of
+        edge order). An island is a physics island, a mesh shell, a farm bucket, a DDM subdomain: one flood fill.
+        See holographic_island.connected_components."""
+        from holographic.simulation_and_physics.holographic_island import connected_components as _cc
+        return _cc(n_nodes, edges)
+
+    # -- FAT-MARGIN CACHING for a drifting query (Box3D lesson / backlog X9) ---------------------------------
+    def margin_cache(self, builder, margin, metric=None):
+        """Cache a baked result over an ENLARGED region around a DRIFTING query (a camera, a cursor, an agent, a
+        recall neighbourhood): every query within `margin` of the bake's centre is served from it. Catto's enlarged
+        AABB, generalized past physics. `.get(point) -> (value, hit)`, `.stats()` counts the trade. Measured on a
+        unit-step 2-D walk: exact-key caching rebuilds 400/400; margin 6.0 rebuilds 20 at 95% hits.
+        See holographic_cachehome.MarginCache."""
+        from holographic.caching_and_storage.holographic_cachehome import MarginCache
+        return MarginCache(builder, margin, metric=metric)
+
+    def drift_scale(self, queries, metric=None):
+        """The `variation` probe pointed at a QUERY STREAM instead of at data: the mean step between consecutive
+        queries. This is the statistic that sets a fat margin. See holographic_cachehome.drift_scale."""
+        from holographic.caching_and_storage.holographic_cachehome import drift_scale as _ds
+        return _ds(queries, metric=metric)
+
+    def replay_margin(self, queries, margin, metric=None):
+        """Replay a query stream against a margin and count what it would cost: {hits, rebuilds, hit_rate, margin}.
+        No baking, so it is cheap enough to sweep. See holographic_cachehome.replay_margin."""
+        from holographic.caching_and_storage.holographic_cachehome import replay_margin as _rm
+        return _rm(queries, margin, metric=metric)
+
+    def replay_margin_error(self, queries, values, margin, metric=None):
+        """Replay a query stream against a margin and measure what the cache would have SERVED against what was TRUE:
+        {hits, rebuilds, hit_rate, margin, max_error, mean_error}. `replay_margin` counts hits; a hit serves a STALE
+        value, and hit rate says nothing about how stale. On a rendered frame the max error saturates at the FIRST
+        reuse (0.5864) while the mean creeps 0.0001 -> 0.0051. See holographic_cachehome.replay_margin_error."""
+        from holographic.caching_and_storage.holographic_cachehome import replay_margin_error as _rme
+        return _rme(queries, values, float(margin), metric=metric)
+
+    def suggest_margin_for_error(self, queries, values, max_mean_error, max_abs_error=None, metric=None):
+        """THE GATE for any fat-margin cache: the LARGEST margin whose replayed error stays inside the budget.
+        `max_abs_error` bounds the WORST served result, and you usually want it -- measured, a value that jumps 0->1
+        passes a mean-only budget at margin 0.1929 and serves a completely wrong answer (max error 1.00). The
+        max-error bound stops at 0.094558, and 0.095158 is already catastrophic: the admissible margin is a CLIFF,
+        not a slope. Size on the error you cannot tolerate. See holographic_cachehome.suggest_margin_for_error."""
+        from holographic.caching_and_storage.holographic_cachehome import suggest_margin_for_error as _sme
+        return float(_sme(queries, values, float(max_mean_error), max_abs_error=max_abs_error, metric=metric))
+
+    def suggest_margin(self, queries, target_hit_rate=0.95, metric=None):
+        """The SMALLEST margin whose replayed hit rate on this query stream meets the target. Empirical by design:
+        a random walk's exit time scales like (R/sigma)^2, but measured rebuilds sit ~1.8x off that, so replaying
+        the stream you actually have beats a fitted law. See holographic_cachehome.suggest_margin."""
+        from holographic.caching_and_storage.holographic_cachehome import suggest_margin as _sm
+        return float(_sm(queries, target_hit_rate=target_hit_rate, metric=metric))
+
+    def conflict_graph(self, item_keys):
+        """Build the CONFLICT GRAPH of a batch of tasks -- `item_keys[i]` is the set of resources task i touches,
+        and two tasks are adjacent iff they share one. Returns (n_items, edges) for graph_coloring / color_waves.
+        Built key-first, so the cost is the sum of squared key degrees, not O(n^2). See holographic_island."""
+        from holographic.simulation_and_physics.holographic_island import conflict_graph as _cg
+        n, e = _cg([set(k) for k in item_keys])
+        return n, [list(x) for x in e]
+
+    def graph_coloring(self, n_nodes, edges):
+        """Greedy graph colouring: each node takes the smallest colour no neighbour uses. DETERMINISTIC by
+        construction (ascending visit order), which is the point -- Catto's parallel solver earns its
+        cross-platform determinism exactly this way. See holographic_island.graph_coloring."""
+        from holographic.simulation_and_physics.holographic_island import graph_coloring as _gc
+        return _gc(int(n_nodes), edges)
+
+    def color_waves(self, n_nodes, edges):
+        """Partition conflicting tasks into WAVES that touch disjoint resources: each wave runs fully parallel with
+        no locks and no atomics, in a reproducible order. Measured: 2,000 transactions over 300 keys colour into 24
+        waves -- 83x lock-free parallelism. See holographic_island.color_waves."""
+        from holographic.simulation_and_physics.holographic_island import color_waves as _cw
+        return _cw(int(n_nodes), edges)
+
+    def plan_write_waves(self, batch_keys):
+        """Schedule database write batches into key-disjoint waves (X10): the single-writer lock serialises writers
+        because two might touch the same row; colouring PROVES when they cannot. Deterministic schedule.
+        See holographic_querylock.plan_write_waves."""
+        from holographic.agents_and_reasoning.holographic_querylock import plan_write_waves as _pw
+        return _pw(batch_keys)
+
+    def scan_exact(self, x, bits=40):
+        """The PREFIX SUM, bit-identical however the work is blocked. A blocked FLOAT scan -- what every parallel
+        scan actually is -- gives a different answer per block count: measured, 4-block vs 7-block disagree by
+        1.14e-12 on uniform data, 3.87e-07 across 16 orders of magnitude, and 92.0 (9.2e-15 relative) on
+        [1e16, 1, -1e16] repeated. Quantize once against a global scale and scan in int64, where addition IS
+        associative. KEPT NEGATIVE: this is not more ACCURATE than np.cumsum -- it is more REPRODUCIBLE. A
+        sequential cumsum beats it on precision every time; it just cannot run on eight blocks and give the same
+        bits. See holographic_distribute.scan_exact."""
+        from holographic.scene_and_pipeline.holographic_distribute import scan_exact as _se
+        return _se(np.asarray(x, float), bits=int(bits))
+
+    def scan_exact_blocked(self, x, n_blocks, bits=40):
+        """`scan_exact` computed the way a GPU or a farm would -- a cumsum per block plus the exclusive prefix of
+        the block sums -- and BIT-IDENTICAL to it for every block count from 1 to N, because the carries are int64.
+        This is the function that makes the claim testable. See holographic_distribute.scan_exact_blocked."""
+        from holographic.scene_and_pipeline.holographic_distribute import scan_exact_blocked as _seb
+        return _seb(np.asarray(x, float), int(n_blocks), bits=int(bits))
+
+    def reduce_sum_exact_partitioned(self, buckets, bits=40):
+        """Sum a list of BUCKETS of contributions, bit-identically under ANY bucketing -- 4-way, 7-way, or one
+        bucket per contribution. This is the invariance `reduce_sum_exact` does NOT have once a farm float-sums
+        inside its buckets (measured: exact on the raw contributions, NOT on the bucket sums). One global scale from
+        the global peak and count (max and len are partition-invariant), then integer accumulators that merge in any
+        order. Determinism that survives RE-PARTITIONING a running farm. See holographic_distribute."""
+        from holographic.scene_and_pipeline.holographic_distribute import reduce_sum_exact_partitioned as _rp
+        return _rp(buckets, bits=bits)
+
+    def island_energy(self, positions, velocities=None, rest=None):
+        """The SLEEP SENSOR for one island: a monotone 'how active is this' scalar (kinetic + displacement from
+        rest). Feed it to island_sleep_tracker to decide awake vs asleep. See holographic_island.island_energy."""
+        from holographic.simulation_and_physics.holographic_island import island_energy as _ie
+        return _ie(positions, velocities=velocities, rest=rest)
+
+    def island_sleep_tracker(self, sleep_energy=1e-8, sleep_frames=4, wake_energy=None):
+        """A per-island awake/asleep tracker with HYSTERESIS: an island sleeps after `sleep_frames` consecutive
+        frames under `sleep_energy`, and wakes the instant it exceeds `wake_energy` (default 4x). Two thresholds,
+        because one flickers on floating-point noise -- measured. See holographic_island.SleepTracker."""
+        from holographic.simulation_and_physics.holographic_island import SleepTracker
+        return SleepTracker(sleep_energy=sleep_energy, sleep_frames=sleep_frames, wake_energy=wake_energy)
+
+    def step_islands(self, state, islands, step, tracker=None, energies=None):
+        """Advance ONLY the awake islands one frame: (new_state, awake_ids, asleep_ids). A sleeping island's rows
+        are carried through BIT-IDENTICALLY (skipping must not perturb). With tracker=None everything is awake --
+        the old behaviour exactly. See holographic_island.step_islands."""
+        from holographic.simulation_and_physics.holographic_island import step_islands as _si
+        return _si(state, islands, step, tracker=tracker, energies=energies)
+
+    def settle_island(self, state, U, tol=1e-6):
+        """SLEEP IS THE CLOSED FORM: send an island straight to the fixed point of `x <- bind(U, x)` in ONE
+        evaluation instead of stepping until it falls asleep -- this is iterate.limit() wearing the physics
+        costume. Measured: the fixed point is NOT rest in general; modes with |eigenvalue| ~ 1 persist, so a
+        diffusive island settles to its MEAN. Only a strictly contractive operator settles to zero.
+        See holographic_island.settle_island."""
+        from holographic.simulation_and_physics.holographic_island import settle_island as _st
+        return _st(state, U, tol=tol)
+
+    def soft_relaxation(self, hertz, zeta, dt):
+        """The per-substep relaxation factor of a SOFT constraint of stiffness `hertz` (natural frequency) and
+        damping ratio `zeta` (1.0 = critically damped), stepped at `dt` -- Catto's Soft Step dial, in physical
+        units. Returns a float in [0, 1]; hertz=inf is the hard projection exactly. Feed it to
+        project_onto_constraints(omega=...), or just pass stiffness=(hertz, zeta) there. Use it to pick a
+        constraint's stiffness once and have it mean the same thing at any substep count -- a hand-tuned omega
+        does not. See holographic_denoise.soft_relaxation."""
+        from holographic.rendering.holographic_denoise import soft_relaxation as _sr
+        return _sr(hertz, zeta, dt)
+
+    def project_onto_constraints(self, x, projections, iters=30, tol=None, omega=1.0,
+                                 stiffness=None, dt=None):
         """Satisfy a set of constraints on a vector by ITERATED PROJECTION -- sweep a list of projections
         (each a callable x->x' snapping x onto one constraint set / manifold) until they jointly hold. This is
         the one engine under three faculties the mind grew separately (Macklin's observation -- the object he
         builds in position-based dynamics): the SBC resonator is alternating projection onto factor codebooks,
         `denoise(method='pnp')` is alternating projection onto data-fidelity and the signal manifold (it now
         literally calls this), and a constraint sweep is PBD. With `omega`<1 the update is under-relaxed (PBD's
-        stability trick); onto convex sets this is POCS and converges to their intersection. Returns
+        stability trick); onto convex sets this is POCS and converges to their intersection.
+
+        SOFT CONSTRAINTS (X2): pass `stiffness=(hertz, zeta)` and the substep `dt` instead of hand-tuning omega,
+        and the constraint is specified in PHYSICAL units -- natural frequency in hertz, damping ratio zeta
+        (1.0 = critically damped). Catto's Soft Step parameterization: the same (hertz, zeta) means the same
+        physics at ANY substep count, where the same omega does not. `stiffness=(inf, zeta)` is the hard
+        projection exactly, so every existing caller is unchanged. This is what gives PBD, FABRIK/IK, the
+        resonator and the PnP denoise loop Catto-style softness from ONE dial. Returns
         (x, n_sweeps, converged). Deterministic given deterministic projections. Useful directly for enforcing
         arbitrary constraints on a hypervector (be a valid code AND agree with a partial observation, say)."""
         from holographic.rendering.holographic_denoise import project_onto_constraints as _poc
-        return _poc(np.asarray(x, float), list(projections), iters=iters, tol=tol, omega=omega)
+        return _poc(np.asarray(x, float), list(projections), iters=iters, tol=tol, omega=omega,
+                    stiffness=stiffness, dt=dt)
 
     def restore(self, y, mask=None, samples=None, forward=None, adjoint=None,
                 mu=0.5, steps=30, sigma=None, rank=8):
@@ -3512,6 +5907,41 @@ class UnifiedMind:
         from holographic.misc.holographic_eulerops import split_face
         return split_face(mesh, f_index, i, j)
 
+    def mesh_poke(self, mesh, f_index, height=0.0):
+        """POKE polygon face `f_index` (holographic_eulerops, FWD-7): add a vertex at the face centroid (pushed out
+        along the face normal by `height`) and fan the face into triangles, one per original edge. An n-gon becomes
+        n triangles. V+1, E+n, F+(n-1), chi unchanged -- a legal Euler edit. The 'poke faces' every modeler uses to
+        fan a quad/ngon to triangles or raise a spike; the inverse of dissolving the center vertex. Returns a new
+        Mesh. height=0 (default) keeps the center in the face plane (pure retopology, no shape change)."""
+        from holographic.misc.holographic_eulerops import poke_face
+        return poke_face(mesh, f_index, height=height)
+
+    def mesh_rip_vertex(self, mesh, vertex):
+        """RIP a shared vertex apart (holographic_eulerops): give every face incident to `vertex` its OWN copy at the
+        same position, so the faces are no longer joined there -- the inverse of a weld at one vertex. Topology only,
+        positions unchanged (the mesh looks identical but is torn at that vertex); ripping a manifold interior vertex
+        opens the surface there. V rises by (incident_faces - 1). A no-op for a vertex used by <=1 face. Returns a
+        new Mesh. The 'rip' a modeler does before pulling the pieces apart."""
+        from holographic.misc.holographic_eulerops import rip_vertex
+        return rip_vertex(mesh, vertex)
+
+    def mesh_split_vertices(self, mesh):
+        """SPLIT every vertex per-face (holographic_eulerops): give each face its own private copies of its corners,
+        so no two faces share a vertex -- the full inverse of a weld (weld_mesh). The result is a 'polygon soup':
+        same geometry, every face topologically independent (flat/faceted shading, no shared normals). Positions
+        unchanged. weld_mesh(mesh_split_vertices(m)) recovers the welded mesh. Returns a new Mesh."""
+        from holographic.misc.holographic_eulerops import split_vertices
+        return split_vertices(mesh)
+
+    def mesh_triangulate(self, mesh):
+        """EAR-CLIP every face of `mesh` into triangles (holographic_meshverbs2), returning a new all-triangle Mesh.
+        The concave-correct counterpart of the kernel's Mesh.triangulate() (which fans -- correct for CONVEX faces
+        only). Ear clipping (Meisters 1975) repeatedly removes a convex corner whose triangle holds no other vertex,
+        so a concave n-gon tiles exactly instead of the flipped/overlapping triangles a fan gives. No new vertices
+        (unlike mesh_poke); only the face list changes. Deterministic. Returns a new Mesh."""
+        from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons
+        return triangulate_ngons(mesh)
+
     def mesh_smooth(self, mesh, lam=0.55, mu=-0.58, iters=8, weights="cotangent"):
         """Taubin lambda|mu no-shrink mesh smoothing / denoising (holographic_meshsmooth, FWD-4): the shipped
         `graphsignal.taubin_filter` WIRED onto explicit mesh geometry -- 3-D vertex positions as the signal,
@@ -3578,6 +6008,16 @@ class UnifiedMind:
         from holographic.mesh_and_geometry.holographic_meshuv import uv_unwrap
         return uv_unwrap(mesh, method=method)
 
+    def mesh_pack_uv(self, mesh, method="lscm", margin=0.02):
+        """PACK UV ISLANDS (holographic_meshuv): unwrap each connected component (UV island) of `mesh` SEPARATELY,
+        then lay the islands out in NON-OVERLAPPING cells of the unit UV square -- the 'pack islands' / smart-UV step
+        that mesh_lscm and mesh_uv_unwrap skip (they solve every component in one frame, so disconnected pieces land
+        on top of each other). `method`: 'lscm' (conformal per island) or 'isomap' (geodesic MDS). Each island is
+        scaled uniformly (no UV stretch) into its cell with a `margin` gutter. Returns a (V,2) UV array in [0,1]^2.
+        Composes the existing per-chart unwrap + a connected-components split; does not re-solve the unwrap."""
+        from holographic.mesh_and_geometry.holographic_meshuv import pack_uv_islands
+        return pack_uv_islands(mesh, method=method, margin=margin)
+
     def mesh_stable_uv(self, mesh, bounds=None, mode="triplanar", axis=2):
         """UVs that are a deterministic function of WORLD POSITION, so they DON'T move under local edits -- the
         stable counterpart to mesh_uv_unwrap (whose global MDS/eigenmap re-solves and can flip on any edit).
@@ -3629,12 +6069,167 @@ class UnifiedMind:
         from holographic.mesh_and_geometry.holographic_meshseam import shortest_seam
         return shortest_seam(mesh, a, b)
 
+    def mesh_auto_seam(self, mesh, threshold_deg=40.0, method="crease"):
+        """AUTO-MARK SEAMS for UV unwrapping (holographic_meshseam): choose which edges to cut WITHOUT naming a path.
+        Returns a sorted list of (lo,hi) seam edges -- the 'marked seams' (the red edges a modeler sees). Where
+        mesh_cut_seam / mesh_shortest_seam cut a GIVEN seam, this SELECTS one. method='crease' (default) seams along
+        the sharp edges (dihedral angle > threshold_deg), since an artist cuts where the surface already folds so the
+        cut is hidden. Composes mesh_creases. Kept negative: a smooth closed surface has no creases -> empty set
+        (honest, not an invented cut); use mesh_shortest_seam for a meridian there. Returns the edge list."""
+        from holographic.mesh_and_geometry.holographic_meshseam import auto_seam
+        return auto_seam(mesh, threshold_deg=threshold_deg, method=method)
+
     def mesh_extrude(self, mesh, face_index, distance):
         """EXTRUDE a face (holographic_meshverbs, FWD-7): lift face `face_index` along its outward normal by
         `distance` and wall it in -- the iconic modelling verb. Preserves the Euler characteristic and keeps a
         closed mesh a closed manifold; the cap moves exactly `distance` along the normal. Returns a new Mesh."""
         from holographic.mesh_and_geometry.holographic_meshverbs import extrude_face
         return extrude_face(mesh, face_index, distance)
+
+    def curve_bezier(self, control, u):
+        """Evaluate a BEZIER curve of any degree at parameter(s) u in [0,1] by de Casteljau (numerically stable).
+        `control` is (k, dim). Returns the point(s). Passes through the first/last control point. Use for a smooth
+        segment, a camera ease, or a tube centreline. See holographic_curves.bezier."""
+        from holographic.mesh_and_geometry.holographic_curves import bezier
+        return bezier(control, u)
+
+    def curve_catmull_rom(self, control, n, alpha=0.5, closed=False):
+        """Sample a CATMULL-ROM spline that INTERPOLATES `control` (passes through every point) -- the right
+        curve for a camera path or a scatter path that must hit its keyframes. `alpha=0.5` (centripetal) avoids
+        cusps on sharp turns. Returns (n, dim). See holographic_curves.catmull_rom."""
+        from holographic.mesh_and_geometry.holographic_curves import catmull_rom
+        return catmull_rom(control, n, alpha=alpha, closed=closed)
+
+    def curve_bspline(self, control, n, degree=3, closed=False):
+        """Sample a uniform B-SPLINE (default cubic) over `control` -- the smoothest (C^(degree-1)) of the
+        splines, approximating not interpolating. The flowing-camera-move curve. Returns (n, dim). See
+        holographic_curves.bspline."""
+        from holographic.mesh_and_geometry.holographic_curves import bspline
+        return bspline(control, n, degree=degree, closed=closed)
+
+    def curve_frame(self, points, closed=False, minimizing=True):
+        """Orthonormal FRAME (tangent, normal, binormal) at each point of a 3-D curve. `minimizing=True` gives
+        the ROTATION-MINIMIZING frame (stable on straight and inflecting curves -- what a tube sweep / spline
+        camera wants); False gives the true FRENET frame (flips at inflections, undefined on straight runs).
+        Returns (T, N, B). See holographic_curves.rotation_minimizing_frame / frenet_frame."""
+        from holographic.mesh_and_geometry.holographic_curves import rotation_minimizing_frame, frenet_frame
+        return rotation_minimizing_frame(points, closed=closed) if minimizing else frenet_frame(points, closed=closed)
+
+    def curve_resample_arc_length(self, points, n):
+        """Resample a curve to `n` points spaced by EQUAL ARC LENGTH (evenly along the curve, not the parameter)
+        -- what a tube wants so its rings are uniform, or a scatter wants for even spacing. See
+        holographic_curves.resample_by_arc_length."""
+        from holographic.mesh_and_geometry.holographic_curves import resample_by_arc_length
+        return resample_by_arc_length(points, n)
+
+    def sweep_tube(self, points, profile=None, radius=0.1, closed=False):
+        """Sweep a 2-D `profile` (default a circle of `radius`) along a 3-D curve into a watertight TUBE mesh,
+        oriented by the rotation-minimizing frame so it does not twist/tear. Returns (vertices, faces) -- pass to
+        Mesh(). The curve->geometry bridge: a bezier/knot/helix becomes hair, cable, vine, neon, a knotted
+        sculpture. `closed=True` welds a looped curve (a torus knot). See holographic_curves.sweep_tube."""
+        from holographic.mesh_and_geometry.holographic_curves import sweep_tube
+        return sweep_tube(points, profile=profile, radius=radius, closed=closed)
+
+    def torus_knot(self, n=400, p=2, q=3, R=1.0, r=0.4):
+        """A (p, q) TORUS KNOT curve: winds p times around the axis, q through the hole (p=2,q=3 = trefoil).
+        Returns (n, 3) points -- sweep_tube it for the demoscene classic. See holographic_curves.torus_knot."""
+        from holographic.mesh_and_geometry.holographic_curves import torus_knot
+        return torus_knot(n=n, p=p, q=q, R=R, r=r)
+
+    def trefoil_knot(self, n=400, scale=1.0):
+        """The TREFOIL knot (simplest non-trivial knot) as (n, 3) points. See holographic_curves.trefoil."""
+        from holographic.mesh_and_geometry.holographic_curves import trefoil
+        return trefoil(n=n, scale=scale)
+
+    def helix(self, n=200, radius=1.0, pitch=0.3, turns=3.0):
+        """A HELIX curve: n points spiralling `turns` times at `radius`, rising `pitch` per turn. (n, 3). Sweep
+        it for a spring, a screw, a DNA strand. See holographic_curves.helix."""
+        from holographic.mesh_and_geometry.holographic_curves import helix
+        return helix(n=n, radius=radius, pitch=pitch, turns=turns)
+
+    def superellipsoid(self, nu=48, nv=48, e1=0.5, e2=0.5, a=1.0, b=1.0, c=1.0):
+        """A SUPERELLIPSOID surface as a point grid: `e1,e2` squareness (1,1)=ellipsoid, ->0=box, >1=star; `a,b,c`
+        semi-axes. Barr's rounded-solid family from two exponents. See holographic_curves.superellipsoid."""
+        from holographic.mesh_and_geometry.holographic_curves import superellipsoid
+        return superellipsoid(nu=nu, nv=nv, e1=e1, e2=e2, a=a, b=b, c=c)
+
+    def gyroid_field(self, points, scale=1.0):
+        """The GYROID triply-periodic minimal surface as an implicit FIELD (surface at f=0): sin x cos y + ... .
+        Returns f at each point -- mesh the zero set, or use as an SDF-like field for infinite seamless lattice
+        art. See holographic_curves.gyroid_field."""
+        from holographic.mesh_and_geometry.holographic_curves import gyroid_field
+        return gyroid_field(points, scale=scale)
+
+    def klein_bottle(self, nu=48, nv=48, scale=1.0):
+        """A KLEIN BOTTLE (figure-8 immersion) as a point grid -- the classic non-orientable surface showpiece.
+        See holographic_curves.klein_bottle."""
+        from holographic.mesh_and_geometry.holographic_curves import klein_bottle
+        return klein_bottle(nu=nu, nv=nv, scale=scale)
+
+    def voxelize_mesh(self, vertices, faces, res=32, pad=0.1, threshold=0.5):
+        """VOXELISE a triangle mesh into an occupancy grid via the generalised WINDING NUMBER (Jacobson 2013) --
+        robust to NON-watertight and self-intersecting meshes, unlike ray-parity. `res` voxels along the longest
+        axis; a voxel is solid where |winding| >= threshold. Returns (occupancy (nx,ny,nz) bool, origin, spacing).
+        O(voxels x triangles) -- for a heavy mesh use voxelize_sdf or decimate first. See
+        holographic_voxelize.voxelize_mesh."""
+        from holographic.mesh_and_geometry.holographic_voxelize import voxelize_mesh
+        return voxelize_mesh(vertices, faces, res=res, pad=pad, threshold=threshold)
+
+    def voxelize_sdf(self, sdf, lo, hi, res=32, iso=0.0):
+        """VOXELISE an SDF / field into an occupancy grid: solid where field <= iso. O(voxels), no winding number
+        -- the fast path for an implicit. `lo`,`hi` are box corners. Returns (occupancy, origin, spacing), the
+        same layout as voxelize_mesh so they are interchangeable. See holographic_voxelize.voxelize_sdf."""
+        from holographic.mesh_and_geometry.holographic_voxelize import voxelize_sdf
+        return voxelize_sdf(sdf, lo, hi, res=res, iso=iso)
+
+    def voxel_centres(self, occ, origin, spacing):
+        """World-space centres (m, 3) of the SOLID voxels of an occupancy grid -- a point cloud of the volume,
+        for instancing, point rendering, or feeding a mesher. See holographic_voxelize.voxel_centres."""
+        from holographic.mesh_and_geometry.holographic_voxelize import voxel_centres
+        return voxel_centres(occ, origin, spacing)
+
+    def occupancy_to_mesh(self, occ, origin, spacing):
+        """Extract a surface MESH (vertices, quads) from an occupancy grid via surface_nets -- closes the round
+        trip mesh -> voxels -> mesh (a voxel-resolution resample of the input). See
+        holographic_voxelize.occupancy_to_mesh."""
+        from holographic.mesh_and_geometry.holographic_voxelize import occupancy_to_mesh
+        return occupancy_to_mesh(occ, origin, spacing)
+
+    def mesh_winding_number(self, points, vertices, faces):
+        """Generalised WINDING NUMBER of each query point w.r.t. a triangle mesh: ~1 inside a closed surface, ~0
+        outside, fractional near boundaries (robust inside/outside test for non-watertight meshes). Returns (n,)
+        in turns. See holographic_voxelize.winding_number."""
+        from holographic.mesh_and_geometry.holographic_voxelize import winding_number
+        return winding_number(points, vertices, faces)
+
+    def nurbs_curve(self, control, weights=None, n=100, degree=3, knots=None):
+        """Evaluate a NURBS (rational B-spline) CURVE: `control` (k,dim) with per-point `weights` (default 1 -> a
+        plain B-spline). Weights are what let a NURBS hold a CONIC exactly (a circle/arc), which a polynomial
+        B-spline only approximates. Returns (n, dim). See holographic_nurbs.nurbs_curve."""
+        from holographic.mesh_and_geometry.holographic_nurbs import nurbs_curve
+        return nurbs_curve(control, weights=weights, n=n, degree=degree, knots=knots)
+
+    def nurbs_surface(self, control_grid, weights=None, nu=40, nv=40, degree_u=3, degree_v=3,
+                      knots_u=None, knots_v=None):
+        """Evaluate a NURBS SURFACE (tensor-product rational B-spline): `control_grid` (ku,kv,3) control net with
+        per-point `weights` (ku,kv). Samples an (nu,nv) grid -> (nu*nv, 3) points. The CAD surface primitive -- a
+        rational patch that can be a sphere cap, cylinder, or a swoopy panel. See holographic_nurbs.nurbs_surface."""
+        from holographic.mesh_and_geometry.holographic_nurbs import nurbs_surface
+        return nurbs_surface(control_grid, weights=weights, nu=nu, nv=nv,
+                             degree_u=degree_u, degree_v=degree_v, knots_u=knots_u, knots_v=knots_v)
+
+    def nurbs_surface_mesh(self, control_grid, weights=None, nu=40, nv=40, degree_u=3, degree_v=3):
+        """Tessellate a NURBS surface into a triangle MESH (vertices, faces) -- the bridge from a CAD patch to the
+        engine's mesh pipeline (render / voxelise / DCC). See holographic_nurbs.nurbs_surface_mesh."""
+        from holographic.mesh_and_geometry.holographic_nurbs import nurbs_surface_mesh
+        return nurbs_surface_mesh(control_grid, weights=weights, nu=nu, nv=nv,
+                                  degree_u=degree_u, degree_v=degree_v)
+
+    def nurbs_circle(self, radius=1.0, n=100):
+        """A NURBS CIRCLE -- the canonical proof that NURBS represent conics EXACTLY (every point at `radius` to
+        ~1e-12, which a polynomial B-spline cannot do). Returns (n, 3). See holographic_nurbs.nurbs_circle."""
+        from holographic.mesh_and_geometry.holographic_nurbs import nurbs_circle
+        return nurbs_circle(radius=radius, n=n)
 
     def mesh_inset(self, mesh, face_index, ratio):
         """INSET a face (holographic_meshverbs, FWD-7): shrink face `face_index` toward its centroid by `ratio`,
@@ -3650,13 +6245,24 @@ class UnifiedMind:
         from holographic.mesh_and_geometry.holographic_meshverbs import dissolve_vertex
         return dissolve_vertex(mesh, vertex)
 
-    def mesh_bevel_vertex(self, mesh, vertex, ratio=0.25):
+    def mesh_bevel_vertex(self, mesh, vertex, ratio=0.25, segments=1):
         """BEVEL a corner (holographic_meshverbs2, FWD-7 remainder): pull each edge incident to `vertex` back toward
-        its neighbour by `ratio`, chamfer every incident face, and cap the hole with a new face -- the corner
-        becomes a small facet. Preserves chi + closed + manifold. Returns a Mesh. Kept negative: this is the VERTEX
-        bevel; the EDGE bevel (two-sided fan split) is deferred; ratio must be in (0,1)."""
-        from holographic.mesh_and_geometry.holographic_meshverbs2 import bevel_vertex
-        return bevel_vertex(mesh, vertex, ratio=ratio)
+        its neighbour by `ratio`, chamfer every incident face, and cap the hole. `segments=1` (default) caps with one
+        FLAT facet (byte-identical to the original bevel); `segments>=2` ROUNDS the corner into a smooth spherical
+        dome of that many rings -- the 'bevel with N segments' fillet. Preserves closed + manifold. Returns a Mesh.
+        Kept negative: this is the VERTEX bevel; the EDGE bevel (two-sided fan split) is deferred; ratio in (0,1)."""
+        from holographic.mesh_and_geometry.holographic_meshverbs2 import bevel_vertex_segments
+        return bevel_vertex_segments(mesh, vertex, ratio=ratio, segments=segments)
+
+    def mesh_fill_holes(self, mesh, mode="fan", max_sides=0):
+        """FILL open holes (boundary loops) of a mesh with faces (holographic_meshverbs2), returning a closed-up Mesh.
+        mode='fan' (default, always works) caps each loop with a centroid vertex + a triangle fan; mode='grid' bridges
+        a big-enough even loop with a coarser quad strip (Blender 'grid fill'), falling back to fan otherwise.
+        `max_sides` (Blender 'Sides') fills only loops with at most that many edges (0 = all) -- set it to close small
+        holes while leaving a large outer border open. Traces loops with face-consistent winding so the fill is
+        manifold. Returns a new Mesh."""
+        from holographic.mesh_and_geometry.holographic_meshverbs2 import fill_holes
+        return fill_holes(mesh, mode=mode, max_sides=max_sides)
 
     def mesh_bridge(self, verts, loop_a, loop_b, closed=True):
         """BRIDGE two edge loops (holographic_meshverbs2, FWD-7 remainder): join two equal-length ordered vertex
@@ -3778,16 +6384,22 @@ class UnifiedMind:
         from holographic.mesh_and_geometry.holographic_meshsubdiv import loop_subdivide
         return loop_subdivide(mesh, levels=levels)
 
-    def solve_ik(self, joints, target, iters=20, tol=None):
+    def solve_ik(self, joints, target, iters=20, tol=None, stiffness=None, dt=None):
         """Inverse kinematics by FABRIK (holographic_meshik, FWD-10): move a chain of `joints` (n+1, 3) so the
         end-effector reaches `target`, keeping every bone's rest length and the root fixed. Implemented LITERALLY
         through this mind's own `project_onto_constraints` engine -- FABRIK's forward/backward reaching IS a
         Gauss-Seidel sweep of bone-length + endpoint-pin projections, so IK is the iterate-a-projection faculty in
         the kinematic-chain costume. Returns (new_joints (n+1,3), n_sweeps). For an UNREACHABLE target the chain
         fully extends toward it (the honest degenerate outcome). Kept negative: plain FABRIK has no joint-angle
-        limits -- a per-joint cone projection would slot into the same sweep but is not shipped here."""
+        limits -- a per-joint cone projection would slot into the same sweep but is not shipped here.
+
+        SOFT IK (C3): `stiffness=(hertz, zeta)` + the substep `dt` makes the chain SPRINGY in physical units rather
+        than rigid. `stiffness=(inf, zeta)` is BIT-IDENTICAL to the rigid default, so nothing changes unless you ask.
+        Measured: the end-effector lags its target by 0.3673 / 0.0336 / 0.0000 at 2 / 8 / 40 Hz, and at a fixed
+        physical horizon the dial holds its meaning where `omega` does not (omega=0.30 reaches 0.4253 at 5 sweeps
+        and 0.0000 at 80; stiffness=(8, 1.0) reaches 0.0033 and 0.0001)."""
         from holographic.mesh_and_geometry.holographic_meshik import solve_ik as _solve_ik
-        return _solve_ik(joints, target, iters=iters, tol=tol)
+        return _solve_ik(joints, target, iters=iters, tol=tol, stiffness=stiffness, dt=dt)
 
     def skin_mesh(self, mesh, transforms, weights):
         """Linear-blend-SKIN a mesh (holographic_meshskin, FWD-9): deform each vertex as the weighted combination
@@ -3799,6 +6411,15 @@ class UnifiedMind:
         radius to cos(theta/2) (the candy-wrapper artifact) -- dual-quaternion skinning is the fix, not shipped."""
         from holographic.mesh_and_geometry.holographic_meshskin import skin_mesh as _skin_mesh
         return _skin_mesh(mesh, transforms, weights)
+
+    def skin_bind_weights(self, vertices, bones, falloff=2.0, max_influences=4):
+        """AUTO-SKIN BINDING (holographic_meshskin) -- compute per-vertex bone weights from bone anchor points, the
+        'bind' step that produces the weights skin_mesh consumes. Inverse-distance falloff to the nearest bones,
+        keeping max_influences and renormalizing to a PARTITION OF UNITY (so rigid motion is exact). The
+        distance-based auto-bind a rig starts from. Kept negative: ignores the surface (can bind across a thin gap);
+        geodesic refinement is future. See holographic_meshskin.skin_bind_weights."""
+        from holographic.mesh_and_geometry.holographic_meshskin import skin_bind_weights
+        return skin_bind_weights(vertices, bones, falloff=falloff, max_influences=max_influences)
 
     def blend_pose(self, targets, weights):
         """The forward blendshape/skinning map for STRUCTURES (holographic_blendpose, ARCH-6): a soft weighted blend
@@ -3967,6 +6588,54 @@ class UnifiedMind:
             chain = self._function_lod_chain(field, bounds, resolution, level)
         idx = self.mesh_select_lod(chain, distance, pixel_budget, screen_height_px=screen_height_px, fov_deg=fov_deg)
         return chain[idx].mesh
+
+    def sdf_to_mesh(self, sdf, bounds=None, resolution=48, level=None):
+        """FRACTAL / SDF -> MESH, the one-liner (holographic bridge). Marches an SDF OBJECT (from fold_fractal /
+        mandelbulb / menger / sphere / any .eval-having field) to a watertight Mesh ready for mesh_to_softbody and the
+        whole mesh + simulation pipeline. This exists because two sharp edges trip everyone: (1) an SDF object is NOT
+        a bare callable, so surface_mesh's `field=` rejects it -- we wrap `.eval` here; (2) a distance-ESTIMATOR
+        fractal (fold_fractal) is ALL-POSITIVE (its DE never dips below 0), so marching at level 0 finds no crossing
+        and returns 0 faces SILENTLY -- we detect an all-positive field and offset the iso `level` a hair into the
+        solid so it actually meshes. Pass an explicit `level` to override. `bounds` defaults to a symmetric box sized
+        to the field (probed), so `m.sdf_to_mesh(m.mandelbulb())` just works. Returns a Mesh.
+
+        KEPT NEGATIVE: an all-positive DE has no true zero surface -- the offset picks a near-surface isocontour, not
+        a canonical boundary; the mesh is 'the fractal at iso=eps', which is the honest thing a raymarcher shows too."""
+        import numpy as _np
+        if not hasattr(sdf, "eval"):
+            raise TypeError("sdf_to_mesh expects an SDF object with .eval(P); wrap a bare function yourself")
+        if bounds is None:
+            # probe a coarse box for the field's support: grow until the corners read clearly outside.
+            b = 1.0
+            for _ in range(6):
+                corners = _np.array([[s * b for s in c] for c in
+                                     [(1, 1, 1), (-1, -1, -1), (1, -1, 1), (-1, 1, -1)]], float)
+                if _np.min(sdf.eval(corners)) > 0.25 * b:      # corners comfortably outside -> box contains it
+                    break
+                b *= 1.6
+            bounds = ([-b, -b, -b], [b, b, b])
+        # auto-detect an all-positive distance estimator and offset the iso level into the solid (the 0-faces fix).
+        if level is None:
+            rng = _np.random.default_rng(0)
+            lo, hi = _np.asarray(bounds[0], float), _np.asarray(bounds[1], float)
+            probe = lo + (hi - lo) * rng.uniform(size=(4000, 3))
+            dvals = sdf.eval(probe)
+            if _np.min(dvals) >= 0.0:                          # never negative -> no zero crossing to march
+                level = float(_np.percentile(dvals, 20))       # a near-surface isocontour that DOES cross
+            else:
+                level = 0.0
+        return self.surface_mesh(lambda P: sdf.eval(_np.asarray(P)), bounds=bounds, resolution=resolution, level=level)
+
+    def field_displace(self, mesh, field, amount=0.1, weight=None, invert=False, bias=0.0):
+        """Displace a mesh's vertices along their normals by a SCALAR FIELD or SDF sampled at each vertex
+        (holographic_autodisplace) -- the general, field-driven modifier. `field` is any .eval-having SDF (mandelbulb,
+        fold_fractal) or a bare callable P->values, so a FRACTAL can drive the relief. `weight` is the per-vertex MASK
+        (an array or callable in [0,1], e.g. sampled from a texture map) so the detail grows only WHERE THE MAP PAINTS
+        it -- the 'per-face mandelbulb modifier from a texture' case. `invert` flips the sign, `bias` recenters.
+        Returns a new Mesh. Generalizes auto_displace (which only reads an RGB image) to any field. Kept negative:
+        displaces along existing normals (adds relief, no re-topology) -- mesh finely first for deep fractal detail."""
+        from holographic.mesh_and_geometry.holographic_autodisplace import field_displace
+        return field_displace(mesh, field, amount=amount, weight=weight, invert=invert, bias=bias)
 
     def _function_lod_chain(self, field, bounds, resolution, level):
         """Field-native LOD for a field FUNCTION: re-sample + march at decreasing resolutions (coarsen the source),
@@ -4828,6 +7497,184 @@ class UnifiedMind:
         from holographic.mesh_and_geometry.holographic_sdf import menger
         return menger(iterations, size)
 
+    def fold_fractal(self, iterations=12, scale=2.0, min_radius=0.5, fold_limit=1.0):
+        """The KALEIDOSCOPIC-IFS / MANDELBOX distance-estimator SDF -- the general FOLD ENGINE behind the fractal-
+        forums 3D fractals and the Yohei-Nishitsuji tweet-shader look (holographic_sdf). Iterates box-fold (conditional
+        reflection) + sphere-fold (inversion through nested spheres) + scale/translate, tracking the derivative for a
+        usable distance estimate. `scale` is the Mandelbox constant, `min_radius` sets where the sphere fold bites,
+        `fold_limit` the box-fold extent. All conformal transforms, so it raymarches and orbit-traps cleanly with the
+        existing renderer. A four-float recipe that regenerates megabytes of deterministic self-similar structure.
+        Returns an SDF. Kept negative: INEXACT (a distance ESTIMATE) -- the in-engine raymarcher steps conservatively,
+        but the GLSL emitter refuses it (a shader consumer must hand-tune the step size)."""
+        from holographic.mesh_and_geometry.holographic_sdf import fold_fractal
+        return fold_fractal(iterations, scale, min_radius, fold_limit)
+
+    def mandelbulb(self, power=8.0, iterations=8, bailout=2.0):
+        """The MANDELBULB distance-estimator SDF (holographic_sdf) -- White & Nylander's polar-power fractal, the 3D
+        Mandelbrot analogue. Iterates z -> z^power + c in spherical coords with the analytic DE 0.5*log(r)*r/dr.
+        power=8 is the classic bulb. Unlike fold_fractal (a Mandelbox FOLD engine), this is the ESCAPE-TIME family in
+        3D (the z^n+c that draws the Mandelbrot set, lifted to a triplex algebra). Raymarches + orbit-traps with the
+        existing renderer. Returns an SDF. Kept negative: INEXACT (a distance ESTIMATE); the GLSL emitter refuses it."""
+        from holographic.mesh_and_geometry.holographic_sdf import mandelbulb
+        return mandelbulb(power, iterations, bailout)
+
+    def escape_time(self, width=256, height=256, center=(-0.5, 0.0), span=3.0, max_iter=100,
+                    power=2.0, julia_c=None):
+        """The 2D ESCAPE-TIME fractal FIELD (holographic_sdf) -- Mandelbrot (julia_c=None) or Julia (julia_c=(re,im)),
+        the classic z -> z^power + c iteration in the complex plane. Returns a (height,width) float array of SMOOTH
+        (continuous) escape counts in [0, max_iter], ready to feed a palette. The 2D sibling of mandelbulb: same
+        z^n+c recurrence read as a field. center/span frame the view. Vectorised, deterministic."""
+        from holographic.mesh_and_geometry.holographic_sdf import escape_time
+        return escape_time(width=width, height=height, center=center, span=span, max_iter=max_iter,
+                           power=power, julia_c=julia_c)
+
+    def fold_fit(self, target, iterations=10, coarse=6, refine_steps=40):
+        """INFER a fold RECIPE from an observed structure (holographic_foldfit) -- the inverse of fold_fractal.
+        Recover the (scale, min_radius, fold_limit) whose Mandelbox fractal best fits the `target` (M,3) point cloud:
+        a deterministic coarse grid over recipe space, then a local refine with this mind's own `optimize` (composed).
+        Returns {recipe, loss, baseline, improved}. The pattern-recognition payoff -- self-similarity detection as
+        parameter estimation. Kept negative: the loss (mean distance-to-surface) is NECESSARY not SUFFICIENT (the DE
+        lower bound can score an over-large fractal that merely contains the points) -- so the baseline-improvement
+        RATIO, not the absolute loss, is the discriminative signal. Recovers A recipe consistent with the cloud."""
+        from holographic.mesh_and_geometry.holographic_foldfit import fold_fit
+        return fold_fit(target, iterations=iterations, coarse=coarse, refine_steps=refine_steps, mind=self)
+
+    def fit_shape(self, target, **kw):
+        """CLOSEST-FIT to a procedural formula + its SHADERTOY / GLSL (holographic_fitshape) -- the capstone. Given a
+        `target`, fit the closest procedural representation and return it with runnable code. Dispatches on the target:
+        an (M,3) POINT CLOUD -> a FRACTAL SDF recipe via fold_fit, reconstructed and emitted as a complete Shadertoy
+        raymarch shader (the strong path: good for self-similar/fractal 3-D structure, quality = fold_fit's baseline-
+        improvement ratio, >~3x is a real fit); a 2-D IMAGE / HEIGHT / TEXTURE -> a PROCEDURAL fBm matched to the
+        target's statistical signature + a GLSL fbm snippet. Returns a dict with `kind`, the fit, a measured `quality`
+        vs `baseline`, the emitted code (`shadertoy` or `glsl`), and a `note`. Honest by construction: KEPT NEGATIVE
+        -- the texture path is a family match (matched roughness+detail), NOT parameter recovery or a pixel match; it
+        does not fit arbitrary meshes or L-systems (a fern's true generator) -- those are scoped next fitters."""
+        from holographic.mesh_and_geometry.holographic_fitshape import fit_shape
+        return fit_shape(target, mind=self, **kw)
+
+    def to_shadertoy(self, sdf):
+        """Emit a complete, runnable SHADERTOY fragment shader for an SDF (holographic_sdf.sdf_shader) -- map() +
+        raymarch + normals + lighting + a mainImage entry point, ready to paste into shadertoy.com. Works for the
+        fractal SDFs too (fold_fractal, mandelbulb, menger): they emit their fold/polar-power loop with a header note
+        that a distance ESTIMATE needs conservative ray steps. The 'get the Shadertoy code for it' primitive. Alias of
+        sdf_shader with the conventional name."""
+        return self.sdf_shader(sdf)
+
+    def ifs_generate(self, name_or_ifs="barnsley_fern", n=20000, seed=0):
+        """Generate a plant/fractal point cloud from an AFFINE IFS via the chaos game (holographic_ifs). Pass a named
+        system ('barnsley_fern', 'culcita_fern', 'sierpinski', 'fractal_tree', 'dragon_curve') or an AffineIFS object;
+        get an (n,2) attractor point cloud. A fern/tree/sierpinski from a handful of 6-number affine maps -- the
+        botanical/branching model that fold_fractal (a Mandelbox fold) is not. Mesh it via sdf_from_points ->
+        sdf_to_mesh for geometry. Returns (n,2) points. Deterministic given `seed`."""
+        from holographic.mesh_and_geometry.holographic_ifs import ifs_library, AffineIFS
+        ifs = name_or_ifs
+        if isinstance(name_or_ifs, str):
+            lib = ifs_library()
+            if name_or_ifs not in lib:
+                raise ValueError("unknown IFS %r; known: %s" % (name_or_ifs, sorted(lib)))
+            ifs = lib[name_or_ifs]
+        return ifs.generate(n=n, seed=seed)
+
+    def ifs_fit(self, target, bins=28):
+        """Match a 2-D `target` point cloud to the CLOSEST NAMED affine-IFS system (holographic_ifs) -- the honest
+        'fit a fern/tree' -- by occupancy signature. Returns {name, ifs, distance, quality, baseline, ranking, note}.
+        `quality` beats `baseline` (the library mean) when the target really resembles a known system; a cloud unlike
+        anything scores near baseline. The botanical companion to fold_fit (Mandelbox) and fit_shape. Kept negative:
+        snaps to a LIBRARY, does not recover arbitrary IFS maps; not rotation-invariant."""
+        from holographic.mesh_and_geometry.holographic_ifs import ifs_fit
+        return ifs_fit(target, bins=bins)
+
+    def fit_primitives(self, target, k=6, auto_k=False, k_max=16, tol=0.05, primitives=("sphere", "box", "capsule")):
+        """Approximate a (M,3) point cloud with a UNION of PRIMITIVES, best-fit per cluster (holographic_primfit) --
+        the honest model for a HARD-SURFACE or NON-FRACTAL organic shape (a 'creature', a part) that fold_fractal and
+        the affine-IFS library can't represent. Clusters the points deterministically, then per cluster fits a SPHERE
+        (round parts), an ORIENTED BOX (blocky parts, via PCA), and a CAPSULE (elongated/rounded limbs) and keeps the
+        best-fitting one. All are EXACT SDFs, so the union raymarches / sdf_to_mesh's / to_shadertoy's. Returns {sdf,
+        parts, kinds, quality, baseline, residual, k}: `kinds` counts each primitive type chosen; `quality` is how
+        many times better than a single bounding sphere. `primitives` restricts the palette (('sphere',) = the old
+        sphere-only behaviour). auto_k=True grows K to the elbow. Kept negative: a cluster spanning two oriented parts
+        is fit by one loose primitive (raise K); approximates the surface, not a minimal CSG tree."""
+        from holographic.mesh_and_geometry.holographic_primfit import fit_primitives
+        return fit_primitives(target, k=k, auto_k=auto_k, k_max=k_max, tol=tol, primitives=primitives)
+
+    def humanoid(self, targets=None, scale=1.0, iters=30, skin=True, body=None,
+                 limb_radius=0.06, head_radius=0.11, torso_radius=0.10):
+        """Build a parametric biped HUMANOID with automatic IK rigging and CHARACTER-EDITOR body morphs
+        (holographic_humanoid). Starts in a T-pose; if `targets` (end_effector -> (x,y,z)) is given, each limb is posed
+        by IK (FABRIK) keeping bone lengths. `body` is a character-editor parameter block (see body_params /
+        default_body): global weight/muscle/fat sliders that distribute across the body by region, per-segment
+        muscle/fat/length overrides, and optional breast geometry (size/sag/separation/nipple_diameter/nipple_depth).
+        Returns the posed Humanoid; if `skin=True` also its morphed primitive-skin SDF (meshes, emits Shadertoy). All
+        morphs default to 0 -> the base build is byte-identical to the un-morphed figure. End-effectors: l_wrist,
+        r_wrist, l_ankle, r_ankle, head."""
+        from holographic.mesh_and_geometry.holographic_humanoid import Humanoid
+        h = Humanoid(scale=scale, body=body)
+        if targets:
+            h.pose_to(targets, iters=iters, mind=self)
+        if skin:
+            return h, h.skin(limb_radius=limb_radius, head_radius=head_radius, torso_radius=torso_radius)
+        return h
+
+    def body_params(self):
+        """The neutral character-editor parameter block for humanoid() (holographic_humanoid.default_body) -- every
+        slider at 0. Copy and adjust: global weight/muscle/fat in [-1,1]; segments[name] = {muscle, fat, length} for
+        torso/neck/shoulder/upper_arm/forearm/hip/thigh/shin; breasts = None or {size, sag, separation,
+        nipple_diameter, nipple_depth}. Pass the result as humanoid(body=...)."""
+        from holographic.mesh_and_geometry.holographic_humanoid import default_body
+        return default_body()
+
+    def fit_pose(self, keypoints, camera=None, iters=30, scale=1.0):
+        """Fit a HUMANOID rig to KEYPOINTS -- the honest 'approximate a pose' (holographic_humanoid). Pass 3-D
+        keypoints (a dict joint_name -> (x,y,z), e.g. from mocap) for a direct IK fit, OR 2-D image keypoints (dict
+        joint_name -> (u,v)) WITH a `camera` (needs .ray(uv) and .project(pts)) for a bone-length-constrained lift +
+        IK. Returns the posed Humanoid (2-D also returns the lifted keypoints). KEPT NEGATIVE, loud: this fits
+        KEYPOINTS, it does NOT detect them in an image (that needs a learned model, which the engine forbids); and a
+        monocular 2-D lift is depth-ambiguous, so it recovers A plausible pose, not THE unique one."""
+        from holographic.mesh_and_geometry.holographic_humanoid import fit_pose_3d, fit_pose_2d
+        if camera is not None:
+            return fit_pose_2d(keypoints, camera, iters=iters, mind=self, scale=scale)
+        return fit_pose_3d(keypoints, iters=iters, mind=self, scale=scale)
+
+    def solve_ik_limited(self, joints, target, limits, iters=20, root_ref=(0.0, 1.0, 0.0)):
+        """CONSTRAINED inverse kinematics (holographic_iklimit): reach `target` while keeping each joint within an
+        anatomical limit -- no hyperextended elbows/knees, ball joints within their cones. `joints` is (n+1,3);
+        `limits` is a list of len n, each None (free) or {'type':'hinge','axis','lo','hi'} / {'type':'cone','half',
+        'ref'?} in RADIANS. Alternates a FABRIK reach (solve_ik) with a root->tip limit projection (constrained
+        FABRIK, Aristidou-Lasenby). Returns (joints, reach_error) -- error>0 when the limits correctly prevent
+        reaching an out-of-range target. Bone lengths preserved; never returns an out-of-limit pose. Kept negative:
+        angle limits only, no self-collision."""
+        from holographic.mesh_and_geometry.holographic_iklimit import solve_ik_limited
+        return solve_ik_limited(joints, target, limits, iters=iters, root_ref=root_ref, mind=self)
+
+    def creature(self, spec, skin=True):
+        """Build a Spore-style non-humanoid CREATURE from a body-plan spec (holographic_creature) -- a spine with limbs
+        attached at fractional positions, bilateral symmetry, and generic organic joint constraints (a cone at each
+        limb mount, no-hyperextension hinges along it). `spec`: {spine:{length,segments,axis,curve,radius}, limbs:[{at,
+        dir,segments,length,radius,mirror,cone_deg,hinge_deg}], head:{at,radius}, body:<morph block>}. Returns the
+        Creature; if skin=True also its morph-aware primitive-skin SDF (meshes, emits Shadertoy). Pass mind.creature
+        (mind.quadruped_spec()) for a ready quadruped. Generalises the humanoid to arbitrary body plans."""
+        from holographic.mesh_and_geometry.holographic_creature import Creature
+        cre = Creature(spec)
+        if skin:
+            return cre, cre.skin()
+        return cre
+
+    def creature_pose(self, spec, targets, iters=30):
+        """Build a creature from `spec` and pose its limbs to `targets` ({chain_name: (x,y,z)}) via CONSTRAINED IK in
+        one deterministic call (holographic_creature). Chain names are 'L0','L0m','L1',... (m = the mirrored twin).
+        Returns (Creature, skin_sdf). Joint limits (and their muscle/fat tightening) are enforced, so limbs never
+        hyperextend."""
+        from holographic.mesh_and_geometry.holographic_creature import Creature
+        cre = Creature(spec)
+        cre.pose(targets, iters=iters, mind=self)
+        return cre, cre.skin()
+
+    def quadruped_spec(self, body=None):
+        """A ready-made creature body plan -- a quadruped (spine + two mirrored leg pairs + head)
+        (holographic_creature.quadruped_spec). A concrete starting spec to build on; pass to creature()."""
+        from holographic.mesh_and_geometry.holographic_creature import quadruped_spec
+        return quadruped_spec(body=body)
+
     def greeble(self, base_mesh, seed=None, density=0.7, max_height=0.15, footprint=0.5):
         """S2 -- cover a base mesh's faces with extruded greeble boxes (the G5 panel idea on any surface) ->
         a merged Mesh of mechanical hull detail. Seat: Quilez/demoscene. KEPT NEGATIVE: instancing, not CSG
@@ -5047,13 +7894,72 @@ class UnifiedMind:
         from holographic.caching_and_storage.holographic_index import Index
         return Index(vectors, labels=labels, method=method, seed=seed)
 
-    def find_capability(self, problem, k=3):
+    def find_capability(self, problem, k=3, accepts=None, produces=None):
         """CONSOLIDATION CATALOG (C1) -- 'search before you build'. Describe a problem in plain English and get the
         engine homes that already solve it, best first, so you don't build a duplicate. The catalog is seeded with
         the consolidation homes (Index/Cache/Field/...) AND this mind's own public faculties (their docstrings), so
         both curated homes and live methods are findable. Returns a list of holographic_catalog.Capability (each has
-        .name, .does, .example, .native). See holographic_catalog."""
-        return self._capability_catalog().find_capability(problem, k=k)
+        .name, .does, .example, .native, .semantic, .consumes, .produces).
+
+        S3 io-shape filter: `accepts='mesh'` keeps only capabilities that consume a mesh ('what can I run on this
+        mesh?'); `produces='mesh'` keeps only those that yield one. Untagged capabilities are unspecified and always
+        shown. See holographic_catalog."""
+        return self._capability_catalog().find_capability(problem, k=k, accepts=accepts, produces=produces)
+
+    def find_capability_uris(self, problem, k=3):
+        """Like find_capability, but each result is annotated with its disambiguating capability URI(s) so a caller
+        NEVER gets a bare ambiguous name (holographic_catalog + holographic_capuri). Returns [{name, does, example,
+        uris}] where `uris` is the full path(s) the name resolves to -- one for a unique name, several for a
+        colliding one (e.g. 'rotation' -> both meshskin and scenegraph). The collision fix at the discovery layer:
+        the agent sees the path to supply, not just the name. See holographic_catalog.find_capability_uris."""
+        return self._capability_catalog().find_capability_uris(problem, k=k)
+
+    def suggest_pipeline(self, start_kind, goal_kind, max_len=4, require_step=False):
+        """Propose a PIPELINE from `start_kind` to `goal_kind` (io kinds, see holographic_iokinds) by chaining
+        capabilities whose `produces` feeds the next's `consumes` (holographic_catalog). Returns the shortest chain
+        as a list of {name, consumes, produces} steps, or None if no route within `max_len`. The render-graph idea
+        over the whole catalog: instead of one capability, the engine proposes a ROUTE -- e.g. 'transform'->'selection'
+        chains transform_selection then mesh_selection. Answers 'how do I get from what I have to what I want?'.
+
+        `require_step=True` on a same-kind query ('mesh'->'mesh') demands a real TRANSFORMING edge (mesh_smooth,
+        mesh_subdivide, ...) instead of the empty 'already there' pipeline -- the 'what can I DO to a mesh?' answer.
+        See holographic_catalog.suggest_pipeline."""
+        return self._capability_catalog().suggest_pipeline(start_kind, goal_kind, max_len=max_len,
+                                                           require_step=require_step)
+
+    def io_kinds(self):
+        """The closed vocabulary of io DATATYPE kinds a capability can consume/produce (holographic_iokinds) --
+        mesh, points, sdf, sdf_scene, field, image, hypervector, transform, selection, scalar, curve, skeleton.
+        These are the kinds the find_capability accepts=/produces= filter and suggest_pipeline route over. Coarse on
+        purpose: the fine distinctions live in each capability's docstring. See holographic_iokinds.IO_KINDS."""
+        from holographic.caching_and_storage.holographic_iokinds import IO_KINDS
+        return list(IO_KINDS)
+
+    def find_scored(self, problem, k=3):
+        """Like find_capability, but returns [(capability, score)] -- so a caller can tell a HIT from a FALLBACK.
+
+        This matters more than it looks. `find_capability` always returns its best three, even when the best is
+        nothing: a query about a faculty the engine does not have still comes back with three confident-looking
+        names. Twice in this program an audit concluded "absent" from a fallback and "present" from a coincidence,
+        and both times the score would have said so immediately. A dominant top score means the engine really does
+        solve this; a flat low-scoring list means it does not, whatever the names look like.
+
+        Use `capability_confidence` for the one-number version. See holographic_catalog.Catalog.find_scored."""
+        return self._capability_catalog().find_scored(problem, k=k)
+
+    def capability_confidence(self, problem):
+        """{top, score, margin, confident} -- how dominant the best capability match is. `margin` is the top score
+        minus the runner-up's; `confident` is True when the top scores at all AND leads by at least 1.0.
+
+        The honest answer to "does this engine already do X?" -- and the antidote to reading a fallback as a hit.
+        Pair it with a symbol grep (tools/backlog_probe.py does both) before concluding anything is missing."""
+        scored = self._capability_catalog().find_scored(problem, k=2)
+        if not scored:
+            return {"top": None, "score": 0.0, "margin": 0.0, "confident": False}
+        top, s0 = scored[0]
+        s1 = scored[1][1] if len(scored) > 1 else 0.0
+        return {"top": top.name, "score": float(s0), "margin": float(s0 - s1),
+                "confident": bool(s0 > 0.0 and (s0 - s1) >= 1.0)}
 
     def suggest(self, task, k=5):
         """AGENT-FRIENDLY autocomplete: turn a plain-English task into the best capabilities to use, each with a
@@ -6406,6 +9312,103 @@ class UnifiedMind:
         from holographic.misc.holographic_generate import crossfade_images
         return crossfade_images(image_a, image_b, steps=steps)
 
+    def image_edges(self, rgb, quantile=0.85):
+        """Boolean edge map of an image (classic CV, holographic_vision): Sobel gradient magnitude thresholded at
+        `quantile` of its own distribution -- self-calibrating, no magic pixel threshold. Accepts RGB (converted to
+        perceptual luma internally) or an already-gray 2-D array. See holographic_vision.edges."""
+        import numpy as np
+        from holographic.misc.holographic_vision import edges, to_gray
+        a = np.asarray(rgb, float)
+        return edges(to_gray(a) if a.ndim == 3 else a, quantile=quantile)
+
+    def image_corners(self, rgb, n=12, rel=0.05, min_dist=4):
+        """Top-n Harris corners of an image as (x, y) points, greedily spaced at least `min_dist` apart
+        (holographic_vision): corners are where the local gradient varies in TWO directions -- the classic
+        interest-point detector. Accepts RGB or gray. See holographic_vision.corners."""
+        import numpy as np
+        from holographic.misc.holographic_vision import corners, to_gray
+        a = np.asarray(rgb, float)
+        return corners(to_gray(a) if a.ndim == 3 else a, n=n, rel=rel, min_dist=min_dist)
+
+    def image_lines(self, rgb, top=5, quantile=0.85, ntheta=180, nms=10):
+        """Dominant straight lines in an image by the classic Hough transform (holographic_vision): every edge
+        pixel votes for the (theta, rho) lines through it; the peaks are the lines. Chains the self-calibrating
+        edge detector internally, so the input is just the image. Returns the `top` (theta, rho, votes) peaks.
+        See holographic_vision.hough_lines."""
+        import numpy as np
+        from holographic.misc.holographic_vision import edges, hough_lines, to_gray
+        a = np.asarray(rgb, float)
+        return hough_lines(edges(to_gray(a) if a.ndim == 3 else a, quantile=quantile), ntheta=ntheta, top=top, nms=nms)
+
+    def image_colours(self, rgb, k=4, seed=0):
+        """The k most common colours in an image (holographic_vision): k-means++ clustering over a pixel sample --
+        the palette / dominant-colour readout. Deterministic per seed. See holographic_vision.dominant_colours."""
+        from holographic.misc.holographic_vision import dominant_colours
+        return dominant_colours(rgb, k=k, seed=seed)
+
+    def image_signature(self, rgb):
+        """One fixed-length feature vector describing an image (holographic_vision.describe): colour histogram +
+        edge-orientation histogram + coarse layout, concatenated -- the classic-CV descriptor behind
+        image_classes. Two visually similar images get nearby signatures; use it for retrieval, dedup, or as a
+        cheap perceptual distance. See holographic_vision.describe."""
+        from holographic.misc.holographic_vision import describe
+        return describe(rgb)
+
+    def image_classes(self, images, k, seed=0, standardize=False):
+        """Cluster a set of images into k visual classes with NO labels (holographic_vision.emergent_classes):
+        describe() every image, k-means the descriptors -- classes EMERGE from appearance. Returns
+        (labels_per_image, class_centroids). Deterministic per seed. See holographic_vision.emergent_classes."""
+        from holographic.misc.holographic_vision import emergent_classes
+        return emergent_classes(images, k, seed=seed, standardize=standardize)
+
+    def ascii_view(self, image, width=80, mode="ramp", ansi=None, ramp=None, gamma=1.0,
+                   invert=False, cell_aspect=0.5):
+        """Render any image to TEXT at `width` characters -- the terminal/log/SSH projection backend
+        (holographic_ascii). Modes by detail-per-character: 'ramp' (luminance glyphs), 'edge' (oriented | / - \\
+        glyphs on strong gradients), 'braille' (2x4 dots = 8 pixels per char, Bayer-dithered -- the max-detail
+        mode), 'half' (2 full-color pixels per char; requires ansi). ansi='256'|'truecolor' colors any mode (the
+        256 path uses a baked colour codebook -- ~13x faster than per-cell formatting). ramp='short'|'long'|
+        'blocks'|'dots' or a custom glyph string picks the luminance codebook. gamma=2.2 brightens a linear
+        render; invert flips the ramp. Deterministic to the byte; fully vectorised (240^2 to 100-wide braille
+        ~5 ms). See holographic_ascii.ascii_render."""
+        from holographic.rendering.holographic_ascii import ascii_render
+        return ascii_render(image, width=width, mode=mode, ansi=ansi, ramp=ramp, gamma=gamma,
+                            invert=invert, cell_aspect=cell_aspect)
+
+    def ascii_sdf(self, sdf, width=80, mode="ramp", z=4.0, fov=0.8, camera=None, lit=True,
+                  ansi=None, ramp=None, cell_aspect=0.5):
+        """Preview a 3-D SDF scene as TEXT -- raymarch + shade + ASCII in one call (holographic_ascii.ascii_sdf),
+        the 'see my SDF over SSH' path with no manual render loop. `sdf` is a live SDF, a domain-warped scene, or
+        its DSL text. Default camera looks down -z from `z`; pass (origin, forward) as `camera` to override. lit
+        adds a lambert term. mode/ansi/ramp as ascii_view. Small by design (a preview); for a full frame use the
+        raymarcher and pass its image to ascii_view. See holographic_ascii.ascii_sdf."""
+        from holographic.rendering.holographic_ascii import ascii_sdf
+        return ascii_sdf(sdf, camera=camera, width=width, mode=mode, z=z, fov=fov, lit=lit,
+                         ansi=ansi, ramp=ramp, cell_aspect=cell_aspect)
+
+    def ascii_field(self, field, bounds=(-1.0, 1.0), res=None, width=80, mode="ramp",
+                    ansi=None, ramp=None, cell_aspect=0.5):
+        """Project a 2-D scalar FIELD sampler straight to TEXT (holographic_ascii.ascii_field) -- composability
+        past finished images. `field` is any callable f(P:(N,2))->(N,) (a bake_nd slice, a noise function, a
+        heightmap); it is sampled over [bounds]^2, self-normalised, and projected. This is the seam that lets the
+        ASCII backend consume the engine's native fields. mode/ansi/ramp as ascii_view. See
+        holographic_ascii.ascii_field."""
+        from holographic.rendering.holographic_ascii import ascii_field
+        return ascii_field(field, bounds=bounds, res=res, width=width, mode=mode,
+                           ansi=ansi, ramp=ramp, cell_aspect=cell_aspect)
+
+    def ascii_animate(self, frame, n, width=80, mode="ramp", ansi=None, ramp=None, cell_aspect=0.5, **kw):
+        """Render an ASCII ANIMATION to a list of `n` text frames (holographic_ascii.ascii_frames) -- the
+        demoscene 'kaleidoscope tunnel in a terminal' as data. `frame` is a callable frame(i, u) or frame(u)
+        (u = i/n normalised time) returning what to draw each frame: an image array (-> ascii_render), an SDF
+        node or DSL text (-> ascii_sdf, raymarched), or a 2-D field sampler f(P) (-> ascii_field). Returns a list
+        of strings (pure, deterministic -- diff them, write a .txt reel, or drive your own loop). For live
+        in-terminal playback with timing, call holographic_ascii.ascii_play directly (it does stdout I/O).
+        mode/ansi/ramp as ascii_view. See holographic_ascii.ascii_frames."""
+        from holographic.rendering.holographic_ascii import ascii_frames
+        return ascii_frames(frame, n, width=width, mode=mode, ansi=ansi, ramp=ramp,
+                            cell_aspect=cell_aspect, **kw)
+
     def auto_displace(self, mesh, rgb, amount=0.1, sigma=4.0, min_confidence=0.02):
         """Inverse-rendering IR5: promote an auto-bump height (IR1) from a shading bump to REAL geometry -- move a
         mesh's vertices along their normals by the derived height, but ONLY if the bump-confidence clears a
@@ -6724,6 +9727,64 @@ class UnifiedMind:
         the limit). See holographic_spectralfield.poisson_solve."""
         from holographic.sampling_and_signal.holographic_spectralfield import poisson_solve
         return poisson_solve(source, dx=dx, eps0=eps0)
+
+    def image_to_mesh(self, image, light=None, res=48, depth_scale=1.0, smooth=1.0):
+        """END-TO-END image -> watertight MESH: estimate depth by shape-from-shading, unproject to points, derive
+        oriented normals from the depth, and reconstruct a surface (points_to_mesh / dual-contour). Returns
+        (verts, quads, field, grids). HONEST: single-view + relative depth (shape-from-shading is ill-posed), so
+        this meshes the VISIBLE FRONT as a height-field surface, not a watertight solid object -- the back is
+        unobserved. For per-pixel splats instead of a mesh, use image_to_3d. Chains depth_from_image + unproject +
+        normal_from_height + points_to_mesh."""
+        import numpy as _np
+        from holographic.mesh_and_geometry.holographic_autobump import normal_from_height
+        img = _np.asarray(image, float)
+        H, W = img.shape[:2]
+        fx = fy = 0.9 * W; cx, cy = W / 2.0, H / 2.0
+        depth = self.depth_from_image(img, light=light, smooth=smooth)
+        z = (1.5 - depth) * depth_scale
+        pts = self.unproject_depth(z, fx, fy, cx, cy).reshape(-1, 3)     # (H*W, 3)
+        # normals from the depth height-field (the existing autobump wheel), flattened to match the points.
+        nmap = normal_from_height(z)                                     # (H, W, 3)
+        nrm = nmap.reshape(-1, 3)
+        lo = pts.min(axis=0) - 0.05; hi = pts.max(axis=0) + 0.05
+        return self.points_to_mesh(pts, nrm, lo.tolist(), hi.tolist(), int(res))
+
+    def depth_from_image(self, image, light=None, albedo=None, smooth=1.0):
+        """Estimate a relative DEPTH MAP from a single image by classical SHAPE FROM SHADING (C1 of photo-to-3D) --
+        no learned weights. Returns depth (H,W) normalised to [0,1] (1=nearest). This is the missing FRONT END for
+        photo_to_3d / unproject_depth, which both need a depth map. HONEST: shape-from-shading is ill-posed
+        (bas-relief ambiguity) so this is a PLAUSIBLE RELATIVE surface, not metric depth -- the confidence map in
+        photo_to_3d abstains where it is weak. Pass `light` (a 3-vector) if you know it. See
+        holographic_shapefromshading.shape_from_shading."""
+        from holographic.rendering.holographic_shapefromshading import shape_from_shading
+        return shape_from_shading(image, light=light, albedo=albedo, smooth=smooth)
+
+    def image_to_3d(self, image, fx=None, fy=None, cx=None, cy=None, light=None, depth_scale=1.0,
+                    confidence_floor=0.3, smooth=1.0):
+        """END-TO-END PHOTO-TO-3D from a single image (C1->C2->C3): estimate depth by shape-from-shading, unproject
+        to camera-space points, and fit per-pixel 3-D GAUSSIANS on the confident front-facing pixels (abstaining on
+        edges / grazing / the unobserved back). Returns the photo_to_3d result dict (positions, colours, radii,
+        confidences, abstain mask, coverage). `fx,fy,cx,cy` default to a reasonable pinhole for the image size;
+        `depth_scale` stretches the relative depth into camera Z. HONEST: the depth is relative (shape-from-shading
+        is ill-posed) and single-view, so this reconstructs the VISIBLE FRONT, not a watertight object. Chains
+        depth_from_image + unproject_depth + photo_to_3d."""
+        import numpy as _np
+        img = _np.asarray(image, float)
+        H, W = img.shape[:2]
+        # sensible default intrinsics: ~50 deg horizontal FOV, principal point at centre.
+        if fx is None:
+            fx = 0.9 * W
+        if fy is None:
+            fy = 0.9 * W
+        if cx is None:
+            cx = W / 2.0
+        if cy is None:
+            cy = H / 2.0
+        depth = self.depth_from_image(img, light=light, smooth=smooth)
+        # map normalised [0,1] (1=near) to a positive camera distance (near = small Z), scaled.
+        z = (1.5 - depth) * depth_scale                          # near pixels ~0.5, far ~1.5 (times scale)
+        colour = img if img.ndim == 3 else _np.stack([img] * 3, axis=2)
+        return self.photo_to_3d(z, colour, fx, fy, cx, cy, confidence_floor=confidence_floor)
 
     def photo_to_3d(self, depth, colour, fx, fy, cx, cy, confidence_floor=0.3):
         """Forecasting sweep (sec.5, depth delegation) / photo-to-3D: lift a depth map + image into per-pixel 3D
@@ -7190,6 +10251,76 @@ class UnifiedMind:
         from holographic.simulation_and_physics.holographic_wave import WaveField
         return WaveField(shape, c=c, dx=dx, damping=damping, absorb_border=absorb_border)
 
+    # -- QUANTUM faculties (complex wavefunction stack: field / solver / current / dot / interferometer) ---------
+    def quantum_field(self, shape, dx=1.0, mass=1.0, hbar=1.0, q=1.0):
+        """A COMPLEX wavefunction psi on a grid -- the central quantum object. `.gaussian_packet(center, sigma, k0)`
+        launches a wave packet, `.set_potential(V)` installs a well/wall, `.set_vector_potential([Ax,Ay])` threads
+        magnetic flux, `.probability_density()` is |psi|^2, `.normalize()` makes it integrate to 1. Hand it to
+        `quantum_solver(...)` to evolve. The quantum complement to wave_field (which carries a REAL acoustic field).
+        See holographic_quantum_field.QuantumField."""
+        from holographic.simulation_and_physics.holographic_quantum_field import QuantumField
+        return QuantumField(shape, dx=dx, mass=mass, hbar=hbar, q=q)
+
+    def quantum_solver(self, field, absorb_border=0):
+        """A split-operator (split-step Fourier) integrator for the time-dependent Schrodinger equation on a
+        QuantumField. `.step(dt)` / `.run(n, dt)` evolve psi in place, UNITARILY (norm conserved to machine
+        precision -- the kinetic step is spectral, the analytic continuation of the heat propagator). An
+        `absorb_border` sponge opens the boundary for scattering. Explicit Euler is unstable and is NOT used (a
+        recorded negative). See holographic_schrodinger.SplitStepSchrodinger."""
+        from holographic.simulation_and_physics.holographic_schrodinger import SplitStepSchrodinger
+        return SplitStepSchrodinger(field, absorb_border=absorb_border)
+
+    def probability_current(self, psi, A=None, mass=1.0, hbar=1.0, q=1.0, dx=1.0, bc="periodic"):
+        """The probability current j = (hbar/m) Im(psi* grad psi) - (q/m) A |psi|^2 of a wavefunction, as [jx, jy].
+        The flow of |psi|^2 -- streamlines of j are the glowing threads in an interferometer, and a loop with
+        circulation is a probability vortex. Returns real arrays. See holographic_probability_current.probability_current."""
+        from holographic.simulation_and_physics.holographic_probability_current import probability_current
+        return probability_current(psi, A=A, mass=mass, hbar=hbar, q=q, dx=dx, bc=bc)
+
+    def quantum_velocity(self, psi, A=None, mass=1.0, hbar=1.0, q=1.0, dx=1.0, bc="periodic"):
+        """The probability VELOCITY field v = j/|psi|^2 -- hand it straight to advect_field to carry glowing tracers
+        along the quantum flow (the SIDEWAYS reuse: the quantum current drives the existing advection). Returns
+        [vx, vy]. See holographic_probability_current.velocity_field."""
+        from holographic.simulation_and_physics.holographic_probability_current import velocity_field
+        return velocity_field(psi, A=A, mass=mass, hbar=hbar, q=q, dx=dx, bc=bc)
+
+    def quantum_dot_well(self, shape, center, depth, width):
+        """A narrow Gaussian potential well (the quantum dot) -- hand it to a QuantumField.set_potential. A negative
+        `depth` makes a repulsive barrier (a tunnelling scatterer). See holographic_quantum_dot.gaussian_well."""
+        from holographic.simulation_and_physics.holographic_quantum_dot import gaussian_well
+        return gaussian_well(shape, center, depth, width)
+
+    def quantum_transmission(self, k0, dot_V=None, shape=(256, 128), dx=0.2, sigma=10.0, x_start=40,
+                             cut=None, steps=600, dt=0.02, absorb_border=20):
+        """MEASURE the fraction of a packet (carrier k0) that crosses a cut plane past an optional dot potential --
+        the transmission. Sweep k0 with and without the dot to see the resonance/tunnelling emerge (measured, not
+        painted). See holographic_quantum_dot.measure_transmission."""
+        from holographic.simulation_and_physics.holographic_quantum_dot import measure_transmission
+        return measure_transmission(k0, dot_V=dot_V, shape=shape, dx=dx, sigma=sigma, x_start=x_start,
+                                    cut=cut, steps=steps, dt=dt, absorb_border=absorb_border)
+
+    def quantum_solenoid_A(self, shape, center, flux, core=1.0):
+        """The azimuthal vector potential of a thin solenoid carrying `flux` -- thread it through a ring with
+        QuantumField.set_vector_potential to get the Aharonov-Bohm phase. See holographic_quantum_scene.solenoid_vector_potential."""
+        from holographic.simulation_and_physics.holographic_quantum_scene import solenoid_vector_potential
+        return solenoid_vector_potential(shape, center, flux, core=core)
+
+    def aharonov_bohm_phase(self, flux, shape=(128, 128), dx=0.2, q=1.0, ring_radius=24):
+        """MEASURE the relative phase the two arms of a ring accumulate from enclosed magnetic `flux` -- the
+        Aharonov-Bohm interference shift, which equals q*Phi/hbar even though the field is zero on the arms. See
+        holographic_quantum_scene.measure_two_arm_phase."""
+        from holographic.simulation_and_physics.holographic_quantum_scene import measure_two_arm_phase
+        return measure_two_arm_phase(flux, shape=shape, dx=dx, q=q, ring_radius=ring_radius)
+
+    def quantum_two_slit(self, shape=(256, 256), dx=0.2, slit_axis=0, slit_pos=None, slit_gap=6, slit_sep=40,
+                         wall_height=400.0):
+        """Build a two-slit interferometer: a high-potential wall with two openings. Returns (QuantumField, V).
+        Launch a packet at it (quantum_solver) and the two slits become coherent sources -> an interference
+        pattern downstream. The canonical warm-up before the Aharonov-Bohm ring. See holographic_quantum_scene.two_slit."""
+        from holographic.simulation_and_physics.holographic_quantum_scene import two_slit
+        return two_slit(shape=shape, dx=dx, slit_axis=slit_axis, slit_pos=slit_pos, slit_gap=slit_gap,
+                        slit_sep=slit_sep, wall_height=wall_height)
+
     def read_wav(self, path):
         """Read a PCM WAV file -> (samples in [-1,1] mono, sample_rate). The front door for driving acoustics/
         cymatics from a real sound. Acoustics A1. See holographic_audio.read_wav."""
@@ -7201,6 +10332,36 @@ class UnifiedMind:
         fluid. Acoustics A1. See holographic_audio.dominant_frequencies (and `spectrum`, `frames` there)."""
         from holographic.misc.holographic_audio import dominant_frequencies
         return dominant_frequencies(samples, rate, k=k)
+
+    def audio_param_bus(self, samples, rate, hop=1024, size=2048, bands=None, smooth=2):
+        """Build an audio -> parameter BUS: per-frame band-energy envelopes (bass/low-mid/high-mid/treble by
+        default, normalised 0..1) plus an onset/beat signal -- the wire that drives scene parameters from music
+        (W5'). Returns a ParamBus; in a render loop call `bus.subscribe(band, lo, hi, frame)` to map a band onto
+        a parameter range (e.g. metaball viscosity from the bass), or `bus.at(frame)` for all bands, or
+        `bus.onset` for beats. Reuses the existing STFT (audio_spectrum's holographic_audio.frames + spectrum) --
+        only the band binning is new. `bands` is a tuple of (lo_hz, hi_hz) pairs; `smooth` de-jitters the
+        envelopes. See holographic_parambus.param_bus."""
+        from holographic.misc.holographic_parambus import param_bus, DEFAULT_BANDS
+        return param_bus(samples, rate, hop=hop, size=size,
+                         bands=bands if bands is not None else DEFAULT_BANDS, smooth=smooth)
+
+    def milk_parse(self, text):
+        """PARSE a Milkdrop `.milk` preset's TEXT into a MilkPreset (holographic_milkdrop) -- settings +
+        per_frame_init/per_frame/per_pixel equation families (compiled) + the captured warp/comp HLSL shaders. Then
+        `preset.initial_state()` and `preset.run_frame(state, audio={bass,mid,treb}, time, frame)` evaluate the
+        per-frame equations deterministically, driving the motion vars (q1..q32, zoom, rot, ...) from the audio
+        envelopes (pair with audio_param_bus). The EQUATION layer -- the per-pixel warp mesh + pixel shaders are
+        parsed and stored but run by the renderer, not here. Returns a MilkPreset."""
+        from holographic.io_and_interop.holographic_milkdrop import parse_milk
+        return parse_milk(text)
+
+    def milk_eval(self, expr, vars=None):
+        """Evaluate ONE ns-eel2 expression string (Milkdrop's equation language) against a variable dict
+        (holographic_milkdrop) -- SAFE (a whitelisted recursive-descent grammar, never Python eval) and
+        deterministic. Unknown vars read as 0; divide-by-zero is 0; an unsupported function raises. Returns a float;
+        `vars` is updated in place for assignments. The building block milk_parse compiles per equation."""
+        from holographic.io_and_interop.holographic_milkdrop import eval_expr
+        return eval_expr(expr, vars)
 
     def acoustic_impedance(self, material):
         """Characteristic acoustic impedance Z = rho * c (rayl) of a material, reused from its density x speed of
@@ -7511,6 +10672,86 @@ class UnifiedMind:
         from holographic.misc.holographic_pattern import make_pattern
         return make_pattern(name, **params)
 
+    def warped_noise(self, scale=2.0, octaves=4, seed=0, warp=0.4, warp_scale=1.0, gain=0.5, lacunarity=2.0):
+        """DOMAIN-WARPED fBm (W11, iq's warped noise / dFBM): fbm sampled at a point displaced by a vector of
+        other fbm fields -- the swirling, flowing, marbled look plain fbm cannot make (smoke, magma, wood grain).
+        Returns f(points)->[0,1]. `warp` is the displacement strength (0 = plain fbm). The single most
+        demoscene-recognisable noise. See holographic_pattern.domain_warped_fbm."""
+        from holographic.misc.holographic_pattern import domain_warped_fbm
+        return domain_warped_fbm(scale=scale, octaves=octaves, seed=seed, warp=warp,
+                                 warp_scale=warp_scale, gain=gain, lacunarity=lacunarity)
+
+    def domain_repeat(self, sdf, period, limit=None):
+        """Tile an SDF (or any .eval field) into an INFINITE lattice by folding the query domain (iq's opRep) --
+        one shape becomes a whole crystal, at O(1) cost, no stored copies. `period` is a scalar or per-axis
+        spacing; a 0/negative axis is not repeated (so [2,0,2] tiles a floor plane, leaving height alone).
+        `limit=(lo,hi)` (per-axis integer bounds) makes it FINITE -- an lo..hi block of copies instead of an
+        endless field (iq's opRepLim). Returns an object with .eval that raymarches straight away. KEPT NOTE:
+        exact distance only for a shape bounded inside its cell (a shape near the period wraps into itself).
+        See holographic_domain.repeat / repeat_limited / wrap_sdf."""
+        from holographic.mesh_and_geometry.holographic_domain import repeat, repeat_limited, wrap_sdf
+        if limit is None:
+            return wrap_sdf(sdf, lambda P: repeat(P, period))
+        lo, hi = limit
+        return wrap_sdf(sdf, lambda P: repeat_limited(P, period, lo, hi))
+
+    def domain_fold(self, sdf, axes=None, plane=0.0):
+        """Fold an SDF's domain into mirror symmetry (kaleidoscope from one abs(), iq's opMirror). Folding one
+        axis reflects space across a plane; folding all axes maps the whole world into one octant -- an instant
+        8-fold crystal from a single asymmetric primitive. `axes` selects which to fold (default: all). Returns
+        an object with .eval. Mirroring is an isometry, so the distance stays exact. See
+        holographic_domain.fold / wrap_sdf."""
+        from holographic.mesh_and_geometry.holographic_domain import fold, wrap_sdf
+        return wrap_sdf(sdf, lambda P: fold(P, axes=axes, plane=plane))
+
+    def domain_twist(self, sdf, k, axis=2, dist_scale=0.7):
+        """Twist an SDF's domain into a helix (iq's opTwist): rotate space by `k` radians per unit along `axis`,
+        turning a bar into a screw or a column into a spiral. `dist_scale` (<1) shrinks the reported distance to
+        keep a raymarcher from oversteping the stretched space (0.7 is a safe default; lower for stronger
+        twists). Returns an object with .eval. See holographic_domain.twist / wrap_sdf."""
+        from holographic.mesh_and_geometry.holographic_domain import domain_twist, wrap_sdf
+        return wrap_sdf(sdf, lambda P: domain_twist(P, k, axis=axis), dist_scale=dist_scale)
+
+    def domain_bend(self, sdf, k, axis=0, dist_scale=0.7):
+        """Bend an SDF's domain into an arc (iq's opCheapBend): curl a straight beam by `k` radians per unit
+        along `axis`. `dist_scale` (<1) keeps the march safe through the stretched domain. Returns an object
+        with .eval. KEPT NOTE: the cheap bend warps distances slightly (fine for silhouettes/shading, which is
+        what it is for). See holographic_domain.bend / wrap_sdf."""
+        from holographic.mesh_and_geometry.holographic_domain import domain_bend, wrap_sdf
+        return wrap_sdf(sdf, lambda P: domain_bend(P, k, axis=axis), dist_scale=dist_scale)
+
+    def smooth_min(self, a, b, k=0.1):
+        """The polynomial smooth-minimum (iq's smin): a soft min(a,b) that MELTS two distance fields together
+        over width `k` instead of creasing at a seam -- what turns two SDFs into one organic metaball blob. Its
+        partners: smooth_max(a,b,k) for a smooth intersection, smooth_max(a,-b,k) for a smooth subtraction. k->0
+        recovers the hard min. Vectorised over scalars or arrays. See holographic_domain.smin."""
+        from holographic.mesh_and_geometry.holographic_domain import smin
+        return smin(a, b, k=k)
+
+    def smooth_max(self, a, b, k=0.1):
+        """The smooth-maximum partner of smooth_min (iq): smooth_max(f,g,k) is a crease-free INTERSECTION of two
+        SDFs, smooth_max(f,-g,k) a crease-free SUBTRACTION. Same width `k`. See holographic_domain.smax."""
+        from holographic.mesh_and_geometry.holographic_domain import smax
+        return smax(a, b, k=k)
+
+    def cosine_palette(self, t, a=(0.5, 0.5, 0.5), b=(0.5, 0.5, 0.5),
+                       c=(1.0, 1.0, 1.0), d=(0.0, 0.33, 0.67)):
+        """iq's cosine gradient palette: turn a scalar `t` (a distance, an iteration count, an orbit trap) into
+        a smooth harmonious RGB colour via a + b*cos(2*pi*(c*t + d)) per channel -- no banding, no harsh clip.
+        a=base, b=contrast, c=cycles-per-channel, d=per-channel phase (the hue). Defaults are iq's rainbow;
+        `t` is a scalar or array, returns (*t.shape, 3) in [0,1]. Pair with random_palette for a seed-driven
+        scheme. See holographic_domain.cosine_palette."""
+        from holographic.mesh_and_geometry.holographic_domain import cosine_palette
+        return cosine_palette(t, a=a, b=b, c=c, d=d)
+
+    def random_palette(self, seed=0, contrast=0.5):
+        """A random-but-harmonious cosine palette from a seed -- the 'regenerate from seeds' lever for COLOUR
+        (iq). Returns the (a,b,c,d) tuple ready for cosine_palette, sampling the TASTEFUL subspace (mid base,
+        bounded amplitude, low frequencies, free phase) so a random seed gives a pleasing scheme, not noise.
+        Deterministic per seed. See holographic_domain.random_palette."""
+        from holographic.mesh_and_geometry.holographic_domain import random_palette
+        return random_palette(seed=seed, contrast=contrast)
+
     def radiance_transfer(self, sdf, points, normals, order=3, n=512):
         """PRECOMPUTED RADIANCE TRANSFER -- collapse the light-transport integral into a per-point transfer vector once,
         then RELIGHT with a dot product (no rays). For a STATIC scene the way a surface point turns incident lighting
@@ -7571,9 +10812,12 @@ class UnifiedMind:
                              background=background)
 
     def save_render(self, path, rgb01):
-        """Write a render (an (H,W,3) image in [0,1]) to a PNG via the stdlib encoder. See holographic_render."""
-        from holographic.rendering.holographic_render import save_png
-        return save_png(path, rgb01)
+        """Write a render (an (H,W,3) image in [0,1]), routed by extension: .png via the stdlib encoder
+        (deterministic, always available); .jpg/.webp/... via Pillow when installed, otherwise a refusal naming
+        the install command (`pip install pillow`, extra: [images]) -- the standard opt-in contract.
+        See holographic_render.save_image."""
+        from holographic.rendering.holographic_render import save_image
+        return save_image(path, rgb01)
 
     def make_cloud(self, center=(0.0, 0.0, 0.0), radius=1.0, camera=None, width=384, height=384,
                    density=6.0, seed=0, grid=56, sky=(0.20, 0.42, 0.74), sun_dir=(-0.45, -0.55, -0.6),
@@ -7935,10 +11179,12 @@ class UnifiedMind:
         holographic_codeedit.Editor.delete_lines."""
         return self._editor.delete_lines(path, start, end)
 
-    def file_grep(self, pattern, path=".", suffix=".py", max_hits=200):
-        """Substring search across files under `path` (filtered by `suffix`). Returns [{file, line, text}] -- the
-        'where is X used' an agent needs constantly. See holographic_codeedit.Editor.grep."""
-        return self._editor.grep(pattern, relpath=path, suffix=suffix, max_hits=max_hits)
+    def file_grep(self, pattern, path=".", suffix=".py", max_hits=200, regex=False):
+        """Search across files under `path` (filtered by `suffix`). Returns [{file, line, text}] -- the 'where is X
+        used' an agent needs constantly. `regex=False` (default) is a plain SUBSTRING match, so `(` and `*` mean
+        themselves; `regex=True` compiles the pattern with `re`. Additive and default-off.
+        See holographic_codeedit.Editor.grep."""
+        return self._editor.grep(pattern, relpath=path, suffix=suffix, max_hits=max_hits, regex=regex)
 
     def file_list(self, path=".", recursive=False, suffix=None):
         """List files under a directory (relative paths); skips __pycache__/hidden. See
@@ -8038,11 +11284,27 @@ class UnifiedMind:
         return Mesh(Q, [tuple(f) for f in base.faces]) if is_mesh else Q
 
     def timeline(self):
-        """A keyframe Timeline: `.key(channel, t, value)` then `.sample(channel, t)` for the lerp-interpolated
-        value at time t (t may be an array -- vectorised). Key blendshape weights, deform params, or transforms
-        and drive the animation from it. See holographic_anim.Timeline."""
+        """A keyframe Timeline (holographic_anim): `.key(channel, t, value, interp='linear')` then
+        `.sample(channel, t)` for the interpolated value at time t (t may be an array -- vectorised). EASING per key:
+        interp='linear' (default), 'step' (hold), 'smooth' (ease in-out), 'ease_in', or 'ease_out' -- the ease in
+        ease out of an animation curve. Key blendshape weights, deform params, or transforms and drive the animation
+        from it. See holographic_anim.Timeline."""
         from holographic.misc.holographic_anim import Timeline
         return Timeline()
+
+    def transport(self, frame_fn, n_frames, fps=24.0, base=None):
+        """An animation TRANSPORT / playhead (holographic_anim) -- start/pause/step/seek/scrub/rewind/fast-forward
+        that the keyframe timeline and frame cache did not provide. `frame_fn(frame) -> state` computes any frame on
+        demand (a deformed mesh's vertices, a sim field, packed params); the Transport holds a current frame + play
+        state and caches computed frames so rewind / scrub-back / replay is O(1). Methods: play(speed) (1.0 forward,
+        -1.0 rewind, 2.0 fast-forward, 0.5 slow-mo), pause(), stop() (pause+rewind to 0), tick(n) (advance the play
+        loop), step(n) (frame-by-frame regardless of play state), seek(frame)/seek_time(sec) (scrub), at(frame)
+        (cached state), .frame/.time. Deterministic: seeking to a frame gives the same state however you arrived (no
+        scrub drift), because frame_fn is a pure function of the frame index. A stateful sim that can't be evaluated
+        at an arbitrary frame should be baked first (bake_deformation), then driven through a Transport over the cache.
+        Returns a Transport. See holographic_anim.Transport."""
+        from holographic.misc.holographic_anim import Transport
+        return Transport(frame_fn, n_frames, fps=fps, base=base)
 
     def frame_cache(self, base, hot=8, tol=1e-9):
         """A tiered delta FrameCache for playback: `.put(frame, state)` stores each frame as a sparse DELTA vs
@@ -8066,6 +11328,15 @@ class UnifiedMind:
         half. Vectorised. See holographic_meshtools.mirror."""
         from holographic.mesh_and_geometry.holographic_meshtools import mirror
         return mirror(mesh, axis=axis, plane=plane, weld=weld, tol=tol)
+
+    def mesh_symmetrize(self, mesh, axis=0, plane=0.0, side=1, tol=1e-5):
+        """SYMMETRIZE a mesh across the `axis`=const `plane` (holographic_meshtools): KEEP the half on `side` (+1 =
+        positive side, -1 = negative), MIRROR it back, and weld the seam -- a bilaterally-symmetric result. Unlike
+        mirror_mesh (which doubles the WHOLE mesh), this first discards the far side, so it FIXES an off-axis sculpt
+        instead of preserving the asymmetry. A face is kept iff its centroid is on `side`; near-plane vertices snap
+        onto the plane so the seam welds. Composes mirror + weld. Returns a new Mesh."""
+        from holographic.mesh_and_geometry.holographic_meshtools import symmetrize
+        return symmetrize(mesh, axis=axis, plane=plane, side=side, tol=tol)
 
     def weld_mesh(self, mesh, tol=1e-5):
         """Merge-by-distance: weld vertices within `tol` into one (mean position), remap faces, drop the faces
@@ -8098,11 +11369,104 @@ class UnifiedMind:
                           sky=sky, ao=ao, shadows=shadows, reflect=reflect, refract=refract, ior=ior, sss=sss,
                           sss_color=sss_color, ambient=ambient)
 
+    def depth_fog(self, color, depth, density=0.15, fog_color=(0.55, 0.65, 0.82), start=0.0):
+        """Apply exponential DEPTH FOG (Beer-Lambert) to a rendered image (W16): fade each pixel toward
+        `fog_color` by 1 - exp(-density * depth). `color` (H,W,3) LINEAR, `depth` (H,W) per-pixel distance (the
+        raymarch t). Apply before gamma. The atmosphere of a scene in one pass. See
+        holographic_atmosphere.depth_fog."""
+        from holographic.rendering.holographic_atmosphere import depth_fog
+        return depth_fog(color, depth, density=density, fog_color=fog_color, start=start)
+
+    def light_shafts(self, color, light_uv=(0.5, 0.2), threshold=0.7, density=0.9, decay=0.92,
+                     weight=0.5, exposure=0.35, samples=48):
+        """Volumetric LIGHT SHAFTS / god rays by radial blur (W16, Mitchell GPU Gems 3): streak the bright pixels
+        (sky/light at `light_uv` screen coords) outward from the source. Returns the shaft glow (H,W,3) to ADD to
+        the scene. Screen-space -- only shafts a source on/near screen. See holographic_atmosphere.light_shafts."""
+        from holographic.rendering.holographic_atmosphere import light_shafts
+        return light_shafts(color, light_uv=light_uv, threshold=threshold, density=density, decay=decay,
+                            weight=weight, exposure=exposure, samples=samples)
+
+    def sphere_trace_trapped(self, sdf, O, D, trap=(0.0, 0.0, 0.0), trap_kind="origin",
+                             max_steps=96, max_dist=20.0, surf_eps=1e-3):
+        """Sphere-trace rays AND return each ray's ORBIT TRAP -- the closest approach of its march to a trap set
+        (Quilez's fractal-colouring scalar). Returns (hit, t, pos, trap_val); the hit/t/pos are identical to
+        sphere_trace (same march), and trap_val is the per-ray minimum distance to the trap. `trap_kind` in
+        {'point','origin','axis','plane'}; `trap` is the point / axis / plane-normal. Feed trap_val through
+        cosine_palette to colour a surface by how near its orbit came. See orbit_trap_render for the whole
+        render in one call, and holographic_raymarch.sphere_trace_trapped."""
+        from holographic.rendering.holographic_raymarch import sphere_trace_trapped
+        return sphere_trace_trapped(sdf, O, D, trap=trap, trap_kind=trap_kind,
+                                    max_steps=max_steps, max_dist=max_dist, surf_eps=surf_eps)
+
+    def orbit_trap_render(self, sdf, camera, width=256, height=256, trap=(0.0, 1.0, 0.0),
+                          trap_kind="axis", palette=None, trap_scale=1.4, light_dir=(0.4, 0.8, 0.3),
+                          ambient=0.25, background=(0.05, 0.06, 0.11), max_steps=110, max_dist=20.0):
+        """Render an SDF scene coloured by ORBIT TRAP -- the signature Quilez fractal look, in one call. Sphere-
+        traces every pixel, tracks each ray's closest approach to the trap set, and maps that scalar through a
+        cosine palette, lit by a simple Lambert term. `trap_kind` in {'point','origin','axis','plane'}; `palette`
+        is a (a,b,c,d) cosine_palette tuple (default: a harmonious random_palette). `trap_scale` stretches the
+        trap value into the palette's [0,1]. Returns (H,W,3) in [0,1] (sRGB). This is W3 -- orbit traps + cosine
+        palettes, the two halves finally meeting. Composes with any domain-warped SDF (fold/repeat/twist).
+        See holographic_raymarch.sphere_trace_trapped and holographic_domain.cosine_palette."""
+        import numpy as _np
+        from holographic.rendering.holographic_raymarch import sphere_trace_trapped, sdf_normal
+        from holographic.mesh_and_geometry.holographic_domain import cosine_palette, random_palette
+        eye, dirs = camera.ray_dirs(width, height)
+        O = _np.broadcast_to(eye, (width * height, 3)).astype(float)
+        D = dirs.reshape(-1, 3)
+        hit, t, pos, trap_val = sphere_trace_trapped(sdf, O, D, trap=trap, trap_kind=trap_kind,
+                                                     max_steps=max_steps, max_dist=max_dist)
+        img = _np.zeros((width * height, 3))
+        img[~hit] = _np.asarray(background)
+        if hit.any():
+            N = sdf_normal(sdf, pos[hit])
+            L = _np.asarray(light_dir, float); L = L / _np.linalg.norm(L)
+            lam = _np.clip(N @ L, 0, 1)[:, None]
+            pal = palette if palette is not None else random_palette(seed=7, contrast=0.6)
+            key = _np.clip(trap_val[hit] * trap_scale, 0, 1)
+            col = cosine_palette(key, *pal)
+            img[hit] = col * (ambient + (1.0 - ambient) * lam)
+        return _np.clip(img.reshape(height, width, 3), 0, 1) ** (1 / 2.2)
+
     def ambient_occlusion(self, sdf, points, normals, samples=6, step=0.06, k=1.6):
         """SDF ambient occlusion at `points` with `normals`: march the normal and read the field -- a near
         surface darkens the point. Field-native, no hemisphere rays. See holographic_raymarch.ambient_occlusion."""
         from holographic.rendering.holographic_raymarch import ambient_occlusion
         return ambient_occlusion(sdf, points, normals, samples=samples, step=step, k=k)
+
+    def sdf_extrude(self, sd2d, height=1.0):
+        """EXTRUDE a 2-D SDF into a 3-D prism along Z (W10, iq's opExtrusion) -- a logo becomes a badge, a gear
+        cross-section a gear. `sd2d` is a 2-D SDF callable f(Q:(n,2))->(n,) (from sdf2d.circle2d / box2d /
+        polygon2d / ...). Returns a 3-D SDF f(P)->dist that plugs into sphere_trace / the mesher / the voxelizer.
+        EXACT. See holographic_sdf2d.extrude."""
+        from holographic.mesh_and_geometry.holographic_sdf2d import extrude
+        return extrude(sd2d, height=height)
+
+    def sdf_revolve(self, sd2d, offset=0.0):
+        """REVOLVE a 2-D SDF around the Y axis into a solid of revolution (W10, a lathe) -- a vase, a bottle, a
+        turned leg; an offset circle becomes a torus. `sd2d` is a 2-D SDF callable; `offset` shifts the profile
+        off the axis. Returns a 3-D SDF f(P)->dist. See holographic_sdf2d.revolve."""
+        from holographic.mesh_and_geometry.holographic_sdf2d import revolve
+        return revolve(sd2d, offset=offset)
+
+    def sdf2d(self, name, **params):
+        """Build a 2-D SDF primitive by name (W10): 'circle' (r), 'box' (bx,by), 'rounded_box' (bx,by,r), 'ngon'
+        (sides,r), 'polygon' (vertices). Returns f(Q:(n,2))->(n,) -- draw a cross-section, then sdf_extrude or
+        sdf_revolve it into 3-D. See holographic_sdf2d."""
+        from holographic.mesh_and_geometry import holographic_sdf2d as s2
+        builders = {"circle": s2.circle2d, "box": s2.box2d, "rounded_box": s2.rounded_box2d,
+                    "ngon": s2.ngon2d, "polygon": s2.polygon2d}
+        if name not in builders:
+            raise ValueError("unknown 2-D SDF %r; try %s" % (name, sorted(builders)))
+        return builders[name](**params)
+
+    def sdf_curvature(self, sdf, points, eps=2e-3):
+        """MEAN CURVATURE of an SDF surface at `points` (W13) -- the field Laplacian (div of the unit gradient).
+        POSITIVE on convex edges/ridges, NEGATIVE in concave creases/cavities, ~0 on flat regions (a sphere of
+        radius r reads 2/r). Drives cavity darkening, edge highlighting, and curvature-aware LOD. See
+        holographic_raymarch.sdf_curvature."""
+        from holographic.rendering.holographic_raymarch import sdf_curvature
+        return sdf_curvature(sdf, points, eps=eps)
 
     def soft_shadow(self, sdf, points, light_dir, k=12.0):
         """SDF soft shadow: march each point toward the light; the closest approach to any surface is the
@@ -9588,6 +12952,14 @@ class UnifiedMind:
         from holographic.misc.holographic_backend import enable_gpu
         return enable_gpu(enable)
 
+    def accelerator_report(self):
+        """Every optional dependency in one report: installed?, version, what it UNLOCKS (with the measured
+        numbers -- 'faster' without a number is advertising), and the exact pip command. NumPy is the only
+        required row; numba, ziglang (native 2-5x batch kernels, bit-identical in safe mode), cupy (GPU),
+        sympy, pillow, flask are all opt-in. See holographic_backend.accelerator_report."""
+        from holographic.misc.holographic_backend import accelerator_report
+        return accelerator_report()
+
     def backend_status(self):
         """A human-readable line describing the current compute backend (GPU enabled/available/unavailable)."""
         from holographic.misc.holographic_backend import device_report
@@ -10258,6 +13630,62 @@ class UnifiedMind:
             return op, operand, float(conf)
         return tok, None, float(conf)                   # a bare-opcode token (no operand)
 
+    def sample_from(self, distribution, temperature=1.0, top_p=1.0, seed_rng=None):
+        """Draw one symbol from a {symbol: weight} distribution with temperature + optional nucleus (top-p) --
+        the GENERAL stochastic-choice primitive (holographic_tokensample.sample_from_distribution), the same
+        draw the char generator, the topic generator, and the recipe grammar all now delegate to. weights may
+        be probabilities, similarities, or raw counts. temperature<1 sharpens (->argmax), >1 flattens; top_p<1
+        keeps only the smallest set of top symbols reaching that mass. Returns the chosen symbol, or None if the
+        distribution is empty / has no positive mass. Use this when you have a distribution in hand; use
+        sample_recipe / generate for full sequences. See holographic_tokensample.sample_from_distribution."""
+        import numpy as _np
+        from holographic.agents_and_reasoning.holographic_tokensample import sample_from_distribution
+        rng = _np.random.default_rng(seed_rng) if seed_rng is not None else None
+        return sample_from_distribution(distribution, temperature=temperature, top_p=top_p, rng=rng)
+
+    def sample_instruction(self, partial, temperature=1.0, top_p=1.0, rng=None):
+        """SAMPLE the next full instruction (the GENERATION dual of complete_instruction). Same learned
+        joint (opcode, operand) grammar, but drawn stochastically instead of argmax -- because a greedy
+        generator LIMIT-CYCLES (measured: greedy recipe generation gave MMD2 0.599 and ~15x the real
+        verbatim-copy rate, looping on the single top continuation; a sampled arm gave MMD2 0.011). Use
+        complete_instruction to PREDICT the next step; use this to GENERATE a diverse, distribution-faithful
+        continuation. Returns (opcode, operand); (None, None) if no grammar or the context is exhausted.
+
+        Delegates the temperature+nucleus draw to PredictiveMemory.sample -> holographic_tokensample, the
+        same primitive the character generator uses. See sample_recipe for a full-sequence generator.
+
+        KEPT NEGATIVES (measured on real physics traces): on HEAVY-TAILED token streams (one token at
+        ~98% marginal), top_p<1 or T<1 silently deletes the rare events -- default T=1.0/top_p=1.0 is the
+        safe setting there. And well-formedness is the CALLER's job: if the language alternates (e.g.
+        run/event), enforce it in the decode loop -- 18% ill-formed emissions measurably destroyed the
+        generated stream's autocorrelation until the caller enforced alternation."""
+        if getattr(self, "_recipe_grammar_joint", None) is None:
+            return None, None
+        toks = [self._instr_token(s) for s in partial]
+        tok, _ = self._recipe_grammar_joint.sample(toks, temperature=temperature, top_p=top_p, rng=rng)
+        if tok is None:
+            return None, None
+        if "|" in tok:                                  # split the joint token back into opcode + operand
+            op, operand = tok.split("|", 1)
+            return op, operand
+        return tok, None                                # a bare-opcode token (no operand)
+
+    def sample_recipe(self, seed, length=16, temperature=1.0, top_p=1.0, seed_rng=0):
+        """Generate a whole recipe by SAMPLING the learned grammar step by step (the non-limit-cycling
+        generator). `seed` is a short list of (opcode, operand) instructions to start from. Returns the
+        generated instructions (opcode, operand pairs) after the seed. This is the sampler the transform-
+        codebook program needed: the grammar can now be SPOKEN, not just predicted."""
+        import numpy as _np
+        rng_ = _np.random.default_rng(seed_rng)
+        out = list(seed)
+        for _ in range(length):
+            op, operand = self.sample_instruction(out[-self._recipe_grammar_joint.order:],
+                                                  temperature=temperature, top_p=top_p, rng=rng_)
+            if op is None:
+                break
+            out.append((op, operand))
+        return out[len(seed):]
+
     def decode_step(self, name_or_program, i):
         """Read the i-th instruction of a procedure as (opcode, operand) -- the program-as-DATA query
         the von Neumann encoding allows: a stored procedure can be INSPECTED, not just run. The honest,
@@ -10302,6 +13730,17 @@ class UnifiedMind:
             raise ValueError("audit_procedure needs steps=<list of step names>, or program=<vec> with "
                              "n_steps=<int>")
         return audit_protocol(M, program, n_steps)
+
+    def selftest_coverage(self):
+        """Which engine modules carry a real selftest, and which don't -- the engine's own test-coverage census,
+        answerable through the mind (an above/below sweep found the CI selftest walker had no mind door, so an
+        agent driving leCore over HTTP could not ask 'is the engine covered?'). Returns {runnable, missing,
+        missing_modules, coverage}: `runnable` have a __main__ AND a _selftest, `missing` advertise an entry
+        point but assert nothing (a false green -- and the exact backfill worklist), `coverage` is the fraction.
+        Pure AST, no subprocess -- safe to call from a served mind; the actual RUN of the walk is the CLI/CI tool
+        tools/run_selftests.py. See holographic_codestructure.selftest_census."""
+        from holographic.io_and_interop.holographic_codestructure import selftest_census
+        return selftest_census()
 
     def attribute(self, text, name=None):
         """WHO taught this? If the sequence model was fit on (text, source)
@@ -10487,6 +13926,458 @@ class UnifiedMind:
         from holographic.misc.holographic_core import load as _load
         return _load(path)
 
+    def doppler_velocity(self, lambda_obs, lambda_rest, relativistic=False):
+        """Line-of-sight velocity (m/s, positive = receding) from a spectral shift: classical v=c*z, or set
+        relativistic=True (stays below c for any redshift). The physical reading of a shifted line. Field-native.
+        See holographic_dedoppler.doppler_velocity."""
+        from holographic.sampling_and_signal.holographic_dedoppler import doppler_velocity as _f
+        return _f(lambda_obs, lambda_rest, relativistic=relativistic)
+
+    def redshift(self, lambda_obs, lambda_rest):
+        """Redshift z = lambda_obs/lambda_rest - 1 (positive = receding). Field-native. See
+        holographic_dedoppler.redshift."""
+        from holographic.sampling_and_signal.holographic_dedoppler import redshift as _f
+        return _f(lambda_obs, lambda_rest)
+
+    def doppler_shift(self, lambda_rest, velocity, relativistic=False):
+        """Forward model: observed wavelength when a source at `lambda_rest` recedes at `velocity` (m/s). The exact
+        inverse of doppler_velocity. See holographic_dedoppler.doppler_shift."""
+        from holographic.sampling_and_signal.holographic_dedoppler import doppler_shift as _f
+        return _f(lambda_rest, velocity, relativistic=relativistic)
+
+    def drift_acceleration(self, drift_rate, freq):
+        """Line-of-sight acceleration (m/s^2) from a narrowband frequency drift rate (Hz/s) at frequency `freq`:
+        a = -c*(df/dt)/f. Turns a detect_drifting result into the emitter's acceleration -- the SETI reading. See
+        holographic_dedoppler.drift_acceleration."""
+        from holographic.sampling_and_signal.holographic_dedoppler import drift_acceleration as _f
+        return _f(drift_rate, freq)
+
+    def stokes_unpolarized(self, intensity=1.0):
+        """Unpolarised light of `intensity` as a Stokes vector [I,0,0,0] -- also what a scalar radiance IS
+        in Stokes terms. `intensity` may be a scalar or a field (a trailing length-4 axis is added). See
+        holographic_stokes.unpolarized."""
+        import holographic.rendering.holographic_stokes as _stk
+        return _stk.unpolarized(intensity)
+
+    def stokes_linear(self, intensity=1.0, angle=0.0, dop=1.0):
+        """Linearly polarised light: e-vector at `angle` RADIANS, degree-of-linear-polarization `dop` in
+        [0,1]. Field-native (all args broadcast). See holographic_stokes.linear."""
+        import holographic.rendering.holographic_stokes as _stk
+        return _stk.linear(intensity, angle, p=dop)
+
+    def stokes_circular(self, intensity=1.0, handedness=1, dop=1.0):
+        """Circularly polarised light: `handedness` +1=right / -1=left, degree-of-circular-polarization
+        `dop`. The channel the mantis shrimp uniquely detects. See holographic_stokes.circular."""
+        import holographic.rendering.holographic_stokes as _stk
+        return _stk.circular(intensity, handedness=handedness, p=dop)
+
+    def stokes_report(self, stokes):
+        """Read a Stokes vector/field OUT in one call: {intensity, dop, dolp, docp, evector_angle,
+        handedness}. All broadcast over a field. See holographic_stokes."""
+        import holographic.rendering.holographic_stokes as _stk
+        return {"intensity": _stk.intensity(stokes), "dop": _stk.dop(stokes),
+                "dolp": _stk.dolp(stokes), "docp": _stk.docp(stokes),
+                "evector_angle": _stk.evector_angle(stokes), "handedness": _stk.handedness(stokes)}
+
+    def stokes_complex_linear(self, stokes):
+        """The complex linear polarization P = Q + iU as a phasor. Sampled over wavelength^2, its FFT is
+        rotation-measure synthesis (Faraday depth) -- the telescope arc reuses this. See
+        holographic_stokes.complex_linear."""
+        import holographic.rendering.holographic_stokes as _stk
+        return _stk.complex_linear(stokes)
+
+    def radiance_to_stokes(self, radiance):
+        """Lift a scalar/RGB radiance to UNPOLARISED Stokes (S0=value, rest 0). Round-trips byte-identically
+        via stokes_to_radiance -- polarization is purely additive. See holographic_stokes.from_radiance."""
+        import holographic.rendering.holographic_stokes as _stk
+        return _stk.from_radiance(radiance)
+
+    def stokes_to_radiance(self, stokes):
+        """Collapse a Stokes field to plain intensity S0 -- the byte-identical 'polarization off' path. See
+        holographic_stokes.to_radiance."""
+        import holographic.rendering.holographic_stokes as _stk
+        return _stk.to_radiance(stokes)
+
+    def mueller_matrix(self, kind, angle=0.0, delta=None, rho=0.0, factor=0.0, n1=1.0, n2=1.5, theta=0.0):
+        """Build the 4x4 Mueller matrix of an optical element by `kind`: 'identity', 'polarizer' (at
+        `angle`), 'retarder' (`delta` rad at `angle`), 'quarter_wave'/'half_wave' (at `angle`), 'rotator'
+        (`rho` rad -- an optical / Faraday rotator), 'depolarizer' (`factor` in [0,1]), or 'fresnel'
+        (dielectric reflection n1->n2 at incidence `theta`). Feed it to apply_mueller. See
+        holographic_mueller."""
+        import holographic.rendering.holographic_mueller as _mu
+        if kind == "identity": return _mu.identity()
+        if kind == "polarizer": return _mu.linear_polarizer(angle)
+        if kind == "retarder": return _mu.retarder(np.pi / 2 if delta is None else delta, angle)
+        if kind == "quarter_wave": return _mu.quarter_wave(angle)
+        if kind == "half_wave": return _mu.half_wave(angle)
+        if kind == "rotator": return _mu.rotator(rho)
+        if kind == "depolarizer": return _mu.depolarizer(factor)
+        if kind == "fresnel": return _mu.fresnel_reflection(n1, n2, theta)
+        raise ValueError("unknown mueller element kind: %r" % (kind,))
+
+    def apply_mueller(self, element, stokes):
+        """Transform a Stokes vector/field by a Mueller matrix (or a per-pixel matrix-field). See
+        holographic_mueller.apply."""
+        import holographic.rendering.holographic_mueller as _mu
+        return _mu.apply(element, stokes)
+
+    def compose_mueller(self, *elements):
+        """Fold a light path (elements IN THE ORDER LIGHT PASSES THROUGH) into one Mueller matrix. See
+        holographic_mueller.compose."""
+        import holographic.rendering.holographic_mueller as _mu
+        return _mu.compose(*elements)
+
+    def rm_synthesis(self, lambda2, phi, P=None, Q=None, U=None, weights=None, lambda2_0=None):
+        """Rotation-measure synthesis: the Faraday-depth spectrum F(phi) of polarized light vs wavelength^2
+        (Brentjens & de Bruyn 2005). Pass complex P (from stokes_complex_linear) or real Q and U, each
+        (...,nchan); returns (...,nphi), field-native over an image cube. This is the SEQUENCE costume of the
+        Stokes state -- the telescope's magnetic-field probe, reusing the engine's phasor. See
+        holographic_rmsynth.rmsynth."""
+        import holographic.rendering.holographic_rmsynth as _rm
+        return _rm.rmsynth(lambda2, phi, P=P, Q=Q, U=U, weights=weights, lambda2_0=lambda2_0)
+
+    def rmtf(self, lambda2, phi, weights=None, lambda2_0=None):
+        """The rotation-measure transfer function (the 'dirty beam' in Faraday space) for a given wavelength^2
+        sampling -- its width is the resolution, its sidelobes are the artefacts a raw F(phi) carries. See
+        holographic_rmsynth.rmtf."""
+        import holographic.rendering.holographic_rmsynth as _rm
+        return _rm.rmtf(lambda2, phi, weights=weights, lambda2_0=lambda2_0)
+
+    def rm_resolution(self, lambda2):
+        """Faraday-depth resolution (FWHM, rad/m^2) from the wavelength^2 coverage: 2*sqrt(3)/span. Wider
+        band -> finer RM separable. See holographic_rmsynth.resolution_fwhm."""
+        import holographic.rendering.holographic_rmsynth as _rm
+        return _rm.resolution_fwhm(lambda2)
+
+    def rm_phi_grid(self, lambda2, oversample=5.0, extent=None):
+        """Build a sensible grid of Faraday depths to evaluate, derived from the wavelength^2 sampling itself
+        (no magic numbers to guess). See holographic_rmsynth.phi_grid."""
+        import holographic.rendering.holographic_rmsynth as _rm
+        return _rm.phi_grid(lambda2, oversample=oversample, extent=extent)
+
+    def rm_peak(self, F, phi, lambda2_0=None):
+        """Reduce a Faraday spectrum (or image cube of them) to its brightest source: {rm, polarized_intensity,
+        angle0}, with sub-bin parabolic RM. Pass lambda2_0 to get the true intrinsic angle at lambda^2=0. See
+        holographic_rmsynth.peak_rm."""
+        import holographic.rendering.holographic_rmsynth as _rm
+        return _rm.peak_rm(F, phi, lambda2_0=lambda2_0)
+
+    def stokes_faraday_depth(self, lambda2, stokes, phi=None, weights=None):
+        """CONVERGENCE door: from a Stokes field + its wavelength^2 axis straight to the Faraday-depth spectrum,
+        in one call. Forms P = Q + iU (stokes_complex_linear) and runs rm_synthesis; if `phi` is None a grid is
+        chosen from the data. This is the single step from 'polarization state' to 'line-of-sight magnetism'.
+        Delegates to holographic_stokes.complex_linear + holographic_rmsynth.rmsynth."""
+        import holographic.rendering.holographic_stokes as _stk
+        import holographic.rendering.holographic_rmsynth as _rm
+        P = _stk.complex_linear(stokes)               # Q + iU per channel, field-native
+        if phi is None:
+            phi = _rm.phi_grid(lambda2)
+        return {"phi": phi, "F": _rm.rmsynth(lambda2, phi, P=P, weights=weights)}
+
+    def faraday_rotate(self, stokes0, lambda2, rm):
+        """FORWARD Faraday model -- the polarized sky a telescope receives: rotate an intrinsic Stokes signal
+        (...,4) by rm*lambda^2 across a band (nchan) -> (...,nchan,4). Intensity and circular are untouched;
+        only the linear plane turns. Field-native over a whole sky; its output is what rm_synthesis inverts. See
+        holographic_rmsynth.faraday_rotate."""
+        import holographic.rendering.holographic_rmsynth as _rm
+        return _rm.faraday_rotate(stokes0, lambda2, rm)
+
+    def faraday_rm_map(self, lambda2, stokes_cube, phi=None, weights=None):
+        """TELESCOPE-AS-OBSERVER: recover a per-pixel Faraday-depth (line-of-sight magnetism) MAP from a sky
+        Stokes cube (...,nchan,4), in one call. Composes rm synthesis + peak over the whole field. Returns
+        {rm, polarized_intensity, angle0, phi, F}. The same polarization core that reads a mantis eye reads a
+        radio dish. See holographic_rmsynth.faraday_rm_map."""
+        import holographic.rendering.holographic_rmsynth as _rm
+        return _rm.faraday_rm_map(lambda2, stokes_cube, phi=phi, weights=weights)
+
+    def make_sky_axis(self, name, n=None, unit="", crval=0.0, crpix=0.0, cdelt=1.0):
+        """One WCS-lite axis descriptor (world = crval + (pixel-crpix)*cdelt, crpix 0-based) for a sky cube. See
+        holographic_skydata.make_axis."""
+        import holographic.io_and_interop.holographic_skydata as _sd
+        return _sd.make_axis(name, n=n, unit=unit, crval=crval, crpix=crpix, cdelt=cdelt)
+
+    def make_skydata(self, data, axes, meta=None):
+        """Assemble a sky observation: a data cube + one world axis per data dim (+ freeform meta). The container
+        the astro tools ingest. See holographic_skydata.make_skydata."""
+        import holographic.io_and_interop.holographic_skydata as _sd
+        return _sd.make_skydata(data, axes, meta=meta)
+
+    def sky_world_coords(self, sky, axis):
+        """The world-coordinate array (RA/Dec/freq...) along one axis of a sky cube, by index or name. See
+        holographic_skydata.world_coords."""
+        import holographic.io_and_interop.holographic_skydata as _sd
+        return _sd.world_coords(sky, axis)
+
+    def sky_pix_to_world(self, sky, axis, pix):
+        """Pixel -> world coordinate on one sky axis (linear). See holographic_skydata.pix_to_world."""
+        import holographic.io_and_interop.holographic_skydata as _sd
+        return _sd.pix_to_world(sky, axis, pix)
+
+    def sky_world_to_pix(self, sky, axis, world):
+        """World -> pixel on one sky axis (exact inverse). See holographic_skydata.world_to_pix."""
+        import holographic.io_and_interop.holographic_skydata as _sd
+        return _sd.world_to_pix(sky, axis, world)
+
+    def sky_lambda2(self, sky, axis=None):
+        """The lambda^2 (m^2) vector of a cube's spectral axis -- the input Faraday RM synthesis wants (frequency
+        is converted via c/f then squared). Auto-finds the spectral axis. The observation->Faraday bridge. See
+        holographic_skydata.lambda2_axis."""
+        import holographic.io_and_interop.holographic_skydata as _sd
+        return _sd.lambda2_axis(sky, axis=axis)
+
+    def sky_stokes_cube(self, sky, spectral=None, stokes=None):
+        """Reshape a sky observation into (...,nchan,4) -- spatial, then spectral channel, then Stokes -- ready for
+        faraday_rm_map. Auto-finds the spectral and Stokes axes. See holographic_skydata.stokes_cube."""
+        import holographic.io_and_interop.holographic_skydata as _sd
+        return _sd.stokes_cube(sky, spectral=spectral, stokes=stokes)
+
+    def save_skydata(self, sky, path):
+        """Persist a sky observation deterministically (JSON header + .npy cube in one .npz, no pickle). See
+        holographic_skydata.save_skydata."""
+        import holographic.io_and_interop.holographic_skydata as _sd
+        return _sd.save_skydata(sky, path)
+
+    def load_skydata(self, path):
+        """Load a sky observation saved by save_skydata (exact round-trip, no pickle). See
+        holographic_skydata.load_skydata."""
+        import holographic.io_and_interop.holographic_skydata as _sd
+        return _sd.load_skydata(path)
+
+    def star_system(self, params, seed=0):
+        """PLUG DATA IN, GET A STAR SYSTEM: assemble physical parameters (star temp/radius/mass; planets a/e/radius/
+        temp) into a deterministic, JSON-serializable scene RECIPE -- star (blackbody colour at the origin) + planets
+        (biome by temperature, Kepler orbit, position, seed to regenerate the surface). Delegates to blackbody,
+        fractal_planet, and Kepler geometry. See holographic_starsystem.star_system."""
+        from holographic.scene_and_pipeline.holographic_starsystem import star_system as _f
+        return _f(params, seed=seed)
+
+    def kepler_ellipse(self, a, e, n=128):
+        """A whole orbit as n (x,y) points with the star at a focus (perihelion a(1-e), aphelion a(1+e)); uniform in
+        phase so points bunch near aphelion as a real planet does. See holographic_starsystem.kepler_ellipse."""
+        from holographic.scene_and_pipeline.holographic_starsystem import kepler_ellipse as _f
+        return _f(a, e, n=n)
+
+    def kepler_position(self, a, e, mean_anomaly):
+        """Position (x,y) on a Kepler orbit at a given phase (mean anomaly, radians), star at a focus. Field-native
+        over an array of phases. See holographic_starsystem.kepler_position."""
+        from holographic.scene_and_pipeline.holographic_starsystem import kepler_position as _f
+        return _f(a, e, mean_anomaly)
+
+    def temperature_to_biome(self, temp_K):
+        """Map a planet's equilibrium temperature (K) to a surface regime (frozen/cold/temperate/hot/molten) -- the
+        biome class its surface is painted with. A documented CHOICE of thresholds. See
+        holographic_starsystem.temperature_to_biome."""
+        from holographic.scene_and_pipeline.holographic_starsystem import temperature_to_biome as _f
+        return _f(temp_K)
+
+    def planet_field(self, planet_spec, dim=256):
+        """Regenerate a planet's actual surface field from its star_system recipe entry, via fractal_planet (the
+        world is never stored, only its seed+knobs -> reproduced on demand). See holographic_starsystem.planet_field."""
+        from holographic.scene_and_pipeline.holographic_starsystem import planet_field as _f
+        return _f(planet_spec, dim=dim)
+
+    def star_cluster(self, n, seed=0, extent=1.0, density_field=None, planets_per_star=0):
+        """Place `n` star systems in a field -- the UP direction of star_system (a cluster is many systems). Masses
+        from a Salpeter IMF, coloured by main-sequence temperature (blue giants, red dwarfs). Even low-discrepancy
+        placement, or pass a density_field (e.g. a cosmic-web map) to cluster them along structure. Deterministic
+        recipe. See holographic_starsystem.star_cluster."""
+        from holographic.scene_and_pipeline.holographic_starsystem import star_cluster as _f
+        return _f(n, seed=seed, extent=extent, density_field=density_field, planets_per_star=planets_per_star)
+
+    def sample_imf(self, n, seed=0, m_low=0.1, m_high=50.0, alpha=2.35):
+        """Draw `n` stellar masses (solar units) from a Salpeter initial mass function (p(m)~m^-alpha, alpha=2.35).
+        Bottom-heavy: mostly red dwarfs, few blue giants. Closed-form inverse-CDF. See holographic_starsystem.sample_imf."""
+        from holographic.scene_and_pipeline.holographic_starsystem import sample_imf as _f
+        return _f(n, seed=seed, m_low=m_low, m_high=m_high, alpha=alpha)
+
+    def mass_to_temperature(self, mass):
+        """A star's main-sequence temperature (K) from its mass (solar units): T ~ 5772*M^0.525 (1 Msun -> Sun). A
+        rough MS scaling, monotonic. See holographic_starsystem.mass_to_temperature."""
+        from holographic.scene_and_pipeline.holographic_starsystem import mass_to_temperature as _f
+        return _f(mass)
+
+    def nebula_volume(self, res=48, seed=0, level=0.5, gain=3.0, ridged=True, star_positions=None, cavity_radius=0.16, dim=256, octaves=5):
+        """Build a 3-D NEBULA density volume (res^3, [0,1]) -- turbulent gas/dust with wispy filaments and dark
+        voids, from the engine's FractalNoise. Pass star_positions to carve cavities where stars blow bubbles (ties
+        to star_cluster). Feeds the volume renderer via nebula_field_fn. See holographic_nebula.nebula_volume."""
+        from holographic.scene_and_pipeline.holographic_nebula import nebula_volume as _f
+        return _f(res=res, seed=seed, level=level, gain=gain, ridged=ridged, star_positions=star_positions, cavity_radius=cavity_radius, dim=dim, octaves=octaves)
+
+    def nebula_column(self, volume, axis=2):
+        """Column density: sum a nebula volume along one axis -> a 2-D image (looking through the cloud), the cheap
+        look without a full ray-march. See holographic_nebula.nebula_column."""
+        from holographic.scene_and_pipeline.holographic_nebula import nebula_column as _f
+        return _f(volume, axis=axis)
+
+    def nebula_field_fn(self, volume, bounds=None):
+        """Wrap a nebula volume as the callable points(N,3)->density the volume renderer marches (trilinear). Drop a
+        nebula straight into render_volume. See holographic_nebula.nebula_field_fn."""
+        from holographic.scene_and_pipeline.holographic_nebula import nebula_field_fn as _f
+        return _f(volume, bounds=bounds)
+
+    def nbody_simulate(self, positions, velocities, masses, dt, steps, G=6.674e-11, softening=0.0, record_every=0):
+        """Integrate an N-BODY gravity system forward `steps` velocity-Verlet steps (symplectic -> energy stays
+        bounded). Returns final positions/velocities, the honest energy DRIFT, and optionally a trajectory. Softened
+        Newtonian, O(N^2). The dynamics counterpart to star_system's closed-form orbits. See holographic_nbody.nbody_simulate."""
+        from holographic.simulation_and_physics.holographic_nbody import nbody_simulate as _f
+        return _f(positions, velocities, masses, dt, steps, G=G, softening=softening, record_every=record_every)
+
+    def nbody_step(self, positions, velocities, masses, dt, G=6.674e-11, softening=0.0):
+        """One velocity-Verlet step of N-body gravity -> (positions, velocities, accel). See holographic_nbody.nbody_step."""
+        from holographic.simulation_and_physics.holographic_nbody import nbody_step as _f
+        return _f(positions, velocities, masses, dt, G=G, softening=softening)
+
+    def nbody_accel(self, positions, masses, G=6.674e-11, softening=0.0):
+        """Softened Newtonian acceleration on each body from all others (the O(N^2) direct sum). See
+        holographic_nbody.nbody_accel."""
+        from holographic.simulation_and_physics.holographic_nbody import nbody_accel as _f
+        return _f(positions, masses, G=G, softening=softening)
+
+    def nbody_energy(self, positions, velocities, masses, G=6.674e-11, softening=0.0):
+        """Total mechanical energy KE + PE of an N-body system -- the quantity a good integrator keeps bounded. See
+        holographic_nbody.nbody_energy."""
+        from holographic.simulation_and_physics.holographic_nbody import nbody_energy as _f
+        return _f(positions, velocities, masses, G=G, softening=softening)
+
+    def circular_orbit_velocity(self, central_mass, radius, G=6.674e-11):
+        """The speed for a circular orbit at `radius` around `central_mass`: sqrt(G*M/r). Seeds a stable orbit. See
+        holographic_nbody.circular_orbit_velocity."""
+        from holographic.simulation_and_physics.holographic_nbody import circular_orbit_velocity as _f
+        return _f(central_mass, radius, G=G)
+
+    def best_period(self, times, values, min_period=None, max_period=None, samples_per_peak=5.0, n_null=0, seed=0):
+        """Find the PERIOD of an unevenly-sampled series (Lomb-Scargle): returns {period, frequency, power, fap}.
+        fap (false-alarm probability) is filled when n_null>0. Closes the loop: a light curve -> a period -> Kepler
+        -> star_system. See holographic_lombscargle.best_period."""
+        from holographic.sampling_and_signal.holographic_lombscargle import best_period as _f
+        return _f(times, values, min_period=min_period, max_period=max_period, samples_per_peak=samples_per_peak, n_null=n_null, seed=seed)
+
+    def lomb_scargle(self, times, values, freqs):
+        """The Lomb-Scargle normalised power at each trial frequency (cycles/time) for unevenly-sampled data --
+        the periodogram a plain FFT can't do. Field-native over freqs. See holographic_lombscargle.lomb_scargle."""
+        from holographic.sampling_and_signal.holographic_lombscargle import lomb_scargle as _f
+        return _f(times, values, freqs)
+
+    def lomb_scargle_auto(self, times, values, min_period=None, max_period=None, samples_per_peak=5.0):
+        """Give me the periodogram of this light curve: builds the frequency grid from the data and returns
+        (freqs, power). See holographic_lombscargle.lomb_scargle_auto."""
+        from holographic.sampling_and_signal.holographic_lombscargle import lomb_scargle_auto as _f
+        return _f(times, values, min_period=min_period, max_period=max_period, samples_per_peak=samples_per_peak)
+
+    def phase_fold(self, times, values, period, t0=0.0):
+        """Fold a series on `period` -> (phase in [0,1), values) sorted by phase. Coherent on the true period,
+        scattered on a wrong one -- the way to SEE a period is right. See holographic_lombscargle.phase_fold."""
+        from holographic.sampling_and_signal.holographic_lombscargle import phase_fold as _f
+        return _f(times, values, period, t0=t0)
+
+    def period_false_alarm(self, times, values, observed_power, freqs, n_null=200, seed=0):
+        """The chance a peak this strong comes from the sampling window alone, via a permutation null (times fixed).
+        Low => the period is real. The honesty gate on a periodicity detection. See
+        holographic_lombscargle.false_alarm_probability."""
+        from holographic.sampling_and_signal.holographic_lombscargle import false_alarm_probability as _f
+        return _f(times, values, observed_power, freqs, n_null=n_null, seed=seed)
+
+    def human_observer(self, samples=90):
+        """The human eye as an OBSERVER (CIE 1931 colour-matching functions on 380-780 nm). Feed it a spectrum
+        with observe_spectrum; blackbody_rgb is exactly this observer applied to a Planck spectrum. See
+        holographic_observer.human_cie."""
+        import holographic.rendering.holographic_observer as _ob
+        return _ob.human_cie(samples)
+
+    def make_observer(self, wavelengths_nm, sensitivities, names=None):
+        """Assemble a custom sensor from a wavelength grid + per-channel sensitivity curves ((nchan,nlam)).
+        A human eye, a mantis eye, or a telescope bandpass are all just different channel sets. See
+        holographic_observer.make_observer."""
+        import holographic.rendering.holographic_observer as _ob
+        return _ob.make_observer(wavelengths_nm, sensitivities, names=names)
+
+    def observer_receptor_bank(self, wavelengths_nm, centers_nm, widths_nm, gains=None):
+        """Build a bank of Gaussian receptor sensitivities (the generic shape of biological cones) on a
+        wavelength grid -- the parts a multi-band eye is made of. See holographic_observer.receptor_bank."""
+        import holographic.rendering.holographic_observer as _ob
+        return _ob.receptor_bank(wavelengths_nm, centers_nm, widths_nm, gains=gains)
+
+    def observe_spectrum(self, spectrum, observer):
+        """Integrate a spectrum (sampled on the observer's wavelengths) against each channel -> readings
+        (...,nchan). Field-native: a hyperspectral image (...,nlam) yields a per-pixel reading image in one
+        call (the observer-over-a-field convergence). See holographic_observer.observe."""
+        import holographic.rendering.holographic_observer as _ob
+        return _ob.observe(spectrum, observer)
+
+    def spectrum_to_rgb(self, spectrum, mode="hue", samples=90):
+        """What the HUMAN eye sees from a spectrum, as sRGB -- the general spectrum->colour door (blackbody_rgb
+        is the special case for a Planck spectrum, reproduced byte-identically). mode 'hue' lifts chromaticity,
+        'none' keeps luminance. See holographic_observer.human_rgb."""
+        import holographic.rendering.holographic_observer as _ob
+        return _ob.human_rgb(spectrum, mode=mode, samples=samples)
+
+    def xyz_to_srgb(self, xyz, mode="hue"):
+        """Convert CIE XYZ readings (from the human observer) to sRGB, matching blackbody's exact conversion.
+        Field-native over an image of readings. See holographic_observer.to_srgb."""
+        import holographic.rendering.holographic_observer as _ob
+        return _ob.to_srgb(xyz, mode=mode)
+
+    def mantis_receptors(self, wavelengths_nm):
+        """The mantis shrimp's ~12 spectral receptors (deep UV to far red) as an observer on the given wavelength
+        grid. Pass a grid reaching into the UV (e.g. 300-720 nm). See holographic_observer.mantis_receptors."""
+        import holographic.rendering.holographic_observer as _ob
+        return _ob.mantis_receptors(wavelengths_nm)
+
+    def polarization_readout(self, stokes):
+        """Read polarization from a Stokes field the mantis way: linear detectors + circular detectors via a
+        quarter-wave retarder (the R8 mechanism). Returns linear_*/circular_* channels, e-vector angle and
+        handedness -- the last is the circular-polarization sense the mantis uniquely sees. See
+        holographic_observer.polarization_readout."""
+        import holographic.rendering.holographic_observer as _ob
+        return _ob.polarization_readout(stokes)
+
+    def mantis_view(self, spectral_stokes, wavelengths_nm):
+        """See a spectral-Stokes signal (...,nlam,4) as a mantis shrimp does: 12 spectral bands + linear +
+        circular polarization, in one call. Spectral channels are a DIRECT readout (no colour-opponent
+        processing -- Thoen et al. 2014). See holographic_observer.mantis_view."""
+        import holographic.rendering.holographic_observer as _ob
+        return _ob.mantis_view(spectral_stokes, wavelengths_nm)
+
+    def wavelength_to_rgb(self, nm):
+        """The approximate sRGB a human sees for a monochromatic light at wavelength `nm` (UV/IR map to black --
+        invisible). Field-native. Reuses the CIE curves. See holographic_falsecolor.wavelength_to_rgb."""
+        import holographic.rendering.holographic_falsecolor as _fc
+        return _fc.wavelength_to_rgb(nm)
+
+    def hsv_to_rgb(self, h, s, v):
+        """Vectorised HSV->RGB (all args in [0,1], hue wraps) -- the natural map for cyclic quantities like a
+        polarization angle. See holographic_falsecolor.hsv_to_rgb."""
+        import holographic.rendering.holographic_falsecolor as _fc
+        return _fc.hsv_to_rgb(h, s, v)
+
+    def falsecolor_spectral(self, readings, centers_nm, uv_hue=0.80):
+        """False-colour N spectral-band readings (...,nchan) into an RGB image, with UV bands made VISIBLE in a
+        chosen hue -- 'what a multi-band eye sees'. A CHOICE, not true colour. See
+        holographic_falsecolor.spectral_falsecolor."""
+        import holographic.rendering.holographic_falsecolor as _fc
+        return _fc.spectral_falsecolor(readings, centers_nm, uv_hue=uv_hue)
+
+    def falsecolor_polarization(self, evector_angle, dolp, value=1.0):
+        """Standard polarization false-colour: hue=e-vector angle, saturation=degree of linear polarization,
+        value=intensity (unpolarised -> grey). Field-native; a CHOICE of mapping. See
+        holographic_falsecolor.polarization_falsecolor."""
+        import holographic.rendering.holographic_falsecolor as _fc
+        return _fc.polarization_falsecolor(evector_angle, dolp, value=value)
+
+    def falsecolor_handedness(self, circular_R, circular_L):
+        """Diverging false-colour for circular polarization sense: right-handed->red, left-handed->blue,
+        unpolarised->white -- the channel the mantis uniquely sees. A CHOICE of convention. See
+        holographic_falsecolor.handedness_falsecolor."""
+        import holographic.rendering.holographic_falsecolor as _fc
+        return _fc.handedness_falsecolor(circular_R, circular_L)
+
+    def mantis_falsecolor(self, view, centers_nm=None):
+        """SEE WHAT THE MANTIS SEES: turn a mantis_view() reading into three human-viewable RGB images -- color
+        (12 bands incl. UV made visible), polarization (angle+strength), and handedness (circular sense). Every
+        image is a false-colour CHOICE, not the mantis' percept. See holographic_falsecolor.mantis_falsecolor."""
+        import holographic.rendering.holographic_falsecolor as _fc
+        return _fc.mantis_falsecolor(view, centers_nm=centers_nm)
+
 
 # ---------------------------------------------------------------------------
 # DEMO: one mind, many modalities, one memory -- measured against separate ones
@@ -10619,5 +14510,41 @@ def demo_unified():
     print("  fuzzy recall was measured to hurt rather than help.")
 
 
+def _selftest():
+    """Regression trap for the mind FACADE itself (T6 backfill; the 12k-line module ran only a demo). This is a
+    WIRING smoke test, not a re-test of each faculty (those have their own selftests): it proves the facade boots
+    deterministically and that a representative faculty from several domains actually resolves and returns a sane
+    result -- the failure this catches is a faculty silently unwired or broken at the delegation boundary, which
+    per this codebase's hard lesson (a shared kernel is not a shared manifold) is exactly where things break."""
+    import numpy as np
+
+    # 1. BOOT is deterministic: two minds from the same seed agree on a produced vector, bit for bit.
+    m1 = UnifiedMind(dim=256, seed=0)
+    m2 = UnifiedMind(dim=256, seed=0)
+    r1 = m1.encode_record({"name": "alice", "age": "thirty"})
+    r2 = m2.encode_record({"name": "alice", "age": "thirty"})
+    assert np.array_equal(r1, r2), "two same-seed minds disagree -- determinism broken at the facade"
+    assert np.asarray(r1).shape == (256,)
+
+    # 2. A representative faculty from several domains resolves and returns something sane (the [BLIND-SPOT] point:
+    #    exercise the DELEGATION, not just attribute existence -- a wired-but-broken method passes hasattr).
+    hits = m1.find_capability("rotate an object")
+    assert len(hits) >= 1                                        # discovery domain
+
+    cov = m1.selftest_coverage()
+    assert cov["runnable"] > 300 and 0.0 <= cov["coverage"] <= 1.0   # introspection domain
+
+    T = m1.scene_translation([1.0, 2.0, 3.0]) if hasattr(m1, "scene_translation") else None
+    if T is not None:
+        assert np.asarray(T).shape == (4, 4)                    # transform domain: a 4x4 matrix
+
+    print("OK: holographic_unified self-test passed (facade boots deterministically -- two same-seed minds encode "
+          "a record bit-identically -- and representative faculties across discovery, introspection and transforms "
+          "resolve through the delegation boundary with sane results)")
+
+
 if __name__ == "__main__":
-    demo_unified()
+    import sys
+    _selftest()
+    if "--demos" in sys.argv:
+        demo_unified()

@@ -53,13 +53,20 @@ setup(
         # -- optional accelerators --
         "jit":      ["numba"],            # numba-compiled fast paths (holographic_jit / sdf_render / codegen)
         "symbolic": ["sympy"],            # design-time symbolic gradients (holographic_codegen / sdf_render)
+        "zig":      ["ziglang"],          # native batch kernels + raymarcher (holographic_zigrun / zigmarch):
+                                          #   measured 2-5x over vectorised NumPy for repeated medium-n kernels,
+                                          #   3.8x on the raymarch demo, BIT-IDENTICAL in safe mode. The wheel
+                                          #   ships the whole Zig toolchain (~45 MB) -- no system compiler needed;
+                                          #   it also backstops the C validation path via `zig cc`.
         "gpu":      ["cupy"],             # GPU backend (holographic_backend). NOTE: CuPy is tied to your CUDA
                                           #   version -- you often need a specific wheel like `cupy-cuda12x`
                                           #   instead, so it is best installed by hand (and left out of `all`).
         # -- optional tooling --
         "ui":       ["flask", "pillow"],  # the browser UI (app.py) + image load/save
+        "images":   ["pillow"],           # image I/O beyond stdlib PNG (jpg/webp/... via mind.save_render) --
+                                          #   pillow without pulling in Flask; a subset of `ui` for headless use
         "dev":      ["pytest", "matplotlib"],   # run the test suite and generate the plots
         # -- convenience: everything portable in one shot (CuPy excluded -- see the note above) --
-        "all":      ["numba", "sympy", "flask", "pillow", "pytest", "matplotlib"],
+        "all":      ["numba", "sympy", "flask", "pillow", "pytest", "matplotlib", "ziglang"],
     },
 )

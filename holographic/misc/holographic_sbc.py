@@ -287,6 +287,13 @@ def _adapt2_selftest():
     assert eok2 == fok2, (fok2, eok2)
 
 
-if __name__ == "__main__":
+def _selftest():
+    """Canonical entry point for the CI walker (T6 backfill): the module's real contract lives in
+    `_adapt2_selftest` under a non-standard name, which the coverage census (greps `def _selftest`) cannot see.
+    This runs it -- no new assertions needed; the existing one is a real contract check."""
     _adapt2_selftest()
     print("holographic_sbc ADAPT-2 selftest passed")
+
+
+if __name__ == "__main__":
+    _selftest()

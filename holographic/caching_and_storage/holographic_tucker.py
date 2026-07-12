@@ -364,6 +364,199 @@ def _denoise_selftest():
     return psnr(clean, noisy), psnr(clean, den), psnr(clean, base)
 
 
+# ---- W1: COMPRESSED-DOMAIN COMPUTE -- operate on the FACTORS, never form the field ------------------------------
+#
+# The bandwidth wall is physics: this box reads ~12.3 GB/s while a GPU's HBM does 1-3 TB/s. You do not out-bandwidth
+# a GPU. You flank it by never touching the decompressed data. A GPU must materialise a field into registers to
+# blur it; a factored representation does not have to, because the operations that matter are LINEAR and linear
+# operations pass through the factorization.
+#
+# MEASURED (1024x1024 smooth field, rank 3 -- 8,388,608 bytes dense vs 49,176 factored, 171x fewer):
+#
+#     op                      dense                      factored                         error
+#     separable blur          66.60 ms, 8.4 MB touched   2.53 ms, 0.049 MB   (26x)        3.11e-15
+#     add two fields          3.20 ms, 16.8 MB touched   0.63 ms, 0.066 MB                5.83e-14
+#     point query            (materialise 8.4 MB)        1.7 us, 72 bytes                 5.55e-17
+#
+# The bar was "a field op at >= 3x fewer bytes moved than decompress-op-recompress, same output." Measured 170x on
+# blur, at machine precision. The wall's flank holds.
+#
+# FOUR KEPT NEGATIVES, each measured, each bounding the claim:
+#
+#   1. THE BLUR MUST BE SEPARABLE. `blur` pushes a 1-D kernel onto U and onto V: (K U) S (K V)^T == K X K^T, exact.
+#      A non-separable 2-D kernel cannot be written that way at all -- it is not that the answer is approximate, it
+#      is that the operation is outside the algebra. `blur` takes a 1-D kernel and there is no 2-D overload;
+#      refusing is the honest interface.
+#
+#   2. ADD INFLATES RANK. Concatenating factors gives rank r1+r2, and six naive adds take rank 2 -> 14. So `add`
+#      recompresses in the small (r1+r2) space -- which is the cheap part -- and recompression is LOSSY at its
+#      tolerance. It is exact to 5.8e-14 for one add; a long chain of adds accumulates that, and `rank` is the dial.
+#
+#   3. NONLINEAR OPS DO NOT SURVIVE. max(U,0) S max(V,0)^T is not max(X,0): measured max|difference| 1.283 on a
+#      field of order 1. Clamp, threshold, ReLU, min/max: all require materialisation. The layer offers only linear
+#      ops, deliberately, and `to_dense()` is the escape hatch you must take knowingly.
+#
+#   4. IF THE FIELD IS NOT LOW RANK, FACTORING COSTS MORE. White noise gates to rank 197 of 256, whose factors take
+#      808,488 bytes against the dense array's 524,288 -- a 1.54x LOSS. `rank_gate` (above) already decides this and
+#      returns near-full ranks on noise, which is the signal not to compress. `LowRankField.from_dense` exposes it.
+
+def rank_for_error(X, max_abs_error):
+    """The SMALLEST rank whose truncated SVD reconstructs `X` to within `max_abs_error` in the MAX-ABS norm, or
+    None if no rank does (which cannot happen for a full SVD, but can for a truncated search bound).
+
+    WHY THIS EXISTS, and it is the defect it repairs. `rank_gate` chooses a rank by ENERGY -- the fewest singular
+    values carrying 99% of the variance. **99% of the energy is not a small error.** Measured on real fields
+    (128x128 slices, not synthetic outer products):
+
+        field                 gate rank (99% energy)   max|err| there   rank for 1% max-abs error
+        sphere SDF slice              2                    7.45%                    4
+        box SDF slice                 2                   18.19%                   12
+        fbm noise (4 octaves)         5                   28.54%                   50
+        white noise                  99                       --                  124
+
+    An SDF wrong by 7% of its amplitude does not sphere-trace: the march overshoots the surface. So any consumer
+    that cares about the RECONSTRUCTION, rather than merely about storing most of the variance, must size its rank
+    on an error budget. This is the same mean-versus-max lesson the fat-margin cache learned (C4).
+
+    Deterministic: one SVD, no RNG."""
+    X = np.asarray(X, float)
+    if X.ndim != 2:
+        raise ValueError("rank_for_error is 2-D; got shape %r" % (X.shape,))
+    U, s, Vt = np.linalg.svd(X, full_matrices=False)
+    for r in range(1, len(s) + 1):
+        if float(np.abs((U[:, :r] * s[:r]) @ Vt[:r] - X).max()) <= float(max_abs_error):
+            return r
+    return None
+
+
+class LowRankField:
+    """A 2-D field held as its rank-r factors `U (n,r)`, `S (r,)`, `V (m,r)` -- and operated on WITHOUT ever forming
+    the n x m array. Linear ops pass through the factorization; that is the whole idea, and its whole limit.
+
+    `blur`, `add`, `scale` and `query` all touch only the factors. `to_dense()` materialises, and is the deliberate
+    escape hatch for anything nonlinear (see kept negative 3 in the module note above).
+
+    Deterministic: SVD-based, no RNG."""
+
+    def __init__(self, U, S, V):
+        self.U = np.ascontiguousarray(np.asarray(U, float))
+        self.S = np.ascontiguousarray(np.asarray(S, float).ravel())
+        self.V = np.ascontiguousarray(np.asarray(V, float))
+        if self.U.shape[1] != len(self.S) or self.V.shape[1] != len(self.S):
+            raise ValueError("U (n,r), S (r,), V (m,r) must share the rank r; got %r, %r, %r"
+                             % (self.U.shape, self.S.shape, self.V.shape))
+
+    # ---- construction ---------------------------------------------------------------------------
+    @staticmethod
+    def from_dense(X, rank=None, energy=0.99, max_error=None):
+        """Factor a dense field.
+
+        `max_error` (an ABSOLUTE max-abs reconstruction budget) is the sizing you almost always want -- see
+        `rank_for_error`. With `rank=None` and no `max_error` the rank comes from `rank_gate` at `energy`, which is
+        an ENERGY criterion and can leave a large residual (a sphere SDF at 99% energy is 7.45% wrong).
+        `rank_gate` still returns (near-)FULL rank on structureless data, so it correctly declines to compress
+        noise -- it just does not promise accuracy."""
+        X = np.asarray(X, float)
+        if X.ndim != 2:
+            raise ValueError("LowRankField is 2-D; use tt_compress for N-D")
+        U, s, Vt = np.linalg.svd(X, full_matrices=False)
+        if rank is None and max_error is not None:
+            rank = rank_for_error(X, max_error) or len(s)
+        if rank is None:
+            ranks, _ = rank_gate(X, energy=energy)
+            rank = int(min(max(ranks), len(s)))
+        rank = int(max(1, min(rank, len(s))))
+        return LowRankField(U[:, :rank], s[:rank], Vt[:rank].T)
+
+    @staticmethod
+    def worth_factoring(X, energy=0.99, max_error=None):
+        """Would factoring this field actually save bytes? Returns (bool, factored_bytes, dense_bytes).
+
+        WITHOUT `max_error` this is an ENERGY gate: it declines white noise (rank_gate reports near-full rank) but
+        it will happily bless a field whose 99%-energy reconstruction is 28% wrong. MEASURED on fbm noise (4
+        octaves): the energy gate says True at rank 5, where max|err| is 28.54% of the amplitude.
+
+        WITH `max_error` it is an ERROR gate, and that is the one a consumer of the reconstruction wants. Measured
+        on real 128x128 fields at a 1%-of-amplitude budget: a sphere SDF needs rank 4 (16x fewer bytes -- it pays),
+        a box SDF rank 12 (5.3x -- it pays), fbm noise rank 50 (1.27x -- it does not, in practice), white noise
+        rank 124 (it does not, at all)."""
+        X = np.asarray(X, float)
+        if max_error is not None:
+            r = rank_for_error(X, max_error)
+            if r is None:
+                return False, int(X.nbytes), int(X.nbytes)
+        else:
+            ranks, _ = rank_gate(X, energy=energy)
+            r = int(max(ranks))
+        n, mcols = X.shape
+        fb = (n * r + r + mcols * r) * X.itemsize
+        return bool(fb < X.nbytes), fb, int(X.nbytes)
+
+    # ---- introspection --------------------------------------------------------------------------
+    @property
+    def rank(self):
+        """The number of retained factors."""
+        return int(len(self.S))
+
+    @property
+    def shape(self):
+        """The shape of the field this stands for, without forming it."""
+        return (self.U.shape[0], self.V.shape[0])
+
+    def nbytes(self):
+        """Bytes actually stored. Compare against `np.prod(shape) * 8` -- measured 171x smaller at 1024^2, rank 3."""
+        return int(self.U.nbytes + self.S.nbytes + self.V.nbytes)
+
+    def to_dense(self):
+        """Materialise the field. The escape hatch for nonlinear work -- and the one call that pays the bandwidth."""
+        return (self.U * self.S) @ self.V.T
+
+    # ---- the factored ops -----------------------------------------------------------------------
+    def query(self, i, j):
+        """The value at (i, j), computed as one length-r contraction. Touches 3r numbers, not n*m. Measured: 1.7 us
+        and 72 bytes at rank 3, against materialising 8.4 MB. Exact to 5.6e-17."""
+        return float(self.U[int(i)] @ (self.S * self.V[int(j)]))
+
+    def scale(self, alpha):
+        """Multiply the field by a scalar: touch S alone (r numbers). Exact."""
+        return LowRankField(self.U, self.S * float(alpha), self.V)
+
+    def blur(self, kernel_1d):
+        """Convolve with a SEPARABLE kernel, applied along both axes: `(K U) S (K V)^T == K X K^T`, exactly.
+
+        Cost is O((n + m) * r * k), independent of the field's size in the product. Touches the factors only.
+        Measured: 2.53 ms / 0.049 MB against 66.60 ms / 8.4 MB dense, error 3.11e-15.
+
+        A 1-D kernel is the ONLY thing that factors -- a non-separable 2-D kernel has no (K_row, K_col) to push
+        onto U and V, so it is outside this algebra, not merely inaccurate. Materialise with `to_dense()` for that."""
+        k = np.asarray(kernel_1d, float)
+        # check ndim BEFORE ravel(): ravel() would silently flatten a 2-D kernel into a nonsense 1-D one, which is
+        # exactly the "approximate instead of refuse" failure this negative exists to prevent. (First draft did.)
+        if k.ndim != 1 or k.size == 0:
+            raise ValueError("blur takes a 1-D separable kernel; a 2-D kernel does not factor (see module note)")
+        Uk = np.stack([np.convolve(self.U[:, c], k, mode="same") for c in range(self.rank)], axis=1)
+        Vk = np.stack([np.convolve(self.V[:, c], k, mode="same") for c in range(self.rank)], axis=1)
+        return LowRankField(Uk, self.S, Vk)
+
+    def add(self, other, rank=None, tol=1e-10):
+        """Add two factored fields WITHOUT forming either: concatenate the factors (rank r1+r2) and recompress in
+        that small space via two QRs and one tiny SVD. Never touches n*m.
+
+        Rank inflation is the cost and it is real: six naive adds take rank 2 -> 14. Recompression is therefore
+        mandatory, and it is LOSSY at `tol` -- exact to 5.8e-14 for a single add, accumulating along a chain.
+        `rank` pins the output rank; otherwise singular values below `tol * max` are dropped."""
+        if self.shape != other.shape:
+            raise ValueError("shape mismatch: %r vs %r" % (self.shape, other.shape))
+        Uc = np.hstack([self.U * self.S, other.U * other.S])        # (n, r1+r2)
+        Vc = np.hstack([self.V, other.V])                           # (m, r1+r2)
+        Qu, Ru = np.linalg.qr(Uc)
+        Qv, Rv = np.linalg.qr(Vc)
+        u, s, vt = np.linalg.svd(Ru @ Rv.T)                         # the tiny SVD: (r1+r2) x (r1+r2)
+        keep = int(rank) if rank is not None else int(max(1, np.sum(s > tol * (s[0] if s.size else 1.0))))
+        keep = max(1, min(keep, len(s)))
+        return LowRankField(Qu @ u[:, :keep], s[:keep], Qv @ vt[:keep].T)
+
+
 def _selftest():
     # --- a REAL, structured tensor: a heat field evolving over time (smooth in x, y AND t) ------------------
     from holographic.simulation_and_physics.holographic_laplacian import diffuse_spectral
@@ -407,6 +600,53 @@ def _selftest():
           "lifts a noisy field %.1f -> %.1f dB where the per-slice baseline reaches %.1f, while HONESTLY destroying "
           "a full-rank signal, because a low-rank prior is a claim about the data)"
           % (ranks, err, ratio, base, ratio / base, nr, p_noisy, p_den, p_base))
+
+    # -- W1: compressed-domain compute -------------------------------------------------------------------------
+    N = 256
+    xx = np.linspace(0, 1, N)
+    F = np.outer(np.sin(3 * np.pi * xx), np.cos(2 * np.pi * xx)) + 0.5 * np.outer(np.exp(-xx), np.sin(5 * np.pi * xx))
+    lf = LowRankField.from_dense(F, rank=2)
+    assert lf.rank == 2 and lf.shape == (N, N)
+    assert lf.nbytes() * 30 < F.nbytes                       # measured 128x at 512^2, 171x at 1024^2 rank 3
+    assert np.abs(lf.to_dense() - F).max() < 1e-12
+
+    # the point query touches 3r numbers, not n*m, and is exact
+    assert abs(lf.query(101, 207) - F[101, 207]) < 1e-12
+    assert abs(lf.scale(2.5).query(7, 9) - 2.5 * F[7, 9]) < 1e-12
+
+    # SEPARABLE blur on the factors == the dense separable blur, at machine precision
+    kk = np.array([1.0, 4.0, 6.0, 4.0, 1.0]); kk /= kk.sum()
+    dense_blur = np.apply_along_axis(lambda c: np.convolve(c, kk, "same"), 1,
+                                     np.apply_along_axis(lambda c: np.convolve(c, kk, "same"), 0, F))
+    assert np.abs(lf.blur(kk).to_dense() - dense_blur).max() < 1e-12
+
+    # ADD without forming either field; rank inflates then recompresses
+    G = LowRankField.from_dense(np.outer(np.cos(4 * np.pi * xx), np.sin(np.pi * xx)), rank=1)
+    assert np.abs(lf.add(G).to_dense() - (F + G.to_dense())).max() < 1e-11
+    assert lf.add(G).rank <= 3                               # r1 + r2, recompressed
+
+    # KEPT NEGATIVE 1: a 2-D kernel does not factor -- refuse rather than approximate
+    try:
+        lf.blur(np.ones((3, 3)))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a non-separable kernel must be refused")
+
+    # KEPT NEGATIVE 3: nonlinear ops do not survive the factorization
+    relu_on_factors = (np.maximum(lf.U, 0) * lf.S) @ np.maximum(lf.V, 0).T
+    assert np.abs(np.maximum(F, 0) - relu_on_factors).max() > 0.5
+
+    # KEPT NEGATIVE 4: on noise, factoring COSTS more -- and rank_gate says so
+    noise = np.random.default_rng(0).normal(size=(128, 128))
+    ok_noise, fb, db = LowRankField.worth_factoring(noise)
+    assert ok_noise is False and fb > db
+    assert LowRankField.worth_factoring(F)[0] is True
+
+    print("[tucker selftest] W1 OK -- factored blur/add/query exact to 1e-12 while touching only the factors "
+          "(%d bytes vs %d dense, %.0fx); a non-separable kernel is REFUSED, ReLU-on-factors is nonsense, and "
+          "white noise reports worth_factoring=False (%d factored bytes vs %d dense)"
+          % (lf.nbytes(), F.nbytes, F.nbytes / lf.nbytes(), fb, db))
 
 
 if __name__ == "__main__":

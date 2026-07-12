@@ -1,10 +1,26 @@
 """holographic_memoryhome.py -- the MEMORY home (consolidation backlog H6): keep the hot working set where the CPU
 can reach it fast. One place for the cache-hierarchy levers the engine actually has.
 
-THE HIERARCHY (the organizing frame)
-------------------------------------
-registers -> L1 -> L2 -> L3 -> RAM -> disk, each ~10x bigger and ~10x slower than the one before. You do not place
-data in the CPU caches by hand, but you decide what LANDS there, and that is most of the speed. The levers:
+THE HIERARCHY (the organizing frame) -- AND ITS MEASURED CORRECTION
+-------------------------------------------------------------------
+The textbook frame is: registers -> L1 -> L2 -> L3 -> RAM -> disk, each ~10x bigger and ~10x slower than the one
+before. That frame is TRUE of the CPU's own caches, which is why the levers below (residency, contiguous layout)
+still pay. It is FALSE of leCore's own tiers, and the measurement says so plainly (per single scalar access):
+
+    reuse a compiled transfer     121 ns          RAM dense index X[i,j]        132 ns
+    MarginCache hit             3,485 ns          BakedGrid trilinear fetch  69,712 ns
+    texture-unit fetch        376,032 ns
+
+A latency ladder would tell you never to use any of them. The reason it is wrong: **none of leCore's tiers is a
+scalar unit.** Every one is a BATCH unit whose per-access cost collapses with N (BakedGrid: 61,765 ns/point at
+N=1, 274 ns/point at N=10,000), and one of them -- `gather` -- has a marginal cost that is CONSTANT in N.
+
+So the organizing question is not "which tier is closest" but **"does the work amortize the setup"**, which is the
+same gate as `should_jump`, `worth_factoring` and `suggest_margin`. `holographic_machinemodel` names every unit
+with its measured (setup, marginal, scaling) and answers that question once, for all of them, via `place()`.
+Read that module before reaching for a tier; the levers below are what you use once you have chosen one.
+
+The levers:
 
   * RESIDENCY  -- keep a reused FFT spectrum around instead of recomputing it. holographic_residency.SpectrumCache
                   is an LRU of atom -> rfft(atom); a bind/unbind against a KNOWN operand then skips the forward

@@ -123,9 +123,63 @@ class Transform:
         return steer_bandwidths(X, y, base=base, k=k, clip=clip)
 
 
+    # --- THE STRUCTURE: which floor of the affine group is this transform standing on? ---
+    #
+    # This home offers `bind` and `scaling` side by side, as if they were the same KIND of thing. They are not, and
+    # a door that suggests a false symmetry is worse than a door that omits something. `bind` is the abelian IDEAL
+    # -- a convolution algebra can represent nothing else -- while `scaling` is the CENTRE of the linear part and is
+    # not a bind at all (no spectrum represents a dilation; fit one on a vector, apply it to another, relative error
+    # 1.579). The tower says which is which, and whether a delta can be pushed through.
+
+    @staticmethod
+    def layer(transform, dim=3):
+        """Which floor of the transform tower `transform` stands on. Takes a callable OR a matrix.
+        {layer, name, diagonalisable, bankable, delta_pushable, why}. Routes to
+        holographic_grouptower.classify_transform."""
+        from holographic.mesh_and_geometry.holographic_grouptower import classify_transform
+        return classify_transform(transform, dim=int(dim))
+
+    @staticmethod
+    def hypervector_layer():
+        """A hypervector operator is ALWAYS the abelian ideal -- `Transform.bind` cannot be a rotation, ever,
+        because circular convolution is commutative. Routes to holographic_grouptower.hypervector_layer."""
+        from holographic.mesh_and_geometry.holographic_grouptower import hypervector_layer
+        return hypervector_layer()
+
+    @staticmethod
+    def is_affine(M, tol=1e-12):
+        """Does the 4x4 `M` fix the plane at infinity? A boolean about the bottom row, not a tolerance on a
+        distance. Beyond it, no delta pushes through. Routes to holographic_projectivetower.is_affine."""
+        from holographic.mesh_and_geometry.holographic_projectivetower import is_affine
+        return is_affine(M, tol=tol)
+
+    @staticmethod
+    def compose_word(chain):
+        """Compose a chain of 4x4s into ONE. A group is CLOSED, so the composed "word" is drawn from the same set
+        as its "letters". Routes to holographic_projectivetower.compose_word."""
+        from holographic.mesh_and_geometry.holographic_projectivetower import compose_word
+        return compose_word(chain)
+
+    @staticmethod
+    def bank(dim, seed=0):
+        """A prebuilt map of hypervector transforms, held as Fourier spectra -- a representation of the abelian
+        ideal, and it can be nothing else. Routes to holographic_transformbank.TransformBank."""
+        from holographic.caching_and_storage.holographic_transformbank import TransformBank
+        return TransformBank(int(dim), seed=int(seed))
+
+    @staticmethod
+    def adjoint(tri, light, A):
+        """Push a delta onto the OTHER operand: `shade(A x, L) == max(0, n . (A^-1 L) / ||A^-T n||)`. This is
+        conjugation, and it works because the translations are a NORMAL subgroup of the affine group.
+        Routes to holographic_equivariance.shade_adjoint."""
+        from holographic.mesh_and_geometry.holographic_equivariance import shade_adjoint
+        return shade_adjoint(tri, light, A)
+
+
 def transform_kinds():
     """The transform representations the home spans (for the catalog / discovery)."""
-    return ("bind(vsa)", "permute(vsa)", "matrix(4x4)", "rotor(clifford)", "steer(anisotropic)")
+    return ("bind(vsa)", "permute(vsa)", "matrix(4x4)", "rotor(clifford)", "steer(anisotropic)",
+            "tower(which floor)", "bank(prebuilt spectra)", "projective(the ceiling)")
 
 
 def _selftest():

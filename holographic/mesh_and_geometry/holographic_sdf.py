@@ -47,13 +47,39 @@ import numpy as np
 # Per-kind arity: (number of scalar params, number of child SDFs). Drives DSL parsing and validation.
 ARITY = {
     "sphere": (1, 0), "box": (3, 0), "torus": (2, 0), "cylinder": (2, 0), "plane": (1, 0),
+    "capsule": (2, 0), "cone": (2, 0), "ellipsoid": (3, 0), "octahedron": (1, 0),
     "union": (0, 2), "intersect": (0, 2), "subtract": (0, 2), "smooth_union": (1, 2),
     "translate": (3, 1), "scale": (1, 1), "rotate": (4, 1), "repeat": (3, 1),
     "round": (1, 1), "onion": (1, 1), "displace": (2, 1), "twist": (1, 1),
+    "mirror": (2, 1), "bend": (2, 1),
+    "elongate": (3, 1),
     "menger": (2, 0),
+    "fold_fractal": (4, 0),
+    "mandelbulb": (3, 0),
 }
-# Domain-warp kinds whose output is NOT an exact distance (a raymarcher must take shorter steps).
-INEXACT = {"twist", "displace"}
+# Domain-warp kinds whose output is NOT an exact distance (a raymarcher must take shorter steps). mirror is an
+# isometry (reflection) and stays exact; bend/twist/displace stretch space and do not. `ellipsoid` has no exact
+# closed-form SDF -- iq's k1*(k1-1)/k2 is a tight BOUND (never oversteps), so it is INEXACT too: correct to
+# raymarch, but the emitter refuses it (a shader consumer needs the shorter-step warning we cannot bake in).
+INEXACT = {"twist", "displace", "bend", "ellipsoid", "fold_fractal", "mandelbulb"}
+
+
+def as_eval(sdf):
+    """Return a plain callable `P:(M,D) -> distances:(M,)` for ANY of the engine's three ways of naming an SDF:
+
+      * a node object with `.eval(P)`   -- what `sphere()`/`box()`/`parse_dsl()` build
+      * a bare callable                 -- what `collide`, `emitter` and every ad-hoc lambda pass around
+      * a DSL STRING, e.g. "(sphere 1.0)" -- parsed here, which is what makes an SDF consumer agent-callable:
+        a callable cannot cross a JSON boundary, but its s-expression can.
+
+    WHY: the conventions grew independently and every consumer had to know which it was holding. The evidence was
+    already in the tree -- `holographic_sdf_render` wraps a callable in a throwaway `_Obj()` class purely to give
+    it an `.eval`, and `sdf_normal` below simply crashed on a lambda (`'function' object has no attribute
+    'eval'`). One adapter at the boundary, instead of a private shim per call site."""
+    if isinstance(sdf, str):
+        return to_callable(parse_dsl(sdf))
+    ev = getattr(sdf, "eval", None)
+    return ev if callable(ev) else sdf
 
 
 def sdf_normal(sdf, P, eps=1e-3):
@@ -61,12 +87,18 @@ def sdf_normal(sdf, P, eps=1e-3):
     vectorised evals). WHY THIS LIVES HERE (backlog G1): the gradient is a property of the FIELD, not the
     renderer -- emission, collision, displacement, sculpting, field-effect falloff, and Walk-on-Spheres all need
     the SAME normal, so it is defined ONCE here and delegated everywhere (no drift, no six private copies). `sdf`
-    is anything with an `.eval(P)`."""
+    is anything with an `.eval(P)` OR a bare callable (see `as_eval`).
+
+    A ZERO gradient is possible and is NOT an error: on an SDF's medial axis (the dead centre of a slab, the axis
+    of a cylinder) the central differences cancel exactly and there is no normal to return. The `+ 1e-12` below
+    makes that a zero vector rather than a NaN; callers that must MOVE a point (collision resolution) have to
+    detect the zero and pick an escape direction themselves -- see holographic_collide.resolve_sdf_collision."""
     P = np.asarray(P, float)
+    _ev = as_eval(sdf)
     ex = np.array([eps, 0, 0]); ey = np.array([0, eps, 0]); ez = np.array([0, 0, eps])
-    nx = sdf.eval(P + ex) - sdf.eval(P - ex)
-    ny = sdf.eval(P + ey) - sdf.eval(P - ey)
-    nz = sdf.eval(P + ez) - sdf.eval(P - ez)
+    nx = _ev(P + ex) - _ev(P - ex)
+    ny = _ev(P + ey) - _ev(P - ey)
+    nz = _ev(P + ez) - _ev(P - ez)
     N = np.stack([nx, ny, nz], axis=1)
     return N / (np.linalg.norm(N, axis=1, keepdims=True) + 1e-12)
 
@@ -103,6 +135,24 @@ class SDF:
     def onion(self, thickness):       return SDF("onion", (thickness,), [self])
     def displace(self, amount, freq): return SDF("displace", (amount, freq), [self])
     def twist(self, k):               return SDF("twist", (k,), [self])
+    def elongate(self, hx=0.0, hy=0.0, hz=0.0):
+        """Stretch this shape by pulling it apart along the axes by half-extents (`hx`,`hy`,`hz`) -- iq's
+        opElongate. A sphere becomes a capsule, a box a longer box, a torus an oval track. EXACT (it splits the
+        shape and inserts a straight run, no distance distortion), so it raymarches cleanly and emits to GLSL.
+        The clean way to make a family of shapes from one primitive."""
+        return SDF("elongate", (float(hx), float(hy), float(hz)), [self])
+    def mirror(self, axis=0, plane=0.0):
+        """Fold space across a plane on one axis (kaleidoscopic symmetry from abs()). A DSL-tree node so it
+        round-trips to GLSL; the same warp as holographic_domain.domain_mirror, here as an authorable modifier."""
+        return SDF("mirror", (float(axis), float(plane)), [self])
+    def fold(self, plane=0.0):
+        """Mirror all three axes about `plane` -- map the world into one octant (an 8-fold kaleidoscope). Composes
+        three `mirror` nodes so it emits to GLSL like any other warp. See holographic_domain.fold."""
+        return self.mirror(0, plane).mirror(1, plane).mirror(2, plane)
+    def bend(self, k, axis=0):
+        """Bend space by `k` radians per unit along `axis` (iq's opCheapBend) -- curl a straight beam into an arc.
+        A DSL node so it round-trips to GLSL. Cheap bend: warps distance slightly (fine for silhouettes)."""
+        return SDF("bend", (float(k), float(axis)), [self])
 
     # ----- holographic representation: the (op, *children) tree typed.tree_to_recipe consumes ----
     def to_tree(self):
@@ -119,6 +169,66 @@ class SDF:
         inner = " ".join([self.kind] + [f"{p:.6g}" for p in self.params]
                          + [c.to_dsl() for c in self.children])
         return "(" + inner + ")"
+
+    def cost(self):
+        """Estimate the per-ray evaluation COST of this SDF tree (W2) -- a machine-model annotation for deciding
+        if a scene is cheap enough to raymarch in real time. Returns a dict: `alu` (approximate arithmetic ops
+        per map() call, the dominant term), `nodes` (tree size), `depth` (nesting), `iterative` (True if it
+        contains a menger/repeat-style loop whose cost scales with a parameter), and `verdict` (a plain-language
+        band). The ALU weights are RELATIVE (a sqrt/length is ~7 flops, a trig call ~8, a min/max ~1) -- honest
+        as ratios, not absolute nanoseconds, because the real number depends on the GPU. iq's ask: know the price
+        before you ship the scene."""
+        # WHY these weights: a length()/sqrt is the expensive leaf op; trig (twist/bend) is worse; boolean ops are
+        # nearly free. Grounded in the _eval / _GLSL_PRIM bodies -- e.g. a torus does two length()s (~14), a box
+        # one length + a max (~8). Menger/repeat carry a LOOP whose body repeats `iterations` times.
+        LEAF = {"sphere": 7, "box": 9, "torus": 14, "cylinder": 12, "plane": 1,
+                "capsule": 8, "cone": 16, "octahedron": 12, "ellipsoid": 14}
+        WARP = {"translate": 3, "scale": 2, "rotate": 12, "repeat": 6, "round": 1, "onion": 2,
+                "displace": 10, "twist": 10, "mirror": 2, "bend": 12, "elongate": 6}
+        COMBINE = {"union": 1, "intersect": 1, "subtract": 2, "smooth_union": 6}
+
+        iterative = [False]
+
+        def walk(node, depth):
+            k = node.kind
+            here = LEAF.get(k, WARP.get(k, COMBINE.get(k, 4)))
+            if k == "menger":                                    # a real for-loop: body ~9 ALU x iterations
+                iters = int(node.params[0])
+                here = 9 * iters + 9
+                iterative[0] = True
+            if k == "fold_fractal":                              # box-fold + sphere-fold + scale, ~14 ALU x iters
+                iters = int(node.params[0])
+                here = 14 * iters + 6
+                iterative[0] = True
+            if k == "mandelbulb":                                # trig-heavy polar power map, ~30 ALU x iters
+                iters = int(node.params[1])
+                here = 30 * iters + 8
+                iterative[0] = True
+            if k == "repeat":
+                iterative[0] = True                              # a mod per axis, cheap but domain-scaling
+            sub = sum(walk(c, depth + 1) for c in node.children)
+            return here + sub
+
+        def count(node):
+            return 1 + sum(count(c) for c in node.children)
+
+        def treedepth(node):
+            return 1 + (max((treedepth(c) for c in node.children), default=0))
+
+        alu = walk(self, 0)
+        n = count(self)
+        d = treedepth(self)
+        # verdict bands: rough, but useful. A 60fps 1080p budget is ~a few hundred ALU per map() at typical march
+        # step counts; these bands assume ~64-128 steps per ray.
+        if iterative[0] and alu > 120:
+            verdict = "expensive (iterative/fractal) -- fine for a hero shot, budget carefully for realtime"
+        elif alu <= 40:
+            verdict = "cheap -- comfortable at realtime resolutions"
+        elif alu <= 120:
+            verdict = "moderate -- realtime at 1080p on a modern GPU, watch the march step count"
+        else:
+            verdict = "heavy -- likely offline or low-res realtime; consider baking or simplifying"
+        return {"alu": alu, "nodes": n, "depth": d, "iterative": iterative[0], "verdict": verdict}
 
     def to_glsl(self, name="map"):
         """Emit a complete Shadertoy-ready fragment shader for this SDF (see _emit_shader)."""
@@ -162,6 +272,105 @@ def menger(iterations=3, size=1.0):
     return SDF("menger", (iterations, size))
 
 
+def fold_fractal(iterations=12, scale=2.0, min_radius=0.5, fold_limit=1.0):
+    """The KALEIDOSCOPIC-IFS / MANDELBOX distance-estimator SDF -- the general 'fold engine' behind the fractal-forums
+    3D fractals and the Yohei-Nishitsuji tweet-shader look. Iterate, `iterations` times: a BOX FOLD (conditional
+    reflection -- reflect each coordinate outside +/-`fold_limit` back inward, `p = clamp(p,-L,L)*2 - p`), then a
+    SPHERE FOLD (invert the point through nested spheres of radius `min_radius`), then a linear `scale`+translate.
+    Track the running derivative so the readout is a true DISTANCE ESTIMATE the raymarcher can step on. `scale` is the
+    Mandelbox constant (|scale|>1 gives the classic box; negative scales give the folded-inside-out variants);
+    `min_radius` sets where the sphere fold bites; `fold_limit` is the box-fold half-extent.
+
+    These are all CONFORMAL (angle-preserving) transforms -- which is exactly why the distance estimate stays usable
+    and why the result raymarches and orbit-traps cleanly with the existing renderer. Returns an SDF that evals,
+    marches to a mesh, and emits GLSL like any other. A tiny recipe (four floats) that regenerates megabytes of
+    deterministic self-similar structure -- the 'determinism instead of storage' lever, as geometry.
+
+    NOTE: like menger, this is an INEXACT distance (a distance ESTIMATE, standard for fractals) -- the raymarcher
+    already steps conservatively for iterative SDFs, but a shader consumer must know to shorten steps near it."""
+    return SDF("fold_fractal", (iterations, scale, min_radius, fold_limit))
+
+
+def mandelbulb(power=8.0, iterations=8, bailout=2.0):
+    """The MANDELBULB distance-estimator SDF (White & Nylander's polar-power fractal, the 3D Mandelbrot analogue).
+    Iterate `z -> z^power + c` in SPHERICAL coordinates (raise the radius to `power`, multiply the two angles by
+    `power`), where c is the query point, tracking the running derivative dr so the readout is the analytic distance
+    estimate `0.5*log(r)*r/dr`. `power`=8 is the classic bulb; other powers give the 'bulb of order n'. `iterations`
+    trades detail for cost; `bailout` is the escape radius. Unlike fold_fractal (a Mandelbox FOLD engine -- conditional
+    reflections), this is the ESCAPE-TIME family in 3D: the same z->z^n+c that draws the Mandelbrot set, lifted to a
+    triplex algebra. Returns an SDF that evals and raymarches/orbit-traps with the existing renderer.
+
+    NOTE: INEXACT (a distance ESTIMATE, standard for escape-time fractals) -- the in-engine raymarcher steps
+    conservatively; the GLSL emitter refuses it (a shader consumer must hand-tune the step size)."""
+    return SDF("mandelbulb", (power, iterations, bailout))
+
+
+# W8 -- the primitive PACK. iq asked for the everyday SDF leaves a scene actually needs (his own articles give the
+# exact closed forms). Each is an EXACT distance (not INEXACT), so they raymarch cleanly and emit to every dialect.
+def capsule(h=1.0, r=0.3):
+    """A capsule (a cylinder with hemispherical caps) along Y: segment from -h to +h on the Y axis, radius `r`.
+    The exact distance to a line segment offset by r -- the primitive for limbs, pills, rounded rods. Returns an SDF."""
+    return SDF("capsule", (h, r))
+
+
+def cone(h=1.0, r=0.5):
+    """A capped cone along Y: height `h` (apex at +h/2, base at -h/2), base radius `r`. iq's exact cone distance
+    (a 2-D distance in the (radial, y) half-plane). Returns an SDF -- spikes, funnels, party hats."""
+    return SDF("cone", (h, r))
+
+
+def ellipsoid(ax=1.0, ay=0.7, az=0.5):
+    """An ellipsoid with semi-axes (`ax`,`ay`,`az`). Uses iq's BOUNDED APPROXIMATION k1*(k1-1)/k2 -- the ellipsoid
+    has no exact closed-form SDF, but this is a tight bound that raymarches correctly (never oversteps). Returns
+    an SDF. Marked APPROX so a caller knows to step conservatively near it."""
+    return SDF("ellipsoid", (ax, ay, az))
+
+
+def octahedron(s=1.0):
+    """A regular octahedron of 'radius' `s` (vertex distance along each axis). iq's exact octahedron distance.
+    Returns an SDF -- crystals, gems, dice, the dual of the cube. Exact, emits to every dialect."""
+    return SDF("octahedron", (s,))
+
+
+def escape_time(width=256, height=256, center=(-0.5, 0.0), span=3.0, max_iter=100,
+                power=2.0, julia_c=None, bounds_ratio=None):
+    """The 2D ESCAPE-TIME fractal FIELD -- Mandelbrot (`julia_c=None`) or Julia (`julia_c=(re,im)`), the classic
+    z -> z^power + c iteration in the complex plane. Returns a (height, width) float array of SMOOTH (continuous)
+    escape counts in [0, max_iter]: for each pixel, iterate until |z| exceeds 2, and record iter + the fractional
+    'smooth iteration' term 1 - log2(log2(|z|)) so the bands are continuous (no staircase) -- the standard input to a
+    palette. A point that never escapes gets max_iter (it is IN the set). The 2D sibling of the mandelbulb: same
+    z^n+c recurrence, read as a field instead of a distance. Vectorised over the whole grid, deterministic.
+
+    Mandelbrot: c = the pixel, z starts at 0. Julia: c = `julia_c` (fixed), z starts at the pixel. `center`/`span`
+    frame the view (span = width of the window in complex units); `power`=2 is the classic set."""
+    cx, cy = center
+    half = span * 0.5
+    xs = np.linspace(cx - half, cx + half, width)
+    ys = np.linspace(cy - half * height / width, cy + half * height / width, height)
+    X, Y = np.meshgrid(xs, ys)
+    C_grid = X + 1j * Y
+    if julia_c is None:
+        c = C_grid                                              # Mandelbrot: c varies per pixel
+        z = np.zeros_like(C_grid)
+    else:
+        c = np.full_like(C_grid, complex(julia_c[0], julia_c[1]))   # Julia: c fixed, z = pixel
+        z = C_grid.copy()
+    out = np.full(C_grid.shape, float(max_iter))
+    escaped = np.zeros(C_grid.shape, dtype=bool)
+    for n in range(max_iter):
+        live = ~escaped
+        z[live] = np.power(z[live], power) + c[live]
+        az = np.abs(z)
+        now = live & (az > 2.0)
+        if np.any(now):
+            # smooth (continuous) escape count: n + 1 - log2(log2|z|) removes the integer-band staircase.
+            out[now] = n + 1.0 - np.log2(np.maximum(np.log2(az[now]), 1e-12))
+            escaped[now] = True
+        if np.all(escaped):
+            break
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Evaluation handlers (vectorized). Primitives read P; ops recurse into children.
 # ---------------------------------------------------------------------------
@@ -193,6 +402,52 @@ def _eval(node, P):
         return np.minimum(np.maximum(d_xz, d_y), 0.0) + np.sqrt(dx * dx + dy * dy)
     if k == "plane":
         return P[:, 1] - p[0]
+    if k == "capsule":             # exact distance to a Y-axis segment [-h,h], inflated by r (iq's sdCapsule)
+        h, r = p
+        py = np.clip(P[:, 1], -h, h)                              # nearest point on the segment (only Y varies)
+        d = P.copy(); d[:, 1] = P[:, 1] - py
+        return np.linalg.norm(d, axis=1) - r
+    if k == "cone":                # capped cone along Y, iq's exact 2-D form in the (radial, y) half-plane
+        h, r = p
+        qr = np.linalg.norm(P[:, [0, 2]], axis=1)                # radial distance from the Y axis
+        # work in 2-D q=(qr, y). Cone from apex (0, h/2) to base rim (r, -h/2).
+        y = P[:, 1]
+        q2 = np.stack([qr, y], axis=1)
+        # tip and base points of the slanted edge
+        k1 = np.array([r, -h / 2.0])
+        k2 = np.array([r, -h / 2.0]) - np.array([r, h])          # direction reference; use iq's sdCappedCone form
+        # ca: distance to the caps; cb: distance to the side; combine with sign
+        ca = np.stack([qr - np.minimum(qr, np.where(y < 0, r, 0.0)), np.abs(y) - h / 2.0], axis=1)
+        e = k1 - np.array([0.0, h / 2.0])                         # slant edge vector (rim minus apex)
+        t = np.clip(((q2 - np.array([0.0, h / 2.0])) @ e) / (e @ e), 0.0, 1.0)
+        cb = (q2 - np.array([0.0, h / 2.0])) - t[:, None] * e
+        s = np.where((cb[:, 0] < 0) & (ca[:, 1] < 0), -1.0, 1.0)
+        return s * np.sqrt(np.minimum(np.sum(ca * ca, axis=1), np.sum(cb * cb, axis=1)))
+    if k == "ellipsoid":           # iq's bounded ellipsoid approximation k1*(k1-1)/k2 (no exact SDF exists)
+        rr = np.array(p)
+        k1 = np.linalg.norm(P / rr, axis=1)
+        k2 = np.linalg.norm(P / (rr * rr), axis=1)
+        return k1 * (k1 - 1.0) / (k2 + 1e-12)
+    if k == "octahedron":          # iq's exact regular octahedron
+        s = p[0]
+        pabs = np.abs(P)
+        m = pabs[:, 0] + pabs[:, 1] + pabs[:, 2] - s
+        out = np.empty(len(P))
+        # iq's branch: pick the face region, else fall back to the plane distance
+        for axis in range(3):
+            pass
+        # vectorised version of iq's sdOctahedron
+        px, py, pz = pabs[:, 0], pabs[:, 1], pabs[:, 2]
+        cond1 = 3.0 * px < m
+        cond2 = 3.0 * py < m
+        cond3 = 3.0 * pz < m
+        q = np.where(cond1[:, None], np.stack([px, py, pz], axis=1),
+             np.where(cond2[:, None], np.stack([py, pz, px], axis=1),
+              np.where(cond3[:, None], np.stack([pz, px, py], axis=1), np.full((len(P), 3), np.nan))))
+        kk = np.clip(0.5 * (q[:, 2] - q[:, 1] + s), 0.0, s)
+        planar = m * 0.57735027                                   # 1/sqrt(3): distance when no face region matches
+        edge = np.linalg.norm(np.stack([q[:, 0], q[:, 1] - s + kk, q[:, 2] - kk], axis=1), axis=1)
+        return np.where(np.isnan(q[:, 0]), planar, edge)
     if k == "menger":          # Inigo Quilez's recursive Menger sponge: a box minus crosses at every scale
         iters, size = int(p[0]), p[1]
         q = np.abs(P) - size
@@ -206,6 +461,54 @@ def _eval(node, P):
             cross = (np.minimum(da, np.minimum(db, dc)) - 1.0) / s
             d = np.maximum(d, cross)        # subtract the cross (carve the holes)
         return d
+    if k == "fold_fractal":    # Mandelbox / KIFS: iterate box-fold, sphere-fold, scale; track the derivative for a DE
+        iters, scale, min_r, L = int(p[0]), float(p[1]), float(p[2]), float(p[3])
+        min_r2 = min_r * min_r
+        fixed_r2 = 1.0                                            # outer sphere-fold radius^2 (the classic Mandelbox)
+        offset = P.copy()                                        # the Mandelbox adds the ORIGINAL point each step
+        z = P.copy()
+        dr = np.ones(P.shape[0])                                 # running derivative (scale factor of the map)
+        for _ in range(iters):
+            z = np.clip(z, -L, L) * 2.0 - z                     # BOX FOLD: reflect coords outside +/-L back inward
+            r2 = np.sum(z * z, axis=1)                          # SPHERE FOLD: invert through nested spheres
+            r2 = np.maximum(r2, 1e-12)                          # guard the inversion at the exact origin (r2 -> 0)
+            m = np.ones_like(r2)
+            inner = r2 < min_r2
+            m = np.where(inner, fixed_r2 / min_r2, m)           # inside min radius -> linear magnification
+            mid = (~inner) & (r2 < fixed_r2)
+            m = np.where(mid, fixed_r2 / r2, m)                 # between -> spherical inversion
+            z = z * m[:, None]
+            dr = dr * m + 1.0
+            z = z * scale + offset                              # linear part: scale + translate by the seed
+            dr = dr * abs(scale)
+        return np.linalg.norm(z, axis=1) / np.abs(dr)           # distance estimate = |z| / |dz/dp|
+    if k == "mandelbulb":      # White-Nylander polar power fractal: z -> z^power + c in spherical coords, analytic DE
+        power, iters, bailout = float(p[0]), int(p[1]), float(p[2])
+        c = P.copy()
+        z = P.copy()
+        dr = np.ones(P.shape[0])                                 # running derivative for the analytic DE
+        r = np.zeros(P.shape[0])
+        active = np.ones(P.shape[0], dtype=bool)                 # rays still inside the bailout radius
+        for _ in range(iters):
+            r = np.linalg.norm(z, axis=1)
+            live = active & (r < bailout) & (r > 1e-9)
+            if not np.any(live):
+                break
+            rl = r[live]
+            # spherical coords of z; raise radius to `power`, scale the two angles by `power` (the triplex power map).
+            theta = np.arccos(np.clip(z[live, 2] / rl, -1.0, 1.0))
+            phi = np.arctan2(z[live, 1], z[live, 0])
+            dr[live] = np.power(rl, power - 1.0) * power * dr[live] + 1.0
+            zr = np.power(rl, power)
+            theta = theta * power
+            phi = phi * power
+            zn = zr[:, None] * np.stack([np.sin(theta) * np.cos(phi),
+                                         np.sin(theta) * np.sin(phi),
+                                         np.cos(theta)], axis=1)
+            z[live] = zn + c[live]                               # + c: the escape-time recurrence
+        r = np.linalg.norm(z, axis=1)
+        r = np.maximum(r, 1e-9)
+        return 0.5 * np.log(r) * r / np.abs(dr)                  # analytic distance estimate for z^n+c fractals
     if k == "union":
         return np.minimum(ch[0].eval(P), ch[1].eval(P))
     if k == "intersect":
@@ -247,6 +550,27 @@ def _eval(node, P):
         q = P.copy()
         q[:, 0] = c * P[:, 0] - s * P[:, 2]
         q[:, 2] = s * P[:, 0] + c * P[:, 2]
+        return ch[0].eval(q)
+    if k == "mirror":
+        axis, plane = int(p[0]), p[1]
+        q = P.copy()
+        q[:, axis] = plane + np.abs(P[:, axis] - plane)     # reflect the far side onto the near side
+        return ch[0].eval(q)
+    if k == "elongate":            # iq's opElongate: split the shape, insert a straight run along each axis. EXACT.
+        h = np.array(p)
+        q = P - np.clip(P, -h, h)                            # subtract the clamped part -> a "hole" of size 2h
+        inner = ch[0].eval(q)
+        # the correction handles the interior of the stretched region (all three |q|==0 there)
+        return inner + np.minimum(np.max(q, axis=1), 0.0)
+    if k == "bend":
+        kk, axis = p[0], int(p[1])
+        # rotate the OTHER two axes by an angle proportional to position along `axis` (a bend, not a spin)
+        a, b = (1, 2) if axis == 0 else (0, 2) if axis == 1 else (0, 1)
+        ang = kk * P[:, axis]
+        c, s = np.cos(ang), np.sin(ang)
+        q = P.copy()
+        q[:, a] = c * P[:, a] - s * P[:, b]
+        q[:, b] = s * P[:, a] + c * P[:, b]
         return ch[0].eval(q)
     raise ValueError(f"no eval for {k}")
 
@@ -298,6 +622,10 @@ _GLSL_PRIM = {
     "torus":    "float sdTorus(vec3 p, float R, float r){ vec2 q=vec2(length(p.xz)-R,p.y); return length(q)-r; }",
     "cylinder": "float sdCyl(vec3 p, float h, float r){ vec2 d=vec2(length(p.xz)-r, abs(p.y)-h); return min(max(d.x,d.y),0.0)+length(max(d,0.0)); }",
     "plane":    "float sdPlane(vec3 p, float h){ return p.y-h; }",
+    "capsule":  "float sdCapsule(vec3 p, float h, float r){ p.y-=clamp(p.y,-h,h); return length(p)-r; }",
+    "cone":     "float sdCone(vec3 p, float h, float r){ vec2 q=vec2(length(p.xz), p.y); vec2 tip=vec2(0.0,h*0.5); vec2 e=vec2(r,-h*0.5)-tip; vec2 ca=vec2(q.x-min(q.x,(q.y<0.0)?r:0.0), abs(q.y)-h*0.5); float t=clamp(dot(q-tip,e)/dot(e,e),0.0,1.0); vec2 cb=q-tip-e*t; float s=((cb.x<0.0)&&(ca.y<0.0))?-1.0:1.0; return s*sqrt(min(dot(ca,ca),dot(cb,cb))); }",
+    "octahedron": "float sdOcta(vec3 p, float s){ p=abs(p); float m=p.x+p.y+p.z-s; vec3 q; if(3.0*p.x<m)q=p.xyz; else if(3.0*p.y<m)q=p.yzx; else if(3.0*p.z<m)q=p.zxy; else return m*0.57735027; float k=clamp(0.5*(q.z-q.y+s),0.0,s); return length(vec3(q.x,q.y-s+k,q.z-k)); }",
+    "ellipsoid": "float sdEllipsoid(vec3 p, vec3 r){ float k1=length(p/r); float k2=length(p/(r*r)); return k1*(k1-1.0)/(k2+1e-12); }",
     "smin":     "float opSmin(float a, float b, float k){ float h=clamp(0.5+0.5*(b-a)/k,0.0,1.0); return mix(b,a,h)-k*h*(1.0-h); }",
 }
 
@@ -314,6 +642,38 @@ def _menger_glsl(iters, size):
             f"  }}\n  return d;\n}}")
 
 
+def _foldfractal_glsl(iters, scale, min_r, L):
+    """GLSL helper for a `iters`-step Mandelbox/KIFS distance estimator -- the exact box-fold + sphere-fold + scale
+    loop the NumPy _eval runs, translated 1:1. A distance ESTIMATE (INEXACT), so the emitted shader header warns to
+    step conservatively; a Shadertoy raymarcher handles that fine."""
+    fname = f"sdFold{iters}"
+    return (f"float {fname}(vec3 p){{\n"
+            f"  vec3 offset=p; vec3 z=p; float dr=1.0;\n"
+            f"  for(int i=0;i<{iters};i++){{\n"
+            f"    z=clamp(z,-{L:.6g},{L:.6g})*2.0-z;                 // box fold\n"
+            f"    float r2=max(dot(z,z),1e-12);                      // sphere fold\n"
+            f"    if(r2<{min_r*min_r:.6g}){{ float t={1.0/(min_r*min_r):.6g}; z*=t; dr*=t; }}\n"
+            f"    else if(r2<1.0){{ float t=1.0/r2; z*=t; dr*=t; }}\n"
+            f"    dr+=1.0;\n"
+            f"    z=z*{scale:.6g}+offset; dr*=abs({scale:.6g});\n"
+            f"  }}\n  return length(z)/abs(dr);\n}}")
+
+
+def _mandelbulb_glsl(power, iters, bailout):
+    """GLSL helper for a `iters`-step Mandelbulb (polar power z->z^n+c) with the analytic DE -- the 1:1 translation of
+    the NumPy _eval. INEXACT (a distance estimate), so the shader header warns to step conservatively."""
+    fname = f"sdBulb{iters}"
+    return (f"float {fname}(vec3 pos){{\n"
+            f"  vec3 z=pos; float dr=1.0; float r=0.0;\n"
+            f"  for(int i=0;i<{iters};i++){{\n"
+            f"    r=length(z); if(r>{bailout:.6g}) break;\n"
+            f"    float theta=acos(clamp(z.z/r,-1.0,1.0)); float phi=atan(z.y,z.x);\n"
+            f"    dr=pow(r,{power - 1.0:.6g})*{power:.6g}*dr+1.0;\n"
+            f"    float zr=pow(r,{power:.6g}); theta*={power:.6g}; phi*={power:.6g};\n"
+            f"    z=zr*vec3(sin(theta)*cos(phi),sin(theta)*sin(phi),cos(theta))+pos;\n"
+            f"  }}\n  return 0.5*log(max(r,1e-9))*max(r,1e-9)/abs(dr);\n}}")
+
+
 def _emit_body(node, pvar, ctr, helpers):
     """Return (statements, distance_expr) for `node` at point variable `pvar`. `helpers` is a dict
     {fn_name: glsl_source} accumulating the helper functions this tree needs."""
@@ -324,18 +684,35 @@ def _emit_body(node, pvar, ctr, helpers):
         ctr[0] += 1
         return f"{prefix}{ctr[0]}"
 
-    if k in ("sphere", "box", "torus", "cylinder", "plane"):
+    if k in ("sphere", "box", "torus", "cylinder", "plane", "capsule", "cone", "octahedron", "ellipsoid"):
         helpers[k] = _GLSL_PRIM[k]
         if k == "sphere":   return stmts, f"sdSphere({pvar},{p[0]:.6g})"
         if k == "box":      return stmts, f"sdBox({pvar},vec3({p[0]:.6g},{p[1]:.6g},{p[2]:.6g}))"
         if k == "torus":    return stmts, f"sdTorus({pvar},{p[0]:.6g},{p[1]:.6g})"
         if k == "cylinder": return stmts, f"sdCyl({pvar},{p[0]:.6g},{p[1]:.6g})"
         if k == "plane":    return stmts, f"sdPlane({pvar},{p[0]:.6g})"
+        if k == "capsule":  return stmts, f"sdCapsule({pvar},{p[0]:.6g},{p[1]:.6g})"
+        if k == "cone":     return stmts, f"sdCone({pvar},{p[0]:.6g},{p[1]:.6g})"
+        if k == "octahedron": return stmts, f"sdOcta({pvar},{p[0]:.6g})"
+        if k == "ellipsoid": return stmts, f"sdEllipsoid({pvar},vec3({p[0]:.6g},{p[1]:.6g},{p[2]:.6g}))"
+        if k == "capsule":  return stmts, f"sdCapsule({pvar},{p[0]:.6g},{p[1]:.6g})"
+        if k == "cone":     return stmts, f"sdCone({pvar},{p[0]:.6g},{p[1]:.6g})"
+        if k == "octahedron": return stmts, f"sdOcta({pvar},{p[0]:.6g})"
 
     if k == "menger":
         iters = int(p[0])
         helpers[f"menger{iters}"] = _menger_glsl(iters, p[1])
         return stmts, f"sdMenger{iters}({pvar})"
+
+    if k == "fold_fractal":
+        iters = int(p[0])
+        helpers[f"fold{iters}"] = _foldfractal_glsl(iters, float(p[1]), float(p[2]), float(p[3]))
+        return stmts, f"sdFold{iters}({pvar})"
+
+    if k == "mandelbulb":
+        iters = int(p[1])
+        helpers[f"bulb{iters}"] = _mandelbulb_glsl(float(p[0]), iters, float(p[2]))
+        return stmts, f"sdBulb{iters}({pvar})"
 
     if k in ("union", "intersect", "subtract", "smooth_union"):
         sa, ea = _emit_body(ch[0], pvar, ctr, helpers)
@@ -383,6 +760,31 @@ def _emit_body(node, pvar, ctr, helpers):
                      f"vec3 {q}=vec3(cos(a{ctr[0]})*{pvar}.x-sin(a{ctr[0]})*{pvar}.z,{pvar}.y,"
                      f"sin(a{ctr[0]})*{pvar}.x+cos(a{ctr[0]})*{pvar}.z);")
         sc, ec = _emit_body(ch[0], q, ctr, helpers); return stmts + sc, ec
+    if k == "mirror":
+        # fold across a plane on one axis: q.<axis> = plane + abs(p.<axis> - plane)  (the kaleidoscope abs())
+        axis, plane = int(p[0]), p[1]
+        comp = ("x", "y", "z")[axis]
+        q = newvar("q")
+        stmts.append(f"vec3 {q}={pvar}; {q}.{comp}={plane:.6g}+abs({pvar}.{comp}-{plane:.6g});")
+        sc, ec = _emit_body(ch[0], q, ctr, helpers); return stmts + sc, ec
+    if k == "bend":
+        # rotate the two axes other than `axis` by an angle proportional to position along `axis`
+        kk, axis = p[0], int(p[1])
+        a, b = ((1, 2) if axis == 0 else (0, 2) if axis == 1 else (0, 1))
+        ca, cb, cc = ("x", "y", "z")[a], ("x", "y", "z")[b], ("x", "y", "z")[axis]
+        q = newvar("q"); an = f"a{ctr[0]}"; ctr[0] += 1
+        stmts.append(f"float {an}={kk:.6g}*{pvar}.{cc}; vec3 {q}={pvar}; "
+                     f"{q}.{ca}=cos({an})*{pvar}.{ca}-sin({an})*{pvar}.{cb}; "
+                     f"{q}.{cb}=sin({an})*{pvar}.{ca}+cos({an})*{pvar}.{cb};")
+        sc, ec = _emit_body(ch[0], q, ctr, helpers); return stmts + sc, ec
+    if k == "elongate":
+        # iq's opElongate: q = p - clamp(p, -h, h); dist = child(q) + min(max(q.x,q.y,q.z), 0.0). EXACT stretch.
+        hx, hy, hz = p
+        q = newvar("q")
+        stmts.append(f"vec3 {q}={pvar}-clamp({pvar},vec3(-{hx:.6g},-{hy:.6g},-{hz:.6g}),"
+                     f"vec3({hx:.6g},{hy:.6g},{hz:.6g}));")
+        sc, ec = _emit_body(ch[0], q, ctr, helpers)
+        return stmts + sc, f"({ec}+min(max({q}.x,max({q}.y,{q}.z)),0.0))"
     raise ValueError(f"no GLSL for {k}")
 
 
@@ -444,6 +846,39 @@ def _selftest():
     t = torus(1.0, 0.25)
     assert abs(t.eval([[1.0, 0.0, 0.0]])[0] + 0.25) < 1e-9     # on the ring centerline -> -r
 
+    # (1b) W8 PRIMITIVE PACK: capsule / cone / octahedron are EXACT (surface distance ~0, sign correct);
+    #      ellipsoid is iq's bounded APPROX (0 on surface, right sign away from the centre degeneracy).
+    cap = capsule(1.0, 0.3)
+    assert abs(cap.eval([[0.3, 0.0, 0.0]])[0]) < 1e-9          # on the tube surface -> 0
+    assert cap.eval([[0.0, 0.0, 0.0]])[0] < 0 < cap.eval([[0.0, 2.0, 0.0]])[0]   # inside/outside
+    oct_ = octahedron(1.0)
+    assert abs(oct_.eval([[1.0, 0.0, 0.0]])[0]) < 1e-9        # a vertex is on the surface
+    assert oct_.eval([[0.0, 0.0, 0.0]])[0] < 0                # centre inside
+    cn = cone(1.0, 0.5)
+    assert cn.eval([[0.0, -0.3, 0.0]])[0] < 0 < cn.eval([[3.0, 3.0, 0.0]])[0]
+    el = ellipsoid(1.0, 0.7, 0.5)
+    assert abs(el.eval([[1.0, 0.0, 0.0]])[0]) < 1e-6          # on the surface along x -> 0
+    assert el.eval([[0.4, 0.0, 0.0]])[0] < 0 < el.eval([[2.0, 0.0, 0.0]])[0]
+    # the three exact ones EMIT to GLSL (the Shadertoy path); ellipsoid is INEXACT and refused there.
+    for prim, fn in ((cap, "sdCapsule"), (cn, "sdCone"), (oct_, "sdOcta")):
+        assert fn in prim.to_glsl()
+
+    # (1c) W9 ELONGATE: stretching a sphere along an axis is EXACT -- the end cap and the side both sit on the
+    #      surface, the interior of the run is inside, and it emits to GLSL (a clamp warp).
+    el_s = sphere(0.5).elongate(1.0, 0.0, 0.0)
+    assert abs(el_s.eval([[1.5, 0.0, 0.0]])[0]) < 1e-9        # end cap on the surface (0.5 past the +1 run)
+    assert abs(el_s.eval([[0.0, 0.5, 0.0]])[0]) < 1e-9        # side on the surface
+    assert el_s.eval([[0.5, 0.0, 0.0]])[0] < 0               # inside the straight run
+    assert "clamp(" in el_s.to_glsl()
+
+    # (1d) W2 scene.cost(): a bare sphere is cheap, a menger is iterative + pricier, and a compound scene costs
+    #      MORE than any of its parts (the walk accumulates). The numbers are relative ALU, not nanoseconds.
+    assert sphere(1.0).cost()["alu"] < menger(3, 1.0).cost()["alu"]      # a fractal costs more than a sphere
+    assert menger(3, 1.0).cost()["iterative"] is True
+    compound_cost = sphere(0.5).union(box(1, 1, 1)).union(torus(1, 0.3)).cost()
+    assert compound_cost["alu"] > sphere(0.5).cost()["alu"]             # the whole exceeds a part
+    assert compound_cost["nodes"] == 5                                  # 3 leaves + 2 unions
+
     # (2) CSG ops: union is the min; subtract carves.
     a, c = sphere(1.0), sphere(1.0).translate([1.5, 0, 0])
     u = a.union(c)
@@ -460,6 +895,20 @@ def _selftest():
     # (4) DOMAIN REPETITION tiles: value at p equals value at p + period.
     rep = sphere(0.3).repeat([2.0, 0.0, 0.0])
     assert abs(rep.eval([[0.4, 0, 0]])[0] - rep.eval([[2.4, 0, 0]])[0]) < 1e-9
+
+    # (4b) DOMAIN WARPS mirror/fold/bend (DEMO-1, iq): eval works AND emits GLSL (round-trips to Shadertoy).
+    #      mirror is an isometry (a reflected query is exact); fold folds all axes into one octant; bend curls.
+    m0 = sphere(0.3).translate([1.0, 0, 0]).mirror(axis=0, plane=0.0)
+    # the mirrored copy: a point at x=-1 sees the sphere reflected from x=+1 (distance ~0 near the mirror image)
+    assert abs(m0.eval([[-1.0, 0, 0]])[0] - m0.eval([[1.0, 0, 0]])[0]) < 1e-9   # symmetric about the plane
+    fld = torus(0.5, 0.15).fold(0.0).repeat([1.3, 1.3, 1.3])
+    bnt = box(0.3, 1.0, 0.3).bend(0.5, axis=1)
+    for warped in (m0, fld, bnt):
+        g = warped.to_glsl()
+        assert "map(" in g and "no GLSL" not in g                              # the whole point: it emits
+    assert "abs(" in fld.to_glsl()                                             # the fold's kaleidoscope abs()
+    # DSL round-trips (one source of truth drives eval, GLSL, and parse)
+    assert np.allclose(fld.eval([[0.5, 0.5, 0.5]]), parse_dsl(fld.to_dsl()).eval([[0.5, 0.5, 0.5]]), atol=1e-12)
 
     # (5) renders to a watertight mesh through the existing bridge (a sphere -> closed surface).
     from holographic.mesh_and_geometry.holographic_meshbridge import sample_field, marching_tetrahedra_vec
@@ -491,9 +940,54 @@ def _selftest():
     mglsl = spng.to_glsl()
     assert "sdMenger3(" in mglsl and "for(int m=0;m<3;m++)" in mglsl
 
+    # (10) FOLD_FRACTAL (Mandelbox / KIFS): the general fold engine. It must produce a usable DISTANCE ESTIMATE
+    #      (never changes faster than the query point moves) and REAL spatial structure (not a constant field).
+    ffr = fold_fractal(iterations=12, scale=2.0, min_radius=0.5, fold_limit=1.0)
+    _rng = np.random.default_rng(0)
+    _A = _rng.uniform(-4, 4, (3000, 3)); _B = _A + _rng.normal(0, 0.005, (3000, 3))
+    _ratio = np.abs(ffr.eval(_A) - ffr.eval(_B)) / np.maximum(np.linalg.norm(_A - _B, axis=1), 1e-9)
+    assert np.percentile(_ratio, 99) < 3.0, "fold_fractal must be a usable distance estimate (bounded Lipschitz)"
+    _X, _Z = np.meshgrid(np.linspace(-3, 3, 60), np.linspace(-3, 3, 60))
+    _grid = np.column_stack([_X.ravel(), np.zeros(_X.size), _Z.ravel()])
+    _dg = ffr.eval(_grid)
+    assert _dg.std() > 1e-3 and (np.percentile(_dg, 90) - np.percentile(_dg, 10)) > 1e-3, \
+        "fold_fractal must have real spatial structure (a spread of distances), not a constant field"
+    assert np.array_equal(ffr.eval(_grid), ffr.eval(_grid)), "fold_fractal must be deterministic"
+    assert ffr.cost()["iterative"] is True, "the fold fractal is an iterative SDF (budget carefully for realtime)"
+
+    # (11) MANDELBULB (escape-time z^n+c in 3D): analytic DE, real inside/outside structure.
+    mbulb = mandelbulb(power=8.0, iterations=8, bailout=2.0)
+    assert mbulb.eval([[0.0, 0.0, 0.0]])[0] <= 0.01, "the mandelbulb origin is inside the set"
+    assert mbulb.eval([[3.0, 3.0, 3.0]])[0] > 2.0, "far points are far outside the bounded bulb"
+    _Xb, _Zb = np.meshgrid(np.linspace(-1.3, 1.3, 50), np.linspace(-1.3, 1.3, 50))
+    _db = mbulb.eval(np.column_stack([_Xb.ravel(), np.zeros(_Xb.size), _Zb.ravel()]))
+    assert _db.min() < 0 < _db.max(), "the mandelbulb slab has both interior (d<0) and exterior (d>0)"
+
+    # (12) ESCAPE_TIME (2D Mandelbrot / Julia field): smooth escape counts, real interior + exterior.
+    _mset = escape_time(width=80, height=80, center=(-0.5, 0.0), span=3.0, max_iter=60)
+    _in = np.mean(_mset >= 59.9)
+    assert 0.05 < _in < 0.8, "the Mandelbrot set has both an interior (in-set) and an exterior"
+    assert _mset[40, 40] >= 59.9, "the cardioid centre is in the set"
+    _jset = escape_time(width=60, height=60, span=3.0, max_iter=60, julia_c=(-0.8, 0.156))
+    assert _jset.std() > 1.0, "the Julia set has real structure"
+    assert np.array_equal(escape_time(width=40, height=40), escape_time(width=40, height=40)), "escape_time det."
+
+    # (13) FRACTAL -> SHADERTOY: fold_fractal + mandelbulb now EMIT a complete raymarch shader (the demoscene OUTPUT).
+    #      They are distance ESTIMATES, so the header warns to step conservatively, but they emit (unlike ellipsoid).
+    _fsh = _emit_shader(fold_fractal(iterations=8, scale=2.0), name="map")
+    assert "sdFold8(" in _fsh and "for(int i=0;i<8;i++)" in _fsh, "fold_fractal emits its fold loop"
+    _bsh = _emit_shader(mandelbulb(power=8.0, iterations=6), name="map")
+    assert "sdBulb6(" in _bsh and "for(int i=0;i<6;i++)" in _bsh, "mandelbulb emits its polar-power loop"
+    # ellipsoid now emits too (iq's bounded k1*(k1-1)/k2 form) -- needed by the humanoid muscle/breast morphs.
+    _esh = _emit_shader(SDF("smooth_union", (0.1,), (sphere(0.3), ellipsoid(0.2, 0.3, 0.2))), name="map")
+    assert "sdEllipsoid(" in _esh and "opSmin(" in _esh, "ellipsoid + smooth_union emit"
+
     print("holographic_sdf selftest passed:",
           f"seam hard={kink_hard:.3f} soft={kink_soft:.3f} mesh_faces={mesh.n_faces} "
-          f"glsl_chars={len(glsl)} menger_center={spng.eval([[0,0,0]])[0]:.3f} kinds={sorted(node_kinds(tree))}")
+          f"glsl_chars={len(glsl)} menger_center={spng.eval([[0,0,0]])[0]:.3f} "
+          f"fold_fractal DE p99-Lipschitz={np.percentile(_ratio,99):.2f} struct_std={_dg.std():.4f} "
+          f"mandelbulb slab d in [{_db.min():.2f},{_db.max():.2f}] mandelbrot_in_set={_in:.2f} "
+          f"kinds={sorted(node_kinds(tree))}")
 
 
 if __name__ == "__main__":

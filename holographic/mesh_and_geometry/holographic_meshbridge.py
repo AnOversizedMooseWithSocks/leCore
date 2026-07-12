@@ -495,6 +495,12 @@ def point_set_to_mesh(P, V, faces, chunk=None, signed=False):
 
 
 def _face_normal(V, f):
+    """Unit normal from the FIRST THREE vertices of `f` -- the triangle normal, valid for triangles and for planar
+    faces.
+
+    **NOT Newell's method, and not a duplicate of `meshverbs.newell_normal`**, though a structural AST scan reports
+    the same shape. On a bent quad the two disagree by 0.47: Newell integrates every edge, this reads three
+    vertices. *Structurally identical, semantically different.* Named here so nobody merges them."""
     a, b, c = V[f[0]], V[f[1]], V[f[2]]
     n = np.cross(b - a, c - a)
     ln = np.linalg.norm(n)

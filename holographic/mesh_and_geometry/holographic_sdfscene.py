@@ -34,6 +34,27 @@ class SDFScene:
         """Return a list of (sdf_fn, material_name). Override this -- it is the only required method."""
         raise NotImplementedError("An SDFScene subclass must implement parts() -> [(sdf_fn, material), ...]")
 
+    @classmethod
+    def from_parts(cls, parts, bounds=None):
+        """Build an SDFScene DIRECTLY from a parts list, without writing a subclass -- the ergonomic door for a
+        caller who just has some (sdf_fn, material) pairs and (optionally) their bounding spheres. `parts` is a list
+        of (sdf_fn, material_name); `bounds`, if given, is a matching list of (center_xyz, radius) so `parts_near`
+        culling works. Returns a ready SDFScene with all the free methods (eval / part_ids / material_at). This is
+        why the base class exists: compose an SDF scene from parts the same way a splat scene bundles primitives."""
+        _parts = list(parts)
+        _bounds = list(bounds) if bounds is not None else None
+
+        class _FromParts(cls):
+            def parts(self):
+                return _parts
+
+            def bounds(self):
+                if _bounds is None:
+                    return super().bounds()
+                return _bounds
+
+        return _FromParts()
+
     # -- cached views of parts() so a subclass's parts() can build lazily and we don't re-call it per query ----
 
     def _parts(self):
@@ -155,7 +176,14 @@ def _selftest():
             return []
     e = Empty()
     assert np.all(np.isinf(e.eval(P))) and list(e.part_ids(P)) == [-1, -1, -1, -1]
-    print("holographic_sdfscene selftest OK")
+
+    # from_parts: build the SAME scene without subclassing -> identical eval/materials, and bounds enable culling.
+    fp = SDFScene.from_parts([(sph((0, 0, 0), 1.0), "a"), (sph((3, 0, 0), 1.0), "b"), (sph((0, 3, 0), 0.5), "c")],
+                             bounds=[((0, 0, 0), 1.0), ((3, 0, 0), 1.0), ((0, 3, 0), 0.5)])
+    assert np.allclose(fp.eval(P), s.eval(P)) and list(fp.material_at(P)) == ["a", "b", "a", "c"]
+    assert fp.parts_near((0.2, 0.1, 0.0), 0.5) == [0]
+    print("holographic_sdfscene selftest OK (min/argmin/materials/parts_near correct; empty scene well-behaved; "
+          "from_parts builds an identical scene without subclassing and supports culling)")
 
 
 if __name__ == "__main__":

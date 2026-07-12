@@ -18,3 +18,10 @@ build-backend = "setuptools.build_meta"
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+# Deselect irreducibly-slow tests BY DEFAULT so `pytest` (local and CI per-change) stays fast. They still run in
+# CI's weekly/tag "full" safety net, which overrides this with `-m ""`. See tests/conftest.py for the rationale and
+# the bar for marking a test slow. `-m slow` runs only them; `-m ""` runs everything.
+addopts = "-m 'not slow'"
+markers = [
+    "slow: an irreducibly slow test (high-dimension bake, full-budget training), deselected by default",
+]

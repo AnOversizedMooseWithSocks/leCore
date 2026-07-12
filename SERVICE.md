@@ -53,6 +53,9 @@ By default it binds to **127.0.0.1** (local only). `--token X` requires `Authori
 | POST | `/skills/route` | `{"task"}` | a decision: `act` (with the call) when confident, else `choose` (options) |
 | POST | `/skills/complete` | `{"prefix"[,"k"]}` | method-name autocomplete with signatures |
 | POST | `/skills/card` | `{"name"}` | a skill card for one capability or method |
+| POST | `/pick` | `{"wireframe", ...}` | viewport picking for a 3D-modeling client: which vert/edge/face is under the cursor |
+| POST | `/frame` | `{...}` | real-time frame serving: adaptive quality per client (the request/response form of a frame stream) |
+| GET | `/frame/stream` | `?session=&target_fps=&frames=` | SSE push channel (Server-Sent Events) that keeps streaming frames to a client |
 
 Every response is JSON with an `ok` flag; a bad request returns HTTP 400, an unknown route 404, an unexpected error 500.
 

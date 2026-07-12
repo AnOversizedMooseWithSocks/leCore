@@ -117,5 +117,54 @@ def demo():
     print("wrote ca_evolution.png, ca_zoo.png")
 
 
+def _selftest():
+    """A NUMERIC REGRESSION TRAP (NCA backlog B5), not a smoke test.
+
+    Before this existed, `python3 -m holographic.misc.holographic_automaton` ran `demo()`, which drew matplotlib
+    figures and wrote `ca_evolution.png` / `ca_zoo.png` into the repo ROOT. The build loop's step-5b -- "run the
+    module self-test" -- therefore verified nothing at all, and littered. `demo()` stays, as a separate entry point.
+
+    The invariants asserted here are properties of the DYNAMICS, not of one lucky array: every cell stays on the
+    unit sphere (the step renormalises), the step is deterministic under a fixed seed, a different seed gives a
+    different grid, and the step actually MOVES the grid. The pinned statistics are quoted to 1e-10 -- a change to
+    the kernel, the gain, or the RNG draw order will trip them."""
+    import numpy as _np
+
+    ca = HyperCA(dim=32, size=24, seed=0)
+    before = ca.grid.copy()
+    ca.step()
+
+    # 1. every cell is a UNIT hypervector: the step renormalises, so nothing can blow up or decay away
+    assert _np.abs(_np.linalg.norm(ca.grid, axis=2) - 1.0).max() < 1e-12
+
+    # 2. the step actually did something (a no-op step would pass every other assertion here)
+    moved = float(_np.abs(ca.grid - before).max())
+    assert moved > 0.1, moved
+
+    # 3. DETERMINISM: same seed, same grid, bit for bit
+    other = HyperCA(dim=32, size=24, seed=0)
+    other.step()
+    assert _np.array_equal(ca.grid, other.grid)
+
+    # 4. ... and the seed is load-bearing
+    assert not _np.allclose(HyperCA(dim=32, size=24, seed=1).grid, HyperCA(dim=32, size=24, seed=0).grid)
+
+    # 5. THE REGRESSION TRAP: pattern statistics after 5 evolution steps, pinned to 1e-10
+    ev = HyperCA(dim=32, size=24, seed=0)
+    ev.evolve(5)
+    assert abs(float(ev.grid.mean()) - 0.000534848538) < 1e-10, float(ev.grid.mean())
+    assert abs(float(ev.grid.std()) - 0.176775886187) < 1e-10, float(ev.grid.std())
+    assert abs(float(ev.image().mean()) - 0.410467731226) < 1e-10, float(ev.image().mean())
+
+    # 6. the readout is a well-formed image
+    img = ev.image()
+    assert img.shape == (24, 24, 3) and img.min() >= 0.0 and img.max() <= 1.0
+
+    print("OK: holographic_automaton self-test passed (every cell stays on the unit sphere to 2.2e-16; one step "
+          "moves the grid by %.3f and is bit-identical under a fixed seed while a different seed diverges; and the "
+          "5-step pattern statistics are pinned to 1e-10 -- mean %.12f, std %.12f, image mean %.12f)"
+          % (moved, float(ev.grid.mean()), float(ev.grid.std()), float(ev.image().mean())))
+
+
 if __name__ == "__main__":
-    demo()
+    _selftest()

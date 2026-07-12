@@ -284,12 +284,16 @@ def _selftest():
         V = rng.uniform(0.0, 1.0, size=(P, A))                            # true value per (situation, action)
         return situations, V
 
-    def run(P, A=3, D=512, visits=4, seed=0):
+    def run(P, A=3, D=512, visits=4, seed=0, with_tabular=True):
         rng = np.random.default_rng(seed)
         S, V = world(P, A, D, rng)
         holo = HolographicValueHead(D, A)
-        # tabular = the REAL creature brain, value mechanism isolated (no consolidation / projection)
-        brain = HolographicMind(dim=D, actions=list(range(A)), epsilon=0.0, maintain=False)
+        # tabular = the REAL creature brain, value mechanism isolated (no consolidation / projection).
+        # PERF (slowest-tests pass): the tabular brain is a P*A*visits absorb loop plus a P*A value sweep on D=512
+        # -- the entire ~17 s cost of this selftest. But only the LOW-load run USES it (to prove holo agrees with
+        # the real brain); the HIGH-load run's assertions check only holo's cliff and byte-size. So the tabular
+        # brain is built only when its result is actually consumed -- dead compute removed, no contract touched.
+        brain = HolographicMind(dim=D, actions=list(range(A)), epsilon=0.0, maintain=False) if with_tabular else None
         for p in range(P):
             for a in range(A):
                 for _ in range(visits):
@@ -297,10 +301,12 @@ def _selftest():
                     s /= np.linalg.norm(s)
                     r = V[p, a] + rng.normal(0, 0.05)                    # noisy return
                     holo.absorb(s, a, r)
-                    brain._absorb(s, a, r)                               # same stream, same interface
+                    if brain is not None:
+                        brain._absorb(s, a, r)                           # same stream, same interface
         best = V.argmax(axis=1)
         holo_hits = sum(holo.decide(S[p]) == best[p] for p in range(P))
-        brain_hits = sum(int(np.argmax([brain.value(S[p], a)[0] for a in range(A)])) == best[p] for p in range(P))
+        brain_hits = (sum(int(np.argmax([brain.value(S[p], a)[0] for a in range(A)])) == best[p] for p in range(P))
+                      if brain is not None else 0)
         # value agreement on the clean situations (holo vs the true value)
         holo_rmse = np.sqrt(np.mean([(holo.value(S[p], a)[0] - V[p, a]) ** 2 for p in range(P) for a in range(A)]))
         return holo_hits / P, brain_hits / P, holo_rmse, holo.nbytes
@@ -310,8 +316,9 @@ def _selftest():
     assert h_lo >= 0.85, f"holo head should nail well-separated situations at low load, got {h_lo:.2f}"
     assert abs(h_lo - b_lo) <= 0.15, f"holo and tabular should agree at low load ({h_lo:.2f} vs {b_lo:.2f})"
 
-    # HIGH load (P approaching D): the two-bundle head must DEGRADE -- the capacity cliff (kept negative).
-    h_hi, b_hi, rmse_hi, bytes_hi = run(P=500)
+    # HIGH load (P approaching D): the two-bundle head must DEGRADE -- the capacity cliff (kept negative). The
+    # tabular brain is not compared here, so it is not built (with_tabular=False) -- this is the big time save.
+    h_hi, b_hi, rmse_hi, bytes_hi = run(P=500, with_tabular=False)
     assert h_hi < h_lo, f"KEPT NEGATIVE: holo head must degrade past the cliff ({h_hi:.2f} !< {h_lo:.2f})"
     assert bytes_hi == bytes_lo, "the holographic policy is FIXED size regardless of experiences"
 

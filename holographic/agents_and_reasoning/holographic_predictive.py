@@ -144,6 +144,57 @@ class PredictiveMemory:
         j = int(np.argmax(sims))
         return self._next_sym[j], float(sims[j])
 
+    def next_distribution(self, recent):
+        """The distribution over next symbols at this context, as {symbol: weight}.
+
+        WHY this exists: `predict` collapses the evidence to a single symbol (argmax or a soft blend),
+        which is right for PREDICTION but LIMIT-CYCLES when looped as a GENERATOR (measured: a greedy
+        recipe generator gave MMD2 0.599 and 15x the real verbatim-copy rate, looping on the top
+        continuation). A generator must SAMPLE, and to sample you need the whole distribution, not the
+        winner. This exposes it, built from the SAME similarities `predict` already computes, so nothing
+        is recomputed or reinvented -- the weight of each candidate next-symbol is its stored context's
+        resonance with the query, times its support (how often that continuation was seen). Support
+        weighting is the same MAP-correctness fix `predict(soft=True)` documents: a 70/30 successor split
+        must read 70/30, not 50/50.
+        """
+        if not self._ctx:
+            return {}
+        q = self.context_vector(recent)
+        qn = q / (np.linalg.norm(q) + 1e-12)
+        sims = self._matrix() @ qn
+        # accumulate resonance*support per candidate next-symbol (a context may recur with the same next)
+        dist = {}
+        for sym, s, sup in zip(self._next_sym, sims, self._support):
+            w = max(float(s), 0.0) * float(sup)      # only positive resonance votes; support weights it
+            if w > 0:
+                dist[sym] = dist.get(sym, 0.0) + w
+        return dist
+
+    def sample(self, recent, temperature=1.0, top_p=1.0, rng=None):
+        """Sample the next symbol (the GENERATION dual of `predict`). Delegates the temperature+nucleus
+        draw to holographic_tokensample.sample_from_distribution -- the same primitive the character
+        generator uses -- over this memory's `next_distribution`. Returns (symbol, weight) or (None, 0.0).
+
+        This is the fix for the deterministic limit-cycle: `predict` for the single best guess, `sample`
+        for a diverse, distribution-faithful continuation.
+        """
+        from holographic.agents_and_reasoning.holographic_tokensample import sample_from_distribution
+        dist = self.next_distribution(recent)
+        sym = sample_from_distribution(dist, temperature=temperature, top_p=top_p, rng=rng)
+        return (sym, dist.get(sym, 0.0)) if sym is not None else (None, 0.0)
+
+    def generate_sampled(self, seed, length=30, temperature=1.0, top_p=1.0, seed_rng=0):
+        """Generate by SAMPLING (not argmax): the non-limit-cycling generator. Mirrors `generate` but
+        draws each next symbol from the distribution, so it does not lock onto one continuation and loop."""
+        rng = np.random.default_rng(seed_rng)
+        out = list(seed)
+        for _ in range(length):
+            sym, _ = self.sample(out[-self.order:], temperature=temperature, top_p=top_p, rng=rng)
+            if sym is None:
+                break
+            out.append(sym)
+        return out[len(seed):]
+
     def _cleanup(self, vec):
         """Snap a noisy next-vector estimate to the nearest known symbol."""
         if np.linalg.norm(vec) == 0 or not self.symbols.vectors:
@@ -192,17 +243,24 @@ class PredictiveMemory:
                 s = float(c @ ctxn / (np.linalg.norm(c) + 1e-12))
                 if s > best_s:
                     best_j, best_s = j, s
-        if best_j >= 0 and surprise <= self.reinforce_threshold:
+        if best_j >= 0 and surprise <= self.reinforce_threshold and best_s >= self.novelty_threshold:
             self._support[best_j] += 1
             return "reinforce"
-        if best_j >= 0 and surprise <= self.novelty_threshold:
+        if best_j >= 0 and surprise <= self.novelty_threshold and best_s >= self.novelty_threshold:
             # move that entry's context toward the new one, by the surprise
             a = min(0.5, surprise)
             self._ctx[best_j] = bundle([(1 - a) * self._ctx[best_j], a * ctx])
             self._support[best_j] += 1
             self._C = None
             return "correct"
-        # create
+        # create. WHY the best_s floor above: reinforce/nudge used to gate on SURPRISE alone, so a
+        # prediction that happened to be right (argmax over near-zero sims) reinforced the nearest
+        # SAME-SUCCESSOR entry even at similarity ~0 -- the transition's mass landed on an UNRELATED
+        # context (measured: a (ctx -> next) pair identical to a stored one read back as an EMPTY
+        # distribution because its support had been absorbed by the zero-context row). "Nearest
+        # matching entry" must actually MATCH: below the novelty similarity line, this context is a
+        # new home, not a reinforcement of an old one. Pinned by
+        # test_repeated_recipe_context_is_stored_not_absorbed.
         self._ctx.append(ctx)
         self._next_sym.append(actual)
         self._next_vec.append(actual_vec)
