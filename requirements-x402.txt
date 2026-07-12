@@ -1,2 +1,2 @@
-x402[fastapi,evm]
-uvicorn
+x402[fastapi,evm]==2.15.0
+uvicorn==0.51.0

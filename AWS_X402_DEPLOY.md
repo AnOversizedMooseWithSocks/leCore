@@ -12,6 +12,7 @@ does **not** need a wallet private key in the container. It only needs:
 - x402/facilitator configuration
 - an admin token for seller-only memory writes
 - a tenant-token secret if private customer memory is enabled
+- an offer-access token if the discounted leOS routes are enabled
 
 The receiving wallet should be a cold wallet, hardware wallet, Safe/multisig,
 or a custody wallet. The API simply tells x402 where funds should go.
@@ -24,9 +25,9 @@ or pay upstream APIs as a buyer.
 - **ECS Fargate** runs the `Dockerfile.x402` container.
 - **Application Load Balancer** terminates HTTPS and forwards to port `4021`.
 - **ECR** stores the container image.
-- **Secrets Manager** stores `LECORE_X402_ADMIN_TOKEN` and production
-  facilitator credentials. Store `LECORE_X402_TENANT_SECRET` there too when
-  private tenants are enabled.
+- **Secrets Manager** stores `LECORE_X402_ADMIN_TOKEN`,
+  `LECORE_X402_LEOS_ACCESS_TOKEN`, and production facilitator credentials.
+  Store `LECORE_X402_TENANT_SECRET` there too when private tenants are enabled.
 - **SSM Parameter Store or plain task env** stores non-secret config like
   `LECORE_X402_PAY_TO`, `LECORE_X402_PRICE`, `LECORE_X402_NETWORK`, and
   `LECORE_X402_TENANT_STATE_DIR`.
@@ -38,9 +39,9 @@ Protected paid routes:
 - `POST /v1/recall`
 - `POST /v1/route`
 - `GET /v1/dashboard`
-- `POST /leos/v1/recall`, at the leOS CA offer price
-- `POST /leos/v1/route`, at the leOS CA offer price
-- `GET /leos/v1/dashboard`, at the leOS CA offer price
+- `POST /leos/v1/recall`, at the credential-gated leOS offer price
+- `POST /leos/v1/route`, at the credential-gated leOS offer price
+- `GET /leos/v1/dashboard`, at the credential-gated leOS offer price
 
 Free routes:
 
@@ -85,6 +86,7 @@ Secrets Manager values:
 ```text
 LECORE_X402_ADMIN_TOKEN=<random admin token>
 LECORE_X402_TENANT_SECRET=<random tenant-token signing secret>
+LECORE_X402_LEOS_ACCESS_TOKEN=<random credential issued to eligible buyers>
 CDP_API_KEY_ID=<if required by facilitator setup>
 CDP_API_KEY_SECRET=<if required by facilitator setup>
 ```
@@ -146,6 +148,10 @@ plans, spend limits, CloudTrail alarms, and a tiny blast radius.
 - Add CloudWatch alarms on 5xx, 402 spikes, and admin write attempts.
 - Use tenant tokens plus isolated tenant state before offering private customer
   memory.
+- Mount `LECORE_X402_TENANT_STATE_DIR` on shared durable storage. Tenant writes
+  reload under an OS-level lock and use atomic replacement, so rolling ECS tasks
+  do not overwrite one another.
+- Keep the leOS offer credential in Secrets Manager and rotate it if disclosed.
 - Do not put secrets or PII in x402 route descriptions or payment metadata.
 
 ## Local Smoke Before AWS
@@ -155,6 +161,7 @@ pip install ".[x402]"
 export LECORE_X402_PAY_TO="0xYourReceivingWallet"
 export LECORE_X402_ADMIN_TOKEN="local-admin-secret"
 export LECORE_X402_TENANT_SECRET="local-tenant-secret"
+export LECORE_X402_LEOS_ACCESS_TOKEN="local-leos-buyer-secret"
 python holographic_x402_api.py --unpaid-dev --host 127.0.0.1 --port 4021
 ```
 

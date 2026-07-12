@@ -1,5 +1,7 @@
 """Tests for the product-facing LocalAgentCore facade."""
 
+import pytest
+
 from holographic_product import LocalAgentCore, demo
 
 
@@ -22,6 +24,16 @@ def test_recall_is_query_safe_and_deterministic():
 
     assert a == b
     assert before == after
+
+
+def test_recall_rejects_invalid_k_and_abstains_on_empty_queries():
+    core = demo()
+
+    with pytest.raises(ValueError, match="positive integer"):
+        core.recall("memory", k=0)
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        core.recall("memory", abstain=2)
+    assert core.recall("") == []
 
 
 def test_route_uses_existing_skill_catalog():

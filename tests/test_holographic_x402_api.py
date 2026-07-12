@@ -7,10 +7,12 @@ from holographic_x402_api import (
     DEFAULT_PRICE,
     DEFAULT_TENANT_ID,
     LEOS_SITE_URL,
+    LEOS_ACCESS_HEADER,
     LEOS_TOKEN_CA,
     LEOS_TOKEN_PRICE,
     TENANT_HEADER,
     TENANT_TOKEN_HEADER,
+    TenantCoreStore,
     X402Config,
     create_app,
     landing_page_html,
@@ -20,6 +22,7 @@ from holographic_x402_api import (
     tenant_access_token,
     x402_route_configs,
 )
+from holographic_product import LocalAgentCore, demo
 
 
 def test_default_x402_config_uses_testnet_price_shape():
@@ -106,20 +109,22 @@ def test_landing_page_explains_why_to_buy_the_api():
     assert "0x96e1...BB84" in html
 
 
-def test_leos_token_offer_is_ca_only_metadata():
+def test_leos_token_offer_identifies_ca_and_requires_access():
     offer = leos_token_offer()
 
     assert offer["site"] == LEOS_SITE_URL
     assert offer["ca"] == LEOS_TOKEN_CA
     assert offer["price"] == LEOS_TOKEN_PRICE
     assert "POST /leos/v1/recall" in offer["discount_routes"]
-    assert "Only the CA is needed" in offer["note"]
+    assert offer["access_header"] == LEOS_ACCESS_HEADER
+    assert offer["access_required"] is True
+    assert "eligible buyers" in offer["note"]
 
 
 def test_unpaid_dev_app_serves_landing_page_and_keeps_api_routes_free():
     fastapi_testclient = pytest.importorskip("fastapi.testclient")
     client = fastapi_testclient.TestClient(
-        create_app(config=X402Config(pay_to="0xabc"), paid=False)
+        create_app(config=X402Config(pay_to="0xabc"), paid=False, leos_access_token="leos-secret")
     )
 
     landing = client.get("/")
@@ -136,11 +141,90 @@ def test_unpaid_dev_app_serves_landing_page_and_keeps_api_routes_free():
     assert pricing.json()["x402"]["price"] == DEFAULT_PRICE
     assert pricing.json()["token_offer"]["ca"] == LEOS_TOKEN_CA
     assert pricing.json()["token_offer"]["price"] == LEOS_TOKEN_PRICE
+    assert pricing.json()["token_offer"]["enabled"] is True
     assert pricing.json()["tenancy"]["default_tenant"] == DEFAULT_TENANT_ID
 
-    leos_route = client.post("/leos/v1/route", json={"task": "search local agent memory"})
+    blocked = client.post("/leos/v1/route", json={"task": "search local agent memory"})
+    assert blocked.status_code == 401
+    assert client.post("/leos/v1/recall", json={"query": "memory"}).status_code == 401
+    assert client.get("/leos/v1/dashboard").status_code == 401
+
+    leos_route = client.post(
+        "/leos/v1/route",
+        headers={LEOS_ACCESS_HEADER: "leos-secret"},
+        json={"task": "search local agent memory"},
+    )
     assert leos_route.status_code == 200
     assert leos_route.json()["tenant"] == DEFAULT_TENANT_ID
+
+
+def test_health_does_not_run_expensive_evidence_probe():
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    core = demo()
+
+    def fail_evidence():
+        raise AssertionError("health must not run evidence")
+
+    core.evidence = fail_evidence
+    client = fastapi_testclient.TestClient(
+        create_app(core=core, config=X402Config(pay_to="0xabc"), paid=False)
+    )
+
+    response = client.get("/health")
+    pricing = client.get("/pricing").json()
+
+    assert response.status_code == 200
+    assert response.json()["memory"]["entries"] == 3
+    assert pricing["token_offer"]["enabled"] is False
+    assert all(not row["route"].split(" ", 1)[1].startswith("/leos/") for row in pricing["routes"])
+    assert client.get("/leos/v1/dashboard").status_code == 503
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"query": "x", "k": "bad"},
+        {"query": "x", "k": 0},
+        {"query": "x", "k": -1},
+        {"query": ""},
+        {"query": "x", "abstain": "bad"},
+        {"query": "x", "abstain": 1.1},
+    ],
+)
+def test_recall_rejects_invalid_inputs(payload):
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    client = fastapi_testclient.TestClient(
+        create_app(config=X402Config(pay_to="0xabc"), paid=False)
+    )
+
+    response = client.post("/v1/recall", json=payload)
+
+    assert response.status_code == 400
+
+
+def test_tenant_id_must_be_a_string_and_match_the_header():
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    client = fastapi_testclient.TestClient(
+        create_app(
+            config=X402Config(pay_to="0xabc"),
+            paid=False,
+            admin_token="admin-secret",
+        )
+    )
+
+    numeric = client.post(
+        "/admin/remember",
+        headers={"X-Admin-Token": "admin-secret"},
+        json={"tenant": 0, "text": "must not reach public"},
+    )
+    mismatch = client.post(
+        "/admin/remember",
+        headers={"X-Admin-Token": "admin-secret", TENANT_HEADER: "acme"},
+        json={"tenant": "beta", "text": "must not cross tenants"},
+    )
+
+    assert numeric.status_code == 400
+    assert mismatch.status_code == 400
 
 
 def test_private_tenant_memory_requires_a_tenant_token():
@@ -229,3 +313,50 @@ def test_tenant_memory_can_persist_to_state_dir(tmp_path):
 
     assert recalled.status_code == 200
     assert recalled.json()["hits"][0]["label"] == "persisted"
+
+
+def test_public_memory_persists_across_app_restart(tmp_path):
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    first = fastapi_testclient.TestClient(
+        create_app(
+            config=X402Config(pay_to="0xabc"),
+            paid=False,
+            admin_token="admin-secret",
+            tenant_state_dir=tmp_path,
+        )
+    )
+    written = first.post(
+        "/admin/remember",
+        headers={"X-Admin-Token": "admin-secret"},
+        json={"text": "unique public persisted phrase", "label": "public-persisted"},
+    )
+    assert written.status_code == 200
+
+    second = fastapi_testclient.TestClient(
+        create_app(
+            config=X402Config(pay_to="0xabc"),
+            paid=False,
+            tenant_state_dir=tmp_path,
+        )
+    )
+    recalled = second.post(
+        "/v1/recall",
+        json={"query": "unique public persisted phrase", "k": 10},
+    )
+
+    assert recalled.status_code == 200
+    assert "public-persisted" in [hit["label"] for hit in recalled.json()["hits"]]
+
+
+def test_persisted_writes_reload_under_process_lock(tmp_path):
+    first = TenantCoreStore(LocalAgentCore(), tmp_path)
+    second = TenantCoreStore(LocalAgentCore(), tmp_path)
+    first.read("acme", lambda core: core.entries)
+    second.read("acme", lambda core: core.entries)
+
+    first.write("acme", lambda core: core.remember("first writer", label="first"))
+    second.write("acme", lambda core: core.remember("second writer", label="second"))
+
+    reloaded = TenantCoreStore(LocalAgentCore(), tmp_path)
+    labels = [entry.label for entry in reloaded.read("acme", lambda core: core.entries)]
+    assert labels == ["first", "second"]

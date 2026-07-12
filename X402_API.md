@@ -9,9 +9,9 @@ the public read/compute routes:
 - `POST /v1/recall`
 - `POST /v1/route`
 - `GET /v1/dashboard`
-- `POST /leos/v1/recall`, at the leOS CA offer price
-- `POST /leos/v1/route`, at the leOS CA offer price
-- `GET /leos/v1/dashboard`, at the leOS CA offer price
+- `POST /leos/v1/recall`, at the credential-gated leOS offer price
+- `POST /leos/v1/route`, at the credential-gated leOS offer price
+- `GET /leos/v1/dashboard`, at the credential-gated leOS offer price
 
 Free routes:
 
@@ -27,6 +27,11 @@ This split is deliberate. Paid customers can use the memory/router/dashboard,
 but they cannot mutate memory unless they also hold the admin token. Private
 tenant memory also requires a tenant token; x402 proves payment, not tenant
 authorization.
+
+The leOS CA identifies the discounted offer, but does not itself prove buyer
+eligibility because it is public. Discounted calls must also include the
+operator-issued `X-leCore-leOS-Access` credential. Failed authorization responses
+are not settled by the x402 middleware.
 
 ## Install
 
@@ -47,6 +52,8 @@ export LECORE_X402_PAY_TO="0xYourReceivingWallet"
 export LECORE_X402_PRICE="$0.0011"
 export LECORE_X402_ADMIN_TOKEN="local-admin-secret"
 export LECORE_X402_TENANT_SECRET="local-tenant-secret"
+export LECORE_X402_LEOS_ACCESS_TOKEN="local-leos-buyer-secret"
+export LECORE_X402_TENANT_STATE_DIR="./tenant-state"
 
 python holographic_x402_api.py --host 127.0.0.1 --port 4021
 ```
@@ -85,6 +92,15 @@ curl -X POST http://127.0.0.1:4021/v1/recall \
   -d '{"query":"deterministic local memory"}'
 ```
 
+Use the discounted leOS route only with an issued offer credential:
+
+```bash
+curl -X POST http://127.0.0.1:4021/leos/v1/recall \
+  -H "Content-Type: application/json" \
+  -H "X-leCore-leOS-Access: local-leos-buyer-secret" \
+  -d '{"query":"deterministic local memory"}'
+```
+
 Requests to paid routes return `402 Payment Required` unless the client retries
 with a valid x402 payment payload:
 
@@ -109,7 +125,10 @@ python holographic_x402_api.py --unpaid-dev --host 127.0.0.1 --port 4021
 - Keep route prices explicit; avoid wildcard paid route configs for this first
   product surface.
 - Keep writes admin-only. Use `LECORE_X402_TENANT_SECRET` and
-  `LECORE_X402_TENANT_STATE_DIR` for isolated private customer memory.
+  `LECORE_X402_TENANT_STATE_DIR` for durable public and private memory. Writes
+  use per-tenant process locks plus atomic replacement on shared storage.
+- Store `LECORE_X402_LEOS_ACCESS_TOKEN` as a secret and distribute it only to
+  buyers eligible for the discounted routes.
 - Treat x402 payment metadata as public enough to avoid putting secrets or PII
   in route descriptions.
 

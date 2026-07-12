@@ -12,6 +12,7 @@
     - `from_dict(cls, data)` -- Build a memory entry from `to_dict` data.
 - **class `LocalAgentCore`** -- Product facade for local agent memory, skill routing, and evidence.
     - `entries(self)` -- A copy of the stored entries, in insertion order.
+    - `memory_summary(self)` -- Return constant-time memory status without running evidence probes.
     - `remember(self, text, label=None, metadata=None, id=None)` -- Store one local memory.
     - `remember_many(self, items)` -- Store several memories.
     - `recall(self, query, k=3, abstain=None)` -- Return the nearest stored memories for `query`, best first.
@@ -22,7 +23,7 @@
     - `dashboard_html(data)` -- Render an evidence snapshot as a dependency-free static HTML dashboard.
     - `to_state(self)` -- Serialize configuration and entries.
     - `from_state(cls, state)` -- Rebuild a core from `to_state` data.
-    - `save(self, path)` -- Write the product state to JSON and return the path.
+    - `save(self, path)` -- Atomically write the product state to JSON and return the path.
     - `load(cls, path)` -- Load a product state saved by `save`.
 - `demo()` -- Build a tiny ready-to-query product demo.
 
@@ -35,12 +36,19 @@
     - `from_env(cls, require_pay_to=True)` -- Build config from LECORE_X402_* environment variables.
     - `to_public_dict(self)` -- Public, JSON-safe view of the payment configuration.
 - `optional_dependency_help()` -- Install hint for the optional paid API dependencies.
-- `leos_token_offer()` -- Public metadata for the leOS CA-only offer.
+- `normalize_tenant_id(value)` -- Return a path-safe tenant id for private memory routing.
+- `tenant_access_token(tenant_id, secret)` -- Deterministic tenant bearer token derived from a server-side secret.
+- **class `TenantCoreStore`** -- Thread-safe LocalAgentCore registry with optional per-tenant persistence.
+    - `loaded_tenants(self)` -- Return tenant ids currently loaded in memory.
+    - `summary(self, tenant_id)` -- Return a cheap cached status summary without probing capabilities.
+    - `read(self, tenant_id, fn)` -- Run a read-style operation while holding the tenant lock.
+    - `write(self, tenant_id, fn)` -- Run a mutating operation, then persist that tenant if configured.
+- `leos_token_offer(access_required=True, enabled=True)` -- Return public metadata for the credential-gated leOS offer.
 - `landing_page_html(config)` -- Render the buyer-facing landing page served from `/`.
 - `payment_manifest(config)` -- Plain JSON route manifest, useful for docs, `/pricing`, and tests.
 - `x402_route_configs(config)` -- Build x402 SDK RouteConfig objects for the protected routes.
 - `x402_resource_server(config)` -- Create an x402 resource server wired to the configured facilitator.
-- `create_app(core=None, config=None, paid=True, admin_token=None)` -- Create the FastAPI app.
+- `create_app(core=None, config=None, paid=True, admin_token=None, tenant_secret=None, tenant_state_dir=None, leos_access_token=None)` -- Create the FastAPI application for paid or local serving.
 - `load_core(path)` -- Load a persisted core if present, otherwise return the demo core.
 - `main(argv=None)` -- CLI entry point for local x402 API serving.
 
