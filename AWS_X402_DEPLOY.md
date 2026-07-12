@@ -11,6 +11,7 @@ does **not** need a wallet private key in the container. It only needs:
 - the public receiving wallet address (`LECORE_X402_PAY_TO`)
 - x402/facilitator configuration
 - an admin token for seller-only memory writes
+- a tenant-token secret if private customer memory is enabled
 
 The receiving wallet should be a cold wallet, hardware wallet, Safe/multisig,
 or a custody wallet. The API simply tells x402 where funds should go.
@@ -24,9 +25,11 @@ or pay upstream APIs as a buyer.
 - **Application Load Balancer** terminates HTTPS and forwards to port `4021`.
 - **ECR** stores the container image.
 - **Secrets Manager** stores `LECORE_X402_ADMIN_TOKEN` and production
-  facilitator credentials.
+  facilitator credentials. Store `LECORE_X402_TENANT_SECRET` there too when
+  private tenants are enabled.
 - **SSM Parameter Store or plain task env** stores non-secret config like
-  `LECORE_X402_PAY_TO`, `LECORE_X402_PRICE`, and `LECORE_X402_NETWORK`.
+  `LECORE_X402_PAY_TO`, `LECORE_X402_PRICE`, `LECORE_X402_NETWORK`, and
+  `LECORE_X402_TENANT_STATE_DIR`.
 - **CloudWatch Logs** captures service logs.
 - **AWS WAF** can rate-limit and block bad traffic at the ALB.
 
@@ -35,6 +38,9 @@ Protected paid routes:
 - `POST /v1/recall`
 - `POST /v1/route`
 - `GET /v1/dashboard`
+- `POST /leos/v1/recall`, at the leOS CA offer price
+- `POST /leos/v1/route`, at the leOS CA offer price
+- `GET /leos/v1/dashboard`, at the leOS CA offer price
 
 Free routes:
 
@@ -44,6 +50,7 @@ Free routes:
 Seller-only route:
 
 - `POST /admin/remember`, guarded by `X-Admin-Token`
+- `POST /admin/tenant-token`, guarded by `X-Admin-Token`
 
 ## Build And Push
 
@@ -67,15 +74,17 @@ Non-secret environment variables:
 
 ```text
 LECORE_X402_PAY_TO=0xYourReceivingWallet
-LECORE_X402_PRICE=$0.001
+LECORE_X402_PRICE=$0.0011
 LECORE_X402_NETWORK=eip155:8453
 LECORE_X402_FACILITATOR_URL=https://api.cdp.coinbase.com/platform/v2/x402
+LECORE_X402_TENANT_STATE_DIR=/data/tenants
 ```
 
 Secrets Manager values:
 
 ```text
 LECORE_X402_ADMIN_TOKEN=<random admin token>
+LECORE_X402_TENANT_SECRET=<random tenant-token signing secret>
 CDP_API_KEY_ID=<if required by facilitator setup>
 CDP_API_KEY_SECRET=<if required by facilitator setup>
 ```
@@ -131,10 +140,12 @@ plans, spend limits, CloudTrail alarms, and a tiny blast radius.
 - Use mainnet network id and production facilitator URL.
 - Put the ALB behind HTTPS only.
 - Keep `/admin/remember` private or blocked from the public ALB path.
+- Keep `/admin/tenant-token` private or blocked from the public ALB path.
 - Keep paid route configs explicit; avoid wildcard paid routes at first.
 - Add WAF rate limits.
 - Add CloudWatch alarms on 5xx, 402 spikes, and admin write attempts.
-- Keep customer memory isolated before offering paid writes.
+- Use tenant tokens plus isolated tenant state before offering private customer
+  memory.
 - Do not put secrets or PII in x402 route descriptions or payment metadata.
 
 ## Local Smoke Before AWS
@@ -143,6 +154,7 @@ plans, spend limits, CloudTrail alarms, and a tiny blast radius.
 pip install ".[x402]"
 export LECORE_X402_PAY_TO="0xYourReceivingWallet"
 export LECORE_X402_ADMIN_TOKEN="local-admin-secret"
+export LECORE_X402_TENANT_SECRET="local-tenant-secret"
 python holographic_x402_api.py --unpaid-dev --host 127.0.0.1 --port 4021
 ```
 
