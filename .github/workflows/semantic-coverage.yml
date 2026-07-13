@@ -1,0 +1,122 @@
+# .github/workflows/semantic-coverage.yml
+#
+# INTEGRATION with the existing workflows (checked against ci.yml / docs.yml / package.yml -- do not rename):
+#   * distinct workflow name; ci.yml's 'tests' check and branch protection are untouched
+#   * path-filtered triggers do NOT match the files docs.yml's docs-bot commits, so no re-trigger loop
+#   * cache keys ('knowledge-cache-*', 'nomic-gq8-*') are disjoint from the pip caches
+#   * PREREQUISITE: knowledge_index.py / lint_scripts.py / findability_lint.py must be COMMITTED under
+#     tools/semantic/ -- CI cannot run what lives only in the local experiments folder. The weights are
+#     NOT committed (137 MB): they arrive via the pinned URL + actions/cache, exactly like a compiler
+#     toolchain. The <1 MB shipping artifacts CAN graduate to the repo later using ci.yml's house
+#     drift-check pattern (regenerate + `git diff --exit-code`, like API_QUICKREF.md).
+#
+# SEMANTIC COVERAGE CI -- keep the extracted geometry in lockstep with the code.
+#
+# WHY THIS FITS ON A FREE RUNNER (measured, not hoped):
+#   nomic gq8 weights           137 MB     vs 14 GB disk
+#   NumPy forward peak RAM     ~0.8 GB     vs 16 GB RAM
+#   .knowledge_cache.json        64 MB     vs 10 GB actions/cache
+#   warm run (content-addressed cache: only NEW/CHANGED docstrings embed)   < 1 min
+#   cold run (~8k entries at 1-3 texts/s on 4 vCPU)                        ~45-140 min, once
+#
+# THE JOB, in order:
+#   1. restore the embedding cache (keyed by wiring config, NOT by commit -- vectors
+#      depend on text+model only, so the cache survives every push)
+#   2. fetch weights only on a cache miss of the model itself
+#   3. embed whatever is new (knowledge_index is already incremental by sha256)
+#   4. THE EXAM: routing suite + findability lint. Docstrings fail like tests.
+#   5. rebuild the <1 MB shipping artifacts (catalog vectors, remap, index) and
+#      upload them; a release job can attach them to tags.
+#
+# Weights come from a release asset or HF; pin the revision. Determinism discipline
+# applies in CI too: PYTHONHASHSEED=0, single-threaded BLAS for reproducible sums.
+
+name: semantic-coverage
+
+on:
+  push:
+    paths: ['holographic/**.py', 'tools/semantic/**.py']
+  schedule:
+    - cron: '17 5 * * 1'        # weekly full pass: catches drift with no code change
+  workflow_dispatch: {}
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      # SAME determinism pins as ci.yml, for the same reason it documents: multi-threaded BLAS sums
+      # in a different order per run and flips knife-edge cosines. One thread, fixed hash seed.
+      PYTHONHASHSEED: '0'
+      OMP_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      NUMEXPR_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12', cache: pip }   # match ci.yml
+
+      - name: install (numpy only -- the constitution applies in CI too)
+        run: pip install numpy
+
+      # -- the embedding cache: survives across commits, keyed only by the wiring config
+      - name: restore embedding cache
+        uses: actions/cache@v4
+        with:
+          path: tools/semantic/.knowledge_cache.json
+          key: knowledge-cache-v1-1000.0-12-True-False
+          restore-keys: knowledge-cache-v1-
+
+      # -- the model: cached separately; downloaded once per runner image change
+      - name: restore model weights
+        id: model
+        uses: actions/cache@v4
+        with:
+          path: tools/semantic/nomic_text
+          key: nomic-gq8-v1        # bump to force a re-fetch; never 'latest'
+
+      - name: fetch model on cache miss (pinned revision)
+        if: steps.model.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p tools/semantic/nomic_text
+          # release asset keeps CI independent of third-party uptime; HF is the fallback
+          curl -L -o tools/semantic/nomic_text/model.safetensors \
+            "${{ vars.NOMIC_WEIGHTS_URL }}"
+          curl -L -o tools/semantic/nomic_text/vocab.txt \
+            "${{ vars.NOMIC_VOCAB_URL }}"
+
+      - name: lint the scripts first (errors halt; the 0.4s crash never eats the budget)
+        run: python tools/semantic/lint_scripts.py
+
+      - name: embed what changed (content-addressed; warm run is seconds)
+        # knowledge_index is ALREADY incremental: sha256(wiring||text) cache keys
+        run: |
+          cd tools/semantic && python knowledge_index.py nomic_text/model.safetensors \
+            nomic_text/vocab.txt --repo ..
+
+      # -- THE EXAM. This is the point of the workflow: coverage is a test, not a report.
+      - name: routing suite (the 12-ask exam; regressions fail the build)
+        # TO ADD: an --exam flag on knowledge_index (~10 lines: run ASKS, exit 1 below bars).
+        # Bars are the measured rev-36 numbers: top-5 >= 8/12, median <= 2.
+        run: |
+          cd tools/semantic && python knowledge_index.py nomic_text/model.safetensors \
+            nomic_text/vocab.txt --repo .. --exam --require-top5 8 --require-median 2
+
+      - name: findability lint (every capability must surface for 5 stranger-phrasings)
+        # N15's lint -- TO ADD as tools/semantic/findability_lint.py (the exam logic exists in the router suite)
+        run: python tools/semantic/findability_lint.py --repo . --require-top5
+        continue-on-error: true   # flip to false the day N15 lands
+
+      - name: "rebuild shipping artifacts (<1 MB: catalog vectors, remap, 64d index)"
+        run: |
+          cd tools/semantic && python knowledge_index.py nomic_text/model.safetensors \
+            nomic_text/vocab.txt --repo .. --save ../artifacts/index_64d.npz
+
+      - name: upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: semantic-artifacts
+          path: artifacts/
+          retention-days: 30
