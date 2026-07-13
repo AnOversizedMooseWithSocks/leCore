@@ -373,6 +373,13 @@ def main():
     print("=" * 90)
     code_idx = [i for i, e in enumerate(entries) if e[0] == 'code']
     code_entries = [entries[i] for i in code_idx]
+    # A zero-module corpus means --repo points at the wrong tree (the classic: run from tools/semantic
+    # with --repo .. instead of ../..). Fail with the FIX in the message, not an IndexError 30 lines down.
+    if not code_entries:
+        raise SystemExit(
+            f"\n  0 code modules found under --repo {args.repo!r} (cwd {os.getcwd()!r}).\n"
+            f"  collect_code looks for holographic_*.py; none were under that path.\n"
+            f"  If running from tools/semantic, the repo root is '../..', not '..'.")
     def kw_rank_of(a, accept):
         order = kw_rank(a, code_entries)
         for r, j in enumerate(order):

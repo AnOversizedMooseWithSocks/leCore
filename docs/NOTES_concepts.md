@@ -32346,3 +32346,18 @@ now emits only routing keys via _routing_keys() (imports knowledge_index's colle
 guessed). 768d kept so a future dim change (we ship 128d now) still restores from the same seed. The full
 cache stays local/gitignored as a build intermediate. KEPT PRINCIPLE: seed exactly what the gate consumes,
 nothing more -- the exam scores code, so the seed carries code.
+
+
+====================================================================================
+CI FIX: --repo path + empty-corpus guard
+====================================================================================
+semantic-coverage.yml ran the indexer from `cd tools/semantic` with `--repo ..` -- but from there the
+repo root is `../..`; `..` is the tools/ dir, which has no holographic_*.py. Result: 0 code modules
+collected (entries: 1 {'docs':1}), routing exam ranked 'of 0 modules', then IndexError at
+detail.append((a, names_r[0], ...)) on the empty names_r. TWO fixes: (1) all three workflow invocations
+now `--repo ../..`; (2) knowledge_index.main() raises a CLEAR SystemExit naming the fix when 0 code
+modules are found, instead of an IndexError 30 lines later. KEPT BUG (mine): my earlier `..`->`../..`
+edit landed in a different copy of the workflow than the one that shipped -- verify the edit hit the
+file that is actually committed, not a staging copy. Reproduced locally: collect_code finds 505 at
+`../..`, 0 at a tools-level path -- matches the CI symptom (2314 terms in CI vs 11,917 locally = it
+walked a nearly-empty subtree).
