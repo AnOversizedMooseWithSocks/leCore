@@ -70,6 +70,12 @@ jobs:
           restore-keys: knowledge-cache-v1-
 
       # -- the model: cached separately; downloaded once per runner image change
+      - name: seed the cache if the runner cache missed
+        # actions/cache above restores .knowledge_cache.json across runs. On the FIRST run (or after the
+        # key rotates) it misses -- so decompress the committed 731 KB routing seed. seed_cache.py
+        # --restore is idempotent: it only writes if the live cache is absent, so a cache HIT is untouched.
+        run: python tools/semantic/seed_cache.py --restore
+
       - name: restore model weights
         id: model
         uses: actions/cache@v4

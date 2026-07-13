@@ -269,6 +269,12 @@ def main():
                          'kept-negative lookup failure.')
     ap.add_argument('--stride', type=int, default=650, help='window stride; overlap = window - stride')
     ap.add_argument('--no-cache', action='store_true')
+    # --exam turns the routing suite into a CI GATE: exit 1 if the @768d numbers miss the bars. Bars
+    # default to the measured state so a regression (a renamed module, a docstring turned to jargon)
+    # fails the build instead of drifting silently. Without --exam the suite just prints, as before.
+    ap.add_argument('--exam', action='store_true', help='exit 1 if the routing suite misses the bars')
+    ap.add_argument('--require-top5', type=int, default=8)
+    ap.add_argument('--require-median', type=float, default=2)
     ap.add_argument('--abtt', type=int, default=1,
                     help='all-but-the-top: principal directions to remove (0 disables)')
     ap.add_argument('--rope-base', type=float, default=None)
@@ -368,6 +374,7 @@ def main():
           f"{float(np.abs(_rows(E) @ _rows(E).T).mean()):.3f} -> corrected "
           f"{float(np.abs(abtt(E) @ abtt(E).T).mean()):.3f}   (all-but-the-top, k={args.abtt})")
 
+    exam_top5, exam_median = 0, 999.0     # set by the 768d pass below; safe defaults for the gate
     print("\n" + "=" * 90)
     print("[3] MODULE ROUTING (bar: keyword top-1 = 1/12)")
     print("=" * 90)
@@ -405,6 +412,8 @@ def main():
                 detail.append((a, names_r[0], rank, acc[0]))
         print(f"  EMBEDDING @{d:3d}d: top-1 {t1}/{len(ASKS_MODULE)}  top-5 {t5}/{len(ASKS_MODULE)}  "
               f"median rank {np.median(ranks):.0f}  worst {max(ranks)}")
+        if d == 768:
+            exam_top5, exam_median = t5, float(np.median(ranks))   # the gate reads full-width only
         if d == 768:
             for a, g, rank, want in detail:
                 mark = 'HIT ' if rank == 1 else ('top5' if rank <= 5 else f'r{rank:<3d}')
@@ -477,6 +486,13 @@ def main():
         print(f"  cache: {len(cache)-hits0} new, {len(cache)} total -> {args.cache}", file=sys.stderr)
 
     print("\nDONE -- paste back. Headlines: [3] beats 1/12? [4] beats 2/6? does 64d hold?")
+
+    # THE GATE, last: only --exam turns a miss into a nonzero exit; it always prints its verdict.
+    ok = exam_top5 >= args.require_top5 and exam_median <= args.require_median
+    print(f"  EXAM: top-5 {exam_top5} (require >= {args.require_top5}) | median {exam_median:.0f} "
+          f"(require <= {args.require_median}) -> {'PASS' if ok else 'FAIL'}")
+    if args.exam and not ok:
+        raise SystemExit(1)
 
 
 if __name__ == '__main__':

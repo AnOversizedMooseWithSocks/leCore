@@ -32361,3 +32361,16 @@ edit landed in a different copy of the workflow than the one that shipped -- ver
 file that is actually committed, not a staging copy. Reproduced locally: collect_code finds 505 at
 `../..`, 0 at a tools-level path -- matches the CI symptom (2314 terms in CI vs 11,917 locally = it
 walked a nearly-empty subtree).
+
+
+====================================================================================
+CI FIX: --exam flag was missing from the SHIPPED knowledge_index.py
+====================================================================================
+The workflow's exam + the local 'build cache fast' command both call `--exam --require-top5 8
+--require-median 2`, but the shipped tools/semantic/knowledge_index.py never had the flag -- my earlier
+--exam work landed in a different copy than the one merged (SAME failure mode as the --repo path: edit
+hit a staging copy, not the committed file). Added for real now: --exam/--require-top5/--require-median,
+the 768d numbers captured in the module-routing loop, gate fires at the TRUE END of main() so a failing
+exam never hides the report above it, and exam_top5/median initialized to safe defaults so the gate line
+can't NameError. KEPT LESSON (third instance): after adding a flag/edit, grep the COMMITTED file for it
+before shipping -- 'I added it' is not 'it is in the zip'.
