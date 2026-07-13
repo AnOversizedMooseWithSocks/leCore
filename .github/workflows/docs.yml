@@ -1,7 +1,7 @@
 # .github/workflows/docs.yml
-# Keep REFERENCE.md in sync with the code automatically. On every push to main, regenerate the code reference
-# from the module docstrings and commit it back if anything changed. (No third-party deps -- docgen.py is pure
-# standard library.)
+# Keep the GENERATED docs in sync with the code automatically. On every push to main, regenerate the code
+# reference, the capabilities menu, the faculty map and the documentation map, and commit them back if anything
+# changed. (docgen.py is pure stdlib; capdoc.py/facultymap.py import the live engine, hence the install step.)
 name: docs
 
 on:
@@ -23,20 +23,31 @@ jobs:
         with:
           python-version: '3.11'
 
+      # capdoc.py reads the LIVE catalog and facultymap.py boots a UnifiedMind -- both import the engine, so the
+      # engine's dependencies must be installed here (docgen.py alone is pure stdlib and never needed this).
+      - name: Install the engine's dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
       - name: Generate the code reference
         run: python docgen.py          # writes REFERENCE.md from every module's docstring + public API
 
       - name: Generate the capabilities menu
         run: python capdoc.py          # writes CAPABILITIES.md (prose) AND capabilities.json (machine-readable) from the live catalog
 
+      - name: Generate the faculty map
+        run: python facultymap.py      # writes docs/FACULTY_MAP.md -- the mind's 1,270+ methods by topic, from live introspection
+
+      - name: Generate the documentation map
+        run: python docmap.py          # writes docs/DOC_MAP.md -- which doc answers which question, + mermaid family/pipeline diagrams (GitHub renders mermaid natively)
+
       - name: Commit refreshed docs if they changed
         run: |
           git config user.name  "docs-bot"
           git config user.email "docs-bot@users.noreply.github.com"
-          if ! git diff --quiet REFERENCE.md CAPABILITIES.md capabilities.json; then
-            git add REFERENCE.md CAPABILITIES.md capabilities.json
-            git commit -m "docs: refresh REFERENCE.md + CAPABILITIES.md + capabilities.json [skip ci]"   # [skip ci] so it doesn't re-trigger CI
+          if ! git diff --quiet REFERENCE.md CAPABILITIES.md capabilities.json docs/FACULTY_MAP.md docs/DOC_MAP.md; then
+            git add REFERENCE.md CAPABILITIES.md capabilities.json docs/FACULTY_MAP.md docs/DOC_MAP.md
+            git commit -m "docs: refresh generated docs (REFERENCE, CAPABILITIES, FACULTY_MAP, DOC_MAP) [skip ci]"   # [skip ci] so it doesn't re-trigger CI
             git push
           else
-            echo "REFERENCE.md, CAPABILITIES.md and capabilities.json already up to date -- nothing to commit."
+            echo "All generated docs already up to date -- nothing to commit."
           fi

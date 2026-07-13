@@ -1,9 +1,10 @@
 # Continuous integration for the Holographic VSA engine.
 #
 # On a push or a pull request it runs only the tests AFFECTED by the changed files (see the "Run the test suite"
-# step). A docs- or config-only change runs no tests at all. As a safety net, the WHOLE suite runs weekly (schedule),
-# on demand (the "Run workflow" button), and on a version tag -- so nothing that the affected-selection might miss can
-# hide for long. The job only goes green if every test that ran passes.
+# step). A docs- or config-only change runs no tests at all. As a safety net, the WHOLE suite -- slow tests
+# included, watchdog lifted -- runs weekly (schedule), on demand (the "Run workflow" button), and on a version
+# tag, as a MATRIX of 4 shard jobs (see `full-suite` at the bottom): timeout-minutes is per JOB, so sharding is
+# what lets the true full run fit GitHub's budget at all. The job only goes green if every test that ran passes.
 #
 # To make that gate actually BLOCK a merge (not just show a red X), mark this check as required once:
 #   GitHub repo -> Settings -> Branches -> Branch protection rule for `main`
@@ -27,6 +28,12 @@ on:
 
 jobs:
   pytest:
+    # This job now handles ONLY the per-change path (a push or a PR): affected-test selection + the gates below.
+    # The FULL suite (schedule / manual / version tag) moved to the sharded `full-suite` matrix job at the bottom --
+    # GitHub's timeout-minutes budget is PER JOB, so one 20-minute job could never hold the true full run
+    # (slow tests selected, watchdog lifted), but four parallel shard jobs give it 4x the budget. Branch protection
+    # is unaffected: pushes and PRs still produce this same "pytest" check.
+    if: (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -79,28 +86,22 @@ jobs:
           set -e
           EVENT="${{ github.event_name }}"
 
-          # The FULL safety net runs EVERYTHING, slow tests included: `-m ""` overrides the default `-m 'not slow'`
-          # (set in pyproject.toml) that keeps per-change and local runs fast. See tests/conftest.py.
-          run_full () { echo "== FULL suite ($1) =="; pytest -q -n auto -m "" --durations=15; }
+          # The FULL suite (slow tests selected, watchdog lifted) lives in the sharded `full-suite` job now -- it
+          # cannot fit one job's 20-minute budget. This job's fallback for an unscopable change is the FAST suite
+          # (the default `-m 'not slow'` from pyproject.toml): complete coverage of the fast tests, and the weekly
+          # sharded run remains the safety net for the slow ones.
+          run_fast () { echo "== FAST suite ($1) =="; pytest -q -n auto --durations=15; }
 
-          # --- the safety net: weekly schedule, manual run, or a version tag -> run EVERYTHING ---
-          case "$EVENT" in
-            schedule|workflow_dispatch) run_full "$EVENT"; exit 0 ;;
-          esac
-          case "${{ github.ref }}" in
-            refs/tags/*) run_full "version tag"; exit 0 ;;
-          esac
-
-          # --- otherwise (a push or a PR): work out what changed, then run only the affected tests ---
+          # --- work out what changed, then run only the affected tests ---
           if [ "$EVENT" = "pull_request" ]; then
             # everything this PR adds on top of its base branch
             CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
           else
             # a push: diff everything between the previous tip and now (covers multi-commit pushes). If there's no
-            # previous tip (a brand-new branch), we can't scope it -> run the full suite to be safe.
+            # previous tip (a brand-new branch), we can't scope it -> run the fast suite to be safe.
             BEFORE="${{ github.event.before }}"
             if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git rev-parse "$BEFORE" >/dev/null 2>&1; then
-              run_full "new branch / no previous commit"; exit 0
+              run_fast "new branch / no previous commit"; exit 0
             fi
             CHANGED=$(git diff --name-only "$BEFORE" HEAD)
           fi
@@ -108,7 +109,7 @@ jobs:
           echo "Changed files:"; echo "$CHANGED"
           SELECTED=$(python tools/select_tests.py $CHANGED)
           if [ "$SELECTED" = "ALL" ]; then
-            run_full "change couldn't be scoped"
+            run_fast "change couldn't be scoped"
           elif [ -z "$SELECTED" ]; then
             echo "== no tests affected by these changes (docs/config only) -- nothing to run =="
           else
@@ -154,6 +155,15 @@ jobs:
       - name: Gate -- no invocation gaps
         run: python tools/skill_lint.py
 
+      # STRUCTURE GATE. Organization is a discoverability property for humans, so it gets the same treatment as
+      # wiring: measured, budgeted at the current state, and failed only on REGRESSION past the budget (misc/ may
+      # not grow past 149 -- new modules land in a real family; no new 2,000+ line giants beyond the recorded 3;
+      # unified.py's section markers may not shrink below 27). Cohesion is REPORTED, never gated -- token metrics
+      # false-alarm on cohesive toolkits (vision, dictionary). Fix by moving the new module to a real family or,
+      # if the budget itself should change, editing the budget in tools/structure_audit.py in the same PR.
+      - name: Gate -- no structural regression (organization budgets)
+        run: python tools/structure_audit.py
+
       # Keep CAPABILITIES.md (the plain-language "what can it do + how to start" menu) AND capabilities.json
       # (its machine-readable sibling that apps ingest) current. Same drift-check pattern as API_QUICKREF.md:
       # regenerate from the live catalog and fail if either committed copy is stale. capdoc.py writes no timestamp
@@ -175,3 +185,51 @@ jobs:
       # --print` gives a fresh endpoint table to paste.
       - name: Gate -- SERVICE.md documents every endpoint and flag
         run: python servicedoc.py
+
+  # ---------------------------------------------------------------------------------------------------------
+  # The TRUE full suite: every test, slow ones included, watchdog lifted (--run-slow). One job's 20-minute
+  # budget can't hold it -- timeout-minutes is PER JOB, so a matrix of 4 shard jobs runs 1/4 of the suite each,
+  # in parallel, with 4x the total budget. tools/shard_tests.py partitions the test files DETERMINISTICALLY
+  # (sorted, integer weights, greedy largest-first; slow-marked tests weighted ~20x since they dominate wall
+  # time), so shard i is the same set on every run and the shards exactly cover the suite (--selfcheck asserts
+  # cover/disjoint/determinism). If a shard ever nears the budget again, raise --num-shards here and in the
+  # matrix -- that is the whole tuning knob.
+  # ---------------------------------------------------------------------------------------------------------
+  full-suite:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false          # one slow shard failing shouldn't cancel the other three -- we want the full picture
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      MPLBACKEND: Agg
+      # Same determinism pins as the per-change job (see the comment there): one BLAS thread, fixed hash seed.
+      PYTHONHASHSEED: "0"
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Sanity-check the partition (exact cover, disjoint, deterministic)
+        run: python tools/shard_tests.py --selfcheck --num-shards 4
+
+      - name: Run shard ${{ matrix.shard }} of 4 (slow tests included, watchdog lifted)
+        run: |
+          SELECTED=$(python tools/shard_tests.py --shard ${{ matrix.shard }} --num-shards 4)
+          pytest -q -n auto --run-slow --durations=15 $SELECTED

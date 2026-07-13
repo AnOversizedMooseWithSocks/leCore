@@ -3829,6 +3829,19 @@ def default_catalog():
                                                 "significance test", "monte carlo p value", "prove it isn't noise",
                                                 "false alarm probability", "null hypothesis test"),
                           semantic="analyze/measure", consumes=(), produces=())
+    c.register_capability("Documentation map (which doc answers which question)", "FIVE doc generators exist -- "
+                          "docgen.py (REFERENCE.md, every module), capdoc.py (CAPABILITIES.md, job-oriented), "
+                          "apiquickref.py (API_QUICKREF.md, curated app surface), facultymap.py (docs/FACULTY_MAP.md, "
+                          "mind methods by topic), skills.manifest() (machine cards) -- plus tools/structure_audit.py "
+                          "for organization budgets. docs/DOC_MAP.md lists them all with the question each answers "
+                          "and the regen command. Exists because root scripts are not catalog entries, so this "
+                          "surface was once UNDISCOVERABLE -- a Rule-0 miss, kept loud. Regen: python3 docmap.py",
+                          example="import subprocess; print(subprocess.run(['python3','docmap.py'],capture_output=True,text=True).stdout)",
+                          native=True, aliases=("where are the docs", "documentation map", "regenerate the docs",
+                                                "doc generators", "which doc should i read", "how is this documented",
+                                                "api reference", "quick reference", "faculty map", "doc of docs",
+                                                "one line per symbol"),
+                          semantic="analyze/describe", consumes=(), produces=())
     c.register_capability("N filter passes in one evaluation (shader algebra)", "a circular convolution is diagonal "
                           "in the Fourier basis, so applying it N times is just the transfer raised to the N-th "
                           "power. mind.filter_passes(field, kernel, N) costs the same whether N is 1 or 1,000,000 "

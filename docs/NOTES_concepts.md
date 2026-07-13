@@ -32094,3 +32094,128 @@ audits 0/0/0; unaccounted()=0; docgen/capdoc regen; drift gate + routing pins gr
 KEPT NEGATIVE (loud): SpatialGrid is NOT a general k-NN index -- it is a low-D geometric index, pathological above
 ~3 D. Do not reach for it on feature vectors or hypervectors. The forest is the high-D index; the grid is the low-D
 geometric one.
+
+## ORGANIZATION AUDIT -- structure measured; two additive fixes (structure_audit + FACULTY_MAP); mass-move REJECTED
+
+Asked: is the tree properly structured classes/methods or functional spaghetti? MEASURED, not eyeballed:
+
+FINDINGS (502 modules across 10 families):
+- misc/ holds 149/502 (29%) -- the junk-drawer signal. BUT: imports are hardcoded dotted family paths with NO shim
+  layer (no meta_path magic; test_repo_layout.py pins the layout precisely because the last reorg broke the build
+  twice). Moving modules is therefore BACKWARD-INCOMPATIBLE and a mass reorg is REJECTED on constitutional grounds
+  (additive-only). The fix is prophylactic: misc/ is now BUDGETED at 149 -- it may not grow; new modules land in a
+  real family.
+- Structure shape: 50% class-bearing / 50% pure-function modules. Pure-function is NOT spaghetti here -- it is the
+  house style (cohesive function families like iterate/denoise/distribute).
+- KEPT NEGATIVE (loud): token-coverage is a BAD cohesion metric. holographic_vision (8/23 coverage) and
+  holographic_dictionary (4/18) looked scattered by tokens and are perfectly cohesive one-topic toolkits (classic CV
+  vocabulary; dictionary API). Both EXONERATED by reading the actual names. Cohesion is therefore REPORTED for human
+  eyes in the audit, never gated.
+- The real navigability gap: unified.py = 14,871 lines, ONE class, 1,274 public methods, only 27 section markers,
+  ordered by SHIPPING ARC (insertion anchors) not topic. Humans had no "what can the mind do with meshes?" page.
+- Giants >2000 loc: exactly 3 (unified 14,871 / catalog 4,594 / creature 2,365) -- now budgeted at 3.
+
+SHIPPED (both additive; no engine code touched):
+1. tools/structure_audit.py -- organization as a MEASURED, gated property like wiring: family distribution, misc
+   share (budget 149), giants (budget 3 at >2000 loc), unified section markers (min 27), prefix-cluster stats.
+   Budgeted-baseline gates (skill_lint's pattern): history is paid for; the gate stops the NEXT regression. Cohesion
+   report-only per the kept negative above. Runs standalone; belongs in the close-out battery alongside the other
+   three audits.
+2. facultymap.py (root, beside capdoc/docgen) -> docs/FACULTY_MAP.md -- the TOPICAL index of all 1,274 mind methods,
+   generated from live introspection (prefix clusters >=3 + one-line docstrings + alphabetical tail). Measured: 116
+   clusters (mesh 66, render 22, file 21, sdf 16, learn 15 ...), 572 tail. Regenerate in close-out next to
+   capdoc/docgen; it cannot drift from the code because it IS the code's introspection.
+
+VERDICT, honestly: the tree is NOT functional spaghetti -- modules are cohesive and named by convention; the naming
+convention (verb-prefix families) already WAS the organization. What was missing was (a) making that organization
+VISIBLE to humans (FACULTY_MAP) and (b) making its erosion MEASURABLE (structure_audit budgets). Both now exist.
+
+## REINVENTION SELF-CHECK on the organization pass -- one real Rule-0 miss found, root-caused, fixed; mermaid added
+
+Asked: did structure_audit/facultymap reinvent something that already existed? Checked honestly against the FULL
+existing doc surface, not just the catalog:
+
+VERDICT, item by item:
+- facultymap.py CONTENT is NOT a duplicate: apiquickref.py covers a short CURATED app-surface list (scene, sdf,
+  mesh, camera...) and holographic_unified is NOT in it (0 references); no doc indexed the mind's 1,274 methods.
+  docgen.py DOES already prefix-cluster -- but at MODULE granularity for REFERENCE.md. So the technique existed,
+  the coverage did not. structure_audit.py has no overlap (name_collisions/audit_imports serve different questions).
+- THE REAL MISS (kept loud): the Rule-0 probe before building facultymap searched the CAPABILITY CATALOG -- and doc
+  generators are root scripts, NOT catalog entries, so find_capability could never have surfaced apiquickref.py.
+  Only capdoc.py's own docstring cross-reference caught it, after the fact. Root cause: an entire class of tooling
+  (the doc surface) was invisible to Rule 0.
+
+FIXES (all additive):
+1. docmap.py -> docs/DOC_MAP.md: the map of the maps -- one table of all five doc generators + structure_audit,
+   the question each answers, and the one-command regen block. Includes two SMALL mermaid diagrams (family layout,
+   doc pipeline); GitHub renders mermaid natively so NO dependency enters the engine. KEPT NEGATIVE: a full
+   502-module import graph was rejected -- at that scale a diagram is a hairball; family level (10 nodes) is where
+   a picture still beats a table.
+2. Catalog entry "Documentation map (which doc answers which question)" with 11 user-mouth aliases -- the ROOT-CAUSE
+   fix: the doc surface is now Rule-0-discoverable ("where are the docs" / "which doc should i read" / "one line per
+   symbol" all top-3). Catalog 347->348; does-field 551 (under 600).
+3. .github/workflows/docs.yml (the tree had NO CI workflows -- the docs.yml remembered from a prior layout does not
+   exist here): regenerates all five docs on push, FAILS on drift (git diff --exit-code, the capdoc drift-gate idea
+   extended to the whole doc surface), then runs structure_audit as the organization gate. Rehearsed locally: regen
+   -> no drift -> audit green. Mermaid needs no renderer in CI; the job only regenerates text.
+
+ANSWER to "would mermaid in CI help": yes, in exactly this scoped form -- family-level diagrams regenerated with the
+docs and rendered by GitHub for free. Not as a module-graph visualizer (hairball) and not as a new dependency.
+
+## CORRECTION (kept loud) -- the real CI workflows exist; my invented docs.yml replaced with theirs, updated minimally
+
+The previous entry claimed "the tree had NO CI workflows." WRONG in an important way: the real repo HAS three
+(.github/workflows/ci.yml, docs.yml, package.yml) -- they were absent from THIS working tree because the upstream
+zips it was built from never contained them. Verified it was NOT my packaging: the zip exclusion "*.git/*" does NOT
+swallow .github/ (tested: .github/workflows/a.yml included, .git/config excluded). Moose supplied the real files;
+my invented docs.yml was DELETED and replaced with the real one.
+
+MINIMAL UPDATES ONLY (per instruction -- update, don't redo):
+- ci.yml: ONE new gate step added beside the existing gates (audit_imports/wiring/catalog_gaps/skill_lint/servicedoc):
+  "Gate -- no structural regression" running tools/structure_audit.py, with a house-style comment explaining the
+  budgeted-baseline contract and the fix path. Nothing else touched.
+- docs.yml: added a dependency install step (capdoc.py reads the LIVE catalog and facultymap.py boots a UnifiedMind
+  -- both import the engine; a latent gap even before this change, since docgen alone is stdlib but capdoc is not),
+  added facultymap.py + docmap.py generation steps, and included docs/FACULTY_MAP.md + docs/DOC_MAP.md in the
+  diff/commit-back set. Header comment updated to match scope. The commit-back pattern (docs-bot, [skip ci]) kept
+  exactly as designed.
+- package.yml: UNTOUCHED -- structure_audit/facultymap/docmap are dev tooling, not wheel content.
+
+REHEARSED locally: all three YAMLs parse; servicedoc.py green (33 endpoints, 5 flags); audit_imports 0 flat;
+structure_audit green; full generator chain regenerates with no drift. The mermaid answer stands, now inside the
+REAL docs.yml: DOC_MAP's family/pipeline diagrams regenerate on push, GitHub renders them natively, no renderer or
+dependency added anywhere.
+
+## CI TEST SHARDING -- the true full suite now fits GitHub's budget (per-JOB timeout x matrix of 4)
+
+THE PROBLEM, precisely: the full suite (slow tests selected) hit the 20-minute GitHub job timeout, so the 15 s
+per-test watchdog was doing double duty as a runtime cap -- slow tests were selected by `-m ""` but the watchdog
+still SKIPPED any exceeding 15 s (only --run-slow/LECORE_RUN_SLOW lifts it, and a true --run-slow run blew the
+budget). Result: "full" runs were never actually full.
+
+THE FIX, structural: GitHub's timeout-minutes applies PER JOB, so a matrix of K shard jobs gives Kx the budget in
+parallel. NO conftest change needed -- --run-slow already lifts the watchdog; the missing piece was only the
+splitter and the workflow shape.
+
+BUILT: tools/shard_tests.py -- deterministic, stdlib-only partition of the 541 test files into N shards. Weight
+proxy (kept honest as a proxy): (count of `def test_`) + 20 x (count of pytest.mark.slow), since slow-marked tests
+dominate wall time by definition. Greedy largest-first bin packing, sorted input, index tiebreak -> shard i of K is
+identical on every machine, no state file. MEASURED balance at K=4: loads 1348/1348/1347/1347 (0% spread). Output
+convention matches select_tests.py (whitespace paths on stdout) so pytest consumes it directly. --selfcheck asserts
+exact cover / disjoint / determinism; --report prints the balance table.
+
+ci.yml (updated surgically, per house rule):
+- `pytest` job now push/PR ONLY (job-level if; tag pushes excluded). Affected-selection + all gates unchanged.
+  The unscopable-change fallback downgraded from run_full (slow included -- the thing that timed out) to run_fast
+  (the default -m 'not slow' suite). Branch protection unaffected: push/PR still produce the same "pytest" check.
+- NEW `full-suite` matrix job (shard: [0..3], fail-fast: false, 20 min EACH) on schedule/dispatch/version-tags:
+  same determinism env pins, partition --selfcheck before running, then `pytest -n auto --run-slow $SELECTED`.
+  The tuning knob is --num-shards + the matrix list, documented in the workflow comment.
+
+VERIFIED here: partition selfcheck green; shard 0/4 collects 1,351 tests through pytest; the exact command shape
+rehearsed for real on the lightest 1/32 shard with --run-slow (157 passed, 10 s); yaml parses; battery 0/0/0.
+HONEST LIMIT: per-shard wall time on a GitHub runner cannot be measured from this sandbox -- 4 shards is the
+design margin (~4x headroom over the run that timed out), and if a shard nears the budget the fix is raising the
+shard count, not re-tightening the watchdog. Regression traps in tests/test_shard_tests.py pin cover/disjoint/
+determinism/balance -- a partition bug would otherwise be the worst CI failure there is: a green build that
+silently tested less than it claimed.

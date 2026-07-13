@@ -2008,6 +2008,13 @@ clean a render or signal with one home: image SVGF (variance-guided a-trous) or 
 from holographic.rendering.holographic_denoisehome import Denoise; Denoise.image(img, N, A, D, method='svgf')
 ```
 
+### Documentation map (which doc answers which question)
+FIVE doc generators exist -- docgen.py (REFERENCE.md, every module), capdoc.py (CAPABILITIES.md, job-oriented), apiquickref.py (API_QUICKREF.md, curated app surface), facultymap.py (docs/FACULTY_MAP.md, mind methods by topic), skills.manifest() (machine cards) -- plus tools/structure_audit.py for organization budgets. docs/DOC_MAP.md lists them all with the question each answers and the regen command. Exists because root scripts are not catalog entries, so this surface was once UNDISCOVERABLE -- a Rule-0 miss, kept loud. Regen: python3 docmap.py.
+
+```python
+import subprocess; print(subprocess.run(['python3','docmap.py'],capture_output=True,text=True).stdout)
+```
+
 ### Durability & crash recovery
 B7: make the query store survive a crash. Take a durable SNAPSHOT of the persistent tiers (replay-based, so it rebuilds byte-identically), keep a write-ahead JOURNAL of inserts/updates/deletes since the snapshot, and RECOVER to the last consistent point by loading the snapshot and replaying the journal. The snapshot+WAL discipline, on top of the plain save/load the service already exposes.
 
@@ -2622,4 +2629,4 @@ import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); x=np.li
 
 ---
 
-*330 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*331 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
