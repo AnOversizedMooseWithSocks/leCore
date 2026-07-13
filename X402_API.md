@@ -118,6 +118,40 @@ Use this only for development:
 python holographic_x402_api.py --unpaid-dev --host 127.0.0.1 --port 4021
 ```
 
+## Optional NoSQLite Memory Backend
+
+`Dockerfile.x402` builds the vendored NoSQLite source snapshot pinned at
+`8964da2` into the service image. The default remains `core`:
+`LocalAgentCore` is the serving backend and the existing per-tenant JSON state
+remains the durable control-plane mirror.
+
+To cut semantic recall over to NoSQLite, configure a durable mounted directory:
+
+```bash
+export LECORE_X402_MEMORY_BACKEND=nosqlite
+export LECORE_X402_NOSQLITE_BIN=/usr/local/bin/nosqlite
+export LECORE_X402_NOSQLITE_DATA_DIR=/data/nosqlite
+export LECORE_X402_NOSQLITE_DURABILITY=sync
+export LECORE_X402_TENANT_STATE_DIR=/data/tenants
+```
+
+The API keeps each tenant in a separate hashed collection, writes the same
+admin-created entry to `LocalAgentCore` for routing/dashboard continuity, and
+uses NoSQLite's deterministic `holographic-hash-v1` encoder plus neural
+candidate routing and cosine reranking for `/v1/recall`. Responses retain the
+existing `id`, `text`, `label`, `metadata`, and `score` shape.
+
+Before cutover, set `LECORE_X402_NOSQLITE_SHADOW=1` while leaving
+`LECORE_X402_MEMORY_BACKEND=core`. Admin writes are mirrored; recall continues
+to serve from the core while differences are logged without query text or
+tenant identifiers.
+
+NoSQLite filesystem mode holds one nonblocking exclusive writer lock for the
+life of its process. Run exactly one active writer against a given data
+directory. A rolling ECS replacement must drain the old writer before enabling
+the new one, so the initial deployed configuration keeps this feature disabled
+until that maintenance window is scheduled.
+
 ## Production Notes
 
 - Use a real receiving wallet and a production facilitator.
@@ -127,6 +161,8 @@ python holographic_x402_api.py --unpaid-dev --host 127.0.0.1 --port 4021
 - Keep writes admin-only. Use `LECORE_X402_TENANT_SECRET` and
   `LECORE_X402_TENANT_STATE_DIR` for durable public and private memory. Writes
   use per-tenant process locks plus atomic replacement on shared storage.
+- If NoSQLite is enabled, mount `LECORE_X402_NOSQLITE_DATA_DIR` on the same
+  durable storage and keep the service at a single active writer for that path.
 - Store `LECORE_X402_LEOS_ACCESS_TOKEN` as a secret and distribute it only to
   buyers eligible for the discounted routes.
 - Treat x402 payment metadata as public enough to avoid putting secrets or PII

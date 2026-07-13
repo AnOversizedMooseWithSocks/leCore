@@ -1,10 +1,24 @@
+FROM rust:1.85-slim AS nosqlite-builder
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src/nosqlite
+
+COPY vendor/nosqlite /src/nosqlite
+
+RUN cargo build --release --locked --bin nosqlite
+
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    LECORE_X402_NOSQLITE_BIN=/usr/local/bin/nosqlite
 
 WORKDIR /app
 
+COPY --from=nosqlite-builder /src/nosqlite/target/release/nosqlite /usr/local/bin/nosqlite
 COPY . /app
 
 RUN python -m pip install --no-cache-dir --upgrade pip \
