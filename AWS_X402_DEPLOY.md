@@ -186,6 +186,10 @@ plans, spend limits, CloudTrail alarms, and a tiny blast radius.
 - Mount `LECORE_X402_TENANT_STATE_DIR` on shared durable storage. Tenant writes
   reload under an OS-level lock and use atomic replacement, so rolling ECS tasks
   do not overwrite one another.
+- Preserve the `.x402-memory-transactions` directory inside tenant state. It is
+  the durable outbox for core-to-NoSQLite writes; callers should send an
+  `Idempotency-Key` on `/admin/remember` retries so a timeout cannot duplicate
+  a memory.
 - Do not enable NoSQLite on the same EFS directory in overlapping ECS tasks;
   schedule a single-writer drain-and-replace cutover instead.
 - Keep the leOS offer credential in Secrets Manager and rotate it if disclosed.

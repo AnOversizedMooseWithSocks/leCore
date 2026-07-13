@@ -48,7 +48,9 @@ LEOS_ACCESS_HEADER = "X-leCore-leOS-Access"
 DEFAULT_TENANT_ID = "public"
 TENANT_HEADER = "X-leCore-Tenant"
 TENANT_TOKEN_HEADER = "X-leCore-Tenant-Token"
+IDEMPOTENCY_HEADER = "Idempotency-Key"
 _TENANT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,63}$")
+_IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9._:-]{1,256}$")
 MAX_QUERY_CHARS = 8192
 MAX_TASK_CHARS = 8192
 MAX_MEMORY_CHARS = 65536
@@ -246,6 +248,15 @@ def tenant_access_token(tenant_id: str, secret: str) -> str:
     return hmac.new(secret.encode("utf-8"), normalized.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
+def normalize_idempotency_key(value: Optional[Any]) -> Optional[str]:
+    """Validate an optional caller-provided retry key without persisting the raw value."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not _IDEMPOTENCY_KEY_RE.match(value):
+        raise ValueError("Idempotency-Key must be 1-256 letters, numbers, '.', '_', ':', or '-'")
+    return value
+
+
 @contextmanager
 def _process_file_lock(path: Path) -> Any:
     """Hold an exclusive process lock for one persisted tenant state file."""
@@ -280,6 +291,25 @@ def _process_file_lock(path: Path) -> Any:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         finally:
             handle.close()
+
+
+def _atomic_write_json(path: Path, value: Dict[str, Any]) -> None:
+    """Durably replace a small JSON control record without exposing a partial file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    temporary = path.with_name(".%s.%s.tmp" % (path.name, os.urandom(8).hex()))
+    try:
+        with open(temporary, "x", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except Exception:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 class TenantCoreStore:
@@ -715,6 +745,246 @@ class NoSQLiteMemoryStore:
         return "lecore_memory_%s" % digest
 
 
+class MemoryTransactionError(RuntimeError):
+    """The durable memory write journal could not be read or completed safely."""
+
+
+class MemoryTransactionConflict(MemoryTransactionError):
+    """One idempotency key was reused for a different memory write."""
+
+
+class MemoryMirrorPending(NoSQLiteError):
+    """A durable core commit needs the same transaction projected to NoSQLite."""
+
+    def __init__(self, tenant_id: str, transaction_id: str, cause: NoSQLiteError):
+        super().__init__(str(cause))
+        self.tenant_id = tenant_id
+        self.transaction_id = transaction_id
+
+
+class TenantMemoryTransactions:
+    """Durable, idempotent memory writes spanning LocalAgentCore and NoSQLite.
+
+    A query-layer transaction can roll in-memory tables back. This API crosses a
+    durable JSON core and an external NoSQLite process, so it instead records an
+    intent first, commits the core entry with a stable id, then projects that
+    entry to NoSQLite. If the process dies between steps, the journal replays the
+    same idempotent projection on the next request or app start.
+    """
+
+    _VERSION = 1
+    _PLANNED = "planned"
+    _CORE_COMMITTED = "core_committed"
+    _COMPLETE = "complete"
+
+    def __init__(self, core_store: TenantCoreStore, state_dir: Any):
+        self._core_store = core_store
+        self._root = Path(state_dir) / ".x402-memory-transactions"
+        self._root.mkdir(parents=True, exist_ok=True)
+
+    def remember(
+        self,
+        tenant_id: str,
+        text: str,
+        label: Optional[str],
+        metadata: Optional[Dict[str, Any]],
+        idempotency_key: Optional[str],
+        mirror: Optional[NoSQLiteMemoryStore],
+    ) -> Dict[str, Any]:
+        """Commit one memory and return its stable transaction status.
+
+        Supplying the same `idempotency_key` with the same request returns the
+        original memory id. Reusing that key for a different request is refused.
+        """
+        tenant = normalize_tenant_id(tenant_id)
+        key = normalize_idempotency_key(idempotency_key)
+        request = {
+            "tenant": tenant,
+            "text": str(text),
+            "label": label,
+            "metadata": dict(metadata or {}),
+        }
+        transaction_id = self._transaction_id(tenant, key)
+        path = self._path_for(tenant, transaction_id)
+        with _process_file_lock(path):
+            record = self._load_or_create(path, transaction_id, request, key, mirror is not None)
+            return self._apply_locked(path, record, mirror)
+
+    def resume(
+        self,
+        tenant_id: str,
+        transaction_id: str,
+        mirror: Optional[NoSQLiteMemoryStore],
+    ) -> Dict[str, Any]:
+        """Resume a known journal record without minting a second transaction."""
+        tenant = normalize_tenant_id(tenant_id)
+        if not re.fullmatch(r"[0-9a-f]{64}", transaction_id):
+            raise MemoryTransactionError("invalid memory transaction id")
+        path = self._path_for(tenant, transaction_id)
+        with _process_file_lock(path):
+            record = self._load(path)
+            self._validate_record(record, path)
+            if record["tenant"] != tenant or record["transaction_id"] != transaction_id:
+                raise MemoryTransactionError("memory transaction does not match its tenant")
+            return self._apply_locked(path, record, mirror)
+
+    def recover_pending(self, mirror: Optional[NoSQLiteMemoryStore]) -> Dict[str, int]:
+        """Replay incomplete durable writes, leaving unavailable mirrors pending."""
+        recovered = 0
+        pending = 0
+        invalid = 0
+        for path in sorted(self._root.glob("*/*.json")):
+            with _process_file_lock(path):
+                try:
+                    record = self._load(path)
+                    if record.get("state") == self._COMPLETE:
+                        continue
+                    result = self._apply_locked(path, record, mirror)
+                    if result["transaction"]["state"] == self._COMPLETE:
+                        recovered += 1
+                    else:
+                        pending += 1
+                except NoSQLiteError as exc:
+                    pending += 1
+                    LOG.warning("NoSQLite transaction recovery remains pending: %s", exc)
+                except MemoryTransactionError as exc:
+                    invalid += 1
+                    LOG.error("could not recover memory transaction %s: %s", path.name, exc)
+        return {"recovered": recovered, "pending": pending, "invalid": invalid}
+
+    def _apply_locked(
+        self,
+        path: Path,
+        record: Dict[str, Any],
+        mirror: Optional[NoSQLiteMemoryStore],
+    ) -> Dict[str, Any]:
+        self._validate_record(record, path)
+        memory = dict(record["memory"])
+        stored = self._core_store.write(
+            record["tenant"],
+            lambda core: self._ensure_core_memory(core, memory),
+        )
+        if record["state"] == self._PLANNED:
+            record["state"] = self._CORE_COMMITTED
+            _atomic_write_json(path, record)
+
+        if record["requires_mirror"]:
+            if mirror is None:
+                return self._result(record, stored)
+            try:
+                mirror.remember(record["tenant"], stored)
+            except NoSQLiteError as exc:
+                raise MemoryMirrorPending(record["tenant"], record["transaction_id"], exc) from exc
+
+        if record["state"] != self._COMPLETE:
+            record["state"] = self._COMPLETE
+            _atomic_write_json(path, record)
+        return self._result(record, stored)
+
+    @staticmethod
+    def _ensure_core_memory(core: LocalAgentCore, memory: Dict[str, Any]) -> Dict[str, Any]:
+        for entry in core.entries:
+            if entry.id != memory["id"]:
+                continue
+            stored = entry.to_dict()
+            if stored != memory:
+                raise MemoryTransactionConflict("memory id %s already holds different content" % memory["id"])
+            return stored
+        return core.remember(
+            memory["text"],
+            label=memory.get("label"),
+            metadata=memory.get("metadata"),
+            id=memory["id"],
+        )
+
+    def _load_or_create(
+        self,
+        path: Path,
+        transaction_id: str,
+        request: Dict[str, Any],
+        key: Optional[str],
+        requires_mirror: bool,
+    ) -> Dict[str, Any]:
+        if path.exists():
+            record = self._load(path)
+            self._validate_record(record, path)
+            if record["request_fingerprint"] != self._fingerprint(request):
+                raise MemoryTransactionConflict("Idempotency-Key was already used for a different memory write")
+            return record
+        record = {
+            "version": self._VERSION,
+            "transaction_id": transaction_id,
+            "tenant": request["tenant"],
+            "request_fingerprint": self._fingerprint(request),
+            "idempotency_key_hash": self._hash(key) if key is not None else None,
+            "requires_mirror": bool(requires_mirror),
+            "state": self._PLANNED,
+            "memory": {
+                "id": "tx_%s" % transaction_id[:32],
+                "text": request["text"],
+                "label": request["label"],
+                "metadata": request["metadata"],
+            },
+        }
+        _atomic_write_json(path, record)
+        return record
+
+    @staticmethod
+    def _load(path: Path) -> Dict[str, Any]:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise MemoryTransactionError("invalid transaction journal %s" % path.name) from exc
+        if not isinstance(value, dict):
+            raise MemoryTransactionError("transaction journal %s is not an object" % path.name)
+        return value
+
+    def _validate_record(self, record: Dict[str, Any], path: Path) -> None:
+        required = {"version", "transaction_id", "tenant", "request_fingerprint", "requires_mirror", "state", "memory"}
+        if not required.issubset(record) or record.get("version") != self._VERSION:
+            raise MemoryTransactionError("unsupported transaction journal %s" % path.name)
+        if record["state"] not in {self._PLANNED, self._CORE_COMMITTED, self._COMPLETE}:
+            raise MemoryTransactionError("unknown transaction state in %s" % path.name)
+        memory = record["memory"]
+        if not isinstance(memory, dict) or set(memory) != {"id", "text", "label", "metadata"}:
+            raise MemoryTransactionError("invalid memory transaction payload in %s" % path.name)
+        if not isinstance(memory["id"], str) or not isinstance(memory["text"], str):
+            raise MemoryTransactionError("invalid memory transaction value in %s" % path.name)
+        if memory["label"] is not None and not isinstance(memory["label"], str):
+            raise MemoryTransactionError("invalid memory transaction label in %s" % path.name)
+        if not isinstance(memory["metadata"], dict):
+            raise MemoryTransactionError("invalid memory transaction metadata in %s" % path.name)
+        if normalize_tenant_id(record["tenant"]) != record["tenant"]:
+            raise MemoryTransactionError("invalid transaction tenant in %s" % path.name)
+
+    def _path_for(self, tenant_id: str, transaction_id: str) -> Path:
+        tenant_digest = self._hash(tenant_id)[:24]
+        return self._root / tenant_digest / (transaction_id + ".json")
+
+    @staticmethod
+    def _hash(value: Optional[str]) -> str:
+        return hashlib.sha256((value or "").encode("utf-8")).hexdigest()
+
+    def _transaction_id(self, tenant_id: str, key: Optional[str]) -> str:
+        material = key if key is not None else os.urandom(32).hex()
+        return self._hash("%s\0%s" % (tenant_id, material))
+
+    @classmethod
+    def _fingerprint(cls, value: Dict[str, Any]) -> str:
+        return cls._hash(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True))
+
+    @staticmethod
+    def _result(record: Dict[str, Any], memory: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "memory": memory,
+            "transaction": {
+                "id": record["transaction_id"],
+                "state": record["state"],
+                "idempotent": record.get("idempotency_key_hash") is not None,
+            },
+        }
+
+
 def leos_token_offer(access_required: bool = True, enabled: bool = True) -> Dict[str, Any]:
     """Return public metadata for the credential-gated leOS offer."""
     return {
@@ -904,10 +1174,15 @@ def create_app(
             data_dir,
             durability=nosqlite_durability or os.environ.get("LECORE_X402_NOSQLITE_DURABILITY", "sync"),
         )
+    memory_transactions = TenantMemoryTransactions(store, tenant_state_dir) if tenant_state_dir else None
 
     @asynccontextmanager
     async def lifespan(_: Any) -> Any:
         try:
+            if memory_transactions is not None:
+                recovery = memory_transactions.recover_pending(nosqlite_store)
+                if recovery["recovered"] or recovery["pending"] or recovery["invalid"]:
+                    LOG.info("memory transaction recovery: %s", recovery)
             yield
         finally:
             if nosqlite_store is not None:
@@ -917,6 +1192,7 @@ def create_app(
     app.state.memory_backend = memory_backend
     app.state.nosqlite_shadow = nosqlite_shadow
     app.state.nosqlite_store = nosqlite_store
+    app.state.memory_transactions = memory_transactions
     config = config or (X402Config.from_env(require_pay_to=paid) if paid else X402Config.from_env(require_pay_to=False))
     tenant_secret = tenant_secret or os.environ.get("LECORE_X402_TENANT_SECRET")
     leos_access_token = leos_access_token or os.environ.get("LECORE_X402_LEOS_ACCESS_TOKEN")
@@ -996,6 +1272,7 @@ def create_app(
             "backend": memory_backend,
             "nosqlite_shadow": bool(nosqlite_shadow),
             "nosqlite_configured": nosqlite_store is not None,
+            "durable_transactions": memory_transactions is not None,
         }
 
     def nosqlite_unavailable(error: NoSQLiteError) -> HTTPException:
@@ -1159,31 +1436,65 @@ def create_app(
         payload: Dict[str, Any],
         x_admin_token: Optional[str] = Header(default=None),
         x_lecore_tenant: Optional[str] = Header(default=None, alias=TENANT_HEADER),
+        idempotency_key: Optional[str] = Header(default=None, alias=IDEMPOTENCY_HEADER),
     ) -> Dict[str, Any]:
         require_admin(x_admin_token)
         tenant_id = tenant_from_payload(payload, x_lecore_tenant)
         text = validated(_required_text, payload, "text", MAX_MEMORY_CHARS)
+        key = validated(normalize_idempotency_key, idempotency_key)
         label = payload.get("label")
         metadata = payload.get("metadata")
         if label is not None and not isinstance(label, str):
             raise HTTPException(status_code=400, detail="label must be a string")
         if metadata is not None and not isinstance(metadata, dict):
             raise HTTPException(status_code=400, detail="metadata must be an object")
-        memory = store.write(
-            tenant_id,
-            lambda tenant_core: tenant_core.remember(text, label=label, metadata=metadata),
-        )
-        if nosqlite_store is not None:
+
+        transaction = None
+        if memory_transactions is not None:
             try:
-                nosqlite_store.remember(tenant_id, memory)
+                committed = memory_transactions.remember(
+                    tenant_id,
+                    text,
+                    label,
+                    metadata,
+                    key,
+                    nosqlite_store,
+                )
+            except MemoryTransactionConflict as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except MemoryTransactionError as exc:
+                raise HTTPException(status_code=500, detail="memory transaction could not be completed") from exc
             except NoSQLiteError as exc:
                 if memory_backend == MEMORY_BACKEND_NOSQLITE:
                     raise nosqlite_unavailable(exc) from exc
                 LOG.warning("NoSQLite shadow write failed: %s", exc)
+                if not isinstance(exc, MemoryMirrorPending):  # pragma: no cover - mirror errors are wrapped above
+                    raise nosqlite_unavailable(exc) from exc
+                committed = memory_transactions.resume(exc.tenant_id, exc.transaction_id, None)
+            memory = committed["memory"]
+            transaction = committed["transaction"]
+        else:
+            if key is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Idempotency-Key requires LECORE_X402_TENANT_STATE_DIR for durable retries",
+                )
+            memory = store.write(
+                tenant_id,
+                lambda tenant_core: tenant_core.remember(text, label=label, metadata=metadata),
+            )
+            if nosqlite_store is not None:  # pragma: no cover - NoSQLite requires durable tenant state
+                try:
+                    nosqlite_store.remember(tenant_id, memory)
+                except NoSQLiteError as exc:
+                    if memory_backend == MEMORY_BACKEND_NOSQLITE:
+                        raise nosqlite_unavailable(exc) from exc
+                    LOG.warning("NoSQLite shadow write failed: %s", exc)
         return {
             "ok": True,
             "tenant": tenant_id,
             "memory": memory,
+            "transaction": transaction,
         }
 
     @app.post("/admin/tenant-token")
