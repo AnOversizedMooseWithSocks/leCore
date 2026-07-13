@@ -16,3 +16,7 @@ repo.zip
 /temp
 /current backlogs
 docs/wiring_audit_backlog.md
+scripts/.knowledge_cache.json
+scripts/.knowledge_cache_huge.json
+scripts/knowledge_cache.zip
+/scripts/nomic_text

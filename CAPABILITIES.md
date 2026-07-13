@@ -280,6 +280,14 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); g=m.regime_gate('sharp', la
 ```
 *Find it by:* re-enable a niche method, route by regime with a fallback, gate a method behind a detector, use a method only in its regime, conditional dispatch with safe default, regime gate, shelved method behind a detector
 
+### route_semantic
+route a request to the right MODULE by COSINE in nomic's embedding space instead of token overlap -- catches meaning when words don't match ('squish a big array down for storage' -> holographic_coldstore). Uses the shipped 96 KB 64d q8 index. Needs a query vector or a build-time-cached phrase; returns None (caller falls back to token find_capability) rather than fabricate an embedding. Measured 7/12 top-1 vs token 2/12.
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.route_semantic('make my picture less grainy'))
+```
+*Find it by:* route by meaning not keywords, semantic search for a module, find the module that means this, cosine route a request, which module handles this by meaning, embedding router
+
 ### suggest_pipeline
 propose a PIPELINE from one datatype to another (holographic_catalog + holographic_iokinds) by chaining capabilities whose produces feeds the next's consumes. Returns the shortest chain of {name, consumes, produces} steps, or None. The render-graph idea over the whole catalog: the engine proposes a ROUTE from what you have to what you want, not just one capability.
 
@@ -2629,4 +2637,4 @@ import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); x=np.li
 
 ---
 
-*331 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*332 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

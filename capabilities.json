@@ -7085,6 +7085,24 @@
     },
     {
       "aliases": [
+        "route by meaning not keywords",
+        "semantic search for a module",
+        "find the module that means this",
+        "cosine route a request",
+        "which module handles this by meaning",
+        "embedding router"
+      ],
+      "consumes": [],
+      "does": "route a request to the right MODULE by COSINE in nomic's embedding space instead of token overlap -- catches meaning when words don't match ('squish a big array down for storage' -> holographic_coldstore). Uses the shipped 96 KB 64d q8 index. Needs a query vector or a build-time-cached phrase; returns None (caller falls back to token find_capability) rather than fabricate an embedding. Measured 7/12 top-1 vs token 2/12",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.route_semantic('make my picture less grainy'))",
+      "name": "route_semantic",
+      "native": true,
+      "produces": [],
+      "semantic": "analyze/route",
+      "theme": "Discover & drive it (for agents)"
+    },
+    {
+      "aliases": [
         "run a game tick over http",
         "invoke game world remotely",
         "stateless game step",
@@ -7718,6 +7736,6 @@
       "theme": "Scenes you can describe & adjust"
     }
   ],
-  "count": 331,
+  "count": 332,
   "schema_version": "1.0"
 }

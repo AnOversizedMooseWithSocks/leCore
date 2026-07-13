@@ -122,8 +122,18 @@ def collect_code(repo):
     return out
 
 
-def collect_md(repo, window=900, stride=650):
+# Docs REGENERATED from code/catalog on every docs.yml push -- embedding them duplicates content already
+# captured by collect_code/collect_terms, AND churns the cache (their hashes change every rebuild). Skip.
+_GENERATED_DOCS = {'REFERENCE.md', 'CAPABILITIES.md', 'FACULTY_MAP.md', 'DOC_MAP.md', 'API_QUICKREF.md'}
+
+
+def collect_md(repo, window=900, stride=650, skip_generated=True):
     """Markdown -> SLIDING WINDOWS inside each heading-section.
+
+    skip_generated (default True): omit docs rebuilt from code (REFERENCE/CAPABILITIES/FACULTY_MAP/
+    DOC_MAP/API_QUICKREF). Measured (rev. 47): these were ~40% of md windows and the sole reason the
+    embed cache churned on every docs-bot commit -- their text is regenerated, so their hashes move,
+    so they re-embed forever while adding nothing collect_code/collect_terms did not already capture.
 
     WHY (measured): sections have a median length of 2,150 chars (p90 3,750; max 100k). The old code
     truncated each to --max-chars (280) before embedding, so **87% of every section was never seen**.
@@ -140,6 +150,8 @@ def collect_md(repo, window=900, stride=650):
         for f in files:
             if not f.endswith('.md'):
                 continue
+            if skip_generated and f in _GENERATED_DOCS:
+                continue                                    # rebuilt from code; see _GENERATED_DOCS
             p = os.path.join(root, f)
             txt = open(p, encoding='utf-8', errors='ignore').read()
             for sec in re.split(r'\n(?=#{1,4}\s)', txt):

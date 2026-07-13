@@ -7954,6 +7954,75 @@ class UnifiedMind:
         shown. See holographic_catalog."""
         return self._capability_catalog().find_capability(problem, k=k, accepts=accepts, produces=produces)
 
+    def route_semantic(self, problem, k=5, query_vec=None):
+        """N28 -- route a request to the right MODULE by cosine in nomic's embedding space, not token
+        overlap. Uses the 96 KB shipped index (lecore_data/routing/index_64d.npz): 503 module vectors at
+        64d q8 with the ABTT correction baked in. Measured on the 12-ask suite: token overlap ~2/12
+        top-1 (median rank 13 of 503); this router 7/12 top-1 (median rank 1).
+
+        It needs a query VECTOR. Supply one via `query_vec` (a 64d nomic vector your app produced), OR
+        rely on the build-time cache for a known phrase. With NEITHER -- a brand-new free-text query and
+        no model present -- this returns None and the caller should use find_capability (token) instead.
+        It NEVER fabricates an embedding: an honest None beats a confident wrong route.
+
+        Returns [(module_name, cosine)] best-first, or None if the query could not be embedded. Default
+        off in spirit: find_capability is unchanged; this is an additive second path.
+        See holographic_router.EmbeddingRouter."""
+        r = self._embedding_router()
+        if r is None:
+            return None
+        if query_vec is not None:
+            return r.route(query_vec, k=k)
+        cache = getattr(self, "_query_cache", None)
+        if cache is not None:
+            hit = r.route_cached(problem, cache, k=k)
+            if hit is not None:
+                return hit
+        qe = self._query_embedder()                             # N31: offline text -> nomic-64, no model
+        if qe is not None:
+            v = qe.embed(problem)
+            if v is not None:
+                return r.route(v, k=k)
+        return None                                             # no vector, no map, no model -> honest miss
+
+    def _embedding_router(self):
+        """Lazily load the shipped routing index. Returns None (never raises) if the index or numpy is
+        absent, so the token router keeps working on a minimal install -- degrade, don't crash."""
+        cached = getattr(self, "_embedding_router_obj", "unset")
+        if cached != "unset":
+            return cached
+        router = None
+        try:
+            import lecore_data
+            import holographic.semantic_router.holographic_router as _hr
+            # prefer the 128d index (measured knee: top-1 plateaus at 128d; 64d cost 4 hits for 32 KB).
+            # fall back to a legacy 64d index if that is all a given install shipped.
+            for fname in ("index_128d.npz", "index_64d.npz"):
+                if lecore_data.exists("routing", fname):
+                    router = _hr.EmbeddingRouter(lecore_data.file("routing", fname))
+                    break
+        except Exception:
+            router = None                                       # any failure -> fall back to tokens
+        self._embedding_router_obj = router
+        return router
+
+    def _query_embedder(self):
+        """Lazily load the N31 offline query embedder (text -> nomic-64 via SIF + ridge W). Returns None
+        if the artifact is absent, so route_semantic keeps its honest fallback -- the map is optional."""
+        cached = getattr(self, "_query_embedder_obj", "unset")
+        if cached != "unset":
+            return cached
+        qe = None
+        try:
+            import lecore_data
+            import holographic.semantic_router.holographic_queryembed as _qe
+            if lecore_data.exists("routing", "query_embed.npz"):
+                qe = _qe.QueryEmbedder(lecore_data.file("routing", "query_embed.npz"))
+        except Exception:
+            qe = None
+        self._query_embedder_obj = qe
+        return qe
+
     def find_capability_uris(self, problem, k=3):
         """Like find_capability, but each result is annotated with its disambiguating capability URI(s) so a caller
         NEVER gets a bare ambiguous name (holographic_catalog + holographic_capuri). Returns [{name, does, example,

@@ -1121,6 +1121,18 @@ def default_catalog():
                                                 "disambiguated capability search", "capability search with uris",
                                                 "find functionality with full paths"),
                           semantic="analyze/pipeline")
+    c.register_capability("route_semantic", "route a request to the right MODULE by COSINE in nomic's embedding "
+                          "space instead of token overlap -- catches meaning when words don't match ('squish a big "
+                          "array down for storage' -> holographic_coldstore). Uses the shipped 96 KB 64d q8 index. "
+                          "Takes a query vector, a build-time-cached phrase, OR free text when the N31 offline embedder ships "
+                          "(SIF token-pool + ridge W, no model); returns None (caller falls back to token find_capability) "
+                          "rather than fabricate an embedding. Measured 7/12 top-1 vs token 2/12",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "print(m.route_semantic('make my picture less grainy'))",
+                          native=True, aliases=("route by meaning not keywords", "semantic search for a module",
+                                                "find the module that means this", "cosine route a request",
+                                                "which module handles this by meaning", "embedding router"),
+                          semantic="analyze/route")
     c.register_capability("resolve_capability_uri", "resolve a bare capability NAME or partial path to the FULL "
                           "capability URI(s) (holographic_capuri) -- 'rotation' -> both meshskin and scenegraph "
                           "paths; 'sdf/sphere' narrows to one. The disambiguation step when a name collides: supply "

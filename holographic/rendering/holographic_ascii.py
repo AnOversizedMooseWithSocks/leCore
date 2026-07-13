@@ -20,6 +20,15 @@ DETAIL PER CHARACTER (the design axis)
                    (an 8x8 Bayer matrix -- vectorised, unlike error diffusion which is inherently serial).
   ANSI color ('256' or 'truecolor') can wrap any glyph mode; 'half' requires it by construction.
 
+APPROVED CHARSET (scope: the GLYPH-RAMP density modes only)
+  The named ramps (short / long / dots / blocks) and the 'ramp' + 'edge' modes draw from an APPROVED palette --
+  ASCII punctuation plus the Unicode shade/block family (see APPROVED_RAMP_CHARS) -- and nothing else: no letters,
+  digits, or #%@&$^"'?, which render unevenly across terminal fonts. _selftest asserts every ramp stays inside it.
+  This does NOT apply to 'braille' or 'half': their glyphs are not palette characters but ADDRESSABLE PIXELS -- a
+  braille cell is a 2x4 dot grid (all 256 U+2800..U+28FF patterns are needed for lossless dot addressing), and a
+  half-block is a 2-pixel colour cell (U+2580). Constraining those to a character subset would break the
+  pixel-exactness that is the entire reason those modes exist, so by design they keep their full glyph range.
+
 RESOLUTION AND SPEED
   `width` is the output width in CHARACTERS; the pixel resolution each mode consumes is width x (1|2|2) wide and
   aspect-derived rows x (1|2|4) tall. Sampling is box-average bilinear, fully vectorised (fancy indexing + one
@@ -36,10 +45,22 @@ to the byte so a text render can sit in a regression test.
 
 import numpy as np
 
-#: Brightness-ordered glyph ramps. SHORT is the classic 10-step; LONG is the ~70-step standard ramp for smoother
-#: gradients (both start at space = black). A custom ramp string can be passed straight to ascii_render.
-RAMP_SHORT = " .:-=+*#%@"
-RAMP_LONG = (" .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$")
+#: The approved glyph palette for the DENSITY ramps (not braille/half -- see the module docstring). Punctuation
+#: that renders evenly across terminal fonts, plus the Unicode shade/block family. This is the single source of
+#: truth _selftest checks every ramp against; a new ramp glyph outside this set fails the selftest loudly.
+APPROVED_RAMP_CHARS = set(" .:-_|=*(){}[]/\\><,~;!`'\u2591\u2592\u2593\u2588"
+                          "\u2580\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2589\u258a\u258b\u258c\u258d\u258e\u258f"
+                          "\u2590\u2594\u2595\u2596\u2597\u2598\u2599\u259a\u259b\u259c\u259d\u259e\u259f"
+                          "\u25a0\u25a1\u25aa\u25ab")
+
+#: Brightness-ordered glyph ramps, dark -> bright, each starting at space = black. CONSTRAINED CHARSET: only the
+#: approved render glyphs are used -- ASCII punctuation (. , - : ~ _ ; < > ! ) ( } { ] [ \\ / = |) plus the Unicode
+#: shade/block family (light/medium/dark shade + full block). NO letters, digits, or #%@&$^"'? -- those rendered
+#: unevenly across terminal fonts and are outside the approved set. Each ramp below is sorted by MEASURED ink
+#: coverage so it is strictly monotonic (asserted in _selftest); the shade blocks carry the smooth mid-to-bright
+#: gradient the old letter-soup faked. A custom ramp string can still be passed straight to ascii_render.
+RAMP_SHORT = " .-:=*\u2592\u2593\u2588"
+RAMP_LONG = (" .,-:~_;<>!)({}][\\/=|\u2591*\u2592\u2593\u2588")
 
 #: 8x8 Bayer ordered-dither matrix, normalised to [0,1). WHY ordered dither and not Floyd-Steinberg: error
 #: diffusion is a serial left-to-right, top-to-bottom recurrence (each pixel's error feeds the next), which cannot
@@ -121,7 +142,7 @@ RAMPS = {
     "short": RAMP_SHORT,
     "long": RAMP_LONG,
     "blocks": " \u2591\u2592\u2593\u2588",           # light/medium/dark shade + full block
-    "dots": " .\u2591:\u2592*\u2593#\u2588",
+    "dots": " .:\u2591*\u2592\u2593\u2588",
 }
 
 
@@ -382,6 +403,8 @@ def _selftest():
     5. ANSI: truecolor escapes present iff requested, reset appended; 'half' refuses to run colorless.
     6. DETERMINISM: byte-identical across two calls.
     7. SPEED: a 240x240 -> 100-wide braille render stays comfortably interactive (< 0.25 s here, typically ms).
+    8. CHARSET: every named ramp and the 'ramp'/'edge' output draws ONLY from APPROVED_RAMP_CHARS (the constrained
+       palette); braille/half are exempt by design (addressable pixels, not palette glyphs) and are NOT checked.
     """
     import time
 
@@ -493,6 +516,21 @@ def _selftest():
     _h = _ink[-1] - _ink[0] + 1
     _w = max(c[1] for c in _cols) - min(c[0] for c in _cols) + 1
     assert 1.5 <= _w / _h <= 2.6, ("sphere ascii stretched: aspect %.2f (want ~2.0)" % (_w / _h))
+
+    # (8) CHARSET: every named ramp glyph is in the approved palette, and each ramp is brightness-MONOTONIC
+    # (dark->bright by ink coverage). Braille/half are exempt by design and deliberately NOT checked here.
+    _cov = {" ": 0.0, ".": 0.05, ",": 0.08, ":": 0.10, "-": 0.10, "_": 0.12, "~": 0.12, ";": 0.14,
+            "<": 0.16, ">": 0.16, "!": 0.16, "(": 0.18, ")": 0.18, "[": 0.20, "]": 0.20, "{": 0.20,
+            "}": 0.20, "/": 0.20, "\\": 0.20, "=": 0.20, "|": 0.22, "\u2591": 0.25, "*": 0.28,
+            "\u2592": 0.50, "\u2593": 0.75, "\u2588": 1.0}
+    for _name, _r in list(RAMPS.items()) + [("SHORT", RAMP_SHORT), ("LONG", RAMP_LONG)]:
+        _bad = sorted({ch for ch in _r if ch not in APPROVED_RAMP_CHARS})
+        assert not _bad, ("ramp %r uses non-approved glyph(s) %r" % (_name, _bad))
+        _c = [_cov[ch] for ch in _r if ch in _cov]
+        assert all(_c[i] <= _c[i + 1] for i in range(len(_c) - 1)), ("ramp %r not brightness-monotonic" % _name)
+    _out = ascii_render(np.tile(np.linspace(0, 1, 48), (24, 1)), width=40, mode="ramp")
+    _bad_out = sorted({ch for ch in _out if ch not in APPROVED_RAMP_CHARS and ch != "\n"})
+    assert not _bad_out, ("ramp render emitted non-approved glyph(s) %r" % _bad_out)
 
     print("holographic_ascii selftest OK (ramp monotone; braille kept a hairline ramp lost %d>=%d; "
           "edge '|' fires; ANSI 256 codebook byte-matches per-cell + interactive; named ramps resolve; "

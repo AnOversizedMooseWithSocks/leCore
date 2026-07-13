@@ -32249,27 +32249,100 @@ LESSON (on record): when inserting into tools/unifiers.py by anchor, verify WHIC
 -- DEFERRED and NOT_APPLICABLE have different contracts (wording markers vs registry membership) and the traps
 distinguish them on purpose. Also: the sharded full suite paid for itself on its first run.
 
+## ASCII RENDER -- glyph ramps constrained to the approved charset (braille/half exempt by design, per Moose)
+
+Moose specified an approved render charset (ASCII punctuation + the Unicode shade/block/braille families; NO
+letters/digits/#%@&$^"'?). AUDITED the live holographic_ascii ramps against it FIRST: 'blocks' and the edge glyphs
+(| / - \) were already compliant; 'short' had 4 violations (+#%@), 'dots' had 1 (#), and 'long' had 47 (built mostly
+from letters/digits -- the classic 70-step ramp).
+
+REBUILT the ramps from the approved set, and -- caught by MEASUREMENT, not eyeball -- ensured each is strictly
+BRIGHTNESS-MONOTONIC by measured ink coverage (my first drafts of 'long'/'dots' were compliant but NON-monotonic;
+sorting by coverage fixed them):
+  short  = " .-:=*░▒▓█"  (the ░/▒/▓/█ shade family carries the smooth mid-to-bright gradient the old #%@ faked)
+  long   = " .,-:~_;<>!)({}][\\/=|░*▒▒▓█"  (punctuation lead-in, then the shade/block family)
+  dots   = " .:░*▒▓█"     blocks = " ░▒▓█" (unchanged, already compliant)
+Added APPROVED_RAMP_CHARS as the single source of truth + a module-docstring scope note.
+
+SCOPE DECISION (asked Moose, answered "charset rule = ramps only"): the constraint applies to the glyph-RAMP density
+modes ('ramp'/'edge' + the named ramps). 'braille' and 'half' are EXEMPT BY DESIGN -- their glyphs are addressable
+PIXELS, not palette characters: a braille cell needs all 256 U+2800..U+28FF dot patterns for lossless 2x4 dot
+addressing (only 129 are in the approved set -- 50%), and 'half' is a 2-pixel colour cell (U+2580). Constraining them
+would break the pixel-exactness that is the whole reason those modes exist. Documented loudly in the module docstring.
+
+VERIFIED: selftest gained contract (8) -- every named ramp + the actual 'ramp' render output stays inside
+APPROVED_RAMP_CHARS AND each ramp is brightness-monotonic; braille/half deliberately NOT checked. selftest green;
+gradient + disc renders eyeballed clean; integration + catalog + render tests green (catalog examples use mode=
+'braille', still valid); audits 0/0/0; docs regen. Additive -- only the ramp glyph choices changed; the resolution
+knob, modes, aspect, determinism, and ANSI paths are untouched. KEPT NEGATIVE: braille is NOT charset-restricted; do
+not "fix" it to the palette -- that was a deliberate, measured design decision.
+
 
 ====================================================================================
-SEMANTIC COVERAGE MERGE (assimilation program -> repo)
+N28 -- EMBEDDING ROUTER WIRED (the 96 KB index becomes a live faculty)
 ====================================================================================
-Added, additively (nothing existing modified):
-  tools/semantic/knowledge_index.py   embedding cache + routing suite + NEW --exam gate
-                                      (--require-top5 8 --require-median 2; exits 1 below
-                                      the measured rev-36 bars; gate runs LAST so a failing
-                                      exam never hides the report above it)
-  tools/semantic/nomic_forward.py     the NumPy BERT-style forward pass the index imports
-  tools/semantic/lint_scripts.py      static gate: alias shadowing = ERROR, style = WARN
-  tools/semantic/.gitignore           weights + cache never enter git
-  .github/workflows/semantic-coverage.yml
-                                      4th workflow beside ci/docs/package (checked: distinct
-                                      name, no docs-bot re-trigger, disjoint cache keys,
-                                      ci.yml's determinism pins + py3.12 conventions).
-                                      Weights arrive via NOMIC_WEIGHTS_URL / NOMIC_VOCAB_URL
-                                      repo variables + actions/cache; first run is manual
-                                      (workflow_dispatch) and populates the cache (~1-2 h,
-                                      once; warm runs ~1 min -- the cache is content-addressed).
-KEPT BUG (caught in-session, on record): the first --exam insertion anchored on `if args.save:`,
-which in this file sits BEFORE the suite computes its numbers -> guaranteed NameError. The anchor
-lesson from tools/unifiers.py applies to every by-anchor insertion: verify WHAT the anchor line
-belongs to before inserting. Gate verified: exits 1 on miss, prints-and-continues without --exam.
+Built: holographic/semantic_router/holographic_router.py (EmbeddingRouter) + mind.route_semantic(),
+delegating, additive, default-behaviour-preserving (find_capability token path UNCHANGED). Ships
+lecore_data/routing/index_64d.npz -- 503 module vectors, 64d q8, ABTT (mu,pc) baked in, 96 KB,
+extracted from the build cache by tools/semantic/export_index.py.
+  Measured contract: token overlap ~2/12 top-1 (median rank 13 of 503); nomic embedding router 7/12
+  top-1 (median 1). route_semantic returns [(module, cosine)] for a query VECTOR or a build-time-cached
+  phrase; with neither (new free text, no model) it returns None so the caller falls back to the token
+  router -- it NEVER fabricates an embedding. Honest miss > confident wrong route.
+  Loader degrades: missing index/numpy -> None, token router keeps working (minimal install safe).
+Gates green: audit_imports BROKEN=0, catalog_gaps 0, skill_lint 0, does<=600. Discoverability 1/1
+(find_capability('route by meaning not keywords') -> route_semantic rank 1).
+KEPT NEGATIVE: the index and the mind's native perceive() are DIFFERENT spaces (nomic-64 vs 256d
+learn_dictionary) -- not interchangeable. route_semantic needs a nomic-64 vector; the native encoder
+cannot supply one. Closing that needs either the nomic encoder at runtime (the footprint we refused,
+rev.35) or N31's ridge map from a token-table pool. Until then: cached-phrase and app-supplied-vector
+paths only. That is the honest boundary of a model-free router.
+KEPT BUG (mine): selftest first asserted cosine>0.9 on a q8+ABTT round-trip; q8 quant + top-PC removal
+put it at 0.82. RANK is the contract, not absolute cosine -- assert the ranking, not a magic threshold.
+
+
+====================================================================================
+N31 -- OFFLINE QUERY EMBEDDER (free-text routing with NO model)
+====================================================================================
+Built: holographic/semantic_router/holographic_queryembed.py (QueryEmbedder) + route_semantic now tries,
+in order: supplied vector -> cached phrase -> OFFLINE EMBED (SIF token-pool + ridge W) -> honest None.
+Artifact ships as lecore_data/routing/query_embed.npz (token table + freqs + W + ABTT pc; a few MB, NO
+transformer). Fit by tools/semantic/distill_map.py export_query_embed(). Loader is lazy + optional:
+absent artifact -> None -> route_semantic falls back exactly as before (N28 behaviour preserved).
+  Mechanism proven on synthetic data: routing over W.sif(query) tracks TRUE-embedding routing 12/12
+  when the spaces are linearly related, held-out R^2 0.924. THE REAL R^2 IS THE GATE and is measured by
+  distill_map.py on the actual corpus -- building the pipe does not assert the water is clean. Until that
+  run clears the bar (>=6/12 top-1, median <=2 per the footprint decision), query_embed.npz is NOT
+  shipped and the offline path stays dormant (returns None). This is the last piece that turns
+  route_semantic from 'phrases we anticipated' into 'any request', still model-free at runtime.
+Gates green: audit_imports BROKEN=0, catalog_gaps 0, skill_lint 0. Selftest: deterministic text->vec,
+unknown-token -> None, correct nomic-64 shape.
+KEPT NEGATIVE (carried from rev.36/N30): SIF's frequency weighting barely beat mean-pooling on synthetic
+data; the load-bearing step is the ABTT first-PC removal. The fit script reports [raw SIF] and [SIF+ABTT]
+separately so the real corpus settles which matters -- do not assume SIF weights help.
+
+
+====================================================================================
+ROUTING INDEX: 64d -> 128d (measured knee)
+====================================================================================
+Dimension sweep on real cached vectors + real ASKS_MODULE: 64d=2/12 top-1, 128d=6/12 (plateau), 768d=6/12.
+64d cost 4 top-1 hits to save 32 KB -- a bad trade that came from letting the 26 MB CACHE size scare set
+the INDEX dimension (wrong object; the index is <400 KB even at full 768d). Shipped index now
+lecore_data/routing/index_128d.npz (128 KB, 503 vectors, 128d q8, ABTT baked). export_index default=128;
+loader prefers 128d, falls back to 64d. KEPT NEGATIVE: sweep the parameter of the thing that SHIPS against
+its own bar; do not inherit a constraint from a different object. Frontier (N38/N39): native high-D +
+role-filler structured index (bind DOES/CONSUMES/PRODUCES) vs the flat 128d baseline -- measurable, kept-
+negative-gated.
+
+
+====================================================================================
+SEED SLIMMED: 26.5 MB -> 731 KB (routing-only)
+====================================================================================
+The committed CI seed was the FULL cache (18,963 entries, 26.5 MB xz) -- but the routing exam only ranks
+over 'code' entries (verified: E[code_idx]). The other ~18,460 md/NOTES/generated-doc windows were never
+scored and were mostly stale churn. New seed = code docstrings + ASKS_MODULE/NEGATIVE queries only: 521
+entries, 768d float16, xz -> 731 KB (36x smaller). tools/semantic/routing_seed.npz.xz; seed_cache.build()
+now emits only routing keys via _routing_keys() (imports knowledge_index's collectors -- key format never
+guessed). 768d kept so a future dim change (we ship 128d now) still restores from the same seed. The full
+cache stays local/gitignored as a build intermediate. KEPT PRINCIPLE: seed exactly what the gate consumes,
+nothing more -- the exam scores code, so the seed carries code.
