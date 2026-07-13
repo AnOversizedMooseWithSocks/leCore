@@ -9,14 +9,19 @@ from holographic_x402_api import (
     DEFAULT_NETWORK,
     DEFAULT_PRICE,
     DEFAULT_TENANT_ID,
+    IDEMPOTENCY_HEADER,
     LEOS_SITE_URL,
     LEOS_ACCESS_HEADER,
     LEOS_TOKEN_CA,
     LEOS_TOKEN_PRICE,
     MEMORY_BACKEND_NOSQLITE,
+    MemoryTransactionConflict,
+    MemoryMirrorPending,
+    NoSQLiteError,
     TENANT_HEADER,
     TENANT_TOKEN_HEADER,
     TenantCoreStore,
+    TenantMemoryTransactions,
     X402Config,
     create_app,
     landing_page_html,
@@ -386,6 +391,143 @@ def test_public_memory_persists_across_app_restart(tmp_path):
     assert "public-persisted" in [hit["label"] for hit in recalled.json()["hits"]]
 
 
+def test_durable_memory_transaction_reuses_one_memory_for_retries(tmp_path):
+    store = TenantCoreStore(LocalAgentCore(), tmp_path)
+    transactions = TenantMemoryTransactions(store, tmp_path)
+
+    first = transactions.remember(
+        "acme",
+        "one durable transaction memory",
+        "journal",
+        {"source": "test"},
+        "retry-001",
+        None,
+    )
+    second = transactions.remember(
+        "acme",
+        "one durable transaction memory",
+        "journal",
+        {"source": "test"},
+        "retry-001",
+        None,
+    )
+
+    assert first["memory"] == second["memory"]
+    assert first["transaction"]["state"] == "complete"
+    entries = store.read("acme", lambda core: core.entries)
+    assert [entry.id for entry in entries] == [first["memory"]["id"]]
+
+    with pytest.raises(MemoryTransactionConflict, match="different memory write"):
+        transactions.remember("acme", "different payload", "journal", {}, "retry-001", None)
+
+
+def test_durable_memory_transaction_recovers_a_failed_mirror(tmp_path):
+    class FlakyMirror:
+        def __init__(self):
+            self.fail = True
+            self.memories = []
+
+        def remember(self, tenant_id, memory):
+            if self.fail:
+                raise NoSQLiteError("mirror offline")
+            self.memories.append((tenant_id, dict(memory)))
+
+    store = TenantCoreStore(LocalAgentCore(), tmp_path)
+    transactions = TenantMemoryTransactions(store, tmp_path)
+    mirror = FlakyMirror()
+
+    with pytest.raises(NoSQLiteError, match="mirror offline") as failed:
+        transactions.remember("acme", "recover this mirror write", "journal", {}, "retry-002", mirror)
+
+    committed = store.read("acme", lambda core: [entry.to_dict() for entry in core.entries])
+    assert len(committed) == 1
+    assert isinstance(failed.value, MemoryMirrorPending)
+    pending = transactions.resume("acme", failed.value.transaction_id, None)
+    assert pending["transaction"]["state"] == "core_committed"
+    assert len(store.read("acme", lambda core: core.entries)) == 1
+
+    restarted = TenantMemoryTransactions(TenantCoreStore(LocalAgentCore(), tmp_path), tmp_path)
+    mirror.fail = False
+    recovery = restarted.recover_pending(mirror)
+
+    assert recovery == {"recovered": 1, "pending": 0, "invalid": 0}
+    assert mirror.memories == [("acme", committed[0])]
+    retried = restarted.remember("acme", "recover this mirror write", "journal", {}, "retry-002", mirror)
+    assert retried["memory"] == committed[0]
+    assert len(TenantCoreStore(LocalAgentCore(), tmp_path).read("acme", lambda core: core.entries)) == 1
+
+
+def test_admin_remember_idempotency_header_is_durable_and_conflicts_cleanly(tmp_path):
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    client = fastapi_testclient.TestClient(
+        create_app(
+            config=X402Config(pay_to="0xabc"),
+            paid=False,
+            admin_token="admin-secret",
+            tenant_state_dir=tmp_path,
+        )
+    )
+    headers = {"X-Admin-Token": "admin-secret", IDEMPOTENCY_HEADER: "api-retry-001"}
+    payload = {"text": "idempotent API memory", "label": "idempotent"}
+
+    first = client.post("/admin/remember", headers=headers, json=payload)
+    second = client.post("/admin/remember", headers=headers, json=payload)
+    conflict = client.post(
+        "/admin/remember",
+        headers=headers,
+        json={"text": "idempotent API memory but changed", "label": "idempotent"},
+    )
+
+    assert first.status_code == 200 and second.status_code == 200
+    assert first.json()["memory"] == second.json()["memory"]
+    assert first.json()["transaction"]["state"] == "complete"
+    assert conflict.status_code == 409
+
+
+def test_idempotency_header_requires_a_durable_tenant_state_dir():
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    client = fastapi_testclient.TestClient(
+        create_app(config=X402Config(pay_to="0xabc"), paid=False, admin_token="admin-secret")
+    )
+
+    response = client.post(
+        "/admin/remember",
+        headers={"X-Admin-Token": "admin-secret", IDEMPOTENCY_HEADER: "requires-state"},
+        json={"text": "this key needs durable state"},
+    )
+
+    assert response.status_code == 400
+    assert "TENANT_STATE_DIR" in response.json()["detail"]
+
+
+def test_shadow_mirror_failure_keeps_the_original_unkeyed_transaction(tmp_path):
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    client = fastapi_testclient.TestClient(
+        create_app(
+            core=LocalAgentCore(),
+            config=X402Config(pay_to="0xabc"),
+            paid=False,
+            admin_token="admin-secret",
+            tenant_state_dir=tmp_path / "core",
+            nosqlite_shadow=True,
+            nosqlite_binary=str(tmp_path / "missing-nosqlite"),
+            nosqlite_data_dir=tmp_path / "nosqlite",
+        )
+    )
+
+    response = client.post(
+        "/admin/remember",
+        headers={"X-Admin-Token": "admin-secret"},
+        json={"text": "shadow write survives its first mirror failure", "label": "shadow"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["transaction"]["state"] == "core_committed"
+    persisted = TenantCoreStore(LocalAgentCore(), tmp_path / "core")
+    entries = persisted.read(DEFAULT_TENANT_ID, lambda core: core.entries)
+    assert len(entries) == 1 and entries[0].label == "shadow"
+
+
 def test_nosqlite_memory_backend_isolates_tenants_and_restarts(tmp_path):
     fastapi_testclient = pytest.importorskip("fastapi.testclient")
     binary = _nosqlite_binary()
@@ -409,6 +551,7 @@ def test_nosqlite_memory_backend_isolates_tenants_and_restarts(tmp_path):
             "backend": MEMORY_BACKEND_NOSQLITE,
             "nosqlite_shadow": False,
             "nosqlite_configured": True,
+            "durable_transactions": True,
         }
 
         public = first.post(

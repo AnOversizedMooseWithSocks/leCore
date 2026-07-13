@@ -70,8 +70,20 @@ Add memories locally as the seller:
 curl -X POST http://127.0.0.1:4021/admin/remember \
   -H "Content-Type: application/json" \
   -H "X-Admin-Token: local-admin-secret" \
+  -H "Idempotency-Key: initial-memory-001" \
   -d '{"text":"local agents need deterministic durable memory","label":"memory"}'
 ```
+
+When `LECORE_X402_TENANT_STATE_DIR` is configured, admin writes use a small
+durable transaction journal. Reuse the same `Idempotency-Key` after a timeout:
+the API returns the original memory rather than creating another entry. Reusing
+one key with a different request is rejected with `409 Conflict`.
+
+For an enabled NoSQLite mirror, the journal records the core commit before
+projecting the same stable memory id to NoSQLite. A temporary NoSQLite failure
+leaves that projection pending; the same idempotent retry, or the next app
+startup, resumes it without duplicating core memory. The implementation does
+not advertise cross-store rollback it cannot provide.
 
 Issue a private tenant token:
 
@@ -145,6 +157,11 @@ Before cutover, set `LECORE_X402_NOSQLITE_SHADOW=1` while leaving
 `LECORE_X402_MEMORY_BACKEND=core`. Admin writes are mirrored; recall continues
 to serve from the core while differences are logged without query text or
 tenant identifiers.
+
+NoSQLite-enabled writes require `LECORE_X402_TENANT_STATE_DIR`, which is also
+where the transaction journal lives. Keep that directory on durable shared
+storage with the tenant state; do not delete `.x402-memory-transactions` during
+normal deployment cleanup.
 
 NoSQLite filesystem mode holds one nonblocking exclusive writer lock for the
 life of its process. Run exactly one active writer against a given data
