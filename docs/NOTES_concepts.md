@@ -32413,3 +32413,33 @@ here -- verified the exam still routes with the code-only corpus. Now a cold CI 
 delta), not 5000 windows. KEPT PRINCIPLE (load-bearing): the committed seed's scope and the CI embed
 step's scope MUST be the same set, or the seed doesn't prevent the work it was built to prevent. Slimming
 one without the other is worse than slimming neither.
+
+
+====================================================================================
+CI MemoryError: garbage safetensors header (bad download), not real OOM
+====================================================================================
+embed step crashed with MemoryError in read_st at json.loads(f.read(n)...): n = the 8-byte header
+length, which was astronomically large because the downloaded 'model.safetensors' was actually an HTML
+error page (curl without -f saved a 404/redirect/blob-viewer page AS the file). read_st read '<!DOCTYPE'
+as a uint64 length -> tried to allocate exabytes -> MemoryError. NOT a real out-of-memory (the model is
+~550 MB; runners have 7 GB). ROOT CAUSE: NOMIC_WEIGHTS_URL was likely a HuggingFace 'blob/' URL (HTML
+viewer) instead of 'resolve/' (raw bytes), and the fetch step's curl lacked -f. FIX: fetch step now uses
+curl -fL --retry 3 (HTTP errors fail the step), guards empty vars in English, and runs
+tools/semantic/check_weights.py to reject a non-safetensors download with a clear message BEFORE the
+forward pass. KEPT LESSON (again): my earlier -f/-guard hardening landed in a staging copy, not the
+shipped workflow -- third time this session an edit missed the committed file. Verify against the zip.
+Also: heredoc-in-yaml-run broke indentation AGAIN; the sanity check lives in a script, not an inline
+heredoc.
+
+
+====================================================================================
+CI FIX: --no-md crashed sections [4]/[5] (md-dependent) with IndexError
+====================================================================================
+With --no-md the md corpus is empty, but section [4] (kept-negative lookup) did
+md_entries[kw_rank(a, md_entries)[0]] -> kw_rank returns [] on empty -> IndexError. The routing exam [3]
+had already PASSED (128d 6/12 top-1, median 2) -- the crash was purely in a diagnostic section that only
+makes sense with md. FIX: sections [4] and [5] now run only `if md_entries` (else print a one-line skip
+notice); the cache dump and the --exam GATE stay at main() top-level so they run regardless. KEPT
+PRINCIPLE: a flag that removes a corpus (--no-md) must guard EVERY consumer of that corpus, not just the
+embed assembly -- I scoped the producer but missed two downstream consumers. Grep for every use of the
+thing a flag disables.

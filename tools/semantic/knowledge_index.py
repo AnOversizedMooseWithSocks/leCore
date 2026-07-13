@@ -433,60 +433,66 @@ def main():
     print("=" * 90)
     md_idx = [i for i, e in enumerate(entries) if e[0] in ('docs', 'note')]
     md_entries = [entries[i] for i in md_idx]
+    if not md_entries:
+        # --no-md skips the markdown corpus, so the negative-lookup (which searches md sections) has
+        # nothing to rank. It is a diagnostic section, not the gate -- skip it cleanly. The routing
+        # exam in [3] already ran and is what --exam gates on.
+        print("  (skipped: --no-md, no markdown corpus to search for kept-negatives)")
+    else:
 
-    # SCORER FIX: retrieval ranks WINDOWS but collapse_by_parent returns one window per SECTION.
-    # The needle may sit in a different window of the same section, so a correct retrieval was being
-    # scored as a miss. Judge the hit at PARENT-SECTION level -- the unit the ranking actually returns.
-    _by_parent = {}
-    for e in md_entries:
-        _by_parent.setdefault(parent_of(e[1]), []).append(e[2])
+        # SCORER FIX: retrieval ranks WINDOWS but collapse_by_parent returns one window per SECTION.
+        # The needle may sit in a different window of the same section, so a correct retrieval was being
+        # scored as a miss. Judge the hit at PARENT-SECTION level -- the unit the ranking actually returns.
+        _by_parent = {}
+        for e in md_entries:
+            _by_parent.setdefault(parent_of(e[1]), []).append(e[2])
 
-    def hit(entry, needle):
-        p = parent_of(entry[1])
-        blob = p + ' ' + ' '.join(_by_parent.get(p, ()))
-        return needle.lower() in blob.lower()
-    kwn = sum(hit(md_entries[kw_rank(a, md_entries)[0]], nd) for a, nd in ASKS_NEGATIVE)
-    print(f"  KEYWORD baseline top-1: {kwn}/{len(ASKS_NEGATIVE)}")
-    Qn = np.array([embed_cached(f"search_query: {a}") for a, _ in ASKS_NEGATIVE])
-    for d in (768, 128, 64):
-        ab_d = AllButTheTop(E[:, :d], k=args.abtt)
-        Ed = ab_d(E[md_idx][:, :d])
-        Qnd = ab_d(Qn[:, :d])
-        t1 = t5 = 0
-        detail = []
-        for i, (a, nd) in enumerate(ASKS_NEGATIVE):
-            full = np.argsort(-(Ed @ Qnd[i]))
-            order = collapse_by_parent(full, md_entries)[:5]
-            h1 = hit(md_entries[order[0]], nd)
-            h5 = any(hit(md_entries[j], nd) for j in order)
-            t1 += h1; t5 += h5
+        def hit(entry, needle):
+            p = parent_of(entry[1])
+            blob = p + ' ' + ' '.join(_by_parent.get(p, ()))
+            return needle.lower() in blob.lower()
+        kwn = sum(hit(md_entries[kw_rank(a, md_entries)[0]], nd) for a, nd in ASKS_NEGATIVE)
+        print(f"  KEYWORD baseline top-1: {kwn}/{len(ASKS_NEGATIVE)}")
+        Qn = np.array([embed_cached(f"search_query: {a}") for a, _ in ASKS_NEGATIVE])
+        for d in (768, 128, 64):
+            ab_d = AllButTheTop(E[:, :d], k=args.abtt)
+            Ed = ab_d(E[md_idx][:, :d])
+            Qnd = ab_d(Qn[:, :d])
+            t1 = t5 = 0
+            detail = []
+            for i, (a, nd) in enumerate(ASKS_NEGATIVE):
+                full = np.argsort(-(Ed @ Qnd[i]))
+                order = collapse_by_parent(full, md_entries)[:5]
+                h1 = hit(md_entries[order[0]], nd)
+                h5 = any(hit(md_entries[j], nd) for j in order)
+                t1 += h1; t5 += h5
+                if d == 768:
+                    detail.append((a, nd, md_entries[order[0]][1], h1, h5))
+            print(f"  EMBEDDING @{d:3d}d: top-1 {t1}/{len(ASKS_NEGATIVE)}  top-5 {t5}/{len(ASKS_NEGATIVE)}")
             if d == 768:
-                detail.append((a, nd, md_entries[order[0]][1], h1, h5))
-        print(f"  EMBEDDING @{d:3d}d: top-1 {t1}/{len(ASKS_NEGATIVE)}  top-5 {t5}/{len(ASKS_NEGATIVE)}")
-        if d == 768:
-            for a, nd, g, h1, h5 in detail:
-                mark = 'HIT ' if h1 else ('top5' if h5 else 'MISS')
-                print(f"     [{mark}] {a[:44]:44s} -> {g[:44]:44s} (want '{nd}')")
+                for a, nd, g, h1, h5 in detail:
+                    mark = 'HIT ' if h1 else ('top5' if h5 else 'MISS')
+                    print(f"     [{mark}] {a[:44]:44s} -> {g[:44]:44s} (want '{nd}')")
 
-    # ---- [5] neighborhoods
-    print("\n" + "=" * 90)
-    print("[5] SEMANTIC NEIGHBORHOODS (is this geometry, or luck?)")
-    print("=" * 90)
-    En = abtt(E)
-    for p in PROBES:
-        q = abtt(embed_cached(f"search_query: {p}"))[0]
-        order = collapse_by_parent(np.argsort(-(En @ q)), entries)[:5]
-        print(f"  '{p}'")
-        for j in order:
-            print(f"      [{entries[j][0]}] {entries[j][1][:66]}")
+        # ---- [5] neighborhoods
+        print("\n" + "=" * 90)
+        print("[5] SEMANTIC NEIGHBORHOODS (is this geometry, or luck?)")
+        print("=" * 90)
+        En = abtt(E)
+        for p in PROBES:
+            q = abtt(embed_cached(f"search_query: {p}"))[0]
+            order = collapse_by_parent(np.argsort(-(En @ q)), entries)[:5]
+            print(f"  '{p}'")
+            for j in order:
+                print(f"      [{entries[j][0]}] {entries[j][1][:66]}")
 
-    if args.ask:
-        q = abtt(embed_cached(f"search_query: {args.ask}"))[0]
-        order = collapse_by_parent(np.argsort(-(En @ q)), entries)[:6]
-        print(f"\n[ASK] '{args.ask}'")
-        for j in order:
-            print(f"   {float(En[j]@q):.3f} [{entries[j][0]}] {entries[j][1][:60]}")
-            print(f"          {entries[j][2][:110]}")
+        if args.ask:
+            q = abtt(embed_cached(f"search_query: {args.ask}"))[0]
+            order = collapse_by_parent(np.argsort(-(En @ q)), entries)[:6]
+            print(f"\n[ASK] '{args.ask}'")
+            for j in order:
+                print(f"   {float(En[j]@q):.3f} [{entries[j][0]}] {entries[j][1][:60]}")
+                print(f"          {entries[j][2][:110]}")
 
     if not args.no_cache:
         json.dump(cache, open(args.cache, 'w'))
