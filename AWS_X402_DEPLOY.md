@@ -23,6 +23,8 @@ or pay upstream APIs as a buyer.
 ## Recommended AWS Architecture
 
 - **ECS Fargate** runs the `Dockerfile.x402` container.
+- The image includes a pinned NoSQLite CLI for an optional semantic-memory
+  backend; it is disabled by default.
 - **Application Load Balancer** terminates HTTPS and forwards to port `4021`.
 - **ECR** stores the container image.
 - **Secrets Manager** stores `LECORE_X402_ADMIN_TOKEN`,
@@ -79,6 +81,7 @@ LECORE_X402_PRICE=$0.0011
 LECORE_X402_NETWORK=eip155:8453
 LECORE_X402_FACILITATOR_URL=https://api.cdp.coinbase.com/platform/v2/x402
 LECORE_X402_TENANT_STATE_DIR=/data/tenants
+LECORE_X402_MEMORY_BACKEND=core
 ```
 
 Secrets Manager values:
@@ -93,6 +96,38 @@ CDP_API_KEY_SECRET=<if required by facilitator setup>
 
 Use ECS task definition `secrets` entries for secrets, not literal environment
 variables in the task definition.
+
+## Optional NoSQLite Cutover
+
+The container has `/usr/local/bin/nosqlite` built from the vendored source
+snapshot pinned at `8964da27670c752121b8e6d26d113577429b02f6`. To use it for
+`/v1/recall`, add:
+
+```text
+LECORE_X402_MEMORY_BACKEND=nosqlite
+LECORE_X402_NOSQLITE_BIN=/usr/local/bin/nosqlite
+LECORE_X402_NOSQLITE_DATA_DIR=/data/nosqlite
+LECORE_X402_NOSQLITE_DURABILITY=sync
+```
+
+Mount `/data/nosqlite` on durable storage. NoSQLite deliberately takes a
+nonblocking exclusive writer lock for the whole process, so a single data path
+must have exactly one active ECS writer. Use a deliberate drain-and-replace
+maintenance deployment for the cutover; do not rely on the normal overlapping
+rolling deployment. The service currently stays on `core` until that operation
+is scheduled.
+
+For a no-serving-impact validation phase, use:
+
+```text
+LECORE_X402_MEMORY_BACKEND=core
+LECORE_X402_NOSQLITE_SHADOW=1
+LECORE_X402_NOSQLITE_BIN=/usr/local/bin/nosqlite
+LECORE_X402_NOSQLITE_DATA_DIR=/data/nosqlite
+```
+
+That mirrors admin writes and compares recall internally while preserving the
+existing LocalAgentCore response as the source of truth.
 
 ## Wallet Storage Decision
 
@@ -151,6 +186,8 @@ plans, spend limits, CloudTrail alarms, and a tiny blast radius.
 - Mount `LECORE_X402_TENANT_STATE_DIR` on shared durable storage. Tenant writes
   reload under an OS-level lock and use atomic replacement, so rolling ECS tasks
   do not overwrite one another.
+- Do not enable NoSQLite on the same EFS directory in overlapping ECS tasks;
+  schedule a single-writer drain-and-replace cutover instead.
 - Keep the leOS offer credential in Secrets Manager and rotate it if disclosed.
 - Do not put secrets or PII in x402 route descriptions or payment metadata.
 

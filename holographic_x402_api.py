@@ -17,17 +17,22 @@ shared memory store just because they paid for one request.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, replace
 import hashlib
 import hmac
 from html import escape
 import argparse
+import json
+import logging
 import os
 from pathlib import Path
+import queue
 import re
 from string import Template
+import subprocess
 import threading
+import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from holographic_product import LocalAgentCore, demo
@@ -48,6 +53,14 @@ MAX_QUERY_CHARS = 8192
 MAX_TASK_CHARS = 8192
 MAX_MEMORY_CHARS = 65536
 MAX_RECALL_K = 100
+MEMORY_BACKEND_CORE = "core"
+MEMORY_BACKEND_NOSQLITE = "nosqlite"
+NOSQLITE_ENCODER = "lecore_text"
+NOSQLITE_INDEX = "embedding_neural"
+NOSQLITE_DIMENSIONS = 384
+
+
+LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -378,6 +391,330 @@ class TenantCoreStore:
             return None
         return self._state_dir / ("%s.json" % normalize_tenant_id(tenant_id))
 
+
+class NoSQLiteError(RuntimeError):
+    """Raised when the optional NoSQLite command process cannot serve a request."""
+
+
+class NoSQLiteProcess:
+    """Serialize JSON-line requests to one long-lived NoSQLite CLI process.
+
+    NoSQLite's filesystem mode intentionally takes an exclusive writer lock for
+    the life of the process. The API therefore keeps exactly one child process
+    per application process and serializes its stdin/stdout protocol here.
+    """
+
+    def __init__(
+        self,
+        binary: str,
+        data_dir: Any,
+        durability: str = "sync",
+        timeout_seconds: float = 10.0,
+    ):
+        self._binary = str(binary)
+        self._data_dir = Path(data_dir)
+        self._durability = durability
+        self._timeout_seconds = float(timeout_seconds)
+        self._lock = threading.RLock()
+        self._process: Optional[Any] = None
+        self._stdout: Any = queue.Queue()
+        self._stderr: Any = queue.Queue()
+        self._generation = 0
+
+    @property
+    def generation(self) -> int:
+        with self._lock:
+            return self._generation
+
+    @property
+    def running(self) -> bool:
+        with self._lock:
+            return self._process is not None and self._process.poll() is None
+
+    def ensure_started(self) -> int:
+        """Start the child lazily and return its generation number."""
+        with self._lock:
+            if self._process is not None and self._process.poll() is None:
+                return self._generation
+            self._stop_process_unlocked()
+            command = [self._binary, "--data-dir", str(self._data_dir), "--durability", self._durability]
+            try:
+                process = subprocess.Popen(
+                    command,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                )
+            except OSError as exc:
+                raise NoSQLiteError("could not start NoSQLite: %s" % exc) from exc
+
+            self._process = process
+            self._stdout = queue.Queue()
+            self._stderr = queue.Queue()
+            self._start_reader(process.stdout, self._stdout)
+            self._start_reader(process.stderr, self._stderr)
+            try:
+                banner = self._read_line_unlocked("startup")
+            except NoSQLiteError:
+                self._stop_process_unlocked()
+                raise
+            if not banner.startswith("nosqlite ready;"):
+                self._stop_process_unlocked()
+                raise NoSQLiteError("unexpected NoSQLite startup response: %s" % banner.strip())
+            self._generation += 1
+            return self._generation
+
+    def command(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Send one command and return the object response from NoSQLite."""
+        with self._lock:
+            self.ensure_started()
+            process = self._process
+            if process is None or process.stdin is None:
+                raise NoSQLiteError("NoSQLite process has no writable stdin")
+            try:
+                process.stdin.write(json.dumps(payload, separators=(",", ":")) + "\n")
+                process.stdin.flush()
+            except OSError as exc:
+                self._stop_process_unlocked()
+                raise NoSQLiteError("failed to send a command to NoSQLite: %s" % exc) from exc
+            try:
+                line = self._read_line_unlocked("command")
+            except NoSQLiteError:
+                self._stop_process_unlocked()
+                raise
+            try:
+                response = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise NoSQLiteError("invalid NoSQLite response: %s" % line.strip()) from exc
+            if not isinstance(response, dict):
+                raise NoSQLiteError("NoSQLite response must be an object")
+            if response.get("ok") == "error":
+                raise NoSQLiteError(str(response.get("message") or "unknown NoSQLite error"))
+            return response
+
+    def close(self) -> None:
+        """Release the child process and its filesystem writer lock."""
+        with self._lock:
+            process = self._process
+            if process is None:
+                return
+            try:
+                if process.poll() is None and process.stdin is not None:
+                    process.stdin.write('{"shutdown":1}\n')
+                    process.stdin.flush()
+                    self._read_line_unlocked("shutdown", timeout_seconds=2.0)
+                process.wait(timeout=2.0)
+            except (OSError, subprocess.TimeoutExpired, NoSQLiteError):
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=2.0)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+            finally:
+                self._clear_process_unlocked()
+
+    def _start_reader(self, stream: Any, output: Any) -> None:
+        def read_lines() -> None:
+            if stream is None:
+                return
+            for line in stream:
+                output.put(line)
+
+        threading.Thread(target=read_lines, daemon=True).start()
+
+    def _read_line_unlocked(self, phase: str, timeout_seconds: Optional[float] = None) -> str:
+        timeout = self._timeout_seconds if timeout_seconds is None else timeout_seconds
+        deadline = time.monotonic() + timeout
+        while True:
+            process = self._process
+            if process is not None and process.poll() is not None:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                return self._stdout.get(timeout=min(remaining, 0.1))
+            except queue.Empty:
+                continue
+        process = self._process
+        state = ""
+        if process is not None and process.poll() is not None:
+            state = " (process exited with code %s)" % process.returncode
+        stderr = self._stderr_text_unlocked()
+        if stderr:
+            state += ": %s" % stderr
+        raise NoSQLiteError("NoSQLite %s timed out%s" % (phase, state))
+
+    def _stderr_text_unlocked(self) -> str:
+        lines = []
+        while True:
+            try:
+                lines.append(self._stderr.get_nowait().strip())
+            except queue.Empty:
+                break
+        return " ".join(line for line in lines if line)[:2000]
+
+    def _clear_process_unlocked(self) -> None:
+        self._process = None
+
+    def _stop_process_unlocked(self) -> None:
+        process = self._process
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+        self._clear_process_unlocked()
+
+
+class NoSQLiteMemoryStore:
+    """Tenant-isolated semantic memory backed by the pinned NoSQLite CLI."""
+
+    def __init__(
+        self,
+        binary: str,
+        data_dir: Any,
+        durability: str = "sync",
+        dimensions: int = NOSQLITE_DIMENSIONS,
+    ):
+        if durability not in {"sync", "buffered"}:
+            raise ValueError("NoSQLite durability must be 'sync' or 'buffered'")
+        self._dimensions = int(dimensions)
+        self._process = NoSQLiteProcess(binary, data_dir, durability=durability)
+        self._lock = threading.RLock()
+        self._encoder_generation: Optional[int] = None
+        self._ready_collections: set[str] = set()
+        self._synced_collections: set[Tuple[int, str]] = set()
+
+    @property
+    def running(self) -> bool:
+        return self._process.running
+
+    def remember(self, tenant_id: str, memory: Dict[str, Any]) -> None:
+        """Persist one LocalAgentCore-compatible memory entry in its tenant collection."""
+        normalized = normalize_tenant_id(tenant_id)
+        with self._lock:
+            collection = self._ensure_collection(normalized)
+            self._insert_memory(collection, normalized, memory)
+
+    def sync(self, tenant_id: str, memories: Iterable[Dict[str, Any]]) -> None:
+        """Backfill the durable core mirror once per tenant and CLI generation."""
+        normalized = normalize_tenant_id(tenant_id)
+        with self._lock:
+            collection = self._ensure_collection(normalized)
+            key = (self._process.generation, collection)
+            if key in self._synced_collections:
+                return
+            for memory in memories:
+                self._insert_memory(collection, normalized, memory)
+            self._synced_collections.add(key)
+
+    def recall(
+        self,
+        tenant_id: str,
+        query: str,
+        k: int,
+        abstain: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return NoSQLite semantic hits in the LocalAgentCore response shape."""
+        normalized = normalize_tenant_id(tenant_id)
+        with self._lock:
+            collection = self._ensure_collection(normalized)
+            response = self._process.command({
+                "semanticSearch": collection,
+                "encoder": NOSQLITE_ENCODER,
+                "index": NOSQLITE_INDEX,
+                "text": query,
+                "k": k,
+            })
+        documents = response.get("documents")
+        if not isinstance(documents, list):
+            raise NoSQLiteError("NoSQLite semantic search returned no documents array")
+        hits = []
+        for document in documents:
+            if not isinstance(document, dict):
+                continue
+            score = document.get("_score")
+            if isinstance(score, bool) or not isinstance(score, (int, float)):
+                continue
+            if abstain is not None and float(score) < abstain:
+                continue
+            metadata = document.get("metadata")
+            label = document.get("label")
+            hits.append({
+                "id": str(document.get("_id", "")),
+                "text": str(document.get("text", "")),
+                "label": label if isinstance(label, str) else None,
+                "metadata": dict(metadata) if isinstance(metadata, dict) else {},
+                "score": float(score),
+            })
+        return hits
+
+    def close(self) -> None:
+        self._process.close()
+
+    def _ensure_collection(self, tenant_id: str) -> str:
+        generation = self._process.ensure_started()
+        if self._encoder_generation != generation:
+            self._ready_collections.clear()
+            self._synced_collections.clear()
+            self._ignore_duplicate({
+                "createEncoder": NOSQLITE_ENCODER,
+                "provider": "holographic-hash-v1",
+                "kind": "text",
+                "dimensions": self._dimensions,
+                "seed": 0,
+            })
+            self._encoder_generation = generation
+        collection = self._collection_name(tenant_id)
+        if collection not in self._ready_collections:
+            self._ignore_duplicate({"create": collection})
+            self._ignore_duplicate({
+                "createIndexes": collection,
+                "indexes": [{
+                    "neural": "embedding",
+                    "dimensions": self._dimensions,
+                    "name": NOSQLITE_INDEX,
+                }],
+            })
+            self._ready_collections.add(collection)
+        return collection
+
+    def _ignore_duplicate(self, command: Dict[str, Any]) -> None:
+        try:
+            self._process.command(command)
+        except NoSQLiteError as exc:
+            if "already exists" not in str(exc):
+                raise
+
+    def _insert_memory(self, collection: str, tenant_id: str, memory: Dict[str, Any]) -> None:
+        document = {
+            "_id": str(memory["id"]),
+            "text": str(memory["text"]),
+            "label": memory.get("label"),
+            "metadata": dict(memory.get("metadata") or {}),
+            "tenant": tenant_id,
+        }
+        try:
+            self._process.command({
+                "insert": collection,
+                "encode": {"encoder": NOSQLITE_ENCODER, "field": "text", "into": "embedding"},
+                "documents": [document],
+            })
+        except NoSQLiteError as exc:
+            if "duplicate value for `_id`" not in str(exc):
+                raise
+
+    @staticmethod
+    def _collection_name(tenant_id: str) -> str:
+        digest = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:24]
+        return "lecore_memory_%s" % digest
+
+
 def leos_token_offer(access_required: bool = True, enabled: bool = True) -> Dict[str, Any]:
     """Return public metadata for the credential-gated leOS offer."""
     return {
@@ -421,6 +758,21 @@ def _abstain_threshold(payload: Dict[str, Any]) -> Optional[float]:
     if not 0.0 <= threshold <= 1.0:
         raise ValueError("abstain must be between 0 and 1")
     return threshold
+
+
+def normalize_memory_backend(value: Any) -> str:
+    """Validate the memory backend selector without accepting silent fallbacks."""
+    if not isinstance(value, str):
+        raise ValueError("memory backend must be a string")
+    backend = value.strip().lower() or MEMORY_BACKEND_CORE
+    if backend not in {MEMORY_BACKEND_CORE, MEMORY_BACKEND_NOSQLITE}:
+        raise ValueError("memory backend must be 'core' or 'nosqlite'")
+    return backend
+
+
+def env_flag(value: Optional[str]) -> bool:
+    """Parse the small explicit boolean surface used by deployment settings."""
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def landing_page_html(config: X402Config) -> str:
@@ -510,6 +862,11 @@ def create_app(
     tenant_secret: Optional[str] = None,
     tenant_state_dir: Optional[Any] = None,
     leos_access_token: Optional[str] = None,
+    memory_backend: Optional[str] = None,
+    nosqlite_binary: Optional[str] = None,
+    nosqlite_data_dir: Optional[Any] = None,
+    nosqlite_durability: Optional[str] = None,
+    nosqlite_shadow: Optional[bool] = None,
 ) -> Any:
     """Create the FastAPI application for paid or local serving.
 
@@ -525,9 +882,41 @@ def create_app(
     except ImportError as exc:
         raise RuntimeError(optional_dependency_help()) from exc
 
-    app = FastAPI(title="leCore x402 API", version="0.1.0")
     core = core or demo()
     store = TenantCoreStore(core, state_dir=tenant_state_dir)
+    memory_backend = normalize_memory_backend(
+        memory_backend if memory_backend is not None else os.environ.get("LECORE_X402_MEMORY_BACKEND", MEMORY_BACKEND_CORE)
+    )
+    nosqlite_shadow = (
+        bool(nosqlite_shadow)
+        if nosqlite_shadow is not None
+        else env_flag(os.environ.get("LECORE_X402_NOSQLITE_SHADOW"))
+    )
+    nosqlite_store: Optional[NoSQLiteMemoryStore] = None
+    if memory_backend == MEMORY_BACKEND_NOSQLITE or nosqlite_shadow:
+        if not tenant_state_dir:
+            raise ValueError("LECORE_X402_TENANT_STATE_DIR is required when NoSQLite is enabled")
+        data_dir = nosqlite_data_dir or os.environ.get("LECORE_X402_NOSQLITE_DATA_DIR")
+        if not data_dir:
+            raise ValueError("LECORE_X402_NOSQLITE_DATA_DIR is required when NoSQLite is enabled")
+        nosqlite_store = NoSQLiteMemoryStore(
+            nosqlite_binary or os.environ.get("LECORE_X402_NOSQLITE_BIN", "nosqlite"),
+            data_dir,
+            durability=nosqlite_durability or os.environ.get("LECORE_X402_NOSQLITE_DURABILITY", "sync"),
+        )
+
+    @asynccontextmanager
+    async def lifespan(_: Any) -> Any:
+        try:
+            yield
+        finally:
+            if nosqlite_store is not None:
+                nosqlite_store.close()
+
+    app = FastAPI(title="leCore x402 API", version="0.1.0", lifespan=lifespan)
+    app.state.memory_backend = memory_backend
+    app.state.nosqlite_shadow = nosqlite_shadow
+    app.state.nosqlite_store = nosqlite_store
     config = config or (X402Config.from_env(require_pay_to=paid) if paid else X402Config.from_env(require_pay_to=False))
     tenant_secret = tenant_secret or os.environ.get("LECORE_X402_TENANT_SECRET")
     leos_access_token = leos_access_token or os.environ.get("LECORE_X402_LEOS_ACCESS_TOKEN")
@@ -602,6 +991,35 @@ def create_app(
             "private_tenants_enabled": bool(tenant_secret),
         }
 
+    def memory_public_dict() -> Dict[str, Any]:
+        return {
+            "backend": memory_backend,
+            "nosqlite_shadow": bool(nosqlite_shadow),
+            "nosqlite_configured": nosqlite_store is not None,
+        }
+
+    def nosqlite_unavailable(error: NoSQLiteError) -> HTTPException:
+        LOG.warning("NoSQLite memory backend is unavailable: %s", error)
+        return HTTPException(status_code=503, detail="NoSQLite memory backend is unavailable")
+
+    def sync_nosqlite_tenant(tenant_id: str) -> None:
+        if nosqlite_store is None:
+            return
+        memories = store.read(tenant_id, lambda tenant_core: [entry.to_dict() for entry in tenant_core.entries])
+        nosqlite_store.sync(tenant_id, memories)
+
+    def shadow_recall(tenant_id: str, query: str, k: int, abstain: Optional[float], core_hits: List[Dict[str, Any]]) -> None:
+        if nosqlite_store is None:
+            return
+        try:
+            sync_nosqlite_tenant(tenant_id)
+            shadow_hits = nosqlite_store.recall(tenant_id, query, k=k, abstain=abstain)
+        except NoSQLiteError as exc:
+            LOG.warning("NoSQLite shadow recall failed: %s", exc)
+            return
+        if [hit.get("id") for hit in core_hits] != [hit.get("id") for hit in shadow_hits]:
+            LOG.info("NoSQLite shadow recall differs from LocalAgentCore")
+
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     def landing() -> str:
         return landing_page_html(config)
@@ -613,6 +1031,7 @@ def create_app(
             "name": "leCore x402 API",
             "paid": bool(paid),
             "memory": store.summary(DEFAULT_TENANT_ID),
+            "memory_backend": memory_public_dict(),
             "tenancy": {
                 "default_tenant": DEFAULT_TENANT_ID,
                 "loaded_tenants": len(store.loaded_tenants()),
@@ -627,6 +1046,7 @@ def create_app(
             "x402": config.to_public_dict(),
             "token_offer": leos_token_offer(enabled=bool(leos_access_token)),
             "tenancy": tenancy_public_dict(),
+            "memory_backend": memory_public_dict(),
             "routes": payment_manifest(active_config),
         }
 
@@ -640,10 +1060,21 @@ def create_app(
         query = validated(_required_text, payload, "query", MAX_QUERY_CHARS)
         k = validated(_recall_k, payload)
         abstain = validated(_abstain_threshold, payload)
-        hits = store.read(
-            tenant_id,
-            lambda tenant_core: tenant_core.recall(query, k=k, abstain=abstain),
-        )
+        if memory_backend == MEMORY_BACKEND_NOSQLITE:
+            if nosqlite_store is None:  # pragma: no cover - guarded during app setup
+                raise HTTPException(status_code=503, detail="NoSQLite memory backend is not configured")
+            try:
+                sync_nosqlite_tenant(tenant_id)
+                hits = nosqlite_store.recall(tenant_id, query, k=k, abstain=abstain)
+            except NoSQLiteError as exc:
+                raise nosqlite_unavailable(exc) from exc
+        else:
+            hits = store.read(
+                tenant_id,
+                lambda tenant_core: tenant_core.recall(query, k=k, abstain=abstain),
+            )
+            if nosqlite_shadow:
+                shadow_recall(tenant_id, query, k, abstain, hits)
         return {
             "ok": True,
             "tenant": tenant_id,
@@ -742,6 +1173,13 @@ def create_app(
             tenant_id,
             lambda tenant_core: tenant_core.remember(text, label=label, metadata=metadata),
         )
+        if nosqlite_store is not None:
+            try:
+                nosqlite_store.remember(tenant_id, memory)
+            except NoSQLiteError as exc:
+                if memory_backend == MEMORY_BACKEND_NOSQLITE:
+                    raise nosqlite_unavailable(exc) from exc
+                LOG.warning("NoSQLite shadow write failed: %s", exc)
         return {
             "ok": True,
             "tenant": tenant_id,
@@ -786,6 +1224,19 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
     p.add_argument("--tenant-secret", default=os.environ.get("LECORE_X402_TENANT_SECRET"))
     p.add_argument("--tenant-state-dir", default=os.environ.get("LECORE_X402_TENANT_STATE_DIR"))
     p.add_argument("--leos-access-token", default=os.environ.get("LECORE_X402_LEOS_ACCESS_TOKEN"))
+    p.add_argument(
+        "--memory-backend",
+        choices=(MEMORY_BACKEND_CORE, MEMORY_BACKEND_NOSQLITE),
+        default=os.environ.get("LECORE_X402_MEMORY_BACKEND", MEMORY_BACKEND_CORE),
+    )
+    p.add_argument("--nosqlite-bin", default=os.environ.get("LECORE_X402_NOSQLITE_BIN", "nosqlite"))
+    p.add_argument("--nosqlite-data-dir", default=os.environ.get("LECORE_X402_NOSQLITE_DATA_DIR"))
+    p.add_argument(
+        "--nosqlite-durability",
+        choices=("sync", "buffered"),
+        default=os.environ.get("LECORE_X402_NOSQLITE_DURABILITY", "sync"),
+    )
+    p.add_argument("--nosqlite-shadow", action="store_true", default=None)
     p.add_argument("--unpaid-dev", action="store_true", help="Disable x402 middleware for local development only")
     args = p.parse_args(list(argv) if argv is not None else None)
 
@@ -804,6 +1255,11 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
         tenant_secret=args.tenant_secret,
         tenant_state_dir=args.tenant_state_dir,
         leos_access_token=args.leos_access_token,
+        memory_backend=args.memory_backend,
+        nosqlite_binary=args.nosqlite_bin,
+        nosqlite_data_dir=args.nosqlite_data_dir,
+        nosqlite_durability=args.nosqlite_durability,
+        nosqlite_shadow=args.nosqlite_shadow,
     )
     try:
         import uvicorn

@@ -1,5 +1,8 @@
 """Tests for the optional x402-paid API publisher."""
 
+import os
+from pathlib import Path
+
 import pytest
 
 from holographic_x402_api import (
@@ -10,6 +13,7 @@ from holographic_x402_api import (
     LEOS_ACCESS_HEADER,
     LEOS_TOKEN_CA,
     LEOS_TOKEN_PRICE,
+    MEMORY_BACKEND_NOSQLITE,
     TENANT_HEADER,
     TENANT_TOKEN_HEADER,
     TenantCoreStore,
@@ -20,6 +24,7 @@ from holographic_x402_api import (
     optional_dependency_help,
     payment_manifest,
     tenant_access_token,
+    normalize_memory_backend,
     x402_route_configs,
 )
 from holographic_product import LocalAgentCore, demo
@@ -92,6 +97,39 @@ def test_env_config_requires_pay_to_for_paid_mode(monkeypatch):
 
 def test_optional_dependency_help_points_to_extra():
     assert 'pip install ".[x402]"' in optional_dependency_help()
+
+
+def test_memory_backend_selection_is_explicit():
+    assert normalize_memory_backend("core") == "core"
+    assert normalize_memory_backend("NoSQLite") == MEMORY_BACKEND_NOSQLITE
+    with pytest.raises(ValueError, match="'core' or 'nosqlite'"):
+        normalize_memory_backend("sqlite")
+
+
+def test_nosqlite_backend_requires_durable_state_dirs(tmp_path):
+    pytest.importorskip("fastapi")
+
+    with pytest.raises(ValueError, match="TENANT_STATE_DIR"):
+        create_app(
+            config=X402Config(pay_to="0xabc"),
+            paid=False,
+            memory_backend=MEMORY_BACKEND_NOSQLITE,
+        )
+
+    with pytest.raises(ValueError, match="NOSQLITE_DATA_DIR"):
+        create_app(
+            config=X402Config(pay_to="0xabc"),
+            paid=False,
+            memory_backend=MEMORY_BACKEND_NOSQLITE,
+            tenant_state_dir=tmp_path / "core",
+        )
+
+
+def _nosqlite_binary() -> str:
+    binary = os.environ.get("LECORE_X402_NOSQLITE_BIN")
+    if not binary or not Path(binary).is_file():
+        pytest.skip("set LECORE_X402_NOSQLITE_BIN to run the optional NoSQLite integration test")
+    return binary
 
 
 def test_landing_page_explains_why_to_buy_the_api():
@@ -346,6 +384,69 @@ def test_public_memory_persists_across_app_restart(tmp_path):
 
     assert recalled.status_code == 200
     assert "public-persisted" in [hit["label"] for hit in recalled.json()["hits"]]
+
+
+def test_nosqlite_memory_backend_isolates_tenants_and_restarts(tmp_path):
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    binary = _nosqlite_binary()
+    data_dir = tmp_path / "nosqlite"
+    tenant_token = tenant_access_token("acme", "tenant-secret")
+    common = {
+        "config": X402Config(pay_to="0xabc"),
+        "paid": False,
+        "admin_token": "admin-secret",
+        "tenant_secret": "tenant-secret",
+        "tenant_state_dir": tmp_path / "core",
+        "memory_backend": MEMORY_BACKEND_NOSQLITE,
+        "nosqlite_binary": binary,
+        "nosqlite_data_dir": data_dir,
+    }
+
+    with fastapi_testclient.TestClient(create_app(**common)) as first:
+        health = first.get("/health")
+        assert health.status_code == 200
+        assert health.json()["memory_backend"] == {
+            "backend": MEMORY_BACKEND_NOSQLITE,
+            "nosqlite_shadow": False,
+            "nosqlite_configured": True,
+        }
+
+        public = first.post(
+            "/admin/remember",
+            headers={"X-Admin-Token": "admin-secret"},
+            json={"text": "unique public nosqlite comet memory", "label": "public-nosqlite"},
+        )
+        private = first.post(
+            "/admin/remember",
+            headers={"X-Admin-Token": "admin-secret", TENANT_HEADER: "acme"},
+            json={"text": "unique acme nosqlite lighthouse memory", "label": "private-nosqlite"},
+        )
+        assert public.status_code == 200
+        assert private.status_code == 200
+
+        acme = first.post(
+            "/v1/recall",
+            headers={TENANT_HEADER: "acme", TENANT_TOKEN_HEADER: tenant_token},
+            json={"query": "acme lighthouse", "k": 10},
+        )
+        public_recall = first.post(
+            "/v1/recall",
+            json={"query": "acme lighthouse", "k": 10},
+        )
+        assert acme.status_code == 200
+        assert public_recall.status_code == 200
+        assert [hit["label"] for hit in acme.json()["hits"]] == ["private-nosqlite"]
+        assert "private-nosqlite" not in [hit["label"] for hit in public_recall.json()["hits"]]
+
+    restart_common = dict(common)
+    restart_common.pop("admin_token")
+    with fastapi_testclient.TestClient(create_app(**restart_common)) as second:
+        persisted = second.post(
+            "/v1/recall",
+            json={"query": "public comet", "k": 10},
+        )
+        assert persisted.status_code == 200
+        assert "public-nosqlite" in [hit["label"] for hit in persisted.json()["hits"]]
 
 
 def test_persisted_writes_reload_under_process_lock(tmp_path):
