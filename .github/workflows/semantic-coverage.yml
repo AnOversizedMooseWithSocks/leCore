@@ -100,7 +100,7 @@ jobs:
         # knowledge_index is ALREADY incremental: sha256(wiring||text) cache keys
         run: |
           cd tools/semantic && python knowledge_index.py nomic_text/model.safetensors \
-            nomic_text/vocab.txt --repo ../..
+            nomic_text/vocab.txt --repo ../.. --no-md
 
       # -- THE EXAM. This is the point of the workflow: coverage is a test, not a report.
       - name: routing suite (the 12-ask exam; regressions fail the build)
@@ -108,7 +108,7 @@ jobs:
         # Bars are the measured rev-36 numbers: top-5 >= 8/12, median <= 2.
         run: |
           cd tools/semantic && python knowledge_index.py nomic_text/model.safetensors \
-            nomic_text/vocab.txt --repo ../.. --exam --require-top5 8 --require-median 2
+            nomic_text/vocab.txt --repo ../.. --no-md --exam --require-top5 8 --require-median 2
 
       - name: findability lint (every capability must surface for 5 stranger-phrasings)
         # N15's lint -- TO ADD as tools/semantic/findability_lint.py (the exam logic exists in the router suite)
@@ -118,7 +118,7 @@ jobs:
       - name: "rebuild shipping artifacts (<1 MB: catalog vectors, remap, 64d index)"
         run: |
           cd tools/semantic && python knowledge_index.py nomic_text/model.safetensors \
-            nomic_text/vocab.txt --repo ../.. --save ../artifacts/index_64d.npz
+            nomic_text/vocab.txt --repo ../.. --no-md --save ../artifacts/index_64d.npz
 
       - name: upload artifacts
         uses: actions/upload-artifact@v4

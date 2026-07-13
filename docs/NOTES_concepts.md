@@ -32374,3 +32374,42 @@ the 768d numbers captured in the module-routing loop, gate fires at the TRUE END
 exam never hides the report above it, and exam_top5/median initialized to safe defaults so the gate line
 can't NameError. KEPT LESSON (third instance): after adding a flag/edit, grep the COMMITTED file for it
 before shipping -- 'I added it' is not 'it is in the zip'.
+
+
+====================================================================================
+FIX: export_index.py depended on lecore_paths' hardcoded 'leCore' sibling name
+====================================================================================
+export_index used paths.REPO = PARENT/'leCore' -- but the repo folder can be named anything (Moose's is
+'holostuff'), so REPO pointed at a nonexistent dir, rglob found nothing, vecs=[], and np.array([])[:, :dim]
+threw 'too many indices for 1-D array'. FIX: export_index now self-locates -- default --repo is two levels
+up from the script (tools/semantic -> repo root), default --cache is alongside it; both overridable. Added
+a loud guard: 0 matched vectors -> SystemExit naming the likely cause (cache built vs different repo path /
+stale), not a cryptic IndexError. KEPT NEGATIVE: a tool that hardcodes the repo FOLDER NAME breaks on every
+clone that renames it -- resolve paths from __file__, never from an assumed sibling name. (Same class as the
+--repo ../.. CI bug: location assumptions must be computed, not hardcoded.)
+
+
+====================================================================================
+FIX: export_index.py now writes to the ENGINE's load path (no manual copy)
+====================================================================================
+export_index wrote routing_index_128d.npz into tools/semantic/ -- but the router LOADS from
+lecore_data/routing/index_128d.npz (different dir, no 'routing_' prefix). So the tool 'succeeded' while
+the engine still saw the old index: a gap (built-but-not-in-place). FIX: default --out is now
+<repo>/lecore_data/routing/index_<dim>d.npz, computed from the resolved repo root, and the dir is created
+if absent -- running the tool ships the index into place. KEPT LESSON: a build tool whose output filename
+!= the consumer's load filename is a silent gap; the default output path should BE the load path.
+
+
+====================================================================================
+CI TIMEOUT FIX: --no-md so the embed scope MATCHES the routing seed
+====================================================================================
+THE BUG Moose caught: the committed seed is routing-only (714 KB, 503 code entries), but the CI embed
+step ran full collect_code + collect_md -> ~5000 md windows NOT in the seed -> cold run embeds them all
+= the hours-long job that times out at the 20-min limit, so actions/cache never saves, so it times out
+forever. The whole point of building locally was to AVOID that, and the slimmed seed broke it by
+disagreeing with the embed scope. FIX: --no-md flag on knowledge_index (embed code+terms only, skip md);
+wired into all three CI indexer calls. The routing exam ranks E[code_idx] only, so md is dead weight
+here -- verified the exam still routes with the code-only corpus. Now a cold CI run embeds ~2 docs (the
+delta), not 5000 windows. KEPT PRINCIPLE (load-bearing): the committed seed's scope and the CI embed
+step's scope MUST be the same set, or the seed doesn't prevent the work it was built to prevent. Slimming
+one without the other is worse than slimming neither.

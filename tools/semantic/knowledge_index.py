@@ -273,6 +273,11 @@ def main():
     # default to the measured state so a regression (a renamed module, a docstring turned to jargon)
     # fails the build instead of drifting silently. Without --exam the suite just prints, as before.
     ap.add_argument('--exam', action='store_true', help='exit 1 if the routing suite misses the bars')
+    # --no-md: embed ONLY code docstrings + terms, skipping the ~5k markdown windows. The routing exam
+    # ranks over 'code' entries only, so md is dead weight in the CI routing job -- and embedding it is
+    # the hours-long step that times out. With --no-md the committed routing seed already holds every
+    # entry this run needs, so a cold CI run embeds ~nothing. Full local builds omit --no-md to keep md.
+    ap.add_argument('--no-md', action='store_true', help='skip markdown windows (routing-only; CI uses this)')
     ap.add_argument('--require-top5', type=int, default=8)
     ap.add_argument('--require-median', type=float, default=2)
     ap.add_argument('--abtt', type=int, default=1,
@@ -317,7 +322,9 @@ def main():
     print("\n" + "=" * 90)
     print("[2] BUILDING THE INDEX: code docstrings + markdown sections")
     print("=" * 90)
-    entries = collect_code(args.repo) + collect_md(args.repo, args.window, args.stride)
+    entries = collect_code(args.repo)
+    if not args.no_md:
+        entries = entries + collect_md(args.repo, args.window, args.stride)
     kinds = collections.Counter(e[0] for e in entries)
     print(f"  entries: {len(entries)}  {dict(kinds)}")
     model = Nomic(args.model, args)

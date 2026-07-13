@@ -29,21 +29,46 @@ def head(p, n=280):
 
 
 def main():
+    here = pathlib.Path(__file__).resolve().parent          # tools/semantic
     ap = argparse.ArgumentParser()
     ap.add_argument('--dim', type=int, default=128)   # measured knee: top-1 plateaus at 128d, 64d cost 4 hits
-    ap.add_argument('--out', default='routing_index_128d.npz')
+    # Default output is the path the ENGINE loads from (lecore_data/routing/index_<dim>d.npz), computed
+    # from the repo root -- so running this tool ships the index into place, no manual copy/rename. The
+    # loader looks for exactly 'index_128d.npz' under the lecore_data 'routing' category.
+    ap.add_argument('--out', default=None)
+    # Default paths are computed from THIS file's location -- repo root is two levels up, cache is right
+    # here -- so the tool works no matter what the repo folder is named. --repo/--cache override if needed.
+    ap.add_argument('--repo', default=str(here.parent.parent),
+                    help='repo root to scan for holographic_*.py (default: two levels up from this script)')
+    ap.add_argument('--cache', default=str(here / '.knowledge_cache.json'),
+                    help='embedding cache json (default: alongside this script)')
     a = ap.parse_args()
 
     import json
-    cache = json.loads(paths.CACHE.read_text())
+    cache_path = pathlib.Path(a.cache)
+    repo = pathlib.Path(a.repo)
+    if not cache_path.is_file():
+        raise SystemExit(f"  no cache at {cache_path}\n  run knowledge_index.py first, or pass --cache.")
+    if not repo.is_dir():
+        raise SystemExit(f"  repo path {repo} is not a directory; pass --repo <repo root>.")
+    if a.out is None:
+        a.out = str(repo / 'lecore_data' / 'routing' / f'index_{a.dim}d.npz')
+    cache = json.loads(cache_path.read_text())
     names, vecs = [], []
-    for p in sorted(paths.REPO.rglob('holographic_*.py')):
+    for p in sorted(repo.rglob('holographic_*.py')):
         b = head(p)
         if not b:
             continue
         k = key(f"search_document: {p.stem} -- {b}")
         if k in cache:                         # only what the model actually embedded
             names.append(p.stem); vecs.append(cache[k])
+    if not vecs:
+        raise SystemExit(
+            f"  0 module vectors matched the cache.\n"
+            f"  scanned {repo} and found holographic_*.py files, but none of their docstrings were in\n"
+            f"  {cache_path.name}. Likely the cache was built against a DIFFERENT repo path, or is stale --\n"
+            f"  re-run: python knowledge_index.py <model> <vocab> --repo {repo}\n"
+            f"  (found {sum(1 for _ in repo.rglob('holographic_*.py'))} modules on disk, {len(cache)} cache entries)")
     V = np.array(vecs, dtype=np.float32)[:, :a.dim]
 
     # ABTT correction baked in (fit on these docs), then q8 -- the shipped form. Store the correction
@@ -56,6 +81,7 @@ def main():
     q = np.round((Vr - lo) / (hi - lo + 1e-12) * 255).astype(np.uint8)
 
     out = pathlib.Path(a.out)
+    out.parent.mkdir(parents=True, exist_ok=True)          # create lecore_data/routing/ if absent
     buf = io.BytesIO()
     np.savez(buf, names=np.array(names), q=q, lo=lo.astype(np.float16), hi=hi.astype(np.float16),
              mu=mu.astype(np.float16), pc=pc.astype(np.float16))
