@@ -4,7 +4,7 @@
 #   * distinct workflow name; ci.yml's 'tests' check and branch protection are untouched
 #   * path-filtered triggers do NOT match the files docs.yml's docs-bot commits, so no re-trigger loop
 #   * cache keys ('knowledge-cache-*', 'nomic-gq8-*') are disjoint from the pip caches
-#   * PREREQUISITE: knowledge_index.py / lint_scripts.py / findability_lint.py must be COMMITTED under
+#   * PREREQUISITE: knowledge_index.py / lint_scripts.py / seed_cache.py / export_index.py must be COMMITTED under
 #     tools/semantic/ -- CI cannot run what lives only in the local experiments folder. The weights are
 #     NOT committed (137 MB): they arrive via the pinned URL + actions/cache, exactly like a compiler
 #     toolchain. The <1 MB shipping artifacts CAN graduate to the repo later using ci.yml's house
@@ -24,7 +24,7 @@
 #      depend on text+model only, so the cache survives every push)
 #   2. fetch weights only on a cache miss of the model itself
 #   3. embed whatever is new (knowledge_index is already incremental by sha256)
-#   4. THE EXAM: routing suite + findability lint. Docstrings fail like tests.
+#   4. THE EXAM: routing suite (--exam). A routing regression fails the build.
 #   5. rebuild the <1 MB shipping artifacts (catalog vectors, remap, index) and
 #      upload them; a release job can attach them to tags.
 #
@@ -120,17 +120,23 @@ jobs:
           cd tools/semantic && python knowledge_index.py nomic_text/model.safetensors \
             nomic_text/vocab.txt --repo ../.. --no-md --exam --require-top5 8 --require-median 2
 
-      - name: findability lint (every capability must surface for 5 stranger-phrasings)
-        # N15's lint -- TO ADD as tools/semantic/findability_lint.py (the exam logic exists in the router suite)
-        run: python tools/semantic/findability_lint.py --repo . --require-top5
-        continue-on-error: true   # flip to false the day N15 lands
+      - name: rebuild the shipped 128d routing index (the 128 KB artifact the engine loads)
+        # export_index.py pulls the routing vectors from the cache and writes them to the exact path
+        # the engine loads (lecore_data/routing/index_128d.npz), creating the dir if needed. This is the
+        # <1 MB ship artifact; the drift-gate below fails if the committed copy is stale.
+        run: python tools/semantic/export_index.py --dim 128 --repo .
 
-      - name: "rebuild shipping artifacts (<1 MB: catalog vectors, remap, 64d index)"
+      - name: fail if the committed index drifted from the freshly-built one
+        # same drift-check pattern as ci.yml's API_QUICKREF/CAPABILITIES: rebuild, and if git sees a diff
+        # the committed index is stale -- run export_index.py locally and commit the result.
         run: |
-          cd tools/semantic && python knowledge_index.py nomic_text/model.safetensors \
-            nomic_text/vocab.txt --repo ../.. --no-md --save ../artifacts/index_64d.npz
+          git diff --exit-code lecore_data/routing/index_128d.npz || {
+            echo "::error::lecore_data/routing/index_128d.npz is stale -- run "
+            echo "  python tools/semantic/export_index.py --dim 128  and commit the result.";
+            exit 1;
+          }
 
-      - name: upload artifacts
+      - name: upload the index as a build artifact (inspectable; the committed copy is authoritative)
         uses: actions/upload-artifact@v4
         with:
           name: semantic-artifacts

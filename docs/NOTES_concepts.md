@@ -32443,3 +32443,19 @@ notice); the cache dump and the --exam GATE stay at main() top-level so they run
 PRINCIPLE: a flag that removes a corpus (--no-md) must guard EVERY consumer of that corpus, not just the
 embed assembly -- I scoped the producer but missed two downstream consumers. Grep for every use of the
 thing a flag disables.
+
+
+====================================================================================
+CI FIX: post-gate artifact steps (findability_lint missing + --save to nonexistent dir)
+====================================================================================
+The routing EXAM passed (md guard worked). Two post-gate steps failed: (1) findability_lint step called
+tools/semantic/findability_lint.py which was NEVER committed (continue-on-error hid it as green but it
+errored every run); (2) the 'rebuild artifacts' step ran knowledge_index --save ../artifacts/index_64d.npz
+-> ../artifacts/ doesn't exist -> FileNotFoundError, AND it wrote 64d when we ship 128d. FIXES: removed
+the findability step entirely (script not written; N15/TO-ADD); replaced --save with
+`export_index.py --dim 128 --repo .` which writes the real 128d index to the load path and mkdirs it;
+added a git-diff drift gate (rebuild -> fail if committed index is stale, same pattern as ci.yml's
+API_QUICKREF). NOTE: cache grew to 505 modules (was 503) -> the committed index must be regenerated from
+the CURRENT cache or the drift gate fails. KEPT LESSON: a workflow that references a file must fail if the
+file is absent -- continue-on-error:true on a missing script masks a real error as a pass. Don't paper a
+missing tool with continue-on-error; either commit the tool or remove the step.
