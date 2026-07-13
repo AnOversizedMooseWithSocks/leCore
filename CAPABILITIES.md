@@ -281,7 +281,7 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); g=m.regime_gate('sharp', la
 *Find it by:* re-enable a niche method, route by regime with a fallback, gate a method behind a detector, use a method only in its regime, conditional dispatch with safe default, regime gate, shelved method behind a detector
 
 ### route_semantic
-route a request to the right MODULE by COSINE in nomic's embedding space instead of token overlap -- catches meaning when words don't match ('squish a big array down for storage' -> holographic_coldstore). Uses the shipped 96 KB 64d q8 index. Takes a query vector, a build-time-cached phrase, OR free text when the N31 offline embedder ships (SIF token-pool + ridge W, no model); returns None (caller falls back to token find_capability) rather than fabricate an embedding. Measured 7/12 top-1 vs token 2/12.
+route a request to the right MODULE by COSINE in nomic's embedding space instead of token overlap -- catches meaning when words don't match ('squish a big array down for storage' -> holographic_coldstore). Uses the shipped 96 KB 64d q8 index. Needs a query vector or a build-time-cached phrase; returns None (caller falls back to token find_capability) rather than fabricate an embedding. Measured 7/12 top-1 vs token 2/12.
 
 ```python
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.route_semantic('make my picture less grainy'))

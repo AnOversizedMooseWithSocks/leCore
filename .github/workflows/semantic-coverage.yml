@@ -85,13 +85,23 @@ jobs:
 
       - name: fetch model on cache miss (pinned revision)
         if: steps.model.outputs.cache-hit != 'true'
+        env:
+          W_URL: ${{ vars.NOMIC_WEIGHTS_URL }}
+          V_URL: ${{ vars.NOMIC_VOCAB_URL }}
         run: |
+          # An unset variable curls "" -> curl error; and WITHOUT -f a 404/redirect saves an HTML error
+          # page AS model.safetensors, which read_st then reads as an 8-byte length -> MemoryError. Guard
+          # both: fail in English if the vars are unset, use -f (HTTP errors fail the step), and sanity-
+          # check that what landed is actually a safetensors file, not HTML.
+          if [ -z "$W_URL" ] || [ -z "$V_URL" ]; then
+            echo "::error::NOMIC_WEIGHTS_URL / NOMIC_VOCAB_URL are not set (repo Settings -> Variables)."
+            exit 1
+          fi
           mkdir -p tools/semantic/nomic_text
-          # release asset keeps CI independent of third-party uptime; HF is the fallback
-          curl -L -o tools/semantic/nomic_text/model.safetensors \
-            "${{ vars.NOMIC_WEIGHTS_URL }}"
-          curl -L -o tools/semantic/nomic_text/vocab.txt \
-            "${{ vars.NOMIC_VOCAB_URL }}"
+          curl -fL --retry 3 -o tools/semantic/nomic_text/model.safetensors "$W_URL"
+          curl -fL --retry 3 -o tools/semantic/nomic_text/vocab.txt "$V_URL"
+          python tools/semantic/check_weights.py tools/semantic/nomic_text/model.safetensors
+          ls -la tools/semantic/nomic_text/
 
       - name: lint the scripts first (errors halt; the 0.4s crash never eats the budget)
         run: python tools/semantic/lint_scripts.py
