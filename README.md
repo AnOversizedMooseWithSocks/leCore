@@ -203,7 +203,7 @@ Active research engine, and a large one — hundreds of modules and thousands of
 
 ## License
 
-See [`LICENSE`](LICENSE).
+See [`LICENSE`](LICENSE) (it's free).
 
 ---
 
