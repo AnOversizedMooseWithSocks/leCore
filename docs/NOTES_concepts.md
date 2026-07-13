@@ -32219,3 +32219,57 @@ design margin (~4x headroom over the run that timed out), and if a shard nears t
 shard count, not re-tightening the watchdog. Regression traps in tests/test_shard_tests.py pin cover/disjoint/
 determinism/balance -- a partition bug would otherwise be the worst CI failure there is: a green build that
 silently tested less than it claimed.
+
+## FULL-SUITE FALLOUT FIXED -- 2 failures from the first real sharded run (both audit traps doing their job)
+
+The first genuinely-full run (sharded, --run-slow) worked: 5,053 passed, 13 min, and it caught 2 things the
+per-change close-outs missed. Both fixed; a third trap tripped during the fix and taught the ledger's real contract.
+
+1. test_no_unreviewed_public_name_collisions: gaussian_curvature + mean_curvature collide between meshcurvature and
+   surfanalysis (the geometry-kernel arc introduced the second). READ BOTH BODIES per the trap's instruction:
+   meshcurvature = DISCRETE per-vertex form on a triangle mesh (angle defect / mixed-area cotan; array over V);
+   surfanalysis = ANALYTIC pointwise form on a parametric surface from fundamental forms (K=(LN-M^2)/(EG-F^2);
+   scalar at (u,v)). One concept, two representations, neither can serve the other's input -- the blessed
+   polymorphic-verb pattern, NOT a duplicate. Registered in tools/name_collisions.KNOWN_COLLISIONS with that reason.
+
+2. test_impossible_and_merely_deferred_are_not_confused: my G2 entry had landed inside the DEFERRED dict (the
+   insertion anchor sat in DEFERRED at line 403, before NOT_APPLICABLE at 438 -- I did not verify WHICH dict the
+   anchor lived in; docs/UNIFIERS.md said NOT_APPLICABLE all along). Relocated to NOT_APPLICABLE, where the
+   semantics fit (the high-D ring-search explosion is closed by mathematics, not merely unpaid-for).
+
+3. THIRD TRAP tripped by the fix, and it was RIGHT: test_retracted_claims_are_not_silently_re_added requires every
+   NOT_APPLICABLE key to reference a REGISTERED unifier -- the dict records retractions of clients FROM REAL
+   REGISTRY ENTRIES, and "spatial.SpatialGrid" was never registered. Fixed the right way: SpatialGrid is now a
+   REGISTRY entry documenting the kernel's true role (the LOW-D geometric k-NN index, exact, grid+ring) with its
+   measured scope in the why and clients HONESTLY EMPTY until a low-D large-N caller appears; the NOT_APPLICABLE
+   entry retracts the 3 proposed clients from it with the G2 measurements. All 24 duplication+unifier tests green;
+   unaccounted()=0.
+
+LESSON (on record): when inserting into tools/unifiers.py by anchor, verify WHICH dict the anchor line belongs to
+-- DEFERRED and NOT_APPLICABLE have different contracts (wording markers vs registry membership) and the traps
+distinguish them on purpose. Also: the sharded full suite paid for itself on its first run.
+
+
+====================================================================================
+SEMANTIC COVERAGE MERGE (assimilation program -> repo)
+====================================================================================
+Added, additively (nothing existing modified):
+  tools/semantic/knowledge_index.py   embedding cache + routing suite + NEW --exam gate
+                                      (--require-top5 8 --require-median 2; exits 1 below
+                                      the measured rev-36 bars; gate runs LAST so a failing
+                                      exam never hides the report above it)
+  tools/semantic/nomic_forward.py     the NumPy BERT-style forward pass the index imports
+  tools/semantic/lint_scripts.py      static gate: alias shadowing = ERROR, style = WARN
+  tools/semantic/.gitignore           weights + cache never enter git
+  .github/workflows/semantic-coverage.yml
+                                      4th workflow beside ci/docs/package (checked: distinct
+                                      name, no docs-bot re-trigger, disjoint cache keys,
+                                      ci.yml's determinism pins + py3.12 conventions).
+                                      Weights arrive via NOMIC_WEIGHTS_URL / NOMIC_VOCAB_URL
+                                      repo variables + actions/cache; first run is manual
+                                      (workflow_dispatch) and populates the cache (~1-2 h,
+                                      once; warm runs ~1 min -- the cache is content-addressed).
+KEPT BUG (caught in-session, on record): the first --exam insertion anchored on `if args.save:`,
+which in this file sits BEFORE the suite computes its numbers -> guaranteed NameError. The anchor
+lesson from tools/unifiers.py applies to every by-anchor insertion: verify WHAT the anchor line
+belongs to before inserting. Gate verified: exits 1 on miss, prints-and-continues without --exam.
