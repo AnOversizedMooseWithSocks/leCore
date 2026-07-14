@@ -9,9 +9,6 @@ the public read/compute routes:
 - `POST /v1/recall`
 - `POST /v1/route`
 - `GET /v1/dashboard`
-- `POST /leos/v1/recall`, at the credential-gated leOS offer price
-- `POST /leos/v1/route`, at the credential-gated leOS offer price
-- `GET /leos/v1/dashboard`, at the credential-gated leOS offer price
 
 Free routes:
 
@@ -28,11 +25,6 @@ but they cannot mutate memory unless they also hold the admin token. Private
 tenant memory also requires a tenant token; x402 proves payment, not tenant
 authorization.
 
-The leOS CA identifies the discounted offer, but does not itself prove buyer
-eligibility because it is public. Discounted calls must also include the
-operator-issued `X-leCore-leOS-Access` credential. Failed authorization responses
-are not settled by the x402 middleware.
-
 ## Install
 
 ```bash
@@ -45,14 +37,15 @@ FastAPI/x402/uvicorn stack.
 ## Testnet Run
 
 The default network is Base Sepolia (`eip155:84532`) and the default facilitator
-is the signup-free x402.org testnet facilitator.
+is the signup-free x402.org testnet facilitator. This is a **developer preview**:
+the listed `$0.0011` request price is displayed as `$1.10 per 1,000 requests`,
+uses testnet USDC, and does not accept production payments.
 
 ```bash
 export LECORE_X402_PAY_TO="0xYourReceivingWallet"
 export LECORE_X402_PRICE="$0.0011"
 export LECORE_X402_ADMIN_TOKEN="local-admin-secret"
 export LECORE_X402_TENANT_SECRET="local-tenant-secret"
-export LECORE_X402_LEOS_ACCESS_TOKEN="local-leos-buyer-secret"
 export LECORE_X402_TENANT_STATE_DIR="./tenant-state"
 
 python holographic_x402_api.py --host 127.0.0.1 --port 4021
@@ -101,15 +94,6 @@ curl -X POST http://127.0.0.1:4021/v1/recall \
   -H "Content-Type: application/json" \
   -H "X-leCore-Tenant: acme" \
   -H "X-leCore-Tenant-Token: <tenant token>" \
-  -d '{"query":"deterministic local memory"}'
-```
-
-Use the discounted leOS route only with an issued offer credential:
-
-```bash
-curl -X POST http://127.0.0.1:4021/leos/v1/recall \
-  -H "Content-Type: application/json" \
-  -H "X-leCore-leOS-Access: local-leos-buyer-secret" \
   -d '{"query":"deterministic local memory"}'
 ```
 
@@ -180,8 +164,6 @@ until that maintenance window is scheduled.
   use per-tenant process locks plus atomic replacement on shared storage.
 - If NoSQLite is enabled, mount `LECORE_X402_NOSQLITE_DATA_DIR` on the same
   durable storage and keep the service at a single active writer for that path.
-- Store `LECORE_X402_LEOS_ACCESS_TOKEN` as a secret and distribute it only to
-  buyers eligible for the discounted routes.
 - Treat x402 payment metadata as public enough to avoid putting secrets or PII
   in route descriptions.
 

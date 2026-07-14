@@ -43,12 +43,12 @@
     - `summary(self, tenant_id)` -- Return a cheap cached status summary without probing capabilities.
     - `read(self, tenant_id, fn)` -- Run a read-style operation while holding the tenant lock.
     - `write(self, tenant_id, fn)` -- Run a mutating operation, then persist that tenant if configured.
-- `leos_token_offer(access_required=True, enabled=True)` -- Return public metadata for the credential-gated leOS offer.
+- `pricing_summary(config)` -- Return the customer-facing request and per-1,000-request price plus preview/production status.
 - `landing_page_html(config)` -- Render the buyer-facing landing page served from `/`.
 - `payment_manifest(config)` -- Plain JSON route manifest, useful for docs, `/pricing`, and tests.
 - `x402_route_configs(config)` -- Build x402 SDK RouteConfig objects for the protected routes.
 - `x402_resource_server(config)` -- Create an x402 resource server wired to the configured facilitator.
-- `create_app(core=None, config=None, paid=True, admin_token=None, tenant_secret=None, tenant_state_dir=None, leos_access_token=None)` -- Create the FastAPI application for paid or local serving.
+- `create_app(core=None, config=None, paid=True, admin_token=None, tenant_secret=None, tenant_state_dir=None)` -- Create the FastAPI application for paid or local serving.
 - `load_core(path)` -- Load a persisted core if present, otherwise return the demo core.
 - `main(argv=None)` -- CLI entry point for local x402 API serving.
 
