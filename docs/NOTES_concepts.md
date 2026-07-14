@@ -32495,3 +32495,18 @@ had the same date.today() on line 155). Verified apiquickref output is now byte-
 KEPT PRINCIPLE (load-bearing for every drift gate): a file compared with `git diff --exit-code` must be
 a pure function of the code -- NO dates, timestamps, hostnames, dict-ordering, or RNG. Non-determinism
 in a gated artifact turns the gate into a daily false alarm. Swept all generators; only these two had it.
+
+
+====================================================================================
+CI: docs.yml now runs on EVERY branch (root of the recurring feature-branch staleness)
+====================================================================================
+CAPABILITIES.md/capabilities.json failed the drift gate -- but this was a REAL change (route_semantic's
+'does' was updated to mention the N31 offline embedder) that I didn't regenerate. Regenerated with capdoc.py
+(verified deterministic). ROOT CAUSE of the whole recurring pattern though: docs.yml (the auto-committer)
+ran on `branches: [main, master]` ONLY, so on the more-stuff feature branch NOTHING regenerated the docs --
+every generated-doc change showed as 'stale' until manually fixed. FIX: docs.yml now triggers on any branch;
+both docs.yml and semantic-coverage.yml push their auto-commit back to the TRIGGERING branch explicitly
+(git push origin HEAD:${{ github.ref_name }}), not a bare push, so feature branches self-heal too.
+KEPT PRINCIPLE: an auto-committer scoped to main leaves every other branch to manual upkeep. If the goal is
+'never regenerate by hand', the regenerator must run wherever development happens -- scope it to the work,
+not just to main.
