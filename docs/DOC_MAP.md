@@ -17,7 +17,7 @@ Regenerate the generated set in one go (the close-out ritual):
 python3 capdoc.py && python3 docgen.py && python3 apiquickref.py && python3 facultymap.py && python3 docmap.py
 ```
 
-## Family layout (502 modules)
+## Family layout (504 modules)
 
 ```mermaid
 graph LR
@@ -32,6 +32,7 @@ graph LR
     H --> io_a["io_and_interop (26)"]
     H --> cach["caching_and_storage (19)"]
     H --> mate["materials_and_texture (14)"]
+    H --> sema["semantic_router (2)"]
 ```
 
 ## Doc pipeline
