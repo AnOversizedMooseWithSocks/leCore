@@ -1,0 +1,34 @@
+[package]
+name = "nosqlite"
+version = "0.1.0"
+edition = "2021"
+description = "MongoDB-shaped embedded document database with a tiny C kernel and Rust orchestration."
+license = "MIT"
+
+[lib]
+name = "nosqlite"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nosqlite"
+path = "src/bin/nosqlite.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+fs2 = "0.4"
+parking_lot = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+zstd = "0.13"
+
+[build-dependencies]
+cc = "1"
+
+[dev-dependencies]
+criterion = "0.7"
+tempfile = "3"
+
+[[bench]]
+name = "engine"
+harness = false

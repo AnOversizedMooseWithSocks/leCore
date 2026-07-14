@@ -129,6 +129,7 @@ The core requires **only NumPy**. Everything else is declared as a named "extra"
 | `jit` | `numba` | numba-compiled fast paths (`holographic_jit`, `sdf_render`, `codegen`) |
 | `symbolic` | `sympy` | design-time symbolic gradients (`holographic_codegen`, `sdf_render`) |
 | `gpu` | `cupy` | the GPU backend (`holographic_backend`) — see the CuPy note |
+| `x402` | `x402[fastapi,evm]`, `uvicorn` | paid API publishing (`holographic_x402_api`) |
 | `ui` | `flask`, `pillow` | the browser UI (`app.py`) and image load/save |
 | `dev` | `pytest`, `matplotlib` | running the test suite and generating plots |
 | `all` | numba, sympy, flask, pillow, pytest, matplotlib | everything portable, in one shot |
