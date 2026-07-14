@@ -5,8 +5,9 @@
 name: docs
 
 on:
-  push:
-    branches: [ main, master ]
+  push:                          # run on ANY branch so feature branches auto-refresh generated docs too
+                                 # (was main/master only -- which left feature-branch pushes perpetually
+                                 # "stale" because nothing regenerated the docs there)
   workflow_dispatch:            # lets you run it by hand from the Actions tab
 
 permissions:
@@ -50,7 +51,7 @@ jobs:
           if ! git diff --quiet REFERENCE.md CAPABILITIES.md capabilities.json API_QUICKREF.md docs/FACULTY_MAP.md docs/DOC_MAP.md; then
             git add REFERENCE.md CAPABILITIES.md capabilities.json API_QUICKREF.md docs/FACULTY_MAP.md docs/DOC_MAP.md
             git commit -m "docs: refresh generated docs (REFERENCE, CAPABILITIES, API_QUICKREF, FACULTY_MAP, DOC_MAP) [skip ci]"   # [skip ci] so it doesn't re-trigger CI
-            git push
+            git push origin HEAD:${{ github.ref_name }}   # push back to the branch that triggered this run (feature branches included)
           else
             echo "All generated docs already up to date -- nothing to commit."
           fi

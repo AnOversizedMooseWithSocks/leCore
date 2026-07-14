@@ -135,7 +135,7 @@ jobs:
           if ! git diff --quiet lecore_data/routing/index_128d.npz; then
             git add lecore_data/routing/index_128d.npz
             git commit -m "semantic: refresh routing index_128d.npz from embed [skip ci]"
-            git push
+            git push origin HEAD:${{ github.ref_name }}
           else
             echo "routing index already up to date -- nothing to commit."
           fi
