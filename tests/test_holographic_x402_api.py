@@ -10,10 +10,6 @@ from holographic_x402_api import (
     DEFAULT_PRICE,
     DEFAULT_TENANT_ID,
     IDEMPOTENCY_HEADER,
-    LEOS_SITE_URL,
-    LEOS_ACCESS_HEADER,
-    LEOS_TOKEN_CA,
-    LEOS_TOKEN_PRICE,
     MEMORY_BACKEND_NOSQLITE,
     MemoryTransactionConflict,
     MemoryMirrorPending,
@@ -25,9 +21,9 @@ from holographic_x402_api import (
     X402Config,
     create_app,
     landing_page_html,
-    leos_token_offer,
     optional_dependency_help,
     payment_manifest,
+    pricing_summary,
     tenant_access_token,
     normalize_memory_backend,
     x402_route_configs,
@@ -51,29 +47,19 @@ def test_payment_manifest_protects_specific_read_routes_only():
         "POST /v1/recall",
         "POST /v1/route",
         "GET /v1/dashboard",
-        "POST /leos/v1/recall",
-        "POST /leos/v1/route",
-        "GET /leos/v1/dashboard",
     }
     assert all("*" not in route for route in routes)
     assert "POST /admin/remember" not in routes
     assert "POST /admin/tenant-token" not in routes
     assert "GET /health" not in routes
     assert all(row["accepts"][0]["pay_to"] == "0xabc" for row in manifest)
-    assert {
-        row["route"]: row["accepts"][0]["price"]
-        for row in manifest
-        if row["route"].startswith("POST /leos") or row["route"].startswith("GET /leos")
-    } == {
-        "POST /leos/v1/recall": LEOS_TOKEN_PRICE,
-        "POST /leos/v1/route": LEOS_TOKEN_PRICE,
-        "GET /leos/v1/dashboard": LEOS_TOKEN_PRICE,
-    }
 
 
 def test_price_validation_keeps_x402_format_honest():
     with pytest.raises(ValueError, match="dollar prefix"):
         X402Config(pay_to="0xabc", price="0.001")
+    with pytest.raises(ValueError, match="positive dollar amount"):
+        X402Config(pay_to="0xabc", price="$0")
 
 
 def test_x402_route_configs_build_against_optional_sdk():
@@ -82,10 +68,7 @@ def test_x402_route_configs_build_against_optional_sdk():
     routes = x402_route_configs(X402Config(pay_to="0xabc"))
 
     assert sorted(routes) == [
-        "GET /leos/v1/dashboard",
         "GET /v1/dashboard",
-        "POST /leos/v1/recall",
-        "POST /leos/v1/route",
         "POST /v1/recall",
         "POST /v1/route",
     ]
@@ -137,38 +120,41 @@ def _nosqlite_binary() -> str:
     return binary
 
 
-def test_landing_page_explains_why_to_buy_the_api():
+def test_landing_page_marks_the_testnet_api_as_a_preview():
     html = landing_page_html(X402Config(pay_to="0x96e1604E92A8A1edD0701be3E67Bd4366e87BB84"))
 
     assert "<title>leCore x402 API</title>" in html
-    assert "Buy the small, useful surface of leCore" in html
-    assert "%s per call" % DEFAULT_PRICE in html
-    assert LEOS_TOKEN_PRICE in html
-    assert LEOS_TOKEN_CA in html
-    assert LEOS_SITE_URL in html
+    assert "Testnet developer preview" in html
+    assert "$1.10 per 1,000 requests" in html
+    assert "does not accept production payments" in html
     assert "Base Sepolia x402" in html
     assert "/pricing" in html
     assert "/v1/dashboard" in html
     assert "0x96e1...BB84" in html
+    assert "leOS" not in html
 
 
-def test_leos_token_offer_identifies_ca_and_requires_access():
-    offer = leos_token_offer()
+def test_pricing_summary_distinguishes_testnet_preview_from_production():
+    preview = pricing_summary(X402Config(pay_to="0xabc"))
+    production = pricing_summary(X402Config(pay_to="0xabc", network="eip155:8453"))
 
-    assert offer["site"] == LEOS_SITE_URL
-    assert offer["ca"] == LEOS_TOKEN_CA
-    assert offer["price"] == LEOS_TOKEN_PRICE
-    assert "POST /leos/v1/recall" in offer["discount_routes"]
-    assert offer["access_header"] == LEOS_ACCESS_HEADER
-    assert offer["access_required"] is True
-    assert "eligible buyers" in offer["note"]
+    assert preview == {
+        "environment": "testnet_preview",
+        "environment_label": "Testnet developer preview",
+        "payment_asset": "testnet USDC",
+        "per_request": DEFAULT_PRICE,
+        "per_1000_requests": "$1.10",
+        "display_price": "$1.10 per 1,000 requests",
+        "payment_notice": "This Base Sepolia developer preview uses testnet USDC and does not accept production payments.",
+    }
+    assert production["environment"] == "production"
+    assert production["payment_asset"] == "USDC"
+    assert production["payment_notice"] == "Payments settle in USDC through x402."
 
 
 def test_unpaid_dev_app_serves_landing_page_and_keeps_api_routes_free():
     fastapi_testclient = pytest.importorskip("fastapi.testclient")
-    client = fastapi_testclient.TestClient(
-        create_app(config=X402Config(pay_to="0xabc"), paid=False, leos_access_token="leos-secret")
-    )
+    client = fastapi_testclient.TestClient(create_app(config=X402Config(pay_to="0xabc"), paid=False))
 
     landing = client.get("/")
     assert landing.status_code == 200
@@ -182,23 +168,15 @@ def test_unpaid_dev_app_serves_landing_page_and_keeps_api_routes_free():
     pricing = client.get("/pricing")
     assert pricing.status_code == 200
     assert pricing.json()["x402"]["price"] == DEFAULT_PRICE
-    assert pricing.json()["token_offer"]["ca"] == LEOS_TOKEN_CA
-    assert pricing.json()["token_offer"]["price"] == LEOS_TOKEN_PRICE
-    assert pricing.json()["token_offer"]["enabled"] is True
+    assert pricing.json()["pricing"]["environment"] == "testnet_preview"
+    assert pricing.json()["pricing"]["per_1000_requests"] == "$1.10"
     assert pricing.json()["tenancy"]["default_tenant"] == DEFAULT_TENANT_ID
-
-    blocked = client.post("/leos/v1/route", json={"task": "search local agent memory"})
-    assert blocked.status_code == 401
-    assert client.post("/leos/v1/recall", json={"query": "memory"}).status_code == 401
-    assert client.get("/leos/v1/dashboard").status_code == 401
-
-    leos_route = client.post(
-        "/leos/v1/route",
-        headers={LEOS_ACCESS_HEADER: "leos-secret"},
-        json={"task": "search local agent memory"},
-    )
-    assert leos_route.status_code == 200
-    assert leos_route.json()["tenant"] == DEFAULT_TENANT_ID
+    assert {row["route"] for row in pricing.json()["routes"]} == {
+        "POST /v1/recall",
+        "POST /v1/route",
+        "GET /v1/dashboard",
+    }
+    assert client.get("/leos/v1/dashboard").status_code == 404
 
 
 def test_health_does_not_run_expensive_evidence_probe():
@@ -218,9 +196,9 @@ def test_health_does_not_run_expensive_evidence_probe():
 
     assert response.status_code == 200
     assert response.json()["memory"]["entries"] == 3
-    assert pricing["token_offer"]["enabled"] is False
+    assert pricing["pricing"]["environment"] == "testnet_preview"
     assert all(not row["route"].split(" ", 1)[1].startswith("/leos/") for row in pricing["routes"])
-    assert client.get("/leos/v1/dashboard").status_code == 503
+    assert client.get("/leos/v1/dashboard").status_code == 404
 
 
 @pytest.mark.parametrize(

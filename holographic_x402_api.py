@@ -18,7 +18,8 @@ shared memory store just because they paid for one request.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager, contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 import hashlib
 import hmac
 from html import escape
@@ -41,10 +42,6 @@ from holographic_product import LocalAgentCore, demo
 DEFAULT_FACILITATOR_URL = "https://x402.org/facilitator"
 DEFAULT_NETWORK = "eip155:84532"  # Base Sepolia, safe default for testnet publishing.
 DEFAULT_PRICE = "$0.0011"
-LEOS_SITE_URL = "https://discoverleos.com/"
-LEOS_TOKEN_CA = "5xgsnby6P9zqGK71J7H4yJLxzqPvNbC7rDZxNzjHmj7e"
-LEOS_TOKEN_PRICE = "$0.0010"
-LEOS_ACCESS_HEADER = "X-leCore-leOS-Access"
 DEFAULT_TENANT_ID = "public"
 TENANT_HEADER = "X-leCore-Tenant"
 TENANT_TOKEN_HEADER = "X-leCore-Tenant-Token"
@@ -87,13 +84,19 @@ REGULAR_PAID_ROUTES: Tuple[PaidRoute, ...] = (
     PaidRoute("GET", "/v1/dashboard", "Read the LocalAgentCore evidence dashboard"),
 )
 
-LEOS_PAID_ROUTES: Tuple[PaidRoute, ...] = (
-    PaidRoute("POST", "/leos/v1/recall", "Recall nearest memories at the leOS CA offer price", price=LEOS_TOKEN_PRICE),
-    PaidRoute("POST", "/leos/v1/route", "Route a task at the leOS CA offer price", price=LEOS_TOKEN_PRICE),
-    PaidRoute("GET", "/leos/v1/dashboard", "Read the dashboard at the leOS CA offer price", price=LEOS_TOKEN_PRICE),
-)
+DEFAULT_PAID_ROUTES: Tuple[PaidRoute, ...] = REGULAR_PAID_ROUTES
+TESTNET_NETWORKS = frozenset({"eip155:84532"})
 
-DEFAULT_PAID_ROUTES: Tuple[PaidRoute, ...] = REGULAR_PAID_ROUTES + LEOS_PAID_ROUTES
+
+def _price_amount(price: str) -> Decimal:
+    """Parse a dollar-denominated x402 price without a floating-point round trip."""
+    try:
+        amount = Decimal(price[1:])
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("x402 price must be a positive dollar amount, e.g. '$0.001'") from exc
+    if not amount.is_finite() or amount <= 0:
+        raise ValueError("x402 price must be a positive dollar amount, e.g. '$0.001'")
+    return amount
 
 
 LANDING_PAGE_TEMPLATE = Template("""<!doctype html>
@@ -102,7 +105,7 @@ LANDING_PAGE_TEMPLATE = Template("""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>leCore x402 API</title>
-<meta name="description" content="Buy local agent memory, capability routing, and readiness dashboards as x402-paid HTTP primitives.">
+<meta name="description" content="Try local agent memory, capability routing, and readiness dashboards as x402-paid HTTP primitives.">
 <style>
 :root{--paper:#fbfaf5;--ink:#171714;--muted:#6f6b61;--line:#ded8c8;--acid:#b7ff3c;--cyan:#28d6ff;--coral:#ff6b57;--gold:#f4c542;--graphite:#20201c}
 *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:inherit;text-decoration:none}
@@ -118,11 +121,10 @@ h1,h2,h3,p{margin-top:0}h1{font-size:clamp(56px,9vw,124px);line-height:.9;margin
 .strip{background:var(--acid);color:var(--ink);display:grid;grid-template-columns:repeat(3,1fr)}.strip div{border-right:1px solid rgba(23,23,20,.22);padding:18px clamp(18px,4vw,54px)}.strip div:last-child{border-right:0}.strip strong,.strip span{display:block}.strip strong{font-size:13px;text-transform:uppercase}.strip span{font-size:clamp(18px,2vw,28px);font-weight:760;margin-top:5px}
 .section{padding:clamp(68px,9vw,128px) clamp(20px,5vw,72px)}.split,.proof{display:grid;gap:clamp(32px,6vw,80px);grid-template-columns:minmax(0,.9fr) minmax(320px,1.1fr)}.eyebrow{color:var(--coral);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;font-weight:720;letter-spacing:0;margin-bottom:16px;text-transform:uppercase}.section h2{color:var(--ink);font-size:clamp(34px,5vw,72px);line-height:.98;margin-bottom:0;max-width:930px}.reason-list{border-top:1px solid var(--line)}.reason-list p{border-bottom:1px solid var(--line);color:#3a372f;font-size:clamp(18px,2vw,25px);line-height:1.35;margin:0;padding:22px 0}.heading{margin-bottom:clamp(28px,5vw,56px)}
 .routes,.cases{display:grid;gap:14px}.routes{grid-template-columns:repeat(3,minmax(0,1fr))}.card,.case,.proof-panel{background:#fff;border:1px solid var(--line);border-radius:8px}.card{min-height:315px;padding:24px}.method{color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;margin-bottom:42px}.card h3{font-size:30px;margin-bottom:10px}.card code{background:#f2eee3;display:inline-block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;margin-bottom:18px;padding:7px 9px}.card p:last-child{color:var(--muted);font-size:17px;line-height:1.48}
-.token-offer{background:#fff}.token-panel{align-items:stretch;border:1px solid var(--line);display:grid;gap:1px;grid-template-columns:minmax(180px,.8fr) minmax(0,1.8fr) auto}.token-panel>div,.token-panel>a{background:#fbfaf5;padding:22px}.token-panel span{color:var(--muted);display:block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;margin-bottom:16px;text-transform:uppercase}.token-panel strong{font-size:clamp(28px,4vw,54px);line-height:1}.token-panel code{display:block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(13px,1.8vw,19px);overflow-wrap:anywhere}.token-panel .button{justify-content:center;min-width:170px}
 .use{background:#f2eee3}.cases{grid-template-columns:repeat(4,minmax(0,1fr))}.case{display:flex;gap:16px;min-height:220px;padding:22px}.case span{color:var(--coral);font-size:30px;line-height:1}.case p{color:#3b382f;font-size:18px;line-height:1.42}
 .proof{background:var(--graphite);color:var(--paper)}.proof h2,.proof p{color:var(--paper)}.proof-copy p:last-child{color:rgba(251,250,245,.75);font-size:19px;line-height:1.55;margin-top:26px;max-width:690px}.proof-panel{background:rgba(251,250,245,.96);color:var(--ink);padding:8px}.proof-panel dl{display:grid;gap:1px;grid-template-columns:repeat(2,1fr);margin:0}.proof-panel div{background:#fbfaf5;min-height:150px;padding:22px}.proof-panel dt{color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;margin-bottom:28px;text-transform:uppercase}.proof-panel dd{font-size:clamp(24px,3vw,40px);font-weight:760;margin:0;overflow-wrap:anywhere}
 .close{align-items:center;display:grid;grid-template-columns:minmax(0,1fr) auto}.close h2{max-width:980px}.close-actions{justify-content:flex-end;margin-top:0}
-@media(max-width:980px){.hero,.split,.proof,.close{grid-template-columns:1fr}.hero{min-height:auto}.terminal{align-self:start;margin-bottom:0;max-width:100%}.routes,.cases,.token-panel{grid-template-columns:1fr}.case,.card{min-height:0}.close-actions{justify-content:flex-start;margin-top:24px}}
+@media(max-width:980px){.hero,.split,.proof,.close{grid-template-columns:1fr}.hero{min-height:auto}.terminal{align-self:start;margin-bottom:0;max-width:100%}.routes,.cases{grid-template-columns:1fr}.case,.card{min-height:0}.close-actions{justify-content:flex-start;margin-top:24px}}
 @media(max-width:680px){.hero{padding:20px 18px 36px}.topbar,.nav,.strip{align-items:flex-start;display:grid;grid-template-columns:1fr}.nav{gap:8px}.copy{padding-top:62px}.status span,.button{width:100%}.strip div{border-bottom:1px solid rgba(23,23,20,.22);border-right:0}.proof-panel dl{grid-template-columns:1fr}.section{padding-left:18px;padding-right:18px}}
 </style>
 </head>
@@ -130,8 +132,8 @@ h1,h2,h3,p{margin-top:0}h1{font-size:clamp(56px,9vw,124px);line-height:.9;margin
 <main>
 <section class="hero" aria-labelledby="hero-title">
 <div class="field" aria-hidden="true"><span class="trace a"></span><span class="trace b"></span><span class="trace c"></span>$nodes</div>
-<nav class="topbar" aria-label="Primary"><a class="brand" href="#hero-title" aria-label="leCore x402 API home"><span class="mark">lc</span><span>leCore x402 API</span></a><div class="nav"><a href="#why">Why buy</a><a href="#routes">Routes</a><a href="#leos">leOS</a><a href="#proof">Proof</a></div></nav>
-<div class="copy"><p class="status"><span>Live on AWS</span><span>$network_label</span><span>$price per call</span><span>leOS CA $leos_token_price</span></p><h1 id="hero-title">leCore x402 API</h1><p class="lede">Buy the small, useful surface of leCore: local agent memory, capability routing, and a readiness dashboard, sold as paid HTTP primitives instead of another subscription dashboard.</p><div class="actions"><a class="button primary" href="/pricing">View pricing</a><a class="button secondary" href="/v1/dashboard">See x402 challenge</a><a class="button secondary" href="$leos_site_url" target="_blank" rel="noopener">leOS site</a></div></div>
+<nav class="topbar" aria-label="Primary"><a class="brand" href="#hero-title" aria-label="leCore x402 API home"><span class="mark">lc</span><span>leCore x402 API</span></a><div class="nav"><a href="#why">Why try it</a><a href="#routes">Routes</a><a href="#proof">Preview status</a></div></nav>
+<div class="copy"><p class="status"><span>$environment_label</span><span>$network_label</span><span>$price_per_thousand</span></p><h1 id="hero-title">leCore x402 API</h1><p class="lede">Try local agent memory, capability routing, and a readiness dashboard as paid HTTP primitives. $payment_notice</p><div class="actions"><a class="button primary" href="/pricing">View preview terms</a><a class="button secondary" href="/v1/dashboard">See x402 challenge</a></div></div>
 <aside class="terminal" aria-label="Live API snapshot"><div class="terminal-top"><span></span><span></span><span></span></div><pre>GET /health
 200 OK
 memory.entries: 3
@@ -140,15 +142,14 @@ paid: true
 GET /v1/dashboard
 402 Payment Required
 network: $network
-asset: USDC</pre></aside>
+asset: $payment_asset</pre></aside>
 </section>
-<section class="strip" aria-label="Live deployment details"><div><strong>Endpoint</strong><span>https://lecore.rati.foundation</span></div><div><strong>Payment</strong><span>x402 exact scheme</span></div><div><strong>Buyer shape</strong><span>inspect, pay, call</span></div></section>
-<section id="why" class="section split"><div><p class="eyebrow">Why you would buy it</p><h2>Because most agents do not need a platform. They need a few reliable cognitive calls.</h2></div><div class="reason-list"><p>You pay for an answerable primitive, not a monthly seat.</p><p>The API is narrow enough to trust: read/compute routes are paid, memory writes stay admin-gated.</p><p>It exposes the useful part of leCore first: local agent memory plus capability routing.</p><p>The implementation is deployed, health-checked, and already returning x402 payment challenges.</p></div></section>
-<section id="leos" class="section token-offer"><div class="heading"><p class="eyebrow">leOS token offer</p><h2>A slightly cheaper price for eligible leOS buyers.</h2></div><div class="token-panel" aria-label="leOS token offer"><div><span>Offer price</span><strong>$leos_token_price</strong></div><div><span>CA</span><code>$leos_token_ca</code></div><a class="button primary" href="$leos_site_url" target="_blank" rel="noopener">leOS website</a></div></section>
+<section class="strip" aria-label="Live deployment details"><div><strong>Endpoint</strong><span>https://lecore.rati.foundation</span></div><div><strong>Stage</strong><span>$environment_label</span></div><div><strong>Buyer shape</strong><span>inspect, pay, call</span></div></section>
+<section id="why" class="section split"><div><p class="eyebrow">Why try it</p><h2>Most agents do not need a platform. They need a few reliable cognitive calls.</h2></div><div class="reason-list"><p>Test the x402 payment flow against one answerable primitive at a time.</p><p>The API is narrow enough to trust: read/compute routes are paid, memory writes stay admin-gated.</p><p>It exposes the useful part of leCore first: local agent memory plus capability routing.</p><p>$payment_notice</p></div></section>
 <section id="routes" class="section"><div class="heading"><p class="eyebrow">What the payment unlocks</p><h2>Three paid routes, each small enough to understand.</h2></div><div class="routes"><article class="card"><p class="method">POST</p><h3>Recall</h3><code>/v1/recall</code><p>Pull nearest memories from a compact local agent core without shipping a whole application stack.</p></article><article class="card"><p class="method">POST</p><h3>Route</h3><code>/v1/route</code><p>Send a plain-language task and get the leCore capability it should use, with evidence attached.</p></article><article class="card"><p class="method">GET</p><h3>Dashboard</h3><code>/v1/dashboard</code><p>Read the readiness surface: memory counts, capability map, abstention behavior, and route coverage.</p></article></div></section>
 <section class="section use"><div class="heading"><p class="eyebrow">Good first buyers</p><h2>Teams who want the leCore idea without adopting the whole repo.</h2></div><div class="cases"><article class="case"><span aria-hidden="true">+</span><p>Agent memory for prototypes that should remember without a database rollout.</p></article><article class="case"><span aria-hidden="true">+</span><p>Capability routing for tools that need to pick the right leCore subsystem before doing work.</p></article><article class="case"><span aria-hidden="true">+</span><p>Evidence dashboards for teams deciding whether a local vector system is ready to productize.</p></article><article class="case"><span aria-hidden="true">+</span><p>A working x402 seller endpoint to copy when you want pay-per-call APIs instead of subscriptions.</p></article></div></section>
-<section id="proof" class="section proof"><div class="proof-copy"><p class="eyebrow">Proof it is real</p><h2>It is already deployed, priced, and protected.</h2><p>The free endpoints show health and pricing. Paid endpoints return a real x402 payment challenge. The receiving address is public, while admin writes stay out of the paid customer path.</p></div><div class="proof-panel"><dl><div><dt>Price</dt><dd>$price</dd></div><div><dt>Network</dt><dd>$network_name</dd></div><div><dt>Receiver</dt><dd>$pay_to_short</dd></div><div><dt>Status</dt><dd>Healthy</dd></div></dl></div></section>
-<section class="section close"><p class="eyebrow">The pitch</p><h2>Buy it when you want a local-memory agent primitive that can pay for itself one request at a time.</h2><div class="close-actions"><a class="button primary" href="/pricing">Inspect the offer</a><a class="button secondary dark" href="/health">Check live health</a></div></section>
+<section id="proof" class="section proof"><div class="proof-copy"><p class="eyebrow">Preview status</p><h2>It is deployed, health-checked, and ready to integrate.</h2><p>The free endpoints show health and preview terms. Paid endpoints return an x402 challenge on $network_name. The receiving address is public, while admin writes stay out of the customer path.</p></div><div class="proof-panel"><dl><div><dt>Preview price</dt><dd>$price_per_thousand</dd></div><div><dt>Network</dt><dd>$network_name</dd></div><div><dt>Receiver</dt><dd>$pay_to_short</dd></div><div><dt>Status</dt><dd>Healthy</dd></div></dl></div></section>
+<section class="section close"><p class="eyebrow">The pitch</p><h2>Try it when you want a local-memory agent primitive without adopting the whole repo.</h2><div class="close-actions"><a class="button primary" href="/pricing">Inspect preview terms</a><a class="button secondary dark" href="/health">Check live health</a></div></section>
 </main>
 </body>
 </html>""")
@@ -170,6 +171,7 @@ class X402Config:
             raise ValueError("pay_to is required")
         if not self.price.startswith("$"):
             raise ValueError("x402 price must include a dollar prefix, e.g. '$0.001'")
+        _price_amount(self.price)
         if not self.network:
             raise ValueError("network is required")
         if not self.facilitator_url:
@@ -985,18 +987,26 @@ class TenantMemoryTransactions:
         }
 
 
-def leos_token_offer(access_required: bool = True, enabled: bool = True) -> Dict[str, Any]:
-    """Return public metadata for the credential-gated leOS offer."""
+def pricing_summary(config: X402Config) -> Dict[str, Any]:
+    """Describe the customer-facing price and whether it is a production charge."""
+    per_thousand = _price_amount(config.price) * Decimal("1000")
+    per_thousand_display = "$%s" % per_thousand.quantize(Decimal("0.01"))
+    testnet = config.network in TESTNET_NETWORKS
+    environment = "testnet_preview" if testnet else "production"
+    payment_asset = "testnet USDC" if testnet else "USDC"
+    payment_notice = (
+        "This Base Sepolia developer preview uses testnet USDC and does not accept production payments."
+        if testnet
+        else "Payments settle in USDC through x402."
+    )
     return {
-        "name": "leOS CA offer",
-        "site": LEOS_SITE_URL,
-        "ca": LEOS_TOKEN_CA,
-        "price": LEOS_TOKEN_PRICE,
-        "access_header": LEOS_ACCESS_HEADER,
-        "access_required": bool(access_required),
-        "enabled": bool(enabled),
-        "discount_routes": [route.key for route in LEOS_PAID_ROUTES],
-        "note": "The CA identifies the offer; eligible buyers also receive an operator-issued access credential.",
+        "environment": environment,
+        "environment_label": "Testnet developer preview" if testnet else "Production API",
+        "payment_asset": payment_asset,
+        "per_request": config.price,
+        "per_1000_requests": per_thousand_display,
+        "display_price": "%s per 1,000 requests" % per_thousand_display,
+        "payment_notice": payment_notice,
     }
 
 
@@ -1048,17 +1058,17 @@ def env_flag(value: Optional[str]) -> bool:
 def landing_page_html(config: X402Config) -> str:
     """Render the buyer-facing landing page served from `/`."""
     network_name = _network_name(config.network)
-    offer = leos_token_offer()
+    summary = pricing_summary(config)
     return LANDING_PAGE_TEMPLATE.substitute(
         nodes=_landing_nodes(),
-        price=escape(config.price),
         network=escape(config.network),
         network_label=escape("%s x402" % network_name),
         network_name=escape(network_name),
         pay_to_short=escape(_short_address(config.pay_to)),
-        leos_site_url=escape(offer["site"], quote=True),
-        leos_token_ca=escape(offer["ca"]),
-        leos_token_price=escape(offer["price"]),
+        environment_label=escape(summary["environment_label"]),
+        payment_asset=escape(summary["payment_asset"]),
+        payment_notice=escape(summary["payment_notice"]),
+        price_per_thousand=escape(summary["display_price"]),
     )
 
 
@@ -1078,8 +1088,6 @@ def payment_manifest(config: X402Config) -> List[Dict[str, Any]]:
                 "pay_to": config.pay_to,
             }],
         }
-        if route.price:
-            row["offer"] = "leos_ca"
         out.append(row)
     return out
 
@@ -1131,7 +1139,6 @@ def create_app(
     admin_token: Optional[str] = None,
     tenant_secret: Optional[str] = None,
     tenant_state_dir: Optional[Any] = None,
-    leos_access_token: Optional[str] = None,
     memory_backend: Optional[str] = None,
     nosqlite_binary: Optional[str] = None,
     nosqlite_data_dir: Optional[Any] = None,
@@ -1195,13 +1202,6 @@ def create_app(
     app.state.memory_transactions = memory_transactions
     config = config or (X402Config.from_env(require_pay_to=paid) if paid else X402Config.from_env(require_pay_to=False))
     tenant_secret = tenant_secret or os.environ.get("LECORE_X402_TENANT_SECRET")
-    leos_access_token = leos_access_token or os.environ.get("LECORE_X402_LEOS_ACCESS_TOKEN")
-    active_config = config
-    if not leos_access_token:
-        active_config = replace(
-            config,
-            routes=tuple(route for route in config.routes if not route.path.startswith("/leos/")),
-        )
 
     if paid:
         try:
@@ -1210,8 +1210,8 @@ def create_app(
             raise RuntimeError(optional_dependency_help()) from exc
         app.add_middleware(
             PaymentMiddlewareASGI,
-            routes=x402_route_configs(active_config),
-            server=x402_resource_server(active_config),
+            routes=x402_route_configs(config),
+            server=x402_resource_server(config),
         )
 
     def require_admin(header_value: Optional[str]) -> None:
@@ -1219,12 +1219,6 @@ def create_app(
             raise HTTPException(status_code=403, detail="admin writes are disabled")
         if not header_value or not hmac.compare_digest(header_value, admin_token):
             raise HTTPException(status_code=401, detail="invalid admin token")
-
-    def require_leos_access(header_value: Optional[str]) -> None:
-        if not leos_access_token:
-            raise HTTPException(status_code=503, detail="leOS discount access is not configured")
-        if not header_value or not hmac.compare_digest(header_value, leos_access_token):
-            raise HTTPException(status_code=401, detail="invalid leOS discount credential")
 
     def require_tenant_access(tenant_id: str, token: Optional[str]) -> None:
         normalized = normalize_tenant_id(tenant_id)
@@ -1321,10 +1315,10 @@ def create_app(
         return {
             "ok": True,
             "x402": config.to_public_dict(),
-            "token_offer": leos_token_offer(enabled=bool(leos_access_token)),
+            "pricing": pricing_summary(config),
             "tenancy": tenancy_public_dict(),
             "memory_backend": memory_public_dict(),
-            "routes": payment_manifest(active_config),
+            "routes": payment_manifest(config),
         }
 
     def recall_response(
@@ -1367,16 +1361,6 @@ def create_app(
     ) -> Dict[str, Any]:
         return recall_response(payload, x_lecore_tenant, x_lecore_tenant_token)
 
-    @app.post("/leos/v1/recall")
-    def leos_recall(
-        payload: Dict[str, Any],
-        x_lecore_leos_access: Optional[str] = Header(default=None, alias=LEOS_ACCESS_HEADER),
-        x_lecore_tenant: Optional[str] = Header(default=None, alias=TENANT_HEADER),
-        x_lecore_tenant_token: Optional[str] = Header(default=None, alias=TENANT_TOKEN_HEADER),
-    ) -> Dict[str, Any]:
-        require_leos_access(x_lecore_leos_access)
-        return recall_response(payload, x_lecore_tenant, x_lecore_tenant_token)
-
     def route_response(
         payload: Dict[str, Any],
         x_lecore_tenant: Optional[str],
@@ -1396,16 +1380,6 @@ def create_app(
     ) -> Dict[str, Any]:
         return route_response(payload, x_lecore_tenant, x_lecore_tenant_token)
 
-    @app.post("/leos/v1/route")
-    def leos_route(
-        payload: Dict[str, Any],
-        x_lecore_leos_access: Optional[str] = Header(default=None, alias=LEOS_ACCESS_HEADER),
-        x_lecore_tenant: Optional[str] = Header(default=None, alias=TENANT_HEADER),
-        x_lecore_tenant_token: Optional[str] = Header(default=None, alias=TENANT_TOKEN_HEADER),
-    ) -> Dict[str, Any]:
-        require_leos_access(x_lecore_leos_access)
-        return route_response(payload, x_lecore_tenant, x_lecore_tenant_token)
-
     def dashboard_response(
         x_lecore_tenant: Optional[str],
         x_lecore_tenant_token: Optional[str],
@@ -1420,15 +1394,6 @@ def create_app(
         x_lecore_tenant: Optional[str] = Header(default=None, alias=TENANT_HEADER),
         x_lecore_tenant_token: Optional[str] = Header(default=None, alias=TENANT_TOKEN_HEADER),
     ) -> Dict[str, Any]:
-        return dashboard_response(x_lecore_tenant, x_lecore_tenant_token)
-
-    @app.get("/leos/v1/dashboard")
-    def leos_dashboard(
-        x_lecore_leos_access: Optional[str] = Header(default=None, alias=LEOS_ACCESS_HEADER),
-        x_lecore_tenant: Optional[str] = Header(default=None, alias=TENANT_HEADER),
-        x_lecore_tenant_token: Optional[str] = Header(default=None, alias=TENANT_TOKEN_HEADER),
-    ) -> Dict[str, Any]:
-        require_leos_access(x_lecore_leos_access)
         return dashboard_response(x_lecore_tenant, x_lecore_tenant_token)
 
     @app.post("/admin/remember")
@@ -1534,7 +1499,6 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
     p.add_argument("--admin-token", default=os.environ.get("LECORE_X402_ADMIN_TOKEN"))
     p.add_argument("--tenant-secret", default=os.environ.get("LECORE_X402_TENANT_SECRET"))
     p.add_argument("--tenant-state-dir", default=os.environ.get("LECORE_X402_TENANT_STATE_DIR"))
-    p.add_argument("--leos-access-token", default=os.environ.get("LECORE_X402_LEOS_ACCESS_TOKEN"))
     p.add_argument(
         "--memory-backend",
         choices=(MEMORY_BACKEND_CORE, MEMORY_BACKEND_NOSQLITE),
@@ -1565,7 +1529,6 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
         admin_token=args.admin_token,
         tenant_secret=args.tenant_secret,
         tenant_state_dir=args.tenant_state_dir,
-        leos_access_token=args.leos_access_token,
         memory_backend=args.memory_backend,
         nosqlite_binary=args.nosqlite_bin,
         nosqlite_data_dir=args.nosqlite_data_dir,
