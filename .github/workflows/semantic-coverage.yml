@@ -35,7 +35,7 @@ name: semantic-coverage
 
 on:
   push:
-    paths: ['holographic/**.py', 'tools/semantic/**.py']
+    paths: ['holographic/**.py', 'tools/semantic/**.py', '.github/workflows/semantic-coverage.yml']
   schedule:
     - cron: '17 5 * * 1'        # weekly full pass: catches drift with no code change
   workflow_dispatch: {}
@@ -44,6 +44,8 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    permissions:
+      contents: write            # so the job can commit the refreshed index_128d.npz back (like docs.yml)
     env:
       # SAME determinism pins as ci.yml, for the same reason it documents: multi-threaded BLAS sums
       # in a different order per run and flips knife-edge cosines. One thread, fixed hash seed.
@@ -120,22 +122,23 @@ jobs:
           cd tools/semantic && python knowledge_index.py nomic_text/model.safetensors \
             nomic_text/vocab.txt --repo ../.. --no-md --exam --require-top5 8 --require-median 2
 
-      - name: rebuild the shipped 128d routing index (the 128 KB artifact the engine loads)
-        # export_index.py pulls the routing vectors from the cache and writes them to the exact path
-        # the engine loads (lecore_data/routing/index_128d.npz), creating the dir if needed. This is the
-        # <1 MB ship artifact; the drift-gate below fails if the committed copy is stale.
-        run: python tools/semantic/export_index.py --dim 128 --repo .
-
-      - name: fail if the committed index drifted from the freshly-built one
-        # same drift-check pattern as ci.yml's API_QUICKREF/CAPABILITIES: rebuild, and if git sees a diff
-        # the committed index is stale -- run export_index.py locally and commit the result.
+      - name: rebuild the shipped 128d routing index and commit it if it changed
+        # export_index.py pulls the routing vectors from the freshly-embedded cache and writes them to
+        # the path the engine loads (lecore_data/routing/index_128d.npz). Instead of GATING (which forced
+        # a manual rebuild), we COMMIT the refresh back -- same auto-commit pattern as docs.yml -- so the
+        # shipped index stays in lockstep with the code on every push, hands-free. [skip ci] on the commit
+        # prevents a re-trigger loop.
         run: |
-          git diff --exit-code lecore_data/routing/index_128d.npz || {
-            echo "::error::lecore_data/routing/index_128d.npz is stale -- run "
-            echo "  python tools/semantic/export_index.py --dim 128  and commit the result.";
-            echo "  please work";
-            exit 1;
-          }
+          python tools/semantic/export_index.py --dim 128 --repo .
+          git config user.name  "semantic-bot"
+          git config user.email "semantic-bot@users.noreply.github.com"
+          if ! git diff --quiet lecore_data/routing/index_128d.npz; then
+            git add lecore_data/routing/index_128d.npz
+            git commit -m "semantic: refresh routing index_128d.npz from embed [skip ci]"
+            git push
+          else
+            echo "routing index already up to date -- nothing to commit."
+          fi
 
       - name: upload the index as a build artifact (inspectable; the committed copy is authoritative)
         uses: actions/upload-artifact@v4

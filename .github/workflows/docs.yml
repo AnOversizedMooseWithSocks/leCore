@@ -34,6 +34,9 @@ jobs:
       - name: Generate the capabilities menu
         run: python capdoc.py          # writes CAPABILITIES.md (prose) AND capabilities.json (machine-readable) from the live catalog
 
+      - name: Generate the API quick reference
+        run: python apiquickref.py     # writes API_QUICKREF.md (pure ast; ci.yml only GATES this, so nothing else regenerates it -- do it here)
+
       - name: Generate the faculty map
         run: python facultymap.py      # writes docs/FACULTY_MAP.md -- the mind's 1,270+ methods by topic, from live introspection
 
@@ -44,9 +47,9 @@ jobs:
         run: |
           git config user.name  "docs-bot"
           git config user.email "docs-bot@users.noreply.github.com"
-          if ! git diff --quiet REFERENCE.md CAPABILITIES.md capabilities.json docs/FACULTY_MAP.md docs/DOC_MAP.md; then
-            git add REFERENCE.md CAPABILITIES.md capabilities.json docs/FACULTY_MAP.md docs/DOC_MAP.md
-            git commit -m "docs: refresh generated docs (REFERENCE, CAPABILITIES, FACULTY_MAP, DOC_MAP) [skip ci]"   # [skip ci] so it doesn't re-trigger CI
+          if ! git diff --quiet REFERENCE.md CAPABILITIES.md capabilities.json API_QUICKREF.md docs/FACULTY_MAP.md docs/DOC_MAP.md; then
+            git add REFERENCE.md CAPABILITIES.md capabilities.json API_QUICKREF.md docs/FACULTY_MAP.md docs/DOC_MAP.md
+            git commit -m "docs: refresh generated docs (REFERENCE, CAPABILITIES, API_QUICKREF, FACULTY_MAP, DOC_MAP) [skip ci]"   # [skip ci] so it doesn't re-trigger CI
             git push
           else
             echo "All generated docs already up to date -- nothing to commit."
