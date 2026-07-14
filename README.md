@@ -78,6 +78,7 @@ pip install "leos-core[symbolic]"           # pip install .[symbolic]  design-ti
 pip install "leos-core[zig]"                # pip install .[zig]       native batch kernels, 2-5x     (ziglang -- whole
                                             #                          toolchain in one wheel, bit-identical in safe mode)
 pip install "leos-core[images]"             # pip install .[images]    jpg/webp/... image I/O         (Pillow, no Flask)
+pip install "leos-core[x402]"               # pip install .[x402]      paid API publishing           (x402, FastAPI)
 pip install "leos-core[dev]"                # pip install .[dev]       run the tests and make plots  (pytest, matplotlib)
 pip install "leos-core[all]"                # pip install .[all]       everything portable, one shot
 pip install "leos-core[ui,jit]"             # pip install .[ui,jit]    ...or combine whichever you want
@@ -162,6 +163,14 @@ Like leOS, leCore is **free and open source**, and the work that keeps it free i
   `find_capability` first, wire every capability to a mind faculty (so it is `/invoke`-able), register it in the
   catalog so it is discoverable, and run the reachability/gap audits — the discipline that keeps the codebase from
   growing gaps or isolating code in tests. Read this before making code changes.
+- **[`PRODUCT.md`](PRODUCT.md)** — the **narrow product wedge**: `LocalAgentCore`, a small stable facade for local
+  agent memory, capability routing, persistence, and the readiness dashboard. Start here if you want the five-minute
+  "use it in an agent" path rather than the whole research surface.
+- **[`X402_API.md`](X402_API.md)** — the **paid API publishing guide**: serve the product wedge over FastAPI with
+  optional x402 middleware, per-route pricing, and admin-gated memory writes.
+- **[`FLY_X402_DEPLOY.md`](FLY_X402_DEPLOY.md)** — the **launch guide** for the paid API on Fly.io (default), with
+  [`AWS_X402_DEPLOY.md`](AWS_X402_DEPLOY.md) as the AWS alternative and the wallet-storage discussion (KMS, Nitro
+  Enclaves, cold/multisig receiving wallets).
 - **[`CAPABILITIES.md`](CAPABILITIES.md)** — the **front-door menu**: a plain-language, grouped list of what leCore can
   do and the one call that starts each job. The friendliest place to begin if you're deciding whether the engine
   already does the thing you need. Generated from the live capability catalog by `capdoc.py` and kept in sync by CI.

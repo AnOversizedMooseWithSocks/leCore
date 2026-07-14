@@ -1,0 +1,26 @@
+.git
+.gitignore
+.dockerignore
+.pytest_cache
+.mypy_cache
+.ruff_cache
+__pycache__
+node_modules
+dist
+.next
+.vinext
+.wrangler
+lecore-site
+*.py[cod]
+*.pyo
+.venv
+venv
+env
+.env
+.env.*
+metrics
+holostuff.zip
+current backlogs
+*_backlog.md
+PANEL_*_backlog.md
+RENDER_PIPELINE_BACKLOG.md
