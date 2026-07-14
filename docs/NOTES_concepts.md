@@ -32481,3 +32481,17 @@ place as a safety net (surgical: didn't flip ci.yml) -- they now rarely fire bec
 fresh; can be relaxed later if the transient-red-then-bot-fixes churn is annoying.
 KEPT PRINCIPLE: a gate WITHOUT a regenerator forces manual work; pair every 'fail if stale' with a 'here
 is how it auto-refreshes', or the gate is just a nag.
+
+
+====================================================================================
+CI FIX: drift-checked generated files must be DETERMINISTIC (no date stamps)
+====================================================================================
+API_QUICKREF.md drift check failed with the ONLY diff being the date: 'generated on 2026-07-12' vs
+'2026-07-14'. apiquickref.py embedded date.today().isoformat() in the header, so the file was "stale"
+every day even when the API was identical -- a self-defeating gate that can never stay green. ci.yml's
+own comment already states the rule (capdoc "writes no timestamp ... so this only trips on a real
+change"); apiquickref violated it. FIX: removed the date from apiquickref.py AND docgen.py (REFERENCE.md
+had the same date.today() on line 155). Verified apiquickref output is now byte-identical across runs.
+KEPT PRINCIPLE (load-bearing for every drift gate): a file compared with `git diff --exit-code` must be
+a pure function of the code -- NO dates, timestamps, hostnames, dict-ordering, or RNG. Non-determinism
+in a gated artifact turns the gate into a daily false alarm. Swept all generators; only these two had it.
