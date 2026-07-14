@@ -1,0 +1,37 @@
+# Fly.io config for the x402-paid leCore API.
+#
+# Deploy with:
+#   fly deploy --config fly.x402.toml
+#
+# See FLY_X402_DEPLOY.md for the full runbook (secrets, volume, mainnet flip).
+
+app = "lecore-x402"
+primary_region = "sea"
+
+[build]
+  dockerfile = "Dockerfile.x402"
+
+[env]
+  # Non-secret config. LECORE_X402_PAY_TO is a public receiving address and can
+  # live here; LECORE_X402_ADMIN_TOKEN must be set with `fly secrets set`.
+  LECORE_X402_NETWORK = "eip155:84532"
+  LECORE_X402_FACILITATOR_URL = "https://x402.org/facilitator"
+  LECORE_X402_PRICE = "$0.0011"
+  LECORE_X402_PUBLIC_URL = "https://lecore-x402.fly.dev"
+  # Persist admin memory writes across restarts (requires the volume below).
+  LECORE_X402_STATE = "/data/core.json"
+
+[[mounts]]
+  source = "lecore_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 4021
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

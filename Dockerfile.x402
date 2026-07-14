@@ -1,0 +1,15 @@
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /app
+
+COPY . /app
+
+RUN python -m pip install --no-cache-dir --upgrade pip \
+    && python -m pip install --no-cache-dir ".[x402]"
+
+EXPOSE 4021
+
+CMD ["python", "holographic_x402_api.py", "--host", "0.0.0.0", "--port", "4021"]
