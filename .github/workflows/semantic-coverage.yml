@@ -133,6 +133,7 @@ jobs:
           git diff --exit-code lecore_data/routing/index_128d.npz || {
             echo "::error::lecore_data/routing/index_128d.npz is stale -- run "
             echo "  python tools/semantic/export_index.py --dim 128  and commit the result.";
+            echo "  please work";
             exit 1;
           }
 
