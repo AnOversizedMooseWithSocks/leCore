@@ -26,7 +26,6 @@
       "Make a mesh manifold (split non-manifold vertices)",
       "Mesh editing (DCC)",
       "Mesh repair (weld + split non-manifold + fill + compact)",
-      "Rendering (path trace)",
       "Route a mesh to its minimal repair (defect-classified)",
       "Smooth a bumpy mesh surface (Taubin no-shrink)",
       "Voxelization",
@@ -114,7 +113,7 @@
   "coverage": {
     "percent": 18,
     "tagged": 71,
-    "total": 391
+    "total": 393
   },
   "edges": [
     {
@@ -241,11 +240,6 @@
       "capability": "Recursive factoring (past the resonator's cliff)",
       "consumes": "hypervector",
       "produces": "hypervector"
-    },
-    {
-      "capability": "Rendering (path trace)",
-      "consumes": "mesh",
-      "produces": "image"
     },
     {
       "capability": "Rendering (path trace)",

@@ -2,7 +2,7 @@
 
 *The workflow graph, auto-derived by `pipelinemap.py` from the catalog's `consumes`/`produces` tags. Nodes are io-kinds; an edge means some capability turns the source kind into the target kind. This is a VIEW of the live tags -- to change it, tag capabilities, not this file.*
 
-> **Coverage: 71 of 391 capabilities carry io-kind tags (18%).** The graph below is that tagged subset. Untagged capabilities are real but do not yet declare a typed edge -- backfilling tags grows the map.
+> **Coverage: 71 of 393 capabilities carry io-kind tags (18%).** The graph below is that tagged subset. Untagged capabilities are real but do not yet declare a typed edge -- backfilling tags grows the map.
 
 ```mermaid
 graph LR
@@ -16,7 +16,6 @@ graph LR
     image["image"] -->|Denoise multi-way data (low-rank tensor prior)| field["field"]
     image["image"] -->|Denoise multi-way data (low-rank tensor prior) +3| image["image"]
     mesh["mesh"] -->|Voxelization| field["field"]
-    mesh["mesh"] -->|Rendering (path trace)| image["image"]
     mesh["mesh"] -->|Make a mesh manifold (split non-manifold vertices) +14| mesh["mesh"]
     mesh["mesh"] -->|mesh_pack_uv| points["points"]
     mesh["mesh"] -->|ray_mesh_intersect +2| scalar["scalar"]
@@ -50,7 +49,7 @@ graph LR
 
 ### `mesh`
 - **produced by:** Make a mesh manifold (split non-manifold vertices), Mesh editing (DCC), Mesh repair (weld + split non-manifold + fill + compact), Route a mesh to its minimal repair (defect-classified), Smooth a bumpy mesh surface (Taubin no-shrink), field_displace, mesh_bevel_vertex, mesh_fill_holes, mesh_poke, mesh_rip_vertex, mesh_split_vertices, mesh_symmetrize, mesh_triangulate, sdf_to_mesh, solidify_mesh, transform_selection
-- **consumed by:** Make a mesh manifold (split non-manifold vertices), Mesh editing (DCC), Mesh repair (weld + split non-manifold + fill + compact), Rendering (path trace), Route a mesh to its minimal repair (defect-classified), Smooth a bumpy mesh surface (Taubin no-shrink), Voxelization, field_displace, mesh_auto_seam, mesh_bevel_vertex, mesh_fill_holes, mesh_pack_uv, mesh_poke, mesh_rip_vertex, mesh_selection, mesh_split_vertices, mesh_symmetrize, mesh_triangulate, pick_mesh, pivot_point, ray_mesh_intersect, select_boundary_loops, select_edge_loop, select_face_ring, select_in_box, select_symmetric, skin_bind_weights, soft_selection_weights, solidify_mesh, transform_selection
+- **consumed by:** Make a mesh manifold (split non-manifold vertices), Mesh editing (DCC), Mesh repair (weld + split non-manifold + fill + compact), Route a mesh to its minimal repair (defect-classified), Smooth a bumpy mesh surface (Taubin no-shrink), Voxelization, field_displace, mesh_auto_seam, mesh_bevel_vertex, mesh_fill_holes, mesh_pack_uv, mesh_poke, mesh_rip_vertex, mesh_selection, mesh_split_vertices, mesh_symmetrize, mesh_triangulate, pick_mesh, pivot_point, ray_mesh_intersect, select_boundary_loops, select_edge_loop, select_face_ring, select_in_box, select_symmetric, skin_bind_weights, soft_selection_weights, solidify_mesh, transform_selection
 
 ### `points`
 - **produced by:** N-body gravity simulation, mesh_pack_uv, snap_to_grid, snap_to_vertices, solve_ik_limited

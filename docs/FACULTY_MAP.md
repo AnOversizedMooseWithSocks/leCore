@@ -767,7 +767,7 @@
 - **`mesh_poke`** -- POKE polygon face `f_index` (holographic_eulerops, FWD-7): add a vertex at the face centroid (pushed out
 - **`mesh_qem_decimate`** -- QEM (quadric error metric) DECIMATION (holographic_meshqem, Garland-Heckbert): greedily collapse the
 - **`mesh_repair`** -- REPAIR a raw mesh by composing the standard cleanup ops (holographic_meshtools.mesh_repair): WELD
-- **`mesh_report`** -- MESH REPORT: one-call topology + shape scoreboard as a dict -- verts, faces, quad/tri/ngon fraction,
+- **`mesh_report`** -- MESH REPORT, dispatching on the input (this method was DEFINED TWICE after a branch merge -- the
 - **`mesh_rip_vertex`** -- RIP a shared vertex apart (holographic_eulerops): give every face incident to `vertex` its OWN copy at the
 - **`mesh_sample_field`** -- Trilinearly sample a banded SDF (from mesh_to_field) at query points (N,3) -> (N,) SIGNED distances; take
 - **`mesh_select_lod`** -- Choose a level of detail by SCREEN-SPACE ERROR (holographic_lod): the index of the coarsest level in
