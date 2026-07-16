@@ -126,10 +126,13 @@ class Hologram:
         return _cg(lambda x: self.P @ (m * (self.P.T @ x)) + lam * x, b, iters)
 
     def damage_mask(self, destroy_fraction, seed=0):
-        rng = np.random.default_rng(seed)
-        keep = np.ones(self.dim)
-        keep[rng.permutation(self.dim)[:int(self.dim * destroy_fraction)]] = 0
-        return keep
+        """Keep-mask zeroing a random `destroy_fraction` of this object's slots -- the graceful-
+        degradation probe (multiply a stored vector by it, then measure surviving recall).
+        DELEGATES to holographic_ai.damage_mask: this body was written three times byte-identically
+        (D2, the one true cross-module duplicate); the mask is a property of a VECTOR, not of this
+        class. Bit-identical to the old inline version -- pinned by tests/test_damage_mask.py."""
+        from holographic.agents_and_reasoning.holographic_ai import damage_mask as _dm
+        return _dm(self.dim, destroy_fraction, seed=seed)
 
 
 # --- pure-numpy orthonormal DCT-II (verified against scipy to 1e-10) ---
@@ -271,10 +274,13 @@ class HolographicImage:
         return int(self.key_bytes() + plate + index)
 
     def damage_mask(self, destroy_fraction, seed=0):
-        rng = np.random.default_rng(seed)
-        keep = np.ones(self.dim)
-        keep[rng.permutation(self.dim)[:int(self.dim * destroy_fraction)]] = 0
-        return keep
+        """Keep-mask zeroing a random `destroy_fraction` of this object's slots -- the graceful-
+        degradation probe (multiply a stored vector by it, then measure surviving recall).
+        DELEGATES to holographic_ai.damage_mask: this body was written three times byte-identically
+        (D2, the one true cross-module duplicate); the mask is a property of a VECTOR, not of this
+        class. Bit-identical to the old inline version -- pinned by tests/test_damage_mask.py."""
+        from holographic.agents_and_reasoning.holographic_ai import damage_mask as _dm
+        return _dm(self.dim, destroy_fraction, seed=seed)
 
 
 # ---------------------------------------------------------------------------

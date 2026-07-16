@@ -427,6 +427,20 @@ class UnifiedMind:
         from holographic.agents_and_reasoning.holographic_ai import cosine
         return cosine(self.perceive(a, "axial"), self.perceive(b, "axial"))
 
+    def damage_mask(self, destroy_fraction, seed=0, dim=None):
+        """GRACEFUL-DEGRADATION PROBE: a keep-mask that zeroes a random `destroy_fraction` of a vector's slots.
+        Multiply a stored hypervector by it to simulate real damage -- a scratched plate, a dropped shard, a lossy
+        channel -- then measure what recall survives. This is how a caller PROVES holography's headline claim on
+        their own data instead of taking it on faith: because a record is spread across every slot rather than
+        filed in one, recall should degrade SMOOTHLY as slots die, not fall off a cliff.
+        `dim` defaults to this mind's dimension. Returns (dim,) of 1.0=keep / 0.0=destroyed, with exactly
+        int(dim*destroy_fraction) slots zeroed. DETERMINISTIC in (dim, fraction, seed), so a degradation curve is
+        reproducible and can sit in a regression test.
+        Delegates to holographic_ai.damage_mask -- the D2 consolidation: this exact body was written three times
+        byte-identically on Hologram / HolographicImage / HolographicArchive, which all now delegate here too."""
+        from holographic.agents_and_reasoning.holographic_ai import damage_mask as _dm
+        return _dm(self.dim if dim is None else dim, destroy_fraction, seed=seed)
+
     def decode_axial(self, vec):
         """Recover the axial value in [0, pi) from an axial hypervector -- the inverse of
         perceive(theta, 'axial'). Lets a recalled/blended orientation be read back as an angle."""
@@ -8480,14 +8494,24 @@ class UnifiedMind:
         from holographic.semantic_router.holographic_workflowgraph import neighbors
         return neighbors(self.workflow_graph(root=root), module, direction=direction, top=top)
 
-    def workflow_propagate(self, seed_scores, alpha=0.5, top=None, root=None):
+    def workflow_propagate(self, seed_scores, alpha=0.5, top=None, root=None, graph=None):
         """Spread per-module scores ONE hop along the workflow bones: a module whose COLLABORATORS are strongly
         scored gets lifted even if its own text was never matched. The structural complement to dense/BM25 --
         it can surface a module the query has no words in common with. alpha weights propagation vs the seed;
         alpha=0 returns the seed unchanged. Returns [(module, score)] best-first. KEPT NEG: one hop only --
-        multi-hop re-diffuses toward the smeared io-kind regime. See holographic_workflowgraph.propagate."""
+        multi-hop re-diffuses toward the smeared io-kind regime.
+
+        `graph` (GS-C sweep): pass ANY directed weighted graph to spread scores over something other than the
+        module bones (scene-selection growth, encyclopedia priming, any node set with weighted neighbours). Shape
+        is workflowgraph's own: {"out": {node: [(nbr, w), ...]}, "in": {node: [(nbr, w), ...]}} -- lists of
+        (neighbour, weight) pairs, not dicts. The kernel was already general; only this faculty was pinned to the
+        module graph. Default None = the workflow graph, so every existing caller is unchanged. KEPT NEG (regime,
+        do not "unify"): field inpainting and mesh diffusion_transfer are the same spreading idea under DIFFERENT
+        discretizations (grid / mesh Laplacian); they are not clients of this pair-list-graph kernel. See
+        holographic_workflowgraph.propagate."""
         from holographic.semantic_router.holographic_workflowgraph import propagate
-        return propagate(self.workflow_graph(root=root), dict(seed_scores), alpha=alpha, top=top)
+        g = self.workflow_graph(root=root) if graph is None else graph
+        return propagate(g, dict(seed_scores), alpha=alpha, top=top)
 
     def find_scored(self, problem, k=3):
         """Like find_capability, but returns [(capability, score)] -- so a caller can tell a HIT from a FALLBACK.
@@ -10676,6 +10700,22 @@ class UnifiedMind:
         return _sd(image, radius=radius, gamma=gamma)
 
 
+
+    def guided_filter(self, guide, src, radius=8, eps=1e-3):
+        """EDGE-AWARE MAP REFINER (He/Sun/Tang guided filter, O(N)): smooth a scalar map WHERE the guide image is
+        smooth and keep its edges WHERE the guide has edges -- a local linear fit, no matting solve. Built for
+        hazedepth's transmission map, but the call is general: it refines ANY (H,W) map against ANY (H,W) guide --
+        AO, soft shadow, matte/alpha, upsampled normals-z, SSS thickness, a coarse mask that must snap to object
+        boundaries. MEASURED (vs a same-support box blur, the honest baseline): on a guide-aligned AO map RMSE
+        0.062 -> 0.017 with the edge step kept (0.55 true, 0.53 guided, 0.04 box -- the box destroys it); on a
+        matte, box is WORSE than the noisy input (0.125 vs 0.105) while guided reaches 0.059.
+        KEPT NEGATIVE (loud): the guide must actually EXPLAIN the map's structure. On a map whose edges IGNORE the
+        guide, guided is NOT better than a box blur (0.030 vs 0.027) and injects a spurious edge from the guide.
+        REGIME (do not confuse -- both are correct, in different regimes): this needs only a GUIDE IMAGE. For
+        render denoising with a full G-buffer, use `denoise_svgf`/`guided_upsample`, whose variance-guided a-trous
+        bilateral takes normal/albedo/depth. Deterministic. See holographic_hazedepth.guided_filter."""
+        from holographic.rendering.holographic_hazedepth import guided_filter as _gf
+        return _gf(guide, src, radius=radius, eps=eps)
 
     def fuse_depth(self, image, weights=(0.55, 0.45), use_haze=True, use_defocus=True, sky_guard=True):
 

@@ -28,6 +28,7 @@ The generators it runs, read from that list at generation time so this page cann
 - `facultymap.py` -> `docs/FACULTY_MAP.md`
 - `docmap.py` -> `docs/DOC_MAP.md`
 - `pipelinemap.py` -> `docs/PIPELINE_MAP.md`, `pipelines.json`
+- `tools/unifiers.py --write` -> `docs/UNIFIERS.md`
 
 ## Family layout (508 modules)
 

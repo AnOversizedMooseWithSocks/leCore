@@ -1183,16 +1183,6 @@ def default_catalog():
                                                 "which tools feed which", "auto document the pipelines",
                                                 "show the whole pipeline graph", "capability dependency graph"),
                           semantic="analyze/pipeline")
-    c.register_capability("find_capability_uris", "like find_capability but each result carries its disambiguating "
-                          "capability URI(s) (holographic_catalog + holographic_capuri) so a caller NEVER gets a "
-                          "bare ambiguous name. Returns [{name, does, example, uris}] -- one path for a unique name, "
-                          "several for a colliding one. The collision fix at the discovery layer",
-                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
-                          "print(m.find_capability_uris('snap to grid')[0]['uris'])",
-                          native=True, aliases=("search capabilities with paths", "find a capability and its uri",
-                                                "disambiguated capability search", "capability search with uris",
-                                                "find functionality with full paths"),
-                          semantic="analyze/pipeline")
     c.register_capability("route_semantic", "route a request to the right MODULE by COSINE in nomic's embedding "
                           "space instead of token overlap -- catches meaning when words don't match ('squish a big "
                           "array down for storage' -> holographic_coldstore). Uses the shipped 96 KB 64d q8 index. "
@@ -4124,6 +4114,54 @@ def default_catalog():
                                                 "significance test", "monte carlo p value", "prove it isn't noise",
                                                 "false alarm probability", "null hypothesis test"),
                           semantic="analyze/measure", consumes=(), produces=())
+    c.register_capability("Documentation map (which doc answers which question)", "SIX doc generators exist -- "
+                          "docgen.py (REFERENCE.md, every module), capdoc.py (CAPABILITIES.md, job-oriented), "
+                          "apiquickref.py (API_QUICKREF.md, curated app surface), facultymap.py (FACULTY_MAP.md, "
+                          "mind methods by topic), pipelinemap.py (PIPELINE_MAP.md, the X->Y workflow graph), "
+                          "docmap.py (this map), plus tools/structure_audit.py. docs/DOC_MAP.md lists them with the "
+                          "question each answers; tools/regen_docs.py is the ONE DOOR that runs them (--check for "
+                          "drift). Exists because root scripts are not catalog entries, so this surface was once "
+                          "UNDISCOVERABLE -- a Rule-0 miss, kept loud.",
+                          example="import subprocess; print(subprocess.run(['python3','docmap.py'],capture_output=True,text=True).stdout)",
+                          native=True, aliases=("where are the docs", "documentation map", "regenerate the docs",
+                                                "doc generators", "which doc should i read", "how is this documented",
+                                                "api reference", "quick reference", "faculty map", "doc of docs",
+                                                "one line per symbol"),
+                          semantic="analyze/describe", consumes=(), produces=())
+    c.register_capability("Damage a vector (graceful-degradation probe)", "mind.damage_mask(destroy_fraction, "
+                          "seed, dim): a keep-mask zeroing a random fraction of a vector's slots. Multiply a "
+                          "stored hypervector by it to simulate a scratched plate or lossy channel, then measure "
+                          "surviving recall -- how you PROVE holography degrades smoothly instead of taking "
+                          "it on faith (dim=256: 20%% slots lost -> cos 0.89, 40%% -> 0.80, 80%% -> 0.54; no "
+                          "cliff). Exactly int(dim*fraction) slots zeroed, deterministic in (dim, fraction, "
+                          "seed) so a curve is reproducible in a test. D2 consolidation: Hologram/"
+                          "HolographicImage/HolographicArchive all delegate here.",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                                  "v=m.perceive('a red cube','text'); "
+                                  "print(m.damage_mask(0.4).sum(), (v*m.damage_mask(0.4)).shape)",
+                          native=True, aliases=("corrupt a vector for testing", "damage a hypervector",
+                                                "zero out random slots", "simulate data loss",
+                                                "knock out part of a vector", "robustness test mask",
+                                                "graceful degradation test", "how much damage can it take",
+                                                "lossy channel simulation", "corruption test"),
+                          semantic="modify/perturb", consumes=(), produces=())
+    c.register_capability("Edge-aware map refiner (guided filter)", "mind.guided_filter(guide, src, radius, eps): "
+                          "smooth a map where the GUIDE image is smooth, keep edges where the guide has edges "
+                          "(He/Sun/Tang local linear fit, O(N)). Refines ANY (H,W) map against ANY (H,W) guide: "
+                          "AO, soft shadow, matte, normals-z, SSS thickness, a mask snapping to boundaries. "
+                          "MEASURED vs a same-support box blur: AO RMSE 0.062->0.017, edge kept (box destroys "
+                          "it). KEPT NEGATIVE: if the map IGNORES the guide it is NOT better than a box blur and "
+                          "injects a spurious edge. REGIME: needs only a guide image; for G-buffer render "
+                          "denoising use denoise_svgf.",
+                          example="import numpy as np; g=np.zeros((48,48)); g[:,24:]=1.0; "
+                                  "m=np.clip(g+0.15*np.random.default_rng(0).standard_normal((48,48)),0,1); "
+                                  "print(mind.guided_filter(g, m, radius=6).shape)",
+                          native=True, aliases=("edge preserving smooth", "smooth but keep edges",
+                                                "refine a map so its edges follow the image", "guided filter",
+                                                "edge aware upsample", "clean up a noisy depth map",
+                                                "make a mask follow the picture edges", "joint bilateral filter",
+                                                "snap a coarse map to object boundaries", "denoise an ao map"),
+                          semantic="modify/filter", consumes=(), produces=())
     c.register_capability("N filter passes in one evaluation (shader algebra)", "a circular convolution is diagonal "
                           "in the Fourier basis, so applying it N times is just the transfer raised to the N-th "
                           "power. mind.filter_passes(field, kernel, N) costs the same whether N is 1 or 1,000,000 "

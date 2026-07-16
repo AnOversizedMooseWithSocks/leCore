@@ -64,7 +64,15 @@ def build():
     # ONLY the entries the routing EXAM touches: code docstrings + the ask queries. The full cache also
     # holds ~18k md/NOTES/generated-doc windows -- stale, churning, and never scored by the module exam
     # (verified: it ranks E[code_idx]). Seeding those was the 26 MB bloat. This keeps ~500 entries.
-    keys = _routing_keys(d)
+    # SORTED, not cache-iteration order. The cache is a dict, so its order is INSERTION order -- which
+    # varies with how a run happened to warm (cold embed vs partial cache vs a different walk). Two runs
+    # that produce numerically IDENTICAL vectors then write byte-DIFFERENT seeds: measured, 499 of 521 rows
+    # out of place between a fresh cold embed and the committed seed, with max|diff| = 0 across every vector.
+    # That churns a 730 KB binary in git for zero data change and would false-alarm any byte-level drift
+    # gate. Sorting by key makes the artifact a pure function of its CONTENT -- the same rule the engine
+    # applies everywhere else (hashlib, PYTHONHASHSEED=0, seeded RNG). Consumers look up by key, so order
+    # was never load-bearing; only reproducibility was.
+    keys = sorted(_routing_keys(d))
     vecs = np.array([d[k] for k in keys], dtype=np.float16)     # half precision, cosine-identical
     buf = io.BytesIO()
     np.savez(buf, keys=np.array(keys), vecs=vecs)

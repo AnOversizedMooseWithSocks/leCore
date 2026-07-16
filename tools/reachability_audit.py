@@ -181,7 +181,13 @@ def audit(root):
     print()
     print("  SIZE CANARY (>= 80%% of the 1 MB agent-read cap; non-gating heads-up): %d" % len(watch))
     for sz, fn in sorted(watch, reverse=True):
-        over = " -- OVER the cap: agent read() refuses; python_check/read_lines still work (uncapped)" \
+        # Over the cap, ONLY the whole-file reads refuse -- that is the cap doing its one job (protecting a
+        # context window). Every bounded-output tool works: view/read_lines (a slice), count_occurrences (an
+        # int), and every WRITE (replace/insert/replace_lines/delete_lines) read uncapped, so a big module
+        # stays fully agent-navigable and agent-EDITABLE. That was not true until the cap-scope fix: view and
+        # all four writes were capped too, so unified.py could not be edited through the mind at all -- pinned
+        # now by tests/test_codeedit_cap_scope.py. Size alone is therefore a heads-up, not a capability loss.
+        over = " -- OVER the cap: whole-file read() refuses BY DESIGN; view/read_lines/count/edits all work" \
                if sz > cap else ""
         print("      %s  %d bytes (%.0f%%)%s" % (fn, sz, 100.0 * sz / cap, over))
     return {"no_doc": no_doc, "import_only": import_only, "kept_neg": kept_neg, "no_public": no_public,

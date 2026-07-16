@@ -16,7 +16,14 @@ algorithm under two names, which no name-based scan would ever pair.
 
     KNOWN, OPEN -- recorded with an owner, not quietly rewired:
       _reply          coordinator, distbus     identical
-      damage_mask     archive, image           identical
+      damage_mask     archive, image           ADJUDICATED (D2): all three sites (Hologram,
+                                               HolographicImage, HolographicArchive) now DELEGATE to
+                                               holographic_ai.damage_mask -- the canonical home, since the
+                                               mask is a property of a VECTOR, not of a storage class.
+                                               Bit-identity measured on 48 (dim, fraction, seed) configs
+                                               BEFORE the rewire and pinned by tests/test_damage_mask.py.
+                                               The entry stays because the delegating shims are still
+                                               textually identical bodies, by design -- same as _occlusion.
       _occlusion      cosamp, iht              ADJUDICATED: both now DELEGATE to occlusion_recall (measured
                                                bit-identical first) -- the entry stays because the two delegating
                                                shims are still textually identical bodies, by design

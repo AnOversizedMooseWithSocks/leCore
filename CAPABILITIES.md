@@ -52,6 +52,14 @@ from holographic.misc.holographic_computehome import Compute; Compute.fuse_recor
 ```
 *Find it by:* compute, fuse, fused, schedule, execute, program, machine, fft
 
+### Damage a vector (graceful-degradation probe)
+mind.damage_mask(destroy_fraction, seed, dim): a keep-mask zeroing a random fraction of a vector's slots. Multiply a stored hypervector by it to simulate a scratched plate or lossy channel, then measure surviving recall -- how you PROVE holography degrades smoothly instead of taking it on faith (dim=256: 20%% slots lost -> cos 0.89, 40%% -> 0.80, 80%% -> 0.54; no cliff). Exactly int(dim*fraction) slots zeroed, deterministic in (dim, fraction, seed) so a curve is reproducible in a test. D2 consolidation: Hologram/HolographicImage/HolographicArchive all delegate here..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); v=m.perceive('a red cube','text'); print(m.damage_mask(0.4).sum(), (v*m.damage_mask(0.4)).shape)
+```
+*Find it by:* corrupt a vector for testing, damage a hypervector, zero out random slots, simulate data loss, knock out part of a vector, robustness test mask, graceful degradation test, how much damage can it take
+
 ### Dialect emitters (WGSL / C / JS / Zig from the Python kernel)
 leCore's kernels are written once, in Python, and the browser needs them in WGSL. mind.emit_kernel(fn, dialect) walks the same AST that code_structure decomposes and a dialect table supplies the type names, the intrinsic names and the declaration syntax -- so the hand-written compute shader becomes a PROJECTION of the authoritative Python kernel: one source of truth, two runtimes, no drift. Dialects: wgsl, c_f64, c_f32, js, zig_f64, zig_f32. THE BAR IS EXECUTED, not asserted: mind.validate_kernel COMPILES the emitted C with cc and RUNS it on the same inputs. MEASURED on the sphere SDF, smoothstep and cosine over 200 random inputs: c_f64 is BIT-IDENTICAL to the Python original (same order of operations, same doubles); c_f32 differs by 8.0e-08 to 3.4e-07. KEPT NEGATIVE 1: A WGSL KERNEL CANNOT BE BIT-IDENTICAL TO ITS PYTHON ORIGINAL -- WGSL's f32 is single precision and NumPy is double, so the bar is 'to float tolerance' and THE TOLERANCE IS f32 EPSILON, not a number anybody chooses. c_f32 exists so that tolerance is measured by running it. KEPT NEGATIVE 2: the emitted WGSL is NOT executed by any test here -- there is no GPU and no browser. Its arithmetic semantics are validated through c_f32, which shares the IR and differs only in a table; what is NOT validated is WGSL's own precision guarantees, its fast-math latitude, or whether the shader compiles. That is a real gap, stated. KEPT NEGATIVE 3: `bind` is NOT emittable and that is not a missing feature -- it is a circular convolution by FFT, a whole-array cooperative algorithm, and its WGSL is a workgroup FFT, a different artifact. A scalar emitter that pretended otherwise would emit an O(D^2) loop nest and call it a bind. K10's rule is obeyed throughout: the emitter REFUSES rather than guesses, because a wrong int/double is a wrong answer at no tolerance. ZIG (opt-in, `pip install ziglang`, numba's exact contract -- every test passes without it): validate_kernel with a zig_* dialect compiles `-O ReleaseSafe` and RUNS. MEASURED: zig_f64 BIT-IDENTICAL on the round-box SDF over 200 inputs; zig_f32 max 7.0e-07. KEPT NEGATIVE 4: Zig REFUSES unused locals/params at compile time -- a dead assignment emits but will not build, and we do not suppress that. KEPT NEGATIVE 5: ReleaseFast licenses float reassociation and is NOT the deterministic mode. KEPT NEGATIVE 6: std.math.pow is not libm pow (measured 1-ulp gap), so f64 bit-identity is a property of the builtin intrinsics only. The zig wheel also backstops the C path: run_c falls back to `zig cc` when no system compiler exists..
 
@@ -2340,6 +2348,13 @@ clean a render or signal with one home: image SVGF (variance-guided a-trous) or 
 from holographic.rendering.holographic_denoisehome import Denoise; Denoise.image(img, N, A, D, method='svgf')
 ```
 
+### Documentation map (which doc answers which question)
+SIX doc generators exist -- docgen.py (REFERENCE.md, every module), capdoc.py (CAPABILITIES.md, job-oriented), apiquickref.py (API_QUICKREF.md, curated app surface), facultymap.py (FACULTY_MAP.md, mind methods by topic), pipelinemap.py (PIPELINE_MAP.md, the X->Y workflow graph), docmap.py (this map), plus tools/structure_audit.py. docs/DOC_MAP.md lists them with the question each answers; tools/regen_docs.py is the ONE DOOR that runs them (--check for drift). Exists because root scripts are not catalog entries, so this surface was once UNDISCOVERABLE -- a Rule-0 miss, kept loud..
+
+```python
+import subprocess; print(subprocess.run(['python3','docmap.py'],capture_output=True,text=True).stdout)
+```
+
 ### Durability & crash recovery
 B7: make the query store survive a crash. Take a durable SNAPSHOT of the persistent tiers (replay-based, so it rebuilds byte-identically), keep a write-ahead JOURNAL of inserts/updates/deletes since the snapshot, and RECOVER to the last consistent point by loading the snapshot and replaying the journal. The snapshot+WAL discipline, on top of the plain save/load the service already exposes.
 
@@ -2352,6 +2367,13 @@ round or bevel the crease where two implicit surfaces meet (K5), the field-nativ
 
 ```python
 import numpy as np, lecore; m=lecore.UnifiedMind(); px=lambda P: np.asarray(P,float)[:,0]; py=lambda P: np.asarray(P,float)[:,1]; f=m.fillet_union(px,py,0.3); float(f(np.array([[0.,0.3,0]]))[0])
+```
+
+### Edge-aware map refiner (guided filter)
+mind.guided_filter(guide, src, radius, eps): smooth a map where the GUIDE image is smooth, keep edges where the guide has edges (He/Sun/Tang local linear fit, O(N)). Refines ANY (H,W) map against ANY (H,W) guide: AO, soft shadow, matte, normals-z, SSS thickness, a mask snapping to boundaries. MEASURED vs a same-support box blur: AO RMSE 0.062->0.017, edge kept (box destroys it). KEPT NEGATIVE: if the map IGNORES the guide it is NOT better than a box blur and injects a spurious edge. REGIME: needs only a guide image; for G-buffer render denoising use denoise_svgf..
+
+```python
+import numpy as np; g=np.zeros((48,48)); g[:,24:]=1.0; m=np.clip(g+0.15*np.random.default_rng(0).standard_normal((48,48)),0,1); print(mind.guided_filter(g, m, radius=6).shape)
 ```
 
 ### False-discovery gate over an ablation table
@@ -2989,4 +3011,4 @@ import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors(
 
 ---
 
-*377 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*380 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
