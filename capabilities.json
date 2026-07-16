@@ -1422,6 +1422,9 @@
         "build a scene",
         "make a scene",
         "create a scene",
+        "describe and build",
+        "build what I describe",
+        "build from a description",
         "scene from text",
         "3d scene",
         "adjust the scene",
@@ -4523,7 +4526,6 @@
         "render"
       ],
       "consumes": [
-        "mesh",
         "sdf_scene"
       ],
       "does": "render a scene to an image: path_trace (Monte-Carlo global illumination), a camera controller, indirect-light gather + irradiance cache (globalillum), precomputed radiance transfer (prt), volumetric integration, and lens/DOF + post-FX. The analysis-by-synthesis render path",

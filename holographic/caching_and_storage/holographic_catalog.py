@@ -1870,7 +1870,8 @@ def default_catalog():
                           "scene.feedback holds the last report. Or wrap an existing object list with "
                           "mind.semantic_scene(objects). Controlled vocabulary, deterministic",
                           example="scene = mind.build_scene('a red metal sphere and a blue box'); scene.name('the sphere','hero'); scene.adjust('give hero a rusty texture'); scene.render()",
-                          native=True, aliases=("scene", "describe a scene", "build a scene", "make a scene", "create a scene",
+                          native=True, module="scene_semantic", aliases=("scene", "describe a scene", "build a scene", "make a scene", "create a scene",
+                                                "describe and build", "build what I describe", "build from a description",
                                                 "scene from text", "3d scene", "adjust the scene", "semantic scene",
                                                 "named objects", "make the sphere bigger", "change the material", "render a scene",
                                                 "text to 3d", "text to scene", "scene editor", "reference objects by name",
@@ -3451,13 +3452,20 @@ def default_catalog():
                                                 "suggest", "decision tree", "route", "list abilities", "available skills",
                                                 "which tool", "find a tool", "capabilities", "manifest", "discover", "help"))
     # --- domain families surfaced by the catalog-gap sweep (tools existed, homes did not) ---
+    # io-tag correction, caught by test_io_shape_pipeline_hierarchy: this entry claimed consumes=('mesh',
+    # 'sdf_scene'), which MANUFACTURED a fake mesh->image edge. The path tracer's signature is
+    # path_trace(sdf, camera, ...) -- there is no mesh path anywhere in it, so suggest_pipeline('points',
+    # 'image') routed through a step that would raise the moment an agent actually called it (and it WON the
+    # route, because the BFS tie-break sorts by name and capital 'R' sorts before lowercase 'render_mesh').
+    # The honest mesh->image producer is "Rasterize a mesh (z-buffer, textured)" / faculty m.render_mesh.
+    # A wrong io tag is worse than a missing one: it is a confidently-suggested broken pipeline.
     c.register_capability("Rendering (path trace)", "render a scene to an image: path_trace (Monte-Carlo global "
                           "illumination), a camera controller, indirect-light gather + irradiance cache "
                           "(globalillum), precomputed radiance transfer (prt), volumetric integration, and lens/DOF + "
                           "post-FX. The analysis-by-synthesis render path", example="mind.path_trace(scene); mind.camera(); from holographic.rendering.holographic_raymarch import sphere_trace",
                           native=True, aliases=("render a scene", "path trace", "ray tracing", "global illumination",
                                                 "camera", "depth of field", "lens", "volumetric render", "radiance transfer",
-                                                "prt", "ambient occlusion", "post processing", "gbuffer", "raytrace", "render"), module="render", consumes=('mesh', 'sdf_scene'), produces=('image',))
+                                                "prt", "ambient occlusion", "post processing", "gbuffer", "raytrace", "render"), module="render", consumes=('sdf_scene',), produces=('image',))
     c.register_capability("Rasterize a mesh (z-buffer, textured)", "RASTERISE a mesh to an (H,W,3) image, z-buffer + Lambert (rasterize_mesh; faculty m.render_mesh). TEXTURED (default-off, byte-identical absent): texture=(H,W,3) + per-vertex uvs (or mesh.uvs) -> each fragment BILINEARLY samples the texture at its barycentric UV; what SHOWING a UV-transferred/baked texture needs (mantis retopo matches original at 0.70-0.77 pixel corr). smooth=True interpolates per-vertex normals (Gouraud) so organic models read curved not faceted. KEPT NEG: textured/smooth need vectorized=True.",
                           example="import numpy as np, lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; from holographic.rendering.holographic_render import Camera; b=box(); uv=np.array([[0,0],[1,0],[1,1],[0,1]]*2,float); chk=np.stack([np.indices((8,8)).sum(0)%2]*3,-1).astype(float); img=m.render_mesh(b, Camera(eye=(2.2,1.6,2.4),target=(0,0,0),fov_deg=40), width=64, height=64, texture=chk, uvs=uv); img.shape",
                           native=True, aliases=("render a mesh with a texture", "textured mesh rendering", "rasterize a mesh",
@@ -4734,7 +4742,7 @@ def default_catalog():
     c.register_capability("Node-graph editor backend", "the unifying NODE-GRAPH a 3-D node editor binds to: one heterogeneous graph of TYPED nodes (scalar/color/field/sdf/mesh/material/texture), 40-node palette (SDF CSG/transforms, bake, fields, textures, geometry modifiers, sdf_to_mesh, PBR/material sockets, audio drivers). ANY param is DRIVABLE; type/cycle-checked; memoized eval; dirty-propagating; JSON-serializable. DRILL-DOWN: list_nodes() overviews, describe(id) shows a node's exact knobs+values+socket types+wiring, describe_type(name) a kind's schema, set_param(id, knob=value) sets an EXACT value.", example="import numpy as np, lecore; m=lecore.UnifiedMind(); g=m.node_graph(); s=g.add('sdf_sphere',{'radius':1.0}); g.describe(s)['params']; g.set_param(s, radius=2.5); g.describe(s)['params']['radius']", native=True, aliases=("node editor", "node based editor", "node graph editor", "wire nodes together", "shader node graph", "geometry nodes", "material node graph", "connect nodes with typed sockets", "visual node graph", "node graph backend", "dataflow node editor", "audio reactive", "audio drives parameters", "shader as a map", "drive a parameter with a signal", "time varying node graph", "make geometry react to music", "music reactive visuals", "drill down to a setting", "list a node's parameters", "what can I adjust on this node", "set an exact value on a node", "inspect a node", "node parameters", "adjust exact settings", "tweak a node's value"))
     c.register_capability("Semantic scene to node graph (drill down to exact settings)", "bridge the high-level SEMANTIC scene to an exact, editable NODE GRAPH ('as above, so below'). scene.to_node_graph() emits each object as an sdf primitive + sdf_translate at its EXACT size/position, unioned. Returns {graph, output, objects: name->node id; materials: name->pbr node (materials=True, colour/metallic/roughness); renderables: name->assign_material node (renderable=True, meshed geometry + material -> drawable)}. describe(id) drills in; set_param(id, radius=/roughness=/res=..) sets an EXACT value. English is the fast way in; the node graph is the precise finish.",
                           example="import lecore; m=lecore.UnifiedMind(); s=m.build_scene('a big red sphere and a box'); ng=s.to_node_graph(); g=ng['graph']; sid=[i for n,i in ng['objects'].items() if 'sphere' in n][0]; g.set_param(sid, radius=3.0); g.describe(sid)['params']['radius']",
-                          native=True, aliases=("drill down from a command to exact settings", "semantic scene to node graph",
+                          native=True, module="scene_semantic", aliases=("drill down from a command to exact settings", "semantic scene to node graph",
                                                 "convert a described scene to nodes", "adjust exact settings of a described object",
                                                 "fine tune a semantic scene", "as above so below", "high level command to exact node",
                                                 "edit exact parameters of a scene object", "scene to node graph", "drill down to exact settings",

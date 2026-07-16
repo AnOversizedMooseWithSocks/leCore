@@ -1532,7 +1532,7 @@ DESCRIBE a 3-D scene in plain words and the engine builds it, then you ADJUST it
 ```python
 scene = mind.build_scene('a red metal sphere and a blue box'); scene.name('the sphere','hero'); scene.adjust('give hero a rusty texture'); scene.render()
 ```
-*Find it by:* scene, describe a scene, build a scene, make a scene, create a scene, scene from text, 3d scene, adjust the scene
+*Find it by:* scene, describe a scene, build a scene, make a scene, create a scene, describe and build, build what I describe, build from a description
 
 ### Floor and wall backdrop for a scene
 give a scene a matching FLOOR and WALL so a render competes with a photo's whole frame instead of empty sky. Set scene.environment['ground_color']=(r,g,b) to recolour the floor and scene.environment['backdrop_color']=(r,g,b) to add a vertical wall behind the scene; render() applies both (default None -> neutral gray floor + sky, byte-identical old behaviour). scene_from_image(background=True) sets them AUTOMATICALLY from the photo's floor/wall regions. Measured: a matching backdrop is the single biggest fidelity lever when matching a photo (it is most of the frame)..

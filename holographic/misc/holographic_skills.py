@@ -23,11 +23,26 @@ import inspect
 def _confidence(scored):
     """Turn find_scored() results into a 0..1 confidence that the TOP hit is the right one. Two factors: DOMINANCE
     (how far ahead of the runner-up) and STRENGTH (absolute match quality -- a 3+ shared-word hit is strong). A lone
-    strong hit is confident; a near-tie is not."""
+    strong hit is confident; a near-tie is not.
+
+    FACET RULE (measured, rev. 9's sequel): a runner-up that is ANOTHER ENTRY OF THE SAME MODULE is a facet of
+    the same subsystem, not a competing skill -- acting on the primary is correct regardless, so it must not
+    dilute dominance. The measured case: 'describe a scene and build it' -> the scene_semantic PRIMARY (3.0)
+    was dragged to 'choose' (conf 0.545) by scene_semantic's OWN node-graph drill-down entry (2.5), whose
+    does-text honestly documents a real describe() method. Trimming honest API documentation to win a routing
+    duel would be lying to the catalog; recognising a same-home facet is the truthful fix. The rule needs BOTH
+    modules tagged and equal -- untagged entries keep the historical behaviour exactly."""
     if not scored:
         return 0.0
     s0 = scored[0][1]
-    s1 = scored[1][1] if len(scored) > 1 else 0.0
+    top_mod = getattr(scored[0][0], "resolved_module", lambda: None)()
+    s1 = 0.0
+    for cap, sc in scored[1:]:
+        mod = getattr(cap, "resolved_module", lambda: None)()
+        if top_mod is not None and mod == top_mod:
+            continue                                            # same-home facet: not a competitor
+        s1 = sc
+        break
     dominance = s0 / (s0 + s1) if (s0 + s1) > 0 else 1.0        # 1.0 = clear winner, 0.5 = tie
     strength = min(1.0, s0 / 3.0)                              # 3+ shared words -> full strength
     return round(dominance * strength, 3)

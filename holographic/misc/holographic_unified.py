@@ -4962,12 +4962,22 @@ class UnifiedMind:
         from holographic.mesh_and_geometry.holographic_isosurface import is_oriented
         return bool(is_oriented(np.asarray(quads, int)))
 
-    def mesh_report(self, vertices, quads, sdf=None):
-        """{n_vertices, n_quads, watertight, euler, surface_error}. The honest baseline for `surface_error` is the
-        CELL SIZE -- a dual extractor cannot place a vertex better than the cell it lives in.
-        See holographic_isosurface.mesh_report."""
-        from holographic.mesh_and_geometry.holographic_isosurface import mesh_report as _mr
-        return _mr(np.asarray(vertices, float), np.asarray(quads, int), sdf=sdf)
+    def mesh_report(self, mesh_or_vertices, quads=None, sdf=None):
+        """MESH REPORT, dispatching on the input (this method was DEFINED TWICE after a branch merge -- the
+        isosurface form was silently shadowed by the later meshtools form, caught by the isosurface wiring
+        test; merged here so BOTH capabilities stay callable, neither reimplemented):
+        - mesh_report(mesh): the general topology + shape scoreboard -- verts, faces, quad/tri/ngon fraction,
+          boundary/nonmanifold edges, manifold/closed flags, euler, valence histogram, bbox, centroid.
+          See holographic_meshtools.mesh_report.
+        - mesh_report(vertices, quads, sdf=...): EXTRACTION VALIDATION for an isosurfacer's raw output --
+          {n_vertices, n_quads, watertight, euler, surface_error}; the honest surface_error baseline is the
+          CELL SIZE (a dual extractor cannot place a vertex better than the cell it lives in).
+          See holographic_isosurface.mesh_report."""
+        if quads is not None:
+            from holographic.mesh_and_geometry.holographic_isosurface import mesh_report as _mr
+            return _mr(np.asarray(mesh_or_vertices, float), np.asarray(quads, int), sdf=sdf)
+        from holographic.mesh_and_geometry.holographic_meshtools import mesh_report as _mr
+        return _mr(self._as_mesh(mesh_or_vertices))
 
     def turnaround(self, mesh, ref_mesh=None, views=("top", "front", "side", "3q"), width=360, height=360):
         """TURNAROUND: render a mesh from the standard modelling views (top/front/side/3q) in one call and, if a
@@ -6526,13 +6536,7 @@ class UnifiedMind:
 
 
 
-    def mesh_report(self, mesh):
-        """MESH REPORT: one-call topology + shape scoreboard as a dict -- verts, faces, quad/tri/ngon fraction,
-        boundary_edges, nonmanifold_edges, is_manifold, is_closed, euler_characteristic, valence_histogram,
-        regular_fraction (valence-4 for quads), bbox_min/max/span, centroid. What lets you SEE a mesh state cheaply
-        and BRANCH on it (boundary_edges>0 -> fill before subdividing). See holographic_meshtools.mesh_report."""
-        from holographic.mesh_and_geometry.holographic_meshtools import mesh_report as _mr
-        return _mr(self._as_mesh(mesh))
+
 
 
 

@@ -52,6 +52,15 @@ except Exception:
 # line. Never add an entry just to make the test pass without reading. The budget may shrink, never grow.
 KNOWN_COLLISIONS = {
     # -- different-domain homonyms: same English word, unrelated jobs. Read, benign. --
+    # Same CONCEPT at two LEVELS (continuous vs discrete) -- delegation impossible, a mesh has no surf_uv:
+    "gaussian_curvature": frozenset({"surfanalysis", "meshcurvature"}),  # analytic K from fundamental forms
+    # on a parametric surface (surf_uv,u,v,h) vs per-vertex angle-defect K on a discrete mesh. Both read.
+    "mean_curvature": frozenset({"surfanalysis", "meshcurvature"}),     # analytic H vs discrete
+    # mean-curvature-normal operator. Same distinction as gaussian_curvature; read together.
+    "mesh_report": frozenset({"isosurface", "meshtools"}),              # extraction VALIDATION against the
+    # source sdf (vertices,quads,sdf -> surface_error) vs the general Mesh scoreboard (mesh). Overlapping
+    # intent, DISJOINT inputs; read both. Future-delegation candidate: isosurface could wrap meshtools for
+    # the topology half once quad support lands there -- accepted rather than force-refactored today.
     "resolve": frozenset({"graphql", "machinemodel", "overrides", "superposed"}),
     "box": frozenset({"codegen", "mesh", "sdf"}),                 # an SDF box, a mesh box, a codegen box literal
     "divergence": frozenset({"curlnoise", "fields", "opponent", "probability_current"}),  # three vector-field

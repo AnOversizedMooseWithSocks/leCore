@@ -435,7 +435,10 @@ DEFERRED = {
         "high-D index is the HoloForest, which chart+graphsignal ALREADY use via a forest= hook; G2's real fix was "
         "to give spectral.knn_adjacency the SAME forest= hook (measured 1.31x at N=800 D=128, growing with N; "
         "approximate recall_k, byte-identical when forest=None). Different index for a different regime is not a "
-        "unification target -- the grid and the forest are both correct, each in its own dimensionality.",
+        "unification target -- the grid and the forest are both correct, each in its own dimensionality. Filed "
+        "DEFERRED, not impossible: the grid-sharing construction EXISTS and is wireable today -- it simply buys "
+        "nothing at these callers' dimensionality, and the shared index that does pay was built and wired "
+        "instead. Re-measure if a caller ever drops to <=3 D at large N, where the grid's regime begins.",
     ("iterate.step_k / limit", "holographic_resonator"):
         "Same as `diffuse`: the alternating cleanup linearises near its fixed point and nowhere else. Its real home "
         "is project_onto_constraints, where it IS wired.",
