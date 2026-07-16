@@ -24,3 +24,23 @@ docs/BACKLOG_modeling.md
 docs/BACKLOG_modeling_v2.md
 docs/BACKLOG_photo3d_retopo.md
 docs/PRIMITIVE_APPLICATION_BACKLOG.md
+/current backlogs
+/temp
+
+# --- CORRECTIONS (added after junk reached a delivery zip; each one is a measured leak) ---
+# `/__pycache__` above has a LEADING SLASH, so it only ignores the one at the repo ROOT. Every nested cache
+# -- holographic/__pycache__, tests/__pycache__, benchmarks/__pycache__, lecore_data/__pycache__ -- was NOT
+# ignored, which is why pycache folders kept turning up in the tree. No leading slash = any depth.
+__pycache__/
+.pytest_cache/
+
+# The semantic tooling MOVED from scripts/ to tools/semantic/, and these rules did not follow it. The
+# embedding cache is 7.9 MB and was therefore unignored and one `git add -A` away from being committed
+# (it reached a delivery zip -- that is how this was found). CI restores it from actions/cache; it is a
+# CACHE, never source. Both the old scripts/ paths above and these are kept: harmless if a layout returns.
+tools/semantic/.knowledge_cache.json
+tools/semantic/.knowledge_cache_huge.json
+tools/semantic/knowledge_cache.zip
+tools/semantic/nomic_text/
+# belt and braces -- the cache by NAME, wherever a future move puts it
+.knowledge_cache*.json

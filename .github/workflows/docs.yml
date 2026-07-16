@@ -29,30 +29,20 @@ jobs:
       - name: Install the engine's dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
 
-      - name: Generate the code reference
-        run: python docgen.py          # writes REFERENCE.md from every module's docstring + public API
-
-      - name: Generate the capabilities menu
-        run: python capdoc.py          # writes CAPABILITIES.md (prose) AND capabilities.json (machine-readable) from the live catalog
-
-      - name: Generate the API quick reference
-        run: python apiquickref.py     # writes API_QUICKREF.md (pure ast; ci.yml only GATES this, so nothing else regenerates it -- do it here)
-
-      - name: Generate the faculty map
-        run: python facultymap.py      # writes docs/FACULTY_MAP.md -- the mind's 1,270+ methods by topic, from live introspection
-
-      - name: Generate the documentation map
-        run: python docmap.py          # writes docs/DOC_MAP.md -- which doc answers which question, + mermaid family/pipeline diagrams (GitHub renders mermaid natively)
-
-      - name: Generate the pipeline map
-        run: python pipelinemap.py     # writes docs/PIPELINE_MAP.md (mermaid workflow graph) + pipelines.json, auto-derived from the catalog's consumes/produces tags
+      # ONE DOOR. This used to be six copy-pasted steps, and that list existed ONLY here -- so a close-out ran
+      # capdoc + docgen, forgot apiquickref, and ci.yml's API_QUICKREF drift gate went red. The canonical list
+      # now lives in tools/regen_docs.py (importable, self-tested, and cross-referenced against ci.yml's gates
+      # by tests/test_regen_docs.py). A missing generator now fails the step LOUDLY instead of being skipped.
+      - name: Regenerate every generated doc -- canonical list lives in tools/regen_docs.py
+        run: python tools/regen_docs.py
 
       - name: Commit refreshed docs if they changed
         run: |
           git config user.name  "docs-bot"
           git config user.email "docs-bot@users.noreply.github.com"
-          if ! git diff --quiet REFERENCE.md CAPABILITIES.md capabilities.json API_QUICKREF.md pipelines.json docs/FACULTY_MAP.md docs/DOC_MAP.md docs/PIPELINE_MAP.md; then
-            git add REFERENCE.md CAPABILITIES.md capabilities.json API_QUICKREF.md pipelines.json docs/FACULTY_MAP.md docs/DOC_MAP.md docs/PIPELINE_MAP.md
+          DOCS=$(python tools/regen_docs.py --outputs)   # the ONE list -- never repeat it here
+          if ! git diff --quiet $DOCS; then
+            git add $DOCS
             git commit -m "docs: refresh generated docs (REFERENCE, CAPABILITIES, API_QUICKREF, PIPELINE_MAP, FACULTY_MAP, DOC_MAP) [skip ci]"   # [skip ci] so it doesn't re-trigger CI
             # REBASE + RETRY: semantic-coverage.yml fires on the same push and auto-commits the routing
             # index -- the remote head can move mid-run and a bare push fails non-fast-forward (measured).

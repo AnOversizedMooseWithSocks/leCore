@@ -34610,3 +34610,128 @@ STATE: all 6 green locally + full regression sweep over every touched surface (c
 duplication 11, unifier 13, isosurface 22, meshtools 5, skills 9, skill_lint 8, integration pair 2).
 Audits: reachability 0 undocumented / catalog_gaps 0 / skill_lint 0 invocation gaps. capdoc + docgen regen
 (509 modules, 157848 LOC).
+
+====================================================================================
+THE API_QUICKREF RED X: a drift gate that measured the CALENDAR, plus a ritual that named 2 of 6 generators.
+====================================================================================
+Moose asked, reasonably, "I thought we fixed this and made the docs happen before tests?" The honest answer is
+no -- and the ordering was never the bug. Two independent root causes, both now fixed at the root.
+
+CAUSE 1 -- THE GATE MEASURED THE CLOCK (the real one). apiquickref.py line 125 stamped date.today() into
+API_QUICKREF.md. ci.yml GATES that file: it regenerates and `git diff --exit-code`s the committed copy. So the
+output was a function of the CALENDAR, and the gate went RED on any push made on a later day than the last docs
+commit -- with zero code changed. MEASURED: the only diff on the red run was `on 2026-07-09` -> `on 2026-07-16`
+(plus genuine symbol drift). THE CONTROL THAT PROVED IT: capdoc.py has the identical gate, writes no timestamp,
+and showed ZERO drift on the same run -- CAPABILITIES.md and capabilities.json were byte-identical. Same gate,
+same push; the one with a clock in it failed. docgen.py had the same stamp in REFERENCE.md: not gated, but it
+guaranteed docs-bot had something to commit EVERY DAY -- pure churn that held the two-bot push race open
+permanently. Both stamps removed; both files verified BYTE-IDENTICAL across two runs.
+  LAW: A GENERATED FILE THAT IS GATED MUST BE A PURE FUNCTION OF THE SOURCE. A date, hostname, path, or dict
+  order in a gated artifact does not document anything -- it converts a correctness gate into a flaky one, and
+  a gate that cries wolf daily is a gate everyone learns to ignore.
+
+CAUSE 2 -- THE LIST WAS INVISIBLE, AND THE DOC NAMED HALF OF IT. docs.yml runs SIX generators (docgen, capdoc,
+apiquickref, facultymap, docmap, pipelinemap). My close-out ran TWO. That was not carelessness alone:
+DEVELOPMENT_STRATEGY.md section 6 and its PR checklist named exactly `capdoc.py` and `docgen.py` -- the
+documented ritual was WRONG, and the full list existed only as copy-pasted steps inside a CI yml, where no
+human or agent closing out a change would ever look. A gate on a file that no reachable list tells you to
+regenerate is a guaranteed red build.
+  FIX (one door): tools/regen_docs.py owns the canonical list, with --check (drift, exit 1), --list, and
+  --outputs. docs.yml's six steps collapse to `python tools/regen_docs.py`, and its `git add` now reads
+  `--outputs` -- a second copy of a list is a second copy of the bug. DEVELOPMENT_STRATEGY.md section 6 + the
+  checklist now say "all six, not just capdoc/docgen".
+  PINNED by tests/test_regen_docs.py (5): the list is well-formed; EVERY file ci.yml drift-gates is produced by
+  a generator in the list (parsed from ci.yml itself, not a hardcoded copy); gated generators are DETERMINISTIC
+  across two runs; no gated output carries a date stamp; and an absent generator is REPORTED, never skipped.
+  KEPT NEGATIVE: regen_docs.py hard-fails on a missing generator by design. A `continue` there is how a
+  reconciliation that silently drops a file becomes a green run that regenerated nothing.
+
+STANDING DESIGN TENSION (recorded, not "fixed"): ci.yml GATES files that docs.yml auto-commits with [skip ci].
+So a REAL drift = one red X that docs-bot then heals in a commit that deliberately never re-runs CI, leaving the
+red on a commit whose docs are already correct. With the clock removed, that now fires only on genuine drift,
+and the author-side fix is one command. Left as-is deliberately: docs-bot is a real safety net, and the
+alternative (dropping the gate) would let a stale capabilities.json -- the contract apps ingest -- merge.
+
+CONTAINER LOSS, FLAGGED LOUDLY: facultymap.py and docmap.py are ABSENT from this working tree (regen_docs
+--check reports both, by design). They exist on the remote -- the docs stage passed there. This is the same
+reconciliation-loss failure mode that ate the _embedding_router/_query_embedder helpers. The zip is safe to
+EXTRACT OVER the repo (extraction does not delete), but it must never be treated as a complete repo snapshot.
+
+====================================================================================
+THE RITUAL WAS DOCUMENTED THREE TIMES, IN THREE DIFFERENT LENGTHS. (Moose supplied the generator sources.)
+====================================================================================
+Moose handed over the actual generator files, which settled two things I could not have known from my tree.
+
+1. facultymap.py and docmap.py were REAL and merely lost in my working tree (regen_docs --check had reported
+   both, loudly, exactly as designed -- the loud failure did its job). Installed; the canonical list now runs
+   end to end: "regenerated 8 outputs from 6 generators", and --check exits 0 for the first time.
+
+2. A SEVENTH doc tool exists that I had never seen: servicedoc.py. It is NOT a generator -- it writes nothing,
+   CHECKS SERVICE.md's endpoint table + CLI flags against the live service, and exits non-zero. ci.yml already
+   runs it as its own step (verified green here: 33 endpoints, 5 cli flags in sync). KEPT NEGATIVE recorded in
+   regen_docs.py: it stays OUT of the list on purpose. Most of SERVICE.md is hand-written prose worth keeping
+   (curl examples, security notes), so wholesale regeneration would destroy it. The list owns only files
+   regenerated IN FULL; a checker in there would have to lie about "regenerating" or start overwriting prose.
+
+THE REAL FINDING: the close-out ritual was written down THREE times and NO TWO AGREED.
+   - DEVELOPMENT_STRATEGY.md section 6 + PR checklist ... 2 generators (capdoc, docgen)
+   - docmap.py's generated DOC_MAP.md ritual line ....... 5 generators (omitted pipelinemap.py)
+   - .github/workflows/docs.yml step list .............. 6 generators  <- the only complete one, and the one
+                                                                          place nobody looks while closing out
+   I followed the doc, and the doc was wrong. That is the whole bug: not laziness, DUPLICATION. Three
+   hand-maintained copies of one list, each stale in its own way, and the authoritative copy hidden in CI.
+   The sting: docmap.py is the MAP OF THE MAPS -- its own docstring is a kept-negative about doc generators
+   being undiscoverable -- and it omitted a generator AND had no row at all for docs/PIPELINE_MAP.md or
+   SERVICE.md. The disease it documents, it had.
+
+FIX (one door, everywhere): tools/regen_docs.py owns the list. docs.yml calls it; its `git add` reads
+--outputs; DEVELOPMENT_STRATEGY.md points at it; and docmap.py now RENDERS `regen_docs.GENERATORS` into
+DOC_MAP.md at generation time instead of hardcoding a command line -- so the page cannot disagree with what CI
+runs. Two missing rows added to the DOC_MAP table (pipelinemap.py, servicedoc.py). Verified DOC_MAP.md stays
+byte-deterministic after taking that import.
+  LAW: A HAND-MAINTAINED SECOND COPY OF A LIST IS ALWAYS THE STALE ONE. If a doc must state the list, it must
+  RENDER it from the code, not restate it.
+
+STATE: regen_docs --check exits 0 (8 outputs, 6 generators). Both ci.yml drift gates simulated PASS and are
+stable across re-runs. servicedoc gate green. tests: test_regen_docs 5, test_build_ergonomics 5, catalog 12.
+Audits: catalog_gaps 0, skill_lint 0. facultymap/docmap/DOC_MAP/FACULTY_MAP verified date-free + deterministic.
+
+====================================================================================
+THE DELIVERY ZIP SHIPPED JUNK -- and the stale .gitignore in it would have overwritten the real one.
+====================================================================================
+Moose: "whoah what's all this extra junk in this zip file?" Correct, and the cause was the same disease as the
+doc-generator arc: a LIST THAT LIVED IN MY HEAD instead of in the repo.
+
+WHAT SHIPPED (measured in the artifact, not guessed): a 27.8 MB zip containing tools/semantic/
+.knowledge_cache.json (7.9 MB -- the embedding cache CI restores from actions/cache, never source) and five
+.gitignore'd BACKLOG docs. The zip was built by hand with `zip -qr ... -x '*__pycache__*' -x '*.pyc'` -- an
+exclusion list typed from memory. The repo already states what is not source; that is what .gitignore IS.
+
+WORSE, AND THE REAL DANGER: my tree carried a STALE ONE-LINE .gitignore (`*.log`). Moose had to send the real
+one ("I don't know why it wasn't in the zip"). Had he extracted my zip over the repo, that one-liner would
+have OVERWRITTEN his 27-rule file -- after which NOTHING would be ignored and the next `git add -A` commits
+everything. A delivery artifact that silently downgrades the repo's own hygiene rules is worse than a big zip.
+
+TWO REAL BUGS FOUND IN .gitignore ITSELF (his repo's bugs, not just the zip's):
+  1. `/__pycache__` -- a LEADING SLASH anchors to the repo ROOT. The root cache was ignored; holographic/,
+     tests/, benchmarks/, lecore_data/ __pycache__ were NOT. THAT is why pycache folders kept reappearing --
+     the exact symptom he reported. Fix: `__pycache__/` (any depth) + `.pytest_cache/`.
+  2. `scripts/.knowledge_cache.json` and `/scripts/nomic_text` -- the semantic tooling MOVED to tools/semantic/
+     and the rules never followed, leaving the 7.9 MB cache unignored and one `git add -A` from being
+     committed. Fix: the tools/semantic/ paths + a name-based `.knowledge_cache*.json` belt-and-braces rule.
+  Old rules kept (harmless if a layout returns). Proven not vacuous: against the ORIGINAL .gitignore both
+  `holographic/__pycache__` and `tools/semantic/.knowledge_cache.json` evaluate ignored=False.
+
+FIX: tools/make_repo_zip.py builds the delivery zip by READING .gitignore -- zip and git agree by
+construction, not by my memory. Supported subset stated honestly in the docstring (anchors, dir-only, `!`
+negation, fnmatch globs; no `**`, no per-dir ignore files). KEPT NEGATIVE: `git ls-files` is the RIGHT answer
+in a real checkout and is not used only because the tree Claude assembles has no .git metadata to ask.
+PINNED by tests/test_gitignore_rules.py (21): nested pycache at five depths, the cache at its REAL path, all
+five backlogs, build artifacts -- and, the far worse failure mode, that real SOURCE is never ignored
+(excluding the engine would beat shipping a cache for damage).
+
+NOT DELETED, DELIBERATELY: figures/ (6.5M), gallery/ (4.3M), archive/ (3.8M), path_d/ (2.2M), benchmarks/,
+data/ are all REFERENCED by repo files (checked: 2-31 referencing files each), so they are content, not junk.
+The GitHub API would have settled it definitively but rate-limited; with no way to verify, deleting on a hunch
+was refused. Zip: 27.8 -> 25.9 MB (the cache is JSON, ~1.9 MB compressed); the remainder is genuinely images.
+Artifact re-audited AFTER build: 0 pycache, 0 .pyc, 0 knowledge_cache, 0 BACKLOG, 0 /temp/, 0 .git entries.

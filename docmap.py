@@ -34,6 +34,13 @@ DOCS = [
      "one line per public symbol of a short curated module list"),
     ("What can the MIND do, by topic (mesh_*, render_*, file_* ...)?", "docs/FACULTY_MAP.md", "facultymap.py",
      "all UnifiedMind public methods, prefix-clustered, one-line docs (live introspection)"),
+    ("How do I get from an X to a Y? (which tool-output feeds which tool-input)", "docs/PIPELINE_MAP.md",
+     "pipelinemap.py",
+     "the workflow graph derived from the catalog's consumes/produces tags (machine twin: pipelines.json)"),
+    ("Does the HTTP service's doc still match its routes and CLI flags?", "SERVICE.md", "servicedoc.py",
+     "a CHECKER, not a generator: gates the endpoint table + launch flags against the live code (`--print` "
+     "emits a fresh table to paste). ci.yml runs it; it is deliberately NOT in tools/regen_docs.py, which "
+     "only owns files that are REGENERATED wholesale"),
     ("Machine-readable cards for agents (act/choose routing, autocomplete)", "(in-memory)",
      "holographic_skills.manifest()", "capability + method cards as data; not a file on disk"),
     ("Is the tree still ORGANIZED (misc budget, giants, section markers)?", "(report)",
@@ -65,8 +72,24 @@ def main():
     lines.append("Regenerate the generated set in one go (the close-out ritual):")
     lines.append("")
     lines.append("```sh")
-    lines.append("python3 capdoc.py && python3 docgen.py && python3 apiquickref.py && python3 facultymap.py && python3 docmap.py")
+    # ONE DOOR. This line used to name five generators and silently omit pipelinemap.py -- in the very file
+    # whose docstring is about doc generators being undiscoverable. A hand-maintained command line IS a second
+    # copy of the list, and the second copy is always the stale one. tools/regen_docs.py owns the list; this
+    # renders that, so the page cannot disagree with what CI and the close-out actually run.
+    lines.append("python3 tools/regen_docs.py           # every generator (canonical list)")
+    lines.append("python3 tools/regen_docs.py --check   # or: is anything stale? (what the CI drift-gate asks)")
     lines.append("```")
+    lines.append("")
+    lines.append("The generators it runs, read from that list at generation time so this page cannot drift:")
+    lines.append("")
+    try:
+        import sys as _sys
+        _sys.path.insert(0, os.path.join(REPO, "tools"))
+        import regen_docs as _rd
+        for _gen, _outs in _rd.GENERATORS:
+            lines.append("- `%s` -> %s" % (_gen, ", ".join("`%s`" % o for o in _outs)))
+    except Exception as _e:                              # never let the map fail to build over a nicety
+        lines.append("- *(could not read tools/regen_docs.py: %s)*" % _e)
     lines.append("")
     lines.append("## Family layout (%d modules)" % sum(fam.values()))
     lines.append("")
