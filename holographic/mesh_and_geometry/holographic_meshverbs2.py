@@ -311,15 +311,26 @@ def _opposite_edge(f, e):
     return None
 
 
-def loop_cut(mesh, start_face, start_edge):
-    """Insert an edge loop through the quad strip carrying `start_edge` (an edge of quad `start_face`): trace the
+def loop_cut(mesh, start_face, start_edge, cuts=1, factor=0.5):
+    """Insert `cuts` edge loops through the quad strip carrying `start_edge` (an edge of quad `start_face`): trace the
     perpendicular loop (enter a quad through one edge, leave through the OPPOSITE edge, cross into the neighbour),
-    insert a midpoint on each crossed edge, and split every crossed quad in two. Returns a new Mesh (chi preserved).
-    Quads only; the trace stops at a boundary (open) or when it returns to the start (closed)."""
+    insert point(s) on each crossed edge, and split every crossed quad. Returns a new Mesh (chi preserved). Quads only;
+    the trace stops at a boundary (open) or when it returns to the start (closed).
+
+    `factor` in (0,1) is WHERE a SINGLE cut lands on each crossed edge (0.5 = midpoint, the default -- byte-identical
+    to before; Blender's Edge Slide). `cuts` > 1 inserts that many evenly-spaced parallel loops in one trace (Blender's
+    Ctrl+R with a scroll count) -- what building profile rings wants without N manual calls; with cuts>1 the `factor`
+    is ignored (the loops are spaced evenly)."""
     faces = [tuple(f) for f in mesh.faces]
     verts = list(mesh.vertices)
     if len(faces[start_face]) != 4:
         raise ValueError("loop_cut needs a quad mesh (the opposite-edge trace is undefined on triangles)")
+    n = max(int(cuts), 1)
+    # the parameters (fractions along each crossed edge) where loops land
+    if n == 1:
+        params = [float(np.clip(factor, 1e-6, 1.0 - 1e-6))]
+    else:
+        params = [(k + 1.0) / (n + 1.0) for k in range(n)]
     # undirected edge -> the faces using it
     e2f = {}
     for fi, f in enumerate(faces):
@@ -336,25 +347,38 @@ def loop_cut(mesh, start_face, start_edge):
         if not nb:
             break
         fi, e = nb[0], opp
-    # a midpoint per crossed edge (entering + final opposite)
+    # n cut points per crossed edge, ordered from the edge's lower-index endpoint (deterministic + shared across the
+    # two faces sharing an edge). cut_pts[ce] is a list of vertex indices in increasing-parameter order.
     crossed = []
     for fi, e in strip:
         crossed.append(frozenset(e)); crossed.append(frozenset(_opposite_edge(faces[fi], e)))
-    mid = {}
+    cut_pts = {}
     for ce in dict.fromkeys(crossed):
-        a, b = tuple(ce)
-        mid[ce] = len(verts)
-        verts.append(0.5 * (mesh.vertices[a] + mesh.vertices[b]))
-    # split each strip quad in two along its two midpoints, in the quad's OWN cyclic order (keeps winding consistent)
+        a, b = sorted(tuple(ce))
+        idxs = []
+        for t in params:
+            idxs.append(len(verts))
+            verts.append((1.0 - t) * mesh.vertices[a] + t * mesh.vertices[b])
+        cut_pts[ce] = (a, b, idxs)                          # remember orientation to order points per quad
+    # split each strip quad into n+1 quads along the two parallel cut sequences
     strip_set = set(fi for fi, _ in strip)
     new_faces = [f for i, f in enumerate(faces) if i not in strip_set]
     for fi, e in strip:
         f = faces[fi]
         i = next(k for k in range(4) if set((f[k], f[(k + 1) % 4])) == set(e))
         v0, v1, v2, v3 = f[i], f[(i + 1) % 4], f[(i + 2) % 4], f[(i + 3) % 4]
-        me, mo = mid[frozenset((v0, v1))], mid[frozenset((v2, v3))]
-        new_faces.append((v0, me, mo, v3))
-        new_faces.append((me, v1, v2, mo))
+        # edge (v0,v1) and its opposite (v2,v3); get each edge's cut points ordered FROM v0 / FROM v3 respectively
+        def ordered(ce_key, from_vertex):
+            a, b, idxs = cut_pts[ce_key]
+            return idxs if a == from_vertex else idxs[::-1]
+        seq01 = ordered(frozenset((v0, v1)), v0)           # points from v0 -> v1
+        seq32 = ordered(frozenset((v2, v3)), v3)           # points from v3 -> v2 (parallel side)
+        left0, left3 = v0, v3
+        for j in range(len(params)):
+            r0, r3 = seq01[j], seq32[j]
+            new_faces.append((left0, r0, r3, left3))
+            left0, left3 = r0, r3
+        new_faces.append((left0, v1, v2, left3))            # the last strip quad
     return Mesh(np.array(verts), new_faces)
 
 
@@ -523,6 +547,16 @@ def _selftest():
     # --- determinism ---
     assert np.array_equal(bevel_vertex(cube, 0, 0.3).vertices, bevel_vertex(cube, 0, 0.3).vertices)
     assert np.array_equal(loop_cut(cube, 0, (f0[0], f0[1])).vertices, loop_cut(cube, 0, (f0[0], f0[1])).vertices)
+
+    # --- loop_cut cuts>1 + factor: N evenly-spaced parallel loops in one trace (each adds faces, stays all-quad
+    # manifold); factor shifts a single cut off the midpoint (still valid). Blender's Ctrl+R count + Edge Slide. ---
+    _g2 = grid(4, 4, width=4.0, height=4.0)
+    _f2 = _g2.faces[0]
+    _c1 = loop_cut(_g2, 0, (_f2[0], _f2[1]), cuts=1)
+    _c3 = loop_cut(_g2, 0, (_f2[0], _f2[1]), cuts=3)
+    assert _c3.n_faces > _c1.n_faces and all(len(f) == 4 for f in _c3.faces) and _c3.is_manifold()
+    _cf = loop_cut(_g2, 0, (_f2[0], _f2[1]), factor=0.25)
+    assert all(len(f) == 4 for f in _cf.faces) and _cf.is_manifold()          # off-midpoint cut still valid
 
     # --- TRIANGULATE: ear-clip is correct on CONCAVE faces where a fan is not ---
     # an L-shaped hexagon (concave at one corner). Ear-clip must tile it EXACTLY; a fan from v0 would emit a

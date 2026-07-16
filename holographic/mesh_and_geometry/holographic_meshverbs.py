@@ -101,10 +101,14 @@ def _ring_walls(face, new_idx):
     return walls
 
 
-def extrude_face(mesh, face_index, distance):
+def extrude_face(mesh, face_index, distance, quad_walls=False):
     """EXTRUDE: lift face `face_index` along its outward normal by `distance` and connect it back with side walls.
     The lifted face becomes the cap (same winding); the walls keep the mesh a closed manifold with chi unchanged.
-    The cap's centroid moves by exactly `distance` along the face normal. Returns a new Mesh."""
+    The cap's centroid moves by exactly `distance` along the face normal. Returns a new Mesh.
+
+    quad_walls=True (default-off, byte-identical off) emits each side wall as ONE QUAD (a, b, b_new, a_new) instead
+    of two triangles -- what a subdivision cage wants: a pure-quad cage keeps Catmull-Clark's valence regular, where
+    triangle walls scatter valence-3/5 verts through the surface. Same winding balance either way."""
     V = mesh.vertices
     face = mesh.faces[face_index]
     m = len(face)
@@ -115,14 +119,23 @@ def extrude_face(mesh, face_index, distance):
     new_idx = [base + k for k in range(m)]
     faces = [f for i, f in enumerate(mesh.faces) if i != face_index]   # drop the original face
     faces.append(tuple(new_idx))                                       # the cap (same winding)
-    faces.extend(_ring_walls(face, new_idx))                           # the side walls
+    if quad_walls:
+        for k in range(m):                                             # one quad per side, same directed-edge balance
+            a, b = face[k], face[(k + 1) % m]
+            faces.append((a, b, new_idx[(k + 1) % m], new_idx[k]))
+    else:
+        faces.extend(_ring_walls(face, new_idx))                       # the triangulated side walls (the original path)
     return Mesh(verts, faces)
 
 
-def inset_face(mesh, face_index, ratio):
+def inset_face(mesh, face_index, ratio, quad_walls=False):
     """INSET: shrink face `face_index` toward its centroid by `ratio` (0 = unchanged, 1 = collapsed to a point),
     ringing the original with new faces around a smaller central face. In-plane (no displacement), so the central
-    face stays coplanar with the original; its area is exactly (1-ratio)^2 of the original. Returns a new Mesh."""
+    face stays coplanar with the original; its area is exactly (1-ratio)^2 of the original. Returns a new Mesh.
+
+    quad_walls=True (default-off, byte-identical off) emits each ring face as ONE QUAD (original edge -> inset edge)
+    instead of two triangles -- the pure-quad ring a Catmull-Clark cage wants (triangle ring faces scatter irregular
+    valence, which is where the mantis v2 head inset left its two valence-8 poles)."""
     V = mesh.vertices
     face = mesh.faces[face_index]
     m = len(face)
@@ -133,7 +146,12 @@ def inset_face(mesh, face_index, ratio):
     new_idx = [base + k for k in range(m)]
     faces = [f for i, f in enumerate(mesh.faces) if i != face_index]
     faces.append(tuple(new_idx))                                       # the central (inset) face
-    faces.extend(_ring_walls(face, new_idx))                           # the surrounding ring
+    if quad_walls:
+        for k in range(m):                                             # one quad per ring segment, same edge balance
+            a, b = face[k], face[(k + 1) % m]
+            faces.append((a, b, new_idx[(k + 1) % m], new_idx[k]))
+    else:
+        faces.extend(_ring_walls(face, new_idx))                       # the surrounding ring (triangulated, original)
     return Mesh(verts, faces)
 
 
@@ -224,6 +242,21 @@ def _selftest():
 
     # --- determinism ---
     assert np.array_equal(extrude_face(sphere, 0, 0.3).vertices, extrude_face(sphere, 0, 0.3).vertices)
+
+    # --- quad_walls (default-off): absent -> byte-identical faces; on a quad box -> pure-quad closed manifold,
+    # the wall style a Catmull-Clark cage wants (triangle walls scatter irregular valence through the surface) ---
+    from holographic.mesh_and_geometry.holographic_mesh import box as _qbox
+    _qb = _qbox()
+    _e_def = extrude_face(_qb, 0, 0.5); _e_off = extrude_face(_qb, 0, 0.5, quad_walls=False)
+    assert [tuple(f) for f in _e_def.faces] == [tuple(f) for f in _e_off.faces]
+    _e_q = extrude_face(_qb, 0, 0.5, quad_walls=True)
+    assert all(len(f) == 4 for f in _e_q.faces) and _e_q.is_manifold() and _e_q.is_closed()
+
+    # inset quad_walls: same story -- default triangle ring is byte-identical; quad ring keeps the cage pure-quad
+    _i_def = inset_face(_qb, 0, 0.4); _i_off = inset_face(_qb, 0, 0.4, quad_walls=False)
+    assert [tuple(f) for f in _i_def.faces] == [tuple(f) for f in _i_off.faces]
+    _i_q = inset_face(_qb, 0, 0.4, quad_walls=True)
+    assert all(len(f) == 4 for f in _i_q.faces) and _i_q.is_manifold() and _i_q.is_closed()
 
     print(f"holographic_meshverbs selftest: ok (extrude/inset/dissolve all preserve chi={chi0}, closed, manifold; "
           f"extrude cap moves exactly 0.300 along the normal; inset area = (1-ratio)^2 exactly; dissolve removes "

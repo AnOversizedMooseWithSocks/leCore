@@ -1,12 +1,13 @@
 # .github/workflows/docs.yml
-# Keep REFERENCE.md in sync with the code automatically. On every push to main, regenerate the code reference
-# from the module docstrings and commit it back if anything changed. (No third-party deps -- docgen.py is pure
-# standard library.)
+# Keep the GENERATED docs in sync with the code automatically. On every push to main, regenerate the code
+# reference, the capabilities menu, the faculty map and the documentation map, and commit them back if anything
+# changed. (docgen.py is pure stdlib; capdoc.py/facultymap.py import the live engine, hence the install step.)
 name: docs
 
 on:
-  push:
-    branches: [ main, master ]
+  push:                          # run on ANY branch so feature branches auto-refresh generated docs too
+                                 # (was main/master only -- which left feature-branch pushes perpetually
+                                 # "stale" because nothing regenerated the docs there)
   workflow_dispatch:            # lets you run it by hand from the Actions tab
 
 permissions:
@@ -23,20 +24,39 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Generate the code reference
-        run: python docgen.py          # writes REFERENCE.md from every module's docstring + public API
+      # capdoc.py reads the LIVE catalog and facultymap.py boots a UnifiedMind -- both import the engine, so the
+      # engine's dependencies must be installed here (docgen.py alone is pure stdlib and never needed this).
+      - name: Install the engine's dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
 
-      - name: Generate the capabilities menu
-        run: python capdoc.py          # writes CAPABILITIES.md (prose) AND capabilities.json (machine-readable) from the live catalog
+      # ONE DOOR. This used to be six copy-pasted steps, and that list existed ONLY here -- so a close-out ran
+      # capdoc + docgen, forgot apiquickref, and ci.yml's API_QUICKREF drift gate went red. The canonical list
+      # now lives in tools/regen_docs.py (importable, self-tested, and cross-referenced against ci.yml's gates
+      # by tests/test_regen_docs.py). A missing generator now fails the step LOUDLY instead of being skipped.
+      - name: Regenerate every generated doc -- canonical list lives in tools/regen_docs.py
+        run: python tools/regen_docs.py
 
       - name: Commit refreshed docs if they changed
         run: |
           git config user.name  "docs-bot"
           git config user.email "docs-bot@users.noreply.github.com"
-          if ! git diff --quiet REFERENCE.md CAPABILITIES.md capabilities.json; then
-            git add REFERENCE.md CAPABILITIES.md capabilities.json
-            git commit -m "docs: refresh REFERENCE.md + CAPABILITIES.md + capabilities.json [skip ci]"   # [skip ci] so it doesn't re-trigger CI
-            git push
+          DOCS=$(python tools/regen_docs.py --outputs)   # the ONE list -- never repeat it here
+          if ! git diff --quiet $DOCS; then
+            git add $DOCS
+            git commit -m "docs: refresh generated docs (REFERENCE, CAPABILITIES, API_QUICKREF, PIPELINE_MAP, FACULTY_MAP, DOC_MAP) [skip ci]"   # [skip ci] so it doesn't re-trigger CI
+            # REBASE + RETRY: semantic-coverage.yml fires on the same push and auto-commits the routing
+            # index -- the remote head can move mid-run and a bare push fails non-fast-forward (measured).
+            # Disjoint files (generated md vs index npz), so the rebase is always clean.
+            pushed=0
+            for i in 1 2 3; do
+              git pull --rebase origin ${{ github.ref_name }}
+              if git push origin HEAD:${{ github.ref_name }}; then pushed=1; break; fi
+              echo "push rejected (remote moved again?) -- retry $i"; sleep $((i*5))
+            done
+            if [ "$pushed" != "1" ]; then
+              echo "::error::could not push regenerated docs after 3 rebase+push attempts."
+              exit 1
+            fi
           else
-            echo "REFERENCE.md, CAPABILITIES.md and capabilities.json already up to date -- nothing to commit."
+            echo "All generated docs already up to date -- nothing to commit."
           fi

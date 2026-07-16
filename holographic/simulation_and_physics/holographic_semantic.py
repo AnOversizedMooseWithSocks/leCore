@@ -114,6 +114,22 @@ LIGHTING_WORDS = {
     "studio": "studio", "dramatic": "dramatic", "moody": "dramatic",
 }
 
+def lighting_params(sun="bright", lighting=None, sun_scale=1.0):
+    """Resolve a lighting request into concrete shading numbers: dict(dir, sun_col, sun_i, amb, amb_col). This is the
+    ONE place that turns a LIGHTING preset name (or the plain sun="bright"/"soft" word) plus a relative sun_scale into
+    a sun DIRECTION, COLOUR, INTENSITY and AMBIENT tint -- so the fast renderer (_scene_setup) and the textured
+    renderer agree instead of each hard-coding their own light. sun_scale multiplies the final intensity (B2b).
+    Defaults (bright/None/1.0) give sun_i=1.0, white light, dir=(-0.45,0.8,-0.35), amb=0.24 -- the historical look.
+    NumPy-free tuples out (readable, deterministic). See LIGHTING for the preset table."""
+    import numpy as _np
+    d = _np.array([-0.45, 0.8, -0.35]); d = d / _np.linalg.norm(d)
+    dir_, sun_col, sun_i, amb, amb_col = tuple(d), (1.0, 1.0, 1.0), (1.0 if sun == "bright" else 0.7), 0.24, (1.0, 1.0, 1.0)
+    preset = LIGHTING.get(lighting) if lighting else None
+    if preset is not None:
+        pd = _np.asarray(preset["dir"], float); pd = pd / (_np.linalg.norm(pd) + 1e-9)
+        dir_, sun_col, sun_i, amb, amb_col = tuple(pd), tuple(preset["sun_col"]), preset["sun_i"], preset["amb"], tuple(preset["amb_col"])
+    return {"dir": dir_, "sun_col": sun_col, "sun_i": float(sun_i) * float(sun_scale), "amb": amb, "amb_col": amb_col}
+
 ARTICLES = {"a", "an", "the"}
 _STOP = {"of", "with", "is", "to", "and", "that", "which", "sitting", "leaning", "resting"}   # glue words
 
@@ -538,6 +554,20 @@ class _SphereSDF:
         return np.linalg.norm(np.asarray(P, float) - self.c, axis=1) - self.r
 
 
+class _EllipsoidSDF:
+    """iq's bounded ellipsoid distance k1*(k1-1)/k2 -- no exact closed form exists, but this bound never oversteps
+    a raymarch. What a stretched 'sphere' object (a leaf, a lemon, a squashed fruit) realizes to."""
+
+    def __init__(self, c, radii):
+        self.c = np.asarray(c, float); self.a = np.maximum(np.asarray(radii, float), 1e-6)
+
+    def eval(self, P):
+        q = (np.asarray(P, float) - self.c)
+        k1 = np.linalg.norm(q / self.a, axis=1)
+        k2 = np.linalg.norm(q / (self.a * self.a), axis=1)
+        return np.where(k2 > 1e-12, k1 * (k1 - 1.0) / np.maximum(k2, 1e-12), -self.a.min())
+
+
 class _BoxSDF:
     def __init__(self, c, half):
         self.c = np.asarray(c, float); self.h = np.asarray(half, float)
@@ -587,6 +617,26 @@ class _TorusSDF:
         p = np.asarray(P, float) - self.c
         qx = np.sqrt(p[:, 0] ** 2 + p[:, 2] ** 2) - self.R
         return np.sqrt(qx * qx + p[:, 1] ** 2) - self.rt
+
+
+class _RotatedSDF:
+    """Wrap an axis-aligned primitive SDF and ROTATE it about its centre by (axis, angle_rad). WHY THIS EXISTS: the
+    local primitive SDFs are axis-aligned (a cone always points +y), so a real rosette of leaves splaying OUTWARD was
+    impossible -- the long-standing 'rotation is not modelled' kept negative. A rotation is rigid (distance-preserving),
+    so evaluating the inner SDF at query points rotated by the INVERSE rotation about the centre is an EXACT rotated
+    SDF -- the same trick the node palette's sdf_rotate uses. Reuses holographic_sdf._rot_matrix for the matrix (do not
+    reinvent the wheel). Default-off: realize_scene only wraps an object that carries a 'rotation' field."""
+    def __init__(self, inner, center, axis, angle):
+        from holographic.mesh_and_geometry.holographic_sdf import _rot_matrix
+        self.inner = inner
+        self.c = np.asarray(center, float)
+        self.Rinv = _rot_matrix(axis, -float(angle))         # rotate query points by -angle == rotate the object by +angle
+        self.r = getattr(inner, "r", None)                   # pass through a radius hint for bounds (rotation-invariant)
+
+    def eval(self, P):
+        P = np.asarray(P, float)
+        local = self.c + (P - self.c) @ self.Rinv.T          # per-point: c + Rinv @ (P - c); then the inner (which
+        return self.inner.eval(local)                        # subtracts the SAME centre) sees the rotated field
 
 
 def _base_size(obj):
@@ -641,28 +691,60 @@ def realize_scene(objects, spacing=2.7, base_radius=0.7):
     out = []
     for i, o in enumerate(objects):
         uni, stretch = _base_size(o)
-        r = base_radius * uni * scale[i]
-        col = COLORS.get(o["color"], (0.8, 0.8, 0.8))
+        # EXPLICIT per-axis stretch (default-off, additive): o['stretch']=(sx,sy,sz) overrides the size-word stretch --
+        # what photo-matched authoring needs (a plate is a squashed cylinder, a leaf a flattened sphere). Absent ->
+        # the size-word behaviour, byte-identical.
+        if o.get("stretch") is not None:
+            stretch = tuple(float(s) for s in o["stretch"])
+        # B2-transform: an optional explicit OFFSET (translate) and SCALE_MUL (continuous scale) on top of the
+        # relation-derived layout. Absent -> (0,0,0) and 1.0, i.e. BYTE-IDENTICAL to the pre-transform layout.
+        obj_pos = pos[i] + np.asarray(o.get("offset", (0.0, 0.0, 0.0)), float)
+        # ABSOLUTE position override (default-off): if an object carries an explicit 'position', it is placed THERE,
+        # bypassing the relation/row layout entirely. This is what lets scene_from_image drop each object at the
+        # location its photo region implies. Absent -> the relation+offset layout as before (byte-identical).
+        if o.get("position") is not None:
+            obj_pos = np.asarray(o["position"], float)
+        r = base_radius * uni * scale[i] * float(o.get("scale_mul", 1.0))
+        # EXACT RGB (default-off, additive): a (r,g,b) tuple/list as o['color'] is used directly -- what a
+        # photo-matched scene needs (colour picked from the image, not the nearest named colour). A string name
+        # goes through COLORS exactly as before, byte-identical.
+        if isinstance(o["color"], (tuple, list)) and len(o["color"]) == 3:
+            col = tuple(float(c) for c in o["color"])
+        else:
+            col = COLORS.get(o["color"], (0.8, 0.8, 0.8))
         mat = MATERIAL_RENDER.get(o["material"], MATERIAL_RENDER[None])
         if o["shape"] == "sphere":
-            sdf = _SphereSDF(pos[i], r)
+            # a STRETCHED sphere is an ellipsoid (iq's bounded approximation) -- default (1,1,1) stays the exact
+            # sphere, byte-identical. What a leaf, a lemon, or a squashed fruit actually is.
+            if tuple(stretch) != (1.0, 1.0, 1.0):
+                sdf = _EllipsoidSDF(obj_pos, np.array(stretch, float) * r)
+            else:
+                sdf = _SphereSDF(obj_pos, r)
         elif o["shape"] == "cylinder":
             sx, sy, sz = stretch
-            sdf = _CylinderSDF(pos[i], r * 0.72 * max(sx, sz), r * 1.05 * sy)
+            sdf = _CylinderSDF(obj_pos, r * 0.72 * max(sx, sz), r * 1.05 * sy)
         elif o["shape"] == "cone":
             sx, sy, sz = stretch
-            sdf = _ConeSDF(pos[i], r * 0.9 * max(sx, sz), r * 1.1 * sy)
+            sdf = _ConeSDF(obj_pos, r * 0.9 * max(sx, sz), r * 1.1 * sy)
         elif o["shape"] == "torus":
-            sdf = _TorusSDF(pos[i], r * 0.72, r * 0.3)
+            sdf = _TorusSDF(obj_pos, r * 0.72, r * 0.3)
         else:
             half = np.array(stretch) * r
-            sdf = _BoxSDF(pos[i], half)
+            sdf = _BoxSDF(obj_pos, half)
+        # optional ROTATION about the object's centre -- (axis, angle_degrees). Absent -> unrotated, BYTE-IDENTICAL to
+        # the axis-aligned layout. This is what lets leaves splay into a rosette (closes the axis-aligned negative).
+        rot = o.get("rotation")
+        if rot:
+            axis, angle_deg = rot
+            sdf = _RotatedSDF(sdf, obj_pos, axis, np.deg2rad(float(angle_deg)))
         out.append({"sdf": sdf, "color": col, "material": mat, "mat_name": o["material"], "name": _obj_name(o)})
     return out
 
 
 def _obj_name(o):
     bits = [o[k] for k in ("color", "size", "material") if o[k]]
+    # an exact-RGB colour (tuple) reads as 'rgb(0.75,0.62,0.25)' in the descriptive name
+    bits = [b if isinstance(b, str) else "rgb(%.2f,%.2f,%.2f)" % tuple(float(c) for c in b) for b in bits]
     return " ".join(bits + [o["shape"]])
 
 
@@ -675,6 +757,18 @@ class _PlaneSDF:
 
     def eval(self, P):
         return np.asarray(P, float)[:, 1] - self.y0
+
+
+class _WallSDF:
+    """A vertical BACKDROP plane at z=z0 (normal +z) -- the wall behind the scene, so a render has a real background to
+    compare against a photo's wall instead of empty sky. With the ground plane it forms a floor+wall corner, which is
+    most of what an indoor product photo's frame is."""
+
+    def __init__(self, z0):
+        self.z0 = float(z0)
+
+    def eval(self, P):
+        return np.asarray(P, float)[:, 2] - self.z0
 
 
 class _UnionSDF:
@@ -831,11 +925,14 @@ def volumetric_field(center, radius, density=1.4, turbulence=0.7, seed=0):
     return field
 
 
-def _scene_setup(objects, ground, sky, sun, glass_tint, rs=None, lighting=None):
+def _scene_setup(objects, ground, sky, sun, glass_tint, rs=None, lighting=None, sun_scale=1.0,
+                 ground_color=None, backdrop=None):
     """Build the immutable per-scene context (SDFs, colours, materials, lighting) once; reused by every ray batch so
     the adaptive refinement does not rebuild it. Pass `rs` to use pre-realized renderables (so volumetric objects can
     be split out and the layout computed once). `lighting` is an optional LIGHTING preset name (noon/sunset/golden/
-    overcast/night/studio/dramatic/...) that sets the sun direction, colour, intensity and ambient tint."""
+    overcast/night/studio/dramatic/...) that sets the sun direction, colour, intensity and ambient tint.
+    `ground_color` recolours the floor (default -> the neutral gray, byte-identical); `backdrop` (an rgb) adds a
+    vertical wall behind the scene of that colour -- both let a render match a photo's floor + wall."""
     if rs is None:
         rs = realize_scene(objects)
     if not rs and not ground:
@@ -849,8 +946,20 @@ def _scene_setup(objects, ground, sky, sun, glass_tint, rs=None, lighting=None):
             elif isinstance(s, _BoxSDF):
                 lows.append(float(s.c[1] - s.h[1]))
         y0 = (min(lows) - 0.08) if lows else -0.9
-        rs = list(rs) + [{"sdf": _PlaneSDF(y0), "color": (0.62, 0.63, 0.66), "material": MATERIAL_RENDER["matte"],
+        gcol = tuple(float(c) for c in ground_color[:3]) if ground_color is not None else (0.62, 0.63, 0.66)
+        rs = list(rs) + [{"sdf": _PlaneSDF(y0), "color": gcol, "material": MATERIAL_RENDER["matte"],
                           "mat_name": "matte", "name": "ground"}]
+    if backdrop is not None:                                  # a vertical wall behind the scene (photo backdrop)
+        backs = []
+        for r in rs:
+            s = r["sdf"]
+            c = getattr(s, "c", None)
+            if c is not None:
+                backs.append(float(c[2]))
+        z0 = (min(backs) - 1.6) if backs else -3.0
+        bcol = tuple(float(c) for c in backdrop[:3])
+        rs = list(rs) + [{"sdf": _WallSDF(z0), "color": bcol, "material": MATERIAL_RENDER["matte"],
+                          "mat_name": "matte", "name": "backdrop"}]
     if not rs:
         return None
     sdfs = [r["sdf"] for r in rs]
@@ -862,6 +971,9 @@ def _scene_setup(objects, ground, sky, sun, glass_tint, rs=None, lighting=None):
         sun_dir = np.asarray(preset["dir"], float); sun_dir = sun_dir / (np.linalg.norm(sun_dir) + 1e-9)
         sun_col = np.asarray(preset["sun_col"], float); sun_i = preset["sun_i"]
         amb = preset["amb"]; amb_col = np.asarray(preset["amb_col"], float)
+    # B2b: relative brightness. sun_scale multiplies the FINAL sun intensity (after any preset), so a spoken
+    # "brighter"/"dimmer" scales the scene without a new preset. Default 1.0 -> byte-identical to before.
+    sun_i = float(sun_i) * float(sun_scale)
     return {"sdfs": sdfs, "union": _UnionSDF(sdfs),
             "colors": np.array([r["color"] for r in rs]),
             "refl": np.array([_reflectivity(r["mat_name"]) for r in rs]),
@@ -1010,7 +1122,7 @@ def _scene_aabb(rs, margin=1.0):
 def render_scene(objects, camera, width=256, height=256, post=None, sun="bright", sky="clear",
                  glass_tint=(0.75, 0.9, 0.85), ss=2, ground=True, dither=0.004, adaptive=True, stats=None,
                  fog=None, fog_density=0.12, fog_color=(0.80, 0.85, 0.92), fog_max_dist=14.0, region_field=None,
-                 bake=None, relax=1.0, lighting=None):
+                 bake=None, relax=1.0, lighting=None, sun_scale=1.0, ground_color=None, backdrop=None):
     """Render a realized scene in a SINGLE pass over the UNION SDF, so objects cast shadows and ambient occlusion on
     EACH OTHER. Per-pixel material/colour comes from the nearest object (the material-id buffer); reflective
     materials pick up a sky reflection; GLASS is see-through. Optional `post` is a holographic_postfx.PostChain.
@@ -1032,7 +1144,8 @@ def render_scene(objects, camera, width=256, height=256, post=None, sun="bright"
     rs_all = realize_scene(objects)                            # realize once; split surface vs volumetric objects
     vol_idx = [i for i, o in enumerate(objects) if isinstance(o, dict) and o.get("material") in _VOLUMETRIC]
     surf_rs = [rs_all[i] for i in range(len(objects)) if i not in vol_idx]
-    ctx = _scene_setup(None, ground, sky, sun, glass_tint, rs=surf_rs, lighting=lighting)
+    ctx = _scene_setup(None, ground, sky, sun, glass_tint, rs=surf_rs, lighting=lighting, sun_scale=sun_scale,
+                       ground_color=ground_color, backdrop=backdrop)
     ctx["region_field"] = region_field                          # optional: shade hit points by region material
     ctx["relax"] = relax                                        # >1 = opt-in over-relaxed marching (grazing scenes)
     if bake is not None and ctx.get("union") is not None and len(surf_rs) > 0:
@@ -1045,7 +1158,7 @@ def render_scene(objects, camera, width=256, height=256, post=None, sun="bright"
     if ctx is None:
         if not vol_idx:
             return np.zeros((height, width, 3))
-        ctx = _scene_setup(None, True, sky, sun, glass_tint, rs=[])   # ground+sky backdrop for the volume
+        ctx = _scene_setup(None, True, sky, sun, glass_tint, rs=[], sun_scale=sun_scale)   # ground+sky backdrop for the volume
 
     eye, dirs0 = camera.ray_dirs(width, height)
     D0 = dirs0.reshape(-1, 3); O0 = np.broadcast_to(eye, D0.shape).copy()
@@ -1224,7 +1337,7 @@ def _scene_material_fn(props, union):
 
 def render_scene_pbr(objects, camera, width=200, height=200, spp=24, max_bounce=4, post=None,
                      ground=True, sky="clear", sun="bright", tonemap=True, dither=0.004, env=None,
-                     adaptive_spp=0, noise_pct=70, stats=None):
+                     adaptive_spp=0, noise_pct=70, stats=None, lighting=None):
     """HYPERREAL render path: route a described scene through the engine's Monte-Carlo PATH TRACER
     (holographic_pathtrace) with REAL per-object Cook-Torrance/GGX materials (holographic_brdf) -- true multi-bounce
     global illumination, soft shadows, colour bleeding, glossy GGX highlights, EMISSIVE objects that light the scene,
@@ -1241,7 +1354,7 @@ def render_scene_pbr(objects, camera, width=200, height=200, spp=24, max_bounce=
     noisy -- raise spp); single-scatter GGX energy loss at high roughness is inherited. Noise falls as 1/sqrt(spp)."""
     from holographic.rendering.holographic_pathtrace import path_trace
     from holographic.rendering.holographic_raymarch import sky_dome
-    ctx = _scene_setup(objects, ground, sky, sun, (0.75, 0.9, 0.85))
+    ctx = _scene_setup(objects, ground, sky, sun, (0.75, 0.9, 0.85), lighting=lighting)  # preset sets the sun_dir the sky dome lights from
     if ctx is None:
         return np.zeros((height, width, 3))
     union = ctx["union"]; sdfs = ctx["sdfs"]
@@ -1370,6 +1483,18 @@ def _selftest():
     spec = control_spec("control the ball size and how metallic it is")
     keys = [c["param"] for c in spec["controls"]]
     assert "size" in keys and "metallic" in keys and spec["target"] == "ball"
+
+    # PHOTO-MATCHED AUTHORING (default-off, additive): an exact (r,g,b) colour is used verbatim; an explicit
+    # per-axis 'stretch' overrides the size-word stretch and turns a 'sphere' into an ELLIPSOID -- what building a
+    # scene from a photo needs (colours picked from the image, a plate/leaf/lemon that is a squashed primitive). A
+    # named colour with no stretch is BYTE-IDENTICAL to before (an exact sphere).
+    _plain = realize_scene([{"shape": "sphere", "color": "red", "material": None, "size": None, "relation": None}])[0]
+    assert isinstance(_plain["sdf"], _SphereSDF)                              # default path unchanged
+    _rgb = realize_scene([{"shape": "sphere", "color": (0.6, 0.5, 0.2), "material": None, "size": None,
+                           "relation": None, "stretch": (1.2, 0.8, 1.0)}])[0]
+    assert isinstance(_rgb["sdf"], _EllipsoidSDF) and _rgb["color"] == (0.6, 0.5, 0.2)   # exact rgb + ellipsoid
+    _e = _EllipsoidSDF((0.0, 0.0, 0.0), (2.0, 1.0, 1.0))                      # on-surface point reads ~0
+    assert abs(float(_e.eval(np.array([[2.0, 0.0, 0.0]]))[0])) < 0.05
 
     print("semantic selftest ok: parsed 3 objects + environment from the example sentence; objects encode/decode "
           "bidirectionally; the bundled scene is queryable by slot; batch edit + control spec work.")

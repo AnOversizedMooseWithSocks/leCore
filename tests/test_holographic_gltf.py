@@ -89,3 +89,28 @@ def test_glb_file_round_trip(tmp_path):
     write_glb(m, str(p))
     back = read_glb(str(p))
     assert back.n_vertices == 8 and back.n_faces == 12
+
+
+def test_read_accessor_honours_byteoffset_and_stride():
+    """The REAL-WORLD layout regression (found by a Sketchfab .glb that imported 0 verts): accessors packed into ONE
+    bufferView at byteOffsets, and interleaved accessors with a byteStride. The first _read_accessor ignored both and
+    silently read all-zeros. Build both layouts by hand and assert exact recovery."""
+    import numpy as np
+    from holographic.io_and_interop.holographic_gltf import _read_accessor
+
+    pos = np.arange(12, dtype="<f4").reshape(4, 3)            # 4 VEC3 floats
+    nrm = (np.arange(12, dtype="<f4") + 100).reshape(4, 3)
+    # layout A: two accessors share one bufferView via accessor.byteOffset
+    blob = pos.tobytes() + nrm.tobytes()
+    views = [{"byteOffset": 0, "byteLength": len(blob)}]
+    a_pos = {"bufferView": 0, "byteOffset": 0, "componentType": 5126, "count": 4, "type": "VEC3"}
+    a_nrm = {"bufferView": 0, "byteOffset": pos.nbytes, "componentType": 5126, "count": 4, "type": "VEC3"}
+    assert np.allclose(_read_accessor(a_pos, views, blob), pos)
+    assert np.allclose(_read_accessor(a_nrm, views, blob), nrm)          # was all-zeros before the fix
+    # layout B: interleaved pos+nrm with byteStride 24
+    inter = np.hstack([pos, nrm]).astype("<f4").tobytes()
+    views_b = [{"byteOffset": 0, "byteLength": len(inter), "byteStride": 24}]
+    b_pos = {"bufferView": 0, "byteOffset": 0, "componentType": 5126, "count": 4, "type": "VEC3"}
+    b_nrm = {"bufferView": 0, "byteOffset": 12, "componentType": 5126, "count": 4, "type": "VEC3"}
+    assert np.allclose(_read_accessor(b_pos, views_b, inter), pos)
+    assert np.allclose(_read_accessor(b_nrm, views_b, inter), nrm)

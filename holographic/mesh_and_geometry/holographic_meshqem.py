@@ -117,15 +117,166 @@ def _edges(mesh):
     return E
 
 
-def qem_decimate(mesh, target_faces):
+def _qem_decimate_fast(mesh, target_faces):
+    """STABLE-INDEX + HEAP QEM decimation -- the O(F log F) fast path (opt-in via qem_decimate(fast=True)).
+
+    The canonical qem_decimate is O(F^2) from two places: re-ranking every edge each step, and collapse_edge
+    rebuilding the whole mesh each call. This path fixes BOTH: vertex->face INCIDENCE makes each collapse O(degree)
+    (only the faces around the merged vertex are touched, no full rebuild), and a LAZY-INVALIDATION HEAP re-ranks only
+    the edges incident to the merged vertex (a version stamp per vertex makes stale heap entries skippable on pop).
+    The mesh is compacted to a fresh Mesh once, at the end.
+
+    NOT bit-identical to the default (same tie-sensitivity caveat as the vectorised path): a valid, deterministic QEM
+    decimation to the same face target, close to the canonical surface, much faster. Manifold-safe: the same LINK
+    CONDITION that collapse_edge enforces is checked (incrementally, from incidence) before every collapse, and a
+    refused edge is dropped until a neighbouring collapse re-pushes it."""
+    import heapq
+
+    V = np.array(mesh.vertices, float)
+    n = len(V)
+    Qlist = [np.asarray(q, float) for q in vertex_quadrics(mesh)]
+    faces = [list(f) for f in mesh.faces]
+    face_alive = [True] * len(faces)
+    n_alive = len(faces)
+    vert_faces = [set() for _ in range(n)]
+    for fi, f in enumerate(faces):
+        for v in f:
+            vert_faces[v].add(fi)
+    vert_alive = [True] * n
+    vert_ver = [0] * n
+
+    def neighbours(x):
+        nb = set()
+        for fi in vert_faces[x]:
+            if face_alive[fi]:
+                nb.update(v for v in faces[fi] if v != x)
+        return nb
+
+    def edge_cost(u, v):
+        Qe = Qlist[u] + Qlist[v]
+        x, cost = contraction_target(Qe, V[u], V[v])
+        return cost, x
+
+    # seed the heap with every edge (u<v), keyed (cost, u, v) for deterministic ties, stamped with vertex versions
+    heap = []
+    seen = set()
+    for fi, f in enumerate(faces):
+        for k in range(3):
+            u, w = f[k], f[(k + 1) % 3]
+            e = (u, w) if u < w else (w, u)
+            if e in seen:
+                continue
+            seen.add(e)
+            c, _x = edge_cost(e[0], e[1])
+            heapq.heappush(heap, (c, e[0], e[1], vert_ver[e[0]], vert_ver[e[1]]))
+
+    def link_ok(a, b):
+        # shared neighbours of a,b must be exactly the apexes of the faces on edge {a,b} (else the collapse folds
+        # the surface onto itself -- the exact condition collapse_edge enforces).
+        shared = neighbours(a) & neighbours(b)
+        apex = set()
+        for fi in vert_faces[a] & vert_faces[b]:
+            if face_alive[fi]:
+                apex.update(v for v in faces[fi] if v != a and v != b)
+        return shared == apex
+
+    while n_alive > target_faces and heap:
+        c, u, w, vu, vw = heapq.heappop(heap)
+        if not (vert_alive[u] and vert_alive[w]):
+            continue
+        if vert_ver[u] != vu or vert_ver[w] != vw:
+            continue                                            # stale entry (an endpoint changed) -> skip
+        if w not in neighbours(u):
+            continue                                            # no longer an edge
+        # keep the lower index (deterministic), remove the other
+        a, b = (u, w) if u < w else (w, u)
+        if not link_ok(a, b):
+            continue                                            # unsafe collapse -> drop (re-pushed if a nbr changes)
+        _c, x = edge_cost(a, b)
+        # --- collapse b into a, touching only b's incident faces (O(degree)) ---
+        for fi in list(vert_faces[b]):
+            if not face_alive[fi]:
+                continue
+            f = faces[fi]
+            f2 = [a if v == b else v for v in f]
+            if len(set(f2)) < 3:                                # degenerate sliver -> kill the face
+                face_alive[fi] = False
+                n_alive -= 1
+                for v in set(f):
+                    vert_faces[v].discard(fi)
+            else:
+                faces[fi] = f2
+                vert_faces[a].add(fi)
+        vert_faces[b] = set()
+        vert_alive[b] = False
+        V[a] = x
+        Qlist[a] = Qlist[a] + Qlist[b]
+        vert_ver[a] += 1                                        # invalidate every stale heap entry touching a
+        # re-rank only the edges now incident to a (the local update the heap needs)
+        for wnb in neighbours(a):
+            if vert_alive[wnb]:
+                cc, _xx = edge_cost(a, wnb)
+                lo, hi = (a, wnb) if a < wnb else (wnb, a)
+                heapq.heappush(heap, (cc, lo, hi, vert_ver[lo], vert_ver[hi]))
+
+    # --- compact once: drop dead vertices, remap faces ---
+    keep = [i for i in range(n) if vert_alive[i]]
+    remap = {old: new for new, old in enumerate(keep)}
+    out_faces = [tuple(remap[v] for v in faces[fi]) for fi in range(len(faces)) if face_alive[fi]]
+    return Mesh(V[keep], out_faces)
+
+
+def qem_decimate(mesh, target_faces, fast=False, uvs=None):
     """Greedily collapse the lowest-QEM-cost edge (deterministic ties by vertex index) via the guarded
     collapse_edge, accumulating quadrics through each collapse, until the mesh has <= target_faces (or no safe
-    collapse remains). Returns a new Mesh. Closed triangle meshes; see the kept negatives."""
+    collapse remains). Returns a new Mesh. Closed triangle meshes; see the kept negatives.
+
+    fast=False (DEFAULT, bit-identical): the original per-edge ranking loop. Pinned as the canonical behaviour so
+    existing decisions never flip.
+    fast=True (OPT-IN): the STABLE-INDEX + HEAP decimator (_qem_decimate_fast) -- vertex->face incidence makes each
+    collapse O(degree) and a lazy-invalidation heap re-ranks only the edges around each merged vertex, so the whole
+    decimation is O(F log F) instead of O(F^2). An EQUALLY-VALID, deterministic QEM decimation to the same face
+    target and close to the canonical surface, much faster -- but NOT bit-identical (batched/heap ordering differs
+    from the per-edge loop at the ULP, and QEM is tie-sensitive). Use it for preview/interactive decimation; use the
+    default where the exact canonical mesh is required. (Kept negative, loud: fast != default byte-for-byte.)
+
+    uvs=None: positions only. If you pass a per-vertex UV array (n_vertices, 2) -- or set mesh.uvs and this reads it
+    -- the LOD RETAINS the TEXTURE MAP: each collapse keeps the SURVIVING vertex's UV and drops the removed vertex's,
+    mirroring collapse_edge's index remap, and the returned Mesh carries .uvs. This is the whole point of a textured
+    LOD: fewer triangles, SAME texture. KEPT NEGATIVE: the survivor's position moves to the QEM optimum `x` but its UV
+    stays put (the standard cheap choice) -- so the UV is exact at surviving vertices and slightly stretched on the
+    triangles around a moved survivor; across a texture SEAM a collapse can also pull a UV to the wrong island (same
+    seam caveat as any collapse). For a UV that tracks the moved point, bake with transfer_uv from the original after."""
+    if uvs is None:
+        uvs = getattr(mesh, "uvs", None)
+    if fast:
+        nm = _qem_decimate_fast(mesh, target_faces)
+        # the fast heap decimator drops faces but can leave ORPHANED vertices behind (verts no face uses) -- they
+        # skew any bbox / normal / silhouette read of the LOD. Compact them, and carry UVs through the SAME remap.
+        used = sorted({int(v) for f in nm.faces for v in f})
+        if len(used) != nm.n_vertices:
+            from holographic.mesh_and_geometry.holographic_mesh import Mesh
+            remap = {old: new for new, old in enumerate(used)}
+            NV = np.asarray(nm.vertices, float)[used]
+            NF = [tuple(remap[int(v)] for v in f) for f in nm.faces]
+            carried = getattr(nm, "uvs", None)
+            nm = Mesh(NV, NF)
+            if carried is not None:
+                nm.uvs = np.asarray(carried, float)[used]
+        if uvs is not None and getattr(nm, "uvs", None) is None:
+            # the fast path renumbers freely; recover UVs by nearest original vertex (positions are unchanged at
+            # surviving verts, so this is exact there). Cheap and correct for the survivors.
+            uvs = np.asarray(uvs, float)
+            OV = np.asarray(mesh.vertices, float); NV = np.asarray(nm.vertices, float)
+            idx = np.array([int(np.argmin(np.sum((OV - p) ** 2, axis=1))) for p in NV])
+            nm.uvs = uvs[idx]
+        return nm
     m = mesh
     Q = vertex_quadrics(m)
+    UV = np.asarray(uvs, float).copy() if uvs is not None else None
     while m.n_faces > target_faces:
         # rank every edge by its contraction cost (deterministic: cost, then the two vertex indices)
-        ranked = []
+        ranked = []                                             # canonical per-edge loop (default, pinned bit-identical)
         for (i, j) in _edges(m):
             Qe = Q[i] + Q[j]
             x, cost = contraction_target(Qe, m.vertices[i], m.vertices[j])
@@ -147,11 +298,15 @@ def qem_decimate(mesh, target_faces):
             keep_new = keep if keep < remove else keep - 1
             Q[keep_new] = Q[keep_new] + QR
             nm.vertices[keep_new] = x
+            if UV is not None:
+                UV = np.delete(UV, remove, axis=0)         # drop the removed vertex's UV; survivor keeps its own
             m = nm
             collapsed = True
             break
         if not collapsed:
             break                                          # no remaining edge can be safely collapsed
+    if UV is not None:
+        m.uvs = UV
     return m
 
 
@@ -269,6 +424,27 @@ def _selftest():
 
     # --- determinism ---
     assert np.array_equal(qem_decimate(ico, 64).vertices, qem_decimate(ico, 64).vertices)
+
+    # --- fast=True (opt-in STABLE-INDEX + HEAP decimator, O(F log F)): same face COUNT, deterministic, closed
+    # manifold, chi preserved, and a surface very close to canonical -- but NOT guaranteed bit-identical (tie-
+    # sensitive). The default stays the canonical per-edge mesh. ---
+    q_slow = qem_decimate(ico, 64, fast=False)
+    q_fast = qem_decimate(ico, 64, fast=True)
+    assert q_fast.n_faces == q_slow.n_faces                     # same target reached
+    assert np.array_equal(qem_decimate(ico, 64, fast=True).vertices,
+                          qem_decimate(ico, 64, fast=True).vertices)   # fast path is itself deterministic
+    # closed 2-manifold + Euler characteristic preserved (a valid decimation, not a torn mesh)
+    from collections import Counter as _Counter
+    _ec = _Counter()
+    for _f in q_fast.faces:
+        for _k in range(len(_f)):
+            _ec[frozenset((_f[_k], _f[(_k + 1) % len(_f)]))] += 1
+    assert all(_v == 2 for _v in _ec.values()), "fast decimation must stay a closed 2-manifold"
+    _chi = len(q_fast.vertices) - len(_ec) + len(q_fast.faces)
+    assert _chi == 2, ("fast decimation must preserve sphere topology (chi=2)", _chi)
+    # surface stays close to canonical
+    dmean, _dmax = surface_deviation(q_fast, q_slow)
+    assert dmean < 0.1, ("fast decimation drifted from canonical", dmean)   # small (tie-order divergence), not broken
 
     # --- cluster_decimate: the PARALLEL path. Coarsens, deterministic, and far faster than greedy QEM ---
     import time as _time

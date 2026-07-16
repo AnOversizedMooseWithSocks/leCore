@@ -377,6 +377,9 @@ def test_perception_explains_plan_break():
     assert replay_plan(w, canon, reset=False)[0] == "escaped"
 
 
+@pytest.mark.slow  # bootstrap-rescue over a starved maze budget; measured ~43-61s, exceeds the 15s per-test budget --
+                    # this file already marks its other two irreducibly-slow tests (lines above); this one was
+                    # missed and was silently hitting the watchdog on every default run
 def test_bootstrap_rescue_cracks_the_starved_maze():
     # THE END-TO-END RESULT, the robust discriminator: on the hard 20x20 seed-11 maze the plain protocol probes
     # 0% (under the decaying-epsilon schedule the loop-attractor policy locks in before luck finds the exit),

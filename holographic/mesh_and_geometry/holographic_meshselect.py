@@ -439,6 +439,27 @@ def select_in_box(mesh, lo, hi, mode="vertex", project=None):
     return vsel.to_mode(mode) if mode != "vertex" else vsel
 
 
+def proportional_edit(mesh, selection, translate, radius, falloff="smooth"):
+    """PROPORTIONAL EDIT (Blender's O + G): move the selected vertices by `translate` and drag their neighbours along
+    with a geodesic falloff -- the organic-shaping verb that lets one grab reshape a whole region smoothly, instead of
+    moving every ring by hand (which is exactly what the mantis box-modelling sessions did the long way).
+
+    One call = soft_selection_weights (the falloff field) + a weighted vertex move: each vertex v shifts by
+    w(v) * translate, where w is 1 on the selection and eases to 0 at `radius` along the surface. `falloff` shapes the
+    curve ('linear' / 'smooth' / 'sharp'). Returns a NEW Mesh (topology unchanged -- only positions move). Deterministic.
+
+    WHY IT DELEGATES: the weight field is soft_selection_weights (the geodesic engine); this is that field times the
+    move, nothing re-implemented. KEPT NEGATIVE: a straight translate of every weighted vertex (no rotate/scale falloff
+    yet), and the radius is geodesic so a fold that brings two surface sheets close still only drags along the surface
+    (correct, but can surprise if you expected a Euclidean bubble)."""
+    from holographic.mesh_and_geometry.holographic_mesh import Mesh
+    V = np.asarray(mesh.vertices, float)
+    md = {"vertices": V, "faces": [list(int(i) for i in f) for f in mesh.faces]}
+    w = soft_selection_weights(md, selection, radius, falloff=falloff)     # (nV,) in [0,1]
+    out = V + w[:, None] * np.asarray(translate, float)[None, :]
+    return Mesh(out, [tuple(int(i) for i in f) for f in mesh.faces])
+
+
 def _selftest():
     """Contracts:
     1. set algebra: add/remove/toggle/invert/union/intersect/minus behave as sets, with out-of-range rejected.
@@ -542,6 +563,21 @@ def _selftest():
     box = select_in_box(g, lo=[-0.1, -0.1, -0.1], hi=[1.1, 1.1, 0.1], mode="vertex")
     picked = np.asarray(g["vertices"])[box.to_list()]
     assert len(box) > 0 and np.all(picked[:, 0] <= 1.1) and np.all(picked[:, 1] <= 1.1)
+
+    # (8) proportional edit: pull the center vertex of a grid up; it moves the full delta, a far vertex is unmoved,
+    # and a mid vertex moves partway -- the geodesic-falloff soft grab (Blender's O + G) as one call.
+    from holographic.mesh_and_geometry.holographic_mesh import grid as _pgrid
+    from holographic.mesh_and_geometry.holographic_meshselect import proportional_edit as _pe
+    _pg = _pgrid(10, 10, width=10.0, height=10.0)
+    _pv = np.asarray(_pg.vertices, float)
+    _ci = int(np.argmin(np.linalg.norm(_pv[:, :2] - _pv[:, :2].mean(0), axis=1)))
+    _po = _pe(_pg, [_ci], translate=(0, 0, 2.0), radius=3.0, falloff="smooth")
+    _dz = np.asarray(_po.vertices, float)[:, 2] - _pv[:, 2]
+    assert abs(_dz[_ci] - 2.0) < 1e-9                                          # the grabbed vertex moves fully
+    _far = int(np.argmax(np.linalg.norm(_pv[:, :2] - _pv[_ci, :2], axis=1)))
+    assert abs(_dz[_far]) < 1e-9                                               # a far vertex is untouched
+    assert 0.0 < _dz[(_dz > 1e-6) & (_dz < 2.0 - 1e-6)].max() < 2.0            # neighbours drag partway
+    assert [tuple(f) for f in _po.faces] == [tuple(f) for f in _pg.faces]      # topology unchanged
 
     print("holographic_meshselect selftest OK (vert/edge/face selection with add/remove/toggle/invert/union/"
           "intersect/minus; out-of-range rejected; mode conversion face->verts(%d)->faces recovers the original; "

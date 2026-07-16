@@ -1,6 +1,7 @@
 """Market data on the holographic substrate -- the wins AND the kept negatives,
 all measured on the checked-in real DEX candles (data/dai_weth_ohlcv.json)."""
 import numpy as np
+import pytest
 
 from holographic.misc.holographic_market import CandleCoder, load_ohlcv
 
@@ -80,6 +81,9 @@ def test_novelty_catches_the_real_anomalies():
     assert big_swing in flags                # the +21bp swing
 
 
+@pytest.mark.slow  # sequentiality_z's n_shuffle=15 permutation null over real tick data; measured ~18-32s, exceeds the
+                    # 15s per-test budget (was silently hitting the watchdog and being skipped, contributing zero
+                    # signal, on every default run -- found via a durations sweep, not previously marked)
 def test_sequentiality_responds_to_regime():
     # ONE INSTRUMENT, TWO REGIMES, OPPOSITE HONEST VERDICTS. DAI one-minute
     # return signs are indistinguishable from their own shuffle (the efficient-
@@ -163,6 +167,8 @@ def test_next_move_momentum_is_real_and_persistence_owns_it():
     assert acc_p > acc_m                     # ...and the simplest rule owns it
 
 
+@pytest.mark.slow  # O(rows^2) similarity scan over the full tick history; measured ~20s, exceeds the 15s per-test
+                    # budget (was silently skipped by the watchdog on every default run, not previously marked)
 def test_next_tick_flat_majority_beats_motif():
     # THE 3-CLASS KEPT NEGATIVE: ticks are 88% flat, so always-predict-flat wins
     # raw next-tick prediction (90.2%) over the motif (89.2%). Pinned so nobody
@@ -331,6 +337,8 @@ def test_predictability_decays_with_horizon():
     assert held_out_z(8) < 2.0               # long horizon: the win is gone
 
 
+@pytest.mark.slow  # 10x the candles (1000 DAI/WETH minutes) through sequentiality_z twice; measured ~27s, exceeds
+                    # the 15s per-test budget (was silently skipped by the watchdog on every default run)
 def test_big_dai_structure_holds_at_scale():
     # 10x THE CANDLES (1000 DAI/WETH minutes), the structural findings sharpen:
     # round-trip finer than the signal, levels strongly ordered, return signs

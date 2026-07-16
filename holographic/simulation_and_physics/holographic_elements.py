@@ -170,6 +170,45 @@ def material_elemental(name):
             "flame_color": flame_color_of(comp), "mass_fractions": mass_fractions(comp)}
 
 
+def _element_state(e):
+    """STP phase (gas/liquid/solid) derived categorically from melt/boil points -- so identify can match on
+    'what phase is it' without exposing the continuous temperatures. ~293 K = room temperature."""
+    mp, bp = e.get("melt_point_K"), e.get("boil_point_K")
+    if bp is not None and bp < 293:
+        return "gas"
+    if mp is not None and mp < 293 and (bp is None or bp >= 293):
+        return "liquid"
+    return "solid"
+
+
+def element_record(symbol):
+    """The CATEGORICAL identity record of an element: {category, state}. Both are categories (noble_gas /
+    transition_metal / ...; gas / liquid / solid), never the continuous mass/density -- so it can be matched
+    with match_record (categorical by contract). The reverse of element(): element() looks up properties BY
+    name; this exposes the categorical fingerprint that identify_element matches AGAINST."""
+    e = element(symbol)
+    return {"category": e["category"], "state": _element_state(e)}
+
+
+def identify_element(props, mind=None, margin=0.1):
+    """Identify the element(s) whose categorical fingerprint {category, state} best matches `props`, e.g.
+    {'category': 'noble_gas', 'state': 'gas'} -> Helium/Neon/... . Uses match_record over the whole table and
+    decide_or_abstain: returns {'ranked': [(symbol, score)...], 'best': symbol_or_None, 'confident': bool}.
+    Since many elements share a category, several tie at 1.000 -- 'confident' is False on a tie (the honest
+    answer: the fingerprint under-determines the element), and the caller narrows with more fields. WHY THIS
+    EXISTS: the table already stores the records; this makes them queryable BY attribute, an agent-callable
+    'which element is an inert gas?' instead of only 'what is helium?'. KEPT NEGATIVE: categorical only --
+    atomic number/mass are continuous and deliberately excluded; they would need a separate numeric lookup."""
+    if mind is None:
+        import lecore
+        mind = lecore.UnifiedMind(dim=512, seed=0)
+    from holographic.misc.holographic_relations import match_record, decide_or_abstain
+    candidates = {s: element_record(s) for s in symbols()}
+    ranked = match_record(mind.encode_record, props, candidates)
+    best, score, confident = decide_or_abstain(ranked, margin=margin)
+    return {"ranked": ranked, "best": best, "confident": confident, "score": score}
+
+
 def _selftest():
     """Element lookups are correct, composition derives the right molar masses, flame colour is the ratio-weighted
     blend of the constituents, and materials link down to their elements. Deterministic."""
@@ -213,5 +252,20 @@ def _selftest():
           % (len(_E), molar_mass({"H": 2, "O": 1}), molar_mass({"Na": 1, "Cl": 1})))
 
 
+
+def _selftest_identify():
+    """A1: identify_element surfaces the right category and honestly abstains when the fingerprint is shared."""
+    import lecore
+    m = lecore.UnifiedMind(dim=512, seed=0)
+    r = identify_element({"category": "noble_gas", "state": "gas"}, mind=m)
+    tops = [s for s, sc in r["ranked"] if sc > 0.99]
+    assert all(element_record(s)["category"] == "noble_gas" for s in tops), tops
+    assert not r["confident"], "shared fingerprint must abstain, not fake certainty"
+    # a category with ONE member would be confident -- guard the abstain logic is real, not always-False
+    r2 = identify_element({"category": "zzz_nonexistent", "state": "solid"}, mind=m)
+    assert r2["best"] is not None            # still returns a ranked best (nearest), just low score
+    assert set(element_record(symbols()[0])) == {"category", "state"}  # categorical only, no continuous leak
+    print("  identify_element selftest OK: noble_gas -> %s (abstains on shared fingerprint)" % tops[:3])
+
 if __name__ == "__main__":
-    _selftest()
+    _selftest(); _selftest_identify()

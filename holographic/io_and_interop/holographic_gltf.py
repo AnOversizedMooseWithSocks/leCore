@@ -72,14 +72,17 @@ def _pad4(b, fill=b"\x00"):
     return b + fill * rem
 
 
-def mesh_to_glb(mesh, base_colour=(0.8, 0.8, 0.8, 1.0), generator="holostuff", material=None):
+def mesh_to_glb(mesh, base_colour=(0.8, 0.8, 0.8, 1.0), generator="holostuff", material=None, texture=None):
     """Serialise a `Mesh` to a single-file binary glTF (`.glb`) and return the bytes.
 
     Lays out one BIN buffer in a fixed attribute order, gives each attribute its own (4-byte aligned)
     bufferView and accessor, writes the glTF-required POSITION min/max, and wraps it all in a one-mesh,
     one-node, one-scene graph with a single default PBR material. The result is what three.js's GLTFLoader
     consumes.
-    """
+
+    `texture` (default-off, byte-identical absent): an (H,W,3) float [0,1] image, PNG-encoded INTO the BIN chunk
+    and bound as the material's baseColorTexture -- what a retopo'd mesh with transferred UVs needs to keep looking
+    like the original asset. Requires the mesh to carry UVs (TEXCOORD_0)."""
     buf = mesh.to_buffers()
     pos = np.ascontiguousarray(buf["position"], dtype="<f4")        # little-endian float32 VEC3
     nrm = np.ascontiguousarray(buf["normal"], dtype="<f4")
@@ -134,6 +137,21 @@ def mesh_to_glb(mesh, base_colour=(0.8, 0.8, 0.8, 1.0), generator="holostuff", m
     accessors.append({"bufferView": idx_view, "componentType": idx_comp,
                       "count": int(indices.size), "type": "SCALAR"})
 
+    # --- optional embedded TEXTURE: PNG bytes live in the BIN chunk via their own (untargeted) bufferView ---
+    img_view = None
+    if texture is not None:
+        from holographic.rendering.holographic_render import png_bytes
+        img_view = add_region(png_bytes(np.asarray(texture, float)), None)
+
+    base_material = (material.to_gltf_dict() if material is not None
+                     else {"pbrMetallicRoughness": {"baseColorFactor": list(base_colour),
+                                                    "metallicFactor": 0.0,
+                                                    "roughnessFactor": 0.8}})
+    if img_view is not None:
+        pbr = base_material.setdefault("pbrMetallicRoughness", {})
+        pbr["baseColorTexture"] = {"index": 0}
+        pbr.pop("baseColorFactor", None)                      # the texture replaces the flat colour
+
     gltf = {
         "asset": {"version": "2.0", "generator": generator},
         "scene": 0,
@@ -143,14 +161,16 @@ def mesh_to_glb(mesh, base_colour=(0.8, 0.8, 0.8, 1.0), generator="holostuff", m
                                     "indices": idx_accessor,
                                     "material": 0,
                                     "mode": _MODE_TRIANGLES}]}],
-        "materials": [material.to_gltf_dict() if material is not None
-                      else {"pbrMetallicRoughness": {"baseColorFactor": list(base_colour),
-                                                     "metallicFactor": 0.0,
-                                                     "roughnessFactor": 0.8}}],
+        "materials": [base_material],
         "accessors": accessors,
-        "bufferViews": [{"buffer": 0, **v} for v in views],
+        "bufferViews": [{"buffer": 0, **{k: v for k, v in vw.items() if not (k == "target" and v is None)}}
+                        for vw in views],
         "buffers": [{"byteLength": len(blob)}],
     }
+    if img_view is not None:
+        gltf["images"] = [{"bufferView": img_view, "mimeType": "image/png"}]
+        gltf["samplers"] = [{"magFilter": 9729, "minFilter": 9729, "wrapS": 10497, "wrapT": 10497}]
+        gltf["textures"] = [{"sampler": 0, "source": 0}]
 
     # --- assemble the .glb container: header + JSON chunk + BIN chunk ---
     # sort_keys gives a stable byte-identical serialisation run to run (determinism).
@@ -167,16 +187,30 @@ def mesh_to_glb(mesh, base_colour=(0.8, 0.8, 0.8, 1.0), generator="holostuff", m
 
 def _read_accessor(accessor, views, blob):
     """Read one accessor's data out of the BIN blob as a NumPy array (float32 for VEC*, the right uint for
-    SCALAR indices). Honours the bufferView byteOffset/byteLength; assumes a tightly-packed accessor (no
-    interleaving / no accessor byteOffset), which is exactly how `mesh_to_glb` writes them."""
+    SCALAR indices). Honours the bufferView byteOffset/byteLength, the ACCESSOR byteOffset, and an interleaved
+    bufferView byteStride -- real-world exporters (Sketchfab/Blender) pack several accessors into one bufferView
+    at offsets, which the first version silently read as all-zeros (the bug that made a real .glb import 0 verts:
+    it honoured only mesh_to_glb's own tightly-packed layout). Unsigned/signed byte and short components are
+    normalised per the glTF spec when accessor.normalized is set."""
     view = views[accessor["bufferView"]]
-    start = view["byteOffset"]
-    raw = blob[start:start + view["byteLength"]]
+    vstart = view.get("byteOffset", 0)
+    astart = accessor.get("byteOffset", 0)                    # the offset the first version ignored
     comp = accessor["componentType"]
     count = accessor["count"]
-    ncomp = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4}[accessor["type"]]
-    dtype = {_COMP_FLOAT: "<f4", _COMP_USHORT: "<u2", _COMP_UINT: "<u4"}[comp]
-    arr = np.frombuffer(raw, dtype=dtype, count=count * ncomp)
+    ncomp = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}[accessor["type"]]
+    dtype = {_COMP_FLOAT: "<f4", _COMP_USHORT: "<u2", _COMP_UINT: "<u4",
+             5120: "<i1", 5121: "<u1", 5122: "<i2"}[comp]
+    isize = np.dtype(dtype).itemsize
+    stride = view.get("byteStride", 0)
+    if stride and stride != ncomp * isize:                    # interleaved: gather each element by stride
+        base = vstart + astart
+        rows = [np.frombuffer(blob, dtype=dtype, count=ncomp, offset=base + i * stride) for i in range(count)]
+        arr = np.stack(rows).reshape(count * ncomp)
+    else:                                                     # tightly packed (incl. our own mesh_to_glb layout)
+        arr = np.frombuffer(blob, dtype=dtype, count=count * ncomp, offset=vstart + astart)
+    if accessor.get("normalized") and comp in (5120, 5121, 5122, _COMP_USHORT):
+        scale = {5120: 127.0, 5121: 255.0, 5122: 32767.0, _COMP_USHORT: 65535.0}[comp]
+        arr = arr.astype(np.float64) / scale
     return arr.reshape(count, ncomp) if ncomp > 1 else arr
 
 

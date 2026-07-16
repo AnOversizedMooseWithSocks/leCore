@@ -324,14 +324,22 @@ class TopicSorter:
         return bundle([self.enc.wordvec(w) for w in toks]) if toks else np.zeros(self.dim)
 
     def fit(self, labeled):
-        """labeled: dict topic -> list of sentences."""
-        for topic, sentences in labeled.items():
-            self.prototypes[topic] = bundle([self.sentence_vector(s) for s in sentences])
+        """labeled: dict topic -> list of sentences. DELEGATES prototype-building to the general
+        holographic_relations.build_prototypes (mean bundle of example encodings) -- this classifier is one
+        caller of the general 'no schema, classify a blend' pattern, so it reuses the shared primitive rather
+        than re-bundling by hand. Behavior identical."""
+        from holographic.misc.holographic_relations import build_prototypes
+        # build_prototypes unit-normalizes each prototype; classify below uses match_prototype which normalizes
+        # the query the same way, so the argmax is unchanged from the old raw-bundle + cosine.
+        self.prototypes = build_prototypes(self.sentence_vector, labeled)
         return self
 
     def classify(self, sentence):
-        v = self.sentence_vector(sentence)
-        return max(self.prototypes, key=lambda t: cosine(v, self.prototypes[t]))
+        """DELEGATES to holographic_relations.match_prototype (nearest class prototype by cosine) -- the same
+        argmax as before, via the shared unstructured matcher. Returns the winning topic label."""
+        from holographic.misc.holographic_relations import match_prototype
+        ranked = match_prototype(self.sentence_vector, sentence, self.prototypes)
+        return ranked[0][0]
 
     def discover(self, sentences, k, seed=0):
         """Cluster sentences into k groups with NO labels -> cluster id per sentence."""

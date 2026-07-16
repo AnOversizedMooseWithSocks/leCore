@@ -753,6 +753,21 @@ class UnifiedMind:
         from holographic.sampling_and_signal.holographic_mutualinfo import mutual_information_vs_null
         return mutual_information_vs_null(x, y, bins=bins, n_shuffle=n_shuffle, seed=seed)
 
+    def permutation_null(self, observed, score_fn, resample_fn, n_null=1000, seed=0, alpha=0.05, side="greater"):
+        """The shuffled-null test as ONE composable primitive: score your real datum, then re-run the IDENTICAL
+        scoring on `n_null` resamples that destroy the structure (resample_fn(rng)), and report whether the real
+        score stands out. This is the discipline radio-SETI (Tarter) and particle physics (Cranmer) live by --
+        "score it, then prove it isn't an artifact of your own pipeline" -- lifted out of the engine's five
+        procedure-matched private nulls so ANY capability, including one built on the engine, can call it. Returns
+        {p, null_mean, null_std, null_ci, observed, collapsed, n_null}: p is the false-alarm probability (with the
+        +1 plug so it is never exactly 0), collapsed is True when p<=alpha (the real score stood out). `side` is
+        'greater' (a match/recall similarity), 'less', or 'two-sided'. Deterministic given deterministic
+        score_fn/resample_fn + seed. KEPT NEGATIVE: a WRONG resample_fn (one that does not destroy the structure
+        the score keys on) gives a mis-calibrated null -- the procedure-match is the caller's job. See
+        holographic_honesty.permutation_null."""
+        from holographic.agents_and_reasoning.holographic_honesty import permutation_null
+        return permutation_null(observed, score_fn, resample_fn, n_null=n_null, seed=seed, alpha=alpha, side=side)
+
     def measure(self, run_once, seeds=range(0, 10), n_boot=2000, boot_seed=0):
         """The VARIANCE HARNESS (holographic_measure) -- every headline number gets a mean, a spread, and a
         confidence interval, not a lucky-seed point estimate. Runs `run_once(seed)` (a callable returning a scalar
@@ -3677,6 +3692,15 @@ class UnifiedMind:
         from holographic.simulation_and_physics.holographic_collide import advance_ccd as _acc
         return _acc(X, V, dt, sdf_eval, radius=radius, restitution=restitution)
 
+    def classify_contact(self, overlap, velocity, restitution, margin=0.1, **bins):
+        """Name a contact's TYPE (bounce / slide / rest_contact / penetration / jam) from its {overlap,
+        velocity, restitution}: bins the continuous scalars to categories, then match_record against the
+        contact-type records + decide_or_abstain. A LABELING/DISPATCH layer over advance_ccd's numerics (not a
+        replacement) -- so a solver can pick a per-type response and log a self-explaining reason. Returns
+        {'type', 'confident', 'record', 'ranked'}. See holographic_collide.classify_contact."""
+        from holographic.simulation_and_physics.holographic_collide import classify_contact
+        return classify_contact(overlap, velocity, restitution, mind=self, margin=margin, **bins)
+
     # -- PURITY & EFFECT ANALYSIS from the stdlib (backlog K6): the gate a shape-keyed cache needs -----------
     def function_purity(self, source, name):
         """Is the module-level function `name` in `source` provably PURE? CONSERVATIVE: unknown means False. A
@@ -4107,6 +4131,16 @@ class UnifiedMind:
         from holographic.mesh_and_geometry.holographic_meshselect import soft_selection_weights
         return soft_selection_weights(mesh, selection, radius, falloff=falloff)
 
+    def proportional_edit(self, mesh, selection, translate, radius, falloff="smooth"):
+        """PROPORTIONAL EDIT (Blender O + G): move the selected vertices by `translate` and drag their neighbours
+        with a geodesic falloff -- one grab reshapes a whole region smoothly instead of moving every ring by hand.
+        `selection` is a vertex-index list (or MeshSelection); `radius` sets the falloff reach along the surface;
+        `falloff` is linear/smooth/sharp. Returns a new Mesh (topology unchanged). See
+        holographic_meshselect.proportional_edit."""
+        from holographic.mesh_and_geometry.holographic_meshselect import proportional_edit as _pe
+        return _pe(self._as_mesh(mesh), selection, translate, radius, falloff=falloff)
+
+
     def select_symmetric(self, mesh, selection, axis=0, tol=1e-4):
         """SYMMETRY SELECTION (holographic_meshselect) -- add a selection's mirror-image elements across a world
         axis plane (axis 0/1/2 = x/y/z=0), so a symmetric edit can be applied to both sides. The selection-level
@@ -4308,6 +4342,79 @@ class UnifiedMind:
         and ROSE to 2866 by 400). Returns (phi, ctx). See holographic_crossfield.cross_field."""
         from holographic.mesh_and_geometry.holographic_crossfield import cross_field as _cf
         return _cf(self._as_mesh(mesh))
+
+    def quad_remesh(self, mesh, use_field=True, field=None):
+        """FIELD-GUIDED tri-to-quad RETOPOLOGY: pair adjacent triangles into quads, preferring pairs whose quad edges
+        align with the 4-RoSy cross field and that form a convex, near-square quad (greedy maximal matching). Returns
+        a QUAD-DOMINANT mesh + report {quads, tris, quad_fraction, field_used}. Reuses cross_field, so the input wants
+        a CLOSED oriented manifold triangle mesh -- run mesh_repair(..., triangulate=True) first; if the field cannot
+        solve it falls back to a squareness metric (field_used=False). HONEST: this walks the field to place quads on
+        the EXISTING vertices -- it does NOT move vertices or regularise valence, so it is NOT a full Instant-Meshes
+        remesh (deferred). See holographic_crossfield.quad_remesh."""
+        from holographic.mesh_and_geometry.holographic_crossfield import quad_remesh as _qr
+        return _qr(self._as_mesh(mesh), use_field=use_field, field=field)
+
+    def guided_cross_field(self, mesh, guide_dirs, guide_weight=5.0):
+        """A GUIDED 4-RoSy field: the smoothest field that ALSO aligns to a prescribed per-face direction where one
+        is given -- field DESIGN, not just smoothing. guide_dirs is (n_faces, 3): a non-zero row guides that face (its
+        length is the confidence), a zero row leaves it free. Solves the soft-constrained (L + w) u = w c (Dirichlet
+        smoothness + an alignment penalty of guide_weight), a linear solve not an eigenproblem. With no guides it ==
+        cross_field. Returns (phi, ctx). This is what lets retopo follow DEFORMATION (strain_directions) or curvature
+        instead of only the smoothest field. Needs a CLOSED oriented manifold mesh. See guided_cross_field."""
+        from holographic.mesh_and_geometry.holographic_crossfield import guided_cross_field as _gcf
+        return _gcf(self._as_mesh(mesh), guide_dirs, guide_weight=guide_weight)
+
+    def strain_directions(self, mesh, deformed_vertices):
+        """Per-face PRINCIPAL STRETCH direction of a deformation (rest mesh -> deformed_vertices) -- the DEFORMATION
+        guide for guided_cross_field, so retopo places edge loops that FOLLOW how the surface bends/stretches
+        (deformation-aware topology), which a distortion-only auto-remesher cannot. Per triangle it forms the
+        deformation gradient, the right Cauchy-Green C, and takes C max-stretch eigenvector back to 3-D, SCALED by the
+        strain anisotropy (isotropic faces -> ~0 confidence, left free). Returns (n_faces, 3) ready as guide_dirs;
+        guiding the field to it puts quad LOOPS perpendicular to the stretch -- encircling the bend. See
+        strain_directions."""
+        from holographic.mesh_and_geometry.holographic_crossfield import strain_directions as _sd
+        return _sd(self._as_mesh(mesh), deformed_vertices)
+
+    def position_field(self, mesh, orient, edge_length, iterations=10, seed=0):
+        """IFAM POSITION FIELD (4-PoSy): optimise a per-vertex LATTICE position aligned to the orientation field, by
+        the local extrinsic smoothing of Instant Field-Aligned Meshes (Jakob et al., SIGGRAPH Asia 2015). For each
+        edge it forms q_ij (the point on both tangent planes), translates the neighbour position by INTEGER rho-steps
+        to line up, and moves the vertex to the neighbour-weighted average -- so neighbours differ by integer lattice
+        steps. THIS is the stage that regularises vertex spacing/valence (field-aligned grid). Works on the vertex
+        graph (no closed mesh needed). Returns P (n_vertices, 3). HONEST: the position FIELD only -- extraction to the
+        final quad mesh (IFAM sec 4.4) is the next step, not built. See position_field / position_field_regularity."""
+        from holographic.mesh_and_geometry.holographic_crossfield import position_field as _pf
+        return _pf(self._as_mesh(mesh), orient, edge_length, iterations=iterations, seed=seed)
+
+    def position_field_regularity(self, mesh, P, orient, edge_length):
+        """How LATTICE-REGULAR a position field is: mean per-edge residual of (p_i - p_j) after removing the nearest
+        integer rho-steps along the field axes, as a fraction of rho. 0 = a perfect field-aligned grid; ~0.5 = no
+        lattice structure. The honest measure that position_field converged. See position_field_regularity."""
+        from holographic.mesh_and_geometry.holographic_crossfield import position_field_regularity as _pfr
+        return _pfr(self._as_mesh(mesh), P, orient, edge_length)
+
+    def face_field_to_vertex(self, mesh, phi):
+        """Average a per-FACE 4-RoSy field (cross_field angles) to a per-VERTEX tangent-plane direction -- the input
+        position_field wants (cross_field is per-face; the position field lives on the vertex graph). See
+        face_field_to_vertex."""
+        from holographic.mesh_and_geometry.holographic_crossfield import face_field_to_vertex as _ffv
+        return _ffv(self._as_mesh(mesh), phi)
+
+    def trace_streamlines(self, mesh, field, seeds=None, step=None, max_steps=200, four_rosy=True, seed=0, n_seeds=24):
+        """Trace STREAMLINES (integral curves) of a per-face direction field across a triangle mesh -- walk along the
+        field crossing edge to edge, until a boundary / max_steps / a closed loop. Returns a list of polylines. The
+        general field->curves primitive, source-agnostic: a 4-RoSy cross_field (retopo guide-curves, hatching),
+        strain_directions (deformation flow lines), an SDF gradient, or a SIMULATION velocity field (streamlines /
+        pathlines). field is per-face angles (len n_faces) or per-face 3-D vectors (n_faces,3); four_rosy=True treats
+        it as a 4-RoSy cross (branch nearest travel chosen so the curve does not reverse), False for a true vector
+        field. Deterministic. See holographic_crossfield.trace_streamlines."""
+        from holographic.mesh_and_geometry.holographic_crossfield import trace_streamlines as _ts
+        return _ts(self._as_mesh(mesh), field, seeds=seeds, step=step, max_steps=max_steps, four_rosy=four_rosy,
+                   seed=seed, n_seeds=n_seeds)
+
+
+
+
 
     def field_singularities(self, mesh, phi=None):
         """The STATELESS one-shot twin of `cross_field` + `singularity_index`: mesh in, plain data out
@@ -4855,12 +4962,33 @@ class UnifiedMind:
         from holographic.mesh_and_geometry.holographic_isosurface import is_oriented
         return bool(is_oriented(np.asarray(quads, int)))
 
-    def mesh_report(self, vertices, quads, sdf=None):
-        """{n_vertices, n_quads, watertight, euler, surface_error}. The honest baseline for `surface_error` is the
-        CELL SIZE -- a dual extractor cannot place a vertex better than the cell it lives in.
-        See holographic_isosurface.mesh_report."""
-        from holographic.mesh_and_geometry.holographic_isosurface import mesh_report as _mr
-        return _mr(np.asarray(vertices, float), np.asarray(quads, int), sdf=sdf)
+    def mesh_report(self, mesh_or_vertices, quads=None, sdf=None):
+        """MESH REPORT, dispatching on the input (this method was DEFINED TWICE after a branch merge -- the
+        isosurface form was silently shadowed by the later meshtools form, caught by the isosurface wiring
+        test; merged here so BOTH capabilities stay callable, neither reimplemented):
+        - mesh_report(mesh): the general topology + shape scoreboard -- verts, faces, quad/tri/ngon fraction,
+          boundary/nonmanifold edges, manifold/closed flags, euler, valence histogram, bbox, centroid.
+          See holographic_meshtools.mesh_report.
+        - mesh_report(vertices, quads, sdf=...): EXTRACTION VALIDATION for an isosurfacer's raw output --
+          {n_vertices, n_quads, watertight, euler, surface_error}; the honest surface_error baseline is the
+          CELL SIZE (a dual extractor cannot place a vertex better than the cell it lives in).
+          See holographic_isosurface.mesh_report."""
+        if quads is not None:
+            from holographic.mesh_and_geometry.holographic_isosurface import mesh_report as _mr
+            return _mr(np.asarray(mesh_or_vertices, float), np.asarray(quads, int), sdf=sdf)
+        from holographic.mesh_and_geometry.holographic_meshtools import mesh_report as _mr
+        return _mr(self._as_mesh(mesh_or_vertices))
+
+    def turnaround(self, mesh, ref_mesh=None, views=("top", "front", "side", "3q"), width=360, height=360):
+        """TURNAROUND: render a mesh from the standard modelling views (top/front/side/3q) in one call and, if a
+        ref_mesh is given, score how well the silhouettes MATCH per view (silhouette IoU in [0,1], 1.0 = identical
+        outline). Returns {sheet, views, iou, mean_iou}. The critic loop that caught the mantis slurped legs, now a
+        NUMBER an agent can optimise (raise mean_iou by fixing the lowest view). Pair with mesh_report for topology.
+        See holographic_render.turnaround."""
+        from holographic.rendering.holographic_render import turnaround as _ta
+        return _ta(self._as_mesh(mesh), ref_mesh=(self._as_mesh(ref_mesh) if ref_mesh is not None else None),
+                   views=views, width=width, height=height)
+
 
     # -- B1: fill the gaps in a field (harmonic / majority, dispatched on type) -----------------------------
     def inpaint(self, field, known, kind="auto", periodic=False):
@@ -5564,7 +5692,7 @@ class UnifiedMind:
         return _sr(hertz, zeta, dt)
 
     def project_onto_constraints(self, x, projections, iters=30, tol=None, omega=1.0,
-                                 stiffness=None, dt=None):
+                                 stiffness=None, dt=None, return_residual=False):
         """Satisfy a set of constraints on a vector by ITERATED PROJECTION -- sweep a list of projections
         (each a callable x->x' snapping x onto one constraint set / manifold) until they jointly hold. This is
         the one engine under three faculties the mind grew separately (Macklin's observation -- the object he
@@ -5579,11 +5707,15 @@ class UnifiedMind:
         physics at ANY substep count, where the same omega does not. `stiffness=(inf, zeta)` is the hard
         projection exactly, so every existing caller is unchanged. This is what gives PBD, FABRIK/IK, the
         resonator and the PnP denoise loop Catto-style softness from ONE dial. Returns
-        (x, n_sweeps, converged). Deterministic given deterministic projections. Useful directly for enforcing
-        arbitrary constraints on a hypervector (be a valid code AND agree with a partial observation, say)."""
+        (x, n_sweeps, converged). `return_residual=True` appends the final constraint residual
+        (x, n_sweeps, converged, residual) = max_j ||proj_j(x)-x|| at the answer -- Macklin's XPBD discipline: how
+        far the solve still sits from satisfying the constraints (the graded signal a converged boolean loses, and
+        the analogue of solve_ik_limited's reach_error). Default off, so every existing 3-tuple caller is unchanged.
+        Deterministic given deterministic projections. Useful directly for enforcing arbitrary constraints on a
+        hypervector (be a valid code AND agree with a partial observation, say)."""
         from holographic.rendering.holographic_denoise import project_onto_constraints as _poc
         return _poc(np.asarray(x, float), list(projections), iters=iters, tol=tol, omega=omega,
-                    stiffness=stiffness, dt=dt)
+                    stiffness=stiffness, dt=dt, return_residual=return_residual)
 
     def restore(self, y, mask=None, samples=None, forward=None, adjoint=None,
                 mu=0.5, steps=30, sigma=None, rank=8):
@@ -5747,16 +5879,18 @@ class UnifiedMind:
         from holographic.misc.holographic_eulerops import collapse_edge
         return collapse_edge(mesh, keep, remove)
 
-    def mesh_qem_decimate(self, mesh, target_faces):
+    def mesh_qem_decimate(self, mesh, target_faces, fast=False, uvs=None):
         """QEM (quadric error metric) DECIMATION (holographic_meshqem, Garland-Heckbert): greedily collapse the
         lowest-cost edge -- cost = how far the collapse moves the surface, read from a per-vertex quadric (an
         accumulated BUNDLE of incident-plane constraints) -- via the guarded mesh_collapse_edge, until <=
         target_faces. Preserves features instead of eroding them; beats a naive shortest-edge collapse on surface
         error (~1.8x mean, ~3x max on a sphere). Returns a new Mesh. Kept negatives: closed meshes (open-boundary
         preservation deferred); minimizes plane-distance, not radius; halts above target if no safe collapse
-        remains. Pair with mesh_surface_deviation to measure the result."""
+        remains. Pair with mesh_surface_deviation to measure the result. Pass uvs= (or set mesh.uvs) and the LOD
+        RETAINS the TEXTURE MAP (survivor keeps its UV); or project from a make_uv_shell envelope for a topology-
+        independent re-bake."""
         from holographic.mesh_and_geometry.holographic_meshqem import qem_decimate
-        return qem_decimate(mesh, target_faces)
+        return qem_decimate(self._as_mesh(mesh), target_faces, fast=fast, uvs=uvs)
 
     def mesh_surface_deviation(self, mesh_a, mesh_b):
         """A decimation QUALITY metric (holographic_meshqem): (mean, max) point-to-surface distance from mesh_a's
@@ -5842,6 +5976,23 @@ class UnifiedMind:
         mesh JOIN the field-native world. KEPT HONEST: nearest-normal sign + needs a watertight band (>= ~2 voxels)."""
         from holographic.mesh_and_geometry.holographic_meshbridge import mesh_to_sdf_grid
         return mesh_to_sdf_grid(mesh, bounds, res=res, band=band)
+
+    def voxel_remesh(self, mesh, resolution=64, pad=0.2):
+        """VOXEL REMESH (Blender Voxel Remesh): rebuild a mesh as a UNIFORM, watertight surface by sampling it into
+        a signed-distance grid and re-marching -- the standard cleanup for messy, self-intersecting, non-manifold,
+        or multi-shell input before retopo. Any tangle in becomes one clean closed surface out at `resolution` cells
+        per axis. A compose of mesh_to_sdf_grid + the mesher. See holographic_meshbridge.voxel_remesh."""
+        from holographic.mesh_and_geometry.holographic_meshbridge import voxel_remesh as _vr
+        return _vr(self._as_mesh(mesh), resolution=resolution, pad=pad)
+
+    def metaball_mesh(self, centers, radius=0.5, level=0.5, resolution=48, pad=0.6):
+        """METABALL MESH (soft-blob base mesh): sum-of-Gaussians field at `centers` (n,3), spread `radius`, marched
+        at `level` -- overlapping blobs FUSE smoothly. The organic-blob base-mesh route complementing skin_skeleton
+        (blobs where branch-stitching gets ugly). Returns a watertight Mesh. See holographic_meshbridge.metaball_mesh."""
+        from holographic.mesh_and_geometry.holographic_meshbridge import metaball_mesh as _mb
+        return _mb(centers, radius=radius, level=level, resolution=resolution, pad=pad)
+
+
 
     def mesh_to_field_vector(self, mesh, bounds, dim=2048, bandwidth=18.0, grid=12, seed=0):
         """FS-5: carry a surface as a SINGLE hypervector (edit = bind). Samples the mesh's signed distance on a
@@ -6079,12 +6230,12 @@ class UnifiedMind:
         from holographic.mesh_and_geometry.holographic_meshseam import auto_seam
         return auto_seam(mesh, threshold_deg=threshold_deg, method=method)
 
-    def mesh_extrude(self, mesh, face_index, distance):
+    def mesh_extrude(self, mesh, face_index, distance, quad_walls=False):
         """EXTRUDE a face (holographic_meshverbs, FWD-7): lift face `face_index` along its outward normal by
         `distance` and wall it in -- the iconic modelling verb. Preserves the Euler characteristic and keeps a
         closed mesh a closed manifold; the cap moves exactly `distance` along the normal. Returns a new Mesh."""
         from holographic.mesh_and_geometry.holographic_meshverbs import extrude_face
-        return extrude_face(mesh, face_index, distance)
+        return extrude_face(mesh, face_index, distance, quad_walls=quad_walls)
 
     def curve_bezier(self, control, u):
         """Evaluate a BEZIER curve of any degree at parameter(s) u in [0,1] by de Casteljau (numerically stable).
@@ -6231,12 +6382,12 @@ class UnifiedMind:
         from holographic.mesh_and_geometry.holographic_nurbs import nurbs_circle
         return nurbs_circle(radius=radius, n=n)
 
-    def mesh_inset(self, mesh, face_index, ratio):
+    def mesh_inset(self, mesh, face_index, ratio, quad_walls=False):
         """INSET a face (holographic_meshverbs, FWD-7): shrink face `face_index` toward its centroid by `ratio`,
         ringing it with new faces around a smaller central face (in-plane, so the central face stays coplanar; its
         area is exactly (1-ratio)^2 of the original). Preserves chi + closed + manifold. Returns a new Mesh."""
         from holographic.mesh_and_geometry.holographic_meshverbs import inset_face
-        return inset_face(mesh, face_index, ratio)
+        return inset_face(mesh, face_index, ratio, quad_walls=quad_walls)
 
     def mesh_dissolve_vertex(self, mesh, vertex):
         """DISSOLVE a vertex (holographic_meshverbs, FWD-7; the Euler KEV verb): remove `vertex` and its incident
@@ -6264,6 +6415,134 @@ class UnifiedMind:
         from holographic.mesh_and_geometry.holographic_meshverbs2 import fill_holes
         return fill_holes(mesh, mode=mode, max_sides=max_sides)
 
+    def mesh_weld(self, mesh, tol=1e-5):
+        """WELD vertices closer than `tol` into one (holographic_meshtools.merge_by_distance): snap to a tol grid,
+        average each group, remap faces, drop any face that collapsed to a degenerate. The standard cleanup after a
+        mirror / import / boolean / marching-cubes extraction. Returns a new Mesh. See mesh_repair for the full
+        weld+fill+compact pass."""
+        from holographic.mesh_and_geometry.holographic_meshtools import merge_by_distance
+        return merge_by_distance(mesh, tol=tol)
+
+    def mesh_repair(self, mesh, weld_tol=1e-5, fill_holes=True, max_fill_sides=0, drop_unreferenced=True,
+                    split_nonmanifold=True, triangulate=False):
+        """REPAIR a raw mesh by composing the standard cleanup ops (holographic_meshtools.mesh_repair): WELD
+        near-duplicate vertices (also drops degenerate faces), SPLIT non-manifold vertices into connected umbrellas
+        (makes the mesh MANIFOLD so the cross-field retopo will accept it), optionally FILL open holes, and DROP
+        unreferenced vertices; triangulate=True ear-clips to uniform triangles (cross_field needs a single face arity).
+        Returns (repaired_mesh, report) with before/after vertex+face counts, manifold/closed flags and the split
+        count -- so a marching-cubes / import / boolean / photo-to-mesh result is made RETOPO-READY. Deterministic;
+        never raises. For even topology follow with retopology (cross_field). See mesh_make_manifold for split-only."""
+        from holographic.mesh_and_geometry.holographic_meshtools import mesh_repair
+        return mesh_repair(mesh, weld_tol=weld_tol, fill_holes=fill_holes, max_fill_sides=max_fill_sides,
+                           drop_unreferenced=drop_unreferenced, split_nonmanifold=split_nonmanifold,
+                           triangulate=triangulate)
+
+    def route_repair(self, mesh, margin=0.15, weld_tol=1e-5, max_fill_sides=0):
+        """Route a mesh to the MINIMAL repair its defect needs instead of always running the full pipeline:
+        diagnose the mesh into a categorical defect record {manifold, closed, duplicates}, match it against the
+        repair-strategy records (match_record), and run only the ops the winning strategy names -- welds a
+        duplicate-only mesh without a hole-fill pass, etc. If the defect is ambiguous (decide_or_abstain), it
+        falls back to the full safe mesh_repair, so it never repairs LESS than needed. Returns (mesh, report)
+        with {strategy, confident, defect} added. Cheaper and self-explaining than mesh_repair. See
+        holographic_meshtools.route_repair."""
+        from holographic.mesh_and_geometry.holographic_meshtools import route_repair
+        return route_repair(mesh, mind=self, margin=margin, weld_tol=weld_tol, max_fill_sides=max_fill_sides)
+
+    def mesh_make_manifold(self, mesh):
+        """Make a mesh MANIFOLD by splitting non-manifold vertices into their connected umbrellas
+        (holographic_meshtools.split_nonmanifold_vertices): at each vertex, incident faces are grouped across MANIFOLD
+        edges only, and a vertex whose faces form more than one umbrella (a bowtie, or the endpoint of an edge shared
+        by >2 faces) is duplicated per umbrella. Resolves non-manifold EDGES too, so a half-edge build / cross-field
+        retopo accepts the result. Unlike mesh_rip_vertex (per-face) / mesh_split_vertices (explode-all), this is the
+        minimal cut and a NO-OP on a clean mesh. Returns (mesh, report). See mesh_repair for the full weld+fill pass."""
+        from holographic.mesh_and_geometry.holographic_meshtools import split_nonmanifold_vertices
+        return split_nonmanifold_vertices(mesh)
+
+    def transfer_uv(self, source_mesh, source_uv, target_vertices, cell_scale=1.0):
+        """TRANSFER per-vertex UVs (or ANY per-vertex attribute) from source_mesh onto new target_vertices by
+        closest-point projection + barycentric interpolation -- the step that makes RETOPO TEXTURE-PRESERVING (the
+        remeshed surface lies on the original, so each new vertex takes the interpolated UV of its closest source
+        triangle). Spatial-hash accelerated. Returns (attr (n,k), residual_distance (n,)) -- the residual is the
+        honest error signal (large = the target strayed off the source surface). KEPT NEG: wrong across UV seams
+        (closest triangle can be another island). See holographic_meshtools.transfer_uv."""
+        from holographic.mesh_and_geometry.holographic_meshtools import transfer_uv as _tuv
+        return _tuv(self._as_mesh(source_mesh), source_uv, target_vertices, cell_scale=cell_scale)
+
+    def shrinkwrap(self, mesh, target_mesh, factor=1.0, cell_scale=1.0):
+        """SHRINKWRAP: move each vertex of `mesh` onto its closest point on `target_mesh` (Blender shrinkwrap /
+        retopo-snap). factor 1.0 lands on the surface, 0.5 pulls halfway, 0.0 is a no-op; topology unchanged.
+        Returns (new_mesh, residual) where residual is the distance each vertex closed. THE retopo finisher: a box
+        model / remesh has clean topology but approximate positions -- one pass snaps positions onto the reference
+        (fixed our box-model surface residual 0.0158 -> ~0). See holographic_meshtools.shrinkwrap."""
+        from holographic.mesh_and_geometry.holographic_meshtools import shrinkwrap as _sw
+        return _sw(self._as_mesh(mesh), self._as_mesh(target_mesh), factor=factor, cell_scale=cell_scale)
+
+    def make_uv_shell(self, mesh, uvs, offset=0.02, relative=True):
+        """Build a UV SHELL (texture-carrying ENVELOPE): push every vertex OUTWARD along its normal by `offset`,
+        keeping the faces and per-vertex `uvs`. A slightly-inflated cage that holds the texture INDEPENDENT of the
+        surface topology -- freeze the map here, then project_uv_from_shell onto any modified mesh (LOD/retopo).
+        relative=True scales offset by the bbox diagonal. Returns a Mesh with .uvs. See
+        holographic_meshtools.make_uv_shell."""
+        from holographic.mesh_and_geometry.holographic_meshtools import make_uv_shell as _mus
+        return _mus(self._as_mesh(mesh), uvs, offset=offset, relative=relative)
+
+    def project_uv_from_shell(self, new_mesh, shell, shell_uvs=None, cell_scale=1.0):
+        """PROJECT a UV map from a texture-carrying SHELL onto a new mesh of ANY topology: for each new vertex, find
+        the closest point on the shell and read its interpolated UV. The other half of the shell workflow -- after
+        make_uv_shell freezes the map, this recovers texture coords on a LOD/retopo/remesh. Returns (uvs, residual).
+        See holographic_meshtools.project_uv_from_shell."""
+        from holographic.mesh_and_geometry.holographic_meshtools import project_uv_from_shell as _pufs
+        return _pufs(self._as_mesh(new_mesh), self._as_mesh(shell), shell_uvs=shell_uvs, cell_scale=cell_scale)
+
+
+    def skin_skeleton(self, verts, edges, radii, resolution=64, smooth_k=None, taper=True):
+        """SKIN A SKELETON (B-Mesh): wrap a stick figure -- verts (n,3), edges [(i,j)...], per-vertex radii (n,) --
+        in one watertight surface, so you model a creature from ~20 joints instead of extruding 200 faces. Each edge
+        becomes a capsule; branches at a shared joint MERGE automatically (smooth_union), then marching-cubes to a
+        Mesh. The base-mesh block-out to retopo onto (quad_remesh / shrinkwrap a cage). See
+        holographic_meshtools.skin_skeleton."""
+        from holographic.mesh_and_geometry.holographic_meshtools import skin_skeleton as _sk
+        return _sk(verts, edges, radii, resolution=resolution, smooth_k=smooth_k, taper=taper)
+
+    def fit_base_mesh(self, target_mesh, verts, edges, radii, resolution=64, smooth_k=None, shrink_factor=1.0):
+        """FIT A BASE MESH TO A TARGET: skin the skeleton into a base mesh, SHRINKWRAP it onto target_mesh, and
+        report the silhouette-fit gain. The block-out-then-snap loop (Blender skin modifier -> snap to sculpt), and
+        an OPTIMISATION target since it returns iou_base/iou_fitted. Returns {base, fitted, residual, iou_base,
+        iou_fitted}. See holographic_meshtools.fit_base_mesh."""
+        from holographic.mesh_and_geometry.holographic_meshtools import fit_base_mesh as _fbm
+        return _fbm(self._as_mesh(target_mesh), verts, edges, radii, resolution=resolution, smooth_k=smooth_k,
+                    shrink_factor=shrink_factor)
+
+    def bake_normal_map(self, low_mesh, low_uv, high_mesh, size=256, world_space=False, ao=False, ao_samples=0):
+        """BAKE a normal map (optionally AO) from a HIGH-poly onto a LOW-poly UVs -- keep the sculpt detail on the
+        retopo. For each texel: low-poly 3-D point -> closest point on the high-poly -> its normal, stored tangent-
+        space (default; portable lavender map) or world-space. ao=True + ao_samples returns (normal_img, ao_img).
+        Returns an (size,size,3) image. See holographic_meshtools.bake_normal_map."""
+        from holographic.mesh_and_geometry.holographic_meshtools import bake_normal_map as _bnm
+        return _bnm(self._as_mesh(low_mesh), low_uv, self._as_mesh(high_mesh), size=size,
+                    world_space=world_space, ao=ao, ao_samples=ao_samples)
+
+    def auto_retopo(self, mesh, voxel_resolution=16, subdivide=0, target=None):
+        """AUTO-RETOPO: turn a messy BLOCK-OUT (a skin_skeleton blob, metaball, boolean mess) into a clean quad-
+        dominant cage in one call -- voxel_remesh (coarse; keep voxel_resolution ~12-20) -> quad_remesh -> optional
+        catmull_clark(subdivide). If target is given, shrinkwrap onto it and score silhouette IoU. Returns {mesh,
+        quad_fraction, report, iou?}. The hand-off that ends the base-mesh pipeline: place joints -> clean model.
+        See holographic_meshtools.auto_retopo."""
+        from holographic.mesh_and_geometry.holographic_meshtools import auto_retopo as _ar
+        return _ar(self._as_mesh(mesh), voxel_resolution=voxel_resolution, subdivide=subdivide,
+                   target=(self._as_mesh(target) if target is not None else None))
+
+
+
+
+
+
+
+
+
+
+
+
     def mesh_bridge(self, verts, loop_a, loop_b, closed=True):
         """BRIDGE two edge loops (holographic_meshverbs2, FWD-7 remainder): join two equal-length ordered vertex
         loops with a band of quads -- the verb that builds a tube between two openings. `verts` holds all points;
@@ -6273,14 +6552,14 @@ class UnifiedMind:
         from holographic.mesh_and_geometry.holographic_meshverbs2 import bridge_loops
         return bridge_loops(verts, loop_a, loop_b, closed=closed)
 
-    def mesh_loop_cut(self, mesh, start_face, start_edge):
+    def mesh_loop_cut(self, mesh, start_face, start_edge, cuts=1, factor=0.5):
         """LOOP-CUT: insert an edge loop (holographic_meshverbs2, FWD-7 remainder): trace the perpendicular loop of
         quads (enter through one edge, leave through the OPPOSITE edge) carrying `start_edge` of quad `start_face`,
         and split every crossed quad in two with a new mid-loop -- the verb that adds a ring of resolution.
         Preserves chi. Returns a Mesh. Kept negative: QUADS only (the opposite-edge trace is undefined on
         triangles); the trace stops at a boundary or when it returns to the start."""
         from holographic.mesh_and_geometry.holographic_meshverbs2 import loop_cut
-        return loop_cut(mesh, start_face, start_edge)
+        return loop_cut(mesh, start_face, start_edge, cuts=cuts, factor=factor)
 
     def pack_images(self, images):
         """Pack a FAMILY of 8-bit images as ONE reference plus per-image deltas, entropy-coded with zlib. Lossless
@@ -6383,6 +6662,36 @@ class UnifiedMind:
         A non-triangle input is triangulated first (Loop is a triangle scheme). Returns a new Mesh."""
         from holographic.mesh_and_geometry.holographic_meshsubdiv import loop_subdivide
         return loop_subdivide(mesh, levels=levels)
+
+    def mesh_catmull_clark(self, mesh, levels=1, creases=None):
+        """CATMULL-CLARK subdivide (holographic_meshsubdiv.catmull_clark) -- THE quad box-modelling subdivision
+        surface: every face becomes quads, so a quad cage STAYS all-quad (Loop, mesh_subdivide, triangulates -- the
+        wrong smoother for a cage). Classic 1978 masks; boundary edges use the B-spline curve rules; chi preserved;
+        a closed manifold stays one. `creases` maps an edge (vi,vj) -> sharpness s>=0 (DeRose 1998 semi-sharp: an
+        edge held sharp for s levels then smoothing) -- default None is the pure smooth surface. Build the dict with
+        mesh_crease_edges. The verb that turns a blocky cage into the smooth model, holding chosen edges sharp with
+        NO extra support loops."""
+        from holographic.mesh_and_geometry.holographic_meshsubdiv import catmull_clark as _cc
+        return _cc(self._as_mesh(mesh), levels=levels, creases=creases)
+
+    def mesh_crease_edges(self, edges, sharpness=5.0):
+        """Build a CREASE map for mesh_catmull_clark from a list of edges: {(vi,vj): sharpness}. `edges` is a list
+        of (vi,vj) vertex-index pairs (order-free); `sharpness` is the shared value (float, or a list matching
+        edges). A high value (~5) reads as a hard crease; ~1-2 as a soft one. Convenience so you never hand-build
+        the dict."""
+        if isinstance(sharpness, (int, float)):
+            return {(int(a), int(b)): float(sharpness) for (a, b) in edges}
+        return {(int(a), int(b)): float(s) for (a, b), s in zip(edges, sharpness)}
+
+    def mesh_auto_crease(self, mesh, threshold_deg=30.0, sharpness=5.0):
+        """AUTO-CREASE: build a crease map for mesh_catmull_clark by tagging every edge whose DIHEDRAL angle exceeds
+        threshold_deg -- the hard box-cage edges an artist would crease by hand, left off smooth regions. Returns
+        {(vi,vj): sharpness} to pass as mesh_catmull_clark(creases=...). So a subdivided box keeps its corners with
+        zero hand-tagging. See holographic_meshsubdiv.auto_crease_map."""
+        from holographic.mesh_and_geometry.holographic_meshsubdiv import auto_crease_map as _acm
+        return _acm(self._as_mesh(mesh), threshold_deg=threshold_deg, sharpness=sharpness)
+
+
 
     def solve_ik(self, joints, target, iters=20, tol=None, stiffness=None, dt=None):
         """Inverse kinematics by FABRIK (holographic_meshik, FWD-10): move a chain of `joints` (n+1, 3) so the
@@ -7702,6 +8011,35 @@ class UnifiedMind:
         from holographic.io_and_interop.holographic_procbridge import procedural_compression
         return procedural_compression(sdf_node, bounds=bounds, res=res)
 
+    def rate_distortion_report(self, arrays, target_cos=0.9999):
+        """Duda's question, answered honestly: what is the CHEAPEST bit budget that stores these vectors while
+        keeping their GEOMETRY (pairwise similarity), not just their bits? Runs the geometry-preserving rate-
+        distortion code (auto KLT rank + coarsest quantization step meeting `target_cos` MEAN reconstruction cosine,
+        rANS-entropy-coded -- Duda's ANS) and reports it AGAINST the float32 baseline so the answer is never dressed
+        up as a free win. Returns {bits_per_vector, float32_bits_per_vector, ratio, achieved_cos_mean,
+        achieved_cos_min, rank, pays}. `pays` is True only when ratio > 1 (it compresses); KEPT NEGATIVE, kept loud:
+        incompressible near-orthogonal vectors do NOT pay -- the RD code can be LARGER than float32, and this report
+        will say so (pays=False). Wires holographic_ratedistortion, which was import-only. See
+        holographic_ratedistortion.geometry_preserving_code / bits_per_vector."""
+        import numpy as _np
+        from holographic.misc.holographic_ratedistortion import geometry_preserving_code, bits_per_vector, reconstruct
+        A = _np.asarray(arrays, float)
+        if A.ndim == 1:
+            A = A[None, :]
+        code = geometry_preserving_code(A, target_cos=target_cos)
+        recon = _np.asarray(reconstruct(code))
+        cos = []
+        for o, r in zip(A, recon):
+            no = _np.linalg.norm(o) * _np.linalg.norm(r)
+            cos.append(float(_np.dot(o, r) / no) if no > 1e-12 else 1.0)
+        bpv = float(bits_per_vector(code))
+        base = float(A.shape[1] * 32)                       # float32 baseline, bits per vector
+        ratio = base / bpv if bpv > 0 else float("inf")
+        return {"bits_per_vector": bpv, "float32_bits_per_vector": base, "ratio": ratio,
+                "achieved_cos_mean": float(_np.mean(cos)), "achieved_cos_min": float(min(cos)),
+                "rank": int(code["B"].shape[0]) if hasattr(code.get("B"), "shape") else None,
+                "pays": bool(ratio > 1.0)}
+
     def soft_min(self, a, b, k):
         """S3/C4 -- the log-sum-exp soft minimum, -k*log(exp(-a/k)+exp(-b/k)); k->0 gives min(a,b). This is
         the SAME log-sum-exp the modern-Hopfield/softmax cleanup uses (softmax is a soft-arg-MAX; this is a
@@ -7935,6 +8273,222 @@ class UnifiedMind:
         from holographic.caching_and_storage.holographic_iokinds import IO_KINDS
         return list(IO_KINDS)
 
+    def route_structured(self, request, module_texts):
+        """Route a REQUEST to modules by holographic role-STRUCTURE, not a bag-of-words mean: parse request
+        and each module into a {action, object, quality} record, bind+bundle via encode_record, match the
+        bound records. Separates the case a flat mean buries (denoise vs fsr on 'less grainy'). module_texts
+        is {name: docstring}; returns [(name, score)] high-to-low; [] if the request does not parse (caller
+        falls back to flat). See holographic_holoroute.route_structured."""
+        import holographic.semantic_router.holographic_holoroute as HR
+        return HR.route_structured(self, request, module_texts)
+
+    def extract_roles(self, text):
+        """Parse a request or docstring into a holographic role record {action, object, quality} over the
+        controlled vocabulary (object fillers = io-kinds). Missing roles omitted, never fabricated; {} means
+        unparsed. The structured half of route_structured. See holographic_holoroute.extract_roles."""
+        import holographic.semantic_router.holographic_holoroute as HR
+        return HR.extract_roles(text)
+
+    def match_record(self, query_fields, candidates, top=None):
+        """DOMAIN-GENERAL structured matching: rank `candidates` ({name: {role: filler}}) by how well their
+        role-filler RECORD matches `query_fields`, via bound-record similarity (bind+bundle+cosine). The
+        general form of route_structured -- the SAME primitive classifies a physics regime, a market event, an
+        astronomy source, or a mesh repair, because it only needs items sharing a schema of codebook fillers.
+        Returns [(name, score)] high-to-low (top-k if given); [] if the query record is empty (abstains, never
+        guesses). See holographic_relations.match_record."""
+        from holographic.misc.holographic_relations import match_record
+        return match_record(self.encode_record, query_fields, candidates, top=top)
+
+    def match_prototype(self, query, prototypes, encode=None):
+        """UNSTRUCTURED classification (the twin of match_record): when an item has NO role schema -- it is a
+        bag/blend, not a record -- match it to the nearest class PROTOTYPE by cosine. The general form of the
+        VSA intent router: classify a question, a gesture, a regime, a writing style by the blend of its
+        features. `prototypes` is {class: unit vector} (see build_prototypes); `encode` maps the query (default
+        self.perceive text). Returns ranked [(class, score)]; composes with decide_or_abstain. See
+        holographic_relations.match_prototype."""
+        from holographic.misc.holographic_relations import match_prototype
+        enc = encode or (lambda x: self.perceive(x, "text"))
+        return match_prototype(enc, query, prototypes)
+
+    def build_prototypes(self, classes, encode=None):
+        """Build class prototypes from EXAMPLES: {class: [example, ...]} -> {class: unit mean vector} (the mean
+        bundle of each class's example encodings). The example-driven setup for match_prototype -- supply
+        instances, not a schema. `encode` defaults to self.perceive text. See holographic_relations.build_prototypes."""
+        from holographic.misc.holographic_relations import build_prototypes
+        enc = encode or (lambda x: self.perceive(x, "text"))
+        return build_prototypes(enc, classes)
+
+    def decide_or_abstain(self, ranked, margin=0.1, min_score=None):
+        """The shared DECISION step: given ranked [(name, score)] from match_record / match_prototype / any
+        scorer, return (winner, score, confident) where confident requires the top-1 to beat top-2 by >= margin
+        (and clear min_score). One honest abstention rule the classify callers share instead of each inventing
+        its own. Cheap gap gate -- for calibrated significance use a shuffle null. See
+        holographic_relations.decide_or_abstain."""
+        from holographic.misc.holographic_relations import decide_or_abstain
+        return decide_or_abstain(ranked, margin=margin, min_score=min_score)
+
+    def pipeline_map(self):
+        """The WHOLE workflow graph as data: every typed edge (consume_kind -> produce_kind -> capability)
+        derived from the live catalog's consumes/produces tags, plus per-kind producers/consumers, coverage,
+        and a gap report (dead-end / source-only / untouched kinds). Where suggest_pipeline answers ONE route
+        ('mesh -> image?'), this returns the entire map an agent can plan over without re-deriving it. See
+        pipelinemap.generate (which also writes docs/PIPELINE_MAP.md + pipelines.json). Returns the dict."""
+        import pipelinemap                                    # top-level generator; stdlib-only, reads the catalog
+        cat = self._capability_catalog()
+        edges = pipelinemap._edges(cat)
+        produce, consume = pipelinemap._adjacency(edges)
+        from holographic.caching_and_storage.holographic_iokinds import IO_KINDS
+        dead_end, source_only, untouched = pipelinemap._orphans(edges, IO_KINDS)
+        total = len(cat._by_name)
+        tagged = sum(1 for c in cat._by_name.values() if c.consumes and c.produces)
+        return {"coverage": {"tagged": tagged, "total": total,
+                             "percent": (100 * tagged // total) if total else 0},
+                "edges": [{"consumes": ci, "produces": po, "capability": n} for ci, po, n in edges],
+                "produced_by": produce, "consumed_by": consume,
+                "gaps": {"dead_end": dead_end, "source_only": source_only, "untouched": untouched}}
+
+    def _embedding_router(self):
+        """Locate + load the shipped routing index (lecore_data/routing/index_<dim>d.npz), preferring 128d --
+        the MEASURED champion dim (dense 6/12 top-1; with gamma=0.5 bone fusion 7/12, median 1, zero per-ask
+        regressions) -- falling back to 64d (measured WEAKER: dense 2/12, and bones do NOT help there; the
+        lexical channel does). Cached; returns None honestly when no artifact ships (route_semantic then
+        returns None and the caller falls back to find_capability). WHY THIS EXISTS AS A GUARDED HELPER: the
+        original helper was LOST in a branch reconciliation and route_semantic raised AttributeError on every
+        call -- found by dogfooding, not by the audits (they check wiring, not execution). The regression trap
+        is the integration test asserting route_semantic never raises."""
+        r = getattr(self, "_embedding_router_cache", None)
+        if r is not None:
+            return r if r is not False else None
+        import os
+        try:
+            from holographic.semantic_router.holographic_router import EmbeddingRouter
+            root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            for dim in (128, 64):
+                path = os.path.join(root, "lecore_data", "routing", "index_%dd.npz" % dim)
+                if os.path.isfile(path):
+                    self._embedding_router_cache = EmbeddingRouter(path)
+                    return self._embedding_router_cache
+        except Exception:
+            pass                                              # a broken artifact must not take routing down
+        self._embedding_router_cache = False                  # tried, absent -> do not re-scan every call
+        return None
+
+    def _query_embedder(self):
+        """Locate + load the offline QUERY embedder (N31: free text -> nomic-64 vector with NO model, via the
+        distilled token-vector artifact from distill_map.py --export, expected under lecore_data/routing/).
+        SAME guarded pattern as _embedding_router, for the same measured reason: this helper was ALSO lost in
+        the branch reconciliation -- route_semantic raised AttributeError the moment a routing index was
+        present and a free-text query reached the embed step. Found only by running the FULL production loop
+        against a real artifact (the earlier no-artifact test returned None before this line -- a coverage
+        hole, now closed in tests). Cached; honest None when no artifact ships (route_semantic then returns
+        None and the caller falls back to find_capability)."""
+        qe = getattr(self, "_query_embedder_cache", None)
+        if qe is not None:
+            return qe if qe is not False else None
+        import os
+        try:
+            from holographic.semantic_router.holographic_queryembed import QueryEmbedder
+            root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            for name in ("queryembed_64d.npz", "query_map_64d.npz"):
+                path = os.path.join(root, "lecore_data", "routing", name)
+                if os.path.isfile(path):
+                    self._query_embedder_cache = QueryEmbedder(path)
+                    return self._query_embedder_cache
+        except Exception:
+            pass                                              # a broken artifact must not take routing down
+        self._query_embedder_cache = False
+        return None
+
+    def route_semantic(self, problem, k=5, query_vec=None, gamma=0.5):
+        """N28 -- route a request to the right MODULE by cosine in nomic's embedding space, not token
+        overlap. Uses the shipped q8 index (lecore_data/routing/index_128d.npz preferred, 64d fallback)
+        with the ABTT correction baked in. Measured on the 12-ask suite at 128d: token overlap 1/12 top-1;
+        dense 6/12; dense + workflow bones (gamma=0.5) 7/12, median 1, ZERO per-ask regressions.
+        gamma DEFAULTS to 0.5 (the measured strict-Pareto winner at this exact dim): this method was broken
+        before the fusion landed (missing helper, raised on every call), so there is no prior behaviour to
+        preserve -- 0.5 is its first WORKING default. Pass gamma=0.0 for plain cosine. Boneless index ->
+        gamma degrades gracefully to plain dense, so old artifacts stay safe.
+
+        It needs a query VECTOR. Supply one via `query_vec` (a 64d nomic vector your app produced), OR
+        rely on the build-time cache for a known phrase. With NEITHER -- a brand-new free-text query and
+        no model present -- this returns None and the caller should use find_capability (token) instead.
+        It NEVER fabricates an embedding: an honest None beats a confident wrong route.
+
+        Returns [(module_name, cosine)] best-first, or None if the query could not be embedded. Default
+        off in spirit: find_capability is unchanged; this is an additive second path.
+        See holographic_router.EmbeddingRouter."""
+        r = self._embedding_router()
+        if r is None:
+            return None
+        if query_vec is not None:
+            return r.route(query_vec, k=k, gamma=gamma)       # gamma>0 = measured dense+bones fusion (7/12)
+        cache = getattr(self, "_query_cache", None)
+        if cache is not None:
+            hit = r.route_cached(problem, cache, k=k)
+            if hit is not None:
+                return hit
+        qe = self._query_embedder()                             # N31: offline text -> nomic-64, no model
+        if qe is not None:
+            v = qe.embed(problem)
+            if v is not None:
+                return r.route(v, k=k)
+        return None                                             # no vector, no map, no model -> honest miss
+
+    def bm25_rank(self, query, docs, k1=1.5, b=0.75, top=None, expand=False):
+        """LEXICAL ranking: rank `docs` (list of text strings) by Okapi BM25 against `query` -- exact term
+        matching with tf-saturation (k1) and length normalization (b), pure NumPy/stdlib, no model. The
+        complement to route_semantic's dense cosine: BM25 catches asks whose query WORDS appear in the target
+        text but whose meaning-geometry buries them. expand=True additionally matches DERIVATIONAL siblings at
+        half weight (a query saying 'emissive' reaches a doc saying 'emission' -- same root, different suffix);
+        default off, exact matches always dominate. Returns [(doc_index, score)] best-first. See
+        holographic_bm25.BM25."""
+        from holographic.semantic_router.holographic_bm25 import BM25
+        return BM25(list(docs), k1=k1, b=b).rank(query, top=top, expand=expand)
+
+    def fuse_rankings(self, ranked_lists, k=60, top=None):
+        """Reciprocal Rank Fusion (Cormack 2009): fuse several ranked id-lists into one by summing 1/(k+rank).
+        Uses only RANKS, so it needs no score calibration -- the right way to combine dense cosine (in [-1,1])
+        with BM25 (unbounded), whose raw scores are not comparable. An item ranked well by MORE retrievers
+        rises. Returns fused [(item_id, score)] best-first. See holographic_bm25.reciprocal_rank_fusion."""
+        from holographic.semantic_router.holographic_bm25 import reciprocal_rank_fusion
+        return reciprocal_rank_fusion(list(ranked_lists), k=k, top=top)
+
+    def workflow_graph(self, root=None, hub_frac=0.15):
+        """The WORKFLOW adjacency: the sparse 'bones' of which modules actually work together, derived from the
+        cross-references the authors already wrote in the docstrings (module A naming holographic_B). Edges are
+        RARITY-weighted (a reference to a module few others mention is worth more) and true hubs are dropped,
+        so the bones stay SPECIFIC -- measured median out-degree 2, versus the io-kind graph's 13-24 generic
+        neighbors on the same modules. Cached per root. Use with workflow_neighbors / workflow_propagate. See
+        holographic_workflowgraph.build_workflow_graph."""
+        from holographic.semantic_router.holographic_workflowgraph import build_workflow_graph
+        import os
+        if root is None:
+            root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        cache = getattr(self, "_workflow_graph_cache", None)
+        if cache is None:
+            cache = self._workflow_graph_cache = {}
+        key = (str(root), float(hub_frac))
+        if key not in cache:
+            cache[key] = build_workflow_graph(root, hub_frac=hub_frac)
+        return cache[key]
+
+    def workflow_neighbors(self, module, direction="both", top=None, root=None):
+        """Which modules WORK WITH `module`, by author-stated cross-reference, best-first as [(module, weight)].
+        'out' = modules it references, 'in' = modules referencing it, 'both' = the union. Sparse and specific
+        (meshsmooth -> graphsignal; resonator -> chunkcodebook), unlike generic same-io-kind adjacency. See
+        holographic_workflowgraph.neighbors."""
+        from holographic.semantic_router.holographic_workflowgraph import neighbors
+        return neighbors(self.workflow_graph(root=root), module, direction=direction, top=top)
+
+    def workflow_propagate(self, seed_scores, alpha=0.5, top=None, root=None):
+        """Spread per-module scores ONE hop along the workflow bones: a module whose COLLABORATORS are strongly
+        scored gets lifted even if its own text was never matched. The structural complement to dense/BM25 --
+        it can surface a module the query has no words in common with. alpha weights propagation vs the seed;
+        alpha=0 returns the seed unchanged. Returns [(module, score)] best-first. KEPT NEG: one hop only --
+        multi-hop re-diffuses toward the smeared io-kind regime. See holographic_workflowgraph.propagate."""
+        from holographic.semantic_router.holographic_workflowgraph import propagate
+        return propagate(self.workflow_graph(root=root), dict(seed_scores), alpha=alpha, top=top)
+
     def find_scored(self, problem, k=3):
         """Like find_capability, but returns [(capability, score)] -- so a caller can tell a HIT from a FALLBACK.
 
@@ -7953,13 +8507,18 @@ class UnifiedMind:
 
         The honest answer to "does this engine already do X?" -- and the antidote to reading a fallback as a hit.
         Pair it with a symbol grep (tools/backlog_probe.py does both) before concluding anything is missing."""
+        # DELEGATE the confident/margin judgment to the shared decide_or_abstain (min_score just above 0 so a
+        # zero-scoring top never counts; margin=1.0 preserves the original 'leads by >= 1.0' rule).
+        from holographic.misc.holographic_relations import decide_or_abstain
         scored = self._capability_catalog().find_scored(problem, k=2)
         if not scored:
             return {"top": None, "score": 0.0, "margin": 0.0, "confident": False}
-        top, s0 = scored[0]
-        s1 = scored[1][1] if len(scored) > 1 else 0.0
-        return {"top": top.name, "score": float(s0), "margin": float(s0 - s1),
-                "confident": bool(s0 > 0.0 and (s0 - s1) >= 1.0)}
+        ranked = [(c.name, s) for c, s in scored]
+        s0 = ranked[0][1]
+        s1 = ranked[1][1] if len(ranked) > 1 else 0.0
+        _, _, confident = decide_or_abstain(ranked, margin=1.0, min_score=1e-12)
+        return {"top": ranked[0][0], "score": float(s0), "margin": float(s0 - s1),
+                "confident": bool(confident)}
 
     def suggest(self, task, k=5):
         """AGENT-FRIENDLY autocomplete: turn a plain-English task into the best capabilities to use, each with a
@@ -8321,6 +8880,51 @@ class UnifiedMind:
         matching. See holographic_fields.spatial_hash_pairs."""
         from holographic.misc.holographic_fields import spatial_hash_pairs
         return spatial_hash_pairs(positions, radius)
+
+    def game_shard(self, dt=1.0/60.0, seed=0, gravity=(0.0, 0.0, 0.0), region=None,
+                   restitution=0.2):
+        """An authoritative, deterministic fixed-tick GAME WORLD shard: player commands in, ticks,
+        AOI snapshots, deltas, region handoff for massive-world sharding across the farm. Use when
+        building a game/multiplayer simulation server on the engine. Delegates entirely to
+        holographic_gameshard.GameShard (default-off: nothing runs until you step it)."""
+        from holographic.simulation_and_physics.holographic_gameshard import GameShard
+        return GameShard(dt=dt, seed=seed, gravity=gravity, region=region,
+                         restitution=restitution)
+
+    def run_game_shard(self, commands, ticks, dt=1.0/60.0, seed=0, gravity=(0.0, 0.0, 0.0),
+                       region=None, restitution=0.2, state=None, aoi=None):
+        """JSON-in/JSON-out one-shot game-world run: feed commands (+ optional saved state), get the
+        final state blob, per-tick lockstep digests, departures, and an optional AOI snapshot. The
+        /invoke-callable face of game_shard(). See holographic_gameshard.run_shard."""
+        from holographic.simulation_and_physics.holographic_gameshard import run_shard
+        return run_shard(commands, ticks, dt=dt, seed=seed, gravity=gravity, region=region,
+                         restitution=restitution, state=state, aoi=aoi)
+
+    def game_world(self, cell=64.0, dt=1.0/60.0, seed=0, gravity=(0.0, 0.0, 0.0), restitution=0.2):
+        """A MASSIVE sharded game world: a lazy grid of game shards with deterministic cross-shard
+        entity migration, seam-free cross-shard AOI snapshots, a world-level lockstep digest, and the
+        collect_only/receive() bus-transport seam for spreading shards across the farm. See
+        holographic_gameshard.ShardWorld."""
+        from holographic.simulation_and_physics.holographic_gameshard import ShardWorld
+        return ShardWorld(cell=cell, dt=dt, seed=seed, gravity=gravity, restitution=restitution)
+
+    def run_game_world(self, commands, ticks, cell=64.0, dt=1.0/60.0, seed=0,
+                       gravity=(0.0, 0.0, 0.0), restitution=0.2, aoi=None):
+        """JSON one-shot over the sharded world: spawn/drive entities, get per-tick world digests,
+        every cross-shard migration, shard count, and an optional cross-shard AOI snapshot. The
+        /invoke-callable face of game_world(). See holographic_gameshard.run_world."""
+        from holographic.simulation_and_physics.holographic_gameshard import run_world
+        return run_world(commands, ticks, cell=cell, dt=dt, seed=seed, gravity=gravity,
+                         restitution=restitution, aoi=aoi)
+
+    def game_bus_host(self, bus, world, own_keys, world_id="w0"):
+        """Host one node's slice of a sharded game world on the EXISTING message/distributed bus:
+        owns a set of cell keys, publishes handoffs on per-cell topics, receives arrivals via
+        subscribe -- the interaction layer's handshake with the data layer (bus/coordinator/presence),
+        duplicating none of it. Rounds are barriered: publish in round R, join at R+1. See
+        holographic_gameshard.BusShardHost."""
+        from holographic.simulation_and_physics.holographic_gameshard import BusShardHost
+        return BusShardHost(bus, world, own_keys, world_id=world_id)
 
     def buoyancy_force(self, temperature, density=None, alpha=0.0, beta=1.0, ambient=0.0):
         """Boussinesq buoyancy force from a temperature (and optional density) field -- hot rises, heavy sinks.
@@ -8752,17 +9356,21 @@ class UnifiedMind:
         return Light(kind=kind, direction=direction, position=position, color=color, intensity=intensity)
 
     def render_mesh(self, mesh, camera, width=512, height=512, lights=None, base_color=(0.8, 0.8, 0.8),
-                    background=(0.05, 0.06, 0.08), ambient=0.15, vectorized=True):
+                    background=(0.05, 0.06, 0.08), ambient=0.15, vectorized=True, texture=None, uvs=None,
+                    smooth=False):
         """Rasterise a mesh to an (H,W,3) RGB image with a z-buffer and Lambert shading (frustum + back-face
         culled). `base_color` may be a PBRMaterial's base_color. vectorized=True (default) uses the batched
         fragment-scatter path (the per-triangle Python loop ported to one array op -- ~8-15x faster, image
         identical); vectorized=False is the readable reference loop. CPU renderer -- the authoring brain's
-        offline / preview frame; the GPU stays the muscle for a heavy interactive viewport. See holographic_render."""
+        offline / preview frame; the GPU stays the muscle for a heavy interactive viewport. Pass `texture` (H,W,3)
+        + per-vertex `uvs` (or mesh.uvs) to render a TEXTURED mesh -- bilinear per-fragment sampling; what
+        showing a UV-transferred or baked texture needs. See holographic_render."""
         from holographic.rendering.holographic_render import rasterize_mesh
         if hasattr(base_color, "base_color"):
             base_color = base_color.base_color
         return rasterize_mesh(mesh, camera, width=width, height=height, lights=lights,
-                              base_color=base_color, background=background, ambient=ambient, vectorized=vectorized)
+                              base_color=base_color, background=background, ambient=ambient,
+                              vectorized=vectorized, texture=texture, uvs=uvs, smooth=smooth)
 
     def ray_path_index(self, objects, camera, width=256, height=256, sun="bright", sky="clear"):
         """Build a BIDIRECTIONAL ray<->object index for a scene: which objects each camera ray TOUCHED along its path
@@ -9281,6 +9889,48 @@ class UnifiedMind:
         from holographic.io_and_interop.holographic_imagecompare import perceptual_distance
         return perceptual_distance(x, y, **kw)
 
+    def sharpen_image(self, x, blur=None, sigma=3.0, lam=1.0, iters=60, noise_level=0.0):
+        """IMAGE MANIPULATION: deblur / sharpen a signal or image by iterating a deconvolution loop toward the
+        deblurred signal (Group G, the sharpen half). `sigma` is the assumed blur width, `lam` the regularisation,
+        `iters` the loop count. Returns the sharpened array. See holographic_sharpen.sharpen_loop."""
+        from holographic.rendering.holographic_sharpen import sharpen_loop
+        return sharpen_loop(x, blur=blur, sigma=sigma, lam=lam, iters=iters, noise_level=noise_level)
+
+    def warp_gather(self, values, positions, query_source_positions):
+        """IMAGE/FIELD WARP: resample `values` (defined at `positions`) at `query_source_positions` by BACKWARD
+        gather -- the artifact-free way to warp an image/field (every output pixel pulls from where it came from,
+        vs forward scatter which leaves holes). Returns the gathered values. See holographic_backwardwarp."""
+        from holographic.misc.holographic_backwardwarp import backward_gather
+        return backward_gather(values, positions, query_source_positions)
+
+    def splat_points(self, points, camera, width, height, colors=None, radius_px=2.0, intensity=1.0,
+                     depth_fade=None, background=(0.0, 0.0, 0.0)):
+        """IMAGE GENERATION from geometry: render an (N,3) point cloud to an (image (H,W,3), alpha (H,W)) by
+        splatting each point as a soft disc of `radius_px`. The cheap raster path for point clouds / particle
+        sims (no marching). `colors` optional per-point rgb; `depth_fade` fades far points. See
+        holographic_pointsplat.splat_points."""
+        from holographic.rendering.holographic_pointsplat import splat_points
+        return splat_points(points, camera, width, height, colors=colors, radius_px=radius_px,
+                            intensity=intensity, depth_fade=depth_fade, background=background)
+
+    def slime_solve_maze(self, world, dim=2048, ants=24, rounds=50, decay=0.80, seed=0, q=2.0,
+                         use_compass=True, record=False, elite=0.0):
+        """SIMULATION: solve a maze with a colony of slime-mold walkers laying pheromone into ONE holographic
+        field, then reading the path back -- emergent pathfinding, deterministic given the seed. Returns
+        (path, info). See holographic_slime.solve_maze."""
+        from holographic.simulation_and_physics.holographic_slime import solve_maze
+        return solve_maze(world, dim=dim, ants=ants, rounds=rounds, decay=decay, seed=seed, q=q,
+                          use_compass=use_compass, record=record, elite=elite)
+
+    def iridescent_tint(self, thickness_nm=320.0, cos_theta=1.0, n_film=1.33, phase_flip=True):
+        """MATERIAL: the iridescent RGB tint of a thin film (soap-bubble / oil-slick sheen) of `thickness_nm` seen
+        at angle `cos_theta` (1.0 = head-on). Multiply a surface's reflected colour by this for iridescence; sweeping
+        the angle or thickness cycles the tint through the spectrum. n_film 1.33 = soapy water, 1.45 = oil. Returns
+        an (...,3) sRGB tint. See holographic_thinfilm.thin_film_tint (iridescent_socket builds the full shader socket)."""
+        from holographic.rendering.holographic_thinfilm import thin_film_tint
+        return thin_film_tint(thickness_nm, cos_theta, n_film=n_film, phase_flip=phase_flip)
+
+
     def compare_image_files(self, path_a, path_b, w_struct=0.5, w_color=0.3, w_edge=0.2):
         """Perceptual similarity in [0,1] (1 = identical) between two images given as FILE PATHS (e.g. two rendered
         PNGs) -- the on-disk companion to compare_images, which takes arrays. Loads both via PIL, resizes the
@@ -9345,6 +9995,17 @@ class UnifiedMind:
         the palette / dominant-colour readout. Deterministic per seed. See holographic_vision.dominant_colours."""
         from holographic.misc.holographic_vision import dominant_colours
         return dominant_colours(rgb, k=k, seed=seed)
+
+    def segment_image(self, rgb, k=5, seed=0, spatial_weight=0.35, split_components=True, min_fraction=0.006):
+        """DEMUX a photo into per-object REGIONS by colour (+ weak spatial coherence) -- the segmentation front end
+        of the photo->3D pipeline. Returns a list of region dicts largest-first: id, mask (H,W bool), area, fraction,
+        bbox, centroid, mean_color, shape (circle/rectangle/line/triangle), circularity/extent/aspect. Deterministic;
+        splits on APPEARANCE not semantics (a shadow can split a floor) -- the per-region stats are the coarse guess
+        the primitive-fit stage refines. Pass a downscaled image (~<=200 px). See holographic_vision.segment_image."""
+        from holographic.misc.holographic_vision import segment_image
+        return segment_image(rgb, k=k, seed=seed, spatial_weight=spatial_weight,
+                             split_components=split_components, min_fraction=min_fraction)
+
 
     def image_signature(self, rgb):
         """One fixed-length feature vector describing an image (holographic_vision.describe): colour histogram +
@@ -9482,6 +10143,208 @@ class UnifiedMind:
         (instancing = a bind); editing the source updates all instances. See holographic_grouping.instance."""
         from holographic.misc.holographic_grouping import instance
         return instance(scene, source, transform=transform, name=name)
+
+    # -- GEOMETRY KERNEL faculties (tolerance authority + exact predicates + curve/surface intersection) --------
+    def model_tolerance(self, abs_tol=1e-9, rel_tol=1e-12, ang_tol=1e-9):
+        """The document's single tolerance authority (K11): the abs/rel/angular tolerances a boolean, a snap, and
+        an intersection all consult so they agree on 'equal'. See holographic_geomkernel.ModelTolerance."""
+        from holographic.mesh_and_geometry.holographic_geomkernel import ModelTolerance
+        return ModelTolerance(abs_tol=abs_tol, rel_tol=rel_tol, ang_tol=ang_tol)
+
+    def orient2d(self, a, b, c):
+        """Exact-sign 2D orientation predicate: +1 if c is left of a->b (ccw), -1 right, 0 exactly collinear
+        (decided by exact Fraction arithmetic, not a fuzzy epsilon). The primitive under robust intersection.
+        See holographic_geomkernel.orient2d."""
+        from holographic.mesh_and_geometry.holographic_geomkernel import orient2d
+        return orient2d(a, b, c)
+
+    def orient3d(self, a, b, c, d):
+        """Exact-sign 3D orientation predicate: +1 if d is above the plane a-b-c, -1 below, 0 exactly coplanar.
+        See holographic_geomkernel.orient3d."""
+        from holographic.mesh_and_geometry.holographic_geomkernel import orient3d
+        return orient3d(a, b, c, d)
+
+    def curve_intersect(self, A, B, tol=None):
+        """CURVE-CURVE intersection (K1): all crossings of two polylines A,B as records {point,i,j,t,u} (segment
+        indices + in-segment parameters), crossings decided by the exact orient2d so a near-tangency is not
+        swallowed. Curves arrive as sampled polylines. See holographic_curveint.intersect_polylines."""
+        from holographic.mesh_and_geometry.holographic_curveint import intersect_polylines
+        return intersect_polylines(A, B, tol=tol)
+
+    def curve_self_intersect(self, A, tol=None):
+        """Self-intersections of one polyline (what an offset curve must clean up). See
+        holographic_curveint.self_intersections."""
+        from holographic.mesh_and_geometry.holographic_curveint import self_intersections
+        return self_intersections(A, tol=tol)
+
+    def surface_intersect(self, f, g, lo, hi, res=24, step=None, tol=None):
+        """SURFACE-SURFACE intersection (K2, the keystone): trace the intersection curve(s) of two implicit
+        surfaces f=0, g=0 over the box [lo,hi] by a predict-correct FIELD MARCH (tangent = grad f x grad g,
+        corrector = Newton projection onto both). Returns a list of (n,3) polylines. Fit a NURBS to a result for
+        a trim loop. See holographic_surfint.surface_surface_intersect."""
+        from holographic.mesh_and_geometry.holographic_surfint import surface_surface_intersect
+        return surface_surface_intersect(f, g, lo, hi, res=res, step=step, tol=tol)
+
+    def trimmed_surface(self, surf_uv, outer, holes=None, u_range=(0.0, 1.0), v_range=(0.0, 1.0)):
+        """TRIMMED SURFACE (K3): a surface surf_uv(u,v)->(x,y,z) restricted to trim loops in parameter space (inside
+        `outer`, outside `holes`) -- how Rhino represents a trimmed face. .is_inside(u,v), .tessellate(nu,nv),
+        .area_fraction(). See holographic_trimsurf.TrimmedSurface."""
+        from holographic.mesh_and_geometry.holographic_trimsurf import TrimmedSurface
+        return TrimmedSurface(surf_uv, outer, holes=holes, u_range=u_range, v_range=v_range)
+
+    def trim_loop_from_curve(self, surf_uv, curve3d, res=40):
+        """Project a 3-D trimming curve (e.g. a K2 SSI polyline) to a (u,v) trim loop -- the K2->K3 bridge. See
+        holographic_trimsurf.trim_loop_from_curve."""
+        from holographic.mesh_and_geometry.holographic_trimsurf import trim_loop_from_curve
+        return trim_loop_from_curve(surf_uv, curve3d, res=res)
+
+    def region_boolean_area(self, A, B, op, res=240):
+        """2D REGION BOOLEAN (K4): the area of union/difference/intersection of two closed polygonal regions, by
+        exact even-odd membership quadrature (the robust scalar). Use region_membership for the predicate. See
+        holographic_region2d.region_boolean_area."""
+        from holographic.mesh_and_geometry.holographic_region2d import region_boolean_area
+        return region_boolean_area(A, B, op, res=res)
+
+    def region_membership(self, A, B, op):
+        """A predicate (x,y)->bool for the boolean op {union,difference,intersection} of two 2D regions -- the
+        always-correct membership core. See holographic_region2d.region_membership."""
+        from holographic.mesh_and_geometry.holographic_region2d import region_membership
+        return region_membership(A, B, op)
+
+    def offset_curve(self, poly, dist, closed=True, tol=None):
+        """CURVE OFFSET (K4): a parallel polyline at distance `dist` (positive grows a CCW loop outward), with the
+        loops a concave offset folds in removed via self-intersection cleanup. See
+        holographic_region2d.offset_polyline."""
+        from holographic.mesh_and_geometry.holographic_region2d import offset_polyline
+        return offset_polyline(poly, dist, closed=closed, tol=tol)
+
+    def sketch2d(self, tol=None):
+        """2D CONSTRAINT SKETCH (K8): a parametric sketch solved by iterated projection. Add points, declare
+        constraints (fix/coincident/horizontal/vertical/distance/parallel/perpendicular/point_on_line), then
+        .solve(); .dof() reports under/well/over-constrained. See holographic_sketch2d.Sketch2D."""
+        from holographic.mesh_and_geometry.holographic_sketch2d import Sketch2D
+        return Sketch2D(tol=tol)
+
+    def mesh_to_stl(self, vertices, faces, name="lecore"):
+        """CAD EXPORT (K7): an ASCII STL string for a mesh (tris/quads/ngons; per-facet normals from the winding).
+        See holographic_cadexport.mesh_to_stl."""
+        from holographic.io_and_interop.holographic_cadexport import mesh_to_stl
+        return mesh_to_stl(vertices, faces, name=name)
+
+    def polylines_to_dxf(self, polylines, closed=None, layer="0"):
+        """CAD EXPORT (K7): a minimal DXF R12 ASCII string for 2-D polylines (POLYLINE/VERTEX; closed loops flagged).
+        The 2-D drawing exchange format Rhino/AutoCAD read. See holographic_cadexport.polylines_to_dxf."""
+        from holographic.io_and_interop.holographic_cadexport import polylines_to_dxf
+        return polylines_to_dxf(polylines, closed=closed, layer=layer)
+
+    def surface_curvature(self, surf_uv, u, v, h=1e-4):
+        """SURFACE ANALYSIS (K9): Gaussian, mean, and principal curvatures at (u,v) on a parametric surface
+        surf_uv(u,v)->(x,y,z), via the first/second fundamental forms. Returns {gaussian, mean, k1, k2}. See
+        holographic_surfanalysis."""
+        from holographic.mesh_and_geometry import holographic_surfanalysis as SA
+        k1, k2 = SA.principal_curvatures(surf_uv, u, v, h)
+        return {"gaussian": SA.gaussian_curvature(surf_uv, u, v, h),
+                "mean": SA.mean_curvature(surf_uv, u, v, h), "k1": k1, "k2": k2}
+
+    def draft_angle(self, surf_uv, u, v, pull_dir=(0.0, 0.0, 1.0), flip_normal=False):
+        """SURFACE ANALYSIS (K9): the moldability draft angle (deg) at (u,v) for a mold pull direction -- positive
+        drafts cleanly, ~0 is a vertical wall, negative is an undercut. Sign follows the surface normal; flip_normal
+        for the caller's outward orientation. See holographic_surfanalysis.draft_angle."""
+        from holographic.mesh_and_geometry.holographic_surfanalysis import draft_angle
+        return draft_angle(surf_uv, u, v, pull_dir=pull_dir, flip_normal=flip_normal)
+
+    def snap_to_midpoints(self, point, vertices, edges, max_dist=None):
+        """OBJECT SNAP (K10): snap a point to the nearest EDGE MIDPOINT ({edge, position, distance}). See
+        holographic_snap.snap_to_midpoints."""
+        from holographic.mesh_and_geometry.holographic_snap import snap_to_midpoints
+        return snap_to_midpoints(point, vertices, edges, max_dist=max_dist)
+
+    def snap_to_intersections(self, point, polylines, max_dist=None, tol=None):
+        """OBJECT SNAP (K10): snap a point to the nearest INTERSECTION of 2-D polylines ({position, distance}),
+        crossings found by the robust curve intersector. See holographic_snap.snap_to_intersections."""
+        from holographic.mesh_and_geometry.holographic_snap import snap_to_intersections
+        return snap_to_intersections(point, polylines, max_dist=max_dist, tol=tol)
+
+    def fillet_union(self, f, g, r):
+        """EDGE FILLET (K5): the union of two implicit surfaces f,g with the convex crease rounded to an EXACT
+        constant radius r (iq opUnionRound) -- a true radius-r circular arc, unlike smooth_union's soft blend.
+        Returns an SDF callable that raymarches/meshes/emits. See holographic_fillet.fillet_union."""
+        from holographic.mesh_and_geometry.holographic_fillet import fillet_union
+        return fillet_union(f, g, r)
+
+    def fillet_intersection(self, f, g, r):
+        """EDGE FILLET (K5): the intersection of f,g with the concave (pocket) crease rounded to radius r
+        (opIntersectionRound). Returns an SDF callable. See holographic_fillet.fillet_intersection."""
+        from holographic.mesh_and_geometry.holographic_fillet import fillet_intersection
+        return fillet_intersection(f, g, r)
+
+    def fillet_difference(self, f, g, r):
+        """EDGE FILLET (K5): f minus g with the resulting edge rounded to radius r. Returns an SDF callable. See
+        holographic_fillet.fillet_difference."""
+        from holographic.mesh_and_geometry.holographic_fillet import fillet_difference
+        return fillet_difference(f, g, r)
+
+    def chamfer_union(self, f, g, r):
+        """EDGE CHAMFER (K5): the union of f,g with a flat 45-degree chamfer of size r at the crease (the straight-
+        bevel alternative to a fillet). Returns an SDF callable. See holographic_fillet.chamfer_union."""
+        from holographic.mesh_and_geometry.holographic_fillet import chamfer_union
+        return chamfer_union(f, g, r)
+
+    def brep_box(self, lo=(-1.0, -1.0, -1.0), hi=(1.0, 1.0, 1.0)):
+        """B-REP (K6): construct a valid closed cube boundary representation (8 verts, 12 edges, 6 faces, genus 0).
+        The canonical smallest valid solid. See holographic_brep.box_brep."""
+        from holographic.mesh_and_geometry.holographic_brep import box_brep
+        return box_brep(lo=lo, hi=hi)
+
+    def brep_validate(self, brep, expected_genus=0):
+        """B-REP (K6): validity report for a boundary representation -- {closed_manifold, V,E,F,R,S, genus,
+        euler_ok} via the Euler-Poincare law V-E+F-R = 2(S-H). See holographic_brep.Brep.validate."""
+        return brep.validate(expected_genus=expected_genus)
+
+    def brep_from_faces(self, vertices, faces, shells=None):
+        """B-REP (K6): build a boundary representation from vertices + BFace loops (topology derived and checkable).
+        See holographic_brep.Brep."""
+        from holographic.mesh_and_geometry.holographic_brep import Brep
+        return Brep(vertices, faces, shells=shells)
+
+    def node_registry(self):
+        """NODE EDITOR backend: the default node-type palette wired to real leCore compute (SDF primitives + CSG +
+        K5 fillet, texture const/mix, scalar). Register more types on it. See holographic_nodegraph.default_registry."""
+        from holographic.scene_and_pipeline.holographic_nodegraph import default_registry
+        return default_registry()
+
+    def node_graph(self, registry=None):
+        """NODE EDITOR backend: a heterogeneous typed node graph an editor binds to -- add nodes, connect sockets
+        (type-checked + cycle-checked), evaluate (topological, memoized), set_param (dirty-propagating), and
+        to_dict/from_dict serialize. Delegates each node's compute to the existing subsystem. Pass a registry or
+        the default is used. See holographic_nodegraph.NodeGraph."""
+        from holographic.scene_and_pipeline.holographic_nodegraph import NodeGraph, default_registry
+        return NodeGraph(registry if registry is not None else default_registry())
+
+    def point_in_brep(self, brep, points, thresh=0.5):
+        """B-REP MEMBERSHIP (toward K6 booleans): is each point inside the solid? Delegates to the generalized
+        winding number of the B-rep triangulated boundary. Returns a boolean array. See
+        holographic_brepbool.point_in_brep."""
+        from holographic.mesh_and_geometry.holographic_brepbool import point_in_brep
+        return point_in_brep(brep, points, mind=self, thresh=thresh)
+
+    def brep_boolean_faces(self, brep_a, brep_b, op):
+        """B-REP BOOLEAN CLASSIFICATION (toward K6 booleans): which whole FACES of A survive a boolean with B
+        (keep outside-B faces for union/difference, inside-B for intersection); faces that STRADDLE the B boundary
+        are flagged as needing a K2-SSI split. Returns {keep, straddle}. See
+        holographic_brepbool.brep_boolean_faces."""
+        from holographic.mesh_and_geometry.holographic_brepbool import brep_boolean_faces
+        return brep_boolean_faces(brep_a, brep_b, op, mind=self)
+
+    def brep_boolean(self, brep_a, brep_b, op, res=48, bounds=None, analytic=False):
+        """The FINISHED B-REP BOOLEAN (union/difference/intersection): the SSI-driven re-stitch that turns two
+        solids into one watertight B-rep. Routes the two solids through the SDF (the K2 surface-surface intersection
+        seam + field combine + marching, reusing route_csg), wraps the watertight result as a B-rep, and VALIDATES
+        it with K6 (closed 2-manifold, Euler, volume vs inclusion-exclusion; see result._boolean_report). analytic=True recovers POLYGONAL faces (merge coplanar triangles). Kept
+        negative: result faces are the marching triangulation, not the inputs' analytic faces (that is the
+        refinement); resolution is the grid's. See holographic_brepbool.brep_boolean."""
+        from holographic.mesh_and_geometry.holographic_brepbool import brep_boolean
+        return brep_boolean(brep_a, brep_b, op, res=res, bounds=bounds, analytic=analytic)
 
     def camera_controller(self, eye=(0.0, 0.0, 5.0), target=(0.0, 0.0, 0.0), up=(0.0, 1.0, 0.0)):
         """Modeling-app feature layer: a viewport camera controller -- orbit/pan/dolly/zoom/frame around a target.
@@ -9728,13 +10591,31 @@ class UnifiedMind:
         from holographic.sampling_and_signal.holographic_spectralfield import poisson_solve
         return poisson_solve(source, dx=dx, eps0=eps0)
 
-    def image_to_mesh(self, image, light=None, res=48, depth_scale=1.0, smooth=1.0):
-        """END-TO-END image -> watertight MESH: estimate depth by shape-from-shading, unproject to points, derive
-        oriented normals from the depth, and reconstruct a surface (points_to_mesh / dual-contour). Returns
-        (verts, quads, field, grids). HONEST: single-view + relative depth (shape-from-shading is ill-posed), so
-        this meshes the VISIBLE FRONT as a height-field surface, not a watertight solid object -- the back is
-        unobserved. For per-pixel splats instead of a mesh, use image_to_3d. Chains depth_from_image + unproject +
-        normal_from_height + points_to_mesh."""
+    def depth_to_mesh(self, depth, colour=None, fx=None, fy=None, cx=None, cy=None,
+                      depth_scale=1.0, discontinuity=0.08, smooth_iters=0):
+        """DEPTH MAP -> a CLEAN triangulated HEIGHT-FIELD MESH (the mesh-cleanup path for single-view photo-to-3D):
+        every pixel a vertex at its unprojected 3-D position, each 2x2 block two triangles EXCEPT where depth jumps
+        > discontinuity (dropped, so the near foreground is not welded to the far background -- the melted-mesh
+        artifact). Regular-grid surface = ZERO non-manifold edges (unlike the dual-contour points_to_mesh path),
+        directly smoothable/textured. Accepts ANY depth (1=near): hand it fuse_depth for hazy/DoF photos. Returns
+        (mesh, vertex_colours). See holographic_photo3d.depth_to_mesh."""
+        from holographic.rendering.holographic_photo3d import depth_to_mesh as _dtm
+        return _dtm(depth, colour=colour, fx=fx, fy=fy, cx=cx, cy=cy, depth_scale=depth_scale,
+                    discontinuity=discontinuity, smooth_iters=smooth_iters)
+
+    def image_to_mesh(self, image, light=None, res=48, depth_scale=1.0, smooth=1.0, repair=False):
+        """END-TO-END image -> MESH: estimate depth by shape-from-shading, unproject to points, derive oriented
+        normals from the depth, and reconstruct a surface (points_to_mesh / dual-contour). Returns (verts, quads,
+        field, grids). HONEST: single-view + relative depth (shape-from-shading is ill-posed), so this meshes the
+        VISIBLE FRONT as a height-field surface, not a watertight solid object -- the back is unobserved. For per-pixel
+        splats instead of a mesh, use image_to_3d. Chains depth_from_image + unproject + normal_from_height +
+        points_to_mesh.
+
+        repair=True runs mesh_repair (weld near-dups + drop degenerate/unreferenced) on the result before returning it
+        -- the standard cleanup for a downstream consumer. DEFAULT-OFF and byte-identical when off. MEASURED KEPT
+        NEGATIVE: on shape-from-shading output the dual-contour extractor emits genuine NON-MANIFOLD edges (edges shared
+        by >2 faces) that weld/fill CANNOT fix, so repair=True is a modest cleanup, NOT a guarantee of a manifold /
+        retopo-ready mesh -- that needs a manifold-guaranteeing extractor or non-manifold-edge splitting (deferred)."""
         import numpy as _np
         from holographic.mesh_and_geometry.holographic_autobump import normal_from_height
         img = _np.asarray(image, float)
@@ -9747,7 +10628,12 @@ class UnifiedMind:
         nmap = normal_from_height(z)                                     # (H, W, 3)
         nrm = nmap.reshape(-1, 3)
         lo = pts.min(axis=0) - 0.05; hi = pts.max(axis=0) + 0.05
-        return self.points_to_mesh(pts, nrm, lo.tolist(), hi.tolist(), int(res))
+        verts, quads, field, grids = self.points_to_mesh(pts, nrm, lo.tolist(), hi.tolist(), int(res))
+        if repair:                                                      # opt-in standard cleanup (see kept negative)
+            from holographic.mesh_and_geometry.holographic_mesh import Mesh
+            rm, _report = self.mesh_repair(Mesh(verts, [tuple(int(i) for i in q) for q in quads]))
+            verts, quads = rm.vertices, rm.faces
+        return verts, quads, field, grids
 
     def depth_from_image(self, image, light=None, albedo=None, smooth=1.0):
         """Estimate a relative DEPTH MAP from a single image by classical SHAPE FROM SHADING (C1 of photo-to-3D) --
@@ -9758,6 +10644,105 @@ class UnifiedMind:
         holographic_shapefromshading.shape_from_shading."""
         from holographic.rendering.holographic_shapefromshading import shape_from_shading
         return shape_from_shading(image, light=light, albedo=albedo, smooth=smooth)
+
+
+
+    def haze_depth(self, image, p=0.95, sky_guard=True, return_extras=False):
+
+        """RELATIVE DEPTH from a single HAZY/FOGGY image via the atmospheric scattering model (Tarel-Hautiere veil
+
+        inference) -- the classical no-weights fix for scenes where shape_from_shading inverts the depth (fog reads
+
+        as near). Returns depth (H,W) in [0,1], 1=nearest, ordering correct for hazy scenes. sky_guard clamps
+
+        bright low-saturation upper-frame pixels to far. See holographic_hazedepth.haze_depth."""
+
+        from holographic.rendering.holographic_hazedepth import haze_depth as _hd
+
+        return _hd(image, p=p, sky_guard=sky_guard, return_extras=return_extras)
+
+
+
+    def sharpness_depth(self, image, radius=6, gamma=0.6):
+
+        """DEPTH-OF-FIELD DEPTH from a single image via LOCAL SHARPNESS (in-focus foreground = near, blurred
+
+        background = far). Robust for heavily textured scenes. Returns depth (H,W) in [0,1], 1=nearest. See
+
+        holographic_hazedepth.sharpness_depth."""
+
+        from holographic.rendering.holographic_hazedepth import sharpness_depth as _sd
+
+        return _sd(image, radius=radius, gamma=gamma)
+
+
+
+    def fuse_depth(self, image, weights=(0.55, 0.45), use_haze=True, use_defocus=True, sky_guard=True):
+
+        """FUSE classical depth cues (HAZE aerial-perspective + SHARPNESS depth-of-field) into one relative depth
+
+        map -- the robust front end for HAZY or shallow-DoF photos where shape_from_shading fails. Returns depth
+
+        (H,W) in [0,1], 1=nearest. On the foggy-forest test this more than doubled the near/far separation vs
+
+        shape-from-shading. Hand to photo_to_3d/unproject. See holographic_hazedepth.fuse_depth."""
+
+        from holographic.rendering.holographic_hazedepth import fuse_depth as _fd
+
+        return _fd(image, weights=weights, use_haze=use_haze, use_defocus=use_defocus, sky_guard=sky_guard)
+
+
+
+
+    def vanishing_point(self, image, top_lines=14, return_confidence=False):
+
+        """Estimate the dominant VANISHING POINT of a scene's linear perspective from its strong OBLIQUE Hough
+
+        lines (rails, walls, a corridor), as (vx,vy) in pixels (may lie outside the image), or None if no clear
+
+        perspective. With return_confidence, also a [0,1] confidence (how tightly the oblique lines agree). See
+
+        holographic_hazedepth.vanishing_point."""
+
+        from holographic.rendering.holographic_hazedepth import vanishing_point as _vp
+
+        return _vp(image, top_lines=top_lines, return_confidence=return_confidence)
+
+
+
+    def ground_plane_depth(self, image, vp=None, horizon_softness=0.05):
+
+        """GROUND-PLANE DEPTH from linear perspective: for a forward-looking camera (road, railway, hallway) the
+
+        ground recedes toward the horizon, so depth increases with height up to the vanishing point's row. THE cue
+
+        that captures a track/road recession when haze and defocus are both weak (mostly-in-focus scene with only
+
+        distant mist). Returns depth (H,W) in [0,1], 1=nearest (frame bottom). vp auto-detected if None. See
+
+        holographic_hazedepth.ground_plane_depth."""
+
+        from holographic.rendering.holographic_hazedepth import ground_plane_depth as _gpd
+
+        return _gpd(image, vp=vp, horizon_softness=horizon_softness)
+
+
+    def auto_fuse_depth(self, image, sky_guard=None, return_weights=False):
+
+        """AUTO-WEIGHTED depth fusion: combine the HAZE and SHARPNESS cues, each weighted by how well it AGREES
+
+        with the scene's LINEAR PERSPECTIVE (the vanishing-point depth prior) -- so the cue actually tracking depth
+
+        for THIS image dominates and an inverted cue is down-weighted, removing per-image hand-tuning. Falls back to
+
+        the fixed 55/45 blend when no confident vanishing point is found. Auto sky-guard. Returns depth (H,W) in
+
+        [0,1], 1=nearest; with return_weights also (haze_w, sharp_w, vp). See holographic_hazedepth.auto_fuse_depth."""
+
+        from holographic.rendering.holographic_hazedepth import auto_fuse_depth as _afd
+
+        return _afd(image, sky_guard=sky_guard, return_weights=return_weights)
+
 
     def image_to_3d(self, image, fx=None, fy=None, cx=None, cy=None, light=None, depth_scale=1.0,
                     confidence_floor=0.3, smooth=1.0):
@@ -10420,6 +11405,16 @@ class UnifiedMind:
         holographic_elements.element."""
         from holographic.simulation_and_physics.holographic_elements import element
         return element(symbol)
+
+    def identify_element(self, props, margin=0.1):
+        """Identify the element(s) whose categorical fingerprint {category, state} best matches `props`, e.g.
+        {'category':'noble_gas','state':'gas'} -> the noble gases. The REVERSE of element(): element() looks up
+        properties by name, this queries the table BY attribute via match_record + decide_or_abstain. Returns
+        {'ranked', 'best', 'confident', 'score'}; confident is False when several elements share the fingerprint
+        (the honest 'under-determined' answer). Categorical only -- mass/number excluded. See
+        holographic_elements.identify_element."""
+        from holographic.simulation_and_physics.holographic_elements import identify_element
+        return identify_element(props, mind=self, margin=margin)
 
     def material_elemental(self, name):
         """A material's ELEMENTAL makeup and everything derived from it: {composition (element:count/ratio),
@@ -11229,6 +12224,32 @@ class UnifiedMind:
         real ImportError tail -> {ok, error}. Catches load-time breakage a syntax check misses. See
         holographic_codeedit.Editor.import_check."""
         return self._editor.import_check(path)
+
+    def affected_tests(self, changed_paths=None, since=None):
+        """Which test files actually need to run for a change -- the fix for "why do thousands of tests run on
+        every small commit?". Delegates entirely to tools/select_tests.py's static import graph (pure `ast`, no
+        execution, no coverage tracing): a test is picked if it transitively imports a changed module, or IS the
+        changed file. This is the SAME logic CI itself already runs on every push/PR (see NOTES_concepts.md, 'CI
+        SPEEDUP') -- previously reachable only from the command line (tools/test_changed.py), now callable through
+        the mind like any other faculty.
+
+        Pass `changed_paths` explicitly (a list of file paths relative to the repo root: what YOU know changed),
+        or leave it None to auto-detect from git via tools/test_changed.changed_files -- the working-tree diff vs
+        HEAD (staged + unstaged + new untracked files), or the diff since `since` (a branch/tag, e.g.
+        since='main') for the PR view.
+
+        Returns a sorted list of test file paths to hand to pytest, the string "ALL" if a change can't be scoped
+        safely (an unknown binary/data file, or a .py outside the module map -- fails toward running MORE tests,
+        never fewer), or [] if nothing is affected (e.g. a docs-only change). See tools.select_tests.affected_tests
+        / tools.test_changed.changed_files."""
+        from tools.select_tests import affected_tests as _affected_tests
+        from tools.test_changed import changed_files as _changed_files, REPO as _REPO
+        root = getattr(self, "_file_root", None) or _REPO
+        if changed_paths is None:
+            changed_paths = _changed_files(since=since)
+            if not changed_paths:
+                return []
+        return _affected_tests(changed_paths, root=root)
 
     def render_frame_delta(self, prev, curr, tile=32, thresh=1e-3):
         """The pixel-streaming primitive: return only the `tile`x`tile` image blocks that CHANGED between two
@@ -12138,6 +13159,18 @@ class UnifiedMind:
         entry point; controlled-vocabulary + deterministic (see holographic_scene_semantic)."""
         from holographic.simulation_and_physics.holographic_scene_semantic import scene_from_description
         return scene_from_description(text, mind=self)
+
+    def scene_from_image(self, image, k=5, seed=0, max_objects=3, background=False):
+        """BUILD A SCENE FROM A PHOTO (machine-initialised, not hand-authored): segment the image into regions,
+        keep the most object-like foreground ones, map each region's silhouette+colour to a primitive, and assemble a
+        live SemanticScene you can adjust()/render()/refine_to_target()/to_node_graph(). Returns {scene, regions,
+        roles, objects}. Deterministic. HONEST: shape comes from the 2-D silhouette and colour from the region mean;
+        DEPTH is not reconstructed (shape-from-shading is a brightness relief, measured too degenerate to fit
+        primitives to), so z=0 and front/back ordering is not recovered -- a machine STARTING POINT the critic and
+        node drill-down then refine. See holographic_scene_semantic.scene_from_image."""
+        from holographic.simulation_and_physics.holographic_scene_semantic import scene_from_image
+        return scene_from_image(image, k=k, seed=seed, max_objects=max_objects, background=background, mind=self)
+
 
     def semantic_scene(self, objects, environment=None):
         """Wrap an EXISTING list of scene objects ({shape,color,material,size,...}) as a SemanticScene so you can

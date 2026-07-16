@@ -114,3 +114,36 @@ def test_sprt_uses_fewer_samples_than_fixed_n_at_matched_error():
     n_fixed = next((N for N in range(1, 200) if fixed_err(N) <= realized), 200)
     assert asn < n_fixed                              # SPRT decides in fewer expected samples
     assert realized <= 0.06                           # and stays near the target error pair
+
+
+def test_permutation_null_primitive_through_mind():
+    """P2 (Tarter/Siemion/Cranmer): the shuffled-null discipline is exposed as ONE composable faculty
+    (mind.permutation_null) so any capability can get honest measurement -- calibrated (random datum flags at
+    ~alpha), has power (a true match collapses the null), discoverable, and deterministic."""
+    import numpy as np
+    import lecore
+    m = lecore.UnifiedMind(dim=128, seed=0)
+
+    # discoverable by a user phrasing
+    top3 = [c.name for c in m.find_capability("score against a shuffled null")[:3]]
+    assert any(n.startswith("Shuffled-null test") for n in top3), top3
+
+    rng0 = np.random.default_rng(2)
+    cb = rng0.standard_normal((25, 128)); cb /= np.linalg.norm(cb, axis=1, keepdims=True) + 1e-12
+    score = lambda q: float(np.max(cb @ (q / (np.linalg.norm(q) + 1e-12))))
+    resample = lambda r: r.standard_normal(128)
+
+    # POWER: a true codebook entry collapses the null
+    r = m.permutation_null(score(cb[7]), score, resample, n_null=300, seed=4)
+    assert r["collapsed"] and r["p"] < 0.02, r
+    assert 0.0 < r["p"] <= 1.0, "the +1 plug keeps p in (0,1]"
+    assert r["null_ci"][0] <= r["null_mean"] <= r["null_ci"][1]
+
+    # CALIBRATION: a random query does NOT reliably collapse the null (its p is not tiny)
+    q = np.random.default_rng(99).standard_normal(128)
+    rr = m.permutation_null(score(q), score, resample, n_null=300, seed=4)
+    assert rr["p"] > 0.02, ("a random query should not look like a strong match", rr["p"])
+
+    # DETERMINISM
+    assert (m.permutation_null(0.4, score, resample, n_null=200, seed=1)["p"]
+            == m.permutation_null(0.4, score, resample, n_null=200, seed=1)["p"])

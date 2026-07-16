@@ -129,9 +129,16 @@ record it as a declared negative so the audit stays meaningful.
 If you touched the catalog, regenerate and let the CI drift-gate keep everyone honest:
 
 ```bash
-python3 capdoc.py     # rewrites CAPABILITIES.md + capabilities.json from the live catalog
-python3 docgen.py     # rewrites REFERENCE.md from module docstrings
+python3 tools/regen_docs.py           # runs EVERY generator (the canonical list) -- this is the whole step
+python3 tools/regen_docs.py --check   # or: just tell me if anything is stale (what CI asks)
+python3 tools/regen_docs.py --list    # what it runs and what each one owns
 ```
+
+There are **six** generators, not two. This section used to name only `capdoc.py` and `docgen.py`, so a
+close-out ran those two, skipped `apiquickref.py`, and CI went red on the API_QUICKREF drift gate — the
+list was never hard, it was just incomplete *here* and invisible everywhere else (it lived only in the step
+list inside `.github/workflows/docs.yml`). The list now lives in `tools/regen_docs.py`; docs.yml calls that
+same module, and `tests/test_regen_docs.py` pins that every file CI drift-gates is covered by it.
 
 `capabilities.json` is the machine-readable contract other tools ingest; the CI gate fails if it drifts from the
 catalog, so a capability change that isn't regenerated can't merge. Add runnable, verified snippets to the
@@ -148,7 +155,7 @@ will rot.
 - [ ] **Registered** in the catalog with a runnable example + search aliases; confirmed discoverable.
 - [ ] Verified **static + self-test + end-to-end** (and HTTP `/invoke` if agent-facing); `file_python_check` clean.
 - [ ] `reachability_audit` / `catalog_gaps` / `skill_lint` all clean.
-- [ ] Generated docs regenerated (`capdoc.py`, `docgen.py`); guide snippets are runnable and were run.
+- [ ] Generated docs regenerated (`python3 tools/regen_docs.py` — all six, not just capdoc/docgen); guide snippets are runnable and were run.
 
 If every box is checked, the capability is real: discoverable, callable, wired, documented, and un-rottable — not
 isolated in a test.

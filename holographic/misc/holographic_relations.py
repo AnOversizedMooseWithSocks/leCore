@@ -99,6 +99,103 @@ def relation_map(rec_a, rec_b):
     return bind(rec_b, involution(rec_a))
 
 
+def match_record(encode, query_fields, candidates, top=None):
+    """DOMAIN-GENERAL structured matching: rank `candidates` by how well their role-filler RECORD matches the
+    query record, using bound-record similarity (bind role->filler, bundle, cosine). This is the general form
+    of holographic role routing -- the SAME primitive works for any typed items:
+      * routing:   {action, object, quality}  -> which module
+      * physics:   {conserved, topology, motion} -> which regime
+      * market:    {instrument, direction, magnitude} -> which event class
+      * astronomy: {band, feature, object} -> which source type
+      * mesh:      {defect, location, severity} -> which repair
+    because the mechanism only cares that items share a SCHEMA of roles with codebook fillers, not what the
+    roles mean. Measured: exact-match candidates score 1.000 and partial matches separate cleanly (a market
+    event sharing instrument+magnitude but flipping direction scores ~0.68, not ~1.0 -- structure, not a bag).
+
+    `encode` is a callable fields_dict -> vector (e.g. mind.encode_record); `query_fields` and each value of
+    `candidates` ({name: fields_dict}) are role->filler dicts. Returns [(name, score)] high-to-low (top-k if
+    `top` given). A candidate with an EMPTY record scores -inf (it has no structure to compare) -- callers
+    union this with a flat ranking rather than trusting a structureless item. KEPT NEGATIVE: this rewards
+    role AGREEMENT over shared fillers; it does NOT help when items share no schema, and it never invents a
+    filler -- an empty query record yields [] (honest abstention), the caller falls back."""
+    import numpy as _np
+    if not query_fields:
+        return []                                            # nothing to match on -> abstain, do not guess
+    q = _np.asarray(encode(query_fields), dtype=_np.float64).reshape(-1)
+    q = q / (_np.linalg.norm(q) + 1e-12)
+    out = []
+    for name, fields in candidates.items():
+        if not fields:
+            out.append((name, float('-inf'))); continue     # no structure -> cannot compete structurally
+        v = _np.asarray(encode(fields), dtype=_np.float64).reshape(-1)
+        v = v / (_np.linalg.norm(v) + 1e-12)
+        out.append((name, float(q @ v)))
+    out.sort(key=lambda kv: -kv[1])
+    return out[:top] if top else out
+
+
+def build_prototypes(encode, classes):
+    """Build class PROTOTYPES from examples: {class_name: [example, ...]} -> {class_name: unit mean vector}.
+    Each prototype is the mean BUNDLE of its examples' encodings (superposition), which is what a class 'looks
+    like' on average. `encode` maps one example -> vector (e.g. mind.perceive for text, or any feature encoder).
+    The example-driven twin of a codebook: you supply instances, not a schema."""
+    import numpy as _np
+    proto = {}
+    for name, examples in classes.items():
+        V = _np.stack([_np.asarray(encode(x), dtype=_np.float64).reshape(-1) for x in examples])
+        mu = V.mean(0)
+        proto[name] = mu / (_np.linalg.norm(mu) + 1e-12)
+    return proto
+
+
+def match_prototype(encode, query, prototypes):
+    """UNSTRUCTURED classification: when an item has NO role schema (it is a bag/blend, not a record), match it
+    to the nearest class PROTOTYPE by cosine. This is the general form of holographic_intent.route_intent
+    (classify a question by the blend of its word meanings) -- promoted so ANY 'no structure, still must
+    decide' case reuses it: a gesture from example poses, a regime from example signals, a material from
+    example samples, a writing style from example texts. `prototypes` is {class: unit vector} from
+    build_prototypes; `encode` maps the query the same way. Returns ranked [(class, score)] high-to-low, so it
+    composes with decide_or_abstain exactly like match_record does.
+
+    match_record vs match_prototype -- the two poles (kept, general): match_record is for items WITH named
+    roles (bind role->filler, structure-aware); match_prototype is for items WITHOUT roles (mean-bundle blend,
+    order-free). Same 'match against a set + decide' frame, opposite assumptions about structure. Pick by: does
+    the item decompose into named roles? Yes -> match_record. No, it is a bag of features -> match_prototype."""
+    import numpy as _np
+    if not prototypes:
+        return []
+    q = _np.asarray(encode(query), dtype=_np.float64).reshape(-1)
+    q = q / (_np.linalg.norm(q) + 1e-12)
+    out = [(name, float(q @ p)) for name, p in prototypes.items()]
+    out.sort(key=lambda kv: -kv[1])
+    return out
+
+
+def decide_or_abstain(ranked, margin=0.1, min_score=None):
+    """The shared DECISION step every classify/match caller reimplements: given a ranked [(name, score)] list
+    (from match_record, a prototype match, any scorer), return (winner, score, confident) where `confident` is
+    True only if the top-1 beats top-2 by at least `margin` (and clears `min_score` if given). WHY THIS IS
+    SHARED: match_record and its cousins return SCORES, not a decision; the caller must judge whether the top
+    is CLEARLY ahead or the field is a tie it should abstain on -- routing abstains on an unparsed request,
+    adaptive dispatch abstains on null-indistinguishable data (the SETI gate), diagnosis must abstain when
+    flu~covid. All the same sub-step: top1-top2 gap vs a margin. Promoting it means one honest abstention rule
+    instead of each caller inventing its own.
+
+    Returns (winner_name, winner_score, confident: bool). On an empty list -> (None, None, False). On a single
+    candidate -> confident iff it clears min_score (no runner-up to separate from). KEPT NEGATIVE: a small
+    margin is NOT calibrated significance -- for a real false-alarm probability use a permutation/shuffle null
+    (decide_confidence / shuffled-null); this is the cheap deterministic gap gate, honest about being cheap."""
+    if not ranked:
+        return (None, None, False)
+    top_name, top_score = ranked[0]
+    if min_score is not None and top_score < min_score:
+        return (top_name, top_score, False)
+    if len(ranked) == 1:
+        return (top_name, top_score, True)
+    gap = top_score - ranked[1][1]
+    return (top_name, top_score, gap >= margin)
+
+
 class KnowledgeStore:
     """A tiny store of role-bound records that answers WHY/HOW questions and
     multi-hop chains. Owns its vocabularies, so all structure is reproducible
@@ -267,3 +364,41 @@ class KnowledgeStore:
             if throughput < min_throughput:            # path too weak -> abstain
                 return None, throughput, confidences
         return filler, throughput, confidences
+
+
+def _selftest():
+    """Assert match_record is DOMAIN-GENERAL and structure-aware: exact match scores 1.0, partial matches
+    separate, empty query abstains. Uses a tiny deterministic record encoder over shared role/filler atoms."""
+    import lecore, numpy as np
+    m = lecore.UnifiedMind(dim=1024, seed=0)
+    enc = m.encode_record
+    # market: rally exact; selloff shares instrument+magnitude but flips direction -> lower, not tied
+    q = {'instrument': 'equity', 'direction': 'up', 'magnitude': 'large'}
+    c = {'rally': {'instrument': 'equity', 'direction': 'up', 'magnitude': 'large'},
+         'selloff': {'instrument': 'equity', 'direction': 'down', 'magnitude': 'large'},
+         'drift': {'instrument': 'bond', 'direction': 'up', 'magnitude': 'small'}}
+    r = match_record(enc, q, c)
+    assert r[0][0] == 'rally' and r[0][1] > 0.99, r
+    assert dict(r)['selloff'] < 0.95 and dict(r)['selloff'] > dict(r)['drift'], r  # partial-match ordering
+    assert match_record(enc, {}, c) == [], "empty query must abstain, not guess"
+
+    # decide_or_abstain: confident on a clear gap, abstains on a tie
+    w, s, conf = decide_or_abstain(r, margin=0.1)
+    assert w == 'rally' and conf is True, (w, conf)
+    tie = [('x', 1.0), ('y', 1.0)]
+    assert decide_or_abstain(tie, margin=0.1)[2] is False, "must abstain on a tie"
+    assert decide_or_abstain([], margin=0.1) == (None, None, False)
+
+    # match_prototype + build_prototypes: classify a role-free blend, compose with decide
+    proto = build_prototypes(lambda x: m.perceive(x, "text"),
+                             {'greet': ['hello there', 'hi how are you'], 'bye': ['goodbye now', 'see you later']})
+    pr = match_prototype(lambda x: m.perceive(x, "text"), "hey hello there", proto)
+    assert pr[0][0] == 'greet', pr
+    assert match_prototype(lambda x: m.perceive(x, "text"), "q", {}) == [], "empty prototypes -> abstain"
+
+    print("  relations selftest OK: match_record rally=%.3f>selloff=%.3f; decide abstains on tie; "
+          "match_prototype -> %s" % (r[0][1], dict(r)['selloff'], pr[0][0]))
+
+
+if __name__ == "__main__":
+    _selftest()

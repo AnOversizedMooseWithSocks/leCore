@@ -1,6 +1,7 @@
 """Tests for holographic_scene: DCT/colour/shape tagging, compositional encoding,
 and resonator factoring (single object and multi-object scenes)."""
 import numpy as np
+import pytest
 import holographic.scene_and_pipeline.holographic_scene as sc
 import holographic.misc.holographic_vision as hv
 
@@ -89,6 +90,8 @@ def test_compositional_separates_what_holistic_cannot():
     assert sc.colour_tag(img) in ("red", "blue")
 
 
+@pytest.mark.slow  # resonator factoring across a blended multi-factor scene; measured ~27s, exceeds the 15s
+                    # per-test budget (was silently skipped by the watchdog on every default run)
 def test_blend_scenes_projects_one_factor_across():
     # SCENE-LEVEL PROJECTION: given two scene vectors (objects unknown), factor
     # each, project one factor across (A's forms wearing B's colours), and

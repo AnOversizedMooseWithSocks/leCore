@@ -193,6 +193,143 @@ def _one_level_matrix(mesh):
     return Mesh(new_V, faces)
 
 
+def auto_crease_map(mesh, threshold_deg=30.0, sharpness=5.0):
+    """AUTO-CREASE: build a crease map for `catmull_clark` by tagging every edge whose DIHEDRAL angle exceeds
+    `threshold_deg` -- the box-cage edges an artist would crease by hand (a cube's 90-deg edges, a bevel's fold),
+    left off a smooth curved region. Returns {(vi,vj): sharpness} ready to pass as catmull_clark(creases=...).
+
+    This is a pure COMPOSITION -- detect_creases (holographic_meshcurvature, the dihedral test) picks the edges, and
+    this pairs each with `sharpness`. So a subdivided box keeps its hard corners with zero hand-tagging: the #1 thing
+    that made the box-model legs slurp was smoothing edges that should have stayed sharp. KEPT NEGATIVE: a single
+    global threshold + a single sharpness; per-edge artistic tuning still wants the manual dict."""
+    from holographic.mesh_and_geometry.holographic_meshcurvature import detect_creases
+    from holographic.mesh_and_geometry.holographic_mesh import Mesh
+    mm = mesh if not isinstance(mesh, dict) else Mesh(np.asarray(mesh["vertices"], float),
+                                                      [tuple(int(i) for i in f) for f in mesh["faces"]])
+    return {tuple(e): float(sharpness) for e in detect_creases(mm, threshold_deg=threshold_deg)}
+
+
+def catmull_clark(mesh, levels=1, creases=None):
+    """CATMULL-CLARK subdivide `levels` times -- THE box-modelling subdivision surface (Catmull & Clark 1978): every
+    face (any arity) becomes quads, so a quad cage STAYS ALL-QUAD -- which is why artists model with it and why Loop
+    (which triangulates) is the wrong smoother for a quad cage. Per level: a FACE point (face centroid), an EDGE point
+    (average of the edge's two ends and its two face points), and each ORIGINAL vertex moves to (F + 2R + (n-3)P)/n --
+    F = average of adjacent face points, R = average of adjacent edge MIDpoints, n = valence (the classic masks).
+    Boundary edges/vertices use the cubic B-spline curve rules (edge midpoint; vertex (1/8,3/4,1/8)), so an open cage
+    subdivides sanely. Preserves chi; a closed manifold stays a closed manifold. Deterministic. Returns a new Mesh.
+
+    SEMI-SHARP CREASES (DeRose/Kass/Truong 1998, the Pixar rules -- default None = the pure smooth surface, unchanged):
+    `creases` maps an undirected edge (vi, vj) (either vertex order) to a sharpness s >= 0. An edge with s >= 1 uses the
+    SHARP rules at this level (edge point = the plain midpoint; a vertex on >=2 sharp edges uses the crease mask
+    (1/8, 3/4, 1/8) along the crease, a vertex on >=3 stays put as a corner); 0 < s < 1 linearly BLENDS the sharp and
+    smooth points; every child of a crease edge inherits s - 1 (so a crease of sharpness k stays sharp for k levels then
+    smooths -- the semi-sharp transition artists tune). This is the SAME machinery as the boundary rules, gated by a
+    per-edge tag, which is why it is a small extension. What lets you hold an edge sharp WITHOUT extra support loops.
+
+    KEPT NEGATIVE: this is the SUBDIVISION, not the limit surface -- no closed-form limit projection here (loop_limit
+    exists for triangles; the Catmull-Clark limit masks are a future add)."""
+    from collections import defaultdict
+    from holographic.mesh_and_geometry.holographic_mesh import Mesh
+    # normalise the crease map to canonical (min,max) keys once; None -> empty (byte-identical smooth path)
+    cr = {}
+    if creases:
+        for (a, b), s in creases.items():
+            if float(s) > 0.0:
+                cr[(min(int(a), int(b)), max(int(a), int(b)))] = float(s)
+    out = mesh
+    for _ in range(int(levels)):
+        V = np.asarray(out.vertices, float)
+        F = [tuple(int(i) for i in f) for f in out.faces]
+        nV = len(V)
+
+        face_pt = np.array([V[list(f)].mean(0) for f in F])                  # one new point per face
+
+        edge_faces = defaultdict(list)                                       # undirected edge -> face indices
+        for fi, f in enumerate(F):
+            k = len(f)
+            for a in range(k):
+                e = (min(f[a], f[(a + 1) % k]), max(f[a], f[(a + 1) % k]))
+                edge_faces[e].append(fi)
+        edges = sorted(edge_faces)                                           # deterministic edge order
+        eidx = {e: i for i, e in enumerate(edges)}
+        edge_pt = np.zeros((len(edges), 3))
+        boundary = np.zeros(len(edges), bool)
+        sharp = np.zeros(len(edges))                                         # per-edge sharpness s at this level
+        for i, e in enumerate(edges):
+            fs = edge_faces[e]
+            mid = 0.5 * (V[e[0]] + V[e[1]])
+            s = cr.get(e, 0.0)
+            sharp[i] = s
+            if len(fs) != 2:                                                 # boundary: always the sharp curve rule
+                edge_pt[i] = mid; boundary[i] = True
+            else:
+                smooth_pt = (V[e[0]] + V[e[1]] + face_pt[fs[0]] + face_pt[fs[1]]) / 4.0
+                if s <= 0.0:
+                    edge_pt[i] = smooth_pt
+                elif s >= 1.0:
+                    edge_pt[i] = mid                                         # fully sharp this level
+                else:
+                    edge_pt[i] = (1.0 - s) * smooth_pt + s * mid            # fractional: blend (DeRose)
+
+        vfaces = defaultdict(list); vedges = defaultdict(list)
+        for fi, f in enumerate(F):
+            for v in set(f):
+                vfaces[v].append(fi)
+        for i, e in enumerate(edges):
+            vedges[e[0]].append(i); vedges[e[1]].append(i)
+
+        newV = np.zeros((nV, 3))
+        for v in range(nV):
+            # a vertex is "creased" along an edge if that edge is a boundary OR carries sharpness >= 1
+            crease_e = [i for i in vedges[v] if boundary[i] or sharp[i] >= 1.0]
+            frac = max([sharp[i] for i in vedges[v] if not boundary[i]] + [0.0])   # strongest fractional pull
+            nb = [edges[i][0] if edges[i][1] == v else edges[i][1] for i in crease_e]
+            n = len(vfaces[v])
+            Fa = face_pt[vfaces[v]].mean(0)
+            Ra = np.array([0.5 * (V[edges[i][0]] + V[edges[i][1]]) for i in vedges[v]]).mean(0)
+            smooth_v = (Fa + 2.0 * Ra + (n - 3.0) * V[v]) / n if n > 0 else V[v].copy()
+            if len(crease_e) >= 3:
+                sharp_v = V[v].copy()                                        # corner: pinned
+            elif len(crease_e) == 2:
+                sharp_v = 0.75 * V[v] + 0.125 * (V[nb[0]] + V[nb[1]])        # crease curve mask
+            elif len(crease_e) == 1:
+                sharp_v = 0.75 * V[v] + 0.125 * (V[nb[0]] + V[nb[0]])        # crease end (dart): treat as its own nb
+            else:
+                sharp_v = None
+            if sharp_v is None:
+                newV[v] = smooth_v                                          # ordinary interior vertex
+            elif any(boundary[i] for i in crease_e) or frac >= 1.0 or len(crease_e) >= 2:
+                # fully sharp when a real boundary/>=1 crease governs it; blend only for a lone fractional edge
+                if 0.0 < frac < 1.0 and not any(boundary[i] for i in crease_e) and all(sharp[i] < 1.0 for i in crease_e):
+                    newV[v] = (1.0 - frac) * smooth_v + frac * sharp_v
+                else:
+                    newV[v] = sharp_v
+            else:
+                newV[v] = (1.0 - frac) * smooth_v + frac * sharp_v          # fractional blend toward the crease
+
+        allV = np.vstack([newV, face_pt, edge_pt])
+        fbase = nV; ebase = nV + len(F)
+        newF = []
+        child_cr = {}                                                       # crease tags for the refined mesh
+        for fi, f in enumerate(F):
+            k = len(f)
+            for a in range(k):                                               # one quad per original face corner
+                v = f[a]
+                e_prev = eidx[(min(f[a - 1], v), max(f[a - 1], v))]
+                e_next = eidx[(min(v, f[(a + 1) % k]), max(v, f[(a + 1) % k]))]
+                newF.append((v, ebase + e_next, fbase + fi, ebase + e_prev))
+        # propagate sharpness to child edges: each crease edge splits into two, each inheriting s - 1 (>=0)
+        for i, e in enumerate(edges):
+            if sharp[i] > 0.0:
+                cs = max(sharp[i] - 1.0, 0.0)
+                if cs > 0.0:
+                    child_cr[(min(e[0], ebase + i), max(e[0], ebase + i))] = cs
+                    child_cr[(min(e[1], ebase + i), max(e[1], ebase + i))] = cs
+        out = Mesh(allV, newF)
+        cr = child_cr
+    return out
+
+
 def loop_subdivide(mesh, levels=1):
     """Loop-subdivide a triangle mesh `levels` times: refine each triangle into four and low-pass smooth with the
     Loop masks (C2 limit surface). A non-triangle input is triangulated first. Returns a new triangle Mesh. Each
@@ -405,6 +542,45 @@ def _selftest():
     Pf, Nf = loop_limit(flat)
     assert float(np.max(np.abs(Pf[:, 2]))) < 1e-12
     assert float(np.abs(np.abs(Nf[:, 2]) - 1.0).max()) < 1e-9              # ...and its normals are all +-z
+
+    # (e) CATMULL-CLARK (the quad box-modelling surface): a cube stays ALL-QUAD (6 -> 24 -> 96), closed manifold,
+    # chi = 2 preserved, and rounds toward a sphere (radius spread shrinks 0.23 -> ~0.01). Loop would triangulate --
+    # the exact reason artists box-model with CC and why it had to exist alongside loop_subdivide.
+    from holographic.mesh_and_geometry.holographic_mesh import box as _box
+    _cc1 = catmull_clark(_box(), 1); _cc2 = catmull_clark(_box(), 2)
+    assert len(_cc1.faces) == 24 and len(_cc2.faces) == 96
+    assert all(len(f) == 4 for f in _cc2.faces) and _cc2.is_manifold() and _cc2.is_closed()
+    _E = set()
+    for _f in _cc2.faces:
+        _ff = [int(i) for i in _f]
+        for _a in range(4):
+            _E.add(tuple(sorted((_ff[_a], _ff[(_a + 1) % 4]))))
+    assert _cc2.n_vertices - len(_E) + len(_cc2.faces) == 2                # chi preserved
+    _V2 = np.asarray(_cc2.vertices, float); _r = np.linalg.norm(_V2 - _V2.mean(0), axis=1)
+    assert float(_r.std() / _r.mean()) < 0.02                              # rounds toward the sphere
+
+    # (f) SEMI-SHARP CREASES (DeRose 1998): creases=None is byte-identical to the smooth path; creasing ALL 12 cube
+    # edges hard keeps the cube BOXY (radius spread stays large instead of rounding), and a single creased edge keeps
+    # the mesh a closed all-quad manifold. This is the verb that holds an edge sharp with NO extra support loops.
+    assert np.array_equal(np.asarray(_cc2.vertices), np.asarray(catmull_clark(_box(), 2, creases=None).vertices))
+    _edges = set()
+    for _f in _box().faces:
+        _ff = [int(i) for i in _f]
+        for _a in range(len(_ff)):
+            _edges.add((min(_ff[_a], _ff[(_a + 1) % len(_ff)]), max(_ff[_a], _ff[(_a + 1) % len(_ff)])))
+    _hard = catmull_clark(_box(), 2, creases={_e: 5.0 for _e in _edges})
+    _Vh = np.asarray(_hard.vertices, float); _rh = np.linalg.norm(_Vh - _Vh.mean(0), axis=1)
+    assert float(_rh.std() / _rh.mean()) > 0.10                            # stayed boxy, did not round
+    _one = catmull_clark(_box(), 2, creases={next(iter(_edges)): 5.0})
+    assert all(len(_f) == 4 for _f in _one.faces) and _one.is_manifold() and _one.is_closed()
+
+    # auto_crease_map: the dihedral detector tags a cube's 12 hard edges automatically; feeding that map keeps the
+    # cube boxy (no hand-tagging). The composition that makes 'crease the sharp edges' a one-liner.
+    _acm = auto_crease_map(_box(), threshold_deg=30.0)
+    assert len(_acm) == 12                                   # all 12 cube edges are 90-deg sharp
+    _auto = catmull_clark(_box(), 2, creases=_acm)
+    _Va = np.asarray(_auto.vertices, float); _ra = np.linalg.norm(_Va - _Va.mean(0), axis=1)
+    assert float(_ra.std() / _ra.mean()) > 0.10             # stayed boxy via auto-crease
 
     print(f"holographic_meshsubdiv selftest: ok (Loop subdivision: faces x4 ({s.n_faces} -> {sub.n_faces}), "
           f"V'=V+E ({s.n_vertices}+{E} = {sub.n_vertices}), chi + closed manifold preserved; flat stays flat to "

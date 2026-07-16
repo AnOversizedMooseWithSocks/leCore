@@ -1,5 +1,6 @@
 """Tests for the 2D / text / learning / utility tool wiring + catalog discoverability (gap closure)."""
 import numpy as np
+import pytest
 from holographic.misc.holographic_unified import UnifiedMind
 from holographic.caching_and_storage.holographic_catalog import default_catalog, seed_from_modules
 
@@ -59,6 +60,8 @@ def test_utilities_discoverable():
     assert any(not h.name.startswith("holographic_") for h in hits)
 
 
+@pytest.mark.slow  # scans catalog_gaps' full family sweep against a live mind; measured ~24-30s, exceeds the 15s
+                    # per-test budget (was silently skipped by the watchdog on every default run)
 def test_gap_tool_reports_zero_for_fixed_families():
     import importlib.util, os
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "catalog_gaps.py")

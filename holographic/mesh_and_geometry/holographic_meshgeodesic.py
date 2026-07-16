@@ -63,6 +63,33 @@ def _edge_graph(mesh):
     return adj
 
 
+def _dijkstra(adj, source, n_vertices, target=None):
+    """Shared single-source Dijkstra over a weighted adjacency {u: [(v, w), ...]} -- the ONE mesh-edge-graph
+    shortest-path kernel (lifted so `geodesic_distances` here and `meshseam.shortest_seam` stop each carrying their
+    own copy). Returns (dist, prev): `dist` an (n_vertices,) float array (np.inf for unreachable), `prev` a dict
+    {v: u} of the predecessor on the shortest path (absent for source and unreachable vertices). Determinism: the
+    heap orders by (distance, vertex-index), so equal-distance ties break on the lower vertex index -- the exact
+    behaviour both callers documented and relied on. Pass `target` for an early-out once it is finalised (path
+    queries do not need the whole field); leave it None for the full single-source field."""
+    dist = np.full(n_vertices, np.inf)
+    dist[source] = 0.0
+    prev = {}
+    pq = [(0.0, int(source))]
+    while pq:
+        d, u = heapq.heappop(pq)
+        if u == target:
+            break                                      # the target is finalised the moment it is popped
+        if d > dist[u]:
+            continue                                   # a stale queue entry
+        for (v, w) in adj[u]:
+            nd = d + w
+            if nd < dist[v]:
+                dist[v] = nd
+                prev[v] = u
+                heapq.heappush(pq, (nd, v))
+    return dist, prev
+
+
 def geodesic_distances(mesh, source, adj=None):
     """Single-source geodesic distance: the shortest path ALONG MESH EDGES from `source` to every vertex
     (Dijkstra with Euclidean edge weights). Distance over the surface, not the straight line through the void.
@@ -70,18 +97,7 @@ def geodesic_distances(mesh, source, adj=None):
     `adj` (from `_edge_graph`) to amortise the graph build across many sources."""
     if adj is None:
         adj = _edge_graph(mesh)
-    dist = np.full(mesh.n_vertices, np.inf)
-    dist[source] = 0.0
-    pq = [(0.0, int(source))]
-    while pq:
-        d, u = heapq.heappop(pq)
-        if d > dist[u]:
-            continue                                   # a stale queue entry
-        for (v, w) in adj[u]:
-            nd = d + w
-            if nd < dist[v]:
-                dist[v] = nd
-                heapq.heappush(pq, (nd, v))
+    dist, _prev = _dijkstra(adj, source, mesh.n_vertices)   # the shared kernel; we keep only the distance field here
     return dist
 
 

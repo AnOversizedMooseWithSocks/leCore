@@ -52,6 +52,9 @@ class Service:
         from holographic.misc.holographic_bus import MessageBus
         self._bus = MessageBus()                            # the message bus: person + agent both connected (push, no poll)
         self._frames = None                                 # lazily-built FrameServer (per-session quality control)
+        self._games = {}                                    # world_id -> (ShardWorld, WorldStreamer): the live game rooms
+        import threading as _threading
+        self._game_lock = _threading.Lock()                 # one clock writer at a time (stream tick vs POSTed commands)
         self._register()
         if persist_path:
             self._load_from_disk()                          # restore a previous session's data if the file exists
@@ -78,6 +81,8 @@ class Service:
         self._routes[("GET", "/tools")] = self._tools           # the standard tool manifest (name, description, params)
         self._routes[("POST", "/invoke")] = self._invoke         # run one faculty: {name, args} -> its result
         self._routes[("POST", "/frame")] = self._frame           # real-time frame serving: adaptive quality per session
+        self._routes[("POST", "/game")] = self._game             # game rooms: create / submit commands / tick / snapshot
+        self._routes[("GET", "/game/stream")] = self._game_stream_doc  # SSE push: per-client world deltas
         self._routes[("POST", "/pick")] = self._pick             # viewport picking: screen coord -> vert/edge/face
         self._routes[("GET", "/frame/stream")] = self._frame_stream_doc  # SSE push: stream frames at a target rate
         self._routes[("POST", "/sql")] = self._sql
@@ -246,6 +251,64 @@ class Service:
                                        last_frame_ms=payload.get("last_frame_ms"))
         info["ok"] = True
         return info
+
+    def _game_room(self, world_id, params=None):
+        """Get-or-create a game room: (ShardWorld, WorldStreamer). The streamer is built
+        NON-advancing -- the clock is owned by whoever drives it (a POST {'ticks':N} or the SSE
+        loop's explicit advance), never implicitly by a read, so two clients can't double-step."""
+        room = self._games.get(world_id)
+        if room is None:
+            from holographic.simulation_and_physics.holographic_gameshard import ShardWorld, WorldStreamer
+            p = params or {}
+            w = ShardWorld(cell=float(p.get("cell", 64.0)), dt=float(p.get("dt", 1.0 / 60.0)),
+                           seed=int(p.get("seed", 0)), gravity=tuple(p.get("gravity", (0.0, 0.0, 0.0))),
+                           restitution=float(p.get("restitution", 0.2)))
+            room = (w, WorldStreamer(w, advance_per_event=False))
+            self._games[world_id] = room
+        return room
+
+    def _game(self, payload):
+        """GAME ROOMS -- the interaction layer's HTTP face. Body: {world, create?, cmds?, ticks?,
+        aoi?, drop?}. `create` passes world params (cell, dt, seed, gravity, restitution) on first
+        contact; `cmds` is a list of shard commands routed by world.submit (spawns route by
+        position); `ticks` advances the authoritative clock N ticks; `aoi` {center, radius}
+        returns a cross-shard snapshot; {drop:true} deletes the room. Deterministic on purpose:
+        the same POST sequence replays to the same world digest. GET /game/stream is the SSE push
+        of per-client deltas over the same room."""
+        payload = payload or {}
+        world_id = payload.get("world", "w0")
+        if payload.get("drop"):
+            self._games.pop(world_id, None)
+            return {"ok": True, "dropped": world_id}
+        w, _st = self._game_room(world_id, payload.get("create"))
+        # WHY a lock and not "the GIL is enough": submit/tick interleaving from a concurrent SSE
+        # thread could apply a command mid-collision-pass -- the digest would still be *a* valid
+        # state, just not a REPLAYABLE one, silently breaking the determinism contract.
+        with self._game_lock:
+            for c in payload.get("cmds", []) or []:
+                w.submit(dict(c))
+            migrated = []
+            for _ in range(int(payload.get("ticks", 0))):
+                migrated.extend(w.tick()["migrated"])
+        out = {"ok": True, "world": world_id, "tick": w.tick_count, "shards": len(w.shards),
+               "n": sum(len(s.ids) for s in w.shards.values()), "migrated": migrated,
+               "digest": w.world_digest()}
+        aoi = payload.get("aoi")
+        if aoi:
+            out["aoi"] = w.snapshot(center=aoi["center"], radius=float(aoi["radius"]))
+        return out
+
+    def _game_stream_doc(self, _payload):
+        """SSE PUSH channel for game rooms: GET /game/stream?world=&session=&target_fps=&frames=
+        &cx=&cy=&cz=&r=&advance= keeps the connection open and pushes one DELTA event per frame
+        ('data: {tick, added, removed, moved, digest, n}'): first event is the client's full
+        area-of-interest as 'added', later events only what changed -- the wire format a three.js
+        client feeds straight into its scene graph. advance=1 (default) makes THIS stream drive
+        the world clock at target_fps; pass advance=0 for extra viewers of a world something else
+        is ticking. This handler is only the doc stub; streaming happens in do_GET (it must hold
+        the socket open)."""
+        return {"ok": True, "note": "GET /game/stream is a streaming SSE endpoint; connect with an "
+                "EventSource. Query: world, session, target_fps, frames (0=unbounded), cx, cy, cz, r, advance."}
 
     def _pick(self, payload):
         """VIEWPORT PICKING for a 3D-modeling client: which vert/edge/face is under the cursor. Body: {wireframe,
@@ -524,6 +587,10 @@ def make_handler(service):
                 if not self._authorized():
                     return self._reply(401, {"ok": False, "error": "missing or bad Authorization bearer token"})
                 return self._stream_frames()
+            if self.path.split("?")[0] == "/game/stream":
+                if not self._authorized():
+                    return self._reply(401, {"ok": False, "error": "missing or bad Authorization bearer token"})
+                return self._stream_game()
             self._serve("GET")
 
         def _stream_frames(self):
@@ -570,6 +637,49 @@ def make_handler(service):
             except (BrokenPipeError, ConnectionResetError):
                 pass                                           # the client closed the EventSource -- stop cleanly
 
+        def _stream_game(self):
+            # SSE for game rooms: same push mechanics as _stream_frames, different payload -- one
+            # WorldStreamer DELTA per event. advance=1 means this stream owns the world clock.
+            import time as _time
+            import urllib.parse as _up
+            q = _up.parse_qs(_up.urlparse(self.path).query)
+            world_id = (q.get("world", ["w0"]) or ["w0"])[0]
+            session = (q.get("session", ["stream"]) or ["stream"])[0]
+            target_fps = float((q.get("target_fps", ["30"]) or ["30"])[0])
+            max_frames = int((q.get("frames", ["0"]) or ["0"])[0])
+            advance = (q.get("advance", ["1"]) or ["1"])[0] not in ("0", "false", "no")
+            center = None
+            radius = None
+            if "r" in q:
+                radius = float(q["r"][0])
+                center = (float((q.get("cx", ["0"]))[0]), float((q.get("cy", ["0"]))[0]),
+                          float((q.get("cz", ["0"]))[0]))
+            world, streamer = service._game_room(world_id)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            period = 1.0 / target_fps
+            n = 0
+            try:
+                while max_frames == 0 or n < max_frames:
+                    start = _time.perf_counter()
+                    with service._game_lock:
+                        if advance:
+                            world.tick()      # this stream is the designated clock
+                        ev = streamer.next_event(session, center=center, radius=radius)
+                    self.wfile.write(("data: " + json.dumps(ev, default=_json_default) + "\n\n").encode())
+                    self.wfile.flush()
+                    n += 1
+                    elapsed = _time.perf_counter() - start
+                    if elapsed < period:
+                        _time.sleep(period - elapsed)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            finally:
+                streamer.drop(session)        # forget the baseline; sessions are per-connection
+
         def do_POST(self):
             self._serve("POST")
 
@@ -614,11 +724,19 @@ def _jsonable(o):
     return {"type": type(o).__name__, "repr": repr(o)[:500]}    # object -> a typed summary, not a crash
 
 
-def serve(host="127.0.0.1", port=8080, token=None, persist_path=None, mind=None):
+def serve(host="127.0.0.1", port=8080, token=None, persist_path=None, mind=None, threads=False):
     """Start the standalone API server (blocking). Returns nothing; Ctrl-C to stop. Pass `mind` to expose a specific
     configured UnifiedMind at /tools + /invoke; otherwise a default one is built on first use."""
     service = Service(token=token, persist_path=persist_path, mind=mind)
-    httpd = HTTPServer((host, port), make_handler(service))
+    if threads:
+        # ThreadingHTTPServer: required for game streaming (an open SSE stream must not block
+        # command POSTs). Default OFF -- single-threaded is the pinned old behaviour, and the
+        # database routes have not been audited for concurrent writers; game routes carry their
+        # own lock.
+        from http.server import ThreadingHTTPServer
+        httpd = ThreadingHTTPServer((host, port), make_handler(service))
+    else:
+        httpd = HTTPServer((host, port), make_handler(service))
     where = "%s:%d" % (host, port)
     print("leCore API service v%s serving on http://%s" % (__version__, where))
     print("  try:  curl http://%s/health" % where)

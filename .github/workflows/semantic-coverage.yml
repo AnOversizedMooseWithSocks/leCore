@@ -1,0 +1,165 @@
+# .github/workflows/semantic-coverage.yml
+#
+# INTEGRATION with the existing workflows (checked against ci.yml / docs.yml / package.yml -- do not rename):
+#   * distinct workflow name; ci.yml's 'tests' check and branch protection are untouched
+#   * path-filtered triggers do NOT match the files docs.yml's docs-bot commits, so no re-trigger loop
+#   * cache keys ('knowledge-cache-*', 'nomic-gq8-*') are disjoint from the pip caches
+#   * PREREQUISITE: knowledge_index.py / lint_scripts.py / seed_cache.py / export_index.py must be COMMITTED under
+#     tools/semantic/ -- CI cannot run what lives only in the local experiments folder. The weights are
+#     NOT committed (137 MB): they arrive via the pinned URL + actions/cache, exactly like a compiler
+#     toolchain. The <1 MB shipping artifacts CAN graduate to the repo later using ci.yml's house
+#     drift-check pattern (regenerate + `git diff --exit-code`, like API_QUICKREF.md).
+#
+# SEMANTIC COVERAGE CI -- keep the extracted geometry in lockstep with the code.
+#
+# WHY THIS FITS ON A FREE RUNNER (measured, not hoped):
+#   nomic gq8 weights           137 MB     vs 14 GB disk
+#   NumPy forward peak RAM     ~0.8 GB     vs 16 GB RAM
+#   .knowledge_cache.json        64 MB     vs 10 GB actions/cache
+#   warm run (content-addressed cache: only NEW/CHANGED docstrings embed)   < 1 min
+#   cold run (~8k entries at 1-3 texts/s on 4 vCPU)                        ~45-140 min, once
+#
+# THE JOB, in order:
+#   1. restore the embedding cache (keyed by wiring config, NOT by commit -- vectors
+#      depend on text+model only, so the cache survives every push)
+#   2. fetch weights only on a cache miss of the model itself
+#   3. embed whatever is new (knowledge_index is already incremental by sha256)
+#   4. THE EXAM: routing suite (--exam). A routing regression fails the build.
+#   5. rebuild the <1 MB shipping artifacts (catalog vectors, remap, index) and
+#      upload them; a release job can attach them to tags.
+#
+# Weights come from a release asset or HF; pin the revision. Determinism discipline
+# applies in CI too: PYTHONHASHSEED=0, single-threaded BLAS for reproducible sums.
+
+name: semantic-coverage
+
+on:
+  push:
+    paths: ['holographic/**.py', 'tools/semantic/**.py', '.github/workflows/semantic-coverage.yml']
+  schedule:
+    - cron: '17 5 * * 1'        # weekly full pass: catches drift with no code change
+  workflow_dispatch: {}
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: write            # so the job can commit the refreshed index_128d.npz back (like docs.yml)
+    env:
+      # SAME determinism pins as ci.yml, for the same reason it documents: multi-threaded BLAS sums
+      # in a different order per run and flips knife-edge cosines. One thread, fixed hash seed.
+      PYTHONHASHSEED: '0'
+      OMP_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      NUMEXPR_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12', cache: pip }   # match ci.yml
+
+      - name: install (numpy only -- the constitution applies in CI too)
+        run: pip install numpy
+
+      # -- the embedding cache: survives across commits, keyed only by the wiring config
+      - name: restore embedding cache
+        uses: actions/cache@v4
+        with:
+          path: tools/semantic/.knowledge_cache.json
+          key: knowledge-cache-v1-1000.0-12-True-False
+          restore-keys: knowledge-cache-v1-
+
+      # -- the model: cached separately; downloaded once per runner image change
+      - name: seed the cache if the runner cache missed
+        # actions/cache above restores .knowledge_cache.json across runs. On the FIRST run (or after the
+        # key rotates) it misses -- so decompress the committed 731 KB routing seed. seed_cache.py
+        # --restore is idempotent: it only writes if the live cache is absent, so a cache HIT is untouched.
+        run: python tools/semantic/seed_cache.py --restore
+
+      - name: restore model weights
+        id: model
+        uses: actions/cache@v4
+        with:
+          path: tools/semantic/nomic_text
+          key: nomic-gq8-v1        # bump to force a re-fetch; never 'latest'
+
+      - name: fetch model on cache miss (pinned revision)
+        if: steps.model.outputs.cache-hit != 'true'
+        env:
+          W_URL: ${{ vars.NOMIC_WEIGHTS_URL }}
+          V_URL: ${{ vars.NOMIC_VOCAB_URL }}
+        run: |
+          # An unset variable curls "" -> curl error; and WITHOUT -f a 404/redirect saves an HTML error
+          # page AS model.safetensors, which read_st then reads as an 8-byte length -> MemoryError. Guard
+          # both: fail in English if the vars are unset, use -f (HTTP errors fail the step), and sanity-
+          # check that what landed is actually a safetensors file, not HTML.
+          if [ -z "$W_URL" ] || [ -z "$V_URL" ]; then
+            echo "::error::NOMIC_WEIGHTS_URL / NOMIC_VOCAB_URL are not set (repo Settings -> Variables)."
+            exit 1
+          fi
+          mkdir -p tools/semantic/nomic_text
+          curl -fL --retry 3 -o tools/semantic/nomic_text/model.safetensors "$W_URL"
+          curl -fL --retry 3 -o tools/semantic/nomic_text/vocab.txt "$V_URL"
+          python tools/semantic/check_weights.py tools/semantic/nomic_text/model.safetensors
+          ls -la tools/semantic/nomic_text/
+
+      - name: lint the scripts first (errors halt; the 0.4s crash never eats the budget)
+        run: python tools/semantic/lint_scripts.py
+
+      - name: embed what changed (content-addressed; warm run is seconds)
+        # knowledge_index is ALREADY incremental: sha256(wiring||text) cache keys
+        run: |
+          cd tools/semantic && python knowledge_index.py nomic_text/model.safetensors \
+            nomic_text/vocab.txt --repo ../.. --no-md
+
+      # -- THE EXAM. This is the point of the workflow: coverage is a test, not a report.
+      - name: routing suite (the 12-ask exam; regressions fail the build)
+        # TO ADD: an --exam flag on knowledge_index (~10 lines: run ASKS, exit 1 below bars).
+        # Bars are the measured rev-36 numbers: top-5 >= 8/12, median <= 2.
+        run: |
+          cd tools/semantic && python knowledge_index.py nomic_text/model.safetensors \
+            nomic_text/vocab.txt --repo ../.. --no-md --structural --exam \
+            --require-top5 8 --require-median 2 --require-fused-top1 7
+          # --structural exercises the PRODUCTION path (dense + workflow bones, route_semantic's default);
+          # --require-fused-top1 7 gates it at the measured champion (strict Pareto over flat 6/12 at 128d).
+          # A bones/fusion regression now fails the build exactly like a dense regression does.
+
+      - name: rebuild the shipped 128d routing index and commit it if it changed
+        # export_index.py pulls the routing vectors from the freshly-embedded cache and writes them to
+        # the path the engine loads (lecore_data/routing/index_128d.npz). Instead of GATING (which forced
+        # a manual rebuild), we COMMIT the refresh back -- same auto-commit pattern as docs.yml -- so the
+        # shipped index stays in lockstep with the code on every push, hands-free. [skip ci] on the commit
+        # prevents a re-trigger loop.
+        run: |
+          python tools/semantic/export_index.py --dim 128 --repo .
+          git config user.name  "semantic-bot"
+          git config user.email "semantic-bot@users.noreply.github.com"
+          if ! git diff --quiet lecore_data/routing/index_128d.npz; then
+            git add lecore_data/routing/index_128d.npz
+            git commit -m "semantic: refresh routing index_128d.npz from embed [skip ci]"
+            # REBASE + RETRY: docs.yml fires on the SAME push and auto-commits generated docs, so the remote
+            # head can move while this job runs -- a bare push then fails non-fast-forward (measured: first
+            # live run). The two bots touch DISJOINT files (index npz vs generated md), so rebasing our one
+            # commit onto the moved head is always clean. Three attempts with backoff, loud failure.
+            pushed=0
+            for i in 1 2 3; do
+              git pull --rebase origin ${{ github.ref_name }}
+              if git push origin HEAD:${{ github.ref_name }}; then pushed=1; break; fi
+              echo "push rejected (remote moved again?) -- retry $i"; sleep $((i*5))
+            done
+            if [ "$pushed" != "1" ]; then
+              echo "::error::could not push the refreshed routing index after 3 rebase+push attempts."
+              exit 1
+            fi
+          else
+            echo "routing index already up to date -- nothing to commit."
+          fi
+
+      - name: upload the index as a build artifact (inspectable; the committed copy is authoritative)
+        uses: actions/upload-artifact@v4
+        with:
+          name: semantic-artifacts
+          path: lecore_data/routing/index_128d.npz
+          retention-days: 30
