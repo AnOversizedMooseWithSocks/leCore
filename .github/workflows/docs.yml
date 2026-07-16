@@ -54,7 +54,19 @@ jobs:
           if ! git diff --quiet REFERENCE.md CAPABILITIES.md capabilities.json API_QUICKREF.md pipelines.json docs/FACULTY_MAP.md docs/DOC_MAP.md docs/PIPELINE_MAP.md; then
             git add REFERENCE.md CAPABILITIES.md capabilities.json API_QUICKREF.md pipelines.json docs/FACULTY_MAP.md docs/DOC_MAP.md docs/PIPELINE_MAP.md
             git commit -m "docs: refresh generated docs (REFERENCE, CAPABILITIES, API_QUICKREF, PIPELINE_MAP, FACULTY_MAP, DOC_MAP) [skip ci]"   # [skip ci] so it doesn't re-trigger CI
-            git push origin HEAD:${{ github.ref_name }}   # push back to the branch that triggered this run (feature branches included)
+            # REBASE + RETRY: semantic-coverage.yml fires on the same push and auto-commits the routing
+            # index -- the remote head can move mid-run and a bare push fails non-fast-forward (measured).
+            # Disjoint files (generated md vs index npz), so the rebase is always clean.
+            pushed=0
+            for i in 1 2 3; do
+              git pull --rebase origin ${{ github.ref_name }}
+              if git push origin HEAD:${{ github.ref_name }}; then pushed=1; break; fi
+              echo "push rejected (remote moved again?) -- retry $i"; sleep $((i*5))
+            done
+            if [ "$pushed" != "1" ]; then
+              echo "::error::could not push regenerated docs after 3 rebase+push attempts."
+              exit 1
+            fi
           else
             echo "All generated docs already up to date -- nothing to commit."
           fi

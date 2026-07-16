@@ -34537,3 +34537,25 @@ semantic-coverage.yml exam step now runs --structural with --require-fused-top1 
 fails the build exactly like a dense regression. Artifact upload path corrected to the real index location.
 AFTER THIS PUSH: change a module -> push -> CI embeds only what changed, gates flat AND fused routing, rebuilds
 the bones-carrying index, auto-commits it. Hands-free.
+
+
+====================================================================================
+FIRST LIVE CI RUN: exam + FUSED GATE PASSED on real weights. One failure: the two-bot push race. Fixed.
+====================================================================================
+The first live semantic-coverage run after the close-out push: every step green THROUGH the routing suite --
+meaning the fused gate (--require-fused-top1 7 at beta=0/gamma=0.5/128d) PASSED on real weights in CI. The
+feature is now measured, shipped, AND enforced automatically.
+
+THE ONE FAILURE: 'rebuild the shipped index and commit it' -- the PUSH, not the build. Diagnosed by
+reproduction + elimination: (1) the npz is BYTE-DETERMINISTIC across runs (verified by byte-compare; numpy
+pins zip member timestamps), so the diff was honest -- CI's rebuild genuinely differed because CI re-embedded
+the session's edited docstrings, which the committed seed predates; (2) docs.yml fires on the SAME push and
+auto-commits generated docs (this push touched many docstrings), so the remote head moved during the 47s
+coverage run -> semantic-bot's bare `git push` failed non-fast-forward. A CLASSIC two-bot race; whichever
+pushes second loses, and BOTH workflows used the naive pattern.
+
+FIX (both workflows, house-consistent): commit -> `git pull --rebase` -> push, 3 attempts with backoff,
+::error + exit 1 on exhaustion (loud, never silent). The rebase is always clean because the bots touch
+DISJOINT files (index npz vs generated md). Both YAMLs re-validated; retry-loop shell logic dry-run under sh.
+AFTER THIS PUSH: the race is closed on both sides; the next docstring-touching push will see docs-bot and
+semantic-bot interleave cleanly.

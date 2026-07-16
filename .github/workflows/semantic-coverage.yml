@@ -139,7 +139,20 @@ jobs:
           if ! git diff --quiet lecore_data/routing/index_128d.npz; then
             git add lecore_data/routing/index_128d.npz
             git commit -m "semantic: refresh routing index_128d.npz from embed [skip ci]"
-            git push origin HEAD:${{ github.ref_name }}
+            # REBASE + RETRY: docs.yml fires on the SAME push and auto-commits generated docs, so the remote
+            # head can move while this job runs -- a bare push then fails non-fast-forward (measured: first
+            # live run). The two bots touch DISJOINT files (index npz vs generated md), so rebasing our one
+            # commit onto the moved head is always clean. Three attempts with backoff, loud failure.
+            pushed=0
+            for i in 1 2 3; do
+              git pull --rebase origin ${{ github.ref_name }}
+              if git push origin HEAD:${{ github.ref_name }}; then pushed=1; break; fi
+              echo "push rejected (remote moved again?) -- retry $i"; sleep $((i*5))
+            done
+            if [ "$pushed" != "1" ]; then
+              echo "::error::could not push the refreshed routing index after 3 rebase+push attempts."
+              exit 1
+            fi
           else
             echo "routing index already up to date -- nothing to commit."
           fi

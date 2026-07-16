@@ -20,3 +20,7 @@ scripts/.knowledge_cache.json
 scripts/.knowledge_cache_huge.json
 scripts/knowledge_cache.zip
 /scripts/nomic_text
+docs/BACKLOG_modeling.md
+docs/BACKLOG_modeling_v2.md
+docs/BACKLOG_photo3d_retopo.md
+docs/PRIMITIVE_APPLICATION_BACKLOG.md
