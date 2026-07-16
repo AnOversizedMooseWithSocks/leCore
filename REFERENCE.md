@@ -473,8 +473,8 @@
 | [`holographic_skydata.py`](#holographic-skydata) | holographic_skydata.py -- a SKY OBSERVATION as first-class data: a cube + world axes (leCore io_and_interop). | 220 |
 | [`holographic_slime.py`](#holographic-slime) | Slime-mold path-finding over a HOLOGRAPHIC associative graph. | 391 |
 | [`holographic_smokepresets.py`](#holographic-smokepresets) | holographic_smokepresets.py -- SMOKE PRESETS (fluids/matter backlog, content item 1). | 159 |
-| [`holographic_snap.py`](#holographic-snap) | holographic_snap.py (mesh_and_geometry) -- the MODELING-GIZMO snap adapter: it answers 'where does this dragge | 184 |
 | [`holographic_snap.py`](#holographic-snap) | holographic_snap.py -- SNAPPING = cleanup, applied to geometry (modeling-app feature layer). | 141 |
+| [`holographic_snap.py`](#holographic-snap) | holographic_snap.py (mesh_and_geometry) -- the MODELING-GIZMO snap adapter: it answers 'where does this dragge | 184 |
 | [`holographic_softbody.py`](#holographic-softbody) | Position-Based Dynamics -- softbody & hardbody simulation, exposed to VSA. | 680 |
 | [`holographic_sparsefield.py`](#holographic-sparsefield) | FS-2 -- the narrow-band sparse field (holographic_sparsefield), array-backed for parallelism. | 530 |
 | [`holographic_spatial.py`](#holographic-spatial) | holographic_spatial.py -- ONE shared spatial index. Bin points into a uniform grid of cells so radius, | 191 |
@@ -18301,6 +18301,28 @@
 
 ### holographic_snap.py
 
+> holographic_snap.py -- SNAPPING = cleanup, applied to geometry (modeling-app feature layer).
+>
+> Thinking holographically: snapping IS cleanup. VSA cleanup projects a noisy vector onto the nearest CLEAN atom in
+> a codebook; snapping projects a dragged, continuous position onto the nearest ALLOWED place -- a grid node, an
+> existing vertex, a point on an edge, an angle increment. Same operation, geometric codebook. And just as cleanup
+> can REFUSE a weak match (return "no confident atom"), a snap has a TOLERANCE: if nothing allowed is close enough,
+> the point is left where it is. That confidence gate is what stops a cursor from teleporting across the screen.
+>
+> These read raw coordinates (the honest way -- no lossy encoding for something this exact). NumPy + stdlib only;
+> deterministic.
+
+**Public API:**
+
+- `def snap_to_grid(p, spacing, origin)` -- Snap a point to the nearest grid node -- round each coordinate to the lattice. The simplest cleanup: the
+- `def snap_to_points(p, points, tol)` -- Snap to the NEAREST point in a set -- this is literally cleanup (nearest codebook entry). Returns
+- `def snap_to_segment(p, a, b)` -- The nearest point on the line SEGMENT a-b (clamped to the endpoints) -- snapping to an edge.
+- `def snap_value(x, increment, origin)` -- Snap a scalar to the nearest multiple of `increment` from `origin` -- e.g. a length to 0.25 m steps.
+- `def snap_angle(theta, increment)` -- Snap an angle (radians) to the nearest multiple of `increment` -- e.g. rotate in 15-degree steps.
+- `class Snapper` -- Snaps a point to the nearest snap target within a tolerance, combining a GRID and a VERTEX set. Whichever
+
+### holographic_snap.py
+
 > holographic_snap.py (mesh_and_geometry) -- the MODELING-GIZMO snap adapter: it answers 'where does this dragged
 > point / transform delta actually go?' in the shapes the interactive edit spine wants (dict hit records, a corrected
 > transform delta), DELEGATING all the actual snap math to the canonical snap primitives in
@@ -18325,28 +18347,6 @@
 - `def snap_to_intersections(point, polylines, max_dist, tol)` -- Snap a point to the nearest INTERSECTION of a set of 2-D polylines -- the 'intersection' object-snap. Computes
 - `def snap_to_edge(point, vertices, edges, max_dist)` -- Snap a point to the nearest point ON any edge, returned as {edge, position, distance, t}, or None if beyond
 - `def snap_transform_delta(delta, target, increment, moved_point, vertices, edges, origin, max_dist)` -- Snap a TRANSFORM DELTA so the moved point lands on a snap target, and return the corrected delta. This is the
-
-### holographic_snap.py
-
-> holographic_snap.py -- SNAPPING = cleanup, applied to geometry (modeling-app feature layer).
->
-> Thinking holographically: snapping IS cleanup. VSA cleanup projects a noisy vector onto the nearest CLEAN atom in
-> a codebook; snapping projects a dragged, continuous position onto the nearest ALLOWED place -- a grid node, an
-> existing vertex, a point on an edge, an angle increment. Same operation, geometric codebook. And just as cleanup
-> can REFUSE a weak match (return "no confident atom"), a snap has a TOLERANCE: if nothing allowed is close enough,
-> the point is left where it is. That confidence gate is what stops a cursor from teleporting across the screen.
->
-> These read raw coordinates (the honest way -- no lossy encoding for something this exact). NumPy + stdlib only;
-> deterministic.
-
-**Public API:**
-
-- `def snap_to_grid(p, spacing, origin)` -- Snap a point to the nearest grid node -- round each coordinate to the lattice. The simplest cleanup: the
-- `def snap_to_points(p, points, tol)` -- Snap to the NEAREST point in a set -- this is literally cleanup (nearest codebook entry). Returns
-- `def snap_to_segment(p, a, b)` -- The nearest point on the line SEGMENT a-b (clamped to the endpoints) -- snapping to an edge.
-- `def snap_value(x, increment, origin)` -- Snap a scalar to the nearest multiple of `increment` from `origin` -- e.g. a length to 0.25 m steps.
-- `def snap_angle(theta, increment)` -- Snap an angle (radians) to the nearest multiple of `increment` -- e.g. rotate in 15-degree steps.
-- `class Snapper` -- Snaps a point to the nearest snap target within a tolerance, combining a GRID and a VERTEX set. Whichever
 
 ### holographic_softbody.py
 
