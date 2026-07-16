@@ -27,6 +27,22 @@ import sys
 
 # unifier -> (module that owns it, symbols that count as citing it, the clients its design names)
 REGISTRY = {
+    "ai.damage_mask (one graceful-degradation probe)": {
+        "module": "holographic_ai",
+        "symbols": ["holographic_ai", "damage_mask"],
+        "why": "The ONE keep-mask that zeroes a random fraction of a vector's slots -- the probe that lets a caller "
+               "PROVE holographic recall degrades smoothly rather than take it on faith (dim=256: 20% slots lost -> "
+               "cos 0.89, 40% -> 0.80, 80% -> 0.54; no cliff). D2: this exact body was written THREE times, "
+               "byte-identically, on Hologram / HolographicImage / HolographicArchive -- the one true cross-module "
+               "duplicate the canonical-shape audit found across 3,594 functions. It is a property of a VECTOR "
+               "(slots), not of any storage class, so it now lives beside the other vector primitives and all three "
+               "classes delegate. Bit-identity was MEASURED on 48 (dim, fraction, seed) configs BEFORE the rewire -- "
+               "the mask is RNG-derived and existing degradation numbers are pinned to the exact slots it kills, so "
+               "a one-slot drift would have silently moved every robustness result in the tree. Pinned by "
+               "tests/test_damage_mask.py. The three delegating shims remain textually identical BY DESIGN (same "
+               "adjudication as _occlusion), so the duplication-audit entry stays.",
+        "clients": ["holographic_image", "holographic_archive"],
+    },
     "semantic.lighting_params": {
         "module": "holographic_semantic",
         "symbols": ["holographic_semantic", "lighting_params"],
@@ -657,6 +673,16 @@ def main(argv):
     root = _repo_root()
     if "--markdown" in argv:
         print(_markdown(root))
+        return 0
+    if "--write" in argv:
+        # WRITE the doc instead of printing it, so tools/regen_docs.py can OWN this file like every other
+        # generated doc. It could not before: --markdown prints, so UNIFIERS.md was produced by a shell
+        # redirect that lived only in a human's memory -- and it drifted exactly as that failure mode predicts
+        # (semantic.lighting_params sat in REGISTRY, unrendered, until a sweep noticed). Same door, no redirect.
+        out = os.path.join(root, "docs", "UNIFIERS.md")     # _repo_root() returns a str, not a Path
+        with open(out, "w", encoding="utf-8", newline="") as fh:
+            fh.write(_markdown(root) + "\n")
+        print("wrote docs/UNIFIERS.md")
         return 0
     for unifier, meta in REGISTRY.items():
         rows = [(c, cites(c, unifier, root)) for c in meta["clients"]]

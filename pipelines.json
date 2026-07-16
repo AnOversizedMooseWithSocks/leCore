@@ -111,9 +111,9 @@
     ]
   },
   "coverage": {
-    "percent": 18,
+    "percent": 17,
     "tagged": 71,
-    "total": 393
+    "total": 396
   },
   "edges": [
     {

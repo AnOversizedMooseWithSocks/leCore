@@ -590,6 +590,34 @@ def _selftest():
     assert af.shape == (H, W) and af.min() >= 0.0 and af.max() <= 1.0 + 1e-6
     assert af[3 * H // 4:].mean() >= af[:H // 4].mean() - 0.05, "auto_fuse_depth inverted the ordering"
 
+    # GUIDED FILTER IS GENERAL (GS-A): it was written for the transmission map, but it refines ANY map against
+    # ANY guide. Assert the measured contract on a map it was NEVER designed for (ambient occlusion), against the
+    # honest same-support baseline (a plain box blur): the guided result must be markedly closer to truth AND keep
+    # the guide's edge, which the box blur destroys.
+    _rng = np.random.default_rng(0)
+    _H = _W = 96
+    _guide = np.zeros((_H, _W)); _guide[:, _W // 2:] = 1.0
+    _guide = np.clip(_guide + 0.03 * _rng.standard_normal((_H, _W)), 0, 1)
+    _ao = np.zeros((_H, _W)); _ao[:, :_W // 2] = 0.35; _ao[:, _W // 2:] = 0.9
+    _noisy = np.clip(_ao + 0.15 * _rng.standard_normal((_H, _W)), 0, 1)
+    _gf = guided_filter(_guide, _noisy, radius=6, eps=1e-3)
+    _box = _box_filter(_noisy, 6)
+    _rmse = lambda x: float(np.sqrt(np.mean((x - _ao) ** 2)))
+    _step = lambda x: float(np.mean(np.abs(x[:, _W // 2] - x[:, _W // 2 - 1])))
+    assert _rmse(_gf) < 0.5 * _rmse(_box), ("guided must beat a box blur on a guide-aligned map",
+                                            _rmse(_gf), _rmse(_box))
+    assert _step(_gf) > 0.7 * _step(_ao), ("guided must keep the guide's edge", _step(_gf), _step(_ao))
+    assert _step(_box) < 0.2 * _step(_ao), ("the box baseline is expected to destroy the edge", _step(_box))
+
+    # KEPT NEGATIVE (loud): the guide must EXPLAIN the map. On a ramp whose structure ignores the guide, the
+    # guided filter is NOT better than the box blur -- and injects a spurious edge from the guide. Never sell it
+    # as a universal denoiser.
+    _ramp = np.tile(np.linspace(0, 1, _W), (_H, 1))
+    _rn = np.clip(_ramp + 0.15 * _rng.standard_normal((_H, _W)), 0, 1)
+    _rmse_r = lambda x: float(np.sqrt(np.mean((x - _ramp) ** 2)))
+    assert _rmse_r(guided_filter(_guide, _rn, radius=6)) >= 0.95 * _rmse_r(_box_filter(_rn, 6)), \
+        "KEPT NEGATIVE broken: guided should NOT beat a box blur when the map ignores the guide"
+
     print(f"holographic_hazedepth selftest ok: veil-depth recovers ordering (bottom-near {bot_near:.2f} > "
           f"top-far {top_near:.2f}), corr-to-true-distance {corr:.2f}, CAP agrees, defocus recovers sharp=near, "
           f"fusion keeps ordering, vanishing-point found at {vp[0]:.0f},{vp[1]:.0f}, ground-plane ramp monotonic, "

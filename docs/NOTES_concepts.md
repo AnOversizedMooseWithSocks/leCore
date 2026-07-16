@@ -34735,3 +34735,510 @@ data/ are all REFERENCED by repo files (checked: 2-31 referencing files each), s
 The GitHub API would have settled it definitively but rate-limited; with no way to verify, deleting on a hunch
 was refused. Zip: 27.8 -> 25.9 MB (the cache is JSON, ~1.9 MB compressed); the remainder is genuinely images.
 Artifact re-audited AFTER build: 0 pycache, 0 .pyc, 0 knowledge_cache, 0 BACKLOG, 0 /temp/, 0 .git entries.
+
+## ORGANIZATION AUDIT -- structure measured; two additive fixes (structure_audit + FACULTY_MAP); mass-move REJECTED
+
+Asked: is the tree properly structured classes/methods or functional spaghetti? MEASURED, not eyeballed:
+
+FINDINGS (502 modules across 10 families):
+- misc/ holds 149/502 (29%) -- the junk-drawer signal. BUT: imports are hardcoded dotted family paths with NO shim
+  layer (no meta_path magic; test_repo_layout.py pins the layout precisely because the last reorg broke the build
+  twice). Moving modules is therefore BACKWARD-INCOMPATIBLE and a mass reorg is REJECTED on constitutional grounds
+  (additive-only). The fix is prophylactic: misc/ is now BUDGETED at 149 -- it may not grow; new modules land in a
+  real family.
+- Structure shape: 50% class-bearing / 50% pure-function modules. Pure-function is NOT spaghetti here -- it is the
+  house style (cohesive function families like iterate/denoise/distribute).
+- KEPT NEGATIVE (loud): token-coverage is a BAD cohesion metric. holographic_vision (8/23 coverage) and
+  holographic_dictionary (4/18) looked scattered by tokens and are perfectly cohesive one-topic toolkits (classic CV
+  vocabulary; dictionary API). Both EXONERATED by reading the actual names. Cohesion is therefore REPORTED for human
+  eyes in the audit, never gated.
+- The real navigability gap: unified.py = 14,871 lines, ONE class, 1,274 public methods, only 27 section markers,
+  ordered by SHIPPING ARC (insertion anchors) not topic. Humans had no "what can the mind do with meshes?" page.
+- Giants >2000 loc: exactly 3 (unified 14,871 / catalog 4,594 / creature 2,365) -- now budgeted at 3.
+
+SHIPPED (both additive; no engine code touched):
+1. tools/structure_audit.py -- organization as a MEASURED, gated property like wiring: family distribution, misc
+   share (budget 149), giants (budget 3 at >2000 loc), unified section markers (min 27), prefix-cluster stats.
+   Budgeted-baseline gates (skill_lint's pattern): history is paid for; the gate stops the NEXT regression. Cohesion
+   report-only per the kept negative above. Runs standalone; belongs in the close-out battery alongside the other
+   three audits.
+2. facultymap.py (root, beside capdoc/docgen) -> docs/FACULTY_MAP.md -- the TOPICAL index of all 1,274 mind methods,
+   generated from live introspection (prefix clusters >=3 + one-line docstrings + alphabetical tail). Measured: 116
+   clusters (mesh 66, render 22, file 21, sdf 16, learn 15 ...), 572 tail. Regenerate in close-out next to
+   capdoc/docgen; it cannot drift from the code because it IS the code's introspection.
+
+VERDICT, honestly: the tree is NOT functional spaghetti -- modules are cohesive and named by convention; the naming
+convention (verb-prefix families) already WAS the organization. What was missing was (a) making that organization
+VISIBLE to humans (FACULTY_MAP) and (b) making its erosion MEASURABLE (structure_audit budgets). Both now exist.
+
+## REINVENTION SELF-CHECK on the organization pass -- one real Rule-0 miss found, root-caused, fixed; mermaid added
+
+Asked: did structure_audit/facultymap reinvent something that already existed? Checked honestly against the FULL
+existing doc surface, not just the catalog:
+
+VERDICT, item by item:
+- facultymap.py CONTENT is NOT a duplicate: apiquickref.py covers a short CURATED app-surface list (scene, sdf,
+  mesh, camera...) and holographic_unified is NOT in it (0 references); no doc indexed the mind's 1,274 methods.
+  docgen.py DOES already prefix-cluster -- but at MODULE granularity for REFERENCE.md. So the technique existed,
+  the coverage did not. structure_audit.py has no overlap (name_collisions/audit_imports serve different questions).
+- THE REAL MISS (kept loud): the Rule-0 probe before building facultymap searched the CAPABILITY CATALOG -- and doc
+  generators are root scripts, NOT catalog entries, so find_capability could never have surfaced apiquickref.py.
+  Only capdoc.py's own docstring cross-reference caught it, after the fact. Root cause: an entire class of tooling
+  (the doc surface) was invisible to Rule 0.
+
+FIXES (all additive):
+1. docmap.py -> docs/DOC_MAP.md: the map of the maps -- one table of all five doc generators + structure_audit,
+   the question each answers, and the one-command regen block. Includes two SMALL mermaid diagrams (family layout,
+   doc pipeline); GitHub renders mermaid natively so NO dependency enters the engine. KEPT NEGATIVE: a full
+   502-module import graph was rejected -- at that scale a diagram is a hairball; family level (10 nodes) is where
+   a picture still beats a table.
+2. Catalog entry "Documentation map (which doc answers which question)" with 11 user-mouth aliases -- the ROOT-CAUSE
+   fix: the doc surface is now Rule-0-discoverable ("where are the docs" / "which doc should i read" / "one line per
+   symbol" all top-3). Catalog 347->348; does-field 551 (under 600).
+3. .github/workflows/docs.yml (the tree had NO CI workflows -- the docs.yml remembered from a prior layout does not
+   exist here): regenerates all five docs on push, FAILS on drift (git diff --exit-code, the capdoc drift-gate idea
+   extended to the whole doc surface), then runs structure_audit as the organization gate. Rehearsed locally: regen
+   -> no drift -> audit green. Mermaid needs no renderer in CI; the job only regenerates text.
+
+ANSWER to "would mermaid in CI help": yes, in exactly this scoped form -- family-level diagrams regenerated with the
+docs and rendered by GitHub for free. Not as a module-graph visualizer (hairball) and not as a new dependency.
+
+## CORRECTION (kept loud) -- the real CI workflows exist; my invented docs.yml replaced with theirs, updated minimally
+
+The previous entry claimed "the tree had NO CI workflows." WRONG in an important way: the real repo HAS three
+(.github/workflows/ci.yml, docs.yml, package.yml) -- they were absent from THIS working tree because the upstream
+zips it was built from never contained them. Verified it was NOT my packaging: the zip exclusion "*.git/*" does NOT
+swallow .github/ (tested: .github/workflows/a.yml included, .git/config excluded). Moose supplied the real files;
+my invented docs.yml was DELETED and replaced with the real one.
+
+MINIMAL UPDATES ONLY (per instruction -- update, don't redo):
+- ci.yml: ONE new gate step added beside the existing gates (audit_imports/wiring/catalog_gaps/skill_lint/servicedoc):
+  "Gate -- no structural regression" running tools/structure_audit.py, with a house-style comment explaining the
+  budgeted-baseline contract and the fix path. Nothing else touched.
+- docs.yml: added a dependency install step (capdoc.py reads the LIVE catalog and facultymap.py boots a UnifiedMind
+  -- both import the engine; a latent gap even before this change, since docgen alone is stdlib but capdoc is not),
+  added facultymap.py + docmap.py generation steps, and included docs/FACULTY_MAP.md + docs/DOC_MAP.md in the
+  diff/commit-back set. Header comment updated to match scope. The commit-back pattern (docs-bot, [skip ci]) kept
+  exactly as designed.
+- package.yml: UNTOUCHED -- structure_audit/facultymap/docmap are dev tooling, not wheel content.
+
+REHEARSED locally: all three YAMLs parse; servicedoc.py green (33 endpoints, 5 flags); audit_imports 0 flat;
+structure_audit green; full generator chain regenerates with no drift. The mermaid answer stands, now inside the
+REAL docs.yml: DOC_MAP's family/pipeline diagrams regenerate on push, GitHub renders them natively, no renderer or
+dependency added anywhere.
+
+## CI TEST SHARDING -- the true full suite now fits GitHub's budget (per-JOB timeout x matrix of 4)
+
+THE PROBLEM, precisely: the full suite (slow tests selected) hit the 20-minute GitHub job timeout, so the 15 s
+per-test watchdog was doing double duty as a runtime cap -- slow tests were selected by `-m ""` but the watchdog
+still SKIPPED any exceeding 15 s (only --run-slow/LECORE_RUN_SLOW lifts it, and a true --run-slow run blew the
+budget). Result: "full" runs were never actually full.
+
+THE FIX, structural: GitHub's timeout-minutes applies PER JOB, so a matrix of K shard jobs gives Kx the budget in
+parallel. NO conftest change needed -- --run-slow already lifts the watchdog; the missing piece was only the
+splitter and the workflow shape.
+
+BUILT: tools/shard_tests.py -- deterministic, stdlib-only partition of the 541 test files into N shards. Weight
+proxy (kept honest as a proxy): (count of `def test_`) + 20 x (count of pytest.mark.slow), since slow-marked tests
+dominate wall time by definition. Greedy largest-first bin packing, sorted input, index tiebreak -> shard i of K is
+identical on every machine, no state file. MEASURED balance at K=4: loads 1348/1348/1347/1347 (0% spread). Output
+convention matches select_tests.py (whitespace paths on stdout) so pytest consumes it directly. --selfcheck asserts
+exact cover / disjoint / determinism; --report prints the balance table.
+
+ci.yml (updated surgically, per house rule):
+- `pytest` job now push/PR ONLY (job-level if; tag pushes excluded). Affected-selection + all gates unchanged.
+  The unscopable-change fallback downgraded from run_full (slow included -- the thing that timed out) to run_fast
+  (the default -m 'not slow' suite). Branch protection unaffected: push/PR still produce the same "pytest" check.
+- NEW `full-suite` matrix job (shard: [0..3], fail-fast: false, 20 min EACH) on schedule/dispatch/version-tags:
+  same determinism env pins, partition --selfcheck before running, then `pytest -n auto --run-slow $SELECTED`.
+  The tuning knob is --num-shards + the matrix list, documented in the workflow comment.
+
+VERIFIED here: partition selfcheck green; shard 0/4 collects 1,351 tests through pytest; the exact command shape
+rehearsed for real on the lightest 1/32 shard with --run-slow (157 passed, 10 s); yaml parses; battery 0/0/0.
+HONEST LIMIT: per-shard wall time on a GitHub runner cannot be measured from this sandbox -- 4 shards is the
+design margin (~4x headroom over the run that timed out), and if a shard nears the budget the fix is raising the
+shard count, not re-tightening the watchdog. Regression traps in tests/test_shard_tests.py pin cover/disjoint/
+determinism/balance -- a partition bug would otherwise be the worst CI failure there is: a green build that
+silently tested less than it claimed.
+
+## FULL-SUITE FALLOUT -- 2 failures from the first real sharded run (both audit traps doing their job)
+
+The first genuinely-full run (sharded, --run-slow) worked: 5,053 passed, 13 min, and it caught 2 things the
+per-change close-outs missed.
+
+1. test_no_unreviewed_public_name_collisions: gaussian_curvature + mean_curvature collide between meshcurvature and
+   surfanalysis. READ BOTH BODIES per the trap's instruction: meshcurvature = DISCRETE per-vertex form on a triangle
+   mesh (angle defect / mixed-area cotan; array over V); surfanalysis = ANALYTIC pointwise form on a parametric
+   surface from the fundamental forms (scalar at (u,v)). One concept, two representations; neither can serve the
+   other's input -- the blessed polymorphic-verb pattern, NOT a duplicate. RESOLVED IN THE MERGE by Moose's entry,
+   which is a superset of mine (same reading, plus a `mesh_report` isosurface/meshtools entry I did not have).
+
+2. test_impossible_and_merely_deferred_are_not_confused, on my G2 entry -- and MY FIX WAS WRONG. I "fixed" it by
+   RELOCATING the entry from DEFERRED to NOT_APPLICABLE (plus a SpatialGrid REGISTRY entry to satisfy the
+   retracted-claims trap). That is a MISFILING, and it is precisely the error the test's own docstring warns about:
+   NOT_APPLICABLE means CLOSED BY MATHEMATICS; DEFERRED means the construction EXISTS and measurement says it does
+   not pay. The grid-sharing construction DOES exist and IS wireable -- it just buys nothing at these callers'
+   dimensionality. Filing it as "impossible" would stop a future session from re-measuring (the exact damage done to
+   meshsubdiv, whose closed form turned out to be real).
+   MOOSE'S FIX IS THE CORRECT ONE and is what the merge keeps: the entry STAYS in DEFERRED, with the deferral
+   reasoning appended ("the construction EXISTS and is wireable today -- it simply buys nothing at these callers'
+   dimensionality, and the shared index that does pay was built and wired instead. Re-measure if a caller ever drops
+   to <=3 D at large N"). My REGISTRY + NOT_APPLICABLE relocation is DROPPED. docs/UNIFIERS.md was reclassified to
+   DEFERRED to match the code (it had been left saying NOT_APPLICABLE -- a doc/code disagreement).
+
+LESSON (on record, corrected): the failure was NOT merely "verify which dict an anchor lands in" -- it was reaching
+for the ledger slot that made a test pass instead of the slot the SEMANTICS demanded. DEFERRED vs NOT_APPLICABLE is
+a claim about whether a thing is possible; get it wrong and you close a door that is actually open.
+
+## ASCII RENDER -- glyph ramps constrained to the approved charset (braille/half exempt by design, per Moose)
+
+Moose specified an approved render charset (ASCII punctuation + the Unicode shade/block/braille families; NO
+letters/digits/#%@&$^"'?). AUDITED the live holographic_ascii ramps against it FIRST: 'blocks' and the edge glyphs
+(| / - \) were already compliant; 'short' had 4 violations (+#%@), 'dots' had 1 (#), and 'long' had 47 (built mostly
+from letters/digits -- the classic 70-step ramp).
+
+REBUILT the ramps from the approved set, and -- caught by MEASUREMENT, not eyeball -- ensured each is strictly
+BRIGHTNESS-MONOTONIC by measured ink coverage (my first drafts of 'long'/'dots' were compliant but NON-monotonic;
+sorting by coverage fixed them):
+  short  = " .-:=*░▒▓█"  (the ░/▒/▓/█ shade family carries the smooth mid-to-bright gradient the old #%@ faked)
+  long   = " .,-:~_;<>!)({}][\\/=|░*▒▒▓█"  (punctuation lead-in, then the shade/block family)
+  dots   = " .:░*▒▓█"     blocks = " ░▒▓█" (unchanged, already compliant)
+Added APPROVED_RAMP_CHARS as the single source of truth + a module-docstring scope note.
+
+SCOPE DECISION (asked Moose, answered "charset rule = ramps only"): the constraint applies to the glyph-RAMP density
+modes ('ramp'/'edge' + the named ramps). 'braille' and 'half' are EXEMPT BY DESIGN -- their glyphs are addressable
+PIXELS, not palette characters: a braille cell needs all 256 U+2800..U+28FF dot patterns for lossless 2x4 dot
+addressing (only 129 are in the approved set -- 50%), and 'half' is a 2-pixel colour cell (U+2580). Constraining them
+would break the pixel-exactness that is the whole reason those modes exist. Documented loudly in the module docstring.
+
+VERIFIED: selftest gained contract (8) -- every named ramp + the actual 'ramp' render output stays inside
+APPROVED_RAMP_CHARS AND each ramp is brightness-monotonic; braille/half deliberately NOT checked. selftest green;
+gradient + disc renders eyeballed clean; integration + catalog + render tests green (catalog examples use mode=
+'braille', still valid); audits 0/0/0; docs regen. Additive -- only the ramp glyph choices changed; the resolution
+knob, modes, aspect, determinism, and ANSI paths are untouched. KEPT NEGATIVE: braille is NOT charset-restricted; do
+not "fix" it to the palette -- that was a deliberate, measured design decision.
+
+## MERGE (incoming repo.zip x this session's branch) -- a FORK reconciled; 4 losses caught, 1 of my fixes RETRACTED
+
+Moose brought a repo.zip "with probably no conflicts". True in the git sense, and it IS mostly a superset -- but a
+wholesale adopt would have silently DROPPED four things. Diffed current-vs-incoming BEFORE adopting, per the merge
+discipline. The trees are a FORK from the G2 close-out, not a linear update: both sides advanced.
+
+MECHANICAL NOTE: the incoming tree is CRLF->LF normalised (make_repo_zip.py), so a naive `diff` shows whole files as
+changed. Every comparison here used --strip-trailing-cr; the real content set is 33 python files.
+
+INCOMING'S NEW WORK (adopted wholesale, no conflict): holographic/semantic_router/ (new package), holographic_
+hazedepth.py, lecore_data/routing/, tools/semantic/, tools/regen_docs.py, tools/make_repo_zip.py, pipelinemap.py +
+pipelines.json + docs/PIPELINE_MAP.md, .github/workflows/semantic-coverage.yml, tests (route_semantic, regen_docs,
+gitignore_rules), ~2,600 lines of NOTES (B1 WordNet expansion BUILT/MEASURED/REJECTED; B2c lighting_params), +97
+catalog capabilities. 508 modules / 545 tests (was 502/542).
+
+WHAT A WHOLESALE ADOPT WOULD HAVE LOST (all restored):
+1. holographic_ascii.py -- the ENTIRE approved-charset work. PROVEN a pure loss: the only lines unique to incoming's
+   ascii.py were the old letter-soup ramps my work replaced (no competing edit), so the file was copied back intact.
+2. The "Documentation map" catalog entry -- gone; "where are the docs" no longer resolved. PORTED onto incoming's
+   catalog (not overwritten -- theirs has +97 caps) and UPDATED for their evolutions: 6 generators now, and
+   tools/regen_docs.py is the ONE DOOR. does-field trimmed to 585 (<600).
+3. Six NOTES entries (ORGANIZATION AUDIT, REINVENTION SELF-CHECK, CORRECTION, CI TEST SHARDING, FULL-SUITE FALLOUT,
+   ASCII RENDER). NOTES was a clean append-divergence from a common ancestor: both appendices kept.
+4. docs/wiring_audit_backlog.md (the only file absent from incoming) -- restored.
+
+WHERE MOOSE WAS RIGHT AND I WAS WRONG (my change RETRACTED, not merged):
+- G2/SpatialGrid: I had "fixed" the failing trap by RELOCATING the entry DEFERRED -> NOT_APPLICABLE (+ a REGISTRY
+  entry to satisfy the retracted-claims trap). That is a MISFILING. NOT_APPLICABLE = closed by MATHEMATICS;
+  DEFERRED = the construction EXISTS and does not pay. Grid-sharing EXISTS and is wireable -- it just buys nothing at
+  these dimensionalities. Moose kept it in DEFERRED and appended exactly that reasoning. THEIR VERSION IS KEPT; my
+  REGISTRY + NOT_APPLICABLE relocation is DROPPED. docs/UNIFIERS.md reclassified to DEFERRED to match the code (it
+  had been left saying NOT_APPLICABLE -- a doc/code disagreement that survived in the incoming tree).
+- name_collisions.py curvature entry: theirs is a SUPERSET (same reading + a mesh_report isosurface/meshtools entry).
+  Mine dropped.
+- docmap.py: theirs is a strict EVOLUTION -- it replaced my hand-maintained regen command line with tools/regen_docs.py,
+  fixing the exact "second copy is the stale copy" failure my own docstring described. Theirs kept.
+
+VERIFIED on the reconciled tree: 508 modules / 545 tests; the 2 previously-failing traps 24/24; ascii selftest green
+(restored charset); audits 0/0/0 + structure + imports 0 flat + unaccounted()=0 + name_collisions 48/48 reviewed;
+servicedoc in sync (33 endpoints, 5 flags); regen_docs --check STALE -> regenerated 8 outputs from 6 generators ->
+clean; CI/guard tests 53 passed; Moose's semantic-router/photo3d/gltf 20 passed; my surfaces 42 passed; three random
+shards (157 + 147 + 136) green.
+
+LESSON: "probably no conflicts" and "nothing lost" are different claims. Git reports conflicts; only a content diff
+reports LOSSES -- and the loudest finding here was not a lost file but a WRONG FIX OF MINE that the other branch had
+corrected properly.
+
+## GENERALIZATION SWEEP #2 -- the merged branch's new functionality, re-costumed (1 item, 1 measured negative, 2 verified-done)
+
+Swept the incoming work for primitives that solve OTHER problems than designed for. Rule-0 probed every candidate;
+the interesting one got a real experiment. Full write-up in docs/wiring_audit_backlog.md (GS-A..GS-D).
+
+- GS-A (DO): hazedepth's guided_filter (He et al.) is a universal edge-aware map refiner -- depth today, but the
+  same call refines AO/shadow/matte/normals-z/SSS maps -- with ZERO callers outside hazedepth and undiscoverable
+  ("edge preserving smooth" -> fillet/subdivision). The stack now holds TWO edge-preserving smoothers in different
+  costumes: svgf's variance-guided a-trous (G-buffer regime) and this (guide-image regime). BOTH correct, regime-
+  separate -- the grid-vs-forest pattern again; lift guided_filter to a faculty, do NOT merge them. Bonus dedup:
+  shapefromshading._box_blur reimplements hazedepth's O(1) cumsum box filter (golden-output discipline if wired --
+  it feeds normals).
+- GS-B (MEASURED NEGATIVE, kept loud): ABTT (remove-top-PC, the queryembed/Arora trick) does NOT improve VSA
+  cleanup recall. In-regime experiment (superposition-noise bundles k=3/5, D=256, N=200, 8 seeds, raw acc
+  0.20-0.34): deltas +0.009..-0.008, inside noise even with a strong injected common direction. WHY: normalized-
+  cosine recall already neutralizes a shared direction (lifts all sims ~equally; argmax unmoved); Arora's win
+  needs raw-dot + extreme frequency anisotropy -- NLP conditions cleanup doesn't have. First attempt was OUT of
+  regime (noise swamped signal, acc 0.02-0.06 floor -- "~same" there was meaningless); rerun in the 0.2-0.35 band
+  before concluding. ABTT stays in the embedding-alignment pipeline where it belongs. Untested sibling filed, not
+  measured: SIF inverse-frequency-weighted bundling for token multisets (text encoders).
+- GS-C (LOW): workflowgraph.propagate(graph, seeds, alpha) is ALREADY general; only the faculty pins it to the
+  module graph. Field inpainting / mesh diffusion_transfer are the same idea under different discretizations --
+  regime-separate, not clients. Optional graph= passthrough on the faculty; not urgent.
+- GS-D (VERIFIED DONE): reciprocal rank fusion was already lifted by the incoming branch itself -- mind.
+  fuse_rankings, top-rank discoverable, bm25 delegates. Recorded so no future sweep re-proposes it.
+
+METHOD NOTE (on record): the first GS-B experiment produced a confident-looking "~same" at accuracy 0.02-0.06 --
+a FLOOR, not a verdict. Regime check before reading any A/B: if the baseline can't discriminate, the comparison
+measures nothing. The rerun in the discriminative band is the one that counts.
+
+## GS-A + GS-C SHIPPED -- guided filter lifted to a faculty; propagate un-pinned. Two dedups MEASURED and REJECTED.
+
+GS-A (DONE): mind.guided_filter(guide, src, radius, eps) -> delegates to holographic_hazedepth.guided_filter
+(He/Sun/Tang, O(N) local linear fit). The primitive was written for hazedepth's transmission map and had ZERO
+callers outside it; 7 stranger phrasings all missed it. Now 7/7 top-3.
+  RULE 0 PAID: the probe surfaced an EXISTING `guided_upsample` faculty -- read it before building: it is
+  G-BUFFER-bound (needs normal/albedo/depth, reuses the SVGF bilateral). Different guide, different math,
+  different regime. The gap was real, and the docstring now cross-references so an agent picks the right one.
+  MEASURED (vs a same-support box blur, the honest baseline, on maps it was never designed for): AO map RMSE
+  0.062 -> 0.017 with the edge step kept (true 0.550 / guided 0.526 / box 0.042 -- the box DESTROYS it); matte:
+  box is WORSE than the noisy input (0.125 vs 0.105) while guided reaches 0.059.
+  KEPT NEGATIVE (pinned in the module selftest AND the faculty test): the guide must EXPLAIN the map. On a ramp
+  whose structure ignores the guide, guided is NOT better than a box blur (0.030 vs 0.027) and injects a spurious
+  edge borrowed from the guide. It is not a universal denoiser.
+
+GS-C (DONE): workflow_propagate gained `graph=` -- any directed weighted graph ({"out"/"in": {node: [(nbr, w)]}})
+can now use the spreading kernel (scene-selection growth, encyclopedia priming). Default None = module bones, so
+callers are unchanged; alpha=0 identity verified on a custom graph.
+  RULE 0 BIT ME, twice, and it is on record: my sweep note claimed propagate took a flat {node: {node: w}} dict.
+  It does not -- it takes {"out","in"} views of PAIR-LISTS. I had read the SIGNATURE, not the BODY. Two failed
+  attempts before reading build_workflow_graph's actual return. Probe live code, not your own summary of it.
+
+TWO DEDUPS MEASURED AND REJECTED (both would have been plausible "wins"):
+  * shapefromshading._box_blur vs hazedepth._box_filter: same cumsum-SAT algorithm, BIT-IDENTICAL in the interior
+    (~2e-15) -- but they differ by up to 0.13 at BORDERS: _box_blur edge-PADS, _box_filter normalizes by the true
+    window size. shapefromshading uses radius = min(H,W)//3 for albedo, so borders DOMINATE, and the output feeds
+    normals. Same-algorithm/different-convention is the tree's existing precedent (mueller vs transform `compose`;
+    meshskin `rotation`): RECORD, do not force. Not wired.
+  * ABTT for VSA cleanup (GS-B): measured negative, see the sweep entry -- unchanged, nothing built.
+
+PRE-EXISTING BUG FOUND AND FIXED (not mine, not the merge's): the incoming branch registered
+`find_capability_uris` TWICE in holographic_catalog.py (lines 1163/1186, byte-identical blocks). The catalog
+selftest is a CI gate and refuses double-registration, so main was red on that gate. My pre-merge tree passed;
+incoming failed. Removed the redundant block. CAUGHT ONLY BECAUSE this item ran the catalog SELFTEST -- the merge
+review had run the audit battery (wiring/catalog_gaps/skill_lint/structure/imports/unifiers/name_collisions) but
+not the module selftests. Lesson: the audit battery and the selftests are DIFFERENT gates; a merge review must run
+both.
+
+CLOSE-OUT: file_python_check after every edit; hazedepth selftest extended (generality + kept negative) and green;
+4 faculty tests in tests/test_generalization_sweep2.py; audits 0/0/0 + structure + imports 0 flat + collisions 48/48
++ unaccounted()=0; catalog selftest 396 caps (no double-registration); skills 887 caps/1328 methods; reachable-by-
+UnifiedMind 467; regen_docs ONE DOOR -> 8 outputs from 6 generators -> drift clean; CI pins 26 passed.
+
+## REVERSE SWEEP -- can the NEW functionality benefit from what already existed? (1 real item, export-blocked; 1 measured negative; 6 verified good)
+
+The mirror of sweep #2. Eight candidates; full verdicts in docs/wiring_audit_backlog.md (RS-1..RS-8). The headline
+finding is HEALTH, and it is worth recording as loudly as a gap would be: the incoming code already reuses the
+engine well. holoroute encodes through mind.encode_record and delegates matching to relations.match_record with a
+generalize-on-contact WHY; vanishing_point delegates to vision.edges + hough_lines; the router's cache key is
+hashlib-clean. A sweep that finds nothing to fix is evidence the discipline is propagating, not wasted effort.
+
+THE ONE REAL ITEM (RS-1, EXPORT-BLOCKED): the runtime router never received the routing program's own best
+worst-case result. Multivec (chunk max-sim; worst rank 240 -> 94 at zero top-1/top-5 cost, measured at 768d) exists
+only in tools/semantic/knowledge_index.py --multivec; the shipped index_128d.npz is FLAT and route_semantic fuses
+dense + bones only. Design is filed and ready: chunked q8 export with chunk 0 = full body (the tooling's own
+"can never do worse" guarantee), max-sim scorer in EmbeddingRouter (~6x index, still <1 MB), GATED on the 12-ask
+exam at 128d -- the positive was measured at 768d, so the transfer is unverified until the exam passes. BLOCKED on
+the offline nomic encoder (model.safetensors + vocab), absent here by footprint policy. NOT built speculatively:
+a scorer without its gate is exactly the unshipped-claim failure mode.
+
+MEASURED NEGATIVE (RS-2, kept loud): HoloForest for the router's kNN NEVER pays at the real scale. N=503, D=128:
+dense 16.6 us/query; forest 1,045 us/query -- 63x SLOWER -- plus a 100 ms build. Same curve as G2 (forest's 1.31x
+was at N=800 and grows with N; below that, per-query Python overhead dominates). The dense scan is the RIGHT
+structure for this index. Recorded so nobody "optimizes" it later.
+
+CORRECT NEGATIVES / VERIFIED DISTINCT: queryembed._tokens is artifact-LOCKED (runtime and fit script must split
+identically or ids desync from the shipped W -- delegation would corrupt the artifact); bm25's tokenizer had
+NOTHING to delegate to (prior "tokenizers" are domain parsers: graphql/milkdrop/codeparse -- bm25's is the
+engine's first English one, with its full-stemmer rejection documented); distill_map's ridge vs the two
+subspace_alignment's is a HOMONYM, not duplication (they compute agreement METRICS -- principal angles; it fits an
+alignment MAP W). No median filter existed before hazedepth's.
+
+RULE-0 ECHO: the HoloForest measurement initially failed twice on API shape (build takes an (N,dim) ARRAY, not
+(name, vec) pairs -- read the body, again). The lesson from GS-C repeated within the same session; it is now a
+pattern, not an incident: probe the BODY, not the signature, not memory, not your own summary.
+
+## D2 SHIPPED -- damage_mask consolidated (the one true cross-module duplicate); plus a one-door gap found and fixed
+
+D2 was the last open item from the duplication self-audit: `damage_mask` written THREE times, byte-identically, on
+Hologram / HolographicImage / HolographicArchive -- the only real cross-module duplicate found across 3,594
+canonical-shape-compared functions. Verified still live (Rule 0: the tree changed a lot since that audit), then:
+
+CANONICAL HOME: holographic_ai.damage_mask(dim, destroy_fraction, seed=0). Chosen by reading, not habit: the mask is
+a property of a VECTOR (slots), not of any storage class, so it belongs beside random_vector/unitary_vector. archive
+ALREADY imported ai, and ai imports neither image nor archive -- no cycle. The three methods keep their signatures
+and delegate; callers unchanged.
+
+BIT-IDENTITY MEASURED BEFORE THE REWIRE (the load-bearing step -- the mask is RNG-derived and existing degradation
+numbers are pinned to the EXACT slots it kills, so a one-slot drift would silently move every robustness result in
+the tree): 48 golden configs (3 classes x dim 64/257 x fraction 0/0.1/0.5/1.0 x seed 0/7) captured from the OLD
+bodies, all 48 bit-identical after. Pinned in tests/test_damage_mask.py (10 tests).
+
+WIRED + DISCOVERABLE: mind.damage_mask(fraction, seed, dim=None) (dim defaults to the mind's). Catalog entry with
+the measured degradation curve; 7/7 stranger phrasings that ALL missed in the Rule-0 probe now hit top-3
+("corrupt a vector for testing", "simulate data loss", "graceful degradation test", ...). Registered as a unifier
+(ai.damage_mask, 2/2 clients wired).
+
+THE CLAIM IT EXISTS TO TEST, now measurable by anyone: recall degrades SMOOTHLY, not off a cliff. dim=256:
+20% slots lost -> cos 0.89, 40% -> 0.80, 60% -> 0.68, 80% -> 0.54. Asserted in the ai selftest (monotone decay +
+60% loss still >0.55) and the faculty tests.
+
+DUPLICATION-AUDIT ANNOTATION CORRECTED, not silenced: the budget entry still fires (the three delegating shims are
+textually identical bodies, by design) -- so the entry STAYS, re-labelled ADJUDICATED following the file's OWN
+precedent for _occlusion (which was resolved the same way). A stale "identical" label would have implied
+unconsolidated duplication.
+
+ONE-DOOR GAP FOUND BY EVIDENCE AND FIXED: the new unifier did not appear in docs/UNIFIERS.md. That doc IS generated
+(tools/unifiers.py --markdown) but the generator PRINTS -- so the file was produced by a shell redirect living only
+in a human's memory, and was NOT in tools/regen_docs.py. It had ALREADY DRIFTED: semantic.lighting_params was in
+REGISTRY since the merge with ZERO hits in the committed doc. (Corollary, kept loud: my merge-time hand-edit of the
+SpatialGrid heading was an edit to a GENERATED file -- now correctly superseded by the generator, which renders it
+as a DEFERRED bullet, its true shape. "Never hand-edit generated files" bit me and self-corrected.) FIX: additive
+--write mode + regen_docs owns docs/UNIFIERS.md + the runner splits args off the generator string. One door now runs
+7 generators -> 9 outputs (was 6 -> 8); drift gate PROVEN to bite (mutate -> named STALE; restore -> clean).
+
+RULE-0 ECHO, THIRD TIME THIS SESSION: _repo_root() returns a str, not a Path -- my `root / "docs"` blew up. Same
+lesson as GS-C's pair-lists and HoloForest's array API. Probe the BODY. It is now a standing pattern, not incidents.
+
+CLOSE-OUT: file_python_check after every edit; 4 touched module selftests green (ai/image/archive/catalog); audits
+0/0/0 + structure + imports 0 flat + collisions 48/48 + unaccounted()=0; catalog 397 caps no double-registration;
+75 tests across the affected files + a 137-test untouched shard green; regen_docs 9 outputs drift-clean.
+
+## BACKLOG CLOSED OUT -- P1/P2/P3 + D3 verified done; item 13 was masking a REAL BUG: the mind could not edit its own central module
+
+Swept the remaining unmarked backlog sections against LIVE code rather than trusting the notes.
+
+VERIFIED ALREADY DONE (marked, not re-done): wiring-audit P1's five Tier-B faculties all exist (splat_points,
+iridescent_tint, light, adaptive_conformal, slime_solve_maze). P2 is resolved by classification -- the reachability
+audit files sync as INFRASTRUCTURE/PLUMBING (reached via a faculty, by design), photos/reanchor as EVIDENCE/HARNESS,
+and fountain/lexicon/materialdata/reasoning as declared, which is why the audit sits at 0 dark. P3's items 11-12 are
+those annotations. D3 closed as a correct negative: every vulture/pyflakes finding is cosmetic (unused locals and
+imports), the 2 "undefined name" hits are intentional noqa'd fixtures, and there are NO dead functions or modules.
+
+ITEM 13 -- "unified.py is 111% of the 1 MB agent-read cap; decide: split / raise the cap / accept". The canary had
+grown to 115%, and its own message claimed "agent read() refuses; python_check/read_lines still work (uncapped)".
+That claim was FALSE where it counted. MEASURED on the live tree: on holographic_unified.py -- the module that
+defines EVERY faculty, hence the file agents edit MOST -- file_view, count_occurrences, file_replace, insert,
+replace_lines and delete_lines ALL raised EditError. Only read_lines and python_check worked. The engine's own
+documented build loop ("file_view the region, then file_replace it") COULD NOT RUN on its most important file, and
+the error even instructed the caller to "read a slice" -- which is exactly what view() is.
+
+ROOT CAUSE, already written down in the code that violated it: read()'s docstring states the rule -- THE CAP'S ONE
+JOB is protecting agent-facing reads from flooding a context window; it is NOT a correctness limit; callers whose
+OUTPUT is small (python_check -> a dict, read_lines -> a slice) read uncapped. C7 learned that lesson when unified.py
+first crossed 1 MB and python_check started refusing... and applied the fix to TWO callers, missing the other six.
+It fails QUIETLY, BY REFUSAL, which is why it survived: nobody reports a tool they silently route around. I did
+exactly that all session -- every unified.py edit here was made with raw Python instead of mind.file_replace, and I
+did not notice I was working around a broken tool. That is the precise failure dogfooding exists to catch.
+
+FIX, by OUTPUT SHAPE rather than by name: whole-file output (read, read_many) stays CAPPED -- that is the cap's
+purpose, verified still to refuse on unified.py. Slice / count / write-status output (view, count_occurrences,
+replace, insert, replace_lines, delete_lines) now reads uncapped. PROVEN end-to-end: an agent can now
+view -> file_replace -> python_check holographic_unified.py through the mind, and the file is byte-identical after
+reverting the probe edit. tests/test_codeedit_cap_scope.py (6 tests) pins the rule per method BY OUTPUT SHAPE; the
+trap was proven to BITE by re-breaking a site (2 failures) and restoring (6 pass). It is codeedit's FIRST test file
+-- the module had only a _selftest, which is part of how six broken methods went unnoticed. The canary text was
+corrected: over the cap, only whole-file read() refuses, by design.
+
+ITEM 13'S ANSWER IS THEREFORE "ACCEPT" -- now that accepting is TRUE. Splitting a 1.15 MB tie-sensitive file into
+mixins was never justified (no measured benefit; real risk across 1,328 methods, MRO and import cycles), and raising
+the cap would be actively HARMFUL -- a 1.1 MB read is exactly what the cap exists to prevent. The file is fully
+navigable AND editable: find_capability -> FACULTY_MAP -> file_grep -> view-slice -> file_replace.
+
+LESSON (the sharpest of the session): a canary that reports a SYMPTOM ("this file is big") can hide the DEFECT
+("your tools refuse to work on it"). The measurement that mattered was not the file's size -- it was trying the
+documented workflow on it. Also: a rule stated in a docstring is not a rule enforced; C7's fix had no test, so its
+missed cases survived two years of the file growing past the boundary.
+
+CLOSE-OUT: file_python_check after every edit; codeedit selftest green; audits 0/0/0 + structure + imports 0 flat +
+collisions 48/48 + unaccounted()=0; 25 tests over touched surfaces + a 157-test untouched shard green; regen_docs
+9 outputs from 7 generators, drift clean.
+
+## RS-1 CLOSED as a MEASURED NEGATIVE -- and my "ship a wider index" follow-on REFUTED by the shipping pipeline
+
+THE GATE RAN (Moose, 80 min: the cache was COLD -- my "warm, ~1 min" prediction was wrong; .knowledge_cache.json is
+gitignored and never travelled with the repo, so "the chunk vectors are already in your cache" was an assumption,
+not a fact. It cost 80 minutes of someone else's time. Check whether an artifact EXISTS before predicting it does.)
+
+RS-1 REFUTED at the ship dim. multivec@128d: worst 81 -> 110, median 2 -> 4 -- it DEGRADES the exact metric it was
+proposed to fix. Real at full width (768d worst 140 -> 57; blend alpha=0.25 -> 67 at zero top-1/top-5 cost) but the
+effect does not survive truncation to 128d. NOTHING BUILT: one run, no export path, no runtime scorer. This is the
+gate working exactly as designed. KEPT NEGATIVE: the 128d blend (alpha=0.5: top-1 3->4, top-5 7->8) looks like a win
+and is NOT -- one ask on a 12-ask exam (~0.6 SE). A 1-ask delta is not a result; a bigger ask set comes first.
+
+THEN I GOT ONE WRONG, LOUDLY. From the exam's per-dim table (@768d top-1 6/12 vs @128d 3/12) I concluded 128d was
+halving top-1 and told Moose to export a 768d index. THE EXAM'S TABLE IS NOT A ROUTER PREDICTION: the exam fits
+all-but-the-top on ALL 5,927 entries (509 code + 1,013 docs + 4,405 notes -- the removed direction is dominated by
+NOTES), while export_index.py fits ABTT on the 503 CODE VECTORS ONLY and bakes mu/pc into the index. Different
+correction, different numbers.
+
+MEASURED IN THE LIVE SHIPPED ROUTER instead (503 modules, same 12 asks, seed vectors, export_index's exact math,
+gamma=0.5 = ship setting):
+    dim  top-1  top-5  median  worst   size
+    768   6/12   8/12    1.5    159   458 KB
+    512   5/12   7/12    2.0    186   331 KB
+    256   7/12   8/12    1.0    142   205 KB
+    128   7/12   9/12    1.0     99   141 KB   <- SHIPS
+     64   3/12   5/12    6.5    162   110 KB
+128d is best-or-tied on EVERY metric at the smallest size that holds. 768d is WORSE (top-5 8 vs 9, worst 159 vs 99)
+at 3x the bytes. 128/256/768 sit within noise (the 512 dip to 5/12 IS the noise floor visible); 64d collapses.
+export_index.py's "measured knee: top-1 plateaus at 128d" is VINDICATED, not stale. index_768d.npz: discard.
+Bones fusion is the largest single effect present (@128d 5/12 worst 153 dense-only -> 7/12 worst 99 fused),
+matching the router docstring's "6->7/12, median 2->1 at the ship dim".
+
+MEASUREMENT UNBLOCK worth reusing: this needed NO model and NO upload. tools/semantic/routing_seed.npz.xz is
+"ONLY routing-relevant entries (code + asks), float16" -- 521 vectors = 509 modules + the 12 asks at FULL 768d.
+Recomputing cache keys (sha256(WIRING||"search_document: {name} -- {body}")) matched 503/509 modules and 12/12 asks
+against the live tree, which is exactly the shipped index's module set. So any dim can be built and scored through
+the real EmbeddingRouter, offline, in seconds. The seed is the reusable measurement instrument -- future dim/ABTT/
+fusion questions do not need the encoder at all.
+
+LESSON (the sharpest): MEASURE THE PIPELINE THAT SHIPS. An offline exam's dimension table read like a router
+prediction and was not one; I nearly traded a 3x bigger artifact for a phantom gain on a number that was never about
+the router. Second lesson, same entry: two of my confident claims this turn ("cache is warm", "128d halves top-1")
+were both ASSUMPTIONS dressed as findings, and both were wrong. Neither cost a bad merge only because the
+measurement ran before the build.
+
+## SEED RECONCILED -- determinism VALIDATED by an independent cold re-embed; seed made content-determined
+
+Moose uploaded the routing seed from his fresh 80-minute cold run to reconcile against the committed one.
+
+RESULT 1 -- NOTHING TO SWAP, AND A REAL VALIDATION. All 521 vectors are BIT-IDENTICAL (max|diff| = 0.0, min cosine
+1.000000000). An independent cold embed, on another machine, from an EMPTY cache, reproduced the committed vectors
+exactly. The engine's determinism claim (no RNG in the forward pass, hashlib keys, PYTHONHASHSEED=0) is now
+validated end-to-end by re-execution rather than asserted -- the strongest evidence for it on record, and it arrived
+as a free by-product of a gate that refuted its own feature.
+
+RESULT 2 -- A REAL DEFECT, found only because the bytes disagreed while the data did not. The files differed
+(731,168 vs 730,860 bytes) with the SAME 521 keys and identical vectors: 499 of 521 ROWS were in a different ORDER.
+seed_cache.py wrote rows in dict-iteration (= insertion) order, which depends on how a run warmed (cold embed vs
+partial cache vs walk order). So identical data produced a byte-different 730 KB committed binary -- git churn for
+zero change, and a landmine for any byte-level drift gate (the exact gate class this repo keeps adding). FIX:
+`keys = sorted(_routing_keys(d))` -- one line, with the WHY. The artifact is now a pure function of its CONTENT,
+which is the rule the engine already applies everywhere else. PROVEN: canonicalising the committed seed and Moose's
+upload independently yields the SAME BYTES (sha256 0c5bd20581a8a03c, 731,200 bytes); the committed seed was rewritten
+in canonical form. Traps in tests/test_routing_seed_canonical.py (4), sort-trap proven to BITE by shuffling.
+
+RESULT 3 -- THE INSTRUMENT IS NOW PINNED. routing_seed.npz.xz = 521 vectors at FULL 768d (503 shipped modules + the
+12 exam asks), ~730 KB. It resolves 503/509 modules and 12/12 asks against the live tree by recomputing
+sha256(WIRING||text) keys, so ANY dimension/ABTT/fusion question can be scored through the real EmbeddingRouter
+offline, in seconds, with NO encoder and NO network. The tests pin that property, not just the file. This is the
+durable asset from the RS-1 arc: the feature was refuted, but the measuring instrument it forced into the open is
+permanent -- and the 80-minute cold embed never has to happen again.
+
+KEPT NOTE: the seed stores FULL width (768d) deliberately, per Moose's point that a wide artifact can serve any
+narrower consumer but not the reverse. Width is a runtime knob; 128d remains the measured champion (see the
+dimension sweep entry) and 64d collapses.

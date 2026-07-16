@@ -54,6 +54,9 @@ GENERATORS = [
     ("facultymap.py",  ["docs/FACULTY_MAP.md"]),
     ("docmap.py",      ["docs/DOC_MAP.md"]),
     ("pipelinemap.py", ["docs/PIPELINE_MAP.md", "pipelines.json"]),
+    # A generator MAY carry args: the string is split on whitespace, so a tool whose default CLI does
+    # something else (unifiers.py prints a wiring table) can still own its doc through the one door.
+    ("tools/unifiers.py --write", ["docs/UNIFIERS.md"]),
 ]
 
 
@@ -88,10 +91,11 @@ def run(check=False, root=None):
 
     env = dict(os.environ, PYTHONHASHSEED="0")           # the constitution applies to the generators too
     for gen, _outs in GENERATORS:
-        if not (root / gen).exists():
+        argv = gen.split()                               # a generator entry may carry args (see GENERATORS)
+        if not (root / argv[0]).exists():
             missing.append(gen)                          # NEVER silently skip -- see the module docstring
             continue
-        proc = subprocess.run([sys.executable, gen], cwd=str(root), env=env,
+        proc = subprocess.run([sys.executable] + argv, cwd=str(root), env=env,
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         if proc.returncode != 0:
             failed.append(gen)

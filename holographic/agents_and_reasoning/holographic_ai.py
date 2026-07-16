@@ -96,6 +96,31 @@ def random_vector(dim, rng):
     return v / np.linalg.norm(v)
 
 
+def damage_mask(dim, destroy_fraction, seed=0):
+    """A KEEP-MASK that zeroes a random `destroy_fraction` of a vector's slots -- the graceful-degradation probe.
+
+    Multiply a stored vector by this to simulate losing part of it (a scratched plate, a dropped shard, a lossy
+    channel) and then measure what recall survives. Holography's headline claim is that information is spread
+    across every slot rather than filed in one, so damage should degrade recall SMOOTHLY instead of destroying a
+    record -- this is the mask that lets a caller prove that on their own data instead of taking it on faith.
+
+    `destroy_fraction` in [0,1]; returns a (dim,) array of 1.0 (keep) and 0.0 (destroyed), with exactly
+    int(dim * destroy_fraction) slots zeroed. DETERMINISTIC: the same (dim, fraction, seed) always yields the
+    same mask, so a degradation curve is reproducible and can sit in a regression test.
+
+    WHY IT LIVES HERE: it was written three times, byte-identical, on Hologram / HolographicImage /
+    HolographicArchive -- the one true cross-module duplicate the shape audit found (D2). It is a property of a
+    VECTOR (slots), not of any storage class, so it belongs beside the other vector primitives and the three
+    classes delegate to it.
+    """
+    rng = np.random.default_rng(seed)
+    keep = np.ones(dim)
+    # permutation (not choice) is what the three original sites used -- keep it EXACTLY, since existing
+    # degradation numbers and their tests are pinned to these precise masks.
+    keep[rng.permutation(dim)[:int(dim * destroy_fraction)]] = 0
+    return keep
+
+
 def derived_atom(seed, name, dim, unitary=False):
     """Mint an atom that is a PURE function of (seed, name) -- the same name always
     produces the same vector, regenerable in isolation with no dependence on what else
@@ -1180,6 +1205,21 @@ def _selftest():
     # 5. DETERMINISM (the repo's non-negotiable): the same seed mints the same vector, bit for bit.
     assert np.array_equal(Vocabulary(dim=d, seed=7).get("z"), Vocabulary(dim=d, seed=7).get("z"))
     assert np.array_equal(derived_atom(0, "x", d), derived_atom(0, "x", d))
+
+    # D2 CONSOLIDATION -- damage_mask is the one true cross-module triplicate, now canonical here (Hologram /
+    # HolographicImage / HolographicArchive delegate). Assert the EXACT numeric contract they depend on.
+    _k = damage_mask(256, 0.25, seed=0)
+    assert _k.shape == (256,) and set(np.unique(_k)) <= {0.0, 1.0}, "keep-mask must be 0/1 of length dim"
+    assert int((_k == 0).sum()) == 64, ("exactly int(dim*fraction) slots must die", int((_k == 0).sum()))
+    assert np.array_equal(damage_mask(256, 0.25, seed=0), _k), "must be deterministic in (dim, fraction, seed)"
+    assert not np.array_equal(damage_mask(256, 0.25, seed=1), _k), "a different seed must move the slots"
+    assert int((damage_mask(64, 0.0, seed=0) == 0).sum()) == 0, "fraction 0.0 destroys nothing"
+    assert int((damage_mask(64, 1.0, seed=0) == 0).sum()) == 64, "fraction 1.0 destroys everything"
+    # THE CLAIM THE PROBE EXISTS TO TEST: a spread record degrades SMOOTHLY, not off a cliff -- losing 60%% of
+    # the slots must still leave it clearly recognisable. Measured ~0.63 here before this line was written.
+    _dv = random_vector(1024, np.random.default_rng(0))
+    _cos6 = cosine(_dv * damage_mask(1024, 0.6, seed=2), _dv)
+    assert _cos6 > 0.55, ("60%% slot loss should still recall clearly (smooth degradation)", _cos6)
 
     print("OK: holographic_ai self-test passed (bind/unbind round-trips with a >5x contrast, unitary unbind is "
           "near-exact at cos>0.99, bundle preserves membership, key->value recall picks the right value with a "

@@ -81,7 +81,11 @@ class Editor:
         """Return lines [start, end] (1-based inclusive) as a single string WITH LINE NUMBERS prefixed, exactly the
         form an agent needs to then target replace/insert/delete_lines/replace_lines. `end=None` -> to EOF. This is
         the everyday 'show me this region so I can edit it' call (read() gives raw text; view() gives located text)."""
-        text = self.read(relpath)
+        # Uncapped, for the same reason as read_lines: the returned SLICE is what enters context, so the file's
+        # total size is irrelevant. Capping here refused view() on holographic_unified.py -- the engine's own
+        # central module and the file agents edit MOST -- while the error told them to "read a slice", which is
+        # exactly what this method IS. C7 fixed read_lines/python_check and missed the rest of the class.
+        text = self.read(relpath, max_bytes=None)
         lines = text.splitlines()
         s = max(1, int(start))
         e = len(lines) if end is None else min(len(lines), int(end))
@@ -102,7 +106,8 @@ class Editor:
     def count_occurrences(self, relpath, text):
         """How many times `text` occurs in a file -- check BEFORE a replace to know whether it's unique (count==1),
         absent (0), or needs count=N/0. Cheap way to avoid an ambiguous-replace EditError."""
-        return self.read(relpath).count(text)
+        # Uncapped: the output is a NUMBER. The cap protects a context window; an int cannot flood one.
+        return self.read(relpath, max_bytes=None).count(text)
 
     def exists(self, relpath):
         """True if the (root-scoped) path exists."""
@@ -220,7 +225,10 @@ class Editor:
         """Replace EXACT text `old` with `new` in a file. By default `old` must occur EXACTLY ONCE (count=1) so the
         edit is unambiguous; pass count=0 to replace ALL occurrences, or count=N to require exactly N. Returns
         {path, replacements, first_line}. This is the workhorse edit -- the same contract as a careful patch tool."""
-        text = self.read(relpath)
+        # Uncapped: this is a WRITE. Nothing enters context but a status dict -- capping here only forbade
+        # EDITING large files, the opposite of this class's job (unified.py could not be edited through the
+        # mind at all, so agents silently routed around their own tools).
+        text = self.read(relpath, max_bytes=None)
         n = text.count(old)
         if n == 0:
             raise EditError("old text not found in %r" % relpath)
@@ -236,7 +244,8 @@ class Editor:
     def insert(self, relpath, after_line, text):
         """Insert `text` (one or more lines) AFTER 1-based line `after_line` (0 = at the very top). Returns
         {path, inserted_at}. Newlines in `text` are honoured; a trailing newline is added if missing."""
-        lines = self.read(relpath).splitlines(keepends=True)
+        # Uncapped: a WRITE (see replace). The cap guards context, not correctness.
+        lines = self.read(relpath, max_bytes=None).splitlines(keepends=True)
         idx = max(0, min(int(after_line), len(lines)))
         block = text if text.endswith("\n") else text + "\n"
         lines[idx:idx] = [block]
@@ -247,7 +256,8 @@ class Editor:
         """Replace lines [start, end] (1-based inclusive) with `text` -- the range-based edit to reach for when the
         old content ISN'T unique enough for replace() (e.g. a body of boilerplate). Pair it with view() to get the
         line numbers first. Returns {path, replaced, new_lines}."""
-        lines = self.read(relpath).splitlines(keepends=True)
+        # Uncapped: a WRITE (see replace). The cap guards context, not correctness.
+        lines = self.read(relpath, max_bytes=None).splitlines(keepends=True)
         s = max(1, int(start)) - 1
         e = min(len(lines), int(end))
         if s >= e:
@@ -260,7 +270,8 @@ class Editor:
 
     def delete_lines(self, relpath, start, end):
         """Delete lines [start, end] (1-based, inclusive). Returns {path, deleted}."""
-        lines = self.read(relpath).splitlines(keepends=True)
+        # Uncapped: a WRITE (see replace). The cap guards context, not correctness.
+        lines = self.read(relpath, max_bytes=None).splitlines(keepends=True)
         s = max(1, int(start)) - 1
         e = min(len(lines), int(end))
         if s >= e:
