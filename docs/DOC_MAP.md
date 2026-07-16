@@ -17,14 +17,14 @@ Regenerate the generated set in one go (the close-out ritual):
 python3 capdoc.py && python3 docgen.py && python3 apiquickref.py && python3 facultymap.py && python3 docmap.py
 ```
 
-## Family layout (504 modules)
+## Family layout (508 modules)
 
 ```mermaid
 graph LR
     H[holographic/]
     H --> misc["misc (149)"]
     H --> mesh["mesh_and_geometry (76)"]
-    H --> rend["rendering (61)"]
+    H --> rend["rendering (62)"]
     H --> simu["simulation_and_physics (48)"]
     H --> agen["agents_and_reasoning (47)"]
     H --> samp["sampling_and_signal (32)"]
@@ -32,7 +32,7 @@ graph LR
     H --> io_a["io_and_interop (26)"]
     H --> cach["caching_and_storage (19)"]
     H --> mate["materials_and_texture (14)"]
-    H --> sema["semantic_router (2)"]
+    H --> sema["semantic_router (5)"]
 ```
 
 ## Doc pipeline
