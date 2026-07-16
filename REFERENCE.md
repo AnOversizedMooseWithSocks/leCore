@@ -166,8 +166,8 @@
 | [`holographic_cosamp.py`](#holographic-cosamp) | SPEED-3 -- CoSaMP batch-selection recovery (holographic_cosamp). | 172 |
 | [`holographic_cosmic.py`](#holographic-cosmic) | Local structure classification of a point cloud -- the 'cosmic web' method, extracted from leOS | 143 |
 | [`holographic_cosserat.py`](#holographic-cosserat) | holographic_cosserat.py -- H2b: TWIST for hair, via a Cosserat rod with orientation frames. | 278 |
-| [`holographic_creature.py`](#holographic-creature) | Spore-style CREATURE builder: a spine with attachable limbs, bilateral symmetry, constraints (holographic_crea | 283 |
 | [`holographic_creature.py`](#holographic-creature) | holographic_creature.py | 2366 |
+| [`holographic_creature.py`](#holographic-creature) | Spore-style CREATURE builder: a spine with attachable limbs, bilateral symmetry, constraints (holographic_crea | 283 |
 | [`holographic_creature_mind.py`](#holographic-creature-mind) | CreatureMind -- the reference DEMO of building a specialized mind ON the one UnifiedMind. | 108 |
 | [`holographic_crossfield.py`](#holographic-crossfield) | holographic_crossfield.py -- the smoothest 4-RoSy field on a surface (Box3D backlog F2). | 797 |
 | [`holographic_curlnoise.py`](#holographic-curlnoise) | holographic_curlnoise.py -- #1 from the SIGGRAPH list: CURL NOISE. Turbulent-looking flow that is | 143 |
@@ -3863,6 +3863,47 @@
 
 ### holographic_creature.py
 
+> holographic_creature.py
+> =======================
+>
+> A creature brain built on the holographic engine in holographic_ai.py.
+>
+> It learns to forage in a little grid world -- find food, avoid poison -- with
+> NO neural net and NO training loop in the gradient sense. It simply remembers
+> what happened (state, action, how it turned out) and, faced with a new
+> situation, does whatever worked in similar situations before. Similarity is
+> measured holographically; the "value" of an action is the reward of its nearest
+> neighbours in memory. That is instance-based reinforcement learning, and it
+> maps cleanly onto leOS's reflex arc + "semantic compass" (lean toward what
+> succeeded) + "void/curiosity" (try what you haven't, where you're unsure).
+>
+> The one trick that makes it learn fast: the creature senses the world
+> EGOCENTRICALLY -- "food is to my east", not "food is at (5,2)". Because the
+> state is relative, a lesson learned in one corner of the map applies
+> everywhere, so it never has to visit every cell.
+>
+> Run:   python3 holographic_creature.py
+> Needs: numpy, and holographic_ai.py beside it.
+
+**Public API:**
+
+- `class HolographicMind` -- Perceive -> decide -> learn, by remembering experiences as PROTOTYPES.
+- `class CreatureEncoder` -- Turn the creature's egocentric senses into a single unit vector -- the creature DOMAIN's encoder.
+- `class FastCreatureEncoder` -- Compiled, fully in-VSA perception: the per-step role/filler BIND (an FFT convolution) is the last
+- `class GridWorld` -- A small grid with one creature, one star (food), some poison cells, and
+- `def run_episode(world, encoder, mind, learn, explore, eval_epsilon, gamma, max_steps, mem, corridor_reflex, danger_reflex, wall_reflex, curiosity, return_trajectory)` -- Live one episode; return (total_reward, stars_collected).
+- `def demo_creature()`
+- `def demo_memory(seeds, episodes, steps)` -- Scene C: with limited vision, show that a working memory of recent moves
+- `def demo_obstacles(seeds, episodes)` -- Scene D: obstacles. First random WALLS in the forage world (the creature
+- `def demo_introspect(episodes, seed)` -- Scene E: the creature's memory is the same holographic kit as the image
+- `def learn_maze(world_factory, dim, episodes, gamma, mem, max_steps, candidates, probe, accept, seed, k, bootstrap)` -- Learn to escape a maze reliably -- the rat-in-a-maze protocol, hardened for
+- `def demo_self_maintaining(dim, seed)` -- The orchestrator brain keeping ITSELF fresh, with no thresholds to tune. We
+- `def capture_route(world_factory, encoder, mind, mem, max_steps, trials)` -- Run a trained maze brain and capture its successful escape routes as
+- `def replay_plan(world, route, reset)` -- Drive navigation from a DISCOVERED route plan instead of re-deciding every
+- `class WorldView` -- The creature's world as a COUNTABLE, DIFFABLE composite -- the scene
+
+### holographic_creature.py
+
 > Spore-style CREATURE builder: a spine with attachable limbs, bilateral symmetry, constraints (holographic_creature).
 >
 > WHY THIS MODULE EXISTS
@@ -3906,47 +3947,6 @@
 
 - `class Creature` -- A procedural creature from a body-plan spec: a spine chain with limbs attached at fractional positions, with
 - `def quadruped_spec(body)` -- A ready-made body plan: a quadruped -- a spine with two pairs of legs (front + back) and a head. A concrete
-
-### holographic_creature.py
-
-> holographic_creature.py
-> =======================
->
-> A creature brain built on the holographic engine in holographic_ai.py.
->
-> It learns to forage in a little grid world -- find food, avoid poison -- with
-> NO neural net and NO training loop in the gradient sense. It simply remembers
-> what happened (state, action, how it turned out) and, faced with a new
-> situation, does whatever worked in similar situations before. Similarity is
-> measured holographically; the "value" of an action is the reward of its nearest
-> neighbours in memory. That is instance-based reinforcement learning, and it
-> maps cleanly onto leOS's reflex arc + "semantic compass" (lean toward what
-> succeeded) + "void/curiosity" (try what you haven't, where you're unsure).
->
-> The one trick that makes it learn fast: the creature senses the world
-> EGOCENTRICALLY -- "food is to my east", not "food is at (5,2)". Because the
-> state is relative, a lesson learned in one corner of the map applies
-> everywhere, so it never has to visit every cell.
->
-> Run:   python3 holographic_creature.py
-> Needs: numpy, and holographic_ai.py beside it.
-
-**Public API:**
-
-- `class HolographicMind` -- Perceive -> decide -> learn, by remembering experiences as PROTOTYPES.
-- `class CreatureEncoder` -- Turn the creature's egocentric senses into a single unit vector -- the creature DOMAIN's encoder.
-- `class FastCreatureEncoder` -- Compiled, fully in-VSA perception: the per-step role/filler BIND (an FFT convolution) is the last
-- `class GridWorld` -- A small grid with one creature, one star (food), some poison cells, and
-- `def run_episode(world, encoder, mind, learn, explore, eval_epsilon, gamma, max_steps, mem, corridor_reflex, danger_reflex, wall_reflex, curiosity, return_trajectory)` -- Live one episode; return (total_reward, stars_collected).
-- `def demo_creature()`
-- `def demo_memory(seeds, episodes, steps)` -- Scene C: with limited vision, show that a working memory of recent moves
-- `def demo_obstacles(seeds, episodes)` -- Scene D: obstacles. First random WALLS in the forage world (the creature
-- `def demo_introspect(episodes, seed)` -- Scene E: the creature's memory is the same holographic kit as the image
-- `def learn_maze(world_factory, dim, episodes, gamma, mem, max_steps, candidates, probe, accept, seed, k, bootstrap)` -- Learn to escape a maze reliably -- the rat-in-a-maze protocol, hardened for
-- `def demo_self_maintaining(dim, seed)` -- The orchestrator brain keeping ITSELF fresh, with no thresholds to tune. We
-- `def capture_route(world_factory, encoder, mind, mem, max_steps, trials)` -- Run a trained maze brain and capture its successful escape routes as
-- `def replay_plan(world, route, reset)` -- Drive navigation from a DISCOVERED route plan instead of re-deciding every
-- `class WorldView` -- The creature's world as a COUNTABLE, DIFFABLE composite -- the scene
 
 ### holographic_creature_mind.py
 
