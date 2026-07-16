@@ -226,7 +226,7 @@ def _qem_decimate_fast(mesh, target_faces):
     return Mesh(V[keep], out_faces)
 
 
-def qem_decimate(mesh, target_faces, fast=False):
+def qem_decimate(mesh, target_faces, fast=False, uvs=None):
     """Greedily collapse the lowest-QEM-cost edge (deterministic ties by vertex index) via the guarded
     collapse_edge, accumulating quadrics through each collapse, until the mesh has <= target_faces (or no safe
     collapse remains). Returns a new Mesh. Closed triangle meshes; see the kept negatives.
@@ -238,11 +238,42 @@ def qem_decimate(mesh, target_faces, fast=False):
     decimation is O(F log F) instead of O(F^2). An EQUALLY-VALID, deterministic QEM decimation to the same face
     target and close to the canonical surface, much faster -- but NOT bit-identical (batched/heap ordering differs
     from the per-edge loop at the ULP, and QEM is tie-sensitive). Use it for preview/interactive decimation; use the
-    default where the exact canonical mesh is required. (Kept negative, loud: fast != default byte-for-byte.)"""
+    default where the exact canonical mesh is required. (Kept negative, loud: fast != default byte-for-byte.)
+
+    uvs=None: positions only. If you pass a per-vertex UV array (n_vertices, 2) -- or set mesh.uvs and this reads it
+    -- the LOD RETAINS the TEXTURE MAP: each collapse keeps the SURVIVING vertex's UV and drops the removed vertex's,
+    mirroring collapse_edge's index remap, and the returned Mesh carries .uvs. This is the whole point of a textured
+    LOD: fewer triangles, SAME texture. KEPT NEGATIVE: the survivor's position moves to the QEM optimum `x` but its UV
+    stays put (the standard cheap choice) -- so the UV is exact at surviving vertices and slightly stretched on the
+    triangles around a moved survivor; across a texture SEAM a collapse can also pull a UV to the wrong island (same
+    seam caveat as any collapse). For a UV that tracks the moved point, bake with transfer_uv from the original after."""
+    if uvs is None:
+        uvs = getattr(mesh, "uvs", None)
     if fast:
-        return _qem_decimate_fast(mesh, target_faces)
+        nm = _qem_decimate_fast(mesh, target_faces)
+        # the fast heap decimator drops faces but can leave ORPHANED vertices behind (verts no face uses) -- they
+        # skew any bbox / normal / silhouette read of the LOD. Compact them, and carry UVs through the SAME remap.
+        used = sorted({int(v) for f in nm.faces for v in f})
+        if len(used) != nm.n_vertices:
+            from holographic.mesh_and_geometry.holographic_mesh import Mesh
+            remap = {old: new for new, old in enumerate(used)}
+            NV = np.asarray(nm.vertices, float)[used]
+            NF = [tuple(remap[int(v)] for v in f) for f in nm.faces]
+            carried = getattr(nm, "uvs", None)
+            nm = Mesh(NV, NF)
+            if carried is not None:
+                nm.uvs = np.asarray(carried, float)[used]
+        if uvs is not None and getattr(nm, "uvs", None) is None:
+            # the fast path renumbers freely; recover UVs by nearest original vertex (positions are unchanged at
+            # surviving verts, so this is exact there). Cheap and correct for the survivors.
+            uvs = np.asarray(uvs, float)
+            OV = np.asarray(mesh.vertices, float); NV = np.asarray(nm.vertices, float)
+            idx = np.array([int(np.argmin(np.sum((OV - p) ** 2, axis=1))) for p in NV])
+            nm.uvs = uvs[idx]
+        return nm
     m = mesh
     Q = vertex_quadrics(m)
+    UV = np.asarray(uvs, float).copy() if uvs is not None else None
     while m.n_faces > target_faces:
         # rank every edge by its contraction cost (deterministic: cost, then the two vertex indices)
         ranked = []                                             # canonical per-edge loop (default, pinned bit-identical)
@@ -267,11 +298,15 @@ def qem_decimate(mesh, target_faces, fast=False):
             keep_new = keep if keep < remove else keep - 1
             Q[keep_new] = Q[keep_new] + QR
             nm.vertices[keep_new] = x
+            if UV is not None:
+                UV = np.delete(UV, remove, axis=0)         # drop the removed vertex's UV; survivor keeps its own
             m = nm
             collapsed = True
             break
         if not collapsed:
             break                                          # no remaining edge can be safely collapsed
+    if UV is not None:
+        m.uvs = UV
     return m
 
 

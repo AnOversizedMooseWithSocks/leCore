@@ -52,6 +52,33 @@ _KNOWN_NEGATIVES = {
     "holographic_splatsharpen", "holographic_graph_memory", "holographic_probesweep",
 }
 
+# INFRASTRUCTURE / PLUMBING -- import-only BY DESIGN, reached THROUGH a higher faculty or the transport layer, not a
+# direct agent faculty. Same spirit as the consolidation-home facades: a module that exists to be used by other code,
+# not called by an agent, must SAY so or the audit can't tell it from a real gap. Verified: each is imported by other
+# engine modules (delegated) or is the transport/query spine itself.
+#   service/toolclient/uri  -- the HTTP tool server + remote-tool client + URI scheme (the transport the agent uses,
+#                              not a capability it invokes).
+#   sync/farm/provenance    -- cross-node sync, the compute farm, and provenance tracking (cross-cutting plumbing).
+#   determinism             -- the determinism harness (imported by ~15 modules to pin seeds); infrastructure, not a op.
+#   query_durable/queryfolder/querygraph/queryprog/querytime -- EXTENSIONS of the wired query-database faculty; the
+#                              agent reaches them through mind's query/database doors, not as standalone methods.
+_KNOWN_INFRASTRUCTURE = {
+    "holographic_service", "holographic_toolclient", "holographic_uri", "holographic_sync", "holographic_farm",
+    "holographic_provenance", "holographic_determinism", "holographic_query_durable", "holographic_queryfolder",
+    "holographic_querygraph", "holographic_queryprog", "holographic_querytime",
+}
+
+
+def _is_evidence(name, src):
+    """An EVIDENCE / HARNESS module runs to DEMONSTRATE a property (an ablation table, a robustness curve) -- it is
+    import-only BY DESIGN and says so in its own docstring. Like a facade, the module must DECLARE it: recognising the
+    self-declaration keeps these out of the "real gap" bucket without a central list going stale. Markers are the exact
+    phrases these modules already use ("not a callable faculty", "stays a harness", "ablation table")."""
+    head = src[:1400].lower()
+    return ("not a callable faculty" in head or "not a callable library capability" in head
+            or "stays a harness" in head or "ablation table" in head
+            or "run to demonstrate a property, not" in head)
+
 
 def _is_facade(name, src):
     """A CONSOLIDATION HOME (`holographic_*home.py`) is a library facade -- "one door, route don't rewrite" -- and
@@ -77,6 +104,7 @@ def audit(root):
     modules = _engine_modules(root)
     no_doc, no_public, import_only, kept_neg, documents_neg, superseded = [], [], [], [], [], []
     facades = []
+    infrastructure, evidence = [], []
     referenced = 0
     for path in modules:
         name = os.path.basename(path)[:-3]
@@ -92,6 +120,8 @@ def audit(root):
         dl = doc.lower()
         is_neg = name in _KNOWN_NEGATIVES                        # deliberately-unwired (explicit list)
         is_facade = _is_facade(name, src)                        # a consolidation home: import-only BY DESIGN
+        is_infra = name in _KNOWN_INFRASTRUCTURE                 # plumbing / query-extension: reached via a faculty
+        is_evidence = _is_evidence(name, src)                    # a harness/ablation: runs to demonstrate, not called
         is_superseded = "superseded by" in dl                    # an older twin, declared and pointed at the wired one
         if ("kept negative" in dl) or ("recorded negative" in dl):
             documents_neg.append(name)                          # merely DOCUMENTS a negative -- honest, good
@@ -107,10 +137,14 @@ def audit(root):
             superseded.append(name)
         if is_facade:
             facades.append(name)
+        if is_infra:
+            infrastructure.append(name)
+        if is_evidence:
+            evidence.append(name)
         if in_mind:
             referenced += 1
-        elif not is_neg and not is_superseded and not is_facade:  # facades are import-only BY DESIGN
-            import_only.append(name)
+        elif not is_neg and not is_superseded and not is_facade and not is_infra and not is_evidence:
+            import_only.append(name)                             # every exclusion above is import-only BY DESIGN
 
     n = len([p for p in modules if os.path.basename(p)[:-3] != "holographic_unified"])
     print("REACHABILITY AUDIT over %d engine modules\n" % n)
@@ -119,6 +153,8 @@ def audit(root):
     print("  modules that DOCUMENT a kept negative (honest measurement): %d" % len(documents_neg))
     print("  SUPERSEDED by a wired twin (declared, use the twin):        %d  %s" % (len(superseded), sorted(superseded)))
     print("  CONSOLIDATION HOMES (one door, import-only BY DESIGN):      %d  %s" % (len(facades), sorted(facades)))
+    print("  INFRASTRUCTURE / PLUMBING (reached via a faculty, by design): %d  %s" % (len(infrastructure), sorted(infrastructure)))
+    print("  EVIDENCE / HARNESS (runs to demonstrate, not a faculty):    %d  %s" % (len(evidence), sorted(evidence)))
     print()
     print("  NO DOCSTRING -> UNDISCOVERABLE by find_capability (FIX these): %d" % len(no_doc))
     for m in sorted(no_doc):

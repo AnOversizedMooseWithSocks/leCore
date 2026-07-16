@@ -80,10 +80,14 @@ def _router(mind):
 
 def route_intent(mind, question):
     """Classify a question's intent from the blend of its word meanings. Returns (intent, score)."""
+    # DELEGATE to the general unstructured matcher (holographic_relations.match_prototype). route_intent
+    # is just the QUESTION-intent caller of "no schema, match against class prototypes"; general
+    # (gestures/regimes/styles reuse it). Behavior identical: same prototypes, same cosine, same argmax.
+    from holographic.misc.holographic_relations import match_prototype
     labels, P = _router(mind)
-    sims = P @ _unit(np.asarray(mind.perceive(question, "text"), float))
-    j = int(np.argmax(sims))
-    return labels[j], float(sims[j])
+    proto = {lab: P[i] for i, lab in enumerate(labels)}
+    ranked = match_prototype(lambda x: mind.perceive(x, "text"), question, proto)
+    return ranked[0][0], ranked[0][1]
 
 
 def _define_struct(mind, word):

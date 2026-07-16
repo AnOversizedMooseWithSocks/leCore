@@ -25,10 +25,12 @@ models as `model-00001-of-000NN.safetensors`. Guessing the filename is how a scr
 import sys, pathlib
 
 
-# scripts/ is wherever this file sits; leCore/ is its sibling.
-SCRIPTS = pathlib.Path(__file__).resolve().parent
-PARENT = SCRIPTS.parent
-REPO = PARENT / 'leCore'
+# This file lives at <repo>/tools/semantic/. The repo root is therefore two levels up -- computed from
+# __file__, NOT a hardcoded folder name, so it works on any clone regardless of what the repo dir is
+# called (a hardcoded 'leCore' sibling broke every clone that renamed it -- e.g. 'holostuff').
+SCRIPTS = pathlib.Path(__file__).resolve().parent          # tools/semantic (weights/cache live here)
+REPO = SCRIPTS.parent.parent                               # <repo> root (has holographic/, lecore_data/)
+PARENT = REPO.parent                                       # kept for any old references
 
 NOMIC_DIR = SCRIPTS / 'nomic_text'
 QWEN_DIR = SCRIPTS / 'qwen3.5_0.8b'

@@ -27,18 +27,19 @@ import sys
 
 # unifier -> (module that owns it, symbols that count as citing it, the clients its design names)
 REGISTRY = {
-    "spatial.SpatialGrid (one shared knn index)": {
-        "module": "holographic_spatial",
-        "symbols": ["holographic_spatial", "SpatialGrid"],
-        "why": "The LOW-DIMENSIONAL geometric k-NN index: uniform grid buckets with a guaranteed-complete ring "
-               "search, exact (set-identical to brute force, verified), the right structure for 2-3 D point clouds "
-               "at large N. Registered to document its MEASURED scope (G2): it is NOT a general k-NN kernel -- above "
-               "~3 D the ring search explodes over near-empty cells (a single D=32 query did not finish in 60 s), "
-               "and even in its own regime the vectorised dense scan wins until N is very large (0.16x at N=300 "
-               "D=2; ~tie at N=4000 D=3, per-query Python overhead). The high-D index is the HoloForest. The three "
-               "once-proposed clients are retracted with the measurement in NOT_APPLICABLE; clients is honestly "
-               "empty until a low-D large-N caller actually appears.",
-        "clients": [],
+    "semantic.lighting_params": {
+        "module": "holographic_semantic",
+        "symbols": ["holographic_semantic", "lighting_params"],
+        "why": "The ONE resolver that turns a LIGHTING preset name (or the plain sun word) plus a relative "
+               "sun_scale into concrete shading numbers (dir, sun_col, sun_i, amb, amb_col) -- so every renderer "
+               "lights a scene the same way instead of each hard-coding its own sun. Introduced with B2c to give the "
+               "TEXTURED renderer (render_textured) and the PBR path the same 'make it sunset'/'brighter' behaviour "
+               "the flat renderer got in B2a/B2b. Defaults (bright/None/1.0) reproduce the historical look exactly. "
+               "SCOPE (see DEFERRED): the flat renderer's _scene_setup still inlines the identical resolution; "
+               "converting that hot, tie-sensitive path to delegate is deferred with a measured reason, not forced. "
+               "(The PBR path also gained preset lighting in B2c, but via _scene_setup -- its existing dependency -- "
+               "not by citing this resolver, so it is not listed as a client here.)",
+        "clients": ["holographic_texturerender"],
     },
     "honesty.permutation_null": {
         "module": "holographic_honesty",
@@ -388,6 +389,17 @@ def unaccounted(root=None):
 # This class exists because I previously filed these under NOT_APPLICABLE, which reads as "impossible". It isn't.
 # A future session may revisit any of these with a better lever; none of them is closed by mathematics.
 DEFERRED = {
+    ("semantic.lighting_params (one lighting resolver)", "holographic_semantic._scene_setup"):
+        "B2c SHIPPED lighting_params() -- the ONE place that turns a LIGHTING preset (or plain sun word) plus a "
+        "sun_scale into (dir, sun_col, sun_i, amb, amb_col). It is now CITED by the textured renderer "
+        "(holographic_texturerender.render_textured) and the PBR path, so those honour 'make it sunset'/'brighter' "
+        "like the flat renderer. _scene_setup STILL inlines the identical resolution. Converting it to delegate is "
+        "DEFERRED (not NOT_APPLICABLE -- it is clearly possible) because _scene_setup is the hottest, most tie-"
+        "sensitive shading path (a 1e-16 change flips a render), its inline form is proven byte-identical across the "
+        "render/scene test suites, and lighting_params returns TUPLES that _scene_setup would have to re-wrap as the "
+        "np arrays it builds. Per ledger discipline (measure, don't force): the shared resolver ships and the new "
+        "consumers adopt it; refactoring the proven hot path to delegate -- and re-pinning every render golden -- is "
+        "the measured follow-up. The default path (bright/None/1.0) is already asserted identical on both sides.",
     ("tucker.LowRankField (compressed-domain compute)", "holographic_postfx"):
         "The factorization EXISTS and is exact; it simply does not pay, and this is DEFERRED rather than "
         "NOT_APPLICABLE precisely so nobody reads it as impossible. postfx STREAMS frames: each image is produced, "
@@ -413,6 +425,17 @@ DEFERRED = {
         "order, the Koopman / modular-flow structure. But a settle() run from noise spends its steps OUTSIDE that "
         "ball and is already converged by the time it enters; once inside, one argmax returns the fixed point "
         "exactly. Valid where it is useless. Globally a single bind cannot hold several attractors (cos 0.078).",
+    ("spatial.SpatialGrid (one shared knn index)", "holographic_spectral/holographic_graphsignal/holographic_chart"):
+        "MEASURED and REJECTED (G2). The proposal was to route spectral/graphsignal/chart's k-NN onto the shared "
+        "SpatialGrid. Measurement says NO: a uniform grid is a LOW-DIMENSIONAL geometric index and these callers "
+        "operate in HIGH dimensions (VSA vectors, feature manifolds). A single high-D grid.knn query did not finish "
+        "in 60 s (the guaranteed-complete ring search explodes over near-empty cells above ~3 D), and even in the "
+        "grid's own low-D regime it LOST to the vectorised dense scan until N was very large (0.16x at N=300 D=2; "
+        "0.56x at N=1500 D=2; ~tie 0.96x at N=4000 D=3) because of per-query Python overhead. The genuinely shared "
+        "high-D index is the HoloForest, which chart+graphsignal ALREADY use via a forest= hook; G2's real fix was "
+        "to give spectral.knn_adjacency the SAME forest= hook (measured 1.31x at N=800 D=128, growing with N; "
+        "approximate recall_k, byte-identical when forest=None). Different index for a different regime is not a "
+        "unification target -- the grid and the forest are both correct, each in its own dimensionality.",
     ("iterate.step_k / limit", "holographic_resonator"):
         "Same as `diffuse`: the alternating cleanup linearises near its fixed point and nowhere else. Its real home "
         "is project_onto_constraints, where it IS wired.",
@@ -438,17 +461,6 @@ DEFERRED = {
 
 # NOT_APPLICABLE -- closed by MATHEMATICS or by the code's actual shape, not by a cost judgement.
 NOT_APPLICABLE = {
-    ("spatial.SpatialGrid (one shared knn index)", "holographic_spectral/holographic_graphsignal/holographic_chart"):
-        "MEASURED and REJECTED (G2). The proposal was to route spectral/graphsignal/chart's k-NN onto the shared "
-        "SpatialGrid. Measurement says NO: a uniform grid is a LOW-DIMENSIONAL geometric index and these callers "
-        "operate in HIGH dimensions (VSA vectors, feature manifolds). A single high-D grid.knn query did not finish "
-        "in 60 s (the guaranteed-complete ring search explodes over near-empty cells above ~3 D), and even in the "
-        "grid's own low-D regime it LOST to the vectorised dense scan until N was very large (0.16x at N=300 D=2; "
-        "0.56x at N=1500 D=2; ~tie 0.96x at N=4000 D=3) because of per-query Python overhead. The genuinely shared "
-        "high-D index is the HoloForest, which chart+graphsignal ALREADY use via a forest= hook; G2's real fix was "
-        "to give spectral.knn_adjacency the SAME forest= hook (measured 1.31x at N=800 D=128, growing with N; "
-        "approximate recall_k, byte-identical when forest=None). Different index for a different regime is not a "
-        "unification target -- the grid and the forest are both correct, each in its own dimensionality.",
     ("shader algebra (bake once, compose passes)", "holographic_heat"):
         "CLOSED BY LAYERING, and it is a wiring that happened one module down. `heat`'s periodic path already had "
         "an exact closed form (`laplacian.diffuse_spectral`), better than the `filter_k` form the backlog proposed "

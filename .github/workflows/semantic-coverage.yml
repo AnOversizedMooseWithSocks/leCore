@@ -120,7 +120,11 @@ jobs:
         # Bars are the measured rev-36 numbers: top-5 >= 8/12, median <= 2.
         run: |
           cd tools/semantic && python knowledge_index.py nomic_text/model.safetensors \
-            nomic_text/vocab.txt --repo ../.. --no-md --exam --require-top5 8 --require-median 2
+            nomic_text/vocab.txt --repo ../.. --no-md --structural --exam \
+            --require-top5 8 --require-median 2 --require-fused-top1 7
+          # --structural exercises the PRODUCTION path (dense + workflow bones, route_semantic's default);
+          # --require-fused-top1 7 gates it at the measured champion (strict Pareto over flat 6/12 at 128d).
+          # A bones/fusion regression now fails the build exactly like a dense regression does.
 
       - name: rebuild the shipped 128d routing index and commit it if it changed
         # export_index.py pulls the routing vectors from the freshly-embedded cache and writes them to
@@ -144,5 +148,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: semantic-artifacts
-          path: artifacts/
+          path: lecore_data/routing/index_128d.npz
           retention-days: 30

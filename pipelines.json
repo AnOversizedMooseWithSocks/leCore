@@ -1,0 +1,646 @@
+{
+  "consumed_by": {
+    "curve": [
+      "Curve-curve intersection"
+    ],
+    "field": [
+      "Aharonov-Bohm ring (magnetic flux phase)",
+      "Denoise multi-way data (low-rank tensor prior)",
+      "Probability current (quantum flow)",
+      "Quantum dot / transmission (resonant scatterer)",
+      "Schrodinger solver (split-operator TDSE)",
+      "Simulation (domain)"
+    ],
+    "hypervector": [
+      "Rate-distortion report (bits per vector at a fidelity)",
+      "Recursive factoring (past the resonator's cliff)",
+      "holographic_tree.HoloForest"
+    ],
+    "image": [
+      "Denoise multi-way data (low-rank tensor prior)",
+      "Faraday sky map (telescope as observer)",
+      "See what the mantis sees (false colour)",
+      "holographic_archive"
+    ],
+    "mesh": [
+      "Make a mesh manifold (split non-manifold vertices)",
+      "Mesh editing (DCC)",
+      "Mesh repair (weld + split non-manifold + fill + compact)",
+      "Rendering (path trace)",
+      "Route a mesh to its minimal repair (defect-classified)",
+      "Smooth a bumpy mesh surface (Taubin no-shrink)",
+      "Voxelization",
+      "field_displace",
+      "mesh_auto_seam",
+      "mesh_bevel_vertex",
+      "mesh_fill_holes",
+      "mesh_pack_uv",
+      "mesh_poke",
+      "mesh_rip_vertex",
+      "mesh_selection",
+      "mesh_split_vertices",
+      "mesh_symmetrize",
+      "mesh_triangulate",
+      "pick_mesh",
+      "pivot_point",
+      "ray_mesh_intersect",
+      "select_boundary_loops",
+      "select_edge_loop",
+      "select_face_ring",
+      "select_in_box",
+      "select_symmetric",
+      "skin_bind_weights",
+      "soft_selection_weights",
+      "solidify_mesh",
+      "transform_selection"
+    ],
+    "points": [
+      "N-body gravity simulation",
+      "fit_pose",
+      "fit_primitives",
+      "fit_shape",
+      "fold_fit",
+      "holographic_spatial.knn",
+      "ifs_fit",
+      "snap_to_grid",
+      "snap_to_vertices",
+      "solve_ik_limited"
+    ],
+    "scalar": [
+      "Honesty & measurement",
+      "Identify an element by its properties",
+      "Name a contact type (bounce/slide/rest/jam)",
+      "timeline"
+    ],
+    "sdf": [
+      "Dialect emitters (WGSL / C / JS / Zig from the Python kernel)",
+      "Voxelization",
+      "ray_sdf_intersect",
+      "sdf_scene",
+      "sdf_to_mesh",
+      "to_shadertoy"
+    ],
+    "sdf_scene": [
+      "Rendering (path trace)"
+    ],
+    "selection": [
+      "pivot_point",
+      "select_edge_loop",
+      "select_face_ring",
+      "select_symmetric",
+      "soft_selection_weights",
+      "transform_selection"
+    ],
+    "skeleton": [
+      "skin_bind_weights"
+    ],
+    "spectrum": [
+      "Mantis-shrimp vision (12-band + polarization)",
+      "Observer (spectrum to sensor readings)",
+      "Optical elements (Mueller matrices)",
+      "Polarized light (Stokes state)",
+      "Rotation-measure synthesis (Faraday depth)"
+    ],
+    "timeseries": [
+      "Doppler velocity & drift acceleration",
+      "Period of a signal (Lomb-Scargle)",
+      "identify_dynamics"
+    ],
+    "transform": [
+      "snap_transform_delta",
+      "transform_selection"
+    ]
+  },
+  "coverage": {
+    "percent": 18,
+    "tagged": 71,
+    "total": 391
+  },
+  "edges": [
+    {
+      "capability": "Aharonov-Bohm ring (magnetic flux phase)",
+      "consumes": "field",
+      "produces": "scalar"
+    },
+    {
+      "capability": "Curve-curve intersection",
+      "consumes": "curve",
+      "produces": "selection"
+    },
+    {
+      "capability": "Denoise multi-way data (low-rank tensor prior)",
+      "consumes": "image",
+      "produces": "image"
+    },
+    {
+      "capability": "Denoise multi-way data (low-rank tensor prior)",
+      "consumes": "image",
+      "produces": "field"
+    },
+    {
+      "capability": "Denoise multi-way data (low-rank tensor prior)",
+      "consumes": "field",
+      "produces": "image"
+    },
+    {
+      "capability": "Denoise multi-way data (low-rank tensor prior)",
+      "consumes": "field",
+      "produces": "field"
+    },
+    {
+      "capability": "Dialect emitters (WGSL / C / JS / Zig from the Python kernel)",
+      "consumes": "sdf",
+      "produces": "scalar"
+    },
+    {
+      "capability": "Doppler velocity & drift acceleration",
+      "consumes": "timeseries",
+      "produces": "scalar"
+    },
+    {
+      "capability": "Faraday sky map (telescope as observer)",
+      "consumes": "image",
+      "produces": "image"
+    },
+    {
+      "capability": "Honesty & measurement",
+      "consumes": "scalar",
+      "produces": "scalar"
+    },
+    {
+      "capability": "Identify an element by its properties",
+      "consumes": "scalar",
+      "produces": "selection"
+    },
+    {
+      "capability": "Make a mesh manifold (split non-manifold vertices)",
+      "consumes": "mesh",
+      "produces": "mesh"
+    },
+    {
+      "capability": "Mantis-shrimp vision (12-band + polarization)",
+      "consumes": "spectrum",
+      "produces": "image"
+    },
+    {
+      "capability": "Mesh editing (DCC)",
+      "consumes": "mesh",
+      "produces": "mesh"
+    },
+    {
+      "capability": "Mesh repair (weld + split non-manifold + fill + compact)",
+      "consumes": "mesh",
+      "produces": "mesh"
+    },
+    {
+      "capability": "N-body gravity simulation",
+      "consumes": "points",
+      "produces": "points"
+    },
+    {
+      "capability": "Name a contact type (bounce/slide/rest/jam)",
+      "consumes": "scalar",
+      "produces": "selection"
+    },
+    {
+      "capability": "Observer (spectrum to sensor readings)",
+      "consumes": "spectrum",
+      "produces": "image"
+    },
+    {
+      "capability": "Optical elements (Mueller matrices)",
+      "consumes": "spectrum",
+      "produces": "spectrum"
+    },
+    {
+      "capability": "Period of a signal (Lomb-Scargle)",
+      "consumes": "timeseries",
+      "produces": "scalar"
+    },
+    {
+      "capability": "Polarized light (Stokes state)",
+      "consumes": "spectrum",
+      "produces": "spectrum"
+    },
+    {
+      "capability": "Probability current (quantum flow)",
+      "consumes": "field",
+      "produces": "field"
+    },
+    {
+      "capability": "Quantum dot / transmission (resonant scatterer)",
+      "consumes": "field",
+      "produces": "scalar"
+    },
+    {
+      "capability": "Rate-distortion report (bits per vector at a fidelity)",
+      "consumes": "hypervector",
+      "produces": "scalar"
+    },
+    {
+      "capability": "Recursive factoring (past the resonator's cliff)",
+      "consumes": "hypervector",
+      "produces": "hypervector"
+    },
+    {
+      "capability": "Rendering (path trace)",
+      "consumes": "mesh",
+      "produces": "image"
+    },
+    {
+      "capability": "Rendering (path trace)",
+      "consumes": "sdf_scene",
+      "produces": "image"
+    },
+    {
+      "capability": "Rotation-measure synthesis (Faraday depth)",
+      "consumes": "spectrum",
+      "produces": "spectrum"
+    },
+    {
+      "capability": "Route a mesh to its minimal repair (defect-classified)",
+      "consumes": "mesh",
+      "produces": "mesh"
+    },
+    {
+      "capability": "Schrodinger solver (split-operator TDSE)",
+      "consumes": "field",
+      "produces": "field"
+    },
+    {
+      "capability": "See what the mantis sees (false colour)",
+      "consumes": "image",
+      "produces": "image"
+    },
+    {
+      "capability": "Simulation (domain)",
+      "consumes": "field",
+      "produces": "field"
+    },
+    {
+      "capability": "Smooth a bumpy mesh surface (Taubin no-shrink)",
+      "consumes": "mesh",
+      "produces": "mesh"
+    },
+    {
+      "capability": "Voxelization",
+      "consumes": "mesh",
+      "produces": "field"
+    },
+    {
+      "capability": "Voxelization",
+      "consumes": "sdf",
+      "produces": "field"
+    },
+    {
+      "capability": "field_displace",
+      "consumes": "mesh",
+      "produces": "mesh"
+    },
+    {
+      "capability": "fit_pose",
+      "consumes": "points",
+      "produces": "sdf"
+    },
+    {
+      "capability": "fit_primitives",
+      "consumes": "points",
+      "produces": "sdf"
+    },
+    {
+      "capability": "fit_shape",
+      "consumes": "points",
+      "produces": "scalar"
+    },
+    {
+      "capability": "fold_fit",
+      "consumes": "points",
+      "produces": "scalar"
+    },
+    {
+      "capability": "holographic_archive",
+      "consumes": "image",
+      "produces": "image"
+    },
+    {
+      "capability": "holographic_spatial.knn",
+      "consumes": "points",
+      "produces": "selection"
+    },
+    {
+      "capability": "holographic_tree.HoloForest",
+      "consumes": "hypervector",
+      "produces": "selection"
+    },
+    {
+      "capability": "identify_dynamics",
+      "consumes": "timeseries",
+      "produces": "transform"
+    },
+    {
+      "capability": "ifs_fit",
+      "consumes": "points",
+      "produces": "scalar"
+    },
+    {
+      "capability": "mesh_auto_seam",
+      "consumes": "mesh",
+      "produces": "selection"
+    },
+    {
+      "capability": "mesh_bevel_vertex",
+      "consumes": "mesh",
+      "produces": "mesh"
+    },
+    {
+      "capability": "mesh_fill_holes",
+      "consumes": "mesh",
+      "produces": "mesh"
+    },
+    {
+      "capability": "mesh_pack_uv",
+      "consumes": "mesh",
+      "produces": "points"
+    },
+    {
+      "capability": "mesh_poke",
+      "consumes": "mesh",
+      "produces": "mesh"
+    },
+    {
+      "capability": "mesh_rip_vertex",
+      "consumes": "mesh",
+      "produces": "mesh"
+    },
+    {
+      "capability": "mesh_selection",
+      "consumes": "mesh",
+      "produces": "selection"
+    },
+    {
+      "capability": "mesh_split_vertices",
+      "consumes": "mesh",
+      "produces": "mesh"
+    },
+    {
+      "capability": "mesh_symmetrize",
+      "consumes": "mesh",
+      "produces": "mesh"
+    },
+    {
+      "capability": "mesh_triangulate",
+      "consumes": "mesh",
+      "produces": "mesh"
+    },
+    {
+      "capability": "pick_mesh",
+      "consumes": "mesh",
+      "produces": "selection"
+    },
+    {
+      "capability": "pivot_point",
+      "consumes": "mesh",
+      "produces": "transform"
+    },
+    {
+      "capability": "pivot_point",
+      "consumes": "selection",
+      "produces": "transform"
+    },
+    {
+      "capability": "ray_mesh_intersect",
+      "consumes": "mesh",
+      "produces": "scalar"
+    },
+    {
+      "capability": "ray_sdf_intersect",
+      "consumes": "sdf",
+      "produces": "scalar"
+    },
+    {
+      "capability": "sdf_scene",
+      "consumes": "sdf",
+      "produces": "sdf_scene"
+    },
+    {
+      "capability": "sdf_to_mesh",
+      "consumes": "sdf",
+      "produces": "mesh"
+    },
+    {
+      "capability": "select_boundary_loops",
+      "consumes": "mesh",
+      "produces": "selection"
+    },
+    {
+      "capability": "select_edge_loop",
+      "consumes": "mesh",
+      "produces": "selection"
+    },
+    {
+      "capability": "select_edge_loop",
+      "consumes": "selection",
+      "produces": "selection"
+    },
+    {
+      "capability": "select_face_ring",
+      "consumes": "mesh",
+      "produces": "selection"
+    },
+    {
+      "capability": "select_face_ring",
+      "consumes": "selection",
+      "produces": "selection"
+    },
+    {
+      "capability": "select_in_box",
+      "consumes": "mesh",
+      "produces": "selection"
+    },
+    {
+      "capability": "select_symmetric",
+      "consumes": "mesh",
+      "produces": "selection"
+    },
+    {
+      "capability": "select_symmetric",
+      "consumes": "selection",
+      "produces": "selection"
+    },
+    {
+      "capability": "skin_bind_weights",
+      "consumes": "mesh",
+      "produces": "scalar"
+    },
+    {
+      "capability": "skin_bind_weights",
+      "consumes": "skeleton",
+      "produces": "scalar"
+    },
+    {
+      "capability": "snap_to_grid",
+      "consumes": "points",
+      "produces": "points"
+    },
+    {
+      "capability": "snap_to_vertices",
+      "consumes": "points",
+      "produces": "points"
+    },
+    {
+      "capability": "snap_transform_delta",
+      "consumes": "transform",
+      "produces": "transform"
+    },
+    {
+      "capability": "soft_selection_weights",
+      "consumes": "mesh",
+      "produces": "scalar"
+    },
+    {
+      "capability": "soft_selection_weights",
+      "consumes": "selection",
+      "produces": "scalar"
+    },
+    {
+      "capability": "solidify_mesh",
+      "consumes": "mesh",
+      "produces": "mesh"
+    },
+    {
+      "capability": "solve_ik_limited",
+      "consumes": "points",
+      "produces": "points"
+    },
+    {
+      "capability": "timeline",
+      "consumes": "scalar",
+      "produces": "scalar"
+    },
+    {
+      "capability": "to_shadertoy",
+      "consumes": "sdf",
+      "produces": "scalar"
+    },
+    {
+      "capability": "transform_selection",
+      "consumes": "mesh",
+      "produces": "mesh"
+    },
+    {
+      "capability": "transform_selection",
+      "consumes": "selection",
+      "produces": "mesh"
+    },
+    {
+      "capability": "transform_selection",
+      "consumes": "transform",
+      "produces": "mesh"
+    }
+  ],
+  "gaps": {
+    "dead_end": [],
+    "source_only": [
+      "curve",
+      "skeleton",
+      "timeseries"
+    ],
+    "untouched": []
+  },
+  "produced_by": {
+    "field": [
+      "Denoise multi-way data (low-rank tensor prior)",
+      "Probability current (quantum flow)",
+      "Schrodinger solver (split-operator TDSE)",
+      "Simulation (domain)",
+      "Voxelization"
+    ],
+    "hypervector": [
+      "Recursive factoring (past the resonator's cliff)"
+    ],
+    "image": [
+      "Denoise multi-way data (low-rank tensor prior)",
+      "Faraday sky map (telescope as observer)",
+      "Mantis-shrimp vision (12-band + polarization)",
+      "Observer (spectrum to sensor readings)",
+      "Rendering (path trace)",
+      "See what the mantis sees (false colour)",
+      "holographic_archive"
+    ],
+    "mesh": [
+      "Make a mesh manifold (split non-manifold vertices)",
+      "Mesh editing (DCC)",
+      "Mesh repair (weld + split non-manifold + fill + compact)",
+      "Route a mesh to its minimal repair (defect-classified)",
+      "Smooth a bumpy mesh surface (Taubin no-shrink)",
+      "field_displace",
+      "mesh_bevel_vertex",
+      "mesh_fill_holes",
+      "mesh_poke",
+      "mesh_rip_vertex",
+      "mesh_split_vertices",
+      "mesh_symmetrize",
+      "mesh_triangulate",
+      "sdf_to_mesh",
+      "solidify_mesh",
+      "transform_selection"
+    ],
+    "points": [
+      "N-body gravity simulation",
+      "mesh_pack_uv",
+      "snap_to_grid",
+      "snap_to_vertices",
+      "solve_ik_limited"
+    ],
+    "scalar": [
+      "Aharonov-Bohm ring (magnetic flux phase)",
+      "Dialect emitters (WGSL / C / JS / Zig from the Python kernel)",
+      "Doppler velocity & drift acceleration",
+      "Honesty & measurement",
+      "Period of a signal (Lomb-Scargle)",
+      "Quantum dot / transmission (resonant scatterer)",
+      "Rate-distortion report (bits per vector at a fidelity)",
+      "fit_shape",
+      "fold_fit",
+      "ifs_fit",
+      "ray_mesh_intersect",
+      "ray_sdf_intersect",
+      "skin_bind_weights",
+      "soft_selection_weights",
+      "timeline",
+      "to_shadertoy"
+    ],
+    "sdf": [
+      "fit_pose",
+      "fit_primitives"
+    ],
+    "sdf_scene": [
+      "sdf_scene"
+    ],
+    "selection": [
+      "Curve-curve intersection",
+      "Identify an element by its properties",
+      "Name a contact type (bounce/slide/rest/jam)",
+      "holographic_spatial.knn",
+      "holographic_tree.HoloForest",
+      "mesh_auto_seam",
+      "mesh_selection",
+      "pick_mesh",
+      "select_boundary_loops",
+      "select_edge_loop",
+      "select_face_ring",
+      "select_in_box",
+      "select_symmetric"
+    ],
+    "spectrum": [
+      "Optical elements (Mueller matrices)",
+      "Polarized light (Stokes state)",
+      "Rotation-measure synthesis (Faraday depth)"
+    ],
+    "transform": [
+      "identify_dynamics",
+      "pivot_point",
+      "snap_transform_delta"
+    ]
+  }
+}

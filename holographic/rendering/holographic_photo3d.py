@@ -120,6 +120,91 @@ def photo_to_gaussians(depth, colour, fx, fy, cx, cy, confidence_floor=0.3):
     }
 
 
+def depth_to_mesh(depth, colour=None, fx=None, fy=None, cx=None, cy=None,
+                  depth_scale=1.0, discontinuity=0.08, smooth_iters=0):
+    """DEPTH MAP -> a CLEAN triangulated HEIGHT-FIELD MESH (the mesh-cleanup path for single-view photo-to-3D). Every
+    pixel becomes a vertex at its unprojected 3-D position; each 2x2 pixel block becomes two triangles -- EXCEPT
+    where the depth jumps more than `discontinuity` across the quad, where the triangle is DROPPED so the mesh does
+    not stretch a rubber sheet between the near foreground and the far background (the artifact that makes naive
+    depth meshes look melted). Optionally per-vertex `colour` from the source photo is carried through.
+
+    This is a REGULAR-GRID surface, so unlike the dual-contour path (points_to_mesh) it is watertight-by-construction
+    as a 2-manifold-with-boundary and has NO non-manifold edges -- it is directly smoothable / decimatable / textured.
+    `depth` is (H,W) in [0,1] with 1=NEAREST (the convention fuse_depth/haze_depth/shape_from_shading return); it is
+    converted to camera Z internally (near = small Z). `fx,fy,cx,cy` default to a reasonable pinhole for the image
+    size. `smooth_iters` runs that many Laplacian passes on the Z to reduce depth noise before meshing.
+
+    Returns (mesh, vertex_colours) where mesh is a holographic_mesh.Mesh of triangles and vertex_colours is (V,3) or
+    None. Deterministic, pure NumPy. KEPT NEGATIVES: single-view, so this is the VISIBLE FRONT as a relief, not a
+    solid (the back and everything behind a depth discontinuity are unobserved -- the dropped triangles leave honest
+    holes, they do not invent geometry); relative depth (not metric); a wrong `discontinuity` either melts the scene
+    (too high) or shreds a smooth slope into confetti (too low)."""
+    from holographic.mesh_and_geometry.holographic_mesh import Mesh
+    depth = np.asarray(depth, float)
+    H, W = depth.shape
+    if fx is None: fx = 0.9 * W
+    if fy is None: fy = 0.9 * W
+    if cx is None: cx = W / 2.0
+    if cy is None: cy = H / 2.0
+
+    # depth is 1=near; camera Z should be SMALL for near, LARGE for far -> Z = (1 - depth). Scale for aspect.
+    z = (1.0 - depth) * float(depth_scale) + 0.3        # +0.3 keeps everything in front of the camera (Z>0)
+
+    # optional Laplacian smoothing of the depth to knock down per-pixel noise before it becomes geometry
+    for _ in range(int(smooth_iters)):
+        z = 0.5 * z + 0.5 * 0.25 * (np.roll(z, 1, 0) + np.roll(z, -1, 0) + np.roll(z, 1, 1) + np.roll(z, -1, 1))
+
+    pts = unproject(z, fx, fy, cx, cy)                  # (H,W,3)
+    V = pts.reshape(-1, 3)
+    idx = np.arange(H * W).reshape(H, W)
+
+    # build the two triangles of every 2x2 block, but CULL any triangle whose vertices span a depth jump bigger than
+    # `discontinuity` -- this is what stops the near foreground from being welded to the far background.
+    z00 = z[:-1, :-1]; z10 = z[1:, :-1]; z01 = z[:-1, 1:]; z11 = z[1:, 1:]
+    # max pairwise |dz| within each quad (in the ORIGINAL 1=near depth units, scale-independent of depth_scale)
+    d = depth
+    d00 = d[:-1, :-1]; d10 = d[1:, :-1]; d01 = d[:-1, 1:]; d11 = d[1:, 1:]
+    span = np.maximum.reduce([np.abs(d00 - d10), np.abs(d00 - d01), np.abs(d11 - d10),
+                              np.abs(d11 - d01), np.abs(d00 - d11), np.abs(d10 - d01)])
+    ok = span <= float(discontinuity)                   # quads flat enough to mesh
+
+    i00 = idx[:-1, :-1][ok]; i10 = idx[1:, :-1][ok]; i01 = idx[:-1, 1:][ok]; i11 = idx[1:, 1:][ok]
+    # two triangles per kept quad, consistent winding
+    tris = np.concatenate([np.stack([i00, i10, i11], 1),
+                           np.stack([i00, i11, i01], 1)], axis=0)
+    faces = [tuple(int(a) for a in t) for t in tris]
+
+    # drop unreferenced vertices (pixels whose every incident quad was culled) so the mesh is compact
+    used = np.unique(tris.ravel())
+    remap = -np.ones(H * W, dtype=int); remap[used] = np.arange(len(used))
+    Vc = V[used]
+    faces = [(int(remap[a]), int(remap[b]), int(remap[c])) for (a, b, c) in faces]
+    mesh = Mesh(Vc, faces)
+
+    vcol = None
+    if colour is not None:
+        col = np.asarray(colour, float)
+        if col.max() > 1.5:
+            col = col / 255.0
+        vcol = col.reshape(-1, 3)[used]
+    return mesh, vcol
+
+
+def _selftest_depth_to_mesh():
+    # a synthetic depth with a sharp step: left half near, right half far. depth_to_mesh should (a) mesh each flat
+    # side, and (b) CULL the triangles bridging the step (discontinuity), leaving two panels not one rubber sheet.
+    H = W = 24
+    d = np.zeros((H, W)); d[:, :W // 2] = 0.9; d[:, W // 2:] = 0.1   # near|far step, jump = 0.8 at the seam
+    mesh_all, _ = depth_to_mesh(d, discontinuity=0.9)               # thresh 0.9 > 0.8 -> bridge the step (one sheet)
+    mesh_cut, _ = depth_to_mesh(d, discontinuity=0.2)               # thresh 0.2 < 0.8 -> cull the step (two panels)
+    assert mesh_cut.n_faces < mesh_all.n_faces, "discontinuity culling should DROP the bridging triangles"
+    # a flat depth meshes to a full grid (no culling) with the expected face count ~ 2*(H-1)*(W-1)
+    flat, _ = depth_to_mesh(np.full((H, W), 0.5), discontinuity=0.1)
+    assert flat.n_faces == 2 * (H - 1) * (W - 1), f"flat depth should fully triangulate, got {flat.n_faces}"
+    print(f"depth_to_mesh ok: flat->{flat.n_faces} faces (full grid); step culls "
+          f"{mesh_all.n_faces - mesh_cut.n_faces} bridging faces.")
+
+
 def _selftest():
     """A two-plane depth map (a near plane and a far plane meeting at an occlusion EDGE) unprojects to two flat
     surfaces; the abstention fires exactly at the edge (stretched geometry avoided) and on invalid/grazing pixels;
@@ -165,6 +250,7 @@ def _selftest():
           "fires at the occlusion edge and the invalid hole; %d confident splats cover %.0f%% of pixels, the rest "
           "abstained (the back and the edge are NOT invented); deterministic"
           % (g["n_observed"], 100.0 * g["coverage"]))
+    _selftest_depth_to_mesh()
 
 
 if __name__ == "__main__":

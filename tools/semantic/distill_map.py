@@ -35,16 +35,105 @@ THE THREE ROWS THAT MATTER
 USAGE
     python3 distill_map.py                  # paths from lecore_paths.py
 """
-import hashlib, json, re
+import hashlib, json, re, pathlib
 import numpy as np
 
 import lecore_paths as paths          # not `as P`: a local `P = ...` would shadow it (learned the hard way)
-import distill_router as dr           # its WordPiece, SIF and accept-sets
+import nomic_forward as nf            # read_st / load_t / WordPiece -- the model machinery (was distill_router)
 
 try:
     import knowledge_index as ki      # its corpus walk AND its cache-key format -- see below
 except ImportError as _e:             # knowledge_index imports nomic_forward at module scope
     raise SystemExit(f"distill_map needs knowledge_index.py and nomic_forward.py in scripts/: {_e}")
+
+
+# --- self-contained replacements for the old distill_router dependency ---------------------------------
+# distill_router lived only in the local experiments folder; its pieces are provided here so distill_map
+# runs from a plain repo checkout. The heavy machinery (safetensors read, WordPiece, token table) is
+# nomic_forward's; only SIF pooling, scoring, and the accept-set check were unique to distill_router.
+
+def _pca_whiten_table(T, keep=None):
+    """Model2Vec's key move (Tulkens & van Dongen 2024; Wada et al. EMNLP 2025): PCA-NORMALIZE the TOKEN
+    TABLE before pooling. Centering + whitening removes the dominant, sentence-semantics-irrelevant
+    directions and equalizes variance across axes, so a plain mean of token rows carries meaning instead
+    of being dominated by a few high-variance nuisance components. THIS IS THE STEP N31 SKIPPED -- we
+    ABTT'd the OUTPUT space and fit W on raw token rows; the literature normalizes the TABLE itself.
+
+    Full-rank by default (keep=None keeps all dims): even without dimensionality reduction, PCA whitening
+    helps purely by normalizing the space (their measured finding). Deterministic: centered SVD, no RNG."""
+    mu = T.mean(0)
+    Tc = T - mu
+    # SVD of the centered table; whiten by dividing each principal direction by its singular value.
+    U, S, Vt = np.linalg.svd(Tc, full_matrices=False)
+    k = keep or len(S)
+    comp = Vt[:k]                                   # principal directions (k x d)
+    sv = S[:k]
+    Tw = (Tc @ comp.T) / (sv / np.sqrt(len(T)) + 1e-8)   # project + whiten (unit-ish variance per axis)
+    return Tw, mu, comp, sv
+
+
+def _zipf_freq(vocab_size):
+    """Rank-based frequency proxy (Model2Vec): tokenizers ship the vocab sorted by frequency, so a token's
+    RANK approximates its probability via Zipf's law (freq ~ 1/rank). Lets SIF weighting work with NO
+    corpus counts -- a fallback/complement to the measured doc-frequency we already compute."""
+    ranks = np.arange(1, vocab_size + 1, dtype=np.float64)
+    return 1.0 / ranks                              # p(word) ~ 1/rank; SIF then weights a/(a+p)
+
+
+def _sif_vectors(texts, wp, T, freq, a=1e-3):
+    """SIF sentence vectors (Arora/Liang/Ma): frequency-weighted mean of token rows, ABTT applied by the
+    caller. T is the token table (V x d); freq is per-token count. Deterministic, no model forward pass."""
+    total = float(freq.sum()) or 1.0
+    out = []
+    for s in texts:
+        ids = [i for i in wp.encode(s) if 0 <= i < len(T)]
+        if not ids:
+            out.append(np.zeros(T.shape[1])); continue
+        w = a / (a + freq[ids] / total)
+        out.append((w[:, None] * T[ids]).sum(0) / w.sum())
+    return np.array(out)
+
+
+def _unit(A):
+    return A / (np.linalg.norm(A, axis=-1, keepdims=True) + 1e-12)
+
+
+def _score(D, Q, names, label, asks=None):
+    """Rank each ask's accepted module; print top-1 / top-5 / median. Mirrors distill_router.score."""
+    asks = asks or ki.ASKS_MODULE
+    Dn, Qn = _unit(D), _unit(Q)
+    ranks = []
+    for i, (a, acc) in enumerate(asks):
+        order = np.argsort(-(Dn @ Qn[i]))
+        ranks.append(next((r + 1 for r, x in enumerate(order) if names[x] in acc), len(names)))
+    t1 = sum(r == 1 for r in ranks); t5 = sum(r <= 5 for r in ranks)
+    print(f"  {label:34s} top-1 {t1:2d}/{len(asks)}  top-5 {t5:2d}/{len(asks)}  median {int(np.median(ranks))}")
+    return t1, t5, float(np.median(ranks))
+
+
+def _check_accept_sets(names):
+    """Warn if any ask's accepted modules are not in the live corpus (the phantom-accept-set trap that
+    silently caps the score). Non-fatal -- prints, so a stale accept-set is visible, not hidden."""
+    have = set(names)
+    for a, acc in ki.ASKS_MODULE:
+        missing = [m for m in acc if m not in have]
+        if missing:
+            print(f"  NOTE: accept-set for {a!r} has modules not in corpus: {missing}")
+
+
+class _DR:
+    """Namespace shim so the existing dr.* call sites keep working."""
+    read_st = staticmethod(nf.read_st)
+    load_t = staticmethod(nf.load_t)
+    WordPiece = nf.WordPiece
+    sif_vectors = staticmethod(_sif_vectors)
+    score = staticmethod(_score)
+    check_accept_sets = staticmethod(_check_accept_sets)
+    ASKS = ki.ASKS_MODULE
+
+
+dr = _DR()
+# ------------------------------------------------------------------------------------------------------
 
 
 # RULE 0, VIOLATED AND CORRECTED. The first version of this file GUESSED how knowledge_index.py builds
@@ -91,10 +180,26 @@ def ridge(S, E, lam):
 
 
 def main():
+    import argparse
+    here = pathlib.Path(__file__).resolve().parent          # tools/semantic
+    ap = argparse.ArgumentParser()
+    # default repo = two levels up (repo root), NOT paths.REPO which hardcodes a 'leCore' sibling name
+    # and breaks on any clone that renamed the repo folder (same bug that hit export_index.py).
+    ap.add_argument('--repo', default=str(here.parent.parent))
+    a = ap.parse_args()
+    repo = pathlib.Path(a.repo)
+    if not repo.is_dir():
+        raise SystemExit(f"  --repo {repo} is not a directory; pass --repo <repo root>.")
+
     cache = load_cache()
 
     # ---- corpus: exactly the entries knowledge_index embedded (its walk, its text, its truncation)
-    names, texts, bodies = corpus(str(paths.REPO))
+    names, texts, bodies = corpus(str(repo))
+    if not names:
+        raise SystemExit(
+            f"  0 module docstrings found under --repo {repo}.\n"
+            f"  collect_code looks for holographic_*.py; none were under that path.\n"
+            f"  If running from tools/semantic, the repo root is '../..' (the default). Pass --repo if elsewhere.")
     dr.check_accept_sets(names)
     asks = [q for q, _ in dr.ASKS]
     print(f"  {len(names)} module docstrings | {len(asks)} asks | cache {len(cache)} entries\n")
@@ -135,10 +240,14 @@ def main():
     embn = [n for n in meta if re.search(r'(embeddings\.word_embeddings|embed_tokens)\.weight$', n)][0]
     T = dr.load_t(str(paths.nomic_weights()), meta, base, embn).astype(np.float64)
     wp = dr.WordPiece(str(paths.nomic_vocab()))
-    import collections
-    freq = collections.Counter()
+    # Frequency of each TOKEN ID across the docs, as an array sized to the token table (SIF weights word i
+    # by a/(a+freq_i)). wp.encode returns ids (np array); count them into a vocab-sized vector. (The old
+    # distill_router had wp.tokens(); nomic_forward's WordPiece exposes encode() -- ids, not strings.)
+    freq = np.ones(len(T), dtype=np.float64)          # 1-smoothed so no id has zero weight
     for d in docs_k:
-        freq.update(wp.tokens(d))
+        for i in wp.encode(d):
+            if 0 <= i < len(T):
+                freq[i] += 1
     S = dr.sif_vectors(docs_k, wp, T, freq)
     Sq = dr.sif_vectors(asks, wp, T, freq)
     print(f"  SIF vectors: {S.shape} from token table {T.shape}\n")
@@ -147,6 +256,19 @@ def main():
     print(f"  {'router':46s} {'bits':>10s}")
     dr.score(E, Eq, names_k, "[ceiling] full encoder (137 MB)")
     dr.score(S, Sq, names_k, "[floor]   SIF token-pool (23 MB q8)")
+
+    # ---- N31b: the Model2Vec fix -- PCA-WHITEN THE TOKEN TABLE, then pool. No W, no model. This is the
+    # step §34 says we skipped. If [m2v] clears the bar, free-text routing ships with just a whitened
+    # token table + rank/SIF weights (a few MB), no ridge map at all.
+    Tw, tmu, tcomp, tsv = _pca_whiten_table(T)          # full-rank whiten (dim unchanged)
+    Sw = dr.sif_vectors(docs_k, wp, Tw, freq)
+    Swq = dr.sif_vectors(asks, wp, Tw, freq)
+    dr.score(Sw, Swq, names_k, "[m2v]     whitened-table SIF (no W)")
+    # and the same with rank-based Zipf weights instead of measured doc frequency (their no-corpus path)
+    zf = _zipf_freq(len(T))
+    Sz = dr.sif_vectors(docs_k, wp, Tw, zf)
+    Szq = dr.sif_vectors(asks, wp, Tw, zf)
+    dr.score(Sz, Szq, names_k, "[m2v+zipf] whitened + rank-SIF (no W)")
 
     # ---- W: ridge, lam chosen on HELD-OUT documents (never on the asks)
     rng = np.random.default_rng(0)
@@ -164,6 +286,19 @@ def main():
 
     W = ridge(S, E, lam)                     # refit on all documents with the chosen lam
     dr.score(E, Sq @ W, names_k, f"[ours]    SIF @ W  (23 MB + {W.size*4/1e6:.1f} MB)")
+
+    # N31b stacked: whitened table AND a ridge W on top. If a linear map still helps AFTER fixing the
+    # table, this is the strongest no-model option; if [m2v] alone already clears the bar, ship that
+    # (simpler -- no W). Pick lam the same honest way, on held-out docs.
+    bestw = (None, -1e9)
+    for lam2 in (1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0):
+        Ww = ridge(Sw[tr], E[tr], lam2)
+        r2w = 1 - np.linalg.norm(Sw[te] @ Ww - E[te]) ** 2 / np.linalg.norm(E[te] - E[te].mean(0)) ** 2
+        if r2w > bestw[1]:
+            bestw = (lam2, r2w)
+    Ww = ridge(Sw, E, bestw[0])
+    print(f"  ridge (whitened): lam* {bestw[0]:g}, held-out R^2 {bestw[1]:+.3f}")
+    dr.score(E, Swq @ Ww, names_k, "[m2v+W]   whitened table + ridge W")
 
     # identity, not just variance -- the §18.1 lesson: R^2 and neighbour transfer are different bars
     unit = lambda A: A / (np.linalg.norm(A, axis=-1, keepdims=True) + 1e-12)

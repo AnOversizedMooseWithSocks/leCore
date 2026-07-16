@@ -51,14 +51,6 @@ except Exception:
 # remove the entry, or accept it as a benign homonym / pinned divergence and leave it -- WITH the reason on the
 # line. Never add an entry just to make the test pass without reading. The budget may shrink, never grow.
 KNOWN_COLLISIONS = {
-    # -- gaussian/mean curvature: ONE concept, TWO representations, both correct. meshcurvature computes the
-    # DISCRETE per-vertex form on a triangle mesh (angle defect / mixed-area cotan; returns an array over V);
-    # surfanalysis computes the ANALYTIC pointwise form on a parametric surface from the fundamental forms
-    # (K=(LN-M^2)/(EG-F^2), H=(EN-2FM+GL)/2(EG-F^2); returns a scalar at (u,v)). Read both bodies; the same verb on
-    # a different geometry costume, the pattern the duplication audit blessed -- NOT a duplicate to merge, because
-    # the discrete estimator is not the analytic formula and neither can serve the other's input.
-    "gaussian_curvature": frozenset({"meshcurvature", "surfanalysis"}),
-    "mean_curvature": frozenset({"meshcurvature", "surfanalysis"}),
     # -- different-domain homonyms: same English word, unrelated jobs. Read, benign. --
     "resolve": frozenset({"graphql", "machinemodel", "overrides", "superposed"}),
     "box": frozenset({"codegen", "mesh", "sdf"}),                 # an SDF box, a mesh box, a codegen box literal

@@ -178,6 +178,42 @@ class NodeGraph:
         for d in self._downstream(nid) | {nid}:
             self._cache.pop(d, None)
 
+    # -- introspection (DRILL-DOWN): what can I adjust, and what is it set to right now? -------------------------
+    # WHY: set_param already sets EXACT values, but an agent (or a UI, or a user) first needs to SEE a node's knobs,
+    # their current values, and their socket types before adjusting -- the "drill down to a specific setting" the
+    # node editor is for. Blender-MCP reviewers name node graphs as the weak point of LLM->code approaches precisely
+    # because the parameters are opaque; here they are first-class and queryable.
+    def describe(self, nid):
+        """Drill down into ONE node: everything you can adjust on it, and its current state. Returns a dict:
+          id, type, params (name -> CURRENT value -- the exact knobs, set with set_param),
+          inputs (socket name -> type you can wire in), outputs (socket name -> type),
+          drivable (param name -> type: a knob that can ALSO be driven by a wired input),
+          wired_in / wired_out (the connections already made). This is the introspection a node editor shows when you
+          select a node. See set_param to change a value exactly."""
+        if nid not in self.nodes:
+            raise KeyError("no node %r (have: %s)" % (nid, ", ".join(self.nodes) or "none"))
+        spec = self.nodes[nid]
+        nt = self.reg.get(spec["type"])
+        wired_in = {e["dst_socket"]: (e["src"], e["src_socket"]) for e in self.edges if e["dst"] == nid}
+        wired_out = [(e["src_socket"], e["dst"], e["dst_socket"]) for e in self.edges if e["src"] == nid]
+        return {"id": nid, "type": spec["type"], "params": dict(spec["params"]),
+                "inputs": dict(nt.inputs), "outputs": dict(nt.outputs), "drivable": dict(nt.param_inputs),
+                "wired_in": wired_in, "wired_out": wired_out}
+
+    def list_nodes(self):
+        """Overview of the whole graph: [{id, type, params}] for every node, id-sorted (deterministic). The first
+        thing an agent calls to see what is in the graph before drilling into one node with describe()."""
+        return [{"id": nid, "type": self.nodes[nid]["type"], "params": dict(self.nodes[nid]["params"])}
+                for nid in sorted(self.nodes)]
+
+    def describe_type(self, type_name):
+        """Drill down into a node KIND (before you add one): its input sockets, output sockets, and drivable knobs.
+        Lets an agent discover what a 'sdf_torus' or 'material_pbr' exposes without adding it first. See default_registry
+        for the palette of type names."""
+        nt = self.reg.get(type_name)
+        return {"type": type_name, "inputs": dict(nt.inputs), "outputs": dict(nt.outputs),
+                "drivable": dict(nt.param_inputs)}
+
     def _downstream(self, nid):
         """All nodes reachable FROM nid (its dependents), so a change invalidates exactly them."""
         stack = [nid]; seen = set()
@@ -702,6 +738,22 @@ def _selftest():
     gcp.connect(ab2, "out", pal, "t")
     col0 = gcp.evaluate(pal, t=0.0)["out"]; col1 = gcp.evaluate(pal, t=0.5)["out"]
     assert np.asarray(col0).shape == (3,) and not np.allclose(col0, col1)
+
+    # (6) DRILL-DOWN introspection: describe/list_nodes/describe_type expose the exact knobs + wiring, and set_param
+    # adjusts an exact value that describe reflects. This is the "drill down to a specific setting" the editor is for.
+    gi = NodeGraph(reg)
+    sp = gi.add("sdf_sphere", {"radius": 1.0}); bx = gi.add("sdf_box", {"size": (0.8, 0.8, 0.8)})
+    un = gi.add("sdf_union"); gi.connect(sp, "out", un, "a"); gi.connect(bx, "out", un, "b")
+    d = gi.describe(sp)
+    assert d["params"] == {"radius": 1.0} and d["outputs"] == {"out": "sdf"}
+    assert d["drivable"] == {"radius": "scalar"}, d["drivable"]        # the radius knob is also drivable
+    assert d["wired_out"] == [("out", un, "a")], d["wired_out"]        # sphere feeds the union's 'a'
+    du = gi.describe(un)
+    assert du["wired_in"] == {"a": (sp, "out"), "b": (bx, "out")}, du["wired_in"]
+    assert [n["id"] for n in gi.list_nodes()] == sorted([sp, bx, un])  # id-sorted, deterministic
+    gi.set_param(sp, radius=2.5)
+    assert gi.describe(sp)["params"]["radius"] == 2.5                  # exact adjust, reflected in the drill-down
+    assert gi.describe_type("sdf_torus")["outputs"] == {"out": "sdf"}  # inspect a kind before adding it
 
     print("holographic_nodegraph selftest OK: one heterogeneous typed graph drives REAL leCore compute -- sdf "
           "CSG/transforms/fillet/bake/field/texture, OUTPUT nodes (sdf_to_mesh + material) that terminate a graph in "

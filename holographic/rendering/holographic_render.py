@@ -114,7 +114,8 @@ class Light:
 # Mesh rasteriser -- z-buffered, flat Lambert shading, frustum + back-face culled.
 # =====================================================================================================
 def rasterize_mesh(mesh, camera, width=512, height=512, lights=None, base_color=(0.8, 0.8, 0.8),
-                   background=(0.05, 0.06, 0.08), ambient=0.15, vectorized=True):
+                   background=(0.05, 0.06, 0.08), ambient=0.15, vectorized=True, texture=None, uvs=None,
+                   smooth=False):
     """Rasterise a triangle mesh to an (H, W, 3) RGB image in [0,1] with a z-buffer and per-face Lambert shading.
     `lights` is a list of Light (defaults to one directional sun + ambient). `base_color` is the surface albedo
     (or pass a PBRMaterial's base_color). Frustum-clips and back-face culls.
@@ -126,13 +127,38 @@ def rasterize_mesh(mesh, camera, width=512, height=512, lights=None, base_color=
     pixel then depth, take the nearest per pixel) -- no Python per-triangle loop. This is the concrete sense in
     which "more VSA-native" (array ops, scatter = bundle) beats a Python loop: it is the SAME NumPy underneath,
     but as one batched op instead of N small ones. vectorized=False keeps the readable per-triangle loop as the
-    reference. Both give the same image."""
+    reference. Both give the same image.
+
+    SMOOTH shading (default-off, byte-identical absent): smooth=True interpolates per-VERTEX normals across each
+    fragment (Gouraud/Phong-style) instead of one flat normal per face -- what makes an organic model (a subdivided
+    creature, a fruit) read as curved rather than faceted. Needs vectorized=True. Costs one vertex_normals() call.
+
+    TEXTURED path (default-off, byte-identical absent): pass `texture` (H,W,3 float [0,1]) and per-vertex `uvs`
+    (n_verts,2) -- or leave uvs=None to read mesh.uvs -- and every fragment's albedo is the BILINEARLY sampled
+    texture at its barycentric-interpolated UV instead of the flat base_color (lighting unchanged). What showing a
+    UV-transferred / baked texture through the engine needs. Requires vectorized=True (the fragment path carries
+    the barycentrics); textured + vectorized=False raises."""
     from holographic.mesh_and_geometry.holographic_mesh import Mesh
+    if uvs is None:
+        uvs = getattr(mesh, "uvs", None)                     # per-vertex UVs survive fan triangulation (indices kept)
     if not all(len(f) == 3 for f in mesh.faces):
         mesh = Mesh(mesh.vertices, [tuple(t) for t in mesh.triangulate()])
+    if texture is not None:
+        if not vectorized:
+            raise ValueError("texture rendering needs vectorized=True (the fragment path carries the barycentrics)")
+        if uvs is None:
+            raise ValueError("texture given but no UVs: pass uvs= or set mesh.uvs")
+        texture = np.asarray(texture, float)
+        uvs = np.asarray(uvs, float)
     if lights is None:
         lights = [Light("directional", direction=(-0.4, -0.8, -0.5), intensity=1.0)]
     base_color = np.asarray(base_color[:3], float)
+
+    vnormals = None
+    if smooth:
+        if not vectorized:
+            raise ValueError("smooth shading needs vectorized=True (the fragment path carries the barycentrics)")
+        vnormals = mesh.vertex_normals(store=False)          # per-vertex shading normals (indices match F)
 
     V = mesh.vertices
     F = np.asarray(mesh.faces, dtype=int)
@@ -167,7 +193,8 @@ def rasterize_mesh(mesh, camera, width=512, height=512, lights=None, base_color=
             L = L / (np.linalg.norm(L, axis=1, keepdims=True) + 1e-12)
         ndl = np.clip(np.sum(fn * L, axis=1), 0.0, None)
         shade += ndl[:, None] * lt.intensity * lt.color
-    face_col = np.clip((ambient + shade) * base_color, 0.0, 1.0)
+    face_light = ambient + shade                              # the light term alone (albedo applied at resolve)
+    face_col = np.clip(face_light * base_color, 0.0, 1.0)
 
     front = (w[F[:, 0], 0] > 0) & (w[F[:, 1], 0] > 0) & (w[F[:, 2], 0] > 0)
     vis = np.where(front)[0]
@@ -220,7 +247,50 @@ def rasterize_mesh(mesh, camera, width=512, height=512, lights=None, base_color=
     first[1:] = pix_s[1:] != pix_s[:-1]                       # first occurrence of each pixel = its min depth
     win = order[first]
     flat = img.reshape(-1, 3)
-    flat[pix[win]] = face_col[ti[win]]
+    # SMOOTH shading: per-fragment normal = barycentric blend of the winning face's vertex normals; recompute the
+    # Lambert term per fragment (default flat path uses the per-face face_light, byte-identical).
+    smooth_light = None
+    if smooth and vnormals is not None:
+        li0, li1, li2 = l0[inside][win], l1[inside][win], l2[inside][win]
+        fw = ti[win]
+        fn = (li0[:, None] * vnormals[F[fw, 0]] + li1[:, None] * vnormals[F[fw, 1]] + li2[:, None] * vnormals[F[fw, 2]])
+        fn = fn / (np.linalg.norm(fn, axis=1, keepdims=True) + 1e-12)
+        sl = np.zeros((len(fw), 3))
+        for lt in lights:
+            if lt.kind == "ambient":
+                sl += lt.intensity * lt.color; continue
+            if lt.kind == "directional":
+                L = np.broadcast_to(-np.asarray(lt.direction, float), fn.shape)
+            else:
+                L = np.asarray(lt.position, float) - centroids[fw]
+                L = L / (np.linalg.norm(L, axis=1, keepdims=True) + 1e-12)
+            ndl = np.clip(np.sum(fn * L, axis=1), 0.0, None)
+            sl += ndl[:, None] * lt.intensity * lt.color
+        smooth_light = ambient + sl                          # (n_win, 3)
+    if texture is None:
+        if smooth_light is not None:
+            flat[pix[win]] = np.clip(smooth_light * base_color, 0.0, 1.0)
+        else:
+            flat[pix[win]] = face_col[ti[win]]                # the flat-albedo path, byte-identical to before
+    else:
+        # per-fragment UV = barycentric blend of the winning face's corner UVs, BILINEARLY sampled, times the
+        # face (or smooth) light term. This is what lets a UV-transferred / baked texture be SHOWN through the engine.
+        li0, li1, li2 = l0[inside][win], l1[inside][win], l2[inside][win]
+        fw = ti[win]
+        uvw = (li0[:, None] * uvs[F[fw, 0]] + li1[:, None] * uvs[F[fw, 1]] + li2[:, None] * uvs[F[fw, 2]])
+        th, tw = texture.shape[:2]
+        fu = (uvw[:, 0] % 1.0) * (tw - 1)
+        fv = (uvw[:, 1] % 1.0) * (th - 1)
+        x0 = np.floor(fu).astype(int); y0 = np.floor(fv).astype(int)
+        x1 = np.minimum(x0 + 1, tw - 1); y1 = np.minimum(y0 + 1, th - 1)
+        ax = (fu - x0)[:, None]; ay = (fv - y0)[:, None]
+        albedo = ((texture[y0, x0] * (1 - ax) + texture[y0, x1] * ax) * (1 - ay)
+                  + (texture[y1, x0] * (1 - ax) + texture[y1, x1] * ax) * ay)
+        if smooth_light is not None:
+            flat[pix[win]] = np.clip(smooth_light * albedo, 0.0, 1.0)
+        else:
+            flat[pix[win]] = np.clip(face_light[fw][:, None] * albedo if face_light.ndim == 1
+                                     else face_light[fw] * albedo, 0.0, 1.0)
     return img
 
 
@@ -619,6 +689,65 @@ def frame_delta_tiles(prev, curr, tile=32, thresh=1e-3):
     return out, (len(out) / total if total else 0.0)
 
 
+def _std_views(mesh, margin=1.6):
+    """Standard orthographic-ish camera set for a model turnaround: top, front, side, and a 3/4. Cameras pull back
+    from the mesh centroid by `margin` * the bbox diagonal so the whole model fits every frame."""
+    V = np.asarray(mesh.vertices, float)
+    c = V.mean(0)
+    diag = float(np.linalg.norm(V.max(0) - V.min(0))) or 1.0
+    d = diag * float(margin)
+    return {
+        "top":   (c + np.array([0.0, d, 1e-3]), (0.0, 0.0, -1.0)),
+        "front": (c + np.array([d, 0.0, 1e-3]), (0.0, 1.0, 0.0)),
+        "side":  (c + np.array([0.0, 0.0, d]),  (0.0, 1.0, 0.0)),
+        "3q":    (c + np.array([d * 0.7, d * 0.5, d * 0.7]), (0.0, 1.0, 0.0)),
+    }, c, diag
+
+
+def turnaround(mesh, ref_mesh=None, views=("top", "front", "side", "3q"), width=360, height=360,
+               base_color=(0.7, 0.72, 0.62), ref_color=(0.55, 0.68, 0.75), background=(0.05, 0.06, 0.08),
+               margin=1.6):
+    """TURNAROUND: render `mesh` from the standard modelling views (top/front/side/3q) in ONE call and, if a
+    `ref_mesh` is given, score how well the silhouettes MATCH per view -- the loop that (by hand) caught the mantis's
+    slurped legs and the box-model's proportions. Returns a dict:
+      sheet      : an (H, W*, 3) image, the views concatenated (mesh alone, or mesh|ref stacked per view if ref given)
+      views      : the view names used
+      iou        : {view: silhouette IoU vs ref} (only if ref_mesh) -- intersection-over-union of the two foreground
+                   masks under the SAME camera, in [0,1]; 1.0 = identical silhouette
+      mean_iou   : the average over views (the single 'does it look right' number)
+    Both meshes are framed by `mesh`'s bbox so the comparison is fair (same camera). Deterministic.
+
+    WHY A NUMBER: "looks right" was vibes; silhouette IoU turns the critic into something an agent can OPTIMISE
+    against (raise the score by fixing the view where it's lowest). KEPT NEGATIVE: silhouette IoU is a 2-D outline
+    match -- it does not see internal topology or depth, so a filled-in wrong-interior model can still score high;
+    pair it with mesh_report for the topology side."""
+    cams, _c, _diag = _std_views(mesh, margin=margin)
+    out_rows = []
+    iou = {}
+    for name in views:
+        eye, up = cams[name]
+        cam = Camera(eye=eye.tolist(), target=_c.tolist(), up=up, fov_deg=35.0, near=1e-3, far=max(5.0, _diag * 6))
+        img = rasterize_mesh(mesh, cam, width=width, height=height, base_color=base_color, background=background)
+        if ref_mesh is not None:
+            rimg = rasterize_mesh(ref_mesh, cam, width=width, height=height, base_color=ref_color,
+                                  background=background)
+            bg = np.asarray(background, float)
+            ma = np.abs(img - bg).sum(-1) > 1e-3               # foreground mask of the model
+            mr = np.abs(rimg - bg).sum(-1) > 1e-3              # foreground mask of the reference
+            inter = float(np.logical_and(ma, mr).sum())
+            union = float(np.logical_or(ma, mr).sum())
+            iou[name] = (inter / union) if union > 0 else 1.0
+            out_rows.append(np.concatenate([img, rimg], axis=1))
+        else:
+            out_rows.append(img)
+    sheet = np.concatenate(out_rows, axis=0)
+    result = {"sheet": sheet, "views": list(views)}
+    if ref_mesh is not None:
+        result["iou"] = iou
+        result["mean_iou"] = float(np.mean([iou[v] for v in views]))
+    return result
+
+
 def _selftest():
     import time
     from holographic.mesh_and_geometry.holographic_mesh import Mesh
@@ -652,6 +781,34 @@ def _selftest():
             assert str(_out).endswith(".jpg")
         except RuntimeError as _e:
             assert "pip install pillow" in str(_e), "the refusal must name the install command"
+
+    # TEXTURED raster path: texture=None BYTE-IDENTICAL to the flat path; a checkerboard on a UV'd box renders
+    # with real texture contrast (std over a face strip), not flat shading -- the trap for backlog A4.
+    from holographic.mesh_and_geometry.holographic_mesh import box as _tbox
+    _tb = _tbox(); _tcam = Camera(eye=(2.2, 1.6, 2.4), target=(0, 0, 0), fov_deg=40)
+    _f1 = rasterize_mesh(_tb, _tcam, width=64, height=64)
+    assert np.array_equal(_f1, rasterize_mesh(_tb, _tcam, width=64, height=64, texture=None))
+    _uv = np.array([[0, 0], [1, 0], [1, 1], [0, 1]] * 2, float)
+    _chk = np.stack([np.indices((8, 8)).sum(0) % 2] * 3, axis=-1).astype(float)
+    _ft = rasterize_mesh(_tb, _tcam, width=64, height=64, texture=_chk, uvs=_uv)
+    assert float(np.abs(_ft - _f1).mean()) > 0.01 and float(_ft[26:38, 20:46].std()) > 0.08
+
+    # SMOOTH shading (default-off): smooth=None byte-identical; on a coarse faceted mesh (a level-1 CC box, 24 big
+    # quads) smooth=True visibly differs from flat per-face shading (Gouraud gradient across each face).
+    from holographic.mesh_and_geometry.holographic_meshsubdiv import catmull_clark as _cc_sm
+    _coarse = _cc_sm(_tbox(), 1)
+    _sf = rasterize_mesh(_coarse, _tcam, width=64, height=64)
+    assert np.array_equal(_sf, rasterize_mesh(_coarse, _tcam, width=64, height=64, smooth=False))
+    _ss = rasterize_mesh(_coarse, _tcam, width=64, height=64, smooth=True)
+    assert float(np.abs(_ss - _sf).mean()) > 0.003          # smooth changes the shading
+
+    # turnaround + silhouette IoU: a mesh vs ITSELF scores 1.0 every view; a half-size copy scores much lower --
+    # the "does it look right" critic that caught the mantis's slurped legs, now a number an agent can optimise.
+    _ta = turnaround(_tbox(), ref_mesh=_tbox(), width=48, height=48)
+    assert abs(_ta["mean_iou"] - 1.0) < 1e-9
+    _half = Mesh(np.asarray(_tbox().vertices, float) * 0.5, [tuple(f) for f in _tbox().faces])
+    _ta2 = turnaround(_tbox(), ref_mesh=_half, width=48, height=48)
+    assert _ta2["mean_iou"] < 0.6                            # a wrong-scale silhouette scores clearly lower
 
     print(f"render selftest ok: rasterised {M.n_faces} faces in {rt*1000:.0f} ms @128x128; "
           f"volume alpha max {alpha.max():.2f}; fire glows red")

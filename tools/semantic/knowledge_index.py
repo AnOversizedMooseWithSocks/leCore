@@ -106,8 +106,98 @@ def words(s):
     return set(w for w in re.findall(r"[a-z]{3,}", s.lower()) if w not in STOP)
 
 
-def collect_code(repo):
-    """One entry per module: its module docstring is the authoritative description (per the guide)."""
+def _module_families(repo):
+    """module NAME (e.g. 'holographic_denoise') -> family (its holographic/<family>/ directory). The family
+    is the natural GROUP level for hierarchical routing: route a query to its family first (an 11-way
+    choice), then rank modules WITHIN that family. This turns a flat 505-way search into group-then-leaf,
+    the structure hierarchical_recall measured at 100% vs 18.3% for flat_recall (holographic_hierarchy)."""
+    import os
+    fam = {}
+    for root, _, files in os.walk(repo):
+        if 'node_modules' in root:
+            continue
+        # family = the directory directly under 'holographic/'
+        parts = root.replace('\\', '/').split('/')
+        family = parts[parts.index('holographic') + 1] if 'holographic' in parts and \
+            parts.index('holographic') + 1 < len(parts) else 'root'
+        for f in files:
+            if f.startswith('holographic_') and f.endswith('.py'):
+                fam[f[:-3]] = family
+    return fam
+
+
+def _doc_chunks(body, max_chunks=6, min_len=24):
+    """Split a docstring into up to max_chunks sentence-ish pieces for MULTI-VECTOR (late-interaction)
+    routing. Deterministic: split on sentence enders and the '--' section marker, drop tiny fragments,
+    keep the whole thing as one chunk if it does not split. Each chunk is embedded separately; a module is
+    then scored by the MAX cosine over its chunks -- so a single strongly-relevant sentence surfaces the
+    module even when the averaged vector buries it. The demux mask: match the part, not the mean."""
+    import re
+    parts = re.split(r'(?<=[.!?])\s+|\s+--+\s+|\s+WHY\b', body)
+    chunks = [c.strip() for c in parts if len(c.strip()) >= min_len]
+    if not chunks:
+        chunks = [body.strip()] if body.strip() else []
+    # always include the FULL body as one chunk too (the mean-equivalent), so multivec can never do worse
+    # than having the whole-text vector available to max over.
+    full = body.strip()
+    if full and full not in chunks:
+        chunks = [full] + chunks
+    return chunks[:max_chunks]
+
+
+def _module_iogroups(repo):
+    """module NAME -> its io-kind GROUP (a produces kind, else a consumes kind), via the module= link. This
+    is the SEMANTIC coarse level for hierarchical routing -- 'what datatype does this act on?' -- cleaner
+    than the directory family (which dumps 149 modules in 'misc'). Modules with no io-kind fall back to a
+    'untyped' group. Same join pipeline_map uses, so finishing the io-kind backfill grows BOTH."""
+    try:
+        import sys, os
+        rr = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if rr not in sys.path: sys.path.insert(0, rr)
+        from holographic.caching_and_storage.holographic_catalog import default_catalog
+    except Exception:
+        return {}
+    cat = default_catalog()
+    out = {}
+    for c in cat._by_name.values():
+        mod = getattr(c, 'module', None)
+        if mod:
+            kinds = list(c.produces) or list(c.consumes)
+            if kinds:
+                out['holographic_' + mod] = kinds[0]          # one group per module (its primary datatype)
+    return out
+
+
+def _alias_enrichment():
+    """module-stem -> ' '.join(catalog aliases), joined via the NEW module= link (trustworthy, not fuzzy).
+    Empty dict if the catalog can't be imported (keeps this tool runnable stand-alone). WHY: a module's
+    aliases are hand-written PARAPHRASES ('clean a noisy signal'); appending them to the routing document
+    pulls the embedding toward the phrasings the asks use -- the 'richer target' hypothesis, made testable
+    only now that module= gives a reliable code-module -> capability join."""
+    import sys, os
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)                     # so holographic.* resolves from tools/semantic
+    try:
+        from holographic.caching_and_storage.holographic_catalog import default_catalog
+    except Exception:
+        return {}
+    cat = default_catalog()
+    out = {}
+    for c in cat._by_name.values():
+        mod = getattr(c, 'module', None)
+        if mod:
+            out.setdefault(mod, []).extend(c.aliases)
+    return {k: ' '.join(v) for k, v in out.items()}
+
+
+def collect_code(repo, enrich_aliases=False):
+    """One entry per module: its module docstring is the authoritative description (per the guide).
+
+    enrich_aliases (default False -> byte-identical old behavior): append the module's catalog aliases
+    (joined via the module= link) to its docstring text before it is embedded, so the routing vector is
+    pulled toward the paraphrases users type. Tests the 'richer target' hypothesis against bare routing."""
+    enr = _alias_enrichment() if enrich_aliases else {}
     out = []
     for root, _, files in os.walk(repo):
         if 'node_modules' in root:
@@ -118,7 +208,17 @@ def collect_code(repo):
             txt = open(os.path.join(root, f), encoding='utf-8', errors='ignore').read()
             m = re.search(r'"""(.*?)"""', txt, re.S)
             if m:
-                out.append(('code', f[:-3], ' '.join(m.group(1).split())[:MAX_CHARS]))
+                stem = f[:-3].replace('holographic_', '')
+                doc = ' '.join(m.group(1).split())
+                if enr.get(stem):
+                    # ADDITIVE enrichment (confound fix): keep the FULL docstring, then append aliases. An
+                    # earlier version prepended+truncated, which EVICTED docstring tail to fit aliases and
+                    # made the test 'aliases + partial docstring' vs 'full docstring' -- not clean. Here the
+                    # docstring is untouched and aliases are pure addition, so the exam measures the aliases.
+                    body = doc[:MAX_CHARS] + ' -- ' + enr[stem]
+                else:
+                    body = doc[:MAX_CHARS]
+                out.append(('code', f[:-3], body))
     return out
 
 
@@ -280,6 +380,48 @@ def main():
     ap.add_argument('--no-md', action='store_true', help='skip markdown windows (routing-only; CI uses this)')
     ap.add_argument('--require-top5', type=int, default=8)
     ap.add_argument('--require-median', type=float, default=2)
+    ap.add_argument('--require-fused-top1', type=int, default=None,
+                    help='GATE the fused (dense + workflow bones) route: fail if top-1 at the champion row '
+                         '(beta=0, gamma=0.5, 128d) drops below N. Needs --structural. The measured bar is 7 '
+                         '(strict Pareto over flat 6/12). Default None = no fused gate.')
+    ap.add_argument('--abtt-sweep', default='',
+                    help="comma-list of k values, e.g. '0,1,2,3,4' -- print the routing exam for each k "
+                         "so the best all-but-the-top depth is a MEASUREMENT, not a guess. Reuses the same "
+                         "eval as [3]; does not change what ships.")
+    ap.add_argument('--hier-by', default='family', choices=('family', 'iokind'),
+                    help="grouping for --hier coarse routing: 'family' = the holographic/<dir>/ (free, but "
+                         "'misc' is a 149-module catch-all); 'iokind' = the module's datatype group via the "
+                         "module= link (semantic, needs io-kind tags -- finishing the pipeline map grows it).")
+    ap.add_argument('--hybrid', action='store_true',
+                    help="HYBRID routing: fuse the dense (nomic cosine) ranking with a pure-NumPy BM25 lexical "
+                         "ranking via Reciprocal Rank Fusion. Recovers LEXICAL misses (query words present in "
+                         "the target docstring: surface/ball/shape) that dense buries, while keeping the dense "
+                         "HITs. The literature-backed fix for vocabulary mismatch; fits NumPy-only (no SPLADE).")
+    ap.add_argument('--structural', action='store_true',
+                    help="Add a THIRD ranked list to --hybrid: workflow-graph propagation. Seeds the sparse "
+                         "author-stated workflow bones with the DENSE scores and spreads one hop, so a module "
+                         "whose COLLABORATORS are hit gets lifted even when the query shares NO words with its "
+                         "docstring -- the gap dense and BM25 both structurally cannot close. Swept by gamma.")
+    ap.add_argument('--max-chunks', type=int, default=6,
+                    help='cap on docstring chunks per module for --multivec. The default 6 was sized for '
+                         '280-char bodies; at --max-chars 5000 a long docstring splits into ~40 sentences and '
+                         'a cap of 6 RE-TRUNCATES what --max-chars just widened. Raise together (e.g. '
+                         '--max-chars 5000 --max-chunks 24) to run full-width windowed routing.')
+    ap.add_argument('--wf-alpha', type=float, default=0.5,
+                    help="Workflow propagation strength (0=seed unchanged, 1=pure neighbour spread).")
+    ap.add_argument('--rrf-k', type=int, default=60,
+                    help="Reciprocal Rank Fusion damping constant k (default 60, standard).")
+    ap.add_argument('--multivec', action='store_true',
+                    help="MULTI-VECTOR (late-interaction) routing: embed each module docstring as several "
+                         "sentence CHUNKS and score by the MAX cosine over a module's chunks, not the mean. "
+                         "Rescues a strong single sentence the averaged vector buries (the demux mask).")
+    ap.add_argument('--hier', action='store_true',
+                    help="HIERARCHICAL routing: route the query to its module FAMILY first (coarse, ~11-way), "
+                         "then rank modules WITHIN that family (fine). Turns the flat 505-way search into "
+                         "group-then-leaf -- the structure hierarchical_recall measured 100%% vs 18.3%% flat.")
+    ap.add_argument('--enrich-aliases', action='store_true',
+                    help="append each module's catalog aliases (via the module= link) to its routing text "
+                         "before embedding -- tests whether the richer paraphrase target beats bare routing.")
     ap.add_argument('--abtt', type=int, default=1,
                     help='all-but-the-top: principal directions to remove (0 disables)')
     ap.add_argument('--rope-base', type=float, default=None)
@@ -322,7 +464,7 @@ def main():
     print("\n" + "=" * 90)
     print("[2] BUILDING THE INDEX: code docstrings + markdown sections")
     print("=" * 90)
-    entries = collect_code(args.repo)
+    entries = collect_code(args.repo, enrich_aliases=getattr(args, 'enrich_aliases', False))
     if not args.no_md:
         entries = entries + collect_md(args.repo, args.window, args.stride)
     kinds = collections.Counter(e[0] for e in entries)
@@ -367,8 +509,25 @@ def main():
 
     if args.save:
         ab64 = AllButTheTop(E[:, :64], k=args.abtt)
-        np.savez_compressed(args.save, emb=ab64(E[:, :64]).astype(np.float32),
-                            names=[e[1] for e in entries], kinds=[e[0] for e in entries])
+        payload = dict(emb=ab64(E[:, :64]).astype(np.float32),
+                       names=[e[1] for e in entries], kinds=[e[0] for e in entries])
+        if getattr(args, 'structural', False) and wf_graph is not None:
+            # persist the WORKFLOW BONES beside the embeddings, INDEX-ALIGNED to names, so the production
+            # router (holographic_router) can run the measured dense+structure fusion at query time without
+            # re-deriving the graph. Flat edge arrays (src_idx, dst_idx, weight) -- ~1.1k edges, npz-friendly.
+            # The graph keys are bare stems; the index names are holographic_<stem> -- join here, once.
+            name_idx = {e[1]: j for j, e in enumerate(entries)}
+            src, dst, wts = [], [], []
+            for (a, b), w in wf_graph["edges"].items():
+                ia = name_idx.get("holographic_" + a)
+                ib = name_idx.get("holographic_" + b)
+                if ia is not None and ib is not None:
+                    src.append(ia); dst.append(ib); wts.append(w)
+            payload.update(bone_src=np.array(src, dtype=np.int32),
+                           bone_dst=np.array(dst, dtype=np.int32),
+                           bone_w=np.array(wts, dtype=np.float32))
+            print(f"  bones packed into index: {len(src)} edges")
+        np.savez_compressed(args.save, **payload)
         print(f"  saved 64d index -> {args.save}")
 
     # ---- [3] module routing
@@ -426,6 +585,287 @@ def main():
                 mark = 'HIT ' if rank == 1 else ('top5' if rank <= 5 else f'r{rank:<3d}')
                 print(f"     [{mark}] {a:42s} -> {g.replace('holographic_',''):20s} "
                       f"(accepted answer at rank {rank}; e.g. {want.replace('holographic_','')})")
+
+    # ---- [3x] HYBRID routing: fuse dense (cosine) with BM25 (lexical) via Reciprocal Rank Fusion. The dense
+    # router buries asks whose query WORDS appear in the target docstring but whose GEOMETRY collapses them
+    # apart (meshsmooth 'bumpy surface' r22, dynamics 'ball goes next' r40). BM25 exact-matches those words;
+    # RRF fuses the two RANKINGS (no score calibration -- cosine and BM25 are on different scales, only ranks
+    # are comparable) so a module ranked well by EITHER rises, and the dense HITs are preserved. Literature:
+    # MonaVec 2606.19458 (training-free BM25+dense RRF, rejects SPLADE for our constraint), gains largest for
+    # weak dense retrievers (2605.24297). KEPT NEG: cannot help 'grainy' (absent from doc AND query terms).
+    wf_graph = None                                            # hoisted: --save reads this even when the
+                                                               # hybrid block never runs (no NameError)
+    if args.structural and not args.hybrid:
+        # --structural adds a THIRD list to the hybrid fusion; on its own it has nothing to fuse INTO. Rather
+        # than silently print nothing (measured: a real user ran --structural alone and got no output), turn
+        # the fusion on and say so.
+        args.hybrid = True
+        print("\n  [note] --structural implies --hybrid (it is a third fusion input); enabling --hybrid.")
+    if args.hybrid:
+        # the exam is launched from tools/semantic, so holographic.* is not on the path yet. Add the repo root
+        # (authoritative: args.repo; fall back to __file__-relative) exactly like the catalog-join helper does.
+        import os as _os
+        for _rr in (_os.path.abspath(args.repo),
+                    _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))):
+            if _rr not in sys.path:
+                sys.path.insert(0, _rr)
+        from holographic.semantic_router.holographic_bm25 import BM25, reciprocal_rank_fusion
+        doc_texts = ["%s -- %s" % (name, body) for (_, name, body) in [entries[i] for i in code_idx]]
+        bm = BM25(doc_texts)
+
+        # ---- THE STRUCTURAL THIRD LIST (--structural): the workflow bones. Dense and BM25 both need the query
+        # to SHARE something with the target text (meaning or words). A vocabulary-gap ask ('less grainy' vs a
+        # docstring that says 'manifold projection / Milanfar') shares NEITHER -- structurally unreachable by
+        # both. The workflow graph reaches it a third way: seed each module with its DENSE score, spread ONE hop
+        # along the sparse author-stated cross-reference bones, and a module whose COLLABORATORS are hit rises
+        # even though its own text was never matched. Rarity-weighted bones keep this precise (median
+        # out-degree 2) -- the diffuse io-kind graph (13-24 neighbours) is exactly what NOT to propagate along.
+        if args.structural:
+            from holographic.semantic_router.holographic_workflowgraph import build_workflow_graph, propagate
+            wf_graph = build_workflow_graph(_os.path.abspath(args.repo))
+            print("  [structural] workflow bones: %d modules, %d edges, hubs dropped %s"
+                  % (wf_graph["n_modules"], len(wf_graph["edges"]), wf_graph["dropped_hubs"][:3]))
+
+        # module-name <-> stem join: the exam names modules 'holographic_meshsmooth'; the workflow graph keys on
+        # the bare stem 'meshsmooth' (same convention as the catalog's resolved_module).
+        stem_of = [code_entries[j][1][len("holographic_"):] if code_entries[j][1].startswith("holographic_")
+                   else code_entries[j][1] for j in range(len(code_entries))]
+        idx_of_stem = {s: j for j, s in enumerate(stem_of)}
+
+        def _structural_order(sims):
+            """Rank doc indices by workflow-propagated dense score. Seeds are CLAMPED at 0: a negative cosine
+            means 'not relevant', and spreading negative activation would actively push a module's collaborators
+            DOWN, which is not the claim -- bones carry evidence FOR, never against."""
+            seed = {stem_of[j]: max(0.0, float(sims[j])) for j in range(len(sims))}
+            ranked = propagate(wf_graph, seed, alpha=args.wf_alpha)
+            order = [idx_of_stem[m] for m, _ in ranked if m in idx_of_stem]
+            seen = set(order)
+            order.extend(j for j in range(len(code_entries)) if j not in seen)   # unranked tail, stable
+            return order
+        # DENSE-DOMINANCE SWEEP: equal-weight RRF (beta=1) let BM25 overtake the dense HITs (measured 6->3
+        # top-1). Down-weight the lexical list: fused uses weights (1.0, beta). beta=0 = pure dense (MUST equal
+        # flat [3] -- a built-in sanity check); beta=1 = classic equal RRF. The IR-literature optimum is
+        # dense-dominant, so the knee should sit at LOW beta -- keeping the dense HITs while a strong BM25 rank
+        # still rescues a dense-buried lexical miss. Sweeps in one run so the knee is measured, not guessed.
+        # WEIGHT GRID. Each row is a (beta, gamma) pair: beta = lexical (BM25) weight, gamma = structural
+        # (workflow) weight, dense always 1.0. (0,0) MUST reproduce flat [3] -- the built-in sanity check.
+        # The beta column isolates lexical; the gamma column isolates STRUCTURE (no lexical confound); the
+        # combined rows test whether the three villagers stack. Equal weight (1.0) is included because it is
+        # the setting that already FAILED for BM25 (6->3 top-1) -- keeping the refutation visible in the table.
+        combos = [(0.0, 0.0), (0.1, 0.0), (0.2, 0.0), (0.3, 0.0), (0.5, 0.0), (1.0, 0.0)]
+        if args.structural:
+            combos += [(0.0, 0.1), (0.0, 0.2), (0.0, 0.3), (0.0, 0.5), (0.0, 1.0),
+                       (0.2, 0.2), (0.3, 0.2), (0.2, 0.3)]
+        print("\n  --- HYBRID ROUTING (dense + BM25%s, weighted RRF k=%d) ---"
+              % (" + WORKFLOW BONES" if args.structural else "", args.rrf_k))
+        print("  %5s %5s | %4s  %6s %6s %7s %6s" % ("beta", "gamma", "dim", "top-1", "top-5", "median", "worst"))
+        detail_rows = {}                                       # (beta,gamma,dim) -> per-ask detail
+        flat_rank = {}                                          # dim -> {ask: rank} from the (0,0) row
+        _struct_cache = {}                                     # (d, ask_i) -> structural order (weight-free)
+        for beta, gamma in combos:
+            for d in (768, 128, 64):                           # 64 = the PRODUCTION index dim; flat 64d is
+                                                               # 2/12, the weakest regime -- where fusion is
+                                                               # predicted (2605.24297) to gain the most.
+                ab_d = AllButTheTop(E[:, :d], k=args.abtt)
+                Ed = ab_d(E[code_idx][:, :d]); Qd = ab_d(Q[:, :d])
+                t1 = t5 = 0; ranks = []; detail = []
+                for i, (a, acc) in enumerate(ASKS_MODULE):
+                    sims = Ed @ Qd[i]
+                    dense_order = list(np.argsort(-sims))                  # dense ranking (doc indices)
+                    bm_order = [j for j, _ in bm.rank(a)]                  # BM25 ranking (doc indices)
+                    lists = [dense_order, bm_order]; wts = [1.0, beta]
+                    if args.structural and gamma > 0.0:
+                        key = (d, i)
+                        if key not in _struct_cache:                       # order is weight-free -> cache it
+                            _struct_cache[key] = _structural_order(sims)
+                        lists.append(_struct_cache[key]); wts.append(gamma)
+                    fused = reciprocal_rank_fusion(lists, k=args.rrf_k, weights=wts)
+                    names_r = [code_entries[j][1] for j, _ in fused]
+                    rank = next((r + 1 for r, n in enumerate(names_r) if n in acc), len(code_entries))
+                    ranks.append(rank); t1 += rank == 1; t5 += rank <= 5
+                    if (beta, gamma) == (0.0, 0.0):
+                        flat_rank.setdefault(d, {})[a] = rank              # baseline rank, for the diff below
+                    detail.append((a, names_r[0], rank))
+                print("  %5.2f %5.2f | %4dd  %5d/%d %5d/%d %7.0f %6d"
+                      % (beta, gamma, d, t1, len(ASKS_MODULE), t5, len(ASKS_MODULE),
+                         np.median(ranks), max(ranks)))
+                # capture per-ask where the RESULT is: measured, the structural win lands at the SHIP dim
+                # (128d), not 768d -- so detail at 768d showed a row with no win and told us nothing about
+                # WHICH ask flipped. Capture the winning row at 128d, keyed by (beta, gamma, dim).
+                if args.structural and (beta, gamma, d) in {(0.0, 0.5, 128), (0.0, 0.5, 768), (0.0, 0.5, 64)}:
+                    detail_rows[(beta, gamma, d)] = detail
+                if args.structural and (beta, gamma, d) == (0.0, 0.5, 128):
+                    fused_top1_128 = t1                        # the champion row, for the --require-fused-top1 gate
+                elif not args.structural and (beta, gamma, d) in {(0.1, 0.0, 128), (0.1, 0.0, 768)}:
+                    detail_rows[(beta, gamma, d)] = detail
+        # PER-ASK DIFF vs the flat baseline -- shows exactly WHICH asks the fusion moved, and by how much.
+        for (b_, g_, d_), rows in sorted(detail_rows.items()):
+            print("  per-ask @%dd at beta=%.2f gamma=%.2f  (flat rank -> fused rank):" % (d_, b_, g_))
+            for a, top, rank in rows:
+                fr = flat_rank.get(d_, {}).get(a)
+                delta = ""
+                if fr is not None and fr != rank:
+                    delta = "  %s r%d -> r%d" % ("BETTER" if rank < fr else "worse ", fr, rank)
+                elif fr is not None:
+                    delta = "  same  r%d" % fr
+                mark = 'HIT ' if rank == 1 else ('top5' if rank <= 5 else 'r%-4d' % rank)
+                print("     [%s] %-34s -> %-18s%s" % (mark, a[:34], top.replace('holographic_', '')[:18], delta))
+        print("  READ: (0,0) MUST equal flat [3] (sanity). beta column = lexical alone; gamma column = "
+              "STRUCTURE alone (no lexical confound) -- does propagating along workflow bones rescue denoise, "
+              "which shares NO words with its docstring? Combined rows test if the three villagers stack. If "
+              "nothing beats (0,0) top-1 6/12, hybrid+structural is a kept negative on this suite.")
+
+        # ---- [3m] MULTI-VECTOR (late-interaction) routing: the demux mask. Each module docstring is split into
+    # sentence chunks (_doc_chunks), each chunk embedded (cached like everything else), and a module scored
+    # by the MAX cosine over its chunks -- so a single strongly-relevant sentence surfaces the module even
+    # when its MEAN vector buries it (denoise's noise sentence diluted by the rest). Compare to flat above.
+    if args.multivec:
+        print("\n  --- MULTI-VECTOR ROUTING (max-sim over docstring chunks vs the mean) ---")
+        # build, per module, the list of chunk vectors (full-width 768d; truncate per dim below).
+        chunk_vecs = []                                     # list over modules -> (n_chunks x 768)
+        for k, name, body in [entries[i] for i in code_idx]:
+            chs = _doc_chunks(body, max_chunks=args.max_chunks)
+            cvs = [embed_cached("search_document: %s -- %s" % (name, c)) for c in chs]
+            chunk_vecs.append(np.array(cvs))
+        for d in (768, 128):
+            ab_d = AllButTheTop(E[:, :d], k=args.abtt)
+            Qd = ab_d(Q[:, :d])
+            # apply the SAME all-but-the-top correction (fit on the whole-doc E) to every chunk vector
+            Cd = [ab_d(cv[:, :d]) for cv in chunk_vecs]
+            t1 = t5 = 0; ranks = []
+            for i, (a, acc) in enumerate(ASKS_MODULE):
+                q = Qd[i] / (np.linalg.norm(Qd[i]) + 1e-12)
+                # score each module by its BEST chunk (late interaction / max-sim)
+                scores = np.array([float(np.max((cv / (np.linalg.norm(cv, axis=1, keepdims=True) + 1e-12)) @ q))
+                                   for cv in Cd])
+                order = np.argsort(-scores)
+                names_r = [code_entries[j][1] for j in order]
+                rank = next((r + 1 for r, n in enumerate(names_r) if n in acc), len(names_r))
+                ranks.append(rank); t1 += rank == 1; t5 += rank <= 5
+            print("  @%3dd: top-1 %d/%d  top-5 %d/%d  median %.0f  worst %d"
+                  % (d, t1, len(ASKS_MODULE), t5, len(ASKS_MODULE), np.median(ranks), max(ranks)))
+            if d == 768:
+                mv_detail = list(zip([a for a, _ in ASKS_MODULE], ranks))   # per-ask rank at full width
+        # PER-ASK: which asks did the chunk max-sim move vs flat? (localizes the demux win -- did denoise
+        # surface from r240?). Prints only the asks whose multivec rank differs from what flat would give.
+        for a, r in mv_detail:
+            mark = 'HIT ' if r == 1 else ('top5' if r <= 5 else 'r%-4d' % r)
+            print("     [%s] %s" % (mark, a))
+        print("  READ: compare to flat [3]. A win here means the relevant signal lived in ONE sentence the "
+              "mean diluted -- the demux/late-interaction mask working. Per-ask above shows WHICH asks moved.")
+
+        # ---- BLEND SWEEP: pure max-sim lets a WRONG module's lone strong chunk overtake a good-mean module
+        # (measured: dynamics 40->94). Blend keeps the whole-doc MEAN as the dominant term and adds the best
+        # chunk as a nudge:  score = alpha*mean_sim + (1-alpha)*max_chunk_sim.  alpha=1 = flat, alpha=0 = pure
+        # multivec. Sweeps alpha in ONE run so the precision(top-1)/recall(top-5) knee is visible, not guessed.
+        # The whole-doc vector is already one of the chunks, so this is a principled reweighting, not new data.
+        print("\n  --- MULTIVEC BLEND SWEEP (alpha*mean + (1-alpha)*max_chunk; alpha=1 flat, 0 pure multivec) ---")
+        print("  %5s | %4s  %6s %6s %7s %6s" % ("alpha", "dim", "top-1", "top-5", "median", "worst"))
+        for alpha in (1.0, 0.75, 0.5, 0.25, 0.0):
+            for d in (768, 128):
+                ab_d = AllButTheTop(E[:, :d], k=args.abtt)
+                Ed = ab_d(E[code_idx][:, :d]); Qd = ab_d(Q[:, :d]); Cd = [ab_d(cv[:, :d]) for cv in chunk_vecs]
+                t1 = t5 = 0; ranks = []
+                for i, (a, acc) in enumerate(ASKS_MODULE):
+                    q = Qd[i] / (np.linalg.norm(Qd[i]) + 1e-12)
+                    mean_s = Ed @ q                                       # whole-doc similarity per module
+                    chunk_s = np.array([float(np.max((cv / (np.linalg.norm(cv, axis=1, keepdims=True) + 1e-12)) @ q))
+                                        for cv in Cd])
+                    scores = alpha * mean_s + (1.0 - alpha) * chunk_s     # the blend
+                    order = np.argsort(-scores)
+                    names_r = [code_entries[j][1] for j in order]
+                    rank = next((r + 1 for r, n in enumerate(names_r) if n in acc), len(names_r))
+                    ranks.append(rank); t1 += rank == 1; t5 += rank <= 5
+                print("  %5.2f | %4dd  %5d/%d %5d/%d %7.0f %6d"
+                      % (alpha, d, t1, len(ASKS_MODULE), t5, len(ASKS_MODULE), np.median(ranks), max(ranks)))
+        print("  READ: look for an alpha that keeps flat's top-1 (alpha=1 row) AND lifts top-5 toward pure "
+              "multivec -- the precision/recall sweet spot. If none beats alpha=1, the blend is a kept negative.")
+
+        # ---- [3h] HIERARCHICAL routing: the structural reframe. Flat routing ranks the accepted answer against
+    # all 505 modules -- denoise buried at r237. Instead: (1) COARSE -- route the query to its module FAMILY
+    # by nearest family PROTOTYPE (mean of the family's module vectors), an ~11-way choice; (2) FINE -- rank
+    # modules only WITHIN the chosen family. This is group-then-leaf (holographic_hierarchy's hierarchical_
+    # recall: 100%% vs 18.3%% flat). Reports coarse-family accuracy AND the fine rank, so we see WHERE it wins
+    # or loses. Honest: if COARSE routes to the wrong family, the answer is unreachable (rank = family size) --
+    # that failure mode is shown, not hidden.
+    if args.hier:
+        # PROMOTED + GENERALIZED: the coarse level is pluggable. 'family' = directory; 'iokind' = the
+        # module's datatype group (the pipeline-map join). Same group-then-leaf structure either way.
+        if args.hier_by == 'iokind':
+            fam_map = _module_iogroups(args.repo)             # module name -> io-kind group (semantic)
+            _grp_label = 'io-kind'
+        else:
+            fam_map = _module_families(args.repo)             # module name -> directory family
+        _default = 'untyped' if args.hier_by == 'iokind' else 'root'
+        families = sorted(set(fam_map.get(code_entries[j][1], _default) for j in range(len(code_entries))))
+        fam_of = [fam_map.get(code_entries[j][1], _default) for j in range(len(code_entries))]
+        # COMBINED with --multivec: the FINE step scores in-group modules by max-sim over their docstring
+        # CHUNKS (late interaction) instead of the mean vector -- so within the coarse group the ask still
+        # surfaces the module whose single best sentence matches, not the one whose average does. Built once.
+        combined = bool(args.multivec)
+        if combined:
+            hchunks = []                                      # module index -> (n_chunks x 768) chunk vectors
+            for k, name, body in [entries[i] for i in code_idx]:
+                cvs = [embed_cached("search_document: %s -- %s" % (name, c)) for c in _doc_chunks(body, max_chunks=args.max_chunks)]
+                hchunks.append(np.array(cvs))
+        print("\n  --- HIERARCHICAL ROUTING (coarse %s -> fine %s) ---"
+              % (args.hier_by, "module by MAX-SIM over chunks" if combined else "module"))
+        for d in (768, 128):
+            ab_d = AllButTheTop(E[:, :d], k=args.abtt)
+            Ed = ab_d(E[code_idx][:, :d]); Qd = ab_d(Q[:, :d])
+            Cd = [ab_d(cv[:, :d]) for cv in hchunks] if combined else None
+            # family prototypes: mean (then unit) of each family's module vectors
+            proto = {}
+            for fam in families:
+                idx = [j for j in range(len(Ed)) if fam_of[j] == fam]
+                v = Ed[idx].mean(0); proto[fam] = v / (np.linalg.norm(v) + 1e-12)
+            P = np.array([proto[f] for f in families])
+            t1 = t5 = 0; ranks = []; coarse_ok = 0
+            for i, (a, acc) in enumerate(ASKS_MODULE):
+                q = Qd[i] / (np.linalg.norm(Qd[i]) + 1e-12)
+                fam_pick = families[int(np.argmax(P @ q))]     # COARSE: nearest family prototype
+                true_fam = fam_map.get(acc[0], _default)
+                coarse_ok += (fam_pick == true_fam)
+                # FINE: rank modules within the picked family only -- by max-sim over chunks if combined, else mean
+                fidx = [j for j in range(len(Ed)) if fam_of[j] == fam_pick]
+                if combined:
+                    def _score(j):
+                        cv = Cd[j]
+                        return float(np.max((cv / (np.linalg.norm(cv, axis=1, keepdims=True) + 1e-12)) @ q))
+                    order = sorted(fidx, key=lambda j: -_score(j))
+                else:
+                    order = sorted(fidx, key=lambda j: -(Ed[j] @ q))
+                names_r = [code_entries[j][1] for j in order]
+                rank = next((r + 1 for r, n in enumerate(names_r) if n in acc), 10**6)
+                ranks.append(rank if rank < 10**6 else len(fidx) + 1)
+                t1 += rank == 1; t5 += rank <= 5
+            print(f"  @{d:3d}d: coarse-group {coarse_ok}/{len(ASKS_MODULE)} correct | "
+                  f"fine top-1 {t1}/{len(ASKS_MODULE)}  top-5 {t5}/{len(ASKS_MODULE)}  median {np.median(ranks):.0f}")
+        print("  READ: fine top-1 counts only asks whose group was routed correctly; a coarse miss caps that "
+              "ask. %s Compare to flat [3] and to --hier alone -- the win is buried answers surfacing."
+              % ("FINE step used max-sim over chunks (--hier --multivec combined)." if combined else ""))
+
+        # ---- [3b] optional: sweep all-but-the-top k so the best depth is measured, not guessed. The synthetic
+    # said "more is better"; the real 12-ask suite showed a TRADEOFF (k=1 best for 128d top-1, k=3 best for
+    # the tail + 64d). This prints the whole curve in one run so the knee is visible. Reuses E, Q, ASKS.
+    if args.abtt_sweep:
+        ks = [int(x) for x in args.abtt_sweep.split(',') if x.strip() != '']
+        print("\n  --- ABTT SWEEP (all-but-the-top depth k; routing exam per k) ---")
+        print(f"  {'k':>3s} | {'dim':>4s}  {'top-1':>6s} {'top-5':>6s} {'median':>7s} {'worst':>6s}")
+        for k in ks:
+            for d in (768, 128, 64):
+                ab = AllButTheTop(E[:, :d], k=k)
+                Ed = ab(E[code_idx][:, :d]); Qd = ab(Q[:, :d])
+                ranks = []
+                for i, (a, acc) in enumerate(ASKS_MODULE):
+                    order = np.argsort(-(Ed @ Qd[i]))
+                    names_r = [code_entries[j][1] for j in order]
+                    ranks.append(next((r + 1 for r, n in enumerate(names_r) if n in acc), len(names_r)))
+                t1 = sum(r == 1 for r in ranks); t5 = sum(r <= 5 for r in ranks)
+                print(f"  {k:>3d} | {d:>4d}  {t1:>4d}/{len(ASKS_MODULE):<1d} {t5:>4d}/{len(ASKS_MODULE):<1d} "
+                      f"{np.median(ranks):>7.0f} {max(ranks):>6d}")
+            print()
+        print("  READ: pick the k that keeps top-1 high at the SHIP dim (128d) while lowering worst/median.")
 
     # ---- [4] the constitutional test: has this been tried?
     print("\n" + "=" * 90)
@@ -502,8 +942,21 @@ def main():
 
     # THE GATE, last: only --exam turns a miss into a nonzero exit; it always prints its verdict.
     ok = exam_top5 >= args.require_top5 and exam_median <= args.require_median
+    fused_msg = ""
+    if args.require_fused_top1 is not None:
+        # the FUSED gate guards the production default (route_semantic gamma=0.5 on the 128d index). A bones
+        # or fusion regression must fail the build just like a dense regression does. 'absent' fails loudly:
+        # if the champion row never ran (e.g. --structural missing), the gate is not silently skipped.
+        ft = locals().get("fused_top1_128")
+        if ft is None:
+            fused_msg = " | fused top-1 ABSENT (need --structural) -> FAIL"
+            ok = False
+        else:
+            f_ok = ft >= args.require_fused_top1
+            fused_msg = f" | fused top-1 {ft} (require >= {args.require_fused_top1}) -> {'PASS' if f_ok else 'FAIL'}"
+            ok = ok and f_ok
     print(f"  EXAM: top-5 {exam_top5} (require >= {args.require_top5}) | median {exam_median:.0f} "
-          f"(require <= {args.require_median}) -> {'PASS' if ok else 'FAIL'}")
+          f"(require <= {args.require_median}){fused_msg} -> {'PASS' if ok else 'FAIL'}")
     if args.exam and not ok:
         raise SystemExit(1)
 

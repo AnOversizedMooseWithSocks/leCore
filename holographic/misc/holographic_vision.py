@@ -320,6 +320,100 @@ def classify_shape(mask):
     return "triangle"
 
 
+def _connected_components(mask):
+    """Label the 4-connected components of a boolean mask by vectorised label propagation (each masked pixel repeatedly
+    takes the min label among itself and its 4 mask-neighbours until stable; background is a barrier). Returns
+    (labels, n) with labels 1..n (0 = background). numpy + stdlib only -- no scipy. WHY vectorised: a Python per-pixel
+    union-find is too slow even at preview resolution; min-propagation converges in ~diameter sweeps of cheap array ops."""
+    m = np.asarray(mask, bool)
+    H, W = m.shape
+    if not m.any():
+        return np.zeros((H, W), int), 0
+    lab = np.zeros((H, W), int)
+    lab[m] = np.arange(1, int(m.sum()) + 1)                   # every masked pixel starts as its own label
+    big = H * W + 2
+    for _ in range(H + W + 2):                                # enough sweeps for a label to flow across a compact region
+        cur = np.where(m, lab, big)                          # background = big so it never wins a min (acts as a wall)
+        up = np.full_like(cur, big); up[1:, :] = cur[:-1, :]
+        dn = np.full_like(cur, big); dn[:-1, :] = cur[1:, :]
+        lf = np.full_like(cur, big); lf[:, 1:] = cur[:, :-1]
+        rt = np.full_like(cur, big); rt[:, :-1] = cur[:, 1:]
+        nb = np.minimum(np.minimum(up, dn), np.minimum(lf, rt))
+        new = np.where(m, np.minimum(cur, nb), 0)
+        if np.array_equal(new, lab):
+            break
+        lab = new
+    uniq = np.unique(lab[m])                                  # compact the surviving labels to 1..n (deterministic order)
+    out = np.zeros((H, W), int)
+    for i, v in enumerate(uniq, start=1):
+        out[lab == v] = i
+    return out, len(uniq)
+
+
+def _region_record(rid, mask, rgb):
+    """Build one region's summary dict from its boolean mask + the source image. Reuses shape_stats/classify_shape."""
+    m = np.asarray(mask, bool)
+    ys, xs = np.nonzero(m)
+    st = shape_stats(m)
+    mean_col = tuple(float(c) for c in rgb[m].mean(axis=0)) if m.any() else (0.0, 0.0, 0.0)
+    return {"id": int(rid), "mask": m, "area": int(m.sum()), "fraction": float(m.mean()),
+            "bbox": (int(ys.min()), int(xs.min()), int(ys.max()), int(xs.max())),
+            "centroid": (float(ys.mean()), float(xs.mean())), "mean_color": mean_col,
+            "shape": classify_shape(m), "circularity": st["circularity"], "extent": st["extent"], "aspect": st["aspect"]}
+
+
+def segment_image(rgb, k=5, seed=0, spatial_weight=0.35, split_components=True, min_fraction=0.006):
+    """Demux a photo into per-object REGIONS by colour (+ weak spatial coherence) -- the segmentation FRONT END of the
+    photo->3D pipeline. k-means clusters pixels in (r,g,b,x,y) space (spatial_weight scales the normalised xy, so
+    spatially-separated things of the same colour can split); with split_components each colour cluster is further cut
+    into 4-connected pieces so two separate same-colour objects become distinct regions; regions below min_fraction of
+    the image are merged into the surviving region whose mean colour is nearest. Returns a list of region dicts, largest
+    first:
+      id, mask (H,W bool), area, fraction, bbox (r0,c0,r1,c1), centroid (r,c), mean_color (r,g,b in 0..1),
+      shape ('circle'/'rectangle'/'line'/'triangle'), circularity, extent, aspect.
+    Deterministic (seeded k-means). numpy + stdlib only -- no scipy/sklearn. HONEST: this splits on APPEARANCE, not
+    semantics -- a two-tone object becomes two regions and a hard shadow can split a floor; the per-region shape/stats
+    are a COARSE guess that the primitive-fit stage refines. Pass a downscaled image (~<=200 px) -- segmentation does
+    not need full resolution and the connected-components sweep scales with the longer side."""
+    rgb = np.asarray(rgb, float)
+    if rgb.max() > 1.5:
+        rgb = rgb / 255.0
+    H, W = rgb.shape[:2]
+    ys, xs = np.mgrid[0:H, 0:W]
+    xy = np.stack([ys / max(H - 1, 1), xs / max(W - 1, 1)], axis=-1) * float(spatial_weight)
+    feats = np.concatenate([rgb.reshape(-1, 3), xy.reshape(-1, 2)], axis=1)
+    labels, _centres = kmeans(feats, int(k), seed=int(seed))
+    lab_img = labels.reshape(H, W)
+
+    raw = []                                                 # (mask, ) for each colour cluster, optionally CCL-split
+    for c in range(int(k)):
+        cluster = (lab_img == c)
+        if not cluster.any():
+            continue
+        if split_components:
+            cc, n = _connected_components(cluster)
+            for comp in range(1, n + 1):
+                raw.append(cc == comp)
+        else:
+            raw.append(cluster)
+
+    regions = [_region_record(i, m, rgb) for i, m in enumerate(raw)]
+    regions.sort(key=lambda r: -r["area"])
+    survivors = [r for r in regions if r["fraction"] >= float(min_fraction)]
+    smalls = [r for r in regions if r["fraction"] < float(min_fraction)]
+    if not survivors and regions:                            # everything tiny -> keep the single largest
+        survivors = [regions[0]]; smalls = regions[1:]
+    # merge each small region into the nearest-colour survivor (colour L2), then recompute that survivor's stats
+    for s in smalls:
+        sc = np.asarray(s["mean_color"], float)
+        j = min(range(len(survivors)), key=lambda t: float(np.sum((np.asarray(survivors[t]["mean_color"]) - sc) ** 2)))
+        survivors[j] = _region_record(survivors[j]["id"], survivors[j]["mask"] | s["mask"], rgb)
+    survivors.sort(key=lambda r: -r["area"])
+    for i, r in enumerate(survivors):                        # renumber ids largest-first, stable
+        r["id"] = i
+    return survivors
+
+
 # ======================================================================
 # patterns  --  one descriptor vector per image (the input to clustering).
 # ======================================================================
@@ -594,6 +688,23 @@ def _selftest():
     step = np.zeros((16, 16, 3)); step[:, 8:] = 1.0
     flat = np.full((16, 16, 3), 0.5)
     assert edges(to_gray(step)).sum() > 5 * (edges(to_gray(flat)).sum() + 1)
+
+    # 3. segment_image DEMUXES a synthetic scene: a red disc on a blue field -> at least two regions whose mean
+    #    colours are clearly red-dominant and blue-dominant (colour separation), and the disc region is round.
+    img = np.zeros((40, 40, 3)); img[:, :, 2] = 1.0                     # blue background
+    yy, xx = np.mgrid[0:40, 0:40]
+    disc = (yy - 20) ** 2 + (xx - 20) ** 2 <= 9 ** 2
+    img[disc] = (1.0, 0.0, 0.0)                                         # red disc
+    regs = segment_image(img, k=2, seed=0)
+    assert len(regs) >= 2, len(regs)
+    reds = [r for r in regs if r["mean_color"][0] > r["mean_color"][2]]
+    blues = [r for r in regs if r["mean_color"][2] > r["mean_color"][0]]
+    assert reds and blues, [r["mean_color"] for r in regs]             # both colours recovered as distinct regions
+    assert classify_shape(reds[0]["mask"]) == "circle", classify_shape(reds[0]["mask"])
+    # connected-components splits two separate same-colour blobs
+    two = np.zeros((20, 40), bool); two[5:15, 3:13] = True; two[5:15, 27:37] = True
+    _cc, ncc = _connected_components(two)
+    assert ncc == 2, ncc
 
     print("OK: holographic_vision self-test passed (RGB<->HSV round-trips to <1e-6, and the edge detector fires "
           "on a vertical step while staying quiet on a flat field)")

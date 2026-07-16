@@ -201,6 +201,49 @@ def advance_ccd(X, V, dt, sdf_eval, radius=0.0, restitution=0.0, max_steps=96, s
     return Xn, Vn, hit
 
 
+# Contact TYPES as categorical records: each names the {overlap, velocity, restitution} condition it is for.
+# This is a LABELING/DISPATCH layer over the numeric resolvers (resolve_sdf_collision / advance_ccd) -- it does
+# NOT replace their math; it names WHAT KIND of contact happened so a caller can pick a per-type response and
+# log a self-explaining reason. Fillers are categories (deep/shallow, fast/slow, bouncy/dead), never raw floats.
+_CONTACT_TYPES = {
+    "bounce":       {"overlap": "shallow", "velocity": "fast", "restitution": "bouncy"},
+    "slide":        {"overlap": "shallow", "velocity": "fast", "restitution": "dead"},
+    "rest_contact": {"overlap": "shallow", "velocity": "slow", "restitution": "dead"},
+    "penetration":  {"overlap": "deep",    "velocity": "fast", "restitution": "bouncy"},
+    "jam":          {"overlap": "deep",    "velocity": "slow", "restitution": "dead"},
+}
+
+
+def _bin_contact(overlap, velocity, restitution, overlap_deep=0.1, velocity_fast=0.5, restitution_bouncy=0.3):
+    """Bin the three CONTINUOUS contact scalars into the CATEGORICAL record classify_contact matches on. The bin
+    edges are the schema -- documented and adjustable -- so the categorical match_record never sees a raw float
+    (its kept-negative: categorical only). This is where the continuous->categorical boundary is made explicit."""
+    return {
+        "overlap": "deep" if overlap >= overlap_deep else "shallow",
+        "velocity": "fast" if abs(velocity) >= velocity_fast else "slow",
+        "restitution": "bouncy" if restitution >= restitution_bouncy else "dead",
+    }
+
+
+def classify_contact(overlap, velocity, restitution, mind=None, margin=0.1, **bins):
+    """Name a contact's TYPE (bounce / slide / rest_contact / penetration / jam) from its {overlap, velocity,
+    restitution}. Bins the continuous scalars to categories (_bin_contact), then match_record against the
+    contact-type records + decide_or_abstain. Returns {'type', 'confident', 'record', 'ranked'}. WHY: the
+    resolvers (resolve_sdf_collision / advance_ccd) compute the RESPONSE but never name the SITUATION; this
+    labels it so a solver can dispatch a per-type policy and log a reason. KEPT NEGATIVE: this is a LABEL over
+    the numerics, NOT a replacement -- the actual impulse math stays in advance_ccd; and the categorical bins
+    lose the exact magnitude (a barely-fast and a very-fast contact both read 'fast'), which is deliberate:
+    which TYPE it is is categorical; how hard to respond is the resolver's continuous job."""
+    if mind is None:
+        import lecore
+        mind = lecore.UnifiedMind(dim=512, seed=0)
+    from holographic.misc.holographic_relations import match_record, decide_or_abstain
+    rec = _bin_contact(overlap, velocity, restitution, **bins)
+    ranked = match_record(mind.encode_record, rec, _CONTACT_TYPES)
+    ctype, score, confident = decide_or_abstain(ranked, margin=margin)
+    return {"type": ctype, "confident": confident, "record": rec, "ranked": ranked}
+
+
 def _selftest():
     """Points scattered inside a sphere are all pushed to its surface by the collision projection; and the SAME
     projection, run inside the shipped project_onto_constraints sweeper alongside a distance link, satisfies BOTH."""
@@ -263,5 +306,17 @@ def _selftest():
           % (3, sweeps))
 
 
+
+def _selftest_classify_contact():
+    """A3: classify_contact names each contact type from binned categoricals; label layer, not the numerics."""
+    import lecore
+    m = lecore.UnifiedMind(dim=512, seed=0)
+    assert classify_contact(0.02, 2.0, 0.8, mind=m)["type"] == "bounce"
+    assert classify_contact(0.02, 0.1, 0.0, mind=m)["type"] == "rest_contact"
+    assert classify_contact(0.5, 0.1, 0.0, mind=m)["type"] == "jam"
+    # KEPT NEGATIVE guard: bins are categorical -- barely-fast and very-fast read the same type
+    assert classify_contact(0.02, 0.6, 0.8, mind=m)["type"] == classify_contact(0.02, 9.0, 0.8, mind=m)["type"]
+    print("  classify_contact selftest OK: bounce/rest/jam named; categorical bins collapse magnitude")
+
 if __name__ == "__main__":
-    _selftest()
+    _selftest(); _selftest_classify_contact()

@@ -40,18 +40,35 @@ class Capability:
     semantic path is orthogonal to the physical location URI: it groups a capability by what a USER does, not by
     which module the code lives in. Default None -> the capability falls back to its location URI for grouping."""
 
-    def __init__(self, name, does, example="", native=True, aliases=(), semantic=None, consumes=(), produces=()):
+    def __init__(self, name, does, example="", native=True, aliases=(), semantic=None, consumes=(), produces=(), module=None):
         self.name = str(name)
         self.does = str(does)
         self.example = str(example)
         self.native = bool(native)
         self.aliases = tuple(aliases)
         self.semantic = str(semantic) if semantic else None
+        self.module = str(module) if module else None
         # io-shape kinds (S3): what datatype(s) this capability takes / returns, from the closed IO_KINDS vocabulary.
         # Validated so a typo is caught here, not silently at pipeline time. Empty = unspecified ('always shown').
         from holographic.caching_and_storage.holographic_iokinds import validate_kinds
         self.consumes = validate_kinds(consumes, where="consumes of %r" % name)
         self.produces = validate_kinds(produces, where="produces of %r" % name)
+
+    def resolved_module(self):
+        """The code module this capability lives in -- explicit `module=` if set, else DERIVED from the
+        `holographic_X` reference in its does/example text. WHY: only ~18 of ~390 registrations set module=
+        by hand, but almost all NAME their module in the docstring ('...holographic_meshsmooth...'). Deriving
+        it deterministically completes the module->capability join that pipeline_map and the io-graph need,
+        WITHOUT hand-editing hundreds of calls (unreviewable, error-prone). Picks the most-referenced module
+        name in the text (a capability may mention several; its OWN module is the one it names most). Returns
+        the bare stem (e.g. 'meshsmooth') or None if nothing is referenced -- an honest None, never a guess."""
+        if self.module:
+            return self.module
+        import re as _re, collections as _collections
+        refs = _re.findall(r"holographic_([a-z0-9_]+)", (self.does or "") + " " + (self.example or ""))
+        if not refs:
+            return None
+        return _collections.Counter(refs).most_common(1)[0][0]
 
     def __repr__(self):
         return "Capability(%r, %s)" % (self.name, "native" if self.native else "python")
@@ -77,13 +94,13 @@ class Catalog:
         self._by_name = {}                                           # name -> Capability (insertion order kept)
 
     def register_capability(self, name, does, example="", native=True, aliases=(), semantic=None,
-                            consumes=(), produces=()):
+                            consumes=(), produces=(), module=None):
         """Add (or replace) a capability. Returns the entry. Additive -- registering the same name again updates it.
         `semantic` (optional) is the File->Export->PNG verb path, e.g. 'transform/rotate'. `consumes`/`produces`
         (optional, S3) are tuples of io kinds (holographic_iokinds) declaring the datatype(s) this takes/returns --
         validated against the closed vocabulary, empty = unspecified. All default off -> byte-identical old entries."""
         cap = Capability(name, does, example, native, aliases, semantic=semantic, consumes=consumes,
-                         produces=produces)
+                         produces=produces, module=module)
         self._by_name[name] = cap
         return cap
 
@@ -364,17 +381,17 @@ def default_catalog():
         native=True, aliases=("knn", "nearest", "lookup", "recall", "retrieve", "similarity", "search", "index"))
     c.register_capability("holographic_spatial.knn", "EUCLIDEAN k-nearest over a POINT cloud (a spatial grid) -- a "
                           "different metric than the cosine Index; use for geometry, not vectors",
-                          example="SpatialGrid(points).knn(query, k)", native=True, aliases=("spatial", "euclidean", "points", "knn"))
+                          example="SpatialGrid(points).knn(query, k)", native=True, aliases=("spatial", "euclidean", "points", "knn"), module="tree", consumes=('points',), produces=('selection',))
     c.register_capability("holographic_rayindex", "which pixels/objects a RAY touches (ray<->object index) -- not a "
                           "nearest(query,k); a distinct spatial ray structure", example="build_ray_index(ctx, camera, w, h)",
                           native=True, aliases=("ray", "pixels", "reshade", "spatial", "bvh"))
     c.register_capability("holographic_tree.HoloForest", "sub-linear approximate nearest-neighbour search over many "
                           "vectors (random-projection forest) with cross-tree agreement", example="HoloForest(V).recall(q,k)",
-                          native=True, aliases=("forest", "ann", "knn"))
+                          native=True, aliases=("forest", "ann", "knn"), module="tree", consumes=('hypervector',), produces=('selection',))
     c.register_capability("holographic_pivot", "recursive pivot-tree index for nearest-neighbour search",
                           example="from holographic.misc.holographic_pivot import ...", native=True, aliases=("pivot", "index"))
     c.register_capability("holographic_archive", "content-addressable image memory (WHT plates), damage-tolerant",
-                          example="from holographic.misc.holographic_archive import ...", native=True, aliases=("image", "store", "recall"))
+                          example="from holographic.misc.holographic_archive import ...", native=True, aliases=("image", "store", "recall"), module="archive", consumes=('image',), produces=('image',))
 
     # --- caching / baking: the CACHES (audit named ~9) = bake_and_query ---
     c.register_capability(
@@ -394,7 +411,7 @@ def default_catalog():
                           example="from holographic.misc.holographic_modulate import demodulate, remodulate", native=True,
                           aliases=("albedo", "irradiance", "denoise", "upscale", "demodulate"))
     c.register_capability("holographic_matbake", "bake POSITION-dependent material channels to a grid, trilinear "
-                          "lookup", example="from holographic.materials_and_texture.holographic_matbake import ...", native=True, aliases=("material", "bake"))
+                          "lookup", example="from holographic.materials_and_texture.holographic_matbake import ...", native=True, aliases=("material", "bake"), consumes=(), produces=('field',))
     c.register_capability("holographic_prt", "precomputed radiance transfer: bake light transport, relight by a dot "
                           "product", example="from holographic.misc.holographic_prt import precompute_transfer, shade_prt", native=True,
                           aliases=("relight", "sh", "transfer", "light"))
@@ -405,12 +422,13 @@ def default_catalog():
                           "crossfade/morph, pattern_field procedural noise/fbm/checker/stripes, svg_canvas vector "
                           "drawing), store & compare (image_archive damage-tolerant recall, compare_images / "
                           "image_distance perceptual similarity). Raster and vector, all on the VSA substrate",
-                          example="mind.recolor_image(img, ref); mind.blend_images(a, b); mind.pattern_field('fbm'); mind.svg_canvas()",
+                          example="mind.recolor_image(img, ref); mind.blend_images(a, b); mind.sharpen_image(img); mind.splat_points(pts, cam, 128, 128)",
                           native=True, aliases=("2d", "image", "edit an image", "generate an image", "draw", "draw a picture",
                                                 "make a drawing", "paint", "paint on a canvas", "canvas", "sharpen", "blur",
                                                 "downscale", "resize", "recolor", "colour transfer", "color transfer",
                                                 "crossfade", "morph", "sprite", "vector graphics", "svg", "procedural texture",
-                                                "picture", "photo", "raster", "pixels"))
+                                                "picture", "photo", "raster", "pixels", "deblur", "sharpen an image",
+                                                "point cloud", "splat points", "render points to an image", "warp an image"))
     c.register_capability("Image analysis (classic CV)", "SEE with arithmetic (holographic_vision, now mind doors): "
                           "image_edges (self-calibrating Sobel edge map), image_corners (Harris interest points), "
                           "image_lines (Hough dominant lines, edge detection chained in), image_colours (k-means "
@@ -426,6 +444,23 @@ def default_catalog():
                                                 "image feature vector", "perceptual image descriptor",
                                                 "analyze an image", "computer vision", "edge detection",
                                                 "corner detection", "hough transform", "image similarity"))
+    c.register_capability("Segment a photo into object regions (demux)", "DEMUX a photo into per-object REGIONS -- the segmentation front end of the photo->3D pipeline. mind.segment_image(rgb, k) k-means-clusters pixels in (r,g,b,x,y), splits each colour cluster into 4-connected components, merges tiny regions. Returns region dicts largest-first: id, mask, area, fraction, bbox, centroid, mean_color, shape (circle/rectangle/line/triangle), circularity/extent/aspect. Deterministic; numpy+stdlib. HONEST: splits on APPEARANCE not semantics (a shadow can split a floor) -- the per-region stats are a coarse guess the primitive-fit stage refines.",
+                          example="import numpy as np, lecore; m=lecore.UnifiedMind(); img=np.zeros((40,40,3)); img[:,:,2]=1.0; img[10:30,10:30]=(1.0,0.0,0.0); [round(r['fraction'],2) for r in m.segment_image(img, k=2)]",
+                          native=True, aliases=("segment an image", "segment a photo into objects", "demux a scene into regions",
+                                                "separate objects in a photo", "colour segmentation", "color segmentation",
+                                                "region segmentation", "split an image into regions", "connected components of an image",
+                                                "find objects in an image", "extract objects from a photo", "foreground regions"))
+    c.register_capability("Build a scene from a photo (image -> editable scene)", "BUILD A SCENE FROM A PHOTO (machine-initialised) -- the demux->fit->assemble front half of image->3D. mind.scene_from_image(image, k, max_objects) segments the photo, keeps the most object-like foreground regions, maps each region's silhouette+colour to a primitive, assembles a live SemanticScene you can adjust/render/refine_to_target/to_node_graph. Returns {scene, regions, roles, objects}. Deterministic. HONEST: shape from silhouette, colour from region mean; DEPTH not reconstructed (z=0) -- a STARTING POINT the critic + drill-down refine; quality bounded by the segmentation.",
+                          example="import numpy as np, lecore; m=lecore.UnifiedMind(); img=np.ones((60,90,3)); yy,xx=np.mgrid[0:60,0:90]; img[(yy-30)**2+(xx-25)**2<=12**2]=(0.85,0.15,0.15); img[20:45,58:82]=(0.15,0.25,0.85); [o['shape'] for o in m.scene_from_image(img, k=3, max_objects=2)['objects']]",
+                          native=True, aliases=("build a scene from a photo", "photo to scene", "image to editable scene",
+                                                "reconstruct a scene from an image", "model a photo automatically", "photo to 3d scene",
+                                                "make a 3d scene from a picture", "auto build a scene from an image", "image to scene",
+                                                "turn a photo into a 3d scene", "scene from a photo"))
+    c.register_capability("Floor and wall backdrop for a scene", "give a scene a matching FLOOR and WALL so a render competes with a photo's whole frame instead of empty sky. Set scene.environment['ground_color']=(r,g,b) to recolour the floor and scene.environment['backdrop_color']=(r,g,b) to add a vertical wall behind the scene; render() applies both (default None -> neutral gray floor + sky, byte-identical old behaviour). scene_from_image(background=True) sets them AUTOMATICALLY from the photo's floor/wall regions. Measured: a matching backdrop is the single biggest fidelity lever when matching a photo (it is most of the frame).",
+                          example="import lecore; m=lecore.UnifiedMind(); s=m.build_scene('a red sphere'); s.environment['ground_color']=(0.2,0.14,0.09); s.environment['backdrop_color']=(0.72,0.72,0.7); s.render(width=64,height=48).shape",
+                          native=True, aliases=("add a floor to a scene", "ground plane colour", "wall behind the scene",
+                                                "backdrop colour", "set the floor colour", "add a background wall",
+                                                "match the photo background", "floor and wall", "environment backdrop"))
     c.register_capability("ascii_view", "render any image to TEXT (holographic_ascii) -- the terminal / log / "
                           "SSH projection backend with a real resolution knob (`width` in characters). Modes by "
                           "detail-per-character: ramp (luminance glyphs, ~70 levels), edge (oriented | / - \\ "
@@ -483,11 +518,13 @@ def default_catalog():
                                                 "photo to 3d", "picture to 3d points", "gaussian splatting from a photo",
                                                 "3d from a single photo", "image to point cloud", "photo to gaussians",
                                                 "3d from one image", "turn a photo into 3d", "photo to 3d model"))
-    c.register_capability("image_to_mesh", "END-TO-END image -> watertight MESH: shape-from-shading depth, "
-                          "unproject to points, oriented normals from the depth, then surface reconstruction "
-                          "(dual contouring). Returns (verts, quads, field, grids). Single-view + relative depth, "
-                          "so it meshes the VISIBLE FRONT as a height-field surface, not a solid object -- for "
-                          "splats instead use image_to_3d",
+    c.register_capability("image_to_mesh", "END-TO-END image -> MESH (the visible FRONT, NOT a watertight solid): "
+                          "shape-from-shading depth, unproject to points, oriented normals, then surface "
+                          "reconstruction (dual contouring). Returns (verts, quads, field, grids). Single-view + "
+                          "relative depth, so it meshes a height-field surface -- for splats use image_to_3d. "
+                          "repair=True runs weld+split-nonmanifold+fill (default-off, byte-identical): MEASURED, it "
+                          "turns the dual-contour output MANIFOLD (non-manifold edges -> 0) so the cross-field retopo "
+                          "accepts it -- pass repair=True then mesh_repair(triangulate=True) for a retopo-ready mesh",
                           example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
                           "img=np.random.default_rng(0).uniform(0,1,(24,24)); v,q,f,g=m.image_to_mesh(img,res=32); print(len(v)>0)",
                           native=True, aliases=("mesh from a photo", "image to 3d mesh", "reconstruct a mesh from a picture",
@@ -515,7 +552,7 @@ def default_catalog():
                           native=True, aliases=("2d sdf", "2d sdf shape", "extrude a 2d profile", "revolve a profile",
                                                 "lathe a shape", "solid of revolution", "extrude a shape",
                                                 "spin a profile", "prism from a cross section", "polygon sdf",
-                                                "2d shape to 3d", "make a vase", "extrude a logo"))
+                                                "2d shape to 3d", "make a vase", "extrude a logo"), consumes=(), produces=('sdf',))
     c.register_capability("sdf_curvature", "MEAN CURVATURE of an SDF surface (W13) -- the field Laplacian "
                           "(divergence of the unit gradient). POSITIVE on convex edges/ridges, NEGATIVE in "
                           "concave creases/cavities, ~0 on flat regions (a sphere of radius r reads 2/r). Drives "
@@ -1034,6 +1071,18 @@ def default_catalog():
                                                 "cap an open loop", "close a hole in a mesh", "fill holes",
                                                 "fill an open boundary with faces"),
                           semantic="create/emit", consumes=("mesh",), produces=("mesh",))
+    c.register_capability("Mesh repair (weld + split non-manifold + fill + compact)", "REPAIR a raw mesh (holographic_meshtools): m.mesh_repair(mesh) WELDS near-dup vertices, SPLITS non-manifold vertices into umbrellas (makes it MANIFOLD so cross-field retopo accepts it), optionally FILLS holes, DROPS unreferenced; triangulate=True gives uniform triangles. Returns (repaired, report) with before/after counts, manifold/closed flags, split count -- makes a marching-cubes / import / boolean / photo-to-mesh result RETOPO-READY. m.mesh_weld / m.mesh_make_manifold are single-step ops. Deterministic; never raises. KEPT NEG: a pure X-junction over-splits into open sheets.",
+                          example="import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import Mesh; book=Mesh(np.array([[0,0,0],[1,0,0],[0,1,0],[0,-1,0],[0,0,1.],[0,0,-1]]),[(0,1,2),(0,1,3),(0,1,4),(0,1,5)]); rm,rep=m.mesh_repair(book, fill_holes=False); (book.is_manifold(), rm.is_manifold(), rep['split_vertices'])",
+                          native=True, aliases=("repair a broken mesh", "fix a mesh", "weld duplicate vertices", "merge vertices by distance",
+                                                "make a mesh watertight", "remove degenerate triangles", "clean up a mesh", "mesh cleanup",
+                                                "fix a non-manifold mesh", "make a mesh manifold", "weld a mesh", "heal a mesh", "retopo-ready mesh"),
+                          semantic="create/emit", consumes=("mesh",), produces=("mesh",))
+    c.register_capability("Route a mesh to its minimal repair (defect-classified)", "ROUTE a mesh to the MINIMAL repair its defect needs (holographic_meshtools.route_repair), not the full pipeline: m.route_repair(mesh) diagnoses a categorical defect record {manifold, closed, duplicates}, MATCHES it against repair-strategy records (match_record), runs only the winning strategy ops -- a duplicate-only mesh welds with no hole-fill. Ambiguous defect -> decide_or_abstain falls back to full mesh_repair, so it never repairs LESS than needed. Returns (mesh, report) with {strategy, confident, defect}. Cheaper, self-explaining. KEPT NEG: categorical presence-of-defect, not hole SIZE.", example="import lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; rm,rep=m.route_repair(box()); print(rep['strategy'], rep['confident'])", native=True, module="meshtools", aliases=("route a mesh defect to the right repair", "minimal mesh repair", "pick the repair a mesh needs", "diagnose and fix a mesh", "targeted mesh cleanup", "which mesh repair to run"), semantic="create/emit", consumes=("mesh",), produces=("mesh",))
+    c.register_capability("Make a mesh manifold (split non-manifold vertices)", "MAKE A MESH MANIFOLD by splitting non-manifold vertices into connected UMBRELLAS (split_nonmanifold_vertices): incident faces are grouped across MANIFOLD edges only; a vertex whose faces form >1 umbrella (a bowtie, or an edge shared by >2 faces) is duplicated per umbrella. Resolves non-manifold EDGES too, so a cross-field retopo (which REFUSES a non-manifold mesh) accepts it. Unlike mesh_rip_vertex or mesh_split_vertices, this is the MINIMAL cut, a NO-OP on a clean mesh. Returns (mesh, report). KEPT NEG: a pure X-junction over-splits into disconnected sheets.",
+                          example="import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import Mesh; book=Mesh(np.array([[0,0,0],[1,0,0],[0,1,0],[0,-1,0],[0,0,1.],[0,0,-1]]),[(0,1,2),(0,1,3),(0,1,4),(0,1,5)]); mm,rep=m.mesh_make_manifold(book); (mm.is_manifold(), rep['split_vertices'])",
+                          native=True, aliases=("make a mesh manifold", "split non-manifold vertices", "fix non-manifold edges",
+                                                "resolve a bowtie vertex", "cut non-manifold edges", "manifold repair", "unfan a vertex"),
+                          semantic="create/emit", consumes=("mesh",), produces=("mesh",))
     c.register_capability("mesh_bevel_vertex", "BEVEL / CHAMFER a corner (holographic_meshverbs2) -- pull each edge "
                           "incident to a vertex back by `ratio` and cap the hole. segments=1 caps with one FLAT "
                           "facet; segments>=2 ROUNDS the corner into a smooth spherical dome (the 'bevel with N "
@@ -1121,6 +1170,29 @@ def default_catalog():
                                                 "disambiguated capability search", "capability search with uris",
                                                 "find functionality with full paths"),
                           semantic="analyze/pipeline")
+    c.register_capability("pipeline_map", "the WHOLE workflow graph as data (pipelinemap + holographic_catalog): "
+                          "every typed edge consume_kind->produce_kind->capability derived from the live "
+                          "consumes/produces tags, plus per-kind producers/consumers, tag coverage, and a GAP "
+                          "report (dead-end kinds produced-but-unconsumed, source-only kinds, untouched kinds). "
+                          "Where suggest_pipeline answers ONE route, this is the whole map to plan over; also "
+                          "writes docs/PIPELINE_MAP.md (mermaid) + pipelines.json",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "print(m.pipeline_map()['coverage'])",
+                          native=True, aliases=("map the workflow", "workflow map", "pipeline diagram",
+                                                "how do tools connect", "graph of tool inputs and outputs",
+                                                "which tools feed which", "auto document the pipelines",
+                                                "show the whole pipeline graph", "capability dependency graph"),
+                          semantic="analyze/pipeline")
+    c.register_capability("find_capability_uris", "like find_capability but each result carries its disambiguating "
+                          "capability URI(s) (holographic_catalog + holographic_capuri) so a caller NEVER gets a "
+                          "bare ambiguous name. Returns [{name, does, example, uris}] -- one path for a unique name, "
+                          "several for a colliding one. The collision fix at the discovery layer",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "print(m.find_capability_uris('snap to grid')[0]['uris'])",
+                          native=True, aliases=("search capabilities with paths", "find a capability and its uri",
+                                                "disambiguated capability search", "capability search with uris",
+                                                "find functionality with full paths"),
+                          semantic="analyze/pipeline")
     c.register_capability("route_semantic", "route a request to the right MODULE by COSINE in nomic's embedding "
                           "space instead of token overlap -- catches meaning when words don't match ('squish a big "
                           "array down for storage' -> holographic_coldstore). Uses the shipped 96 KB 64d q8 index. "
@@ -1133,6 +1205,67 @@ def default_catalog():
                                                 "find the module that means this", "cosine route a request",
                                                 "which module handles this by meaning", "embedding router"),
                           semantic="analyze/route")
+    c.register_capability("workflow_neighbors", "WHICH MODULES WORK TOGETHER (holographic_workflowgraph): the sparse workflow bones, from cross-references authors already wrote in docstrings (module A naming holographic_B). Edges are RARITY-weighted (a reference to a module few others mention counts more), hubs dropped, so bones stay SPECIFIC -- median out-degree 2 vs the io-kind graph 13-24. m.workflow_neighbors(module) -> [(module, weight)]; direction out/in/both. E.g. meshsmooth->graphsignal, resonator->chunkcodebook. KEPT NEG: author-stated, coverage uneven; relatedness, not runnable dataflow (the io graph does that).", example="import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors('meshsmooth', top=3)])", native=True, module="workflowgraph", aliases=("which modules work together", "related modules", "what modules go with this one", "module cross references", "workflow adjacency", "what should I use alongside this"), semantic="analyze/route")
+    c.register_capability("workflow_propagate", "SPREAD scores one hop along the WORKFLOW BONES (holographic_workflowgraph.propagate): a module whose COLLABORATORS are strongly scored gets lifted even if its own text was never matched -- the structural complement to dense cosine and BM25, which both need shared words. m.workflow_propagate({module: score}) -> [(module, score)] best-first; alpha weights propagation vs the seed, alpha=0 returns the seed unchanged (sanity check). The mechanism for surfacing a module the query has NO vocabulary overlap with. KEPT NEG: ONE hop only -- multi-hop re-diffuses toward the smeared io-kind regime.", example="import lecore; m=lecore.UnifiedMind(); print(m.workflow_propagate({'mesh': 1.0}, alpha=0.8)[:2])", native=True, module="workflowgraph", aliases=("spread scores across related modules", "propagate activation along a graph", "lift related modules", "structural routing signal", "boost neighbors of a match", "graph propagation of relevance"), semantic="analyze/route")
+    c.register_capability("bm25_rank", "LEXICAL ranking by Okapi BM25 (holographic_bm25): rank a list of text docs by exact-term match to a query, with tf-saturation (k1) and length normalization (b). Pure NumPy/stdlib, no model. The complement to route_semantic's dense cosine -- catches asks whose query WORDS appear in the target text but whose embedding-geometry buries them (measured: 'bumpy surface'->meshsmooth, dense r22, BM25 top-5). Returns [(doc_index, score)]. KEPT NEG: cannot match a word absent from the docs (bag-of-words, no meaning).", example="import lecore; m=lecore.UnifiedMind(); print(m.bm25_rank('smooth bumpy surface', ['smooth a bumpy surface mesh','fluid solver'])[:1])", native=True, module="bm25", aliases=("keyword search over text", "bm25 lexical ranking", "rank documents by term overlap", "exact word match retrieval", "tf-idf style document ranking", "which text matches these keywords"), semantic="analyze/route")
+    c.register_capability("fuse_rankings", "RECIPROCAL RANK FUSION (holographic_bm25.reciprocal_rank_fusion): fuse several ranked id-lists into one by summing 1/(k+rank). Uses only RANKS, so no score calibration -- the right way to combine dense cosine (in [-1,1]) with BM25 (unbounded), whose raw scores are not comparable. An item ranked well by MORE retrievers rises. m.fuse_rankings([dense_order, bm25_order]) -> fused [(id, score)]. The hybrid-retrieval fuser the IR literature uses for vocabulary-mismatch.", example="import lecore; m=lecore.UnifiedMind(); print(m.fuse_rankings([[0,1,2],[0,2,1]])[:1])", native=True, module="bm25", aliases=("combine ranked lists", "reciprocal rank fusion", "merge two rankings", "fuse dense and sparse retrieval", "hybrid search fusion", "blend search results by rank"), semantic="analyze/route")
+    c.register_capability("route_structured", "route a request to a MODULE by holographic role-STRUCTURE "
+                          "instead of a bag-of-words mean (holographic_holoroute): parse request and module "
+                          "into a {action, object, quality} record, bind+bundle via encode_record, match the "
+                          "BOUND records. Separates the case a flat mean buries -- 'make my picture less grainy' "
+                          "ranks denoise 1.000 vs fsr 0.409 where cosine put denoise at rank 237. Structure, not "
+                          "the average. Returns [(name, score)] or [] if the request does not parse",
+                          example="import lecore; m=lecore.UnifiedMind(dim=1024,seed=0); "
+                          "print(m.route_structured('make my picture less grainy', "
+                          "{'denoise':'reduce noise in an image','fsr':'upscale image resolution'})[:1])",
+                          native=True, module="holoroute",
+                          aliases=("route by structure not keywords", "match a request by roles and fillers",
+                                   "holographic role router", "route by action object quality",
+                                   "structured routing by binding", "which module by request structure"),
+                          semantic="analyze/route")
+    c.register_capability("match_record", "DOMAIN-GENERAL structured matching (holographic_relations): rank "
+                          "candidates by how well their {role: filler} RECORD matches a query record, via "
+                          "bound-record similarity (bind+bundle+cosine). The general form of route_structured "
+                          "-- the SAME primitive classifies a physics regime {conserved,topology,motion}, a "
+                          "market event {instrument,direction,magnitude}, an astronomy source {band,feature,"
+                          "object}, or a mesh repair {defect,location,severity}. Exact match 1.0, partials "
+                          "separate, empty query abstains. Returns [(name,score)]",
+                          example="import lecore; m=lecore.UnifiedMind(dim=1024,seed=0); "
+                          "print(m.match_record({'band':'radio','feature':'periodic'}, "
+                          "{'pulsar':{'band':'radio','feature':'periodic'},'quasar':{'band':'radio','feature':'broadband'}})[:1])",
+                          native=True, module="relations",
+                          aliases=("match by structured record", "classify by role filler record",
+                                   "nearest record by binding", "structure-aware nearest match",
+                                   "rank candidates by their attributes", "which class does this record fit",
+                                   "match physics regime market event astronomy source by structure"),
+                          semantic="analyze/match")
+    c.register_capability("match_prototype", "UNSTRUCTURED classification (holographic_relations, twin of "
+                          "match_record): when an item has NO role schema -- a bag/blend, not a record -- match "
+                          "it to the nearest class PROTOTYPE by cosine. The general form of the VSA intent "
+                          "router: classify a question, gesture, regime, or style by the blend of its features. "
+                          "build_prototypes({class:[examples]}) makes the prototypes; returns ranked [(class,"
+                          "score)]. Pick vs match_record: has named roles -> match_record; role-free bag -> this",
+                          example="import lecore; m=lecore.UnifiedMind(dim=1024,seed=0); "
+                          "P=m.build_prototypes({'greet':['hello there','hi how are you'],'bye':['goodbye','see you']}); "
+                          "print(m.match_prototype('hey hello',P)[:1])",
+                          native=True, module="relations",
+                          aliases=("classify without a schema", "nearest prototype match", "match a blend to a class",
+                                   "intent style regime by example", "classify a bag of features",
+                                   "which class does this blend fit"),
+                          semantic="analyze/match")
+    c.register_capability("decide_or_abstain", "the shared DECISION step for any classify/match "
+                          "(holographic_relations): given ranked [(name,score)] from match_record / "
+                          "match_prototype / any scorer, return (winner, score, confident) where confident "
+                          "requires top-1 to beat top-2 by >= margin. One honest abstention rule instead of "
+                          "each caller inventing its own -- abstains on a tie (flu~covid) rather than forcing a "
+                          "pick. Cheap gap gate; for calibrated significance use a shuffle null",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "print(m.decide_or_abstain([('a',0.9),('b',0.4)], margin=0.1))",
+                          native=True, module="relations",
+                          aliases=("pick the winner or abstain", "confidence gate on a ranking",
+                                   "abstain when the top isn't clearly ahead", "margin between top two",
+                                   "trust the best only if separated", "decide or say unsure"),
+                          semantic="analyze/decide")
     c.register_capability("resolve_capability_uri", "resolve a bare capability NAME or partial path to the FULL "
                           "capability URI(s) (holographic_capuri) -- 'rotation' -> both meshskin and scenegraph "
                           "paths; 'sdf/sphere' narrows to one. The disambiguation step when a name collides: supply "
@@ -1608,7 +1741,7 @@ def default_catalog():
                           native=True, aliases=("voxelize a mesh", "mesh to voxel grid", "occupancy grid from a mesh",
                                                 "sample an sdf onto a voxel grid", "dense voxel volume",
                                                 "point in mesh test", "inside outside mesh", "winding number",
-                                                "voxel point cloud", "mesh to voxels to mesh", "rasterize a mesh"))
+                                                "voxel point cloud", "mesh to voxels to mesh", "rasterize a mesh"), consumes=('mesh', 'sdf'), produces=('field',))
     c.register_capability("Curves, splines & knots", "parametric CURVES and geometry (holographic_curves): BEZIER "
                           "(de Casteljau), CATMULL-ROM (interpolating, centripetal), B-SPLINE (Cox-de Boor); "
                           "tangent + rotation-minimizing / Frenet FRAMES; arc-length resampling; SWEEP a profile "
@@ -1623,7 +1756,7 @@ def default_catalog():
                                                 "sweep a profile along a curve", "tube along a path", "bezier tube",
                                                 "torus knot", "trefoil knot", "superellipsoid", "gyroid",
                                                 "klein bottle", "helix", "spline camera path", "parametric curve",
-                                                "knot geometry", "make a tube from a curve"))
+                                                "knot geometry", "make a tube from a curve"), consumes=(), produces=('curve',))
     c.register_capability("audio_param_bus", "drive scene PARAMETERS from audio (W5') -- build a per-frame bus of "
                           "band-energy envelopes (bass / low-mid / high-mid / treble, normalised 0..1) plus an "
                           "onset/beat signal, then subscribe a scene knob to a band. bus.subscribe(band, lo, hi, "
@@ -1717,7 +1850,18 @@ def default_catalog():
                           "paints it on. Set the MOOD with a time-of-day/lighting word in the description -- 'a white "
                           "sphere at sunset', '...at noon', '...on an overcast day', 'a dramatic ...' -- which sets the "
                           "sun direction, colour and ambient (noon/morning/afternoon/sunset/sunrise/golden/dusk/overcast/"
-                          "night/moonlit/studio/dramatic). Attach an EXTERNAL image file as a texture -- scene.attach_texture_file('the "
+                          "night/moonlit/studio/dramatic). Or CHANGE the lighting on a LIVE scene by talking to it -- "
+                          "scene.adjust('make it sunset'), scene.adjust('studio lighting'), scene.adjust('moody') -- which "
+                          "sets environment['lighting'] and render() honours it (bare 'make it golden' stays a material "
+                          "change; 'golden hour' is the preset). scene.options()['lighting'] lists the presets. Relative "
+                          "BRIGHTNESS too -- scene.adjust('make it brighter'), scene.adjust('dimmer'), scene.adjust('much "
+                          "darker') -- scales environment['sun_scale'] (compounds, clamped) which the fast renderer applies. "
+                          "Place objects RELATIVE to each other -- scene.adjust('put the sphere on top of the box'), "
+                          "scene.adjust('move the cone next to the sphere'), '...inside...', '...behind...', '...in front "
+                          "of...' -- deterministic exact layout (sets the object's relation; the realizer re-positions it). "
+                          "MOVE or SCALE by an amount -- scene.adjust('move the sphere left 2'), scene.adjust('nudge the "
+                          "box up'), scene.adjust('scale the sphere up'), scene.adjust('make the box twice as big'), "
+                          "'halve it' -- exact offsets/scale (+x right, +y up, +z toward camera). Attach an EXTERNAL image file as a texture -- scene.attach_texture_file('the "
                           "sphere', 'project/textures/wave.png') -- and the scene tracks it in an AssetLibrary: if the "
                           "files move, scene.set_asset_roots([...]) + scene.resolve_assets() (or scene.relink(one, new)) "
                           "re-find them and render() reloads them, falling back to the object's colour if one is missing. "
@@ -1734,7 +1878,18 @@ def default_catalog():
                                                 "cylinder", "cone", "torus", "donut", "pyramid", "tube", "pillar", "ring shape",
                                                 "teal", "navy", "silver", "brown", "lavender", "crimson", "colours", "shapes",
                                                 "at sunset", "at noon", "golden hour", "time of day", "lighting", "overcast",
-                                                "dramatic lighting", "moody lighting", "studio lighting", "night scene", "sunrise"))
+                                                "dramatic lighting", "moody lighting", "studio lighting", "night scene", "sunrise",
+                                                "make it sunset", "make it night", "change the lighting", "adjust the lighting",
+                                                "set the lighting", "set the mood", "make the scene dramatic", "make it moody",
+                                                "control lighting semantically", "adjust scene lighting",
+                                                "make it brighter", "make it dimmer", "brighten the scene", "dim the scene",
+                                                "make it darker", "turn up the brightness", "brighter", "dimmer",
+                                                "put the sphere on top of the box", "move it next to", "place one object on another",
+                                                "put one inside another", "relative layout", "arrange objects", "position objects",
+                                                "on top of", "next to", "stack objects", "attach one object to another",
+                                                "move the sphere left", "nudge the object up", "shift it right", "translate an object",
+                                                "scale the sphere up", "make it twice as big", "shrink an object", "resize an object",
+                                                "move an object by an amount"))
     c.register_capability("Instancing (shared definition + type-safe binding)", "place ONE shared definition many "
                           "times so editing it once updates every copy (edit-once): mind.shared_definition('chair', "
                           "mesh, 'metal') then scene.place(defn, transform) in mind.instanced_scene(); repaint the "
@@ -1901,7 +2056,7 @@ def default_catalog():
                                                 "my resonator fails past four factors", "resonator cliff",
                                                 "break a bound product into eight parts", "deep factorization",
                                                 "macro codebook factoring", "expand by lookup", "verify gate",
-                                                "map bind", "involution", "self inverse binding", "multiset factors"))
+                                                "map bind", "involution", "self inverse binding", "multiset factors"), module="resonator", consumes=("hypervector",), produces=("hypervector",))
     c.register_capability("Post-effect kernel fusion (N linear passes, one FFT pair)", "compose a RUN of linear, "
                           "shift-invariant post-effects (denoise, sharpen) into ONE transfer and evaluate it with a "
                           "single FFT pair instead of one per stage -- diagonal operators commute and multiply, so the "
@@ -2072,7 +2227,114 @@ def default_catalog():
                                                 "smoothest direction field", "field aligned remesh",
                                                 "singularities of a direction field", "instant meshes",
                                                 "quad mesh from a field", "retopology", "connection laplacian",
-                                                "poincare hopf", "direction field"))
+                                                "poincare hopf", "direction field", "retopologize a mesh",
+                                                "remesh to quads", "remesh a mesh", "clean up mesh topology"))
+    c.register_capability("Quad remesh (field-guided tris-to-quads)", "FIELD-GUIDED tri-to-quad RETOPOLOGY: m.quad_remesh(mesh) pairs adjacent triangles into quads, preferring pairs whose edges align with the 4-RoSy cross field and form convex near-square quads. Returns a QUAD-DOMINANT mesh + report {quads, tris, quad_fraction, field_used}. Reuses cross_field, so input wants a CLOSED oriented manifold TRIANGLE mesh -- run mesh_repair(triangulate=True) first; falls back to squareness if the field cannot solve. HONEST: places quads on EXISTING vertices, does NOT move vertices or regularise valence, so NOT a full Instant-Meshes remesh (deferred).",
+                          example="import lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons; qm,rep=m.quad_remesh(triangulate_ngons(box())); (rep['quads'], rep['quad_fraction'])",
+                          native=True, aliases=("quad remesh", "tris to quads", "quadrangulate a mesh", "merge triangles into quads",
+                                                "quad dominant mesh", "field aligned quad mesh", "retopologize to quads",
+                                                "convert triangles to quads", "make a quad mesh"))
+    c.register_capability("Guided cross field (deformation/curvature-aware field design)", "A GUIDED 4-RoSy field (field DESIGN): m.guided_cross_field(mesh, guide_dirs, guide_weight) solves the smoothest field that ALSO aligns to a prescribed per-face direction. guide_dirs is (n_faces,3): a non-zero row guides that face (length=confidence), zero row free. Soft-constrained solve (L + w)u = w c -- a linear SOLVE, not an eigenproblem; no guides == cross_field. Returns (phi, ctx) for quad_remesh(field=...). Makes retopo DEFORMATION-AWARE (feed strain_directions) or curvature-aware, following deliberate topology instead of only minimising distortion. Needs a CLOSED oriented manifold mesh.",
+                          example="import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons; from holographic.mesh_and_geometry.holographic_crossfield import face_frames; tb=triangulate_ngons(box()); n,ex,ey=face_frames(np.asarray(tb.vertices,float),np.asarray(tb.faces,int)); phi,ctx=m.guided_cross_field(tb, np.cos(np.pi/8)*ex+np.sin(np.pi/8)*ey, guide_weight=12.0); round(float(np.mean(np.abs(np.cos(4*(phi-np.pi/8))))),2)",
+                          native=True, aliases=("guided cross field", "field design", "constrain a cross field", "align a field to a direction",
+                                                "deformation aware field", "curvature aware field", "steer a cross field"))
+    c.register_capability("Deformation strain directions (retopo guide)", "Per-face PRINCIPAL STRETCH direction of a deformation (rest -> deformed vertices): m.strain_directions(mesh, deformed_vertices) -- the DEFORMATION guide that makes retopo place edge loops FOLLOWING how a surface bends/stretches, which an off-the-shelf remesher cannot (no strain signal). Per triangle: deformation gradient -> right Cauchy-Green C -> max-stretch eigenvector to 3-D, SCALED by anisotropy (isotropic face -> ~0 confidence, free). Returns (n_faces,3) as guide_dirs for guided_cross_field; guiding the field to the stretch puts quad LOOPS perpendicular to it -- encircling the bend.",
+                          example="import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons; tb=triangulate_ngons(box()); V=np.asarray(tb.vertices,float); Vs=V.copy(); Vs[:,0]=V[:,0]+0.8*V[:,1]; m.strain_directions(tb, Vs).shape",
+                          native=True, aliases=("deformation aware retopology", "strain directions", "principal stretch direction",
+                                                "edge loops that follow deformation", "animation aware retopo", "deformation guide for retopo",
+                                                "loops around a joint"))
+    c.register_capability("Position field (IFAM 4-PoSy lattice remesh)", "IFAM POSITION FIELD (4-PoSy, Jakob et al. 2015): m.position_field(mesh, orient, edge_length) optimises a per-vertex LATTICE position aligned to the orientation field by local extrinsic smoothing -- per edge it forms q_ij, translates the neighbour by INTEGER rho-steps to line up, then averages, so neighbours differ by integer lattice steps. Regularises vertex spacing/valence (a field-aligned grid). Vertex-graph only. Returns P; position_field_regularity scores convergence (0=perfect grid). HONEST: the position FIELD only; extraction to the quad MESH (IFAM 4.4) is next, not built.",
+                          example="import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import grid; g=grid(8,8,width=7.0,height=7.0); V=np.asarray(g.vertices,float); o=np.tile([1.,0,0],(len(V),1)); rng=np.random.default_rng(0); g.vertices=V+np.column_stack([rng.normal(0,.24,len(V)),rng.normal(0,.24,len(V)),np.zeros(len(V))]); P=m.position_field(g,o,7.0/8,iterations=20); round(m.position_field_regularity(g,P,o,7.0/8),3)",
+                          native=True, aliases=("position field", "posy field", "instant meshes position field", "field aligned lattice",
+                                                "regularise vertex spacing", "position field remesh", "ifam position field", "snap vertices to a field grid"))
+    c.register_capability("Trace streamlines (field -> curves)", "Trace STREAMLINES of a per-face direction field on a triangle mesh: m.trace_streamlines(mesh, field) walks the field edge to edge until a boundary / max_steps / a loop, returning polylines. The general FIELD -> CURVES primitive, source-agnostic -- the SAME tracer serves a cross_field (retopo guides, hatching), strain_directions (deformation flow lines), an SDF gradient, or a SIMULATION velocity field (streamlines / pathlines). field is per-face angles or 3-D vectors; four_rosy=True treats it as a 4-RoSy cross (nearest-travel branch, never reverses), False for a true vector field.",
+                          example="import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import grid; g=grid(10,10,width=5.0,height=5.0); uni=np.tile([1.,0,0],(len(g.faces),1)); lines=m.trace_streamlines(g, uni, four_rosy=False, seeds=[0,40,80]); (len(lines), max(len(L) for L in lines)>5)",
+                          native=True, aliases=("trace streamlines", "integral curves of a field", "field lines", "flow lines",
+                                                "streamlines of a velocity field", "pathlines", "hatching curves from a field",
+                                                "trace a direction field", "flow visualization", "guide curves from a cross field"))
+    c.register_capability("UV / attribute transfer (texture-preserving retopo)", "TRANSFER per-vertex UVs -- or ANY per-vertex attribute (colours, weights, normals) -- onto NEW vertices by closest-point + barycentric interpolation: m.transfer_uv(source_mesh, source_uv, target_vertices) -> (attr, residual). THE step that makes retopo TEXTURE-PRESERVING: the remeshed surface lies on the original, so each new vertex takes the interpolated UV of its closest source triangle. Spatial-hash accelerated; the residual is the honest error signal. MEASURED: exact on-surface; mantis 1490 verts in 1.6s, residual mean 4e-5. KEPT NEG: wrong across UV SEAMS; seam-split not built.",
+                          example="import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import grid; g=grid(6,6,width=6.0,height=6.0); V=np.asarray(g.vertices,float); uv=(V[:,:2]-V[:,:2].min(0))/6.0; got,res=m.transfer_uv(g, uv, np.array([[0.5,0.5,0.0]])); (np.round(got,3).tolist(), float(res[0]))",
+                          native=True, aliases=("transfer uvs to a new mesh", "reproject uv coordinates", "texture preserving retopology",
+                                                "keep the texture after remeshing", "attribute transfer between meshes",
+                                                "closest point barycentric transfer", "bake uvs onto a retopo mesh"))
+    c.register_capability("Shrinkwrap (snap a mesh onto a surface)", "SHRINKWRAP: move each vertex onto its CLOSEST POINT on a target surface (Blender shrinkwrap / retopo-snap): m.shrinkwrap(mesh, target, factor=1.0) -> (new_mesh, residual). factor 1.0 lands on the surface, 0.5 halfway, 0.0 no-op; topology preserved; residual = distance each vertex closed. THE retopo finisher: a box model / remesh has clean TOPOLOGY but approximate POSITIONS -- one pass snaps positions onto the reference (fixed our box-model residual 0.0158 -> ~0). KEPT NEG: closest-POINT not normal-raycast; a thin target can pull to the wrong side (small factor, repeat).",
+                          example="import numpy as np, lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box, grid, Mesh; tgt=grid(6,6,width=6.0,height=6.0); lift=Mesh(np.asarray(box().vertices,float)+np.array([0,0,2.0]),[tuple(f) for f in box().faces]); sw,res=m.shrinkwrap(lift, tgt, factor=1.0); (bool(np.allclose(np.asarray(sw.vertices)[:,2],0,atol=1e-6)), round(float(res.max()),2))",
+                          native=True, aliases=("shrinkwrap a mesh", "snap a mesh onto a surface", "project a mesh onto another",
+                                                "conform a mesh to a surface", "retopo snap", "wrap a mesh to a target",
+                                                "pull vertices onto a surface"))
+    c.register_capability("UV shell (texture-carrying envelope)", "UV SHELL (cage-bake as geometry): freeze a texture onto a slightly-inflated ENVELOPE so it survives ANY topology change. make_uv_shell pushes vertices OUTWARD along normals, keeping faces + UVs. project_uv_from_shell reads each new vertex UV from the closest shell point, so a LOD/retopo/remesh recovers the texture regardless of topology; returns (uvs, residual). Freeze once, project onto any geometry. MEASURED: mantis LOD and retopo both re-textured from ONE shell, residual 0.0017. KEPT NEG: uniform offset can pinch in deep concavity; closest-point can grab a thin feature's far side.",
+                          example="import numpy as np, lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; b=box(); V=np.asarray(b.vertices,float); uv=(V[:,:2]-V[:,:2].min(0)); uv=uv/(uv.max(0)+1e-9); shell=m.make_uv_shell(b, uv, offset=0.1); puv,res=m.project_uv_from_shell(b, shell); (puv.shape==uv.shape, float(res.mean())<0.2)",
+                          native=True, aliases=("uv shell", "texture shell", "cage bake uvs", "keep texture through a remesh",
+                                                "project texture onto new topology", "reproject uvs after decimation",
+                                                "envelope to carry a texture map"))
+    c.register_capability("Depth from a hazy/foggy image (haze + defocus)", "RELATIVE DEPTH from a single HAZY/shallow-DoF photo -- the NO-WEIGHTS fix for scenes where shape-from-shading INVERTS depth (fog reads as near). Fuses HAZE (atmospheric scattering, Tarel-Hautiere veil; m.haze_depth) + DEPTH-OF-FIELD (local sharpness; m.sharpness_depth) via a guided filter; hand to photo_to_3d. Returns depth (H,W) in [0,1], 1=nearest. MEASURED: on the foggy forest photo it more than DOUBLED near/far separation vs SfS (+0.13 vs +0.06), fixing the inversion. KEPT NEG: relative not metric; needs real haze or DoF (else use shape_from_shading); sky-guard clamps bright sky to far.",
+                          example="import numpy as np, lecore; m=lecore.UnifiedMind(); img=np.zeros((60,90,3)); yy,xx=np.mgrid[0:60,0:90]; img[:]=0.3+0.5*(yy/59.0)[...,None]; d=m.fuse_depth(img); (d.shape==(60,90), float(d[40:].mean())>=0.0)",
+                          native=True, aliases=("depth from a foggy image", "haze depth", "depth from fog", "dehaze depth",
+                                                "atmospheric depth from a photo", "defocus depth", "depth of field depth",
+                                                "fix shape from shading on outdoor photos", "depth from a hazy photo"))
+    c.register_capability("Auto-weighted depth from a photo (vanishing-point gated)", "AUTO-WEIGHTED single-image depth (m.auto_fuse_depth): fuse HAZE + SHARPNESS, each weighted by how well it AGREES with the scene's LINEAR PERSPECTIVE -- the cue tracking depth for THIS photo dominates, an INVERTED cue auto-down-weighted, no per-image hand-tuning. Vanishing point from oblique Hough lines (m.vanishing_point + confidence); native cue full weight, flipped one discounted; fixed fallback if no confident VP. Returns depth (H,W), 1=nearest. MEASURED: tracks->haze 0.73, bridge->0.57, forest->0.78. Feed depth_to_mesh. KEPT NEG: VP prior gives the depth AXIS not true depth; relative.",
+                          example="import numpy as np, lecore; m=lecore.UnifiedMind(); img=np.zeros((50,70,3)); yy,xx=np.mgrid[0:50,0:70]; img[:]=(0.25+0.55*yy/49.0)[...,None]; d=m.auto_fuse_depth(img); (d.shape==(50,70), 0.0<=float(d.mean())<=1.0)",
+                          native=True, aliases=("auto depth from a photo", "automatic depth cue weighting", "vanishing point depth",
+                                                "detect the vanishing point", "perspective-weighted depth", "auto fuse depth cues",
+                                                "best depth cue for this photo"))
+    c.register_capability("Ground-plane depth (forward-looking perspective)", "GROUND-PLANE DEPTH from linear perspective (m.ground_plane_depth): for a forward-looking camera the ground recedes to the horizon, so depth rises with height up to the VP row. THE cue that captures a track/road recession when HAZE and DEFOCUS are weak (mostly-in-focus scene). auto_fuse_depth uses it as the BACKBONE (haze/sharpness add relief) at a confident VP -- fixed misty-tracks flat depth (std 0.13->0.26). Returns depth (H,W), 1=nearest. KEPT NEG: assumes a level forward-looking camera, ground at bottom -- meaningless for top-down/portrait (gated behind a confident VP); RAMP only.",
+                          example="import numpy as np, lecore; m=lecore.UnifiedMind(); img=np.zeros((60,80,3)); yy,xx=np.mgrid[0:60,0:80]; img[:]=(0.2+0.6*yy/59.0)[...,None]; d=m.ground_plane_depth(img, vp=(40,5)); (d.shape==(60,80), float(d[50:].mean())>float(d[:10].mean()))",
+                          native=True, aliases=("ground plane depth", "perspective depth ramp", "road recession depth",
+                                                "depth from linear perspective", "forward-looking depth", "horizon depth ramp",
+                                                "depth for a road or track scene"))
+    c.register_capability("Depth map to a clean height-field mesh", "DEPTH MAP -> a CLEAN triangulated HEIGHT-FIELD MESH for single-view photo-to-3D (m.depth_to_mesh). 2 triangles per pixel block, dropped where depth jumps > `discontinuity` (so near foreground is not welded to far -- no melted mesh). Regular grid = ZERO non-manifold edges (unlike dual-contour points_to_mesh), smoothable/textured. Accepts ANY depth (1=near); pair with fuse_depth. Returns (mesh, vertex_colours). MEASURED: bridge photo -> 104k-vert textured relief, 0 non-manifold edges. KEPT NEG: single-view FRONT relief not a solid; relative depth; wrong discontinuity melts or shreds.",
+                          example="import numpy as np, lecore; m=lecore.UnifiedMind(); img=np.zeros((40,60,3)); yy,xx=np.mgrid[0:40,0:60]; img[:]=(0.3+0.5*yy/39.0)[...,None]; d=m.fuse_depth(img); mesh,vcol=m.depth_to_mesh(d, colour=img, discontinuity=0.1); (mesh.n_vertices>0, vcol is not None)",
+                          native=True, aliases=("depth map to mesh", "height field mesh from depth", "mesh a depth map",
+                                                "photo to a clean mesh", "triangulate a depth image", "relief mesh from a photo",
+                                                "turn a depth map into geometry"))
+    c.register_capability("Skin a skeleton (B-Mesh base mesh)", "SKIN A SKELETON (B-Mesh, SDF route): wrap a stick figure -- verts (n,3), edges [(i,j)...], per-vertex radii (n,) -- in ONE watertight surface (faculty m.skin_skeleton). Each edge becomes a capsule; branches MERGE automatically (smooth_union stitches for free), then marching-cubes to a Mesh. THE base-mesh route: model a creature from ~20 joints not 200 extrudes. MEASURED: an 18-joint mantis skeleton skins to a watertight blob at 0.29 silhouette IoU vs the original. KEPT NEG: organic isotropic-triangle topology, NOT edge-loops -- a BLOCK-OUT to retopo/quad_remesh onto, not a final cage.",
+                          example="import numpy as np, lecore; m=lecore.UnifiedMind(); sk=m.skin_skeleton(np.array([[0,0,0],[1.0,0,0],[0.5,0.8,0]]), [(0,1),(0,2)], np.array([0.2,0.15,0.12]), resolution=36); (sk.n_vertices>0, sk.is_closed())",
+                          native=True, aliases=("skin a skeleton", "skin modifier", "base mesh from a stick figure",
+                                                "tube mesh from edges with radii", "creature from joints", "b-mesh",
+                                                "blockout mesh from a skeleton"))
+    c.register_capability("Fit a base mesh to a target", "FIT A BASE MESH TO A TARGET (the closed block-out loop): skin a skeleton into a watertight base mesh, SHRINKWRAP it onto a target, report the silhouette-fit gain (faculty m.fit_base_mesh). The block-out-then-snap loop, an OPTIMISATION target since it returns iou_base and iou_fitted. Returns {base, fitted, residual, iou_base, iou_fitted}. MEASURED: a crude 1-edge capsule fitted to a stretched-box target jumped 0.64 -> 0.97 mean IoU. KEPT NEG: closest-point shrinkwrap -- the skeleton must roughly COVER the target parts; fits SHAPE not TOPOLOGY (retopo after).",
+                          example="import numpy as np, lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box, Mesh; tgt=Mesh(np.asarray(box().vertices,float)*np.array([2.0,0.6,0.6]),[tuple(f) for f in box().faces]); r=m.fit_base_mesh(tgt, np.array([[-1.0,0,0],[1.0,0,0]]), [(0,1)], np.array([0.4,0.4]), resolution=28); r['iou_fitted']>r['iou_base']",
+                          native=True, aliases=("fit a base mesh to a target", "block out and snap to a reference",
+                                                "auto-fit a skeleton to a mesh", "skin then shrinkwrap",
+                                                "fit a blockout to a sculpt", "conform a base mesh"))
+    c.register_capability("Voxel remesh (uniform cleanup)", "VOXEL REMESH (Blender Voxel Remesh): rebuild a mesh as a UNIFORM watertight surface via a signed-distance grid + re-marching (faculty m.voxel_remesh). The standard cleanup for messy/self-intersecting/non-manifold/multi-shell input before retopo -- any tangle becomes one clean closed surface at `resolution` cells per axis. A compose of mesh_to_sdf_grid + marching tetrahedra. Pairs with skin_skeleton (clean the block-out) then quad_remesh (get quads). KEPT NEG: uniform density rounds off features below the cell size (raise resolution or crease after); wants a roughly-closed input.",
+                          example="import lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; vr=m.voxel_remesh(box(), resolution=36); (vr.n_faces>0, m.mesh_report(vr)['is_closed'])",
+                          native=True, aliases=("voxel remesh", "remesh a mesh uniformly", "clean up a messy mesh",
+                                                "rebuild a mesh watertight", "uniform remesh", "fix a non-manifold mesh by remeshing",
+                                                "remesh with a voxel grid"))
+    c.register_capability("Metaball mesh (soft-blob base mesh)", "METABALL MESH (Blender metaballs / soft-blob base mesh): sum-of-Gaussians field at `centers` (n,3), spread `radius`, marched at `level` -- overlapping blobs FUSE smoothly (faculty m.metaball_mesh). The organic-blob base-mesh route complementing skin_skeleton (blobs where branch-stitching gets ugly). Returns a watertight Mesh. MEASURED: two overlapping blobs fuse to one watertight shell. KEPT NEG: isotropic-triangle blob topology (retopo after); too high a `level` on far centers yields separate shells.",
+                          example="import numpy as np, lecore; m=lecore.UnifiedMind(); mb=m.metaball_mesh(np.array([[0.0,0,0],[0.4,0,0]]), radius=0.4, resolution=32); (mb.n_faces>0, m.mesh_report(mb)['is_closed'])",
+                          native=True, aliases=("metaball mesh", "soft blob surface", "sum of gaussians mesh",
+                                                "merge blobs into a mesh", "metaballs", "blob base mesh"))
+    c.register_capability("Bake a normal map (high to low)", "BAKE a normal map (optionally AO) from a HIGH-poly onto a LOW-poly's UVs -- the 'keep the sculpt detail on the retopo' step (faculty m.bake_normal_map). Per texel: find its 3-D point, project to the CLOSEST point on the high-poly, read that normal, store it. Default TANGENT-space (portable, flat = lavender 0.5,0.5,1.0); world_space=True for a raw static map; ao=True + ao_samples adds an occlusion pass. Returns an (size,size,3) image. MEASURED: a high-poly bump bakes as non-flat R/G against a lavender flat. KEPT NEG: closest-point with no cage limit (a floating detail bleeds); AO is coarse.",
+                          example="import numpy as np, lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import grid, Mesh; low=grid(5,5,width=2.0,height=2.0); LV=np.asarray(low.vertices,float); uv=(LV[:,:2]-LV[:,:2].min(0)); uv=uv/uv.max(0); HV=LV.copy(); r=np.linalg.norm(HV[:,:2]-HV[:,:2].mean(0),axis=1); HV[:,2]=0.4*np.exp(-(r/0.5)**2); nm=m.bake_normal_map(low, uv, Mesh(HV,[tuple(f) for f in low.faces]), size=24); nm.shape",
+                          native=True, aliases=("bake a normal map", "bake high poly to low poly", "normal map baking",
+                                                "keep sculpt detail on the retopo", "bake ambient occlusion", "transfer detail to a texture"))
+    c.register_capability("Auto-retopo (blockout to quad cage)", "AUTO-RETOPO: turn a messy BLOCK-OUT (skin_skeleton blob, metaball, boolean mess) into a clean quad-dominant cage in ONE call (m.auto_retopo): voxel_remesh COARSE (keep ~12-20) -> quad_remesh -> optional catmull_clark(subdivide). With target=, shrinkwraps onto it and scores IoU. Returns {mesh, quad_fraction, report, iou?}. ENDS the base-mesh pipeline: place joints -> skin -> auto_retopo -> clean model. MEASURED: a skinned blob -> 0.77-1.00 quad fraction, watertight. KEPT NEG: uniform topology not artist edge FLOW -- a base asset, not a hero face; quad_remesh cost rises fast with tris.",
+                          example="import numpy as np, lecore, warnings; warnings.filterwarnings('ignore'); m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_meshtools import skin_skeleton; sk=skin_skeleton(np.array([[0.0,0,0],[1.0,0,0]]), [(0,1)], np.array([0.3,0.3]), resolution=16); r=m.auto_retopo(sk, voxel_resolution=10); (r['quad_fraction']>0.5, r['report']['is_closed'])",
+                          native=True, aliases=("auto retopo", "automatic retopology", "blockout to quad cage",
+                                                "turn a blob into quads", "clean up a blockout to a cage", "auto retopologize"))
+    c.register_capability("Mesh report (topology scoreboard)", "MESH REPORT: one-call topology + shape scoreboard as a DICT (holographic_meshtools.mesh_report; faculty m.mesh_report): verts, faces, quad/tri/ngon fraction, boundary_edges (open holes/seams), nonmanifold_edges, is_manifold, is_closed, euler_characteristic, valence_histogram, regular_fraction (valence-4 for a quad mesh), bbox min/max/span, centroid. What lets an agent SEE a mesh's state cheaply and BRANCH on it -- e.g. boundary_edges>0 means fill before subdividing; quad_fraction<1 means triangulate/remesh first. Returns a dict (not a print) so it can drive logic. Deterministic.",
+                          example="import lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; r=m.mesh_report(box()); (r['quad_fraction'], r['is_closed'], r['euler_characteristic'])",
+                          native=True, aliases=("mesh report", "topology scoreboard", "mesh statistics", "inspect a mesh",
+                                                "quad percentage and valence", "is my mesh watertight", "mesh quality check"))
+    c.register_capability("Turnaround + silhouette-IoU critic", "TURNAROUND: render a mesh from the standard views (top/front/side/3q) in ONE call and, given a ref_mesh, score how well the silhouettes MATCH per view (faculty m.turnaround). Returns {sheet, views, iou {view:IoU}, mean_iou}. IoU = intersection-over-union of the two foreground masks under the same camera; 1.0 = identical outline. THE critic loop that caught the mantis slurped legs -- now a NUMBER an agent can OPTIMISE (fix the lowest view). MEASURED: mesh vs itself 1.0 every view; half-size copy 0.22. KEPT NEG: silhouette only, blind to interior topology; pair with mesh_report.",
+                          example="import lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; r=m.turnaround(box(), ref_mesh=box(), width=64, height=64); round(r['mean_iou'],3)",
+                          native=True, aliases=("turnaround render", "compare model to reference", "silhouette iou",
+                                                "does my model look right", "multi-view render", "score a model against a reference",
+                                                "orthographic views of a mesh"))
+    c.register_capability("Proportional edit (soft grab with falloff)", "PROPORTIONAL EDIT (Blender O + G): move selected vertices and drag neighbours with a geodesic falloff, in one call (faculty m.proportional_edit(mesh, selection, translate, radius, falloff) -> new Mesh, topology unchanged). Grabbed verts move fully, neighbours ease to 0 at `radius` along the surface (falloff linear/smooth/sharp) -- reshape a whole region with ONE grab instead of moving every ring by hand. Delegates the falloff to soft_selection_weights (the geodesic engine). KEPT NEG: translate only (no rotate/scale falloff); radius is geodesic.",
+                          example="import numpy as np, lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import grid; g=grid(8,8,width=8.0,height=8.0); V=np.asarray(g.vertices,float); c=int(np.argmin(np.linalg.norm(V[:,:2]-V[:,:2].mean(0),axis=1))); out=m.proportional_edit(g,[c],(0,0,1.5),2.5); round(float(np.asarray(out.vertices)[c,2]),3)",
+                          native=True, aliases=("proportional editing", "soft selection move", "grab with falloff",
+                                                "move vertices with falloff", "soft grab", "reshape a region smoothly",
+                                                "pull a vertex and drag neighbors"))
+    c.register_capability("Catmull-Clark subdivision (quad box modelling)", "CATMULL-CLARK subdivide (catmull_clark): m.mesh_catmull_clark(cage, levels, creases=) -- THE box-modelling subd surface (1978 masks): every face becomes quads, so a quad cage STAYS ALL-QUAD (Loop triangulates, wrong for a cage). SEMI-SHARP CREASES (DeRose 1998): creases={(vi,vj):sharpness} holds edges sharp for `sharpness` levels then smooths -- sharp edges with NO support loops (build via m.mesh_crease_edges). Chi preserved; closed stays closed. MEASURED: cube 6->24->96 all-quad, spread 0.23->0.009 smooth vs 0.15 all-creased (stays boxy). KEPT NEG: subdivision only, no closed-form limit.",
+                          example="import lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; cc=m.mesh_catmull_clark(box(),2); (len(cc.faces), all(len(f)==4 for f in cc.faces), cc.is_manifold())",
+                          native=True, aliases=("catmull clark subdivision", "subdivision surface", "subdivide a quad cage",
+                                                "smooth a box model", "subd modelling", "box modeling subdivision",
+                                                "turn a cage into a smooth surface", "crease an edge", "semi-sharp crease",
+                                                "hold an edge sharp", "sharp edge subdivision", "mark edge sharp",
+                                                "auto crease sharp edges", "crease the sharp edges", "detect and crease creases"))
     c.register_capability("Dialect emitters (WGSL / C / JS / Zig from the Python kernel)", "leCore's kernels are written "
                           "once, in Python, and the browser needs them in WGSL. mind.emit_kernel(fn, dialect) walks "
                           "the same AST that code_structure decomposes and a dialect table supplies the type names, "
@@ -2985,6 +3247,7 @@ def default_catalog():
                                                 "my sim gives different results on different nodes", "float associativity",
                                                 "deterministic reduction", "exact accumulation", "order independent sum",
                                                 "bit identical across nodes", "farm determinism", "rns"))
+    c.register_capability("Name a contact type (bounce/slide/rest/jam)", "NAME what KIND of contact happened (holographic_collide.classify_contact) from {overlap, velocity, restitution}: bins the scalars to categories, then match_record against the contact-type records (bounce/slide/rest_contact/penetration/jam) + decide_or_abstain. m.classify_contact(overlap, velocity, restitution) -> {type, confident, record}. A LABEL/DISPATCH layer over the numeric resolvers (advance_ccd computes the RESPONSE; this names the SITUATION for per-type dispatch + a logged reason). KEPT NEG: a label, not a replacement; bins collapse magnitude.", example="import lecore; m=lecore.UnifiedMind(); print(m.classify_contact(0.02, 2.0, 0.8)['type'])", native=True, module="collide", aliases=("classify a collision type", "what kind of contact is this", "name the contact bounce or rest", "categorize a physics collision", "contact type from overlap and velocity", "is this a bounce or a jam"), semantic="analyze/match", consumes=("scalar",), produces=("selection",))
     c.register_capability("Tunnelling & CCD (speculative margins, conservative advancement)", "stop fast bodies "
                           "passing through thin walls. mind.time_of_impact(X, V, dt, sdf) sweeps each point along its "
                           "path and returns (hit, toi, contact) -- continuous collision detection by conservative "
@@ -3194,14 +3457,20 @@ def default_catalog():
                           "post-FX. The analysis-by-synthesis render path", example="mind.path_trace(scene); mind.camera(); from holographic.rendering.holographic_raymarch import sphere_trace",
                           native=True, aliases=("render a scene", "path trace", "ray tracing", "global illumination",
                                                 "camera", "depth of field", "lens", "volumetric render", "radiance transfer",
-                                                "prt", "ambient occlusion", "post processing", "gbuffer", "raytrace", "render"))
-    c.register_capability("Mesh editing (DCC)", "modeling/DCC edits on a Mesh: extrude/inset faces (meshpoly), "
+                                                "prt", "ambient occlusion", "post processing", "gbuffer", "raytrace", "render"), module="render", consumes=('mesh', 'sdf_scene'), produces=('image',))
+    c.register_capability("Rasterize a mesh (z-buffer, textured)", "RASTERISE a mesh to an (H,W,3) image, z-buffer + Lambert (rasterize_mesh; faculty m.render_mesh). TEXTURED (default-off, byte-identical absent): texture=(H,W,3) + per-vertex uvs (or mesh.uvs) -> each fragment BILINEARLY samples the texture at its barycentric UV; what SHOWING a UV-transferred/baked texture needs (mantis retopo matches original at 0.70-0.77 pixel corr). smooth=True interpolates per-vertex normals (Gouraud) so organic models read curved not faceted. KEPT NEG: textured/smooth need vectorized=True.",
+                          example="import numpy as np, lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; from holographic.rendering.holographic_render import Camera; b=box(); uv=np.array([[0,0],[1,0],[1,1],[0,1]]*2,float); chk=np.stack([np.indices((8,8)).sum(0)%2]*3,-1).astype(float); img=m.render_mesh(b, Camera(eye=(2.2,1.6,2.4),target=(0,0,0),fov_deg=40), width=64, height=64, texture=chk, uvs=uv); img.shape",
+                          native=True, aliases=("render a mesh with a texture", "textured mesh rendering", "rasterize a mesh",
+                                                "show a textured model", "preview a mesh with its texture", "z-buffer render",
+                                                "display uv mapped texture", "software rasterizer"))
+    c.register_capability("Smooth a bumpy mesh surface (Taubin no-shrink)", "SMOOTH / denoise a bumpy mesh surface (holographic_meshsmooth): m.mesh_smooth(mesh) runs Taubin lambda|mu no-shrink smoothing -- a low-pass over vertex positions using cotangent weights that removes surface noise/bumps WITHOUT the shrinkage plain Laplacian smoothing causes. Exposes lam/mu/iters. The go-to for a jagged / noisy / faceted mesh from marching-cubes, scanning, or photogrammetry. KEPT NEG: it is a low-pass, so it also softens INTENDED sharp features; and it over-smooths an already-clean mesh (needs a noise estimate, no auto-tune).", example="import lecore; from holographic.mesh_and_geometry.holographic_mesh import box; m=lecore.UnifiedMind(); sm=m.mesh_smooth(box()); print(len(sm.vertices))", native=True, module="meshsmooth", aliases=("smooth out the bumpy surface", "smooth a mesh", "remove bumps from a mesh", "denoise a mesh surface", "make a jagged mesh smooth", "taubin smoothing", "relax mesh vertices", "smooth a noisy scan"), semantic="create/emit", consumes=("mesh",), produces=("mesh",))
+    c.register_capability("Mesh editing (DCC)", "modeling/DCC edits on a Mesh: extrude/inset faces (meshpoly; extrude/inset quad_walls=True emit pure-quad side/ring walls for a Catmull-Clark cage; loop_cut takes cuts=N + factor for N spaced parallel loops), "
                           "subdivide + smooth (meshsubdiv, Catmull-Clark), deform/warp (deform), rig-skin-pose a "
                           "skeleton (blendpose), UV unwrap (chart), decimate/QEM, booleans, and mesh<->SDF. "
                           "Blender-parity polygon editing", example="mind.deform(mesh, ...); mind.mesh_to_sdf(mesh); from holographic.mesh_and_geometry.holographic_meshverbs import extrude_face",
                           native=True, aliases=("edit a mesh", "extrude", "bevel", "inset", "subdivide", "smooth a mesh",
                                                 "decimate", "reduce polygons", "uv unwrap", "unwrap uv", "rig", "skin",
-                                                "pose a skeleton", "skeleton", "deform", "boolean", "remesh", "dcc", "modeling"))
+                                                "pose a skeleton", "skeleton", "deform", "boolean", "remesh", "dcc", "modeling"), consumes=('mesh',), produces=('mesh',))
     c.register_capability("SDF & procedural geometry", "implicit + procedural geometry: signed distance fields (sdf), "
                           "sphere-trace raymarching with ambient occlusion (raymarch), sculpting, procedural terrain "
                           "(procgen), spatial tiling + octree, and voxelization. Native-first shape building",
@@ -3231,7 +3500,8 @@ def default_catalog():
                           "planning (plan), slime-mould flow networks (flow), tree/graph navigation (navigator), and "
                           "maze solving. Pathfinding on the VSA substrate", example="from holographic.scene_and_pipeline.holographic_plan import ...; mind.solve_maze(world); from holographic.misc.holographic_flow import ...",
                           native=True, aliases=("navigation", "plan a route", "pathfinding", "shortest path", "maze",
-                                                "slime mould", "flow network", "route", "navigate", "wayfinding", "traverse"))
+                                                "slime mould", "flow network", "route", "navigate", "wayfinding", "traverse",
+                                                "slime mold maze solver", "pheromone pathfinding", "solve a maze"))
     c.register_capability("Learning & agents", "gradient-free learning on the substrate: an RL agent with a value head "
                           "+ drives (agent), a holographic classifier, an echo-state reservoir (reservoir), "
                           "mixture-of-experts (moe), KAN, forward-forward, recurrent/predictive nets, and dreaming. NPC "
@@ -3335,7 +3605,7 @@ def default_catalog():
                                                 "system identification", "fit equation of motion", "momentum of an object",
                                                 "identify dynamics", "mass ratio from collision", "weigh an object",
                                                 "learn dynamics coefficients", "damping and stiffness from data",
-                                                "gauge freedom mass force", "can i get mass from a trajectory"))
+                                                "gauge freedom mass force", "can i get mass from a trajectory"), module="dynamics", consumes=('timeseries',), produces=('transform',))
     c.register_capability("central_mass_from_orbit", "weigh a CENTRAL BODY from a bound orbit (holographic_sysid): "
                           "Kepler's third law M = 4*pi^2*a^3/(G*T^2); semi-major axis from radius extremes, period "
                           "from the unwrapped bearing (the monotone-rotation winding picture). 2-D or inclined 3-D "
@@ -3518,7 +3788,7 @@ def default_catalog():
                           "engine's own truth-in-advertising tools", example="from holographic.misc.holographic_measure import ...; from holographic.misc.holographic_ablate import ...",
                           native=True, aliases=("measure", "error bars", "significance", "ablation", "false discovery rate",
                                                 "calibrated", "benchmark", "variance", "stress test", "proof of structure",
-                                                "honesty", "null model", "confidence interval"))
+                                                "honesty", "null model", "confidence interval"), module="honesty", consumes=('scalar',), produces=('scalar',))
     c.register_capability("Program & machine (VM)", "the VSA computer: a stored-program holographic machine "
                           "(machine/HoloMachine) that runs vector programs, recipes with holes / hygienic templates "
                           "(template), a content-addressed compile cache (compile), tool-orchestration planning "
@@ -3570,6 +3840,11 @@ def default_catalog():
                           "roughness/normal/...) you sample per point; its position-dependent channels BAKE via the "
                           "Cache home and shade via the Shading home", example="from holographic.materials_and_texture.holographic_material import Material",
                           native=True, aliases=("material", "channels", "albedo", "roughness", "metallic", "shader"))
+    c.register_capability("Iridescent thin-film tint (soap bubble / oil slick)", "MATERIAL: mind.iridescent_tint(thickness_nm, cos_theta) returns the view-dependent RGB tint of a thin film -- the soap-bubble / oil-slick / pearlescent sheen. Sweeping the angle or thickness cycles the tint through the spectrum (the hallmark of iridescence). n_film 1.33 = soapy water, 1.45 = oil. Multiply a surface's reflected colour by this; holographic_thinfilm.iridescent_socket builds the full f(points,normals,view)->rgb shader socket.",
+                          example="import lecore; m=lecore.UnifiedMind(); m.iridescent_tint(thickness_nm=320.0, cos_theta=1.0)",
+                          native=True, aliases=("iridescent material", "iridescence", "soap bubble colour", "soap bubble color",
+                                                "oil slick sheen", "thin film interference", "pearlescent", "nacre", "rainbow sheen",
+                                                "make it iridescent", "peacock colour", "beetle shell"))
     c.register_capability("Multi-material (mask-blended)", "combine N materials by per-point MASKS -- generalises the "
                           "2-way Material.blend to a weighted mix where each material's weight is a mask (a texture "
                           "graph, a field, or a constant) that varies over the surface: paint rust into metal, moss "
@@ -3787,7 +4062,7 @@ def default_catalog():
                           example="clean, ranks, sigma = mind.denoise_tensor(noisy_field)",
                           native=True, aliases=("denoise a volume", "denoise a field", "low rank denoise",
                                                 "tensor denoising", "clean a frame stack", "remove noise from a field",
-                                                "multiway denoise"))
+                                                "multiway denoise"), module="denoise", consumes=('image', 'field'), produces=('image', 'field'))
     c.register_capability("Store a multi-way array (tensor-train file)", "holographic_tucker.save_tensor(X, path) "
                           "writes a volume / frame stack / BRDF table as a Tensor-Train code, and load_tensor reads "
                           "it back. Measured on a real (24,32,32) field: 4,433 bytes at rel-err 3.9e-5, against "
@@ -3823,7 +4098,7 @@ def default_catalog():
                                                 "compress a codebook", "entropy code vectors", "geometry preserving "
                                                 "compression", "cheapest bit budget", "will these vectors compress",
                                                 "ans entropy coding", "quantize a codebook honestly"),
-                          semantic="analyze/measure", consumes=(), produces=())
+                          semantic="analyze/measure", consumes=('hypervector',), produces=('scalar',), module="ratedistortion")
     c.register_capability("Shuffled-null test (score vs its own null)", "mind.permutation_null(observed, score_fn, "
                           "resample_fn, n_null, alpha, side): the SETI/particle-physics discipline as one composable "
                           "primitive -- score your real datum, re-run the IDENTICAL scoring on resamples that destroy "
@@ -3841,19 +4116,6 @@ def default_catalog():
                                                 "significance test", "monte carlo p value", "prove it isn't noise",
                                                 "false alarm probability", "null hypothesis test"),
                           semantic="analyze/measure", consumes=(), produces=())
-    c.register_capability("Documentation map (which doc answers which question)", "FIVE doc generators exist -- "
-                          "docgen.py (REFERENCE.md, every module), capdoc.py (CAPABILITIES.md, job-oriented), "
-                          "apiquickref.py (API_QUICKREF.md, curated app surface), facultymap.py (docs/FACULTY_MAP.md, "
-                          "mind methods by topic), skills.manifest() (machine cards) -- plus tools/structure_audit.py "
-                          "for organization budgets. docs/DOC_MAP.md lists them all with the question each answers "
-                          "and the regen command. Exists because root scripts are not catalog entries, so this "
-                          "surface was once UNDISCOVERABLE -- a Rule-0 miss, kept loud. Regen: python3 docmap.py",
-                          example="import subprocess; print(subprocess.run(['python3','docmap.py'],capture_output=True,text=True).stdout)",
-                          native=True, aliases=("where are the docs", "documentation map", "regenerate the docs",
-                                                "doc generators", "which doc should i read", "how is this documented",
-                                                "api reference", "quick reference", "faculty map", "doc of docs",
-                                                "one line per symbol"),
-                          semantic="analyze/describe", consumes=(), produces=())
     c.register_capability("N filter passes in one evaluation (shader algebra)", "a circular convolution is diagonal "
                           "in the Fourier basis, so applying it N times is just the transfer raised to the N-th "
                           "power. mind.filter_passes(field, kernel, N) costs the same whether N is 1 or 1,000,000 "
@@ -4231,9 +4493,9 @@ def default_catalog():
         aliases=("field", "grid", "volume", "density", "sdf", "sample", "voxel"))
     c.register_capability("holographic_sparsefield", "narrow-band sparse field -- cost scales with surface area, "
                           "not volume", example="from holographic.misc.holographic_sparsefield import ...", native=True,
-                          aliases=("narrow", "band", "sparse", "field"))
+                          aliases=("narrow", "band", "sparse", "field"), consumes=(), produces=('field',))
     c.register_capability("holographic_fpefield", "fractional-power-encoded N-D field (surface as one hypervector)",
-                          example="from holographic.sampling_and_signal.holographic_fpefield import ...", native=True, aliases=("fpe", "field", "continuous"))
+                          example="from holographic.sampling_and_signal.holographic_fpefield import ...", native=True, aliases=("fpe", "field", "continuous"), consumes=(), produces=('field',))
 
     # --- scale / compute / the kernel verbs ---
     c.register_capability("holographic_distribute", "scale out a commutative-monoid computation: partition into "
@@ -4300,7 +4562,7 @@ def default_catalog():
                           native=True, aliases=("simulation", "solver", "fluid", "smoke", "fire", "cloth", "softbody",
                                                 "step", "advance", "sim loop", "mpm", "reaction diffusion",
                                                 "particle system", "particles", "emitter", "mass spring", "spring",
-                                                "rigid body", "collision"))
+                                                "rigid body", "collision"), module="fluid", consumes=('field',), produces=('field',))
     c.register_capability("Encoders (number to vector)", "turn raw values into hypervectors: scalar & fractional-power "
                           "encoding (encoders/fpe -- nearby numbers map to nearby vectors), N-D coordinate fields "
                           "(fpefield), complex-phasor FHRR (fhrr), sparse block codes (sbc), geometric-algebra Clifford "
@@ -4434,6 +4696,7 @@ def default_catalog():
     c.register_capability("Polarized light (Stokes state)", "the STATE of polarized light as a Stokes vector [S0,S1,S2,S3] (holographic_stokes): total intensity plus linear (Q,U) and CIRCULAR (V / handedness) polarization. Field-native (a whole image is (...,4)); reports degree-of-polarization, e-vector angle and handedness; scalar radiance lifts/round-trips byte-identically. The circular channel is the one the mantis shrimp uniquely sees",
                           example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.stokes_report(m.stokes_circular(1.0, handedness=1))['docp'])",
                           native=True, aliases=("polarization", "polarisation", "stokes vector", "degree of polarization", "e-vector angle", "circular polarization", "linearly polarized light", "unpolarized light", "handedness of light", "polarized reflection", "polarized light state"), semantic="create/emit", consumes=("spectrum",), produces=("spectrum",))
+    c.register_capability("Identify an element by its properties", "IDENTIFY the element(s) whose categorical fingerprint {category, state} matches given properties (holographic_elements.identify_element) -- the REVERSE of element() (which looks up BY name). m.identify_element({'category':'noble_gas','state':'gas'}) -> the noble gases, ranked by match_record over all 43 element records, gated by decide_or_abstain. confident is False when several elements share the fingerprint (honest under-determined answer; narrow with more fields). KEPT NEG: categorical only -- atomic number/mass excluded.", example="import lecore; m=lecore.UnifiedMind(); r=m.identify_element({'category':'noble_gas','state':'gas'}); print([s for s,sc in r['ranked'][:3]], r['confident'])", native=True, module="elements", aliases=("which element is this", "identify an element from its properties", "find the element that is an inert gas", "reverse periodic table lookup", "classify an element by category", "what element has these properties"), semantic="analyze/match", consumes=("scalar",), produces=("selection",))
     c.register_capability("Optical elements (Mueller matrices)", "how optical elements TRANSFORM polarized light, as real 4x4 Mueller matrices (holographic_mueller): polarizer, wave plate / retarder (a quarter-wave plate converts linear<->circular -- the mantis R8 mechanism), optical ROTATOR (= Faraday rotation), depolarizer, and polarizing dielectric (Fresnel) reflection. Elements COMPOSE (a light path folds to one matrix) and apply to a Stokes vector or a whole field",
                           example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.stokes_report(m.apply_mueller(m.mueller_matrix('quarter_wave', angle=np.pi/4), m.stokes_linear(1.0, 0.0)))['docp'])",
                           native=True, aliases=("mueller matrix", "polarizer", "wave plate", "quarter wave plate", "half wave plate", "retarder", "optical rotator", "faraday rotation", "fresnel polarization", "birefringence", "transform polarized light", "polarizing filter"), semantic="transform/warp", consumes=("spectrum",), produces=("spectrum",))
@@ -4457,7 +4720,7 @@ def default_catalog():
 
     # --- GEOMETRY KERNEL (modeling-app backend: tolerance authority + exact predicates + intersection + trim + 2D) ---
     c.register_capability("Model tolerance + exact geometric predicates", "the geometry kernel foundation: ONE ModelTolerance authority (abs/rel/angular) every boolean/snap/intersection consults so they agree on equal, plus orient2d/orient3d EXACT-sign predicates (float fast path, Fraction exact fallback) that decide collinear/coplanar ties deterministically instead of by a fuzzy epsilon. See holographic_geomkernel.", example="import lecore; m=lecore.UnifiedMind(); m.orient2d((0,0),(1,0),(0,1))", native=True, aliases=("model tolerance", "geometric tolerance", "orient2d", "orient3d", "robust predicate", "exact sign of a determinant", "is a point left of a line", "collinear test", "are three points collinear", "which side of a line is a point", "coplanar test", "tolerance authority"))
-    c.register_capability("Curve-curve intersection", "where two curves cross (K1): all intersections of two polylines as records {point, segment indices, parameters}, crossings decided by the exact orient2d so a near-tangency is not swallowed; plus self-intersections (what an offset curve must clean up) and split-at-crossing. See holographic_curveint.", example="import numpy as np, lecore; m=lecore.UnifiedMind(); m.curve_intersect(np.array([[-1.,0],[1,0]]), np.array([[0,-1.],[0,1]]))", native=True, aliases=("curve curve intersection", "intersect two curves", "where do two curves cross", "spline intersection", "where do two splines cross", "do these curves cross", "find where curves meet", "self intersection of a curve", "polyline intersection", "segment intersection", "curve crossing points"))
+    c.register_capability("Curve-curve intersection", "where two curves cross (K1): all intersections of two polylines as records {point, segment indices, parameters}, crossings decided by the exact orient2d so a near-tangency is not swallowed; plus self-intersections (what an offset curve must clean up) and split-at-crossing. See holographic_curveint.", example="import numpy as np, lecore; m=lecore.UnifiedMind(); m.curve_intersect(np.array([[-1.,0],[1,0]]), np.array([[0,-1.],[0,1]]))", native=True, aliases=("curve curve intersection", "intersect two curves", "where do two curves cross", "spline intersection", "where do two splines cross", "do these curves cross", "find where curves meet", "self intersection of a curve", "polyline intersection", "segment intersection", "curve crossing points"), consumes=('curve',), produces=('selection',))
     c.register_capability("Surface-surface intersection (SSI)", "trace the intersection curve of two implicit surfaces f=0, g=0 (K2, the kernel keystone) by a predict-correct FIELD MARCH: tangent = grad f x grad g, corrector = Newton projection onto both surfaces (one more iterate-a-projection). Returns polylines; fit a NURBS for a trim loop. Tangencies reported degenerate, not marched into noise. See holographic_surfint.", example="import numpy as np, lecore; m=lecore.UnifiedMind(); sA=lambda P: np.linalg.norm(np.asarray(P,float),axis=1)-1.0; sB=lambda P: np.linalg.norm(np.asarray(P,float)-np.array([1.,0,0]),axis=1)-1.0; len(m.surface_intersect(sA,sB,(-1.5,-1.5,-1.5),(2,1.5,1.5)))", native=True, aliases=("surface surface intersection", "SSI", "intersect two surfaces", "intersection curve of two surfaces", "trim curve from two surfaces", "where two surfaces meet", "solid intersection curve", "implicit surface intersection"))
     c.register_capability("Trimmed surface", "a surface restricted to trim loops in parameter space (K3): inside an outer loop and outside holes -- how Rhino represents a trimmed face. Robust point-in-trim (exact orient2d), trim-respecting tessellation, and a bridge that projects a 3-D SSI curve to a (u,v) trim loop. See holographic_trimsurf.", example="import numpy as np, lecore; m=lecore.UnifiedMind(); flat=lambda u,v: np.array([u,v,0.0]); ts=m.trimmed_surface(flat, [[0,0],[1,0],[1,1],[0,1]]); ts.is_inside(0.5,0.5)", native=True, aliases=("trimmed surface", "trim a surface", "surface with a hole", "trimmed nurbs face", "cut a region from a surface", "trim loop", "bounded surface patch"))
     c.register_capability("2D region boolean + curve offset", "union/difference/intersection of two closed polygonal regions by exact even-odd membership (K4, the SketchUp-face/drafting layer), plus parallel-curve OFFSET with the folded loops a concave offset makes cleaned up via self-intersection removal. See holographic_region2d.", example="import numpy as np, lecore; m=lecore.UnifiedMind(); A=np.array([[0,0],[1,0],[1,1],[0,1]]); B=np.array([[0.5,0],[1.5,0],[1.5,1],[0.5,1]]); round(m.region_boolean_area(A,B,'intersection'),2)", native=True, aliases=("2d boolean", "region boolean", "union of two polygons", "polygon difference", "clip polygons", "offset a curve", "parallel curve", "inset a polygon", "curve offset", "2d region union"))
@@ -4468,7 +4731,31 @@ def default_catalog():
     c.register_capability("Edge fillet + chamfer (exact radius)", "round or bevel the crease where two implicit surfaces meet (K5), the field-native fillet: fillet_union/intersection/difference give an EXACT constant-radius circular arc at the edge (iq rounded booleans) -- a true dimensioned radius, unlike smooth_union whose k is a soft blend, not a radius; chamfer_union gives the flat 45-degree bevel. Result is an SDF that raymarches/meshes/emits. KEPT NEGATIVE: a 3-way vertex is only approximately r. See holographic_fillet.", example="import numpy as np, lecore; m=lecore.UnifiedMind(); px=lambda P: np.asarray(P,float)[:,0]; py=lambda P: np.asarray(P,float)[:,1]; f=m.fillet_union(px,py,0.3); float(f(np.array([[0.,0.3,0]]))[0])", native=True, aliases=("fillet an edge", "round an edge", "constant radius fillet", "chamfer an edge", "bevel an edge", "round the corner between two surfaces", "edge blend", "rolling ball fillet", "fillet between two solids"))
     c.register_capability("B-rep solid topology (Euler-Poincare validity)", "the boundary-representation foundation (K6): the vertex/edge/loop/face/shell topology of an exact solid, with Euler-Poincare validity (V-E+F-R=2(S-H)), genus, closed-2-manifold checking, and a bridge that lets each FACE carry a trimmed analytic surface (K3). A B-rep face is a trimmed surface, not a polygon -- that is what distinguishes this from the mesh Euler ops. HONEST SCOPE: topology+validity+face-geometry; B-rep booleans (SSI re-stitch) are the declared next step. See holographic_brep.", example="import lecore; m=lecore.UnifiedMind(); m.brep_validate(m.brep_box())['genus']", native=True, aliases=("b-rep", "boundary representation", "solid topology", "euler poincare validity", "is this a valid solid", "faces edges loops shells", "genus of a solid", "closed manifold check", "exact solid representation"))
     c.register_capability("B-rep boolean (finished solid modeling)", "the FINISHED B-rep boolean -- union/difference/intersection of two solids into one watertight B-rep (the SSI-driven re-stitch turning K2/K3/K6 into full solid modeling). Routes both solids through the SDF (intersection seam + field combine + marching, reusing route_csg), wraps the watertight result as a B-rep, VALIDATED with K6 (closed 2-manifold, Euler, volume vs inclusion-exclusion). analytic=True recovers POLYGONAL faces (~100x fewer, same volume). See holographic_brepbool.", example="import lecore; m=lecore.UnifiedMind(); a=m.brep_box(lo=(-1,-1,-1),hi=(1,1,1)); b=m.brep_box(lo=(0,0,0),hi=(2,2,2)); r=m.brep_boolean(a,b,'union',bounds=((-1.5,-1.5,-1.5),(2.5,2.5,2.5))); r._boolean_report['closed_manifold']", native=True, aliases=("b-rep boolean", "boolean of two solids", "union two solids", "subtract one solid from another", "intersect two solids", "solid modeling boolean", "csg on solids", "merge two solids", "re-stitch solids"))
-    c.register_capability("Node-graph editor backend", "the unifying NODE-GRAPH a 3-D node editor binds to: one heterogeneous graph of TYPED nodes (scalar/color/field/sdf/mesh/material/texture), 40-node palette -- SDF primitives/booleans/transforms, bake-to-grid, fields, textures, geometry modifiers, sdf_to_mesh, PBR + TEXTURE-DRIVEN MATERIAL SOCKETS (driven or procedural albedo), and audio-reactive drivers. ANY param is DRIVABLE (a typed input overrides the knob). Connections type/cycle-checked; eval topological+memoized; dirty-propagating; JSON serializable. See holographic_nodegraph.", example="import numpy as np, lecore; m=lecore.UnifiedMind(); g=m.node_graph(); s=g.add('sdf_sphere',{'radius':1.0}); b=g.add('sdf_box',{'size':(0.8,0.8,0.8)}); u=g.add('sdf_union'); g.connect(s,'out',u,'a'); g.connect(b,'out',u,'b'); type(g.evaluate(u)['out']).__name__", native=True, aliases=("node editor", "node based editor", "node graph editor", "wire nodes together", "shader node graph", "geometry nodes", "material node graph", "connect nodes with typed sockets", "visual node graph", "node graph backend", "dataflow node editor", "audio reactive", "audio drives parameters", "shader as a map", "drive a parameter with a signal", "time varying node graph", "make geometry react to music", "music reactive visuals"))
+    c.register_capability("Node-graph editor backend", "the unifying NODE-GRAPH a 3-D node editor binds to: one heterogeneous graph of TYPED nodes (scalar/color/field/sdf/mesh/material/texture), 40-node palette (SDF CSG/transforms, bake, fields, textures, geometry modifiers, sdf_to_mesh, PBR/material sockets, audio drivers). ANY param is DRIVABLE; type/cycle-checked; memoized eval; dirty-propagating; JSON-serializable. DRILL-DOWN: list_nodes() overviews, describe(id) shows a node's exact knobs+values+socket types+wiring, describe_type(name) a kind's schema, set_param(id, knob=value) sets an EXACT value.", example="import numpy as np, lecore; m=lecore.UnifiedMind(); g=m.node_graph(); s=g.add('sdf_sphere',{'radius':1.0}); g.describe(s)['params']; g.set_param(s, radius=2.5); g.describe(s)['params']['radius']", native=True, aliases=("node editor", "node based editor", "node graph editor", "wire nodes together", "shader node graph", "geometry nodes", "material node graph", "connect nodes with typed sockets", "visual node graph", "node graph backend", "dataflow node editor", "audio reactive", "audio drives parameters", "shader as a map", "drive a parameter with a signal", "time varying node graph", "make geometry react to music", "music reactive visuals", "drill down to a setting", "list a node's parameters", "what can I adjust on this node", "set an exact value on a node", "inspect a node", "node parameters", "adjust exact settings", "tweak a node's value"))
+    c.register_capability("Semantic scene to node graph (drill down to exact settings)", "bridge the high-level SEMANTIC scene to an exact, editable NODE GRAPH ('as above, so below'). scene.to_node_graph() emits each object as an sdf primitive + sdf_translate at its EXACT size/position, unioned. Returns {graph, output, objects: name->node id; materials: name->pbr node (materials=True, colour/metallic/roughness); renderables: name->assign_material node (renderable=True, meshed geometry + material -> drawable)}. describe(id) drills in; set_param(id, radius=/roughness=/res=..) sets an EXACT value. English is the fast way in; the node graph is the precise finish.",
+                          example="import lecore; m=lecore.UnifiedMind(); s=m.build_scene('a big red sphere and a box'); ng=s.to_node_graph(); g=ng['graph']; sid=[i for n,i in ng['objects'].items() if 'sphere' in n][0]; g.set_param(sid, radius=3.0); g.describe(sid)['params']['radius']",
+                          native=True, aliases=("drill down from a command to exact settings", "semantic scene to node graph",
+                                                "convert a described scene to nodes", "adjust exact settings of a described object",
+                                                "fine tune a semantic scene", "as above so below", "high level command to exact node",
+                                                "edit exact parameters of a scene object", "scene to node graph", "drill down to exact settings",
+                                                "adjust exact colour or roughness of an object", "renderable node graph from a scene"))
+    c.register_capability("Rotate or tilt a scene object", "ROTATE / TILT a scene object about an axis (closes the axis-aligned limitation, so leaves can splay into a rosette): scene.adjust('tilt the cone 30 degrees'), scene.adjust('rotate the box 45 about y'), scene.adjust('lean it left'). Sets rotation (axis, angle_deg); the realizer wraps it in a rotation-EXACT SDF (query points rotated about the centre, distance-preserving). tilt/lean default to x, rotate/turn/spin to y (turntable); 'about x/y/z' picks the axis; a left/down/back word negates; repeats on the same axis ACCUMULATE.",
+                          example="import lecore; m=lecore.UnifiedMind(); s=m.build_scene('a green cone'); s.adjust('tilt the cone 40 degrees'); s.objects[0]['rotation']",
+                          native=True, aliases=("rotate an object", "tilt a shape", "tilt the cone", "rotate the box",
+                                                "lean an object", "turn an object", "spin it", "orient at an angle",
+                                                "rotate a scene object", "tilt a leaf outward", "face a different direction"))
+    c.register_capability("Per-object render passes (which object made each pixel)", "BIDIRECTIONAL LOOKUP: scene.render_passes(want=['mask','depth','normal','position']) returns, per pixel, WHICH object produced it -- one Cryptomatte-style matte per object keyed by NAME ('object:<name>'), plus the requested G-buffer passes and a 'beauty'. The trace-back the renderer already computes (union SDF's nearest-object id at each hit), now surfaced: an EXACT per-object mask for OUR renders (no colour segmentation), which the FOCUSED critic (propose_edits(focus=...)) and per-object material/texture work build on. Deterministic.",
+                          example="import lecore; m=lecore.UnifiedMind(); s=m.build_scene('a red sphere and a blue box'); p=s.render_passes(want=['mask'], width=64, height=48); sorted(k for k in p if k.startswith('object:'))",
+                          native=True, aliases=("which object did each pixel hit", "per object mask from a render", "trace a pixel to its object",
+                                                "object id pass", "cryptomatte", "g-buffer", "render passes", "per object coverage matte",
+                                                "aov render channels", "depth and normal pass", "bidirectional pixel lookup"))
+    c.register_capability("Critique & refine a scene toward a target image (image->3D loop)", "THE CRITIC of the image->3D loop: scene.propose_edits(target_image[, geometry=True]) renders candidate edits (lighting/brightness/material/colour, and with geometry=True coarse move/scale), scores each by how much it cuts the perceptual distance, returns them RANKED by improvement -- nothing applied. scene.refine_to_target(target_image, max_steps) greedily applies the best edit until converged/out of budget. Deterministic; feed the top into adjust(). KEPT NEGATIVE: ranks colour/lighting/material and COARSE geometry well, blind to FINE geometry (node-graph drill-down's job).",
+                          example="import numpy as np, lecore; m=lecore.UnifiedMind(); g=m.build_scene('a red sphere'); g.adjust('make it night'); t=np.asarray(g.render(width=48,height=36),float); s=m.build_scene('a red sphere'); s.propose_edits(t, candidates=['make it night','make it brighter'], width=48, height=36)['proposals'][0]['command']",
+                          native=True, aliases=("propose edits to match a target image", "critique a render against a target",
+                                                "automatically improve a scene to match a photo", "suggest changes to reduce image difference",
+                                                "refine a scene toward an image", "image to 3d refinement", "hill climb scene edits",
+                                                "self improve a scene", "match a scene to a reference image", "make the scene look like this photo",
+                                                "reposition objects to match a photo"))
     c.register_capability("B-rep membership + boolean face classification", 'the classification half of a solid boolean (toward K6 booleans): point_in_brep tests whether points are inside a B-rep solid (delegates to the generalized winding number), and brep_boolean_faces decides which whole faces of A survive a union/difference/intersection with B, flagging faces that straddle the B boundary (which need a K2-SSI split). HONEST SCOPE: whole-face granularity; the SSI face-split + re-stitch is the declared next step. See holographic_brepbool.', example="import lecore; m=lecore.UnifiedMind(); c=m.brep_box(); bool(m.point_in_brep(c, [[0,0,0]])[0])", native=True, aliases=("is a point inside a solid", "point in solid", "point inside a brep", "solid membership", "boolean of two solids", "classify faces for a boolean", "inside outside test for a solid", "solid boolean classification"))
     return c
 

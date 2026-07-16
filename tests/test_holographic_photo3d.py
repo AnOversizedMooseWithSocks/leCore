@@ -43,3 +43,35 @@ def test_deterministic():
     a = photo_to_gaussians(depth, colour, fx, fy, cx, cy)
     b = photo_to_gaussians(depth, colour, fx, fy, cx, cy)
     assert np.array_equal(a["positions"], b["positions"]) and a["n_observed"] == b["n_observed"]
+
+
+def test_image_to_mesh_repair_flag_honest():
+    """image_to_mesh(repair=False) is byte-identical (default); repair=True now runs weld+SPLIT-nonmanifold+fill and
+    MAKES THE MESH MANIFOLD (non-manifold edges -> 0), so the cross-field retopo accepts it -- the split closed the gap
+    the earlier weld/fill-only repair could not."""
+    import lecore
+    from collections import Counter
+    from holographic.mesh_and_geometry.holographic_mesh import Mesh
+    m = lecore.UnifiedMind(dim=64)
+    H = W = 40
+    yy, xx = np.mgrid[0:H, 0:W]
+    img = np.exp(-(((yy - 20) / 12.0) ** 2 + ((xx - 20) / 12.0) ** 2))[..., None] * np.array([0.8, 0.7, 0.6])
+
+    a = m.image_to_mesh(img, res=20, repair=False)
+    b = m.image_to_mesh(img, res=20, repair=False)
+    assert np.array_equal(a[0], b[0]) and [tuple(q) for q in a[1]] == [tuple(q) for q in b[1]]  # deterministic + off
+
+    def nm_edges(faces):
+        und = Counter()
+        for f in faces:
+            f = [int(i) for i in f]; n = len(f)
+            for k in range(n):
+                und[tuple(sorted((f[k], f[(k + 1) % n])))] += 1
+        return sum(1 for c in und.values() if c > 2)
+
+    raw = Mesh(a[0], [tuple(int(i) for i in q) for q in a[1]])
+    assert nm_edges(a[1]) > 0 and not raw.is_manifold()                       # raw output IS non-manifold
+
+    v1, q1, _f, _g = m.image_to_mesh(img, res=20, repair=True)                # opt-in repair splits non-manifold verts
+    rep = Mesh(v1, [tuple(int(i) for i in f) for f in q1])
+    assert nm_edges(q1) == 0 and rep.is_manifold()                           # repaired output IS manifold (the payoff)

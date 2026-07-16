@@ -135,18 +135,25 @@ def _metal_for(mat_name):
 
 
 def render_textured(scene, textures, camera=None, width=256, height=192, light_dir=(0.5, 0.85, 0.6),
-                    sky_color=(0.55, 0.68, 0.85), ground=True, base_color=(0.80, 0.80, 0.80), aa=2):
+                    sky_color=(0.55, 0.68, 0.85), ground=True, base_color=(0.80, 0.80, 0.80), aa=2,
+                    lighting=None, sun_scale=1.0):
     """Render a SemanticScene with COMPOSED textures/materials applied per object. `textures` maps an object NAME (as
     in scene.names()) to a CMP1 texture graph or a Material; objects without an entry fall back to their scene colour.
     Returns an (H, W, 3) float image in [0,1]. See the module docstring for the honest kept limits.
 
     `aa` is the anti-aliasing supersample factor (SSAA): aa=2 (default) renders at 2x the width and height and averages
-    each 2x2 block back down, so object edges are smooth instead of jagged. aa=1 turns it off (faster, but aliased)."""
+    each 2x2 block back down, so object edges are smooth instead of jagged. aa=1 turns it off (faster, but aliased).
+
+    `lighting` (B2c, default None) is a LIGHTING preset name; when given, the light DIRECTION, INTENSITY, COLOUR and
+    AMBIENT come from that preset (via holographic_semantic.lighting_params) so a textured scene honours 'make it
+    sunset' just like the flat renderer. `sun_scale` (default 1.0) multiplies the intensity for 'brighter'/'dimmer'.
+    Both defaults reproduce the historical look BYTE-IDENTICALLY (sun_i=1.0, white light, dir=light_dir, amb=_AMBIENT)."""
     # ANTI-ALIASING: render once at aa-times the resolution, then box-average each aa x aa block down. Cheap, readable,
     # and the aspect ratio is preserved because (width*aa)/(height*aa) == width/height.
     if aa and aa > 1:
         big = render_textured(scene, textures, camera=camera, width=width * aa, height=height * aa,
-                              light_dir=light_dir, sky_color=sky_color, ground=ground, base_color=base_color, aa=1)
+                              light_dir=light_dir, sky_color=sky_color, ground=ground, base_color=base_color, aa=1,
+                              lighting=lighting, sun_scale=sun_scale)
         return big.reshape(height, aa, width, aa, 3).mean(axis=(1, 3))
 
     from holographic.rendering.holographic_raymarch import sphere_trace, sdf_normal
@@ -165,7 +172,15 @@ def render_textured(scene, textures, camera=None, width=256, height=192, light_d
         span = max(3.0, 1.6 * len(realized))
         camera = Camera(eye=(span * 0.4, span * 0.28, span), target=(0, 0, 0), fov_deg=42.0)
 
-    L = np.asarray(light_dir, float); L = L / (np.linalg.norm(L) + 1e-12)
+    # B2c: resolve the lighting request ONCE (shared with the flat renderer via lighting_params). Defaults reproduce
+    # the historical look: sun_i=1.0 -> light_i==_LIGHT, white sun/ambient, amb_i==_AMBIENT, and L==light_dir.
+    from holographic.simulation_and_physics.holographic_semantic import lighting_params
+    lp = lighting_params(lighting=lighting, sun_scale=sun_scale)
+    light_i = _LIGHT * lp["sun_i"]                             # direct-light intensity (brightness follows sun_scale/preset)
+    amb_i = _AMBIENT * (lp["amb"] / 0.24)                      # ambient scaled RELATIVE to the historical 0.24 baseline
+    sun_col = np.asarray(lp["sun_col"], float)                # warm/cool sun tint (white by default -> identity)
+    amb_col = np.asarray(lp["amb_col"], float)                # sky-tinted ambient fill (white by default -> identity)
+    L = np.asarray(lp["dir"] if lighting is not None else light_dir, float); L = L / (np.linalg.norm(L) + 1e-12)
     eye, dirs = camera.ray_dirs(width, height)
     D = dirs.reshape(-1, 3); O = np.broadcast_to(eye, D.shape).copy()
 
@@ -197,9 +212,9 @@ def render_textured(scene, textures, camera=None, width=256, height=192, light_d
             else:
                 alb, rough, metal = _albedo_rough_metal(tex, uvs, base_color, realized[k].get("mat_name"))
             Nk, Vk = N[m], V[m]
-            lit = cook_torrance(Nk, Vk, np.broadcast_to(L, Nk.shape), alb, metal, rough) * _LIGHT
+            lit = cook_torrance(Nk, Vk, np.broadcast_to(L, Nk.shape), alb, metal, rough) * light_i
             sh = _shadow(union, Ph[m], N[m], L)                # 1.0 lit, 0.0 shadowed (hard shadow)
-            shade[m] = lit * sh[:, None] + _AMBIENT * alb      # + a little ambient so shadowed side isn't black
+            shade[m] = lit * sh[:, None] * sun_col + amb_i * alb * amb_col   # coloured direct + coloured ambient fill
         frame[idx] = np.clip(shade / (1.0 + shade), 0.0, 1.0)  # Reinhard tone-map
 
     # composite a simple shaded ground where it is nearer than any object hit
@@ -213,7 +228,7 @@ def render_textured(scene, textures, camera=None, width=256, height=192, light_d
             sh = _shadow(union, Pg + 1e-3 * Ng, Ng, L)
             lam = np.clip((Ng * L).sum(1), 0, 1)
             base = np.array([0.62, 0.62, 0.64])
-            frame[gi] = np.clip(base * (0.25 + 0.75 * lam * sh)[:, None], 0, 1)
+            frame[gi] = np.clip(base * (0.25 + 0.75 * lam * sh)[:, None] * lp["sun_i"], 0, 1)   # ground tracks brightness
 
     return frame.reshape(height, width, 3)
 

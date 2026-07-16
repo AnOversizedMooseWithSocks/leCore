@@ -717,6 +717,51 @@ def metaball_field(centers, radius=0.5):
 # =====================================================================================================
 # Self-test -- SDF -> mesh (analytic sphere), mesh -> SDF (probes), splat -> mesh (metaball blob).
 # =====================================================================================================
+def voxel_remesh(mesh, resolution=64, pad=0.2):
+    """VOXEL REMESH (Blender's Voxel Remesh): rebuild a mesh as a UNIFORM, watertight surface by sampling it into a
+    signed-distance grid and re-marching -- the standard cleanup for messy, self-intersecting, non-manifold, or
+    multi-shell input before retopo. Any tangle in becomes one clean closed surface out, at a density set by
+    `resolution` (cells per axis). `pad` (RELATIVE to the mesh size) grows the bounds so the SDF band clears the grid
+    edge and the surface always closes -- the default 0.2 is watertight; drop it only if you know the mesh is small
+    in its box.
+
+    A pure COMPOSE: mesh_to_sdf_grid (the winding/flood-filled SDF) -> marching_tetrahedra_vec (the mesher), both
+    already here. Returns a watertight triangle Mesh. This is what turns the skin_skeleton block-out, a boolean mess,
+    or an imported scan into something with consistent topology. KEPT NEGATIVE: uniform density loses sharp features
+    below the cell size (a thin blade or a crisp corner rounds off -- raise resolution or crease after); the sign is
+    nearest-normal, so a deeply non-watertight input can leak (voxel remesh wants a roughly-closed shell)."""
+    V = np.asarray(mesh.vertices, float)
+    span = float((V.max(0) - V.min(0)).max()) or 1.0
+    p = float(pad) * span                                # pad relative to the mesh size, so the SDF band clears the
+    lo = V.min(0) - p; hi = V.max(0) + p                 # grid boundary and the marched surface always closes
+    grid, axes = mesh_to_sdf_grid(mesh, (lo.tolist(), hi.tolist()), res=int(resolution))
+    return marching_tetrahedra_vec(grid, axes, level=0.0)
+
+
+def metaball_mesh(centers, radius=0.5, level=0.5, resolution=48, pad=0.6):
+    """METABALL MESH (Blender metaballs / the classic soft-blob base mesh): sum-of-Gaussians field -> marching-cubes
+    surface. `centers` (n,3) are the blob positions, `radius` their spread, `level` the isovalue (higher = tighter
+    around each center, lower = blobs merge more). Overlapping blobs FUSE smoothly -- the organic-blob route that
+    complements skin_skeleton (blobs where skeleton branch-stitching gets ugly: a torso lump, a knuckle cluster).
+    Returns a watertight triangle Mesh. `pad` (relative to the blob spread) frames the grid so the surface closes.
+
+    Reuses metaball_field (the engine's splat-as-implicit-field) -- a `bundle` of Gaussians IS a superposition, and
+    thresholding it is an isosurface, the 'as above so below' identity in mesh form. KEPT NEGATIVE: isotropic-triangle
+    blob topology (a base mesh to retopo onto, like skin_skeleton); `level` vs `radius` interact -- too high a level on
+    far-apart centers yields separate shells (they only merge where the summed field clears `level`)."""
+    C = np.asarray(centers, float)
+    field = metaball_field(C, radius=radius)
+    ext = radius * (1.0 + float(pad))
+    lo = C.min(0) - ext; hi = C.max(0) + ext
+    n = int(resolution)
+    xs = np.linspace(lo[0], hi[0], n); ys = np.linspace(lo[1], hi[1], n); zs = np.linspace(lo[2], hi[2], n)
+    GX, GY, GZ = np.meshgrid(xs, ys, zs, indexing="ij")
+    P = np.stack([GX.ravel(), GY.ravel(), GZ.ravel()], axis=1)
+    vals = field(P).reshape(n, n, n)
+    # metaball_field is a SUM (higher inside), but marching_tetrahedra expects inside-negative; negate around `level`
+    return marching_tetrahedra_vec(level - vals, (xs, ys, zs), level=0.0)
+
+
 def _selftest():
     # --- SDF -> mesh: extract the analytic unit sphere; closed manifold, chi=2, vertices on the sphere ---
     vals, axes = sample_field(sphere_sdf(radius=1.0), ((-1.5, -1.5, -1.5), (1.5, 1.5, 1.5)), res=24)
@@ -775,6 +820,26 @@ def _selftest():
 
     # --- determinism ---
     assert np.array_equal(marching_tetrahedra(vals, axes, 0.0).vertices, marching_tetrahedra(vals, axes, 0.0).vertices)
+
+    # voxel_remesh: a box rebuilds to a uniform closed surface (the standard messy-input cleanup). Marching
+    # tetrahedra can be non-manifold at grid-coincident points (its declared negative), so check watertightness via
+    # boundary edges (a robust closed-surface test) rather than the strict half-edge manifold assertion.
+    from holographic.mesh_and_geometry.holographic_mesh import box as _vbox
+    from collections import Counter as _VC
+    _vr = voxel_remesh(_vbox(), resolution=36)
+    _vec = _VC()
+    for _vf in _vr.faces:
+        for _a in range(len(_vf)):
+            _vec[tuple(sorted((_vf[_a], _vf[(_a + 1) % len(_vf)])))] += 1
+    assert _vr.n_faces > 0 and sum(1 for _cc in _vec.values() if _cc == 1) == 0   # no boundary edges = closed
+
+    # metaball_mesh: two overlapping Gaussian blobs FUSE into one watertight shell (the soft-blob base-mesh route).
+    _mb = metaball_mesh(np.array([[0.0, 0, 0], [0.4, 0, 0]]), radius=0.4, level=0.5, resolution=32)
+    _mbe = _VC()
+    for _mf in _mb.faces:
+        for _a in range(len(_mf)):
+            _mbe[tuple(sorted((_mf[_a], _mf[(_a + 1) % len(_mf)])))] += 1
+    assert _mb.n_faces > 0 and sum(1 for _cc in _mbe.values() if _cc == 1) == 0   # fused, closed
 
     print(f"holographic_meshbridge selftest: ok (SDF->mesh: unit sphere extracted, {sphere.n_faces} faces, closed "
           f"manifold chi={sphere.euler_characteristic()}, vertices on sphere mean r={radii.mean():.3f}+/-{radii.std():.3f}; "

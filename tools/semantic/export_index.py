@@ -80,13 +80,33 @@ def main():
     lo = Vr.min(1, keepdims=True); hi = Vr.max(1, keepdims=True)
     q = np.round((Vr - lo) / (hi - lo + 1e-12) * 255).astype(np.uint8)
 
+    # WORKFLOW BONES, names-aligned, packed beside the vectors: the measured dense+structure fusion
+    # (top-1 6->7/12, median 2->1, ZERO per-ask regressions at the ship dim, gamma=0.5) needs the bone
+    # graph at query time, and the router should not re-derive it from source it may not have. ~1.1k
+    # edges as flat (src_idx, dst_idx, weight) arrays -- a few KB. The graph keys are bare stems;
+    # index names are holographic_<stem> -- joined here, once, at export.
+    import sys
+    if str(repo) not in sys.path:
+        sys.path.insert(0, str(repo))
+    from holographic.semantic_router.holographic_workflowgraph import build_workflow_graph
+    wf = build_workflow_graph(str(repo))
+    name_idx = {n: j for j, n in enumerate(names)}
+    b_src, b_dst, b_w = [], [], []
+    for (sa, sb), w in wf["edges"].items():
+        ia = name_idx.get("holographic_" + sa)
+        ib = name_idx.get("holographic_" + sb)
+        if ia is not None and ib is not None:
+            b_src.append(ia); b_dst.append(ib); b_w.append(w)
+
     out = pathlib.Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)          # create lecore_data/routing/ if absent
     buf = io.BytesIO()
     np.savez(buf, names=np.array(names), q=q, lo=lo.astype(np.float16), hi=hi.astype(np.float16),
-             mu=mu.astype(np.float16), pc=pc.astype(np.float16))
+             mu=mu.astype(np.float16), pc=pc.astype(np.float16),
+             bone_src=np.array(b_src, dtype=np.int32), bone_dst=np.array(b_dst, dtype=np.int32),
+             bone_w=np.array(b_w, dtype=np.float32))
     out.write_bytes(buf.getvalue())
-    print(f"  {len(names)} module vectors @ {a.dim}d q8 -> {out.name}  ({out.stat().st_size/1024:.0f} KB)")
+    print(f"  {len(names)} module vectors @ {a.dim}d q8 + {len(b_src)} bone edges -> {out.name}  ({out.stat().st_size/1024:.0f} KB)")
     print(f"  (from a {len(cache)}-entry build cache; the other {len(cache)-len(names)} entries stay local)")
 
 
