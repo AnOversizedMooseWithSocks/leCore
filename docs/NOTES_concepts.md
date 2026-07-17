@@ -35242,3 +35242,35 @@ permanent -- and the 80-minute cold embed never has to happen again.
 KEPT NOTE: the seed stores FULL width (768d) deliberately, per Moose's point that a wide artifact can serve any
 narrower consumer but not the reverse. Width is a runtime knob; 128d remains the measured champion (see the
 dimension sweep entry) and 64d collapses.
+
+## LINE ENDINGS: root-caused to MY delivery tree; rebased onto Moose's repo; deliveries are now all-LF
+
+Moose asked whether line endings "really matter that much" after every file showed modified. Two answers, measured:
+
+FOR THE ENGINE: NO -- and that is DESIGN, not luck. collect_code does `doc = ' '.join(m.group(1).split())` before
+the text is hashed, so a CRLF docstring and an LF one yield the SAME routing cache key (verified both ways: the
+key matches after normalisation and DIFFERS without it). Python is newline-agnostic; docgen emits identical content
+from a CRLF tree and an LF tree (tested by regenerating in both). The seed, the index, and every gate are immune.
+
+FOR REVIEW: CATASTROPHICALLY YES, and this session is the receipt. The earlier merge was "probably no conflicts" and
+WAS -- yet a wholesale adopt would have dropped four things (the whole ASCII charset arc, a catalog entry, six NOTES
+entries, the backlog). They were found ONLY by diffing with --strip-trailing-cr. When every file reads "modified", a
+real loss is invisible. Line endings do not threaten correctness; they threaten the ability to SEE correctness --
+which, in a repo whose failure mode is silent gaps rather than bugs, is the expensive harm.
+
+ROOT CAUSE WAS MINE. Measured: Moose's repo is 1,245 text files at LF / 0 CRLF (his `.gitattributes: * text=auto`
+normalises on commit). MY delivery tree was 992 CRLF / 234 LF -- MIXED, because the merge base was CRLF-ish and my
+binary-mode edits faithfully preserved whatever each file already had. So every zip I handed back re-sprayed CRLF
+into an all-LF repo. The fix is not to patch my tree file-by-file: it is to REBASE onto his, since a diff proved his
+repo already contained 100% of my work (0 content differences; only docs/wiring_audit_backlog.md was absent, never
+committed). recon is now a copy of his pushed repo + the backlog, minus two stray logs, regenerated: 1,240 LF / 0
+CRLF, gates 6/6, 55 tests, 3 selftests green.
+
+KEPT NOTE FOR FUTURE SESSIONS: deliver what the REPO stores (LF), not what the working tree happens to hold. And
+`git add --renormalize .` is the one-time index fix when a `.gitattributes` lands after the fact -- it re-runs the
+clean filter and stages only files whose NORMALISED content actually changed.
+
+ALSO FIXED HERE: diag.log + rvd.log were committed (7 bytes each, "DONE 0") and *.log is not in .gitignore --
+removed from the tree. MY OWN HAZARD, recorded loudly: every zip I build excludes `-x "*.log"`, so if a .log were
+ever real repo content I would silently drop it on each round-trip. Same class as the CRLF spray: a delivery
+mechanism that quietly edits the payload.
