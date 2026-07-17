@@ -44,3 +44,17 @@ tools/semantic/knowledge_cache.zip
 tools/semantic/nomic_text/
 # belt and braces -- the cache by NAME, wherever a future move puts it
 .knowledge_cache*.json
+features/photo_sample/tracks2.jpg
+features/photo_sample/tracks.jpg
+features/photo_sample/still.jpg
+features/photo_sample/room2.jpg
+features/photo_sample/room.jpg
+features/photo_sample/plant2.jpg
+features/photo_sample/plant.jpg
+features/photo_sample/plane3.jpg
+features/photo_sample/plane2.jpg
+features/photo_sample/plane1.jpg
+features/photo_sample/mess.jpg
+features/photo_sample/forest_steps.jpg
+features/photo_sample/deer.jpg
+features/photo_sample/bridge.jpg
