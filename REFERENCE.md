@@ -166,8 +166,8 @@
 | [`holographic_cosamp.py`](#holographic-cosamp) | SPEED-3 -- CoSaMP batch-selection recovery (holographic_cosamp). | 172 |
 | [`holographic_cosmic.py`](#holographic-cosmic) | Local structure classification of a point cloud -- the 'cosmic web' method, extracted from leOS | 143 |
 | [`holographic_cosserat.py`](#holographic-cosserat) | holographic_cosserat.py -- H2b: TWIST for hair, via a Cosserat rod with orientation frames. | 278 |
-| [`holographic_creature.py`](#holographic-creature) | Spore-style CREATURE builder: a spine with attachable limbs, bilateral symmetry, constraints (holographic_crea | 283 |
 | [`holographic_creature.py`](#holographic-creature) | holographic_creature.py | 2366 |
+| [`holographic_creature.py`](#holographic-creature) | Spore-style CREATURE builder: a spine with attachable limbs, bilateral symmetry, constraints (holographic_crea | 283 |
 | [`holographic_creature_mind.py`](#holographic-creature-mind) | CreatureMind -- the reference DEMO of building a specialized mind ON the one UnifiedMind. | 108 |
 | [`holographic_crossfield.py`](#holographic-crossfield) | holographic_crossfield.py -- the smoothest 4-RoSy field on a surface (Box3D backlog F2). | 797 |
 | [`holographic_curlnoise.py`](#holographic-curlnoise) | holographic_curlnoise.py -- #1 from the SIGGRAPH list: CURL NOISE. Turbulent-looking flow that is | 143 |
@@ -473,8 +473,8 @@
 | [`holographic_skydata.py`](#holographic-skydata) | holographic_skydata.py -- a SKY OBSERVATION as first-class data: a cube + world axes (leCore io_and_interop). | 220 |
 | [`holographic_slime.py`](#holographic-slime) | Slime-mold path-finding over a HOLOGRAPHIC associative graph. | 391 |
 | [`holographic_smokepresets.py`](#holographic-smokepresets) | holographic_smokepresets.py -- SMOKE PRESETS (fluids/matter backlog, content item 1). | 159 |
-| [`holographic_snap.py`](#holographic-snap) | holographic_snap.py (mesh_and_geometry) -- the MODELING-GIZMO snap adapter: it answers 'where does this dragge | 184 |
 | [`holographic_snap.py`](#holographic-snap) | holographic_snap.py -- SNAPPING = cleanup, applied to geometry (modeling-app feature layer). | 141 |
+| [`holographic_snap.py`](#holographic-snap) | holographic_snap.py (mesh_and_geometry) -- the MODELING-GIZMO snap adapter: it answers 'where does this dragge | 184 |
 | [`holographic_softbody.py`](#holographic-softbody) | Position-Based Dynamics -- softbody & hardbody simulation, exposed to VSA. | 680 |
 | [`holographic_sparsefield.py`](#holographic-sparsefield) | FS-2 -- the narrow-band sparse field (holographic_sparsefield), array-backed for parallelism. | 530 |
 | [`holographic_spatial.py`](#holographic-spatial) | holographic_spatial.py -- ONE shared spatial index. Bin points into a uniform grid of cells so radius, | 191 |
@@ -3873,6 +3873,47 @@
 
 ### holographic_creature.py
 
+> holographic_creature.py
+> =======================
+>
+> A creature brain built on the holographic engine in holographic_ai.py.
+>
+> It learns to forage in a little grid world -- find food, avoid poison -- with
+> NO neural net and NO training loop in the gradient sense. It simply remembers
+> what happened (state, action, how it turned out) and, faced with a new
+> situation, does whatever worked in similar situations before. Similarity is
+> measured holographically; the "value" of an action is the reward of its nearest
+> neighbours in memory. That is instance-based reinforcement learning, and it
+> maps cleanly onto leOS's reflex arc + "semantic compass" (lean toward what
+> succeeded) + "void/curiosity" (try what you haven't, where you're unsure).
+>
+> The one trick that makes it learn fast: the creature senses the world
+> EGOCENTRICALLY -- "food is to my east", not "food is at (5,2)". Because the
+> state is relative, a lesson learned in one corner of the map applies
+> everywhere, so it never has to visit every cell.
+>
+> Run:   python3 holographic_creature.py
+> Needs: numpy, and holographic_ai.py beside it.
+
+**Public API:**
+
+- `class HolographicMind` -- Perceive -> decide -> learn, by remembering experiences as PROTOTYPES.
+- `class CreatureEncoder` -- Turn the creature's egocentric senses into a single unit vector -- the creature DOMAIN's encoder.
+- `class FastCreatureEncoder` -- Compiled, fully in-VSA perception: the per-step role/filler BIND (an FFT convolution) is the last
+- `class GridWorld` -- A small grid with one creature, one star (food), some poison cells, and
+- `def run_episode(world, encoder, mind, learn, explore, eval_epsilon, gamma, max_steps, mem, corridor_reflex, danger_reflex, wall_reflex, curiosity, return_trajectory)` -- Live one episode; return (total_reward, stars_collected).
+- `def demo_creature()`
+- `def demo_memory(seeds, episodes, steps)` -- Scene C: with limited vision, show that a working memory of recent moves
+- `def demo_obstacles(seeds, episodes)` -- Scene D: obstacles. First random WALLS in the forage world (the creature
+- `def demo_introspect(episodes, seed)` -- Scene E: the creature's memory is the same holographic kit as the image
+- `def learn_maze(world_factory, dim, episodes, gamma, mem, max_steps, candidates, probe, accept, seed, k, bootstrap)` -- Learn to escape a maze reliably -- the rat-in-a-maze protocol, hardened for
+- `def demo_self_maintaining(dim, seed)` -- The orchestrator brain keeping ITSELF fresh, with no thresholds to tune. We
+- `def capture_route(world_factory, encoder, mind, mem, max_steps, trials)` -- Run a trained maze brain and capture its successful escape routes as
+- `def replay_plan(world, route, reset)` -- Drive navigation from a DISCOVERED route plan instead of re-deciding every
+- `class WorldView` -- The creature's world as a COUNTABLE, DIFFABLE composite -- the scene
+
+### holographic_creature.py
+
 > Spore-style CREATURE builder: a spine with attachable limbs, bilateral symmetry, constraints (holographic_creature).
 >
 > WHY THIS MODULE EXISTS
@@ -3916,47 +3957,6 @@
 
 - `class Creature` -- A procedural creature from a body-plan spec: a spine chain with limbs attached at fractional positions, with
 - `def quadruped_spec(body)` -- A ready-made body plan: a quadruped -- a spine with two pairs of legs (front + back) and a head. A concrete
-
-### holographic_creature.py
-
-> holographic_creature.py
-> =======================
->
-> A creature brain built on the holographic engine in holographic_ai.py.
->
-> It learns to forage in a little grid world -- find food, avoid poison -- with
-> NO neural net and NO training loop in the gradient sense. It simply remembers
-> what happened (state, action, how it turned out) and, faced with a new
-> situation, does whatever worked in similar situations before. Similarity is
-> measured holographically; the "value" of an action is the reward of its nearest
-> neighbours in memory. That is instance-based reinforcement learning, and it
-> maps cleanly onto leOS's reflex arc + "semantic compass" (lean toward what
-> succeeded) + "void/curiosity" (try what you haven't, where you're unsure).
->
-> The one trick that makes it learn fast: the creature senses the world
-> EGOCENTRICALLY -- "food is to my east", not "food is at (5,2)". Because the
-> state is relative, a lesson learned in one corner of the map applies
-> everywhere, so it never has to visit every cell.
->
-> Run:   python3 holographic_creature.py
-> Needs: numpy, and holographic_ai.py beside it.
-
-**Public API:**
-
-- `class HolographicMind` -- Perceive -> decide -> learn, by remembering experiences as PROTOTYPES.
-- `class CreatureEncoder` -- Turn the creature's egocentric senses into a single unit vector -- the creature DOMAIN's encoder.
-- `class FastCreatureEncoder` -- Compiled, fully in-VSA perception: the per-step role/filler BIND (an FFT convolution) is the last
-- `class GridWorld` -- A small grid with one creature, one star (food), some poison cells, and
-- `def run_episode(world, encoder, mind, learn, explore, eval_epsilon, gamma, max_steps, mem, corridor_reflex, danger_reflex, wall_reflex, curiosity, return_trajectory)` -- Live one episode; return (total_reward, stars_collected).
-- `def demo_creature()`
-- `def demo_memory(seeds, episodes, steps)` -- Scene C: with limited vision, show that a working memory of recent moves
-- `def demo_obstacles(seeds, episodes)` -- Scene D: obstacles. First random WALLS in the forage world (the creature
-- `def demo_introspect(episodes, seed)` -- Scene E: the creature's memory is the same holographic kit as the image
-- `def learn_maze(world_factory, dim, episodes, gamma, mem, max_steps, candidates, probe, accept, seed, k, bootstrap)` -- Learn to escape a maze reliably -- the rat-in-a-maze protocol, hardened for
-- `def demo_self_maintaining(dim, seed)` -- The orchestrator brain keeping ITSELF fresh, with no thresholds to tune. We
-- `def capture_route(world_factory, encoder, mind, mem, max_steps, trials)` -- Run a trained maze brain and capture its successful escape routes as
-- `def replay_plan(world, route, reset)` -- Drive navigation from a DISCOVERED route plan instead of re-deciding every
-- `class WorldView` -- The creature's world as a COUNTABLE, DIFFABLE composite -- the scene
 
 ### holographic_creature_mind.py
 
@@ -18311,6 +18311,28 @@
 
 ### holographic_snap.py
 
+> holographic_snap.py -- SNAPPING = cleanup, applied to geometry (modeling-app feature layer).
+>
+> Thinking holographically: snapping IS cleanup. VSA cleanup projects a noisy vector onto the nearest CLEAN atom in
+> a codebook; snapping projects a dragged, continuous position onto the nearest ALLOWED place -- a grid node, an
+> existing vertex, a point on an edge, an angle increment. Same operation, geometric codebook. And just as cleanup
+> can REFUSE a weak match (return "no confident atom"), a snap has a TOLERANCE: if nothing allowed is close enough,
+> the point is left where it is. That confidence gate is what stops a cursor from teleporting across the screen.
+>
+> These read raw coordinates (the honest way -- no lossy encoding for something this exact). NumPy + stdlib only;
+> deterministic.
+
+**Public API:**
+
+- `def snap_to_grid(p, spacing, origin)` -- Snap a point to the nearest grid node -- round each coordinate to the lattice. The simplest cleanup: the
+- `def snap_to_points(p, points, tol)` -- Snap to the NEAREST point in a set -- this is literally cleanup (nearest codebook entry). Returns
+- `def snap_to_segment(p, a, b)` -- The nearest point on the line SEGMENT a-b (clamped to the endpoints) -- snapping to an edge.
+- `def snap_value(x, increment, origin)` -- Snap a scalar to the nearest multiple of `increment` from `origin` -- e.g. a length to 0.25 m steps.
+- `def snap_angle(theta, increment)` -- Snap an angle (radians) to the nearest multiple of `increment` -- e.g. rotate in 15-degree steps.
+- `class Snapper` -- Snaps a point to the nearest snap target within a tolerance, combining a GRID and a VERTEX set. Whichever
+
+### holographic_snap.py
+
 > holographic_snap.py (mesh_and_geometry) -- the MODELING-GIZMO snap adapter: it answers 'where does this dragged
 > point / transform delta actually go?' in the shapes the interactive edit spine wants (dict hit records, a corrected
 > transform delta), DELEGATING all the actual snap math to the canonical snap primitives in
@@ -18335,28 +18357,6 @@
 - `def snap_to_intersections(point, polylines, max_dist, tol)` -- Snap a point to the nearest INTERSECTION of a set of 2-D polylines -- the 'intersection' object-snap. Computes
 - `def snap_to_edge(point, vertices, edges, max_dist)` -- Snap a point to the nearest point ON any edge, returned as {edge, position, distance, t}, or None if beyond
 - `def snap_transform_delta(delta, target, increment, moved_point, vertices, edges, origin, max_dist)` -- Snap a TRANSFORM DELTA so the moved point lands on a snap target, and return the corrected delta. This is the
-
-### holographic_snap.py
-
-> holographic_snap.py -- SNAPPING = cleanup, applied to geometry (modeling-app feature layer).
->
-> Thinking holographically: snapping IS cleanup. VSA cleanup projects a noisy vector onto the nearest CLEAN atom in
-> a codebook; snapping projects a dragged, continuous position onto the nearest ALLOWED place -- a grid node, an
-> existing vertex, a point on an edge, an angle increment. Same operation, geometric codebook. And just as cleanup
-> can REFUSE a weak match (return "no confident atom"), a snap has a TOLERANCE: if nothing allowed is close enough,
-> the point is left where it is. That confidence gate is what stops a cursor from teleporting across the screen.
->
-> These read raw coordinates (the honest way -- no lossy encoding for something this exact). NumPy + stdlib only;
-> deterministic.
-
-**Public API:**
-
-- `def snap_to_grid(p, spacing, origin)` -- Snap a point to the nearest grid node -- round each coordinate to the lattice. The simplest cleanup: the
-- `def snap_to_points(p, points, tol)` -- Snap to the NEAREST point in a set -- this is literally cleanup (nearest codebook entry). Returns
-- `def snap_to_segment(p, a, b)` -- The nearest point on the line SEGMENT a-b (clamped to the endpoints) -- snapping to an edge.
-- `def snap_value(x, increment, origin)` -- Snap a scalar to the nearest multiple of `increment` from `origin` -- e.g. a length to 0.25 m steps.
-- `def snap_angle(theta, increment)` -- Snap an angle (radians) to the nearest multiple of `increment` -- e.g. rotate in 15-degree steps.
-- `class Snapper` -- Snaps a point to the nearest snap target within a tolerance, combining a GRID and a VERTEX set. Whichever
 
 ### holographic_softbody.py
 
