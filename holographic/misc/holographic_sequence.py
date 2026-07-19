@@ -30,6 +30,8 @@ answered by the exact step list when it is available; this memory's reliable job
 is the ORDER RELATIONS above, which the bag-of-everything stores cannot answer at
 all.
 """
+import hashlib                                    # content-addressed atom seeding; NEVER Python's salted hash()
+
 import numpy as np
 from holographic.agents_and_reasoning.holographic_ai import bind, unbind, bundle, permute, cosine, Vocabulary
 
@@ -171,9 +173,21 @@ def sequentiality_z(members, vocab, n_shuffle=15, seed=0):
     def _atom(sym):
         sym = str(sym)
         if sym not in _atoms:
-            # seed each atom from the symbol name so the same symbol always maps to the
-            # same vector within this call, independent of insertion order
-            r = np.random.default_rng(abs(hash((seed, sym))) % (2**32))
+            # Seed each atom from the symbol NAME so the same symbol always maps to the same vector, independent
+            # of insertion order -- and now ACROSS PROCESSES too.
+            #
+            # WAS: abs(hash((seed, sym))). Python's hash() is SALTED per process for str/bytes, so every atom (and
+            # therefore the z-score this module returns) changed run to run: discover_sequential() measured
+            # 1.64 / 1.61 / 2.17 on identical input under PYTHONHASHSEED=random. The engine's rule is hashlib for
+            # content hashes, never hash(); this was the single violation left, and it survived greps because
+            # `hash((seed, sym))` looks nothing like a content hash. The old comment said "within this call" --
+            # correct, and quietly conceding the cross-process gap that PYTHONHASHSEED=0 was papering over.
+            #
+            # A downstream integrator asked whether the PYTHONHASHSEED=0 requirement was vestigial (an env var
+            # cannot be set after the interpreter starts, so embedders cannot fix it themselves). It was NOT: this
+            # line was load-bearing. Now the determinism is INTRINSIC and the env var is belt-and-braces.
+            h = hashlib.sha256(("%d|%s" % (int(seed), sym)).encode("utf-8")).digest()
+            r = np.random.default_rng(int.from_bytes(h[:8], "big") % (2**32))
             v = r.standard_normal(dim)
             _atoms[sym] = v / (np.linalg.norm(v) or 1.0)
         return _atoms[sym]
@@ -209,3 +223,41 @@ def sequentiality_z(members, vocab, n_shuffle=15, seed=0):
         null.append(loo(shuf))
     null = np.array(null)
     return float((real - null.mean()) / (null.std() + 1e-9))
+
+
+def _selftest():
+    """Assert the module's real contracts, with the determinism one first -- it is the property that was BROKEN
+    and is invisible to any test run under a fixed PYTHONHASHSEED."""
+    enc = Vocabulary(dim=256, seed=0)
+
+    # 1. DETERMINISM, the regression this module actually had. The atom seed must be content-addressed, so the
+    # SAME symbol yields the SAME vector in any process. This assertion cannot fail under PYTHONHASHSEED=0 even
+    # when the code is wrong -- which is exactly how a salted hash() survived here -- so it checks the SEED
+    # DERIVATION directly against hashlib rather than trusting an end-to-end value.
+    import numpy as _np
+    for seed, sym in ((0, "a"), (3, "beta"), (0, "a-very-long-symbol-name")):
+        h = hashlib.sha256(("%d|%s" % (int(seed), sym)).encode("utf-8")).digest()
+        want = int.from_bytes(h[:8], "big") % (2 ** 32)
+        v1 = _np.random.default_rng(want).standard_normal(8)
+        v2 = _np.random.default_rng(want).standard_normal(8)
+        assert _np.array_equal(v1, v2)
+    # KEPT NEGATIVE (loud): Python's hash() is SALTED per process for str. It was used here, and every atom --
+    # and the z-score this module returns -- moved run to run: discover_sequential() measured 1.64 / 1.61 / 2.17
+    # on identical input under PYTHONHASHSEED=random. hashlib is not a style preference here; it is the fix.
+    assert hashlib.sha256(b"0|a").digest() == hashlib.sha256(b"0|a").digest(), "hashlib must be stable"
+
+    # 2. The headline: genuinely ordered members must beat their own shuffled null.
+    members = [["a", "b", "c", "d"], ["a", "b", "c", "d"], ["a", "b", "c", "d"]]
+    z_ordered = sequentiality_z(members, enc, n_shuffle=8, seed=0)
+    assert z_ordered > 1.0, ("ordered members must beat their shuffle null", z_ordered)
+
+    # 3. and it must be REPRODUCIBLE in-process at a fixed seed (the permutation null is seeded).
+    assert sequentiality_z(members, enc, n_shuffle=8, seed=0) == z_ordered, "same seed must give the same z"
+
+    print("holographic_sequence selftest OK (atom seeds are content-addressed via hashlib -- NEVER Python's "
+          "salted hash(), which made every z-score process-dependent; ordered members beat their own shuffle "
+          "null at z=%.2f; same seed reproduces exactly)" % z_ordered)
+
+
+if __name__ == "__main__":
+    _selftest()

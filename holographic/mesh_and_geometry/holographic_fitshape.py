@@ -230,3 +230,86 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+def oriented_bbox(points, refine_steps=24, refine_span_deg=20.0):
+    """Minimal-volume ORIENTED bounding box of a point set: PCA seed + coarse-to-fine rotation refinement,
+    with a hard AABB FALLBACK so the result is NEVER worse than the axis-aligned box.
+
+    The fallback is not politeness -- it is a fixed bug: a PCA-seeded OBB on an already axis-aligned cube can
+    return a box LARGER than the AABB (degenerate covariance picks arbitrary axes; observed demo-side). The
+    identity rotation is always in the candidate set, so obb_volume <= aabb_volume holds by construction.
+
+    Refinement: sweep small per-axis rotations around the current best frame, halving the span each round
+    (coarse-to-fine, `refine_steps` total evaluations per axis-pass). Deterministic, NumPy-only.
+
+    Returns dict: center (3,), axes (3,3 rows, orthonormal), half_extents (3,), volume.
+    """
+    import numpy as np
+    P = np.asarray(points, float).reshape(-1, 3)
+
+    def box_of(R):
+        # extents of the points in frame R (rows = axes); volume of that box
+        Q = P @ R.T
+        lo, hi = Q.min(axis=0), Q.max(axis=0)
+        he = 0.5 * (hi - lo)
+        ctr_local = 0.5 * (hi + lo)
+        vol = float(np.prod(np.maximum(2.0 * he, 1e-300)))
+        return vol, ctr_local @ R, he
+
+    def rot(axis, ang):
+        c, s = np.cos(ang), np.sin(ang)
+        i, j = [(1, 2), (2, 0), (0, 1)][axis]
+        R = np.eye(3); R[i, i] = c; R[j, j] = c; R[i, j] = -s; R[j, i] = s
+        return R
+
+    # candidates: identity (the AABB fallback) and the PCA frame
+    C = np.cov((P - P.mean(axis=0)).T) if len(P) > 1 else np.eye(3)
+    _, U = np.linalg.eigh(C + 1e-30 * np.eye(3))
+    cands = [np.eye(3), U.T]
+    best = min(((box_of(R), R) for R in cands), key=lambda t: t[0][0])
+
+    span = np.radians(refine_span_deg)
+    for _round in range(4):                                   # halve the search span each round
+        improved = True
+        while improved:
+            improved = False
+            for axis in range(3):
+                for ang in np.linspace(-span, span, refine_steps):
+                    if ang == 0.0:
+                        continue
+                    R = rot(axis, ang) @ best[1]
+                    cand = (box_of(R), R)
+                    if cand[0][0] < best[0][0] - 1e-15:
+                        best = cand; improved = True
+        span *= 0.5
+
+    (vol, center, he), R = best
+    return {"center": center, "axes": R, "half_extents": he, "volume": vol}
+
+
+def _selftest_obb():
+    """Pin the two contracts: never worse than AABB (the fixed bug), and near-tight on a rotated box."""
+    import numpy as np
+    rng = np.random.default_rng(0)
+    # axis-aligned cube corner points: OBB must equal the AABB volume (fallback guarantee)
+    cube = np.array([[x, y, z] for x in (0, 1) for y in (0, 1) for z in (0, 1)], float)
+    r = oriented_bbox(cube)
+    aabb_vol = float(np.prod(cube.max(0) - cube.min(0)))
+    assert r["volume"] <= aabb_vol + 1e-9, "OBB worse than AABB: the exact bug the fallback exists to kill"
+    # a 1 x 2 x 3 box rotated 45 deg about Z: AABB inflates, OBB must recover ~the true 6.0 volume
+    box = rng.uniform(0, 1, (400, 3)) * [1.0, 2.0, 3.0]
+    th = np.pi / 4
+    Rz = np.array([[np.cos(th), -np.sin(th), 0], [np.sin(th), np.cos(th), 0], [0, 0, 1]])
+    pts = box @ Rz.T
+    r2 = oriented_bbox(pts)
+    aabb2 = float(np.prod(pts.max(0) - pts.min(0)))
+    assert r2["volume"] < 0.8 * aabb2, (r2["volume"], aabb2)     # genuinely beats the inflated AABB
+    assert r2["volume"] <= 6.0 * 1.10, r2["volume"]              # within 10% of the true box (sampled corners)
+    # axes orthonormal
+    assert np.allclose(r2["axes"] @ r2["axes"].T, np.eye(3), atol=1e-10)
+    print("fitshape OBB selftest OK (fallback + rotated-box recovery)")
+
+if __name__ == "__main__":
+    _selftest_obb()
+

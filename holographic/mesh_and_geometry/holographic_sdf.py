@@ -122,6 +122,13 @@ class SDF:
         P = np.atleast_2d(np.asarray(P, float))
         return _eval(self, P)
 
+    # An SDF IS a distance field, so let it be USED as one: field consumers that take a callable func(pts) ->
+    # distances (mesh_from_sdf, sample_field, scatter layers) now accept the SDF object directly instead of
+    # forcing callers to remember `.eval`. Additive: eval is unchanged and everything that dispatches on
+    # isinstance(x, SDF) still sees an SDF (a class being callable does not change its type).
+    def __call__(self, P):
+        return self.eval(P)
+
     # ----- combinators (operator sugar so trees read like math) ---------------------------------
     def union(self, other):           return SDF("union", (), [self, other])
     def intersect(self, other):       return SDF("intersect", (), [self, other])
@@ -841,6 +848,8 @@ def _selftest():
     s = sphere(1.0)
     assert abs(s.eval([[2, 0, 0]])[0] - 1.0) < 1e-9            # outside by 1
     assert abs(s.eval([[0, 0, 0]])[0] + 1.0) < 1e-9            # inside by 1 (-1)
+    # an SDF is callable and identical to .eval, so field consumers (mesh_from_sdf, sample_field) take it direct
+    assert np.array_equal(s([[2, 0, 0]]), s.eval([[2, 0, 0]])), "SDF.__call__ must equal .eval"
     b = box(1, 1, 1)
     assert abs(b.eval([[2, 0, 0]])[0] - 1.0) < 1e-9
     t = torus(1.0, 0.25)

@@ -178,15 +178,20 @@
 
 - **class `Camera`** -- A pinhole camera.
     - `view_matrix(self)` -- World -> camera (look-at).
-    - `projection_matrix(self)` -- Perspective projection (OpenGL-style, maps the frustum to the [-1,1] cube).
+    - `projection_matrix(self, aspect=None)` -- Perspective projection (OpenGL-style, maps the frustum to the [-1,1] cube).
     - `ray_dirs(self, width, height, jitter=None)` -- Per-pixel world-space ray origins (the eye) and unit directions, shape (H, W, 3), for ray marching.
 - **class `Light`** -- A light.
-- `rasterize_mesh(mesh, camera, width=512, height=512, lights=None, base_color=(0.8, 0.8, 0.8), background=(0.05, 0.06, 0.08), ambient=0.15, vectorized=True, texture=None, uvs=None, smooth=False)` -- Rasterise a triangle mesh to an (H, W, 3) RGB image in [0,1] with a z-buffer and per-face Lambert shading.
+- `rasterize_mesh(mesh, camera, width=512, height=512, lights=None, base_color=(0.8, 0.8, 0.8), background=(0.05, 0.06, 0.08), ambient=0.15, vectorized=True, texture=None, uvs=None, smooth=False, two_sided=False, vertex_colors=None)` -- Rasterise a triangle mesh to an (H, W, 3) RGB image in [0,1] with a z-buffer and per-face Lambert shading.
 - `volume_render(field, camera, bounds, width=256, height=256, steps=96, mode='smoke', sigma=12.0, emission_color=None, albedo=(0.9, 0.9, 0.95), lights=None, background=(0.0, 0.0, 0.0), early_term=True, empty_skip=True, occ_res=24, occ_thresh=0.001, term_eps=0.002, self_shadow=False, shadow_steps=16, shadow_sigma=None, ambient=(0.42, 0.52, 0.66), phase_g=0.0, powder=False, multi_scatter=1, only=None)` -- Render a density FIELD (callable points(N,3)->density>=0) volumetrically by marching camera rays through `bounds`=(min_corner, max_corner) and accumulating the volume-rendering integral.
 - `png_bytes(rgb01, level=6, filters=True)` -- Encode an (H,W,3) image in [0,1] to PNG *bytes* -- a minimal, pure-stdlib encoder (zlib + struct), so the render module carries no image-library dependency.
 - `save_image(path, rgb01, level=6, filters=True)` -- Save an (H,W,3) [0,1] image, routed by extension: .png uses the stdlib encoder (deterministic, zero-dependency, always available); anything else (.jpg, .webp, .bmp, ...) uses Pillow when installed and otherwise refuses with the install command -- the same opt-in contract as every accelerator (`pip install pillow`, or the `images` extra).
 - `save_png(path, rgb01, level=6, filters=True)` -- Write an (H,W,3) image in [0,1] to a PNG file.
 - `frame_delta_tiles(prev, curr, tile=32, thresh=0.001)` -- The pixel-streaming primitive: split two frames into `tile`x`tile` blocks and return only the tiles that CHANGED, as a list of (row, col, tile_pixels).
+- `fit_camera(mesh, direction=(1.0, 0.75, 1.1), up=(0.0, 1.0, 0.0), fov_deg=50.0, aspect=1.0, margin=1.06)` -- Solve for the camera that FRAMES a mesh: the closest eye along `direction` that keeps every vertex inside the frustum, with the target chosen so the subject is CENTRED.
+- `gauss_area_map(mesh, nth=24, nph=48)` -- The Extended Gaussian Image (Horn 1984): every face's AREA binned by its NORMAL's direction on the sphere.
+- `egi_similarity(ref_mesh, mesh, nth=24, nph=48)` -- Orientation-field preservation in [0, 1]: 1 - normalised L1 between the two Extended Gaussian Images.
+- `silhouette_mask(mesh, direction, up=(0.0, 1.0, 0.0), size=128, frame=None)` -- A binary ORTHOGRAPHIC coverage mask of `mesh` seen along `direction` -- the silhouette and nothing else.
+- `silhouette_sweep(ref_mesh, mesh, n_azimuth=6, size=128, include_top=True, ref_cache=None)` -- Rotate the pair under a fixed orthographic camera and score silhouette IoU at every stop -- Moose's turntable, made cheap enough to be a DEFAULT guard.
 - `turnaround(mesh, ref_mesh=None, views=('top', 'front', 'side', '3q'), width=360, height=360, base_color=(0.7, 0.72, 0.62), ref_color=(0.55, 0.68, 0.75), background=(0.05, 0.06, 0.08), margin=1.6)` -- TURNAROUND: render `mesh` from the standard modelling views (top/front/side/3q) in ONE call and, if a `ref_mesh` is given, score how well the silhouettes MATCH per view -- the loop that (by hand) caught the mantis's slurped legs and the box-model's proportions.
 
 ### `holographic_pipeline`
@@ -247,7 +252,8 @@
 *Binary glTF (.glb) emission and parsing (FWD-2): the boundary between the NumPy back end and three.js.*
 
 - `mesh_to_glb(mesh, base_colour=(0.8, 0.8, 0.8, 1.0), generator='holostuff', material=None, texture=None)` -- Serialise a `Mesh` to a single-file binary glTF (`.glb`) and return the bytes.
-- `glb_to_mesh(data)` -- Parse a binary glTF (`.glb`) back into a `Mesh`.
+- `scene_primitives(gltf)` -- THE canonical vertex order of a glTF scene: the ordered list of (mesh_index, primitive_index, world_matrix, node_index) the active scene references, walked depth-first with node transforms composed.
+- `glb_to_mesh(data)` -- Parse a binary glTF (`.glb`) back into a `Mesh` -- the WHOLE scene, not a fragment.
 - `write_glb(mesh, path, **kw)` -- Write a mesh to a `.glb` file.
 - `read_glb(path)` -- Read a mesh from a `.glb` file.
 - `validate_glb(data)` -- A structural conformance check on a `.glb`: the container a real GLTFLoader requires.

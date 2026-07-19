@@ -103,10 +103,16 @@ def polygon2d(vertices):
 # Lift operators: a 2-D SDF -> a 3-D SDF f(P:(n,3))->(n,).
 # ---------------------------------------------------------------------------------------------------------
 
-def extrude(sd2d, height=1.0):
-    """EXTRUDE a 2-D SDF into a 3-D prism of half-`height` along Z (iq's opExtrusion). EXACT: the in-plane 2-D
-    distance and the |z|-cap distance combine without distortion. Returns a 3-D SDF f(P)->dist -- a logo becomes
-    a solid badge, a gear cross-section a gear."""
+def extrude(sd2d, height=1.0, total_height=None):
+    """EXTRUDE a 2-D SDF into a 3-D prism along Z (iq's opExtrusion). EXACT: the in-plane 2-D distance and the
+    |z|-cap distance combine without distortion. Returns a 3-D SDF f(P)->dist -- a logo becomes a solid badge,
+    a gear cross-section a gear.
+
+    LOUD: `height` is a HALF-extent -- the solid spans |z| < height, total thickness 2*height. This has bitten
+    real users (half-thick extrusions in Poly Studio). If you think in total thickness, pass `total_height=`
+    instead (mutually exclusive with a non-default `height`)."""
+    if total_height is not None:
+        height = 0.5 * float(total_height)
     def f(P):
         P = np.atleast_2d(np.asarray(P, float))
         d = sd2d(P[:, :2])                                       # 2-D distance in the XY plane

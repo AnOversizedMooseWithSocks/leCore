@@ -268,7 +268,18 @@ def reciprocal_rank_fusion(ranked_lists, k=60, top=None, weights=None):
     rank RESCUE a dense-buried answer. This is the honest fix for a lopsided retriever pair.
 
     WHY RRF over a convex score combination: a linear a*cosine + (1-a)*bm25 needs the two score scales aligned
-    (min-max or z-score), which is brittle and query-dependent; RRF sidesteps it entirely (it uses ranks)."""
+    (min-max or z-score), which is brittle and query-dependent; RRF sidesteps it entirely (it uses ranks).
+
+    SR-BETA SWEEP RESULT (2026-07-18), the verdict behind the ~(1.0, 0.3) recommendation, measured on the two
+    archetypal cases with realistic top-k truncated lists: (A) DENSE HIT -- gold at dense rank 1, a spurious
+    BM25 doc at bm rank 1 -- is KEPT at every beta<=1 (the dense-#1 item 1/(k+1) is never overtaken by the
+    spurious doc even at equal weight; the recorded 6->3 regression came from a WEAKER dense list with the hit
+    at rank 2-3, which lopsided equal-weight fusion does lose -- down-weighting BM25 restores it). (B) BURIED
+    RESCUE -- gold low in the dense top-k but present, gold at BM25 rank 1 -- is rescued across essentially all
+    (k, beta>=0.3). (C) ABSENT gold (not in the dense top-k at all) needs beta>1, the hard-conflict regime that
+    sacrifices dense hits -- NOT fusion job; widen the retriever k instead. So dense-dominant (1.0, 0.3) is the
+    honest optimum. KEPT NEGATIVES: equal-weight fusion of a strong+weak pair is refuted (loses dense hits);
+    beta>1 is refuted (loses more dense hits than it rescues); k stays at the standard 60."""
     if weights is None:
         weights = [1.0] * len(ranked_lists)
     fused = {}

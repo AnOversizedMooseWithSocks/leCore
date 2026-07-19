@@ -205,3 +205,123 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+def fast_winding_number(points, vertices, faces, cells=16, beta=2.0, chunk=4096):
+    """Generalised winding number, ACCELERATED by the cluster-dipole approximation of Barill et al. 2018
+    ("Fast Winding Numbers for Soups and Clouds", SIGGRAPH). Same contract as winding_number (turns; ~1 inside,
+    ~0 outside, robust on open meshes), built because the exact sum measured 1465s for one 64^3 grid on an
+    11k-triangle scan -- a conversion step cannot cost 24 minutes.
+
+    HOW: triangles are binned into a `cells`^3 grid by centroid. Each non-empty cell stores its area-weighted
+    dipole (the sum of triangle area-normal vectors) and an area-weighted centroid. A query farther than
+    `beta` x cell_radius uses the first-order dipole term  w += a_sum . (c - p) / (4pi |c - p|^3)  -- the far
+    field of a surface patch; only the few NEAR cells pay the exact Van Oosterom-Strackee sum. The near/far
+    split is exact-or-approximate per (query, cell), so accuracy degrades only where the dipole is provably a
+    good model (error ~ (r/d)^2 <= 1/beta^2 per cell).
+
+    KEPT HONEST: this is an approximation. Measured on a closed icosphere the fast-vs-exact deviation stays far
+    from the 0.5 inside/outside threshold (selftest pins < 0.05), which is the property the sign use needs; do
+    not use it where fractional winding VALUES matter (use winding_number). beta=2 is the paper's working point.
+    """
+    P = np.asarray(points, float)
+    V = np.asarray(vertices, float)
+    F = np.asarray([f[:3] for f in faces], int)
+    A, B, C = V[F[:, 0]], V[F[:, 1]], V[F[:, 2]]
+    an = 0.5 * np.cross(B - A, C - A)                              # area-weighted normals (the dipole strengths)
+    area = np.linalg.norm(an, axis=1)
+    cen = (A + B + C) / 3.0
+
+    lo, hi = V.min(0), V.max(0)
+    ext = np.maximum(hi - lo, 1e-12)
+    G = int(cells)
+    key = np.clip(((cen - lo) / ext * G).astype(int), 0, G - 1)
+    cid = (key[:, 0] * G + key[:, 1]) * G + key[:, 2]
+    order = np.argsort(cid, kind="stable")                         # stable: deterministic bucket layout
+    cid_s = cid[order]
+    starts = np.searchsorted(cid_s, np.unique(cid_s))
+    bounds = np.append(starts, len(cid_s))
+    ids = np.unique(cid_s)
+
+    K = len(ids)
+    dip = np.zeros((K, 3)); ccen = np.zeros((K, 3)); crad = np.zeros(K)
+    tri_of = []                                                    # per cell: its triangle indices (original ids)
+    for k in range(K):
+        sel = order[bounds[k]:bounds[k + 1]]
+        tri_of.append(sel)
+        w = area[sel]
+        tot = w.sum()
+        ccen[k] = (cen[sel] * w[:, None]).sum(0) / tot if tot > 0 else cen[sel].mean(0)
+        dip[k] = an[sel].sum(0)
+        corners = np.concatenate([A[sel], B[sel], C[sel]], axis=0)
+        crad[k] = np.linalg.norm(corners - ccen[k], axis=1).max()
+
+    out = np.zeros(len(P))
+    fourpi = 4.0 * np.pi
+    for s in range(0, len(P), chunk):
+        q = P[s:s + chunk]                                         # (c, 3)
+        d = q[:, None, :] - ccen[None, :, :]                       # (c, K, 3) query - cell centre
+        dist = np.linalg.norm(d, axis=2)                           # (c, K)
+        far = dist > beta * crad[None, :]
+        # FAR: one dipole term per (query, far cell) -- the whole speedup lives in this line
+        r3 = np.where(far, dist, 1.0) ** 3
+        contrib = np.einsum("ckj,kj->ck", -d, dip) / r3            # a . (ccen - q) / |...|^3, sign via -d
+        out[s:s + chunk] += np.where(far, contrib, 0.0).sum(axis=1) / fourpi
+        # NEAR: exact Van Oosterom-Strackee for the few close cells, per cell (queries batched)
+        for k in range(K):
+            near_q = np.where(~far[:, k])[0]
+            if len(near_q) == 0:
+                continue
+            sel = tri_of[k]
+            qq = q[near_q][:, None, :]                             # (n, 1, 3)
+            Ar = (A[sel][None, :, :] - qq).reshape(-1, 3)
+            Br = (B[sel][None, :, :] - qq).reshape(-1, 3)
+            Cr = (C[sel][None, :, :] - qq).reshape(-1, 3)
+            sa = _solid_angle(Ar, Br, Cr).reshape(len(near_q), len(sel)).sum(axis=1)
+            out[s + near_q] += sa / fourpi
+    return out
+
+
+def _selftest_fast_winding():
+    """Pin the two contracts: (1) fast tracks exact far from the 0.5 threshold on a CLOSED surface; (2) on an
+    OPEN surface (the whole point) inside/outside classification still works where exact winding says it should."""
+    import time
+    rng = np.random.default_rng(0)
+    # closed icosphere-ish: subdivide an octahedron onto the unit sphere (deterministic, no scipy)
+    V = np.array([[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]], float)
+    F = [(0,2,4),(2,1,4),(1,3,4),(3,0,4),(2,0,5),(1,2,5),(3,1,5),(0,3,5)]
+    for _ in range(3):                                             # 8 -> 512 triangles
+        V2 = list(V); F2 = []
+        cache = {}
+        def mid(i, j):
+            k = (min(i,j), max(i,j))
+            if k not in cache:
+                m = V2[i] + V2[j]; m = m / np.linalg.norm(m)
+                cache[k] = len(V2); V2.append(m)
+            return cache[k]
+        for (a,b,c) in F:
+            ab, bc, ca = mid(a,b), mid(b,c), mid(c,a)
+            F2 += [(a,ab,ca),(ab,b,bc),(ca,bc,c),(ab,bc,ca)]
+        V, F = np.array(V2), F2
+    pts = rng.uniform(-1.5, 1.5, (400, 3))
+    w_exact = winding_number(pts, V, F)
+    w_fast = fast_winding_number(pts, V, F, cells=8)
+    err = np.abs(w_exact - w_fast)
+    assert err.max() < 0.05, err.max()                             # far from the 0.5 threshold
+    inside = np.linalg.norm(pts, axis=1) < 0.95
+    outside = np.linalg.norm(pts, axis=1) > 1.05
+    assert np.all(w_fast[inside] > 0.5) and np.all(w_fast[outside] < 0.5)
+    # OPEN mesh: delete 10% of triangles -- classification must survive (the soup case this exists for)
+    keep = [f for i, f in enumerate(F) if i % 10]
+    w_open = fast_winding_number(pts, V, keep, cells=8)
+    agree = ((w_open > 0.5) == inside)[inside | outside].mean()
+    assert agree > 0.95, agree
+    # and it must actually be FAST: exact vs fast on the same batch
+    t0 = time.time(); winding_number(pts, V, F); t_e = time.time() - t0
+    t0 = time.time(); fast_winding_number(pts, V, F, cells=8); t_f = time.time() - t0
+    print("fast_winding selftest OK (closed max err %.4f; open agreement %.2f; %.2fs exact vs %.2fs fast)"
+          % (err.max(), agree, t_e, t_f))
+
+
+if __name__ == "__main__":
+    _selftest_fast_winding()

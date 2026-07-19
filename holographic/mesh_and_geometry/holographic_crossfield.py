@@ -63,7 +63,16 @@ def face_frames(V, F):
     """A per-face orthonormal frame `(normal, ex, ey)`. `ex` is the first edge, projected into the face plane, so
     the frame is a deterministic function of the face's winding -- which is why the mesh must be oriented."""
     n = np.cross(V[F[:, 1]] - V[F[:, 0]], V[F[:, 2]] - V[F[:, 0]])
-    n = n / np.linalg.norm(n, axis=1, keepdims=True)
+    # DEGENERATE-FACE GUARD: a zero-area face (collinear corners -- hole-fill fans and repair emit these) has
+    # ||n|| = 0, and the bare divide produced NaN that propagated through the orientation field into
+    # position_field's integer round() and crashed the retopo on a hole-filled scan. The division below is the
+    # EXACT original (bare norm, no epsilon) so every non-degenerate frame is BIT-IDENTICAL -- the phi pins
+    # d2c81dd2/cee8e113 hold. Only the zero-norm ROWS are then overwritten with a finite stable frame; a
+    # zero-area face carries no direction, so the field ignores it. errstate silences the expected 0/0 warning.
+    nn = np.linalg.norm(n, axis=1, keepdims=True)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        n = n / nn
+    n = np.where(np.isfinite(n).all(axis=1, keepdims=True), n, np.array([0.0, 0.0, 1.0]))
     ex = V[F[:, 1]] - V[F[:, 0]]
     ex = ex - (ex * n).sum(1, keepdims=True) * n
     ex = ex / np.linalg.norm(ex, axis=1, keepdims=True)
@@ -161,23 +170,101 @@ def connection_laplacian(F, rho, dual_edges):
     return L
 
 
-def cross_field(mesh):
+def _sparse_smallest_eigvec(nF, rho, dual_edges, tol=1e-10, max_iters=20000, seed=0):
+    """The connection Laplacian's smallest-eigenvalue eigenvector WITHOUT materialising the matrix: shifted
+    power iteration on (cI - L), whose LARGEST eigenvector is L's smallest. This is the "shifted power
+    iteration on a sparse operator" that connection_laplacian's HONEST SCOPE note has always named as the
+    standard remedy -- now implemented. It is the engine's recurring "iterate a projection" pattern.
+
+    NOT kept-negative 3: that negative is JACOBI SMOOTHING -- per-face normalize-of-neighbour-average -- which
+    provably oscillates (torus energy 3620 -> 2788 -> rose to 2865). Power iteration normalises GLOBALLY (one
+    L2 norm over the whole vector) and converges monotonically to the extreme eigenvector at rate
+    ((c - lambda_2)/(c - lambda_min))^k. The two iterations look similar and are not.
+
+    c is the tightest Gershgorin bound: every row has |diag| = deg_f and off-diagonal mass deg_f with
+    |weights| = 1, so lambda <= 2 * max_deg (= 6 on a closed triangle mesh's dual). A tight c matters: the
+    convergence ratio is 1 - gap/(c - lambda_min), so slack in c directly slows the solve.
+
+    Deterministic: seeded start vector, fixed iteration order, no ties (the eigenvector is unique up to global
+    phase for a connected dual graph with a simple smallest eigenvalue; phase is normalised by the caller only
+    through angle/4, and parity with the dense path is pinned up to that phase in the selftest).
+
+    Returns (u, lambda_min_estimate, total_matvecs)."""
+    e_f = np.fromiter((f for f, g in dual_edges), int, len(dual_edges))
+    e_g = np.fromiter((g for f, g in dual_edges), int, len(dual_edges))
+    w_fg = np.exp(1j * 4.0 * np.array([rho[(g, f)] for f, g in dual_edges]))   # L[f,g] weight (negated below)
+    w_gf = np.exp(1j * 4.0 * np.array([rho[(f, g)] for f, g in dual_edges]))   # L[g,f] weight
+    deg = np.zeros(nF)
+    np.add.at(deg, e_f, 1.0)
+    np.add.at(deg, e_g, 1.0)
+    c = 2.0 * float(deg.max())
+
+    def matvec_L(x):
+        y = deg * x
+        np.add.at(y, e_f, -w_fg * x[e_g])
+        np.add.at(y, e_g, -w_gf * x[e_f])
+        return y
+
+    # ITERATION DELEGATED to numerics.smallest_eigenpair (M7 / ledger P2): the two-phase shifted-inverse
+    # solver is now the shared primitive; this function keeps what is Laplacian-SPECIFIC (the dual-edge matvec
+    # and the Gershgorin bound c = 2*max_deg) and hands the generic iteration over. The full measured history
+    # of every algorithmic choice (inverse-vs-power, two phases, eigen-residual exit, stall-is-completion)
+    # travels in the primitive's docstring. Parity with the dense path remains pinned in the selftests below;
+    # the sparse phi hash is pinned in tests/test_cad_backlog (cee8e1134fd1a71f on the 3072-face box).
+    from holographic.misc.holographic_numerics import smallest_eigenpair as _se
+    u, lam, matvecs = _se(matvec_L, nF, c, seed=seed)
+    return u, lam, matvecs
+
+
+def cross_field(mesh, solver="auto", sparse_threshold=2048, boundary="raise"):
     """The SMOOTHEST 4-RoSy field: per-face angles `phi` in `(-pi/4, pi/4]`, plus the connection.
 
     The minimiser of the Dirichlet energy is the eigenvector of the connection Laplacian's smallest eigenvalue
-    (Knoppel et al. 2013). It is a solve, not an iteration -- see kept negative 3.
+    (Knoppel et al. 2013). It is a solve, not a LOCAL iteration -- kept negative 3 (Jacobi smoothing
+    oscillates) stands untouched; the sparse path below is a global power iteration, a different animal.
 
-    Returns `(phi, ctx)` where `ctx` carries `rho`, `rings`, `dual_edges` and `defect`, so `singularity_index` and
-    `field_energy` do not rebuild them."""
+    `solver`: "auto" (default) uses the dense eigh below `sparse_threshold` faces -- BIT-IDENTICAL to the
+    historical behaviour for every mesh that was previously affordable, so no existing decision flips -- and
+    the sparse shifted power iteration above it, where the dense path was never a real option (measured
+    F^3.28: 3k faces 63 s, 40k faces 3.4 days and a 26 GB matrix). "dense" / "sparse" force a path.
+
+    `boundary`: "raise" (default, the historical behaviour) rejects an open mesh. "natural" solves it with
+    FREE boundaries -- and this costs nothing extra, because `connection` only ever transported across
+    INTERIOR dual edges: a boundary face simply has fewer neighbours, so its Laplacian row has a smaller
+    diagonal and the field is unconstrained there, which IS the natural boundary condition. The closed check
+    was a guard, not a mathematical necessity. This matters because every photogrammetry scan is open (the
+    ladybird has 31,932 boundary edges) and a scan is exactly what surface-route retopo exists to serve. The
+    default stays "raise" so no existing caller's error contract changes; closed meshes take a bit-identical
+    path either way (pinned).
+
+    KEPT NEGATIVE, and it is a TRAP not a limitation: the first natural-boundary test returned an all-NaN
+    field and looked like the boundary maths failing. It was not -- the fixture (_uv_sphere_fixture) has 48
+    ZERO-AREA pole triangles, whose face normal is 0/0. Degenerate faces poison the connection long before
+    the boundary matters. An open mesh with no degenerate faces solves cleanly (a 180-face box patch with 10
+    boundary edges: finite field, lambda 0.0896, energy 62.07). Feed this a scan only after culling
+    zero-area faces, or the NaN will be blamed on the wrong stage -- as it was here, for a minute.
+
+    Returns `(phi, ctx)`; ctx carries `rho`, `rings`, `dual_edges`, `defect`, `lambda_min`, and now `solver`
+    (+ `power_iters` on the sparse path), so `singularity_index` and `field_energy` do not rebuild them."""
     V = np.asarray(mesh.vertices, float)
     F = np.asarray(mesh.faces, int)
     if len(F) < 4:
         raise ValueError("cross_field needs a closed surface with at least 4 faces")
 
     rho, opposite, next_vertex, dual_edges = connection(V, F)
-    if len(dual_edges) * 2 != len(F) * 3:
-        raise ValueError("the mesh has boundary edges; cross_field wants a CLOSED surface")
+    n_boundary = len(F) * 3 - len(dual_edges) * 2
+    if n_boundary != 0 and boundary == "raise":
+        raise ValueError("the mesh has boundary edges; cross_field wants a CLOSED surface "
+                         "(pass boundary='natural' to solve with free boundaries)")
 
+    use_sparse = (solver == "sparse") or (solver == "auto" and len(F) > int(sparse_threshold))
+    if use_sparse:
+        u, lam, iters = _sparse_smallest_eigvec(len(F), rho, dual_edges)
+        phi = np.angle(u) / 4.0
+        ctx = {"rho": rho, "rings": vertex_rings(F, opposite, next_vertex, len(V)), "dual_edges": dual_edges,
+               "defect": angle_defect(V, F), "lambda_min": lam, "n_vertices": len(V),
+               "solver": "sparse", "power_iters": iters, "n_boundary_edges": n_boundary}
+        return phi, ctx
     L = connection_laplacian(F, rho, dual_edges)
     if np.abs(L - L.conj().T).max() > 1e-9:
         raise ValueError("the connection Laplacian is not Hermitian: the transport is inconsistent")
@@ -185,7 +272,8 @@ def cross_field(mesh):
     phi = np.angle(vec[:, 0]) / 4.0
 
     ctx = {"rho": rho, "rings": vertex_rings(F, opposite, next_vertex, len(V)), "dual_edges": dual_edges,
-           "defect": angle_defect(V, F), "lambda_min": float(w[0]), "n_vertices": len(V)}
+           "defect": angle_defect(V, F), "lambda_min": float(w[0]), "n_vertices": len(V), "solver": "dense",
+           "n_boundary_edges": n_boundary}
     return phi, ctx
 
 
@@ -389,7 +477,60 @@ def face_field_to_vertex(mesh, phi):
     return acc
 
 
-def position_field(mesh, orient, edge_length, iterations=10, seed=0):
+def graded_levels(mesh, target_edge, rho0, k_min=0, k_max=6):
+    """Per-vertex power-of-two SIZE LEVELS from a target edge length, BALANCED so |k_i - k_j| <= 1 across every
+    mesh edge -- the size field that lets extract_quads grade its lattice (M1 increment 1). rho(v) = rho0 *
+    2^k(v); a vertex wanting a fine edge gets a high k, and the balance relaxation (a quadtree 2:1 balance)
+    caps the level JUMP across any edge at 1.
+
+    WHY power-of-two and WHY balanced: the extractor keys each vertex as round(P/rho) in its OWN level's
+    lattice. 2^k lattices have NESTED cell walls (every coarse wall is a fine wall), so cells at different
+    levels still ALIGN -- the only artefact at a level boundary is a hanging node (a fine wall interior to a
+    coarse cell). Capping |dk| <= 1 limits that to ONE hanging node per coarse edge instead of three, which is
+    what keeps the T-junction stitch simple. |dk| >= 2 is not wrong topologically but multiplies the stitch
+    cases; the balance pass is cheap insurance. (Verified in the M1 math tests: walls nest for any dk; the
+    <=1 rule is about stitch simplicity, not commensurability -- my first framing of it as commensurability
+    was wrong and is kept as a NOTE.)
+
+    target_edge is (n_vertices,) desired edge length per vertex (e.g. clamp(c/|H|) from mesh_curvature). Level
+    k(v) = clamp(round(log2(rho0 / target_edge(v))), k_min, k_max): a SMALLER target -> larger k -> finer rho.
+    Returns (levels (n_vertices,) int, rho (n_vertices,) float = rho0 * 2^levels). Deterministic: the balance
+    relaxation is a fixed-point iteration over a fixed edge order, terminating when no edge violates 2:1
+    (it always terminates -- each pass can only LOWER a level toward its neighbour, bounded below by k_min)."""
+    V = np.asarray(mesh.vertices, float)
+    F = [tuple(int(i) for i in f[:3]) for f in mesh.faces]
+    nV = len(V)
+    te = np.asarray(target_edge, float).reshape(-1)
+    if te.shape[0] != nV:
+        raise ValueError("target_edge must be (n_vertices,)")
+    # seed levels from the target edge; a finer target (smaller) => higher level
+    with np.errstate(divide="ignore", invalid="ignore"):
+        raw = np.log2(np.where(te > 1e-12, rho0 / te, 1.0))
+    k = np.clip(np.round(raw), k_min, k_max).astype(np.int64)
+    # unique undirected edges, fixed order
+    eset = set()
+    for f in F:
+        for a, b in ((f[0], f[1]), (f[1], f[2]), (f[2], f[0])):
+            eset.add((a, b) if a < b else (b, a))
+    edges = np.array(sorted(eset), dtype=np.int64) if eset else np.zeros((0, 2), np.int64)
+    # 2:1 BALANCE: repeatedly LOWER the higher endpoint of any over-jumped edge toward within 1 of its
+    # neighbour. Only lowering (never raising) guarantees monotone termination bounded by k_min. A raise-based
+    # scheme could oscillate; lowering cannot. (Kept negative: balancing by raising is not deterministic-safe.)
+    for _ in range(k_max - k_min + 2 + nV):        # generous cap; converges far sooner, asserted below
+        d = np.abs(k[edges[:, 0]] - k[edges[:, 1]]) if len(edges) else np.array([0])
+        if len(edges) == 0 or int(d.max()) <= 1:
+            break
+        hi = np.where(k[edges[:, 0]] > k[edges[:, 1]], edges[:, 0], edges[:, 1])
+        lo = np.where(k[edges[:, 0]] > k[edges[:, 1]], edges[:, 1], edges[:, 0])
+        viol = d > 1
+        # lower each violating edge's high endpoint to neighbour+1 (batch min via np.minimum.at semantics)
+        target_k = k[lo[viol]] + 1
+        np.minimum.at(k, hi[viol], target_k)
+    rho = rho0 * (2.0 ** k.astype(float))
+    return k, rho
+
+
+def position_field(mesh, orient, edge_length, iterations=10, seed=0, levels=None, fast=False):
     """IFAM POSITION FIELD (4-PoSy): optimise a per-vertex LATTICE position p_i, aligned to the orientation field, by
     the local EXTRINSIC smoothing operator of Instant Field-Aligned Meshes (Jakob, Tarini, Panozzo & Sorkine-Hornung,
     SIGGRAPH Asia 2015). Each vertex carries a position p_i on a rho-spaced grid whose axes are the orientation dir
@@ -402,8 +543,11 @@ def position_field(mesh, orient, edge_length, iterations=10, seed=0):
 
     HONEST SCOPE: this is the position FIELD only -- it moves points onto a field-aligned lattice. Turning that lattice
     into the final quad MESH is the EXTRACTION step (build G' from unit integer jumps + detect faces, IFAM sec 4.4),
-    which the paper itself flags as the error-prone part -- NOT built here yet. Combined with a deformation-guided
-    orientation field (guided_cross_field), this is deformation-aware position-field remeshing."""
+    which lives in extract_quads (right below) and is composed by surface_retopo. VERIFIED end to end: surface_retopo
+    on an icosphere yields a field-aligned quad-dominant mesh (165 quads + boundary tris). The compatible-representative
+    averaging here is the step a research pass measured as MANDATORY -- naive per-vertex rounding is a trivial fixed
+    point (neighbour lattice coherence stays random); translating each neighbour by integer lattice steps before
+    averaging is what creates coherence. With guided_cross_field this is deformation-aware position-field remeshing."""
     V = np.asarray(mesh.vertices, float)
     N = np.asarray(mesh.vertex_normals(), float)
     O = np.asarray(orient, float)
@@ -411,6 +555,18 @@ def position_field(mesh, orient, edge_length, iterations=10, seed=0):
     O = O / (np.linalg.norm(O, axis=1, keepdims=True) + 1e-12)
     Bt = np.cross(N, O)                                        # the perpendicular lattice axis
     rho = float(edge_length); eps = 1e-4
+    # M1 increment 2 -- GRADED operator. levels=None keeps the UNIFORM path bit-identical (rho is the scalar
+    # below, every round()/acc unchanged, phi pins hold). When per-vertex `levels` (int, from graded_levels)
+    # are given, each EDGE uses rho_e = edge_length * 2^max(k_i, k_j) -- the COARSER of the two lattices, so a
+    # fine vertex expressed against a coarser neighbour still lands on integer steps (2^k walls are nested).
+    # When all levels are equal this is EXACTLY rho*2^k, a single constant == the uniform operator (proven in
+    # the M1 reduction test), which is why the graded path is a strict superset and safe to add default-off.
+    rho_v = None
+    if levels is not None:
+        klv = np.asarray(levels, np.int64).reshape(-1)
+        if klv.shape[0] != len(V):
+            raise ValueError("levels must be (n_vertices,) integer power-of-two levels from graded_levels")
+        rho_v = rho * (2.0 ** klv.astype(float))
     nbrs = [set() for _ in range(len(V))]
     for f in mesh.faces:
         ff = [int(x) for x in f]; k = len(ff)
@@ -420,6 +576,32 @@ def position_field(mesh, orient, edge_length, iterations=10, seed=0):
     nbrs = [sorted(s) for s in nbrs]
     P = V.copy()
     rng = np.random.default_rng(int(seed))
+    if fast:
+        # H2 FAST PATH (opt-in, default off like the QEM decimator's fast path -- same reason: a ULP-level
+        # difference must never silently flip a tie). This vectorises ONLY the inner neighbour loop while
+        # keeping the EXACT sequential Gauss-Seidel outer order (rng.permutation(seed)). MEASURED: the outer
+        # order is LOAD-BEARING -- Jacobi (all-at-once) matches the pinned lattice only 55%, colored-GS 52%,
+        # and even sequential GS with a DIFFERENT seed only ~58%; the pinned retopo is tied to seed=0's exact
+        # visit order. But vectorising the neighbour AVERAGE within a fixed visit order is safe: each vertex's
+        # update reads the current P and writes one vertex, so nothing about the GS dependency changes. The dead
+        # li/lj/_q derivation terms (unused: _q never feeds acc) are dropped. MEASURED bit-identical: lattice
+        # match 100%, max position diff 2e-11 (dies in extraction's cell rounding -> EXTRACTED MESH IDENTICAL,
+        # 0.00 vertex diff, same face count). So fast=True is a speed-only change, verified not a decision change.
+        nbr_arr = [np.asarray(s, int) for s in nbrs]
+        for _ in range(int(iterations)):
+            for i in rng.permutation(len(V)):
+                js = nbr_arr[i]
+                if len(js) == 0:
+                    continue
+                diff = P[i] - P[js]                                          # (deg, 3) over all neighbours at once
+                rho_e = rho if rho_v is None else np.maximum(rho_v[i], rho_v[js])[:, None]
+                a = np.round(np.sum(diff * O[js], axis=1) / (rho_e.ravel() if rho_v is not None else rho))
+                c = np.round(np.sum(diff * Bt[js], axis=1) / (rho_e.ravel() if rho_v is not None else rho))
+                step = (rho_e if rho_v is not None else rho) * (a[:, None] * O[js] + c[:, None] * Bt[js])
+                pi = (P[js] + step).mean(0)                                  # neighbour-weighted average (w = deg)
+                rel = pi - V[i]
+                P[i] = V[i] + (rel - (rel @ N[i]) * N[i])
+        return P
     for _ in range(int(iterations)):
         for i in rng.permutation(len(V)):
             js = nbrs[i]
@@ -432,13 +614,314 @@ def position_field(mesh, orient, edge_length, iterations=10, seed=0):
                 lj = 2.0 * ((N[j] + d * N[i]) @ (V[i] - V[j])) / denom
                 _q = 0.5 * (V[i] + V[j]) - 0.25 * (li * N[i] + lj * N[j])   # on both tangent planes (unused directly but
                 diff = P[i] - P[j]                                          # the derivation behind the integer match)
-                a = round(float(diff @ O[j]) / rho); c = round(float(diff @ Bt[j]) / rho)
-                acc += P[j] + rho * (a * O[j] + c * Bt[j])     # translate neighbour by integer rho-steps to line up
+                rho_e = rho if rho_v is None else max(rho_v[i], rho_v[j])   # coarser lattice of the pair
+                a = round(float(diff @ O[j]) / rho_e); c = round(float(diff @ Bt[j]) / rho_e)
+                acc += P[j] + rho_e * (a * O[j] + c * Bt[j])   # translate neighbour by integer rho_e-steps to line up
                 w += 1.0
             pi = acc / w
             rel = pi - V[i]
             P[i] = V[i] + (rel - (rel @ N[i]) * N[i])          # keep p_i on the tangent plane at v_i (near the surface)
     return P
+
+
+def field_to_vertex_dirs(mesh, phi):
+    """Per-FACE 4-RoSy angles -> per-VERTEX 3-D directions, which is what position_field consumes.
+
+    The two field stages disagree about where a field lives (cross_field: faces; position_field: vertices),
+    and every caller of the pair was going to write this averaging loop. It is one function, here, once.
+    Averaging the DIRECTION VECTORS (not the angles) is deliberate: angles are mod pi/2, so their arithmetic
+    mean is meaningless across a lattice jump -- the vectors average correctly because the 4-RoSy ambiguity is
+    resolved into the face frame first."""
+    V = np.asarray(mesh.vertices, float)
+    F = np.asarray(mesh.faces, int)[:, :3]
+    _n, ex, ey = face_frames(V, F)
+    phi = np.asarray(phi, float)
+    fd = np.cos(phi)[:, None] * ex + np.sin(phi)[:, None] * ey
+    ov = np.zeros((len(V), 3))
+    cnt = np.zeros(len(V))
+    for k in range(3):
+        np.add.at(ov, F[:, k], fd)
+        np.add.at(cnt, F[:, k], 1.0)
+    ov = ov / np.maximum(cnt, 1.0)[:, None]
+    return ov / (np.linalg.norm(ov, axis=1, keepdims=True) + 1e-12)
+
+
+def feature_size_field(mesh, k=12, opposing=-0.3, cap=None):
+    """R5 -- LOCAL THICKNESS per vertex: distance to the nearest surface point whose normal OPPOSES this
+    vertex's (dot < `opposing`), i.e. the other wall of a plate or the far side of a leg. This is the sizing
+    signal that prevents 'cells coarser than the feature': feed clamp(thickness/2) into graded_levels as the
+    target edge and thin parts get a FINER lattice while thick bodies stay coarse -- attacking the ROOT of the
+    dropped-legs failure where the silhouette guard only catches the symptom (Dey-Zhao local-feature-size,
+    approximated by opposite-normal proximity instead of a full medial axis).
+
+    THE QUERY IS A RECALL (H5): the nearest-opposing-point search runs on SpatialMemory (position hypervectors,
+    streamed top-k) -- the backlog's predicted composition, no new nearest-neighbour machinery. k neighbours
+    are recalled per vertex and filtered by the normal test; vertices with no opposing neighbour in the top-k
+    (a locally-open surface, e.g. a single-sided sheet) get `cap` (default: the mesh bbox diagonal -- 'no
+    thickness constraint here'). Deterministic per the memory's seed. Returns (n_vertices,) thickness."""
+    import numpy as np
+    from holographic.sampling_and_signal.holographic_spatialmem import SpatialMemory
+    V = np.asarray(mesh.vertices, float)
+    N = np.asarray(mesh.vertex_normals(), float)
+    mem = SpatialMemory(V, dim=256, seed=0)
+    idx = mem.nearest(V, k=int(k))
+    diag = float(np.linalg.norm(V.max(0) - V.min(0)))
+    cap = float(cap) if cap is not None else diag
+    thick = np.full(len(V), cap)
+    for i in range(len(V)):
+        js = idx[i]
+        opp = js[(N[js] @ N[i]) < float(opposing)]
+        if len(opp):
+            d = np.linalg.norm(V[opp] - V[i], axis=1)
+            d = d[d > 1e-9]
+            if len(d):
+                thick[i] = float(d.min())
+    return thick
+
+
+def surface_retopo(mesh, edge_length=None, density=1.0, iterations=20, guide_dirs=None, guide_weight=5.0,
+                   boundary="natural", solver="auto", shrink=True, fast=False, snap_singular=False,
+                   feature_sized=False):
+    """SURFACE-ROUTE RETOPO: a field-aligned quad-dominant mesh whose vertices never leave the source surface.
+
+    The composition the whole retopo arc was for -- and it is four EXISTING stages plus one new key:
+        cross_field / guided_cross_field  (orientation; sparse since R1, open meshes since R3a/R6a)
+          -> field_to_vertex_dirs         (faces -> vertices)
+          -> position_field               (IFAM 4-PoSy lattice; already built)
+          -> extract_quads                (IFAM 4.4; the only genuinely new stage -- cluster by lattice key)
+          -> shrinkwrap(source)           (already built)
+
+    WHY THIS EXISTS, measured, and why it is not auto_retopo: auto_retopo VOXELISES first, and voxelisation
+    STRUCTURALLY cannot pass the silhouette gate on thin features -- measured on a ladybird scan, voxel_remesh
+    ALONE scored 0.785/0.825/0.884/0.935 at res 12/20/32/48, failing at every resolution affordable, because
+    an SDF cannot represent what it cannot sample (0.18-unit cells, 0.05-unit legs). That route is correct for
+    its documented scope (block-outs). This route never leaves the surface, so the silhouette survives BY
+    CONSTRUCTION: measured on a 768-face fixture, 323 faces at IoU 0.989, 77% quads.
+
+    `density` scales the lattice spacing against the source's mean edge (1.0 = about one quad per source edge;
+    2.0 = half as dense). `edge_length` overrides it outright. `guide_dirs` (n_faces, 3) routes through
+    guided_cross_field, so a strain or rig signal puts loops where deformation lives.
+
+    Returns (mesh, report). The FACULTY m.surface_retopo owns the silhouette guard; this primitive does not
+    guard, matching every other primitive in the tree."""
+    V = np.asarray(mesh.vertices, float)
+    F = np.asarray(mesh.faces, int)
+    if edge_length is None:
+        e = np.linalg.norm(V[F[:, 1]] - V[F[:, 0]], axis=1).mean()
+        edge_length = float(e) * float(density)
+    if guide_dirs is None:
+        phi, ctx = cross_field(mesh, solver=solver, boundary=boundary)
+    else:
+        phi, ctx = guided_cross_field(mesh, guide_dirs, guide_weight=guide_weight, solver=solver,
+                                      boundary=boundary)
+    ov = field_to_vertex_dirs(mesh, phi)
+    levels = None
+    if feature_sized:
+        # R5: cap the target edge at half the local thickness so thin parts get a FINER lattice -- the sizing
+        # field that removes the "cells coarser than the feature" hole source at its ROOT. graded_levels
+        # balances the per-vertex levels 2:1 so the nested lattices stitch (its own pinned contract).
+        thick = feature_size_field(mesh)
+        target = np.minimum(edge_length, np.maximum(thick * 0.5, edge_length * 0.25))
+        levels, _rho = graded_levels(mesh, target, edge_length)
+    P = position_field(mesh, ov, edge_length, iterations=iterations, fast=fast, levels=levels)
+    qm, rep = extract_quads(mesh, P, edge_length, source=(mesh if shrink else None), snap_singular=snap_singular,
+                            levels=levels)
+    rep.update({"edge_length": float(edge_length), "guided": guide_dirs is not None,
+                "solver": ctx.get("solver", "dense"), "n_boundary_edges": ctx.get("n_boundary_edges", 0)})
+    return qm, rep
+
+
+def extract_quads(mesh, P, edge_length, source=None, min_cell_faces=1, levels=None, snap_singular=False):
+    """IFAM EXTRACTION (sec 4.4): turn a converged POSITION FIELD into a mesh -- the stage
+    position_field's docstring has always named as unbuilt, and the paper itself flags as the error-prone one.
+
+    HOLOGRAPHIC READING, which is what made this small: THIS IS cluster_decimate IN THE FIELD'S FRAME. That
+    operator quantizes vertices to an AXIS-ALIGNED grid, collapses each cell to a representative, and rebuilds
+    faces. Extraction quantizes to the FIELD-ALIGNED lattice the position field already computed, collapses
+    each cell, and rebuilds faces. Same skeleton -- key, group, representative, reconnect -- so no second
+    grouping pass gets grown here, and the quad PAIRING is handed to quad_remesh, which already does exactly
+    that with the same field. What is genuinely new is only the KEY.
+
+    The key is the COARSE/FINE SPLIT this engine keeps rediscovering: p_i / edge_length rounds to an INTEGER
+    lattice cell (the discrete anchor -- topology lives here) and the in-cell offset is the graded residual,
+    which DIES in the collapse by design. That is why extraction is a rounding and not an optimisation.
+
+    Vertices are collapsed to their cell's mean of ORIGINAL positions, so every output vertex sits at the
+    centroid of surface points -- near, not on, the surface. `source` shrinkwraps the result onto it, which is
+    what makes the silhouette survive BY CONSTRUCTION rather than by luck (pass the original mesh).
+
+    Returns (quad_mesh, report). report carries cells, collapsed_faces, degenerate_cells (triangles whose 3
+    corners fell in fewer than 3 distinct cells -- dropped, they are the lattice saying "one point here") and
+    quad_fraction. Deterministic: lattice rounding, np.unique ordering, no seed.
+
+    KEPT NEGATIVE / honest scope: singular cells (where the integer jumps around a vertex do not close) are
+    NOT reconciled -- they simply produce triangles, which quad_remesh leaves as triangles and quad_fraction
+    reports. The paper resolves them with an explicit consistency pass. Reporting an honest triangle beats
+    guessing a quad, but a low quad_fraction here means the FIELD is singular-rich, not that extraction failed.
+
+    KEPT NEGATIVE (M1 increment 3, MEASURED 2026-07-19 -- do not rebuild the "cross-level tri-pairing pass"):
+    the backlog planned a second pass to pair the ~20 excess triangles a GRADED level boundary leaves, recovering
+    quad_fraction (measured graded 0.71 vs uniform 0.77, a real ~0.03-0.06 gap that persists on box and other
+    fixtures). BUILDING IT WAS REFUTED BY MEASUREMENT: quad_remesh's existing gate (edge shared by exactly 2
+    tris, near-coplanar, convex quad) ALREADY pairs every geometrically-valid boundary pair. Of the 15 leftover
+    tri-pairs on the split box, ZERO are coplanar+convex; even dropping the coplanarity gate only 3 are convex,
+    and those 3 fold across the box's real edges (dihedral dot down to -1.0). A second pass with the same gate
+    recovers nothing; a second pass with a LOOSER gate makes folded/skew quads -- strictly worse than an honest
+    triangle. The residual gap is INHERENT to grading: a level boundary genuinely needs transition triangles to
+    change cell size, and forcing them into quads degrades the mesh. The backlog's "20 pairable tris" was an
+    earlier fixture's number and does not hold on the current engine. IF the graded quad_fraction ever needs to
+    rise, the lever is a FINER level field (fewer, gentler boundaries), not tri-pairing -- measure that instead.
+
+    HOLE DEFECT -- PARTIALLY FIXED (M11), and the scope is exact so nobody over-trusts it. There were TWO hole
+    sources. (1) FIXED: deduping kept triangles by the SORTED cell-triple merged the front and back of a thin
+    feature (same three cells, opposite winding) into one face, leaving the other side open. Rotation-canonical
+    (winding-preserving) dedup recovers both. MEASURED: a CLOSED box is now closed at EVERY density (boundary
+    edges 0 at 0.8/1.0/1.3/1.5/2.0), where sorted dedup left 6. (2) NOT FIXED: on a real SCAN the source has
+    open boundaries and dense field singularities, so density-2.0 on the ladybird still leaves 165 boundary
+    edges (down from more, but not zero). Those are the `distinct`-filter drops at singular clusters plus
+    inherited source holes -- the genuinely hard case IFAM resolves with an explicit consistency pass, still
+    filed as M11's remaining work. report["nonmanifold_edges"] surfaces the singular cells (13 of 285 on the
+    box; localised, clustered -- the field's cone points, reported NOT forced flat, because forcing
+    manifoldness invents surface). So: closed inputs come out closed; singular-rich scans are IMPROVED but
+    still need topology_delta to audit, and surface_retopo remains honest via that report."""
+    from holographic.mesh_and_geometry.holographic_mesh import Mesh
+    V = np.asarray(mesh.vertices, float)
+    P = np.asarray(P, float)
+    if P.shape != V.shape:
+        raise ValueError("P must be (n_vertices, 3) from position_field; got %s for %d vertices"
+                         % (P.shape, len(V)))
+    rho = float(edge_length)
+    if rho <= 0:
+        raise ValueError("edge_length must be > 0")
+
+    # M1 increment 2 -- LEVEL-KEYED extraction. levels=None keeps the uniform key round(P/rho) bit-identical.
+    # When per-vertex `levels` are given, each vertex is keyed in ITS OWN lattice round(P/(rho*2^k)) AND the
+    # level joins the key, so a coarse cell (0,0,0,k=1) is NEVER merged with a fine cell (0,0,0,k=0) that
+    # happens to round the same -- the two lattices are nested but distinct, and merging them would collapse
+    # the grading. The (cell, level) key is the same coarse/fine split extract_quads already uses, extended by
+    # one integer axis (the "boring-axis elevation" move: level is a carrier, not bound into the spatial key).
+    if levels is None:
+        key = np.round(P / rho).astype(np.int64)              # the lattice cell = the discrete anchor
+    else:
+        klv = np.asarray(levels, np.int64).reshape(-1)
+        if klv.shape[0] != len(V):
+            raise ValueError("levels must be (n_vertices,) from graded_levels")
+        rho_v = (rho * (2.0 ** klv.astype(float)))[:, None]
+        spatial = np.round(P / rho_v).astype(np.int64)        # each vertex keyed in its OWN level's lattice
+        key = np.concatenate([spatial, klv[:, None]], axis=1) # (x, y, z, level) -- level is a distinct axis
+    cells, inv = np.unique(key, axis=0, return_inverse=True)
+    n_cells = len(cells)
+
+    # representative = mean of ORIGINAL positions in the cell (cluster_decimate's move, same reason)
+    acc = np.zeros((n_cells, 3))
+    cnt = np.zeros(n_cells)
+    np.add.at(acc, inv, V)
+    np.add.at(cnt, inv, 1.0)
+    OV = acc / np.maximum(cnt, 1.0)[:, None]
+
+    F = np.asarray(mesh.faces, int)
+    mapped = inv[F[:, :3]]                                     # each triangle's corners -> their cells
+    distinct = ((mapped[:, 0] != mapped[:, 1]) & (mapped[:, 1] != mapped[:, 2]) &
+                (mapped[:, 0] != mapped[:, 2]))
+
+    # ---- R2: QEx-STYLE SINGULAR-VERTEX SNAP (Ebke et al. 2013, adapted to lattice clustering) -----------
+    # A "degenerate" triangle means corners ROUNDED into the same cell; when a neighbouring triangle did NOT
+    # collapse that pair, dropping this one punches a hole (the measured islands/holes of the retopo). QEx's
+    # cure is to move the singular vertex to a consistent fixed point instead of abandoning the cell. The
+    # lattice analog: a vertex whose position sits on a MARGINAL rounding boundary (fraction near 0.5) may be
+    # re-keyed to the adjacent cell -- GLOBALLY, once, per vertex, like QEx's per-vertex snap -- when that
+    # strictly converts degenerate triangles to distinct ones. ADDITIVITY GUARANTEE (what keeps the pinned
+    # retopo bit-identical): a re-key is applied ONLY if every currently-KEPT face at that vertex keeps its
+    # exact cell triple (impossible to change: the alternative cell differs, so we additionally require the
+    # vertex to appear ONLY in degenerate faces or faces whose triple stays distinct with the new key). If
+    # any kept face would change, the snap is refused. So existing faces cannot change; only dropped faces
+    # can be rescued. Deterministic: vertices visited in index order, one pass.
+    if snap_singular and (~distinct).any():
+        frac = P / (rho_v if levels is not None else rho) - np.round(P / (rho_v if levels is not None else rho))
+        vert_faces = {}
+        for fi, f in enumerate(F[:, :3]):
+            for v in f:
+                vert_faces.setdefault(int(v), []).append(fi)
+        deg_idx = np.where(~distinct)[0]
+        deg_verts = sorted(set(int(v) for fi in deg_idx for v in F[fi, :3]))
+        snapped = 0
+        for v in deg_verts:
+            fr = frac[v]
+            axis = int(np.argmax(np.abs(fr)))
+            if abs(fr[axis]) < 0.25:                       # not marginal: the rounding was decisive, honour it
+                continue
+            alt = key[v].copy()
+            alt[axis] += 1 if fr[axis] > 0 else -1
+            hit = np.where((cells == alt).all(1))[0]       # only snap INTO an existing cell -- never invent one
+            if len(hit) == 0:
+                continue
+            new_cell = int(hit[0])
+            ok, gain = True, 0
+            for fi in vert_faces[v]:
+                tri = [inv[x] if x != v else new_cell for x in F[fi, :3]]
+                now_distinct = len(set(tri)) == 3
+                if distinct[fi] and tri != [int(x) for x in mapped[fi]]:
+                    ok = False; break                      # would change a kept face: refuse (additivity)
+                if not distinct[fi] and now_distinct:
+                    gain += 1
+            if ok and gain > 0:
+                inv[v] = new_cell
+                snapped += 1
+        if snapped:
+            mapped = inv[F[:, :3]]
+            distinct = ((mapped[:, 0] != mapped[:, 1]) & (mapped[:, 1] != mapped[:, 2]) &
+                        (mapped[:, 0] != mapped[:, 2]))
+    kept = mapped[distinct]
+    degenerate = int((~distinct).sum())
+
+    # drop duplicate triangles (many source faces collapse onto the same cell triple), but dedup by the
+    # ROTATION-CANONICAL form, NOT the sorted one. THE HOLE FIX (M11): sorting the triple discards winding, so
+    # the FRONT and BACK of a thin feature -- which map to the same three cells with OPPOSITE orientation --
+    # were merged into one face, leaving the other side as a boundary. MEASURED on a closed box: sorted dedup
+    # left 6 boundary edges (holes); rotation-canonical dedup leaves 0, recovering exactly the front/back
+    # pairs. Rotation-invariant (a==b==c cyclic shifts are the same face) but winding-PRESERVING (a,b,c and
+    # a,c,b stay distinct), which is the whole point.
+    seen = set()
+    tris = []
+    for r in kept:
+        a, b, c = int(r[0]), int(r[1]), int(r[2])
+        canon = min((a, b, c), (b, c, a), (c, a, b))     # cyclic-min: same face under rotation, not reflection
+        if canon not in seen:
+            seen.add(canon)
+            tris.append((a, b, c))
+    if not tris:
+        raise ValueError("extraction produced no faces: edge_length (%g) is coarser than the whole mesh" % rho)
+
+    # compact: drop cells that no surviving face referenced (an isolated vertex breaks normals downstream)
+    used = np.unique(np.asarray(tris, int).ravel())
+    remap = -np.ones(n_cells, int)
+    remap[used] = np.arange(len(used))
+    tri_mesh = Mesh(OV[used], [tuple(int(remap[i]) for i in f) for f in tris])
+
+    if source is not None:
+        from holographic.mesh_and_geometry.holographic_meshtools import shrinkwrap
+        tri_mesh, _res = shrinkwrap(tri_mesh, source, factor=1.0)
+
+    # the PAIRING is quad_remesh's job, with the same field -- do not re-grow it here
+    out = quad_remesh(tri_mesh, use_field=True)     # the primitive: the FACULTY owns the silhouette guard
+    qm = out[0] if isinstance(out, tuple) else out
+    nq = sum(1 for f in qm.faces if len(f) == 4)
+    # count non-manifold edges in the OUTPUT: these are the field's singular cells (the integer lattice cannot
+    # close around a cone point), NOT a construction error -- they cluster at a handful of cells (measured: 13
+    # of 285 on the box) and are REPORTED, never forced flat. Forcing manifoldness here would invent surface.
+    import collections as _c
+    _ec = _c.Counter()
+    for _f in qm.faces:
+        _n = len(_f)
+        for _k in range(_n):
+            _a, _b = int(_f[_k]), int(_f[(_k + 1) % _n])
+            _ec[(min(_a, _b), max(_a, _b))] += 1
+    _nonman = sum(1 for _v in _ec.values() if _v > 2)
+    report = {"cells": int(n_cells), "collapsed_faces": len(tris), "degenerate_cells": degenerate,
+              "nonmanifold_edges": _nonman,
+              "quad_fraction": (nq / len(qm.faces)) if len(qm.faces) else 0.0,
+              "vertices": len(qm.vertices), "faces": len(qm.faces)}
+    return qm, report
 
 
 def position_field_regularity(mesh, P, orient, edge_length):
@@ -583,7 +1066,7 @@ def quad_remesh(mesh, use_field=True, field=None):
     return Mesh(V, out_faces), report
 
 
-def guided_cross_field(mesh, guide_dirs, guide_weight=5.0):
+def guided_cross_field(mesh, guide_dirs, guide_weight=5.0, solver="auto", sparse_threshold=2048, boundary="raise"):
     """A GUIDED 4-RoSy field: the smoothest field that ALSO aligns to a prescribed per-face direction where one is
     given -- field DESIGN, not just field smoothing. This is what lets retopo follow DEFORMATION (or curvature, or an
     artist's strokes) instead of only minimising distortion the way an off-the-shelf auto-remesher does. `guide_dirs`
@@ -594,15 +1077,27 @@ def guided_cross_field(mesh, guide_dirs, guide_weight=5.0):
     (Bommes/Knoppel field design). Adding w on the diagonal makes the system positive-definite, so it is a linear solve,
     not an eigenproblem. With NO guides it falls back to the smoothest eigenvector (== cross_field). Returns (phi, ctx),
     the same shape cross_field returns, so quad_remesh / field_report consume it directly. Needs a CLOSED oriented
-    manifold mesh."""
+    manifold mesh.
+
+    `solver`/"auto": dense below `sparse_threshold` faces (BIT-compatible history), sparse above -- the guided
+    system (L + diag(w) + 1e-9 I) is complex Hermitian POSITIVE DEFINITE by construction (+w IS the
+    definiteness), exactly numerics.cg's contract (ledger P1), matvec off dual_edges + a diagonal, nothing
+    materialised. MEASURED: 12,288 guided faces 0.7 s where the dense route extrapolates to ~99 minutes;
+    dense-vs-sparse parity 3e-9 on the 4-phasor; the guide-free sparse path IS cross_field's sparse path (same
+    eigensolver, agreement to machine epsilon -- the renormalise costs one ulp of angle, pinned as such, not
+    as exact equality: a rescale before atan2 legally moves the last bit).
+    `boundary`: "raise" (history) | "natural" (free boundaries, same guard relaxation as cross_field/R3a --
+    scans are open, and guides on scans are the whole point of R6).
+    """
     V = np.asarray(mesh.vertices, float)
     F = np.asarray(mesh.faces, int)
     if len(F) < 4:
         raise ValueError("guided_cross_field needs a closed surface with at least 4 faces")
     rho, opposite, next_vertex, dual_edges = connection(V, F)
-    if len(dual_edges) * 2 != len(F) * 3:
-        raise ValueError("the mesh has boundary edges; guided_cross_field wants a CLOSED surface")
-    L = connection_laplacian(F, rho, dual_edges)
+    n_boundary = len(F) * 3 - len(dual_edges) * 2
+    if n_boundary != 0 and boundary == "raise":
+        raise ValueError("the mesh has boundary edges; guided_cross_field wants a CLOSED surface "
+                         "(pass boundary='natural' to solve with free boundaries)")
     _n, ex, ey = face_frames(V, F)
     g = np.asarray(guide_dirs, float)
     if g.shape != (len(F), 3):
@@ -611,10 +1106,41 @@ def guided_cross_field(mesh, guide_dirs, guide_weight=5.0):
     theta = np.arctan2((g * ey).sum(1), (g * ex).sum(1))     # the guide's angle in each face's own frame
     c = np.exp(1j * 4.0 * theta)
     w = np.where(conf > 1e-9, float(guide_weight), 0.0)      # alignment weight only where a guide is given
+    use_sparse = (solver == "sparse") or (solver == "auto" and len(F) > int(sparse_threshold))
     if not np.any(w > 0):
-        _wv, vec = np.linalg.eigh(L)                         # no guides -> the smoothest field (cross_field)
-        u = vec[:, 0]
+        if use_sparse:
+            u, _lam, _mv = _sparse_smallest_eigvec(len(F), rho, dual_edges)   # == cross_field's sparse path
+        else:
+            L = connection_laplacian(F, rho, dual_edges)
+            _wv, vec = np.linalg.eigh(L)                     # no guides -> the smoothest field (cross_field)
+            u = vec[:, 0]
+    elif use_sparse:
+        # THE SAME F^3 WALL R1 TORE DOWN, one function below it: the dense route materialises (L + diag(w) +
+        # eps I) and np.linalg.solve's it -- 3.4 days / 26 GB at the resolution scans need. Holographic
+        # reading: (L + diag(w) + eps I) is complex Hermitian POSITIVE DEFINITE by construction (+w IS the
+        # definiteness; eps covers the guide-free faces), which is exactly numerics.cg's contract -- the P1
+        # promotion pays here directly. The matvec is the sparse connection matvec plus a diagonal; nothing
+        # is materialised. Parity vs the dense route is pinned in _selftest_guided_sparse.
+        from holographic.misc.holographic_numerics import cg as _cg_shared
+        e_f = np.fromiter((f for f, g2 in dual_edges), int, len(dual_edges))
+        e_g = np.fromiter((g2 for f, g2 in dual_edges), int, len(dual_edges))
+        w_fg = np.exp(1j * 4.0 * np.array([rho[(g2, f)] for f, g2 in dual_edges]))
+        w_gf = np.exp(1j * 4.0 * np.array([rho[(f, g2)] for f, g2 in dual_edges]))
+        deg = np.zeros(len(F))
+        np.add.at(deg, e_f, 1.0)
+        np.add.at(deg, e_g, 1.0)
+        diag = deg + w + 1e-9
+
+        def matvec_A(x):
+            y = diag * x
+            np.add.at(y, e_f, -w_fg * x[e_g])
+            np.add.at(y, e_g, -w_gf * x[e_f])
+            return y
+
+        b = (w * c).astype(complex)
+        u = _cg_shared(matvec_A, b, iters=4000, tol=0.0, rtol=1e-10)
     else:
+        L = connection_laplacian(F, rho, dual_edges)
         A = L + np.diag(w.astype(complex)) + 1e-9 * np.eye(len(F))   # +w makes it positive-definite; eps for safety
         u = np.linalg.solve(A, (w * c).astype(complex))
     u = u / (np.abs(u) + 1e-12)
@@ -654,6 +1180,245 @@ def strain_directions(mesh, deformed_vertices):
         aniso = np.sqrt(lmax / lmin) - 1.0                     # 0 = isotropic (no direction), grows with stretch ratio
         out[i] = aniso * (v2[0] * ex[i] + v2[1] * ey[i])
     return out
+
+
+def mesh_laplacian_eigenmaps(mesh, k=8, solver="auto", sparse_threshold=2000):
+    """The low SPECTRUM of a mesh's cotan Laplacian -- the eigenfunctions that a spectral analysis (R6
+    quadrangulation, spectral segmentation, Morse-Smale layout) is built on. This is the SCALAR vertex
+    Laplacian, distinct from crossfield's CONNECTION Laplacian (which lives on faces and carries a frame):
+    the scalar operator L is the discrete Laplace-Beltrami (Pinkall-Polthier cotan weights), M the lumped
+    barycentric mass. We solve the generalised problem L phi = lambda M phi by symmetrising to M^-1/2 L M^-1/2.
+
+    solver: "dense" calls numpy.linalg.eigh (exact, O(n^3), fine to a few thousand verts). "sparse" uses the
+    matvec-only block shifted inverse iteration (low_eigenvectors) -- BIT-COMPATIBLE in the eigenvalues and
+    eigenSPACE (verified: l=1 residual ~1e-11 vs dense on a sphere), scaling past where the dense O(n^3) is
+    affordable. "auto" (default) picks dense below sparse_threshold vertices, sparse above -- the same
+    auto-threshold pattern connection_laplacian already uses, so small meshes stay bit-identical to before.
+
+    VALIDATED: on a discretised unit sphere the eigenvalues cluster at l(l+1) = 0, 2, 6, 12 (the spherical-
+    harmonic spectrum) and eigenfunctions 1..3 span x,y,z to R^2 = 1.000 -- the textbook Laplace-Beltrami
+    result, so the operator is correct, not merely plausible.
+
+    Returns (eigenvalues (k,), eigenfunctions (n_verts, k)). Eigenfunction 0 is the constant (lambda ~ 0);
+    the useful ones start at index 1. Deterministic (eigh, or the seeded block solver, sorted ascending)."""
+    V = np.asarray(mesh.vertices, float)
+    F = [tuple(int(i) for i in f[:3]) for f in mesh.faces if len(f) >= 3]
+    n = len(V)
+    L = np.zeros((n, n)); area = np.zeros(n)
+    for f in F:
+        for e in range(3):
+            i, j, o = f[e], f[(e + 1) % 3], f[(e + 2) % 3]
+            u = V[i] - V[o]; v = V[j] - V[o]
+            cot = float(np.dot(u, v) / (np.linalg.norm(np.cross(u, v)) + 1e-12))
+            L[i, j] -= 0.5 * cot; L[j, i] -= 0.5 * cot
+            L[i, i] += 0.5 * cot; L[j, j] += 0.5 * cot
+        a = 0.5 * float(np.linalg.norm(np.cross(V[f[1]] - V[f[0]], V[f[2]] - V[f[0]])))
+        for e in range(3):
+            area[f[e]] += a / 3.0
+    Minv = 1.0 / np.sqrt(area + 1e-12)
+    use_sparse = (solver == "sparse") or (solver == "auto" and n > int(sparse_threshold))
+    if use_sparse:
+        from holographic.misc.holographic_numerics import low_eigenvectors
+        Ls_matvec = lambda x: Minv * (L @ (Minv * x))           # the symmetric operator M^-1/2 L M^-1/2
+        c = float(np.abs(L).sum(1).max() * float(np.max(Minv)) ** 2)  # Gershgorin-ish bound (cg tolerances)
+        w, Us = low_eigenvectors(Ls_matvec, n, c, k=min(int(k), n), dtype=float)
+    else:
+        w, Us = np.linalg.eigh(Minv[:, None] * L * Minv[None, :])  # symmetric -> real, ascending
+    kk = min(int(k), n)
+    return w[:kk], (Minv[:, None] * Us[:, :kk])                  # back to function space
+
+
+def mesh_fiedler_order(mesh):
+    """A stable linear ORDER of a mesh's vertices from its Fiedler vector (the 2nd cotan-Laplacian
+    eigenfunction) -- connectivity-adjacent vertices land near each other, the spectral-seriation order a
+    mesh-as-sequence encoding wants (SATO-SEQ). Reuses mesh_laplacian_eigenmaps (so it inherits the auto
+    dense/sparse solver). Sign of the Fiedler vector is canonicalised (largest-|value| vertex forced
+    positive, id tie-break) so the order is deterministic. Returns an int array `order` (vertex indices,
+    ascending Fiedler value); mesh.vertices[order] is the reordered vertex list."""
+    w, phi = mesh_laplacian_eigenmaps(mesh, k=2)
+    f = phi[:, 1].copy()
+    piv = int(np.lexsort((np.arange(len(f)), -np.abs(f)))[0])    # largest |value|, id tie-break
+    if f[piv] < 0:
+        f = -f                                                   # canonical sign -> deterministic order
+    return np.lexsort((np.arange(len(f)), f))                    # ascending Fiedler value, id tie-break
+
+
+
+
+
+def morse_critical_points(mesh, scalar):
+    """Count and classify the CRITICAL POINTS of a scalar field on a mesh -- the minima, maxima, and saddles
+    that a Morse-Smale complex is built from (the singularity structure R6 uses to lay out a quad domain). A
+    vertex is critical by the standard discrete Banchoff/lower-star test on its 1-ring: order neighbours by
+    the field, count how many contiguous 'lower' arcs surround it. 0 lower arcs among all-higher neighbours =
+    MINIMUM; among all-lower = MAXIMUM; 2 arcs = a simple SADDLE; >2 = a monkey saddle (degree tracked).
+
+    The Euler-Poincare check comes free and is asserted by the selftest: minima - saddles + maxima = chi.
+    Returns {minima, maxima, saddles, indices: {vertex: type}} with type in {'min','max','saddle'}.
+    Deterministic (field ties broken by vertex id)."""
+    from collections import defaultdict
+    V = np.asarray(mesh.vertices, float)
+    F = [tuple(int(i) for i in f[:3]) for f in mesh.faces if len(f) >= 3]
+    s = np.asarray(scalar, float)
+    ring = defaultdict(set)
+    nbr_faces = defaultdict(list)
+    for f in F:
+        for e in range(3):
+            a, b = f[e], f[(e + 1) % 3]
+            ring[a].add(b); ring[b].add(a)
+        for e in range(3):
+            nbr_faces[f[e]].append(f)
+    def lower(u, v):                                             # strict order with id tie-break (Morse)
+        return (s[v], v) < (s[u], u)
+    out = {}
+    for u in range(len(V)):
+        nb = list(ring[u])
+        if len(nb) < 3:
+            continue
+        low = {v for v in nb if lower(u, v)}
+        if not low:
+            out[u] = "min"; continue
+        if len(low) == len(nb):
+            out[u] = "max"; continue
+        # count contiguous lower-arcs around the 1-ring using the incident-face edge links
+        link = defaultdict(set)
+        for f in nbr_faces[u]:
+            others = [x for x in f if x != u]
+            if len(others) == 2:
+                link[others[0]].add(others[1]); link[others[1]].add(others[0])
+        seen = set(); arcs = 0
+        for v in low:
+            if v in seen:
+                continue
+            arcs += 1; stack = [v]; seen.add(v)
+            while stack:
+                x = stack.pop()
+                for y in link[x]:
+                    if y in low and y not in seen:
+                        seen.add(y); stack.append(y)
+        if arcs >= 2:
+            out[u] = "saddle"                                   # arcs==2 simple; >2 monkey (still a saddle)
+    mn = sum(1 for t in out.values() if t == "min")
+    mx = sum(1 for t in out.values() if t == "max")
+    sd = sum(1 for t in out.values() if t == "saddle")
+    return {"minima": mn, "maxima": mx, "saddles": sd, "indices": out}
+
+
+def _selftest_eigenmaps():
+    """R6 foundation: cotan Laplacian eigenspectrum matches the sphere's l(l+1) harmonics and its first
+    eigenspace recovers x,y,z; Morse critical counts obey Euler-Poincare (min - saddle + max = chi)."""
+    from holographic.mesh_and_geometry.holographic_mesh import box, Mesh
+    from holographic.mesh_and_geometry.holographic_meshsubdiv import loop_subdivide
+    from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons
+    S = triangulate_ngons(loop_subdivide(box(), 3))
+    V = np.asarray(S.vertices, float); V = V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-9)
+    sphere = Mesh(V, [tuple(int(i) for i in f) for f in S.faces])
+    w, phi = mesh_laplacian_eigenmaps(sphere, k=6)
+    assert abs(w[0]) < 1e-6, "first eigenvalue must be ~0 (constant), got %.3e" % w[0]
+    # eigenvalues 1..3 near 2 (l=1 harmonics of the unit sphere)
+    assert np.allclose(w[1:4], 2.0, atol=0.05), "l=1 harmonics must sit at ~2, got %s" % w[1:4]
+    # eigenspace 1..3 recovers each coordinate to R^2 ~ 1
+    B = phi[:, 1:4]
+    for c in range(3):
+        xyz = V[:, c] - V[:, c].mean()
+        proj = B @ np.linalg.lstsq(B, xyz, rcond=None)[0]
+        r2 = 1 - np.var(xyz - proj) / np.var(xyz)
+        assert r2 > 0.98, "coordinate %d must be recovered by the first eigenspace (R^2 %.3f)" % (c, r2)
+    # Morse critical points of the z-height on the sphere: exactly 1 min + 1 max, and Euler holds (chi=2)
+    crit = morse_critical_points(sphere, V[:, 2])
+    chi = crit["minima"] - crit["saddles"] + crit["maxima"]
+    assert chi == 2, "Euler-Poincare must give chi=2 on a sphere, got %d (%d/%d/%d)" % (
+        chi, crit["minima"], crit["saddles"], crit["maxima"])
+    print("eigenmaps selftest OK (sphere spectrum l(l+1); eigenspace recovers xyz R2~1; Morse chi=2)")
+
+
+def stripe_pattern(mesh, direction_field, frequency=20.0, iters=80):
+    """Knoppel-Crane-Pinkall-Schroder STRIPE PATTERNS (SIGGRAPH 2015): evenly-spaced stripes on a surface
+    that follow a per-vertex tangent DIRECTION FIELD -- the co-oriented iso-lines a quad layout, texture
+    alignment, or hatching wants. The stripes are the level sets of arg(psi) for a complex per-vertex phase
+    psi whose gradient tracks `frequency * direction_field`.
+
+    THE HOLOGRAPHIC READING (why this cost almost nothing): it is ONE smallest-eigenvector problem, so it
+    reuses the shipped matvec-only eigensolver (low_eigenvectors) exactly as the cross field reuses the
+    connection Laplacian. Build the Hermitian energy operator A with A_ii = sum_j w_ij (cotan weights) and
+    A_ij = -w_ij exp(-i omega_ij), where the per-edge target phase increment omega_ij = frequency *
+    <e_ij, (X_i + X_j)/2> encodes "advance the phase as you walk along the field". The minimiser of
+    psi^H A psi (the smoothest phase consistent with the field) is A's smallest eigenvector -- pull it with a
+    shift just below 0, complex dtype. Level sets of arg(psi) are the stripes.
+
+    MEASURED on a sphere with a smooth field at frequency 18: smallest eigenvalue 8.9e-3, and the recovered
+    phase follows the field to a median per-edge residual of 0.006 rad (near-exact). Deterministic (seeded
+    eigensolver start, fixed traversal).
+
+    direction_field: (n_verts, 3) tangent vectors (need not be unit; only direction matters). Returns
+    (psi (n,) complex, report). Stripes = level sets of numpy.angle(psi); a crisp mask is
+    (numpy.cos(numpy.angle(psi)) > 0). This is the field-following SIBLING of the 4-RoSy cross field, not a
+    replacement: cross_field gives DIRECTIONS, stripe_pattern turns a direction field into placed LINES."""
+    from collections import defaultdict
+    from holographic.misc.holographic_numerics import low_eigenvectors
+    V = np.asarray(mesh.vertices, float)
+    F = [tuple(int(i) for i in f[:3]) for f in mesh.faces if len(f) >= 3]
+    X = np.asarray(direction_field, float)
+    n = len(V)
+    cot = defaultdict(float)
+    edges = set()
+    for f in F:
+        for e in range(3):
+            i, j, o = f[e], f[(e + 1) % 3], f[(e + 2) % 3]
+            u = V[i] - V[o]; v = V[j] - V[o]
+            c = float(np.dot(u, v) / (np.linalg.norm(np.cross(u, v)) + 1e-12))
+            key = (min(i, j), max(i, j))
+            cot[key] += 0.5 * c
+            edges.add(key)
+    A = np.zeros((n, n), complex)
+    for (i, j) in sorted(edges):                                # sorted -> deterministic assembly
+        w = cot[(i, j)]
+        omega = float(frequency) * float(np.dot(V[j] - V[i], 0.5 * (X[i] + X[j])))
+        A[i, i] += w; A[j, j] += w
+        A[i, j] += -w * np.exp(-1j * omega)
+        A[j, i] += -w * np.exp(1j * omega)
+
+    def matvec(x):
+        return A @ x
+
+    c0 = float(np.abs(A).sum(1).max())
+    w_eig, Vpsi = low_eigenvectors(matvec, n, c0, k=1, shift=-0.02, iters=int(iters), dtype=complex)
+    psi = Vpsi[:, 0]
+    # phase-follows-field residual, the honest quality number
+    res = []
+    for (i, j) in sorted(edges):
+        dphi = float(np.angle(psi[j] * np.conj(psi[i])))
+        omega = float(frequency) * float(np.dot(V[j] - V[i], 0.5 * (X[i] + X[j])))
+        res.append(abs(float(np.angle(np.exp(1j * (dphi - omega))))))
+    report = {"energy": float(w_eig[0].real), "n_verts": n,
+              "phase_residual_median": float(np.median(res)) if res else 0.0,
+              "frequency": float(frequency)}
+    return psi, report
+
+
+def _selftest_stripe():
+    """Stripe patterns: the recovered phase follows the direction field (median edge residual small) and the
+    energy is a small non-negative eigenvalue. On a sphere with a smooth field the stripes are even."""
+    from holographic.mesh_and_geometry.holographic_mesh import box, Mesh
+    from holographic.mesh_and_geometry.holographic_meshsubdiv import loop_subdivide
+    from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons
+    S = triangulate_ngons(loop_subdivide(box(), 3))
+    V = np.asarray(S.vertices, float); V = V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-9)
+    N = V.copy()
+    ax = np.array([0.0, 0, 1.0])
+    X = ax[None, :] - N * (N @ ax)[:, None]
+    bad = np.linalg.norm(X, axis=1) < 1e-6
+    X[bad] = np.array([1.0, 0, 0]) - N[bad] * (N[bad] @ np.array([1.0, 0, 0]))[:, None]
+    X = X / (np.linalg.norm(X, axis=1, keepdims=True) + 1e-12)
+    mesh = Mesh(V, [tuple(int(i) for i in f) for f in S.faces])
+    psi, rep = stripe_pattern(mesh, X, frequency=18.0)
+    assert rep["energy"] < 0.05, "stripe energy must be a small eigenvalue, got %.3e" % rep["energy"]
+    assert rep["phase_residual_median"] < 0.05, \
+        "stripe phase must follow the field (median residual %.3f rad)" % rep["phase_residual_median"]
+    # the phase actually winds (stripes exist), not a constant
+    assert np.ptp(np.angle(psi)) > 1.0, "phase must vary across the surface"
+    print("stripe pattern selftest OK (energy %.2e, phase-follows-field median %.4f rad)" % (
+        rep["energy"], rep["phase_residual_median"]))
 
 
 def _selftest():
@@ -792,5 +1557,180 @@ def _selftest():
              rep["energy"], field_energy(junk, ctx)))
 
 
+def _selftest_natural_boundary():
+    """R3a: cross_field solves OPEN meshes with free boundaries -- the closed check was a guard, not maths
+    (connection only ever transported across INTERIOR dual edges). Pins: (1) closed meshes are BIT-IDENTICAL
+    across boundary modes, so nothing that worked changes; (2) the default still RAISES on an open mesh, so
+    no caller's error contract moves; (3) boundary="natural" gives an open mesh a finite field; (4) the
+    DEGENERATE-FACE trap stays named -- zero-area faces NaN the connection and look like a boundary bug."""
+    from holographic.mesh_and_geometry.holographic_mesh import box, Mesh
+    from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons
+    from holographic.mesh_and_geometry.holographic_meshsubdiv import loop_subdivide
+    closed = loop_subdivide(triangulate_ngons(box()), levels=2)
+    p1, c1 = cross_field(closed)
+    p2, c2 = cross_field(closed, boundary="natural")
+    assert np.array_equal(p1, p2) and c1["n_boundary_edges"] == 0     # closed: untouched, either way
+    CV = np.asarray(closed.vertices, float)
+    openm = Mesh(CV, [tuple(f) for f in closed.faces][:-12])          # a hole, no degenerate faces
+    try:
+        cross_field(openm)
+        raise AssertionError("the default must still raise on an open mesh")
+    except ValueError:
+        pass
+    phi, ctx = cross_field(openm, boundary="natural")
+    assert np.isfinite(phi).all() and ctx["n_boundary_edges"] > 0
+    assert 0.0 < ctx["lambda_min"] < 1.0, ctx["lambda_min"]
+    print("natural-boundary selftest OK (closed bit-identical; default still raises; open patch solves with "
+          "%d boundary edges, lambda %.4f)" % (ctx["n_boundary_edges"], ctx["lambda_min"]))
+
+
+def _selftest_surface_retopo():
+    """R3: the surface route -- the arc's point. Pins the claim that distinguishes it from voxelize-then-quad:
+    the silhouette survives BY CONSTRUCTION because vertices never leave the surface. Also pins that the
+    result is quad-DOMINANT and that a coarser lattice yields fewer faces (the density knob is real)."""
+    from holographic.mesh_and_geometry.holographic_mesh import box
+    from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons
+    from holographic.mesh_and_geometry.holographic_meshsubdiv import loop_subdivide
+    from holographic.rendering.holographic_render import silhouette_sweep
+    src = loop_subdivide(triangulate_ngons(box()), levels=3)
+    fine, rf = surface_retopo(src, density=1.0)
+    coarse, rc = surface_retopo(src, density=1.5)
+    assert rf["faces"] > rc["faces"], "density must control the budget"
+    assert rf["quad_fraction"] > 0.6, rf["quad_fraction"]              # quad-DOMINANT, not quad-perfect
+    # H2: the vectorised-inner position_field fast path (fast=True) must produce a BIT-IDENTICAL retopo -- it
+    # keeps the exact sequential Gauss-Seidel visit order and only vectorises the neighbour average. MEASURED
+    # (and this pin enforces): Jacobi/colored-GS/other-seed all FLIP the lattice (55/52/58% match, a kept
+    # negative), so fast is NOT a reorder; it is the SAME order computed without the Python neighbour loop.
+    fine_fast, rff = surface_retopo(src, density=1.0, fast=True)
+    assert rff["faces"] == rf["faces"], "fast retopo must not change the face count"
+    assert np.abs(np.asarray(fine_fast.vertices) - np.asarray(fine.vertices)).max() < 1e-9, \
+        "fast=True must be bit-identical to fast=False (it only vectorises the inner loop, same GS order)"
+    # R2: snap_singular is ADDITIVE BY CONTRACT -- every face produced with snap OFF must also be produced
+    # (same cell triple) with snap ON; snap may only ADD rescued faces, never change or remove kept ones.
+    # Default is OFF (constitution: it changes the output mesh -- 328->334 on this very fixture, measured --
+    # so it is an opt-in capability, not a silent flip of the pinned extraction).
+    # R5: feature_size_field reads local thickness -- on the unit box every vertex's opposing wall is ~1 away
+    thick = feature_size_field(src)
+    # (top-k recall finds same-wall neighbours first, so the opposing hit can be the diagonal wall -- the
+    # estimate is an UPPER bound near corners; still bounded by the bbox and far from degenerate)
+    assert 0.7 < np.median(thick) < 1.8, "box thickness should be ~1-1.7, got median %.2f" % np.median(thick)
+    # feature_sized retopo runs and never loses faces vs baseline (finer cells where thin, never coarser)
+    fine_fs, rfs = surface_retopo(src, density=1.0, feature_sized=True)
+    assert rfs["faces"] > 0
+    # MEASURED, recorded here as the shipping contract: on the mantis at density 2.0 unguarded, baseline
+    # shatters into 12 components; snap_singular alone -> 5; feature_sized alone -> 5; BOTH -> 1 component.
+    # The two fixes compose: snap rescues marginal roundings, sizing prevents sub-feature cells at the root.
+    fine_snap, rsnap = surface_retopo(src, density=1.0, snap_singular=True)
+    assert rsnap["faces"] >= rf["faces"], "snap must never lose faces"
+    def face_set(mm):
+        VV = np.round(np.asarray(mm.vertices), 6)
+        return {tuple(sorted(map(tuple, VV[list(f)]))) for f in mm.faces}
+    missing = face_set(fine) - face_set(fine_snap)
+    assert len(missing) <= max(2, int(0.02 * rf["faces"])), \
+        "snap changed/removed %d kept faces -- additivity contract broken" % len(missing)
+    sw = silhouette_sweep(src, fine, n_azimuth=6, size=128)
+    assert sw["worst"] >= 0.95, ("the surface route must pass the gate voxelize-then-quad structurally "
+                                 "cannot: %.3f" % sw["worst"])
+    # M11: a CLOSED input must come out CLOSED at every density -- oriented dedup recovers front/back pairs
+    # that sorted dedup merged into holes. (Scans stay open at singular clusters -- that is M11's remaining
+    # work, deliberately NOT asserted here.)
+    from holographic.mesh_and_geometry.holographic_meshtools import face_orientation_report as _for
+    for _d in (1.0, 1.5, 2.0):
+        _o, _ = surface_retopo(src, density=_d)
+        assert _for(_o)["boundary_edges"] == 0, ("closed input must stay closed at density %.1f (got %d "
+                                                 "boundary edges) -- the oriented-dedup hole fix regressed"
+                                                 % (_d, _for(_o)["boundary_edges"]))
+    # every output vertex is ON the source (that IS the mechanism -- shrinkwrap closed it)
+    assert np.isfinite(np.asarray(fine.vertices)).all()
+    d1, _ = surface_retopo(src, density=1.0)
+    assert np.array_equal(np.asarray(fine.vertices), np.asarray(d1.vertices)), "must be deterministic"
+    # graded_levels (M1 increment 1): balance property + grading direction + termination.
+    from holographic.mesh_and_geometry.holographic_meshsubdiv import loop_subdivide as _lsub
+    _gm = _lsub(triangulate_ngons(box()), levels=3)
+    _Vg = np.asarray(_gm.vertices, float)
+    _rho0 = float(np.linalg.norm(_Vg[np.asarray(_gm.faces)[0][1]] - _Vg[np.asarray(_gm.faces)[0][0]]))
+    _te = np.where(_Vg[:, 0] > 0, _rho0 * 0.25, _rho0 * 4.0)          # 4 levels apart -> MUST balance
+    _k, _rho = graded_levels(_gm, _te, _rho0, k_min=0, k_max=6)
+    _Fg = [tuple(int(i) for i in f[:3]) for f in _gm.faces]
+    _mj = max(abs(int(_k[a]) - int(_k[b])) for f in _Fg for a, b in ((f[0], f[1]), (f[1], f[2]), (f[2], f[0])))
+    assert _mj <= 1, "graded_levels 2:1 balance FAILED: max |dk| = %d" % _mj
+    assert _k[_Vg[:, 0] > 0].mean() > _k[_Vg[:, 0] < 0].mean(), "grading must refine the fine-target side"
+    assert np.allclose(_rho, _rho0 * 2.0 ** _k), "rho must equal rho0*2^k"
+    print("graded_levels selftest OK (2:1-balanced |dk|<=1 from a 4-level-apart target; grades toward the "
+          "fine side; rho = rho0*2^k)")
+    print("surface_retopo selftest OK (%d faces at %.0f%% quads, silhouette %.3f -- the gate the voxel route "
+          "fails; density knob real; deterministic)" % (rf["faces"], 100 * rf["quad_fraction"], sw["worst"]))
+
+
+def _selftest_guided_sparse():
+    """R6a: the guided solve routed through the promoted shared CG. Pins: (1) dense-vs-sparse parity on the
+    4-phasor (< 1e-6; measured 3e-9); (2) the guide-free sparse path equals cross_field's sparse path to
+    machine epsilon -- NOT bit-equality, and that is deliberate: guided renormalises u/(|u|+eps) before the
+    angle, and a rescale before atan2 legally moves the last ulp (caught by an over-strict pin in
+    development); (3) natural boundary inherited; (4) dense path below threshold untouched."""
+    from holographic.mesh_and_geometry.holographic_mesh import box, Mesh
+    from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons
+    from holographic.mesh_and_geometry.holographic_meshsubdiv import loop_subdivide
+    b = triangulate_ngons(box())
+    mm = loop_subdivide(b, levels=2)
+    F = np.asarray(mm.faces, int)
+    V = np.asarray(mm.vertices, float)
+    rng = np.random.default_rng(1)
+    g = np.zeros((len(F), 3))
+    idx = rng.choice(len(F), size=len(F) // 5, replace=False)
+    e = V[F[idx, 1]] - V[F[idx, 0]]
+    g[idx] = e / np.linalg.norm(e, axis=1, keepdims=True)
+    pd, _ = guided_cross_field(mm, g, solver="dense")
+    ps, cs = guided_cross_field(mm, g, solver="sparse")
+    assert np.abs(np.exp(1j * 4 * pd) - np.exp(1j * 4 * ps)).max() < 1e-6
+    assert cs["guided"] is True
+    p0, _ = guided_cross_field(mm, np.zeros((len(F), 3)), solver="sparse")
+    p1, _ = cross_field(mm, solver="sparse")
+    assert np.abs(np.exp(1j * 4 * p0) - np.exp(1j * 4 * p1)).max() < 1e-12
+    openm = Mesh(V, [tuple(f) for f in mm.faces][:-12])
+    Fo = np.asarray(openm.faces, int)
+    try:
+        guided_cross_field(openm, np.zeros((len(Fo), 3)))
+        raise AssertionError("default must still raise on an open mesh")
+    except ValueError:
+        pass
+    po, _ = guided_cross_field(openm, np.zeros((len(Fo), 3)), boundary="natural")
+    assert np.isfinite(po).all()
+    print("guided-sparse selftest OK (dense parity 4-phasor; guide-free == cross_field sparse to eps; "
+          "natural boundary inherited)")
+
+
+def _selftest_sparse_solver():
+    """Pin the sparse path: (1) eigenvalue parity with dense eigh to 1e-6 on meshes with a healthy gap;
+    (2) NEVER an interior eigenvalue (the RQI nearest-eigenpair trap, caught in development: a mid-spectrum
+    start locked onto 1.616 where the minimum was 0.424 -- the 2-phase warm-up is what this pin protects);
+    (3) deterministic across calls; (4) the auto threshold routes small meshes dense (bit-compatible) and
+    large ones sparse."""
+    from holographic.mesh_and_geometry.holographic_mesh import box
+    from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons
+    from holographic.mesh_and_geometry.holographic_meshsubdiv import loop_subdivide
+    b = triangulate_ngons(box())
+    for lv in (1, 2):
+        mm = loop_subdivide(b, levels=lv)
+        V = np.asarray(mm.vertices, float); F = np.asarray(mm.faces, int)
+        rho, opp, nxt, de = connection(V, F)
+        L = connection_laplacian(F, rho, de)
+        w = np.linalg.eigvalsh(L)
+        u1, lam1, _ = _sparse_smallest_eigvec(len(F), rho, de)
+        u2, lam2, _ = _sparse_smallest_eigvec(len(F), rho, de)
+        assert lam1 == lam2 and np.array_equal(u1, u2), "sparse solver must be deterministic"
+        assert abs(lam1 - w[0]) <= max(1e-6, 2 * (w[1] - w[0])), (lam1, w[0], w[1])
+        assert lam1 < w[1] + 1e-9, "converged to an INTERIOR eigenvalue: the RQI trap is back"
+    small = loop_subdivide(b, levels=2)
+    phi_s, ctx_s = cross_field(small)
+    assert ctx_s["solver"] == "dense", "small meshes must stay on the bit-compatible dense path"
+    big = loop_subdivide(b, levels=4)
+    phi_b, ctx_b = cross_field(big)
+    assert ctx_b["solver"] == "sparse" and np.isfinite(phi_b).all()
+    print("sparse cross_field selftest OK (parity to dense, interior-eigenvalue trap pinned, deterministic, "
+          "auto-routing: %d faces dense / %d faces sparse in %d matvecs)"
+          % (len(small.faces), len(big.faces), ctx_b["power_iters"]))
+
+
 if __name__ == "__main__":
-    _selftest()
+    _selftest(); _selftest_sparse_solver(); _selftest_natural_boundary(); _selftest_guided_sparse(); _selftest_surface_retopo(); _selftest_eigenmaps(); _selftest_stripe()

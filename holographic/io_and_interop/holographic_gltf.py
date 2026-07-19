@@ -214,11 +214,84 @@ def _read_accessor(accessor, views, blob):
     return arr.reshape(count, ncomp) if ncomp > 1 else arr
 
 
+def _node_matrix(node):
+    """A node's LOCAL transform as a 4x4 (column-vector convention): `matrix` verbatim, else T @ R @ S per the
+    glTF spec (rotation is an [x,y,z,w] quaternion). Identity when the node carries nothing."""
+    if "matrix" in node:
+        return np.array(node["matrix"], float).reshape(4, 4).T   # glTF stores column-major
+    M = np.eye(4)
+    if "scale" in node:
+        M[0, 0], M[1, 1], M[2, 2] = node["scale"]
+    if "rotation" in node:
+        q = np.asarray(node["rotation"], float)
+        n = float(np.linalg.norm(q))
+        # normalise: glTF stores quats as float32, so they are unit only to ~1e-8, and the matrix formula below
+        # is exact only for a unit quaternion -- the raw values yield det 0.99999993 (measured), i.e. not a
+        # rotation. Same fix as assetimport._quat_to_mat; the two readers had the same assumption.
+        x, y, z, w = (q / n) if n > 1e-12 else np.array([0.0, 0.0, 0.0, 1.0])
+        R = np.array([[1 - 2*(y*y + z*z), 2*(x*y - z*w),     2*(x*z + y*w)],
+                      [2*(x*y + z*w),     1 - 2*(x*x + z*z), 2*(y*z - x*w)],
+                      [2*(x*z - y*w),     2*(y*z + x*w),     1 - 2*(x*x + y*y)]])
+        M = np.block([[R, np.zeros((3, 1))], [np.zeros((1, 3)), np.ones((1, 1))]]) @ M
+    if "translation" in node:
+        T = np.eye(4); T[:3, 3] = node["translation"]
+        M = T @ M
+    return M
+
+
+def scene_primitives(gltf):
+    """THE canonical vertex order of a glTF scene: the ordered list of (mesh_index, primitive_index, world_matrix,
+    node_index) the active scene references, walked depth-first with node transforms composed. Every reader that
+    builds a per-vertex array MUST iterate this and concatenate in this order, or its rows will not line up with
+    glb_to_mesh's vertex table. `node_index` rides along because a primitive's SKIN is a property of the node,
+    not of the mesh -- and JOINTS_0 values are indices into THAT skin, so a reader cannot interpret them without
+    knowing which node it is standing on.
+
+    WHY THIS IS A FUNCTION AND NOT A LOOP INSIDE glb_to_mesh: the traversal used to be written out twice -- once
+    in the geometry reader and once in the attribute reader -- which is a drift waiting to happen, and it duly
+    happened: when glb_to_mesh learned to read the whole scene, the JOINTS/WEIGHTS reader was still returning
+    the first primitive's rows, so a rigged two-mesh file loaded 16 positions against 8 weights. Silently. One
+    walk, many payloads.
+
+    Falls back to [(0, 0, identity)] for a minimal file with no scene graph (what mesh_to_glb emits), which
+    keeps engine-emitted round-trips byte-identical."""
+    nodes = gltf.get("nodes", [])
+    scenes = gltf.get("scenes", [])
+    meshes = gltf.get("meshes", [])
+    scene = scenes[gltf.get("scene", 0)] if scenes else None
+    out = []
+    if scene is not None and nodes:
+        def walk(ni, acc):
+            node = nodes[ni]
+            acc = acc @ _node_matrix(node)
+            if "mesh" in node:
+                for pi in range(len(meshes[node["mesh"]].get("primitives", []))):
+                    out.append((node["mesh"], pi, acc, ni))
+            for child in node.get("children", []):
+                walk(child, acc)
+        for root in scene.get("nodes", []):
+            walk(root, np.eye(4))
+    if not out:
+        out = [(0, 0, np.eye(4), -1)]                        # minimal engine-emitted file: no node graph at all
+    return out
+
+
 def glb_to_mesh(data):
-    """Parse a binary glTF (`.glb`) back into a `Mesh`. Reads the FIRST mesh primitive: POSITION, the
-    triangle indices, and NORMAL / TEXCOORD_0 if present. The faces come back as triangles (glTF stores a
-    triangle index buffer); positions and the triangle set are recovered exactly. This is the offline proof
-    that what we emitted is well-formed and lossless across the boundary."""
+    """Parse a binary glTF (`.glb`) back into a `Mesh` -- the WHOLE scene, not a fragment. Walks the active
+    scene's node graph, composes each node's transform (matrix or T*R*S), and concatenates EVERY referenced
+    mesh primitive (POSITION + indices + NORMAL/TEXCOORD_0) with vertex-index offsets. Positions are taken to
+    world space through the composed transforms; normals through the inverse-transpose (renormalised).
+
+    WHY THE REWRITE (a filed latent issue that then FIRED on a real asset): the first version read only the
+    FIRST primitive of the FIRST mesh -- correct for every engine-EMITTED .glb (mesh_to_glb writes exactly
+    one), silently wrong for real exports. A Sketchfab crab scan shipped as a 24-vert pedestal cube plus five
+    ~65k-vert chunks (the classic 65k split); the old reader returned THE CUBE -- 24 of 312,578 vertices.
+    Engine-emitted files still round-trip byte-identically (one mesh, identity transform: the concatenation of
+    one thing is that thing -- pinned by the existing selftest).
+
+    Returns a Mesh with `face_material` (per-face material INDEX list, -1 = none) attached, so a caller with
+    the glTF's material table can subset or texture per material. Unreferenced meshes (in no scene) are skipped
+    -- matching every viewer's behaviour."""
     if len(data) < 12:
         raise ValueError("not a .glb: too short")
     magic, version, total = struct.unpack_from("<III", data, 0)
@@ -245,18 +318,78 @@ def glb_to_mesh(data):
 
     views = json_obj["bufferViews"]
     accessors = json_obj["accessors"]
-    prim = json_obj["meshes"][0]["primitives"][0]
-    attrs = prim["attributes"]
+    meshes = json_obj["meshes"]
+    nodes = json_obj.get("nodes", [])
+    scenes = json_obj.get("scenes", [])
+    scene = scenes[json_obj.get("scene", 0)] if scenes else None
 
-    pos = _read_accessor(accessors[attrs["POSITION"]], views, blob).astype(float)
-    idx = _read_accessor(accessors[prim["indices"]], views, blob).astype(np.int64).reshape(-1, 3)
-    nrm = (_read_accessor(accessors[attrs["NORMAL"]], views, blob).astype(float)
-           if "NORMAL" in attrs else None)
-    uv = (_read_accessor(accessors[attrs["TEXCOORD_0"]], views, blob).astype(float)
-          if "TEXCOORD_0" in attrs else None)
+    all_pos, all_nrm, all_uv, faces, face_mat = [], [], [], [], []
+    offset = 0
+    any_nrm = any_uv = False
+    for mesh_i, prim_i, M, _ni in scene_primitives(json_obj):  # THE canonical order; see scene_primitives
+        prim = meshes[mesh_i]["primitives"][prim_i]
+        attrs = prim["attributes"]
+        pos = _read_accessor(accessors[attrs["POSITION"]], views, blob).astype(float)
+        if not np.allclose(M, np.eye(4)):
+            pos = pos @ M[:3, :3].T + M[:3, 3]
+        idx = _read_accessor(accessors[prim["indices"]], views, blob).astype(np.int64).reshape(-1, 3)
+        nrm = (_read_accessor(accessors[attrs["NORMAL"]], views, blob).astype(float)
+               if "NORMAL" in attrs else None)
+        if nrm is not None and not np.allclose(M, np.eye(4)):
+            nrm = nrm @ np.linalg.inv(M[:3, :3])         # inverse-transpose, applied as row @ inv
+            ln = np.linalg.norm(nrm, axis=1, keepdims=True)
+            nrm = nrm / np.where(ln > 1e-12, ln, 1.0)
+        uv = (_read_accessor(accessors[attrs["TEXCOORD_0"]], views, blob).astype(float)
+              if "TEXCOORD_0" in attrs else None)
+        n = len(pos)
+        all_pos.append(pos)
+        all_nrm.append(nrm if nrm is not None else np.zeros((n, 3)))
+        any_nrm = any_nrm or (nrm is not None)
+        all_uv.append(uv if uv is not None else np.zeros((n, 2)))
+        any_uv = any_uv or (uv is not None)
+        mat_i = prim.get("material", -1)
+        for tri in idx:
+            faces.append((int(tri[0]) + offset, int(tri[1]) + offset, int(tri[2]) + offset))
+            face_mat.append(mat_i)
+        offset += n
 
-    faces = [tuple(int(i) for i in tri) for tri in idx]
-    return Mesh(pos, faces, normals=nrm, uvs=uv)
+    out = Mesh(np.vstack(all_pos), faces,
+               normals=np.vstack(all_nrm) if any_nrm else None,
+               uvs=np.vstack(all_uv) if any_uv else None)
+    out.face_material = face_mat                             # per-face material index; -1 = none declared
+    return out
+
+
+def _selftest_multimesh():
+    """Pin the whole-scene reader: two meshes under transformed nodes concatenate with the transforms APPLIED
+    and per-face material indices attached -- the crab-scan case (24-vert cube read instead of 312k verts)."""
+    import copy
+    from holographic.mesh_and_geometry.holographic_mesh import box
+    blob = mesh_to_glb(box())
+    jlen = struct.unpack("<I", blob[12:16])[0]
+    g = json.loads(blob[20:20 + jlen])
+    binary = blob[20 + jlen + 8:]
+    g["meshes"].append(copy.deepcopy(g["meshes"][0]))
+    g["meshes"][0]["primitives"][0]["material"] = 0
+    g["meshes"][1]["primitives"][0]["material"] = 1
+    g["nodes"] = [{"mesh": 0}, {"mesh": 1, "translation": [5.0, 0.0, 0.0]}]
+    g["scenes"] = [{"nodes": [0, 1]}]; g["scene"] = 0
+    js = json.dumps(g, separators=(",", ":")).encode()
+    js += b" " * ((4 - len(js) % 4) % 4)
+    total = 12 + 8 + len(js) + 8 + len(binary)
+    out = struct.pack("<III", _GLB_MAGIC, _GLB_VERSION, total)
+    out += struct.pack("<II", len(js), _CHUNK_JSON) + js
+    out += struct.pack("<II", len(binary), _CHUNK_BIN) + binary
+    m = glb_to_mesh(out)
+    one = glb_to_mesh(mesh_to_glb(box()))
+    n1 = len(one.vertices)
+    assert len(m.vertices) == 2 * n1 and len(m.faces) == 2 * len(one.faces)
+    V = np.asarray(m.vertices)
+    assert np.allclose(V[n1:] - V[:n1], [5.0, 0.0, 0.0]), "node translation must be APPLIED, not ignored"
+    assert m.face_material[:len(one.faces)] == [0] * len(one.faces)
+    assert m.face_material[len(one.faces):] == [1] * len(one.faces)
+    assert np.array_equal(np.asarray(one.vertices), V[:n1])   # single-mesh files: byte-compatible
+    print("gltf multimesh selftest OK (2 meshes concatenated, translation applied, face materials [0,1])")
 
 
 def write_glb(mesh, path, **kw):
@@ -351,4 +484,4 @@ def _selftest():
 
 
 if __name__ == "__main__":
-    _selftest()
+    _selftest(); _selftest_multimesh()

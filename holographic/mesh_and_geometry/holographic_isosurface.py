@@ -223,14 +223,18 @@ def is_oriented(quads):
 
     A watertight-but-unoriented mesh has each undirected edge in two faces that wind the SAME way, so half its
     normals point inward. Measured on a sphere before the fix: watertight True, oriented False, 228 directed edges
-    duplicated, 98 of 200 quad normals outward."""
-    from collections import Counter
+    duplicated, 98 of 200 quad normals outward.
 
-    counts = Counter()
-    for q in np.asarray(quads, int):
-        for e in ((q[0], q[1]), (q[1], q[2]), (q[2], q[3]), (q[3], q[0])):
-            counts[e] += 1
-    return bool(counts) and all(c == 1 for c in counts.values())
+    DEDUP (audit 2026-07-17): this was QUAD-ONLY -- it indexed q[0..3] literally, so it could not read a
+    TRIANGLE mesh, i.e. every scan and every decimation output. meshtools.face_orientation_report is the same
+    property at ANY face degree, and it SUPERSETS this. Rather than keep two checkers for one property, this
+    name and signature stay (every historical caller reads unchanged) and DELEGATE. Quad input is bit-identical
+    -- the general counter reduces to this one when every face has 4 corners (pinned in meshtools)."""
+    from holographic.mesh_and_geometry.holographic_meshtools import face_orientation_report
+
+    class _Faces(object):                     # the report takes a mesh-like; quads alone are the historical arg
+        faces = list(np.asarray(quads, int))
+    return bool(len(_Faces.faces)) and face_orientation_report(_Faces)["oriented"]
 
 
 def mesh_report(vertices, quads, sdf=None):

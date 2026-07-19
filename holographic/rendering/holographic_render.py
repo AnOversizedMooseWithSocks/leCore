@@ -61,12 +61,17 @@ class Camera:
         M[:3, 3] = -R @ self.eye
         return M
 
-    def projection_matrix(self):
-        """Perspective projection (OpenGL-style, maps the frustum to the [-1,1] cube)."""
+    def projection_matrix(self, aspect=None):
+        """Perspective projection (OpenGL-style, maps the frustum to the [-1,1] cube).
+
+        `aspect` overrides the stored `self.aspect` for this call. The renderer passes the FRAME's own
+        width/height, because that -- not a value stored on the camera -- is the aspect actually being drawn
+        into. See rasterize_mesh's WHY comment; ray_dirs has always done the same thing for the ray path."""
         t = np.tan(np.radians(self.fov_deg) / 2.0)
+        a = float(self.aspect if aspect is None else aspect)
         n, fa = self.near, self.far
         P = np.zeros((4, 4))
-        P[0, 0] = 1.0 / (self.aspect * t)
+        P[0, 0] = 1.0 / (a * t)
         P[1, 1] = 1.0 / t
         P[2, 2] = -(fa + n) / (fa - n)
         P[2, 3] = -2.0 * fa * n / (fa - n)
@@ -115,7 +120,7 @@ class Light:
 # =====================================================================================================
 def rasterize_mesh(mesh, camera, width=512, height=512, lights=None, base_color=(0.8, 0.8, 0.8),
                    background=(0.05, 0.06, 0.08), ambient=0.15, vectorized=True, texture=None, uvs=None,
-                   smooth=False):
+                   smooth=False, two_sided=False, vertex_colors=None):
     """Rasterise a triangle mesh to an (H, W, 3) RGB image in [0,1] with a z-buffer and per-face Lambert shading.
     `lights` is a list of Light (defaults to one directional sun + ambient). `base_color` is the surface albedo
     (or pass a PBRMaterial's base_color). Frustum-clips and back-face culls.
@@ -139,10 +144,28 @@ def rasterize_mesh(mesh, camera, width=512, height=512, lights=None, base_color=
     UV-transferred / baked texture through the engine needs. Requires vectorized=True (the fragment path carries
     the barycentrics); textured + vectorized=False raises."""
     from holographic.mesh_and_geometry.holographic_mesh import Mesh
+    # P3 (client): accept a plain dict / CameraController here, not only a strict Camera. fit_camera returns a
+    # dict and callers piped it straight in, hitting "dict has no attribute projection_matrix". render_mesh
+    # already coerced at its boundary; doing it here too means the LOW-LEVEL entry point is as forgiving as the
+    # faculty. as_camera passes a real Camera through by identity, so nothing that already works changes.
+    if not hasattr(camera, "projection_matrix"):
+        from holographic.io_and_interop.holographic_coerce import as_camera
+        camera = as_camera(camera)
     if uvs is None:
         uvs = getattr(mesh, "uvs", None)                     # per-vertex UVs survive fan triangulation (indices kept)
+    # VCOL: per-vertex colours from the param or the mesh attribute (RGBA -> RGB). Takes precedence over
+    # texture when given, so a coloured recall-bake renders with no atlas. None = the old texture/flat paths.
+    vcol = vertex_colors
+    if vcol is None and getattr(mesh, "colours", None) is not None and texture is None:
+        vcol = np.asarray(mesh.colours, float)[:, :3]
+    elif vcol is not None:
+        vcol = np.asarray(vcol, float)
+        if vcol.shape[1] == 4:
+            vcol = vcol[:, :3]
     if not all(len(f) == 3 for f in mesh.faces):
         mesh = Mesh(mesh.vertices, [tuple(t) for t in mesh.triangulate()])
+    if vcol is not None and not vectorized:
+        raise ValueError("vertex-colour rendering needs vectorized=True (the fragment path carries the barycentrics)")
     if texture is not None:
         if not vectorized:
             raise ValueError("texture rendering needs vectorized=True (the fragment path carries the barycentrics)")
@@ -162,7 +185,18 @@ def rasterize_mesh(mesh, camera, width=512, height=512, lights=None, base_color=
 
     V = mesh.vertices
     F = np.asarray(mesh.faces, dtype=int)
-    MVP = camera.projection_matrix() @ camera.view_matrix()
+    # THE FRAME'S OWN ASPECT drives the projection, not a value stored on the camera. MEASURED BUG this fixes:
+    # at 640x360 a sphere rasterised 1.78x wider than tall (an ellipse), because the stored self.aspect
+    # defaults to 1.0 while the pixel grid is 16:9 -- and the RAY path (ray_dirs) already derived it from
+    # width/height, so the engine's two render paths disagreed about the shape of the same scene under the same
+    # camera. That disagreement is what makes this a bug rather than a convention. A camera with an explicit
+    # aspect can still force one by rendering at a matching size; square frames -- every default, every
+    # turnaround view, every silhouette guard view -- are bit-identical either way.
+    try:
+        _P = camera.projection_matrix(aspect=width / float(height))
+    except TypeError:
+        _P = camera.projection_matrix()          # duck-typed camera without the override: leave it alone
+    MVP = _P @ camera.view_matrix()
     Vh = np.hstack([V, np.ones((len(V), 1))])
     clip = Vh @ MVP.T
     w = clip[:, 3:4]
@@ -191,7 +225,9 @@ def rasterize_mesh(mesh, camera, width=512, height=512, lights=None, base_color=
         else:
             L = lt.position - centroids
             L = L / (np.linalg.norm(L, axis=1, keepdims=True) + 1e-12)
-        ndl = np.clip(np.sum(fn * L, axis=1), 0.0, None)
+        ndl_raw = np.sum(fn * L, axis=1)
+        # two-sided: |n.l| -- thin sheets and unorientable patches shade like their front (see docstring WHY)
+        ndl = np.abs(ndl_raw) if two_sided else np.clip(ndl_raw, 0.0, None)
         shade += ndl[:, None] * lt.intensity * lt.color
     face_light = ambient + shade                              # the light term alone (albedo applied at resolve)
     face_col = np.clip(face_light * base_color, 0.0, 1.0)
@@ -264,10 +300,25 @@ def rasterize_mesh(mesh, camera, width=512, height=512, lights=None, base_color=
             else:
                 L = np.asarray(lt.position, float) - centroids[fw]
                 L = L / (np.linalg.norm(L, axis=1, keepdims=True) + 1e-12)
-            ndl = np.clip(np.sum(fn * L, axis=1), 0.0, None)
+            ndl_raw = np.sum(fn * L, axis=1)
+            ndl = np.abs(ndl_raw) if two_sided else np.clip(ndl_raw, 0.0, None)
             sl += ndl[:, None] * lt.intensity * lt.color
         smooth_light = ambient + sl                          # (n_win, 3)
-    if texture is None:
+    if vcol is not None:
+        # VCOL: per-fragment colour = barycentric blend of the winning face's corner COLOURS, times the light
+        # term -- the same machine as the texture path (barycentric interpolate + shade) but the albedo comes
+        # from mesh.colours instead of a sampled atlas. This is what lets H5's vertex-scale recall bake (which
+        # produces per-vertex colour with nowhere to render) and any coloured DCC mesh be SHOWN with no atlas.
+        # Mirrors the texture branch exactly so shading (flat/smooth/two_sided) is byte-identical in behaviour.
+        li0, li1, li2 = l0[inside][win], l1[inside][win], l2[inside][win]
+        fw = ti[win]
+        albedo = (li0[:, None] * vcol[F[fw, 0]] + li1[:, None] * vcol[F[fw, 1]] + li2[:, None] * vcol[F[fw, 2]])
+        if smooth_light is not None:
+            flat[pix[win]] = np.clip(smooth_light * albedo, 0.0, 1.0)
+        else:
+            flat[pix[win]] = np.clip(face_light[fw][:, None] * albedo if face_light.ndim == 1
+                                     else face_light[fw] * albedo, 0.0, 1.0)
+    elif texture is None:
         if smooth_light is not None:
             flat[pix[win]] = np.clip(smooth_light * base_color, 0.0, 1.0)
         else:
@@ -689,6 +740,55 @@ def frame_delta_tiles(prev, curr, tile=32, thresh=1e-3):
     return out, (len(out) / total if total else 0.0)
 
 
+def fit_camera(mesh, direction=(1.0, 0.75, 1.1), up=(0.0, 1.0, 0.0), fov_deg=50.0, aspect=1.0, margin=1.06):
+    """Solve for the camera that FRAMES a mesh: the closest eye along `direction` that keeps every vertex
+    inside the frustum, with the target chosen so the subject is CENTRED. Returns a camera dict
+    {eye, target, up, fov_deg} ready for render_mesh.
+
+    WHY THIS EXISTS, twice measured: guessing "eye = centre + dir * radius * k" fails in both directions on
+    real assets. On a 0.086-unit crab scan, preview_asset's framing left the subject at 4% of the frame; on a
+    3.6-unit ladybird scan, a hand-picked k clipped it against all four edges. Bounding-SPHERE framing is the
+    usual quick fix and is still wrong here: it ignores the aspect ratio and wastes the frame on a flat, wide
+    subject (a crab is 0.086 x 0.031 -- a sphere around it is mostly air).
+
+    The solve is exact rather than iterative: for each vertex, |x| <= (dist - z) * tan(fov/2) * aspect and
+    |y| <= (dist - z) * tan(fov/2) must hold, so dist >= max over vertices of (|x|/tx + z, |y|/ty + z). Taking
+    the max satisfies every vertex at once.
+
+    CENTRING IS SEPARATE FROM DISTANCE and is the part that is easy to get wrong: the CENTROID is not the
+    centre of the projected extents (a scan's vertices bunch where the scanner saw detail), so aiming at the
+    centroid leaves the subject off-centre and clipping one edge while the other has slack -- measured on the
+    ladybird, which clipped at column 0 while its right edge had 7 px spare. The target is therefore the point
+    that centres the PROJECTED bounding box, computed in the camera's own basis.
+
+    KEPT NEGATIVE: this frames the VERTEX cloud. A displacement map, a wide line width, or a fat point sprite
+    can still paint outside it. `margin` (default 6%) is the cheap insurance."""
+    V = np.asarray(mesh.vertices, float)
+    d = np.asarray(direction, float); d = d / (np.linalg.norm(d) or 1.0)
+    u = np.asarray(up, float)
+    if abs(float(u @ d)) > 0.99:
+        u = np.array([1.0, 0.0, 0.0])
+    r = np.cross(u, d); r /= (np.linalg.norm(r) or 1.0)
+    u2 = np.cross(d, r)
+    c0 = V.mean(0)
+    P = V - c0
+    x = P @ r; y = P @ u2; z = P @ d
+    # centre the target on the PROJECTED extents, not the centroid (see docstring)
+    cx = 0.5 * (x.min() + x.max()); cy = 0.5 * (y.min() + y.max())
+    target = c0 + r * cx + u2 * cy
+    x = x - cx; y = y - cy
+    ty = np.tan(np.radians(float(fov_deg)) / 2.0)
+    tx = ty * float(aspect)
+    dist = float(np.maximum(np.abs(x) / max(tx, 1e-9) + z, np.abs(y) / max(ty, 1e-9) + z).max())
+    dist = max(dist * float(margin), 1e-6)
+    # RETURN the aspect we fit for. The solve above sizes the horizontal half-angle as tx = ty*aspect, so if
+    # the renderer then uses a DIFFERENT aspect (its default) the fit is silently wrong -- the subject is
+    # framed for one frame shape and drawn in another. This is the same two-paths-disagree-on-aspect bug that
+    # bit rasterize_mesh vs the ray path earlier; the camera must CARRY the aspect it was fit for.
+    return {"eye": (target + d * dist).tolist(), "target": target.tolist(),
+            "up": tuple(float(v) for v in u2), "fov_deg": float(fov_deg), "aspect": float(aspect)}
+
+
 def _std_views(mesh, margin=1.6):
     """Standard orthographic-ish camera set for a model turnaround: top, front, side, and a 3/4. Cameras pull back
     from the mesh centroid by `margin` * the bbox diagonal so the whole model fits every frame."""
@@ -697,11 +797,203 @@ def _std_views(mesh, margin=1.6):
     diag = float(np.linalg.norm(V.max(0) - V.min(0))) or 1.0
     d = diag * float(margin)
     return {
-        "top":   (c + np.array([0.0, d, 1e-3]), (0.0, 0.0, -1.0)),
-        "front": (c + np.array([d, 0.0, 1e-3]), (0.0, 1.0, 0.0)),
-        "side":  (c + np.array([0.0, 0.0, d]),  (0.0, 1.0, 0.0)),
-        "3q":    (c + np.array([d * 0.7, d * 0.5, d * 0.7]), (0.0, 1.0, 0.0)),
+        "top":    (c + np.array([0.0, d, 1e-3]), (0.0, 0.0, -1.0)),
+        "bottom": (c + np.array([0.0, -d, 1e-3]), (0.0, 0.0, 1.0)),
+        "front":  (c + np.array([d, 0.0, 1e-3]), (0.0, 1.0, 0.0)),
+        # left/right: the two z-axis views. "side" is kept as an alias of "right" so every existing caller and
+        # every recorded IoU number stays byte-identical -- the new names are ADDITIVE, per the constitution.
+        "right":  (c + np.array([0.0, 0.0, d]),  (0.0, 1.0, 0.0)),
+        "left":   (c + np.array([0.0, 0.0, -d]), (0.0, 1.0, 0.0)),
+        "side":   (c + np.array([0.0, 0.0, d]),  (0.0, 1.0, 0.0)),
+        "3q":     (c + np.array([d * 0.7, d * 0.5, d * 0.7]), (0.0, 1.0, 0.0)),
+        # "persp" is 3q from the OPPOSITE quadrant, so the pair of perspective views covers all eight octants'
+        # worth of outline between them rather than doubling up on one corner.
+        "persp":  (c + np.array([-d * 0.7, d * 0.5, -d * 0.7]), (0.0, 1.0, 0.0)),
     }, c, diag
+
+
+def gauss_area_map(mesh, nth=24, nph=48):
+    """The Extended Gaussian Image (Horn 1984): every face's AREA binned by its NORMAL's direction on the
+    sphere. A one-array signature of the surface's ORIENTATION FIELD -- translation-invariant, O(F), ~0.14 s
+    on 322k faces. Compare two with egi_similarity.
+
+    WHAT IT MEASURES, established by experiment rather than hope -- this instrument came out of the search for
+    a one-image silhouette check, and it is NOT one: decimating a dense sphere leaves the silhouette at 0.99
+    worst-view IoU while EGI similarity collapses 0.59 -> 0.06, because the normal field coarsens drastically
+    even when the outline barely moves. Orientation and outline are ORTHOGONAL quantities. That makes this the
+    complement to silhouette_sweep, whose kept negative has always been "blind to interior detail and
+    normals": sweep guards the OUTLINE, EGI guards the SURFACE CHARACTER. Use both when "did the optimisation
+    destroy the model" means more than the profile.
+
+    KEPT NEGATIVES from the same search, so nobody re-walks it: (1) radial OCCUPANCY over the direction sphere
+    ("does a ray from the centre hit the object") carries almost no information -- 94.7% of bins occupied on
+    the crab, any star-ish object saturates it. (2) The radial EXTENT map (max distance per direction, the
+    'spherical extension function' of Kazhdan et al., SGP 2003) is a MAX-statistic: with density-matched
+    surface sampling its whole degradation ladder (0.9868/0.9861/0.9717) sits at its own noise floor (0.9895)
+    -- a leg can thin to a remnant that still reaches the same max radius and extent never notices, while
+    silhouettes integrate projected AREA and do. (3) The SH rotation-invariance machinery of that literature
+    solves alignment for RETRIEVAL; our two meshes share a frame, so direct per-bin comparison is strictly
+    more sensitive and none of it is needed."""
+    V = np.asarray(mesh.vertices, float)
+    F = mesh.__dict__.get("_silhouette_F")
+    if F is None:
+        try:
+            F = np.asarray(mesh.faces, dtype=int)
+            if F.ndim != 2 or F.shape[1] != 3:
+                raise ValueError
+        except (ValueError, TypeError):
+            F = np.asarray([f[:3] for f in mesh.faces if len(f) >= 3], int)
+        mesh.__dict__["_silhouette_F"] = F
+    n = np.cross(V[F[:, 1]] - V[F[:, 0]], V[F[:, 2]] - V[F[:, 0]])
+    a = 0.5 * np.linalg.norm(n, axis=1)
+    nn = n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
+    th = np.arccos(np.clip(nn[:, 1], -1, 1))
+    ph = np.arctan2(nn[:, 2], nn[:, 0]) % (2 * np.pi)
+    ti = np.clip((th / np.pi * nth).astype(int), 0, nth - 1)
+    pi_ = np.clip((ph / (2 * np.pi) * nph).astype(int), 0, nph - 1)
+    m = np.zeros(nth * nph)
+    np.add.at(m, ti * nph + pi_, a)
+    return m
+
+
+def egi_similarity(ref_mesh, mesh, nth=24, nph=48):
+    """Orientation-field preservation in [0, 1]: 1 - normalised L1 between the two Extended Gaussian Images.
+    1.0 = identical area-weighted normal distributions. Sensitive BY DESIGN: it reads how much the normal
+    field coarsened, which is large under any decimation (a grid-5 sphere reads 0.06 against its dense source
+    while the silhouette reads 0.99) -- interpret it as 'how much surface character changed', not pass/fail
+    against the silhouette guard's 0.95 scale. Returns {"similarity", "ref_area", "area"}."""
+    a = gauss_area_map(ref_mesh, nth=nth, nph=nph)
+    b = gauss_area_map(mesh, nth=nth, nph=nph)
+    s = float(np.abs(a).sum() + np.abs(b).sum())
+    simv = 1.0 - float(np.abs(a - b).sum() / s) if s > 0 else 1.0
+    return {"similarity": round(simv, 4), "ref_area": float(a.sum()), "area": float(b.sum())}
+
+
+def silhouette_mask(mesh, direction, up=(0.0, 1.0, 0.0), size=128, frame=None):
+    """A binary ORTHOGRAPHIC coverage mask of `mesh` seen along `direction` -- the silhouette and nothing else.
+
+    WHY NOT rasterize_mesh: a silhouette needs no z-buffer, no lighting, no perspective -- only "which pixels
+    does the projection cover". The full rasteriser costs 0.5-1.5 s per view on a 322k-face scan (measured);
+    this is vectorised end to end with no per-triangle Python loop: project the vertices orthographically,
+    SAMPLE every edge at pixel density (one big scatter -- the outline cannot be missed because every triangle
+    contributes its whole boundary), then FLOOD-FILL the background inward from the border and invert. Interior
+    pixels are whatever the background could not reach.
+
+    Orthographic on purpose, not as a shortcut: Moose's symmetry observation -- the silhouette along +axis and
+    -axis is the same outline mirrored -- is TRUE under orthographic projection and FALSE under perspective
+    (measured: the spike box read top 0.779 vs bottom 1.000 with the perspective critic, because perspective
+    plus occlusion break the symmetry). So a sweep only needs azimuths in [0, pi). PRECISION OF THAT CLAIM,
+    measured: the equivalence is exact in the continuous limit but NOT pixel-exact -- independently quantising
+    the two mirrored projections of the crab cost 15% IoU (0.847) purely at the outline, because thin limbs
+    give the silhouette an enormous perimeter. This is exactly why the SWEEP always renders both meshes under
+    the SAME direction and SAME frame: truncation then bites both masks identically and cancels out of the
+    comparison. Never compare masks made under different directions.
+
+    `frame=(centre, radius)` pins the projection window; pass the SAME frame for two meshes to make their masks
+    comparable (the sweep does this with the reference's frame). Returns a (size, size) bool array.
+
+    KEPT NEGATIVE: flood-fill-from-border cannot represent ENCLOSED holes -- a donut seen face-on masks as a
+    disc, so a decimation that fills the hole is invisible to this instrument from that direction (usually
+    another azimuth still catches the shape change). The perspective critic (turnaround) does not have this
+    blind spot; it is slower and keeps its place for final review renders."""
+    V = np.asarray(mesh.vertices, float)
+    # MEASURED perf fix: the mask pipeline itself is 0.26 s on 322k faces, but converting the face list cost
+    # another ~0.8 s PER CALL -- and a sweep calls this 7 times per mesh. Cache the (F,) array on the mesh
+    # object (additive attribute, same pattern as uv_transfer_report); invalidation is a non-issue because
+    # meshes here are immutable value objects -- every operation returns a NEW mesh.
+    F = mesh.__dict__.get("_silhouette_F")
+    if F is None:
+        try:
+            F = np.asarray(mesh.faces, dtype=int)              # all-triangle fast path: one C conversion
+            if F.ndim != 2 or F.shape[1] != 3:
+                raise ValueError
+        except (ValueError, TypeError):
+            F = np.asarray([f[:3] for f in mesh.faces if len(f) >= 3], int)   # ngons: slice per face
+        mesh.__dict__["_silhouette_F"] = F
+    d = np.asarray(direction, float); d = d / (np.linalg.norm(d) or 1.0)
+    u = np.asarray(up, float)
+    if abs(float(u @ d)) > 0.99:                                  # up parallel to view: pick another up
+        u = np.array([1.0, 0.0, 0.0])
+    r = np.cross(u, d); r /= (np.linalg.norm(r) or 1.0)
+    u2 = np.cross(d, r)
+    P = np.stack([V @ r, V @ u2], axis=1)                         # orthographic: just a basis projection
+    if frame is None:
+        c = P.mean(0)
+        rad = float(np.abs(P - c).max()) * 1.05 or 1.0
+    else:
+        c3, rad = frame
+        c = np.array([float(np.asarray(c3, float) @ r), float(np.asarray(c3, float) @ u2)])
+        rad = float(rad)
+    Q = (P - c) / (2 * rad) + 0.5                                 # into [0,1]^2
+    px = np.clip(Q * (size - 1), 0, size - 1)
+    mask = np.zeros((size, size), bool)
+    # every edge, sampled at ~pixel density, one scatter. 3F edges; sample counts proportional to length.
+    E = np.concatenate([px[F[:, [0, 1]]], px[F[:, [1, 2]]], px[F[:, [2, 0]]]])   # (3F, 2, 2)
+    seg = E[:, 1] - E[:, 0]
+    n_s = np.minimum(np.ceil(np.linalg.norm(seg, axis=1)).astype(int) + 1, 4 * size)
+    tot = int(n_s.sum())
+    idx = np.repeat(np.arange(len(E)), n_s)
+    # within-edge parameter 0..1, built without a loop: cumulative offsets
+    starts = np.concatenate([[0], np.cumsum(n_s)[:-1]])
+    tpar = (np.arange(tot) - starts[idx]) / np.maximum(n_s[idx] - 1, 1)
+    pts = E[idx, 0] + seg[idx] * tpar[:, None]
+    xi = np.clip(pts[:, 0].astype(int), 0, size - 1)
+    yi = np.clip(pts[:, 1].astype(int), 0, size - 1)
+    mask[yi, xi] = True
+    # flood the background from the border: iterative dilation of "outside", blocked by the outline
+    outside = np.zeros_like(mask)
+    outside[0, :] = ~mask[0, :]; outside[-1, :] = ~mask[-1, :]
+    outside[:, 0] |= ~mask[:, 0]; outside[:, -1] |= ~mask[:, -1]
+    while True:
+        grown = outside.copy()
+        grown[1:, :] |= outside[:-1, :]; grown[:-1, :] |= outside[1:, :]
+        grown[:, 1:] |= outside[:, :-1]; grown[:, :-1] |= outside[:, 1:]
+        grown &= ~mask
+        if grown.sum() == outside.sum():
+            break
+        outside = grown
+    return ~outside
+
+
+def silhouette_sweep(ref_mesh, mesh, n_azimuth=6, size=128, include_top=True, ref_cache=None):
+    """Rotate the pair under a fixed orthographic camera and score silhouette IoU at every stop -- Moose's
+    turntable, made cheap enough to be a DEFAULT guard. Azimuths cover [0, pi) only: under orthographic
+    projection theta and theta+pi give mirror-identical outlines (the symmetry that perspective breaks), so
+    n_azimuth=6 already sees the outline from 12 directions' worth of information, plus the top view.
+
+    The REFERENCE's frame (centre + projection radius) is used for both meshes at every angle, so the masks are
+    comparable and a shrunken candidate scores honestly low rather than being re-framed to fit. Returns
+    {"iou": {view: value}, "worst": float, "worst_view": str, "mean": float, "seconds": float}."""
+    import time as _time
+    t0 = _time.time()
+    RV = np.asarray(ref_mesh.vertices, float)
+    c3 = RV.mean(0)
+    rad = float(np.linalg.norm(RV - c3, axis=1).max()) * 1.05 or 1.0
+    views = []
+    for k in range(int(n_azimuth)):
+        th = np.pi * k / float(n_azimuth)
+        views.append(("az%03d" % int(np.degrees(th)), np.array([np.cos(th), 0.0, np.sin(th)])))
+    if include_top:
+        views.append(("top", np.array([0.0, 1.0, 0.0])))
+    iou = {}
+    # ref_cache: a dict the CALLER owns. The reference's masks are identical for every candidate a guard tries,
+    # so a walk-back loop passes the same dict each time and only the candidate is re-projected -- the 322k
+    # source is masked once per direction for the whole search, not once per step.
+    if ref_cache is None:
+        ref_cache = {}
+    for name, d in views:
+        key = (name, int(size))
+        a = ref_cache.get(key)
+        if a is None:
+            a = silhouette_mask(ref_mesh, d, size=size, frame=(c3, rad))
+            ref_cache[key] = a
+        b = silhouette_mask(mesh, d, size=size, frame=(c3, rad))
+        un = float(np.logical_or(a, b).sum())
+        iou[name] = (float(np.logical_and(a, b).sum()) / un) if un > 0 else 1.0
+    worst_view = min(iou, key=iou.get)
+    return {"iou": {k: round(v, 4) for k, v in iou.items()}, "worst": float(iou[worst_view]),
+            "worst_view": worst_view, "mean": float(np.mean(list(iou.values()))),
+            "seconds": round(_time.time() - t0, 3)}
 
 
 def turnaround(mesh, ref_mesh=None, views=("top", "front", "side", "3q"), width=360, height=360,
@@ -814,5 +1106,59 @@ def _selftest():
           f"volume alpha max {alpha.max():.2f}; fire glows red")
 
 
+def _selftest_silhouette():
+    """Pin the fast silhouette instrument: (1) identity sweeps to 1.0 in every direction; (2) a mesh that LOST
+    its spike is caught by SOME direction of the turntable (the whole point of sweeping: degradation is local
+    and one bad azimuth must be enough); (3) masks are deterministic; (4) the ref frame is shared, so a
+    half-size copy scores badly instead of being re-framed to fit."""
+    from holographic.mesh_and_geometry.holographic_mesh import box, Mesh
+    from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons
+    b = triangulate_ngons(box())
+    V = np.asarray(b.vertices, float).tolist(); F = [tuple(f) for f in b.faces]
+    tip = len(V); V.append([0.5, 3.0, 0.5]); F += [(2, 3, tip), (3, 7, tip), (7, 6, tip), (6, 2, tip)]
+    spiky = Mesh(np.array(V), F)
+    r_id = silhouette_sweep(spiky, spiky, n_azimuth=6, size=96)
+    assert all(v == 1.0 for v in r_id["iou"].values()), r_id["iou"]
+    r_lost = silhouette_sweep(spiky, triangulate_ngons(box()), n_azimuth=6, size=96)
+    assert r_lost["worst"] < 0.85, "losing the spike must be caught: %s" % r_lost["iou"]
+    a = silhouette_mask(spiky, [1.0, 0.0, 0.3], size=96)
+    b2 = silhouette_mask(spiky, [1.0, 0.0, 0.3], size=96)
+    assert np.array_equal(a, b2)
+    half = Mesh(np.array(V) * 0.5, F)
+    r_half = silhouette_sweep(spiky, half, n_azimuth=4, size=96)
+    assert r_half["worst"] < 0.5, "a shrunken copy must score badly under the shared frame"
+    # EGI: identity exact; TRANSLATION-invariant (normals do not move); and the complement demonstrated --
+    # a coarsened sphere keeps its silhouette but not its orientation field.
+    e_id = egi_similarity(spiky, spiky)
+    assert e_id["similarity"] == 1.0
+    moved = Mesh(np.array(V) + np.array([5.0, -2.0, 1.0]), F)
+    assert egi_similarity(spiky, moved)["similarity"] == 1.0, "EGI must ignore translation"
+    # fit_camera: nothing clips, at any aspect, on an OFF-CENTRE mesh (the case that breaks centroid framing)
+    off = Mesh(np.array(V) + np.array([4.0, 1.0, -3.0]), F)
+    for (w_, h_) in ((320, 320), (480, 270), (270, 480)):
+        cam = Camera(**fit_camera(off, direction=(1.0, 0.6, 0.9), aspect=w_ / float(h_)))
+        img = rasterize_mesh(off, cam, width=w_, height=h_, background=(0.0, 0.0, 0.0))
+        fgm = np.asarray(img, float).sum(2) > 0.02
+        assert fgm.any(), "subject vanished at %dx%d" % (w_, h_)
+        ys_, xs_ = np.where(fgm)
+        assert xs_.min() > 0 and xs_.max() < w_ - 1 and ys_.min() > 0 and ys_.max() < h_ - 1, \
+            "fit_camera clipped an off-centre mesh at %dx%d" % (w_, h_)
+    # and the projection uses the FRAME's aspect: a sphere is a circle at 16:9, not an ellipse
+    from holographic.mesh_and_geometry.holographic_meshtools import _uv_sphere_fixture
+    sp = _uv_sphere_fixture(32)
+    cam = Camera(eye=(0, 0, 6.0), target=(0, 0, 0))
+    im2 = np.asarray(rasterize_mesh(sp, cam, width=640, height=360, background=(0.0, 0.0, 0.0)), float)
+    fg2 = im2.sum(2) > 0.02
+    ys2, xs2 = np.where(fg2)
+    ratio = (xs2.max() - xs2.min() + 1) / float(ys2.max() - ys2.min() + 1)
+    assert abs(ratio - 1.0) < 0.06, "sphere rasterised as an ellipse (w/h %.3f): aspect regression" % ratio
+
+    e_lost = egi_similarity(spiky, triangulate_ngons(box()))
+    assert e_lost["similarity"] < 0.9, "losing the spike's faces must move the orientation field"
+    print("silhouette selftest OK (identity 1.0 all views; lost spike caught at worst %.3f; deterministic; "
+          "half-size scores %.3f under the shared frame; EGI identity 1.0, translation-invariant, spike loss "
+          "%.3f)" % (r_lost["worst"], r_half["worst"], e_lost["similarity"]))
+
+
 if __name__ == "__main__":
-    _selftest()
+    _selftest(); _selftest_silhouette()

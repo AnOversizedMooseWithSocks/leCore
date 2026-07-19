@@ -27,7 +27,8 @@ import threading
 
 import numpy as np
 
-from holographic.scene_and_pipeline.holographic_distribute import reduce_sum, reduce_min, reduce_max, reduce_bundle
+from holographic.scene_and_pipeline.holographic_distribute import (reduce_bundle, reduce_first, reduce_max,
+                                                                   reduce_min, reduce_sum)
 
 # -- job states --------------------------------------------------------------------------------------------
 CREATED = "created"
@@ -38,7 +39,10 @@ CANCELLED = "cancelled"
 FAILED = "failed"
 
 # reducers referenced by NAME so a job survives serialization (a function object cannot be saved to JSON)
-_REDUCERS = {"sum": reduce_sum, "min": reduce_min, "max": reduce_max, "bundle": reduce_bundle}
+# "first" = the identity reduce for an ATOMIC job (one bucket, nothing to combine) -- what job_submit uses to run
+# an arbitrary faculty in the background. Additive: existing jobs name sum/min/max/bundle and are untouched.
+_REDUCERS = {"sum": reduce_sum, "min": reduce_min, "max": reduce_max, "bundle": reduce_bundle,
+             "first": reduce_first}
 
 
 def _pack(v):
@@ -77,6 +81,13 @@ class Job:
         self.reduce = reduce                            # a reducer NAME (survives serialization)
         self.cache = cache                              # a shared read-only array (or None)
         self.meta = dict(meta or {})
+        # Whether the last checkpoint attempt succeeded: None = not attempted yet, True = on disk, False = this
+        # job's state is not JSON-representable (it RUNS, it just cannot survive a restart -- see save()).
+        # Declared here rather than only inside save() so a consumer can always READ it: _run sets status=DONE
+        # BEFORE it checkpoints, so anything polling job_status and then reading this attribute would otherwise
+        # race it and hit AttributeError. Found exactly that way, by a test that passed alone and failed in suite.
+        self.persisted = None
+        self.persist_error = None
         self.done = []                                  # completed bucket indices (order-independent -- monoid)
         self.partials = []                              # their results, aligned with self.done
         self.status = CREATED
@@ -187,10 +198,29 @@ class JobManager:
 
     # -- persistence (survive an app restart) ---------------------------------------------------------------
     def save(self, job_id, path=None):
-        """Checkpoint a job to JSON. With store_dir set this is called automatically at every stopping point."""
+        """Checkpoint a job to JSON. With store_dir set this is called automatically at every stopping point.
+        Returns the path, or None when this job's state is not JSON-representable (it then runs normally but
+        cannot survive a restart -- `job.persisted` records which).
+
+        MEASURED BUG this guards: save() is called from _run, INSIDE the daemon thread. A cache holding a live
+        object (job_submit("render_mesh", {"mesh": <Mesh>, ...}) -- legal, and it computes the right image) made
+        json.dump raise TypeError, which crashed the worker thread with an unhandled traceback the caller could
+        not catch. The job had already SUCCEEDED; only the bookkeeping exploded, and it did so on stderr where a
+        library has no business writing. Persistence is a BONUS property of a job, not a precondition for running
+        one -- so a state that cannot be written degrades to "runs, does not persist" instead of taking the work
+        down with it. Marked, not silent: `persisted=False` is on the job for anyone who needs the guarantee."""
         path = path or self._path(job_id)
+        job = self.jobs[job_id]
+        try:
+            state = job.to_state()
+            text = json.dumps(state)                       # serialise BEFORE opening, so a failure leaves no
+        except TypeError as e:                             # truncated half-written checkpoint on disk
+            job.persisted = False
+            job.persist_error = "state is not JSON-representable (%s); job ran but will not survive a restart" % e
+            return None
         with open(path, "w") as f:
-            json.dump(self.jobs[job_id].to_state(), f)
+            f.write(text)
+        job.persisted = True
         return path
 
     def load(self, job_id=None, path=None):

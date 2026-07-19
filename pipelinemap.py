@@ -42,6 +42,14 @@ def _edges(cat):
     for cap in sorted(cat._by_name.values(), key=lambda c: c.name):
         if not cap.consumes or not cap.produces:
             continue                                       # untagged on either side = no typed edge to draw
+        if getattr(cap, "polymorphic", False):
+            # C6: same kind in -> same kind out. Only the DIAGONAL is a real edge; the off-diagonal pairs the
+            # cross product would emit are conversions this capability cannot perform, and a router that
+            # believes them plans routes that cannot run.
+            for k in cap.consumes:
+                if k in cap.produces:
+                    out.append((k, k, cap.name))
+            continue
         for ci in cap.consumes:
             for po in cap.produces:
                 out.append((ci, po, cap.name))
@@ -73,10 +81,21 @@ def _orphans(edges, all_kinds):
 
 
 def generate(root=REPO):
-    """Write docs/PIPELINE_MAP.md and pipelines.json from the live catalog. Returns (md_path, json_path)."""
-    from holographic.caching_and_storage.holographic_catalog import default_catalog
+    """Write docs/PIPELINE_MAP.md and pipelines.json from the live catalog. Returns (md_path, json_path).
+
+    THE CATALOG IS THE MIND'S, NOT default_catalog(). This generator used to read default_catalog() -- the ~400
+    curated entries -- while mind.pipeline_map() reads the mind-seeded catalog (~2,100 entries, with _IO_SHAPES
+    applied and every `method` VERIFIED callable). The committed pipelines.json therefore DISAGREED with the live
+    engine: no `method` field, and no image->mesh edges, while the faculty served both -- and the drift gate
+    could not see it, because the file was perfectly up to date WITH ITS GENERATOR. Generated docs feed back into
+    what agents believe is possible, so a doc generated from a poorer catalog is a poorer world model published
+    as truth. Third instance of this exact shape (browse_semantic's bare fallback, the UNIFIERS.md redirect);
+    the cure each time is ONE source. Costs an engine import -- capdoc/facultymap already pay it.
+    tests/test_pipeline_edges.py pins pipelines.json == mind.pipeline_map() edge-for-edge."""
+    import lecore
     from holographic.caching_and_storage.holographic_iokinds import IO_KINDS
-    cat = default_catalog()
+    mind = lecore.UnifiedMind(dim=64, seed=0)
+    cat = mind._capability_catalog()
 
     edges = _edges(cat)
     produce, consume = _adjacency(edges)
@@ -146,7 +165,9 @@ def generate(root=REPO):
     # ---- pipelines.json: the machine-readable contract. Edge list + adjacency + coverage + gaps.
     data = {
         "coverage": {"tagged": tagged, "total": total, "percent": pct},
-        "edges": [{"consumes": ci, "produces": po, "capability": name} for ci, po, name in edges],
+        # `method` mirrors mind.pipeline_map() (C7): the verified callable name, or None = honestly import-only.
+        "edges": [{"consumes": ci, "produces": po, "capability": name,
+                   "method": getattr(cat._by_name.get(name), "method", None)} for ci, po, name in edges],
         "produced_by": produce,
         "consumed_by": consume,
         "gaps": {"dead_end": dead_end, "source_only": source_only, "untouched": untouched},

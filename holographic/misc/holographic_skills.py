@@ -90,18 +90,88 @@ def _catalog():
     return seed_from_modules(default_catalog())
 
 
+def _params(fn):
+    """A method's parameters as DATA: [{name, kind, required, default}] -- what a client needs to build a call
+    without parsing a signature string.
+
+    WHY: the card served `signature` as prose ("(mesh, camera, width=512, ...)"), so every client wrote its own
+    parser to turn it into form fields. A downstream node pack did exactly that. Parsing our own repr back out is
+    work we can do once, correctly, from `inspect` -- which also knows *args/**kwargs, which a naive split does not.
+    `default` is repr'd rather than returned raw so the card stays JSON-safe (a tuple default like (0.8, 0.8, 0.8)
+    is not a JSON scalar, and a client that JSON-dumps the card would otherwise be handed a landmine).
+    """
+    import inspect
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return []
+    out = []
+    for pname, prm in sig.parameters.items():
+        if pname == "self":
+            continue
+        out.append({"name": pname,
+                    "kind": str(prm.kind).lower(),                      # positional_or_keyword / var_keyword / ...
+                    "required": prm.default is inspect.Parameter.empty
+                                and prm.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD),
+                    "default": None if prm.default is inspect.Parameter.empty else repr(prm.default)})
+    return out
+
+
+def _io_for(name):
+    """This method's declared io shape: (consumes, produces, primary). `primary` is the parameter that takes the
+    PIPED input -- the first required positional -- which is the one thing a node pack cannot guess and the thing
+    it must know to wire an edge automatically. None when the method declares no io kinds."""
+    from holographic.caching_and_storage.holographic_catalog import _IO_SHAPES
+    cons, prod = _IO_SHAPES.get(name, ((), ()))
+    return list(cons), list(prod)
+
+
 def skill_card(name):
     """A machine-readable card for ONE skill, resolved either as a catalog CAPABILITY (by name) or a UnifiedMind
     METHOD (by name). None if neither. Gives an agent the what + the how-to-call in one object."""
     cat = _catalog()
     cap = cat.get(name)
     if cap is not None:
-        return {"kind": "capability", "name": cap.name, "does": cap.does, "example": cap.example,
-                "native": cap.native, "aliases": list(cap.aliases)}
+        card = {"kind": "capability", "name": cap.name, "does": cap.does, "example": cap.example,
+                "native": cap.native, "aliases": list(cap.aliases),
+                # C7: the verified callable name, or None = honestly import-only (reach it via `example`).
+                "method": getattr(cap, "method", None)}
+        # C9: a capability that IS callable carries the method's structured params too. Without this the two card
+        # kinds disagreed: describe_skill("render_mesh") served params (method branch) while
+        # describe_skill("image_to_3d") did not (it is ALSO a catalog entry, so it returned here first and exited).
+        # Same question, two answers, decided by which index happened to hold the name -- a client cannot code
+        # against that.
+        if card["method"]:
+            from holographic.misc.holographic_unified import UnifiedMind
+            fn = getattr(UnifiedMind, card["method"], None)
+            if fn is not None:
+                card["params"] = _params(fn)
+                cons, prod = _io_for(card["method"])
+                card["consumes"] = cons or list(getattr(cap, "consumes", ()) or ())
+                card["produces"] = prod or list(getattr(cap, "produces", ()) or ())
+                req = [q["name"] for q in card["params"]
+                       if q["required"] and q["kind"].startswith("positional")]
+                card["primary"] = req[0] if req else None
+        return card
     ms = mind_methods()
     if name in ms:
-        return {"kind": "method", "name": name, "call": "mind.%s%s" % (name, ms[name]["signature"]),
-                "signature": ms[name]["signature"], "summary": ms[name]["summary"]}
+        # `method` is present on BOTH card kinds and always means the same thing: the name to call on the mind
+        # (None = import-only). A client reads one field regardless of which index the name resolved through.
+        card = {"kind": "method", "name": name, "call": "mind.%s%s" % (name, ms[name]["signature"]),
+                "signature": ms[name]["signature"], "summary": ms[name]["summary"], "method": name}
+        # C9: the same information as DATA, so a client stops parsing our prose signature back into fields.
+        from holographic.misc.holographic_unified import UnifiedMind
+        fn = getattr(UnifiedMind, name, None)
+        if fn is not None:
+            card["params"] = _params(fn)
+            cons, prod = _io_for(name)
+            card["consumes"], card["produces"] = cons, prod
+            # `primary` = the param the piped input goes to. First REQUIRED positional; None when the method takes
+            # only options (nothing to pipe into). A client that guesses this wrong wires the wrong socket.
+            req = [q["name"] for q in card["params"]
+                   if q["required"] and q["kind"].startswith("positional")]
+            card["primary"] = req[0] if req else None
+        return card
     return None
 
 

@@ -653,17 +653,58 @@ def flood_fill_sign(grid, band):
     return g
 
 
-def mesh_to_sdf_grid(mesh, bounds, res=48, band=None):
-    """Build a FULL, re-marchable signed distance grid from a mesh: mesh_distance_grid (the banded signed SDF by
-    tiling) then flood_fill_sign (interior filled negative). This is the complete mesh -> field conversion -- the
-    imported mesh becomes a field, so it can be re-marched at any resolution (field-native LOD), trilinearly sampled
-    (sample_distance_grid), or composited like any SDF. Returns (grid res^3, (xs,ys,zs)). Carries the honest caveats
-    of both parts (nearest-normal sign; needs a watertight band of >= ~2 voxels)."""
+def open_fraction(mesh):
+    """Fraction of edges that are BOUNDARY (used by exactly one face). 0.0 = edge-closed; a scan-style triangle
+    soup measures near 1 (the mantis regression case measured 0.71). The cheap probe that routes the sign method."""
+    from collections import Counter
+    cnt = Counter()
+    for f in mesh.faces:
+        n = len(f)
+        for i in range(n):
+            a, b = f[i], f[(i + 1) % n]
+            cnt[(a, b) if a < b else (b, a)] += 1
+    if not cnt:
+        return 1.0
+    return sum(1 for v in cnt.values() if v == 1) / float(len(cnt))
+
+
+def mesh_to_sdf_grid(mesh, bounds, res=48, band=None, sign="auto", open_threshold=0.05):
+    """Build a FULL, re-marchable signed distance grid from a mesh -- the complete mesh -> field conversion.
+    Returns (grid res^3, (xs,ys,zs)).
+
+    `sign` chooses where the INSIDE comes from, because the two failure modes are disjoint:
+      * "flood"   -- the original path: banded nearest-normal sign + flood_fill_sign. Exact and cheap for
+        edge-closed meshes; on an OPEN mesh the negative shell has holes, the flood LEAKS, and marching the
+        result yields scattered garbage blobs (the mantis .glb regression: a Sketchfab scan soup with 71%
+        boundary edges shredded into disconnected chunks -- reproduced, pinned).
+      * "winding" -- magnitude from the same distance build, sign from the GENERALISED WINDING NUMBER
+        (Jacobson et al. 2013) via the fast cluster-dipole sum (Barill et al. 2018; measured 113x over the
+        exact sum on the regression scan). No closure or orientation assumption -- the published robust answer
+        for soups. Costs O(voxels x cells) + exact near-cells.
+      * "auto" (default) -- probe open_fraction(mesh): > `open_threshold` routes to "winding", else "flood".
+        BACKWARD COMPATIBLE BY MEASUREMENT, not by promise: an edge-closed mesh takes the flood path
+        BIT-IDENTICALLY (pinned by selftest); only the class whose flood output was documented garbage moves.
+    """
     grid, axes = mesh_distance_grid(mesh, bounds, res=res, band=band)
     lo = np.asarray(bounds[0], float)
     hi = np.asarray(bounds[1], float)
     band_val = 4.0 * float(((hi - lo) / max(int(res) - 1, 1)).max()) if band is None else band
-    return flood_fill_sign(grid, band_val), axes
+    if sign == "auto":
+        sign = "winding" if open_fraction(mesh) > open_threshold else "flood"
+    if sign == "flood":
+        return flood_fill_sign(grid, band_val), axes
+    if sign != "winding":
+        raise ValueError("sign must be 'auto', 'flood', or 'winding', got %r" % (sign,))
+    from holographic.mesh_and_geometry.holographic_voxelize import fast_winding_number
+    xs, ys, zs = axes
+    gx, gy, gz = np.meshgrid(xs, ys, zs, indexing="ij")
+    pts = np.stack([gx.ravel(), gy.ravel(), gz.ravel()], axis=1)
+    tris = [f[:3] for f in mesh.faces]
+    w = fast_winding_number(pts, mesh.vertices, tris).reshape(grid.shape)
+    inside = np.abs(w) > 0.5                                     # |w|: robust to either global orientation
+    # magnitude from the band build (clamped to band far away), sign purely from the winding number -- the
+    # nearest-normal sign is DISCARDED because on a soup it is exactly the broken part
+    return np.where(inside, -np.abs(grid), np.abs(grid)), axes
 
 
 def mesh_to_sdf(mesh, points):
@@ -717,7 +758,7 @@ def metaball_field(centers, radius=0.5):
 # =====================================================================================================
 # Self-test -- SDF -> mesh (analytic sphere), mesh -> SDF (probes), splat -> mesh (metaball blob).
 # =====================================================================================================
-def voxel_remesh(mesh, resolution=64, pad=0.2):
+def voxel_remesh(mesh, resolution=64, pad=0.2, sign="auto", keep_uv="auto"):
     """VOXEL REMESH (Blender's Voxel Remesh): rebuild a mesh as a UNIFORM, watertight surface by sampling it into a
     signed-distance grid and re-marching -- the standard cleanup for messy, self-intersecting, non-manifold, or
     multi-shell input before retopo. Any tangle in becomes one clean closed surface out, at a density set by
@@ -734,8 +775,50 @@ def voxel_remesh(mesh, resolution=64, pad=0.2):
     span = float((V.max(0) - V.min(0)).max()) or 1.0
     p = float(pad) * span                                # pad relative to the mesh size, so the SDF band clears the
     lo = V.min(0) - p; hi = V.max(0) + p                 # grid boundary and the marched surface always closes
-    grid, axes = mesh_to_sdf_grid(mesh, (lo.tolist(), hi.tolist()), res=int(resolution))
-    return marching_tetrahedra_vec(grid, axes, level=0.0)
+    grid, axes = mesh_to_sdf_grid(mesh, (lo.tolist(), hi.tolist()), res=int(resolution), sign=sign)
+    out = marching_tetrahedra_vec(grid, axes, level=0.0)
+    # keep_uv="auto": a remesh REPLACES the topology, so uvs can only be PROJECTED from the source surface
+    # (transfer_uv -- exact carry is meaningless across a re-march). Same honest caveat as everywhere: at a UV
+    # seam the nearest source triangle may sit on either atlas island; the projection residual is the error
+    # signal. keep_uv=False = geometry only (the old output, byte-identical).
+    src_uv = getattr(mesh, "uvs", None) if keep_uv in ("auto", True) else None
+    if src_uv is not None and len(out.vertices):
+        try:
+            from holographic.mesh_and_geometry.holographic_meshtools import transfer_uv, uv_atlas_report
+            atlas = uv_atlas_report(mesh)
+            # same honesty rule as cluster_decimate: a fragmented (per-triangle) atlas cannot survive ANY
+            # per-vertex transfer -- refuse and point at rebake_texture instead of emitting confetti uvs.
+            if keep_uv is True:
+                # FORCED legacy path: plain per-vertex transfer, exactly as before reprojection existed. This is
+                # the documented escape hatch and it must not quietly change meaning -- a caller who asked to
+                # force it gets the old behaviour (uvs present, seams smeared on a fragmented atlas), not a
+                # refusal. Routing True through reproject_uv broke that: reprojection RAISES on a fragmented
+                # atlas, so "force" silently became "no uvs at all". The selftest caught it.
+                new_uv, _ = transfer_uv(mesh, np.asarray(src_uv, float), np.asarray(out.vertices, float))
+                out.uvs = new_uv
+                out.uv_transfer_report = dict(atlas, skipped=False, reprojected=False, forced=True)
+            elif not atlas["transferable"]:
+                out.uv_transfer_report = dict(atlas, skipped=True,
+                                              reason="fragmented atlas (median %.1f faces/island): use "
+                                                     "meshtools.rebake_texture, or keep_uv=True to force"
+                                                     % atlas["faces_per_island_median"])
+            else:
+                # same reasoning as cluster_decimate: remeshing welds the seams, so REPROJECT (per-corner,
+                # re-splitting the cuts) rather than transfer per vertex.
+                from holographic.mesh_and_geometry.holographic_meshtools import reproject_uv
+                try:
+                    rmesh, new_uv, rrep = reproject_uv(mesh, np.asarray(src_uv, float), out)
+                    rmesh.uv_transfer_report = dict(atlas, skipped=False, reprojected=True, **{
+                        k: rrep[k] for k in ("seam_splits", "projection_distance_mean", "finite")})
+                    return rmesh
+                except ValueError:
+                    out.uv_transfer_report = dict(atlas, skipped=True,
+                                                  reason="reprojection refused: fragmented atlas -- use "
+                                                         "meshtools.rebake_texture")
+                    return out
+        except Exception:
+            pass
+    return out
 
 
 def metaball_mesh(centers, radius=0.5, level=0.5, resolution=48, pad=0.6):
@@ -849,3 +932,84 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+def _selftest_soup_sign():
+    """Pin the .glb-scan regression and its fix. Three contracts:
+    (1) BIT-IDENTICAL backward compat: an edge-closed mesh under sign='auto' equals the old flood path exactly.
+    (2) THE REGRESSION, kept loud: on an open triangle soup the flood path mis-signs the interior badly.
+    (3) THE FIX: winding sign recovers a sane interior on the same soup at the same resolution."""
+    rng = np.random.default_rng(0)
+    from holographic.mesh_and_geometry.holographic_mesh import Mesh
+
+    # (1) closed cube: auto must route to flood and match it to the bit
+    Vc = np.array([[x, y, z] for z in (0, 1) for y in (0, 1) for x in (0, 1)], float)
+    quads = [(0, 2, 3, 1), (4, 5, 7, 6), (0, 1, 5, 4), (2, 6, 7, 3), (0, 4, 6, 2), (1, 3, 7, 5)]
+    Fc = [t for q in quads for t in ((q[0], q[1], q[2]), (q[0], q[2], q[3]))]
+    cube = Mesh(Vc, Fc)
+    assert open_fraction(cube) == 0.0
+    b = ((-0.3, -0.3, -0.3), (1.3, 1.3, 1.3))
+    g_auto, _ = mesh_to_sdf_grid(cube, b, res=24, sign="auto")
+    g_old, _ = mesh_to_sdf_grid(cube, b, res=24, sign="flood")
+    assert np.array_equal(g_auto, g_old), "closed mesh must take the flood path BIT-IDENTICALLY"
+
+    # a SLIT SOUP of the unit sphere -- the honest model of a scan like the mantis: a NEARLY-CONTIGUOUS surface
+    # whose every triangle is disconnected. Built by subdividing an octahedron onto the sphere (128 tris) and
+    # SHRINKING each triangle 20% about its centroid with its own private vertices: 100% boundary edges,
+    # slit gaps ~0.064 (super-voxel at res 64, voxel 0.041), solid-angle coverage 0.8^2 = 64%.
+    # KEPT NEGATIVE FROM WRITING THIS TEST: the first soup (isolated random patches) covered only ~8% of the
+    # sphere's solid angle, so the winding number CORRECTLY said "not inside" (w ~ coverage). Winding sign fixes
+    # surfaces with holes; it cannot invent a surface that mostly is not there. That is a property, not a bug.
+    # 2 subdivisions (128 tris), not 3: the slit width scales with EDGE length (slit ~ shrink * edge / sqrt(3)),
+    # so fewer/bigger triangles buy wider slits at the SAME coverage. Measured while writing this: at 512 tris
+    # the slit (0.032) is SMALLER than the res-64 voxel (0.041), the shell closes on the grid, and flood signs
+    # 100% -- the test silently tests nothing. At 128 tris the slit is 0.064 > voxel and the leak fires.
+    Vs = np.array([[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]], float)
+    Fs = [(0,2,4),(2,1,4),(1,3,4),(3,0,4),(2,0,5),(1,2,5),(3,1,5),(0,3,5)]
+    for _ in range(2):
+        V2 = list(Vs); F2 = []; cache = {}
+        def mid(i, j):
+            k = (min(i, j), max(i, j))
+            if k not in cache:
+                mp = V2[i] + V2[j]; cache[k] = len(V2); V2.append(mp / np.linalg.norm(mp))
+            return cache[k]
+        for (a, b, c) in Fs:
+            ab, bc, ca = mid(a, b), mid(b, c), mid(c, a)
+            F2 += [(a,ab,ca),(ab,b,bc),(ca,bc,c),(ab,bc,ca)]
+        Vs, Fs = np.array(V2), F2
+    tris = Vs[np.asarray(Fs)]                                    # (512, 3, 3)
+    centroids = tris.mean(axis=1, keepdims=True)
+    shrunk = centroids + 0.8 * (tris - centroids)                # 20% slit, every triangle its own island
+    V = shrunk.reshape(-1, 3)
+    F = [(3*i, 3*i+1, 3*i+2) for i in range(len(tris))]
+    soup = Mesh(V, F)
+    assert open_fraction(soup) == 1.0
+    bs = ((-1.3, -1.3, -1.3), (1.3, 1.3, 1.3))
+    # res 64 pins the BROKEN side of the flood's sharp resolution threshold (sweep on record: a dense-patch
+    # draft of this soup flood-signed 100% at res 40 -- the dilated shell closed ON THE GRID and blocked the
+    # flood -- and 3% at res 64 once the holes exceeded the voxel. The failure is a THRESHOLD, not a decay,
+    # which is why the mantis .glb "suddenly" regressed when render fidelity rose.)
+    res = 64
+    xs = np.linspace(-1.3, 1.3, res)
+    gx, gy, gz = np.meshgrid(xs, xs, xs, indexing="ij")
+    truly_inside = np.sqrt(gx**2 + gy**2 + gz**2) < 0.85         # safely interior, away from the slitted shell
+    g_flood, _ = mesh_to_sdf_grid(soup, bs, res=res, sign="flood")
+    g_wind, _ = mesh_to_sdf_grid(soup, bs, res=res, sign="winding")
+    flood_ok = float((g_flood[truly_inside] < 0).mean())
+    wind_ok = float((g_wind[truly_inside] < 0).mean())
+    # (2) the regression: the leaked flood misses most of the interior on a soup. Pinned as a NEGATIVE so a
+    # future "improvement" to flood_fill_sign that silently fixes soups gets noticed and promoted deliberately.
+    assert flood_ok < 0.6, "KEPT NEGATIVE moved: flood now signs soup interiors (%.2f) -- re-evaluate the auto route" % flood_ok
+    # (3) the fix: winding signs the same interior, at the same res. Bound is 0.9 not 0.99 because deep-interior
+    # w equals the solid-angle coverage (~0.64 here) -- above threshold everywhere but not by miles; the mantis
+    # itself (coverage near 1 with slits) measured w up to 1.01.
+    assert wind_ok > 0.9, wind_ok
+    # and auto routes the soup to winding
+    g_auto2, _ = mesh_to_sdf_grid(soup, bs, res=res, sign="auto")
+    assert np.array_equal(g_auto2, g_wind)
+    print("soup-sign selftest OK (closed: auto==flood bit-identical; soup interior signed: flood %.0f%% vs "
+          "winding %.0f%%)" % (100 * flood_ok, 100 * wind_ok))
+
+
+if __name__ == "__main__":
+    _selftest_soup_sign()
