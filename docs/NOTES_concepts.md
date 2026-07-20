@@ -40097,3 +40097,47 @@ structural item and found the tooling (import_footprint) already there. Two "fix
 of my own first hypothesis (erode: normalise-alone insufficient; cap-change-alone insufficient -- both needed).
 The recurring lesson held: "corrupts results" earns a default change (not a flip); "matters for embedding" was
 mostly already-built infra needing a doc pointer, not a build. All additive, gates 0/0/0, regen drift-clean.
+
+## CI FIX: 8 failures diagnosed as pre-existing (not from the client backlog), fixed on their real contracts
+
+CI went red after the client-backlog merge; investigation proved NONE of the 8 failures were caused by that work
+-- they are pre-existing conditions the full 24-shard CI surfaced that targeted local runs had not hit. Three
+classes:
+
+CLASS 1 -- platform floating-point pins (4 tests: m6 delta, m7 phi sha, m14 transfer_uv/nrm sha, degenerate_face
+phi sha). These PASSED locally and failed only on CI. Root cause: OpenBLAS ships DYNAMIC_ARCH (a different
+eigensolver/BLAS kernel per CPU microarch), so bit-exact sha256(.tobytes()) / == pins on eigensolver + projection
+output differ across machines with NO logic change (m6 delta was 6 ULPs, ~4e-17 apart). Byte-identity across CPUs
+was never achievable, so the pins asserted a guarantee that never held. FIX: replaced cross-platform byte pins
+with the real contract -- WITHIN-platform determinism (re-run must match exactly, np.array_equal) PLUS the
+independent correctness checks already in each test (m7 already compares the eigenpair to np.linalg.eigh at 1e-6;
+m14 already array_equals the plain vs displacement path to prove the shared projection). m6's float delta became
+abs(...) < 1e-12. The load-bearing behavioral pins that ARE platform-stable stayed exact (result_faces==186,
+iters==4, budget_error==0.07, counter==mv).
+
+CLASS 2 -- stale behavioral tests vs a documented guard (2 tests: qem_decimate 96!=<=64, lod_chain 1!=>=3). Root
+cause: the silhouette=0.95 default guard (Moose's own "crab-leg" complaint arc, NOTES "DECIMATION UNDER CONTROL")
+DELIBERATELY raises the face budget x1.5 until the outline survives, so target 64 -> 96 is intended, and on a
+compact icosphere the guarded LOD chain correctly collapses to one level. Both tests predate that default and were
+never updated; both live in holographic_meshqem.py (mtime 05:12, days before this session -- NOT touched by me).
+FIX: pass silhouette=None so each test exercises the RAW decimation capability it intends to test; the guarded
+default remains the documented production behavior.
+
+CLASS 3 -- a latent test bug (1 test, io_shape_pipeline). Hardcoded "render_mesh" as the mesh->image pipeline
+step, but the deterministic ALPHABETICAL tie-break correctly picks "JSON-drivable objects (mesh/camera
+coercion)", which sorts first and was already producing mesh->image in the PRE-SESSION recon tree (verified: recon
+gives the same winner). The test's OWN docstring says to assert the contract "not a hardcoded name that rots on
+every merge" for its sibling mesh->selection assertion -- so both mesh->image assertions (points->image and
+curve->image) now assert the alphabetically-first producer via a computed mesh_img_producers[0].
+
+VERIFICATION: all 7 named test functions pass; full test_cad_backlog.py green (114 passed, 1 skip); 31 adjacent
+integration tests (qem/lod/pipeline/surface_deviation) pass; a representative untouched shard-7 subset (47) passes;
+audits 0/0/0, regen drift-clean. My edited engine files (terrain/meshtools/render/sdf/assetimport) were confirmed
+NOT to feed the qem/crossfield/transfer_uv paths -- this round changed ONLY test files.
+
+METHOD/LESSON: "tests failing after my merge" is not "my merge broke them" -- reproduced each locally, checked
+whether it passed in the pre-session tree, and located each root cause before touching anything. The recurring
+trap this exposes: bit-exact sha/== pins on BLAS output are a determinism ANTI-pattern across platforms (they pin
+the platform, not the algorithm); the honest pin is within-run repeatability + a tolerance/structural correctness
+check. Also: run at least one full shard, not just targeted tests, before declaring CI-green -- targeted runs miss
+exactly the cross-file behavioral drift (guard-default vs stale expectation) that the full suite catches.
