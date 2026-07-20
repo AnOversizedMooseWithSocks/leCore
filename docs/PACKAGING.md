@@ -34,7 +34,7 @@ Three small files drive it:
 - **`setup.py`** — uses `find_packages()` to ship the whole `holographic` package tree (adding a new module or
   subpackage needs no edit here), plus two top-level modules: the `lecore` shim and the standalone
   `holographic_service` HTTP server. Declares `numpy` as the only required dependency; everything else is an
-  opt-in extra (see the table below): `jit`, `symbolic`, `gpu`, `ui`, `dev`, and `all`. It also ships the
+  opt-in extra (see the table below): `jit`, `fft`, `symbolic`, `zig`, `gpu`, `ui`, `images`, `dev`, and `all`. It also ships the
   **`lecore_data`** package (below) via `package_data`, so the runtime data travels with the wheel.
 - **`pyproject.toml`** — three lines telling `python -m build` to use setuptools.
 - **`lecore.py`** — the friendly front door (`UnifiedMind` + the raw ops).
@@ -59,64 +59,64 @@ wheel from there — so the distribution has exactly the code and data it needs 
 workflow smoke-tests the built wheel in an isolated temp dir and asserts the bundled dictionary actually loads, so
 a wheel that shipped without its data would fail the release rather than reach users.
 
-## CI
+## CI: auto-publish on every green merge to main
 
-`package.yml` goes in `.github/workflows/`. On every push to `main` and on version tags (`v*`) it builds the
-wheel, **installs it in isolation and imports it as a smoke test**, uploads the wheel + sdist as build
-artifacts, and — on a `v*` tag — attaches them to the GitHub Release. On a `v*` tag it **also publishes the
-release to PyPI** (see below), so `pip install leos-core` picks it up.
+Releases are hands-off. There are **no tags to manage** and **one number to edit**.
 
-> **If the "Attach to the GitHub Release" step fails with `Resource not accessible by integration`:** the job's
-> token is read-only. Attaching files *writes* to the release (part of the `contents` scope), so the `build-wheel`
-> job declares `permissions: contents: write`. That block is what grants it — don't remove it.
+**The version lives in one file: `VERSION`** (currently `0.2.0`). Everything reads it — `setup.py` (`version=read_version()`),
+`lecore.__version__` (from the installed wheel's metadata, or `VERSION` from a clone), and `tools/check_version.py`.
+They can never drift again (previously `lecore.py` was stuck at `0.1.0` while `setup.py` said `0.2.0`).
 
-### Publishing to PyPI (trusted publishing — no stored token)
+**You own `major.minor`; CI owns `patch`.** To cut a `0.3` or `1.0` line, hand-edit `VERSION` (e.g. to `0.3.0`) and
+commit — the next merge auto-bumps from there (`0.3.1`, `0.3.2`, …). The automation only ever touches the third digit.
 
-The `publish-pypi` job uses PyPI **Trusted Publishing** (OpenID Connect). GitHub proves its identity to PyPI
-directly, so there is **no API token or password stored in the repo** — that's what the `id-token: write`
-permission in the workflow is for. You do this one-time setup on PyPI, then every `v*` tag publishes itself:
+The flow, end to end:
 
-1. Log in at <https://pypi.org>. (For a dry run first, do the same on <https://test.pypi.org>.)
-2. Because `leos-core` doesn't exist on PyPI yet, add a **pending publisher**:
-   Account menu → **Publishing** → "Add a new pending publisher". (After the first successful publish it
-   becomes a normal publisher attached to the project.)
+1. **Branch protection makes tests a merge gate.** A branch can only merge to `main` once the `tests` check passes.
+   This is a one-time repo setting (below), enforced by GitHub, not by a workflow file.
+2. **A merge lands on `main`** → the `tests` workflow runs on `main` and (if green) completes successfully.
+3. **`package.yml` triggers on that completion** (`workflow_run`), and only if the run it followed **succeeded** and
+   was **on main**. It runs `tools/bump_version.py` (patch bump, `0.2.0` → `0.2.1`), commits the new `VERSION` back to
+   `main` with `[skip ci]` in the message (so the commit does **not** re-trigger tests → no publish loop), builds and
+   smoke-tests the wheel, and publishes it to PyPI.
+
+So the moment a green PR merges, `pip install -U leos-core` gets a fresh patch release. A failed test run on main
+publishes nothing (the `conclusion == 'success'` gate). A push to a feature branch publishes nothing (the
+`head_branch == 'main'` gate).
+
+> **Manual re-publish:** the workflow also has a `workflow_dispatch` button (Actions tab → package → Run workflow).
+> That path does **not** bump — it re-publishes the current `VERSION` as-is, for the rare case a publish failed *after*
+> the bump commit already landed.
+
+### One-time setup
+
+**(a) Branch protection** — Settings → Branches → add a rule for `main`: require status checks to pass before
+merging, and select the **`pytest`** check (the `tests` workflow's per-change job). Optionally require a PR before
+merging. That is what makes "can only merge when tests pass" real.
+
+**(b) PyPI Trusted Publishing** (OpenID Connect — no API token or password stored in the repo; that's what the
+workflow's `id-token: write` permission is for). One-time on PyPI:
+
+1. Log in at <https://pypi.org>. (For a dry run first, do the same on <https://test.pypi.org> and uncomment the
+   `repository-url` line in the workflow.)
+2. Because `leos-core` doesn't exist on PyPI yet, add a **pending publisher**: Account menu → **Publishing** → "Add a
+   new pending publisher". (After the first successful publish it becomes a normal publisher on the project.)
 3. Fill in exactly:
    - **PyPI Project Name:** `leos-core`
    - **Owner:** `AnOversizedMooseWithSocks`
    - **Repository name:** `leCore`
    - **Workflow name:** `package.yml`
-   - **Environment name:** leave blank (unless you uncomment the `environment: pypi` line in the workflow —
-     if you set one there, set the same name here).
-4. Save. Now cut a release: bump `version` in `setup.py`, commit, then push a tag:
-   ```sh
-   git tag v0.1.0
-   git push origin v0.1.0
-   ```
-   The workflow builds, smoke-tests, attaches the files to the GitHub Release, and publishes `leos-core 0.1.0`
-   to PyPI. A version number can only be published **once** — to re-publish you must bump the version.
+   - **Environment name:** leave blank.
+4. Save. From then on, every green merge to `main` publishes the next patch automatically.
 
-Reserving the parent name `leos` (optional): publishing `leos-core` does **not** reserve `leos`. If you want
-the parent name held too, upload a small placeholder release under `name="leos"` (a separate project/repo, or
-a one-off local `twine upload`), since PyPI only reserves the exact name you upload.
+Until step (b) is done, the publish job will *run* on a green merge but *fail* at the PyPI handshake — the bump and
+commit still happen, so just complete the PyPI setup and the next merge (or a manual dispatch) publishes.
 
-### Versioning
-The version lives in `setup.py` (`version="0.1.0"`); bump it per release. To release, tag the matching version
-(`git tag v0.1.0 && git push origin v0.1.0`).
+### Versioning helpers
 
-CI guards the two staying in sync: on a tag push, the `package` workflow runs `python tools/check_version.py --expect
-"$GITHUB_REF_NAME"` **before** building, and fails the release if the tag and `setup.py` disagree — so you can't
-accidentally publish `0.1.0` under a `v0.2.0` tag (and PyPI never lets you re-upload a version, so catching it here
-matters). You can run the same check locally: `python tools/check_version.py` prints the current version, and
-`python tools/check_version.py --expect v0.2.0` tells you whether a tag you're about to push would match.
-
-If you'd rather have the git tag *drive* the version instead of hand-bumping, add one line to the workflow before the
-build step (this makes the check above always pass, since the tag becomes the source of truth):
-
-```yaml
-      - name: Set version from the tag (optional)
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: sed -i "s/version=\"[^\"]*\"/version=\"${GITHUB_REF_NAME#v}\"/" setup.py
-```
+`python tools/check_version.py` prints the current version (reads `VERSION`). `python tools/bump_version.py --print`
+shows what the next patch would be without writing; `--current` prints the current; no flag performs the bump. The
+bump tool refuses a malformed `VERSION` (exit 1) rather than publishing a garbage number.
 
 ## Optional extras (opt-in dependencies)
 
@@ -127,11 +127,14 @@ The core requires **only NumPy**. Everything else is declared as a named "extra"
 | Extra | Pulls in | For |
 |---|---|---|
 | `jit` | `numba` | numba-compiled fast paths (`holographic_jit`, `sdf_render`, `codegen`) |
+| `fft` | `pyfftw` | FFTW-backed FFT with plan caching (`holographic_fft`), opt-in via `mind.fft_backend(use_pyfftw=True)`; NumPy FFT stays the deterministic default |
 | `symbolic` | `sympy` | design-time symbolic gradients (`holographic_codegen`, `sdf_render`) |
+| `zig` | `ziglang` | native batch kernels + raymarcher (`holographic_zigrun`, `zigmarch`); ships the whole Zig toolchain, no system compiler needed |
 | `gpu` | `cupy` | the GPU backend (`holographic_backend`) — see the CuPy note |
 | `ui` | `flask`, `pillow` | the browser UI (`app.py`) and image load/save |
-| `dev` | `pytest`, `matplotlib` | running the test suite and generating plots |
-| `all` | numba, sympy, flask, pillow, pytest, matplotlib | everything portable, in one shot |
+| `images` | `pillow` | image I/O beyond stdlib PNG (jpg/webp/…) without pulling in Flask — a headless subset of `ui` |
+| `dev` | `pytest`, `matplotlib`, `nltk` | running the test suite, generating plots, and loading the text corpora the benchmarks/ablations use |
+| `all` | numba, pyfftw, sympy, flask, pillow, pytest, matplotlib, ziglang, nltk | everything portable, in one shot (CuPy excluded) |
 
 **CuPy note:** CuPy is tied to your installed CUDA version, so plain `pip install cupy` often isn't what you
 want — install the matching wheel by hand instead (e.g. `cupy-cuda12x`). That's why `gpu` is kept out of `all`.

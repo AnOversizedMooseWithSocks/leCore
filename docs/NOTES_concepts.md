@@ -40141,3 +40141,78 @@ trap this exposes: bit-exact sha/== pins on BLAS output are a determinism ANTI-p
 the platform, not the algorithm); the honest pin is within-run repeatability + a tolerance/structural correctness
 check. Also: run at least one full shard, not just targeted tests, before declaring CI-green -- targeted runs miss
 exactly the cross-file behavioral drift (guard-default vs stale expectation) that the full suite catches.
+
+## RELEASE AUTOMATION: auto-publish on green merge to main, single-source VERSION, patch auto-bump
+
+Moose wanted: (1) a branch can only merge to main when tests pass, (2) each merge bumps the version 0.2.0->0.2.1
+and publishes, (3) ONE place to edit the version so hand-bumping to 0.3.0/1.0.0 later is painless while auto-bumps
+stay 0.0.1 increments. Built exactly that; no tags to manage.
+
+SINGLE SOURCE OF TRUTH -- the new top-level VERSION file. Everything reads it: setup.py (version=read_version()
+reading VERSION), lecore.__version__ (importlib.metadata when installed -- the wheel records VERSION at build time
+-- else the VERSION file from a clone, else "0.0.0"), and tools/check_version.py. FIXED A REAL DRIFT: lecore.py had
+__version__="0.1.0" hardcoded while setup.py said "0.2.0" -- the exact fork this design prevents.
+
+OWNERSHIP SPLIT -- human owns major.minor, CI owns patch. tools/bump_version.py increments ONLY the third digit
+(0.2.0->0.2.1). To cut a new line you hand-edit VERSION to 0.3.0 and commit; the next merge auto-bumps to 0.3.1.
+bump_version refuses a malformed VERSION (exit 1) rather than publishing a guessed number -- pinned by 9 tests
+(patch-only, resume-after-hand-edit, no minor carry, dry-runs don't write, malformed fails loud).
+
+THE WORKFLOW (package.yml rewritten) -- triggers on workflow_run: the `tests` workflow COMPLETING. Gated hard:
+runs only if that run's conclusion=='success' AND head_branch is main/master. Then: bump patch -> commit VERSION
+back to main with "[skip ci]" -> build+smoke-test wheel (now also asserts wheel __version__ == VERSION, catching a
+0.0.0-fallback build) -> publish to PyPI via trusted publishing (OIDC, no stored token). A workflow_dispatch button
+re-publishes the current VERSION as-is WITHOUT bumping (for a publish that failed after the bump landed).
+
+LOOP-BREAKER, the load-bearing subtlety: the bump commit pushes to main, which WOULD re-trigger tests -> publish
+-> bump -> ... The "[skip ci]" in the commit message makes GitHub skip the tests run on that commit, so no
+workflow_run completes, so package never re-fires. Traced every path: tests-fail-on-main (conclusion gate blocks),
+feature-branch push (head_branch gate blocks), PR-not-merged (pull_request event, not the push that publishes).
+
+BRANCH PROTECTION is a repo SETTING, not a file (documented in PACKAGING.md): require the `pytest` check before
+merging to main. That -- not a workflow -- is what makes "can only merge when tests pass" real.
+
+TWO PACKAGING BUGS CAUGHT BEFORE THEY SHIPPED (measurement over assumption): (1) `python -m build` builds the
+wheel FROM the sdist, and VERSION was not in MANIFEST.in, so the first wheel built as 0.0.0 while the sdist was
+0.2.0 -- added `include VERSION` to MANIFEST.in. (2) build_package.sh copies a curated stage and did not copy
+VERSION, so setup.py's read would hit the fallback -- added `cp VERSION` to the stage. Both now verified: wheel and
+sdist agree, and an isolated install reports 0.2.0 via metadata.
+
+FILES: new VERSION, tools/bump_version.py, tests/test_bump_version.py; edited setup.py (read_version), lecore.py
+(_read_version via metadata/file), tools/check_version.py (reads VERSION, tag language removed), build_package.sh
+(+cp VERSION), MANIFEST.in (+include VERSION), .github/workflows/package.yml (rewritten), docs/PACKAGING.md
+(release section rewritten). Old tag-based flow (check_version --expect on a v* tag, softprops release attach) is
+gone. C1 is now "flip the two one-time switches" (branch protection + PyPI trusted publisher), not a manual chore.
+
+## OPTIONAL EXTRAS AUDIT: two undeclared optional deps found + fixed, consistency pinned by tests
+
+Moose asked to make sure the GPU / optional-package story is all good before the first auto-publish. Audited the
+ACTUAL optional imports in holographic/ against setup.py's extras_require -- measurement, not assumption -- and
+found two genuine gaps:
+
+- pyfftw: a real FFT accelerator (holographic_fft, wired to mind.fft_backend(use_pyfftw=True), used by the spectral
+  faculties -- fuse/ai/machine/residency). It was imported but had NO extra, so a user could not
+  `pip install leos-core[fft]` to get it. ADDED extra "fft": ["pyfftw"], folded into "all", and added a row to
+  accelerator_report so the user-facing "what accelerates the engine + how to get it" list names it.
+- nltk: used to load benchmark/ablation/measure text CORPORA (guarded everywhere -- returns None/skips when
+  absent). Not a runtime accelerator; belongs with dev tooling. ADDED to "dev": [..., "nltk"] and to "all".
+
+Everything else verified CORRECT: jit(numba)/symbolic(sympy)/zig(ziglang)/gpu(cupy)/ui(flask,pillow)/images(pillow)
+all match their imports; ziglang is probed via find_spec (real); flask is NOT imported anywhere in the core (only
+app.py/service entry points), confirming the NumPy-only-core constitution holds. gpu(cupy) is correctly EXCLUDED
+from "all" (CuPy is CUDA-version-specific, hand-installed).
+
+PINNED so it cannot silently drift again (the pyfftw gap existed precisely because nothing checked):
+- test_every_optional_import_has_a_declared_extra: scans holographic/ for optional third-party imports and asserts
+  each is installable via some extra (import-name->dist-name mapped, e.g. PIL->pillow). PROVEN to catch a
+  regression: removing the fft extra makes it fail.
+- test_all_extra_is_the_union_minus_cupy: asserts "all" == union of the other extras minus cupy, so a new extra
+  can't be added and forgotten from "all".
+- tightened test_core_imports_on_numpy_alone's blocklist to also block pyfftw + sympy (were missing), so a future
+  hard-import of either into the core is caught.
+
+DOCS: PACKAGING.md extras table rewritten to list all 9 (jit/fft/symbolic/zig/gpu/ui/images/dev/all) matching
+setup.py exactly; the summary line updated. Wheel metadata verified to carry all 9 Provides-Extra, and
+`pip install .[fft]` dry-run resolves pyfftw. LESSON: an extras block is a claim about what the code imports --
+verify it against the actual imports, and pin it, or it drifts the moment someone adds a guarded import without a
+matching extra (which is exactly what happened with pyfftw).

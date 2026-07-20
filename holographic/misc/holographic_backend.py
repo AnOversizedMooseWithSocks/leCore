@@ -147,6 +147,11 @@ def accelerator_report():
     rows.append({"name": "numba", "required": False, "installed": ok, "version": ver,
                  "unlocks": "JIT fast paths (holographic_jit / sdf_render / codegen)",
                  "install": "pip install numba   (extra: [jit])"})
+    ok, ver = probe("pyfftw")
+    rows.append({"name": "pyfftw", "required": False, "installed": ok, "version": ver,
+                 "unlocks": "FFTW-backed FFT with plan caching (holographic_fft), opt-in via "
+                            "mind.fft_backend(use_pyfftw=True); NumPy FFT stays the bit-exact deterministic default",
+                 "install": "pip install pyfftw   (extra: [fft])"})
     ok, ver = probe("ziglang", attr="__name__")
     if ok:
         import subprocess

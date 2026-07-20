@@ -20,7 +20,7 @@ def test_core_imports_on_numpy_alone():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     code = (
         "import sys\n"
-        "for banned in ('PIL','matplotlib','nltk','scipy','sklearn','torch','cupy','numba'):\n"
+        "for banned in ('PIL','matplotlib','nltk','scipy','sklearn','torch','cupy','numba','pyfftw','sympy'):\n"
         "    sys.modules[banned] = None            # any 'import <banned>' now raises ImportError\n"
         "import numpy\n"
         "import lecore\n"
@@ -71,3 +71,84 @@ def test_superseded_modules_still_carry_their_banner():
         assert matches, "could not find %s.py anywhere under holographic/" % m
         txt = open(matches[0], encoding="utf-8").read()
         assert "SUPERSEDED BY" in txt, "%s lost its superseded banner" % m
+
+
+def test_every_optional_import_has_a_declared_extra():
+    """Every third-party package the engine imports OPTIONALLY (numpy is the only hard dep) must be installable via
+    a `pip install leos-core[extra]` -- otherwise a user hits `ImportError: No module named X` on an accelerated
+    path with no documented way to get X. This pins the setup.py extras against the actual imports, so a newly
+    added optional dependency (like pyfftw was) can't ship without an extra. Import name -> distribution name is
+    mapped where they differ (PIL->pillow)."""
+    import ast
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    # the packages the CORE is allowed to hard-import (no extra needed) + pure stdlib/first-party
+    ALWAYS_OK = {"numpy"}
+    # import name -> the pip distribution name that provides it, when they differ
+    DIST = {"PIL": "pillow"}
+    # third-party import names we care about (accelerators + optional tooling); everything else is stdlib/first-party
+    OPTIONAL_IMPORTS = {"numba", "cupy", "sympy", "pyfftw", "PIL", "matplotlib", "nltk", "flask"}
+
+    # 1. scan the engine for which of those it actually imports
+    found = set()
+    for path in glob.glob(os.path.join(root, "holographic", "**", "*.py"), recursive=True):
+        tree = ast.parse(open(path, encoding="utf-8").read())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    top = a.name.split(".")[0]
+                    if top in OPTIONAL_IMPORTS:
+                        found.add(top)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                top = node.module.split(".")[0]
+                if top in OPTIONAL_IMPORTS:
+                    found.add(top)
+
+    # 2. read the distributions setup.py's extras can install
+    setup_src = open(os.path.join(root, "setup.py"), encoding="utf-8").read()
+    tree = ast.parse(setup_src)
+    extras = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "setup":
+            for kw in node.keywords:
+                if kw.arg == "extras_require":
+                    extras = ast.literal_eval(kw.value)
+    installable = {pkg.lower() for pkgs in extras.values() for pkg in pkgs}
+
+    # 3. every optional import must be reachable through some extra (by its DIST name)
+    missing = []
+    for imp in sorted(found):
+        dist = DIST.get(imp, imp).lower()
+        if dist not in installable and dist not in ALWAYS_OK:
+            missing.append("%s (needs extra providing %r)" % (imp, dist))
+    assert not missing, (
+        "optional imports with NO installable extra -- add them to setup.py's extras_require:\n  "
+        + "\n  ".join(missing))
+
+
+def test_all_extra_is_the_union_minus_cupy():
+    """`all` is the convenience 'everything portable' extra: it must equal the union of the other extras minus cupy
+    (CuPy is CUDA-version-specific, installed by hand). If someone adds an extra and forgets to fold it into `all`,
+    `pip install leos-core[all]` silently misses it -- this catches that."""
+    import ast
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    tree = ast.parse(open(os.path.join(root, "setup.py"), encoding="utf-8").read())
+    extras = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "setup":
+            for kw in node.keywords:
+                if kw.arg == "extras_require":
+                    extras = ast.literal_eval(kw.value)
+
+    union = set()
+    for name, pkgs in extras.items():
+        if name == "all":
+            continue
+        union.update(pkgs)
+    union.discard("cupy")                    # deliberately excluded from all
+    assert set(extras["all"]) == union, (
+        "`all` is out of sync with the other extras (minus cupy).\n"
+        "  in all but not union: %s\n  in union but not all: %s"
+        % (sorted(set(extras["all"]) - union), sorted(union - set(extras["all"]))))
