@@ -14,6 +14,15 @@ def read(name):
     path = os.path.join(here, name)
     return open(path, encoding="utf-8").read() if os.path.exists(path) else ""
 
+# THE VERSION lives in one place: the top-level VERSION file. You hand-edit the major.minor there (0.2 -> 0.3 ->
+# 1.0); CI's tools/bump_version.py increments only the PATCH digit on each merge to main. Reading it here (rather
+# than hardcoding a number) means setup.py, lecore.py and the wheel can never drift out of sync -- there is
+# exactly one number to change. Fallback to a sentinel if the file is somehow absent, so a build never crashes on
+# a missing VERSION; the CI version-check would catch that separately.
+def read_version():
+    raw = read("VERSION").strip()
+    return raw or "0.0.0"
+
 # every package under holographic/ (holographic itself + every family subpackage) ships in the wheel.
 # lecore_data is a separate runtime-data package, declared alongside it below.
 engine_packages = find_packages(where=here, include=["holographic", "holographic.*"])
@@ -25,7 +34,7 @@ setup(
     # modules still install at the top level, so users write `import lecore` (via the lecore.py shim) exactly
     # as they did from a clone. Install:  pip install leos-core   ->   then:  import lecore
     name="leos-core",
-    version="0.2.0",                     # bump per release (or let CI set it from the git tag -- see PACKAGING.md)
+    version=read_version(),             # single source of truth: the VERSION file (CI bumps the patch digit)
     description="leOS-core (import name: lecore) -- the vector-symbolic core of leOS: memory, geometry, physics and more on one NumPy substrate.",
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
@@ -52,6 +61,9 @@ setup(
         #
         # -- optional accelerators --
         "jit":      ["numba"],            # numba-compiled fast paths (holographic_jit / sdf_render / codegen)
+        "fft":      ["pyfftw"],           # FFTW-backed FFT (holographic_fft): a numpy-compatible drop-in with plan
+                                          #   caching, opt-in via mind.fft_backend(use_pyfftw=True). NumPy FFT stays
+                                          #   the deterministic default; this only accelerates the spectral paths.
         "symbolic": ["sympy"],            # design-time symbolic gradients (holographic_codegen / sdf_render)
         "zig":      ["ziglang"],          # native batch kernels + raymarcher (holographic_zigrun / zigmarch):
                                           #   measured 2-5x over vectorised NumPy for repeated medium-n kernels,
@@ -65,8 +77,10 @@ setup(
         "ui":       ["flask", "pillow"],  # the browser UI (app.py) + image load/save
         "images":   ["pillow"],           # image I/O beyond stdlib PNG (jpg/webp/... via mind.save_render) --
                                           #   pillow without pulling in Flask; a subset of `ui` for headless use
-        "dev":      ["pytest", "matplotlib"],   # run the test suite and generate the plots
+        "dev":      ["pytest", "matplotlib", "nltk"],   # run the test suite, generate the plots, and load the text
+                                          #   corpora the benchmarks/ablations use (nltk is guarded everywhere -- the
+                                          #   engine returns None / skips a benchmark when it is absent, never errors)
         # -- convenience: everything portable in one shot (CuPy excluded -- see the note above) --
-        "all":      ["numba", "sympy", "flask", "pillow", "pytest", "matplotlib", "ziglang"],
+        "all":      ["numba", "pyfftw", "sympy", "flask", "pillow", "pytest", "matplotlib", "ziglang", "nltk"],
     },
 )

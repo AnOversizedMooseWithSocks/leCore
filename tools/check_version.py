@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
-check_version.py -- read the package version out of setup.py, and (optionally) assert it matches an expected value.
+check_version.py -- print the package version, and (optionally) assert it matches an expected value.
 
-WHY THIS EXISTS. Releases are cut by pushing a git tag like `v0.2.0`, but the version that actually gets published is
-the one written in setup.py. If you tag `v0.2.0` and forget to bump setup.py (still `0.1.0`), you'd publish the wrong
-number -- or, since PyPI never lets you re-upload a version, hit a confusing failure. This tiny check closes that gap:
-CI runs it on a tag push and fails the release if the tag and setup.py disagree, BEFORE anything is published.
+WHY THIS EXISTS. The single source of truth for the version is the top-level VERSION file (setup.py, lecore and CI
+all read it). This tiny helper prints that version for scripts/CI and can assert it equals an expected string --
+useful as a sanity gate. Since CI now bumps VERSION automatically on each merge to main (tools/bump_version.py) and
+publishes without any tag, there is no tag-vs-setup.py mismatch to guard anymore; this stays as a dependency-free
+way to read and check the number.
 
-OLD-SCHOOL AND DEPENDENCY-FREE: standard library only. It reads setup.py with `ast` (it does NOT execute setup.py),
-finds the setup(...) call, and pulls out the `version=` keyword -- so there is nothing to import and nothing to run.
+OLD-SCHOOL AND DEPENDENCY-FREE: standard library only. It reads the VERSION file directly (and falls back to parsing
+setup.py with `ast`, not executing it, for older layouts) -- so there is nothing to import and nothing to run.
 
     Print the version:   python tools/check_version.py
-    Assert a match:      python tools/check_version.py --expect 0.2.0     # exit 1 if setup.py != 0.2.0
-                         python tools/check_version.py --expect v0.2.0    # a leading 'v' (as in a git tag) is fine
+    Assert a match:      python tools/check_version.py --expect 0.2.0     # exit 1 if VERSION != 0.2.0
+                         python tools/check_version.py --expect v0.2.0    # a leading 'v' is tolerated
 """
 import ast
 import os
@@ -20,7 +21,15 @@ import sys
 
 
 def read_version(setup_path):
-    """Return the string passed as version= to the setup(...) call in setup.py, or None if not found. AST only."""
+    """Return the package version. The single source of truth is now the top-level VERSION file (setup.py reads
+    it via read_version(), so it is no longer an AST-visible constant). Prefer VERSION; fall back to parsing a
+    literal version= out of setup.py for older layouts. AST/text only -- nothing imported, nothing run."""
+    root = os.path.dirname(os.path.abspath(setup_path))
+    version_file = os.path.join(root, "VERSION")
+    if os.path.exists(version_file):
+        raw = open(version_file, encoding="utf-8").read().strip()
+        if raw:
+            return raw
     tree = ast.parse(open(setup_path, encoding="utf-8").read())
     for node in ast.walk(tree):
         # we want the call `setup(...)` -- match either `setup(` or `setuptools.setup(`
@@ -51,10 +60,10 @@ def main(argv):
         return 0
 
     if version != expect:
-        print("VERSION MISMATCH: setup.py says %r but the tag/expected version is %r.\n"
-              "Bump setup.py's version= to match the tag (or tag the version setup.py already has)." % (version, expect))
+        print("VERSION MISMATCH: the VERSION file says %r but the expected version is %r.\n"
+              "Edit the VERSION file to match (or update what you are checking against)." % (version, expect))
         return 1
-    print("version OK: setup.py and the tag agree on %s" % version)
+    print("version OK: %s" % version)
     return 0
 
 

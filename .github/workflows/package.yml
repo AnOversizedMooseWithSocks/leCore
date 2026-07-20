@@ -1,29 +1,47 @@
 # .github/workflows/package.yml
-# Build an installable leOS-core wheel on every push to main and on version tags, smoke-test that it imports,
-# upload it as a build artifact, attach it to a GitHub Release on a tag, and -- on a version tag -- publish it
-# to PyPI so people can `pip install leos-core` (and then `import lecore`).
+# Publish leOS-core to PyPI automatically on every GREEN merge to main -- no tags to manage.
+#
+# THE FLOW you asked for:
+#   1. A branch can only merge to main when the `tests` workflow passes (that is a BRANCH-PROTECTION rule you set
+#      once in the repo settings -- see PACKAGING.md; GitHub, not this file, enforces it).
+#   2. When a merge lands on main, the `tests` workflow runs and (if green) COMPLETES successfully.
+#   3. This workflow triggers on that completion (workflow_run), and ONLY if the run it followed succeeded AND was
+#      on main. It bumps the PATCH digit of the VERSION file (0.2.0 -> 0.2.1), commits that back to main with
+#      [skip ci] so it does NOT re-trigger, builds + smoke-tests the wheel, and publishes it to PyPI.
+#
+# You own major.minor: to cut a 0.3 or 1.0 line, hand-edit the VERSION file and commit -- the next merge auto-bumps
+# from there (0.3.1, 0.3.2, ...). There is exactly one number to change and never a tag to push.
 name: package
 
 on:
-  push:
-    branches: [ main, master ]
-    tags:     [ 'v*' ]
-  workflow_dispatch:            # lets you run it by hand from the Actions tab
+  workflow_run:
+    workflows: ["tests"]          # keyed on the `name:` of ci.yml -- must stay in sync with it
+    types: [completed]
+  workflow_dispatch:              # a manual "Run workflow" button (re-publish the current VERSION as-is, no bump)
+
+# Least privilege, declared once. contents:write is needed to push the version-bump commit back to main;
+# id-token:write is the OIDC handshake for PyPI trusted publishing (no stored token anywhere).
+permissions:
+  contents: write
+  id-token: write
 
 jobs:
-  # ---------------------------------------------------------------------------------------------------------
-  # Job 1: build the wheel + sdist, prove the wheel imports, and stash the built files as an artifact.
-  # ---------------------------------------------------------------------------------------------------------
-  build-wheel:
+  publish:
+    # Gate hard: only when the tests run we followed actually SUCCEEDED and was on main/master. On workflow_dispatch
+    # there is no triggering run, so allow it through (manual re-publish of the current VERSION).
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       (github.event.workflow_run.head_branch == 'main' || github.event.workflow_run.head_branch == 'master'))
     runs-on: ubuntu-latest
-    # The default GITHUB_TOKEN is READ-ONLY. Attaching the wheel/sdist to a GitHub Release WRITES to the release,
-    # which lives under the "contents" scope -- without this the release step fails with
-    # "Resource not accessible by integration". contents:write also covers the read that checkout needs, and we scope
-    # it to just this job (least privilege; the publish job below keeps its own id-token:write and nothing more).
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
+      # Check out main at its tip. We push a commit back, so fetch with a token and full history.
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -33,13 +51,31 @@ jobs:
       - name: Install the build tool
         run: python -m pip install --upgrade pip build
 
-      # On a version tag, make sure the tag and setup.py agree BEFORE building/publishing. Catches the easy mistake
-      # of tagging v0.2.0 while setup.py still says 0.1.0 -- which would otherwise publish the wrong version (and PyPI
-      # never lets you re-upload a version). No-op on branch pushes (there's no version tag to check). Fix on failure:
-      # bump setup.py's version= to match the tag, or tag the version setup.py already has.
-      - name: Check the tag matches setup.py version
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: python tools/check_version.py --expect "${{ github.ref_name }}"
+      # Bump ONLY the patch digit of the VERSION file (0.2.0 -> 0.2.1). On workflow_dispatch we do NOT bump --
+      # a manual run re-publishes the current VERSION as-is (useful if a publish failed after the bump landed).
+      - name: Bump the patch version
+        if: github.event_name != 'workflow_dispatch'
+        run: python tools/bump_version.py
+
+      - name: Read the version to publish
+        id: ver
+        run: echo "version=$(python tools/bump_version.py --current)" >> "$GITHUB_OUTPUT"
+
+      # Commit the bumped VERSION back to main BEFORE publishing. [skip ci] on the message stops this push from
+      # re-triggering the tests workflow (and therefore this workflow) -- the loop-breaker. If nothing changed
+      # (dispatch with no bump), `git commit` is a no-op guarded by `git diff --quiet`.
+      - name: Commit the version bump back to main
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- VERSION; then
+            echo "VERSION unchanged; nothing to commit."
+          else
+            git add VERSION
+            git commit -m "chore(release): v${{ steps.ver.outputs.version }} [skip ci]"
+            git push origin HEAD:${{ github.event.workflow_run.head_branch || github.ref_name }}
+          fi
 
       - name: Build the package (copies essentials, strips tests, builds the wheel)
         run: sh build_package.sh
@@ -52,6 +88,9 @@ jobs:
           cd "$(mktemp -d)"
           # The distribution is "leos-core" but the import name is still "lecore" (via the lecore.py shim).
           python -c "import lecore; assert hasattr(lecore, 'UnifiedMind'); print('leOS-core installed; import lecore OK')"
+          # Prove the wheel's recorded version matches the VERSION file we just published -- catches any build that
+          # picked up the 0.0.0 fallback (VERSION missing from the sdist/stage).
+          python -c "import lecore; assert lecore.__version__ == '${{ steps.ver.outputs.version }}', ('wheel version %r != VERSION %r' % (lecore.__version__, '${{ steps.ver.outputs.version }}'))"
           # The runtime data package must be present AND its dictionary must load -- this is the check that would
           # have caught a wheel shipped without its data. If it fails, the data isn't in package_data / build_package.sh.
           python -c "import lecore_data; assert lecore_data.exists('knowledge', 'dictionary.json.xz'), 'vendored dictionary missing from the wheel'"
@@ -60,43 +99,12 @@ jobs:
       - name: Upload the wheel + sdist as build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: leos-core-dist          # the later publish job downloads this exact name
+          name: leos-core-dist
           path: dist/*
 
-      - name: Attach to the GitHub Release (only when a version tag is pushed)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-
-  # ---------------------------------------------------------------------------------------------------------
-  # Job 2: publish to PyPI. Runs ONLY on a version tag (v*), and ONLY after the build job succeeded.
-  #
-  # This uses PyPI "Trusted Publishing" (OIDC): GitHub proves to PyPI who it is, so there is NO API token or
-  # password stored anywhere in this repo. The `id-token: write` permission below is what lets that handshake
-  # happen. You do a ONE-TIME setup on PyPI first -- see PACKAGING.md for the exact clicks:
-  #   PyPI -> your project (or "pending publisher") -> Publishing -> add a GitHub trusted publisher with
-  #   owner = AnOversizedMooseWithSocks, repo = leCore, workflow = package.yml.
-  # After that, pushing a tag like v0.1.0 publishes that version automatically.
-  # ---------------------------------------------------------------------------------------------------------
-  publish-pypi:
-    needs: build-wheel                       # don't publish unless the wheel built and imported cleanly
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write                        # REQUIRED for trusted publishing (the OIDC handshake). No token needed.
-    # environment: pypi                      # optional: create a GitHub Environment named "pypi" for an extra
-                                             #   approval gate, then set the same name on PyPI's publisher config
-                                             #   and uncomment this line. Leave commented for the simplest setup.
-    steps:
-      - name: Download the built wheel + sdist from Job 1
-        uses: actions/download-artifact@v4
-        with:
-          name: leos-core-dist
-          path: dist                         # the publish action expects the files in dist/
-
+      # Publish to PyPI via Trusted Publishing (OIDC) -- no API token stored anywhere. One-time PyPI setup required
+      # (see PACKAGING.md): add a trusted publisher for owner=AnOversizedMooseWithSocks, repo=leCore,
+      # workflow=package.yml. PyPI rejects a re-upload of an existing version, so the auto-bump guarantees each
+      # publish is a fresh number.
       - name: Publish to PyPI (trusted publishing -- no stored secret)
         uses: pypa/gh-action-pypi-publish@release/v1
-        # Defaults publish to the real PyPI. To rehearse on TestPyPI first, uncomment:
-        # with:
-        #   repository-url: https://test.pypi.org/legacy/

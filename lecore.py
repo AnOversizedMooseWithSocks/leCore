@@ -130,4 +130,24 @@ def areas():
     return out
 
 
-__version__ = "0.1.0"
+def _read_version():
+    """The single source of truth for the version is the VERSION file (CI bumps its patch digit on each merge).
+    When leCore is installed as a wheel, that file is not shipped, but setuptools recorded the version into the
+    package metadata AT BUILD TIME from the same VERSION file -- so read metadata first (the installed truth),
+    then fall back to the VERSION file (running from a clone), then a sentinel. This means __version__ can never
+    drift from setup.py the way a hardcoded literal did (it was stuck at 0.1.0 while setup.py said 0.2.0)."""
+    try:
+        from importlib.metadata import version as _v          # installed case: the wheel's recorded version
+        return _v("leos-core")
+    except Exception:
+        pass
+    try:
+        import os
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "VERSION"), encoding="utf-8") as fh:   # clone case: read the source of truth
+            return fh.read().strip()
+    except Exception:
+        return "0.0.0"
+
+
+__version__ = _read_version()

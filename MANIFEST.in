@@ -6,6 +6,9 @@
 include README.md
 include LICENSE
 include requirements.txt
+# VERSION is the single source of truth setup.py reads for the package version. `python -m build` builds the wheel
+# FROM the sdist, so if VERSION is not in the sdist the wheel builds as the 0.0.0 fallback -- include it here.
+include VERSION
 
 # the runtime data package (the vendored dictionary + material property JSON the engine reads at runtime)
 recursive-include lecore_data *

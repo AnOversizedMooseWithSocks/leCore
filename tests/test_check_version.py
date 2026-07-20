@@ -1,4 +1,4 @@
-"""Tests for tools/check_version.py -- the tag-vs-setup.py version guard used at release time."""
+"""Tests for tools/check_version.py -- reads the package version (VERSION file) and optionally asserts a match."""
 import os
 import sys
 import subprocess

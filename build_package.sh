@@ -27,6 +27,10 @@ find "$STAGE"/holographic -name "test_*.py" -delete 2>/dev/null || true
 
 echo ">> copying the packaging files and the convenience shim"
 cp setup.py pyproject.toml lecore.py "$STAGE"/
+# VERSION is the single source of truth that setup.py reads for version=; without it in the stage the wheel would
+# build as the 0.0.0 fallback. lecore.__version__ reads the recorded metadata once installed, so it does not need
+# VERSION at runtime -- but the BUILD does.
+cp VERSION "$STAGE"/
 [ -f LICENSE ]   && cp LICENSE   "$STAGE"/ || true
 [ -f README.md ] && cp README.md "$STAGE"/ || true
 [ -f MANIFEST.in ] && cp MANIFEST.in "$STAGE"/ || true
