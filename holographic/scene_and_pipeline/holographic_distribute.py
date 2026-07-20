@@ -115,6 +115,25 @@ def distribute_bricks(out_shape, regions, worker, cache=None, fill=0.0, skip=Non
 
 # ---- reassembly = the computation's own commutative monoid ----------------------------------------------------------
 
+def reduce_first(parts):
+    """The single partial, unchanged -- the identity reduce for an ATOMIC job (exactly one bucket).
+
+    WHY IT EXISTS: the job machinery is a checkpointed monoid fold over buckets, which is right for work that
+    DECOMPOSES (a noise bake splits into z-slice bands and sums). A generic `job_submit("render_mesh", ...)` does
+    not decompose: it is one call, one bucket, and there is nothing to combine. reduce_sum happens to return
+    parts[0] for a single part, so it would "work" -- but it would be a lie in the job's own state ("sum"), it
+    calls .copy() on the result (a real cost on a large image), and it would break the moment a caller passed two
+    buckets expecting a sum. An atomic job says so.
+
+    Asserts the atomicity rather than silently dropping data: a `first` job with several partials is a caller
+    error, not something to paper over.
+    """
+    if len(parts) != 1:
+        raise ValueError("reduce='first' is for ATOMIC (single-bucket) jobs; got %d partials -- use sum/min/max/"
+                         "bundle for work that decomposes" % len(parts))
+    return parts[0]
+
+
 def reduce_sum(parts):
     """Linear superposition: forces, fields, potentials, radiance, densities. Exact + order-independent."""
     out = parts[0].copy() if hasattr(parts[0], "copy") else parts[0]

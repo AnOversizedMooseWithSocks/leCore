@@ -184,10 +184,14 @@ class Service:
         args = payload.get("args", {}) or {}
         if not name or name.startswith("_"):
             return {"ok": False, "error": "invalid or private tool name: %r" % name}
-        fn = getattr(self.mind, name, None)
-        if not callable(fn):
-            return {"ok": False, "error": "no such tool: %r" % name}
-        result = fn(**args) if isinstance(args, dict) else fn(*args)
+        # DELEGATE to mind.invoke (C3): the dispatch rules live in ONE place now, so this endpoint and every
+        # other client agree by construction instead of by two copies happening to match. The HTTP shape is
+        # unchanged -- errors still come back as {ok: False, error} rather than an exception -- and _jsonable
+        # stays here because JSON-safety is this boundary's job, not the mind's.
+        try:
+            result = self.mind.invoke(name, args)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
         return {"ok": True, "name": name, "result": _jsonable(result)}
 
     def _frame_stream_doc(self, _payload):

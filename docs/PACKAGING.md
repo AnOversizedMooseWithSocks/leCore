@@ -139,6 +139,49 @@ want — install the matching wheel by hand instead (e.g. `cupy-cuda12x`). That'
 To add a new optional dependency later, add a line to `extras_require` in `setup.py` — nothing else changes,
 and the core stays NumPy-only.
 
+## Subsetting & embedding the engine (Pyodide, flat bundles)
+
+If you are carving out a slice of the engine for a constrained target (a Pyodide bundle, a size-limited
+deploy), three things matter, and the engine already gives you the tools for each.
+
+**1. The canonical internal import style is packaged path, and it is deliberate.** Every module addresses its
+siblings as `from holographic.<family>.holographic_<name> import ...` (2900+ of them; only a dozen legacy
+exceptions remain). This is the one blessed style — do not introduce flat `import holographic_<name>` imports,
+because the two cannot coexist without a bidirectional shim. If you must run modules *flat* (no `holographic`
+package on the path), add a shim that maps the flat names onto the packaged ones once, at bundle-build time,
+rather than editing modules:
+
+```python
+# flat_shim.py -- run once when building a flat bundle, BEFORE importing any holographic_* module.
+import importlib, sys, pkgutil, holographic
+for _finder, _name, _ispkg in pkgutil.walk_packages(holographic.__path__, "holographic."):
+    if _name.rsplit(".", 1)[-1].startswith("holographic_"):
+        sys.modules.setdefault(_name.rsplit(".", 1)[-1], importlib.import_module(_name))
+```
+
+**2. Find the TRUE minimal dependency set with `import_footprint`, not a naive tracer.** A follow-every-import
+tracer reports ~500 modules for `lecore` because it walks into `try:`-guarded optional-accelerator imports
+(numba, cupy, pyfftw, matplotlib, sympy, nltk) that never run on a clean import. The engine's own tracer
+separates what actually runs from what is merely referenced:
+
+```python
+import lecore
+m = lecore.UnifiedMind(dim=64, seed=0)
+r = m.import_footprint("lecore")
+r["required"]           # ~30 modules that REALLY import (vs r["naive"] ~500)
+r["required_external"]  # ['numpy'] -- the real pip dependency for a bundle
+r["optional_external"]  # ['PIL', 'cupy', 'numba', 'matplotlib', 'sympy', ...] -- safe to exclude
+```
+
+`required_external` is the answer a bundler needs: the core closes over **numpy only**; everything in
+`optional_external` is behind a guard and can be dropped from the bundle. (Complements `accelerator_report`,
+which says what is *installed here*, and `tools/audit_imports.py`, which says whether an import *resolves*.)
+
+**3. Runtime data files resolve in both layouts already.** Data (the WordNet dictionary, material property
+JSON, routing indices) is looked up by trying the `lecore_data` package first, then falling back to a
+`__file__`-relative path — so it resolves the same from a clone, a wheel, or a flat bundle without a bare
+`import holographic` coupling the lookup to the packaged layout. If you relocate data, keep both lookup arms.
+
 ## Where each file goes in the repo
 
 | File | Location |

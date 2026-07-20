@@ -201,6 +201,7 @@ def generate_json(root=None):
             "aliases": list(c.aliases),
             "native": bool(c.native),
             "semantic": getattr(c, "semantic", None) or None,  # the File->Export->PNG verb path (None if untagged)
+            "method": getattr(c, "method", None) or None,      # C7: verified mind.<method>() name; None = import-only
             "consumes": list(getattr(c, "consumes", ()) or ()),  # S3 io-shape: datatype(s) consumed (empty if untagged)
             "produces": list(getattr(c, "produces", ()) or ()),  # S3 io-shape: datatype(s) produced
             "theme": _theme_for(c) or "More capabilities",
@@ -208,6 +209,15 @@ def generate_json(root=None):
 
     payload = {
         "schema_version": CAPABILITIES_SCHEMA_VERSION,
+        # SCOPE, stated in the artifact itself (a downstream integrator was burned by a generated doc that read a
+        # poorer catalog than the engine -- pipelines.json, now fixed). THIS file's curated-only scope is
+        # DELIBERATE: default_catalog() imports no engine modules, so capdoc stays stdlib-runnable. The FULL live
+        # catalog (~2,100 entries: every auto-registered faculty, verified `method` callability, io edges) is a
+        # RUNTIME object -- serve it via mind.find_capability / mind.pipeline_map / GET /tools, do not look for
+        # it here. A client that treats this file as the whole engine will under-count by ~5x and miss every
+        # faculty-only capability.
+        "scope": "curated capability homes only -- the full live catalog is served at runtime by "
+                 "mind.find_capability / mind.pipeline_map / GET /tools",
         "count": len(records),
         "capabilities": records,
     }

@@ -35274,3 +35274,4870 @@ ALSO FIXED HERE: diag.log + rvd.log were committed (7 bytes each, "DONE 0") and 
 removed from the tree. MY OWN HAZARD, recorded loudly: every zip I build excludes `-x "*.log"`, so if a .log were
 ever real repo content I would silently drop it on each round-trip. Same class as the CRLF spray: a delivery
 mechanism that quietly edits the payload.
+
+## SEMANTIC TAG COVERAGE 5.2% -> 30.9% (6x) -- derived, not typed; plus TWO bugs the audit found underneath
+
+Moose flagged tag coverage at ~4%. Audited it through the engine (find_capability found no existing tagger -- all
+fallbacks, so building was licensed) and the number was 108/2095 = 5.2%. What that number MEANS: capuri is explicit
+that browse_semantic "omits untagged capabilities", so coverage IS the File->Export->PNG action menu. 95% of the
+engine's verb surface was invisible in its own menu -- `render/` was an EMPTY branch while 50 render faculties
+existed, and `io/` did not appear at all.
+
+THE BREAKDOWN CHANGED THE TARGET (measure before building):
+    auto: mind METHOD   1203    0 tagged   <- the real surface: verb_noun identifiers, the things a user DOES
+    auto: MODULE name    495    0 tagged   <- NOT actions. "holographic_raypick" is not something you DO.
+    curated             396   108 tagged
+So "full coverage of 2,095" is the WRONG goal and was rejected with a reason: tagging module names would file
+modules in an action menu. They abstain BY DESIGN, pinned by a test.
+
+BUILT holographic_semantictag.infer_semantic(name, doc) -- a frozen ordered stem -> "root/sub" table, no model, no
+learned weights, deterministic. Wired into seed_from_mind so the tag is DERIVED at registration (exactly as
+_METHOD_ALIASES fixed dark method names in D1): hand-writing 1,200 tags is 1,200 chances to rot and the next
+faculty lands untagged anyway. IT ABSTAINS (returns None) -- the house rule the router already follows: an honest
+None beats a confident wrong route, because a wrong branch files a capability under a verb nobody looks for and,
+unlike a missing tag, LOOKS DONE.
+
+VALIDATED AGAINST THE 108 HAND TAGS AS GROUND TRUTH: 75% root-accuracy where it commits, 59% abstention. NOT good
+enough to mass-apply -- and the disagreements were the interesting part: the GOLD is wrong in places. "Smooth a
+bumpy mesh surface (Taubin)" is tagged create/emit; "Mesh repair (weld + split non-manifold)" is tagged create/emit.
+Smoothing and welding are modify/. So the ground truth is partly unreliable, which is why the inference is scoped to
+METHOD names (verb_noun identifiers, 45% commit rate) rather than curated prose names.
+
+KEPT NEGATIVE (design, pinned in the selftest): an earlier draft checked the name's LEADING token first as "the
+verb". It FOUGHT the rule ordering and mis-filed measure_area as measure/distance. Word order in a name is a WEAKER
+signal than the table's precedence -- one ordered pass over all tokens is correct. Also rejected: 'scatter' and
+'sample' as stems (scatter is both a particle sim and a render splat; sample is both a selection and a signal read).
+An ambiguous stem does not buy coverage, it buys a wrong branch.
+
+TWO REAL BUGS FOUND UNDERNEATH THE COVERAGE NUMBER:
+ 1. THE FACULTY COULD NOT SEE ITS OWN TAGS. mind.browse_capabilities(by='semantic') called browse_semantic(prefix)
+    BARE, which silently falls back to default_catalog() -- the ~400 CURATED entries. So the verb menu could never
+    show a mind's auto-registered faculties no matter how well tagged: the tags lived on one catalog and the menu
+    read another. The new tags were invisible until that line passed self._capability_catalog(). Fixed.
+ 2. SUB-BRANCH DRIFT IS UNPOLICED. The S4.1 gate checks ROOTS only. Measured: 73 of the 108 existing tags (68%) use
+    sub-branches SEMANTIC_TAXONOMY.md never lists -- create/emit x21 (the single most-used tag!), analyze/measure
+    x15, simulate/step x9. Three of them are mine from earlier this session (modify/perturb, modify/filter,
+    analyze/describe): I invented undocumented branches while following a gate that only looked at roots. FILED,
+    not fixed here -- extending S4.1 to gate sub-branches would fail on 73 pre-existing tags and needs the
+    taxonomy settled first (document the grounded ones, fix the wrong ones). That is its own bounded item.
+
+RESULT: 108/2095 (5.2%) -> 649/2099 (30.9%), 6x. Menu: 649 leaves across ALL 11 roots (was 108 across 9).
+render/ 0 -> 50 across 5 sub-branches; io/ absent -> 45. Faculties mind.semantic_tag_coverage() and
+mind.infer_semantic_tag(name); catalog entry 5/5 stranger phrasings discoverable; tests/test_semantictag.py (18).
+Registered the "coverage" name collision after reading all three bodies (sdfemit = which SDF node kinds emit,
+ldexplore = grid cells visited, semantictag = fraction tagged: three unrelated spaces, benign homonym). NOTE: my
+first attempt added a SECOND "coverage" key to KNOWN_COLLISIONS -- a dict literal's last key wins, so my entry was
+silently dead and the audit stayed red until I updated the existing line instead.
+
+THE HONEST CEILING: the remaining ~69% is not a to-do list. ~500 module names abstain by design; the rest are
+noun-named faculties (svg_canvas, planet_field, image_edges) with no verb to file under. Raising coverage further
+means either renaming faculties or loosening the table into wrong branches. Coverage is a MEASURED outcome here,
+not a target to hit.
+
+## SEMANTIC ARC: step-back audit -> SEMANTIC_BACKLOG.md; S0/S1 done, S2 tooling ready, one retraction
+
+Moose called a step-back ("are we solving the right problems? half-wired things? duplicates?"). All three suspicions
+CONFIRMED, plus one of my own claims refuted by the work.
+
+S0 -- TAG CLOSE-OUT DONE. semantictag: coverage 108/2095 (5.2%) -> 649/2099 (30.9%); browse_capabilities
+(by='semantic') now reads THE MIND'S OWN catalog (it called browse_semantic() bare and silently fell back to the
+~400-entry default_catalog -- the new tags were invisible until that line changed). 'coverage' 3-way name collision
+read and adjudicated benign (sdfemit=node kinds, ldexplore=grid cells, semantictag=tag fraction). The two
+duplication-audit failures were ORDERING (collision entry landed before regen_docs ran) -- a reminder that the
+battery is order-sensitive: regen before judging.
+
+S1 -- TOOLING DUPLICATION KILLED. scripts/ (Moose's push; designed per its own README to live OUTSIDE the repo)
+duplicated tools/semantic/ in OLDER versions: knowledge_index 476 vs 965 lines, export_index 68 vs 114, distill_map
+182 vs 331, plus a stale routing_index_64d.npz. Running a stale copy would cold-embed with old wiring and pollute
+the shared cache. The six superseded files + stale index removed; research-arc-only scripts kept as history; README
+rewritten as an archive pointer. Verified first: nothing imports from scripts/, CI never runs it. Reversible via git.
+
+S2 -- N31 GATE TOOLING READY, and A RETRACTION. My situation report said "route_semantic never calls queryembed".
+WRONG: it calls _query_embedder() -- I grepped for the literal string 'queryembed' and missed the indirection.
+Rule-0 violation #4 this arc (pair-lists, HoloForest API, _repo_root str, now this): probe BODIES, not substrings.
+The chain was dead for three OTHER reasons: (1) export_query_embed sat below __main__, NEVER CALLED -- a passing
+fit wrote nothing (fixed: --export); (2) the fit ran at 768d while 128d ships -- the RS-1b lesson, so --dim added
+and the printed bars now grade the shipping artifact; (3) the loader and exporter disagreed on the FILENAME three
+ways (queryembed_64d/query_map_64d wanted vs query_embed.npz recommended) -- a fitted artifact would have landed
+and silently never loaded, route_semantic returning None with the cure on disk under the wrong name. Fixed:
+canonical query_embed_128d.npz first in the loader's list, agreement PINNED by test_queryembed_artifact (4 tests:
+exporter -> embedder -> real router at matching dim; determinism; all-unknown -> None; honest-None fallback).
+
+THE PATTERN, named: three independently-harmless breaks composing into one dead feature is what "half wired" MEANS
+here. Each piece was reachable, documented, selftested; only running the WHOLE loop (or pinning it with an
+end-to-end test) exposes it. Same lesson as the codeedit cap: component health does not imply chain health.
+
+GATE HANDED TO MOOSE (pre-registered bar = the script's own): --dim 128 --export ...; ship only if [ours] top-1
+>= 6/12 and median <= 2; if [m2v] alone clears it, prefer the simpler no-W artifact (schema follow-up); below the
+bar NOTHING lands and S3 closes as a kept negative.
+
+STANDING DECISIONS in docs/SEMANTIC_BACKLOG.md: S4 (front-door hybrid) gated on a >=30-ask CATALOG-corpus suite
+built BEFORE any wiring; S5 sub-branch drift gate (68% of hand tags use undocumented sub-branches -- doc-first,
+then extend S4.1 to full paths); explicit do-not-retry list (multivec@128, wider index, hierarchical, intuition
+fusion, table-loosening for coverage).
+
+## CLIENT AUDIT FILED (comfy-lecore) -- and a correction to our own framing of the tagging arc
+
+A downstream builder sent a 16-item backlog from auditing the published wheel + a clone. Spot-checked the load-
+bearing claims against the LIVE tree before filing; every one reproduced: the image->mesh nonsense route (tensor
+denoiser -> Aharonov-Bohm ring, caused by one wrong `field` tag); the restore() trap (it is the inverse-problem
+solver, one keystroke from load()); zero object constructors / no mind.invoke / no job_submit / no features();
+CameraController lacking projection_matrix (the two-camera-class trap).
+
+THE CORRECTION, kept loud: the "87/2,095 (4%)" that launched the semantic arc was the client's io-KIND count
+(consumes/produces -- pipeline edges, nodegen's raw material), NOT the semantic verb tags. Two tag systems; I
+raised the verb tags 108 -> 649 (real, stands on its own: the action menu was 95% blind) but the client-valuable
+number is io-kinds and it is STILL 116/2,099 (5.5%). Filed as S7 with the client's own evidence setting the order:
+LINT FIRST (a wrong io tag actively poisons Auto Route; worse than missing), then the drive, with C7's `method=`
+field riding along. Lesson: when a number arrives second-hand, resolve WHICH instrument produced it before aiming.
+
+Also verified: the engine never calls Python's hash() (grep: docstrings + a GLSL string only), so the
+PYTHONHASHSEED=0 requirement is probably vestigial -- C13 is the cheap experiment (run the determinism suite with
+salted hashing) that either deletes the footgun from the ritual or finds the one caller hiding from grep.
+
+New file docs/CLIENT_INTEGRATION_BACKLOG.md: C1 publish (Moose) -> C2 JSON-drivable render + camera-protocol
+unification -> C3 mind.invoke hoist -> C4 object handles -> S7 -> C7/C8/C9/C10 -> P2 footguns (save_state aliases,
+state_path ctor, features(), io_kinds contract, dtype kwarg, source_only consumers). Their "not your problem" list
+honoured verbatim so nobody upstreams a fix that breaks their handling.
+
+## C2 + C3 SHIPPED (client audit) -- and Rule 0 corrected the diagnosis of the flagship bug
+
+C2 -- "render_mesh cannot be called by ANY JSON client, and there are no primitive constructors". Rule 0 first,
+and it moved the whole item: THE CONSTRUCTORS EXIST. m.render_mesh(m.mesh_box(), m.camera(...)) already rendered
+(64,64,3) in-process with zero class imports, and m.camera() returns a Camera WITH projection_matrix. The audit
+searched make_box / box_mesh / cube / primitive / make_camera; find_capability answered "Catmull-Clark
+subdivision". So bug (a) was VOCABULARY, not capability -- the engine's own rule, stated: a capability
+find_capability cannot surface does not exist. Fixed with D1-pattern aliases written from the CLIENT's mouth
+verbatim; all 7 of their phrasings now hit top-3.
+
+Bug (b), coercion, was real: dict args raised AttributeError from deep inside the rasteriser. Fixed at the
+FACULTY boundary only (holographic_coerce.as_mesh/as_camera) -- holographic_render keeps taking real objects and
+stays free of dict-sniffing; only the JSON-facing edge is permissive. Real objects pass by IDENTITY (asserted), so
+no existing decision can flip.
+
+Bug (c), the two-camera trap the auditor "fell in": CameraController has no projection_matrix and fails DEEP in the
+MVP build -- but it has ALWAYS carried to_camera(), the exact bridge, and nothing ever called it. So the fix was
+CALL THE BRIDGE THAT EXISTS, not mint a protocol or a third camera class. Same shape as the codeedit cap and the
+N31 chain: every piece present and healthy, the connection absent. That is now three instances -- "half wired"
+here means composition failure, not component failure, and only running the WHOLE loop finds it.
+
+C3 -- mind.invoke hoisted with Service._invoke's exact semantics; the service now DELEGATES (pinned by test, so
+they cannot re-fork). One set of dispatch rules instead of one per client.
+
+MEASURED BONUS THAT SHRINKS C4: the client predicted C2's acceptance would need object handles to pass over HTTP.
+It does not -- POST /invoke render_mesh with a JSON mesh + JSON camera returns a real image RIGHT NOW, because
+coercion BUILDS the object server-side instead of shuttling it. C4 is now only about chaining expensive/lossy
+outputs, and is re-scoped to "measure the payload cost first"; a registry + TTL may never be worth it.
+
+CLOSE-OUT: coerce selftest + catalog selftest green; audits 0 dark / 0 gaps / 0 lint / structure / 0 flat /
+collisions 48/48; 76 tests incl. the service suite; FULL HTTP ROUND-TRIP proven (agent-facing, so in-process was
+not the claim): /invoke dispatches, renders from JSON, and refuses private+unknown names as JSON errors.
+
+## C6 + C7 + C8 SHIPPED -- the client's nonsense route had TWO causes, and one was a DUPLICATE hiding its own fix
+
+C6. The report: suggest_pipeline("image","mesh") -> tensor denoiser + Aharonov-Bohm ring. Reproduced. Two causes:
+
+(1) FAKE EDGES. Both edge builders read consumes x produces as a CROSS PRODUCT. That is CORRECT for a CONJUNCTIVE
+capability (transform_selection needs mesh AND selection AND transform, so "I hold a selection, can I reach a
+mesh?" is a real question) and WRONG for a POLYMORPHIC one: denoise_tensor takes image OR field and returns THE
+SAME KIND, so image->field is a conversion it cannot perform. The tuple could not express the difference -- one
+field, two meanings. New `polymorphic=True` keeps only the diagonal. Default False, so no existing edge moves.
+
+(2) THE REAL ROUTE WAS UNTAGGED. image_to_mesh / depth_to_mesh / photo_to_3d each announce "image -> MESH" in
+their own FIRST DOCSTRING LINE and declared nothing. So no typed image->mesh edge existed, the router had no
+honest answer available, and it took the dishonest one. This is S7's thesis proven: coverage is not cosmetic, the
+gap PRODUCES wrong routes. Tagged; suggest_pipeline("image","mesh") now returns depth_to_mesh -- a route that runs.
+
+THE DUPLICATE THAT HID THE FIX (the user's "duplicate functionality" suspicion, vindicated a second time):
+pipelinemap._edges and Catalog.suggest_pipeline each build the edge set, and _edges' docstring claimed to be
+"EXACTLY the edge set suggest_pipeline builds". They had ALREADY diverged -- I fixed polymorphic in _edges, the
+pipeline_map fake edges vanished, and THE NONSENSE ROUTE SURVIVED because suggest_pipeline had its own copy. A
+docstring asserting agreement is not agreement; test_pipeline_edges now pins them equal edge-for-edge.
+
+C7. `method` field: derived when omitted (bare name, else the `m.foo(` regex the client was running on our example
+strings -- now ONCE, in the engine). The step no client could do: seed_from_mind VERIFIES every guess against a
+live mind and nulls the liars. MEASURED: 511 of 2,040 naive guesses were WRONG (508 module names -- a module is
+not a faculty -- + 3 strays). Now 0. C8 falls out for free: method=None IS the import-only flag, so one field
+answers both questions instead of two that could disagree. 574 flagged, matching their reported ~570. And exactly
+4 pipeline edges have method=None -- the same 4 in their EXCLUDED.md: never regexable because genuinely
+import-only, and now they SAY so.
+
+KEPT NEGATIVES, both measured: (a) the audit asked for smoke-calling to verify tags; NOT built -- a valid input
+fixture per kind for 100+ faculties is a second engine to maintain, a wrong fixture reports a lie about a lie, and
+the 3 static checks caught the ENTIRE reported failure. Unbought until a bug survives them. (b) the lint's first
+rule flagged any consumes/produces OVERLAP -> 5 FALSE POSITIVES on legitimate conjunctive tags (select_edge_loop,
+skin_mesh, transform_selection). A lint that cries wolf gets muted and the real liar rides in behind it. Tightened
+to `consumes == produces`, which is exactly the polymorphic shape. Both negatives pinned by tests.
+
+CI gate added (tools/tag_lint.py): liars + crossfake FAIL; untagged converters are REPORTED as S7's drive queue,
+not failed. All three rules proven to BITE by mutating the live catalog and watching the reported bug reappear.
+CLOSE-OUT: audits 0/0/0 + tag_lint clean; 3 selftests; 97 tests over touched surfaces + a 214-test untouched
+shard; regen 9 outputs drift-clean.
+
+## MOOSE'S WARNING PAID: generated docs FEED BACK into the system, and one machine contract was lying
+
+The warning: "auto generated documentation feeds into the system -- some determine how things are related, what
+is possible, and how it works." Audited every generator's INPUT catalog, and found the fourth instance of the
+one-source bug -- this one in a shipped machine contract.
+
+pipelines.json (the contract an agent reads for "what routes exist") was generated by pipelinemap.generate() from
+default_catalog() -- the ~400 curated entries -- while mind.pipeline_map() serves the mind-seeded catalog (~2,100,
+_IO_SHAPES applied, method verified). So the COMMITTED json had no `method` field and NO image->mesh edges while
+the live engine served both. The drift gate was structurally blind to it: the file was perfectly up to date WITH
+ITS GENERATOR; the generator read the wrong world. A doc that feeds an agent's world model, generated from a
+poorer catalog, is a poorer world model published as truth. FIX: generate() now builds a mind and reads the SAME
+catalog as the faculty; pipelines.json mirrors pipeline_map()'s edge dicts including method; pinned edge-for-edge
+by test (ordering-insensitive). Its coverage line is now honest too: 91/2,103 both-tagged (4%) -- S7's target
+number, published accurately.
+
+THE COUNTER-CASE, kept deliberately: capdoc.py ALSO reads default_catalog() -- and that is CORRECT. Its comment
+says why: default_catalog() imports no engine modules, so capdoc stays stdlib-runnable. Blindly "fixing" it would
+bloat CAPABILITIES.md 5x and break that property. The actual hazard was a CLIENT mistaking capabilities.json for
+the full contract, so the scope is now stated INSIDE the artifact ("curated homes only -- the full live catalog is
+served at runtime by find_capability / pipeline_map / GET /tools"), and each record carries the C7 `method` field.
+Lesson pair: same evidence (generator reads default_catalog), two OPPOSITE correct actions -- one is a bug, one is
+a design with a WHY-comment. Read the comment before "fixing".
+
+Four instances of one shape now on record: browse_semantic's bare fallback, UNIFIERS.md's redirect, pipelinemap's
+default_catalog, and (averted) capdoc misread. The pattern: a VIEW quietly bound to a poorer source than the
+system it describes. The cure each time: one source, pinned by a test that compares the view to the live engine.
+
+## S7 BATCH 1 + C9 -- and a FIFTH instance of the one-source shape, fixed at the source this time
+
+S7 batch 1 (io-kind drive). 91 -> 98 both-tagged; 104 -> 111 edges; the `timeseries` source-only gap CLOSED
+(record_physics_trace / audio_param_bus produce it). New REAL routes: field->mesh (occupancy_to_mesh),
+field<->hypervector (grid_to_hypervector / hypervector_to_grid), skeleton->image (skin_mesh -> render).
+
+METHOD, and the reason it is slow on purpose: EVERY tag was verified by READING the signature and the first
+docstring line. The `X_to_Y` naming convention looks like a free tag source and LIES about types --
+mesh_to_stl produces a STRING, mesh_to_softbody a SoftBody, procedure_to_recipe a recipe, and field_to_splats
+takes `centers` (points) despite the name. None are io kinds. Name-inference would have manufactured exactly the
+fake edges tag_lint was built to catch -- the semantictag verb drive could infer safely because a VERB is in the
+name; a TYPE is not. Four candidates abstained, pinned by test so a future session must read before tagging.
+
+KEPT NEGATIVE: curve/skeleton remain source_only. Nothing in the engine PRODUCES them (you import a skeleton, you
+draw a curve) -- that is honest, and inventing a producer tag to empty a gap report is the dishonesty the lint
+exists to prevent. A gap report with a true gap in it is working.
+
+C9 (structured args): params as DATA from inspect (which knows *args/**kwargs -- a signature-string split does
+not), plus `primary` (the param the piped input goes to) and `produces`. `default` is repr'd so the card stays
+JSON-safe: a tuple default like (0.8,0.8,0.8) would hand a JSON-dumping client a landmine.
+
+FIFTH ONE-SOURCE INSTANCE, and the first fixed at the SOURCE. holographic_skills._catalog() builds
+seed_from_modules(default_catalog()) -- WITHOUT seed_from_mind, so it never runs the verification pass that nulls
+method liars. It served method="holographic_rayindex": a call that does not exist. The tempting fix was to verify
+inside skill_card (a sixth verifier). Instead _derive_method now REFUSES a module-shaped name outright, so every
+consumer -- verified or not, present or future -- is honest by construction. Rule extracted: when the same bug
+appears in the Nth view, stop fixing views. Also found: describe_skill answered the SAME question two ways
+depending on which index held the name (method branch served params; capability branch did not) -- one field,
+`method`, on both kinds now.
+
+CLOSE-OUT: audits 0/0/0 + tag_lint clean; 2 selftests; 102 tests over touched surfaces + a 152-test untouched
+shard; regen 9 outputs drift-clean.
+
+## C10 job_submit -- and TWO bugs found by measuring my own docstring instead of asserting it
+
+C10. The client guessed right: the job surface (list/status/result/cancel/pause/resume) all existed; only START
+was missing -- background=True was a kwarg exactly ONE method (bake_cloud_job) accepted, so a client's "async"
+toggle worked for one faculty out of 1,300. The machinery is a checkpointed monoid fold, so the generic submit is
+one bucket + an identity reduce + a worker that calls mind.invoke. The worker closes over the mind (a mind cannot
+go in a JSON checkpoint) and is registered on the shared manager next to the noise worker, so a reopened mind
+re-registers it by name exactly as the noise job does.
+
+NEW PRIMITIVE, reduce_first: sum/min/max/bundle are for work that DECOMPOSES. reduce_sum returns parts[0] for a
+single part, so an atomic job would have "worked" -- while calling itself a "sum" in its own persisted state, and
+calling .copy() on the result (a real cost on a large image). It would also break silently the day someone passed
+two buckets expecting a sum. reduce_first is the honest monoid for one indivisible call and ASSERTS atomicity
+(>1 partial = caller error, not something to paper over by dropping data).
+
+BUG 1, found by TESTING A DOCSTRING CLAIM. I wrote "a live object works in-process but will not persist" and then
+measured it instead of trusting it. It ran and returned the right image -- and crashed the daemon thread with an
+unhandled TypeError from json.dump, on stderr, where the caller could not catch it and a library has no business
+writing. The job had already SUCCEEDED; only the bookkeeping exploded. Cure: persistence is a BONUS property of a
+job, not a precondition for running one, so an unserialisable state degrades to persisted=False with the reason
+recorded (marked, never silent). Also serialise BEFORE opening the file, so a failure leaves no truncated
+checkpoint on disk. This was NOT a job_submit bug -- ANY job with a non-JSON cache crashed its thread.
+
+BUG 2, found by a test that PASSED ALONE AND FAILED IN SUITE: _run sets status=DONE BEFORE it checkpoints, so
+anything that polls job_status and then reads job.persisted races it and hits AttributeError. Cure: the attribute
+is declared in Job.__init__ (None = not attempted), so a consumer can always read it. Lesson: "passes alone,
+fails in suite" is a race, not flakiness -- read the ordering, do not rerun until green.
+
+LESSON, repeated: a claim in a docstring is worth exactly what its test is worth. Both bugs came from writing
+down a limitation and then insisting on measuring it. Neither was in the client's report.
+
+CLOSE-OUT: audits 0/0/0 + tag_lint clean; 3 selftests; 85 tests over touched surfaces + a 24-shard untouched
+regression run; regen drift-clean; .lecore_jobs scratch removed before packaging.
+
+## C11/C12/C13 -- and PYTHONHASHSEED=0 was NOT vestigial: it was hiding three real bugs
+
+C13 IS THE HEADLINE, and it refuted my own prior note. Last session I wrote "grep shows the engine never calls
+hash() -- the PYTHONHASHSEED=0 requirement is probably vestigial". The client's grep said the same. BOTH WERE
+WRONG. holographic_sequence seeded atom vectors with abs(hash((seed, sym))). Python salts hash() per process for
+str, so every atom -- and the z-score the module returns -- moved run to run: discover_sequential() measured
+1.64 / 1.61 / 2.17 on IDENTICAL input under PYTHONHASHSEED=random. It survived greps because `hash((seed, sym))`
+looks nothing like a content hash, and it survived every TEST because CI pins PYTHONHASHSEED=0 -- the env var was
+PAPERING OVER a bug, not preventing one. Fixed with hashlib (the engine's own rule). The static trap I then wrote
+found TWO MORE sites in holographic_recurrent. A grep found one; the trap found the rest -- that is the entire
+argument for the static half of a gate.
+
+METHOD NOTE: the runtime tests run in SUBPROCESSES with random salts, because an in-process assertion is blind to
+the salt it inherited. That blindness is exactly why this lived for so long, and why "we run the suite under
+PYTHONHASHSEED=0" was never evidence of determinism. Baseline captured BEFORE the fix: z=2.8379187419114142.
+After: 2.2324732585958955, identical across salts. The VALUE moved (atoms are differently seeded); the DECISION
+did not flip ('executable' both sides) -- which is the contract that matters, since an atom's value is arbitrary
+and only its consistency is load-bearing. holographic_sequence also had NO _selftest (a build-loop violation it
+predates); added one that pins the seed DERIVATION against hashlib directly, because an end-to-end assertion
+cannot fail under a fixed salt even when the code is wrong.
+
+C11/C12: save_state/load_state/from_file aliases, all delegating (one implementation, several honest names).
+Found a trap the client did NOT report and that is worse than the restore() one they did: `load` is a CLASSMETHOD
+that RETURNS a new mind, so their described pattern ("the Loader constructs then calls load()") silently loads
+NOTHING -- `m.load(p)` leaves `m` empty and it behaves as if the save file were blank. Documented at the call site
+with the right/wrong pair. C12 turned out to ALREADY EXIST: UnifiedMind.load(path) IS construct-from-file; it just
+lacked the name anyone would search for. Fourth time this arc that the reported gap was VOCABULARY, not capability.
+
+TOOL NOTE: file_replace REFUSED an ambiguous anchor ("occurs 2 times, count=1 required") and left the file intact
+-- the editor's uniqueness guard doing exactly its job, mid-chain, with zero partial damage. Verified intact
+before redoing with a unique anchor rather than assuming.
+
+CLOSE-OUT: audits 0/0/0 + tag_lint clean; 4 selftests; 59 tests over touched surfaces + a 24-shard untouched run;
+regen drift-clean.
+
+## C14/C15/C16 -- the client backlog is now DONE except C1 (Moose's publish) and C4 (re-scoped)
+
+C14 features()/version(). {name: bool} for a preflight in one call; features() with no argument maps every public
+faculty to True; version() carries {engine, capabilities_schema, dim, seed}. The client's insight was that a
+hardcoded faculty list rots; the sharper point is that it rots SILENTLY -- a missing faculty and a RENAMED one are
+the same absent attribute from outside, so a preflight cannot tell "not built yet" from "moved". Asking the engine
+cannot go stale because it is computed from the live object. Private names are always False (not contract).
+
+C15 io_kinds contract, stated in the faculty's OWN docstring rather than a doc a client will not find: STABLE =
+mesh/points/sdf/sdf_scene/field/image/hypervector/transform/selection/scalar; PROVISIONAL = curve/skeleton/
+timeseries/spectrum. curve+skeleton have NO tagged producer and that is honest (the engine consumes them; you
+import a skeleton, you draw a curve). Pinned by a test asserting source_only == {curve, skeleton} EXACTLY -- so if
+a future session tags a producer, the test fails loudly and the doc gets corrected instead of quietly going stale.
+That is the cure for a doc-vs-code drift: make the doc's claim a test.
+
+C16 smalls: (a) resolve_capability_uri's caveat now LEADS ("URI-ONLY -- returns [] for a plain faculty name")
+rather than hiding in paragraph three -- behaviour untouched, only the misreading closed. (b) render_mesh(dtype=)
+default None = float64, byte-identical; the cast is at the EXIT, after the shading maths, so it cannot move a
+pixel (asserted: a.astype(float32) == b). Casting earlier would have changed the maths -- the tempting place is
+the wrong place. (c) timeseries consumer closed in S7 batch 1; curve/skeleton stay open honestly.
+
+STATUS of the client backlog: C2 C3 C6 C7 C8 C9 C10 C11 C12 C13 C14 C15 C16 all DONE. C5->S7 batch 1 done,
+ongoing. C1 is Moose's publish. C4 re-scoped to "measure the payload cost first" -- MEASURED to be unnecessary for
+the flagship, since coercion lets the object be BUILT server-side from JSON rather than shuttled as a handle.
+
+CLOSE-OUT: audits 0/0/0 + tag_lint clean; catalog selftest; 90 tests over touched surfaces + a 230-test untouched
+shard; regen drift-clean.
+
+## S5 sub-branch drift gate -- and the empty branches were EVIDENCE, not decoration
+
+S4.1 gated the ROOT only, so 102 capabilities under 15 branches SEMANTIC_TAXONOMY.md never listed passed CI for as
+long as they existed (create/emit x21, simulate/step x37, analyze/measure x15, ...). A menu path nobody documented
+is the discovery equivalent of a dark module: real, reachable, absent from the map everyone reads. Doc-first per
+the doc's own rule -- a branch with members has EARNED its place, so the DOC was what drifted. All 15 documented.
+
+THE REVERSE DIRECTION IS THE FIND. Two branches were DOCUMENTED BUT EMPTY (convert/isosurface, simulate/pbd) --
+which the doc itself declares a bug. They were empty because their MEMBERS WERE UNTAGGED, not because they were
+aspirational: occupancy_to_mesh / mesh_from_sdf / points_to_mesh are literally "points<->mesh, sdf<->mesh", and
+resolve_swept_collision is a PBD collision step that the stem "resolve" mis-filed under analyze/pipeline. An empty
+branch is EVIDENCE (of missing tags), not decoration to delete. Generalised: when a map and a territory disagree,
+check which one is wrong before "fixing" either -- twice now the map was right and the code was missing.
+
+NEW MECHANISM, _SEMANTIC_OVERRIDES: a stem is a strong signal that is sometimes simply WRONG ("resolve" is a
+capability lookup nine times in ten and a PBD solver the tenth). The cure is NOT a cleverer table -- every special
+case in a stem table costs accuracy on every OTHER name -- it is a short explicit exception list, same shape as
+_METHOD_ALIASES. Overrides win; inference fills the rest. Pinned small by test (>30 entries means the table is
+wrong, not the names).
+
+GATE DESIGN: the test compares the DOC to the LIVE ENGINE, in both directions, rather than to a hardcoded list in
+the gate -- which would be a THIRD copy free to drift. Same cure as pipelines.json == pipeline_map(). Both rules
+proven to bite by mutating a live tag. Result: 66 documented == 66 in use, zero drift either way.
+
+MY OWN MISS-TAG, caught by READING a branch's members rather than trusting its count: I had tagged "Run any
+faculty as a background job" simulate/step. simulate/ is "evolve a physical field over time"; a job evolves
+nothing. A tag can be counted and still be wrong -- which is exactly the failure abstention exists to prevent, and
+a reminder that a coverage number is not a quality number.
+
+KEPT OBSERVATION (not done, deliberately): create/emit (21 members: creature, humanoid, mandelbulb, ifs_generate)
+overlaps create/procedural almost exactly, and two names for one action is a discoverability tax. Merging is a
+CANDIDATE, not a chore -- re-filing 21 live tags should be measured (does the menu get easier to browse?), never
+smuggled into a documentation pass.
+
+CLOSE-OUT: audits 0/0/0 + tag_lint clean; 2 selftests; 88 tests over touched surfaces + a 207-test untouched
+shard; regen drift-clean.
+
+## S7 batch 2 + S4 ask set: the front door's FIRST honest baseline, and BM25/RRF are KEPT NEGATIVES
+
+S7 batch 2. 98 -> 108 tagged, 111 -> 123 edges, lint clean. Ten more tags, every one verified by READING the
+signature + first docstring line: advect/diffuse_field (field->field), domain_twist/bend/repeat/fold (sdf->sdf),
+bake_sdf (sdf->field), collide_sdf + ambient_occlusion (conjunctive), emit_from_surface (sdf->points). The engine
+can now plan MULTI-STEP routes: sdf->image = mesh_from_sdf THEN render, a chain that was unplannable while either
+link was untagged. ABSTAINED and pinned: ascii_field/ascii_sdf produce TEXT (no such io kind; minting one to fit
+two faculties is a taxonomy decision, not a tagging one), curve_resample_arc_length's signature is (points, n) --
+the NAME says curve, the CODE takes points -- and bump/apply_mueller/classify_transform merely MENTION kinds.
+Mentioning is not converting.
+
+S4 ASK SET BUILT (tools/semantic/catalog_exam.py): 35 asks over the 2,111-entry CATALOG corpus -- deliberately NOT
+the 12-ask MODULE exam (different corpus, different baseline; conflating them is the RS-1b mistake that cost 80
+minutes). EIGHT of my first-draft golds DID NOT EXIST: I wrote the names the engine OUGHT to have from memory
+(mesh_boolean, mesh_decimate, cleanup, bind, unbind, resonator, cloth_step, pbd_step) and the engine has
+brep_boolean, mesh_qem_decimate, learn_cleanup, map_bind, unbind_keys, holographic_resonator, cloth, rigid_body.
+verify_golds caught every one BEFORE a score printed -- a nonexistent gold is unreachable, so its ask silently
+drops out of the denominator and flatters every arm equally. It is also a finding: if the names I reach for from
+memory are not the catalog's, a stranger's odds are worse, and that IS the problem the suite measures.
+
+FIRST MEASUREMENT: token (BASELINE) 14/35 top1, 21/35 top5, median 2.0 | bm25 15/35, 22/35, 2.0 | rrf 15/35,
+22/35, 2.0. KEPT NEGATIVE, loud: BM25 = +1 ask, RRF adds NOTHING on top. On 35 asks a 1-ask delta is ~0.5 SE --
+noise in a win's clothes. NEITHER SHIPS. (BM25 does rescue one genuine lexical case: coldstore r46 -> r4, matching
+RS-1's finding -- keep for a future tiebreak, worthless alone.)
+
+THE DISCIPLINE POINT, and the most important line in this entry: 6 of 35 asks miss in EVERY arm, and I could have
+made all six pass in a minute by adding aliases. I did NOT. Fixing an exam's own failures with aliases is TEACHING
+TO THE TEST -- the suite would stop measuring retrieval and start measuring whether someone had read it. The
+misses ARE the signal: zero lexical overlap means no lexical method reaches them, which is the honest argument for
+the embedding arm (S2) and for alias MINING from real failed-then-rephrased queries. Aliases learned from USE,
+never from the exam. Pinned by test, including a trap that FAILS if BM25 ever becomes genuinely dominant (+5
+top-1) -- the signal to re-open S4 with real evidence rather than from memory.
+
+TOOL/TEST NOTE: the exam tests exceeded the repo's 15s per-test budget and were being SILENTLY SKIPPED. Marked
+@pytest.mark.slow honestly -- a skip nobody notices is worse than an absent test, because it looks like coverage.
+Also: my first bm25_rank call assumed (name, text) pairs and name-returns; the LIVE signature takes texts and
+returns (index, score). Rule 0 again -- probe the contract, not the memory of it.
+
+CLOSE-OUT: audits 0/0/0 + tag_lint clean; regen drift-clean; 89 tests over touched surfaces + a 178-test untouched
+shard; exam's 4 tests green in the slow lane.
+
+## S2 GATE RUN: FAILED. N31 free-text routing is a KEPT NEGATIVE -- and the export was never gated
+
+Moose ran the fit at 128d on the shipping config (warm cache + nomic weights):
+
+    [ceiling] full encoder (137 MB)      top-1  5/12   top-5  8/12   median  2
+    [floor]   SIF token-pool (23 MB q8)  top-1  3/12   top-5  5/12   median 13
+    [m2v]     whitened table (no W)      top-1  3/12   top-5  5/12   median 17
+    [m2v+zipf] whitened + rank-SIF       top-1  1/12   top-5  2/12   median 18
+    [ours]    SIF @ W (23 MB + 0.1 MB)   top-1  1/12   top-5  2/12   median 19
+
+THE LEARNED MAP IS WORSE THAN NOT HAVING ONE. [ours] 1/12 vs [floor] 3/12; median 19 vs 13. The ridge explained
+R^2 +0.06 of held-out variance and cost 2 top-1 and 6 median rank to APPLY. Free-text routing via a distilled map
+is DEAD at 128d. S4's embedding arm dies with it -- there is no encoder worth shipping. Nothing was exported.
+
+MY BAR WAS ABOVE THE CEILING. I pre-registered "top-1 >= 6/12 AND median <= 2". The full 137 MB encoder scores
+5/12. The bar was UNFALSIFIABLE: no map, however good, can clear a bar its own upper bound cannot reach. I set it
+from the 768d numbers and never checked it against the 128d ceiling I had myself measured. The right reference was
+never the ceiling -- it was the FLOOR: does the learned map beat doing nothing? That question is answerable and
+the answer is a clean no. RULE: a bar must be set against a REACHABLE reference, or it measures the setter's
+optimism rather than the method.
+
+THE EXPORT WAS NOT GATED, AND ONLY A CRASH PREVENTED A BAD SHIP. --export called export_query_embed
+unconditionally, one line below the scores that condemned it. Had it worked, a FAILING run would have written an
+8 MB artifact that makes routing WORSE into lecore_data/routing/. It failed only because the function was defined
+BELOW the __main__ guard -- NameError. That is the HALF-FIX TWIN of last session's bug: then the function was
+never CALLED; I added the call and left it undefined at call time. Both halves survived because the fit needs
+encoder weights this container does not have, so I never ran the chain end to end. A FIX YOU CANNOT EXECUTE IS A
+HYPOTHESIS, NOT A FIX. And a gate that lives in a docstring is not a gate: the bar is now enforced in code
+(EXPORT_BAR_TOP1/EXPORT_BAR_MEDIAN, set against the FLOOR), a failed gate prints and writes NOTHING, and both the
+refusal and the absence of a committed artifact are pinned by tests.
+
+WHAT SURVIVES: the token front door (14/35 top-1 on the 35-ask catalog exam) is still the shipped answer, and the
+137 MB CEILING itself only reaches 5/12 -- distillation was never the weak link. The TASK is hard, and a 12-ask
+exam cannot separate these arms anyway (~0.6 SE per ask). Any reopening starts with the 35-ask suite, not a
+cleverer map. Three sessions of N31 work end as a documented negative; that is the system working, not a loss.
+
+## POLY STUDIO BACKLOG UPSTREAMED: the demo-layer hand-rolls become engine faculties (8 capabilities, 10 tests)
+
+The Poly Studio backlog document listed what demo #10 had to hand-roll or route around. This session upstreamed
+the lot -- audited first (Rule 0: sketch2d was ALREADY shipped by a prior session and was skipped; everything
+else probed as genuine gaps -- mass properties / OBB / section / erosion / camera-from-VPs / NodeGraph.remove /
+ccrun all returned only fallbacks).
+
+SHIPPED, each wired + cataloged + agent-invokable (verified over the in-process Service /tools + /invoke):
+
+- meshtools.mass_properties: exact signed-tet volume / area / COM / inertia (Tonon 2004 covariance
+  C0=(I+ones)/120). THE POINT: the demo's first re-derivation produced NEGATIVE principal moments; the selftest
+  pins positivity on a rotated box so that bug can never ship twice. Cube exact to 1e-12 (I = m s^2/6).
+- meshtools.section: exact planar cross-section -- winding-oriented triangle/plane segments, shoelace area
+  (holes subtract), perimeter, contour chaining. Cube mid-cut: area 1, perim 4, 1 contour to 1e-12; two cubes
+  -> 2 contours. Replaces the demo's raster/flood-fill approximation with the numeric contour.
+- meshtools.draft_report: read-only area-weighted moldable/parting/undercut fractions vs a pull direction
+  (cube vs +Z: 1/6 / 4/6 / 1/6 exact). Complements surfanalysis.draft_angle (per-point, parametric).
+- ALL THREE fan-triangulate ngons internally (planar-convex exact) -- caught because the catalog example
+  m.mass_properties(box()) hit the engine's own QUAD primitive; a pure-triangle refusal would have made the
+  CAD trio unusable on the engine's own output. skill_lint caught it before a human did. WHY-comment records
+  the caveat: concave/non-planar ngons should mesh_repair(triangulate=True) first.
+- fitshape.oriented_bbox: PCA seed + coarse-to-fine per-axis rotation refinement with a HARD AABB FALLBACK
+  (identity always in the candidate set) so obb_vol <= aabb_vol by construction -- the demo observed a
+  PCA-only OBB come out LARGER than the AABB on an aligned cube; pinned. 45-deg rotated 1x2x3 box: recovers
+  ~6.0 where the AABB inflates 40%+; /invoke round-trip returned exactly 6.0 on the 8 corners.
+- terrain.erode: classic droplet hydraulic erosion (momentum walk, capacity pickup, brushed carving so
+  channels have width). Deterministic under seed, additive copy, peaks never grow. KEPT NOTE: sediment
+  leaving the tile edge is lost, like real drainage -- material is NOT exactly conserved, by design.
+- hazedepth.camera_from_vanishing_points: Caprile-Torre f=sqrt(-(v1-pp).(v2-pp)) + Gram-Schmidt orientation.
+  Synthetic round-trip: f to 1e-6, axes to 1e-9 up to sign. REFUSES an impossible VP pair (dot >= 0) instead
+  of returning an imaginary focal. Sits beside vanishing_point() (detection) -- detection feeds calibration.
+- nodegraph.NodeGraph.remove(nid): O(edges) delete + incident-edge prune + downstream memo invalidation --
+  kills the serialize-drop-rebuild O(graph) workaround. KeyError on unknown id. KEPT BEHAVIOUR: a downstream
+  node whose REQUIRED input lost its wire fails at evaluate time; remove prunes topology, it does not invent
+  defaults.
+- io_and_interop.holographic_ccrun: the C-compiler twin of zigrun (the donated ccrun.py, upstreamed). Same
+  emitted c_f64/c_f32 IR the emitter already validates by running, same SoA ctypes harness, sha256
+  content-addressed cache, cc/gcc/clang probe ($CC first). Measured here: f64 BIT-IDENTICAL to the Python
+  kernel on 500 random points (array_equal), f32 max err 2.19e-07 (inside emit's measured ~3e-7). Wired as
+  m.c_batch_eval. KEPT NEGATIVE: no C SIMD dialect -- -O3 autovectorizes; a hand-vector C path is
+  per-arch intrinsics maintenance without a measured win. Refusal path (no compiler) is itself tested.
+
+ERGONOMICS (backlog section B):
+- PBRMaterial.emission is now a live property synonym for .emissive (read+write). The old behaviour --
+  m.emission = ... silently creating a DEAD attribute the renderer never reads -- was the single most
+  time-wasting naming mismatch in the demo build. Serialization still speaks glTF's emissiveFactor.
+- sdf2d.extrude grew total_height= (mutually exclusive alternative to the HALF-extent height=), and the
+  docstring now says HALF-EXTENT loudly. Legacy calls byte-identical.
+
+RULE-0 FINDING KEPT: "2D constraint sketch solver" already existed (holographic_sketch2d, Gauss-Newton,
+fix/coincident/distance/parallel/perpendicular/point_on_line + dof report) -- the backlog was written before
+that session landed. Audit before build saved a duplicate module.
+
+Deltas: +1 module (ccrun), +7 mind faculties, +8 catalog entries (all <=600-char does, 40/40 stranger
+phrasings hit top-3), +10 integration tests (tests/test_cad_backlog.py, all green), +5 module selftests.
+Gates: reachability / catalog_gaps / skill_lint at 0/0/0; capdoc + docgen regenerated (510 modules,
+158,811 LOC documented); full static compile clean.
+
+NOT DONE (recorded so the next session doesn't guess): backlog C2 subgraph collapse (needs a SubGraph node
+type -- a real graph-model design decision, not a verb), D packaging items (flat/packaged import duality,
+lazy optional-dep accessors -- a tooling arc of its own), B naming items already covered above, and the
+mesh-verb "does this preserve the analytic sdf_tree?" contract flag (touches many verbs; wants its own pass).
+
+## BACKLOG C2 CLOSED: subgraph nesting (collapse/expand) -- the item the demo "couldn't honestly finish"
+
+Rule 0 first: six phrasings ("collapse nodes into one group node", "nested subgraph inside a node graph",
+"reusable node group", "make a macro node from a selection", "node graph inside a node", ...) all returned only
+the generic 'Node-graph editor backend' fallback. Genuine gap. Built.
+
+THE DESIGN DECISION (the whole item hinged on it): NodeType's sockets are FIXED per type, but every collapse has
+a different boundary, so one generic "subgraph" type is impossible. Two candidates:
+  (a) register a bespoke type per collapse instance -- REJECTED, and this is the load-bearing rejection: a fresh
+      registry could never load a saved graph, so to_dict/from_dict (the part of this module the demo explicitly
+      praised as solid) would silently rot the moment anyone nested anything. Serialization that breaks quietly
+      is exactly this repo's failure mode.
+  (b) the type carries only the SIGNATURE (socket names+types, sha256-hashed into its name so identical
+      signatures SHARE a type), and the inner graph rides in the node's params as plain JSON-able data.
+      from_dict re-registers any subgraph type it meets, depth-first, from params. SHIPPED.
+Consequence worth stating: because the type holds no content, two structurally different groups with the same
+socket signature share a type and that is CORRECT -- the content is in params, where serialization can see it.
+
+BOUNDARY MECHANICS: the inner graph resolves inputs from EDGES only -- there is no side channel to inject a
+value -- so each boundary input becomes a real inner PROXY node emitting whatever the group was handed. Proxies
+are typed per socket kind, NOT 'any': losing strict connect-time checking inside a group would make nesting the
+one place bad wires hide. Inputs dedupe per external (src, socket) -- one source feeding three inner sockets is
+ONE group input. Verified: an external scalar driving sdf_sphere.radius still drives THROUGH the boundary after
+collapse (set_param on the outside changes the marched result).
+
+BUG FOUND AND FIXED MID-BUILD, kept loud: my first output rule was boundary-only (inner->external edges). That
+made collapsing a TERMINAL selection -- the whole graph, say -- produce a group with ZERO output sockets: a node
+whose result can never be read again. A refactor that can silently destroy the ability to read what you computed
+is not a refactor. Fixed with Blender's Make-Group rule: outputs = (a) inner outputs feeding outside, PLUS (b)
+inner outputs with NO consumer at all. An output feeding only inner nodes stays internal plumbing, correctly
+hidden. Pinned by test_terminal_collapse_stays_readable.
+
+CYCLE GUARD (pinned kept negative): contracting a selection to a point closes a loop when an external node sits
+BOTH downstream and upstream of the selection (a -> b -> c with {a, c} selected). Refused, checked BEFORE any
+mutation, and the test asserts the graph is byte-identical (sorted to_dict JSON) after the refusal -- same
+contract connect() already honours. A collapse that half-mutates then raises would be worse than no collapse.
+
+EXPAND is the exact inverse (inner ids re-prefixed so they cannot collide; external sources/sinks re-attached),
+so grouping is never a one-way door -- an editor can offer both. Round-trip is result-preserving, pinned.
+
+MEASURED CONTRACT, not a smoke test: collapse is bit-identical (np.array_equal on the marched SDF probe, not a
+tolerance) before/after, through nesting, and after JSON -> fresh registry. Also verified end-of-pipeline: a
+collapsed graph is still just an SDF source -- marched to a mesh and measured with the new mass_properties.
+
+TRADE-OFF ON RECORD: the inner graph is rebuilt per evaluate, so the inner memo does not survive across calls.
+Deliberate -- the OUTER graph memoizes the group node, so a rebuild happens once per dirty cycle, not once per
+downstream reader. Caching live NodeGraph objects on params would be faster and would break to_dict (params must
+stay JSON-able). Correct serialization beats a micro-optimisation on the editor path. If a profile ever shows
+this matters, the fix is a content-hash-keyed cache of built inner graphs, NOT live objects in params.
+
+Deltas: +2 NodeGraph methods (collapse, expand) + 4 module-level helpers, +2 catalog entries (578/439-char does,
+11/11 stranger phrasings top-3, both examples run verbatim), +7 integration tests (tests/test_cad_backlog.py now
+17, all green), +1 module selftest. Gates 0/0/0; capdoc + docgen regenerated (510 modules, 159,124 LOC); static
+compile clean; targeted regression green (geometry_kernel_integration 12, skindeform 7, integration tool/graph/
+catalog slice 23).
+
+STILL NOT DONE (unchanged): backlog D packaging arc (flat/packaged import duality, lazy optional-dep accessors),
+and the mesh-verb "does this preserve the analytic sdf_tree?" contract flag. Both want their own pass.
+
+## BACKLOG D2 CLOSED BY REFUTATION: the requested 500-module sweep would have fixed NOTHING (and the gate it gave us)
+
+The ask: "holographic_* modules pull heavy optional deps in dead/try branches ... static import-tracing a demo's
+slice balloons from ~29 runtime modules to ~496 ... Core ask: isolate optional-accelerator imports behind a lazy
+accessor so tooling can see the real minimal dep set."
+
+Rule 0 first: seven phrasings returned only fallbacks. The two nearest neighbours answer DIFFERENT questions and
+were deliberately not extended -- holographic_backend.accelerator_report is a runtime probe of the MACHINE ("what
+is installed, what does it buy"); tools/audit_imports is a correctness gate ("does this import RESOLVE"). Neither
+can answer the bundler's question ("what must exist for `import X` to succeed"). Genuine gap. Built
+holographic_deptrace: ast-only (never imports what it analyses), classifying every edge by WHERE it sits --
+HARD (module top level: runs on import, ImportError fatal), GUARDED (lexically inside try: runs, failure caught --
+an opt-in accelerator), DEFERRED (inside a function: does not run at import AT ALL). Required footprint = the
+transitive closure over HARD edges only.
+
+FIRST, THE INSTRUMENT VALIDATED ITSELF AGAINST THE COMPLAINT: `import lecore` measures required=30 modules vs
+naive=499 (16.6x). The demo independently reported "~29 runtime modules to ~496". Two different methods, same
+numbers -- the tracer is measuring the real thing.
+
+THEN IT REFUTED THE PREMISE. Engine-wide edge census: hard=1024, GUARDED=3, deferred=2662. Three. The complete
+list of guarded external imports in the entire engine is:
+    holographic_fft.py:22     pyfftw
+    holographic_codegen.py:22 sympy
+    holographic_jit.py:26     numba
+Each already isolated in its own dedicated module -- exactly the discipline the backlog asked us to introduce.
+The balloon is NOT try/except accelerators; it is 2662 DEFERRED function-level imports of our OWN modules. Those
+already do not run at import time. So the requested lazy-accessor sweep would have moved imports that don't run
+at import into a different form that also doesn't run at import: required footprint would stay 30, the naive
+number would stay 499, and ~500 modules would have been churned for zero measured gain. KEPT NEGATIVE, LOUD: the
+defect was in the TOOLING (blind to import POSITION), not in the code. Classification recovers 30/499 with zero
+code changes. This is the "walls are bad approaches" lever in reverse -- the wall was a measurement artefact.
+Hard external imports across the engine are exactly numpy (459 modules) + PIL (1, holographic_photos.py:48, and
+NOT in lecore's import-time closure -- so the core contract holds).
+
+THE DURABLE ASSET (better than the feature that was asked for): HARD CONSTRAINT #1 IS NOW A GATE, NOT A
+DISCIPLINE. `assert import_footprint("lecore")["required_external"] == ["numpy"]` is pinned in the module selftest
+AND in tests/test_deptrace.py. The day anyone top-level-imports torch/scipy/sklearn anywhere in the import-time
+closure, it fails loudly and BY NAME. The constitution used to be enforced by reviewer attention; it is now
+enforced by measurement. Same shape as the RS-1 arc: the feature was refuted, the instrument it forced into the
+open is permanent.
+
+DESIGN NOTES / KEPT SIMPLIFICATIONS, stated rather than hidden:
+- "inside a try" is judged LEXICALLY (any descendant of ast.Try), so a try used for a fallback path (not for
+  optionality) also reads as GUARDED. Conservative direction: it never mislabels a real dependency as optional.
+  Inferring intent from the handler would be guessing.
+- DEFERRED beats GUARDED (a try inside a function is deferred): "does it run at import" is the question asked.
+- stdlib is split from external via sys.stdlib_module_names -- the interpreter's own answer, no hand list to rot.
+  Lumping `os` in with `numpy` made the one number anyone wants unreadable.
+- NO local-walk fallback for module discovery: select_tests.discover_modules stays the single source of truth, and
+  a fallback would be exactly the second source of truth the reuse exists to prevent (it would drift the first
+  time _IGNORE_DIRS changed). Analysing a tree without the repo's tools/ is out of scope and says so.
+- Flat and packaged entry names must give the SAME answer (pinned): flatcompat resolves both at runtime, so a
+  tracer that disagreed with the runtime would be lying. This also quietly measures backlog D1.
+
+Deltas: +1 module (deptrace), +2 mind faculties (import_footprint, trace_imports; both /invoke-verified), +2
+catalog entries (577/553-char does, 12/12 stranger phrasings top-3), +9 tests (tests/test_deptrace.py), +1 module
+selftest pinning the classifier 6/6 exact AND the constitution. Gates 0/0/0; capdoc + docgen regenerated (511
+modules, 159,416 LOC); static compile clean; targeted regression green (26 backlog tests + 9 integration slice).
+
+BACKLOG STATE AFTER THIS SESSION: A (all shipped), B (all shipped), C1/C2/C3 shipped, D1 measured-and-pinned as a
+by-product (flat==packaged answer), D2 refuted + instrumented, D3 (bare `import holographic` for capabilities.json
+discovery) still open, and the mesh-verb "does this preserve the analytic sdf_tree?" contract flag still open --
+that one touches many verbs and wants its own pass.
+
+## REBASE ONTO NEW MAIN: my semantic tags were INVENTED, and one was a transposition of a real branch
+
+Main moved while the Poly Studio backlog arc was in flight. Rebased rather than adopted -- a diff proved main did
+NOT contain any of my work, so this was a genuine three-way merge, not a fast-forward. Both trees were all-LF, so
+the CRLF hazard on record did not fire this time.
+
+WHAT THE FILE CENSUS CAUGHT (the reason a wholesale copy is never safe):
+- `scripts/` was SPLIT in main: the routing/semantic tooling (distill_map, export_index, knowledge_index,
+  lecore_paths, nomic_forward) moved to `tools/semantic/`, and routing_index_64d.npz became the compressed
+  tools/semantic/routing_seed.npz.xz. My tree still held the OLD copies. Copying my tree over main would have
+  RESURRECTED five deleted files and a stale 64d index -- the same class of harm as the CRLF spray: a delivery
+  mechanism quietly editing the payload. Carried nothing from scripts/.
+- Of the 9 files I had edited, main had genuinely changed only TWO (catalog +240 lines, unified +202). The other
+  seven showed a diff only because MY edits were in them (the "main_added" lines were the originals my patches
+  replaced). Those seven were carried whole; catalog and unified had my blocks RE-APPLIED onto main's version by
+  anchor, never copied over it. Main's additions there were Capability(method=, polymorphic=) [C6/C7] and nine new
+  faculties (invoke, features, version, semantic_tag_coverage, infer_semantic_tag, job_submit, from_file,
+  save_state, load_state) -- all of which a wholesale copy would have destroyed.
+- .pytest_cache was in my tree and is not repo content. Dropped. (Same hazard as the *.log entry on record.)
+
+THEN MAIN'S NEW GATES FOUND A REAL DEFECT IN MY WORK -- which is the entire point of rebasing onto them:
+tag_lint passed clean (0 liars, 0 crossfake -- my entries are all single-kind consumes, so the cross-product
+trap cannot fire), but `test_no_tag_uses_an_undocumented_branch` failed with THREE branches nobody else used:
+measure/analyze (7), transform/edit (3), transform/simulate (1) -- 11 of my 12 entries. All three were MINE. I had
+invented menu paths and filed real capabilities under them.
+
+THE WORST ONE, KEPT LOUD: `measure/analyze` is a TRANSPOSITION of the real branch `analyze/measure`. The taxonomy
+distinguishes them precisely -- analyze/measure is FITTERS (fit_pose, fit_shape: analyse structure by fitting a
+model to it), while the measure/ root reads a quantity straight off geometry with no model in between. My tag was
+not a typo; it looked exactly like a documented branch and would have passed any eyeball review. This is the same
+family as the tag_lint story that main was written for: a wrong tag does not fail to help, it actively misleads.
+
+`transform/edit` was wrong at the ROOT, not the branch: this taxonomy defines transform/ as "move points/objects
+WITHOUT changing topology", and deleting or collapsing a node changes the graph's topology outright.
+
+RETAGGED ALL 12 by SIBLING PRECEDENT rather than by my own taste (measured against the live catalog, not guessed):
+  mass_properties, cross-section        -> measure/area       (its own faculty's auto-derived tag agrees)
+  draft report                          -> measure/curvature  (the branch already holding surface analysis)
+  oriented_bbox                         -> measure/bounds     (the doc NAMES bbox here; measure_bbox agrees)
+  camera_from_vanishing_points          -> analyze/measure    (a fitter: fit_pose precedent)
+  terrain erosion                       -> simulate/run       (documented: run a simulation to completion)
+  C batch kernels                       -> simulate/run       (its ZIG TWIN's tag; two tags for one action is a
+                                                               discoverability tax -- consistency beats taste)
+  import footprint, import classify     -> analyze/describe   (accelerator_report precedent: a report about a thing)
+  collapse / expand / delete node       -> modify/graph       (NEW branch, 3 members, documented)
+`modify/graph` was minted deliberately and per the doc's own rule ("if several existing capabilities share that
+action, add the branch; if it's a one-off, hang it on the nearest existing branch") -- three capabilities share
+"edit a node graph's topology", so it has members and earned its place, and it lives under a DOCUMENTED root.
+
+KEPT NEGATIVE, GATE-SHAPED AND FUNNY-BUT-SERIOUS: documenting modify/graph then FAILED the opposite gate
+(test_no_documented_branch_is_empty) reporting transform/edit as a documented-but-empty branch. Cause: my own WHY
+note named the retired tag in BACKTICKS, and _documented_branches() reads any back-ticked `root/sub` in the doc as
+DOCUMENTED. Prose about a dead tag resurrected it. Fixed by quoting instead of back-ticking, and the reason is now
+written into the doc itself so the next person naming a retired tag does not repeat it. The bidirectional gate
+(nothing undocumented, nothing documented-and-empty) is a genuinely good design: it caught both my invention AND
+my explanation of the invention.
+
+ALSO ADOPTED FROM MAIN: tools/regen_docs.py is now the canonical regeneration (9 outputs from 7 generators) --
+hand-running capdoc.py + docgen.py, as this arc had been doing, misses pipelines.json and PIPELINE_MAP.md.
+test_pipelines_json_matches_the_live_engine caught exactly that drift, because my 12 new capabilities changed the
+live pipeline edge set. Use tools/regen_docs.py from here on.
+
+STATE: rebased tree = main + the full Poly Studio arc (A/B/C1/C2/C3 shipped, D1 measured, D2 refuted+instrumented).
+Gates: tag_lint 0/0/0, reachability/catalog_gaps/skill_lint 0/0/0, semantic 22 passed, main's new suites 99 passed,
+my suites 26 passed. Discoverability re-verified after the retag: 12/12 stranger phrasings still top-3.
+STILL OPEN: backlog D3 (bare `import holographic` for capabilities.json discovery), the mesh-verb "does this
+preserve the analytic sdf_tree?" contract flag, and main's own docs/SEMANTIC_BACKLOG.md + docs/CLIENT_INTEGRATION_
+BACKLOG.md arcs, which this session did not touch.
+
+## .GLB "RENDERED AS GARBAGE" REGRESSION: importer innocent; the flood-fill sign leaks on scan soups -- winding-number sign shipped
+
+Moose reported .glb models rendering as shredded garbage blobs (mantis scan attached), onset unknown. Root-caused
+by ELIMINATION, each step measured on the actual asset:
+
+1. IMPORTER EXONERATED. The file declares 18610 positions / 33009 indices (11003 tris) in one primitive;
+   read_glb returns exactly that. Shared POSITION/NORMAL bufferView disambiguated by accessor byteOffset --
+   handled (that was a PREVIOUS session's fix, on record in the docstring). Node matrices (Sketchfab's double
+   Z-up flip) compose to IDENTITY. Winding consistent (0 same-direction edge repeats), authored normals agree
+   with winding (mean dot 0.983, 0 flipped). Direct rasterisation renders a correct mantis.
+2. THE MESH IS A SOUP: 18089 of 25549 edges are BOUNDARY (71%). A decimated scan of disconnected sub-voxel
+   patches (median edge 0.0011 vs res-64 voxel 0.0030). Not "a mesh with a hole" -- every triangle an island.
+3. THE FAILURE: mesh_to_sdf_grid = banded nearest-normal sign + flood_fill_sign. The negative shell of a soup
+   is Swiss cheese; the flood pours through; the marched result is the reported garbage. REPRODUCED exactly
+   (voxel_remesh at res 64 -> scattered chunks matching Moose's screenshot).
+4. WHY IT LOOKED LIKE A SUDDEN REGRESSION: the failure is a sharp RESOLUTION THRESHOLD, not a decay. Measured
+   sweep on a synthetic soup: flood signs the interior 100% at res 40 (voxel exceeds the shell holes -- the
+   dilated band closes ON THE GRID and blocks the flood) and 3% at res 64 (holes exceed the voxel). Crossing
+   render fidelity over that threshold flips output from fine to garbage with no code change at all.
+5. ALSO REFUTED IN PASSING: mesh_distance_grid's shell-vs-scatter "verified equivalent" claim fails on soups
+   (3001 vs 5425 interior voxels at equal settings). Equivalence was validated on well-behaved meshes only.
+   Both methods produce garbage here, so this is a footnote, not the cause.
+
+THE FIX -- reuse first (Rule 0 paid twice):
+- The robust sign ALREADY EXISTED in-engine: holographic_voxelize.winding_number (Jacobson et al. 2013,
+  generalised winding number -- no closure/orientation assumption), living one module away from the conversion
+  that needed it. The gap was WIRING, not capability.
+- It was 24 minutes per 64^3 grid (measured 1465s estimate), so shipped fast_winding_number: the cluster-dipole
+  acceleration of Barill et al. 2018 (area-weighted dipole per cell for far queries, exact Van Oosterom-Strackee
+  for near cells). Measured 12.9s on the same grid = 113x. Selftest pins closed-surface fast-vs-exact max err
+  0.0122 (threshold is 0.5) and 100% open-mesh classification agreement.
+- mesh_to_sdf_grid/voxel_remesh grew sign="auto"|"flood"|"winding" (default auto): open_fraction(mesh) > 5%
+  routes to winding sign (magnitude still from the distance build; the nearest-normal sign is DISCARDED there
+  because on a soup it is exactly the broken part). BACKWARD COMPATIBLE BY MEASUREMENT: an edge-closed mesh
+  takes the flood path BIT-IDENTICALLY (np.array_equal, pinned in selftest AND pytest).
+- VERDICT ON THE ASSET: voxel_remesh(mantis) now yields one coherent mantis (union-find: largest component
+  >90% of faces, pinned on the synthetic) instead of confetti. Before/after render pair delivered.
+
+KEPT NEGATIVES FROM BUILDING THE TEST (the test itself needed three drafts, each refuted by measurement):
+- Draft 1 (isolated random patches, 8% solid-angle coverage): winding CORRECTLY said "not inside" -- w tracks
+  coverage. Winding sign fixes surfaces with holes; it cannot invent a surface that mostly is not there. That is
+  a property, not a bug, and it is now written into the selftest.
+- Draft 2 (dense patches, res 40): flood signed 100% -- the shell closed on the grid and the test silently
+  tested NOTHING. The failing regime is slit > voxel; the slit width scales with EDGE length, so the final soup
+  uses FEWER, BIGGER triangles (128-tri slit sphere, 20% shrink: 100% boundary edges, slit 0.064 > voxel 0.041,
+  64% coverage). Final pinned numbers: flood 4% vs winding 100% interior signed, same mesh, same res.
+- Per-test budget: the 64^3 soup test measures ~17s > main's new 15s budget -> @pytest.mark.slow, with the same
+  contract ALSO pinned budget-independently in the module _selftest.
+
+DRIVE-BY FIX FOUND BY THE /invoke ROUND-TRIP: the mesh_to_sdf_grid FACULTY did not coerce {'vertices','faces'}
+JSON (its sibling voxel_remesh did, via _as_mesh / main's C2 arc). Pre-existing gap; wired, verified over the
+in-process service with a plain-JSON tetrahedron.
+
+STILL OPEN, FILED HONESTLY: glb_to_mesh reads only the FIRST primitive and IGNORES node transforms (they compose
+to identity on this asset, so it was not the cause here -- but a multi-primitive or genuinely-transformed .glb
+will import wrong). That is an importer completeness item for a future pass, now on record instead of latent.
+
+Deltas: +1 function in voxelize (fast_winding_number) + selftest, +2 params threaded (sign= through meshbridge
+and both faculties), +1 open_fraction probe, +1 catalog entry (543-char does; 6/6 stranger phrasings incl.
+Moose's own words "glb import renders as garbage blobs"), +5 pytest tests (1 slow), +1 module selftest, +1 JSON
+coercion fix. Gates: tag_lint/reachability/catalog_gaps/skill_lint all clean; semantic 41 passed; suites 55
+passed; regen_docs run.
+
+## TEXTURE-LOSS REGRESSION: the weld was the wound -- attribute-aware repair + uv projection through the LOD chain
+
+Moose reported "losing texture information and the mesh is not looking great" through the mesh
+optimization/quality process. Root-caused on the same mantis .glb, and the cause is one function:
+
+THE MEASUREMENT THAT NAMED IT: mesh_repair welded 18610 -> 5497 vertices and returned uvs=None, normals=None.
+Then the census that explains BOTH symptoms at once: of the 4956 duplicate-position vertex groups in the scan,
+ALL 4956 have DIFFERING uvs (median uv spread 0.67 -- different atlas islands) and ZERO are render duplicates.
+glTF splits vertices along UV seams; this scan is atlas-packed per patch, so every coincident pair is a SEAM.
+A position-only weld on such a mesh is not cleanup, it is damage twice over: it drops the attribute arrays
+("losing texture information") and merges seam vertices so the atlas becomes uncarryable even in principle,
+while also gluing normals across seams ("not looking great").
+
+THE FIX, auto-routed on a measured property (third use of the pattern this arc):
+- merge_by_distance(attrs="auto"): a mesh carrying uvs/normals welds only vertices agreeing in position AND uv
+  AND normal -- the glTF render-duplicate weld. Seams stay split; arrays are carried EXACTLY (group members
+  agree by construction). A mesh with NO attributes takes the old path BIT-IDENTICALLY (pinned).
+- split_nonmanifold_vertices / _drop_unreferenced: attribute rows copied/sliced with the vertices (exact).
+- mesh_repair: LAYERED carry -- exact through weld/split/drop; fill_holes/triangulate rebuild the Mesh and
+  strip attrs, so the attr-carrying pre-fill mesh is remembered and re-attached afterwards: EXACT rows for
+  every surviving vertex, PROJECTION (transfer_uv) only for the appended hole-fill tail. Report gains
+  uvs_carried. KEPT NEGATIVE FROM DRAFT 1 OF THIS FIX: projecting EVERYTHING after fill scrambles uvs at seams
+  (closest triangle can sit on either atlas island) -- measured, which is why the layered exact-carry exists.
+- cluster_decimate(keep_uv="auto") + voxel_remesh(keep_uv="auto"): uvs PROJECTED onto the result via
+  transfer_uv -- projection on purpose (a cluster representative merges seam verts; a re-march replaces the
+  topology; no exact answer exists, the nearest-surface interpolation is the honest one). Geometry is untouched
+  either way; keep_uv=False restores the old geometry-only output byte-identically.
+- qem_decimate needed NOTHING: it already auto-reads mesh.uvs and carries survivor uvs (found by measuring
+  before patching -- half the reported pipeline was already correct, and only measurement said which half).
+
+VERDICT, quantified on the mantis with a checker texture (colour-spread of foreground pixels: textured ~120,
+gray 0): original 121.8 -> OLD repair 0.0 (the report, reproduced) -> NEW repair 121.8 (identical to the
+original -- and the same 8403 foreground pixels, because on this scan the correct weld count is ZERO) ->
+cluster-LOD 115.0 at 2838 faces (texture survives decimation). 2x2 comparison grid delivered.
+
+WHY-COMMENT WORTH REPEATING HERE: on a seam-split scan the attribute-aware weld welds NOTHING, and that is the
+CORRECT answer -- the 13k "removed" vertices of the old path were the texture atlas's structure, not redundancy.
+
+ALSO OBSERVED, filed not fixed: fill_holes on a 71%-boundary soup fan-fills thousands of slits (+18k faces of
+spikes). Attribute carry now survives it, but for scans route_repair/fill_holes=False is the right call; a
+"soup-aware fill policy" is a future item, noted in the repair docstring territory rather than silently changed.
+
+Deltas: merge_by_distance +attrs/uv_tol/normal_tol, split/drop attr carry, mesh_repair layered carry +
+uvs_carried report, cluster_decimate/voxel_remesh +keep_uv, +1 selftest (attr-weld, 4 contracts), +5 pytest
+tests (suite now 25+1slow), +1 catalog entry (549-char does, 6/6 stranger phrasings incl. Moose's own words),
+comparison grid rendered. Gates tag_lint/reachability/catalog_gaps/skill_lint clean; semantic 41; regression 46.
+
+## "STILL NO PROPERLY TEXTURED RENDER": the pieces all existed -- the COMPOSITION did not. preview_asset ships it
+
+Moose's follow-up was correct and precise: every render this arc had delivered used a SYNTHETIC CHECKER, never
+the asset's own texture. Why: read_glb (the geometry-only reader this arc reached for) drops materials, while
+load_glb (holographic_assetimport) already extracts embedded textures into PBRMaterials with base_color_map --
+and NOTHING pointed from the import to the textured render. Rendering the real texture took five manual steps
+(LoadedMesh -> .mesh(), attach lm.uv, normalise the 8-bit map to [0,1], frame a camera, pass texture+uvs), two
+of them non-obvious. The arc itself is the evidence: I built texture-PRESERVATION through the whole pipeline
+while never once rendering the texture, because discovery routed to read_glb and stopped.
+
+PROOF BEFORE PRETTY PICTURES (the view tool was not rendering images this session, so an eyeball claim was
+unavailable -- which forced the better validation): UV-READBACK. Render once with a coordinate-encoding texture
+(R=u, G=v; background flagged in B), read each surface pixel's uv back out of the frame, sample the REAL texture
+at that uv, and compare with the real-texture render. Result over 17,833 surface pixels: mean |diff| 0.0088,
+p95 0.029 -- the rendered surface IS the texture sampled at the mesh's own uvs, residual = bilinear-vs-nearest.
+KEPT NEGATIVE from the first draft of this test: a sum()-based foreground mask counted the BACKGROUND as
+foreground (307,200 "surface" pixels = every pixel) and reported mean err 0.06 -- the background colour compared
+against texels at uv=(0.05,0.06). The blue-channel flag exists because of that measurement.
+
+CONVENTION PINNED, NOT ASSUMED: the rasterizer maps v directly to image row (row 0 = top), which IS glTF's
+top-left uv origin -- so the mantis needed NO V-flip. A test now fails by name if anyone "fixes" the sampler to
+a bottom-left origin (the classic silent every-glb-flips regression).
+
+SHIPPED: assetimport.preview_asset(path) -- import with materials + embedded textures, attach uvs, normalise the
+base-colour map, auto-frame, rasterize textured+smooth. Returns (image, LoadedMesh). Wired as m.preview_asset
+(in /tools), cataloged (581-char does; 5/5 stranger phrasings; the example is comment-guarded since it needs a
+file on disk), selftest round-trips an embedded two-colour texture through a written .glb (both halves must
+appear on the surface -- uvs really drive the sampling). Multi-material assets render with the FIRST
+base_color_map; per-face material split is the importer's existing report, deliberately not re-solved here.
+
+DELIVERED RENDERS (real texture, smooth shading): hero pair (two angles), pipeline strip original -> repaired
+(uvs_carried=True) -> cluster-LOD 4,942 faces with uvs -- the texture survives the whole optimization chain and
+it is the ASSET'S texture this time. One-call m.preview_asset render included.
+
+Deltas: +1 function + selftest (assetimport), +1 faculty, +1 catalog entry, +2 pytest tests (composition
+round-trip; uv-convention pin). Gates tag_lint/reachability/catalog_gaps/skill_lint clean; semantic 41; suite 27.
+
+## CRAB SCAN: the filed multi-mesh importer gap FIRED -- whole-scene glb_to_mesh + a 95x split_nonmanifold fix
+
+Moose supplied a fresh model (Japanese freshwater crab, Sketchfab CC0). Structure census FIRST (the discipline
+paid immediately): 6 meshes -- a 24-vert pedestal cube (material 0) + five ~65k-vert chunks (material 1, the
+classic 65k-per-mesh export split), 2 materials, 2 embedded images, node transforms composing to identity.
+Total 312,578 verts / 322,046 tris. The importer-completeness item filed two arcs ago fired exactly as written:
+first-primitive-only glb_to_mesh imported THE CUBE -- 24 of 312,578 vertices. Reproduced before fixing.
+
+SHIPPED -- whole-scene glb_to_mesh (holographic_gltf): walks the active scene graph, composes node transforms
+(matrix verbatim or T@R@S from the quaternion, column-vector convention), concatenates every referenced
+primitive with index offsets, positions to world space, normals via inverse-transpose renormalised, and
+attaches Mesh.face_material (per-face material index, -1 = none). Unreferenced meshes skipped (viewer
+behaviour). BACKWARD COMPATIBLE: engine-emitted single-mesh files are the concatenation of one thing --
+byte-identical, pinned by the existing round-trip selftest AND an explicit assert in the new multimesh
+selftest (2 meshes, translation APPLIED not ignored, face materials [0,1]).
+
+load_glb now maps the reader's material INDICES to material NAMES per face (the old line stamped mats[0] on
+every face -- wrong the moment a multi-material file arrived). preview_asset picks the texture by FACE
+COVERAGE (Counter over face_material), not dict order, and SUBSETS the render to the chosen material's faces
+-- so the crab previews as the crab (322,046 body faces) and the 12-face pedestal does not wear its skin.
+
+PERF WALL EXPOSED AND FIXED: mesh_repair on the 322k-face body blew a >800s budget. Profiling by stage: load
+1.3s, open_fraction 0.5s, weld 1.2s -- the hog was split_nonmanifold_vertices scanning ALL edges inside the
+per-vertex loop (`for e in sorted(edge_faces): if v in e` = O(V * E log E)). Hoisted to per-vertex edge
+buckets built once (sorted per vertex -- a subsequence of the old global order, so the union-find unions run
+in the same order and the output is deterministic-equal). Whole repair: 8.4s. >=95x on the real asset, pinned
+by a 7,200-face grid test with a seconds-scale budget.
+
+THE WELD EARNED ITS KEEP ON A SECOND ASSET CLASS: 30,174 welded vertices here are the 65k-CHUNK BORDERS --
+duplicate (pos+uv+normal)-identical vertices along the export split seams, correctly stitched back into one
+connected surface while the true UV seams stayed split. The attribute-aware key does both jobs with no
+special-casing.
+
+VALIDATED: crab uv-readback over 20,378 surface pixels: mean |diff| 0.0149, p95 0.050 -- rendered surface ==
+texture at the mesh's own uvs. open_fraction 0.416 -> sign auto-routes to winding. Pipeline: repair (uvs
+carried, 11,098 umbrella splits) -> cluster LOD 322k -> 35k faces with uvs. Delivered: one-call preview +
+textured pipeline strip.
+
+SEMANTIC GATE CAUGHT ANOTHER INVENTED TAG: "io/load" refused; retagged io/import by documented-branch
+precedent. Second offence this session-family; the gate keeps earning its place.
+
+STILL OPEN, refiled honestly: _gltf_mesh_attribute (JOINTS/WEIGHTS for rigged models) still reads the FIRST
+primitive only -- the same class of bug one layer down; harmless for these unrigged scans, wrong for a rigged
+multi-mesh file. Skins/animations alignment with the concatenated vertex table is unverified. Next importer
+pass.
+
+Deltas: glb_to_mesh rewritten (+_node_matrix, +face_material), +1 gltf selftest, load_glb face-material names,
+preview_asset dominant-material subset, split_nonmanifold O(E) hoist, +2 pytest tests, +1 catalog entry
+(570-char does, 6/6 phrasings incl. "glb shows a cube instead of my model"). Gates clean; semantic 76; suite 29.
+
+## TEXTURE THROUGH LOD: why the mantis was confetti at low quality -- a fragmented atlas defeats per-vertex transfer
+
+Moose looked at the pipeline strips from the import arcs and called it: the mantis LOD panel was speckled, and
+"texture reprojection didn't work like it was supposed to". Correct, and the cause was structural, not a
+tuning problem.
+
+MEASURED FIRST (the number that decided the whole design): the mantis atlas has 4079 ISLANDS over 11003 faces
+-- MEDIAN 1 FACE PER ISLAND, 77% with <= 2 faces, median island uv extent 0.0136. It is a per-TRIANGLE
+photogrammetry atlas: the uv mapping is only defined triangle-by-triangle. A 4942-face LOD face is 2.6x an
+entire island's 3-D area. So NO per-vertex (or per-corner) uv transfer can preserve it -- a new face's three
+corners project into three unrelated islands and the triangle bilinearly smears an arbitrary slice of the atlas
+across itself. Confirmed on the output: transferred LOD median uv EDGE 0.60 of the atlas (source: 0.013), 90.3%
+of faces straddling, carrying 87% of the surface area. That is the speckle, exactly.
+
+SHIPPED, three parts:
+* uv_atlas_report(mesh) -- the DIAGNOSTIC that answers "will my uvs survive retopo/LOD/remesh" BEFORE the time
+  is spent: islands, faces/island, tiny-island fraction, and `transferable`. Faculty m.uv_atlas_report.
+* rebake_texture(...) -- the CORRECT route: build a new per-face atlas for the target and paint the source's
+  colour into it (texel -> barycentric -> 3-D point -> closest point on source -> source uv -> bilinear
+  sample). Topology-independent by construction: it never asks the source atlas to span anything, only to be
+  sampled pointwise. THE COSTUME: this is bake_normal_map's walk with COLOUR as the payload -- Rule 0 paid
+  again; the machinery existed, the wiring did not.
+* textured_lod(mesh, texture) -- ONE CALL that ROUTES BY MEASUREMENT: coherent atlas -> cheap transfer (source
+  image reused); fragmented -> re-bake (new image). report["route"] makes the old silent failure a readable field.
+
+THE ACTUAL BUG WAS DISHONESTY, and it is fixed at the source: cluster_decimate/voxel_remesh keep_uv="auto" now
+REFUSE to transfer onto a fragmented atlas and attach .uv_transfer_report naming rebake_texture, instead of
+silently emitting uvs that render as confetti. keep_uv=True still forces the old path (additive escape hatch).
+
+A TEST WAS PINNING THE BUG. test_voxel_remesh_projects_uvs asserted that voxel_remesh emits uvs for
+_slit_sphere -- a fixture whose OWN DOCSTRING says "every triangle is its own island". It did emit them:
+scrambled ones. The test was asserting the lie. Inverted, not deleted, with the reason on record. A test that
+pins wrong behaviour is worse than no test; the suite passing was part of why this survived two arcs.
+
+THREE REAL BUGS, all found by NUMERIC debugging (the view tool is unreliable this session, and none of these
+would have been caught by eyeballing a render):
+1. Conservative rasterization: the exact hypotenuse/corner texel falls between texel centres, so a strict
+   (u+v)<=1 test left each face's corner texel unwritten. Now covered with a half-texel eps.
+2. The dilation used np.roll -- which WRAPS. The atlas's right edge was padded from its LEFT edge: an unrelated
+   face's colour teleporting across the image. Replaced with shifted slices.
+3. Sampling used `uv % 1.0`. 1.0 % 1.0 == 0.0, so a projection landing on the texture's far edge sampled the
+   OPPOSITE edge. Wrap is right for a TILED material; CLAMP is right for baking one atlas. Now clamps.
+
+A WALL, AND THE APPROACH THAT WAS BAD: per-texel transfer_uv measured 963 pts/s -> a 1024^2 bake would be
+~545s. The per-face atlas makes that unnecessary: all ~200 texels of a cell come from ONE face and share ONE
+neighbourhood, so the spatial-hash query belongs PER FACE (4942 queries), not per texel (500k). Same answer,
+~20x less searching. Mantis bake: 37.6s. Cache locality applied to the query itself, not a cleverer metric.
+
+I NEARLY SHIPPED A WRONG SCOPE NOTE, kept loudly because it is the more useful lesson. uv_straddle_fraction's
+docstring claimed it was "meaningless on a per-face atlas, since every face is its own island there -- it reads
+1.0 on a perfect bake". Reasoned from a 4-face toy that read 1.0; plausible; FALSE. Measured: a per-face bake of
+a 2048-face mesh reads 0.00. The 4-face case read high because g=2 makes huge cells -- a DENSITY/threshold
+effect, the metric's one real hole, not an island effect. One example plus a good story almost became permanent
+documentation. The correction and both readings are pinned by test_uv_straddle_metric_is_density_dependent.
+
+VERDICT, measured on the reported failure. High-frequency (speckle) energy on the render: source 0.0553 -> OLD
+transferred LOD 0.1362 (2.5x the source = confetti) -> NEW rebaked 0.0536 (BELOW source: an honest LOD blur).
+Render error vs the full-res render: 0.120 -> 0.057. Silhouette pixels: source 11713, old 8123 (30% of the
+model missing), rebaked 11293. Bake projection distance mean 0.00006 against a 0.16 bbox.
+
+KEPT NEGATIVES on rebake_texture: ~50% atlas efficiency (one face per square cell; pairing two triangles per
+cell would halve the waste but their shared diagonal would bleed under filtering -- rejected deliberately); no
+cage/max projection distance (inherited from bake_normal_map); a face thinner than ~3 texels under-samples.
+
+Deltas: +uv_atlas_report, +uv_straddle_fraction, +rebake_texture, +textured_lod, +_barycentric_batch,
++_selftest_rebake (4 contracts); keep_uv honesty in cluster_decimate + voxel_remesh; voxel_remesh faculty gains
+keep_uv; +3 faculties (m.uv_atlas_report, m.mesh_textured_lod, m.mesh_rebake_texture, all /invoke-verified);
++1 catalog entry (595-char does, 6/6 phrasings); +5 pytest tests, 1 inverted. Gates 0/0/0/0; cad suite 34;
+semantic+pipeline 76.
+
+## RIGGED MULTI-MESH .glb: the same bug, one layer down -- and the fix is ONE WALK, MANY PAYLOADS
+
+Filed twice, then the whole-scene geometry fix MADE IT ACTIVE, which is worth saying plainly: before, positions
+and JOINTS/WEIGHTS were both wrong in the same way (first primitive only), so they at least AGREED. After,
+positions covered the whole scene and the attribute reader still returned the first primitive's rows. Reproduced
+on a hand-built rigged two-mesh .glb: 16 positions, 8 weight rows, nothing raised. Any skinning indexing
+weights[i] silently addressed the wrong vertices. A fix that upgrades a latent bug into an active one is still
+the fix's responsibility -- filing it was not enough.
+
+ROOT CAUSE, structural: the scene traversal was written out TWICE (geometry reader, attribute reader). Two
+copies of an order drift the moment one is improved. FIX: gltf.scene_primitives(gltf) is now THE canonical
+vertex order -- (mesh_index, primitive_index, world_matrix, node_index), depth-first, transforms composed. Both
+readers ride it; a test asserts the walk PREDICTS the vertex table's length, so a third private walk cannot
+appear quietly. One walk, many payloads -- the same shape as the bake being bake_normal_map's walk with a
+different payload. This keeps being the lesson.
+
+THE TRAP UNDER THE TRAP, found by asking what a joint index actually MEANS: JOINTS_0 is not a node index -- it
+indexes the `joints` array of the skin ON THAT PRIMITIVE'S NODE. Two chunks on different skins both say
+"joint 0" and mean different bones, so concatenating raw WELDS TWO SKELETONS with no error. The old reader
+could never have got this right: it never knew which node it stood on. _gltf_skin_binding now remaps every
+chunk's local indices into one scene-wide joint list (lm.joint_nodes, first-seen order over the skins array =
+deterministic). Single-skin files -- the overwhelming majority -- remap to themselves, unchanged. Verified:
+two chunks both carrying local joint 0 come back as global 0 and 1, resolving to nodes 2 and 3.
+Primitives lacking JOINTS/WEIGHTS (a rigged body beside an unrigged prop -- legal and common) ZERO-FILL IN
+PLACE rather than shifting every subsequent row.
+
+Real-asset regression check after the refactor: mantis 18,610 verts, crab 312,602 verts, both still textured
+(colour spread 0.143 / 0.157). Engine-emitted single-mesh round-trips still byte-identical.
+
+Deltas: +gltf.scene_primitives (canonical walk, node index carried), glb_to_mesh consumes it,
++_gltf_skin_binding (global joint remap), _gltf_mesh_attribute whole-scene + zero-fill, +_accessor_count,
++_rigged_glb fixture, +_selftest_rigged_multimesh, +3 pytest tests (37 in the cad suite), catalog does updated
+(578 chars, 7/7 phrasings incl. "rigged glb loads wrong weights"). Gates 0/0/0/0; semantic+pipeline 76.
+
+MORPH TARGETS: THE SAME BUG, A THIRD LAYER DOWN -- FIXED IN THE SAME PASS, not filed a third time. This entry
+originally said morph targets were "easy to fix on scene_primitives -- not done". Filing it would have directly
+contradicted the paragraph three above, which says filing was not enough. So: _gltf_morph_targets now rides the
+canonical walk, deltas span the whole vertex table, and a primitive with fewer (or no) targets ZERO-FILLS the
+missing ones -- a zero delta is exactly "this chunk does not move for that shape key". T is taken from the
+widest primitive (a scene may legally give primitives different target counts).
+
+A DELTA IS NOT A POSITION -- the trap inside the fix: morph deltas live in the primitive's object space, so they
+need the node's transform exactly as positions do, EXCEPT the translation. Apply the full matrix and every
+vertex teleports by the node's offset the instant any weight goes non-zero. Rotation/scale block only. Pinned by
+an assert that the fixture's 3.0 node translation never appears in a delta.
+
+KEPT NEGATIVE: only POSITION deltas are read; NORMAL/TANGENT deltas (legal in the spec) are ignored, so a
+morphed mesh keeps its REST normals until something recomputes them. Named so it is not rediscovered as a bug.
+
+STILL OPEN, honestly: animations' keyframed node transforms are read but never composed with the skin binding
+into a posed vertex table -- no test drives an animated rigged multi-mesh end to end, and that is the last
+member of this bug family I have not closed. Soup-aware fill_holes policy still fan-fills slits on scans.
+
+## POSING A RIGGED ASSET: the last missing link -- and two silent bugs the analytic test dragged out
+
+The remaining member of the import bug family, named in the previous entry as still-open. Rule 0 said what it
+always says here: linear_blend_skin EXISTED (meshskin), AnimationClip.sample EXISTED, _gltf_node_graph EXISTED
+-- its docstring literally reads "the deformer walks this" -- inverse-bind matrices EXISTED. Nothing composed
+them, so every rigged .glb imported and sat in its bind pose forever. The gap was never the machinery.
+
+SHIPPED: pose_asset(lm, time, clip) -> (Mesh, report), faculty m.pose_asset, /tools-visible. The chain in spec
+order: sample the clip -> compose the hierarchy to world -> joint matrix = world_anim(joint) @ inverse_bind ->
+undo the REST node transform glb_to_mesh baked into each chunk -> blend. An unskinned chunk still rides its
+node's animated transform (a prop on a moving arm), which is why lm.chunks now records which node each vertex
+came from -- the walk knew and was throwing it away.
+
+TWO SILENT BUGS, both found because the test compares against ANALYTIC TRUTH rather than a golden run:
+
+1. sample() OVERRODE UN-ANIMATED PATHS. glTF says an animation overrides only the paths it targets; every other
+   path keeps the node's own TRS. It defaulted translation to (0,0,0). A rotation-only channel -- THE most
+   common thing in a rig, since bones rotate about a fixed offset -- therefore collapsed every bone's rest
+   translation and pulled the skeleton to the origin. sample(t, rest_trs=...) now takes the rest; the old
+   no-rest call keeps its exact previous behaviour. node_graph carries `trs` alongside `local` because you
+   cannot override ONE path of an already-composed matrix.
+
+2. THE QUATERNION WAS NEVER RENORMALISED, and this is the one worth remembering. The analytic 90-degree swing
+   came out 1.03e-07 off. That is "close enough" by any eyeball, and I nearly filed it as float32 noise. I
+   guessed the cause (float32 quantisation of sin(45)) and MEASURED the guess: wrong -- normalising cancels
+   that exactly, 0.00e+00. Kept digging: _quat_to_mat's formula is exact only for a UNIT quaternion, glTF
+   stores quats as float32 so they are unit only to ~1.7e-8, and the raw keyframe produced a matrix with
+   det 0.99999993 -- not a rotation at all. Every posed vertex inherited it. Fixed in BOTH readers (they had
+   independently made the same assumption). Result: 1.03e-07 -> 4.4e-16, machine precision. A near-unit
+   quaternion is the NORMAL case for imported data, not a malformed one; the reader must handle it rather than
+   assume the file is perfect. Verified no drift: both real assets pose to themselves at EXACTLY 0.00e+00.
+
++linear_blend_skin_indexed (meshskin): the sparse (V,K) influence form every rigged glTF actually ships.
+Building the dense (V,B) matrix instead is a wall, not a style preference -- a 312k-vertex scan on a 100-bone
+rig is a 31M-entry, 96%-zero matrix (~250 MB) and B full-mesh passes instead of K gathers. MEASURED equivalent
+to the dense definition at 3.5e-12 (not bit-identical: dense accumulates per BONE, sparse per INFLUENCE). Its
+docstring claimed "1e-12" until the selftest was run and said otherwise; the pin is 1e-10, the measured number
+rounded out. Another instance of writing the number before earning it.
+
+KEPT NEGATIVES: linear blend skinning, so candy-wrapper collapse on a 180-degree twist is present and NOT fixed
+(dual-quaternion skinning is the known answer). Morph weights are read but pose_asset does bones, not shape
+keys. A vertex no bone claims is left where it is rather than collapsed to the origin (pinned).
+
+Deltas: +pose_asset, +_world_transforms, +_scene_chunks, +lm.chunks, sample(rest_trs=), node_graph trs,
+_quat_to_mat renormalises (both readers), +linear_blend_skin_indexed, +_bone_glb fixture, +_selftest_pose,
++4 pytest tests (42 in the cad suite), +1 faculty, +1 catalog entry (573-char does, 6/6 phrasings, animate/pose
+-- the DOCUMENTED branch, sibling of blend_pose; my first tag was an invented transform/deform). Gates 0/0/0/0;
+semantic+pipeline 76. The import bug family is now closed: geometry, materials, uvs, skin weights, joint
+indices, morph targets, animation.
+
+## UV THROUGH TOPOLOGY CHANGE: an audit, a NaN, and a seam that per-vertex transfer cannot express
+
+Moose: "when meshes have the number of faces changed, they need UVs reprojected... make sure we aren't
+losing/destroying the model's information." Correct on both counts, and sharper than it looks -- the previous
+entry's keep_uv="auto" REFUSAL stops the confetti but hands back a mesh with NO uvs, which is still losing the
+map. Refusing is not solving.
+
+THE AUDIT FIRST (this is the reusable move -- give every face-count-changing op a mesh WITH a coherent atlas
+and measure what survives, rather than reasoning about which one is suspect):
+  qem_decimate carried | cluster_decimate NON-FINITE | voxel_remesh NON-FINITE | subdivide LOST |
+  triangulate LOST | quad_remesh LOST | auto_retopo ERROR | repair/weld carried
+Two of them were emitting NaN uvs on a PERFECTLY COHERENT atlas -- nothing to do with the fragmentation work.
+
+ROOT CAUSE: _closest_point_barycentric implements Ericson's region test, which assumes a NON-DEGENERATE
+triangle. A zero-length edge gives d1 == d3, so `d1 / (d1 - d3)` is 0/0 -> NaN. That is not an exotic input: it
+is the POLE TRIANGLE of every uv-sphere and any face that lost an edge to a weld. The NaN flowed through
+transfer_uv into the uv array and out of the decimators, silently, with no exception. A mesh whose uvs are NaN
+has no relationship to its texture at all. Every division in the routine is now guarded (_safe_ratio) and the
+result is always finite -- that one fix repaired both operations.
+
++reproject_uv(source, source_uv, target) -> (mesh, uv, report); faculty m.mesh_reproject_uv; catalog entry.
+PER-CORNER, because per-vertex CANNOT express a seam: a seam IS a place where the atlas is cut and the source
+stores two vertices at one 3-D point; any retopo welds them into one; one vertex carries one uv; so the faces
+around the seam interpolate across the whole map. Structural, not numerical -- no better projection fixes it.
+
+THE DESIGN WAS CORRECTED BY MEASUREMENT THREE TIMES, each time against my own reasoning:
+ 1. Island-restriction alone did NOTHING (0 splits, same 5 bad faces). A seam is a cut WITHIN one island -- the
+    u=0 and u=1 columns of a uv-sphere are the same island. Kept anyway: it is still right for multi-island.
+ 2. Disambiguating EVERY corner by uv-proximity-to-home split 442 of 156 vertices and multiplied uv error 60x.
+    It biases each corner toward its own face's centre so shared corners never agree and can never re-join.
+    Gated it behind a DISCONTINUITY test (candidate uv spread > 5x the median source uv edge): where the map is
+    smooth the plain nearest triangle is both accurate and consistent. 442 splits -> 36, at the cuts only.
+ 3. The tie window had to be the TARGET's resolution, not an epsilon: a decimated vertex is an APPROXIMATION of
+    the source, so every source triangle within ~a target edge is an equally valid preimage and the choice
+    between them must be made on uv, not on a distance the target cannot resolve. A fixed 1e-6 never fired and
+    the pole fan stayed collapsed. Swept: tie=0 -> 5 bad faces; 0.5 -> 0 for 36 splits; 1.0 -> 0 for 77. Default 0.5.
+
+THE SPHERE IS A STRAWMAN -- kept loudly. On a uv-sphere reprojection is a WASH (uv err 0.0362 -> 0.0371,
+smeared pixels 1.46% -> 1.42%): its bad faces are the POLE fan, where u is genuinely singular and the faces are
+tiny on screen. I nearly shipped the sphere numbers. The CYLINDER is the honest fixture -- its seam has real
+AREA either side and no pole to confound it: 12/288 faces spanning the seam and 3.36% of pixels smeared -> 0
+and 0.00%, uv error 4x lower, for 23 splits. Same code. A fixture that does not exhibit the bug proves nothing.
+Also: a CHECKER texture is the wrong instrument (high-frequency error is dominated by geometry, and it ranked
+reprojection WORSE); the R=u/G=v COORDINATE texture with circular-u comparison measures uv error and nothing else.
+
+CONTRACT CHANGE, deliberate and pinned: keep_uv="auto" may now return MORE vertices than keep_uv=False, because
+seam-correct uvs REQUIRE duplicates at the cuts. The invariant that must hold is SURFACE identity, not
+vertex-TABLE identity -- every face's three positions, in order, bit-identical. The existing test pinned the
+table and had to be updated to pin the surface. First implementation reused merge_by_distance(attrs="auto") to
+re-weld the split soup -- elegant, and WRONG: that weld AVERAGES merged positions and moved the surface by
+1.11e-16, which this engine counts as a flip. Replaced with an exact split that copies TV[vi] verbatim: now
+0.00e+00.
+
+keep_uv=True must stay the LEGACY per-vertex transfer. Routing it through reprojection silently turned "force"
+into "no uvs at all", because reprojection RAISES on a fragmented atlas. _selftest_rebake caught it.
+
++triangulate_ngons now carries uvs/normals -- FREE and exact (ear clipping adds no vertices, row i is still
+vertex i). It was dropping them for nothing.
+
+Deltas: +_safe_ratio, +reproject_uv, +_uv_island_labels, +_uv_sphere_fixture, +_uv_cylinder_fixture,
++_selftest_reproject, triangulate carries attrs, cluster_decimate/voxel_remesh keep_uv="auto" reproject,
+m.mesh_cluster_decimate EXPOSES keep_uv (it was reachable on the function but not the method everyone calls --
+a faculty gap the audit found), +m.mesh_reproject_uv, +1 catalog entry (586-char does, 6/6 phrasings,
+convert/uv), +6 pytest tests incl. the audit matrix itself as a parametrized regression trap (50 in the cad
+suite). Gates 0/0/0/0; semantic+pipeline 76. Real assets unregressed; mantis still routes to rebake.
+
+KEPT NEGATIVES / STILL OPEN: mesh_subdivide and quad_remesh still LOSE uvs (reproject_uv rescues both --
+measured 1276 verts +51 splits and 353 verts +28 splits, finite -- but native interpolation would be EXACT and
+cheaper for subdivide, so wiring the approximate path in by default would be the wrong trade; filed, not
+hidden). auto_retopo still ERRORS on a uv-sphere ('dict' has no attribute 'faces' + a crossfield
+divide-by-zero) -- untriaged. reproject preserves an EXISTING atlas and cannot help a fragmented scan atlas;
+that is rebake_texture's job and it raises and says so.
+
+## THE REPROJECTION TIE-BREAK CONFLATED TWO DECISIONS -- caught from a render, not a test
+
+Moose, on the delivered strip: "the UVs don't seem to be lined up properly." Correct, and my own numbers had
+already said so if I had read them honestly instead of celebrating the headline.
+
+THE TELL, and it was sitting in the previous entry: reprojection took the sphere's v error from 0.00031 to
+0.00711 and I waved it off as "dominated by the ambiguous verts". Then measured on the cylinder: per-vertex
+transfer gets v EXACTLY right (0.00000); reprojection returned 0.00782 mean, 0.05 at p95. v is a CONTINUOUS
+coordinate on a cylinder -- there is no seam in it anywhere -- so every bit of that error was FABRICATED by
+code that was only supposed to be resolving a cut. A whole-face-sized v error is exactly what "doesn't line up"
+looks like.
+
+ROOT CAUSE: at an ambiguous corner I picked `min |uv - home_uv|` -- a single argmin answering TWO different
+questions at once:
+    WHICH SIDE of the cut does this corner belong to?   -> genuinely a uv question (which side the home is on)
+    WHERE ON THAT SIDE does it project?                 -> a GEOMETRY question (the nearest triangle)
+Answering both with uv drags every ambiguous corner toward its own face's CENTROID, in BOTH coordinates. It
+shrinks each ambiguous face in uv space. The fix is to separate them: pick the side by uv, then take the
+geometrically nearest triangle ON that side. Two lines, and it is strictly better on every axis at once:
+    cylinder v error   0.00782 mean / 0.05 p95  ->  0.00000 EXACT (matches plain transfer)
+    seam-spanning faces         12/288 -> 0     (unchanged: still perfect)
+    uv error vs full-res render 0.0179 -> 0.0014 (13x, was 0.0044 before this fix)
+    smeared pixels              3.36% -> 0.00%
+    vertex splits               23 -> 7          (fewer, because it stopped splitting what it had corrupted)
+
+PINNED so it cannot come back: _selftest_reproject and the pytest now assert the SEAM-FREE coordinate is exact
+to 1e-9. A seam fix that damages the smooth axis is not a seam fix. The general trap: when a heuristic must
+choose among candidates, check whether "which one" is really two questions with two different right answers.
+
+ALSO ON RECORD -- I shipped a picture I had not verified. The delivered uv_reproject_seam.png was the SPHERE
+checker strip (the strawman fixture, whose pole faces are invisible), rendered BEFORE the exact-split rewrite,
+using the instrument I had ALREADY written down as wrong for this measurement. Moose was looking at a stale
+render of the weakest case. Regenerated on the cylinder and verified NUMERICALLY against the reference panel
+before delivery: badly-wrong pixels 4.11% (per-vertex) -> 1.01% (reproject). Rule: measure the artifact you
+hand over, not just the code that made it -- the view tool is unreliable this session, which is precisely why
+the numeric check on the delivered file is not optional.
+
+Sphere KEPT NEGATIVE updated honestly: reprojection takes it 5 -> 1 spanning faces, NOT 0. The remainder is the
+POLE, where u is genuinely singular (the entire u range collapses onto one 3-D point) and one welded pole
+vertex cannot be made consistent for every face in the fan. The cylinder reaches 0 because its seam has real
+area. Same code, opposite headline -- which is the whole reason the cylinder is the fixture that gets quoted.
+
+Deltas: nearest_consistent splits side-choice from position-choice; docstring/catalog numbers corrected
+(they quoted the pre-fix 23 splits and the sphere's wash); +2 pinned asserts (selftest + pytest) on the
+seam-free coordinate; strip regenerated on the cylinder and numerically verified. Gates 0/0/0/0; cad 50;
+semantic+pipeline 76; real assets unregressed; mantis still refuses and names the rebake.
+
+## CUT-AWARE REPROJECTION, LITERATURE-GUIDED: side is a CONSTRAINT, not a tie-break -- and the sphere closes
+
+Moose: "still minor problems, check online." Both halves correct. The probe found them: 9-13 INTERNALLY
+INCONSISTENT faces on decimated uv-spheres -- corners whose u disagrees below the 0.5 seam-crosser threshold,
+invisible to the headline metric. Root: side-as-TIE-BREAK has a structural hole. A corner whose nearest source
+triangle is uniquely on the WRONG side never enters the tie window, so the side choice never runs, and it
+silently gets the wrong-side uv. No tolerance fixes that; the architecture was wrong.
+
+LITERATURE (real, cited): Liu/Ferguson/Jacobson/Gingold, "Seamless" (SIGGRAPH Asia 2017) -- seam-aware
+DECIMATION with topological conditions for seam-free collapses; filed as the alternative architecture (we own
+our decimators, so constraining the collapse is available to us; post-hoc reprojection stays the general tool
+because it also serves remesh/retopo/imported LODs). And US10984581 (Disney, cut-aware UV transfer): assign
+each target FACE to a patch by MAJORITY of points within it, then constrain the face's corners to that patch.
+That maps directly onto this design and named both weaknesses: centroid-only home assignment, and side applied
+only at ties.
+
+THE REDESIGN, with every step measured and two of my own confident claims killed on the way:
+ 1. Side became a per-corner CONSTRAINT: filter candidates to uv-consistency with home (`allow` = disc + the
+    face's own legitimate uv extent via a source uv-per-unit-length scale); geometry picks among survivors;
+    honest fallback to plain nearest when nothing is consistent.
+ 2. Home became a MAJORITY VOTE over 7 samples (centroid, corners, edge midpoints)... which made the sphere
+    WORSE (3 -> 8 crossers). Diagnosis: at a pole, every sample sitting on the singular point sees the whole
+    fan at distance zero, resolves the tie identically (lowest face index), and stuffs the ballot -- the
+    centroid probe gave the singularity one vote, the ensemble gave it five. Fix: an AMBIGUOUS SAMPLE ABSTAINS
+    (its near-tie uv spread > disc). For a pole-fan face the voters are exactly the corners away from the pole
+    -- the ones that know where the face lives.
+ 3. Numbers identical after the abstention fix -> instrumented one failing pole corner by hand instead of
+    re-theorising: `allow` (0.567) was admitting 46 of 48 fan segments, and at distance-0 geometry degenerated
+    to face-index. At a singularity, uv-to-home must rank the tie -- but UNGATED that re-created the centroid
+    drag at one remove (318 splits on the cylinder vs 7, seam-free err 0.1 vs 1e-16): smooth-surface tie sets
+    agree within disc but are not IDENTICAL, so home-ranking still pulled. Final precedence, each clause paid
+    for: (1) consistency filter; (2) geometry; (3) uv-to-home ONLY at uv-AMBIGUOUS geometric ties.
+ 4. Re-swept `tie` AFTER the redesign: its optimum moved (0.5 -> 0.25; the wide window's old job -- catching
+    wrong-side picks -- is now the filter's job, so width only pollutes singular corners: sphere seam-free err
+    1.2e-2 -> 2.3e-4, 53x). A parameter's swept optimum is CONDITIONAL on the design around it; re-sweep after
+    any redesign or the old number silently becomes a bug.
+
+VERDICT: cylinder & sphere x grids {7,5}: 0 seam-crossers, 0 inconsistent faces, splits 5-25 (at the cuts),
+cylinder seam-free axis 1.11e-16, surface still bit-identical, render 3.36% smeared -> 0.00%. The sphere's
+pole -- kept negative since the feature landed -- is CLOSED: the fan splits exactly as the source stores it.
+Sphere grid-4's 13 "inconsistent" are the METRIC complaining about legitimately huge faces (92-face sphere;
+naive has 12 of the same) -- recorded as measuring-stick saturation, not defect. Selftest now pins the sphere
+at zero across both grids; catalog updated with no stale numbers.
+
+Deltas: nearest_consistent rebuilt (constraint + gated uv ranking), majority-vote home with abstention,
+uv_per_len consistency scale, tie default 0.25, sphere pinned at 0/0 in selftest, catalog does rewritten
+(592). Gates 0/0/0/0; cad 50; semantic+pipeline 76; mantis still refuses; surface identity intact.
+
+## REPROJECT vs REBAKE, MEASURED -- and an honest deflation of the sphere headline
+
+Moose: "are you fitting the original map on the new surface, or baking a new one? you should probably be
+generating a new map." Both paths already exist (reproject_uv keeps the source image and recomputes
+coordinates; rebake_texture builds a NEW atlas AND a new image; textured_lod routes). The routing was never
+MEASURED against each other, only argued. Measured now, decimated uv-sphere 576 -> 286 faces, deliberately
+brutal texture (near-Nyquist sine + 8-texel checker + gradient), error vs the full-res reference:
+
+    reproject (reuse the original 512^2 map)   mean 0.1068 | badly-wrong 14.80% | 3.1 MB, SHARED with source
+    rebake -> new 512^2 atlas                  mean 0.1814 | badly-wrong 26.55% | 3.1 MB, new image
+    rebake -> new 1024^2                       mean 0.1255 | badly-wrong 16.23% | 12.6 MB
+    rebake -> new 2048^2                       mean 0.1080 | badly-wrong 14.06% | 50.3 MB
+
+VERDICT: for a COHERENT atlas, generating a new map costs 16x the texture memory just to BREAK EVEN. A rebake
+resamples -- source image -> new atlas -> screen is two samplings -- and has to buy the loss back with excess
+resolution; reprojection samples once. This is the same reason production pipelines and the Seamless paper
+frame the goal as texture REUSE across LODs. So the default stays: coherent -> reproject, fragmented -> rebake
+(where reprojection is impossible and rebake is the only answer, e.g. the mantis at median 1 face/island).
+Moose's instinct is right for SCANS and wrong for clean unwraps -- which is exactly why the router exists, and
+now it has numbers instead of an argument.
+
+DEFLATION -- two claims of mine did not survive:
+ 1. "The residual is decimation's geometry, not uv." FALSE. Same LOD, flat colour (pure geometry): 4.04%
+    badly-wrong. Textured: 14.80%. So the texture path contributes ~10 points, not zero. What is true is
+    subtler: the uv SHIFT is small in uv units but the test texture's finest feature is an 8-texel checker
+    cell / 18-texel sine period, so a sub-quad uv shift lands on a different cell and reads as a large colour
+    error. Near-Nyquist content amplifies resampling. Stated properly instead of hand-waved.
+ 2. The sphere strip's "6.04% -> 1.41%" is REAL but NOT general. Re-measured at grid 8 with the coordinate
+    texture (same mesh, same camera, only the uv method differing -- the honest apples-to-apples): per-vertex
+    0.0356 mean / 2.00% smeared vs reproject 0.0354 / 1.94%. Essentially IDENTICAL. Reprojection's benefit is
+    CONCENTRATED in the seam and pole faces; it does not and cannot improve the bulk of the surface, where the
+    dominant error is decimation moving the geometry. The strip's headline came from grid 7 + a checker, a
+    combination that maximises the visible difference. The cylinder's 3.36% -> 0.00% remains the honest
+    demonstration because there the defect IS the whole story.
+
+METRIC LIMIT, recorded so it is not misread again: rendering a 286-face surface and a 576-face one from the
+same camera and differencing per pixel folds DECIMATION's geometric deviation into the "uv error". It is valid
+for RANKING two uv methods on the SAME mesh; it is NOT an absolute uv error, which is why neither row above is
+near zero. The structural metrics (seam-spanning faces, internally-inconsistent faces, seam-free-axis error)
+are the ones that isolate the thing being fixed -- and those are 0 / 0 / 1.11e-16.
+
+No code change: this entry is measurement and correction only. Gates unchanged 0/0/0/0.
+
+## DECIMATION UNDER CONTROL: explicit budgets + an optional silhouette guard (Moose's crab-leg complaint)
+
+Moose, on the 3k-face crab: limbs degraded; need (a) control over WHETHER geometry is modified at all, (b) an
+explicit face-count / percentage target, (c) an OPTIONAL silhouette comparison so the outline survives. All
+three are one theme: the engine was deciding things it should be TOLD.
+
+RULE 0 PAID AGAIN, TWICE: the silhouette critic ALREADY EXISTED (m.turnaround's per-view IoU -- built for the
+mantis slurped-legs incident) and mesh_qem_decimate already took target_faces. The gaps were (1) the FAST
+decimator's only knob was `grid` -- an implementation detail, not a contract -- and (2) nothing composed
+budget + critic into a guarded operation. Composition, not machinery. Again.
+
++decimate_to(mesh, target_faces|target_fraction, min_silhouette_iou=None) in meshqem; faculty
+m.mesh_decimate_to; catalog (581-char does, 6/6 phrasings, modify/weld -- the tag the sibling decimation entry
+already carries; there is no modify/decimate leaf and inventing one is what the gate exists to refuse).
+  * No target -> the SAME OBJECT back, untouched, report says so. "Never modify" is a policy and must be
+    expressible as the absence of a request, not a magic flag.
+  * Budget -> deterministic BISECTION over grid. faces(grid) is strictly monotone (measured: 20->1980 ...
+    200->153086 on the 322k crab), so <=12 steps land within tol (10%) with no randomness. Crab: asked 20000,
+    got 20132 (0.7% err, 9 iters, 6.2s).
+  * Guard -> m.turnaround IoU vs the SOURCE, and the criterion is the WORST VIEW, not the mean -- degradation
+    is LOCAL: the crab's eaten legs read 0.876 on the top view while the mean still said 0.906. Fail -> walk
+    back (grid x1.5) to the coarsest passing level and ship THAT, with
+    report.budget_missed_for_silhouette=True. Conflict resolves toward the guard, LOUDLY, never silently.
+    Crab: asked 3000 -> shipped 15215, every view >= 0.974.
+
+Selftest fixture: a box with a thin SPIKE (the crab's leg in miniature) -- coarse clustering eats it, only the
+critic notices; guard walked 54 -> 181 faces and reported the miss. Pinned: identity-when-untargeted (object
+identity, not equality), budget-within-tol, guard-floor-honoured, miss-reported. +3 pytest tests (53 in cad).
+
+MISSTEPS ON RECORD: (1) registered the catalog entry with a placeholder tag I KNEW was wrong instead of
+checking the sibling first -- the sibling's tag turned out to be the same string, but that was luck, not
+process. (2) The catalog example imported a function that does not exist (sphere_mesh); skill_lint would have
+caught it, but writing an example without RUNNING it first is the exact rot the ritual forbids. Both fixed.
+
+KEPT NEGATIVES: the guard is silhouette-only -- blind to interior detail, normals, texture (a limb can flatten
+without leaving the outline of any of 4 views); pair with mesh_surface_deviation. Walk-back is geometric
+(x1.5), coarsest-passing, not optimal-passing. Guard cost ~2s/check at 160px. decimate_to drives
+cluster_decimate only; qem_decimate already had target_faces and needs no wrapper.
+
+Gates 0/0/0/0; cad 53; semantic+pipeline 76. Real-asset demo strip: crab_guard_compare.png
+(source | unguarded 3k, IoU 0.876 | guarded 15k, IoU 0.974), top view -- where the legs live.
+
+## SILHOUETTE PRESERVATION AS THE DEFAULT: the orthographic turntable sweep
+
+Moose's directive, in three parts, all shipped: (1) silhouette checking is an AUTOMATED part of
+decimation/remesh/LOD, ON BY DEFAULT, opt-out for deliberate destruction ("similar to our denoising process,
+except 3 dimensional" -- the guard validates the modification against its signal); (2) his symmetry point --
+top/bottom and left/right silhouettes are the same outline -- adopted by making the instrument ORTHOGRAPHIC,
+where it is true (and measured FALSE under perspective: spike box top 0.779 vs bottom 1.000, occlusion breaks
+it); (3) speed decided the design: the turntable was affordable, so rotation IS the default, not the fallback.
+
++silhouette_mask (render): orthographic binary coverage -- project, sample every EDGE at pixel density (one
+scatter; the outline cannot be missed), flood-fill the background from the border, invert. No z-buffer, no
+lighting. MEASURED: pipeline 0.26s on 322k faces; the first version cost 1.09s and the difference was the
+PER-CALL face-list conversion, not the algorithm -- cached as mesh._silhouette_F (immutable value objects, no
+invalidation). KEPT NEGATIVE: flood-fill cannot represent enclosed holes -- a donut face-on masks as a disc;
+the perspective critic keeps that job.
+
++silhouette_sweep (render; faculty m.silhouette_sweep; catalog 590, 6/6, analyze/measure -- the family's
+measurement tag at 16 uses; the sibling turnaround entry is UNTAGGED, noted): n_azimuth directions across
+[0, pi) + top, both meshes under the REFERENCE's frame, IoU per direction. ~2.2s warm for a 322k+17k pair x 7
+directions. Ranks degradation identically to the perspective critic (crab grids 140/60/25 -> 0.984/0.960/
+0.880 vs the critic's 0.995/0.976/0.906). ref_cache: the source's masks are computed once per guard SEARCH,
+not per candidate.
+
+PRECISION BOUGHT BY MEASUREMENT, twice:
+ * The theta<->theta+pi equivalence is exact in the CONTINUOUS limit but NOT pixel-exact: independently
+   quantising the two mirrored projections of the crab cost 15% IoU (0.847) purely at the outline -- thin
+   limbs give the silhouette an enormous perimeter. Consequence baked into the design: the sweep ALWAYS
+   renders both meshes under the same direction and frame, so truncation bites both identically and cancels.
+   Never compare masks made under different directions.
+ * The sweep is STRICTER than the old 4-view perspective guard: the same crab request (3000 faces, floor
+   0.95) now ships 33k faces where the old guard shipped 15k -- more directions see more of the outline, and
+   the x1.5 ladder is coarse. Documented, not hidden.
+
+DEFAULT-ON WIRING (owner directive explicitly supersedes the additive-only convention AT THE FACULTY LAYER;
+module-level primitives cluster_decimate/voxel_remesh/qem_decimate are untouched and unguarded):
+ * decimate_to / m.mesh_decimate_to: min_silhouette_iou defaults 0.95, engine = the sweep. First landing
+   missed that the FACULTY still passed None explicitly, silently overriding the module default -- caught by
+   reading the report, not by any gate: a default must change in ONE place and flow.
+ * m.mesh_cluster_decimate / m.voxel_remesh / m.mesh_qem_decimate: silhouette=0.95 default via the shared
+   +silhouette_guarded(src, op, knob) helper -- run, sweep, knob x1.5 until the worst direction clears the
+   floor, verdict rides as .silhouette_report. silhouette=None reproduces the unguarded primitive
+   BIT-IDENTICALLY (pinned).
+
+TEST FALLOUT, handled honestly: two voxel tests silently became SKIPS (guard walk-back blew the 15s budget) --
+they test topology/uv contracts, so they opt out explicitly; guard coverage got its own tests (+2, cad suite
+55). My bulk regex for that edit matched a nested paren and produced a syntax error -- greedy-match blunder,
+caught by file_python_check, fixed by hand. _selftest_decimate_to now tests budget accuracy with the guard
+explicitly OFF (the default guard may legitimately override the budget; pinning both at once pins nothing) and
+separately pins that the default call IS guarded.
+
+Gates 0/0/0/0; cad 55; semantic+pipeline 76. STILL OPEN: quad_remesh and auto_retopo faculties are not yet
+guarded (auto_retopo still errors on the uv-sphere fixture, untriaged); the rebake perf wall stands.
+
+## THE SPHERICAL SILHOUETTE SEARCH: three candidates measured, one shipped as a COMPLEMENT, two filed blind
+
+Moose: could an inverted spherical render capture silhouette info from every angle in one flat image -- "or
+does that perspective eliminate the silhouette info we need almost entirely. I'm not sure which would be the
+case"? Also proposed: cheap raycasting, the normal map, "think holographically". LITERATURE (Kazhdan et al.,
+SGP 2003; Horn 1984 EGI): the family he is describing is exactly the SPHERICAL SHAPE FUNCTIONS of the
+retrieval literature -- spherical extension functions, extended Gaussian images. One insight cut our way: their
+SH rotation-invariance machinery exists for UNALIGNED retrieval; our source and LOD share a frame, so direct
+per-bin comparison is strictly more sensitive and the SH layer (holographic_spharm exists, audited) is not
+needed here.
+
+MEASURED VERDICT, candidate by candidate, crab ladder 140/60/25 (sweep reference 0.984/0.960/0.880):
+ * RADIAL OCCUPANCY ("does a ray from the centre hit the object"): Moose's second guess is CORRECT -- it
+   eliminates the information almost entirely. 94.7% of direction bins occupied on the crab; any star-ish
+   object saturates it. Its apparent ladder sensitivity (0.90/0.73/0.43) was pure vertex-count confound.
+ * RADIAL EXTENT (max distance per direction -- the honest form of the "inverted spherical render", and the
+   'spherical extension function' of the literature): with the confound KILLED by density-matched surface
+   sampling, the entire ladder (0.9868/0.9861/0.9717) sits at the instrument's own noise floor (0.9895) --
+   grid 140 and grid 60 indistinguishable. STRUCTURAL reason, worth keeping: extent is a MAX-statistic per
+   direction cone; a leg can thin to a remnant that still reaches the same max radius. Silhouettes integrate
+   projected AREA; no scalar field over the direction sphere carries that. The confound itself is the deeper
+   lesson: the vertex-fed version LOOKED sensitive (0.95/0.84/0.61) and every bit of it was sampling density,
+   not shape -- an instrument must be fed density-independent samples or it measures the tessellation.
+ * EGI (area-weighted normal distribution -- Moose's normal-map instinct): monotone on the ladder AND, the
+   decisive control, ORTHOGONAL to silhouettes: a decimated sphere keeps silhouette worst-view 0.99 while EGI
+   collapses 0.59 -> 0.06. It measures SURFACE CHARACTER (how much the orientation field coarsened), which is
+   precisely the quantity the silhouette guard's kept negative admits blindness to. SHIPPED as the complement:
+   gauss_area_map + egi_similarity (render), faculty m.mesh_egi_compare, catalog (572, 6/6, analyze/measure).
+   O(F), 0.14s on 322k faces, translation-invariant, identity==1.0 pinned. Explicitly NOT on the guard's 0.95
+   scale.
+
+BEST APPROACH, as asked: the sweep REMAINS the silhouette instrument -- it IS the cheap raycasting trick
+(edge-splat + flood fill, no shading), it measures the actual quantity, and at 2.2s it did not need replacing.
+What the search bought instead is the missing HALF of "did optimization destroy the model": outline (sweep) +
+surface character (EGI). Guard both.
+
+PROCESS NEGATIVES kept loud: (1) a prefix str-anchor mangled a def line for the SECOND time this session
+("def turnaround(mesh" matched inside the full signature) -- anchors must be full lines or uniquely suffixed;
+twice is a pattern, not an accident. (2) The occupancy kept-negative's first PIN failed because the test
+reproduced the confound the investigation had just named (325 fixture verts cannot saturate 512 bins) -- a pin
+of a sampling-sensitive negative must itself be density-independent. Fixed with area-weighted surface samples.
+
+Gates 0/0/0/0; cad 57; semantic+pipeline 76.
+
+## FAMILY-WIDE SAFEGUARD: silhouette comparison now DRIVES every mesh-reducing faculty
+
+Moose's directive closed out: "have this silhouette comparison information drive the mesh
+decimation/LOD/remesh/retopo related functionality, and ensure that we don't cause visibly destructive mesh
+changes without user direction." The audit table (inspect over every faculty matching
+decimate/remesh/retopo/lod/simplif) found six unguarded; all six are now wired, each with the semantics its
+shape demands, all opt-out via silhouette=None:
+
+ * mesh_lod_chain / mesh_cluster_lod_chain / mesh_field_lod -> +silhouette_guard_chain (meshqem): sweep every
+   level vs the SOURCE, TRUNCATE the chain at levels whose worst direction fails the floor. Truncation, not
+   refinement, on purpose: a chain is a menu, and a destroyed level is not a lower-quality option -- it is a
+   wrong answer a distance selector would serve to a nearby camera. Report lists per-level worsts and every
+   dropped level; verdict rides on mind._last_lod_chain_silhouette because LODLevel has __slots__ (learned by
+   AttributeError, not by reading first). Spike chain (grids 12,6,3): 4 in -> 3 kept, level 3 dropped at
+   0.871. QEM chain on a small sphere at targets .5/.2 keeps ONLY the original (worsts 1.0/0.885/0.841) --
+   honest: a 576-face sphere cannot lose half its faces and hold a 0.95 outline at 128px.
+ * mesh_textured_lod: geometry is guarded FIRST (grid walked up via silhouette_guarded), then the texture is
+   routed onto the surviving grid -- texturing a destroyed mesh well is still a destroyed mesh. Verdict in the
+   returned report dict. Catalog does-field note SKIPPED at 671 chars > 600 (skill_lint budget); guard lives
+   in the method docstring instead -- tighten-don't-regress, per the doctrine.
+ * quad_remesh: pairing does not move vertices, so the guard passes at exactly 1.0000 (measured) and is
+   near-free insurance. There is NO finer knob, so below the floor the action is REFUSAL: the ORIGINAL mesh
+   comes back with report refused_for_silhouette=True; silhouette=None forces the destructive result.
+ * auto_retopo: voxel_resolution is the finer knob; silhouette_guarded walks it (8 -> 12 on the sphere,
+   passing at 0.954). RETRACTION on the record: the "auto_retopo errors on the uv-sphere fixture" negative
+   from two sessions ago was MY PROBE mishandling its dict return ({mesh, quad_fraction, report}), not the
+   function. The function was always fine. Filed negatives must name what was actually tested.
+ * silhouette_guarded gained get_mesh= (extract the mesh from dict/tuple results) -- same pattern as the
+   chain guard, needed the day a guarded op returned something richer than a mesh.
+
+THE STRUCTURAL TRAP (the part that makes this permanent): test_every_mesh_reducing_faculty_is_silhouette_guarded
+enumerates the family BY NAME PATTERN over dir(mind) and fails if any matching faculty lacks a silhouette
+parameter -- with an explicit _GUARD_EXEMPT allowlist carrying REASONS (mesh_subdivide/subdivide_sequence
+refine rather than reduce; mesh_select_lod/splat_select_lod select; splat_lod_chain has its own PSNR
+contract; mesh_decimate_to's guard has its own name, whose 0.95 default is pinned separately). A future
+mesh-reducing faculty that ships unguarded is a CI failure the day it lands. The guard is now a property of
+the FAMILY, not a per-function favour.
+
+Fixture note kept loud: the spike box is NON-MANIFOLD by construction (spike quads triple the box's shared
+edges) -- cluster tolerates it, QEM's euler ops rightly refuse it. Use it for cluster/sweep paths; use the
+manifold uv-sphere for QEM paths.
+
+Gates 0/0/0/0; cad 60; semantic+pipeline 76. Open: rebake perf wall (matters more now that guards ship
+bigger LODs); preview_asset auto-framing; splat family deliberately outside this guard's scope.
+
+## THE ASPECT BUG: the rasteriser stretched every non-square render (found by a second test asset)
+
+Moose handed over a ladybird scan (tytthaspis_sedecimpunctata.glb, 91,808 verts / 151,582 faces, ONE material
+'Tytthapsis_neu2.1001' with a 2048^2 base_color_map, uvs present, atlas 1753 islands / median 2.0 -- a scan,
+transferable=False, same family as the crab and mantis). Rendering it surfaced two real defects, neither in the
+asset.
+
+DEFECT 1 -- rasterize_mesh IGNORED THE FRAME'S ASPECT. MEASURED: a sphere at 640x360 rasterised 1.78x wider
+than tall, exactly the frame's aspect; at 360x640 it stretched the other way. Cause: rasterize_mesh built its
+MVP from camera.projection_matrix(), which used the camera's STORED self.aspect (default 1.0), while the pixel
+grid was 16:9. WHAT MAKES IT A BUG RATHER THAN A CONVENTION, and the argument worth keeping: ray_dirs (the RAY
+path) has always derived aspect from width/height and carries a comment saying why -- so the engine's two
+render paths DISAGREED about the shape of the same scene under the same camera (raster w/h 1.779 vs ray 1.000).
+An engine cannot hold both. Fixed: Camera.projection_matrix(aspect=None) takes an override; rasterize_mesh
+passes width/height. Verified circle at 1:1, 16:9, 9:16, 4:1. SQUARE FRAMES ARE BIT-IDENTICAL (pinned) -- which
+is why nothing regressed: every default, every turnaround view, and every silhouette-guard view is square, so
+all recorded guard numbers stand. Every non-square render this session (crab heroes at 900x760, 640x480) was
+horizontally stretched and I did not notice; the ladybird's clipping is what exposed it.
+
+DEFECT 2 -- no framing capability existed (filed twice, never built). +fit_camera (render; faculty
+m.fit_camera; catalog 587, 6/6, analyze/measure): the closest eye along a direction that keeps every vertex in
+frame, aspect-aware, solved EXACTLY (dist >= max over verts of (|x|/tx + z, |y|/ty + z) -- no iteration).
+TWO NEGATIVES BOUGHT BY MEASUREMENT: (1) bounding-SPHERE framing ignores aspect and wastes the frame on flat
+wide subjects (a crab is 0.086 x 0.031 -- a sphere around it is mostly air); (2) CENTRING IS NOT DISTANCE: the
+CENTROID is not the centre of the projected extents (a scan's verts bunch where the scanner saw detail), so
+centroid-aimed framing clips one edge while the other has slack -- measured, the ladybird clipped at column 0
+with 7px spare on the right. The target is the point centring the PROJECTED bbox, in the camera's own basis.
+Pinned: an OFF-CENTRE mesh must not clip at 1:1, 16:9, or 9:16, and the sphere-is-a-circle aspect regression.
+KEPT NEGATIVE: frames the VERTEX cloud -- displacement, wide lines, or fat sprites can still paint outside;
+margin (6%) is the insurance.
+
+LADYBIRD END-TO-END, all guards live: default decimate_to asked 3000 -> shipped 6383 at worst 0.969 (1.9s);
+opt-out shipped 2914 exactly, whose real worst is 0.949 -- i.e. the guard refuses a result only 0.001 under the
+floor, which is the floor doing its job, not drama. uv path correctly REFUSED transfer on the fragmented atlas
+and named mesh_rebake_texture. EGI on the guarded result: 0.796 while the outline held at 0.969 -- the
+orthogonality holds on a second real asset.
+
+PROCESS: my first two probes of this asset were wrong AGAIN in the same way as the crab (guessed camera
+distance instead of solving; read fill% without checking the bbox touched the frame edge). The bbox-touch check
+is now what fit_camera's pin asserts. Gates 0/0/0/0; cad 60; semantic+pipeline 76.
+
+## RETOPO IS ARCHITECTURALLY WRONG FOR SCANS: voxelize-then-quad cannot pass the silhouette gate
+
+Moose, with four reference images (Skif head edge-loops; good/bad sphere-cylinder junction; fan-pole REJECTED
+vs quad-grid HIRED; boss-on-curve loop density): retopo must GENERATE GOOD TOPOLOGY -- loops following the
+form, density matched to curvature, not blocky, and it must PASS THE SILHOUETTE GATE like decimation does. Our
+560-quad ladybird cage at IoU 0.785 IS the "REJECTED" panel. He is right.
+
+RULE 0 CAUGHT MY OWN MISUSE FIRST: auto_retopo takes `target=` and its docstring always said "the result is
+shrinkwrapped onto it (so the coarse remesh does not drift off the shape)". I never passed it. MEASURED with
+it: res 12/16/20 -> silhouette 0.814/0.839/0.855 (from 0.785), EGI 0.303/0.447/0.527, cost 6.7/17.3/67.6s.
+Real improvement, still FAILS the 0.95 gate. Shrinkwrap cannot recover what voxelisation deleted.
+
+ATTRIBUTION, the decisive measurement -- the loss is the VOXELISATION, not the quad step. voxel_remesh ALONE vs
+the source: res 12 -> 0.785, res 20 -> 0.825, res 32 -> 0.884, res 48 -> 0.935. Every one FAILS, before
+quad_remesh has run at all. Cause is structural: res 20 on a 3.58-unit bbox is 0.18-unit cells and a ladybird
+leg is ~0.05 units -- an SDF cannot represent what it cannot sample. Thin features die in the grid.
+
+THE ARCHITECTURE IS UNAFFORDABLE, not merely untuned. Extrapolating the voxel curve, silhouette >= 0.95 needs
+res ~64 => ~40,320 marched faces. cross_field's MEASURED exponent is F^3.28 (768 faces 0.67s, 3072 faces
+63.1s -- it is np.linalg.eigh on a DENSE (nF,nF) complex connection_laplacian, whose own docstring is honest:
+"O(F^3), fine to a few thousand faces... a shifted inverse-power iteration on a sparse operator is the standard
+remedy", not implemented). At 40,320 faces that is 2.9e5 s = 3.4 DAYS and a 26 GB dense matrix. So
+voxelize-then-quad CANNOT pass the gate for a model with thin features at ANY affordable budget. Filed as a
+STRUCTURAL NEGATIVE, not a perf todo.
+
+SCOPE RETRACTION: auto_retopo's docstring says its input is "a messy BLOCK-OUT (a skin_skeleton blob, a
+metaball, a boolean mess)". A 151k-face photogrammetry scan with 0.05-unit legs is OUT OF SCOPE and I drove it
+there for two turns without reading the scope line. The tool is not broken; I misused it. Its guard interaction
+is separately my bug: the x1.5 walk-back on voxel_resolution is CUBIC through cross_field (24->36->54 = 11x),
+which OOM-killed the process twice -- silhouette_guarded is not cost-aware and must not walk a cubic knob.
+
+THE RIGHT ARCHITECTURE (named, not built): field-aligned quad meshing ON THE ORIGINAL SURFACE -- the Instant
+Meshes / QuadriFlow family (Jakob et al. 2015). Never voxelise: compute the 4-RoSy field on the dense original
+(true curvature, thin features intact), then extract a quad mesh whose vertices lie ON that surface at the
+requested density. Silhouette survives BY CONSTRUCTION because the vertices never leave the surface, which is
+exactly why it can pass a gate that voxelize-then-quad structurally cannot. It also produces what Moose's
+reference images show: loops following principal curvature, density tracking curvature.
+BLOCKER CHAIN, in order: (1) sparse cross_field -- replace dense eigh with power iteration on (cI - L) using a
+sparse matvec (Gershgorin c > lambda_max; smallest-eigenvector target); NumPy-only, deterministic, and it is
+the engine's own recurring "iterate a projection" pattern (resonator/IK/PBD). (2) field-aligned extraction on
+the original surface. (3) guided_cross_field ALREADY accepts per-face guides, so a rig/strain signal plugs into
+step 2 the day a skeletoniser exists. Nothing here needs scipy.
+
+Gates 0/0/0/0 (no code changed this turn -- measurement and retraction only).
+
+## RETOPO ARC OPENED: docs/PLAN_retopo.md (R1-R7); R1 SHIPPED -- sparse cross_field
+
+Backlog filed as the plan of record (docs/PLAN_retopo.md): R1 sparse cross_field; R2 cost-aware guard walk
+(the cubic-knob OOM is MY bug); R3 surface-anchored quad extraction (the architecture change -- Instant
+Meshes / QuadriFlow family, silhouette survives by construction); R4 curvature-sized density; R5 gate
+integration + family-trap coverage; R6 guide plumbing into the surface route (guided_cross_field's socket);
+R7 skeletonizer (separate arc, horizon).
+
+R1 DONE. +_sparse_smallest_eigvec in holographic_crossfield: the "shifted inverse-power iteration on a sparse
+operator" that connection_laplacian's HONEST SCOPE note has named since it was written. Sparse matvec straight
+off dual_edges (no matrix), CG inner solves (positive definite BY THE SHIFT'S CONSTRUCTION), two-phase outer
+loop, residual exit, deterministic seed. cross_field(solver="auto"): dense eigh below 2048 faces --
+BIT-IDENTICAL history for every previously-affordable mesh, no decision flips -- sparse above. Faculty
+m.cross_field(solver=) additive.
+
+MEASURED: parity with dense eigh to 8 DECIMALS on all fixtures (residuals 1e-8..1e-10); 3072 faces 63s -> 0.4s
+(157x); 12,288 faces 2.7s; 42,184 faces (voxel-64 ladybird, the res the silhouette gate needs) 9.4s where the
+dense extrapolation said 3.4 DAYS / 26 GB. ~2e4 total effort ratio. The raw 151k scan raises on boundary edges
+-- the documented CLOSED-surface precondition, an R3 concern (scans are open), not a solver limit.
+
+THREE SOLVER NEGATIVES, each caught by measurement mid-build and pinned:
+ 1. FALSE CONVERGENCE by successive-iterate agreement: warm-starting CG at u biases the solve toward u, so
+    u_k and u_{k+1} agree long before either is the eigenvector (parity fell to 0.65). Exit on the
+    EIGEN-RESIDUAL ||Lu - lam u||, which the warm start cannot game.
+ 2. THE RQI NEAREST-EIGENPAIR TRAP: the Rayleigh shift converges to the eigenpair NEAREST the shift; a random
+    start's Rayleigh sits mid-spectrum and locked onto lambda=1.616 where the minimum was 0.424. Cure: 4
+    directionally-safe fixed-shift outers (sigma=-eps <= 0 <= lambda_min favours the bottom from ANY start),
+    THEN the Rayleigh endgame. Pinned: lam < lambda_2 always.
+ 3. NEAR-DEGENERACY IS A FLOOR, NOT A FAILURE: the box family's gap shrinks (3.3e-2 -> 9.1e-4) and under a
+    tiny gap the residual stalls gap-limited while ANY vector in the near-degenerate subspace is equally good
+    for the FIELD (energy differs by <= gap). Stall exit = completion; parity asserts eigenvalue agreement
+    within 2*gap, not raw eigenvector overlap, which near-degeneracy makes meaningless.
+KEPT NEGATIVE 3 OF THE MODULE STANDS UNTOUCHED: Jacobi smoothing (local normalize-of-average) oscillates;
+the sparse path is a GLOBAL normalized iteration -- similar-looking, different animal, now said in both
+docstrings so nobody conflates them again.
+
+Selftest + pytest pin (parity, interior-trap, determinism, auto-routing); cad 61; gates 0/0/0/0; docs regen.
+NEXT: R2 (cost-aware guard), then R3 (surface-anchored extraction -- where the ladybird finally passes the
+gate it currently cannot).
+
+## R2 DONE -- the guard's step is a COST decision (my OOM bug, fixed)
+
+silhouette_guarded gained `knob_cost` + `max_knob`. The bug was mine and it was conceptual: a flat x1.5
+walk-back suits a knob whose work grows ~linearly (cluster grid, face budget) and is ruinous for one that
+grows CUBICALLY -- auto_retopo's voxel_resolution feeds an res^3 grid into cross_field, so x1.5 is 3.4x work
+PER STEP, and 24->36->54 OOM-killed the process twice this session while I blamed the tool.
+
+ * knob_cost="cubic" steps 2^(1/3) = 1.26, so ONE step costs ~2x -- the same bite x1.5 already takes out of a
+   linear knob. "quadratic" = 1.41. A callable(knob)->factor covers anything odd. An unknown string RAISES
+   rather than silently defaulting (pinned).
+ * LINEAR KEEPS ITS HISTORICAL 1.5, deliberately, NOT the "each step ~2x" ideal of 2.0: every guard decision
+   on record (the crab's 3000-ask -> 33455) was walked at 1.5, and re-tuning it would FLIP shipped results for
+   no correctness gain -- 1.5 is the FINER walk, so it ships closer to the minimum passing level and costs only
+   time. The constitution's "existing decisions must never flip" beat the tidier constant. Pinned.
+ * max_knob CAPS the walk: past it the guard sets report.refused_knob_cap=True and returns, loudly. Before the
+   cap, the caller got no result and no reason -- the process was simply killed.
+ * m.auto_retopo declares knob_cost="cubic", max_voxel_resolution=48 (new param, additive).
+
+ACCEPTANCE, the exact call that OOM-killed us twice: m.auto_retopo(ladybird_151k, voxel_resolution=24) now
+RETURNS in 7.5s with refused_knob_cap=True, passed=False, worst 0.861 and a 2958-face cage in hand. Refusal
+with a reason instead of death. The ladder is [24, 31, 40] where x1.5 gave [24, 36, 54, 81].
+
+Selftest _selftest_guard_cost + pytest pin (cad 62). MY MISSTEP, pinned by the selftest that caught it: the
+first assert compared report["step_factor"] to 2**(1/3) at 1e-9 -- but the report ROUNDS step_factor to 4 dp,
+so the test was wrong, not the code. Tolerance fixed; the rounding is now noted at the assert.
+
+Gates 0/0/0/0; cad 62; semantic+pipeline 76. NEXT: R3 -- surface-anchored quad extraction, where the ladybird
+finally gets a retopo that CAN pass the gate (voxelize-then-quad structurally cannot).
+
+## R3 RESCOPED BY AUDIT (75% of it already existed); R3a DONE -- open meshes get a field
+
+Moose: "knock it out, and make sure we aren't duplicating any functionality." The second half was the whole
+lesson. I had scoped R3 as "build Instant Meshes". THE AUDIT FOUND THREE OF ITS FOUR STAGES ALREADY BUILT:
+  * orientation field -> cross_field / guided_cross_field  (R1 made it affordable at scan scale)
+  * POSITION field    -> position_field (IFAM 4-PoSy, Jakob et al. SIGGRAPH Asia 2015)
+                         + position_field_regularity                                        [EXISTED]
+  * surface snapping  -> shrinkwrap(mesh, target, factor) -> (mesh, residual)               [EXISTED]
+  * EXTRACTION (IFAM sec 4.4)                                                          <- the ONLY real gap
+position_field's own docstring had already named the gap and the paper section: "Turning that lattice into the
+final quad MESH is the EXTRACTION step (build G' from unit integer jumps + detect faces, IFAM sec 4.4), which
+the paper itself flags as the error-prone part -- NOT built here yet." I was one find_capability call away
+from rebuilding a SIGGRAPH paper the engine already implements. Rule 0 is not a ritual; this is the third
+consecutive session where the machinery existed and the gap was composition.
+
+R3a -- A PRECONDITION GAP the probe surfaced, which blocks R3 on every real asset, so it went first.
+MEASURED boundary edges: subdivided box 0 | _uv_sphere_fixture 72 | LADYBIRD SCAN 31,932. cross_field demanded
+a CLOSED surface -- and every photogrammetry scan is open, i.e. exactly the input the surface route exists to
+serve. position_field (vertex graph) and shrinkwrap (closest point) already accept open meshes; ORIENTATION was
+the only blocker. And the check was a GUARD, NOT MATHS: `connection` only ever transported across INTERIOR
+dual edges, so a boundary face simply has fewer neighbours -> a smaller Laplacian diagonal -> the field is
+unconstrained there, which IS the natural (free) boundary condition. Nothing had to be computed differently.
++cross_field(boundary="raise"|"natural"), default "raise" so no caller's error contract moves; ctx gains
+n_boundary_edges; faculty m.cross_field(boundary=). Closed meshes BIT-IDENTICAL across modes (pinned).
+Open 180-face box patch, 10 boundary edges: finite field, lambda 0.0896, energy 62.07.
+
+KEPT NEGATIVE / TRAP, filed loudly in the docstring because it cost real time and pointed at the wrong stage:
+the first natural-boundary test returned an ALL-NaN field and looked like the boundary maths failing. It was
+not. _uv_sphere_fixture has 48 ZERO-AREA pole triangles whose face normal is 0/0; DEGENERATE FACES poison the
+connection long before boundaries matter. A clean open mesh solves fine. Cull zero-area faces before feeding a
+scan, or the NaN gets blamed on the wrong stage -- as I did, for a minute. (Same family as the _safe_ratio
+degenerate-triangle fix in meshtools: this engine's fixtures bite where triangles collapse.)
+
+Selftest _selftest_natural_boundary + pytest pin; cad 63; gates 0/0/0/0; docs regen; PLAN_retopo.md updated
+(R1/R2/R3a DONE, R3 rescoped to the extractor alone).
+NEXT: R3 proper -- extract_quads(mesh, P, orient, edge_length) (IFAM 4.4: collapse vertices sharing a lattice
+cell, connect by unit integer jumps, detect 4-cycles), then a thin surface_retopo faculty composing
+cross_field(natural) -> position_field -> extract_quads -> shrinkwrap(target=source). Everything above it is
+already built and measured.
+
+## RETROACTIVE DEDUP AUDIT (Moose: "for ALL backlog items, including ones we already knocked out")
+
+He was right to widen it. Applying Rule 0 BACKWARDS over everything shipped this arc found one real duplicate
+and cleared the rest. Recorded so nobody re-runs the audit blind.
+
+DUPLICATE FOUND -- R1's CG. holographic_image._cg (io_and_interop) is a conjugate-gradient solver with the
+SAME matvec-closure shape as the one R1 wrote inside _sparse_smallest_eigvec. Two CG implementations now exist
+in the tree. NOT a lazy copy, and the reason is measured, not asserted:
+  * _cg computes `rs = r @ r` -- the REAL bilinear form. The connection Laplacian is COMPLEX Hermitian, where
+    the inner product must be CONJUGATED (np.vdot). `r @ r` on a complex residual is not a norm; CG built on
+    it does not converge for a Hermitian system. The existing solver could not have been called as-is.
+  * _cg has NO warm start (x = zeros_like(b) always). Crossfield's inverse iteration warm-starts at u each
+    outer step -- that is most of why it needs so few matvecs. The shift folds into the matvec closure fine;
+    the warm start does not fold into anything.
+  * VERIFIED: rewriting `r @ r` as `float(np.real(np.vdot(r, r)))` is BIT-IDENTICAL on real input (max |diff|
+    0.000e+00 on a 40x40 SPD system) -- so one complex-aware solver CAN serve both callers.
+  * Blocking the swap: _cg is a PRIVATE helper in an IMAGE module with 2 live callers, and the families here
+    are domain-based -- there is no numerics home. A private cross-family import (mesh_and_geometry ->
+    io_and_interop) is exactly the wiring dishonesty the audits exist to catch.
+FILED AS R8 with the three exact steps (x0 param defaulting to zeros; vdot; promote out of the image module,
+both delegate, both pinned). NOT swept in at the tail of a context: it is a 3-file change touching a module
+with live callers I would have to re-pin, and "small, verified increments / never a multi-file sweep in one
+pass" is the rule that has kept this tree honest all session. A noted debt beats a rushed refactor.
+
+AUDITED AND CLEAN (no duplication): R2's cost-aware knob walk -- nothing in the catalog walks a parameter
+against a cost curve; "bisection search" returns only decimate_to, which is ours. R3a -- a guard relaxation,
+zero new machinery (the maths was already there; only the check was wrong). silhouette_sweep -- the
+perspective critic (turnaround) exists and is a DIFFERENT instrument, kept, and both are registered. EGI and
+fit_camera -- catalog returns only themselves plus unrelated fallbacks. The sparse eigensolver itself -- the
+nearest hit, "Closed-form operator iteration (iterate)", is about diagonalising a BIND operator in the
+Fourier basis, not eigen-solving an arbitrary sparse Hermitian operator; not the same thing.
+
+THE LESSON, third time this arc: the machinery usually exists and the gap is composition. R3 was scoped as
+"build Instant Meshes" and turned out to be 25% of that (position_field/IFAM 4-PoSy and shrinkwrap were both
+already built, and position_field's docstring had already named the missing stage AND its paper section).
+Audit before scoping, not just before coding -- an over-scoped plan wastes the same time a duplicate does.
+
+## PROMOTION LEDGER OPENED; P1/R8 EXECUTED -- one CG, both callers delegating, everything pinned
+
+Moose's structural point, quoted because it is the arc's thesis: "There are tricks and methods hiding under
+different names that all do the same thing and haven't been generalized and promoted yet. Having duplicate or
+fragmented specialized functionality... results in stale code and methods." Response in two parts, both
+MEASURED rather than asserted.
+
+1) docs/PROMOTION_LEDGER.md -- the fragmentation INVENTORY, grep evidence over the live tree (file counts,
+top sites): dense eigensolve in 10 files; dense linear solve in 10; lstsq in 19; CG in exactly 2 (the known
+pair); fixed-point projection iterations in 31; flood fill in 9; adaptive sampling in 18; bisection-shaped
+loops in 36; FFT diagonalisation in 46. Seven ledger entries (P1 CG; P2 operator eigenpair; P3 bisection; P4
+guarded knob walk split from its criterion; P5 flood fill; P6 adaptive sampling AUDIT; P7 diagonal-evolution
+AUDIT), each with the promotion plan and the rule that binds them all: PROMOTION KEEPS EVERY EXISTING CALLER
+BIT-IDENTICAL -- generalize the machinery, never the results. Discipline line: ONE promotion per arc with the
+full ritual; a ledger of named debts beats a sweep of unverified refactors. Important negative in P2: do NOT
+flatten holographic_iterate's closed-form bind-operator spectra into the iterative solver -- closed form beats
+iteration where it applies; correct SPECIALIZATION is not fragmentation.
+
+2) P1 EXECUTED (= plan R8). +holographic/misc/holographic_numerics.py -- the shared numerics home that did not
+exist (the families are domain-based; that absence is WHY two CGs grew). cg(matvec, b, x0=None, iters, tol,
+rtol): complex-aware (np.vdot), warm-startable, both stopping conventions (absolute tol = image's contract;
+rtol = crossfield's). holographic_image._cg now DELEGATES (name+signature kept, every historical call site
+reads unchanged); crossfield's inner CG now DELEGATES (shift folded into the matvec closure, warm start via
+x0). Faculty m.solve_linear_cg (dense/JSON-drivable form; closures cannot cross JSON, docstring says to import
+numerics.cg for the matvec form); catalog 567 chars, 6/6 phrasings, analyze/measure.
+
+PINS, all measured: real path BIT-IDENTICAL to the historical loop (0.000e+00, both on a plain SPD system and
+on image's exact operator shape P(m*(P^T x)) + lam x); complex-Hermitian converges to 1e-8 (the case `r @ r`
+could not solve); crossfield's sparse eigensolver parity selftests pass UNCHANGED with the delegated solver --
+and the matvec count is EXACTLY 2232, same as before delegation: the same arithmetic sequence, not merely the
+same answer. Image module selftest unchanged.
+
+MISSTEP ON RECORD: my pytest pin asserted residual < 1e-8 while the faculty's contract is tol=1e-13 on
+||r||^2, i.e. ||r|| ~ 3e-7. The pin was wishing, not reading the contract; the measured 1.15e-07 residual was
+CORRECT behaviour. Assert the contract, not the wish -- same lesson as the step_factor rounding pin, same day.
+
+Gates 0/0/0/0; cad 64; semantic+pipeline 76. Ledger P2-P7 remain named debts with owners and evidence.
+
+## PLAN_retopo v2 -- HOLOGRAPHICALLY RECONSIDERED; R6a FOUND BY THE RECONSIDERATION AND SHIPPED SAME TURN
+
+Moose: "The entire plan needs to be holographically reconsidered and updated." v1 was a conventional graphics
+pipeline plan; v2 re-derives every item through the engine's own doctrine -- which existing general move is
+this in costume; which lever dissolves the wall; what gets PROMOTED rather than built. The reframings that
+changed the work, not just the words:
+
+ * R3 EXTRACTION = CLUSTER-BY-KEY IN THE FIELD'S FRAME. IFAM 4.4 is cluster_decimate wearing a different
+   lattice: quantize to a key (field-aligned lattice coordinate instead of an axis grid), collapse per cell,
+   reconnect (unit integer jumps instead of grid adjacency), emit faces (4-cycles). The lattice coordinate is
+   the COARSE/FINE doctrine verbatim: integer cell = discrete anchor (topology), in-cell offset = residual
+   (dies in the collapse by design). Singularity cells: emit triangles and REPORT, never guess.
+ * R4 SIZING = ADAPTIVE SAMPLING (ledger P6), not a new subsystem. Density-follows-curvature is importance
+   sampling of a surface; angle_defect already rides in cross_field's ctx as the curvature signal; rho becomes
+   rho(v) through position_field's own hierarchical formulation.
+ * R5 GATE = the SAME walk machinery; P4's split (walk_knob from the silhouette criterion) makes the next
+   guard (EGI floor) a parameter, not a rewrite.
+ * R7 = SDF RIDGE + VSA CLEANUP, the deepest reframing: the medial axis is the ridge of a distance field the
+   engine already computes everywhere; and "detect a creature" is CLEANUP AGAINST A CODEBOOK -- the founding
+   move. Shape signature (EGI + skeleton spectrum + proportions) as a hypervector, resonated against archetype
+   prototypes (biped/quadruped/hexapod/blob); winner names the rig template. find_capability FOR SHAPES. A
+   composition of existing faculties plus one ridge-tracer -- no longer a research project.
+
+R6a -- THE RECONSIDERATION'S OWN CATCH, SHIPPED SAME TURN. Reading guided_cross_field through the lens found
+the SAME F^3 WALL R1 tore down, one function below it: the guided solve materialised (L + diag(w) + 1e-9 I)
+and np.linalg.solve'd it. Holographic reading: that system is complex Hermitian POSITIVE DEFINITE BY
+CONSTRUCTION (+w IS the definiteness) -- exactly numerics.cg's contract, so the P1 promotion pays direct:
+matvec off dual_edges + a diagonal, nothing materialised. Also inherited boundary="natural" (the R3a guard
+relaxation, which had been DUPLICATED as a second copy of the same check -- now both paths carry the param).
++solver="auto" (dense < 2048 faces bit-compatible; sparse above), faculty passthrough, guide-free sparse path
+delegates to _sparse_smallest_eigvec so it IS cross_field's path.
+
+MEASURED: dense-vs-sparse guided parity 3.1e-9 / 6.7e-9 (192 / 768 faces, 4-phasor); guide-free sparse ==
+cross_field sparse to 5e-16; 12,288 guided faces in 0.7 s where the dense route extrapolates to ~99 MINUTES;
+open meshes: default raises (contract), natural solves finite.
+
+PIN LESSON, third of the day, now a pattern worth naming: my first parity assert demanded np.array_equal
+between the guide-free path and cross_field -- but guided renormalises u/(|u|+eps) before the angle, and a
+rescale before atan2 legally moves the LAST ULP. Assert the mathematics (phasor distance < 1e-12), not an
+accidental bit-pattern. Kept in the selftest docstring.
+
+WITHOUT R6a, R6 was decorative: guides could never have reached a scan -- the strain/rig signal would have hit
+the dense wall the moment it mattered. The reconsideration was not a documentation pass; it found and removed
+the arc's next blocker before the arc reached it.
+
+Gates 0/0/0/0; cad 65; semantic+pipeline 76. NEXT per v2: R3 extraction as cluster-by-lattice-key (fresh
+context recommended -- it is the arc's heart), with R4/R5 riding P6/P4 promotions.
+
+## R3 DONE -- the surface route exists and PASSES the gate voxelize-then-quad structurally cannot
+
++extract_quads (IFAM sec 4.4 -- the stage position_field's docstring has named as unbuilt since it was
+written, and the paper itself flags as the error-prone one), +field_to_vertex_dirs, +surface_retopo, faculty
+m.surface_retopo (guarded, LINEAR knob), catalog 598 chars 6/6 create/emit.
+
+THE HOLOGRAPHIC READING IS WHAT MADE IT SMALL: extraction IS cluster_decimate in the field's frame. Quantize
+to a key, collapse per cell, rebuild faces -- identical skeleton; only the KEY is new (field-aligned lattice
+coordinate instead of an axis-aligned grid). The key is the COARSE/FINE doctrine verbatim: p_i/edge_length
+rounds to an integer cell (discrete anchor, topology lives here) and the in-cell offset is the residual, which
+DIES in the collapse by design. That is why extraction is a rounding, not an optimisation. The quad PAIRING is
+handed to quad_remesh -- the field-guided pairing that already existed -- so no second pairing pass grew here.
+
+MEASURED on a 768-face closed fixture: density 1.0 -> 323 faces, 77% quads, SILHOUETTE 0.989 PASS; 1.5 -> 189
+faces, 63% quads, 0.973 PASS; 2.0 -> 113 faces, 0.945 (fails, and the guard catches it). Compare the voxel
+route on the same kind of demand: 0.785/0.825/0.884/0.935 at res 12/20/32/48, failing at EVERY affordable
+resolution. The mechanism is the whole claim: vertices never leave the source (shrinkwrap closes the cell
+representative onto it), so the silhouette survives BY CONSTRUCTION rather than by search.
+GUARD DIRECTION TRAP, caught in build: silhouette_guarded walks a knob UP, but for this route FINER = SMALLER
+density, so the knob is inverted (knob = max_density*100/density). Without the inversion the guard would walk
+the mesh COARSER on failure -- exactly backwards. Verified: asked density 2.5, guard walked 1 step to 0.963.
+KEPT NEGATIVE in extract_quads' docstring: singular cells are NOT reconciled -- they emit triangles, which
+quad_remesh leaves as triangles and quad_fraction reports. Reporting an honest triangle beats guessing a quad;
+a low quad_fraction means the FIELD is singular-rich, not that extraction failed.
+
+R3b FILED -- the real scan found the next precondition, and Rule 0 says it is a real gap. surface_retopo
+RAISES on the ladybird LOD: "the mesh is not consistently oriented". connection needs consistent winding;
+scans do not have it. AUDIT: mesh_is_oriented EXISTS (a CHECK), isosurface.is_oriented exists, but NO repair
+faculty exists (mesh_orient/orient_mesh/fix_orientation MISSING; mesh_repair does weld/fill/non-manifold, not
+winding). Holographic reading: consistent orientation is a 2-COLOURING/BFS over the dual graph -- flood fill
+(ledger P5's move) on face adjacency, flipping a face that disagrees with the neighbour that reached it -- and
+the dual graph is ALREADY BUILT by connection, while surface_nets "learned to orient itself because this
+module needed it". The move is in the tree, unpromoted. Non-orientable/disconnected components: report
+per-component, never guess.
+
+Gates 0/0/0/0; cad 66; semantic+pipeline 76. The arc now reads: R1/R2/R3/R3a/R6a/R8=P1 DONE; R3b NEXT (small,
+and it is the last thing between surface_retopo and the ladybird); then R4 (=P6 adaptive sampling), R5, R6, R7.
+
+## R3b DONE -- mesh_orient (the field solver's precondition); R3c FILED -- conditioning, not retopology
+
++face_orientation_report + mesh_orient (meshtools), faculties m.mesh_orient / m.mesh_orientation_report,
+catalog 588 chars 6/6 convert/emit. Holographic reading held: consistent winding is FLOOD-FILL 2-COLOURING
+over the dual graph (ledger P5's move) -- BFS, flip anyone who disagrees with whoever reached them. No new
+species of maths; the dual graph was already being built by connection.
+
+TWO REAL FINDINGS, both from measurement, both filed loudly:
+ 1. is_oriented IS QUAD-ONLY. It indexes q[0..3] literally, so it cannot look at a TRIANGLE mesh -- i.e. every
+    scan and every decimation output in this tree. The tree could check orientation only on quads and could
+    never repair it at all. +face_orientation_report is the general-degree version; pinned to agree with
+    is_oriented where they overlap.
+ 2. NON-MANIFOLD IS NOT NON-ORIENTABLE, and conflating them made my first version LIE. It propagated across
+    every face touching an edge; a 3-face edge then imposes contradictory parity, which it reported as
+    "non-orientable". MEASURED on the ladybird LOD: 490 non-manifold edges (up to SEVEN faces on one edge),
+    and it called 7 of 9 components non-orientable while flipping NOTHING. Fixed: propagate across manifold
+    (exactly-2-face) edges only; count non-manifold separately; genuine non-orientability (conflicting parity
+    across MANIFOLD edges) is still detected, left alone, and reported -- never guessed. Pinned both ways.
+    Correct chain for a scan: m.mesh_repair (splits non-manifold) -> m.mesh_orient -> m.surface_retopo.
+
+LADYBIRD, END TO END, FIRST TIME: mesh_repair -> mesh_orient (oriented True, 0 non-manifold) ->
+surface_retopo -> 738 faces. Silhouette 0.897 at density 2.0, quad_fraction 0.44. FAILS the gate, and the
+cause is measured and is NOT the extractor: the decimated scan is 399 COMPONENTS. A lattice cannot lay a
+coherent grid across 399 disconnected shells, and quad_fraction 0.44 is the field honestly reporting a
+shattered, singular-rich domain. R3C FILED: the blocker is INPUT CONDITIONING (component cull/merge; and the
+honest question of whether DECIMATION is doing the shattering, in which case the surface route belongs on the
+151k SOURCE, not on a LOD). Do not tune the extractor to compensate for dust.
+
+Gates 0/0/0/0; cad 67; semantic+pipeline 76. Arc: R1/R2/R3/R3a/R3b/R6a/R8=P1 DONE; R3c NEXT (conditioning),
+then R4 (=P6), R5, R6, R7.
+
+## R3c DONE -- THE LADYBIRD PASSES THE GATE. The surface route works on a real photogrammetry scan.
+
+MY R3c HYPOTHESIS WAS BACKWARDS, and one measurement killed it. I assumed decimation was shattering the mesh.
+MEASURED face-connected components: SOURCE 151,582 faces = 2,064 COMPONENTS, largest only 30.1% of faces,
+1,772 of them under 10 faces (dust). LOD 5,853 = 9 components. LOD 19,844 = ONE component, 100%.
+DECIMATION IS NOT SHATTERING THE SCAN -- IT IS HEALING IT. The weld merges scan dust into a coherent shell.
+The raw scan is the INCOHERENT input; the surface route wants a BIGGER LOD, not the source. Every instinct I
+had about "run it on the source, not a LOD" was exactly wrong, and cost nothing only because I measured before
+building the component-culling machinery R3c had scoped -- which is now unnecessary. Decimation already IS the
+conditioner.
+
+ACCEPTANCE -- THE ARC'S POINT, MET:
+  decimate_to(20000) [IoU 0.989, ONE component] -> mesh_repair -> mesh_orient [oriented, 0 flips, 0
+  non-manifold] -> surface_retopo(density=2.0) -> 2,679 faces, quad 0.48, SILHOUETTE 0.952 vs the 151,582-face
+  SOURCE. PASSES the 0.95 gate.
+The comparison that makes it mean something: voxelize-then-quad on this same asset tops out at 0.935 (res 48,
+22,680 faces) and FAILS at every affordable resolution, structurally -- an SDF cannot represent what it cannot
+sample. The surface route passes because its vertices never leave the surface. 151,582 -> 2,679 faces (57x) at
+0.952, quad-dominant-ish, deterministic. density 3.0 gives 1,057 faces at 0.923 (the guard walks that).
+
+HONEST REMAINING WEAKNESS, filed not hidden: quad_fraction 0.48 is LOW. The field is singular-rich on a scan
+(extract_quads emits honest triangles at singular cells rather than guessing quads -- the kept negative doing
+its job). That is what R4 (curvature-sized density = ledger P6 adaptive sampling) is for: uniform density on a
+curvature-varying surface forces singularities. Do NOT tune the extractor to fake the number up.
+
+REPORTING BUG FOUND, filed: mesh_orient's report["components"] counts ORIENTATION-PROPAGATION components
+(manifold-edge-connected), NOT geometric components -- it says 399 where the geometric count is 9, because
+non-manifold edges block propagation. Both are correct answers to different questions; the NAME lies. Rename
+to propagation_components (additive: keep both keys one release).
+
+Gates 0/0/0/0; cad 67. Arc: R1/R2/R3/R3a/R3b/R3c/R6a/R8=P1 DONE. The surface-route retopo the owner asked for
+-- loops from a real field, silhouette-safe, not a voxel blockout -- EXISTS and is measured on his own asset.
+NEXT: R4 (=P6) to lift quad_fraction honestly; then R5 (family trap), R6 (guides), R7 (skeletonizer).
+
+## P6 CLOSED AS A NEGATIVE; R4 RESCOPED -- the audit made it HARDER, which is the audit working
+
+Two results, both from reading live code rather than trusting the plan's own words:
+
+P6 IS NOT A DUPLICATE -- fragmentation-by-VOCABULARY, caught. The ledger listed "adaptive sampling (18 files)"
+as a promotion candidate and R4 as "promote it onto surfaces". WRONG: holographic_adaptive_sample is a
+CALIBRATED STOP RULE for a RENDERER's per-pixel sample budget (ci_half_width, converged_mask,
+samples_to_target) -- it decides WHEN TO STOP SAMPLING A PIXEL. R4's sizing field decides HOW BIG A QUAD IS ON
+A SURFACE. Same English phrase, different quantities, different units, zero shared machinery. Promoting them
+together would have been the ledger's own failure mode inverted: not fragmenting one move across names, but
+FUSING two moves because they share a name. THE WORD IS THE COINCIDENCE, THE MOVE IS NOT. P6 closed. The
+general lesson for the ledger: an entry justified by a grep of ENGLISH is a hypothesis, not a finding -- P2's
+"do not flatten iterate's closed form" and P6's "these were never the same thing" are the two directions the
+same discipline protects against.
+
+R4 IS HARDER THAN v2 CLAIMED, and v2's own words gave it away ("position_field takes rho(v) with minor
+edits"). Reading the operator: `a = round((P[i]-P[j]) @ O[j] / rho); acc += P[j] + rho*(a*O[j] + c*Bt[j])` --
+ONE GLOBAL rho, and the ENTIRE construction rests on neighbours differing by an INTEGER number of rho-steps.
+If rho_i != rho_j that integer jump IS NOT DEFINED: the lattices do not commensurate across the edge, and
+extract_quads' key round(P/rho) has no single rho to divide by either. Graded sizing is a CONSTRUCTION, not a
+parameter swap -- which is precisely why the paper treats it separately. Honest options filed in the plan:
+(a) power-of-two grading, rho(v) -> rho0*2^k, so a coarse step IS two fine steps and neighbours commensurate
+(the paper's answer, real work); (b) per-component/per-cluster uniform rho + stitching; (c) uniform rho and
+live with quad_fraction 0.48, which is today.
+The input R4 needs already exists and needed no promotion either: m.mesh_curvature(mesh, kind="mean") +
+m.mesh_curvature_confidence.
+DONE WHEN: quad_fraction rises measurably above 0.48 at equal-or-better silhouette WITH the grading pinned --
+never by tuning the extractor to hide triangles.
+
+This is the fourth time this arc that an audit resized an item before a line was written (R3: 75% existed;
+R3a: the maths was free; R3c: the hypothesis was backwards; R4/P6: the duplicate was a homonym). Audit before
+SCOPING is now carrying more weight than audit before coding.
+
+## R5 DONE (the trap caught it itself); the lying report field renamed
+
+R5 -- THE STRUCTURAL TRAP EARNED ITS KEEP, unattended. test_every_mesh_reducing_faculty_is_silhouette_guarded
+enumerates dir(mind) by NAME PATTERN ("decimate|remesh|retopo|lod|simplif") rather than a hand-kept list, so
+when surface_retopo landed it was REQUIRED to carry a guard without anyone adding it anywhere -- a trap
+written months ago catching a capability that did not exist when it was written. That is the whole argument
+for structural traps over checklists, and it is now on record with a receipt. All 14 enumerated faculties
+account for themselves: 10 guarded, 4 exempt with reasons (mesh_decimate_to's floor is pinned separately as
+min_silhouette_iou=0.95; select_lod/splat_* do not reduce).
+
+RENAMED THE FIELD THAT LIED (the debt I filed one turn earlier, closed): mesh_orient's report["components"]
+counted what the ORIENTATION FLOOD could reach -- manifold-edge connectivity -- NOT geometric components. It
+said 399 on the ladybird LOD where the geometric count is 9, because 490 non-manifold edges block the flood.
+Both numbers are correct answers to different questions; the NAME was the bug, and a plausible-but-wrong
+number is worse than a missing one because nobody checks it. Now report["propagation_components"] carries the
+honest name, report["components"] stays ONE RELEASE as a deprecated alias (additive -- nothing that reads it
+breaks), both pinned to agree so the alias cannot drift, and the docstring says which question each answers
+and how to get the geometric count instead.
+
+Gates 0/0/0/0; cad 67; semantic+pipeline 76.
+ARC STATUS: R1, R2, R3, R3a, R3b, R3c, R5, R6a, R8=P1 DONE. P6 closed as a NEGATIVE (homonym, not duplicate).
+OPEN: R4 (graded sizing -- needs the power-of-two commensurability construction, the paper's hard part), R6
+(guide plumbing -- trivial now that R6a exists), R7 (skeletonizer + VSA creature cleanup), ledger P2/P3/P4/P5
+/P7. The retopo capability the owner asked for is DONE and measured on his asset: 151,582 faces -> 2,679 at
+silhouette 0.952, where the voxel route fails at 0.883.
+
+## ONE MASTER BACKLOG (docs/BACKLOG.md); the original Poly Studio backlog is CLOSED; one duplicate of MINE fixed
+
+Moose surfaced the ORIGINAL Poly Studio engine-gap backlog (written from building an app ON leCore) and asked
+the three questions that matter: did we work holographically, did we introduce duplicates, did we take
+sub-optimal paths -- then merge everything into ONE backlog.
+
+THE ORIGINAL BACKLOG IS ENTIRELY CLOSED. Audited LIVE, not remembered: mass_properties, oriented_bbox,
+mesh_section, draft_report, sketch2d, camera_from_vanishing_points, terrain_erode, node-graph delete, subgraph
+collapse/expand, AND the C backend (ccrun's donation) all exist and are catalogued. Its B-section ergonomics
+are naming/doc items to re-confirm against live docstrings before re-filing.
+
+THE HEADLINE CROSS-SOURCE RESULT, and it is the owner's thesis with an INDEPENDENT receipt: Poly Studio's
+B-item said "the terrain axis swap is a reflection, it inverts winding, I had to reverse triangle order BY
+HAND; generators should emit consistent winding." That is EXACTLY m.mesh_orient -- which this arc built for
+RETOPO, from a completely different direction, without knowing the demo had hand-rolled the specialized
+symptom. One general move, two domains, discovered twice. Filed as M3: make the generators CALL mesh_orient
+instead of each carrying its own flip. This is what "generalize and promote rather than implement in another
+specialized spot" looks like when it actually lands.
+
+A DUPLICATE OF MY OWN, FOUND BY TURNING THE AUDIT ON THIS ARC AND FIXED IMMEDIATELY: I introduced a SECOND
+orientation checker. isosurface.is_oriented is QUAD-ONLY (it indexes q[0..3] literally, so it cannot read a
+triangle mesh -- every scan, every decimation output), and my new face_orientation_report is general-degree and
+SUPERSETS it. Two checkers for one property is precisely the fragmentation the ledger exists to stop, and I
+created it while writing the ledger. FIXED: is_oriented DELEGATES; name and signature kept so every historical
+caller reads unchanged; parity with the historical quad counter pinned three ways; isosurface selftest passes
+untouched. Filed the not-duplicates too, so they are not "fixed" later: cg (Hermitian-PD matvec) vs sketch2d
+(Gauss-Newton/lstsq) vs iterate.dominant_eigenvector (Fourier closed form) are THREE MOVES; P6 is a homonym.
+
+MASTER BACKLOG docs/BACKLOG.md: 10 items closed, 10 open (M1 graded sizing = the paper's hard part; M2 guides;
+M3 generators->mesh_orient; M4 P4 walk_knob split, load-bearing for an EGI floor since the ladybird measured
+outline 0.969 vs EGI 0.796; M5 P5 flood fill, 22 files; M6 P3 bisect_to_budget; M7 P2 eigenpair; M8 P7 FFT
+audit; M9 R7 skeletonizer+VSA cleanup; M10 standing debts incl. preview_asset adopting fit_camera). PLAN_retopo
+and PROMOTION_LEDGER now carry SUPERSEDED banners pointing at it -- kept for their measurements and negatives,
+which the master summarises but does not reproduce. A backlog with two entry points is a backlog with none.
+
+THE PROCESS SCORECARD IS IN THE MASTER, LOUD: two OOM kills from walking a cubic knob while blaming the tool
+whose docstring said BLOCK-OUT; R3 scoped at 4x its size; a whole session of horizontally stretched renders
+shipped unnoticed; R3c's hypothesis backwards; three over-strict pins in one day. The pattern worth keeping:
+FOUR items were resized by an audit before a line was written. Audit before SCOPING now carries more weight
+than audit before coding -- an over-scoped plan wastes exactly what a duplicate wastes.
+
+Gates 0/0/0/0; cad 68; semantic+pipeline 76.
+
+## M3 WAS WRONG AND I CAUGHT IT BY RUNNING IT -- measurement over narrative, applied to my own best story
+
+Last turn I filed M3 as the arc's headline: Poly Studio's B-item ("terrain axis swap inverts winding, I
+reversed triangle order BY HAND; generators should emit consistent winding") matched m.mesh_orient, built this
+arc for retopo from a different direction -- one general move, two domains, discovered twice. It was the
+prettiest result of the session. I wrote it into the master backlog WITHOUT RUNNING IT. Both halves are false:
+
+ 1. THE TERRAIN GENERATOR IS ALREADY FINE. Measured: terrain_to_mesh(Terrain(), 24) -> 1058 faces, ORIENTED
+    True, 0 duplicated directed edges, normals 100% +Z. It is Z-up and documents that. Nothing to fix.
+ 2. MESH_ORIENT CANNOT CURE IT ANYWAY, and this is the distinction to keep: the demo's Z-up->Y-up swap
+    V[:, [0,2,1]] is a REFLECTION (det=-1). The swapped box measures ORIENTED True with 0% outward normals --
+    CONSISTENTLY oriented and CONSISTENTLY INSIDE-OUT. mesh_orient repairs INCONSISTENCY (neighbours
+    disagreeing across an edge); a globally inverted mesh has NO disagreement to find, so it flips 0 faces --
+    correctly. INCONSISTENT WINDING and GLOBAL INVERSION ARE DIFFERENT DEFECTS WITH DIFFERENT CURES. I
+    conflated them and would have shipped a "fix" that provably does nothing, with a satisfying story attached.
+
+THE REAL GAP, now filed correctly: no reflection-aware transform exists. transform_mesh / convert_up_axis are
+MISSING; the demo hand-rolled the reversal because NOTHING OWNED THE RULE. Core ask: transform_mesh(mesh, M)
+that flips winding when det(M) < 0, and convert_up_axis on top. One rule, one place: a negative-determinant
+transform inverts winding.
+
+ALSO FOUND, deliberately NOT fixed: m.mirror_mesh(box, axis=0) -> oriented False, 28 duplicated directed
+edges, 14 NON-MANIFOLD edges. Mirroring a symmetric box through its own centre welds coincident geometry, so
+this may be correct-but-surprising. Filed to be measured against an ASYMMETRIC fixture first. Not fixing it
+today is the same discipline that just caught M3.
+
+THE LESSON, and it is the sharpest one of the arc: MEASUREMENT OVER NARRATIVE APPLIES HARDEST TO THE FINDINGS
+THAT FLATTER YOU. "Loud negatives" and "kept negatives" are easy when the result is disappointing. M3 was a
+result that confirmed the owner's thesis, matched two independent sources, and made the whole arc look
+coherent -- which is exactly why it sailed into the master backlog unrun. The engine's own rule already
+covered this ("a great-looking win means: hunt for the bug or the strawman baseline FIRST") and I applied it
+to every measurement this session except the one I most wanted to be true.
+
+Gates 0/0/0/0; cad 68. Master backlog M3 rewritten with the measurements; scorecard item 6 added.
+
+## M3 DONE -- the reflection rule now lives in one place (the item I had to correct before I could build it)
+
++transform_mesh(mesh, matrix) and +convert_up_axis(mesh, frm, to) in meshtools; faculties m.transform_mesh /
+m.convert_up_axis; catalog 589 chars, 6/6 phrasings, convert/emit. Rule 0 confirmed the gap was real:
+transform_mesh / mesh_transform / apply_matrix / convert_up_axis / mesh_scale / mesh_rotate ALL missing --
+this engine had no matrix-transform entry point for a mesh at all, which is why the demo hand-rolled one.
+
+THE RULE, in ONE place: a negative-determinant transform (mirror, axis swap, negative scale) inverts winding,
+so transform_mesh reverses the faces iff det < 0. convert_up_axis rides on it with a PROPER rotation (det=+1)
+so nothing inverts in the first place -- the naive column permutation V[:, [0,2,1]] IS a reflection, which is
+the whole trap. Singular matrices RAISE: silently returning collapsed geometry is worse than stopping.
+
+MEASURED: reflection -> 100% outward preserved (winding flipped for us); rotation -> faces BIT-IDENTICAL
+(winding untouched -- a proper transform must not touch it); convert_up_axis z->y -> 100% outward, oriented.
+KEPT NEGATIVE, pinned in BOTH the selftest and the pytest so the distinction cannot rot: the naive swap still
+measures 0% OUTWARD while reporting ORIENTED=TRUE, and mesh_orient still flips 0 faces on it. Those two
+assertions sitting next to each other are the whole lesson -- INCONSISTENT WINDING and GLOBAL INVERSION are
+different defects, one is invisible to the checker that finds the other, and I conflated them for a full turn
+because the wrong story was prettier.
+
+THE SHAPE OF THIS ITEM IS THE SESSION IN MINIATURE: filed on an unmeasured premise (WRONG in both halves) ->
+caught by running it -> re-filed with numbers -> built small, because the corrected version was smaller and
+sharper than the fiction. The audit did not slow the work down; the un-audited version would have shipped a
+no-op with a satisfying narrative attached.
+
+Gates 0/0/0/0; cad 69; semantic+pipeline 76. BACKLOG.md: M3 DONE. Open: M1 (graded sizing, the paper's hard
+part), M2, M4-M10.
+
+## THE TOPOLOGY GATE -- and it caught OUR OWN newest code before it was even finished
+
+Moose: gate on disconnected faces, and on holes created/filled, as well as silhouette; plus a normal/
+displacement map so the low-res looks high-res.
+
+RULE 0 FIRST, and it resized all three asks:
+ * NORMAL BAKE ALREADY EXISTS: m.bake_normal_map(low_mesh, low_uv, high_mesh, size, world_space). The third
+   ask is 50% already shipped. Only DISPLACEMENT is missing -- and it is likely a PARAMETER on that same bake
+   (the ray-cast low->high correspondence is already owned), not a new baker. Filed M12 as an AUDIT, not a
+   build, because assuming is what P6 just punished.
+ * THE INVARIANTS WERE ALREADY MEASURED, JUST NEVER GATED: m.mesh_connected_components exists (route,
+   ARCH-7); mesh_report already returns boundary_edges, euler_characteristic, is_closed, nonmanifold_edges.
+   The gap was COMPOSITION, for the fourth time this arc. +topology_delta REUSES route.connected_components
+   rather than growing a second BFS (the P5 flood-fill move, consumed not duplicated).
+
+THE GATE CAUGHT MY OWN SURFACE_RETOPO, MEASURED BEFORE THE GATE EXISTED:
+    op                     boundary edges   closed
+    source (768, closed)         0           True
+    cluster_decimate g=8         0           True
+    qem -> 200                   0           True
+    surface_retopo d=1.5        15           False   <- HOLES, at a 0.973 IoU silhouette PASS
+CAUSE: extract_quads DROPS every source triangle whose 3 corners land in fewer than 3 distinct lattice cells
+(192 of 768 at density 1.0). I filed that count as degenerate_cells -- a report FIELD -- and never asked what
+dropping those faces does to the SURFACE. THEY ARE HOLES. The silhouette gate is structurally blind to it: a
+hole inside the outline does not move the outline. This is the sweep's own donut-vs-disc kept negative, which
+I wrote, biting a different operator that I also wrote, one day later.
+
+WHY THIS GATE IS RIGHT, in the engine's terms: the outline is NECESSARY, never SUFFICIENT. We now have three
+independent instruments and each is blind where another sees -- silhouette (outline), EGI (orientation field,
+which caught a decimated sphere at 0.99 outline / 0.06 EGI), topology (integers: islands, holes, genus). The
+owner's rule that holes must not be FILLED either is the sharp one and it is now in the docstring: a scan's
+holes are DATA; silently closing them invents surface that was never measured.
+
++topology_delta + faculty m.mesh_topology_delta + catalog 592 6/6 analyze/measure; selftest pins islands /
+holes-punched / holes-filled / identity; pytest additionally pins that QEM and cluster decimation PRESERVE
+topology (a regression trap for the operators that currently pass). Integers, NO TOLERANCE -- an integer
+invariant with a tolerance is not an invariant.
+DEFECT FILED LOUD at the site (extract_quads' docstring) and as M11: the fix is IFAM's own -- a collapsed cell
+should MERGE its corners into one output vertex and let neighbours re-stitch, not vanish.
+M13 filed: wiring the gate into the reducing faculties is BLOCKED ON M4 (P4's walk_knob/criterion split) --
+the owner has now asked for three gates and silhouette_guarded can hold exactly one. M4 just became the
+critical path.
+
+Gates 0/0/0/0; cad 70.
+
+## M4 / ledger P4 DONE -- the walk split from the criterion, and it paid within the hour
+
++walk_knob(op, knob, passes, knob_cost, max_knob, max_steps, factor) in meshqem: the SEARCH, separated from
+what it searches for. `passes(out) -> (ok, report_fields)` is the criterion and it returns its OWN vocabulary,
+merged into the report -- so silhouette_iou/worst_view, islands_created/holes_created, and a future egi score
+each belong to their criterion and the walk knows about none of them. silhouette_guarded is now ONLY the
+criterion: a six-line closure. Everything the search knew about silhouettes moved out; everything the
+silhouette knew about walking is gone.
+
+BIT-IDENTICAL, and pinned against the decisions this arc RECORDED BEFORE the split -- because a split that
+moves an answer is a rewrite, not a split:
+  ladybird ask 3000 -> 6383 faces @ worst 0.969   (recorded: 6383, 0.969)
+  opt-out           -> 2914 faces exactly          (recorded: 2914)
+  auto_retopo cubic  -> knob 24, refused True, step 1.260  (recorded: 24, True, 1.260)
+The selftest additionally drives walk_knob with a criterion that knows NOTHING about meshes (an integer
+threshold) and asserts the exact historical ladder [5, 8, 12, 18, 27]. That is what proves the split is real
+rather than cosmetic: the walk no longer mentions geometry at all.
+
+IT PAID THE SAME HOUR, which is the whole argument for the ledger: +topology_guarded is TWELVE LINES because
+walk_knob already owned the search. The owner asked for three gates and the guard could hold one; now the
+question is an argument. Measured, topology_guarded walks surface_retopo's density finer until the holes close:
+  knob 133 (density 1.504): 8 boundary edges, 452 degenerate cells -- holes
+  knob 200 (density 1.000): 6 boundary edges, 192 degenerate cells -- holes
+  knob 300 (density 0.667): 0 boundary edges,  66 degenerate cells -- CLOSED. A real pass, walked to.
+KEPT HONEST: that is a WORKAROUND, not M11's fix. The extractor still drops faces; a fine enough lattice just
+drops fewer than it takes to punch through. Nobody should read "the gate passes now" as "the bug is gone" --
+M11 (collapsed cells MERGE their corners and let neighbours re-stitch) is still the real repair.
+
+BAD SPLICE, HANDLED BY THE RULE INSTEAD OF BY CLEVERNESS: my first attempt computed the replacement span by
+INDEX and silently deleted decimate_to along with it. The session rule says restore the file from the
+canonical zip rather than repair blind -- did exactly that, then redid the split as two SURGICAL anchored
+edits (insert walk_knob above silhouette_guarded; replace only the body between its exact first and last
+lines). Zero collateral. The rule exists because repairing blind is how you spend an hour proving the tests
+were right.
+
+Gates: tag_lint OK, catalog_gaps 0, skill_lint 0; reachability's 8 import-only are PRE-EXISTING modules
+(brdf/encoders/fountain/lexicon/lightcache/lights/materialdata/reasoning), not this work. cad 70.
+BACKLOG: M4 DONE -> M13 (wire the topology gate into the reducing faculties by DEFAULT) is now UNBLOCKED.
+
+## M12 AUDITED -- displacement is a PARAMETER, and the real work is the cage the normal bake never got
+
+The owner's third ask was "a normal/displacement map that makes the low-res look high-res". Rule 0 already
+showed the NORMAL half ships (m.bake_normal_map, with optional AO). This is the audit of the other half, and
+it answers with the module's own docstring: bake_normal_map "Reuses transfer_uv's closest-point projection
+(the high-poly lookup)". THE LOW->HIGH CORRESPONDENCE IS ALREADY A SHARED PRIMITIVE -- transfer_uv owns it and
+the normal bake is merely one consumer. Displacement is the SAME lookup recording a different quantity: per
+texel, (Q - P) . N -- signed distance from the low point to its closest high point along the low normal, where
+P and N are what the baker already holds and Q is what the projection already returns. Nothing new gets built;
+a third consumer gets added. This is the fifth time this arc that the answer was COMPOSITION.
+
+THE FINDING THAT ACTUALLY MATTERS, and it inverts the item's difficulty: bake_normal_map carries a KEPT
+NEGATIVE -- no cage / ray-distance limit, so a texel far from the high-poly still grabs the nearest normal and
+a floating detail bleeds. Displacement INHERITS that negative AND MAKES IT WORSE IN KIND: for normals a bad
+value is a SHADING artefact; for displacement it is a SPIKE, because the bad value moves GEOMETRY. So the
+projection is the easy half and the CAGE is the item. Filed that way: displacement ships with the
+max_distance the normal bake never got, and the acceptance is measured with silhouette_sweep (does applying
+the map to the low-poly reproduce the high-poly outline better than the low-poly alone?) rather than by
+eyeballing a height image.
+
+This is the pattern the arc keeps producing: the audit does not just find that something exists -- it finds
+WHICH HALF IS HARD, and it is reliably not the half the item's title names.
+
+## M13 TEMPLATE -- the second gate lands as an INSTRUMENT, not a policy change (and that was the hard call)
+
+M4's split unblocked this the same hour. Wired topology reporting into m.surface_retopo as the template --
+ONE faculty, not the six-faculty sweep the item names, because a multi-file sweep at a context tail is exactly
+how decimate_to got deleted today.
+
+THE DESIGN DECISION IS THE WHOLE ITEM, and it is a constitution question, not a coding one: the gate REPORTS
+by default (topology=True) and refuses only on topology="refuse". Enforcing by default would FLIP DECISIONS
+THAT SHIPPED -- and surface_retopo is MEASURED to punch holes (M11), so a default refusal would have broken
+the owner's own working pipeline on the day the instrument landed, in the name of telling him the truth. AN
+INSTRUMENT THAT STARTS REFUSING YESTERDAY'S WORK IS A DECISION CHANGE WEARING A MEASUREMENT'S CLOTHES.
+Decisions change in ONE place, on purpose, never as a side effect of adding a gauge. The engine's own rule
+("additive, backward-compatible only; existing decisions must never flip") already decided this; I only had to
+not talk myself out of it because the refusal felt more rigorous.
+
+VERIFIED: face count IDENTICAL (323) with the instrument on, off, and as RECORDED before it existed -- adding
+a measurement must never change an answer. The report now carries BOTH truths simultaneously, which is the
+point of having three instruments: silhouette 0.989 PASS *and* topology preserved False, holes_created True.
+An operator that is honest about the outline and dishonest about closure now SAYS SO in its own report.
+Pinned: default report, opt-out clean, refuse raises.
+
+REMAINING FIVE are the same ~10-line pattern, one file at a time, never a sweep: cluster_decimate,
+qem_decimate, decimate_to, voxel_remesh, quad_remesh. Worth noting for whoever takes it: the first four
+MEASURE AS CLEAN today (pinned), so for them this is a REGRESSION TRAP, not a bug hunt. The bug lives in
+surface_retopo and it is M11.
+
+Gates: tag_lint OK, catalog_gaps 0, skill_lint 0. cad 71; semantic+pipeline 76.
+
+## M14 FILED -- the owner's holographic reframe of the bake, measured and scoped (not built at a tail)
+
+Moose's principle, stated generally: do not run multiple passes when you can add DIMENSIONS to one pass and
+PROJECT OUT what each operation needs. Applied to the bakes, and it is exactly right -- I measured it rather
+than nodding along.
+
+MEASUREMENT: the low->high PROJECTION is the whole cost of a bake (~1.7-1.9s of a ~1.9s bake, size 48,
+768-face high-poly; pixel writes are free next to it). A second quantity today re-runs the ENTIRE projection on
+IDENTICAL hits -- two normal bakes clocked 1.91s then 1.74s with bit-identical output, i.e. the engine
+recomputed every closest-point from scratch to produce a map it already had. And `_high_normal_at` internally
+computes the closest point, barycentric weights, hit face, AND distance, then discards all but the normal. The
+other channels' answers are computed and thrown away on every call.
+
+THE HOLOGRAPHIC DESIGN (docs/DESIGN_holographic_bake.md): split along the seam the cost already draws.
+mesh_correspondence(...) runs ONE projection sweep and records a BUFFER -- hit point, barycentric, hit face,
+signed distance along the low normal, valid mask. Then cheap projectors read channels out of it with no new
+projection: normal, displacement (the stored distance -- literally free), AO, attribute transfer. bake_maps
+requests N channels for ~1 projection + N cheap reads instead of N projections. The cage/max_distance that M12
+identified as displacement's real work lives in the correspondence, because EVERY channel needs it, not just
+displacement -- so ONE cage serves all of them.
+
+WHY THIS IS THE ENGINE'S OWN INSTINCT, not a new idea imported: the top find_capability hit for "sample
+several channels at a surface point" was gather_field -- "compile the work so ONE operation serves many reads"
+(sum_j w_j Z(u_j) into one query, exact to 7e-15). That is this move transposed: gather_field superposes many
+SAMPLE POINTS into one query; the bake superposes many CHANNELS onto one correspondence. Same holography, other
+axis. And it SUBSUMES M12: displacement stops being an item and becomes a field read over the shared buffer.
+find_capability also confirmed the pattern does NOT yet exist as a reusable thing -- transfer_uv owns the
+projection but welds UV as the payload; bake_normal_map RE-IMPLEMENTS the same projection for normals; a
+displacement bake would be a third copy. Three copies of one correspondence, each married to one payload. THAT
+is the fragmentation the reframe dissolves.
+
+Filed as M14, a full build arc for a fresh context: new module (correspondence + 4 projectors + bake_maps),
+bake_normal_map refactored to DELEGATE, and the load-bearing pin -- fused normal map BIT-IDENTICAL to the
+standalone, because a shared buffer must change WHEN work happens and nothing else. Not started at a context
+tail; a half-built correspondence that silently perturbs the normal bake would corrupt a path the owner
+relies on, and that is the one outcome this whole arc has been organised to avoid.
+
+## M15 DONE -- the reference outline was the redundant pass (the owner's catch, measured and fixed)
+
+Moose asked whether the silhouette pass redoes work we already do. Ran it down rather than assuming, and there
+were two answers.
+
+FIRST, WHAT IS NOT REDUNDANT (so nobody "fixes" it): silhouette_mask is NOT the render pass recomputed. Its
+docstring shows it was built specifically to avoid that -- no z-buffer, no lighting, no perspective, the full
+rasteriser measured at 0.5-1.5s/view and rejected in favour of vectorised orthographic edge coverage. And the
+ref_cache inside silhouette_sweep already computes the source's outline ONCE per walk (measured: 7 reference
+masks across a 2-step walk that made 14 candidate masks). Both of those are already correct.
+
+SECOND, THE REAL REDUNDANCY, and it is the bakes' pattern again: across SEPARATE guarded operations on the
+same source, the reference outline was re-masked from scratch every time. Measured 7/7/7 reference masks for
+three guarded ops on one box, because ref_cache was a fresh {} created inside each faculty call -- it caches
+WITHIN a walk but never ACROSS calls. A pipeline that decimates, then clusters, then retopos one source paid
+the reference projection three times for an outline that never changed.
+
+FIX: silhouette_guarded gained ref_cache=None. Default None reproduces the old per-call behaviour exactly; a
+caller sharing one dict pays the reference projection ONCE across all its ops. MEASURED 21->7 reference masks
+across three ops, and the result is BIT-IDENTICAL with or without the shared cache -- pinned, because a cache
+that changes an answer is a bug wearing an optimisation's clothes. Safe by construction: the cache only ever
+grows with REFERENCE views (invariant for a given source+size+views), never candidate views.
+
+THE HOLOGRAPHIC READING THE OWNER IS TEACHING, now with a second instance: an INVARIANT recomputed per
+operation is the tell. The bakes recompute the low->high projection per channel (M14); the guard recomputed
+the reference outline per operation (M15). Both are "you already did this pass -- keep the result and project/
+read what you need." find_capability pointed at the existing "Dependency-keyed cache (key on what the operator
+reads)" faculty as the eventual automatic home (content-hash the reference), filed as M15's follow-up -- but
+that is a deliberate cache-lifetime build, not a tail item, so the caller-threaded version ships first and is
+correct on its own.
+
+Gates: tag_lint OK, catalog_gaps 0, skill_lint 0; reachability's 8 import-only are the same pre-existing
+modules. cad 71.
+
+## M16 FILED -- the silhouette "4 not 7" catch: symmetry already banked, and a fixed count can STRADDLE the worst
+
+Owner proposed 4 views (side/top/front/perspective) since front/back etc. are identical. Measured it against
+the live code and dense-24 ground truth, and the answer is more precise than the proposal:
+
+FRONT/BACK IS ALREADY FREE. silhouette_sweep covers azimuths in [0, pi) only, because theta and theta+pi are
+mirror-identical under orthographic projection -- Moose's own observation, already implemented. n_azimuth=6 is
+6 DISTINCT directions, not 3 opposed pairs, so the opposite-view saving the owner is pointing at was banked
+long ago. (With the on-record caveat that the mirror equivalence is exact in the continuous limit but NOT
+pixel-exact -- the crab lost 15% IoU to independently quantising the two mirrors, which is precisely why the
+sweep always masks both meshes under the SAME direction and frame so truncation cancels out of the ratio.)
+
+THE SHARP FINDING, which inverts the request: a FIXED small count can MISS the worst view. On a decimated box
+the true worst azimuth is 135 deg; n_azimuth=4 (0/45/90/135) lands on it exactly and equals dense-24 (0.9780),
+while the CURRENT n_azimuth=6 (0/30/60/90/120/150) STRADDLES it and reports 0.9846 -- NON-CONSERVATIVE by
++0.0066, calling the mesh better than it is. Meanwhile the ladybird saturates at n_azimuth=2 (3 views) = dense
+exactly. So there is no universally right fixed count: a cube's worst view is 45 deg off-face and a 30-deg
+grid never samples there, while an organic scan is caught by almost any ring. THE COUNT IS NOT THE VARIABLE;
+THE SAMPLING PHASE RELATIVE TO THE OBJECT'S SYMMETRY IS.
+
+Did NOT change the default: 4 would suit the cube and regress off-4-grid objects, and any count change flips
+shipped decisions (the constitution's hard line). Filed M16 with the holographic fix instead -- spend samples
+where the signal is (ledger lever 4): a coarse ring to find the worst BASIN, then a 1-D bisection on the
+IoU-vs-angle curve to refine the azimuth around it (the same knob-bisection decimate_to already owns). ~4-5
+masks converge on the true worst for ANY symmetry, opt-in and validated against dense-24 on box+ladybird+crab
+before it is ever a default.
+
+THE PATTERN HELD ONE MORE TIME: the owner's reuse instinct was right in spirit (do not oversample) but the
+attractive specific number (4) was measurement-contradicted -- 4 is right for a cube and wrong in general, and
+6 is quietly WRONG for a cube. Measure the claim, keep what is true (symmetry already banked; oversampling is
+real), correct what is not (a fixed count is the wrong lever), file the honest fix.
+
+## M2 DONE -- guide plumbing was already wired; the work was verifying it, and the first metric LIED
+
+Audited M2 ("wire strain_directions into surface_retopo's guide_dirs") and found it already connected:
+strain_directions(mesh, deformed) exists, returns (n_faces, 3), and surface_retopo's guide_dirs param (built
+in R3) accepts it directly. strain -> surface_retopo -> guided=True. So M2 was VERIFICATION, not a build --
+the fifth item this arc that an audit found smaller than filed.
+
+BUT verification caught a real trap in MY OWN test metric, which is worth more than the item. First pass
+asserted guidance improves |field . strain| (a single-vector dot) and it FAILED -- 0.572 -> 0.455, guidance
+apparently making alignment WORSE. That would have read as "guides are inert, M2 is broken." The bug was the
+metric, not the guide: guided_cross_field returns a 4-RoSy field (phi = angle(u)/4), so its single
+representative is an ARBITRARY one of four directions 90 deg apart, and a perfectly guide-aligned field can
+land on the representative that dots low against the guide. The correct metric is cos(4*(phi - guide_angle)),
+which measures alignment MODULO 90 deg -- the invariant a 4-RoSy actually preserves. Under it: unguided 0.092
+-> guided 0.999, monotone in guide_weight (0.092/0.997/0.999/1.000 at gw 0/1/5/20). Guides are strongly
+load-bearing. THE LESSON, again: a failing assertion is a claim about the METRIC as much as the code -- assert
+the invariant the object actually has (4-RoSy alignment is mod 90), not the one the naive scalar wants.
+
+KEPT NEGATIVE, filed not fought: "put edge loops where it deforms" resolves to edge-loop SELECTION verbs, not
+the strain guide -- "edge loops" + "put" has too much pull toward select_edge_loop. This is the same
+structural vocabulary gap as "less grainy" -> denoise: unrecoverable by adding aliases, because the collision
+is lexical, not semantic. Extended the winnable phrasings ("retopo that follows how the model bends" resolves)
+and left the unwinnable one documented.
+
+Gates clean; cad 72. BACKLOG: M2 DONE.
+
+## M16 INVESTIGATED, NOT SHIPPED -- "coarse + refine" is not unconditionally conservative (prototyped)
+
+Took M16 (adaptive worst-view) as the small independent item and PROTOTYPED it outside the module before
+touching anything -- which is what kept a non-conservative gate out of the default guard.
+  v1 refine-around-single-minimum: correct on the box (0.9782@135, the angle fixed n=6 straddles), but LADYBIRD
+     read +0.0031 ABOVE dense -- a second basin at 72 deg the single-minimum refine never visited.
+  v2 refine-around-every-near-minimum: ladybird fixed, but BOX g5 read +0.0012 above dense, because dense's
+     worst at 8 deg is a NARROW trough between coarse samples and below the refine band. And v2 cost 84 masks,
+     MORE than dense-90 -- the cost saving evaporated while chasing conservativeness.
+THE FINDING, filed loud: the worst-view-vs-angle curve is NOT unimodal, so no fixed "coarse ring then refine
+the minimum" is unconditionally conservative -- a narrow trough between coarse samples is invisible to it, and
+adding seeds until it is not erases the reason to be adaptive. This is exactly the M16 lesson one level deeper:
+the count was the wrong lever, and now "coarse+refine" is revealed as the wrong SHAPE. The honest fix is a
+Lipschitz branch-and-bound (bound IoU's rate of change per degree from the silhouette perimeter, refine only
+intervals that could beat the current worst) -- provably conservative, genuinely adaptive -- and it needs the
+Lipschitz constant measured before it is built. Filed as option (a) with (b) symmetry-detection and (c)
+opt-in-reporting-only as the safe first ship.
+
+WHY I DID NOT SHIP EVEN THE OPT-IN VERSION THIS TURN: an adaptive=True that is silently non-conservative is
+WORSE than no feature -- a caller who reaches for the "more accurate" mode and gets an over-optimistic worst
+is strictly misled. Two prototypes both had a fixture where they lied. The correct next step is to measure the
+Lipschitz bound and build option (a), or ship option (c) which cannot lie because it just samples more. Either
+is a real build for a fresh context, not a tail patch. The prototypes and the ranked options are in BACKLOG
+M16 so the next attempt starts from the failure modes, not from the attractive-but-wrong "coarse+refine".
+
+No code shipped; no gate touched; the default sweep is UNCHANGED and still bit-identical to every recorded
+decision. This turn bought knowledge, not lines -- which for M16 is the correct purchase.
+
+## M5 AUDITED -- "flood fill" is TWO primitives wearing one word (the P6 homonym trap, caught again)
+
+Checked whether M5 (promote flood fill, 22 sites) is tail-safe before reaching for it. It is not, and the
+reason is the same one that closed P6: the shared English word hides two different moves. The 22 sites split
+cleanly -- 11 GRAPH floods (mesh dual-edge adjacency: mesh_orient, connected_components, tear; no grid, no
+connectivity parameter even meaningful) and 5 GRID floods (image mask, border-inward, WITH a 4-vs-8
+connectivity choice: silhouette_mask, render). Exactly one file (meshtools) does both, and even there they
+share only a deque. A graph has no 4-vs-8; a grid has no dual edges.
+
+So numerics.flood_fill(mask_or_graph, seeds) -- the naive filing -- would be fragmentation-by-vocabulary
+INVERTED: fusing two moves because they share a name, the mirror of splitting one move across names. The honest
+promotion is TWO primitives that happen to share a queue: graph_flood(adjacency, seeds) and grid_flood(mask,
+seeds, connectivity). And there is a decision-flip landmine in the fusion: silhouette_mask's border flood is
+8-connected and the entire silhouette guard is pinned to its output, so a single flood_fill with a 4-connected
+default would silently change every silhouette number ever recorded.
+
+This is the THIRD time the P6 pattern has appeared this arc (P6 adaptive-sampling homonym; M3 inconsistent-vs-
+inverted winding; now flood graph-vs-grid). The tell is stable: when a promotion is justified by a grep of an
+ENGLISH WORD, check that the sites share the MOVE and not just the vocabulary -- and check specifically for a
+parameter one kind has that the other cannot even express (connectivity here), because that parameter is the
+proof they are different primitives.
+
+No code shipped -- M5 rescoped in BACKLOG as two primitives, to be built alongside M11's loop-walk extractor
+(a third graph_flood consumer, so the graph primitive earns its promotion on THREE sites at once instead of
+being retrofitted). Another knowledge-purchase turn, and the right one: promoting the fused version would have
+been a decision-flipping mistake dressed as a cleanup.
+
+## M10 preview_asset/fit_camera DONE -- the filed premise was wrong, and a real aspect bug hid under it
+
+Took the "preview_asset should adopt fit_camera (crab at 4% of frame)" debt as a safe complete item. Two
+findings, both from measuring instead of trusting the filing:
+
+ 1. THE "4% OF FRAME" WAS MY OWN MEASUREMENT ERROR. My original 4x claim used direction [1.0,0.75,1.1] -- a
+    long vector, so the heuristic (eye = centre + eye_dir*bbox_diag) pushed the eye far and framed tiny. But
+    preview_asset's actual eye_dir is (0.55,0.35,0.7); with THAT, the heuristic puts the eye 1.14x the fit
+    distance -- a modest improvement, not 4x. The heuristic was never badly broken; I compared against a
+    strawman (a different, longer direction) without noticing. Added fit=True anyway (opt-in, default keeps
+    the heuristic so nothing reframes), but honestly labelled as a small convenience, not a rescue.
+
+ 2. THE REAL BUG WAS UNDERNEATH, and the investigation only found it because the 1.1x result didn't match my
+    4x expectation and I chased the discrepancy instead of shipping. fit_camera sizes the horizontal
+    half-angle as tx = ty*aspect, but its returned dict did NOT include aspect -- so the renderer used its
+    OWN default aspect and the carefully-fit framing was silently wrong on any non-square frame. This is the
+    SAME two-paths-disagree-on-aspect bug that bit rasterize_mesh vs the ray path earlier this arc, in a third
+    location. FIXED at source: fit_camera returns aspect; pinned that the subject fills the CONSTRAINING axis
+    (78% tall on a 4:1 frame, 88% wide on a 1:4) -- correct fitted behaviour. as_camera already allow-listed
+    aspect so nothing downstream breaks; regression-checked the surface_vs_voxel camera path.
+
+THE LESSON, a variant of this arc's spine: a wrong expectation is USEFUL if you chase the gap instead of
+forcing the result. My 4x was wrong, the fit=True win was unimpressive, and following THAT disappointment
+down found a silent aspect bug affecting every fit_camera caller on a non-square frame -- worth far more than
+the convenience flag I set out to add. Do not ship to hit the expected number; when the measurement disagrees
+with the plan, the disagreement is the finding.
+
+Gates: tag_lint/catalog_gaps/skill_lint clean; reachability's 8 import-only unchanged (pre-existing). cad 74.
+
+## M11 HALF DONE -- the cheap hypothesis beat the rewrite for closed inputs (measure before building, again)
+
+"Knock it out" on M11, and the discipline paid: before building the loop-walk extractor PLAN_next_arc scoped,
+tested the CHEAP hypothesis the census had implied -- that holes came from deduping kept triangles by the
+SORTED cell-triple, which merges the front and back of a thin feature (same three cells, opposite winding)
+into one face. Rotation-canonical dedup (winding-preserving: cyclic-min, so a,b,c and a,c,b stay distinct)
+recovers both sides.
+
+MEASURED: a CLOSED box is now closed at EVERY density -- boundary edges 0 at 0.8/1.0/1.3/1.5/2.0, where sorted
+dedup left 6 -- at unchanged silhouette (0.989) and quad_fraction (0.76). ~15 lines, not the rewrite. The
+census had already said 5 cell-triples were being deduped and only 2 of 6 boundary edges came from dropped
+bridges; testing the dedup hypothesis first is exactly why the big construction turned out unnecessary for
+well-formed inputs.
+
+HONEST REMAINING SCOPE, not overclaimed: a real SCAN still has holes. Ladybird at density 2.0 keeps 165
+boundary edges -- source open boundaries plus dense field singularities the `distinct` filter drops. So the
+fix closes CLOSED inputs completely and IMPROVES scans without closing them. report["nonmanifold_edges"] now
+surfaces the singular cells (13 of 285 on the box, clustered = the field's cone points), REPORTED not forced
+flat because forcing manifoldness invents surface. The defect docstring, the selftest, and the pytest all
+state this exact scope: "closed inputs come out closed; singular-rich scans are improved but still need
+topology_delta to audit." M11's remaining work (IFAM's consistency pass for singular clusters) is still the
+loop-walk in PLAN_next_arc, but now needed ONLY for singular-rich scans -- a much smaller, better-targeted
+job than "extraction punches holes".
+
+THE PATTERN, stated plainly since it keeps earning its place: the census turned a scary rewrite into a 15-line
+fix plus a narrowed remainder. Measure the specific mechanism, test the cheapest hypothesis it implies, and
+only build the big thing for the part that survives. Two of the three census defects (sorted-dedup merge; the
+2 bridge edges) fell to the cheap fix; only the singular-cluster part needs the rewrite.
+
+Gates 0/0/0/0 (reachability's 8 import-only pre-existing); cad 74; semantic+pipeline 76.
+
+## M12 DONE -- displacement bakes from the normal's OWN projection (the owner's holographic move, literally)
+
+The owner asked (turns ago) for "a normal/displacement map that makes the low-res look high-res", then taught
+the general principle: do not run multiple passes when you can add a DIMENSION to one pass and project out
+what each operation needs. M12 is that principle applied to the exact case that motivated it.
+
+_high_normal_at computed the closest high-poly point and threw it away, returning only the normal -- the M14
+waste, in one function. Now it returns (normal, hit_point), and displacement = (hit - texel_point) . low_normal
+is read from the SAME cast: one projection, two channels. m.bake_normal_map(displacement=True, max_distance=D).
+
+THE CAGE IS THE ITEM, exactly as M12's audit predicted: bake_normal_map's kept-negative was "no ray-distance
+limit, a far texel grabs a stray normal". For NORMALS that is a shading artefact; for DISPLACEMENT it is a
+SPIKE, because the value moves GEOMETRY. So displacement ships WITH the max_distance cage the normal bake never
+got -- clamp the signed distance, and a stray hit can no longer punch a spike into the mesh.
+
+VERIFIED and PINNED, with the load-bearing invariant first: the normal map is BIT-IDENTICAL with displacement
+ON vs OFF (adding the channel did not perturb the existing bake -- if it had, the shared-projection claim
+would be a lie). Cage clamps hard (0.002 -> 0.002). Signed and sane. Additive: default displacement=None leaves
+every existing caller untouched.
+
+This is ALSO M14 increment 1, proven: the one-cast-many-channels principle works and is pinned. What remains
+of M14 is the optimisation the principle enables -- factor the projection into a standalone mesh_correspondence
+buffer so AO and attribute-transfer read from it too, and refactor the normal path to delegate. That is a
+cleanup now, not a discovery: the hard question ("does reading multiple channels from one cast actually work
+and stay identical?") is answered YES with a bit-identical pin. Full arc still, but de-risked.
+
+Gates 0/0/0/0 (reachability 8 import-only pre-existing); cad 75; semantic+pipeline 76.
+
+## M6 AUDITED -- the census trap resolved: 2 genuine consumers, a REAL promotion, but tie-sensitive
+
+Audited M6 (promote bisect_to_budget) before building, and the census trap resolved cleanly: the ledger's "36
+files match the shape" is 151 files with lo/hi/mid code, but the ACTUAL move -- bisect a monotone f(knob) to a
+numeric target -- has exactly TWO genuine consumers. decimate_to (arithmetic bisection, mid=(lo+hi)//2, integer
+grid, target=faces) and ratedistortion (GEOMETRIC bisection, mid=sqrt(lo*hi), continuous scale, target=cosine
+-- "the largest delta whose mean cosine still meets the target"). nodegraph's lo/hi turned out to be SDF bbox
+CORNERS, not a bisection at all.
+
+So M6 is NOT a homonym (unlike P6/M5) and NOT premature (2 consumers is the threshold where promotion pays) --
+it is a GENUINE promotion. The catch that makes it a fresh-context item rather than a tail patch: the two
+consumers differ in MIDPOINT TYPE (arithmetic vs geometric), which the primitive must PARAMETERISE not flatten
+(the M4/P2 lesson yet again), AND both are TIE-SENSITIVE SHIPPED DECISIONS. decimate_to's grid choice and
+ratedistortion's delta are exactly the kind of bit-identical-critical path the constitution warns about
+("bit-identical to 1e-12 still flips a creature's trajectory"). Extracting decimate_to's best-tracking and
+tolerance-exit logic from its reporting while preserving every tie is delicate; a rushed extraction that
+flips one decimation is strictly worse than leaving it un-promoted.
+
+DID NOT BUILD IT at a context tail -- specified the primitive
+(bisect_to_budget(probe, target, lo, hi, midpoint, max_iters, tol, cmp)) and the LOAD-BEARING acceptance
+(both call sites bit-identical, exact iter count and output pinned before/after) in BACKLOG so the build is
+mechanical next session. The audit IS the deliverable this turn: it turned "36 files, vague" into "2
+consumers, one parameterised difference, two bit-identity pins", which is the difference between a safe build
+and a decision-flipping accident.
+
+Distinguishing the three promotion outcomes this arc, now clear: P6 = HOMONYM (don't fuse); M5 flood = TWO
+primitives (split, don't fuse); M6 bisect = ONE primitive, TWO consumers, parameterised (genuine promotion).
+The audit is what tells them apart, and only the third is a promotion at all.
+
+No code shipped; gates unchanged. cad 75.
+
+## M13 COMPLETE -- the topology instrument rides all six reducing faculties (the owner's ask, fully landed)
+
+Planned first (the owner's instruction), and the plan was what made the execution safe: probed all five
+remaining faculties' RETURN SHAPES before editing (three return bare Mesh -> report rides .topology_report
+beside the existing .silhouette_report convention; two return (Mesh, dict) -> a "topology" key), and captured
+the M6 pin values (decimate_to 768->200 = 186 faces, 4 iters) BEFORE touching anything so drift would be
+caught instantly.
+
+Wired one faculty at a time, file_python_check after each, through ONE shared helper (_topology_check) so the
+rule -- report by default, refuse opt-in, skip on False -- is typed ONCE and cannot drift per faculty.
+VERIFIED across all six: results BIT-IDENTICAL with the instrument on vs off (an instrument that changes an
+answer is a bug); the recorded decimate_to decision unchanged at 186/4; refuse FIRES on a real violation and
+only on one. The violation test is the owner's own rule made executable: voxel_remesh at res 10 on a holed box
+CLOSES the hole (an SDF rebuild does that by nature) -> holes_filled=True -> refuse raises "a scan's holes are
+data". And a clean op under refuse does not raise. My first test premise was wrong (expected voxel res 12 on a
+solid box to violate; a box voxelises cleanly and it PRESERVED) -- the code was right and the test premise
+was the bug, caught by reading the result instead of forcing it.
+
+ONE HARNESS FINDING, fixed deliberately: adding the delta computation nudged one borderline test (13.9s)
+across the harness's 15s auto-skip on a loaded run, making it FLAP between pass and skip by machine load.
+Marked it @pytest.mark.slow explicitly -- a test's status should be a decision, not a coin-flip on CPU
+contention. 75 pass, 2 deliberately deselected.
+
+The owner's original three-part ask is now COMPLETE end to end: (1) islands gated, (2) holes-created AND
+holes-filled gated, both riding every reducing faculty by default as a report and on demand as a refusal;
+(3) normal + displacement baked from one projection. Gates 0/0/0/0 (8 import-only pre-existing);
+cad 75+2 slow; semantic+pipeline 76.
+
+## M6 fully de-risked -- both bit-identity pins captured; extraction is now mechanical (and why I did not rush it)
+
+Did NOT attempt M6's extraction this turn, and the reason is a specific signal worth recording as process
+discipline: two edit-precision slips in recent turns (the walk_knob splice that deleted decimate_to; a BACKLOG
+str-replace whose anchor failed mid-script and had to be redone). For a TIE-SENSITIVE extraction of a
+load-bearing shipped path -- where a single flipped tie in decimate_to's bisection silently changes a
+creature's trajectory -- a run of edit slips is exactly the wrong condition to push under. The safety net (pins
++ restore-from-zip) means a flip would be CAUGHT, not shipped, but "caught after a bad splice" still burns the
+budget the splice-and-restore cycle costs, and the honest call is to not start delicate surgery with an unsteady
+hand.
+
+Instead captured M6's SECOND pin so the next session's build is pure mechanical extraction with both contracts
+in hand: decimate_to(768->200)=186 faces/4 iters (already verified stable through M13), and
+ratedistortion.geometry_preserving_code(seed-0, 40x16, target_cos=0.9999) delta=0.04737815295834658. Also
+noted the shape difference the primitive must accommodate: decimate_to brackets-then-bisects WITH best-tracking
+and a tolerance exit; ratedistortion is a FIXED 28-iteration geometric bisection with NEITHER. So
+bisect_to_budget must make best-tracking/tolerance OPTIONAL, not assume decimate_to's richer loop -- the M4/P2
+lesson (parameterise the real difference) applies to the loop STRUCTURE here, not just the midpoint.
+
+This is the "if additional planning is needed, do it now" instruction applied honestly: the planning that turns
+a risky tie-sensitive edit into a mechanical one IS the work, and recognising when edit precision is degrading
+is part of the measurement-over-narrative discipline pointed at my own execution.
+
+No code shipped; gates unchanged; cad 75+2 slow.
+
+## M6 dry-run -- prototyped the primitive in isolation, found the entanglement as a concrete off-by-one
+
+Rather than accept "M6 is tie-sensitive, defer" as narrative, TESTED it: prototyped bisect_to_budget in
+isolation and ran it against both consumers' inputs BEFORE touching any file. Result: it reproduces
+decimate_to's FACE count (186, exact) but NOT the reported iters (5 vs pinned 4), and the geometric loop ran 29
+vs 28. The face result is right; the ITER ACCOUNTING is where a naive extraction would silently flip a reported
+value, because decimate_to mutates report["iters"] at hand-chosen points and counts the initial probe(hi)
+differently than a generic loop.
+
+So the suspected entanglement is now a CONCRETE, located defect rather than a vague worry: the primitive must
+not own the counter; iter accounting stays caller-side; the primitive guarantees only the face result / delta.
+That is the difference between "defer because scary" and "defer with the exact thing that would have broken
+written down" -- the second is a plan, the first is a shrug. The extraction is still a fresh-context job (it
+edits a load-bearing tie-sensitive path), but it is now mechanical AND it knows the one trap that a
+copy-the-loop extraction would have walked straight into.
+
+This is the measurement-over-narrative discipline turned on the deferral decision itself: I claimed M6 was
+delicate; the prototype proved it, and converted the claim into a specific pin (report["iters"] must stay
+caller-owned) that makes the eventual build safe. No shipped code; the prototype lives only in this note and
+the BACKLOG. Gates unchanged; cad 75+2 slow.
+
+## M6 DONE -- bisect_to_budget promoted; both consumers delegate; both bit-identity pins hold
+
+Built numerics.bisect_to_budget and had decimate_to AND ratedistortion delegate to it. The promotion is real
+because it moved NO recorded decision: decimate_to 768->200 = 186 faces / 4 iters / err 0.07 (stable across
+targets 100/300/500, fraction, guarded path); ratedistortion delta = 0.04737815295834658 exactly.
+
+The two traps the dry-run predicted were both real and both surfaced DURING the build, exactly where prototyped:
+ 1. ITER OWNERSHIP: a primitive-owned counter reproduces the face result but flips decimate_to's reported iters
+    4->5. Fix as planned: the primitive takes on_probe(k, v) and the caller keeps report["iters"], skipping the
+    initial at(hi) just as the historical loop did. iters stayed 4. THIS is why the dry-run mattered -- without
+    it I would have shipped a silent iters regression.
+ 2. KEY: decimate_to probes to a MESH, ratedistortion to a float. The best-track err (abs(cand-target)) blew up
+    on Mesh - int the first time I ran it against consumer 1. Added a `key` param (len(faces) vs identity) --
+    the parameterise-the-real-difference lesson, now with THREE parameters that were genuine differences
+    (midpoint arith/geom, tol vs fixed-iters, key object/scalar) and NONE that were forks.
+
+ONE GATE CATCH worth recording: my catalog entry used semantic="compute", an UNDOCUMENTED taxonomy branch --
+caught by test_semantictag (not by tag_lint/catalog_gaps/skill_lint, which passed). Retagged analyze/measure.
+The lesson: the four fast gates are necessary not sufficient; the integration suite catches taxonomy drift the
+lint gates do not, so "0/0/0/0" is not "done" -- the pytest suites are part of the gate.
+
+This completes the promotion trilogy cleanly: P6 = HOMONYM (audited, refused fusion); M5 = TWO PRIMITIVES
+(audited, split, deferred to build with the loop-walk); M6 = ONE PRIMITIVE, TWO CONSUMERS (audited, promoted,
+both pins held). The audit is what told them apart every time; only the last was a promotion, and it shipped
+without moving a bit of either consumer's recorded behaviour.
+
+Gates 0/0/0/0; cad 76; semantic+pipeline+client 76; numerics selftest + ratedistortion pin green.
+
+## M8 AUDITED -- diagonal-evolution pattern confirmed (~6 sites, 2 time-flavours), verdict stays AUDIT-ONLY
+
+Ran M8 as the explicitly audit-only item (safest possible: no code, just classification). Result sharpens the
+ledger: 59 FFT sites (not 46), of which 53 are PLAIN spectral use and only ~6 share the diagonal-EVOLUTION move
+(FFT -> multiply a per-frequency factor -> invert), in two flavours of ONE pattern -- DISCRETE transfer**k
+(iterate, transformbank, simreadout, dynamics) and CONTINUOUS exp(-t*k2) (fields/diffuse_periodic, reproject).
+The ledger hypothesis "iterate and diffuse grew the same pattern independently" is CONFIRMED, and now bounded
+to exactly those two flavours. backend's **k was a token co-occurrence with no FFT-with-power context, correctly
+excluded by reading the actual block.
+
+VERDICT: audit-only STANDS, and the reasoning is the MIRROR of M6. M6 was a promotion because the shared code
+was LONG (a bracket-bisect-best-track loop) and the consumers FEW (2) -- fusing paid. M8's shared code is SHORT
+(each site is 2-4 lines: rfft, multiply, irfft) and while the sites are few, fusing 6 short correct call sites
+behind numerics.diagonal_evolve(spectrum, factor, k) is a DISCOVERABILITY TAX, not a win -- every reader would
+now chase an indirection to see a 3-line FFT. Filed as a LATENT promotion: revisit only if a third distinct
+consumer appears or one flavour grows complex.
+
+THE RULE this completes: promotion pays when the shared code is LONG and the call sites FEW; it costs when the
+code is SHORT and already clear, however many sites "match a pattern". "6 sites match" is a census, not a
+mandate -- the same census-is-a-hypothesis discipline, now pointed at the promote/don't-promote decision. With
+M6 (promote), M5 (split), P6 (homonym), and now M8 (don't-promote-short-clear-code), the promotion decision
+tree is complete and each branch has a worked example on record.
+
+No code shipped; gates unchanged; cad 76.
+
+## M7 DONE -- the eigensolver promoted; crossfield delegates; phi bit-identical on both routes
+
+Built M7 with the M6 playbook: PIN FIRST (cross_field's phi sha-pinned on the dense 768-face and sparse
+3072-face routes), then extract, then verify the pins. numerics.smallest_eigenpair(matvec, n, c) now owns the
+two-phase shifted-inverse iteration (safe fixed shift -> Rayleigh endgame, CG inner solves, eigen-residual
+exit, stall-is-completion); crossfield keeps only what is Laplacian-SPECIFIC -- the dual-edge matvec and the
+Gershgorin bound -- and delegates. 3.5k chars of iteration deduplicated out of crossfield. Both phi pins hold
+to the bit; crossfield's dense/sparse parity selftests stay green; the primitive independently finds the true
+smallest eigenpair of an arbitrary PSD matvec (1e-6, alignment >0.999, real and complex dtypes), with the
+matvec counter caller-side via on_matvec -- the M6 bookkeeping lesson applied preemptively rather than
+re-learned.
+
+ONE MIGRATION CATCH, instructive: a pre-existing wiring-honesty test asserted the literal string
+"holographic_numerics import cg" inside _sparse_smallest_eigvec -- the P1 promotion's detectable-delegation
+pin. M7 moved that cg call INTO the primitive, so the string left crossfield and the test failed -- correctly,
+because the thing it pinned genuinely changed. The chain is now one level deeper (crossfield ->
+smallest_eigenpair -> cg) and the test asserts each link of the CURRENT chain. The lesson: wiring-honesty
+pins must FOLLOW promotions -- when a delegation deepens, the pin moves with it, asserting the new chain
+link-by-link rather than being deleted or loosened.
+
+The promotion met the M8 rule cleanly: the shared code was LONG (a full two-phase eigensolver) and the sites
+FEW -- the promotion pays, and every measured algorithmic choice now travels in ONE docstring where the next
+consumer (graph spectra, modal analysis, any spectral solve) will find it.
+
+Gates 0/0/0/0; cad 77; semantic+pipeline+client 76; numerics + crossfield selftests green; phi pins
+d2c81dd2847439ed / cee8e1134fd1a71f on record.
+
+## M14 DONE -- correspondence is now a shared buffer, projected many ways (the owner's reframe, realised)
+
+The owner's holographic reframe for M14: a high->low correspondence is ONE projection computed once, from
+which every bake (normal, displacement, AO) and every transfer (uv, attribute) reads a different channel --
+not a projection re-cast per operation. M12 proved the principle in miniature (displacement rode the normal's
+cast); M14 makes it the architecture.
+
+Built build_face_grid + closest_face_point: the uniform spatial hash and ring-expanding closest-point search
+that FOUR sites had copied inline, now one pair. transfer_uv and bake_normal_map's _high_normal_at both
+delegate; the primitive returns (face_index, barycentric, dist2) and each caller interpolates its OWN channel
+(UVs vs normals vs the hit point). Both load-bearing paths BIT-IDENTICAL through the refactor -- sha-pinned
+transfer_uv (out 6f296d80bb12e491, dist 326ba2806dec4bbf) and bake (740e16230c4eb938), and displacement still
+rides it with normal-identity. The one subtlety handled: _high_normal_at kept the closest point `q` from
+_closest_point_barycentric; the shared query returns bary, so I reconstruct the hit point as the bary-weighted
+corner sum -- identical to `q` (which IS that sum), verified by the pin holding.
+
+THE PLAYBOOK held for a MULTI-SITE refactor, not just a single extraction: PIN every affected output first
+(three shas here), build the shared helper, migrate ONE site and verify its pin before touching the second.
+transfer_uv migrated and held; only then bake. Had either pin flipped I would have restored that one file and
+diagnosed, with the other site untouched. This is why multi-site refactors are safe when done pin-first-one-
+at-a-time and dangerous done as a sweep.
+
+REMAINING (now small and opportunistic): two more inline closest-point sites (transfer_attribute, holographic_ai)
+can migrate later, each pinned. The load-bearing two are done and the reframe is realised: m.mesh_closest_point
+is the buffer, and the bakes/transfers are its readers. Faculty + catalog (589, 6/6) + pytest pin + meshtools
+selftests green.
+
+Gates 0/0/0/0; cad 78; semantic+pipeline+client 76; meshtools selftests green; three M14 pins on record.
+
+
+## M11 RESOLVED -- the remainder was a phantom (inherited openness), and the hunt found a real crash
+
+Went to build M11's singular-cluster loop-walk and measured the actual problem first. It dissolved: the
+ladybird's 167 output boundary edges are not extractor-created. The SOURCE going into retopo already had 3268
+boundary edges (a massively open surface scan); the extractor carries that to a coarser 167, creating none.
+DECISIVE TEST: close the scan (fill_holes -> 0 boundary), retopo -> 0 output boundary. The extractor creates
+~no holes on ANY closed input. The loop-walk was chasing INHERITED openness the existing fill_holes handles.
+
+Census-beats-rewrite at its strongest: the from-scratch extraction algorithm was UNNECESSARY, provable in
+three measurements (source 3268, output 167, closed-source output 0). The tell was the ratio -- an extractor
+that PUNCHES holes makes output boundary > input; this one makes it far LESS. I had read 167 as a defect
+without comparing to the 3268 it came from. Compare against the input, always.
+
+BONUS crash: face_frames normalised a zero-area face's normal by zero length -> NaN -> position_field round()
+-> ValueError on any hole-filled/repair-fanned mesh. Fixed with the file's epsilon idiom, but CAREFULLY: my
+first attempt n/(nn+1e-12) shifted every real normal and FLIPPED both phi pins -- restored from zip, redid as
+the EXACT bare divide with only NaN rows overwritten (np.where on isfinite), holding pins bit-identical AND
+making degenerate faces finite. Lesson re-earned: an epsilon in a denominator is NOT free -- it changes every
+value, so a guard must touch ONLY the degenerate rows, verified against the pin.
+
+M11 done; crash fixed and pinned; loop-walk struck from the plan. Gates 0/0/0/0; cad 79; crossfield selftest
+green; phi pins d2c81dd2/cee8e113 hold.
+
+PROCESS NOTE: the heredoc-with-triple-quoted-python failure recurred TWICE this turn (BACKLOG + NOTES edits
+lost to a SyntaxError inside a bash heredoc). Confirmed root cause and the fix that works every time: write the
+edit to a standalone /tmp/*.py file and run it, ONE file operation per script, never chained behind grep -c
+(whose nonzero exit on 0 matches silently aborts an && chain). This is now the only safe way I edit markdown.
+
+
+## M1 INCREMENT 1 DONE -- the graded size field, plus a math self-correction worth more than the code
+
+Started M1 (graded sizing, the paper's hard part) the disciplined way: test the PREMISE before building. Two
+premise checks paid off.
+
+PREMISE 1 (worth building?): ladybird curvature |H| varies 7.8x p90/p50 (max/median ~180x). Uniform lattice
+sizing genuinely wastes faces on the flat elytra and starves the leg joints. M1 is worth finishing -- unlike
+M11's remainder, which measurement dissolved.
+
+PREMISE 2 (the core math): I tested "does |dk|<=1 keep the extractor's integer keys commensurable?" and it
+FAILED -- a level-0 point at ODD multiples of rho0 is a HALF-integer in the 2x-coarser lattice. That looked
+like a refutation of the plan. But I asked the wrong question: the extractor needs CELL WALLS to align, not
+arbitrary points to be commensurable. 2^k lattice walls are NESTED (every coarse wall is a fine wall) for ANY
+dk -- verified. So cells align; the level boundary produces a HANGING NODE (a fine wall interior to a coarse
+cell), and |dk|<=1 caps that to ONE hanging node per coarse edge instead of three. The balance rule is about
+STITCH SIMPLICITY, not commensurability. My first framing was wrong and is kept as a NOTE in graded_levels'
+docstring -- the correction reframes increment 3 precisely (the T-junction stitch inserts the one hanging-node
+midpoint into the coarse loop).
+
+BUILT graded_levels(mesh, target_edge, rho0): seed k from the target (fine target -> high level), then
+2:1-balance via a LOWERING-ONLY relaxation (only ever drop a level toward its neighbour; monotone, bounded by
+k_min, so it terminates deterministically -- a raising scheme could oscillate, kept as a negative). Verified
+|dk|<=1 from a 4-level-apart target, grades toward the fine side, rho=rho0*2^k. This is the FOUNDATION the
+graded operator (increment 2) and T-junction stitch (increment 3) consume, and it is pinned before either is
+built -- the same build-the-verifiable-foundation-first move that made M14 safe.
+
+THE LESSON: a failed premise test is not a stop sign -- it is a prompt to check whether you asked the right
+question. My "commensurability" test failed correctly and taught me the real invariant (wall nesting), which
+is a better foundation for increments 2-3 than the plan's original framing. Measurement over narrative, turned
+on my own plan.
+
+Gates 0/0/0/0; cad 80; crossfield selftests (guided/graded/retopo) green; phi pins d2c81dd2/cee8e113 hold.
+
+
+## M1 INCREMENT 2 DONE -- the graded operator + level-keyed extraction, as strict supersets
+
+Built the harder half of M1 the safe way: prove the graded form REDUCES to the uniform form bit-identically
+before touching the pinned path. In isolation, the graded jump (rho_e = rho0*2^max(k_i,k_j)) with all levels
+EQUAL is exactly the uniform jump (a single constant rho0*2^k) -- every round() and acc identical. So both
+edits (position_field's operator, extract_quads' key) are additive strict supersets: levels=None keeps the
+uniform path, and only the graded branch is new.
+
+VERIFIED four ways: levels=None == uniform (surface_retopo pin 328/0 holds); levels=all-zero == None; a
+UNIFORM level k == position_field at rho0*2^k exactly; VARYING levels produce a valid closed adaptively-sized
+mesh (299/0.70 vs 368/0.84 uniform on the split box). The level joins the extraction key as a DISTINCT AXIS
+(x,y,z,level) so nested-but-distinct lattices never merge -- the boring-axis-elevation move (a constant-delta
+axis is a carrier, not bound into content) applied to the size level.
+
+HONEST NEGATIVE kept loud: graded quad_fraction DIPS below uniform (0.70 < 0.84) here. That is EXPECTED without
+increment 3 -- the un-stitched level boundaries triangulate. I did NOT tune the extractor to hide that (the
+constitution's rule: never raise quad_fraction by hiding triangles). The mesh is valid and closed, which is
+what increment 2 guarantees; the T-junction stitch (increment 3) is the quad-quality fix, and its input (one
+hanging node per coarse edge, guaranteed by the |dk|<=1 balance) is now built and pinned.
+
+The build-on-a-pinned-foundation discipline held across THREE increments now: graded_levels (inc 1) pinned
+before the operator; the operator's uniform-reduction proven before the pinned position_field was touched; the
+level key added additive-default-off. Each layer verified before the next sat on it -- which is why a
+multi-part construction on the retopo's most tie-sensitive path moved zero recorded decisions.
+
+Gates 0/0/0/0; cad 81; crossfield selftests (guided/graded/retopo) green; surface_retopo pin 328/0 and phi
+pins d2c81dd2/cee8e113 all hold.
+
+
+## M1 INCREMENT 3 -- researched, and the "deficit" it was meant to fix was a WRONG-BASELINE ARTIFACT
+
+Planned increment 3 (the T-junction stitch) properly before building, and the research dissolved most of it --
+the third time this session a scary remaining item shrank under measurement (after M11's phantom holes and the
+fit_camera 4x).
+
+The chain: graded quad_fraction read 0.70 (89 triangles) vs uniform 0.84 (60 tris), and I filed a ~29-triangle
+"deficit" for the stitch to fix. Research steps, each narrowing it:
+ 1. Level-boundary structure: 68 cross-level edges, all |dk|=1 (balance holds); a coarse cell abuts up to 3
+    fine cells (mean 1.8) -- so the plan's "always a 5-gon" was wrong, it can be a 5/6/7-gon.
+ 2. Only 9 faces dropped at boundaries; 59 cross-level faces already kept. Small.
+ 3. Prototyped a coplanar-convex tri-pair merge on the output: merged ZERO pairs. The remaining tris are NOT
+    naively mergeable.
+ 4. THE DECISIVE BASELINE CHECK: I had compared graded (mostly COARSE) against the FINE-uniform mesh. But
+    COARSE-uniform ALONE has 87 triangles (coarser lattice -> more tris per quad at the field's singular
+    cells). Graded's 89 is ~ the coarse-uniform count; the true boundary excess is only ~16, and those ~16
+    are genuine level-boundary transitions where a flat quad would DISTORT the surface (the T-junction being
+    correct, not defective).
+
+CONCLUSION: M1's functional goal -- adaptive sizing that refines where curvature is high without breaking the
+extractor -- is MET by increments 1+2. The graded mesh is valid, closed, and its quad fraction is APPROPRIATE
+for its mixed resolution. Comparing it to the fine-uniform quad fraction was the error. "graded quad_fraction <
+uniform" is NOT a defect -- it is the wrong comparison, the SAME wrong-baseline mistake as fit_camera's "4x"
+and M11's "167 holes". The right baseline is a uniform mesh at the same mixed resolution, against which graded
+is on par.
+
+What remains of inc3 is OPTIONAL cosmetic n-gon insertion at ~16 transitions, which improves neither
+correctness nor fidelity -- filed as a kept "possible but doesn't pay", not built. THE LESSON, yet again and
+now unmissable: before building a fix for a metric gap, verify the BASELINE is the right one. Three times this
+session a "gap" was a baseline artifact. The discipline is now a reflex: a deficit vs baseline X is a claim
+about X as much as about the code.
+
+Gates 0/0/0/0; cad 81; crossfield selftests green; all pins hold. M1 is functionally COMPLETE at increments
+1+2.
+
+
+## M9 INCREMENT 1 DONE -- the skeleton is the correspondence machine wearing a new costume
+
+Opened M9 (the biggest item, skeletonizer + creature detection) the disciplined way: test the riskiest premise
+before writing a module. The skeleton half rests on "medial axis = ridge of the interior distance field" -- so
+I built that field from EXISTING pieces and checked it on a cylinder (whose medial axis is exactly its
+centerline). The ridge landed at radial distance 0.02 on the axis and spanned the height. Premise confirmed;
+only then wrote holographic_skeleton.
+
+THE GENERALISE-ON-CONTACT WIN: the skeleton is NOT a new machine. Distance-to-surface is M14's shared
+correspondence (closest_face_point -- the same one the bakes and transfers use); inside/outside is voxelize's
+generalised winding number. mesh_skeleton is those two sampled on a grid with a local-maximum filter. The
+correspondence buffer I factored two turns ago for the bakes turned out to be the skeleton's distance oracle
+too -- exactly the "which existing module is this in a different costume?" habit paying a second dividend.
+mesh_skeleton returns {points, depth=medial radius}; interior_distance_field exposes the field for thickness
+analysis. Validated on the real ladybird (46 ridge points, deepest at the body core).
+
+KEPT NEGATIVE, loud in the module docstring AND the selftest: this is a VOXEL ridge -- resolution-limited and
+not guaranteed connected. The true curve skeleton is a connected 1-D graph; a grid ridge approximates it. The
+graph-thinning collapse is increment 2, filed not built -- calling the voxel ridge a clean 1-D curve would
+overclaim, so the honest name is "the deep interior voxels".
+
+The premise-test-first discipline has now shaped every hard item this session: M1 (curvature varies 7.8x ->
+worth building; commensurability self-correction), M11 (holes were inherited -> dissolved), inc3 (deficit was
+a baseline artifact -> dissolved), M9 (ridge IS the centerline -> build it). Two dissolved, two built -- and
+the test is what told them apart each time. This is the opposite of guessing from the plan.
+
+Gates 0/0/0/0 (8 import-only pre-existing); cad 82; semantic+pipeline+client 76; skeleton selftest green.
+M9 increment 1 (the medial-axis field + ridge) done; increments 2 (1-D curve) and 3 (creature detection via
+VSA archetype resonance) build on it.
+
+
+## M9 INCREMENT 2 DONE -- ridge to a curve, and the cheap hypothesis beat the heavy one again
+
+Collapsed the medial-axis ridge to a 1-D curve. Measured the ridge's graph structure FIRST: one connected
+component (good) but a THICK cloud -- degrees 7-11, not a thin degree-2 path. So the obvious approach (walk the
+neighbour graph) fails; the ridge is a fat tube, not a curve.
+
+Rather than reach for morphological thinning (a heavy kernel), tested the cheaper hypothesis the structure
+suggested: within a single connected limb the ridge is a tube around ONE axis, so order the ridge points along
+their PRINCIPAL AXIS (PCA) and average cross-section bins. On a cylinder this collapses to a PERFECTLY straight
+line on the axis -- radial 0.000, straightness residual 0.0000. Deterministic, NumPy-only, no thinning kernel,
+no learned step. That is skeleton_curve.
+
+KEPT NEGATIVE, measured not guessed: single-axis PCA-collapse is a SINGLE-BRANCH tool. I built an L-shaped bent
+tube fixture and measured the failure -- one global PCA axis cuts the corner (residual 0.478). So a bent or
+branched skeleton needs branch SEGMENTATION first, then skeleton_curve per branch. I scoped increment 2 to what
+is robustly correct NOW (the per-branch collapse, exact for limbs) and documented the boundary with a real
+measurement rather than shipping a whole-creature curve that would silently cut corners. The primitive is
+precisely the per-branch call that increment 2-plus (segmentation) will make.
+
+The measure-first-then-take-the-cheap-path pattern held once more: I did not build thinning; I built the
+projection the geometry made obvious, verified it exactly, and fenced its limit with a measurement. Every hard
+item this session went through the same gate -- and the gate keeps steering toward the smaller correct build.
+
+Gates 0/0/0/0 (8 import-only pre-existing); cad 82 (+1 timing-skip, pre-existing); integration 76; both
+skeleton selftests green. M9 at increments 1+2; increment 3 (creature detection via VSA archetype resonance)
+is the VSA-meets-geometry research, on a pinned skeleton foundation.
+
+
+## M9 DISCOVERABILITY HARDENING -- audited the skeleton caps the way a STRANGER searches, closed 3 gaps
+
+Checked the three skeleton capabilities against STRANGER phrasings (not my registered aliases) and found real
+gaps: "where is the spine of this model", "find the bones inside a character", and "how thick is this part at
+each point" all MISSED -- the words spine/bones/thick were nowhere in the aliases, and interior_distance_field
+had no catalog entry of its own (it only rode along on mesh_skeleton's). Deep wiring was already sound (all
+three are faculties that DELEGATE, all documented -> auto-introspected into GET /tools, module resolves), but
+"wired" is not "findable". A capability a user cannot phrase their way to is siloed in practice even if the
+audit passes.
+
+FIXED: broadened mesh_skeleton aliases (spine, bones-inside-a-character, medial surface, auto-rig) and
+skeleton_curve aliases (reduce-a-limb-to-a-line, trace-the-middle, spine-polyline); and gave
+interior_distance_field its OWN catalog entry as a THICKNESS/wall field ("how thick is this part") rather than
+leaving it as the skeleton's internal step -- it answers a distinct user question. Re-ran the exact failing
+audit: 0/12 misses, including two new probes (wall thickness, auto rig a character skeleton). All four gates
+still 0/0/0/0; skill_lint confirms 0 inert aliases and the new example runs; HTTP /tools sees all three.
+
+THE PRINCIPLE, reinforced: the aliases must come from the USER'S mouth, not the implementer's. I registered
+6/6 on MY phrasings and still missed the three most natural ways to ask -- because I was phrasing like someone
+who knew the code. Rule 0 works in both directions: probe with stranger phrasings before building AND after,
+and treat a miss as a wiring bug, not a user error. interior_distance_field is the reminder that a faculty
+without its own catalog entry is half-wired: reachable by the audit, invisible to the search.
+
+
+## RENDER-EXERCISE FOLLOW-UP -- the "loader bug" was a MISDIAGNOSIS; the real gap was a missing pointer
+
+Went to fix the "GLB importer drops textures" bug I flagged after rendering the three creatures. It was NOT a
+bug. Measured it properly: load_glb DOES attach the embedded texture -- base_color_map is a full TextureMap
+(mantis 4096^2, crab 1024^2 + 4096^2) with the image in [0,1]. My original diagnosis read mat.base_color (the
+grey FACTOR) and did np.asarray(base_color_map).shape, which returns () for a TextureMap OBJECT, not an array
+-- so I concluded "empty" when the texture was there all along. Measure before declaring a bug: the same
+discipline that dissolved M11 and inc3, now applied to my own bug report.
+
+WORSE (for my process): preview_asset ALREADY does the whole one-call textured render -- import, coverage-based
+material pick, 8-bit normalise, auto-frame, textured raster -- and does it BETTER than what I hand-rolled during
+the render exercise (I reinvented it from render_mesh up because I never Rule-0'd the preview path). Verified:
+preview_asset renders all three creatures textured in one call. The exercise's manual buffer-extraction was
+pure reinvention of an existing, more capable faculty.
+
+THE ONE REAL GAP, and it is genuine: preview_asset works from a FILE PATH, so a mesh I DECIMATED or
+RETOPOLOGISED myself (no path) could not reuse its texture pick -- and there was no helper returning
+render-ready (texture, uvs) from a LOADED mesh. That is exactly what I hand-extracted. FIXED by factoring the
+material-pick + normalise out of preview_asset into asset_base_texture(loaded_mesh) -> (texture, uvs,
+base_color); preview_asset now DELEGATES to it (pins 69a3bff7 / 4d622b42 held bit-identical -- behaviour
+preserving). Faculty m.asset_base_texture; catalog 597, 6/6 on the phrasings I'd actually have used mid-task.
+
+KEPT OBSERVATION (a real writer asymmetry, filed not fixed): mesh_to_glb does NOT embed a texture from
+material.base_color_map alone -- it needs the explicit texture= arg. The READER attaches to base_color_map, the
+WRITER ignores it. My selftest hit this (first fixture passed only material=, got no texture back on reload);
+the working _selftest_preview passes texture= explicitly. Filed as an asymmetry to close in a future pass; not
+this session's item.
+
+LESSONS: (1) Rule 0 the HIGH-LEVEL faculty before building up from primitives -- preview_asset existed and I
+missed it. (2) A bug report is a hypothesis; measure it before writing the fix -- mine was wrong. (3) The real
+improvement was still there underneath: the one-call path could not serve a self-derived mesh, and now it can.
+
+Gates 0/0/0/0 (8 import-only pre-existing); cad 84; integration 76; preview_asset pins held; new selftest green.
+
+
+## M5 RESOLVED -- the flood primitive was already built; the plan mis-measured it twice
+
+Went to build M5's two flood primitives (graph_flood + grid_flood). Census-beats-rewrite dissolved it, and
+caught two wrong premises in the existing plan entry along the way:
+
+1. The graph flood ALREADY EXISTS: holographic_island.connected_components(n_nodes, edges) is the canonical
+   primitive -- its docstring literally says 'the generic flood fill under every island in the engine' and
+   route.connected_components already DELEGATES to it. The plan said 'build graph_flood'; it was built.
+
+2. silhouette_mask's border flood is 4-CONNECTED, not 8. The plan (and my own compaction summary) said the
+   silhouette flood was 8-connected and pinned, and that a connectivity default would flip it. I read the code:
+   it is a vectorised array-shift dilation -- up/down/left/right only, no diagonals, no per-pixel stack. There
+   is no exposed connectivity knob to promote, and nothing to flip. A pinned-path worry built on a misread.
+
+3. The two remaining inline graph-floods do not delegate cleanly. meshseam's excludes seam edges while
+   building adjacency (set-based). meshtools' is a HOMONYM: it looks like a flood but carries per-face
+   winding-FLIP state computed during traversal (each neighbour's flip depends on its shared-edge direction;
+   order is load-bearing via seed_face). connected_components has no per-node walk-state, so forcing delegation
+   would flip the pinned orientation result. Kept negative -- the same homonym check as P6/P7.
+
+THE ONE REAL WIN: island.connected_components had no direct faculty. 'flood fill a graph' surfaced 'Islands +
+sleep' (a simulation concept), not the reusable primitive, and there was no m.-method. Wired
+m.graph_connected_components as a thin delegate (no new logic) + catalog 577, 6/6. So M5's honest outcome is
+identical in shape to P8/M8: the promotion the plan imagined was mostly already done or a homonym, and the
+actual deliverable was DISCOVERABILITY of the primitive that already existed.
+
+RULE REINFORCED: a backlog entry's stated measurements are themselves hypotheses to re-check. Two numbers in
+M5's own filing (graph_flood needs building; silhouette is 8-connected) were wrong, and both fell to reading
+the live code. The plan is not ground truth; the code is.
+
+Gates 0/0/0/0 (8 import-only pre-existing); cad tests green (M5 faculty pinned); integration 76; the pinned
+silhouette masks untouched (nothing was promoted into that path).
+
+
+## RENDER GRID FIX -- both failures were MY pipeline's usage, not the engine (third time this pattern)
+
+Moose flagged the retopo column as trash and the LOD column as untextured. Diagnosed both before re-rendering:
+
+LOD UNTEXTURED: mesh_decimate_to(keep_uv=True) works PERFECTLY -- but it needs the uvs attached to the input
+MESH as .uvs, and returns them as .uvs. My render pipeline built the Mesh WITHOUT uvs and then read .uv (the
+LoadedMesh attribute name), so keep_uv had nothing to carry and I read the wrong attribute back. Two usage
+errors stacked. Fix: attach uv to the Mesh (Mesh(..., uvs=uv)) and read lod.uvs. keep_uv then carries them and
+the LOD renders textured.
+
+RETOPO TRASH: two causes, both mine. (1) DENSITY INVERTED -- I had CONFIG densities backwards; higher density =
+LARGER cells = FEWER faces (density 0.6 -> 16.7k faces, 2.0 -> 3.1k). My original grid used a coarse density
+giving ~2.2k faces on a thin mantis, so the quad lattice scattered along the near-1D legs. (2) I retopo'd off
+the coarse LOD. Fix: density ~1.0-1.1 gives dense retopo (mantis 3.5k, ladybird 6.9k, crab 8.2k) that holds
+together, quad fraction 0.44-0.51. The UV TRANSFER was never the problem -- residual mean 0.0000 max 0.0011,
+the retopo lies exactly on the original surface. It only LOOKED like trash because the geometry was too sparse.
+
+RESIDUAL HONEST LIMIT (kept, not hidden): the mantis retopo still thins on the finest leg tips -- mantis legs
+are near-1D and a quad lattice cannot fully wrap them at any reasonable face budget. That is geometry, not a
+bug; documented rather than tuned away.
+
+THE PATTERN, now THREE times in a row (loader 'bug', preview reinvention, this): the engine was right, my
+USAGE was wrong, and measuring before re-rendering found it. But there is a real ergonomic trap worth a future
+hardening: the .uv (LoadedMesh) vs .uvs (Mesh) attribute split is a foot-gun -- keep_uv silently no-ops if the
+uvs are not on the Mesh, and reading the wrong name gets None with no error. A future pass could make
+mesh_decimate_to warn when keep_uv=True but the input carries no uvs, and/or unify the attribute name. Filed,
+not built (it is a usability fix outside this session's item).
+
+No engine code changed this turn -- the fix was entirely in the render pipeline's usage. Renders regenerated:
+all three LODs textured, all three retopos dense textured quad meshes.
+
+## RENDER GRID FIX -- ADDENDUM: the keep_uv "foot-gun" is actually well-handled; the engine was right again
+
+Followed up on the keep_uv trap I flagged and found the engine ALREADY handles it correctly and self-documents.
+keep_uv='auto' (the default) deliberately SKIPS uv transfer on a FRAGMENTED atlas -- the three photogrammetry
+scans have median 1.0 face per uv island, and a per-vertex transfer onto that scatters uvs as confetti (the
+exact bug the 'auto' branch was built to prevent, measured: 90% of faces across island boundaries). And it sets
+lod.uv_transfer_report with skipped=True, the median, and the remedy ('use meshtools.rebake_texture, or
+keep_uv=True to force'). My original pipeline just ignored that report. keep_uv=True (what my corrected
+pipeline used) forces the legacy transfer, which is fine here because I ALSO transfer_uv explicitly with
+verified-tiny residual. So there is NO code fix -- the proposed 'warn when keep_uv drops uvs' already exists as
+uv_transfer_report, and 'auto' is smarter than a warning (it refuses the scramble outright). Fourth instance
+this session of "the engine was right, my usage was wrong": loader texture, preview reinvention, density
+inverted + wrong attribute name, and now the keep_uv report I overlooked. The meta-lesson: when a leCore call
+returns a report dict, READ it -- it is usually already telling you what I was about to 'fix'.
+
+## TEXTURE QUALITY -- Moose was right: fragmented atlas needs REBAKE, and mesh_textured_lod already routes it
+
+Moose observed the retopo/LOD textures look "ok in spots, not properly textured overall" and hypothesised the
+modified mesh needs a FRESH UV MAP before reprojection (to kill poorly-formed UVs / wasted space). Diagnosed and
+confirmed -- the hypothesis is exactly right, and quantified WHY:
+
+ROOT CAUSE (measured): my render pipeline transferred the ORIGINAL scan's per-vertex UVs onto the retopo. But
+the scans have FRAGMENTED atlases -- uv_atlas_report on the transferred retopo: 146 islands, 78.8% TINY islands,
+median island area 3.9e-7, transferable=FALSE. When a retopo face's three corners land in three unrelated
+1-face islands, the face samples texture from three disconnected parts of the map -> confetti. "OK in spots" =
+faces inside the one big island; "garbage" = faces straddling the 78% tiny fragments. The scans are worse than
+I knew: the mantis has 4079 uv islands at median 1.0 face each.
+
+WHY FRESH-UNWRAP ALONE IS NOT ENOUGH (measured, a subtlety past the initial hypothesis): retopologising an OPEN
+scan produces a mesh that is itself FRAGMENTED -- the mantis retopo is 65 disconnected surface components (one
+1169-vert body + 52 shards <5 verts). A UV unwrap can only pack what the surface gives it, so unwrapping the
+raw retopo still yields ~65 islands. On the LARGEST connected component alone, a fresh LSCM unwrap gives
+islands=1, tiny_frac=0.00, transferable=TRUE -- clean. So fresh-unwrap pays off ONLY on a connected mesh.
+
+THE ENGINE ALREADY HAD THE RIGHT ANSWER (fourth time this session). rebake_texture builds its OWN per-face
+atlas and paints the source colour in per texel via closest-point projection -- topology-independent BY
+CONSTRUCTION, straddle-free, no dependence on the source atlas being coherent. And mesh_textured_lod is the
+ONE-CALL wrapper that ROUTES BY MEASUREMENT: uv_atlas_report decides -- coherent atlas -> cheap transfer,
+fragmented atlas -> rebake. On the mantis it auto-detected 4079 islands and chose REBAKE, projection distance
+mean 0.0001, straddle-free. My render script hand-rolled transfer_uv and never checked the report, so it took
+the wrong route silently -- the exact failure textured_lod's docstring says it exists to prevent ("speckled
+confetti with no error raised ... exactly what happened to a mantis scan").
+
+RESOLUTION: the render pipeline should call mesh_textured_lod (or check uv_atlas_report and rebake when
+transferable=False), NOT transfer raw UVs. No engine change -- the routing faculty already exists and works.
+KEPT NEGATIVE: rebake is SLOW (M10 perf wall: ~a projection per texel; mantis 6k faces @1024 = 43s; the
+ladybird at 151k source faces blows the interactive budget). So the rebake route is correct-but-costly; the
+M10 batch-axis perf work is what makes it practical at scale. Filed against M10, not this turn.
+
+META (now 4x): loader texture, preview reinvention, keep_uv report, and now textured_lod routing -- each time
+the engine already had the correct, measured path and I hand-rolled a worse one. The reflex to build now
+firmly includes: search for the ONE-CALL faculty first, and READ the report a call returns.
+
+## RETOPO SHARDS -- Moose was right again: the retopo problem is MESH, not texture. Built drop_small_components
+
+Moose observed the rebake fixed the LOD but the retopo still looked messed up, and hypothesised it might be the
+MESH not the texture. Correct. Rendered the retopo FLAT-SHADED (no texture) and measured it: 88 connected
+components (one 90%-of-verts body + ~75 shards of <5 verts) plus 26 ZERO-AREA degenerate faces. A field-guided
+quad extractor drops isolated cells; the coherent body is fine, the debris is speckle. Texture was innocent
+(projection distance 0.0001, straddle-free) -- the geometry was shattered.
+
+Ruled out the easy explanations by measurement: (a) NOT open-boundary -- closing the scan first (fill_holes,
+18089 boundary edges -> 0) left the component count UNCHANGED. (b) NOT a simple resolution knob -- denser retopo
+gave MORE components (203 at density 0.8), not fewer, though the largest stayed ~90%. So the shards are a
+persistent extraction artifact, and the honest fix is to REMOVE them, keeping the coherent body.
+
+BUILT drop_small_components(mesh, keep_largest| min_faces| min_fraction) in meshtools -- generalise-on-contact
+on the graph flood I wired last turn (holographic_island.connected_components). keep_largest collapses the
+mantis retopo 102 -> 1 components, dropping 353 shard faces (3.5%), carrying uvs through the remap. Faculty
+m.mesh_drop_small_components; catalog 565, 6/6; semantic modify/filter (modify/mesh was undocumented in the
+taxonomy -- the integration test caught it, retagged). Selftest + cad pin green.
+
+THE FULL CORRECT RETOPO-TEXTURING PIPELINE is now: retopo -> triangulate -> drop_small_components(keep_largest)
+-> rebake_texture (route by uv_atlas_report). Each step earned by a measurement: the shards (flat render + 88
+components), the fragmented atlas (transferable=False), the rebake (straddle-free). What LOOKED like one "bad
+texture" was two distinct real problems -- a shattered mesh and a fragmented atlas -- and Moose's instinct
+separated them correctly at each step.
+
+KEPT NEGATIVE (loud in the docstring): drop_small_components only REMOVES; it cannot reconnect a body the
+extractor split into pieces (e.g. sub-cell-width mantis legs). Reconnecting those needs a denser field or a
+different extractor, not cleanup. So the mantis body cleans up perfectly; its thinnest leg tips, if the
+extractor dropped them into shards, are removed rather than repaired -- honest, not hidden.
+
+Gates 0/0/0/0 (8 import-only pre-existing); cad 86; integration 76. The graph-flood primitive paid a second
+dividend as the shard-cleanup's engine -- exactly the "which other modules should now delegate to this" habit.
+
+## PROCESS_SCAN -- Moose specified the correct pipeline; built it as one faculty with four workflows
+
+Moose called the ad-hoc results awful and specified the correct order: (1) repair the ORIGINAL mesh, (2) retopo
+the REPAIRED mesh, (3) LOD (unsure if a second retopo is needed), (4) fresh UVs for the new model, (5)
+reproject the original texture -- plus four workflow variants (retopo+lod / retopo only / lod only / neither).
+He was right on every count, and his step-3 uncertainty resolved to a measured YES:
+
+MEASURED before building: decimating a clean retopo'd body RE-SHATTERS it (1 -> 38-46 components) AND stalls on
+the silhouette guard (budget_missed_for_silhouette=True, 12.6k -> only 10.7k faces) -- the decimator honestly
+refuses a budget that would break the silhouette of thin limbs. A COARSER RETOPO instead is clean BY
+CONSTRUCTION (3116 faces, 1 component). So in the retopo workflow, LOD = second coarser retopo (density scaled
+by sqrt(current/target) since faces ~ 1/density^2); in the no-retopo workflow, LOD = QEM decimation. Moose's
+"maybe we need to retopo again" instinct was exactly the right call.
+
+ALSO MEASURED: repairing the ORIGINAL first (his step 1) dramatically improves the retopo itself -- 4
+components before cleanup instead of 88 when retopo ran on a decimated copy. The previous awful results came
+from my wrong order (decimate -> repair -> retopo) plus transferred fragmented uvs; the correct order fixes
+most of the shattering at the source.
+
+BUILT process_scan(mesh, uv=, texture=, retopo=, lod=, density=, bake_size=) in meshtools: repair -> [retopo]
+-> [lod via coarser-retopo | qem] -> [shard cleanup] -> [fresh per-face atlas + rebake]. Four workflows via
+two flags, each stage's numbers in the report. End-to-end on the mantis: repair 11010 -> retopo 6435 (quad
+0.57) -> cleanup 4->1 comps -> rebake coverage 0.88, projection 5e-05; the render is one coherent surface (96%
+of fg pixels in a single blob). Faculty m.process_scan; catalog 593, 6/6; semantic analyze/pipeline; selftest
+pins the four-workflow routing; cad test pins routing + the textured path. numpy 2.x note: ndarray.ptp() is
+gone, use np.ptp(a, axis=).
+
+Gates 0/0/0/0 (8 pre-existing); cad 87; integration 76. The pipeline composes five existing faculties in the
+order the measurements demanded -- the orchestration was the missing piece, not the stages.
+
+## HOLOGRAPHIC PIPELINE AUDIT — Moose: "slow = traditional, find the VSA move." Measured the whole pipeline.
+
+Moose's architectural principle: every slow stage is a traditional implementation of a move the engine already
+does holographically under another name. Profiled the scan pipeline end to end and Rule-0'd each hot loop
+against VSA primitives. Full findings in BACKLOG_holographic_pipeline.md (H1-H6). The measured headline:
+
+**H1 — rebake is scatter/gather in disguise, and the win is real (~1500×).** rebake_texture's hot path is a
+per-face×per-candidate closest-point loop: profiled 1.05M closest-point calls / 142s cumulative at 512². A
+texel->source-colour lookup is exactly `gather` reading a `scatter` bundle (holographic_transfer's adjoint
+pair). SCATTER source-vertex colours into a volumetric grid keyed by 3-D position, GATHER at target texels:
+measured 0.02-0.06s vs 46-62s, mean colour error 0.066-0.088 RGB (visually close). Bleed risk (two walls per
+cell) is 8% at GR=96 but 0% at GR>=160 — a grid fine enough to separate opposite faces is bleed-free and still
+bakes in 0.03s. VERDICT BUILD (default-off, thickness-routed: volume bake on the body, surface projection on
+sub-cell legs). This is the cleanest confirmation yet of the principle: the closest-point loop was a hand-rolled
+scatter/gather.
+
+**H2 — position_field (13s of 17s raw retopo) is a triple-nested Python Gauss-Seidel sweep.** The IFAM 4-PoSy
+operator is a weighted graph diffusion + per-edge integer-lattice snap — a propagate-over-a-graph move. The
+linear averaging is a sparse matvec (the eigenpair machinery cross_field already uses); the integer snap is
+nonlinear and the sweep is Gauss-Seidel, so naive vectorisation changes the fixed point. VERDICT INVESTIGATE:
+measure Jacobi(batched)-vs-GS lattice agreement before building; a flip of the pinned retopo is a kept-negative.
+
+**H3 — HoloForest index for nearest-point: premise REFUTED for the bake.** recall/HoloForest find nearest of a
+DISCRETE codebook by cosine; the bake needs nearest CONTINUOUS surface point + barycentric uv. H1's
+scatter/gather already solves that stage with less machinery. DON'T-BUILD for the bake; the general enabler is
+H5 (a proximity-preserving position encoder), filed separately.
+
+**H4 — the silhouette guard re-runs the WHOLE retopo up to 6×** when only the extraction density changes.
+Bake-once/sample-many: solve the orientation field once, re-extract per density. VERDICT BUILD reuse_field so
+the guard's retries are cheap re-extractions, not full re-solves (pins must stay bit-identical).
+
+**H5 — proximity-preserving position encoder (R^3 -> hypervector, cos monotone in -dist)** is the missing
+bridge: with it EVERY nearest-point query (rebake, shrinkwrap, closest_point, ICP, PnP, correspondence) becomes
+`recall` with HoloForest sublinear scaling. Rule-0 seed: Encoders (number to vector). VERDICT RESEARCH flagship
+— "every closest-point is a recall," the geometric twin of "IK/PBD/PnP/resonator are all iterate a projection."
+
+Priority: H1 (ship first, low risk) > H4 (1 solve not 3) > H2 (needs the Jacobi measurement) > H6 guard verify
+> H5 research. Every item carries its kill-switch measurement; none to be built blind.
+
+NO ENGINE CODE CHANGED this turn beyond the earlier in-flight process_scan silhouette guard (verified runs,
+pins hold; its silhouette_iou report plumbing is H6's verify item). This was an audit + backlog turn.
+
+## H1 SHIPPED — rebake_texture method="scatter": the closest-point loop WAS a hand-rolled scatter/gather
+
+Built the top backlog item. rebake_texture now takes method="project" (default, bit-identical to before, pins
+hold) and method="scatter" (the holographic fast path). The scatter path: sample source colour at each source
+vertex uv, SCATTER it into a volumetric grid keyed by 3-D position (holographic_transfer.scatter), GATHER the
+colour at every texel's 3-D point in one vectorised call (gather). No per-face closest-point loop.
+
+WHY SCATTER COLOUR NOT UV (the load-bearing design choice): colour is CONTINUOUS across the surface even when
+the source atlas is fragmented (median 1 face/island) -- which is the whole reason rebake exists. Scattering uv
+would reintroduce the confetti transfer_uv fails on (a texel between two 1-face islands averages uv 0.9 and 0.1
+into 0.5). Colour has no seams, so the volume bake is safe on exactly the atlases that break uv transfer.
+
+MEASURED: on the mantis (14396-face target, 512-768 atlas) the scatter itself is ~0.5s vs a 92s projection
+bake; end-to-end incl. the texel gather it was 2.54s = 36x here (the ~1500x figure is the scatter step alone;
+the gather over 500k texels is the remaining cost, itself a future batch target). Coverage identical (0.995),
+colour diff project-vs-scatter 0.089 RGB, renders visually indistinguishable on the body.
+
+KEPT NEGATIVES, pinned in the selftest (tested on a DENSE source, interior-only, because these ARE the limits):
+(1) quality is bounded by SOURCE VERTEX DENSITY, not texture resolution -- a low-poly source with a high-res
+texture loses detail (the 4-vertex quad corner error was 0.5; that's the negative, not a bug); (2) two walls
+within one grid cell bleed -- the grid auto-sizes to ~2x the source resolution to keep cells sub-wall (0% bleed
+at GR>=160 measured), raise grid= if a thin feature smears. Both are why project stays the DEFAULT and scatter
+is opt-in for dense scans.
+
+Wired: method= + grid= on rebake_texture and m.mesh_rebake_texture; bake_method= threaded through process_scan
++ m.process_scan (+ silhouette= exposed on the faculty, which the guard edit added). Catalog entry "Holographic
+texture bake (scatter/gather fast path)" 599 chars, 6/6 discoverable. Gates 0/0/0/0; cad 88; integration 76.
+The cleanest confirmation of Moose's principle so far: the slow loop was literally a scatter/gather written out
+by hand.
+
+## H4 SHIPPED — but its ORIGINAL premise was wrong; the real lever was the iteration plateau, not field reuse
+
+H4 was filed as "the guard re-solves the whole retopo N times; reuse the orientation field." MEASURED and
+REFUTED: the orientation field (cross_field + vertex dirs) is only 1.1s = 8% of a solve. The cost is
+position_field (13-17s), which is DENSITY-DEPENDENT and genuinely re-runs per density -- reusing the field
+saves ~1s, not the bulk. So field-reuse as filed was a small win chasing the wrong stage.
+
+The REAL lever, found by measuring position_field's convergence: face count and quad_fraction PLATEAU by ~5
+iterations (2653 faces at it=5 vs 2664 at it=20, 0.4%) while time is LINEAR (6.5s vs 15.9s). The silhouette
+guard only needs each trial density's silhouette + face count -- both stable early. So surface_retopo now takes
+guard_iterations=N: the guard's TRIAL solves run at N iterations, and the CHOSEN density gets one full-iteration
+re-solve. Measured 1.48x when the guard WALKS (115s -> 78s, identical 6229 faces). On a first-try pass it is
+break-even (1 cheap trial + 1 full solve ~= 1 full solve). Default guard_iterations=None is bit-unchanged.
+
+A FALSE START worth keeping: my first cut refined ALWAYS, which DOUBLED the first-try case (35.7s vs 16.4s) --
+because the guard usually passes first try on these scans, so there was no search to cheapen and the refine was
+pure overhead. Fixed by understanding the win is ONLY on a walk; a first-try pass is break-even by construction
+(the single trial + single full solve). The measurement caught the regression before it shipped.
+
+KEPT NEGATIVE: H4 pays ONLY when the silhouette floor is tight enough to force a density walk (thin features:
+the mantis-legs case). On a loose floor that passes first try, guard_iterations is break-even, not a speedup --
+correctly, since there is nothing to search. Wired on m.surface_retopo (guard_iterations=None default);
+process_scan's guarded retopo can pass it through. cad 89; gates 0/0/0/0; integration 76.
+
+## H2 SHIPPED — position_field fast path: vectorise the INNER loop only; the GS ORDER is load-bearing
+
+H2 (the biggest raw-retopo prize: position_field was 13s of 17s) shipped as surface_retopo(fast=True) /
+position_field(fast=True), default OFF like the QEM decimator's fast path. MEASURED 3.5x on the mantis (12.7s
+-> 3.6s), BIT-IDENTICAL: max position diff 0.00e+00, extracted mesh identical (2664 faces, 0.00 vertex diff),
+surface_retopo pin 328/76% unchanged.
+
+THE MEASUREMENT THAT DECIDED THE DESIGN (did it before touching the pinned path, per discipline): position_field
+is Gauss-Seidel with a per-edge INTEGER-LATTICE snap, visited in rng.permutation(seed=0) order. I tested every
+way to batch it against the pinned lattice (round(P/rho) cell match):
+  - Jacobi (all-at-once):        55% cell match  -- FLIPS the retopo
+  - colored Gauss-Seidel:        52%             -- FLIPS (exact GS on independent sets, still wrong)
+  - sequential GS, seed=1/2:     58% / 57%       -- FLIPS (a DIFFERENT valid order gives a DIFFERENT lattice)
+  - sequential GS, seed=0:      100%             -- the pinned answer
+So the outer visit ORDER is fundamentally load-bearing: the operator is order-sensitive and the pinned mesh is
+tied to seed=0's exact sequence. ANY reorder is a kept negative -- it flips a pinned decision.
+
+The honest win is NARROW and safe: keep the exact sequential order, vectorise ONLY the inner neighbour loop
+(each vertex's average over its neighbours is independent given the current P). Also drops the dead li/lj/_q
+derivation terms (_q never fed acc). MEASURED bit-identical because the tiny ULP differences (2e-11 on a fixture,
+0.00 on the mantis) die in extraction's cell rounding. fast=False stays the default so no existing decision can
+flip on a tie; fast=True is opt-in for the ~3.5x.
+
+KEPT NEGATIVES, all measured and pinned: (1) full vectorisation (Jacobi) is impossible without flipping the
+lattice -- 55% match; (2) even a different SEED flips it (58%), so the pinned retopo is seed-0-specific by
+nature, not by accident; (3) the fast path is a speed-only change ONLY because the extraction rounds away the
+ULP residual -- if a future extraction became ULP-sensitive, fast would need re-verification.
+
+Wired: fast= on position_field + surface_retopo (primitive + m.surface_retopo faculty), retopo_fast= on
+process_scan + faculty. cad 90; gates 0/0/0/0; integration 76. This closes the three build items H1/H4/H2; H6
+(guard report plumbing) also fixed and pinned. Only H5 (position encoder, flagship research) remains open.
+
+## H5 SHIPPED — SpatialMemory: "every closest-point is a recall," measured, with its capacity tension pinned
+
+The flagship backlog item. Investigation first (three gated questions), then the build:
+
+Q1 MONOTONICITY: the engine ALREADY HAD the bridge -- holographic_fpe.VectorFunctionEncoder (n-D fractional
+power encoding, "nearby numbers map to nearby vectors", encode_many already FFT-vectorised with the 195x
+lesson in its own docstring). Measured spearman(cos, -dist) = 0.967 on random R^3 pairs. Rule 0 pays again:
+zero encoder code needed building.
+
+Q2 TRUE-NEAREST RECALL on the mantis scan (18610 verts): top-1 exact-index 94-96%, but the metric that matters
+for geometry is the DISTANCE RATIO -- p95 = 1.000-1.009: the recalled point is within ~1% of the true nearest
+distance, i.e. GEOMETRICALLY EQUIVALENT for transfer/bake/shrinkwrap. Exact-index recall is the wrong bar for
+continuous geometry; distance-ratio is the honest one.
+
+Q3 SPEED FRONTIER (18k pts, 20k texel-scale queries): dim=256 is the sweet spot -- 4.9s/batch vs 20.0s brute
+euclid = 4.1x, with the one-time source encoding (1.7s) amortised across batches. dim=128 degrades (dr-p95
+1.065); dim=512 buys little (dr-p95 1.001 vs 1.009).
+
+RESONANT READOUT (the composability half): top-k similarity-weighted payload average = a SOFT nearest-neighbour
+gather in encoding space. Reading scan vertex colour: 0.034 RGB mean error at k=4 -- BETTER than the scatter
+bake's 0.066-0.088.
+
+THE KEPT NEGATIVE THAT SHAPED THE DESIGN -- THE CAPACITY TENSION: bundling K position(x)payload bindings into
+ONE vector collapses (62% at K=8, 25-33% at K=128, dim 256). Cause is fundamental: FPE keys are CORRELATED BY
+DESIGN (proximity preservation IS correlation), and correlated keys cross-talk in a superposition.
+Proximity-preservation and bundle-capacity are in DIRECT TENSION -- one encoding cannot maximise both. So
+SpatialMemory is an ITEM STORE, never a scene bundle, and the selftest PINS the collapse (asserts bundle
+recall < 60% -- if that ever passes, the analysis is wrong and the design must be revisited). High-capacity
+bundles need RANDOM keys and give up proximity: the engine's ordinary record/recall path.
+
+BUILT: holographic/sampling_and_signal/holographic_spatialmem.py -- SpatialMemory(points, payloads, dim=256)
+with nearest(k) / read(k) STREAMED top-k (a 236k-texel query against 18k points is 16 GB as a full similarity
+matrix, measured OOM; streamed top-k is MBs), auto-fit padded bounds + query clamping (FPE collapses
+out-of-range values -- the pad is load-bearing), deterministic per seed. Convenience spatial_recall() one-call.
+Faculty m.spatial_recall; catalog 560, 6/6. INTEGRATION: rebake_texture method="recall" fills the per-face
+atlas by resonant readout -- pinned in _selftest_rebake with determinism + interior accuracy. The measured
+TRADE: recall's sweet spot is VERTEX-scale queries (0.9s/1.7k verts, best quality); scatter owns TEXEL-scale
+atlases (2.5s vs recall's 120s at 768^2 -- the streamed matmul is the honest cost). Three bake routes now, each
+with its domain: project (exact, low-poly sources), scatter (texel-scale speed), recall (vertex-scale quality +
+the VSA substrate: encoded positions bind/compose with everything else in the engine).
+
+cad 91; gates 0/0/0/0; integration 76. The H backlog is fully closed: H1/H2/H4/H5 shipped, H3 refuted-and-
+subsumed, H6 fixed. "IK, PBD, PnP, and the resonator are all iterate a projection" now has its geometric twin
+on record: EVERY CLOSEST-POINT IS A RECALL.
+
+## REGRESSION (Moose-caught, render): missing faces = repair ran on uv-split confetti; FIXED + pinned
+
+Moose spotted amputated geometry in the recall-bake render. Diagnosis chain, each step measured:
+(1) NOT the recall method -- project on the same mesh gave identical 0.865 coverage.
+(2) NOT nondeterminism -- cross-process probe bit-identical at every stage (a real scare, cleanly refuted).
+(3) ROOT CAUSE: the demo attached the scan's fragmented per-face uvs to the mesh BEFORE repair. mesh_repair
+then operated on the uv-SPLIT vertex set: 29062 faces instead of 11010, hole-filling ran wild, the retopo
+inherited a shattered graph (65 components vs 12), and drop_small_components(keep_largest) amputated 11% of
+the surface -- the missing limbs in the render. A second contributing factor: the demo used silhouette=None,
+so the guard never walked the coarse density finer (the guarded default yields 1 component and 0% dropped).
+
+FIX (process_scan): repair a GEOMETRY-ONLY copy -- src_uv is captured separately and the bake stage re-projects
+from the ORIGINAL mesh + uv, so stripping uvs for repair loses nothing. with-uvs and without-uvs inputs now
+repair to the identical welded 11010 faces. Pinned: test_process_scan_repairs_welded_geometry (fragmented-uv
+box must repair == plain box).
+
+LESSONS, kept loud: (a) fragmented uvs must NEVER ride through repair/retopo -- they exist for the bake only;
+(b) an unguarded coarse retopo + keep_largest is an amputation recipe -- the guard is not just a quality floor,
+it is what keeps the mesh in ONE component; (c) "the engine was right, the recipe was wrong" again -- but this
+time the recipe trap was inside process_scan itself for any caller passing a textured scan, so it earned an
+engine fix, not just a notes entry. cad 92; gates 0/0/0/0; integration 76.
+
+## RESEARCH -> BACKLOG_retopo_topology.md: the holes/islands are IFAM-inherent; six items filed (R1-R6)
+
+Online research confirmed the extraction holes/islands are inherent to IFAM section 4.4 (reference impl
+deletes low-support cells, abandons non-closing walks, refuses degree>=7 hole fills) -- not a porting bug.
+Filed BACKLOG_retopo_topology.md: R1 topology gate (Euler/boundary-loop/component invariant matching --
+intended holes = input's boundary loops, destruction = new loops/components/genus change; replaces blind
+keep_largest amputation), R2 QEx singularity fixed-point snapping in extract_quads (additive: only fires on
+cells we currently DROP), R3 QuadriFlow-style min-cost-flow integer assignment (sibling solver, gated by R1;
+NEVER a reorder of the pinned GS path per H2), R4 Botsch-Kobbelt link-condition isotropic remeshing as the
+provably-topology-safe fallback, R5 local-feature-size sizing field feeding position_field's existing rho_v
+(composes with H5 spatial_recall for the thickness query), R6 spectral quadrangulation + VSA lattice-key
+resonator cleanup (research). Priority R1 > R2 > R5 > R4 > R3 > R6. No code changed this turn.
+
+## R1+R2+R5 SHIPPED — topology gate, singular-cell snap, feature-sized lattice: 12 components -> 1
+
+From BACKLOG_retopo_topology.md, three items built with full ritual; the headline measurement: mantis retopo
+at density 2.0 unguarded shattered into 12 components at baseline; snap_singular alone -> 5; feature_sized
+alone -> 5; BOTH -> **1 component, mesh intact**. The two fixes compose because they attack different causes:
+snap rescues MARGINAL roundings at cell boundaries, sizing prevents SUB-FEATURE cells at the root.
+
+**R1 topology_report / topology_gate (meshtools).** Per-component V/E/F/chi/boundary-loops/genus + loop
+fingerprints (centroid/length); gate passes iff components, genus, and boundary loops are preserved --
+INTENDED holes = loops matched to the input, destruction = new loops/components/genus change, violations
+NAMED. Fixtures pinned: box g0, grid 1 intended loop, analytic torus g1; punched-hole and genus-loss rejected,
+intended boundaries accepted. Wired into process_scan's shard_cleanup stage: the amputation now reports
+topology_ok / topology_violations / dropped_fraction -- loud, never silent. FIRST CATCH on day one: the
+guarded retopo on the subdivided-box fixture introduces 3 non-manifold edges (IFAM's documented failure mode,
+previously invisible). deterministic loop tracing (min-vertex tie-break). KEPT NEGATIVE: the gate DETECTS,
+it cannot RECONNECT -- that is R2/R3's job.
+
+**R2 snap_singular (extract_quads, QEx-adapted).** Ebke et al. 2013's cure -- move the singular vertex to a
+consistent fixed point instead of abandoning the cell -- adapted to lattice clustering: a vertex on a MARGINAL
+rounding boundary (|frac| > 0.25) is re-keyed GLOBALLY to the adjacent existing cell when that strictly
+converts degenerate triangles to distinct ones AND no kept face changes its triple (the additivity refusal).
+Never invents cells, never updates representatives (would leak into kept faces). Rescued 1134 of 8546
+degenerate cells on the mantis (+820 faces, 12->5 components). DEFAULT OFF, constitution-driven: it ADDS
+faces, so the pinned 328-face retopo would become 334 -- measured, and the reason it is an opt-in capability,
+not a silent flip. Additivity pinned in the selftest as a face-SUBSET contract.
+
+**R5 feature_size_field + feature_sized (crossfield).** Local thickness = distance to the nearest OPPOSING-
+normal surface point -- and THE QUERY IS A RECALL: it runs on H5's SpatialMemory (streamed top-k), the exact
+composition the backlog predicted, zero new nearest-neighbour machinery. Thickness/2 caps the target edge into
+graded_levels (existing 2:1-balanced machinery -- Rule 0 again: levels/rho_v already existed end to end
+through position_field AND extract_quads; only the thickness signal was missing). Kept honest: top-k finds
+same-wall neighbours first, so the estimate is an UPPER bound near corners (box median 1.51 not 1.0 --
+measured, bounded in the selftest).
+
+Threading: surface_retopo(snap_singular=, feature_sized=) at primitive + faculty; process_scan(retopo_snap=,
+retopo_sized=). All default off. Catalog: "Topology gate" 590 + "Retopo destruction fixes" 599, both 6/6.
+cad 95 (+4); gates 0/0/0/0; integration 76.
+
+**R3 (min-cost-flow integer assignment) NOT built this arc:** R2+R5 reached the 1-component target on the
+measured case, so per the backlog's own threshold ("if the gate shows zero mismatches after R1+R2 you may not
+need QuadriFlow") R3 stays filed, to be built only if the gate reports failures the snap+sizing pair cannot
+close. **R4 (link-condition isotropic remesher) and R6 (spectral/VSA) remain open backlog** -- R4 is the
+safety-net route worth its own bounded arc; R6 is research.
+
+## GABOR FIELDS SHIPPED (Condor et al., SIGGRAPH 2026) — verified on-engine BEFORE building, then built
+
+Moose flagged the paper (orientation-selective volumetric LOD via Gabor kernel mixtures) for cloud rendering.
+Measurement-first verdict, all three claims verified on our stack before any module was written:
+(1) CLOSED-FORM RAY INTEGRAL: cos = Re exp(i.) turns the anisotropic-Gabor line integral into a 1-D complex
+Gaussian -- ~10 lines of NumPy, verified vs 400k-sample quadrature over 30 random kernels at 2.1e-16.
+(2) EQUAL-BUDGET WIN: on wispy oriented content, gaussian-base + gabor-residual beats equal-count gaussians
+by +3.7 to +7.2 dB in the prototype, +13-14 dB in the shipped fitter -- consistent with our OWN 2-D precedent
+(splat_field basis='gabor': +7 dB on oriented gratings, +0.2 broadband): Gabor pays where content is oriented.
+(3) FREE LOD: kernels carry |w|, so LOD = pruning above a cutoff -- no mipmaps, no refit (boring-axis
+elevation: frequency is a CARRIER used to mask). Demo cloud: 40 -> 33 -> 10 kernels, graceful.
+
+Rule 0 haul first: splat_field basis='gabor' (2-D, with its 89x-fit-cost negative), splat_aniso (3-D gaussian
+mixtures), and the Cloud stack's closed-form FPE line integrals all pre-existed. The genuine gap was the 3-D
+GABOR primitive + its analytic ray integral + frequency-pruned LOD -- exactly what got built.
+
+BUILT holographic/rendering/holographic_gaborfield.py: gabor_ray_integral (vectorised, shared or per-kernel
+SPD Q), GaborField (eval / ray_integral / transmittance = Beer-Lambert one call per ray no marching / lod /
+render_ortho), fit_gabor_field (deterministic greedy matching pursuit; FFT-peak frequency dictionary with
+|k|>=2 near-DC skip + mirror dedup; per-atom frequency refinement x0.75-1.25; ENVELOPE LADDER x1/2/4).
+Faculty m.gabor_volume; catalog 578, 6/6; cad 96; gates 0/0/0/0; integration 76.
+
+FIT-DEBUGGING LESSONS, measured and kept: (a) the FFT dictionary alone gave only +0.5 dB -- bin quantisation
+(half-bin error decorrelates the wave across the envelope) cost most of the gain; per-atom scale refinement
+recovered it. (b) |residual|-moment envelope sizing froze every sigma at ~0.10 -- a wisp extends far beyond
+the local window, and ONE broad gabor cleans a whole filament field; the x1/2/4 envelope ladder was the
+unlock (+0.9 -> +14.4 dB). (c) The draft LOD assert (base error < 4x full) FAILED once the fitter improved --
+the better the gabors, the more pruning costs; restated honestly as base < 0.5x zero-predictor AND full <
+base. 'Graceful' means the base is a valid coarse level, not that detail is cheap to discard.
+
+KEPT NEGATIVES: isotropic-envelope fitter only (anisotropic Q supported and verified in the INTEGRAL, but
+vs splat_aniso's anisotropic gaussians the equal-count claim is UNPROVEN); greedy fit cost paid once per
+asset (the 2-D precedent's 89x trade); near-DC bands belong to w=0 atoms (a low-frequency gabor is a worse
+gaussian). Taxonomy lesson: fitters tag analyze/measure -- semantic lint caught my invented create/generate.
+
+FUTURE (filed, not built): anisotropic-envelope fitter; control-variate stochastic residual selection for the
+full path tracer (the paper's 2x); wiring GaborField as a density source for cloud_single_scatter.
+
+## THREE-REPO TRIAGE (Moose): AniGen / SATO / CWF-Remesher — one shipped, two filed with verdicts
+
+Same treatment as Gabor Fields: verify relevance on-engine, implement only what pays.
+
+**CWF-Remesher (AIGODLIKE Blender addon wrapping CWF, Xu et al. SIGGRAPH 2024) -> SHIPPED as cvt_remesh.**
+The addon itself is a C++ wrapper (xmake .pyd) -- code not adoptable; the ALGORITHM (CVT + QEM joint energy)
+is. THE HOLOGRAPHIC READING made it nearly free: Lloyd relaxation IS k-means IS the engine's codebook move
+(iterate-a-projection, again), and cluster_decimate already owned the other half (bundled-quadric
+representatives + face rebuild). PREMISE MEASURED FIRST on the mantis at equal vertex budget vs
+cluster_decimate(grid=24): min-angle median 22.8 -> 43.1 deg, slivers(<10deg) 14% -> 1%, components 41 -> 9,
+non-manifold 211 -> 82. A box lattice cuts where the BOX says; a relaxed partition cuts where the SURFACE
+says. Built in meshqem: deterministic farthest-point seeding, Lloyd + surface snap, quadric representatives,
+rotation-canonical face dedup (extract_quads' hole-fix lesson applied from day one), optional shrinkwrap.
+Fulfils the R4 isotropic-fallback slot of the retopo backlog. KEPT HONEST: not provably manifold (82
+non-manifold edges remain) -- every result goes through topology_gate; and it is NOT the full CWF energy
+(no L-BFGS joint solve, no explicit feature-edge term) -- the 80% that composes from shipped parts.
+
+**SATO (Xrvitd, SIGGRAPH 2026: Strips-as-Tokens mesh serialization) -> NOT BUILT, filed.** Technically
+compatible (single-file NumPy, deterministic) but GPL-3.0 -- the CODE cannot be vendored into leCore. The
+IDEAS are independently implementable from the paper and genuinely resonate: face-strip serialization with
+3-level hierarchical coordinate quantization + prefix sharing IS the engine's coarse/fine split, and
+in-band UV-island transition tokens are boring-axis elevation. But its VALUE serves autoregressive mesh
+GENERATION pipelines (DeepMesh/BPT lineage), which leOS does not run; as a pure codec it would duplicate
+glb/zip io without a measured consumer. FILED as M9-adjacent research: mesh-as-token-SEQUENCE ->
+hypervector encoding of whole meshes via the engine's sequence machinery is the interesting leCore-native
+angle, worth its own measurement arc if M9 wants whole-mesh similarity. License note recorded.
+
+**AniGen (VAST-AI, SIGGRAPH 2026: S^3 fields for animatable asset generation) -> NOT BUILT, concepts filed.**
+Constitutionally out for core: PyTorch + CUDA + 18GB-GPU pretrained flow-matching checkpoints (spconv,
+pytorch3d, nvdiffrast), plus a non-commercial third-party CUBVH component -- untestable in this environment
+and not adoptable in any. The CONCEPTS feed M9/M2 directly and are implementable classically: (1) shape,
+skeleton, and skinning as MUTUALLY CONSISTENT FIELDS over one shared spatial domain (our FPE volumetrics +
+curve-skeleton + heat-style weight fields are exactly this substrate); (2) a confidence-DECAYING skeleton
+field near Voronoi boundaries of bones -- an uncertainty carrier on the skeleton field, boring-axis move;
+(3) skinning weights decoupled from joint count via a shared feature field. Filed into the M9/M2 rigging
+arc as design language, with the honest note that their results come from learned priors we will not have.
+
+cad 98 (+2 this arc: cvt_remesh, gabor pin counted earlier); gates 0/0/0/0; integration 76.
+
+ADDENDUM (cvt_remesh guard): the institutional guard-coverage pin caught the new faculty shipping UNGUARDED
+-- every mesh-reducing faculty must hold a silhouette floor, and the right fix was compliance, not exemption.
+m.cvt_remesh now guards by default (knob = n_sites, walks finer; silhouette=None for the raw primitive).
+Final: cad 97, gates 0/0/0/0, integration 76.
+
+## "Tons of missing faces" (Moose, retopo vs LOD) — diagnosed as SHADING, not geometry; two_sided= shipped
+
+Diagnosis chain, each step measured: (1) NOT holes -- the retopo mesh has ZERO boundary edges (topologically
+closed; the R1 tracer confirms 0 loops, 0 open chains). (2) NOT culling -- double-sided-geometry probe
+changed nothing. (3) ROOT CAUSE: mesh_orient reports 1152 ORIENTATION ISLANDS and 1875 duplicated directed
+edges on a 3070-face retopo -- thin features legitimately collapse to zero-thickness sheets (front/back face
+pairs at the SAME representatives, the M11 dedup fix keeping both), and orientation cannot propagate through
+the non-manifold cone points, so no consistent global winding EXISTS. The renderer clipped n.l at 0, so every
+flipped patch shaded ambient-only: 23% of the mantis's visible pixels were flipped-dark -- the "missing
+faces" look. The LOD/QEM path never shows this because decimation INHERITS the input's consistent winding;
+retopo rebuilds faces from scratch.
+
+FIX: rasterize_mesh(two_sided=True) shades |n.l| -- the standard presentation for thin/unorientable content.
+Measured: flipped-dark pixels 23% -> 6% (the remainder is genuinely shadow-facing), mean luminance +13%,
+1445 px changed. DEFAULT OFF: closed oriented meshes are bit-identical (pinned on the box, plus a
+flipped-triangle brighter contract). Threaded through m.render_mesh.
+
+LESSON, kept loud: "missing faces" has FOUR distinct causes now catalogued on this asset -- (a) amputated
+components (fixed: R2 snap + R5 sizing), (b) unwritten atlas texels (fixed: welded repair + guard), (c) real
+extraction holes (prevented: R1 gate + guard), (d) flipped-winding dark shading (fixed: two_sided). Diagnose
+by MEASUREMENT (boundary edges / orient report / pixel deltas) before reaching for a fix -- three of the four
+would have been mis-fixed by the obvious guess. Mesh-level winding cure remains R3's territory (the cone
+points). cad 98; gates unchanged.
+
+## Dark-speckle texture arc (Moose: "black all over on retopo, LOD looks fine") — three refuted hypotheses, two real causes, FINAL parity
+
+Moose's light-background suggestion was the unlock (black-on-black had hidden everything). Diagnosis chain
+with the refuted hypotheses KEPT on record: (1) REFUTED: source uv-gutter bleed -- the gutter is bright
+(lum 0.79 vs on-chart 0.88), only 12.5% seam band. (2) REFUTED: opposing-normal correspondence -- only 2.3%
+of retopo faces match an opposing source face, and those aren't darker (0.86 vs 0.88). (3) PARTIAL: unwritten
+half-cell black -- real (atlas cells ~7px at 10k faces, margin=2 cannot cover; 21.5% dark render pixels) but
+flood-filling it only recovered ~1 point. (4) THE REAL RESIDUAL: scatter's POSITION-KEYED gather is
+orientation-blind -- this scan bakes occlusion into albedo (24.6% of on-chart texels near-black: undersides,
+crevices), and thin-feature cells blend front+back, painting real black onto visible texels (22,170 pure-
+black WRITTEN texels). project (surface correspondence, no volumetric mixing) does not: ceiling test
+original 14.6% dark / project+flood 16.5% / scatter+flood 22.4%.
+
+FIXES SHIPPED: rebake_texture(fill_mode="flood") -- outward-only dilation until zero unwritten texels;
+default "margin" bit-identical (sha pin passes), process_scan opts in. Painted texels provably untouched
+(pinned). FINAL with process_scan's DEFAULT project bake + flood: retopo render dark 14.7% lum 0.313 vs
+original 14.6% / 0.312 -- statistical parity with the source. The earlier speckly renders had chosen
+bake_method="scatter" for speed; the default was already the quality path.
+
+LESSONS: (a) render bakes on a NON-BLACK background -- black-on-black hid two geometry causes and two
+texture causes across this asset's arc; (b) fill_mode's first insert hit the wrong closing paren (landed
+inside np.asarray) and then collided with a local variable named `fill` -- exact-string edits still need the
+enclosing context read first; (c) a scan with baked-in occlusion makes ORIENTATION part of the color signal:
+position-only correspondence is lossy on it. FILED (measured motive, 22.4 vs 16.5): normal-aware scatter --
+key the gather grid by position + normal hemisphere to close the speed path's gap; bounded item.
+
+## "LOD and retopo switched places" (Moose) — the LOD path was never broken; the comparison call was
+
+At equal 10.5k-face budget the LOD render measured 37.7% dark (vs source 14.6%) while the fixed retopo hit
+parity -- an apparent inversion. DIAGNOSIS: the comparison had called mesh_decimate_to(keep_uv=True) directly,
+FORCING uv inheritance through the scan's per-face confetti atlas; QEM edge collapses then interpolate uvs
+across unrelated charts, sampling garbage (mostly dark). The engine already knew better twice over:
+keep_uv="auto" REFUSES transfer on a fragmented atlas (verified on the mantis), and process_scan's
+LOD-with-texture route decimates uv-FREE and rebakes a fresh atlas (project+flood). Routed properly:
+LOD 14.3% dark / 0.313 lum, retopo 14.7% / 0.313, original 14.6% / 0.312 -- all three at parity.
+
+Pinned (test_lod_texture_route): auto-refusal on a confetti fixture + the repair->lod_via_decimate->rebake
+stage sequence. LESSON, kept loud: when a comparison contradicts prior experience, suspect the COMPARISON
+before the code -- and never override an "auto" guard in a benchmark without recording why; the guard was
+the accumulated lesson. cad 100.
+
+## MASTER_BACKLOG.md created — every remaining item audited against the live engine first
+
+Rule-0 sweep over 14 item groups (3-5 stranger phrasings each) BEFORE listing. Headline audit results:
+ARCH-1 CLOSED BY AUDIT (validate_recipe already shipped in holographic_recipeops -- the audit's whole
+purpose, working). R3 SHARPENED by measurement: existing make-manifold closes all 142 non-manifold edges
+but by SPLITTING (components 1 -> 107) -- the real fix must reconnect, not cut; local cone-point resolution
+before MCF. M2 is REUSE-heavy (skin_bind_weights / solve_ik / B-Mesh skinning all exist); M9's genuine gap
+is segmentation + symmetric-part detection only. GAB-CLOUD is wiring (cloud_single_scatter's density
+interface exists). Tiers: 1 bounded+measured (NA-SCAT, R3, GAB-CLOUD, VCOL), 2 completion (SR-BETA,
+CWF-FULL, GAB-ANISO, GAB-CV), 3 research (M9/M2/R6/SATO-SEQ/M16), 4 decisions/blocked (FORK, ABS-LADDER,
+A2/B1). Recommended start: NA-SCAT.
+
+## NA-SCAT shipped — but the REAL fix was the grid auto-sizer, not the normal key (measurement corrected the plan)
+
+The backlog motive was "scatter blends front/back on thin features -> 22.4% dark vs project 16.5%". Built the
+hemisphere-keyed normal_aware scatter as planned -- and the kill-switch REFUTED the premise: 22.6% vs 22.4%,
+no improvement. Diagnosis instead of assuming the fix was broken: swept the grid and found the dark gap is
+COVERAGE, not bleed -- the auto-sizer's old "2x source edge for anti-bleed" rule OVERSHOT on a dense target
+(picked 242), so texels out-resolved the grid and landed in empty cells -> gathered ~0 -> dark. At grid=96-128
+scatter already hit 16.4-16.6% = project's 16.5% ceiling; at grid=300 it was 29%. The normal split had made
+it WORSE by further starving each bin.
+
+REAL FIX: coverage-aware auto grid -- size the cell to the coarser of (source edge * 2) and (TARGET texel
+spacing), never finer than either sampling can fill. Mantis auto grid 242 -> 121, dark 22.4% -> 16.5%, lum
+0.297 -> 0.322, at 1.7s (33x faster than project's 57s, now at PARITY). normal_aware kept as the small
+additive sharpness gain it measurably is (atlas std 0.1622 -> 0.1653 on the mantis, ~28% toward project's
+0.1764, zero dark cost) with an empty-bin fallback so coverage never drops -- NOT claimed as the bleed cure
+(could not construct a synthetic case where it separated walls the coarse grid didn't already separate; that
+property is filed UNPROVEN, not asserted). Threaded process_scan(bake_normal_aware=); scatter capability
+does-string updated (extend, not a sibling) + coverage-aware note. Pinned test_nascat_coverage_and_normal.
+
+LESSON, kept loud: the backlog's premise ("normal bleed") was a HYPOTHESIS; the kill-switch refuted it and the
+sweep found the true cause (coverage). Filed motive != confirmed cause -- measure the mechanism before
+building the fix the name implies. cad 101; gates 0/0/0/0; integration 76. process_scan default is still
+method='project'; scatter is now a genuine equal-quality fast alternative rather than a quality tradeoff.
+
+## R3 shipped as manifold_cleanup — the "cone points" were FINS; four local surgeries refuted; honest split+gate
+
+Characterized the 142 non-manifold edges on the guarded mantis retopo: 136 of 142 are 4-FACE edges, 282
+duplicated directed half-edges, 76 exact duplicate faces -- NOT true topological cones. They are doubled
+faces: extract_quads' winding-preserving dedup correctly keeps both sides of a feature that collapsed to a
+single zero-thickness sheet, but where both copies land on the SAME cells the shared edge carries 4 faces.
+CONSUMER MOTIVE, measured: QEM decimate REFUSES the mesh ("directed edge appears twice") -> LOD-on-retopo
+blocked; loop_subdivide survives (nm 142->512) but QEM does not.
+
+FOUR LOCAL SURGERIES TRIED, ALL REFUTED (kept negatives, loud, in the module docstring so no reinvention):
+(1) drop-one-duplicate -> opens 51 holes (removes one side of a REAL thin sheet); (2) drop-both-copies ->
+fragments 1->40 components (a fin was the only bridge between regions); (3) dihedral-keep-2 (keep the flattest
+2 faces per nm edge) -> clears nm but opens 67 loops AND still fails QEM. The research predicted this: a
+defect baked into the EXTRACTION cannot be cleanly repaired post-hoc; it needs a manifold-guaranteeing
+extraction (QuadriFlow global integer assignment = R3-proper, filed).
+
+SHIPPED manifold_cleanup (meshtools): split non-manifold vertices into manifold umbrellas (the reference cut)
+-> keep_largest -> topology_gate, REPORTING the cost. MEASURED on the mantis: nm 142->0, 1 component
+preserved, 24 small holes introduced, 93.3% faces kept, and QEM ACCEPTS the result. Pinned with the consumer
+contract (test_r3_manifold_cleanup: QEM refuses the fin, accepts the cleaned mesh). Faculty m.manifold_cleanup;
+process_scan(manifold=True) opts in (default OFF -- it drops faces). Catalog 587, 6/6.
+
+SCARE CAUGHT mid-build: process_scan(manifold=True) reported 9776 components on the FINAL mesh -- but that is
+the post-BAKE output (per-face uv split by design, 3 verts/face); the pre-bake GEOMETRY is correctly 1
+component / nm 0. Verify the right mesh: manifoldness is a geometry property the bake preserves positionally.
+
+KEPT NEGATIVE, first-class: manifold_cleanup is NOT lossless (24 holes on the mantis) -- it trades a few small
+holes for strict manifoldness and says so in its report. R3-proper (global integer assignment guaranteeing
+manifold-by-construction) remains the lossless target, filed. cad 102; gates 0/0/0/0; integration 76.
+
+## GAB-CLOUD shipped — a fitted Gabor field renders as a single-scattered cloud through the existing renderer
+
+The audit called this "wiring" and it mostly was, with one real piece of math: cloud_single_scatter needs a
+volume with .density(P) AND .optical_depth(O,D,L) -- a FINITE-SEGMENT integral (0..L to the ceiling), not
+GaborField's full-line ray_integral (which would count density past the medium boundary). Built the segment
+integral: the per-kernel integrand Re[A exp(-a t^2/2 + b t + c)] has definite integral 0..L =
+sqrt(pi/2a) exp(c+b^2/2a) [erf(z1)-erf(z0)], summed, real, clamped. Needed a COMPLEX erf (numpy has none,
+scipy is banned) -- built _erf_cplx: Maclaurin series for |z|<=4, asymptotic erfc expansion beyond, verified
+1e-11 vs quadrature on complex args and 8.5e-13 vs math.erf on the real axis. .density is a one-line alias to
+.eval. GaborField now satisfies the protocol and drops into cloud_single_scatter unchanged.
+
+MEASURED: a fitted Gabor cloud (23 gabors/7 gaussians, 36.8 dB) renders through single_scatter; the CLOSED-
+FORM shadow ray gets 49x fewer density evals at 7.9e-5 max error -- the SAME bar the FPE volume clears,
+because the closed-form shadow is the whole point of that renderer and the Gabor segment integral is exact.
+LOD composes: prune high-freq gabors (36->14 kernels) and re-render a cheaper coarse cloud, no refit.
+
+DEBUG LESSONS kept: (1) first Faddeeva/Weideman erf approximation was wrong by 3e5 -- replaced with the plain
+series+asymptotic split, which is slower but correct and readable (constitution: readable > clever). (2) the
+segment integral came out exactly HALF the quadrature -- a spurious *0.5; the erf-difference already gives the
+full integral. Both caught by the vs-quadrature kill-switch before shipping.
+
+BUILT: GaborField.density / .optical_depth (segment, vectorised, chunked) + _erf_cplx; faculty
+m.gabor_cloud_render; catalog 568 tagged render/frame (NOT create/generate -- there IS a render/ branch, the
+tag lint's discipline); pinned test_gab_cloud_render (segment vs quadrature, renders, closed-form bar holds).
+Demo: gabor_cloud_rendered.png (full | base-only LOD). cad 103; gates 0/0/0/0; integration 76.
+
+FUTURE still filed: GAB-CV control-variate estimators (now unblocked -- the renderer integration this needed
+exists); GAB-ANISO anisotropic-envelope fitter.
+
+## VCOL shipped — vertex-colour rendering; the datatype existed, only the render path was missing
+
+Rule 0 surprise: Mesh already carried a .colours attribute (V,4 RGBA) -- the DATATYPE was there, only the
+RASTERIZER path to show it was missing (grep + 5 probes confirmed texture-only rendering). So VCOL was a
+render branch, not new machinery: rasterize_mesh(vertex_colors=) barycentric-interpolates per-vertex colour
+exactly like the texture branch interpolates uvs, times the same light term -- flat/smooth/two_sided all
+behave identically, just albedo from colours instead of a sampled atlas. Resolves from the param OR mesh.colours
+(param wins; texture wins over both if somehow all set). Default None = the old texture/flat paths byte-identical.
+
+MOTIVE (from the master backlog): H5's vertex-scale recall bake produces per-vertex colour with nowhere to
+render -- now it renders with no atlas. Also the standard DCC vertex-colour need. Pinned
+test_vcol_vertex_colour_render: param path == mesh.colours path, position-graded colours render as a gradient
+(std 0.24, not flat), plain render unaffected.
+
+EXTENDED not siblinged: threaded vertex_colors through m.render_mesh and updated the existing "Rasterize a
+mesh" catalog entry (now names texture + VCOL + smooth + two_sided as the four default-off albedo/shading
+modes) rather than registering a redundant capability -- the discoverability-tax discipline. Demo: vcol_demo.png.
+cad 104; gates 0/0/0/0; integration 76.
+
+## SR-BETA closed — dense-dominance sweep run; (1.0, 0.3) validated; the honest finding is a THREE-case split
+
+The machinery existed (fuse_rankings + bm25_rank + reciprocal_rank_fusion's weights= param, with the equal-
+weight refutation already recorded). The GAP was: the beta sweep was never actually run to pick the weight,
+and the faculty didn't expose weights=. Ran it. No committed routing eval harness and the dense router needs
+a pre-built nomic index unavailable in this env, so used a CONTROLLED mechanism sweep on the two archetypal
+cases with REALISTIC top-k truncated lists (not full permutations -- the first synthetic attempts failed
+because every doc appeared in both full lists, giving spurious docs undeserved cross-credit; truncating to
+top-k is how RRF is actually used and fixed the measurement).
+
+VERDICT, three cases: (A) DENSE HIT (gold dense#1, spurious BM25#1) is KEPT at every beta<=1 -- the dense-#1
+1/(k+1) is never overtaken; the recorded 6->3 regression was a WEAKER dense list with the hit at rank 2-3,
+which lopsided equal-weight fusion loses and down-weighting restores. (B) BURIED RESCUE (gold low-but-present
+in dense, #1 in BM25) is rescued at essentially all (k, beta>=0.3). (C) ABSENT gold (not in dense top-k at
+all) needs beta>1 -- the hard-conflict regime that sacrifices dense hits, NOT fusion's job; widen the
+retriever's k instead. So dense-dominant (1.0, 0.3) is the honest optimum: keep every dense hit, rescue every
+buried-but-returned gold, leave absent-gold to retrieval breadth. k stays 60.
+
+KEPT NEGATIVES (loud): equal-weight fusion of a strong+weak pair loses dense hits (refuted); beta>1 loses more
+than it rescues (refuted); a synthetic with FULL-permutation lists is a broken stand-in for top-k retrieval
+(the measurement bug, fixed). HONEST SCOPE: this is a mechanism validation of the recorded default, NOT a
+re-derivation on the real 12-query nomic suite (which needs the embedding index this env lacks) -- filed that
+the definitive number wants the real suite when the index is present.
+
+BUILT: weights= exposed on m.fuse_rankings; SR-BETA verdict recorded in reciprocal_rank_fusion's docstring;
+pinned test_sr_beta_weighted_fusion (all three cases + faculty weights=). cad 105; gates 0/0/0/0; integration 76.
+
+## M9 shipped — mesh part segmentation via surface Reeb graph (limbs + body), with symmetric-part pairing
+
+The flagship VSA-geometry arc's first half. Rule 0: mesh_parts / match_symmetric_parts were genuine gaps
+(segmentation probes returned only fallbacks); the SUBSTRATE was rich (curve skeleton, B-Mesh skin,
+skin_bind_weights, solve_ik all exist).
+
+KEY RESEARCH PIVOT, measured: the obvious substrate -- the voxel-ridge mesh_skeleton -- FAILED for limb work.
+On the scanned mantis it found 45 ridge points at res=40 in 141s, and res=48 exhausted memory (winding_number
+holds (chunk, n_faces, 3) temporaries). The mantis's legs are THINNER THAN A VOXEL, so the ridge vanishes
+there -- the module's own recorded "res-limited" negative biting hard. THE LESSON: a creature's structure
+lives on its SURFACE graph, not in a volume grid. Switched to the classic Reeb construction (Reeb 1946;
+level-set components of geodesic distance, the standard Morse function for part decomposition): Dijkstra from
+a farthest-from-farthest extremity -> quantise distance into bands -> connected components per band = Reeb
+nodes -> edges between consecutive-band components -> branch decomposition (paths between degree!=2 nodes) ->
+per-vertex labels -> absorb sub-1.5% twigs by neighbour majority vote. Deterministic (sorted adjacency, heap
+vertex-id ties, deepest-first claiming).
+
+MEASURED on the mantis (5.5k verts, 0.2s via faculty): 12 parts, EVERY part a single connected blob, aspect
+ratios splitting cleanly -- elongated limbs 7.5-13.4 vs chunky core 1.2. match_symmetric_parts found 3
+symmetric limb pairs (the bilateral plane = least-spread PCA axis of the part centroids; pair on size+aspect+
+mirrored-centroid agreement) -- correct for a bilaterally symmetric insect. Demo mantis_parts_symmetric.png
+(pairs painted matching colours).
+
+FIXTURE LESSONS kept: (1) three tubes meeting at a POINT are non-manifold; repair splits the shared cap and
+the surface stays disconnected -- mesh_parts needs a CONNECTED surface (documented precondition). Replaced
+with three arms pulled from a subdivided sphere (one closed surface). (2) At 386 verts the Reeb bands are
+coarser than the arms and the decomposition is unstable -- needed subdiv-4 (~1.5k) -- the SAME resolution
+lesson as the voxel ridge, now on the surface side. Both in the selftest as WHY-comments.
+
+BUILT: holographic_skeleton.mesh_parts + match_symmetric_parts; faculties m.mesh_parts / m.match_symmetric_parts;
+catalog "Mesh part segmentation" 541 chars, 6/6 discoverable; pinned test_m9_mesh_parts (star->4 parts, 3 arms,
+symmetric pair, every part connected). cad 106; gates 0/0/0/0; integration 76. UNBLOCKS M2 (rig templates):
+the per-part labels + symmetric pairs are what skin_bind_weights/solve_ik/B-Mesh compose into a rig.
+
+## M2 shipped — rig_from_parts: joint tree + bound skin from an M9 segmentation (the flagship's second half)
+
+As the audit predicted, M2 was REUSE-heavy: skin_bind_weights, linear_blend_skin, rotation/make_transform all
+existed; M9 (this session) supplied the parts. rig_from_parts is the COMPOSITION bridge, with one genuine idea.
+
+THE ONE IDEA -- label-aware bind, measured: the stock distance bind (skin_bind_weights) leaks across thin gaps
+(its own documented caveat), putting only 57% of vertices' top weight on their own part's joint on the mantis.
+Fix: restrict each vertex's candidate joints to its OWN part + its PARENT part, using the segmentation as a
+hard prior. Raised own-part binding to 87%, and a single-limb rotation then stays isolated at 11000x in-vs-out
+motion (aspect-13.4 leg). No new binder -- the label mask over the existing inverse-distance weights.
+
+STRUCTURE: core part (largest, lowest aspect) roots a BFS tree over part adjacency (a label-crossing mesh edge
+= adjacency); each elongated part (aspect>3) gets a proximal joint (near its parent) + a distal tip so it can
+bend; chunky parts get one centroid joint. Bones: parent-distal -> child-proximal, and each limb prox -> dist.
+Weights are a partition of unity (rigid motion exact). Feed weights + per-joint transforms to the existing
+linear_blend_skin to pose. Demo mantis_rig_pose.png (rest | one leg rotated, moving limb orange, rest frozen).
+
+FIXTURE FIX kept: the prototype crashed on labels present via edges but below min_part_frac (13,15 not in
+part_ids) -- restrict ALL part-graph work to the KEPT label set. Deterministic (sorted adjacency + BFS).
+
+BUILT: holographic_meshskin.rig_from_parts + _selftest_rig; faculty m.rig_from_parts; catalog "Rig from parts"
+597 chars, 6/6 discoverable; pinned test_m2_rig_from_parts (partition of unity + one-arm pose isolation). cad
+107; gates 0/0/0/0; integration 76. The M9->M2 flagship arc is COMPLETE end to end: scan -> parts -> symmetric
+pairs -> joint tree -> bound skin -> poseable rig, all NumPy/stdlib, all measured.
+
+## GAB-CV declared NEGATIVE + GAB-ANISO shipped (two Tier-2 gabor items, one built one refuted)
+
+GAB-CV (control-variate rendering) -- INVESTIGATED, DECLARED NEGATIVE. The paper's control variate reduces
+VARIANCE in a STOCHASTIC Gabor estimator; leCore's cloud renderer is fully DETERMINISTIC closed-form (exact
+shadow integral, fixed-step view march), and the SDF path tracer is surface-only -- no stochastic density
+sampling anywhere, so there is no variance to reduce. Two candidate wins measured and refuted: (1) base/
+residual split of the view march does not help -- the dominant march error is TRANSMITTANCE ACCUMULATION,
+smooth regardless of the residual (base-only march error 1.6e-3 = full at 8 steps); (2) substituting the
+closed-form optical_depth for the marched transmittance made error WORSE (0.3x) and plateaued at 6.3e-3 --
+the analytic tau and the calibrated marched density are not consistent (the renderer applies a fitted scale
+volint's raw integral lacks), so mixing them biases rather than controls. Filed as a declared negative in the
+module header; needs a stochastic volume renderer to have a target.
+
+GAB-ANISO (anisotropic-envelope fitter) -- SHIPPED, the claim now PROVEN. Motive, measured: on oriented thin
+filaments the isotropic fitter PLATEAUS at ~29 dB regardless of K -- round envelopes cannot capture a diagonal
+filament, they can only tile it, and even tiling saturates. Anisotropic envelopes break the plateau: fit a
+per-atom SPD precision Q = inv(local |residual|-weighted covariance), an oriented ellipsoid that cleans a
+whole filament in ONE atom. MEASURED +1.4 to +5.7 dB over isotropic at equal K (K=24: 28.9 -> 33.5), and it
+reaches iso's ceiling at ~1/3 the kernels. Slightly WORSE on blobby content (wispy fixture 38.7 -> 37.4) --
+round is optimal there and the covariance estimate adds noise -- so it is correctly OPT-IN.
+
+The integral math already consumed a (K,3,3) Q (the selftest verified it since v1); this session made
+GaborField STORE an optional Q and generalised eval + the segment optical_depth to the quadratic form
+d.Q.d / om.Q.d / om.Q.om. GUARANTEE: Q=None (or Q=I/sigma^2) is byte-identical to the isotropic field --
+verified 1e-12 on eval and on the segment integral; aniso segment matches quadrature to 1e-13. lod() carries
+Q through the pruned view. BUILT: GaborField Q + fit_gabor_field(anisotropic=True); faculty
+m.gabor_volume(anisotropic=); catalog updated (extend not sibling, 561 chars); pinned test_gab_aniso_fit
+(>2 dB win, quadrature-exact aniso integral, iso byte-identical). cad 108; gates 0/0/0/0; integration 76.
+
+## CWF-FULL DEFERRED-with-measurement + R6-foundation shipped (cotan Laplacian eigenmaps + Morse critical points)
+
+CWF-FULL (full joint CVT+QEM energy with a feature-edge term) -- DEFERRED, gate not cleared. Its gate was "a
+measured case where cvt_remesh erodes features". Built a hard-edged tessellated box (92 crease verts, 12 sharp
+90-degree edges) and measured: all 8 CORNERS survive, output face centroids float only 0.0034 off the true
+surface (max 0.024 vs edge 0.125, at corners only), just 7% of output edges cut a corner by >0.15 edge. That
+is MINOR erosion, not failure -- the crease is under-sampled (40/100 sites land on it) but never destroyed. So
+CWF-FULL does NOT clear its own gate; the joint L-BFGS energy would be a marginal sharpness gain at large
+complexity cost. Number recorded in the cvt_remesh docstring; revisit only if a real asset shows a rounded
+crease. No build -- the gate discipline working as intended (like GAB-CV, a filed premise that measurement did
+not confirm).
+
+R6-foundation (spectral quadrangulation groundwork) -- SHIPPED the two primitives everything downstream needs.
+Rule 0: no scalar mesh Laplacian eigendecomposition and no Morse-Smale critical-point machinery existed (the
+crossfield CONNECTION Laplacian is a DIFFERENT operator -- on faces, carrying a frame). Built:
+ * mesh_laplacian_eigenmaps -- the low spectrum of the cotan Laplace-Beltrami operator (Pinkall-Polthier cotan
+   weights + lumped barycentric mass), solved as the symmetrised generalised eigenproblem M^-1/2 L M^-1/2 via
+   eigh. VALIDATED to textbook accuracy on a sphere: eigenvalues cluster at l(l+1)=0,2,6,12 (the spherical-
+   harmonic spectrum) and eigenfunctions 1..3 span x,y,z at R2=1.000 -- correct, not merely plausible.
+ * morse_critical_points -- minima/maxima/saddles of a scalar field by the discrete lower-star (Banchoff)
+   test on each 1-ring, contiguous lower-arc counting for saddles. Obeys Euler-Poincare (min-saddle+max=chi),
+   verified chi=2 on a sphere (z-height gives exactly 1 min + 1 max).
+
+These are the foundation R6 spectral quadrangulation builds on (eigenfunctions for the domain, MSC for the
+singularity layout) AND independently useful (spectral segmentation, shape descriptors, feature analysis).
+Faculties m.mesh_laplacian_eigenmaps / m.morse_critical_points; catalog two entries (600/448 chars), both 6/6
+discoverable; pinned test_r6_laplacian_eigenmaps. cad 109; gates 0/0/0/0; integration 76. The full MSC->quad
+domain layout + the resonator-cleanup-of-lattice VSA experiment remain filed as the next R6 step.
+
+## Research-verification pass — all remaining backlog items tested empirically, backlog now BUILD-READY
+
+A de-risking research report (web deep-research, full artifact delivered to Moose) covered the four remaining
+arcs: R6-full spectral quadrangulation, the resonator-lattice VSA experiment, SATO-SEQ, and M16. This pass
+VERIFIED its key claims by experiment on the live tree before updating the backlog. Verdicts, all measured:
+
+1. STAGE-0 EIGENSOLVER (the shared dependency, no scipy): block shifted inverse iteration + hand-rolled CG
+   reproduces the dense-eigh sphere spectrum — l=1 eigenSPACE residual 2.5e-11, low eigenvalues <2e-3.
+   KEPT CAVEAT: eigenvalues far from the shift converge slower (5.943 vs 5.912 at 40 iters) — use per-band
+   shifts. Deterministic (seeded start vector, fixed Gram-Schmidt order).
+
+2. M16: certified Lipschitz B&B on a deterministic icosphere WORKS (true optimum to 0.003 deg, certified gap
+   1e-3) but at an honest conservative L costs 16,080 evals vs dense 2,562 — the certificate is real, the
+   economy is NOT (kept negative). DIRECT (no L, upper-hull cell selection) needs 1,704 evals — beats dense —
+   and lands 0.343 deg from truth vs dense's 1.467. DIRECT is the default; B&B the certified opt-in.
+
+3. R6 QUAD ROUTE: the Instant-Meshes position-field operator is pure NumPy and byte-identical on re-run, BUT
+   the naive per-vertex np.round is a TRIVIAL FIXED POINT (neighbor lattice coherence 0.396 = random). The
+   compatible-representative step (translate each neighbor by integer lattice multiples before averaging) is
+   MANDATORY — coherence 0.396 -> 0.124 with even crude frames. Production needs the shipped 4-RoSy field.
+   MIQ/Bommes = mixed-integer + GPL CoMISo: avoid. Stripe Patterns = one smallest-eigenvector problem: the
+   simple alternate.
+
+4. RESONATOR LATTICE CLEANUP: the conditional verdict is now EMPIRICAL. Direct noisy coords: np.round wins
+   (83% @ sigma 0.3, O(1)) — VSA adds nothing. HOLISTIC-ONLY (only the bound product z_u^u ⊙ z_v^v observed,
+   phase noise 0.6 rad): FHRR resonator recovers (u,v) EXACTLY 200/200, even 51x51 codebooks in dim 1024 —
+   where rounding is undefined. Build only gated behind a bound-product consumer.
+
+5. SATO-SEQ: GPL-3.0 on Xrvitd/SATO CONFIRMED via the GitHub API (clean-room only; and we don't need the
+   strip machinery). Morton/Z-order is byte-stable under input permutation (tested). Permutation-power
+   sequences on the live FHRR primitives round-trip perfectly to 64 tokens @ dim 1024 / 256 @ dim 4096 —
+   capacity cliff ~dim/8, so CHUNK at <= dim/16.
+
+MASTER_BACKLOG.md rewritten: R6 / SATO-SEQ / M16 now carry [RESEARCH VERIFIED — BUILD-READY] with measured
+numbers, kept negatives, build plans, and license flags inline. No engine code changed this pass (verification
+scripts only); tests/gates state unchanged (cad 109, gates 0/0/0/0, integration 76).
+
+## Stripe patterns shipped (R6 iso-line route) + a big Rule-0 finding: most "remaining" work was already built
+
+Followed "keep going" into the research-verified backlog and hit a striking Rule-0 result: probing the four
+supposedly-unbuilt arcs, ALMOST EVERYTHING already shipped in the R6-foundation session:
+ * low_eigenvectors (block shifted inverse iteration + CG, matvec-only, no scipy, with a `shift` param and the
+   per-band caveat documented) -- Stage-0 is DONE. Re-verified: interior shift=5.9 pulls the sphere's l=2
+   cluster (5.912-5.965) at eigen-residual 3.5e-6, deterministic.
+ * worst_view (mode="direct"|"certified", DIRECT default) -- M16 is DONE. Re-verified: matches the research
+   prototype (0.000 deg at 2000 evals), deterministic, both modes run.
+ * Position field (IFAM 4-PoSy lattice remesh), Quad remesh, Mesh as a sequence (SATO-SEQ: seq_encode /
+   mesh_to_tokens), Recursive factoring (the resonator-factor path) -- all ALREADY SHIPPED.
+The DISCIPLINE WORKING: Rule 0 stopped three would-be redundant builds. Do not sibling what exists.
+
+The ONE genuine gap (5/5 stranger phrasings returned only fallbacks): STRIPE PATTERNS. Built it.
+ * stripe_pattern (Knoppel-Crane-Pinkall-Schroder, SIGGRAPH 2015): evenly-spaced stripes following a per-vertex
+   tangent direction field -- the field-following SIBLING of the cross field (cross_field gives directions,
+   stripe_pattern turns a direction field into placed lines). ONE smallest-eigenvector problem, so it REUSES
+   low_eigenvectors exactly as the cross field reuses the connection Laplacian: Hermitian energy A with
+   A_ii=sum_j w_ij (cotan), A_ij=-w_ij exp(-i omega_ij), omega_ij=freq*<e_ij,(X_i+X_j)/2>; smallest eigenvector
+   via the shipped matvec-only solver, complex dtype, shift just below 0. MEASURED on a sphere at freq 18:
+   energy 8.9e-3, phase follows the field to a 0.006 rad median edge residual (near-exact), deterministic.
+   Demo stripe_pattern.png (even stripes wrapping the sphere along the field).
+ * Faculty m.stripe_pattern; catalog "Stripe patterns" 591 chars, 6/6 discoverable; pinned
+   test_r6_stripe_pattern. cad 114; gates 0/0/0/0; integration 76.
+
+R6 is now effectively COMPLETE: eigenmaps + Morse critical points + position-field quad remesh + stripe-pattern
+iso-lines all shipped. The only R6 remainder is the SSQ MSC->quad domain layout and the resonator-cleanup-of-
+lattice experiment (gated on a bound-product consumer, per the verified research verdict).
+
+## Research arcs BUILT — Stage-0 eigensolver + SATO-SEQ + M16 (three items, all measured, all gated green)
+
+The de-risking research pass became code. Three items shipped with full ritual; each carried a bug that only
+testing caught (measurement over narrative, again).
+
+STAGE-0 low_eigenvectors (holographic_numerics): the k lowest eigenvectors of a Hermitian PSD operator from
+its MATVEC alone, no scipy -- block shifted inverse iteration on the shared cg. Matches dense eigh to l=1
+eigenspace residual 9.5e-12, deterministic. BUG CAUGHT: first default shift scaled with the Gershgorin bound
+c (-2e-2*c = -796), which put the shift far below lambda_min and inverse iteration then favoured nothing near
+zero -- residual 0.67. Fix: a small ABSOLUTE negative shift (-0.02); c sizes only the cg tolerances. Recorded
+as a WHY-comment with the measured evidence. The deflation-through-smallest_eigenpair approach was tried FIRST
+and refuted (all eigenvalues collapsed to 0 -- projecting the iterate off found vectors inside the matvec
+breaks the shift-invariants); block inverse iteration with explicit cg is the shipped path.
+
+R6-FOUNDATION extension (holographic_crossfield): mesh_laplacian_eigenmaps grew a solver="auto" matvec path
+(dense below 2000 verts -- BYTE-IDENTICAL to before; sparse via low_eigenvectors above), so eigenmaps scale
+past the O(n^3) wall. Added mesh_fiedler_order (canonical-sign Fiedler seriation) for SATO-SEQ.
+
+SATO-SEQ (holographic_meshseq, NEW): clean-room mesh serializer -- Morton/Z-order (VERIFIED byte-stable under
+input permutation), PolyGen ZYX, Fiedler orders -- plus FHRR permutation-power seq_encode/seq_decode. TWO BUGS
+CAUGHT: (1) vocab-size mismatch -- encode drew max(tokens)+1 atoms, decode drew a different count, desyncing
+the shared-rng phasor codebook; fixed with a fixed vocab_size param. (2) KEPT NEGATIVE: the research report's
+"chunk via role-bundling past the cliff" idea FAILS (measured 3/256) -- the TOTAL term count crosstalks, not
+per-chunk, so N chunks in one bundle are as bad as N*chunk tokens. Switched to BLOCK-LIST storage (O(len/chunk)
+vectors), which round-trips EXACTLY. GPL-3.0 on Xrvitd/SATO re-confirmed via the GitHub API; nothing copied.
+
+M16 (holographic_worstview, NEW): global worst view over S^2 without a dense sweep. DIRECT-on-sphere
+(Lipschitz-constant-FREE, default -- safe when the metric jumps at occlusion) + certified Piyavskii B&B
+(opt-in). Confirms the research verdict: DIRECT beats a 2562 dense sweep on evals AND accuracy; certified mode
+returns a valid <=1e-3 certificate but costs more (kept negative: certificate real, economy not). Deterministic
+icosahedral subdivision, hashlib-keyed heap.
+
+Wired: m.low_eigenvectors, m.mesh_fiedler_order, m.mesh_to_tokens, m.seq_encode, m.seq_decode, m.worst_view.
+Catalog: 3 entries (Low eigenvectors / Mesh as a sequence / Global worst view), 18/18 discoverable. Pinned
+test_stage0_low_eigenvectors, test_eigenmaps_sparse_matches_dense, test_satoseq_roundtrip, test_m16_worst_view.
+cad 113; gates 0/0/0/0; integration 76. REMAINING from the research: the R6 quad LAYOUT (Instant-Meshes
+position field + the mandatory compatible-representative step) and the gated resonator lattice cleanup.
+
+## R6 COMPLETE — quad layout was ALREADY BUILT (Rule 0 win); holistic lattice resonator shipped as the last gap
+
+Went to build the R6 quad LAYOUT from the research plan (Instant-Meshes position field + the mandatory
+compatible-representative step). Rule 0 found it ALREADY SHIPPED: position_field (holographic_crossfield) is
+the full IFAM 4-PoSy operator WITH the compatible-representative averaging (translate each neighbour by
+integer rho-steps before averaging -- exactly the step the research pass flagged as mandatory), AND
+extract_quads is the IFAM sec 4.4 extraction, AND surface_retopo composes them. VERIFIED end to end:
+surface_retopo on an icosphere yields 165 quads + boundary tris. The only defect was a STALE docstring in
+position_field claiming extraction was "NOT built here yet" while extract_quads sits right below it -- fixed.
+This is the design habit paying off: "which existing module is this in a different costume?" -- the whole
+quad pipeline was the costume the research called R6-quad. No sibling built.
+
+The one genuine R6 gap was the GATED resonator lattice cleanup, in the FHRR/FPE algebra the existing
+factor_composite (MAP/SBC algebras) could not reach. Built fpe_lattice_resonator (holographic_fpe): factor a
+bound product prod z_a^{k_a} of fractional-power-encoded integer coordinates back to the integer tuple by an
+iterated FHRR resonator over power-codebooks (Frady/Kent/Olshausen/Sommer 2020). VERIFIED matching the
+research pass: 200/200 holistic-only recovery at 0.6 rad phase noise, exact + deterministic on clean products,
+51x51 codebooks fine in dim 1024. KEPT NEGATIVE loud in code + catalog: for DIRECT noisy coordinates np.round
+dominates (83% at sigma 0.3, O(1)) -- the resonator earns its place ONLY holistic-only (coordinates never
+observed, only the bound product). Faculty m.fpe_lattice_resonator; catalog "Holistic lattice cleanup" 600
+chars, 6/6 discoverable; pinned test_r6_holistic_lattice_resonator. cad 115; gates 0/0/0/0; integration 76.
+
+R6 is now COMPLETE: eigenmaps (dense+sparse) + Morse critical points + Fiedler order + IFAM position-field
+quad remesh (position_field/extract_quads/surface_retopo, pre-existing) + holistic resonator lattice cleanup.
+The one thing filed-not-built: the SSQ Morse-Smale-complex quad DOMAIN layout (an alternative to the IFAM
+route we already have) -- a redundant second backend, correctly deferred until a measured case wants it.
+
+## Backlog finish pass — R3-proper CLOSED BY MEASUREMENT (lossless local repair PROVEN impossible); everything else correctly gated
+
+Went to finish the backlog honestly rather than declare victory. Audited every remaining item:
+ * R3-proper (lossless manifold reconnect) -- the one filed item with a "try local first" plan. Rule 0: only
+   fallbacks (manifold_cleanup splits). Re-characterized the mantis density-2 retopo: 442 nm edges, 259 exact
+   -duplicate faces. Tried surgery-5 (remove one copy of each exact-duplicate face -- looks lossless): removed
+   259, nm 442->335, QEM ACCEPTS -- BUT opened 288 boundary edges. Then PROVED why: all 259 duplicate faces
+   are OPPOSITE-WOUND (measured), i.e. genuine two-sided sheets whose both sides enclose a zero-thickness
+   feature. Removing either side MUST open a hole. So no local removal is lossless -- this is now proven, not
+   just the earlier four surgeries' observation. R3-proper genuinely needs manifold-guaranteeing extraction
+   (QuadriFlow global integer assignment / min-cost-flow), which doesn't exist in-engine and is a large build
+   whose only consumer (QEM-on-retopo) is ALREADY unblocked by the shipped split+gate. VERDICT: filed, not
+   built -- no measured need justifies a QuadriFlow-scale solver to save 24 holes on one path. Surgery-5 added
+   as a kept negative in manifold_cleanup's docstring so no future session retries exact-dedup.
+ * SSQ MSC quad-layout backend (R6): Rule 0 confirms it would be a THIRD redundant path -- IFAM position-field
+   AND Stripe Patterns (both already shipped: "Stripe patterns (field-following even stripes on a surface)")
+   already produce quad layouts. Correctly deferred until a measured case wants the MSC-specific topology.
+ * CWF-FULL: deferred-with-measurement (gate not cleared -- cvt_remesh's erosion is minor, recorded).
+ * GAB-CV: declared negative (deterministic renderer, no variance to reduce).
+ * Tier 4: FORK (Moose's architecture decision, not code), ABS-LADDER (awaiting Moose's approval), A2/B1
+   (data-blocked correct negatives).
+
+Reachability audit: 8 import-only modules, all pre-existing library modules (brdf/encoders/fountain/lexicon/
+lightcache/lights/materialdata/reasoning) -- unchanged, stable at 8 across every session; every capability
+built this arc is fully wired. No new gaps.
+
+The backlog is now FINISHED in the honest sense: every item is either SHIPPED, CLOSED-BY-MEASUREMENT (R3-proper,
+CWF-FULL, GAB-CV -- each with the measurement on record explaining why not to build), REDUNDANT-DEFERRED (SSQ),
+DECISION-GATED (FORK, ABS-LADDER -- Moose's calls), or DATA-BLOCKED (A2/B1). No item with a measured motive and
+a clear build path remains unbuilt.
+
+## BRANCH MERGE: Moose's superpowers/CAD branch reconciled onto the this-arc tree (additive)
+
+Moose uploaded a full branch snapshot (repo.zip, ~28 MB) to merge. It was NOT a patch against recon -- it was a
+SUPERSET: my entire this-arc deliverable (S7 batch1+2 tags, C9/C10/C14 faculties, _SEMANTIC_OVERRIDES, S5 gate,
+S2 export gate, the C13 hashlib determinism fixes) was already integrated, with the branch's own new work layered
+on top. Verified before trusting: incoming had 0 recon-only py files (nothing of mine lost) and 10 new ones.
+
+WHAT THE BRANCH ADDS (8 modules + 2 test files, all self-test clean on arrival):
+  numerics   -- shared iterative numerics; the CG solver PROMOTED out of holographic_image (crossfield had grown
+                a duplicate complex-Hermitian one). Real-input path proven BIT-IDENTICAL (0.000e+00 on a 40x40
+                SPD system) and the old _cg name/signature kept as a delegating shim -- every historical call site
+                reads unchanged. Textbook "generalize on contact".
+  deptrace   -- import-footprint tracer (Poly Studio D2). Its own test records the premise was REFUTED by
+                measurement ("only 3 guarded external imports exist"); what shipped is the measuring instrument.
+                Correctly TOOL-ONLY: catalog row with method=None, no faculty -- and wiring_report does not flag
+                it, so the branch declared it honestly. Not every module earns a faculty.
+  skeleton / worstview / meshseq / gaborfield / spatialmem / ccrun -- all discoverable (most are the TOP hit for
+                a natural-language probe; spatialmem wires spatial_recall/index/hash_pairs).
+Plus additive growth across 22 shared files: the big one is the mesh-verb buildout (meshtools +2370, crossfield
++949, meshqem +572) and a node-graph/render expansion. Near-zero deletions; the -N lines were the CG relocation.
+
+FALSE ALARM worth recording (my own Rule-0 lesson, again): a substring grep for "abs(hash((" flagged
+holographic_sequence as a determinism REGRESSION. It was byte-identical to recon -- the match was my own WHY-comment
+("WAS: abs(hash(...")  describing the OLD code; live code uses hashlib. Probe live bodies, not substrings. Bit me,
+I caught it, moving on.
+
+TWO REAL AUDIT FLAGS, both the branch's honest new state, both budgeted (measured, not waved through):
+  * structure_audit exit 1 x2: giants 3->4 (meshtools at 3347 loc) and misc/ 149->150 (numerics landed there).
+    Budgeted to the measured state with WHY-comments that NAME the module and flag the open review (should
+    meshtools split? does numerics want its own family?) -- a decision for Moose, not a merge-time forced move.
+  * name_collisions: ccrun and zigrun share compile_cached AND build_batch_source -- parallel native backends (C
+    vs Zig), each its own real body, each sha256-content-addressed per the determinism rule. Benign homonyms,
+    same shape as `coverage`; added to KNOWN_COLLISIONS after reading both bodies. 48 -> 50 in the reviewed budget.
+
+ONE TEST FIX (additive, portability): test_preview_asset_fit_is_opt_in hardcoded
+/mnt/user-data/uploads/cc0____japanese_freshwater_crab.glb -- a dev-box asset not shipped in the repo, so it
+FileNotFound-ed anywhere but Moose's machine. Now skips cleanly when the fixture is absent (the test logic is
+fine; a hardcoded absolute path is a portability bug in the test, not the code). It still runs where the file is.
+
+VERIFICATION: all wiring audits 0/0/0 + tag_lint clean + structure/collisions green after budgeting; regen docs
+already in sync (my edits were to audit budgets, which do not feed generated docs); 8 new-module selftests; the
+branch's 2 new test files (124 tests, 1 now-skipped fixture); the full this-arc regression set (99); the
+numerics-consumer tests (crossfield/meshqem/image/render, 47); two untouched shards (183 + 223). Merge is clean.
+
+
+============================================================================================================
+## ARCHIVED BACKLOGS (2026-07-19) -- five completed/superseded backlog docs folded into NOTES before deletion
+============================================================================================================
+
+Moose's cleanup: old completed backlogs carry no value as task lists once their tasks are done and their research
+is cataloged. The five docs below were each verified COMPLETE (no open work) and REDUNDANT (their findings already
+in NOTES/researchLog), then their full substantive bodies were archived HERE -- verbatim, not summarised -- so the
+deletion loses no measurement, no kept negative, and no don't-build verdict. The live master backlog (BACKLOG.md,
+still has real REMAINING increments) and the two active this-arc backlogs (CLIENT_INTEGRATION, SEMANTIC) were NOT
+touched. Historical NOTES entries that say "filed X" / "findings in Y" remain valid as journal history.
+
+
+------------------------------------------------------------------------------------------------------------
+### ARCHIVED: docs/MASTER_BACKLOG.md
+### (all-remaining-work audit (17/17 shipped); RESEARCH-tier items carry measured negatives)
+------------------------------------------------------------------------------------------------------------
+
+# MASTER BACKLOG — all remaining work, audited against the live engine (2026-07-18)
+
+Every item below was probed through find_capability (3-5 stranger phrasings each) before being listed.
+AUDIT verdicts: REUSE (exists, wire/measure it) | EXTEND (substrate exists, one ingredient missing) |
+BUILD (only fallbacks returned) | RESEARCH (no precedent anywhere) | CLOSED (audit found it already shipped).
+Priority order at the bottom. Constitution applies to every item: NumPy/stdlib core, deterministic,
+additive/default-off, measured with baselines and kept negatives.
+
+## Tier 1 — bounded items with measured motives
+
+### NA-SCAT — normal-aware scatter bake   [SHIPPED 2026-07-18 — real fix was COVERAGE-AWARE GRID; scatter now = project quality at 33x speed; normal_aware a small sharpness bonus]
+Motive, measured: scatter's position-only gather blends front/back on thin features of occlusion-baked
+scans -- 22.4% dark render pixels vs project+flood's 16.5% (the quality ceiling) at 2s vs 57s.
+Audit: SpatialMemory/scatter grid exist but are POSITION-only; no hemisphere-keyed variant anywhere.
+Move: extend the scatter grid key with a quantized normal hemisphere (position (+) orientation -- a bound
+pair, the VSA-native key); gather compatible samples, fall back to any when empty.
+Kill-switch: scatter+normal on the mantis closes to within 2 points of project's dark% at <5s. Pin the
+existing scatter sha (default off or bit-identical opt-out).
+
+### R3 — resolve retopo cone points   [COMPLETE 2026-07-19 — manifold_cleanup (split+gate) ships and unblocks QEM; R3-proper (lossless global integer assignment) CLOSED BY MEASUREMENT: all 259 duplicate faces are OPPOSITE-WOUND two-sided sheets, so NO local removal is lossless (proven, not asserted); a QuadriFlow-scale MCF solver would save 24 holes on one already-unblocked path — not justified. Filed, not built]
+Motive, measured: guarded mantis retopo carries 142 non-manifold edges (IFAM singular cells); strict-manifold
+consumers blocked. AUDIT FINDING: the existing make-manifold CLOSES all 142 but by SPLITTING -- components
+1 -> 107. Existing machinery trades the defect; the real fix must RECONNECT: either QuadriFlow-style global
+min-cost-flow integer assignment (no MCF solver exists in-engine -- genuine build; sibling solver, NEVER a
+reorder of the pinned GS path per H2), or a local cone-point resolution pass (re-key the offending cells so
+walks close). Try local first: cheaper, and R2's snap is the precedent.
+Kill-switch: nonmanifold 0 AND components unchanged AND silhouette held on the mantis suite.
+
+### GAB-CLOUD — GaborField as cloud density source   [SHIPPED 2026-07-18 — segment integral + complex erf built; renders via cloud_single_scatter, closed-form shadow 49x at 8e-5; LOD composes]
+Audit: cloud_single_scatter EXISTS with a density interface; GaborField has closed-form ray integrals.
+Move: adapter so cloud_single_scatter consumes a GaborField (shadow rays via field.ray_integral -- may be
+CHEAPER than the FPE path since the base is ~10 kernels). Mostly wiring + one integration test.
+Kill-switch: rendered cloud from a fitted GaborField matches the FPE-density render at equal extinction.
+
+### VCOL — vertex-colour rendering   [SHIPPED 2026-07-18 — Mesh.colours existed, only the render path was missing; barycentric vcol branch, param or attribute, default-off; unblocks H5 recall bake]
+Audit: no per-vertex-colour path in the rasterizer (grep + probes both empty; texture-only).
+Motive: recall-bake at vertex scale (H5) produces per-vertex colours with nowhere to go; standard DCC need.
+Move: `vertex_colors=` on rasterize_mesh, barycentric interpolation, additive default-None.
+Kill-switch: a colour-graded sphere renders with smooth gradients; texture path bit-identical when unused.
+
+## Tier 2 — measurement/completion work on existing substrate
+
+### SR-BETA — dense-dominance sweep for hybrid retrieval   [SHIPPED 2026-07-18 — (1.0,0.3) validated via 3-case mechanism sweep; weights= exposed on faculty; real 12-query nomic suite re-derivation filed for when the index is present]
+Audit: fuse_rankings + bm25_rank shipped and discoverable. This is MEASUREMENT: complete the beta sweep,
+pick the weighting, pin it, record the verdict (equal-weight RRF already refuted, top-1 6 -> 3).
+
+### CWF-FULL — full CWF energy for cvt_remesh                             [AUDIT: EXTEND]
+Audit: holographic_optimize (incl. quasi-Newton), holographic_energy, meshcurvature (crease detection) all
+exist; cvt_remesh ships the 80%. Move: joint CVT+QEM objective through the existing optimizer + crease term
+from meshcurvature. Only if a measured case needs it -- cvt_remesh already beats grid decisively.
+
+### GAB-ANISO — anisotropic-envelope Gabor fitter   [SHIPPED 2026-07-18 — claim PROVEN: +1.4-5.7 dB over iso on filaments, breaks the iso plateau, 1/3 the kernels; opt-in (worse on blobs); m.gabor_volume(anisotropic=True)]
+Audit: the integral supports per-kernel SPD Q (verified); splat_aniso has the covariance-fitting move to
+borrow. Motive: the equal-count claim vs anisotropic Gaussians is UNPROVEN (kept negative on record).
+
+### GAB-CV — control-variate estimators   [DECLARED NEGATIVE 2026-07-18 — deterministic renderer has no variance to reduce; two candidate wins measured and refuted; needs a stochastic volume renderer to have a target]
+Audit: no variance-reduction/control-variate machinery anywhere. The paper's extra ~2x: always integrate the
+Gaussian base analytically, stochastically select Gabor residuals. Needs the renderer integration first
+(GAB-CLOUD), so sequenced after it.
+
+## Tier 3 — research arcs (own sessions)
+
+### M9 — branch segmentation / creature detection   [SHIPPED 2026-07-18 — surface Reeb graph (voxel ridge REFUTED for thin limbs); mantis 12 parts + 3 symmetric pairs in 0.2s; m.mesh_parts / m.match_symmetric_parts; UNBLOCKS M2]
+Audit: curve skeleton + single-branch collapse + B-Mesh skinning + creature/creature_pose all exist; missing
+is the SEGMENTATION (labeling skeleton branches / mesh parts) and symmetric-part detection (probe returned
+only fallbacks). AniGen S3-field concepts filed as design language (shape/skeleton/skin as consistent
+fields; confidence-decaying skeleton). The flagship VSA-geometry arc.
+
+### M2 — rig templates   [SHIPPED 2026-07-18 — rig_from_parts: joint tree + label-aware skin from M9 parts; label-aware bind 57->87% own-part, one-limb pose isolated 11000x; m.rig_from_parts; M9->M2 arc COMPLETE]
+Audit: skin_bind_weights, solve_ik, skeleton skinning EXIST. M2 is mostly COMPOSITION once M9 labels parts.
+
+### R6 — spectral quadrangulation + VSA lattice cleanup   [COMPLETE 2026-07-19 — eigenmaps (dense+sparse via m.low_eigenvectors) + Morse critical points + m.mesh_fiedler_order + IFAM position-field quad remesh (position_field/extract_quads/surface_retopo, was ALREADY built — Rule 0 win) + gated holistic resonator lattice cleanup (m.fpe_lattice_resonator, 200/200 at 0.6 rad; rounding wins direct-regime, kept negative). Only the redundant SSQ MSC-layout backend filed-not-built]
+FOUNDATION SHIPPED earlier (cotan eigenmaps l(l+1)-validated + Morse critical points, Euler chi=2).
+Research report (see NOTES + de-risking artifact) verified by experiment on the live tree:
+ * Stage-0 eigensolver (no scipy): block SHIFTED INVERSE ITERATION + CG reproduces the dense-eigh sphere
+   spectrum — l=1 eigenSPACE residual 2.5e-11, low eigenvalues <2e-3; eigenvalues far from the shift converge
+   slower (5.943 vs 5.912 @ 40 iters) → use PER-BAND SHIFTS. Deterministic (seeded start, fixed GS order).
+ * QUAD LAYOUT primary route = Instant-Meshes position field (Jakob et al. 2015, BSD ref code): local
+   averaging + tangent projection + np.round lattice snap, pure NumPy, byte-identical on re-run. MEASURED
+   TRAP kept: naive per-vertex rounding is a TRIVIAL FIXED POINT (init=origin never moves; neighbor coherence
+   0.396 = random). The COMPATIBLE-REPRESENTATIVE step (shift each neighbor by integer lattice translates
+   before averaging) is MANDATORY — coherence 0.396 → 0.124 (usable) even with crude frames; feed the shipped
+   4-RoSy cross field for production quality. Secondary route: Stripe Patterns (single smallest-eigenvector
+   of a 2n×2n real symmetric matrix — Stage-0 solves it). MIQ/Bommes = MIP + GPL CoMISo — AVOID.
+ * VSA LATTICE CLEANUP verdict now EMPIRICAL: for direct noisy coords np.round dominates (83% @ sigma 0.3,
+   O(1)) — do NOT ship VSA there. For the HOLISTIC-ONLY case (only the bound product z_u^u ⊙ z_v^v observed),
+   the FHRR resonator achieves 100% exact recovery at 0.6 rad phase noise, even 51×51 codebooks in dim 1024 —
+   the regime where rounding is UNDEFINED. Build gated: only where a bound-product representation exists
+   (e.g. holographically-stored parameterizations). Pure NumPy (complex Hadamard + matmul).
+BUILD PLAN: (1) stage-0 eigen kit as a faculty (per-band shifted inverse iteration), (2) IM position field on
+the shipped cross field + mesh extraction, (3) stripe-pattern iso-lines as the simple alternate, (4) gated
+resonator lattice decode for holistic parameterizations. References: Dong et al. SIGGRAPH 2006; Jakob et al.
+SIGGRAPH Asia 2015 (BSD); Knöppel et al. SIGGRAPH 2015; Frady/Kent Neural Comp 2020.
+
+### SATO-SEQ — mesh-as-sequence hypervector encoding   [SHIPPED 2026-07-19 — m.mesh_to_tokens/seq_encode/seq_decode: Morton|ZYX|Fiedler orders, FHRR permutation-power, block storage past the cliff (role-bundling REFUTED 3/256); clean-room, GPL SATO untouched]
+GPL hazard CONFIRMED via GitHub API: Xrvitd/SATO = GPL-3.0 ("Strips as Tokens", SIGGRAPH 2026). NEVER copy
+or adapt that repo; the strip-token IDEA is fair to reimplement clean-room from the paper, but we do not need
+it. VERIFIED on the live tree:
+ * MORTON/Z-ORDER serialization: pure integer bit-interleave, byte-stable under input permutation (tested,
+   200 pts). Zero eigensolve. PolyGen ZYX sort (Nash ICML 2020, permissive convention) is the alternate;
+   Fiedler ordering reuses the Stage-0 eigen kit.
+ * PERMUTATION-POWER sequence encoding on the live FHRR primitives round-trips PERFECTLY to 64 tokens @
+   dim 1024 and 256 tokens @ dim 4096 (capacity cliff at ~dim/8; 1024 drops to 0.93 @ 128, 0.64 @ 256).
+   CHUNK at ≤ dim/16 tokens per bundle, hierarchically bundle chunks.
+BUILD PLAN: morton_key + mesh_to_sequence (Morton|ZYX|Fiedler orders) + seq_encode/seq_decode via
+permutation-power over hashlib-seeded FHRR vocab, chunked. Gate: build when a whole-mesh-similarity or
+mesh-in-hypervector consumer exists (M9 similarity, scene memory).
+
+### M16 — Lipschitz worst-view solver   [SHIPPED 2026-07-19 — m.worst_view: DIRECT (Lipschitz-free) default beats dense sweep, certified Piyavskii B&B opt-in with a real <=1e-3 certificate; deterministic icosphere B&B]
+VERIFIED head-to-head on a planted-optimum S² problem (deterministic icosahedral subdivision, hashlib
+tie-broken heap):
+ * Certified Lipschitz B&B (Piyavskii bound f(c)+L·r per spherical triangle): FINDS the true optimum to
+   0.003 deg WITH a certificate (gap 1.05e-3) — but at a conservative analytic L costs 16,080 evals vs the
+   dense sweep's 2,562. The certificate is real; the economy is NOT (kept negative at honest L).
+ * DIRECT-on-sphere (Jones 1993, no Lipschitz constant; upper-convex-hull cell selection): 1,704 evals —
+   BEATS dense (2,562) — and lands 0.343 deg from truth vs dense's 1.467 deg. Winner.
+BUILD PLAN: m.worst_view(metric_fn, mode="direct"|"certified", eps) — DIRECT default, L-based B&B as the
+certified opt-in for metrics with a sound L (silhouette-IoU jumps at occlusion events → L unsound → DIRECT).
+Build when a real asset shows the 6-azimuth turntable missing a worst view, OR when view-QA ships.
+
+## Tier 4 — decisions & blocked
+
+### FORK — mesh-first vs native-first architecture                        [DECISION, not code]
+ARCH-1 (recipe validator) CLOSED BY AUDIT -- validate_recipe shipped in holographic_recipeops. The fork
+decision itself remains Moose's call; no code proceeds from it until made.
+
+### ABS-LADDER — abstraction ladder (PLAN_abstraction_ladder.md)          [AWAITING APPROVAL]
+No implementation until Moose approves the plan.
+
+### A2 / B1 — material library / labeled scene set                        [DATA-BLOCKED]
+Unchanged: correct negatives until data exists.
+
+## Recommended order
+1. NA-SCAT (small, measured, closes the last texture gap)
+2. R3 local cone-point resolution (last retopo defect class; try local before MCF)
+3. GAB-CLOUD wiring, then GAB-CV
+4. VCOL (small, unblocks H5's vertex-scale recall bake)
+5. SR-BETA measurement close-out
+6. M9 -> M2 research arc (fresh session, full budget)
+Everything else on demand or after a measured motive appears.
+
+------------------------------------------------------------------------------------------------------------
+### ARCHIVED: docs/PLAN_retopo.md
+### (the retopo arc holographically reconsidered; SUPERSEDED by BACKLOG.md, kept for measurements)
+------------------------------------------------------------------------------------------------------------
+
+> **SUPERSEDED AS AN ENTRY POINT (2026-07-17): see docs/BACKLOG.md**, the single master backlog
+> merging the retopo arc with the Poly Studio engine-gap backlog. This file is kept for its MEASUREMENTS and
+> KEPT NEGATIVES, which the master summarises but does not reproduce. Work is tracked in BACKLOG.md.
+
+# PLAN_retopo.md v2 -- the retopo arc, HOLOGRAPHICALLY RECONSIDERED (2026-07-17)
+
+Owner directive: "The entire plan needs to be holographically reconsidered and updated." v1 was written as a
+conventional graphics pipeline -- build IFAM extraction, add curvature sizing, bolt on guides. v2 re-derives
+every item through the engine's own doctrine: WHICH EXISTING GENERAL MOVE IS THIS IN COSTUME? Which lever
+(bake-once / partition / determinism-not-storage / MORE DIMENSIONS / tiling) dissolves the wall? What gets
+PROMOTED (ledger) rather than built? The v1 scoping error -- "build Instant Meshes" when 75% existed -- was a
+failure of exactly this lens, and it repeats below: nearly every remaining item is existing machinery wearing
+a domain costume.
+
+Done so far: R1 sparse cross_field (the eigensolve wall) | R2 cost-aware guard walk | R3a natural boundaries
+| R8=P1 promoted shared CG. Each of these is ALREADY a holographic move: R1 = iterate-a-projection on a
+matvec operator; R2 = cost-curve-aware search; R3a = the maths was free, only the guard was wrong; P1 =
+consolidate-and-promote.
+
+## R6a -- Sparse GUIDED solve (found BY this reconsideration)                        [DONE 2026-07-17]
+guided_cross_field dense-solves (L + diag(w) + 1e-9 I) u = w c with np.linalg.solve -- THE SAME F^3 WALL R1
+tore down, one function below it. Holographic reading: the system is complex Hermitian POSITIVE DEFINITE by
+construction (+w is the definiteness), which is precisely numerics.cg's contract -- the P1 promotion pays
+immediately, matvec off dual_edges + diagonal, zero new machinery. Also inherits boundary="natural" (same
+one-line guard as R3a, currently duplicated at line ~726). Dense below the threshold (bit-identical), sparse
+above; parity pinned. WITHOUT THIS, R6's guides cannot reach scans at all -- the strain/rig signal would hit
+the wall the moment it mattered.
+
+## R3 -- Extraction (IFAM 4.4) = CLUSTER-BY-KEY in the field's frame                 [DONE 2026-07-17]
+v1 scoped this as bespoke graph surgery. Holographic reading: extraction IS cluster_decimate in a different
+costume. cluster_decimate: quantize vertices to an AXIS-ALIGNED grid, collapse each cell to a representative,
+rebuild faces. IFAM extraction: quantize vertices to the FIELD-ALIGNED lattice the position field already
+computed, collapse each cell, connect cells whose lattice coords differ by a unit step, emit 4-cycles as
+quads. Same skeleton: key -> group -> representative -> reconnect. The lattice coordinate is a COARSE/FINE
+SPLIT (NOTES doctrine: discrete anchor + graded residual): integer cell = anchor (topology lives here),
+in-cell offset = residual (dies in the collapse, by design). BUILD: extract_quads keyed on the lattice
+coordinate, reusing the cluster/spatial-hash machinery (meshtools) rather than growing a second grouping
+pass. The paper's "error-prone part" is integer-jump inconsistency at singularities -- detect and emit those
+cells as triangles (quad_fraction reports it), never guess. Then surface_retopo = cross_field(natural) ->
+position_field -> extract_quads -> shrinkwrap(source). Silhouette survives BY CONSTRUCTION.
+
+### R3b -- PRECONDITION: consistent orientation                                      [DONE 2026-07-17]
+surface_retopo works on the closed fixture (323 faces, IoU 0.989, 77% quads) and RAISES on the ladybird's
+decimated LOD: "directed edge (0,1) appears twice: the mesh is not consistently oriented". `connection` needs
+consistent winding, and photogrammetry scans do not have it. Rule 0 result: mesh_is_oriented EXISTS (a
+CHECK); isosurface.is_oriented(quads) exists; NO repair faculty exists (mesh_orient/orient_mesh/
+fix_orientation all MISSING; mesh_repair does weld/fill/non-manifold, not winding). So this is a REAL gap,
+not a duplicate.
+Holographic reading: consistent orientation is a 2-COLOURING / BFS over the dual graph -- flood fill on the
+face adjacency (ledger P5's move), flipping a face when it disagrees with the neighbour that reached it. The
+dual graph is ALREADY BUILT by `connection` (dual_edges), and surface_nets "learned to orient itself because
+this module needed it" (crossfield's own docstring) -- so the move exists in the tree, unpromoted.
+Non-orientable or disconnected components: report per-component, never guess.
+DONE WHEN: mesh_orient(mesh) -> (mesh, report) flips a scrambled fixture back to consistent (pinned against
+mesh_is_oriented), leaves an already-oriented mesh BIT-IDENTICAL, and surface_retopo runs the ladybird
+end-to-end through the 0.95 gate.
+
+### R3c -- SCAN CONDITIONING                                                         [DONE 2026-07-17]
+RESOLVED, and the hypothesis was BACKWARDS. MEASURED components: SOURCE 151,582 faces = 2,064 COMPONENTS
+(largest only 30.1% of faces; 1,772 of them under 10 faces -- dust). LOD 5,853 = 9 components. LOD 19,844 =
+ONE component, 100%. DECIMATION IS NOT SHATTERING THE MESH -- IT IS HEALING IT (the weld merges scan dust).
+So the surface route wants a BIGGER LOD, not the raw source: the raw scan is the incoherent input.
+ACCEPTANCE MET: decimate_to(20000) [IoU 0.989, 1 component] -> mesh_repair -> mesh_orient [oriented, 0 flips,
+0 non-manifold] -> surface_retopo(density=2.0) -> 2,679 faces, quad 0.48, SILHOUETTE 0.952 vs the 151k SOURCE.
+PASSES the 0.95 gate that voxelize-then-quad structurally cannot (0.935 ceiling at res 48, failing).
+Open follow-ups (not blockers): quad_fraction 0.48 is low -- a singular-rich field, which is what R4
+(curvature-sized density, = ledger P6) is for; density 3.0 gives 1,057 faces at 0.923 (guard walks it).
+NOTE for whoever reads mesh_orient's report: its "components" counts ORIENTATION-PROPAGATION components
+(manifold-edge-connected), NOT geometric ones -- it said 399 where the geometric count is 9, because
+non-manifold edges block propagation. Both numbers are correct for their question; the field name is
+misleading and should be renamed propagation_components.
+
+## R4 -- Curvature-sized density                              [RESCOPED BY AUDIT -- harder than v2 assumed]
+TWO AUDIT RESULTS, both of which change the plan:
+ 1. P6 IS A DEAD END, and that is a finding: holographic_adaptive_sample is a renderer's per-pixel STOP RULE
+    (CI half-width / samples_to_target). R4's sizing decides HOW BIG A QUAD IS. Same English, different
+    quantity. No promotion applies. Do not force it -- that would be fragmentation-by-vocabulary.
+ 2. THE INPUT ALREADY EXISTS: m.mesh_curvature(mesh, kind="mean") + m.mesh_curvature_confidence. Nothing to
+    build there either.
+SO THE REAL CONTENT IS THE ONE THING v2 WAVED AT AS "minor edits", AND IT IS NOT MINOR. position_field's
+operator is `a = round((P[i]-P[j]) @ O[j] / rho); acc += P[j] + rho*(a*O[j] + c*Bt[j])` -- ONE GLOBAL rho. The
+whole construction rests on neighbours differing by an INTEGER number of rho-steps. If rho_i != rho_j the
+integer jump between them is not defined: the two lattices do not commensurate, and extract_quads' key
+(round(P/rho)) has no single rho to divide by either. This is exactly why the paper (Jakob et al. 2015 sec 4,
+and the follow-up hierarchical work) treats graded sizing as its own construction, not a parameter swap.
+Options, honestly ranked:
+  a. POWER-OF-TWO GRADING (the paper's own answer): quantize rho(v) to rho0 * 2^k, so across an edge the
+     lattices are commensurate (a coarse step IS two fine steps). Extraction keys per level. Real work.
+  b. Uniform rho, but choose it per COMPONENT or per curvature CLUSTER, and stitch. Cheaper, coarser.
+  c. Uniform rho + accept the singularities, which is TODAY (quad_fraction 0.48 on the ladybird).
+DONE WHEN: quad_fraction on the ladybird rises MEASURABLY above 0.48 at equal or better silhouette, with the
+grading construction pinned -- not by tuning the extractor to hide triangles.
+
+## R5 -- Gate integration                                     [DONE 2026-07-17 -- the trap caught it ITSELF]
+surface_retopo lands default-guarded (silhouette=0.95) with a LINEAR knob (density -- explicitly NOT
+auto_retopo's cubic voxel resolution). VERIFIED: test_every_mesh_reducing_faculty_is_silhouette_guarded
+enumerates dir(mind) by NAME PATTERN ("retopo" matches), so it required the new faculty to carry a guard
+WITHOUT ANYONE ADDING IT TO A LIST -- the structural trap catching a capability that did not exist when the
+trap was written. All 14 enumerated faculties now account for themselves (10 guarded, 4 exempt with reasons).
+REMAINS OPEN, small: P4's split (walk_knob separated from the silhouette criterion) so the next guard -- an
+EGI floor, since the outline is NECESSARY and orientation preservation is the SUFFICIENCY check the ladybird
+showed diverging (outline 0.969 while EGI read 0.796) -- is a parameter, not a rewrite.
+
+## R6 -- Guides = the SAME solve with a nonzero right-hand side
+After R6a there is nothing to build here but plumbing: strain_directions (exists) or skeleton-derived
+directions enter as guide_dirs; loops concentrate where deformation lives because the FIELD does. Acceptance
+unchanged: bent-cylinder with strain guides shows loops at the bend.
+
+## R7 -- Skeletonizer + creature detection = SDF RIDGE + VSA CLEANUP (the deepest reframing)
+v1 said "mean-curvature contraction or distance-field ridge tracing" as bespoke geometry. Holographic reading,
+two halves:
+  * SKELETON: the medial axis is the RIDGE OF THE DISTANCE FIELD, and the engine is saturated with SDF
+    machinery (mesh_to_sdf_grid, sdf_surface_points, Walk on Stars). Ridge-following of a scalar field is the
+    same move the photo-depth work already does on images. Iterative contraction, if used, is
+    iterate-a-projection (resonator/IK/PBD family). No new mathematical species required.
+  * CREATURE DETECTION: "detect a creature shape" is CLEANUP AGAINST A CODEBOOK -- the engine's founding
+    move. Encode a shape signature (EGI histogram + skeleton graph spectrum + proportions) as a hypervector;
+    resonate against an archetype codebook (biped/quadruped/hexapod/blob); the winner names the rig template
+    and the joint priors. This is find_capability FOR SHAPES, on machinery that already exists. VSA program,
+    not classifier.
+Feeds R6 as guide_dirs near joints. Still a separate arc; now it is a COMPOSITION of existing faculties plus
+one ridge-tracer, not a research project.
+
+## STANDING RULES (unchanged, they earned it)
+One item per arc, full ritual, every promotion bit-identical for existing callers, kept negatives loud.
+Ledger P2-P7 remain open; P4 and P6 are now load-bearing for R5 and R4 respectively.
+
+------------------------------------------------------------------------------------------------------------
+### ARCHIVED: docs/BACKLOG_retopo_topology.md
+### (mesh-destruction research; R1-R3 shipped (topology gate et al))
+------------------------------------------------------------------------------------------------------------
+
+# Retopo topology backlog — from the mesh-destruction research (2026-07-18)
+
+Context, measured this session: our extract_quads is a faithful port of IFAM section 4.4, and the research
+confirms the holes/islands are INHERENT to that algorithm, not a porting bug -- the reference implementation
+deletes low-support cells, abandons non-closing face walks, refuses holes of degree >= 7, and handles
+non-manifold output by cutting regions out. Our keep_largest then amputates whatever the extraction shattered
+(11% of the mantis at coarse density). The guard hides this by walking finer, but hiding is not fixing.
+Each item below carries the research grounding, the leCore move, and its kill-switch measurement.
+
+## R1 — Topology gate  [SHIPPED 2026-07-18 — report+gate, wired into process_scan, violations named; caught 3 non-manifold edges on day one]
+
+**Grounding.** Euler-Poincare: chi = V - E + F; per component, genus g = (2 - chi - B)/2 with B = boundary
+loops. An INTENDED hole is a boundary loop present in the INPUT; a destruction artifact is a NEW boundary
+loop, a NEW component, or a genus change. This is the principled answer to "don't fill holes that are
+supposed to be there" -- match loops, don't threshold sizes.
+
+**Build.** `topology_report(mesh)` -> {components, per-comp (V,E,F,chi,B,g), boundary loop fingerprints
+(centroid, length, normal), non-manifold edge count}. `topology_gate(input, output)` -> pass/fail + which
+invariant broke + which loops are new vs matched. Wire into process_scan AFTER retopo: on fail, retry finer
+(existing guard machinery) instead of keep_largest amputation; keep_largest only when input was 1 component
+AND retry exhausted, loudly reported.
+
+**Existing to reuse (Rule 0 targets).** island.connected_components (the graph flood), mesh_repair's edge
+accounting; probe find_capability for "euler characteristic", "genus", "boundary loops", "non-manifold edges"
+before building -- some of this likely exists in the repair/validate family.
+
+**Kill-switch.** On the mantis suite: gate must classify the guarded 1-component result PASS and the coarse
+unguarded 12-65-component result FAIL with "new components + new boundary loops" named. Selftest fixtures: a
+torus (g=1 preserved), a cylinder (2 intended boundary loops preserved), a punched-hole regression (new loop
+-> FAIL).
+
+## R2 — QEx-style singularity snapping  [SHIPPED 2026-07-18 — default-off (adds faces, 328->334 measured); 1134 cells rescued, 12->5 comps alone]
+
+**Grounding.** QEx (Ebke et al. 2013): (a) round transition functions to EXACT grid automorphisms (rotation
+r mod 4, integer translation); (b) snap each singular vertex to the FIXED POINT of its accumulated transition
+(their Algorithm 2, closed form per r) so the period-jump cycle CLOSES instead of the cell being dropped.
+Converts "degenerate cell -> hole" into "valid irregular vertex".
+
+**Build.** In extract_quads, before dropping a cell whose corners land in < 3 distinct lattice cells or whose
+jump cycle does not close: compute the accumulated automorphism around the vertex; if r != 0, snap the lattice
+key to the fixed point and re-attempt the face. Default-off flag `qex_snap=True`? NO -- measure first: if
+bit-identical on currently-passing meshes (snapping only fires on cells we currently DROP, so it is additive
+by construction), it can default ON; the pinned 328-face retopo must not change.
+
+**Kill-switch.** Mantis at density 2.0 unguarded: components 12 -> target <= 2, dropped-face fraction 5% ->
+< 1%. Pinned retopo (328/76%) bit-identical. If snapping changes ANY currently-produced face, demote to
+default-off and record why.
+
+## R3 — Global integer assignment via min-cost flow (QuadriFlow strategy)  [INVESTIGATE: the principled fix]
+
+**Grounding.** QuadriFlow (Huang et al., SGP 2018): keep the orientation field, solve integer offsets as a
+GLOBAL minimum-cost network flow (+ SAT flip removal) -> watertight by construction, ~4x fewer singularities
+than Instant Meshes. Successive-shortest-paths MCF is pure-NumPy implementable and deterministic.
+
+**Build order.** Only if R1+R2 leave failures: MCF on the dual singularity graph replacing the per-vertex GS
+position_field integer assignment. Replace SAT flip-removal with the R1 gate (reject + retry). This is a
+NEW solver path (default-off, `solver="flow"`), never a change to the pinned GS path -- H2 proved the GS
+order is load-bearing, so flow is a SIBLING route gated by R1, not a reorder of the existing one.
+
+**Kill-switch.** Watertightness on the scan suite (0 new boundary loops, 1 component) at densities where GS
+extraction fails the R1 gate. If MCF runtime > the guard-retry cost it replaces, file as kept negative.
+
+## R4 — Botsch-Kobbelt link-condition remeshing as the topology-safe fallback  [BUILD: the safety net]
+
+**Grounding.** Split/collapse/flip + tangential smoothing, each operator guarded by the link condition and
+boundary rules, is provably manifold-preserving: genus, components, and boundary loops invariant BY
+CONSTRUCTION. Cannot shatter. Trade: isotropic tris, not a global quad layout.
+
+**Build.** `isotropic_remesh(mesh, target_edge, iterations, preserve_boundary=True)` with link-condition
+checks on every collapse/flip. Rule 0 first: we have loop_subdivide, QEM collapse machinery, meshverbs --
+the collapse+link-condition may partially exist in the QEM decimator; extend, don't duplicate. Wire into
+process_scan as the route the pipeline switches to when the R1 gate rejects the quad extraction twice
+(report says which route ran). LOD path already works well (Moose) -- this complements it, never replaces.
+
+**Kill-switch.** Property test: 500 random operator applications on torus/cylinder fixtures -> topology_report
+invariants unchanged after every single operation. Any violation = the operator guard is wrong, fix before
+shipping.
+
+## R5 — Local-feature-size sizing field  [SHIPPED 2026-07-18 — SpatialMemory-powered thickness -> graded_levels; WITH R2: 12 comps -> 1, mesh intact]
+
+**Grounding.** Dey-Zhao medial-axis approximation from Voronoi/Delaunay filtering gives local feature size;
+cap target edge length at a fraction of local thickness so thin plates keep >= 2 cells across. Attacks the
+ROOT of the leg-dropping (cells coarser than the feature), where the silhouette guard only detects the symptom.
+
+**Build.** `feature_size_field(mesh)` -> per-vertex thickness estimate (nearest opposite-normal surface point
+-- note: this is a closest-point query = spatial_recall's move, H5 composes here). Feed as rho_v into
+position_field (it already supports per-vertex rho via rho_v!). Probe first whether graded_levels/rho_v
+machinery already gives us this for free.
+
+**Kill-switch.** Mantis legs at density 2.0: silhouette worst-azimuth without guard retries. Win = fewer guard
+steps to pass 0.95 (cheaper) AND intact legs at coarser global density. If the thickness field costs more than
+the guard retries it saves, kept negative.
+
+## R6 — Spectral quadrangulation + VSA lattice cleanup  [RESEARCH: the holographic track]
+
+**Grounding.** Spectral Surface Quadrangulation (Dong et al. 2006): Morse-Smale complex of a cotan-Laplacian
+eigenfunction -> extraordinary points only at well-spaced extrema, global structure by construction. Our
+cross_field already builds the same cotan-Laplacian eigenproblem -- the substrate exists. VSA angle: encode
+lattice keys + period jumps as FPE/SSP vectors, resonator-style cleanup snaps inconsistent cells to a
+consistent key -- a holographic analog of R2's fixed-point snapping. No published precedent; genuinely ours.
+
+**Scope.** Two bounded prototypes, measurement-first: (1) MSC of eigenvector #k on the mantis -- count
+extraordinary points vs IFAM singularities; (2) FPE-encode cell keys, bundle corner sets, resonate -- does
+cleanup agree with R2's algebraic snap? If yes, the VSA route replaces special-case code with the engine's
+own primitives. File honestly if it doesn't pay.
+
+### Priority order
+1. **R1 topology gate** -- immediate, replaces amputation with detection; everything else is measured through it.
+2. **R2 QEx snapping** -- converts most holes to valid singularities; additive by construction.
+3. **R5 sizing field** -- removes the thin-feature motive for over-coarse cells; composes with H5.
+4. **R4 isotropic fallback** -- the provably-safe route when the gate rejects.
+5. **R3 min-cost flow** -- only if R1+R2 leave gate failures; sibling solver, never a reorder.
+6. **R6 spectral/VSA** -- research arc, own session.
+
+Every item: Rule-0 audit first, kill-switch measured before shipping, kept negatives filed loudly.
+
+------------------------------------------------------------------------------------------------------------
+### ARCHIVED: docs/BACKLOG_holographic_pipeline.md
+### (pipeline stages as holographic-move costumes; H1-H6, incl H3 DON'T-BUILD note)
+------------------------------------------------------------------------------------------------------------
+
+# Holographic pipeline backlog — measured, not assumed
+
+Moose's principle: **slow stages are traditional implementations of moves the engine already does
+holographically under another name.** Every entry below was profiled/measured before filing. Format per item:
+the MEASURED premise, the holographic MOVE it's a costume of, and an honest BUILD / DON'T-BUILD verdict with
+the number that decides it.
+
+Pipeline stage times (mantis, 11k src faces, density 1.5, bake 512²):
+`repair 0.3s | retopo 46s (guarded, ~3× raw) | rebake +62s`. Raw retopo 17s, of which `position_field` 13s.
+
+## H1 — Rebake via scatter/gather instead of per-texel closest-point  [SHIPPED 2026-07-18 — method="scatter", 36x end-to-end, pins hold]
+
+**Measured premise.** rebake_texture's hot path is a per-target-face × per-candidate-source-triangle loop:
+profiled at **1.05M closest-point calls / 142s cumulative** on a 512² bake. The docstring itself measures the
+naive per-texel rate at 963 pts/s. A naive "just vectorise the argmin" is ALSO ~982 queries/s (O(Q×V) broadcast
+blows memory) — confirmed, so vectorising the loop is not the fix.
+
+**Holographic move.** A texel→source-colour lookup is `gather` reading a `scatter` bundle — the engine's
+rank-agnostic, adjoint scatter/gather pair (holographic_transfer). SCATTER the source-vertex colours into a
+volumetric grid keyed by 3-D position (bundle colour onto space); GATHER at each target texel's 3-D point.
+
+**Measured result.** scatter+gather bake: **0.02–0.06s** vs 46–62s (≈1500×). Mean colour error vs
+exact-nearest **0.066–0.088** RGB units (visually close). Bleed risk (two walls in one cell) is **8% at GR=96,
+0% at GR≥160** — a grid fine enough to separate opposite faces has no bleed and still bakes in 0.03s.
+
+**Verdict: BUILD** `rebake_texture_holo` (or a `method="scatter"` route on rebake_texture) as a default-off
+fast path, routed by measured mesh thickness: volume bake where cell < local wall separation (the body),
+surface projection where not (sub-cell legs). KEPT NEGATIVE: the volume bake blurs sub-cell-width features;
+that is why it is thickness-routed, not a blanket replacement.
+
+## H2 — position_field (IFAM 4-PoSy) is a triple-nested Python loop  [SHIPPED 2026-07-18 — fast=True vectorises INNER loop only, 3.5x, bit-identical; Jacobi/reorder REFUTED as lattice-flipping kept negatives]
+
+**Measured premise.** `position_field` is **13s of the 17s raw retopo**. Its structure is
+`for _ in iterations: for i in permutation(vertices): for j in neighbours:` — a Gauss-Seidel sweep in pure
+Python.
+
+**Holographic move.** The IFAM operator is a weighted graph diffusion with a per-edge integer-lattice snap —
+a "propagate a value over a graph" / scatter-gather-on-the-vertex-graph move. The linear part (neighbour-
+weighted averaging) is a sparse matvec = the engine's `iterate` / eigenpair machinery already used by
+cross_field.
+
+**Open question (must measure before building).** The integer-jump snap per edge is NONLINEAR and the sweep is
+Gauss-Seidel (uses updated neighbours mid-sweep), which resists naive vectorisation. A Jacobi (batched) sweep
+vectorises trivially but changes the fixed point — must verify it converges to an equivalent lattice and does
+not flip the pinned retopo (surface_retopo 328/0 pins). Candidate: vectorise the linear averaging as a sparse
+matvec + apply the integer snap as a batched round, alternating (operator-splitting), guarded by the existing
+silhouette floor.
+
+**Verdict: INVESTIGATE.** Prize is ~13s→(hopefully)~1-2s per retopo, ×3 under the guard. Do NOT build blind;
+measure Jacobi-vs-Gauss-Seidel lattice agreement first (a kept-negative if it flips).
+
+## H3 — Nearest-point via the holographic index (HoloForest) vs spatial hash  [DON'T-BUILD (yet): premise refuted for THIS use]
+
+**Measured premise.** I hypothesised the engine's associative index (`recall`→HoloForest) would beat the rebake
+spatial hash for nearest-point. But `recall` finds nearest of a DISCRETE codebook by cosine; rebake needs
+nearest CONTINUOUS point on a triangle + barycentric uv. Encoding positions for cosine-nearest needs a
+proximity-preserving code (FPE / spatial semantic pointer) — `Encoders (number to vector)` exists but wiring a
+3-D FPE + HoloForest is more machinery than H1's scatter/gather, which already solves the same stage.
+
+**Verdict: DON'T-BUILD for the bake** (H1 dominates it). KEEP as a research note: a proximity-preserving
+position encoder (H5) would make MANY geometric queries associative; file it as its own item rather than
+bolting it onto rebake.
+
+## H4 — Silhouette guard re-runs the WHOLE retopo up to 6×  [SHIPPED 2026-07-18 — premise CORRECTED: field reuse is 8%%; real lever is guard_iterations plateau, 1.48x on walks]
+
+**Measured premise.** The guard calls `surface_retopo(density=1/knob)` from scratch each retry — cross_field +
+position_field + extract every time. But density only changes the EXTRACTION lattice spacing; the cross_field
+(orientation) is density-independent and position_field is largely reusable.
+
+**Holographic move.** Bake-once / sample-many (lever 1, cache locality): solve the orientation field ONCE, then
+re-extract at each density — the guard's retries become cheap re-extractions, not full re-solves.
+
+**Verdict: BUILD** a `surface_retopo(reuse_field=...)` path so silhouette_guarded passes the solved field
+between retries. Turns 3× full solves into 1 solve + 3 extractions. Fork-independent; pins must hold
+(re-extraction at the same density must be bit-identical to the monolithic call).
+
+## H5 — Proximity-preserving position encoder (the geometry↔VSA bridge)  [SHIPPED 2026-07-18 — SpatialMemory on holographic_fpe: 4.1x recall, dr-p95 1.009, resonant readout 0.034 RGB; capacity tension PINNED as kept negative]
+
+**Premise.** The reason each geometric query is re-solved traditionally is that leCore has no
+distance-preserving map from R³ position → hypervector. With one (fractional-power / spatial-semantic-pointer
+encoding, cos(enc(p),enc(q)) monotone in −‖p−q‖), EVERY nearest-point query becomes `recall` and inherits the
+HoloForest's sublinear scaling: rebake, shrinkwrap, closest_point, ICP, PnP, correspondence — all one move.
+
+**Verdict: RESEARCH** (flagship, deserves its own arc). Rule-0 showed `Encoders (number to vector)` as the
+seed. Measure: does a 3-D FPE preserve rank-order of distances well enough that recall returns the true nearest
+surface element? If yes, it collapses a whole family of geometry loops into associative recall — the deepest
+expression of Moose's principle. Precedent in NOTES: "IK, PBD, PnP, and the resonator are all iterate a
+projection"; this would add "and every closest-point is a recall."
+
+## H6 — Quality: retopo drops thin features where QEM doesn't  [guard report plumbing FIXED 2026-07-18 — silhouette_iou now populated + pinned]
+
+**Measured premise (this session).** At equal budget, retopo silhouette IoU ~97.4% vs QEM ~98.6% — retopo
+loses ~1-2% coverage, concentrated on thin legs, because the extractor drops sub-cell cells. Re-orienting output
+gained 0px; output-repair (split+orient) LOST 5.3%. The silhouette guard (H4-related) is the honest lever: retry
+finer until worst-view IoU holds.
+
+**Verdict: BUILD/KEEP the guard** (already added to process_scan this session, pending verify). Quality ceiling
+without a denser field is the extractor's sub-cell limit — a kept negative, not a bug. H2+H4 make the guard
+affordable enough to run at higher density where legs need it.
+
+### Priority order (by measured value / risk)
+1. **H1 scatter/gather bake** — 1500× on the 62s stage, low risk (thickness-routed, default-off). Ship first.
+2. **H4 field-reuse in the guard** — turns 3× solves into 1, low risk (pin-checked re-extraction).
+3. **H2 position_field vectorisation** — biggest raw-retopo prize but needs the Jacobi-vs-GS measurement.
+4. **H6 guard verify** — finish the in-flight process_scan guard + pin.
+5. **H5 position encoder** — flagship research; would subsume H3 and much of the geometry-query family.
+
+Every item carries its kill-switch measurement. None to be built blind.
+
+------------------------------------------------------------------------------------------------------------
+### ARCHIVED: docs/PLAN_next_arc.md
+### (context-tail investigation plan for M11/M1 (extract_quads three-defect census))
+------------------------------------------------------------------------------------------------------------
+
+# PLAN_next_arc.md -- investigation + build plans for the remaining heavy items (written at a context tail,
+# so the next session builds instead of re-deriving). Read with BACKLOG.md; this deepens M11, M1, and orders
+# the rest.
+
+## M11 -- extract_quads' holes: the mechanism is THREE defects, not one (measured 2026-07-17)
+
+Census on the closed 768-face box at density 1.0 (rho = mean edge):
+  * 576 source faces keep 3 distinct cells; 174 collapse to 2 (an EDGE); 18 collapse to 1 (a POINT).
+  * Output cell-triangle graph: 6 boundary edges (the holes), 839 clean 2-face edges, **9 edges with >2
+    faces -- the extractor CREATES NON-MANIFOLD edges too**, which no one had measured until now.
+  * Of the 6 boundary edges: only 2 sit on cell-pairs that were bridged by dropped 2-distinct faces.
+  * 5 kept cell-triples appear 2+ times pre-dedup: np.unique keeps ONE, and where the two copies were the
+    front/back of a pinched region, the discarded copy's neighbours lose their partner edge.
+
+CONCLUSION FOR THE FIX: patching the current construction (re-adding dropped bridges, skipping dedup) treats
+symptoms of the WRONG CONSTRUCTION. Mapping SOURCE TRIANGLES to cell triples is not IFAM's extraction. The
+paper builds output faces from the CELL-ADJACENCY GRAPH: nodes = occupied cells; edges = any source edge
+whose endpoints land in different cells; FACES = the oriented loops of that graph walked in the position
+field's frame (each cell's outgoing edges sorted by field angle; walk next-edge-clockwise to close 3/4/5-gons).
+Under that construction a 2-distinct triangle contributes its EDGE (as it should), dedup never fires (faces
+come from loop-walking, not from face-mapping), and manifoldness is a property of the walk, not luck.
+BUILD SHAPE: new function extract_quads_v2 alongside the old (additive; old stays as the pinned baseline),
++ topology_delta in its selftest. ACCEPTANCE: closed box in -> closed mesh out (boundary_edges 0,
+nonmanifold_added False) at density 1.0 AND 2.0, silhouette >= old construction, quad_fraction reported
+honestly. Ladybird end-to-end re-run; expect quad_fraction to RISE (fewer dropped faces = fewer forced
+triangles). Old extract_quads keeps its loud defect docstring and a deprecation note.
+TRAPS: (a) loop-walking needs consistent winding -- mesh_orient is the precondition, already enforced
+upstream; (b) cells with high valence produce n-gons -- triangulate only at the END, and only if the caller
+asks (n-gons are legal in this Mesh); (c) the walk's "clockwise" must use the FIELD frame, not screen space.
+
+## M1 -- graded sizing: the construction, worked out so the build is mechanical
+
+THE RULE (power-of-two grading, the paper's answer): rho(v) = rho0 * 2^k(v), k integer, and ACROSS ANY EDGE
+|k_i - k_j| <= 1 (a "balanced" grading, enforced by flood-relaxation of k after it is seeded from curvature:
+k = clamp(round(log2(target(v)/rho0)), then relax until balanced -- same balancing as quadtrees).
+THE OPERATOR CHANGE, and why it stays an integer: today
+    a = round((P_i - P_j) @ O_j / rho);  acc += P_j + rho * (a*O_j + c*Bt_j)
+With grading, evaluate the jump IN THE COARSER of the two lattices: rho_e = rho0 * 2^max(k_i, k_j). A coarse
+step IS two fine steps, so a fine vertex expressed in the coarse lattice still lands on integers -- that is
+the entire point of powers of two, and why arbitrary rho(v) fails (no common lattice). So the edge term
+becomes a = round(diff @ O_j / rho_e), acc += P_j + rho_e * (...). One line per axis.
+EXTRACTION KEY: key(v) = (round(P/ (rho0 * 2^k(v))), k(v)) -- the level is PART of the key (coarse cell
+(0,0,0,k=1) is not fine cell (0,0,0,k=0)). Cell adjacency across a level boundary: a coarse cell abuts the
+2x2 fine cells it covers; the loop walk needs a "T-junction" rule -- the paper resolves it by inserting the
+fine midpoints into the coarse loop (making the coarse face a 5/6-gon), NOT by snapping fine to coarse.
+SEEDING: k from m.mesh_curvature (exists) -- target(v) = clamp(c / (|H| + eps), rho_min, rho_max).
+ACCEPTANCE: ladybird quad_fraction rises measurably above the uniform baseline AT EQUAL-OR-BETTER silhouette
+AND topology preserved (all three gates). KEPT-NEGATIVE CANDIDATES to test loudly: grading may LOWER
+silhouette on thin features if k seeds too coarse there (curvature is high on legs, so it should refine --
+verify, don't assume); the balanced-grading relaxation must terminate (it does on finite meshes -- pin it).
+ORDER DEPENDENCY: build AFTER M11's v2 extractor. Grading on top of the face-mapping construction inherits
+its holes and makes them unattributable.
+
+## Recommended order for the next arc
+1. M11 extract_quads_v2 (the construction is now specified; everything downstream needs it)
+2. M1 graded sizing (on top of v2; the math above; the hard part is the T-junction walk)
+3. M14 bake fusion (DESIGN_holographic_bake.md is complete; independent of 1-2, could interleave)
+4. M5 flood_fill promotion (mesh_orient + silhouette_mask + route.connected_components + 19 others; do it
+   WHILE touching extraction since the loop walk is another consumer)
+5. M16 adaptive worst-view (spec in BACKLOG; independent, small)
+6. M6/M7/M8 promotions; M9 skeletonizer last (largest, feeds on all of it).
+
+## BACKLOG CLEANUP: five completed backlogs archived-then-deleted; three active ones kept
+
+Moose: old completed backlogs carry no value once tasks are done and research is cataloged elsewhere. Executed as
+extract-then-delete, never delete-blind.
+
+WHAT WAS DELETED (5): MASTER_BACKLOG.md (17/17 shipped), PLAN_retopo.md (explicitly SUPERSEDED by BACKLOG.md),
+BACKLOG_retopo_topology.md (R1-R3 shipped), BACKLOG_holographic_pipeline.md (H1-H6 resolved, incl the H3
+DON'T-BUILD note), PLAN_next_arc.md (context-tail M11/M1 census). Each was verified COMPLETE (no open work) before
+it qualified.
+
+WHAT WAS KEPT (3), because "completed" was FALSE for them: BACKLOG.md is the live master -- it still has real
+REMAINING increments (graded position_field inc 2/3, T-junction stitch, branch segmentation, creature detection)
+and is referenced by 8 files as the entry point. CLIENT_INTEGRATION_BACKLOG.md and SEMANTIC_BACKLOG.md are the
+active this-arc backlogs (C1 wheel pending, S2 kept-negative, S4 embedding arm gated). Deleting any of these would
+have destroyed live scope. The lesson that gated the whole task: "old backlog" is a CLAIM to verify per-file, not
+a property of the filename -- a status tally (done vs open markers) plus a read of the REMAINING lines told them
+apart.
+
+HOW DELETION WAS MADE SAFE: the premise was "research should already be cataloged elsewhere" -- but I did not
+trust that, I ENFORCED it. Every deleted doc's full substantive body was archived VERBATIM into this file (see
+"ARCHIVED BACKLOGS" above, +590 lines) before removal, so preservation does not depend on a fuzzy match having
+found every measurement. Spot-check confirmed the load-bearing findings survive: the H3 "DON'T-BUILD for the bake"
+verdict, GAB-CV's "DECLARED NEGATIVE -- deterministic renderer has no variance to reduce", the "2,064 COMPONENTS"
+retopo measurement, "voxelize-then-quad structurally cannot" (0.935 ceiling), the "equal-count vs anisotropic
+Gaussians UNPROVEN" kept negative, and "extractor CREATES NON-MANIFOLD edges too". A fuzzy-matcher pass flagged
+~28 lines as "missing" post-archive; every one was an artifact of reformatting (unicode x/arrow, collapsed
+blanks) -- word-cluster recheck showed 6/6 content words present for all but one trivial priority-list line.
+
+DANGLING-REFERENCE FIX: BACKLOG.md's header said "supersedes PLAN_retopo.md + PROMOTION_LEDGER.md" -- both now
+gone, so that was a dead pointer. Rewrote it to note the predecessors were folded into NOTES ("ARCHIVED BACKLOGS")
+and must not be recreated. All other references to the deleted files are HISTORICAL NOTES journal entries ("filed
+X", "findings in Y") which stay valid as history. No generator, no CI, no docstring depended on the deleted files
+(grepped *.py + .github/). Engine boots, wiring/structure gates green, regen drift-clean.
+
+
+============================================================================================================
+## ARCHIVED (2026-07-19): docs/PROMOTION_LEDGER.md -- all promotions resolved, verified against the live engine
+============================================================================================================
+P1 cg / P2 low_eigenvectors / P3 bisect_to_budget / P4 walk_knob / P5 flood_fill_sign all SHIPPED (verified
+live 2026-07-19); P6 CLOSED (not a duplicate); P7 resolved as audit-only via M8. The ledger's own discipline
+line -- 'one promotion per session-arc, a ledger of named debts beats a sweep of unverified refactors' -- is
+worth keeping and is why this list never became a reckless refactor sweep. Full body archived verbatim below;
+the live status of each P-item now lives in OPEN_ITEMS.md's 'already done' section.
+
+> **SUPERSEDED AS AN ENTRY POINT (2026-07-17): see docs/BACKLOG.md**, the single master backlog
+> merging the promotion ledger with the Poly Studio engine-gap backlog. This file is kept for its MEASUREMENTS and
+> KEPT NEGATIVES, which the master summarises but does not reproduce. Work is tracked in BACKLOG.md.
+
+# PROMOTION_LEDGER.md -- specialized fragments that are one general move in costume
+
+Owner directive (2026-07-17): "There are tricks and methods hiding under different names that all do the same
+thing and haven't been generalized and promoted yet. Having duplicate or fragmented specialized functionality
+results in stale code and methods." This ledger is the MEASURED inventory (grep evidence over the live tree,
+file counts, not memory), each entry with the underlying move, the fragments, and a promotion plan. It is the
+Abstraction Ladder's consolidate-discover-promote loop applied to the CODEBASE ITSELF. Rule for every entry:
+promotion must keep every existing caller BIT-IDENTICAL (pinned) -- generalize the machinery, never the results.
+
+## P1 -- Conjugate gradient (2 implementations)                                    [DONE 2026-07-17]
+Fragments: holographic_image._cg (real bilinear form, no warm start); the CG inside
+crossfield._sparse_smallest_eigvec (complex-Hermitian vdot, warm start, shift). MEASURED: real path of the
+vdot form is bit-identical (0.000e+00 on a 40x40 SPD system). Promotion: holographic_numerics.cg(matvec, b,
+x0=None, shift=...) complex-aware; both delegate; both pinned.
+
+## P2 -- Smallest/dominant eigenpair of an OPERATOR (3+ costumes)
+Fragments: crossfield._sparse_smallest_eigvec (shifted inverse iteration, complex Hermitian);
+holographic_iterate.dominant_eigenvector (bind operators ONLY -- Fourier-diagonal, closed form, correctly
+specialized: do NOT flatten it into the iterative one, closed form beats iteration where it applies);
+holographic_spectral + holographic_nystrom (dense eigh x5, Nystrom low-rank). Promotion: numerics gains
+smallest_eigenpair(matvec, n, ...) (the crossfield solver, generalized); crossfield delegates. Dense-eigh
+sites stay dense where matrices are small -- the R1 threshold lesson: routing, not replacement.
+
+## P3 -- Bisection to a budget (36 files match the shape)
+decimate_to's monotone-knob bisection is the clean general form (bracket, bisect, tolerance, determinism).
+Most of the 36 are ad-hoc lo/hi loops. Promotion: numerics.bisect_to_budget(eval, target, ...); migrate
+callers OPPORTUNISTICALLY (each migration pinned), starting with meshqem's own 7 sites.
+
+## P4 -- Guarded knob walk (1 implementation, N potential users)
+silhouette_guarded's cost-aware walk (knob_cost, max_knob, refuse-not-die) is quality-vs-cost search machinery
+that nothing else can reach: the walk logic is fused to the silhouette criterion. Promotion: split
+walk_knob(op, knob, passes=..., knob_cost=..., max_knob=...) from the criterion; silhouette_guarded becomes
+walk_knob(passes=sweep-floor). Any future guard (EGI floor, deviation floor, PSNR floor for splats) reuses the
+walk instead of re-growing it.
+
+## P5 -- Flood fill / BFS dilation (9 files)
+silhouette_mask's border flood; meshbridge(10 hits); scene(2). Same move on different grids. Promotion:
+numerics.flood_fill(mask, seeds) vectorized; migrate opportunistically, pinned each time.
+
+## P6 -- Adaptive sampling                                    [AUDITED 2026-07-17 -- NOT A DUPLICATE. CLOSED.]
+The audit's suspicion was right and the answer is a NEGATIVE, recorded so nobody "promotes" these together:
+holographic_adaptive_sample is a CALIBRATED STOP RULE for a RENDERER's per-pixel sample budget (CI half-width,
+converged_mask, samples_to_target) -- it decides WHEN TO STOP SAMPLING A PIXEL. R4's sizing field decides HOW
+BIG A QUAD IS ON A SURFACE. Same English word ("adaptive sampling"), different quantities, different units,
+no shared machinery. Promoting them together would be fragmentation-by-vocabulary -- the exact opposite of the
+ledger's purpose. The word is the coincidence; the move is not.
+WHAT R4 ACTUALLY NEEDS ALREADY EXISTS: m.mesh_curvature(mesh, kind="mean") + m.mesh_curvature_confidence.
+So R4 has its input and needs no promotion. See PLAN_retopo R4 for the real (non-trivial) content.
+
+## P7 -- FFT diagonalisation (46 files -- the engine's signature move)
+fields(20), shader(19), transformbank(12). Likely mostly CORRECT reuse of np.fft rather than fragmentation --
+but transfer/step_k/limit (iterate) and diffuse_periodic (solve_laplace) show the same closed-form-evolution
+pattern independently grown. Audit task: is there one "diagonal evolution" primitive hiding in three modules?
+
+DISCIPLINE: one promotion per session-arc, executed with the full ritual; the rest stay listed. A ledger of
+named debts beats a sweep of unverified refactors -- the constitution's additive rule applies to REFACTORS
+doubly, because their whole promise is "nothing changed".
+
+## BACKLOG SWEEP #2: consolidated the scattered OPEN items and verified each against the live engine
+
+Follow-up to the backlog cleanup: Moose flagged that the first pass missed some docs and left completed items
+uncrossed -- and that some "open" items may have been finished in other branches without the backlog being
+updated. Both were true.
+
+MISSED DOCS this sweep caught: PROMOTION_LEDGER.md (I had assumed it deleted -- BACKLOG.md's old header claimed to
+supersede it -- but it was still present; all P-items verified done/closed, archived to NOTES, deleted).
+
+THE HEADLINE, and the reason the sweep was worth doing: THREE items carried OPEN markers and were already SHIPPED
+in the merged branch, found by probing the live engine rather than trusting the checkbox:
+  * M16 worst-view -> m.worst_view (Lipschitz / DIRECT-on-sphere branch-and-bound). The backlog had it as an
+    UNBUILT research item with ranked "next attempt" options; the branch built option (a). The catalog string
+    even names the Lipschitz method.
+  * M9 inc2 branch segmentation -> m.mesh_parts (Reeb-graph limb/body) + m.match_symmetric_parts. The branch
+    REFUTED the voxel-ridge approach the backlog planned (bad for thin limbs) and used a surface Reeb graph.
+  * Promotion ledger P1-P5 all shipped (cg, low_eigenvectors, bisect_to_budget, walk_knob, flood_fill_sign);
+    the ledger header was stale. P6 closed, P7 resolved as audit-only (= M8).
+
+CONSOLIDATION: docs/OPEN_ITEMS.md is now the single verified live list. Genuinely OPEN, each probed not-built:
+M1 inc3 (cross-level tri-pairing, quad_fraction fix -- fully researched, bounded extension of existing
+tri-pairing), M9 inc3 (creature identification: shape signature resonated vs archetypes -- no faculty exists),
+M10 debts (rebake perf batch; mesh_orient components-alias drop; Poly Studio D-section flat-vs-packaged re-audit,
+the tracing half already shipped as deptrace.import_footprint). MOOSE: C1 publish (2233 live caps vs a stale
+wheel). RE-SCOPE: C4 object handles (obviated for the flagship by coercion; real only for expensive/lossy
+chaining). GATED KEPT-NEGATIVE: S4 embedding arm (S2 failed) and P7 (audit-only).
+
+METHOD, reinforced: "open" is a claim to verify against LIVE CODE, not a property of an unchecked box. A status
+tally of done-vs-open markers is a starting filter, NOT an answer -- it both missed C1 (phrased "PENDING" not
+"[ ]") and flagged M16/M9 as open when they were built. Only find_capability probes + attribute checks settled
+each one. Same lesson as the deletions: verify before you trust the doc, in EITHER direction.
+
+Two stale doc pointers repointed (numerics docstring + a test section label pointed at the now-deleted ledger;
+both now point at the NOTES archive / OPEN_ITEMS.md). BACKLOG.md gained a banner directing to OPEN_ITEMS.md and
+crossed off M16 + M9 inc2. Gates green, regen drift-clean.
+
+## OPEN-ITEMS KNOCK-OUT: two measured no-builds, two already-done, one deprecation made safe, one research arc scoped
+
+Worked the consolidated OPEN_ITEMS.md. The headline: almost nothing needed BUILDING -- measurement dissolved most
+of it, which is the point.
+
+M1 inc3 (cross-level tri-pairing) -- MEASURED NO-BUILD. The backlog planned a second pass to pair the ~20 excess
+triangles a graded level boundary leaves (a real gap: graded quad_fraction 0.71 vs uniform 0.77, persistent on box
++ other fixtures). Built the measurement FIRST: of 15 leftover tri-pairs, ZERO are coplanar+convex; even dropping
+the coplanarity gate only 3 are convex, and those fold across the box's real edges (dihedral dot to -1.0).
+quad_remesh's existing gate ALREADY pairs every geometrically-valid boundary pair. A second pass recovers nothing
+(same gate) or makes folded/skew quads (looser gate) -- strictly worse than an honest triangle. The gap is
+INHERENT to grading (a level boundary needs transition triangles); the real lever, if ever needed, is a finer
+level field, not tri-pairing. The backlog's "20 pairable tris" was an earlier fixture's number that does not hold
+on the current engine. Kept negative recorded in extract_quads' docstring. THIS is measurement over narrative: a
+fully-researched, ready-to-build item refuted by 20 minutes of measuring the actual leftover tris.
+
+M10 rebake perf wall (244s) -- ALREADY DONE. rebake_texture(method="scatter") is the H1 scatter/gather path (36x),
+shipped in a branch; the 244s was the old per-texel route. Another "done in a branch, not crossed off".
+
+M10 mesh_orient 'components' alias -- HANDLED ADDITIVELY, not dropped. Dropping the key is a BREAKING change and
+C1 (publish) has not shipped, so no external caller has had a release to migrate -- dropping it pre-publish would
+break clients the instant the wheel lands, exactly what the additive rule prevents. Instead the report now carries
+a machine-readable _deprecated: ("components",) marker (pinned by selftest), so a post-C1 "drop deprecated keys"
+pass is mechanical rather than archaeological. Nothing internal reads the deprecated key (verified: only the
+SEPARATE topology report's components key has readers). Drop AFTER C1. Lesson: a deprecation debt is not "delete
+now", it is "make the eventual delete safe and mechanical, then wait for the release boundary".
+
+M9 inc3 (creature identification) -- SCOPED as a research arc, NOT knocked out. Ingredient audit: EGI exists but
+COMPARE-only (histogram internal to egi_similarity, not a standalone descriptor); skeleton_curve + mesh_parts
+exist; VSA bind/bundle exist (map_bind/superpose_batch/fpe_lattice_resonator). Genuinely missing: a standalone
+shape-signature VECTOR, a prototype STORE, resonance/nearest-match, AND the measured baseline proving it
+DISCRIMINATES shapes (where the research risk lives). That is a full-ritual arc with its own baseline and kept
+negatives, not a bounded close-out -- rushing it would produce an unmeasured "win", the exact failure the
+constitution warns about. Left OPEN and correctly labelled research.
+
+NET: OPEN_ITEMS.md's buildable list is now empty of bounded work. What remains is C1 (Moose), C4 (re-scope on a
+concrete workflow -- do not build blind), the M9 inc3 research arc, one optional D-section re-audit (likely
+another no-build), and the S2/S4/P7 kept negatives. Two Rule-0 signature misreads this session (graded_levels
+wants per-vertex target_edge; position_field wants field_to_vertex_dirs output, not raw phi) -- probed the live
+contract each time rather than pushing a guess. Only code changes: the _deprecated marker + two docstring kept
+negatives; all additive, gates 0/0/0, regen drift-clean.
+
+## CLIENT INTEGRATOR BACKLOG (11 items) -- knocked out: 6 built/fixed, 5 already-solved-or-doc
+
+Fresh backlog from the integrator building ON leCore. Priority: P1 corrupts, P2 blocks usage, P3 ergonomics.
+
+BUILT / FIXED (6):
+- [P1] terrain.erode runaway. Reproduced the client's exact numbers (1.0 peak -> 2.787 at 3000 droplets;
+  20-unit -> 1537). ROOT CAUSE: capacity=4.0 grows peaks even on the module's OWN fBm terrain (0.487 -> 1.871),
+  so this was a genuine bug, not a valid decision being flipped -- the old selftest missed it by using only 400
+  droplets. FIX: default capacity 4.0 -> 1.0 (stable AND still carves, 2x the material movement of 0.5) PLUS
+  height-scale invariance (normalise to [0,1], erode, rescale) so ANY unit is safe -- normalisation ALONE was
+  insufficient (cap=4.0 explodes at every scale), and cap-change alone left tall terrains exploding; both were
+  needed. Selftest hardened with the exact runaway trap (unit + 20x gaussian, 3000 droplets) and a scale-
+  invariance pin (erode(H) == erode(20H)/20). KEPT NEGATIVE recorded: "cap=0.5*span" is NOT the fix (tall
+  terrain still explodes -- the speed*gravity term against un-normalised dh is the feedback, not capacity alone).
+- [P3a] rasterize_mesh now coerces a dict/CameraController camera via holographic_coerce.as_camera (the bridge
+  the client named), matching render_mesh. Real Camera passes by identity, so nothing that worked changes.
+- [P3b] mass_properties: added inertia_tensor as an additive ALIAS of inertia_com; docstring lists exact keys.
+- [P2] LoadedMesh.split_by_material -> ordered {material_name: LoadedMesh}, each reindexed to a compact vertex
+  set with UVs/normals subset in BOTH conventions (glTF per-vertex by vertex-remap, OBJ per-corner by face
+  selection). No-material -> single "" group, never drops faces. Wired as m.split_by_material, catalogued (5/5
+  stranger-phrasing), semantic convert/split (NEW branch, documented in taxonomy, S5 drift closed), tested 5/5.
+  NOTE: this is the first faculty whose input is a LoadedMesh, and its HTTP /invoke surfaces the known C4
+  object-handles gap (a LoadedMesh cannot be reconstructed from JSON) -- in-process is sound; HTTP is C4's job.
+- [P2] rebake_texture auto-sizing: size="auto" picks a usable atlas (>= 4 texels/face); a too-small explicit
+  size raises a HELPFUL error naming the minimum. Docstring documents the scan-scale perf path (decimate first
+  or method="scatter"). Selftest pins both. Backward-compatible: an explicit big-enough size is byte-identical.
+- [P3] SDF cookbook (docs/SDF_COOKBOOK.md): constructors-are-functions / combinators-are-methods, the
+  build->eval->mesh pipeline, the NodeGraph route with its 'a'/'b'/'out' sockets, and the collected gotchas
+  (box takes 3 scalars, rotate takes an axis vector). Every snippet verified-runnable; linked in README. BONUS
+  ergonomic fix: SDF.__call__ = eval, so mesh_from_sdf(shape) works without .eval (safe -- all dispatch is
+  isinstance(x, SDF), nothing keyed on SDF being non-callable; scatterlayer already hasattr-checks eval).
+
+ALREADY SOLVED / DOC (5) -- the more important finding, per Rule 0:
+- [P2] optional-dep import balloon: the shipped import_footprint faculty ALREADY answers this. lecore naive-
+  traces to 508 modules but the true required closure is 30 (required_external=['numpy']); the balloon (cupy,
+  numba, matplotlib, pyfftw, sympy, nltk, PIL) is correctly classified optional_external. Documented in
+  PACKAGING.md's new "Subsetting & embedding" section with the runnable trace.
+- [P3] capabilities.json / data discovery via bare `import holographic`: NOT in the runtime path (only a test).
+  Runtime data resolves via lecore_data-package-first then __file__-relative fallback, which works in flat
+  bundles already (holographic_dictionary._resolve_data_path). Documented as the both-arms pattern to keep.
+- [P2] flat-vs-packaged import duality: the code already picked packaged style overwhelmingly (2942 vs 13), so
+  it is near-consistent, NOT a live duality. Refactoring 2942 imports would be a massive non-additive sweep for
+  ~0 benefit. Resolved by DOCUMENTING the canonical style + a flat-bundle shim recipe (verified, maps 518
+  modules) in PACKAGING.md.
+- [P2] analytic-preservation contract: the client's premise (mesh verbs silently DROP sdf_tree) does not map to
+  the architecture -- a Mesh has NO sdf_tree to drop (verified: Mesh attrs carry no analytic field). The
+  analytic tree lives on the SDF object and the scene/session by design, precisely so mesh ops can't stale it.
+  No per-verb flag is needed; the contract is "hold an SDF (exact) or a Mesh (sampled), carry both if you need
+  both." Documented in the SDF cookbook. Building a preservation-flag system would be machinery for a non-problem.
+- [P3] (subsumed) capabilities.json packaged-layout coupling: same resolution as the data-discovery item.
+
+METHOD: reproduced every P1/P2 claim with the client's own numbers before touching code; ran Rule 0 on every
+structural item and found the tooling (import_footprint) already there. Two "fixes" that were really refutations
+of my own first hypothesis (erode: normalise-alone insufficient; cap-change-alone insufficient -- both needed).
+The recurring lesson held: "corrupts results" earns a default change (not a flip); "matters for embedding" was
+mostly already-built infra needing a doc pointer, not a build. All additive, gates 0/0/0, regen drift-clean.
+
+## CI FIX: 8 failures diagnosed as pre-existing (not from the client backlog), fixed on their real contracts
+
+CI went red after the client-backlog merge; investigation proved NONE of the 8 failures were caused by that work
+-- they are pre-existing conditions the full 24-shard CI surfaced that targeted local runs had not hit. Three
+classes:
+
+CLASS 1 -- platform floating-point pins (4 tests: m6 delta, m7 phi sha, m14 transfer_uv/nrm sha, degenerate_face
+phi sha). These PASSED locally and failed only on CI. Root cause: OpenBLAS ships DYNAMIC_ARCH (a different
+eigensolver/BLAS kernel per CPU microarch), so bit-exact sha256(.tobytes()) / == pins on eigensolver + projection
+output differ across machines with NO logic change (m6 delta was 6 ULPs, ~4e-17 apart). Byte-identity across CPUs
+was never achievable, so the pins asserted a guarantee that never held. FIX: replaced cross-platform byte pins
+with the real contract -- WITHIN-platform determinism (re-run must match exactly, np.array_equal) PLUS the
+independent correctness checks already in each test (m7 already compares the eigenpair to np.linalg.eigh at 1e-6;
+m14 already array_equals the plain vs displacement path to prove the shared projection). m6's float delta became
+abs(...) < 1e-12. The load-bearing behavioral pins that ARE platform-stable stayed exact (result_faces==186,
+iters==4, budget_error==0.07, counter==mv).
+
+CLASS 2 -- stale behavioral tests vs a documented guard (2 tests: qem_decimate 96!=<=64, lod_chain 1!=>=3). Root
+cause: the silhouette=0.95 default guard (Moose's own "crab-leg" complaint arc, NOTES "DECIMATION UNDER CONTROL")
+DELIBERATELY raises the face budget x1.5 until the outline survives, so target 64 -> 96 is intended, and on a
+compact icosphere the guarded LOD chain correctly collapses to one level. Both tests predate that default and were
+never updated; both live in holographic_meshqem.py (mtime 05:12, days before this session -- NOT touched by me).
+FIX: pass silhouette=None so each test exercises the RAW decimation capability it intends to test; the guarded
+default remains the documented production behavior.
+
+CLASS 3 -- a latent test bug (1 test, io_shape_pipeline). Hardcoded "render_mesh" as the mesh->image pipeline
+step, but the deterministic ALPHABETICAL tie-break correctly picks "JSON-drivable objects (mesh/camera
+coercion)", which sorts first and was already producing mesh->image in the PRE-SESSION recon tree (verified: recon
+gives the same winner). The test's OWN docstring says to assert the contract "not a hardcoded name that rots on
+every merge" for its sibling mesh->selection assertion -- so both mesh->image assertions (points->image and
+curve->image) now assert the alphabetically-first producer via a computed mesh_img_producers[0].
+
+VERIFICATION: all 7 named test functions pass; full test_cad_backlog.py green (114 passed, 1 skip); 31 adjacent
+integration tests (qem/lod/pipeline/surface_deviation) pass; a representative untouched shard-7 subset (47) passes;
+audits 0/0/0, regen drift-clean. My edited engine files (terrain/meshtools/render/sdf/assetimport) were confirmed
+NOT to feed the qem/crossfield/transfer_uv paths -- this round changed ONLY test files.
+
+METHOD/LESSON: "tests failing after my merge" is not "my merge broke them" -- reproduced each locally, checked
+whether it passed in the pre-session tree, and located each root cause before touching anything. The recurring
+trap this exposes: bit-exact sha/== pins on BLAS output are a determinism ANTI-pattern across platforms (they pin
+the platform, not the algorithm); the honest pin is within-run repeatability + a tolerance/structural correctness
+check. Also: run at least one full shard, not just targeted tests, before declaring CI-green -- targeted runs miss
+exactly the cross-file behavioral drift (guard-default vs stale expectation) that the full suite catches.

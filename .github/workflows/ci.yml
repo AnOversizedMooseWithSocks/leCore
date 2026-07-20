@@ -155,6 +155,17 @@ jobs:
       - name: Gate -- no invocation gaps
         run: python tools/skill_lint.py
 
+      # TAG-TRUTH GATE (C6). skill_lint asks "can an agent CALL this?"; this asks "is what the tag CLAIMS true?".
+      # A downstream node pack shipped a broken Auto Route because a tag lied: consumes/produces are read as a
+      # cross product, so a POLYMORPHIC capability (denoise_tensor: image|field -> the SAME kind) silently
+      # published image->field and field->image edges it cannot perform, and suggest_pipeline("image","mesh")
+      # escaped through the fake hop into a tensor denoiser + an Aharonov-Bohm ring. A wrong tag does not merely
+      # fail to help -- it actively misleads, and unlike a missing tag it looks correct. Fails on a tagged
+      # capability whose method is not callable, or an unflagged polymorphic tag. Untagged converters are
+      # REPORTED, not failed: that list is the drive queue (S7), not a regression.
+      - name: Gate -- io tags do not lie
+        run: python tools/tag_lint.py
+
       # STRUCTURE GATE. Organization is a discoverability property for humans, so it gets the same treatment as
       # wiring: measured, budgeted at the current state, and failed only on REGRESSION past the budget (misc/ may
       # not grow past 149 -- new modules land in a real family; no new 2,000+ line giants beyond the recorded 3;

@@ -3647,7 +3647,10 @@ def test_qem_decimation_through_the_mind():
 
     um = UnifiedMind(dim=128, seed=0)
     ico = _icosphere(2)
-    qem = um.mesh_qem_decimate(ico, 64)
+    # silhouette=None opts out of the silhouette guard, which by DESIGN raises the face budget x1.5 until the
+    # outline survives (so the guarded default returns ~96 for target 64, as documented on mesh_qem_decimate) --
+    # this test is about raw decimation reaching the target with valid topology, so opt out of the guard.
+    qem = um.mesh_qem_decimate(ico, 64, silhouette=None)
     assert qem.is_manifold() and qem.is_closed() and qem.euler_characteristic() == 2 and qem.n_faces <= 64
 
     # naive midpoint baseline for the comparison
@@ -3765,7 +3768,11 @@ def test_mesh_lod_policy_through_the_mind():
     from holographic.mesh_and_geometry.holographic_meshsmooth import _icosphere
 
     um = UnifiedMind(dim=128, seed=0)
-    chain = um.mesh_lod_chain(_icosphere(2), targets=(0.5, 0.25, 0.125))
+    # silhouette=None: the silhouette guard (default 0.95) raises each level's face budget x1.5 until the outline
+    # survives, which on a compact icosphere pulls every requested level back to the base resolution -- so the
+    # guarded chain dedupes to a single level. This test is about the CHAIN-BUILDING policy (coarser levels with
+    # distance), so opt out of the guard to exercise the actual multi-level chain.
+    chain = um.mesh_lod_chain(_icosphere(2), targets=(0.5, 0.25, 0.125), silhouette=None)
     assert len(chain) >= 3
     assert chain[0].max_error == 0.0                       # the original is the fine end
     assert all(chain[i].n_faces > chain[i + 1].n_faces for i in range(len(chain) - 1))
@@ -13005,15 +13012,23 @@ def test_io_shape_pipeline_hierarchy():
     # the SEEDED conversion edges (_IO_SHAPES, applied by seed_from_mind) give real geometry pipelines: a full mind
     # can route points -> mesh -> image and sdf -> mesh. This is the payoff -- the router has real edges, not just
     # the handful of directly-tagged select/transform capabilities.
+    # NOTE (contract, not a hardcoded name -- same lesson as the mesh->selection assertion above): the second step
+    # is the alphabetically-first mesh->image PRODUCER, which is the deterministic tie-break among equal-length
+    # routes. Hardcoding "render_mesh" rots the moment another mesh->image producer is registered (a coercion-alias
+    # capability now sorts ahead of it), and it is platform-independent, so assert the CONTRACT.
+    mesh_img_producers = sorted(cap.name for cap in c.all()
+                                if cap.consumes and cap.produces and "mesh" in cap.consumes and "image" in cap.produces)
     p2i = mind.suggest_pipeline("points", "image")
-    assert p2i and [s["name"] for s in p2i] == ["points_to_mesh", "render_mesh"], p2i
+    assert p2i and [s["name"] for s in p2i] == ["points_to_mesh", mesh_img_producers[0]], (p2i, mesh_img_producers[:3])
     assert mind.suggest_pipeline("sdf", "mesh")[0]["name"] == "mesh_from_sdf"
 
-    # the added edges (inpaint/fill, mesh refine, sweep, skin) enable more routes.
-    assert mind.suggest_pipeline("curve", "image") == [{"name": "sweep_tube", "consumes": ["curve"],
-                                                        "produces": ["mesh"]},
-                                                       {"name": "render_mesh", "consumes": ["mesh"],
-                                                        "produces": ["image"]}]
+    # the added edges (inpaint/fill, mesh refine, sweep, skin) enable more routes. (Same contract as above: the
+    # mesh->image tail is the alphabetically-first producer, not a hardcoded render_mesh that a coercion-alias now
+    # sorts ahead of -- assert the route SHAPE and the deterministic tie-break, not a brittle name.)
+    curve_img = mind.suggest_pipeline("curve", "image")
+    assert curve_img and len(curve_img) == 2
+    assert curve_img[0]["name"] == "sweep_tube" and curve_img[0]["produces"] == ["mesh"]
+    assert curve_img[1]["name"] == mesh_img_producers[0] and curve_img[1]["produces"] == ["image"]
     # require_step turns a same-kind query into a transforming edge: 'refine this mesh' / 'fill this field'.
     assert mind.suggest_pipeline("mesh", "mesh") == []                    # default: already there
     refine = mind.suggest_pipeline("mesh", "mesh", require_step=True)

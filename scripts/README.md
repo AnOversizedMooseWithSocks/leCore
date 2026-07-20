@@ -1,4 +1,19 @@
-# leCore assimilation scripts
+# leCore assimilation scripts — RESEARCH ARCHIVE
+
+**The semantic-index tooling moved to `tools/semantic/` and is maintained THERE.** The copies that used to sit
+here (`knowledge_index.py`, `export_index.py`, `distill_map.py`, `nomic_forward.py`, `lecore_paths.py`, and a
+stale `routing_index_64d.npz`) were OLDER versions of the same files — knowledge_index here was 476 lines against
+965 in tools/semantic — and running one would have cold-embedded with stale wiring and polluted the shared cache.
+They were removed rather than left as a trap; `git log -- scripts/` has every byte if the history is ever needed.
+
+What REMAINS in this folder is the closed LLM-assimilation research arc's one-off experiment scripts (the census
+and probe runs: `llm_census.py`, `model_analysis_program.py`, `qwen_config_probe.py`, `smol_*.py`,
+`nomic_vision_census.py`, `align_models.py`, `run_all.py`, `distill_router.py`, `lint_scripts.py`). That arc is
+CLOSED — its verdicts (mostly kept negatives: six compression mechanisms measured dead on three architectures)
+live in `leCore_model_assimilation_backlog.md`, and the one shippable result became the semantic index documented
+in `docs/SEMANTIC_CAPABILITY.md`. These scripts are history, kept runnable-in-principle against the sibling
+model-folder layout described below, but nothing in the repo imports them and CI never runs them.
+
 
 Drop this `scripts/` folder as a SIBLING of the `leCore/` repo folder
 (lecore_paths.py resolves everything from that layout; run it alone to verify):

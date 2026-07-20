@@ -158,6 +158,10 @@ Like leOS, leCore is **free and open source**, and the work that keeps it free i
   surface-vs-volume mental model, three ways to make a cloud (describe it, one call, or by hand), building scenes
   from words, cameras and lights, volumetric smoke/fog/fire, and the adaptive path tracer. Every snippet is
   verified-runnable, with real cost numbers and a troubleshooting table. Start here if you want to *make a picture*.
+- **[`docs/SDF_COOKBOOK.md`](docs/SDF_COOKBOOK.md)** — a **practical guide to signed distance fields**: the
+  constructors-are-functions / combinators-are-methods model, the runnable build→evaluate→mesh pipeline, the
+  data-driven NodeGraph route (with its `'a'`/`'b'`/`'out'` socket names), and the collected gotchas
+  (`box` takes three scalars, `rotate` takes an axis vector). Every snippet is verified-runnable.
 - **[`DEVELOPMENT_STRATEGY.md`](DEVELOPMENT_STRATEGY.md)** — the **standard process for changing leCore**: audit with
   `find_capability` first, wire every capability to a mind faculty (so it is `/invoke`-able), register it in the
   catalog so it is discoverable, and run the reachability/gap audits — the discipline that keeps the codebase from

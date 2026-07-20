@@ -490,7 +490,15 @@ def triangulate_ngons(mesh):
     out = []
     for f in mesh.faces:
         out.extend(triangulate_face(f, mesh.vertices))
-    return Mesh(mesh.vertices.copy(), out)
+    # Carry the per-vertex attributes. This is FREE and exact -- ear clipping adds no vertices, it only rewrites
+    # the face list, so row i still describes vertex i. Dropping them was a pure loss: a uv-mapped mesh came out
+    # of triangulate with no uvs at all and no way to get them back except by reprojecting from a copy the
+    # caller no longer had. Found by auditing every face-count-changing operation for what it does to uvs.
+    uvs = getattr(mesh, "uvs", None)
+    nrm = getattr(mesh, "normals", None)
+    return Mesh(mesh.vertices.copy(), out,
+                uvs=None if uvs is None else np.asarray(uvs).copy(),
+                normals=None if nrm is None else np.asarray(nrm).copy())
 
 
 # =====================================================================================================

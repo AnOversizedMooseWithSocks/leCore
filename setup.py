@@ -25,7 +25,7 @@ setup(
     # modules still install at the top level, so users write `import lecore` (via the lecore.py shim) exactly
     # as they did from a clone. Install:  pip install leos-core   ->   then:  import lecore
     name="leos-core",
-    version="0.1.0",                     # bump per release (or let CI set it from the git tag -- see PACKAGING.md)
+    version="0.2.0",                     # bump per release (or let CI set it from the git tag -- see PACKAGING.md)
     description="leOS-core (import name: lecore) -- the vector-symbolic core of leOS: memory, geometry, physics and more on one NumPy substrate.",
     long_description=read("README.md"),
     long_description_content_type="text/markdown",

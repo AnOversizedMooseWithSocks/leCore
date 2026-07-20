@@ -127,16 +127,16 @@ def geometry_preserving_code(arrays, target_cos=0.9999, max_rank=None):
         den = np.linalg.norm(X, axis=1) * np.linalg.norm(Xh, axis=1) + 1e-12
         return float(np.mean(num / den))
 
-    # bisection for the LARGEST delta (fewest bits) whose mean cosine still meets the target
+    # bisection for the LARGEST delta (fewest bits) whose mean cosine still meets the target -- DELEGATED to
+    # numerics.bisect_to_budget (M6 promotion). GEOMETRIC midpoint over a continuous scale, a FIXED 28 iters
+    # with NO best-tracking (tol=None returns the final lo). cmp reads "can we afford coarser?": cos_at(mid)
+    # still meets target -> grow lo. This is the SAME move as decimate_to on a different quantity; the shared
+    # primitive owns the loop, the geom/arith + tol-vs-fixed differences are its parameters. Pinned bit-
+    # identical: delta = 0.04737815295834658 on default_rng(0).standard_normal((40,16)), target_cos 0.9999.
+    from holographic.misc.holographic_numerics import bisect_to_budget as _b2b
     span = float(np.abs(C).max()) or 1.0
-    lo, hi = span * 1e-5, span
-    for _ in range(28):
-        mid = (lo * hi) ** 0.5                          # geometric bisection over scale
-        if cos_at(mid) >= target_cos:
-            lo = mid                                    # can afford coarser
-        else:
-            hi = mid                                    # need finer
-    delta = lo
+    delta, _val = _b2b(cos_at, target_cos, span * 1e-5, span, midpoint="geom", max_iters=28, tol=None,
+                       cmp=lambda c, tgt: c >= tgt)
 
     Q = np.round(C / delta).astype(np.int64)
     qmin = int(Q.min())

@@ -626,3 +626,69 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+def camera_from_vanishing_points(vp1, vp2, principal_point, min_focal=1e-3):
+    """CAMERA CALIBRATION from two vanishing points of ORTHOGONAL line families: focal length + orientation.
+
+    Classic single-image calibration (Caprile & Torre 1990; Hartley-Zisserman ch.8): for a camera with square
+    pixels and known principal point, two VPs of perpendicular 3-D directions satisfy
+    (vp1 - pp) . (vp2 - pp) + f^2 = 0, so f = sqrt(-dot). The rotation follows: r1, r2 are the normalised
+    back-projections K^-1 [vp, 1]; r2 is Gram-Schmidt-orthogonalised against r1 (measured VPs are never exactly
+    orthogonal); r3 = r1 x r2 completes a right-handed frame.
+
+    Complements vanishing_point() (which DETECTS a VP from an image); this consumes VP coordinates -- from
+    detection, user clicks, or synthetic data. Raises ValueError when the dot product is non-negative (the
+    VP pair is geometrically impossible for orthogonal directions with that principal point -- garbage in
+    should refuse, not return an imaginary focal length).
+
+    Returns dict: focal (pixels), R (3,3; ROWS are the world axes' directions in camera coordinates -- i.e.
+    world direction d images at the VP of K @ (R @ d)), principal_point.
+    """
+    pp = np.asarray(principal_point, float)
+    d1 = np.asarray(vp1, float) - pp
+    d2 = np.asarray(vp2, float) - pp
+    dot = float(d1 @ d2)
+    if dot >= -(min_focal * min_focal):
+        raise ValueError("vp pair incompatible with orthogonal directions (dot=%.3g >= 0): "
+                         "check the principal point or the line families" % dot)
+    f = float(np.sqrt(-dot))
+    r1 = np.array([d1[0], d1[1], f]); r1 /= np.linalg.norm(r1)
+    r2 = np.array([d2[0], d2[1], f])
+    r2 -= (r2 @ r1) * r1                                     # Gram-Schmidt: absorb VP measurement noise
+    r2 /= np.linalg.norm(r2)
+    r3 = np.cross(r1, r2)
+    R = np.stack([r1, r2, r3])                               # rows = world X, Y, Z in camera coords
+    return {"focal": f, "R": R, "principal_point": pp}
+
+
+def _selftest_camera_vp():
+    """Round-trip: synthesize VPs from a KNOWN camera, recover focal to 1e-9 and axes up to sign."""
+    rng = np.random.default_rng(0)
+    f_true = 800.0
+    pp = np.array([320.0, 240.0])
+    # a random rotation via QR (deterministic under the seed)
+    Q, _ = np.linalg.qr(rng.normal(size=(3, 3)))
+    if np.linalg.det(Q) < 0:
+        Q[:, 0] *= -1
+    # vp of world direction d: project K (Q d) -- rows of Q^T? Use camera-coord dirs = Q @ e_i = Q columns.
+    def vp_of(dcam):
+        assert abs(dcam[2]) > 1e-9
+        return pp + f_true * dcam[:2] / dcam[2]
+    c1, c2 = Q[:, 0], Q[:, 1]                                # camera-frame directions of world X and Y
+    got = camera_from_vanishing_points(vp_of(c1), vp_of(c2), pp)
+    assert abs(got["focal"] - f_true) < 1e-6, got["focal"]
+    # recovered rows must match the true directions up to SIGN (a VP is a direction mod +/-)
+    for row, true in zip(got["R"][:2], (c1, c2)):
+        assert min(np.linalg.norm(row - true), np.linalg.norm(row + true)) < 1e-9
+    # impossible pair (both VPs on the same side, positive dot) must refuse
+    try:
+        camera_from_vanishing_points(pp + [100, 0], pp + [200, 0], pp)
+        raise AssertionError("must refuse a non-orthogonal-compatible VP pair")
+    except ValueError:
+        pass
+    print("camera_from_vanishing_points selftest OK (f=%.1f recovered, axes to 1e-9, bad pair refused)" % f_true)
+
+
+if __name__ == "__main__":
+    _selftest_camera_vp()

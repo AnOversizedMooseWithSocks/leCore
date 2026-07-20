@@ -75,7 +75,18 @@ KNOWN_COLLISIONS = {
     "classify": frozenset({"equivariance", "opponent"}),
     "compose_object": frozenset({"compose", "material"}),
     "connected_components": frozenset({"island", "route"}),
-    "coverage": frozenset({"ldexplore", "sdfemit"}),
+    # Read all three bodies before extending this: sdfemit.coverage() reports which holographic_sdf node KINDS the
+    # shader emitter handles vs refuses (a gap = silently omitted geometry); ldexplore.coverage(strategy, T, ...)
+    # counts distinct GRID CELLS an exploration strategy visits; semantictag.coverage(catalog) is the FRACTION OF
+    # CAPABILITIES carrying a verb tag (browse_semantic omits the untagged, so the number IS the menu). Three
+    # unrelated spaces, three signatures, no shared kernel -- the same benign homonym as "box" (sdf/mesh/codegen).
+    # ccrun.* compiles emitted C with the system cc; zigrun.* compiles the same-shaped source with zig. Parallel
+    # native backends by design: two methods share a name (compile_cached, build_batch_source), each its own real
+    # body (not a shim), each content-addressing with sha256/hashlib per the determinism rule. Benign-homonym
+    # shape, same as `coverage` below -- read both bodies before touching either.
+    "compile_cached": frozenset({"ccrun", "zigrun"}),
+    "build_batch_source": frozenset({"ccrun", "zigrun"}),
+    "coverage": frozenset({"ldexplore", "sdfemit", "semantictag"}),
     "decompose": frozenset({"codestructure", "transform"}),
     "demo_organizer": frozenset({"navigator", "organizer"}),
     "demo_text": frozenset({"encoders", "text"}),

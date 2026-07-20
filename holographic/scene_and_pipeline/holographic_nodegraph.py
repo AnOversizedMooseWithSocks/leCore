@@ -83,6 +83,72 @@ class NodeRegistry:
         return self.types[name]
 
 
+# ---- subgraph plumbing: proxy sources, signature-hashed group types, and rehydration --------------------------
+# These are module-level (not NodeGraph methods) because from_dict must reach them BEFORE any graph exists.
+
+def _ensure_proxy_type(reg, socket_type):
+    """Register (idempotently) the boundary PROXY source for `socket_type` and return its type name.
+
+    A subgraph's inner graph resolves inputs from EDGES only -- there is no side channel to inject a value. So a
+    boundary input becomes a real inner node that simply emits whatever the group node was handed. Typed per
+    socket kind (not 'any') so the inner graph keeps the SAME strict connect-time type checking as the outer one:
+    losing that inside a group would make nesting a place where bad wires hide."""
+    name = "subgraph_in_%s" % socket_type
+    if name not in reg.types:
+        reg.register(name, {}, {"out": socket_type}, lambda p, i: {"out": p.get("value")})
+    return name
+
+
+def _subgraph_signature(in_types, out_types):
+    """Content hash of a group's SOCKET SIGNATURE. hashlib, never hash(): the type name lands in serialized graphs,
+    so it must mean the same thing in every process and across runs (PYTHONHASHSEED has no vote)."""
+    import hashlib
+    text = "|".join("%s:%s" % (k, in_types[k]) for k in sorted(in_types)) + "||" + \
+           "|".join("%s:%s" % (k, out_types[k]) for k in sorted(out_types))
+    return hashlib.sha256(text.encode()).hexdigest()[:8]
+
+
+def _subgraph_fn(reg):
+    """The group node's compute: rebuild the inner graph, push the incoming values into the proxies, evaluate the
+    mapped inner outputs. Closes over the registry because a node fn only ever sees (params, inputs).
+
+    TRADE-OFF (measured cost, chosen deliberately): the inner graph is rebuilt per evaluate, so the inner memo does
+    not survive across calls -- but the OUTER graph memoizes this node, so a rebuild happens once per dirty cycle,
+    not once per downstream reader. Caching live inner NodeGraph objects on params would be faster and would break
+    to_dict (params must stay JSON-able). Correct serialization beats a micro-optimisation on the editor path."""
+    def fn(params, inputs, ctx):
+        payload = params["__subgraph__"]
+        inner = NodeGraph.from_dict(reg, payload["graph"])
+        for slot in payload["in_map"]:
+            inner.nodes[slot["proxy"]]["params"]["value"] = inputs.get(slot["socket"])
+        return {slot["socket"]: inner.evaluate(slot["src"], ctx.get("t", 0.0))[slot["src_socket"]]
+                for slot in payload["out_map"]}
+    return fn
+
+
+def _ensure_subgraph_type(reg, in_types, out_types):
+    """Register (idempotently) a group type for this socket signature and return its name. Two collapses with the
+    same signature SHARE the type -- correct, because the type holds no content: the inner graph lives in params."""
+    name = "subgraph_%s" % _subgraph_signature(in_types, out_types)
+    if name not in reg.types:
+        reg.register(name, dict(in_types), dict(out_types), _subgraph_fn(reg))
+    return name
+
+
+def _rehydrate_subgraph_type(reg, payload):
+    """Re-register a saved group's type (and its proxies) from the node's own params -- what makes a nested graph
+    load into a FRESH registry."""
+    in_types = {slot["socket"]: slot["type"] for slot in payload["in_map"]}
+    out_types = {slot["socket"]: slot["type"] for slot in payload["out_map"]}
+    for slot in payload["in_map"]:
+        _ensure_proxy_type(reg, slot["type"])
+    for spec in payload["graph"]["nodes"].values():             # nested groups rehydrate depth-first
+        nested = spec.get("params", {}).get("__subgraph__")
+        if nested is not None:
+            _rehydrate_subgraph_type(reg, nested)
+    return _ensure_subgraph_type(reg, in_types, out_types)
+
+
 class NodeGraph:
     """A heterogeneous typed node graph. Add nodes, connect sockets (type-checked, cycle-free), evaluate a node's
     outputs (topological, memoized), edit params (dirty-propagating), and serialize."""
@@ -171,6 +237,22 @@ class NodeGraph:
         self._cache[nid] = out
         return out
 
+    def remove(self, nid):
+        """DELETE a node and prune every incident edge, in O(edges) -- the editor verb that was missing.
+
+        Without this, deleting one node meant serialize-whole-graph -> drop -> rebuild (O(graph), loses any
+        non-serialized state; the Poly Studio demo shipped exactly that workaround). Downstream nodes that were
+        fed by the removed node keep their sockets (now unwired) and simply re-evaluate from params/defaults;
+        their memo entries are invalidated like any topology change. Raises KeyError for an unknown id, so a
+        typo'd delete fails loudly instead of silently succeeding."""
+        if nid not in self.nodes:
+            raise KeyError("no node %r in graph" % (nid,))
+        downstream = self._downstream(nid)                       # capture BEFORE the edges are pruned
+        del self.nodes[nid]
+        self.edges = [e for e in self.edges if e["src"] != nid and e["dst"] != nid]
+        for d in downstream | {nid}:                             # topology changed for everything it fed
+            self._cache.pop(d, None)
+
     def set_param(self, nid, **params):
         """Edit a node's params and mark it + everything downstream DIRTY, so the next evaluate recomputes only the
         affected subgraph (dirty propagation -- the incremental re-eval an interactive editor needs)."""
@@ -224,6 +306,174 @@ class NodeGraph:
                     seen.add(e["dst"]); stack.append(e["dst"])
         return seen
 
+    # -- SUBGRAPH NESTING (collapse a selection into one reusable node, and expand it back) --------------------
+    # WHY THIS SHAPE: NodeType's sockets are FIXED per type, but every collapse has a different boundary, so one
+    # generic "subgraph" type cannot work. The type therefore carries only the SIGNATURE (socket names+types,
+    # content-hashed into its name so identical signatures share a type), while the INNER GRAPH rides in the
+    # node's params as plain JSON-able data. That is what keeps to_dict/from_dict -- the part of this module that
+    # already worked -- working through nesting: from_dict re-registers any subgraph type it finds from params.
+    # REJECTED: registering a bespoke type per collapse instance (a fresh registry could never load a saved
+    # graph -- serialization would silently rot, the exact failure this repo is built to avoid).
+
+    def collapse(self, node_ids, registry=None):
+        """COLLAPSE a selection of nodes into ONE reusable subgraph node; returns the new node's id.
+
+        Boundary detection: external->selection edges become the group's INPUT sockets (deduped per external
+        source, so one source feeding three inner sockets is one group input). OUTPUT sockets come from two
+        rules: inner outputs that feed an external node, PLUS inner outputs with no consumer at all (so
+        collapsing a TERMINAL selection still exposes its result -- Blender's Make-Group rule). External wires
+        are re-pointed at the group node, so the graph computes exactly what it computed before -- `collapse`
+        is a refactor, not an edit.
+
+        REFUSES a collapse that would create a cycle (an external node that sits BOTH downstream and upstream of
+        the selection cannot survive the contraction) -- checked before any mutation, like connect(). Nesting is
+        recursive: a subgraph node is an ordinary node and may itself be inside a later selection.
+        """
+        reg = registry if registry is not None else self.reg
+        sel = list(dict.fromkeys(node_ids))                      # dedupe, keep caller order (deterministic)
+        if not sel:
+            raise ValueError("collapse needs at least one node")
+        for nid in sel:
+            if nid not in self.nodes:
+                raise KeyError("no node %r in graph" % (nid,))
+        selset = set(sel)
+
+        # -- cycle guard FIRST: contracting the selection to a point must not close a loop through the outside --
+        outside_down = set()
+        for nid in sel:
+            outside_down |= (self._downstream(nid) - selset)
+        for ext in outside_down:
+            if (self._downstream(ext) & selset):
+                raise ValueError("collapsing %s would create a cycle through external node %r" % (sel, ext))
+
+        in_edges, out_edges, inner_edges = [], [], []
+        for e in self.edges:
+            si, di = e["src"] in selset, e["dst"] in selset
+            if si and di:
+                inner_edges.append(e)
+            elif di:
+                in_edges.append(e)
+            elif si:
+                out_edges.append(e)
+
+        # -- boundary INPUTS: one group socket per unique external (src, src_socket) --------------------------
+        in_map, in_types, in_sources = [], {}, []
+        by_src = {}                                              # (src, src_socket) -> the slot dict it owns
+        for e in in_edges:
+            key = (e["src"], e["src_socket"])
+            slot = by_src.get(key)
+            if slot is None:
+                sock = "in_%d" % len(in_map)
+                stype = reg.get(self.nodes[e["src"]]["type"]).outputs[e["src_socket"]]
+                slot = {"socket": sock, "type": stype, "targets": []}
+                by_src[key] = slot
+                in_types[sock] = stype
+                in_map.append(slot)
+                in_sources.append({"socket": sock, "src": e["src"], "src_socket": e["src_socket"]})
+            slot["targets"].append({"dst": e["dst"], "dst_socket": e["dst_socket"]})
+
+        # -- OUTPUTS: one group socket per unique inner (src, src_socket), from TWO rules ---------------------
+        # (a) BOUNDARY: an inner output that feeds an external node -- the wire must survive the contraction.
+        # (b) DANGLING: an inner output with NO consumer at all, inner or outer -- Blender's Make-Group rule.
+        # WHY (b) EXISTS (a real bug this fixes, not a nicety): without it, collapsing a TERMINAL selection --
+        # the whole graph, say -- produced a group with ZERO output sockets, i.e. a node whose result could
+        # never be read again. A refactor that can silently destroy the ability to read what you computed is
+        # not a refactor. An output that feeds only INNER nodes stays internal plumbing, correctly hidden.
+        out_map, out_types, out_sinks = [], {}, []
+        seen_out = {}
+
+        def _claim_out(src, src_socket):
+            key = (src, src_socket)
+            if key not in seen_out:
+                sock = "out_%d" % len(out_map)
+                seen_out[key] = sock
+                stype = reg.get(self.nodes[src]["type"]).outputs[src_socket]
+                out_types[sock] = stype
+                out_map.append({"socket": sock, "type": stype, "src": src, "src_socket": src_socket})
+            return seen_out[key]
+
+        for e in out_edges:                                      # (a) boundary
+            out_sinks.append({"socket": _claim_out(e["src"], e["src_socket"]),
+                              "dst": e["dst"], "dst_socket": e["dst_socket"]})
+        consumed = {(e["src"], e["src_socket"]) for e in self.edges}
+        for nid in sel:                                          # (b) dangling; sorted -> deterministic naming
+            for sname in sorted(reg.get(self.nodes[nid]["type"]).outputs):
+                if (nid, sname) not in consumed:
+                    _claim_out(nid, sname)
+
+        # -- the INNER graph: the selection, its internal wires, plus one proxy source per boundary input -----
+        inner_nodes = {nid: {"type": self.nodes[nid]["type"], "params": dict(self.nodes[nid]["params"])}
+                       for nid in sel}
+        inner = {"nodes": inner_nodes, "edges": [dict(e) for e in inner_edges]}
+        for slot in in_map:
+            pid = "__in_%s" % slot["socket"]
+            inner["nodes"][pid] = {"type": _ensure_proxy_type(reg, slot["type"]), "params": {"value": None}}
+            for tgt in slot["targets"]:
+                inner["edges"].append({"src": pid, "src_socket": "out",
+                                       "dst": tgt["dst"], "dst_socket": tgt["dst_socket"]})
+            slot["proxy"] = pid
+
+        payload = {"graph": inner, "in_map": in_map, "out_map": out_map}
+        type_name = _ensure_subgraph_type(reg, in_types, out_types)
+
+        # -- mutate: drop the selection + every incident edge, add the group node, re-point the boundary ------
+        for nid in sel:
+            del self.nodes[nid]
+        self.edges = [e for e in self.edges if e["src"] not in selset and e["dst"] not in selset]
+        gid = self.add(type_name, {"__subgraph__": payload})
+        for s in in_sources:
+            self.connect(s["src"], s["src_socket"], gid, s["socket"])
+        for s in out_sinks:
+            self.connect(gid, s["socket"], s["dst"], s["dst_socket"])
+        self._cache.clear()
+        return gid
+
+    def expand(self, nid, prefix=None):
+        """EXPAND a subgraph node back into its constituent nodes -- the inverse of collapse, so an editor can
+        offer both and a collapse is never a one-way door. Inner ids are re-prefixed to avoid colliding with the
+        outer graph's; returns the list of new node ids. Raises ValueError on a non-subgraph node."""
+        spec = self.nodes.get(nid)
+        if spec is None:
+            raise KeyError("no node %r in graph" % (nid,))
+        payload = spec["params"].get("__subgraph__")
+        if payload is None:
+            raise ValueError("node %r is not a subgraph node" % (nid,))
+        pre = prefix if prefix is not None else "%s_" % nid
+        inner = payload["graph"]
+        proxies = {slot["proxy"]: slot["socket"] for slot in payload["in_map"]}
+
+        newid = {}
+        for iid, ispec in inner["nodes"].items():
+            if iid in proxies:
+                continue                                         # proxies are boundary plumbing, not real nodes
+            nid2 = pre + iid
+            self.nodes[nid2] = {"type": ispec["type"], "params": dict(ispec["params"])}
+            newid[iid] = nid2
+
+        # what fed each group input socket / what each group output fed, from the OUTER wires
+        feeds = {e["dst_socket"]: (e["src"], e["src_socket"]) for e in self.edges if e["dst"] == nid}
+        sinks = [(e["src_socket"], e["dst"], e["dst_socket"]) for e in self.edges if e["src"] == nid]
+
+        self.edges = [e for e in self.edges if e["src"] != nid and e["dst"] != nid]
+        del self.nodes[nid]
+
+        for e in inner["edges"]:
+            if e["src"] in proxies:
+                ext = feeds.get(proxies[e["src"]])               # re-attach the original external source
+                if ext is not None:
+                    self.edges.append({"src": ext[0], "src_socket": ext[1],
+                                       "dst": newid[e["dst"]], "dst_socket": e["dst_socket"]})
+            else:
+                self.edges.append({"src": newid[e["src"]], "src_socket": e["src_socket"],
+                                   "dst": newid[e["dst"]], "dst_socket": e["dst_socket"]})
+        omap = {slot["socket"]: slot for slot in payload["out_map"]}
+        for (osock, dst, dsock) in sinks:
+            slot = omap[osock]
+            self.edges.append({"src": newid[slot["src"]], "src_socket": slot["src_socket"],
+                               "dst": dst, "dst_socket": dsock})
+        self._cache.clear()
+        return [newid[i] for i in inner["nodes"] if i not in proxies]
+
     # -- serialization -----------------------------------------------------------------------------------------
     def to_dict(self):
         """The whole graph as plain JSON-able data (node ids, types, params, edges) -- what an editor saves/loads."""
@@ -232,9 +482,16 @@ class NodeGraph:
 
     @classmethod
     def from_dict(cls, registry, data):
+        """Rebuild a graph from to_dict data. Any SUBGRAPH node re-registers its type into `registry` from its own
+        params on the way in -- so a saved nested graph loads into a FRESH registry, which is the whole reason the
+        inner graph rides in params rather than in a bespoke per-instance type."""
         g = cls(registry)
         for nid, spec in data["nodes"].items():
-            g.nodes[nid] = {"type": spec["type"], "params": dict(spec.get("params", {}))}
+            params = dict(spec.get("params", {}))
+            payload = params.get("__subgraph__")
+            if payload is not None:
+                _rehydrate_subgraph_type(registry, payload)
+            g.nodes[nid] = {"type": spec["type"], "params": params}
         g.edges = [dict(e) for e in data["edges"]]
         g._next = len(g.nodes)
         return g
@@ -769,3 +1026,100 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+def _selftest_subgraph():
+    """Regression trap for nesting. The contract is EXACT: a collapse must not change what the graph computes,
+    must survive JSON into a FRESH registry, must nest, must expand back, and must refuse a cycle untouched."""
+    from holographic.mesh_and_geometry.holographic_sdf import as_eval
+    import json
+    P = np.array([[0.9, 0.0, 0.0], [0.0, 0.0, 0.0], [5.0, 0.0, 0.0]])
+
+    def build():
+        reg = default_registry(); g = NodeGraph(reg)
+        sc = g.add("scalar", {"value": 1.3})
+        sph = g.add("sdf_sphere", {"radius": 1.0})
+        bx = g.add("sdf_box", {"size": (0.8, 0.8, 0.8)})
+        uni = g.add("sdf_union")
+        g.connect(sc, "out", sph, "radius")                   # an EXTERNAL driver crosses the boundary
+        g.connect(sph, "out", uni, "a"); g.connect(bx, "out", uni, "b")
+        return reg, g, sc, sph, bx, uni
+
+    reg, g, sc, sph, bx, uni = build()
+    ref = as_eval(g.evaluate(uni)["out"])(P)
+    gid = g.collapse([sph, bx])
+    assert np.array_equal(as_eval(g.evaluate(uni)["out"])(P), ref), "collapse changed the result"
+    nt = reg.get(g.nodes[gid]["type"])
+    assert nt.inputs == {"in_0": "scalar"}, nt.inputs         # the driver became ONE typed group input
+    assert set(nt.outputs) == {"out_0", "out_1"}, nt.outputs
+
+    # the external driver still drives THROUGH the group boundary
+    g.set_param(sc, value=2.0)
+    driven = as_eval(g.evaluate(uni)["out"])(P)
+    assert not np.array_equal(driven, ref), "driver stopped driving through the group"
+    g.set_param(sc, value=1.3)
+
+    # JSON round-trip into a FRESH registry that has never seen this group type
+    data = json.loads(json.dumps(g.to_dict()))
+    g2 = NodeGraph.from_dict(default_registry(), data)
+    assert np.array_equal(as_eval(g2.evaluate(uni)["out"])(P), ref), "reload into a fresh registry diverged"
+
+    # EXPAND is the exact inverse
+    g.expand(gid)
+    assert np.array_equal(as_eval(g.evaluate(uni)["out"])(P), ref), "expand changed the result"
+    assert gid not in g.nodes and len(g.nodes) == 4
+
+    # NESTING + the TERMINAL case: a group inside a group, collapsed to the whole graph, stays readable
+    reg3, g3, _sc3, sph3, bx3, uni3 = build()
+    ref3 = as_eval(g3.evaluate(uni3)["out"])(P)
+    inner = g3.collapse([sph3, bx3])
+    outer = g3.collapse([inner, uni3])
+    assert np.array_equal(as_eval(g3.evaluate(outer)["out_0"])(P), ref3), "nested collapse diverged"
+    g4 = NodeGraph.from_dict(default_registry(), json.loads(json.dumps(g3.to_dict())))
+    assert np.array_equal(as_eval(g4.evaluate(outer)["out_0"])(P), ref3), "nested reload diverged"
+
+    # KEPT NEGATIVE, PINNED: contracting a selection with an external node BETWEEN two members would close a
+    # loop -- it is refused, and the refusal leaves the graph byte-identical (like connect()).
+    reg5 = default_registry(); h = NodeGraph(reg5)
+    a = h.add("sdf_sphere", {"radius": 1.0}); b = h.add("sdf_union")
+    c = h.add("sdf_union"); d = h.add("sdf_box", {"size": (0.5, 0.5, 0.5)})
+    h.connect(a, "out", b, "a"); h.connect(d, "out", b, "b")
+    h.connect(b, "out", c, "a"); h.connect(a, "out", c, "b")
+    snapshot = json.dumps(h.to_dict(), sort_keys=True)
+    try:
+        h.collapse([a, c])
+        raise AssertionError("a cycle-creating collapse must be refused")
+    except ValueError:
+        pass
+    assert json.dumps(h.to_dict(), sort_keys=True) == snapshot, "a refused collapse must not mutate the graph"
+    print("nodegraph subgraph selftest OK (collapse exact, driven boundary, JSON->fresh registry, "
+          "expand inverse, nesting, terminal readable, cycle refused untouched)")
+
+
+def _selftest_remove():
+    """Pin the remove() contract: node gone, incident edges pruned, downstream re-evaluates, unknown id raises."""
+    reg = default_registry()
+    g = NodeGraph(reg)
+    # use whatever two connectable types the default registry offers via describe_type -- keep it registry-agnostic:
+    sph = g.add("sdf_sphere", {"radius": 1.0})
+    bx = g.add("sdf_box", {"size": (0.5, 0.5, 0.5)})
+    uni = g.add("sdf_union")
+    g.connect(sph, "out", uni, "a"); g.connect(bx, "out", uni, "b")
+    g.evaluate(uni)                                              # warm the memo so invalidation is observable
+    assert len(g.edges) == 2
+    g.remove(sph)                                                # delete a WIRED node
+    assert sph not in g.nodes and bx in g.nodes and uni in g.nodes
+    assert len(g.edges) == 1 and all(e["src"] != sph and e["dst"] != sph for e in g.edges)
+    assert uni not in g._cache, "downstream memo must be invalidated by the topology change"
+    # NOTE (kept behaviour): a node whose REQUIRED input lost its wire fails at evaluate time -- remove()
+    # prunes topology, it does not invent defaults for sockets the node type declares mandatory.
+    n_edges_before = 2
+    try:
+        g.remove("nope"); raise AssertionError("unknown id must raise")
+    except KeyError:
+        pass
+    print("nodegraph remove selftest OK (%d edges before, pruned clean)" % n_edges_before)
+
+if __name__ == "__main__":
+    _selftest_remove(); _selftest_subgraph()
+

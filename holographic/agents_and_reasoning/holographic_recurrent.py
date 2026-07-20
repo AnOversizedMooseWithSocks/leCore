@@ -47,9 +47,24 @@ real task. So the reservoir is built, exposed behind a model= switch, and kept o
 record as a measured negative for these corpora rather than adopted as a default. The
 demo at the bottom runs the real A/Bs; the numbers are reported, win or lose.
 """
+import hashlib                                   # content-addressed atom seeding; NEVER Python's salted hash()
+
 import numpy as np
 
 from holographic.agents_and_reasoning.holographic_ai import bind, permute
+
+
+def _atom_seed(seed, symbol):
+    """A stable RNG seed for a symbol's atom vector: sha256(seed|symbol), NOT Python's hash().
+
+    hash() is salted per process for str/bytes, so it is fine for an in-memory dict key and WRONG for anything
+    whose value crosses a process boundary -- which a seed does the moment two runs are compared. This engine's
+    rule is hashlib for content hashes, never hash(); both _atom implementations below share this one derivation
+    so they cannot drift apart. Same shape as holographic_sequence's fix -- that one was found by grep, THESE two
+    by the static trap in tests/test_determinism_without_hashseed.py, which is the whole argument for the trap.
+    """
+    h = hashlib.sha256(("%d|%s" % (int(seed), symbol)).encode("utf-8")).digest()
+    return int.from_bytes(h[:8], "big") % (2 ** 32)
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +212,9 @@ class ReservoirCharModel:
 
     def _atom(self, ch):
         if ch not in self._atoms:
-            r = np.random.default_rng(abs(hash((self.seed, ch))) % (2**32))
+            # hashlib, not hash(): the latter is SALTED per process, so every atom moved run to run unless
+            # PYTHONHASHSEED=0 happened to be set. See _atom_seed and holographic_sequence's measured failure.
+            r = np.random.default_rng(_atom_seed(self.seed, ch))
             v = r.standard_normal(self.dim)
             self._atoms[ch] = v / (np.linalg.norm(v) or 1.0)
         return self._atoms[ch]
@@ -335,7 +352,7 @@ class ReservoirSequenceClassifier:
     def _atom(self, sym):
         sym = str(sym)
         if sym not in self._atoms:
-            r = np.random.default_rng(abs(hash((self.seed, sym))) % (2**32))
+            r = np.random.default_rng(_atom_seed(self.seed, sym))   # see _atom_seed: hashlib, never salted hash()
             v = r.standard_normal(self.dim)
             self._atoms[sym] = v / (np.linalg.norm(v) or 1.0)
         return self._atoms[sym]

@@ -34,6 +34,40 @@ THE THREE ROWS THAT MATTER
 
 USAGE
     python3 distill_map.py                  # paths from lecore_paths.py
+
+MEASURED VERDICT (128d, Moose's machine, warm cache + nomic weights -- the config that would actually SHIP):
+
+    [ceiling] full encoder (137 MB)      top-1  5/12   top-5  8/12   median  2
+    [floor]   SIF token-pool (23 MB q8)  top-1  3/12   top-5  5/12   median 13
+    [m2v]     whitened table (no W)      top-1  3/12   top-5  5/12   median 17
+    [m2v+zipf] whitened + rank-SIF       top-1  1/12   top-5  2/12   median 18
+    [ours]    SIF @ W (23 MB + 0.1 MB)   top-1  1/12   top-5  2/12   median 19
+
+KEPT NEGATIVE -- N31 FREE-TEXT ROUTING DOES NOT SHIP AT 128d. The learned ridge map is WORSE THAN NOT HAVING ONE:
+[ours] 1/12 vs [floor] 3/12, median 19 vs 13. The ridge explained R^2 +0.06 of held-out variance and cost 2 top-1
+and 6 median rank to apply. The zipf/rank-SIF variant is equally dead (1/12). Nothing clears; nothing is exported.
+
+TWO METHOD FAILURES OF MINE, recorded because they are more useful than the numbers:
+
+1. THE BAR WAS SET ABOVE THE CEILING. I pre-registered "top-1 >= 6/12" -- and the full 137 MB encoder scores 5/12
+   at this dim. The bar was unfalsifiable: no map, however good, could have cleared a bar its own upper bound
+   cannot reach. A bar must be set against a REACHABLE reference. The right reference was never the ceiling, it
+   was the FLOOR: does the learned map beat doing nothing? That question is answerable, and the answer is no.
+
+2. THE EXPORT WAS NOT GATED, AND THE ONLY THING PREVENTING A BAD SHIP WAS A CRASH. --export called
+   export_query_embed unconditionally, regardless of the scores printed one line above. Had it worked, a failing
+   run would have written an 8 MB artifact that makes routing WORSE into lecore_data/. It did not work only
+   because the function was defined BELOW the __main__ guard -- so main() raised NameError. That is the half-fix
+   twin of last session's bug (then: never CALLED; now: called and not yet DEFINED). Neither half was caught
+   because the fit needs encoder weights this container does not have, so the chain was never run end to end.
+   A FIX YOU CANNOT EXECUTE IS A HYPOTHESIS, NOT A FIX -- and a gate that lives in a doc is not a gate. The bar is
+   now enforced in code (EXPORT_BAR_TOP1/EXPORT_BAR_MEDIAN), and a failed gate PRINTS AND WRITES NOTHING.
+
+WHAT THIS KILLS: S4's embedding arm (there is no encoder worth shipping at 128d), and free-text routing via a
+distilled map. WHAT SURVIVES: the token front door (measured 14/35 top-1 on the catalog exam), and the honest
+observation that the 137 MB ceiling itself only reaches 5/12 -- the distillation was never the weak link; the
+TASK is hard at 12 asks, and a 12-ask exam cannot separate these arms anyway (1 ask ~ 0.6 SE). If this is ever
+reopened it needs the bigger ask set first (tools/semantic/catalog_exam.py, 35 asks), not a cleverer map.
 """
 import hashlib, json, re, pathlib
 import numpy as np
@@ -179,6 +213,16 @@ def ridge(S, E, lam):
     return np.linalg.solve(S.T @ S + lam * np.eye(d), S.T @ E)
 
 
+#: The pre-registered bar for shipping the N31 free-text routing artifact, named HERE so it cannot drift from the
+#: doc that promised it. NOTE THE HONEST CORRECTION: the bar was first registered as top-1 >= 6/12, which is ABOVE
+#: the measured 128d CEILING (the full 137 MB encoder scores 5/12). A bar the ceiling cannot clear is unfalsifiable
+#: -- the experiment could not have succeeded whatever the map did. Re-registered against the FLOOR instead, which
+#: is the question that actually matters: does the learned map beat doing nothing? (At 128d it does not: 1/12 vs
+#: 3/12.) A bar must be set against a reachable reference, or it measures the setter's optimism.
+EXPORT_BAR_TOP1 = 4         # must beat the [floor] SIF token-pool (3/12) by a clear margin, not the ceiling
+EXPORT_BAR_MEDIAN = 8       # floor's median is 13; a map that helps should cut it, not raise it to 19
+
+
 def main():
     import argparse
     here = pathlib.Path(__file__).resolve().parent          # tools/semantic
@@ -186,6 +230,15 @@ def main():
     # default repo = two levels up (repo root), NOT paths.REPO which hardcodes a 'leCore' sibling name
     # and breaks on any clone that renamed the repo folder (same bug that hit export_index.py).
     ap.add_argument('--repo', default=str(here.parent.parent))
+    ap.add_argument('--dim', type=int, default=None,
+                    help="truncate encoder + token table to this width BEFORE fitting, so every printed bar "
+                         "describes the artifact that would ship (the shipped index is 128d; a fit at 768 "
+                         "measures a different pipeline -- the RS-1b lesson). Default: full width, unchanged.")
+    ap.add_argument('--export', default=None, metavar='OUT.npz',
+                    help="write the N31 runtime artifact (tokens + token table + freqs + W) for "
+                         "holographic_queryembed after the fit. Export at --dim 128 to serve the shipped "
+                         "index. The fit prints its bar either way; whether to SHIP what this writes is the "
+                         "caller's call, made on those numbers.")
     a = ap.parse_args()
     repo = pathlib.Path(a.repo)
     if not repo.is_dir():
@@ -233,12 +286,18 @@ def main():
     if missing:
         raise SystemExit(f"asks not in cache: {missing[:3]} -- run knowledge_index.py on this repo first")
     Eq = np.array(Eq)
+    if a.dim:
+        # Truncate FIRST, then fit: the shipped router works in the truncated space, so R^2/top-1 measured at
+        # full width would grade an artifact nobody ships (measure the pipeline that ships -- RS-1b).
+        E, Eq = E[:, :a.dim], Eq[:, :a.dim]
     print(f"  encoder vectors: {E.shape} docs, {Eq.shape} queries (cache hit {hit}/{len(texts)})\n")
 
     # ---- S: SIF token-pool vectors, from the token table alone
     meta, base = dr.read_st(str(paths.nomic_weights()))
     embn = [n for n in meta if re.search(r'(embeddings\.word_embeddings|embed_tokens)\.weight$', n)][0]
     T = dr.load_t(str(paths.nomic_weights()), meta, base, embn).astype(np.float64)
+    if a.dim:
+        T = T[:, :a.dim]                      # same truncation as E: SIF pools in the shipping space
     wp = dr.WordPiece(str(paths.nomic_vocab()))
     # Frequency of each TOKEN ID across the docs, as an array sized to the token table (SIF weights word i
     # by a/(a+freq_i)). wp.encode returns ids (np array); count them into a vocab-sized vector. (The old
@@ -285,7 +344,28 @@ def main():
     print(f"\n  ridge: lam* {lam:g} chosen on held-out docs, held-out R^2 {r2:+.3f}")
 
     W = ridge(S, E, lam)                     # refit on all documents with the chosen lam
-    dr.score(E, Sq @ W, names_k, f"[ours]    SIF @ W  (23 MB + {W.size*4/1e6:.1f} MB)")
+    # score() already RETURNS (top1, top5, median) -- capture it rather than inventing a last_score() accessor.
+    ours_top1, _ours_top5, ours_med = dr.score(E, Sq @ W, names_k,
+                                               f"[ours]    SIF @ W  (23 MB + {W.size*4/1e6:.1f} MB)")
+
+    if a.export:
+        # pc=None deliberately: the shipped index bakes its own mu/pc and EmbeddingRouter corrects the QUERY with
+        # them (proven by the offline dim sweep, which routed raw truncated seed vectors) -- a second correction
+        # here would apply ABTT twice.
+        #
+        # THE PRE-REGISTERED GATE, enforced in code rather than trusted to a human reading a table. Measured
+        # 2026-xx at 128d: [ours] top-1 1/12, median 19 -- WORSE than the [floor] SIF token-pool (3/12, median 13)
+        # that uses no learned map at all. The ridge explained R^2 +0.06 of held-out variance and cost 2 top-1 and
+        # 6 median rank to apply. Exporting anyway would have shipped an 8 MB artifact that makes routing worse,
+        # and the ONLY thing standing between that and lecore_data/ was a NameError. A gate that lives in a
+        # docstring is not a gate.
+        if ours_top1 < EXPORT_BAR_TOP1 or ours_med > EXPORT_BAR_MEDIAN:
+            print("\n  EXPORT REFUSED -- [ours] scored top-1 %d/%d, median %g; the pre-registered bar is top-1 "
+                  ">= %d AND median <= %d. Nothing is written. This is the DESIGNED outcome of a failed gate, not "
+                  "an error: the artifact only ships if it EARNS it."
+                  % (ours_top1, len(names_k), ours_med, EXPORT_BAR_TOP1, EXPORT_BAR_MEDIAN))
+        else:
+            export_query_embed(a.export, T, wp.vocab, freq, W, pc=None)
 
     # N31b stacked: whitened table AND a ridge W on top. If a linear map still helps AFTER fixing the
     # table, this is the strongest no-model option; if [m2v] alone already clears the bar, ship that
@@ -313,9 +393,6 @@ def main():
     print(f"  and the encoder stays an optional package. Either answer is worth having.")
 
 
-if __name__ == '__main__':
-    main()
-
 
 def export_query_embed(out_path, token_table, vocab, freqs, W, pc=None, sif_a=1e-3):
     """Write the N31 runtime artifact: token table + freqs + ridge W (+ ABTT pc). This is what
@@ -328,4 +405,14 @@ def export_query_embed(out_path, token_table, vocab, freqs, W, pc=None, sif_a=1e
         kw["pc"] = pc.astype(np.float16)
     np.savez(out_path, **kw)
     import os
-    print(f"  wrote {out_path} ({os.path.getsize(out_path)/1e6:.2f} MB) -- ship to lecore_data/routing/query_embed.npz")
+    print(f"  wrote {out_path} ({os.path.getsize(out_path)/1e6:.2f} MB) -- ship to lecore_data/routing/"
+          f"query_embed_128d.npz (the FIRST name _query_embedder checks; pinned by test_queryembed_artifact)")
+
+
+# The __main__ guard belongs at the BOTTOM, after every def it might reach. It previously sat ABOVE
+# export_query_embed, so main() raised NameError the first time --export was actually used -- the half-fix twin of
+# the bug it was meant to close (last session the function was never CALLED; then it was called and still not
+# DEFINED yet). Neither half was caught because the fit needs encoder weights this container does not have, so the
+# chain was never run end to end. A fix you cannot execute is a hypothesis, not a fix.
+if __name__ == '__main__':
+    main()

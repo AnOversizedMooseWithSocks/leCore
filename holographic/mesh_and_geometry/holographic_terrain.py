@@ -155,3 +155,138 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+def erode(height, droplets=2000, steps=30, inertia=0.05, capacity=1.0, deposition=0.3,
+          erosion=0.3, evaporation=0.02, min_slope=0.01, radius=2, seed=0):
+    """HYDRAULIC EROSION of a height grid: droplet simulation that carves drainage channels and softens peaks.
+
+    Each seeded droplet walks downhill (gradient descent with `inertia` momentum so channels meander rather
+    than zigzag), picks up sediment proportional to speed*water up to `capacity`, deposits when over capacity
+    or on uphill motion, and evaporates. Erosion is brushed over a `radius` neighbourhood so channels have
+    width instead of single-cell scratches (the classic droplet model, e.g. Beyer 2015 / common in procedural
+    terrain literature). Purely additive: takes and returns a plain (H, W) float array; the fBm `Terrain`
+    class is untouched. Deterministic under `seed` (seeded default_rng; no Python hash anywhere).
+
+    HEIGHT UNITS: scale-invariant. The grid is normalised to [0,1] internally, eroded, and rescaled to the
+    caller's units, so the result is independent of the input's height scale -- a normalised height grid and the
+    same terrain in metres erode identically (previously capacity=4.0 caused a deposition runaway on any
+    off-unit-scale grid: a 1.0 peak rose to 11.77, a 20-unit terrain to 74,306). `capacity` defaults to 1.0
+    (stable and still carving); 4.0 grew peaks even on the module's own fBm terrain, which is why the default
+    changed. Lower capacity = gentler carving, higher = more aggressive; above ~2.0 risks the old feedback.
+
+    Returns the eroded copy. Conservation note: sediment leaving the grid edge with a dying droplet is lost --
+    total material is NOT exactly conserved, matching real drainage out of the tile.
+    """
+    # SCALE INVARIANCE (fixes the reported runaway). The droplet dynamics are NOT height-unit-agnostic: `speed`
+    # updates via dh*gravity and `cap` scales with dh, so a 20-unit terrain gets 20x the sediment per step and the
+    # deposition feedback explodes (client measured a 1.0 peak -> 11.77, a 20-unit terrain -> 74,306). The physics
+    # only behaves in the unit-height regime the parameters were tuned for. So normalise the grid to [0,1], run
+    # there, and rescale back -- ANY input then behaves like the well-tested unit case. Additive: a grid already
+    # in [0,1] is unchanged to floating point (span==1, offset==0), so no existing unit-scale result moves; only
+    # the previously-corrupt off-unit-scale results change, which is the fix, not a regression.
+    H_in = np.asarray(height, float)
+    _lo = float(H_in.min())
+    _span = float(H_in.max()) - _lo
+    if _span < 1e-12:
+        return H_in.astype(float).copy()                      # flat grid: nothing to erode, and 1/span would blow up
+    H = (np.array(height, float, copy=True) - _lo) / _span     # work in [0,1], the regime the params were tuned for
+    h, w = H.shape
+    rng = np.random.default_rng(seed)
+
+    # precompute the erosion brush: gaussian-ish weights over the radius disc, normalised
+    ys, xs = np.mgrid[-radius:radius + 1, -radius:radius + 1]
+    dist = np.sqrt(xs * xs + ys * ys)
+    brush = np.maximum(0.0, 1.0 - dist / max(radius, 1e-9))
+    brush /= brush.sum()
+
+    def grad(px, py):
+        # bilinear height + gradient at a continuous position (cell-local finite differences)
+        xi, yi = int(px), int(py)
+        fx, fy = px - xi, py - yi
+        h00, h10 = H[yi, xi], H[yi, xi + 1]
+        h01, h11 = H[yi + 1, xi], H[yi + 1, xi + 1]
+        gx = (h10 - h00) * (1 - fy) + (h11 - h01) * fy
+        gy = (h01 - h00) * (1 - fx) + (h11 - h10) * fx
+        hh = h00 * (1 - fx) * (1 - fy) + h10 * fx * (1 - fy) + h01 * (1 - fx) * fy + h11 * fx * fy
+        return hh, gx, gy
+
+    starts = rng.uniform([1.0, 1.0], [w - 2.0, h - 2.0], size=(droplets, 2))
+    for (px, py) in starts:
+        dx = dy = 0.0
+        speed, water, sediment = 1.0, 1.0, 0.0
+        for _ in range(steps):
+            h0, gx, gy = grad(px, py)
+            # momentum blend: pure gradient at inertia=0, straight-line at inertia=1
+            dx = dx * inertia - gx * (1 - inertia)
+            dy = dy * inertia - gy * (1 - inertia)
+            n = np.hypot(dx, dy)
+            if n < 1e-12:
+                break
+            dx, dy = dx / n, dy / n
+            nx, ny = px + dx, py + dy
+            if not (1.0 <= nx < w - 2 and 1.0 <= ny < h - 2):
+                break                                        # droplet leaves the tile; its sediment leaves too
+            h1, _, _ = grad(nx, ny)
+            dh = h1 - h0
+            cap = max(-dh, min_slope) * speed * water * capacity
+            if sediment > cap or dh > 0:
+                # deposit: over capacity, or moving uphill (fill the pit it just climbed out of)
+                amt = min(dh, sediment) if dh > 0 else (sediment - cap) * deposition
+                sediment -= amt
+                H[int(py), int(px)] += amt
+            else:
+                # erode, brushed over the disc so channels get width
+                amt = min((cap - sediment) * erosion, -dh)
+                cy, cx = int(py), int(px)
+                y0, y1 = cy - radius, cy + radius + 1
+                x0, x1 = cx - radius, cx + radius + 1
+                if 0 <= y0 and y1 <= h and 0 <= x0 and x1 <= w:
+                    H[y0:y1, x0:x1] -= amt * brush
+                else:
+                    H[cy, cx] -= amt
+                sediment += amt
+            speed = float(np.sqrt(max(speed * speed + dh * -9.81 * 0.1, 0.0)))
+            water *= (1.0 - evaporation)
+            px, py = nx, ny
+    return H * _span + _lo                                     # rescale back to the caller's height units
+
+
+def _selftest_erode():
+    """Pin: deterministic, peaks lowered, real material moved, no NaN, additive (input untouched)."""
+    t = Terrain(seed=3, octaves=4)
+    H0 = t.heightmap(48)
+    H1 = erode(H0, droplets=400, steps=25, seed=0)
+    H2 = erode(H0, droplets=400, steps=25, seed=0)
+    assert np.array_equal(H1, H2), "erosion must be deterministic under a seed"
+    assert np.array_equal(H0, t.heightmap(48)), "input grid must not be mutated (additive contract)"
+    assert np.isfinite(H1).all()
+    assert H1.max() <= H0.max() + 1e-12, "peaks must not GROW under erosion"
+
+    # THE RUNAWAY REGRESSION TRAP (client-reported, and the old selftest missed it because 400 droplets on a
+    # gentle fBm never triggered the deposition feedback). Two conditions that USED to explode with capacity=4.0:
+    # a clean unit-height gaussian at 3000 droplets, and the SAME shape at 20x. Both must stay bounded now that
+    # the default is 1.0 and the run is height-normalised. Peaks GREW to 2.79 and 1537 respectively before the fix.
+    import numpy as _np
+    _n = 48
+    _xx, _yy = _np.meshgrid(_np.linspace(-3, 3, _n), _np.linspace(-3, 3, _n))
+    _peak = _np.exp(-(_xx * _xx + _yy * _yy) / 2.0)                      # max ~1.0
+    for _scale in (1.0, 20.0):
+        _e = erode(_peak * _scale, droplets=3000, seed=0)
+        assert _e.max() <= _peak.max() * _scale + 1e-6, (
+            "erode RUNAWAY at scale %g: peak %g grew to %g -- the height-scale feedback is back"
+            % (_scale, _peak.max() * _scale, _e.max()))
+    # SCALE INVARIANCE, pinned: eroding H and eroding 20*H must agree after rescaling (same normalised run).
+    _a = erode(_peak, droplets=800, seed=1)
+    _b = erode(_peak * 20.0, droplets=800, seed=1) / 20.0
+    assert _np.allclose(_a, _b, atol=1e-9), "erode must be height-scale invariant (normalise-run-rescale)"
+    moved = float(np.abs(H1 - H0).sum())
+    assert moved > 1e-3, "erosion moved no material -- simulation is dead"
+    # a different seed carves different channels (the droplets, not the terrain, are the randomness)
+    H3 = erode(H0, droplets=400, steps=25, seed=1)
+    assert not np.array_equal(H1, H3)
+    print("terrain erode selftest OK (deterministic, peaks<=, |moved|=%.4f)" % moved)
+
+
+if __name__ == "__main__":
+    _selftest_erode()

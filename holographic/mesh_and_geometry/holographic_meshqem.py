@@ -463,7 +463,250 @@ def _selftest():
           f"{_tc*1000:.0f}ms vs greedy QEM {_tq*1000:.0f}ms ({_tq/_tc:.0f}x faster -- the bundled-quadric vertex merge))")
 
 
-def cluster_decimate(mesh, grid=16):
+def walk_knob(op, knob, passes, knob_cost="linear", max_knob=None, max_steps=6, factor=None):
+    """Walk a monotone quality knob until a CRITERION passes -- the search, separated from what it searches for.
+
+    THE SPLIT (ledger P4), and the need is concrete: silhouette_guarded fused this walk to ONE criterion, so a
+    second gate could not be added without rewriting the search. The owner then asked for three gates
+    (outline / topology / orientation-field), and each is blind where the others see -- an outline cannot see a
+    hole punched inside it (measured: surface_retopo, 0.973 IoU PASS, 6 boundary edges in a closed box); EGI
+    cannot see the outline (a decimated sphere: 0.99 silhouette, 0.06 EGI). The walk is identical for all
+    three; only the question differs, so the question is now an argument.
+
+    `passes(out) -> (ok, report_fields)`: the criterion returns its verdict AND whatever it measured, merged
+    into the report -- so each criterion owns its own vocabulary (silhouette_iou/worst_view;
+    islands_created/holes_created; egi) without this function knowing any of it. `passes=None` runs `op` once.
+
+    `knob_cost` sizes the step to the COST CURVE ("linear" keeps the historical x1.5; "cubic" steps x1.26,
+    because a voxel resolution costs res^3 and x1.5 there OOM-killed this process twice). `max_knob` makes the
+    walk REFUSE (refused_knob_cap=True) rather than march into a wall. Returns (out, report). Deterministic."""
+    _STEP = {"linear": 1.5, "quadratic": 2.0 ** (1.0 / 2.0), "cubic": 2.0 ** (1.0 / 3.0)}
+    if callable(knob_cost):
+        step = float(knob_cost(knob))
+    else:
+        step = _STEP.get(str(knob_cost))
+        if step is None:
+            raise ValueError("knob_cost must be one of %s or a callable" % sorted(_STEP))
+    if factor is not None:
+        step = float(factor)
+
+    out = op(knob)
+    report = {"knob": knob, "guard_walked_back": False, "steps": 0,
+              "knob_cost": knob_cost if not callable(knob_cost) else "callable",
+              "step_factor": round(step, 4), "max_knob": max_knob, "refused_knob_cap": False}
+    if passes is None:
+        return out, report
+    ok, fields = passes(out)
+    report.update(fields)
+    steps = 0
+    while not ok and steps < max_steps:
+        nxt = int(np.ceil(knob * step))
+        if nxt <= knob:
+            nxt = knob + 1
+        if max_knob is not None and nxt > int(max_knob):
+            report["refused_knob_cap"] = True
+            break
+        knob = nxt
+        out = op(knob)
+        ok, fields = passes(out)
+        steps += 1
+        report.update(fields)
+        report.update({"knob": knob, "steps": steps, "guard_walked_back": True})
+    report["passed"] = bool(ok)
+    return out, report
+
+
+def topology_guarded(src_mesh, op, knob, knob_cost="linear", max_knob=None, max_steps=6, factor=None,
+                     get_mesh=lambda x: x, allow_fill=False):
+    """Walk a knob until the op stops CHANGING TOPOLOGY -- the second gate, and it is 12 lines because
+    walk_knob already owns the search (ledger P4's split paying immediately).
+
+    THE GATE THE OUTLINE CANNOT BE: silhouette is blind to anything inside the hull. Measured, our own
+    surface_retopo scored 0.973 IoU -- a clean PASS -- while punching 6 boundary edges into a CLOSED box.
+    Refuses on islands_created (a reducing op that detaches geometry has TORN the surface) and on
+    holes_created. `allow_fill=False` also refuses holes_FILLED, because a scan's holes are DATA and closing
+    them invents surface that was never measured; set True only when filling is the caller's actual intent.
+
+    Compose with silhouette_guarded rather than replacing it: they answer different questions, and a mesh
+    needs both answers. Returns (out, report)."""
+    from holographic.mesh_and_geometry.holographic_meshtools import topology_delta
+
+    def passes(out):
+        d = topology_delta(src_mesh, get_mesh(out))
+        ok = not (d["islands_created"] or d["holes_created"] or (d["holes_filled"] and not allow_fill))
+        return ok, {"topology": d}
+
+    out, report = walk_knob(op, knob, passes, knob_cost=knob_cost, max_knob=max_knob,
+                            max_steps=max_steps, factor=factor)
+    return out, report
+
+
+def silhouette_guarded(src_mesh, op, knob, min_iou=0.95, n_azimuth=6, size=128, max_steps=6, factor=None,
+                       get_mesh=lambda x: x, knob_cost="linear", max_knob=None, ref_cache=None):
+    """Run `op(knob)` (a mesh-producing operation whose `knob` makes the result FINER as it grows -- a cluster
+    grid, a voxel resolution, a face budget) and hold it to a silhouette floor. Returns (mesh, report).
+
+    The shared engine behind the default-on guards: sweep the result against the source (orthographic
+    turntable, worst direction); below the floor -> knob * factor and retry, up to max_steps; ship the first
+    passing level. The source's masks are computed ONCE for the whole search (ref_cache). min_iou=None runs
+    `op` exactly once, unguarded -- destructive modification as an explicit choice, per the owner directive
+    that preservation is the default and destruction is the opt-out. The report always says what happened:
+    silhouette_iou per direction, worst_view, steps, guard_walked_back, and (when hit) refused_knob_cap.
+
+    `knob_cost` sizes the step to the operation's COST CURVE: "linear" (default -- a cluster grid or a face
+    budget) keeps the historical x1.5; "cubic" (a voxel resolution, work ~ res^3) steps x1.26 so ONE step
+    costs ~2x instead of 3.4x; a callable(knob) -> factor for anything odd. `max_knob` caps the walk and makes
+    the guard REFUSE (refused_knob_cap=True) instead of marching into a wall."""
+    from holographic.rendering.holographic_render import silhouette_sweep as _sweep
+
+    # THE WALK IS walk_knob's NOW; THIS FUNCTION IS ONLY THE CRITERION (ledger P4's split). Everything the
+    # search knew about silhouettes lives in `passes`; everything the silhouette knew about walking is gone.
+    # Behaviour is UNCHANGED and pinned bit-identical -- a split that moves a decision is not a split.
+    # ref_cache: the REFERENCE's outline masks are invariant for a given (src_mesh, size, views), so a caller
+    # running several guarded ops on ONE source can pass ONE dict and pay the reference projection ONCE across
+    # all of them -- measured, three guarded ops on the same box re-masked its 7 views 3x (7/7/7) with a
+    # fresh dict each. Default None keeps the old per-call behaviour exactly; the cache only ever GROWS with
+    # reference views, never candidate ones, so sharing it is always safe.
+    cache = {} if ref_cache is None else ref_cache
+
+    def passes(out):
+        r = _sweep(src_mesh, get_mesh(out), n_azimuth=n_azimuth, size=size, ref_cache=cache)
+        return (r["worst"] >= float(min_iou)), {"silhouette_iou": r["iou"], "worst_view": r["worst_view"]}
+
+    out, report = walk_knob(op, knob, None if min_iou is None else passes, knob_cost=knob_cost,
+                            max_knob=max_knob, max_steps=max_steps, factor=factor)
+    report["min_silhouette_iou"] = min_iou
+    return out, report
+
+
+def silhouette_guard_chain(src_mesh, levels, get_mesh=lambda x: x, min_iou=0.95, n_azimuth=6, size=128):
+    """Hold an entire fine->coarse LOD CHAIN to a silhouette floor: sweep every level against the SOURCE and
+    TRUNCATE the chain at the last level whose worst direction clears `min_iou`. Returns (kept_levels, report).
+
+    Truncation, not refinement, is the chain semantics on purpose: a chain is a menu of quality levels, and a
+    level whose outline is visibly destroyed is not a lower-quality option -- it is a wrong answer that a
+    distance-based selector would happily serve to a nearby camera. Dropping it means the menu only contains
+    truthful entries; the report names every dropped level and its worst direction so the caller can rebuild
+    with a finer ladder if they wanted more levels. min_iou=None keeps everything (destructive by explicit
+    choice). The source's masks are computed once for the whole chain (ref_cache)."""
+    from holographic.rendering.holographic_render import silhouette_sweep as _sweep
+    report = {"min_silhouette_iou": min_iou, "levels_in": len(levels), "per_level": [], "dropped": []}
+    if min_iou is None:
+        report["levels_kept"] = len(levels)
+        return list(levels), report
+    cache = {}
+    kept = []
+    for i, lv in enumerate(levels):
+        mesh_i = get_mesh(lv)
+        r = _sweep(src_mesh, mesh_i, n_azimuth=n_azimuth, size=size, ref_cache=cache)
+        entry = {"level": i, "faces": len(mesh_i.faces), "worst": r["worst"], "worst_view": r["worst_view"]}
+        report["per_level"].append(entry)
+        if r["worst"] >= float(min_iou):
+            kept.append(lv)
+        else:
+            report["dropped"].append(entry)
+    report["levels_kept"] = len(kept)
+    return kept, report
+
+
+def decimate_to(mesh, target_faces=None, target_fraction=None, keep_uv="auto",
+                min_silhouette_iou=0.95, views_size=128, max_iters=12, tol=0.10, n_azimuth=6):
+    """Decimate to an EXPLICIT budget -- and, optionally, refuse to ship a result that broke the outline.
+    Returns (mesh, report). The engine stops deciding for the caller:
+
+      * target_faces / target_fraction  -- what you want to hit (exactly one of them). cluster_decimate's
+        `grid` is an implementation knob, not a contract; faces(grid) is strictly MONOTONE (measured on a 322k
+        scan: grid 20->1980 faces ... 200->153086), so a bisection over grid finds the coarsest level within
+        `tol` (default 10%) of the budget in <= max_iters deterministic steps. No randomness, no re-runs.
+      * min_silhouette_iou -- the guard, ON BY DEFAULT (0.95) per owner directive: silhouette preservation is
+        part of the operation the way denoising validates its signal, and destructive modification is the
+        OPT-OUT (min_silhouette_iou=None), not the silent default. The engine is silhouette_sweep -- an
+        orthographic turntable, n_azimuth directions across [0, pi) plus the top, ~2 s warm on a 322k source
+        with the reference's masks cached across the whole walk-back. If the WORST direction falls below the
+        floor, the search walks BACK to the coarsest level that still passes and the report says which
+        direction failed and what was shipped instead. Worst-direction (not mean) because degradation is
+        local: the crab's slurped legs read 0.880 at one azimuth while the mean still said 0.903.
+      * target None + guard None -> the mesh is returned UNTOUCHED (identity, report says so): "modifying the
+        model at all might be considered bad" is a valid policy and must be expressible.
+
+    Silhouette-vs-budget conflict resolves toward the GUARD (ship more faces than asked rather than a broken
+    outline), reported loudly -- report['budget_missed_for_silhouette']=True -- never silently.
+
+    KEPT NEGATIVE: the guard is silhouette-only -- blind to interior detail, normals, and texture (a limb can
+    flatten without leaving the outline from any of 4 views). Pair with mesh_surface_deviation for interiors.
+    IoU floor and view size trade cost for sensitivity; 160px catches the crab's leg loss (0.876 vs 0.976)."""
+    from holographic.mesh_and_geometry.holographic_mesh import Mesh as _Mesh
+    src_faces = len(mesh.faces)
+    report = {"source_faces": src_faces, "target_faces": target_faces, "target_fraction": target_fraction,
+              "min_silhouette_iou": min_silhouette_iou, "iters": 0, "modified": False,
+              "budget_missed_for_silhouette": False}
+    if target_faces is None and target_fraction is None:
+        report["result_faces"] = src_faces
+        report["note"] = "no target given: mesh returned untouched (explicit no-modification policy)"
+        return mesh, report
+    if target_faces is not None and target_fraction is not None:
+        raise ValueError("give target_faces OR target_fraction, not both")
+    if target_fraction is not None:
+        target_faces = max(4, int(round(src_faces * float(target_fraction))))
+    target_faces = int(target_faces)
+    if target_faces >= src_faces:
+        report["result_faces"] = src_faces
+        report["note"] = "target >= source: nothing to do"
+        return mesh, report
+
+    def at(grid):
+        return cluster_decimate(mesh, grid=int(grid), keep_uv=keep_uv)
+
+    # bisection over the monotone faces(grid) -- DELEGATED to numerics.bisect_to_budget (M6 promotion). The
+    # move (bracket then bisect a monotone probe to a budget, tracking the closest within tol) is shared with
+    # ratedistortion; the primitive owns it, this caller owns only the accounting. THE ITER COUNTER STAYS
+    # HERE: report["iters"] is incremented via on_probe, and -- exactly as the historical loop did -- the
+    # INITIAL at(hi) probe is NOT counted (only the bracket-grow probes and the loop probes are). The M6
+    # dry-run proved a primitive-owned counter reproduced the face result but flipped iters 4->5; keeping the
+    # counter caller-side preserves report["iters"] bit-identically. key=len(faces) turns the probed Mesh into
+    # the budget number; the primitive returns (best_mesh, grid, err) matching the old (out, out_grid, out_err).
+    from holographic.misc.holographic_numerics import bisect_to_budget as _b2b
+    _first = [True]
+    def _count(k, v):
+        if _first[0]:               # the initial at(hi) before bracketing was never counted historically
+            _first[0] = False
+            return
+        report["iters"] += 1
+    out, out_grid, out_err = _b2b(at, target_faces, 2, 16, midpoint="arith", max_iters=max_iters, tol=tol,
+                                  key=lambda mesh: len(mesh.faces),
+                                  cmp=lambda mesh, tgt: len(mesh.faces) < tgt,
+                                  bracket=True, bracket_cap=4096, on_probe=_count)
+    report.update({"grid": int(out_grid), "result_faces": len(out.faces),
+                   "budget_error": round(float(out_err), 4), "modified": True})
+
+    if min_silhouette_iou is not None:
+        # guard engine: the orthographic turntable (holographic_render.silhouette_sweep). ref_cache makes the
+        # SOURCE's masks a one-time cost for the entire walk-back, not a per-candidate one.
+        from holographic.rendering.holographic_render import silhouette_sweep as _sweep
+        _cache = {}
+
+        def worst_iou(cand):
+            r = _sweep(mesh, cand, n_azimuth=n_azimuth, size=views_size, ref_cache=_cache)
+            return r["worst"], r["iou"]
+        w, per = worst_iou(out)
+        report["silhouette_iou"] = {k: round(v, 4) for k, v in per.items()}
+        report["worst_view"] = min(per, key=per.get)
+        if w < float(min_silhouette_iou):
+            # walk BACK toward the source until the outline survives; ship the coarsest passing level
+            g = out_grid
+            while w < float(min_silhouette_iou) and g < 4096:
+                g = int(np.ceil(g * 1.5))
+                out = at(g)
+                w, per = worst_iou(out)
+                report["iters"] += 1
+            report.update({"grid": int(g), "result_faces": len(out.faces),
+                           "silhouette_iou": {k: round(v, 4) for k, v in per.items()},
+                           "worst_view": min(per, key=per.get),
+                           "budget_missed_for_silhouette": len(out.faces) > target_faces * (1 + tol)})
+    return out, report
+
+
+def cluster_decimate(mesh, grid=16, keep_uv="auto"):    # keep_uv: "auto" (transfer only if the atlas allows) | True (force) | False
     """PARALLEL decimation by vertex clustering (Rossignac-Borrel / Lindstrom) -- the O(n) counterpart of the greedy
     qem_decimate, for an IMPORTED mesh that has no field behind it. Partition the bounding box into a grid^3 lattice
     (the same floor-divide spatial binning the engine's tilers use), collapse every vertex in a cell to ONE
@@ -531,8 +774,334 @@ def cluster_decimate(mesh, grid=16):
     mapped = mapped[keep]                                                       # drop collapsed (degenerate) faces
     if len(mapped):
         mapped = np.unique(mapped, axis=0)                                      # drop exact duplicate faces
-    return Mesh(rep, [tuple(int(x) for x in row) for row in mapped])
+    out = Mesh(rep, [tuple(int(x) for x in row) for row in mapped])
+    # keep_uv="auto": when the source carries uvs, PROJECT them onto the representatives via transfer_uv (the
+    # texture-preserving-retopo machinery). Projection, not exact carry, ON PURPOSE: a cell's representative
+    # merges vertices that may span a UV SEAM (different atlas islands), so no exact per-vertex answer exists --
+    # the honest one is the nearest-surface-point interpolation, matching what the coarse LOD geometrically IS.
+    # keep_uv=False restores the geometry-only output. Geometry is UNTOUCHED either way (nothing flips).
+    src_uv = getattr(mesh, "uvs", None) if keep_uv in ("auto", True) else None
+    if src_uv is not None and len(rep):
+        try:
+            from holographic.mesh_and_geometry.holographic_meshtools import transfer_uv, uv_atlas_report
+            atlas = uv_atlas_report(mesh)
+            # keep_uv="auto" REFUSES to transfer onto a fragmented atlas rather than emitting uvs that render
+            # as confetti. MEASURED, and the whole reason this branch exists: a photogrammetry scan whose atlas
+            # has 4079 islands at a MEDIAN OF 1 FACE each cannot be transferred by any per-vertex scheme -- a
+            # new face's three corners land in three unrelated islands, and the result put 90% of faces across
+            # island boundaries (median uv edge 0.60 of the atlas vs 0.013 on the source). Silently shipping
+            # that was the bug. The correct route for such a mesh is meshtools.rebake_texture; keep_uv=True
+            # forces the old transfer anyway (documented, for a mesh whose atlas you know is coherent).
+            if keep_uv is True:
+                # FORCED legacy path: plain per-vertex transfer, exactly as before reprojection existed. This is
+                # the documented escape hatch and it must not quietly change meaning -- a caller who asked to
+                # force it gets the old behaviour (uvs present, seams smeared on a fragmented atlas), not a
+                # refusal. Routing True through reproject_uv broke that: reprojection RAISES on a fragmented
+                # atlas, so "force" silently became "no uvs at all". The selftest caught it.
+                new_uv, _ = transfer_uv(mesh, np.asarray(src_uv, float), rep)
+                out.uvs = new_uv
+                out.uv_transfer_report = dict(atlas, skipped=False, reprojected=False, forced=True)
+            elif not atlas["transferable"]:
+                out.uv_transfer_report = dict(atlas, skipped=True,
+                                              reason="fragmented atlas (median %.1f faces/island): per-vertex "
+                                                     "uv transfer would scramble it -- use "
+                                                     "meshtools.rebake_texture, or keep_uv=True to force"
+                                                     % atlas["faces_per_island_median"])
+            else:
+                # REPROJECT, not per-vertex transfer: a decimator WELDS the two sides of every uv seam (they are
+                # one 3-D point), and one vertex can carry one uv, so plain transfer makes the faces around the
+                # seam span the atlas. Measured on a decimated cylinder: 12/288 faces spanning the seam and
+                # 3.36% of rendered pixels smeared -> 0 and 0.00% after reprojection, for 23 vertex splits.
+                # reproject_uv re-splits the seams and returns a NEW mesh, so hand that back whole.
+                from holographic.mesh_and_geometry.holographic_meshtools import reproject_uv
+                try:
+                    rmesh, new_uv, rrep = reproject_uv(mesh, np.asarray(src_uv, float), out)
+                    rmesh.uv_transfer_report = dict(atlas, skipped=False, reprojected=True, **{
+                        k: rrep[k] for k in ("seam_splits", "projection_distance_mean", "finite")})
+                    return rmesh
+                except ValueError:                           # fragmented atlas slipped past the report: refuse
+                    out.uv_transfer_report = dict(atlas, skipped=True,
+                                                  reason="reprojection refused: fragmented atlas -- use "
+                                                         "meshtools.rebake_texture")
+                    return out
+        except Exception:
+            pass                                             # a failed transfer must not fail the decimation
+    return out
 
 
 if __name__ == "__main__":
-    _selftest()
+    _selftest(); _selftest_cvt_remesh()
+
+
+def cvt_remesh(mesh, n_sites=500, iterations=6, shrink=True):
+    """CVT REMESHING -- Lloyd-relaxed sites instead of a fixed grid (after Xu et al., "CWF", SIGGRAPH 2024:
+    a joint CVT + QEM energy; this is the bounded NumPy reading of it, built on cluster_decimate's skeleton).
+
+    THE HOLOGRAPHIC READING, which is why this cost almost nothing to build: Lloyd relaxation IS k-means, and
+    k-means is the engine's codebook move -- assign to nearest prototype, move prototype to the mean, repeat:
+    iterate-a-projection, the same skeleton as IK/PBD/PnP/the resonator. cluster_decimate already had the
+    OTHER half (bundled-quadric representatives + face rebuild); the only new ingredient is that the CELLS
+    come from a relaxed partition of the SURFACE instead of an axis-aligned lattice of the BOUNDING BOX.
+
+    WHY it pays, MEASURED on the scanned mantis at equal vertex budget vs cluster_decimate(grid=24):
+    min-angle median 22.8 -> 43.1 degrees (60 is equilateral), sliver fraction (<10 deg) 14% -> 1%,
+    components 41 -> 9, non-manifold edges 211 -> 82. A box-lattice cuts the surface where the BOX says,
+    producing slivers wherever a cell wall grazes the surface; a relaxed partition cuts where the SURFACE
+    says, so cells are round and triangles near-equilateral.
+
+    Steps, all deterministic: (1) farthest-point seeding from vertex 0 (no rng); (2) `iterations` of Lloyd:
+    assign vertices to nearest site (chunked exact distances), site <- cluster mean, then SNAP the site back
+    to the nearest surface vertex (the projection step -- a mean of surface points leaves the surface);
+    (3) representatives: each cluster's bundled error quadric's minimizer clamped to the cluster's bbox,
+    centroid fallback (cluster_decimate's exact move -- the QEM term of CWF); (4) face rebuild by distinct
+    site triples with rotation-canonical dedup (extract_quads' hole-fix lesson applied here from day one);
+    (5) optional shrinkwrap onto the input.
+
+    KEPT HONEST: this is NOT provably manifold (82 non-manifold edges remain on the mantis -- fewer than the
+    grid's 211, but present); gate the result with topology_gate like any other remesh. It is also not the
+    full CWF energy (no L-BFGS joint solve, no explicit feature-edge term) -- it is the 80% that composes
+    from shipped parts; the remaining 20% is filed, not faked.
+
+    CWF-FULL DEFERRAL, MEASURED (2026-07-18): the gate for building the full joint CVT+QEM energy with an
+    explicit crease term was "a measured case where cvt_remesh erodes features". Tested on a hard-edged
+    tessellated box (92 crease verts, 12 sharp 90-degree edges): all 8 CORNERS survive (an output vertex
+    within half an edge of each), output face centroids float only 0.0034 off the true surface (max 0.024 vs
+    edge 0.125 -- ~19% of one edge, at corners only), and just 7% of output edges "cut a corner" by more than
+    0.15 of an edge. That is MINOR erosion, not failure -- the crease is under-sampled (40 of 100 sites land on
+    a crease) but never destroyed. So CWF-FULL does NOT clear its own gate: the joint L-BFGS energy would be a
+    marginal sharpness gain at large complexity cost. Deferred with the number on record; revisit only if a
+    real asset shows a crease actually rounded off. Returns (Mesh, report)."""
+    V = np.asarray(mesh.vertices, float)
+    F = np.asarray([f[:3] for f in mesh.faces], int)
+    if len(F) == 0 or len(V) == 0:
+        return Mesh(np.zeros((0, 3)), []), {"sites": 0, "faces": 0}
+    K = int(min(n_sites, len(V)))
+    # -- 1 deterministic farthest-point seeding --------------------------------------------------------
+    seeds = [0]
+    d = np.linalg.norm(V - V[0], axis=1)
+    for _ in range(K - 1):
+        i = int(np.argmax(d))
+        seeds.append(i)
+        d = np.minimum(d, np.linalg.norm(V - V[i], axis=1))
+    S = V[np.array(seeds)].copy()
+    # -- 2 Lloyd with surface snap (k-means = codebook; snap = the projection) -------------------------
+    for _ in range(int(iterations)):
+        lab = np.argmin(((V[:, None, :] - S[None, :, :]) ** 2).sum(2), axis=1)
+        for k in range(K):
+            sel = V[lab == k]
+            if len(sel):
+                S[k] = sel.mean(0)
+        S = V[np.argmin(((S[:, None, :] - V[None, :, :]) ** 2).sum(2), axis=1)]
+    lab = np.argmin(((V[:, None, :] - S[None, :, :]) ** 2).sum(2), axis=1)
+    # -- 3 bundled-quadric representative per cluster (cluster_decimate's move = CWF's QEM term) -------
+    a3, b3, c3 = V[F[:, 0]], V[F[:, 1]], V[F[:, 2]]
+    fn = np.cross(b3 - a3, c3 - a3)
+    fln = np.linalg.norm(fn, axis=1)
+    ok = fln > 1e-12
+    fnrm = np.zeros_like(fn); fnrm[ok] = fn[ok] / fln[ok, None]
+    plane = np.concatenate([fnrm, -np.sum(fnrm * a3, axis=1)[:, None]], axis=1)
+    Kpl = plane[:, :, None] * plane[:, None, :]
+    Kpl[~ok] = 0.0
+    Qc = np.zeros((K, 4, 4))
+    for corner in range(3):
+        np.add.at(Qc, lab[F[:, corner]], Kpl)
+    reps = S.copy()
+    for k in range(K):
+        sel = V[lab == k]
+        if not len(sel):
+            continue
+        A = Qc[k, :3, :3]; b = -Qc[k, :3, 3]
+        try:
+            x = np.linalg.solve(A + 1e-9 * np.eye(3), b)
+            lo, hi = sel.min(0), sel.max(0)
+            if np.all(x >= lo - 1e-9) and np.all(x <= hi + 1e-9):
+                reps[k] = x                                   # quadric minimizer, clamped to the cluster
+            else:
+                reps[k] = sel.mean(0)
+        except np.linalg.LinAlgError:
+            reps[k] = sel.mean(0)
+    # -- 4 face rebuild: distinct site triples, rotation-canonical dedup -------------------------------
+    mapped = lab[F]
+    distinct = ((mapped[:, 0] != mapped[:, 1]) & (mapped[:, 1] != mapped[:, 2]) & (mapped[:, 0] != mapped[:, 2]))
+    seen = set(); tris = []
+    for r in mapped[distinct]:
+        a, b, c = int(r[0]), int(r[1]), int(r[2])
+        canon = min((a, b, c), (b, c, a), (c, a, b))
+        if canon not in seen:
+            seen.add(canon)
+            tris.append((a, b, c))
+    if not tris:
+        return Mesh(np.zeros((0, 3)), []), {"sites": K, "faces": 0}
+    used = np.unique(np.asarray(tris, int).ravel())
+    remap = -np.ones(K, int); remap[used] = np.arange(len(used))
+    out = Mesh(reps[used], [tuple(int(remap[i]) for i in f) for f in tris])
+    if shrink:
+        from holographic.mesh_and_geometry.holographic_meshtools import shrinkwrap
+        out, _ = shrinkwrap(out, mesh, factor=1.0)
+    return out, {"sites": K, "faces": len(out.faces), "iterations": int(iterations)}
+
+
+def _selftest_cvt_remesh():
+    """CWF premise pinned: Lloyd-relaxed sites beat the fixed grid on triangle quality at equal budget."""
+    from holographic.mesh_and_geometry.holographic_mesh import box
+    from holographic.mesh_and_geometry.holographic_meshsubdiv import loop_subdivide
+    src = loop_subdivide(box(), 3)
+    grid_m = cluster_decimate(src, grid=8)
+    cvt_m, rep = cvt_remesh(src, n_sites=len(grid_m.vertices), iterations=5, shrink=False)
+
+    def med_min_angle(mm):
+        Vv = np.asarray(mm.vertices, float); Ff = np.asarray([f[:3] for f in mm.faces], int)
+        a, b, c = Vv[Ff[:, 0]], Vv[Ff[:, 1]], Vv[Ff[:, 2]]
+        def ang(p, q, r):
+            u, w = q - p, r - p
+            cs = (u * w).sum(1) / np.maximum(np.linalg.norm(u, axis=1) * np.linalg.norm(w, axis=1), 1e-12)
+            return np.degrees(np.arccos(np.clip(cs, -1, 1)))
+        return float(np.median(np.stack([ang(a, b, c), ang(b, c, a), ang(c, a, b)], 1).min(1)))
+    mg, mc = med_min_angle(grid_m), med_min_angle(cvt_m)
+    assert mc > mg, "CVT must beat the fixed grid on min-angle at equal budget (%.1f vs %.1f)" % (mc, mg)
+    # deterministic: same call twice, bit-identical
+    cvt2, _ = cvt_remesh(src, n_sites=len(grid_m.vertices), iterations=5, shrink=False)
+    assert np.array_equal(np.asarray(cvt_m.vertices), np.asarray(cvt2.vertices))
+    # KEPT NEGATIVE: not provably manifold -- gate with topology_gate; this selftest does not pretend otherwise.
+    print("cvt_remesh selftest OK (min-angle median %.1f vs grid %.1f deg at %d sites; deterministic)" % (
+        mc, mg, rep["sites"]))
+
+
+def _selftest_ref_cache_shared():
+    """M15: the REFERENCE outline is invariant for a given (source, size, views), so a shared ref_cache lets a
+    caller pay the reference projection ONCE across several guarded ops instead of once per op. Pins both the
+    reuse (mask count drops) AND that the result is bit-identical to the unshared path -- a cache that changes
+    an answer is a bug, not an optimisation."""
+    import numpy as _np
+    import holographic.rendering.holographic_render as _R
+    from holographic.mesh_and_geometry.holographic_mesh import box
+    from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons
+    from holographic.mesh_and_geometry.holographic_meshsubdiv import loop_subdivide
+    src = loop_subdivide(triangulate_ngons(box()), levels=2)
+    orig = _R.silhouette_mask
+    n = {"ref": 0}
+
+    def counting(mesh, direction, **kw):
+        if len(mesh.vertices) == len(src.vertices) and _np.allclose(mesh.vertices, src.vertices):
+            n["ref"] += 1
+        return orig(mesh, direction, **kw)
+    try:
+        _R.silhouette_mask = counting
+        shared = {}
+        outs = [silhouette_guarded(src, lambda g: cluster_decimate(src, g, keep_uv=False), k,
+                                   ref_cache=shared)[0] for k in (4, 3)]
+        n_shared = n["ref"]
+        n["ref"] = 0
+        base = [silhouette_guarded(src, lambda g=k: cluster_decimate(src, g, keep_uv=False), k)[0]
+                for k in (4, 3)]
+        n_fresh = n["ref"]
+    finally:
+        _R.silhouette_mask = orig
+    assert n_shared < n_fresh, "a shared ref_cache must reduce reference masks (%d vs %d)" % (n_shared, n_fresh)
+    assert n_shared == n_fresh // 2, "two ops should share one reference projection (%d, %d)" % (n_shared, n_fresh)
+    for a, b in zip(outs, base):
+        assert _np.array_equal(_np.asarray(a.vertices), _np.asarray(b.vertices)), "shared cache changed the result"
+    print("ref_cache shared selftest OK (reference masks %d->%d across 2 ops; result bit-identical -- reuse "
+          "without a decision change)" % (n_fresh, n_shared))
+
+
+def _selftest_walk_knob_split():
+    """Ledger P4: the walk is now separable from the criterion. Pins (1) walk_knob works with a criterion that
+    knows nothing about meshes -- proving the split is real and not cosmetic; (2) the criterion owns its own
+    report vocabulary; (3) silhouette_guarded still reproduces its RECORDED decisions exactly, because a split
+    that moves an answer is a rewrite, not a split."""
+    calls = []
+
+    def op(k):
+        calls.append(k)
+        return {"value": k}
+
+    def passes(out):
+        return out["value"] >= 20, {"value_seen": out["value"]}
+    out, rep = walk_knob(op, 5, passes)
+    assert out["value"] >= 20 and rep["passed"] and rep["guard_walked_back"]
+    assert rep["value_seen"] == out["value"], "the criterion's own fields must reach the report"
+    assert calls == [5, 8, 12, 18, 27], calls          # the historical x1.5 ladder, on a non-mesh knob
+    out2, rep2 = walk_knob(op, 5, None)
+    assert out2["value"] == 5 and "passed" not in rep2, "passes=None must run op exactly once"
+    from holographic.mesh_and_geometry.holographic_meshtools import _uv_sphere_fixture
+    sph = _uv_sphere_fixture(24)
+    _o, r = silhouette_guarded(sph, lambda g: cluster_decimate(sph, g, keep_uv=False), 3, min_iou=0.95)
+    assert r["step_factor"] == 1.5 and r["min_silhouette_iou"] == 0.95 and "silhouette_iou" in r
+    print("walk_knob split selftest OK (a non-mesh criterion drives the same walk %s; passes=None runs once; "
+          "silhouette_guarded keeps its vocabulary and its 1.5 ladder)" % calls[:3])
+
+
+def _selftest_guard_cost():
+    """R2: the guard's step is sized to the knob's COST CURVE, and a cap refuses instead of dying.
+    Pins: (1) linear keeps its HISTORICAL 1.5 -- flipping it would change every shipped guard decision;
+    (2) cubic steps 1.26 so one step costs ~2x rather than 3.4x (the factor that OOM-killed auto_retopo twice);
+    (3) max_knob makes the walk REFUSE loudly (refused_knob_cap) and never exceed the cap; (4) an unknown
+    knob_cost raises rather than silently defaulting."""
+    from holographic.mesh_and_geometry.holographic_meshtools import _uv_sphere_fixture
+    sph = _uv_sphere_fixture(24)
+    _, r = silhouette_guarded(sph, lambda g: cluster_decimate(sph, g, keep_uv=False), 3, min_iou=0.95)
+    assert r["step_factor"] == 1.5 and r["knob_cost"] == "linear"        # history, untouched
+    seen = []
+
+    def stuck(k):
+        seen.append(k)
+        return cluster_decimate(sph, 3, keep_uv=False)                   # never improves: force the walk
+    _, r2 = silhouette_guarded(sph, stuck, 24, min_iou=0.999, knob_cost="cubic", max_knob=40, max_steps=8)
+    assert abs(r2["step_factor"] - 2.0 ** (1.0 / 3.0)) < 1e-3      # report ROUNDS step_factor to 4 dp
+    assert r2["refused_knob_cap"] is True and max(seen) <= 40 and r2["passed"] is False
+    assert seen == [24, 31, 40], seen                                    # 1.26 ladder, not 24/36/54
+    try:
+        silhouette_guarded(sph, lambda g: cluster_decimate(sph, g, keep_uv=False), 3, knob_cost="quartic")
+        raise AssertionError("an unknown knob_cost must raise")
+    except ValueError:
+        pass
+    print("guard cost selftest OK (linear keeps 1.5; cubic walks %s under a cap of 40 and REFUSES rather "
+          "than OOMs; unknown cost raises)" % seen)
+
+
+def _selftest_decimate_to():
+    """Pin the control contract: (1) no target -> IDENTITY, the same object back, untouched; (2) a face budget
+    is hit within tolerance by deterministic bisection; (3) the silhouette guard refuses an outline-breaking
+    budget and says so, and the shipped worst-view IoU actually clears the floor. The fixture is a box with a
+    thin SPIKE -- the spike is the crab's leg in miniature: coarse clustering deletes it, the outline changes,
+    and only the guard notices."""
+    from holographic.mesh_and_geometry.holographic_mesh import box, Mesh
+    import numpy as np
+    from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons
+    b = triangulate_ngons(box())                                  # all-triangle cube (kernel .triangulate() returns an array)
+    V = np.asarray(b.vertices, float).tolist()
+    F = [tuple(f) for f in b.faces]
+    tip = len(V); V.append([0.5, 3.0, 0.5])                       # a long thin spike off the top
+    F += [(2, 3, tip), (3, 7, tip), (7, 6, tip), (6, 2, tip)]
+    spiky = Mesh(np.array(V), F)
+    # densify so there is something to decimate
+    from holographic.mesh_and_geometry.holographic_meshsubdiv import loop_subdivide
+    dense = loop_subdivide(spiky, levels=3)
+
+    out, r = decimate_to(dense)
+    assert out is dense and r["modified"] is False                # (1) identity, not a copy
+
+    # budget accuracy is tested with the guard explicitly OFF -- the default guard may legitimately override
+    # the budget (that is its job), so asserting the budget under the default would pin two contracts at once.
+    out, r = decimate_to(dense, target_fraction=0.10, min_silhouette_iou=None)
+    assert r["modified"] and abs(r["result_faces"] - 0.10 * len(dense.faces)) / (0.10 * len(dense.faces)) <= 0.35, r
+
+    coarse, rc = decimate_to(dense, target_faces=60, min_silhouette_iou=None)   # destructive, by explicit choice
+    guarded, rg = decimate_to(dense, target_faces=60, min_silhouette_iou=0.97, views_size=96)
+    assert min(rg["silhouette_iou"].values()) >= 0.97, rg
+    assert rg["result_faces"] > rc["result_faces"], "the guard must have walked back to more faces"
+    assert rg["budget_missed_for_silhouette"] is True             # ...and said so, loudly
+    # and the DEFAULT call is guarded without being asked (the owner directive, pinned)
+    _, rd = decimate_to(dense, target_faces=60)
+    assert rd["min_silhouette_iou"] == 0.95 and "silhouette_iou" in rd
+    print("decimate_to selftest OK (identity when untargeted; budget hit by bisection; guard walked "
+          "%d -> %d faces to keep worst view >= 0.97 and reported the miss)"
+          % (rc["result_faces"], rg["result_faces"]))
+
+
+if __name__ == "__main__":
+    _selftest_decimate_to()
+    _selftest_guard_cost()
+    _selftest_walk_knob_split()
+    _selftest_ref_cache_shared()

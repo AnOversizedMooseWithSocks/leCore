@@ -126,6 +126,21 @@ class PBRMaterial:
         # interference. The path tracer reads this and tints the reflection via holographic_thinfilm.
         self.iridescence_nm = float(iridescence_nm)
 
+    # -- alias: `emission` <-> `emissive` ---------------------------------------------------------------------
+    # WHY: half the surrounding vocabulary (Blender's node, most UIs, users' instinct) says "emission"; glTF and
+    # this class say "emissive". Writing `m.emission = ...` used to silently create a DEAD attribute the renderer
+    # never reads -- the single most time-wasting naming mismatch in the Poly Studio build. A property makes the
+    # wrong-but-obvious name a working synonym instead of a silent no-op. Backward compatible: `emissive` stays
+    # the stored name, serialization untouched.
+    @property
+    def emission(self):
+        """Synonym for `emissive` (RGB). Reads and writes the same stored value."""
+        return self.emissive
+
+    @emission.setter
+    def emission(self, value):
+        self.emissive = tuple(float(c) for c in value)
+
     def sample(self, u=0.5, v=0.5):
         """The effective PBR values at UV (u,v): each channel is its factor multiplied by its texture map where one
         is set (glTF's factor x texture rule). With no maps this returns the factor-level values, so old callers

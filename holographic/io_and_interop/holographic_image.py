@@ -33,23 +33,15 @@ The substrate is unchanged -- still a sum of weighted random keys in one vector
 import numpy as np
 
 
-# --- conjugate-gradient solver for symmetric positive-definite systems ---
+# --- conjugate-gradient solver: PROMOTED to holographic_numerics (ledger P1) ---
+# This module had its own real-only CG; crossfield independently grew a complex-Hermitian one because this one
+# computed `r @ r` (not a norm for complex residuals) and could not be reused. One complex-aware solver now
+# serves both: for real input `float(np.real(np.vdot(r, r)))` is BIT-IDENTICAL to `r @ r` (measured 0.000e+00
+# on a 40x40 SPD system) and the delegation below is pinned bit-identical in _selftest. The name and signature
+# stay so every historical call site in this module reads unchanged.
 def _cg(matvec, b, iters=250, tol=1e-13):
-    x = np.zeros_like(b)
-    r = b - matvec(x)
-    p = r.copy()
-    rs = r @ r
-    for _ in range(iters):
-        Ap = matvec(p)
-        a = rs / (p @ Ap + 1e-30)
-        x += a * p
-        r -= a * Ap
-        rs2 = r @ r
-        if rs2 < tol:
-            break
-        p = r + (rs2 / rs) * p
-        rs = rs2
-    return x
+    from holographic.misc.holographic_numerics import cg
+    return cg(matvec, b, iters=iters, tol=tol)
 
 
 # --- fast Walsh-Hadamard transform (O(D log D), matrix-free), D = 2^m ---
