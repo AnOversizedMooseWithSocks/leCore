@@ -161,3 +161,37 @@ def test_vsa_encoding_preserves_similarity():
     c, _ = hv.make_shape("line", 64, seed=3)
     H = hv.vsa_encode(np.stack([hv.describe(a), hv.describe(b), hv.describe(c)]), dim=2048, seed=0)
     assert cosine(H[0], H[1]) > cosine(H[0], H[2])
+
+
+def test_tighten_selection_fixes_the_rotate_pivot():
+    """The reported bug: a small drawing inside a big transparent rectangle selection rotated about the RECTANGLE's
+    centre (empty space) instead of the drawing's centre. tighten_selection shrinks the marquee to the opaque
+    pixels so the pivot lands on the content. Through the mind (the /invoke path the canvas uses)."""
+    import numpy as np
+    import lecore
+    m = lecore.UnifiedMind(dim=64, seed=0)
+
+    # a 100x100 transparent layer, a 10x10 opaque drawing off-centre
+    alpha = np.zeros((100, 100), float)
+    alpha[20:30, 60:70] = 1.0
+
+    # the user drags a big marquee over the whole thing; without tightening, its centre is (49.5, 49.5) -- empty
+    r = m.tighten_selection(alpha, bbox=(0, 0, 99, 99))
+    assert not r["empty"]
+    assert r["bbox"] == (20, 60, 29, 69)                 # tightened exactly to the drawing
+    assert r["centre"] == (24.5, 64.5)                   # pivot is the DRAWING centre, not the marquee's (49.5,49.5)
+    assert r["area"] == 100
+
+    # bbox arrives as a JSON list over /invoke, not a tuple -- must still work
+    r_list = m.tighten_selection(alpha, bbox=[0, 0, 99, 99])
+    assert r_list["bbox"] == (20, 60, 29, 69)
+
+    # a marquee over blank space is a REAL answer: signal empty so the caller keeps the original selection
+    blank = m.tighten_selection(alpha, bbox=(0, 0, 10, 10))
+    assert blank["empty"] and blank["bbox"] is None
+
+    # RGBA input uses the alpha channel; a threshold drops near-transparent anti-aliased fringe
+    rgba = np.zeros((100, 100, 4), np.uint8)
+    rgba[20:30, 60:70, 3] = 255
+    rgba[50, 50, 3] = 40                                  # a faint stray pixel outside the drawing
+    assert m.tighten_selection(rgba, threshold=0.5)["bbox"] == (20, 60, 29, 69)   # fringe excluded

@@ -331,6 +331,77 @@ def classify_shape(mask):
     return "triangle"
 
 
+def tighten_selection(alpha, bbox=None, threshold=0.0):
+    """Shrink a rectangular raster selection to the NON-TRANSPARENT content inside it -- the "auto-shrink to opaque
+    pixels" that Photoshop/GIMP do, so a later rotate/scale pivots about the DRAWING's centre, not the loose
+    marquee's centre.
+
+    WHY THIS EXISTS: a user rubber-bands a big rectangle over a small drawing on an otherwise-transparent layer.
+    The selection bbox is the rectangle, whose centre sits in empty space -- so rotating "about the selection
+    centre" spins the drawing around a point outside it. Tightening the bbox to the opaque pixels first puts the
+    pivot where the content actually is.
+
+    alpha:     (H,W) alpha/coverage in [0,1] or [0,255], OR an (H,W,4) RGBA image (its alpha channel is used), OR an
+               (H,W) boolean mask. Anything > `threshold` counts as content.
+    bbox:      optional (r0,c0,r1,c1) INCLUSIVE marquee to search within (the rectangle the user dragged). None =
+               the whole image. Coordinates are clamped to the image; r1/c1 are inclusive to match segment_image's
+               region bbox convention.
+    threshold: alpha strictly above this is "content". Default 0.0 (any non-zero coverage). Use e.g. 0.5 to ignore
+               near-transparent anti-aliased fringe.
+
+    Returns a dict:
+      empty:   True if the marquee contains NO content above threshold (then bbox/centre are None and the caller
+               should keep the original selection rather than collapse it -- an empty tighten is a real answer, not
+               an error).
+      bbox:    (r0,c0,r1,c1) inclusive, the tight box of content pixels (in FULL-image coordinates).
+      centre:  (row, col) float centre of that tight bbox -- the pivot a rotate/scale should turn about.
+      area:    number of content pixels inside the marquee.
+
+    Deterministic, numpy-only. Non-destructive: reads the alpha, returns numbers -- it does not modify the image or
+    the selection; the caller replaces its marquee with `bbox`.
+
+    KEPT NEGATIVE: this returns the AXIS-ALIGNED tight box, not a per-pixel mask or a rotated minimal box. A rotate
+    wants a pivot POINT, and the bbox centre is that point; carrying the full mask here would just duplicate what
+    segment_image already returns. If a caller needs the exact opaque mask, threshold the alpha directly.
+    KEPT NEGATIVE: centre is the BBOX centre, not the alpha-weighted centroid. For a symmetric drawing they
+    coincide; for an L-shape they differ, and the bbox centre is what matches "rotate about the selection box",
+    which is the behaviour being fixed. `centroid` is available from shape_stats if a mass-centre is wanted."""
+    a = np.asarray(alpha)
+    if a.ndim == 3:                     # RGBA (or RGB with no alpha -> treat as fully opaque)
+        a = a[:, :, 3] if a.shape[2] >= 4 else np.ones(a.shape[:2], dtype=a.dtype)
+    if a.dtype == bool:
+        cov = a
+    else:
+        af = a.astype(np.float64)
+        # normalise 0..255 to 0..1 so `threshold` means the same thing regardless of input dtype
+        if af.max() > 1.0:
+            af = af / 255.0
+        cov = af > threshold
+    H, W = cov.shape
+
+    if bbox is not None:
+        r0, c0, r1, c1 = bbox
+        # clamp the marquee to the image; r1/c1 inclusive
+        r0 = max(0, int(r0)); c0 = max(0, int(c0))
+        r1 = min(H - 1, int(r1)); c1 = min(W - 1, int(c1))
+        if r1 < r0 or c1 < c0:
+            return {"empty": True, "bbox": None, "centre": None, "area": 0}
+        window = cov[r0:r1 + 1, c0:c1 + 1]
+        off_r, off_c = r0, c0
+    else:
+        window = cov
+        off_r, off_c = 0, 0
+
+    ys, xs = np.nonzero(window)
+    if ys.size == 0:                    # nothing opaque in the marquee -- keep the original selection
+        return {"empty": True, "bbox": None, "centre": None, "area": 0}
+
+    tr0 = int(ys.min()) + off_r; tr1 = int(ys.max()) + off_r
+    tc0 = int(xs.min()) + off_c; tc1 = int(xs.max()) + off_c
+    centre = ((tr0 + tr1) / 2.0, (tc0 + tc1) / 2.0)
+    return {"empty": False, "bbox": (tr0, tc0, tr1, tc1), "centre": centre, "area": int(ys.size)}
+
+
 def _connected_components(mask):
     """Label the 4-connected components of a boolean mask by vectorised label propagation (each masked pixel repeatedly
     takes the min label among itself and its 4 mask-neighbours until stable; background is a barrier). Returns
@@ -812,9 +883,26 @@ def _selftest():
     # KEPT NEGATIVE: default is uint8, NOT float, on purpose -- flipping it would break every existing caller
     # (the never-flip rule). Float is correct for the ecosystem but must be opted into.
 
+    # tighten_selection: a small opaque blob inside a big transparent marquee must shrink to the blob and pivot
+    # about the BLOB centre (the rotate-centre bug being fixed), not the marquee centre.
+    _al = np.zeros((100, 100), float); _al[20:30, 60:70] = 1.0
+    _t = tighten_selection(_al, bbox=(0, 0, 99, 99))
+    assert _t["bbox"] == (20, 60, 29, 69), _t["bbox"]           # tightened to the drawing, exactly
+    assert _t["centre"] == (24.5, 64.5), _t["centre"]           # pivot is the DRAWING centre, not (49.5, 49.5)
+    assert _t["area"] == 100 and not _t["empty"]
+    # an empty marquee is a REAL answer -> signal empty so the caller keeps the original selection, never collapses
+    _e = tighten_selection(_al, bbox=(0, 0, 10, 10))
+    assert _e["empty"] and _e["bbox"] is None, _e
+    # RGBA input uses the alpha channel; threshold ignores near-transparent fringe
+    _rgba = np.zeros((100, 100, 4), np.uint8); _rgba[20:30, 60:70, 3] = 255; _rgba[40, 40, 3] = 40
+    assert tighten_selection(_rgba, threshold=0.5)["bbox"] == (20, 60, 29, 69)   # the alpha-40 fringe pixel excluded
+    # KEPT NEGATIVE: returns the axis-aligned tight bbox + its centre, NOT a mask or a rotated min-box -- a rotate
+    # needs a pivot POINT, and the bbox centre is it; the full mask lives on segment_image's region records.
+
     print("OK: holographic_vision self-test passed (RGB<->HSV round-trips to <1e-6, the edge detector fires "
-          "on a vertical step while staying quiet on a flat field, and dominant_colours returns uint8 0-255 by "
-          "default / float 0-1 under as_float=True with matching colours)")
+          "on a vertical step while staying quiet on a flat field, dominant_colours returns uint8 0-255 by "
+          "default / float 0-1 under as_float=True with matching colours, and tighten_selection shrinks a "
+          "marquee to opaque content with the drawing centre as pivot / signals empty on a blank marquee)")
 
 
 if __name__ == "__main__":

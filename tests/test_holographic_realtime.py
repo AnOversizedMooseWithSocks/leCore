@@ -484,3 +484,38 @@ def test_the_sdf_emitter_is_callable_over_http_with_strict_json():
     payload = {"name": "sdf_dialect", "args": {"sdf_node": tree.to_dsl(), "dialect": "wgsl"}}
     result = json.loads(json.dumps(invoke(payload)))["result"]
     assert result.startswith("fn map(p: vec3<f32>) -> f32")
+
+
+def test_obs_capture_profile_through_the_mind():
+    """The OBS browser-source profile (mind.obs_capture_profile): the settings a streamer pastes into OBS to
+    capture the leOS canvas. Preset -> exact size, fps -> the same budget as the frame-budget math, transparent
+    flips the CSS + URL hint, bad input refused. This is the in-constitution streaming path (OBS encodes; the
+    engine serves the page + frames)."""
+    import lecore
+    m = lecore.UnifiedMind(dim=64, seed=0)
+
+    p = m.obs_capture_profile(preset="1080p", fps=30)
+    assert p["width"] == 1920 and p["height"] == 1080 and p["fps"] == 30
+    assert p["frame_budget_ms"] > 0.0                      # a real per-frame budget
+    assert p["transparent"] is False and p["custom_css"] == ""
+    assert isinstance(p["obs_steps"], list) and any("Browser" in s for s in p["obs_steps"])
+    assert "url" in p and p["url"].startswith("http")
+
+    # transparent: CSS + a URL hint the front end can read to pick a transparent clear colour
+    tp = m.obs_capture_profile(preset="720p", fps=60, transparent=True)
+    assert tp["width"] == 1280 and tp["height"] == 720 and tp["transparent"]
+    assert "rgba(0, 0, 0, 0)" in tp["custom_css"] and tp["url"].endswith("#transparent")
+
+    # all four presets resolve to their standard sizes
+    sizes = {pr: (m.obs_capture_profile(preset=pr)["width"], m.obs_capture_profile(preset=pr)["height"])
+             for pr in ("720p", "1080p", "1440p", "4k")}
+    assert sizes == {"720p": (1280, 720), "1080p": (1920, 1080),
+                     "1440p": (2560, 1440), "4k": (3840, 2160)}
+
+    # bad input refused loudly, never guessed
+    for bad in (dict(preset="8k"), dict(fps=0)):
+        try:
+            m.obs_capture_profile(**bad)
+            assert False, "should refuse %r" % bad
+        except ValueError:
+            pass

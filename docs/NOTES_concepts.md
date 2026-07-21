@@ -40928,3 +40928,74 @@ VERIFICATION: both originally-failing files green (47) + ccrun/zigrun/emit surfa
 drift-free. LESSON (reinforced): a wall-clock `> 0.0` pin is the same anti-pattern as a bit-exact BLAS pin -- it
 pins the machine, not the algorithm; assert presence/structure, not a strict-positive timing. And duplication-audit
 failures get unify-or-document (here: one home in emit both already import), never a budget bump.
+
+## UI BUG REPORT: segment_image stale-server + NEW tighten_selection (rotate-pivot fix)
+
+Two issues from the canvas app.
+
+#1 "select object button" -> `UnifiedMind.segment_image() got an unexpected keyword argument 'max_dim'`. NOT a code
+bug: segment_image in the CURRENT tree HAS max_dim (added by the recent branch; 0 occurrences in the prior tree).
+The running 127.0.0.1:5050 server is a STALE build predating the max_dim addition, while the (updated) front end now
+sends it. Verified the current faculty accepts max_dim via the /invoke-style path (returned regions). FIX: restart
+the server from the current tree -- engine needs no change.
+
+#2 NEW CAPABILITY tighten_selection (holographic_vision). Reported: drawing on a new layer, rectangle-selecting it,
+then transforming -- the drawing filled only a small part of the marquee, and rotate used the MARQUEE centre (empty
+space) instead of the drawing centre. Photoshop/GIMP auto-shrink a selection to its non-transparent pixels; we
+didn't. RULE 0: probed 7 phrasings, only fallbacks (transform_selection/pivot_point operate on an already-defined
+selection; nothing tightened a raster selection to opaque content) -- genuine gap.
+BUILT tighten_selection(alpha, bbox=None, threshold=0.0) in holographic_vision (the mask+bbox home; reuses the
+np.nonzero -> min/max bbox pattern from _region_record). Accepts (H,W) alpha 0..1 or 0..255, (H,W,4) RGBA (uses
+alpha channel), or a bool mask; optional inclusive marquee bbox. Returns {empty, bbox, centre, area}: bbox is the
+tight content box, centre the (row,col) pivot a rotate/scale turns about. On the exact scenario (10x10 drawing at
+rows20-29/cols60-69 inside a 0..99 marquee) it returns bbox (20,60,29,69) and centre (24.5,64.5) -- the DRAWING
+centre, not the marquee's (49.5,49.5). EMPTY marquee returns empty=True with bbox None so the caller KEEPS the
+original selection rather than collapsing it (an empty tighten is a real answer, not an error).
+KEPT NEGATIVES: returns the axis-aligned tight bbox + its centre, NOT a per-pixel mask (segment_image already
+carries masks) and NOT a rotated min-box (a rotate wants a pivot POINT = the bbox centre). centre is the BBOX
+centre, not the alpha-weighted centroid -- the bbox centre is what "rotate about the selection box" means, which is
+the behaviour being fixed; shape_stats has the mass-centroid if wanted.
+WIRED mind.tighten_selection (delegating). CATALOGUED "Tighten a selection to opaque pixels (auto-shrink marquee)"
+with user-phrased aliases (auto shrink selection / exclude transparent pixels / rotate about the drawing centre /
+...), 4-of-5 stranger phrasings return it top-1 (the 5th sensibly returns pivot_point first). does trimmed to 557
+(<600). HTTP round-trip proven: /invoke with bbox as a JSON LIST (not tuple) works. Integration test through the
+mind + module selftest (loud). Audits 0/0/0, docs regenerated. The front end should call mind.tighten_selection on
+the layer alpha within the marquee BEFORE computing the transform pivot, and use the returned centre.
+
+## OBS STREAMING + INVITE/JOIN BUTTONS (front-end enablement)
+
+Two asks: (1) can leOS be part of an OBS stack, (2) multi-user is wired but there's no invite/join button.
+
+OBS -- the honest boundary. INPUT (video -> us) is already covered by the FrameSource protocol (decoder-free: the
+host feeds (frame,seq), the engine owns the contract). OUTPUT (us -> OBS): the realistic in-constitution path is
+OBS's BROWSER SOURCE pointed at the web canvas -- we already have the HTTP service, /frame, /frame/stream (SSE), and
+per-session frame budgeting. A full RTMP/NDI/virtual-camera ENCODER is OUT (needs ffmpeg/OS video I/O, violates the
+NumPy-only core); OBS itself does the encoding once it captures the browser source. RULE 0: probed 6 phrasings, only
+fallbacks -> genuine gap for the capture-config helper.
+BUILT obs_capture_profile(base_url, preset, fps, transparent, headroom) in holographic_framebudget (home of
+FrameServer + frame_budget_ms, which it reuses). preset '720p'/'1080p'/'1440p'/'4k' -> exact browser-source size
+(match the OBS canvas -> no scaling); transparent=True -> transparent-bg custom CSS + a '#transparent' URL hint the
+front end reads for a clear colour. Returns {url,width,height,fps,frame_budget_ms,transparent,custom_css,obs_steps,
+note} -- obs_steps is the human click-path, note is the honest encoder boundary. Refuses a bad preset/fps loudly.
+Wired mind.obs_capture_profile, catalogued "Stream to OBS (browser-source capture profile)" (5/5 stranger phrasings
+top-1), does trimmed to 600.
+
+INVITE/JOIN -- the backend ALREADY existed. RULE 0 found the full access system: mind.invite(kind, grants) mints an
+Invite (secrets token), mind.admit(code, actor_id) redeems it into a scoped read-only Principal, plus
+principal/share/grant/workspace.fork. The gap was exactly as reported: no button -- and the primitives are
+low-level (kind, grants, namespaces), too much for a UI button to assemble. BUILT two button-facing wrappers on
+UnifiedMind that DELEGATE to invite/admit:
+  * create_invite_link(workspace, base_url, grants, kind) -> {code, link, workspace, kind, grants}; link is
+    base_url?join=<code> (Copy button), code is the bare token ('type a code' box); default grant = read
+    workspace/scene. Handles a base_url that already has a query string (?x=1&join=...).
+  * join_from_link(link_or_code, actor_id) -> admits from EITHER a pasted LINK (parses ?join=) OR a bare code;
+    returns the scoped guest Principal; AccessError on unknown/used code (same contract as admit).
+Round-trip verified: host invites -> guest joins from link, another from bare code, bad code refused. Wired,
+catalogued as "Invite button" + "Join button" (invite queries -> Invite button, join queries -> Join button; does
+594/500). The front end wires the two buttons to these; the access logic is untouched (delegation only).
+
+All three faculties JSON-safe over /invoke (verified: exposed to /tools, obs profile is a plain dict, invite link is
+plain, join returns a Principal the service summarizes). Integration tests in test_holographic_realtime (obs) +
+test_holographic_access (invite/join). Audits 0/0/0, docs regenerated. FRONT-END TODO (not this repo): an Invite
+button -> create_invite_link -> copy link; a Join box -> join_from_link; a Stream/OBS panel -> obs_capture_profile
+showing the URL/size/fps + steps.
