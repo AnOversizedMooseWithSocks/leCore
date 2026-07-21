@@ -40897,3 +40897,34 @@ copy-pasting it hits NameError. Fixed to `hash32_unit(3, 5, 7, seed=0)` with a c
 copy-paste. Regenerated docs, re-ran battery clean. LESSON: skill_lint's example check is structural, not an exec
 with undefined-name detection -- a runnable-looking example with free placeholder vars slips through, so spot-exec
 new examples in an empty namespace when auditing a merge.
+
+## CI FIX (round 2): flaky timing pin + ccrun/zigrun __call__ unified
+
+Two CI failures after the merge. Diagnosed each before touching:
+
+#1 test_holographic_machinemodel::test_the_two_measurements_that_were_fictions_now_measure_real_work -- PRE-EXISTING
+FLAKE, module AND test unchanged from the prior tree (neither the branch nor I touched them). `marginal_ns > 0.0`
+pins a wall-clock measurement: `_time` divides a perf_counter delta by the rep count, and on a fast/quiet CI runner
+the quick-mode loop finishes inside the timer resolution floor, so a genuine measurement rounds to exactly 0.0.
+Reproduced locally: 184831, 198538, then 0.0 across three runs. The module's OWN docstring says "a marginal_ns of
+exactly 0.0 is a real answer, not a missing one" -- so the strict-positive pin contradicts the module's semantics.
+FIX: assert the measurement is PRESENT (real, finite, non-negative float) rather than strictly positive -- the
+no-op "fictions" the test guards against had no entry to measure at all, so present+finite is the honest form of
+"measures real work" that doesn't fight the clock. Verified robust across 5 runs.
+
+#2 test_duplication_audit::test_the_duplicate_budget_does_not_grow -- NEW cross-module duplicate (['__call__'],
+['ccrun','zigrun']); the branch changed both runners so their __call__ bodies became a canonical-shape match. Read
+both: genuinely identical SoA ctypes marshalling (arg-count check -> ascontiguousarray each column -> 1-D
+same-length check -> np.concatenate into one buffer -> ctypes call -> return); ccrun's own comment said "inherited
+from zigrun's honest timing note" -- copied logic, not coincidental shape. The test demands unify-or-document,
+never raise the budget. UNIFIED (both already import from holographic_emit, their shared home): added
+`call_soa_kernel(n_params, np_dtype, ct, fn, arrays)` to holographic_emit (lazy-imports numpy+ctypes so the emitter
+stays import-light; carries the per-call-concatenate KEPT NEGATIVE), and both __call__ bodies are now one-line
+delegations (under min_statements, so no longer a duplicate). Behavior preserved: ccrun selftest still f64
+BIT-IDENTICAL on 500 pts; emit selftest still bit-identical sphere-SDF; zigrun asserts source emission (native run
+skipped, no toolchain). Budget NOT raised.
+
+VERIFICATION: both originally-failing files green (47) + ccrun/zigrun/emit surfaces (94) + audits 0/0/0 + docs
+drift-free. LESSON (reinforced): a wall-clock `> 0.0` pin is the same anti-pattern as a bit-exact BLAS pin -- it
+pins the machine, not the algorithm; assert presence/structure, not a strict-positive timing. And duplication-audit
+failures get unify-or-document (here: one home in emit both already import), never a budget bump.

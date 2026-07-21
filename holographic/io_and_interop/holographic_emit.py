@@ -186,6 +186,33 @@ class EmitError(ValueError):
     """The emitter refused. The message names the construct; refusing is the feature (K10)."""
 
 
+def call_soa_kernel(n_params, np_dtype, ct, fn, arrays):
+    """Marshal `arrays` (P columns of equal length N) into one contiguous SoA buffer and call a compiled scalar
+    kernel `fn(in_ptr, n, out_ptr)` via ctypes, returning the (N,) output. This is the ONE calling convention the
+    C runner (ccrun) and the Zig runner (zigrun) share -- both emit a `void k(const T* in, long n, T* out)` with P
+    blocks of N laid end to end, so the Python-side marshalling is identical and lived, copied, in both CKernel and
+    ZigKernel.__call__. Unified here (the module both already import from) so it cannot drift between the two
+    backends; each kernel object just passes its own n_params / dtype / ctypes scalar type / bound function.
+
+    numpy and ctypes are imported lazily so the emitter itself stays import-light (it is mostly string generation;
+    only the native runners actually marshal).
+
+    KEPT NEGATIVE: the concatenate is a per-call SoA copy, counted inside any timing of a kernel call -- it caches
+    nothing and charges everything. That honesty (originally noted in zigrun) now lives with the shared code."""
+    import ctypes
+    import numpy as np
+    if len(arrays) != n_params:
+        raise EmitError("kernel takes %d arrays, got %d" % (n_params, len(arrays)))
+    cols = [np.ascontiguousarray(a, dtype=np_dtype) for a in arrays]
+    n = cols[0].shape[0]
+    if any(c.shape != (n,) for c in cols):
+        raise EmitError("all input arrays must be 1-D of the same length")
+    inp = np.concatenate(cols)                           # SoA: P blocks of N, one contiguous buffer
+    out = np.empty(n, dtype=np_dtype)
+    fn(inp.ctypes.data_as(ctypes.POINTER(ct)), n, out.ctypes.data_as(ctypes.POINTER(ct)))
+    return out
+
+
 def _expr(node, dialect):
     d = DIALECTS[dialect]
     if isinstance(node, ast.BinOp):
