@@ -168,6 +168,25 @@ def test_harmonic_fill_hits_its_bar_and_pins_the_known_cells():
     assert np.array_equal(u[known], smooth[known])          # known cells pinned bit-for-bit
 
 
+def test_multichannel_inpaint_equals_the_per_channel_loop_it_replaces():
+    """ITEM 6: an RGB field fills in one call, EXACTLY equal to the per-channel loop it replaces (so leStudio's
+    Inpaint node deletes its 3x loop). Multi-channel is an API convenience, not a speedup -- the solver is iterative
+    (see N10 kept negative), so the per-channel loop is what runs; the single-channel path is unchanged."""
+    from holographic.misc.holographic_unified import UnifiedMind
+    smooth, _labels, known = _fields()
+    rgb = np.stack([smooth, np.roll(smooth, 3, 0), 0.2 + 0.5 * smooth], axis=-1)
+    um = UnifiedMind(dim=64, seed=0)
+    joint = um.inpaint(rgb, known)                                   # one call, float (H,W,3) -> harmonic
+    loop = np.stack([harmonic_fill(rgb[..., c], known) for c in range(3)], axis=-1)
+    assert joint.shape == rgb.shape
+    assert np.array_equal(joint, loop)                              # byte-for-byte equal to the loop
+    assert np.array_equal(joint[known], rgb[known])                # every channel's known cells pinned
+    # a (H,W,C) mask is a caller error -- the mask is over the spatial axes only
+    import pytest
+    with pytest.raises(ValueError):
+        harmonic_fill(rgb, np.ones(rgb.shape, bool))
+
+
 def test_kept_negative_wrapping_a_non_periodic_field_solves_a_different_problem():
     # np.roll wraps. On a non-periodic field the wrapped Laplacian is 5.4x worse. The BC is the gate.
     smooth, _labels, known = _fields()

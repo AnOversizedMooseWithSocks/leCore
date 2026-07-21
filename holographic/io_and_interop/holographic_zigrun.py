@@ -44,7 +44,7 @@ import subprocess
 import numpy as np
 
 from holographic.io_and_interop.holographic_emit import (
-    EmitError, _as_node_and_fn, _emit_node, _zig_argv, zig_available)
+    EmitError, _as_node_and_fn, _emit_node, _zig_argv, zig_available, call_soa_kernel)
 
 #: Where compiled libraries live. Content-addressed, so a stale entry is impossible -- a changed kernel is a new key.
 CACHE_DIR = os.environ.get("LECORE_ZIG_CACHE", os.path.join(os.path.expanduser("~"), ".cache", "lecore_zig"))
@@ -138,17 +138,10 @@ class ZigKernel:
         self._ct = ct
 
     def __call__(self, *arrays):
-        if len(arrays) != self.n_params:
-            raise EmitError("kernel takes %d arrays, got %d" % (self.n_params, len(arrays)))
-        cols = [np.ascontiguousarray(a, dtype=self._np_dtype) for a in arrays]
-        n = cols[0].shape[0]
-        if any(c.shape != (n,) for c in cols):
-            raise EmitError("all input arrays must be 1-D of the same length")
-        inp = np.concatenate(cols)                       # SoA: P blocks of N, one contiguous buffer
-        out = np.empty(n, dtype=self._np_dtype)
-        self._fn(inp.ctypes.data_as(ctypes.POINTER(self._ct)), n,
-                 out.ctypes.data_as(ctypes.POINTER(self._ct)))
-        return out
+        # Delegates to the shared SoA-marshalling helper (holographic_emit.call_soa_kernel) -- same ABI as the C
+        # runner (ccrun), so one calling convention with one home rather than a copy per backend. The KEPT NEGATIVE
+        # (per-call concatenate copy, counted in any timing) lives with that shared code.
+        return call_soa_kernel(self.n_params, self._np_dtype, self._ct, self._fn, arrays)
 
 
 def as_numpy(kernel):

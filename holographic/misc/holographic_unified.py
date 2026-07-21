@@ -4165,6 +4165,26 @@ class UnifiedMind:
             self._workspace_manager = WorkspaceManager(self.db)
         return self._workspace_manager
 
+    def save_container(self, sections, meta=None, compress=True):
+        """Serialise a list of typed SECTIONS into one app-neutral CONTAINER FILE -> bytes (holographic_container).
+        A section is {"kind", "id", "meta", "arrays": {name: ndarray}}; `meta` is optional top-level file metadata.
+        The point: a section whose `kind` a reader does not understand round-trips UNTOUCHED, so an image editor, a
+        3D app, and a video editor can all share ONE forward-compatible file -- each registers its own kinds, none
+        owns the format. Numeric arrays only (no pickle, for safety); save->load->save is byte-identical. NOT the
+        workspace_manager (that checkpoints a live DB by replay) -- this is the file format for shipping typed data
+        between apps. See holographic_container.save_container."""
+        from holographic.io_and_interop.holographic_container import save_container
+        return save_container(sections, meta=meta, compress=compress)
+
+    def load_container(self, data):
+        """Inverse of save_container: container bytes -> {"meta", "sections": [{kind, id, meta, arrays}, ...]}
+        (holographic_container). Sections come back in saved order with numeric arrays reconstructed; a kind this
+        caller does not understand comes back exactly as stored, so a file survives a round-trip through an app that
+        understands only SOME of its kinds -- the mechanism behind sharing one workspace across apps. Loads no
+        pickle (runs no code). See holographic_container.load_container."""
+        from holographic.io_and_interop.holographic_container import load_container
+        return load_container(data)
+
     def frame_server(self, ladder=None, headroom=0.15):
         """Build a FRAME SERVER (holographic_framebudget) -- server-side real-time frame serving for front-end
         clients that PULL frames (the request/response form of a frame stream). Keeps one frame-budget controller
@@ -4174,6 +4194,36 @@ class UnifiedMind:
         holographic_framebudget.FrameServer."""
         from holographic.scene_and_pipeline.holographic_framebudget import FrameServer
         return FrameServer(ladder=ladder, headroom=headroom)
+
+    def synthetic_frame_source(self, kind="clock", size=(64, 64), frames=120, seed=0):
+        """Build a pure-NumPy, DECODER-FREE reference FrameSource -- a deterministic synthetic clip (holographic_
+        framesource) for demos/tests of the temporal seam without any cv2/ffmpeg. kinds: 'clock'/'gradient'/'bars'.
+        seekable + pausable; advance()/seek()/pause() step it; get() -> (frame, seq). A host's real video source
+        honours the SAME contract. See holographic_framesource.SyntheticFrameSource."""
+        from holographic.io_and_interop.holographic_framesource import SyntheticFrameSource
+        return SyntheticFrameSource(kind=kind, size=size, frames=frames, seed=seed)
+
+    def map_frames(self, source, fn, cache=None):
+        """The temporal DOOR: pull the current frame from a host-provided FrameSource (any object with get() ->
+        (frame, seq)), apply fn(frame), and MEMOISE by seq so per-frame work runs once per distinct frame. Returns
+        (out, seq). Pass a plain dict as `cache` (kept between calls) for the skip-recompute behaviour. Imports NO
+        decoder -- cv2/ffmpeg live in the host's FrameSource; this is the seam for temporal NCA / optical flow /
+        video colour transfer. See holographic_framesource.map_frames."""
+        from holographic.io_and_interop.holographic_framesource import map_frames
+        return map_frames(source, fn, cache=cache)
+
+    def frame_key(self, source, prefix=""):
+        """A deterministic (hashlib) cache key for a FrameSource's CURRENT frame -- `prefix` + the current seq. The
+        signature-based invalidation seam: a per-frame result is valid exactly while this key is unchanged. See
+        holographic_framesource.frame_key."""
+        from holographic.io_and_interop.holographic_framesource import frame_key
+        return frame_key(source, prefix=prefix)
+
+    def is_frame_source(self, obj):
+        """Duck-check whether `obj` honours the FrameSource contract (a callable get() returning a 2-tuple) -- so a
+        HOST source that never imported leCore still qualifies. See holographic_framesource.is_frame_source."""
+        from holographic.io_and_interop.holographic_framesource import is_frame_source
+        return is_frame_source(obj)
 
     def pick_element(self, wireframe, screen_u, screen_v, want="vertex", cam_z=3.0, fov_scale=1.6):
         """VIEWPORT PICKING for a 3D-modeling app (holographic_framebudget): given a wireframe cage and a screen
@@ -5443,6 +5493,10 @@ class UnifiedMind:
         `kind="auto"` sends an integer array to a majority vote and a float array to a harmonic (Laplace) solve --
         a discrete field has no mean, so averaging it is a category error.
 
+        A CONTINUOUS field may be (H,W) or (H,W,C): an RGB image fills in ONE call (per-channel, shared mask), so a
+        caller stops writing its own 3x loop. HONEST: multi-channel is API ergonomics, NOT a speedup -- the solver
+        is iterative (no factorisation to amortise), so the per-channel loop is measured-fastest and is what runs.
+
         MEASURED (48x48, 59% erased, 8 seeds): harmonic MAE 0.0015 mean; majority accuracy 0.9653 mean, and 0.9990
         in region interiors -- nearly all the error is boundary error. THE BOUNDARY CONDITION IS THE GATE:
         `periodic=False` (edge-clamped) is the default, because wrapping a non-periodic field with np.roll solves a
@@ -5452,7 +5506,9 @@ class UnifiedMind:
 
     def harmonic_fill(self, field, known, periodic=False, iters=2000, tol=1e-9):
         """Fill a CONTINUOUS field's holes by a Laplace solve: each hole relaxes to the mean of its four neighbours,
-        known cells pinned bit-for-bit. The minimal-energy interpolant. See holographic_inpaint.harmonic_fill."""
+        known cells pinned bit-for-bit. The minimal-energy interpolant. Accepts (H,W) or (H,W,C) -- an RGB field
+        fills per-channel with the shared mask in one call (a convenience, not a speedup: the solver is iterative).
+        See holographic_inpaint.harmonic_fill."""
         from holographic.sampling_and_signal.holographic_inpaint import harmonic_fill as _hf
         return _hf(np.asarray(field, float), np.asarray(known, bool), periodic=periodic, iters=iters, tol=tol)
 
@@ -8579,12 +8635,15 @@ class UnifiedMind:
         from holographic.io_and_interop.holographic_procgen import object_to_mesh
         return object_to_mesh(sdf_node, bounds=bounds, res=res)
 
-    def sdf_shader(self, sdf_node, name="map"):
+    def sdf_shader(self, sdf_node, name="map", camera="fixed"):
         """S1 -- emit a complete Shadertoy-ready GLSL fragment shader (map() + raymarch + normals + light)
         for an SDF tree -- the demoscene OUTPUT. The shader embeds its own DSL in a header comment, so it
-        round-trips back to a tree. Seat: Quilez (raymarched SDFs). KEPT NEGATIVE: twist/displace are
-        domain warps (not exact distances) -- the emitter flags them and the raymarcher must shorten steps."""
-        return sdf_node.to_glsl(name=name)
+        round-trips back to a tree. camera="fixed" (default) is the classic head-on view (byte-identical to the
+        historic output); camera="uniforms" emits an ORBIT camera driven by host-bound uAngle/uHeight/uDist
+        uniforms, so a WebGL2 host can spin/zoom by setting uniforms instead of string-splicing a new camera into
+        the source. Seat: Quilez (raymarched SDFs). KEPT NEGATIVE: twist/displace are domain warps (not exact
+        distances) -- the emitter flags them and the raymarcher must shorten steps."""
+        return sdf_node.to_glsl(name=name, camera=camera)
 
     def sdf_parse(self, dsl_text):
         """S1 -- parse a compact SDF DSL string back into an SDF tree -- the INPUT side of shader I/O.
@@ -8653,13 +8712,15 @@ class UnifiedMind:
         from holographic.mesh_and_geometry.holographic_fitshape import fit_shape
         return fit_shape(target, mind=self, **kw)
 
-    def to_shadertoy(self, sdf):
+    def to_shadertoy(self, sdf, camera="fixed"):
         """Emit a complete, runnable SHADERTOY fragment shader for an SDF (holographic_sdf.sdf_shader) -- map() +
         raymarch + normals + lighting + a mainImage entry point, ready to paste into shadertoy.com. Works for the
         fractal SDFs too (fold_fractal, mandelbulb, menger): they emit their fold/polar-power loop with a header note
-        that a distance ESTIMATE needs conservative ray steps. The 'get the Shadertoy code for it' primitive. Alias of
-        sdf_shader with the conventional name."""
-        return self.sdf_shader(sdf)
+        that a distance ESTIMATE needs conservative ray steps. camera="fixed" (default) is the classic head-on view;
+        camera="uniforms" emits an ORBIT camera controlled by host-bound uAngle/uHeight/uDist uniforms (for a WebGL2
+        host that spins/zooms the scene without re-emitting or string-splicing the shader). The 'get the Shadertoy
+        code for it' primitive. Alias of sdf_shader with the conventional name."""
+        return self.sdf_shader(sdf, camera=camera)
 
     def ifs_generate(self, name_or_ifs="barnsley_fern", n=20000, seed=0):
         """Generate a plant/fractal point cloud from an AFFINE IFS via the chaos game (holographic_ifs). Pass a named
@@ -10832,21 +10893,29 @@ class UnifiedMind:
         a = np.asarray(rgb, float)
         return hough_lines(edges(to_gray(a) if a.ndim == 3 else a, quantile=quantile), ntheta=ntheta, top=top, nms=nms)
 
-    def image_colours(self, rgb, k=4, seed=0):
+    def image_colours(self, rgb, k=4, seed=0, as_float=False):
         """The k most common colours in an image (holographic_vision): k-means++ clustering over a pixel sample --
-        the palette / dominant-colour readout. Deterministic per seed. See holographic_vision.dominant_colours."""
+        the palette / dominant-colour readout. Deterministic per seed. Returns (palette[k,3], weights[k]).
+        as_float=False (default) keeps the legacy uint8 0-255 palette; as_float=True returns float 0-1 to match the
+        rest of the image ecosystem with no range conversion (recommended for image pipelines). Default is OFF only
+        to avoid flipping existing callers. See holographic_vision.dominant_colours."""
         from holographic.misc.holographic_vision import dominant_colours
-        return dominant_colours(rgb, k=k, seed=seed)
+        return dominant_colours(rgb, k=k, seed=seed, as_float=as_float)
 
-    def segment_image(self, rgb, k=5, seed=0, spatial_weight=0.35, split_components=True, min_fraction=0.006):
+    def segment_image(self, rgb, k=5, seed=0, spatial_weight=0.35, split_components=True, min_fraction=0.006,
+                      max_dim=None):
         """DEMUX a photo into per-object REGIONS by colour (+ weak spatial coherence) -- the segmentation front end
         of the photo->3D pipeline. Returns a list of region dicts largest-first: id, mask (H,W bool), area, fraction,
         bbox, centroid, mean_color, shape (circle/rectangle/line/triangle), circularity/extent/aspect. Deterministic;
         splits on APPEARANCE not semantics (a shadow can split a floor) -- the per-region stats are the coarse guess
-        the primitive-fit stage refines. Pass a downscaled image (~<=200 px). See holographic_vision.segment_image."""
+        the primitive-fit stage refines. Cost scales with pixel count: set max_dim to bound the resolution the sweep
+        runs at (the input is box-downsampled to that longest side, segmented, and masks nearest-upsampled back to
+        full size with all stats recomputed on the original image) -- the interactive-latency knob, in the engine
+        instead of every caller. max_dim=None (default) runs at full resolution, byte-identical to before. See
+        holographic_vision.segment_image."""
         from holographic.misc.holographic_vision import segment_image
         return segment_image(rgb, k=k, seed=seed, spatial_weight=spatial_weight,
-                             split_components=split_components, min_fraction=min_fraction)
+                             split_components=split_components, min_fraction=min_fraction, max_dim=max_dim)
 
 
     def image_signature(self, rgb):
@@ -10923,7 +10992,9 @@ class UnifiedMind:
     def color_transfer(self, img, reference, mode="covariance", strength=1.0, clip=True):
         """Inverse-rendering ST1: grade an image toward a REFERENCE image's colour statistics (Reinhard 2001) --
         the 'match the sunset's mood' knob. mode='meanstd' (per-channel) or 'covariance' (full mean+covariance,
-        whitening/colouring). Moves colour, not content. See holographic_colortransfer.color_transfer."""
+        whitening/colouring); 'mean_std'/'mean-std'/'cov'/'mk' are accepted aliases and an unknown mode raises
+        ValueError (it used to be silently ignored). Moves colour, not content. See
+        holographic_colortransfer.color_transfer."""
         from holographic.materials_and_texture.holographic_colortransfer import color_transfer
         return color_transfer(img, reference, mode=mode, strength=strength, clip=clip)
 
@@ -12646,6 +12717,32 @@ class UnifiedMind:
         from holographic.mesh_and_geometry.holographic_domain import cosine_palette
         return cosine_palette(t, a=a, b=b, c=c, d=d)
 
+    def pattern_to_glsl(self, name, fn_name="pattern", **params):
+        """Compile a CLOSED-FORM procedural pattern (checker/stripes/gradient/dots) to a GLSL `float <fn_name>(vec3 p)`
+        function -- matches the numpy pattern field per-point to float precision, so a procedural background renders
+        client-side and composes with the SDF/postfx emitters into GPU-resident looks. noise/fbm raise (their int64-
+        lattice hash is not reproducible in GLSL ES 3.00). For a 2-D background call `<fn_name>(vec3(uv, 0.0))`. See
+        holographic_pattern.pattern_to_glsl."""
+        from holographic.misc.holographic_pattern import pattern_to_glsl
+        return pattern_to_glsl(name, fn_name=fn_name, **params)
+
+    def pattern_to_wgsl(self, name, fn_name="pattern", **params):
+        """Compile a CLOSED-FORM pattern (checker/stripes/gradient/dots) to a WGSL `fn <fn_name>(p: vec3<f32>) -> f32`
+        for WebGPU -- the WGSL counterpart of pattern_to_glsl, matching the numpy field per-point to f32. WGSL is
+        emitted from the same math (no `mod`, `select` for the ternary, vec3<f32>/let), not translated from the GLSL.
+        noise/fbm/noise32/fbm32 are deferred WGSL scope and raise. See holographic_pattern.pattern_to_wgsl."""
+        from holographic.misc.holographic_pattern import pattern_to_wgsl
+        return pattern_to_wgsl(name, fn_name=fn_name, **params)
+
+    def cosine_palette_to_glsl(self, a=(0.5, 0.5, 0.5), b=(0.5, 0.5, 0.5), c=(1.0, 1.0, 1.0),
+                               d=(0.0, 0.33, 0.67), fn_name="palette"):
+        """Compile iq's cosine palette to a GLSL `vec3 <fn_name>(float t)` function -- a + b*cos(2*pi*(c*t+d)),
+        clamped -- matching cosine_palette per-point to float precision. Feed it an orbit trap / iteration count /
+        distance in a shader for a demoscene colouring; pair with random_palette for a seed-driven scheme
+        (m.cosine_palette_to_glsl(*m.random_palette(seed))). See holographic_domain.cosine_palette_to_glsl."""
+        from holographic.mesh_and_geometry.holographic_domain import cosine_palette_to_glsl
+        return cosine_palette_to_glsl(a=a, b=b, c=c, d=d, fn_name=fn_name)
+
     def random_palette(self, seed=0, contrast=0.5):
         """A random-but-harmonious cosine palette from a seed -- the 'regenerate from seeds' lever for COLOUR
         (iq). Returns the (a,b,c,d) tuple ready for cosine_palette, sampling the TASTEFUL subspace (mid base,
@@ -12653,6 +12750,15 @@ class UnifiedMind:
         Deterministic per seed. See holographic_domain.random_palette."""
         from holographic.mesh_and_geometry.holographic_domain import random_palette
         return random_palette(seed=seed, contrast=contrast)
+
+    def palette_stops(self, seed=0, n=8, contrast=0.5, coeffs=None):
+        """Sample a cosine palette into `n` plottable RGB colour STOPS -> array (n,3) in [0,1] -- the colours-you-
+        can-plot companion to random_palette (which returns cosine COEFFICIENTS a,b,c,d, not colours). Use this for
+        a swatch strip, a gradient ramp, or a legend; pass coeffs=(a,b,c,d) to sample a KNOWN palette instead of a
+        seeded one. Pure composition of random_palette + cosine_palette, so the stops ARE the palette's colours.
+        Deterministic per seed. See holographic_domain.palette_stops."""
+        from holographic.mesh_and_geometry.holographic_domain import palette_stops
+        return palette_stops(seed=seed, n=n, contrast=contrast, coeffs=coeffs)
 
     def radiance_transfer(self, sdf, points, normals, order=3, n=512):
         """PRECOMPUTED RADIANCE TRANSFER -- collapse the light-transport integral into a per-point transfer vector once,
@@ -14557,7 +14663,13 @@ class UnifiedMind:
         A GPU runs three passes over the image; this runs one multiply. Measured on a 3-stage graph: exact to
         6.7e-16 against the staged computation, 34 us per application against 205 us (6.0x) -- and the compiled cost
         does not depend on the number of stages at all. `translate` accepts fractional (sub-sample) shifts, and
-        `blur` a fractional number of passes. See holographic_shader.Pipeline."""
+        `blur` a fractional number of passes.
+
+        .apply() takes a 2-D field OR an RGB image (H,W,3): a channel axis is BATCHED (transfer applied to all
+        channels in one call, exactly equal to a per-channel loop), so RGB callers stop looping (~1.4x on CPU at
+        1080p from the shared FFT plan). The pipeline is pure FFT algebra, so it inherits use_gpu FOR FREE: with the
+        GPU backend on, apply runs on the device (throughput path, matches numpy to a tolerance -- not the bit-exact
+        CPU guarantee). GPU off (default) is byte-identical. See holographic_shader.Pipeline."""
         from holographic.rendering.holographic_shader import Pipeline
         return Pipeline(shape)
 
@@ -14855,6 +14967,42 @@ class UnifiedMind:
         if not steps:
             return default_chain()
         return PostChain(list(steps))
+
+    def postfx_to_glsl(self, chain, name="postfx", skip_unsupported=False):
+        """Compile a postfx PostChain (or a [(name, params), ...] step list) to a complete Shadertoy-style FRAGMENT
+        SHADER, so a host runs the whole colour pipeline on the viewer's GPU at display rate -- live video grading in
+        the browser, zero per-frame server cost. Emits the POINTWISE stages (exposure/reinhard/aces/gamma/
+        color_grade/vignette) EXACTLY (matches PostChain.apply to float precision); a neighbour/blur/depth stage
+        (bloom/glare/dof/...) raises unless skip_unsupported=True (multi-pass/depth is not single-pass fragment-
+        emittable). Pairs with the SDF emitter (to_shadertoy) so 'leCore generates your GPU code' is an
+        architecture. See holographic_postfx.chain_to_glsl."""
+        from holographic.rendering.holographic_postfx import PostChain, chain_to_glsl
+        steps = chain.steps if isinstance(chain, PostChain) else list(chain)
+        return chain_to_glsl(steps, name=name, skip_unsupported=skip_unsupported)
+
+    def bloom_passes(self, threshold=0.8, sigma=4.0, intensity=0.6):
+        """Emit BLOOM as an ordered multi-pass GPU DAG (bright-pass -> separable blur H,V -> composite) with wiring --
+        the honest multi-pass form of the effect that a single fragment pass (postfx_to_glsl) has to refuse. Returns
+        {passes, targets}; the host allocates two ping-pong targets and runs the passes in order. See
+        holographic_postfx.bloom_glsl_passes."""
+        from holographic.rendering.holographic_postfx import bloom_glsl_passes
+        return bloom_glsl_passes(threshold=threshold, sigma=sigma, intensity=intensity)
+
+    def compose_shader(self, functions, entry=None, header=""):
+        """Compose emitted GLSL function pieces (from pattern_to_glsl / cosine_palette_to_glsl / postfx_to_glsl /
+        sdf map emitters) into ONE shader source, deterministically -- with a duplicate-function-name check that
+        RAISES rather than silently shadow one (rename via the emitter's fn_name=). The first-class way to build a
+        composed look (pattern -> palette -> grade). See holographic_emit.assemble_glsl."""
+        from holographic.io_and_interop.holographic_emit import assemble_glsl
+        return assemble_glsl(functions, entry=entry, header=header)
+
+    def wrap_webgl2(self, shadertoy_src, uniforms=("sampler2D iChannel0", "vec3 iResolution"), entry="mainImage"):
+        """Wrap a Shadertoy-style GLSL source (defining void <entry>(out vec4, in vec2)) into a COMPLETE WebGL2
+        (GLSL ES 3.00) fragment shader -- #version + precision preamble, declared uniforms, out vec4, and the main()
+        bridge. The one true wrapper, so callers stop hand-rolling a preamble that drifts. See
+        holographic_emit.webgl2_wrap."""
+        from holographic.io_and_interop.holographic_emit import webgl2_wrap
+        return webgl2_wrap(shadertoy_src, uniforms=uniforms, entry=entry)
 
     def signed_distance_field_3d(self, inside_mask, h=1.0):
         """Occupancy VOLUME -> signed distance field via 3-D fast-sweeping eikonal (Numba ~230x on 96^3, bit-exact

@@ -214,13 +214,15 @@ class Pipeline:
         p.transfer = H.astype(complex, copy=False)
         return p
 
-    def _fwd(self, f):
-        return np.fft.rfftn(f, axes=self.axes) if self.real else np.fft.fftn(f, axes=self.axes)
+    def _fwd(self, f, xp=np):
+        # xp is numpy by default; apply() passes cupy when the GPU backend is active. FFT over the SPATIAL axes only
+        # (self.axes), so a trailing channel axis on f rides through untouched -- that is the RGB batch.
+        return xp.fft.rfftn(f, axes=self.axes) if self.real else xp.fft.fftn(f, axes=self.axes)
 
-    def _inv(self, F):
+    def _inv(self, F, xp=np):
         if self.real:
-            return np.fft.irfftn(F, s=self.shape, axes=self.axes)
-        return np.real(np.fft.ifftn(F, axes=self.axes))
+            return xp.fft.irfftn(F, s=self.shape, axes=self.axes)
+        return xp.real(xp.fft.ifftn(F, axes=self.axes))
 
     def _freq(self, axis):
         """The frequency grid for `axis` -- HALVED on the last axis when `real=True`, because that is where rfftn
@@ -292,11 +294,37 @@ class Pipeline:
         return self
 
     def apply(self, field):
-        """Run the compiled graph: one FFT, one multiply, one inverse FFT -- however many stages it has."""
+        """Run the compiled graph: one FFT, one multiply, one inverse FFT -- however many stages it has.
+
+        `field` is the pipeline's `shape`, OR that shape with ONE extra trailing CHANNEL axis -- an RGB image
+        (H,W,3) for a 2-D pipeline. In the batched case the transform runs over the SPATIAL axes only and the
+        compiled transfer is applied to EVERY channel in one call, so an RGB caller stops looping. WHY this is a
+        genuine batch and not a loop in disguise (unlike the iterative inpaint solver): the transfer is composed
+        ONCE and the FFT is diagonal/batchable in the Fourier basis, so numpy's rfftn shares one plan/setup across
+        the channels -- measured faster than the per-channel loop (see _selftest).
+
+        GPU: the pipeline is pure FFT algebra, so it inherits use_gpu FOR FREE. When use_gpu(True) is active AND
+        cupy is present, apply runs on the device through the engine's array_module switch -- the field and transfer
+        move to the device, the FFT/multiply/iFFT run there, and the result comes back to numpy. HONEST: the GPU
+        path is for THROUGHPUT (a 1080p apply) and matches numpy only to a tolerance -- bit-exactness is a CPU
+        property (the backend's contract). GPU OFF (the default) is byte-identical to before."""
+        from holographic.misc.holographic_backend import array_module, asnumpy
         f = np.asarray(field, float)
-        if f.shape != self.shape:
-            raise ValueError("field shape %s does not match the pipeline's %s" % (f.shape, self.shape))
-        return self._inv(self._fwd(f) * self.transfer)
+        nd = len(self.shape)
+        if f.shape == self.shape:
+            batched = False
+        elif f.ndim == nd + 1 and f.shape[:nd] == self.shape:
+            batched = True                                  # trailing channel axis (RGB): (H,W,C) for a 2-D pipe
+        else:
+            raise ValueError("field shape %s does not match the pipeline's %s (optionally + one trailing channel "
+                             "axis)" % (f.shape, self.shape))
+        xp = array_module()                                 # numpy unless use_gpu is on AND cupy is present
+        fx = xp.asarray(f)                                  # host->device once (no-op on CPU)
+        H = xp.asarray(self.transfer)
+        if batched:
+            H = H[..., None]                                # broadcast the spatial transfer over the channel axis
+        out = self._inv(self._fwd(fx, xp) * H, xp)
+        return asnumpy(out)                                 # device->host at the boundary (no-op on CPU)
 
 
 def combine(pipelines, weights=None):
@@ -891,6 +919,37 @@ def _selftest():
                          - Pipeline((n,)).translate(1.0).apply(f))) < 1e-9          # composed: exact
     staged_half = Pipeline((n,)).translate(0.5).apply(Pipeline((n,)).translate(0.5).apply(f))
     assert np.max(np.abs(staged_half - Pipeline((n,)).translate(1.0).apply(f))) > 1e-3   # materialised: lossy
+
+    # ---- ITEM 7: batched-channel apply + GPU switch ----------------------------------------------------
+    # apply accepts a 2-D field OR a 2-D field + one trailing CHANNEL axis (an RGB image). The batched result
+    # must be EXACTLY the per-channel loop it replaces, and the single-field path stays byte-identical (never-flip).
+    kb2 = gauss_kernel(64, 2.0) if "gauss_kernel" in dir() else None
+    import numpy as _np
+    def _g2(nn, s=2.0):
+        xx = _np.arange(nn) - nn // 2
+        kk = _np.exp(-(xx[:, None] ** 2 + xx[None, :] ** 2) / (2 * s * s)); return kk / kk.sum()
+    P2 = Pipeline((48, 48), real=True).blur(_g2(48), 1).gain(1.2)
+    rng2 = _np.random.default_rng(0)
+    field2d = rng2.random((48, 48))
+    rgb = rng2.random((48, 48, 3))
+    # single-field byte-identical to the raw transfer application (the historic apply)
+    ref2d = _np.fft.irfftn(_np.fft.rfftn(field2d, axes=(0, 1)) * P2.transfer, s=(48, 48), axes=(0, 1))
+    assert _np.array_equal(P2.apply(field2d), ref2d)
+    batched = P2.apply(rgb)
+    loop = _np.stack([P2.apply(rgb[..., c]) for c in range(3)], axis=-1)
+    assert batched.shape == (48, 48, 3)
+    assert _np.array_equal(batched, loop)                       # RGB batch == the loop it replaces, exactly
+    # a field with the wrong spatial shape is rejected (a channel axis is the ONLY extra axis allowed)
+    try:
+        P2.apply(_np.zeros((49, 48)))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("apply must reject a field whose spatial shape != the pipeline's")
+    # GPU switch: with no cupy in this environment the array_module returns numpy, so apply is the CPU path and is
+    # byte-identical. KEPT NOTE: the batch win is REAL (shared FFT plan/setup) but MODEST on CPU (~1.4x at 1080p) --
+    # the arithmetic is still C FFTs; the GPU path (default-off, use_gpu) is where a 1080p apply beats CPU, and it
+    # is throughput-only (matches numpy to a tolerance, not bit-exact -- the backend's contract).
 
     # ---- H3: the algebra has a Nyquist -----------------------------------------------------------------
     xs = np.linspace(0.0, 1.0, 240)

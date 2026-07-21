@@ -27,7 +27,7 @@ import subprocess
 
 import numpy as np
 
-from holographic.io_and_interop.holographic_emit import EmitError, _as_node_and_fn, _emit_node
+from holographic.io_and_interop.holographic_emit import EmitError, _as_node_and_fn, _emit_node, call_soa_kernel
 
 #: Content-addressed cache -- a changed kernel is a new key; a stale entry is impossible.
 CACHE_DIR = os.environ.get("LECORE_CC_CACHE", os.path.join(os.path.expanduser("~"), ".cache", "lecore_cc"))
@@ -109,19 +109,11 @@ class CKernel:
         self._ct = ct
 
     def __call__(self, *arrays):
-        if len(arrays) != self.n_params:
-            raise EmitError("kernel takes %d arrays, got %d" % (self.n_params, len(arrays)))
-        cols = [np.ascontiguousarray(a, dtype=self._np_dtype) for a in arrays]
-        n = cols[0].shape[0]
-        if any(cl.shape != (n,) for cl in cols):
-            raise EmitError("all input arrays must be 1-D of the same length")
-        # KEPT NEGATIVE (inherited from zigrun's honest timing note): this concatenate is a per-call SoA copy
-        # counted inside any timing you take of a CKernel call. Caches nothing; charges everything.
-        inp = np.concatenate(cols)
-        out = np.empty(n, dtype=self._np_dtype)
-        self._fn(inp.ctypes.data_as(ctypes.POINTER(self._ct)), n,
-                 out.ctypes.data_as(ctypes.POINTER(self._ct)))
-        return out
+        # Delegates to the shared SoA-marshalling helper (holographic_emit.call_soa_kernel) -- the C runner and the
+        # Zig runner emit the same `void k(const T* in, long n, T* out)` ABI, so the Python-side marshalling is one
+        # convention with one home, not copied per backend. The KEPT NEGATIVE (per-call concatenate copy counted in
+        # any timing) now lives with that shared code.
+        return call_soa_kernel(self.n_params, self._np_dtype, self._ct, self._fn, arrays)
 
 
 def _selftest():

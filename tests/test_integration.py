@@ -4735,6 +4735,28 @@ def test_sdf_shader_is_shadertoy_ready():
     assert scene.to_dsl() in glsl
 
 
+def test_shadertoy_camera_modes_through_the_mind():
+    """ITEM 8: through the mind, the emitted shader supports two cameras. 'fixed' (default) is byte-identical to the
+    historic head-on view (no existing output flips); 'uniforms' declares AND uses uAngle/uHeight/uDist so a WebGL2
+    host can orbit/zoom by binding uniforms instead of string-splicing the source. Unknown camera raises."""
+    from holographic.misc.holographic_unified import UnifiedMind
+    from holographic.mesh_and_geometry.holographic_sdf import sphere, torus
+    um = UnifiedMind(dim=64, seed=0)
+    scene = sphere(1.0).smooth_union(torus(0.9, 0.25), 0.3)
+    fixed = um.to_shadertoy(scene)
+    assert um.to_shadertoy(scene, camera="fixed") == fixed == um.sdf_shader(scene)   # default IS fixed
+    assert "vec3 ro=vec3(0.0,0.0,4.0), rd=normalize(vec3(uv,-1.5));" in fixed        # exact historic camera
+    assert "uAngle" not in fixed
+    uni = um.to_shadertoy(scene, camera="uniforms")
+    for tok in ("uniform float uAngle;", "uniform float uHeight;", "uniform float uDist;", "uDist*sin(uAngle)"):
+        assert tok in uni, tok
+    assert "vec3 ro=vec3(0.0,0.0,4.0)" not in uni                                    # fixed camera dropped
+    assert "void mainImage" in uni and "float map(vec3 p)" in uni and scene.to_dsl() in uni
+    import pytest
+    with pytest.raises(ValueError):
+        um.to_shadertoy(scene, camera="orbit")                                       # no silent fall-through
+
+
 def test_menger_and_greeble_through_the_mind():
     """S1/S2: the Menger fractal marches to a detailed mesh, and greebling a base box adds hull detail."""
     from holographic.misc.holographic_unified import UnifiedMind
@@ -5782,6 +5804,49 @@ def test_eikonal_3d_and_postfx_through_mind():
     frame = rng.uniform(0, 1, (32, 32, 3))
     out = um.post_process(frame, um.postfx_chain(("exposure", {"ev": 0.3}), ("aces", {}), ("vignette", {"strength": 0.4})))
     assert out.shape == (32, 32, 3) and out.max() <= 1.0
+
+
+def test_postfx_to_glsl_matches_apply_through_the_mind():
+    """ITEM 9: a pointwise colour chain compiles to a fragment shader whose per-pixel math matches PostChain.apply
+    exactly -- so a host runs the grade on the GPU with the same result. Proven via an independent transcription of
+    the emitted GLSL semantics (uv = i/(N-1)). A neighbour/blur/depth stage raises unless skip_unsupported."""
+    from holographic.misc.holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=64, seed=0)
+    chain = um.postfx_chain(("exposure", {"ev": 0.3}),
+                            ("color_grade", {"contrast": 1.08, "saturation": 1.12, "temperature": 0.02}),
+                            ("vignette", {"strength": 0.35}), ("aces", {}))
+    glsl = um.postfx_to_glsl(chain)
+    assert "void mainImage" in glsl and "vec3 postfx(vec3 c, vec2 uv)" in glsl and "_aces" in glsl
+    assert um.postfx_to_glsl(chain) == chain.to_glsl()          # faculty and method agree
+
+    def _glsl_ref(steps, x):
+        x = np.asarray(x, float).copy(); H, W = x.shape[:2]
+        uvy = (np.arange(H) / (H - 1))[:, None]; uvx = (np.arange(W) / (W - 1))[None, :]
+        for nm, pr in steps:
+            if nm == "exposure":
+                x = x * 2.0 ** pr.get("ev", 0.0)
+            elif nm == "aces":
+                y = np.maximum(x, 0.0); x = np.clip((y * (2.51 * y + 0.03)) / (y * (2.43 * y + 0.59) + 0.14), 0, 1)
+            elif nm == "color_grade":
+                con = pr.get("contrast", 1.0); sat = pr.get("saturation", 1.0); tmp = pr.get("temperature", 0.0)
+                x = (x - 0.5) * con + 0.5
+                lum = (x * np.array([0.2126, 0.7152, 0.0722])).sum(-1, keepdims=True)
+                x = lum + (x - lum) * sat; x = x + np.array([tmp, 0.0, -tmp]); x = np.clip(x, 0, 1)
+            elif nm == "vignette":
+                st = pr.get("strength", 0.4)
+                vr = np.sqrt((2 * uvy - 1) ** 2 + (2 * uvx - 1) ** 2)
+                vm = np.clip(1 - st * np.clip(vr, 0, 1) ** 2.0, 0, 1)
+                x = x * vm[:, :, None]
+        return np.clip(x, 0, 1)
+
+    hdr = np.random.default_rng(0).uniform(0, 1.5, (16, 16, 3))
+    err = np.abs(chain.apply(hdr) - _glsl_ref(chain.steps, hdr)).max()
+    assert err < 1e-9, err                                      # emitted shader math == .apply
+    import pytest
+    with pytest.raises(ValueError):
+        um.postfx_to_glsl(um.postfx_chain(("exposure", {}), ("bloom", {})))   # neighbour stage refuses
+    assert "// skipped" in um.postfx_to_glsl(um.postfx_chain(("exposure", {}), ("bloom", {})),
+                                             skip_unsupported=True)
 
 
 def test_semantic_text_to_scene_through_mind():

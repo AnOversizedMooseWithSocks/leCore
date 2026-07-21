@@ -241,6 +241,45 @@ def random_palette(seed=0, contrast=0.5):
     return (tuple(a), tuple(b), tuple(c), tuple(d))
 
 
+def palette_stops(seed=0, n=8, contrast=0.5, coeffs=None):
+    """Sample a cosine palette into `n` plottable RGB colour STOPS -> array (n, 3) in [0,1].
+
+    WHY THIS EXISTS: random_palette returns the (a,b,c,d) COEFFICIENTS of a cosine gradient, not colours -- the
+    name reads like "a list of colours", so a caller that wanted swatches interpolated the coefficients as if they
+    were RGB and got garbage. This is the colours-you-can-plot companion: it evaluates the palette at `n` evenly
+    spaced points t in [0,1] and hands back the actual RGB rows a UI swatch strip / gradient ramp / legend wants.
+
+    By default it draws the coefficients from random_palette(seed, contrast); pass an explicit `coeffs=(a,b,c,d)`
+    (e.g. from your own random_palette call) to sample a KNOWN palette instead. This is pure composition of the two
+    existing primitives (random_palette + cosine_palette), not a new colour model -- so the stops are exactly the
+    colours cosine_palette would produce, just materialised as a small table. Deterministic per seed."""
+    if coeffs is None:
+        coeffs = random_palette(seed=seed, contrast=contrast)
+    a, b, c, d = coeffs
+    t = np.linspace(0.0, 1.0, int(n))                    # even stops across the gradient -> a swatch strip
+    return cosine_palette(t, a=a, b=b, c=c, d=d)         # (n, 3) float RGB, identical to the palette at those t
+
+
+def _gf3(v):
+    """Format a length-3 vector as a GLSL vec3 literal. Delegates to the shared holographic_emit.glsl_vec3
+    (sweep-consolidated -- one formatter, three call sites)."""
+    from holographic.io_and_interop.holographic_emit import glsl_vec3
+    return glsl_vec3(v)
+
+
+def cosine_palette_to_glsl(a=(0.5, 0.5, 0.5), b=(0.5, 0.5, 0.5), c=(1.0, 1.0, 1.0), d=(0.0, 0.33, 0.67),
+                           fn_name="palette"):
+    """Compile iq's cosine palette to a GLSL `vec3 <fn_name>(float t)` function -- colour(t) = a + b*cos(2*pi*(c*t+d)),
+    clamped [0,1]. Matches holographic_domain.cosine_palette per-point to float precision, so a demoscene palette
+    renders client-side and composes with the SDF/postfx emitters (feed it an orbit trap, an iteration count, a
+    distance). Pair with random_palette(seed) for a seed-driven scheme: cosine_palette_to_glsl(*random_palette(seed)).
+    (leStudio backlog item 10.)"""
+    return ("// cosine palette as GLSL (matches holographic_domain.cosine_palette to float precision)\n"
+            "vec3 %s(float t){\n"
+            "    return clamp(%s + %s * cos(6.28318530717959 * (%s * t + %s)), 0.0, 1.0);\n"
+            "}\n" % (fn_name, _gf3(a), _gf3(b), _gf3(c), _gf3(d)))
+
+
 def _selftest():
     """Assert the REAL contracts, with cross-condition CONTRAST rather than fragile absolutes.
 
@@ -301,6 +340,30 @@ def _selftest():
     pa = random_palette(seed=7)
     assert random_palette(seed=7) == pa                                # deterministic
     assert cosine_palette(ts, *pa).min() >= 0.0                        # in gamut
+
+    # (6) ITEM 4: palette_stops turns a palette into n PLOTTABLE rgb rows -- shape, gamut, determinism, and (the
+    #     whole point) it equals cosine_palette sampled at the same even t, so the stops ARE the palette's colours,
+    #     not an interpolation of its coefficients (the bug that shipped garbage when a caller read the a,b,c,d
+    #     coeffs as if they were colours).
+    stops = palette_stops(seed=7, n=8)
+    assert stops.shape == (8, 3) and stops.min() >= 0.0 and stops.max() <= 1.0
+    assert np.array_equal(palette_stops(seed=7, n=8), stops)           # deterministic per seed
+    t8 = np.linspace(0.0, 1.0, 8)
+    assert np.allclose(stops, cosine_palette(t8, *random_palette(seed=7)))  # exactly the palette at those t
+    # explicit coeffs path samples a KNOWN palette rather than a seeded one
+    assert np.allclose(palette_stops(coeffs=pa, n=8), cosine_palette(t8, *pa))
+    # KEPT NEGATIVE: random_palette returns COEFFICIENTS (a,b,c,d), not colours -- interpolating those coefficients
+    # as RGB stops is the documented misuse this function exists to prevent.
+
+    # (7) ITEM 10: cosine_palette_to_glsl emits a `vec3 palette(float t)` matching cosine_palette per-point to float
+    #     precision. Verified with an INDEPENDENT transcription of the emitted GLSL on t in [0,1].
+    tt = np.linspace(0, 1, 129)
+    for sd in (0, 3, 7):
+        a2, b2, c2, d2 = random_palette(seed=sd)
+        g = cosine_palette_to_glsl(a2, b2, c2, d2)
+        assert "vec3 palette(float t)" in g
+        glsl_col = np.clip(np.array(a2) + np.array(b2) * np.cos(6.28318530717959 * (np.array(c2) * tt[:, None] + np.array(d2))), 0, 1)
+        assert np.abs(cosine_palette(tt, a=a2, b=b2, c=c2, d=d2) - glsl_col).max() < 1e-9, sd
 
     print("holographic_domain selftest OK (one sphere -> %d lattice hits vs %d single; "
           "mirror exact to 1e-12; smin a smooth lower bound; cosine palette in gamut)"

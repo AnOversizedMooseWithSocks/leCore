@@ -103,8 +103,114 @@ DIALECTS = {
 _BINOPS = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Div: "/"}
 
 
+def glsl_float(x):
+    """Format a Python float as a GLSL float LITERAL: %.6g, guaranteed to carry a decimal point (or exponent) so
+    GLSL never reads it as an int. THE one shared formatter for every GLSL emitter in the engine (sdf camera
+    uniforms aside) -- postfx (item 9), pattern and cosine-palette (item 10) all delegate here, because three
+    private copies of the same six lines was exactly the buried duplication the wiring sweep exists to catch."""
+    s = "%.6g" % float(x)
+    if "e" not in s and "E" not in s and "." not in s:
+        s += ".0"
+    return s
+
+
+def glsl_vec3(v):
+    """Format a length-3 vector as a GLSL vec3 literal, each component via glsl_float."""
+    import numpy as _np
+    v = _np.asarray(v, float).ravel()
+    return "vec3(%s, %s, %s)" % (glsl_float(v[0]), glsl_float(v[1]), glsl_float(v[2]))
+
+
+import re as _re
+
+# THE shared home for GLSL shader ASSEMBLY (backlog B1). The engine's GLSL emitters -- sdf (to_shadertoy), postfx
+# (chain_to_glsl), pattern (pattern_to_glsl), palette (cosine_palette_to_glsl) -- each produce self-contained GLSL
+# function pieces. Composing several into ONE shader, and wrapping a Shadertoy-style source for WebGL2, were done by
+# HAND at every call site (the cross-item capstone concatenated strings; every parse check re-wrote the #version
+# preamble). This consolidates both: one composer, one wrapper, so a new emitter reuses them instead of hand-rolling.
+
+_GLSL_FUNC_DEF = _re.compile(r"^\s*(?:highp\s+|mediump\s+|lowp\s+)?\w+\s+(\w+)\s*\(", _re.MULTILINE)
+
+
+def glsl_function_names(src):
+    """The top-level function names DEFINED in a GLSL source (best-effort, for duplicate detection). Skips lines that
+    are comments or preprocessor directives. Not a full parser -- it exists to catch the one real hazard when
+    composing pieces: two functions with the SAME name."""
+    names = []
+    for line in src.splitlines():
+        s = line.strip()
+        if s.startswith("//") or s.startswith("#") or s.startswith("/*") or s.startswith("*"):
+            continue
+        mo = _GLSL_FUNC_DEF.match(line)
+        if mo and "return" != mo.group(1) and "{" in line:      # a def has a brace on (or opening) the line
+            names.append(mo.group(1))
+    return names
+
+
+def assemble_glsl(functions, entry=None, header=""):
+    """Compose emitted GLSL function pieces into ONE source, in order, deterministically. `functions` is a list of
+    GLSL source strings (each the output of an emitter, e.g. a `float pattern(vec3 p){...}`); `entry` is an optional
+    trailing block (a mainImage / main); `header` an optional leading comment/uniform block.
+
+    RAISES on a duplicate top-level function name across the pieces -- the one real hazard the wiring sweep flagged
+    (compose two palettes and one silently shadows the other). That is a kept negative made into an error: the caller
+    renames (the emitters take an fn_name= for exactly this) rather than get a wrong shader."""
+    seen = {}
+    for i, fsrc in enumerate(functions):
+        for nm in glsl_function_names(fsrc):
+            if nm in seen:
+                raise ValueError("assemble_glsl: duplicate function name %r (pieces %d and %d) -- rename one via the "
+                                 "emitter's fn_name= argument" % (nm, seen[nm], i))
+            seen[nm] = i
+    parts = ([header.rstrip("\n")] if header else []) + [f.rstrip("\n") for f in functions]
+    if entry:
+        parts.append(entry.rstrip("\n"))
+    return "\n\n".join(parts) + "\n"
+
+
+def webgl2_wrap(shadertoy_src, uniforms=("sampler2D iChannel0", "vec3 iResolution"), entry="mainImage"):
+    """Wrap a Shadertoy-style GLSL source (one that defines `void <entry>(out vec4, in vec2)`) into a COMPLETE WebGL2
+    (GLSL ES 3.00) fragment shader: the `#version 300 es` + precision preamble, the declared `uniform`s, an
+    `out vec4 fragOut;`, the body, and a `void main(){ <entry>(fragOut, gl_FragCoord.xy); }` bridge. Deterministic.
+    This is the one true wrapper -- callers stop hand-rolling the preamble (which drifts)."""
+    decls = "\n".join("uniform %s;" % u for u in uniforms)
+    return ("#version 300 es\n"
+            "precision highp float;\n"
+            "%s\n"
+            "out vec4 fragOut;\n\n"
+            "%s\n\n"
+            "void main(){ %s(fragOut, gl_FragCoord.xy); }\n" % (decls, shadertoy_src.rstrip("\n"), entry))
+
+
 class EmitError(ValueError):
     """The emitter refused. The message names the construct; refusing is the feature (K10)."""
+
+
+def call_soa_kernel(n_params, np_dtype, ct, fn, arrays):
+    """Marshal `arrays` (P columns of equal length N) into one contiguous SoA buffer and call a compiled scalar
+    kernel `fn(in_ptr, n, out_ptr)` via ctypes, returning the (N,) output. This is the ONE calling convention the
+    C runner (ccrun) and the Zig runner (zigrun) share -- both emit a `void k(const T* in, long n, T* out)` with P
+    blocks of N laid end to end, so the Python-side marshalling is identical and lived, copied, in both CKernel and
+    ZigKernel.__call__. Unified here (the module both already import from) so it cannot drift between the two
+    backends; each kernel object just passes its own n_params / dtype / ctypes scalar type / bound function.
+
+    numpy and ctypes are imported lazily so the emitter itself stays import-light (it is mostly string generation;
+    only the native runners actually marshal).
+
+    KEPT NEGATIVE: the concatenate is a per-call SoA copy, counted inside any timing of a kernel call -- it caches
+    nothing and charges everything. That honesty (originally noted in zigrun) now lives with the shared code."""
+    import ctypes
+    import numpy as np
+    if len(arrays) != n_params:
+        raise EmitError("kernel takes %d arrays, got %d" % (n_params, len(arrays)))
+    cols = [np.ascontiguousarray(a, dtype=np_dtype) for a in arrays]
+    n = cols[0].shape[0]
+    if any(c.shape != (n,) for c in cols):
+        raise EmitError("all input arrays must be 1-D of the same length")
+    inp = np.concatenate(cols)                           # SoA: P blocks of N, one contiguous buffer
+    out = np.empty(n, dtype=np_dtype)
+    fn(inp.ctypes.data_as(ctypes.POINTER(ct)), n, out.ctypes.data_as(ctypes.POINTER(ct)))
+    return out
 
 
 def _expr(node, dialect):
@@ -445,6 +551,25 @@ def _selftest():
     text = "def lerp(a: float, b: float, t: float) -> float:\n    return a + (b - a) * t\n"
     assert emit_source(text, "wgsl").startswith("fn lerp(a: f32, b: f32, t: f32) -> f32")
     assert emit_source(text, "c_f64").startswith("double lerp(double a")
+
+    # B1: GLSL shader ASSEMBLY -- compose function pieces, catch duplicate names, wrap for WebGL2 (deterministic).
+    fa = "float f(vec3 p){ return p.x; }"
+    fb = "vec3 g(float t){ return vec3(t); }"
+    assert glsl_function_names(fa) == ["f"] and glsl_function_names(fb) == ["g"]
+    composed = assemble_glsl([fa, fb], entry="void mainImage(out vec4 c, in vec2 u){ c = vec4(g(f(vec3(u,0.0))),1.0); }")
+    assert "float f(vec3 p)" in composed and "vec3 g(float t)" in composed and "mainImage" in composed
+    assert assemble_glsl([fa, fb], entry="void mainImage(out vec4 c, in vec2 u){ c=vec4(0.0); }") == \
+           assemble_glsl([fa, fb], entry="void mainImage(out vec4 c, in vec2 u){ c=vec4(0.0); }")   # deterministic
+    try:
+        assemble_glsl([fa, fa])                                # duplicate 'f' -> raise, not a silently-shadowed shader
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("assemble_glsl must reject a duplicate function name")
+    w = webgl2_wrap(composed)
+    assert w.startswith("#version 300 es") and "out vec4 fragOut;" in w
+    assert "void main(){ mainImage(fragOut, gl_FragCoord.xy); }" in w
+    assert webgl2_wrap(composed) == w
 
     print("OK: holographic_emit self-test passed (the sphere SDF emitted to C and COMPILED with cc: c_f64 is "
           "BIT-IDENTICAL to the Python original over %d inputs, c_f32 differs by %.3e -- and that number is the "

@@ -51,6 +51,17 @@ DECLARED NEGATIVES -- the VSA route was measured and lost. Do not rebuild it.
     floor is 0.0081 at D=1024 and 0.0057 at D=8192, so 8x the dimension buys 30%.
   * N9: a bundle's per-role error grows with the number of roles -- 0.0010 (1 role), 0.0177 (2), 0.0324 (8),
     0.0732 (32). Type-blind fill is a schema-agnostic FALLBACK, not a precision tool.
+  * N10 (leStudio backlog item 6): a MULTI-CHANNEL harmonic_fill accepts (H,W,C) so a caller writes one call
+    instead of its own 3x loop (leStudio's Inpaint node deletes that loop). But the backlog's premise -- "factorise
+    the Laplacian once, back-substitute per channel, ~1/3 the time" -- is REFUTED for this engine: harmonic_fill is
+    an ITERATIVE Jacobi solve, not a factorised direct solve (a dense factorisation of the unknowns' Laplacian is
+    O(U^3) in the hole count -- infeasible at image sizes). With no factorisation there is nothing to amortise, so a
+    joint (H,W,C) sweep is NOT faster: it does the same arithmetic as the loop while striding across the interleaved
+    channel axis on every stencil (cache-hostile), and must run the MAX of the channels' sweep counts vs the loop's
+    SUM-with-early-exit -- so joint work (max_sweeps x C) is always >= loop work. MEASURED 256x256 RGB smooth data:
+    loop 0.19s vs joint 0.29-0.31s for BOTH (H,W,C) and channel-first (C,H,W) layouts. So the multi-channel path
+    ships as the per-channel LOOP (arithmetic-optimal, cache-friendly, byte-identical to what callers wrote by hand);
+    the value is API ergonomics, NOT speed. Do not rebuild joint iteration for performance.
 """
 
 import numpy as np
@@ -69,16 +80,49 @@ def harmonic_fill(field, known, periodic=False, iters=2000, tol=1e-9):
     """Fill the unknown cells of a CONTINUOUS field by a Laplace solve: relax each hole to the mean of its four
     neighbours, holding the known cells fixed.
 
-    `known` is a boolean mask, True where the value is trusted. Jacobi iteration to `tol` or `iters`; deterministic,
-    no RNG, and the initial guess is the mean of the known cells so the answer does not depend on what was in the
-    holes. Returns a new array; the input is not modified.
+    `field` is (H,W) OR (H,W,C). A MULTI-CHANNEL field (an RGB image) is filled channel-by-channel with the SAME
+    mask and stacked -- so a caller writes ONE call instead of its own per-channel loop (this is the seam that lets
+    leStudio's Inpaint node delete its 3x loop). The single-channel path is BYTE-IDENTICAL to before.
+
+    KEPT NEGATIVE (loud, MEASURED -- do not "optimise" this into a single (H,W,C) Jacobi sweep): the multi-channel
+    API is a CONVENIENCE, NOT a speedup. The NCA backlog imagined "factorise the Laplacian once, back-substitute per
+    channel" -- but this solver is ITERATIVE (Jacobi), not a factorised direct solve (a dense factorisation of the
+    unknowns' Laplacian is O(U^3) in the number of holes -- tens of thousands at image sizes -- so it is infeasible;
+    Jacobi is the right method). With no factorisation there is nothing to amortise: a joint (H,W,C) sweep does the
+    SAME arithmetic as the loop but strides across the interleaved channel axis on every spatial stencil (cache-
+    hostile), and it must run the MAX of the channels' sweep counts while the loop runs the SUM WITH PER-CHANNEL
+    EARLY-EXIT -- so joint work (max_sweeps x C) is always >= loop work. Measured 256x256 RGB, smooth data: loop
+    0.19s vs joint 0.29-0.31s (both (H,W,C) and channel-first (C,H,W) layouts). The loop is arithmetic-optimal and
+    cache-friendly; that is what this ships.
+
+    `known` is a boolean mask over the two spatial axes, True where the value is trusted. Jacobi iteration to `tol`
+    or `iters`; deterministic, no RNG, and the initial guess is the mean of the known cells so the answer does not
+    depend on what was in the holes. Returns a new array; the input is not modified.
 
     MEASURED on a 48x48 field with 59% erased: MAE 0.00123 on the holes (non-periodic field, clamped BC). Wrapping
-    a non-periodic field costs 5.4x. Raises if nothing is known -- there is no interpolant through no data."""
-    u = np.asarray(field, float).copy()
+    a non-periodic field costs 5.4x. Raises if nothing is known -- there is no interpolant through no data.
+
+    KEPT NEGATIVE (backlog A1, spectral acceleration -- MEASURED, do NOT reinvent): the FFT "shader algebra" tempts a
+    spectral fill (diffuse-and-reproject: fft-smooth the whole field, re-impose the known pixels, repeat), on the
+    theory that one FFT propagates globally where Jacobi crawls one pixel per sweep. It DOES NOT PAY, two ways.
+    (1) Pure diffuse-reproject: 20x SLOWER than Jacobi and BIASED -- the domain is Dirichlet, not periodic, so the
+        FFT wrap leaks across the border and it converges ~8e-4 off the true harmonic answer even mirror-padded.
+    (2) Coarse-to-fine alpha schedule + a Jacobi finish (to nail the exact BC): reaches Jacobi's steady state (agree
+        2e-9) but still 0.75x -- SLOWER. The FFT warm-start cuts Jacobi iterations only ~2-5x, while each FFT step
+        (complex transform on a 4x mirror-padded field) costs ~30x a Jacobi sweep, so the warm-start never pays back.
+    Root cause: a Jacobi sweep is a single cache-friendly real stencil; the FFT would have to cut the iteration count
+    by >30x to win, and it cuts it by <5x. Jacobi is the right method here (same family as item 6's negative:
+    "possible but doesn't pay"). A true win would need multigrid (a different algorithm, not the FFT route) -- not
+    filed as work, filed as the reason the obvious spectral idea is a trap."""
+    u = np.asarray(field, float)
     m = np.asarray(known, bool)
-    if u.shape != m.shape:
-        raise ValueError("field %r and mask %r must have the same shape" % (u.shape, m.shape))
+    if m.shape != u.shape[:2]:                        # mask covers the two spatial axes; a channel axis may trail
+        raise ValueError("field %r and mask %r must have the same spatial shape" % (u.shape, m.shape))
+    if u.ndim > 2:
+        # multi-channel: same mask per channel, per-channel fill + stack (measured-fastest -- see KEPT NEGATIVE).
+        return np.stack([harmonic_fill(u[..., c], m, periodic=periodic, iters=iters, tol=tol)
+                         for c in range(u.shape[-1])], axis=-1)
+    u = u.copy()
     if not m.any():
         raise ValueError("harmonic_fill needs at least one known cell; there is no interpolant through no data")
     if m.all():
@@ -147,7 +191,11 @@ def inpaint(field, known, kind="auto", periodic=False, **kw):
 
     `kind="auto"` sends an integer/bool array to `majority_fill` and a float array to `harmonic_fill`. Pass
     `kind="continuous"` or `kind="categorical"` to override -- a float array holding class ids is a real thing, and
-    averaging it would silently produce labels that do not exist."""
+    averaging it would silently produce labels that do not exist.
+
+    A CONTINUOUS field may be (H,W) or (H,W,C): an RGB image fills in one call (per-channel with the shared mask),
+    so callers stop writing their own 3x loop. HONEST: multi-channel is an API convenience, NOT a speedup -- see
+    harmonic_fill's KEPT NEGATIVE (the solver is iterative, so there is no factorisation to amortise)."""
     arr = np.asarray(field)
     if kind == "auto":
         kind = "categorical" if arr.dtype.kind in "biu" else "continuous"
@@ -228,6 +276,28 @@ def _selftest():
 
     # 6. an all-known field is returned unchanged
     assert np.array_equal(harmonic_fill(smooth, np.ones((N, N), bool)), smooth)
+
+    # 7. ITEM 6 -- multi-channel harmonic_fill. An (H,W,C) field fills per-channel with the SHARED mask and must be
+    #    EXACTLY equal to the explicit per-channel loop (byte-for-byte), and the single-channel path must be
+    #    unchanged. This is the seam that deletes a caller's 3x loop.
+    rgb = np.stack([smooth, np.roll(smooth, 3, 0), 0.2 + 0.5 * xx], axis=-1)
+    joint = harmonic_fill(rgb, known)
+    loop = np.stack([harmonic_fill(rgb[..., c], known) for c in range(3)], axis=-1)
+    assert joint.shape == (N, N, 3)
+    assert np.array_equal(joint, loop)                              # multi-channel == the loop it replaces, exactly
+    assert np.array_equal(joint[known], rgb[known])                # every channel's known cells pinned
+    assert np.array_equal(harmonic_fill(smooth, known), u)         # single-channel path byte-identical to step 1
+    assert np.array_equal(inpaint(rgb, known), joint)              # float (H,W,C) dispatches to harmonic
+    # a mask that matches the channel dims instead of the spatial dims is a caller error -> raise
+    try:
+        harmonic_fill(rgb, np.ones((N, N, 3), bool))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a (H,W,C) mask must be rejected -- the mask is over spatial axes only")
+    # KEPT NEGATIVE (N10): multi-channel is API ERGONOMICS, not a speedup. harmonic_fill is ITERATIVE (Jacobi), so
+    # there is no factorisation to reuse; a joint (H,W,C) sweep is measured SLOWER than this per-channel loop
+    # (cache-hostile channel striding + max-vs-sum-with-early-exit sweeps). Do not rebuild joint iteration for speed.
 
     print("OK: holographic_inpaint self-test passed (harmonic fill MAE %.5f on 59%%-erased holes, against a wrapped "
           "Laplacian's %.5f -- the boundary condition is the gate; majority fill %.4f accuracy overall and %.4f in "

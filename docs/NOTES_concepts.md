@@ -40216,3 +40216,715 @@ setup.py exactly; the summary line updated. Wheel metadata verified to carry all
 `pip install .[fft]` dry-run resolves pyfftw. LESSON: an extras block is a claim about what the code imports --
 verify it against the actual imports, and pin it, or it drifts the moment someone adds a guarded import without a
 matching extra (which is exactly what happened with pyfftw).
+
+
+## P0 BACKLOG SWEEP (leStudio integration items 1-4): API-consistency paper-cuts, one small release
+
+Driven by leStudio (an image editor built ON leCore via pip). Four silent-failure / naming traps that bit the app
+and will bite every downstream caller the same way. ALL fixes are additive / default-off / backward-compatible; no
+existing decision flips. Audited each with find_capability (5+ phrasings) first -- items 1-3 EXTEND an existing
+cataloged faculty (no new capability), item 4 is a genuine gap (audit returned only fallbacks).
+
+ITEM 1 -- image_colours returned uint8 0-255 while the whole image ecosystem speaks float 0-1 (collapsed leStudio's
+Posterize silently: nearest-colour matching across mismatched ranges has a well-defined useless answer, so nothing
+raised). FIX: dominant_colours (holographic_vision) gains as_float=False; the centres are ALREADY computed in float
+[0,1] and only quantised at the return, so as_float=True just skips the *255/clip/astype. Threaded through
+mind.image_colours. KEPT NEGATIVE (loud, in code + selftest): default stays uint8, NOT float -- flipping it would
+break every existing caller (the never-flip rule); float is ecosystem-correct but must be opted into. Selftest pins
+BOTH dtypes and that float == uint8/255 to the quantisation floor (same colours, different range).
+
+ITEM 2 -- pattern_field: noise/fbm accept `seed`, checker/stripes/gradient/dots raised TypeError on it, so a UI with
+a kind dropdown + seed slider crashed on 4 of 6 kinds. FIX: ONE edit in make_pattern (holographic_pattern), not four
+signature changes -- a documented _INERT_FOR_DETERMINISTIC=("seed",) set; make_pattern drops only those inert keys
+the chosen builder can't take, so every kind accepts seed (a no-op for the exact kinds). KEPT NEGATIVE: any OTHER
+unknown kwarg STILL raises TypeError -- the fix does not reintroduce silent-parameter-drop (the exact bug item 3
+exists to kill). Selftest asserts: all kinds accept seed, seed is bit-identical no-op for the 4 exact kinds, and a
+bogus kwarg still raises.
+
+ITEM 3 -- color_transfer accepted ANY mode string, silently falling through to covariance (we shipped "mean_std"
+instead of "meanstd" -- a live-looking parameter that did nothing). FIX: a _MODE_ALIASES canonicalisation map
+(mean_std/mean-std/cov/mk + case-insensitive) in holographic_colortransfer; unknown mode now raises ValueError with
+the valid list. Backward-compatible: the two real modes are unchanged; only previously-silent-garbage now errors.
+Selftest: alias == canonical result, and an unknown mode raises.
+
+ITEM 4 -- random_palette returns cosine COEFFICIENTS (a,b,c,d), not colours; the name reads as "a list of colours",
+so a caller interpolated the coefficients as RGB stops and shipped garbage. FIX: NEW palette_stops(seed, n, contrast,
+coeffs=None) in holographic_domain -- pure composition of random_palette + cosine_palette (NOT a new colour model):
+evaluate the palette at n even t -> (n,3) float RGB. Wired as mind.palette_stops (delegating, verified by AST), new
+catalog entry "Palette colour stops (plottable swatches)" with 14 stranger-phrasing aliases, 5/5 discoverability
+confirmed. KEPT NEGATIVE: interpolating the coefficients as RGB is the documented misuse this exists to prevent.
+
+VERIFY: 4 module selftests green; compileall + audit_imports clean; reachability/catalog_gaps/skill_lint 0/0/0 (a
+649-char does-field regression on palette_stops caught by skill_lint and tightened to <600 before it could ship);
+capdoc + docgen regenerated (palette_stops in CAPABILITIES.md / capabilities.json / REFERENCE.md); targeted tests
+45 passed (vision, pattern, colortransfer, catalog, catalog_exam runs the palette_stops example, techstack confirms
+NumPy-only core intact). Determinism cross-checked dim-independent (256 vs 512 identical).
+
+FILES: holographic/misc/holographic_vision.py (dominant_colours as_float + selftest), holographic/misc/
+holographic_pattern.py (make_pattern inert-kwarg filter + selftest), holographic/materials_and_texture/
+holographic_colortransfer.py (mode aliases/validation + selftest), holographic/mesh_and_geometry/holographic_domain.py
+(palette_stops + selftest), holographic/misc/holographic_unified.py (image_colours as_float, color_transfer doc,
+palette_stops faculty), holographic/caching_and_storage/holographic_catalog.py (palette_stops entry).
+
+DELETES app workarounds: leStudio's `pal / 255.0` branch (item 1, once as_float=True adopted), try/except TypeError
+retry on pattern kinds (item 2). Item 3 turns a dead misspelled param into a real one; item 4 removes the coefficient-
+as-colour misuse.
+
+
+## BACKLOG ITEM 8 (leStudio): uniform-driven Shadertoy camera -- native GPU orbit, no string-splicing
+
+leStudio's /api/sdf/shader REGEX-REPLACED the emitter's hard-coded `vec3 ro=vec3(0.0,0.0,4.0)` line to inject an
+orbit camera (uAngle/uHeight/uDist) -- safe only because the app generates the string. That workaround belongs in
+the engine. AUDITED first: find_capability surfaced to_shadertoy/sdf_shader as the top hits, so this EXTENDS the
+existing emitter (one new arg), it does NOT add a sibling.
+
+CHANGE: _emit_shader (holographic_sdf) gains camera="fixed"|"uniforms", threaded through node.to_glsl -> the
+sdf_shader and to_shadertoy faculties. "fixed" (default) is the classic head-on view, kept BYTE-IDENTICAL to the
+historic output (never-flip rule; every existing shader test still asserts the exact camera line). "uniforms"
+DECLARES and USES three host-bound uniforms and emits iq's orbit basis:
+    vec3 cw=normalize(-vec3(uDist*sin(uAngle),uHeight,uDist*cos(uAngle)));
+    vec3 cu=normalize(cross(cw,vec3(0,1,0))); vec3 cv=cross(cu,cw);
+    vec3 ro=vec3(uDist*sin(uAngle),uHeight,uDist*cos(uAngle));
+    vec3 rd=normalize(uv.x*cu+uv.y*cv+1.5*cw);
+Focal length 1.5 matches the fixed camera so the FOV is identical between modes. GLSL matched to leStudio's
+proven-shipped splice verbatim, so it is known-good. Unknown camera raises ValueError (no silent fall-through --
+same honesty rule as item 3).
+
+ACCEPTANCE MEASURED (not eyeballed): wrapped the "uniforms" output for WebGL2 the way leStudio does and PARSED it
+with a real GLSL ES 3.00 parser (@shaderfrog/glsl-parser via node) -- PARSE OK for both fixed and uniforms (the only
+note is the built-in gl_FragCoord, identical for both modes, i.e. not from this change). So the emitted source
+compiles as-is once the host binds the uniforms.
+
+KEPT NEGATIVE (loud, in the selftest): "uniforms" emits SELF-CONTAINED uniform declarations -- a host wrapper must
+NOT re-declare uAngle/uHeight/uDist (GLSL ES 3.00 forbids redeclaring a uniform). leStudio's adoption is: request
+camera="uniforms", and DELETE both its regex splice AND its own orbit-uniform decls from the WebGL2 wrapper.
+
+DISCOVERABILITY: the orbit-camera phrasings ("spin and zoom the shadertoy scene", "controllable camera in the
+emitted glsl") did not rank on the updated faculty docstrings alone -- added to_shadertoy + sdf_shader entries to
+_METHOD_ALIASES (the auto-registration alias hook, NOT a duplicate catalog entry), 5/5 stranger phrasings now
+resolve to the right faculty.
+
+VERIFY: sdf module selftest green (camera-mode asserts: fixed byte-identical, uniforms declares+uses all three,
+unknown raises); compileall + audit_imports clean; reachability/catalog_gaps/skill_lint at baseline (0 gating gaps);
+existing tests unchanged -- test_holographic_sdf 10 passed, integration shader tests 8 passed (the fixed camera is
+asserted verbatim, proving no flip); new test_shadertoy_camera_modes_through_the_mind pins both modes at the mind
+level. capdoc/docgen regenerated (capabilities.json UNCHANGED -- item 8 extends faculties, does not touch the curated
+default_catalog, so no drift-gate risk; REFERENCE.md regenerated).
+
+FILES: holographic/mesh_and_geometry/holographic_sdf.py (_emit_shader camera param + template slots + to_glsl +
+selftest), holographic/misc/holographic_unified.py (sdf_shader + to_shadertoy camera passthrough), holographic/
+caching_and_storage/holographic_catalog.py (_METHOD_ALIASES: to_shadertoy + sdf_shader orbit-camera aliases),
+tests/test_integration.py (camera-modes integration test).
+
+DELETES app workaround: leStudio's regex camera splice in /api/sdf/shader (the _re.search(r"vec3 ro=vec3\([^;]+;")
++ replace), and its wrapper's uAngle/uHeight/uDist uniform declarations -- both replaced by requesting
+camera="uniforms".
+
+
+## BACKLOG ITEM 5 (leStudio): segment_image(max_dim=) -- the interactive-latency knob, in the engine
+
+Cost scales with pixel count (k-means over every pixel + a connected-components sweep whose cost tracks the longer
+side), so every interactive caller independently learned to shrink the input and scale masks back up -- leStudio
+bounded to 224 px in TWO places. AUDITED first: no existing bounded-resolution segmentation, and no PUBLIC image-
+resize primitive to reuse (the several _resample/_downsample/box_resize helpers are all private, purpose-specific,
+and in other modules -- importing another module's private helper is fragile coupling). So this EXTENDS segment_image
+with a max_dim param and adds two small module-LOCAL resize helpers next to it.
+
+CHANGE (holographic_vision): segment_image gains max_dim=None. When set and the image is larger, it box-downsamples
+to that longest side, segments the thumbnail, then NEAREST-upsamples each region mask back to full size and REBUILDS
+the record via _region_record on the ORIGINAL image -- so area/bbox/centroid are in original pixels and mean_color is
+the true full-res mean, all exactly consistent with the returned mask (reuse, not manual per-stat rescaling). Two
+helpers: _downsample_rgb_area (box/area average -- WHY not nearest: nearest ALIASES thin features into the wrong
+colour cluster; area is the honest low-pass; pure np.add.at index-binning, deterministic, arbitrary ratios) and
+_upsample_mask_nn (nearest is MANDATORY for a label mask -- interpolation invents invalid labels). Threaded through
+mind.segment_image. max_dim=None (default) is byte-identical to the historic full-resolution behaviour.
+
+MEASURED (the acceptance bar): on a 1024x1024 synthetic scene, max_dim=224 gives full-size masks with red/blue/green
+all recovered as distinct regions, and runs in 1.19 s vs 87.3 s full-res -- a 73x speedup (comfortably beats
+leStudio's current bounded latency). Default path proven byte-identical to the historic call (mask + bbox equal).
+Deterministic across repeat calls.
+
+KEPT NEGATIVE (loud, in selftest): segmenting a downsampled image is a QUALITY/LATENCY TRADE, not free -- the result
+is the segmentation of the thumbnail (masks upsampled), NOT identical to the full-res segmentation. max_dim=None is
+the only path that reproduces the historic result exactly.
+
+DISCOVERABILITY: the latency phrasings ("bound the segmentation resolution", "downsample before segmenting", "limit
+segmentation to a max dimension") did not rank on the docstring alone -- added a segment_image entry to _METHOD_ALIASES
+(the auto-registration hook, not a duplicate catalog entry); 5/5 stranger phrasings now resolve to segment_image.
+
+VERIFY: vision module selftest green (max_dim asserts: None byte-identical, full-size masks, box downsample hits the
+target longest side, label-safe nearest upsample); compileall + audit_imports clean; reachability/catalog_gaps/
+skill_lint at 0 gating gaps; test_holographic_vision 16 passed + new max_dim mind-level test; integration photo->3D/
+demux tests 6 passed (default path unchanged for downstream scene_from_image callers). capdoc/docgen regenerated
+(capabilities.json unchanged -- faculty extension, default_catalog untouched, no drift-gate risk).
+
+FILES: holographic/misc/holographic_vision.py (_downsample_rgb_area + _upsample_mask_nn helpers, segment_image max_dim
+branch + doc + selftest), holographic/misc/holographic_unified.py (segment_image max_dim passthrough), holographic/
+caching_and_storage/holographic_catalog.py (_METHOD_ALIASES: segment_image), tests/test_holographic_vision.py
+(max_dim mind-level test).
+
+DELETES app workaround: BOTH of leStudio's 224 px bounding sites (server.py:688 and __init__.py:1415) -- callers pass
+max_dim= and let the engine own the downsample/upsample.
+
+
+## BACKLOG ITEM 6 (leStudio): multi-channel inpaint -- API delivered, PERFORMANCE CLAIM REFUTED (kept negative N10)
+
+Backlog premise: "inpaint is single-channel; RGB callers loop 3x and re-factorise the same Laplacian each time.
+Accept (H,W,C), factorise once, back-substitute per channel -> ~1/3 wall time." AUDITED + READ THE CODE FIRST, and
+the premise is WRONG for this engine: harmonic_fill is an ITERATIVE Jacobi solve (relax each hole to its 4-neighbour
+mean, known cells pinned), NOT a factorised direct solve. There is no Laplacian matrix being factorised, so there is
+nothing to amortise across channels. (A dense factorisation of the unknowns' Laplacian is O(U^3) in the hole count --
+tens of thousands of unknowns at image sizes -- so a direct solver is infeasible here; Jacobi is the right method.)
+
+MEASURED the joint-iteration idea before shipping it (measurement over narrative): a single (H,W,C) Jacobi sweep is
+SLOWER than the per-channel loop, not 3x faster. 256x256 RGB, smooth data, default settings: loop 0.19s vs joint
+0.29-0.31s -- for BOTH the interleaved (H,W,C) layout AND a channel-first (C,H,W) contiguous layout. Two reasons,
+both structural: (1) the joint sweep strides across the interleaved channel axis on every spatial stencil (cache-
+hostile) while 3 separate 2D solves keep spatial memory contiguous; (2) joint must run the MAX of the channels'
+sweep counts, while the loop runs the SUM with PER-CHANNEL EARLY-EXIT at tol -- and max_sweeps x C is always >= the
+loop's work. Joint iteration LITERALLY CANNOT WIN on this solver.
+
+SO WHAT SHIPPED: harmonic_fill / inpaint now accept (H,W) OR (H,W,C); the multi-channel path fills PER-CHANNEL with
+the shared mask and stacks -- i.e. it moves the caller's loop INTO the engine (measured-fastest, byte-identical to
+what callers wrote by hand). The value is API ergonomics + correct mask handling in one call, NOT speed. The single-
+channel path is byte-identical to before. The refuted performance claim is filed LOUD as declared negative N10 in the
+module docstring, in harmonic_fill's docstring, and in the selftest -- so no future session rebuilds joint iteration
+for performance.
+
+VERIFY: inpaint selftest green (multi-channel == per-channel loop EXACTLY byte-for-byte; single-channel byte-
+identical to step 1; (H,W,C) mask rejected; N10 kept negative recorded); compileall + audit_imports clean;
+reachability/catalog_gaps/skill_lint 0 gating gaps; 42 fill-related tests pass + new mind-level
+test_multichannel_inpaint_equals_the_per_channel_loop_it_replaces. Discoverability: added inpaint + harmonic_fill to
+_METHOD_ALIASES (image-oriented phrasings did not rank on the field-oriented docstring) -- 5/5 stranger phrasings
+("inpaint an rgb image", "fill a masked area of a photo", ...) now resolve. capdoc/docgen regenerated
+(capabilities.json unchanged -- faculty extension, default_catalog untouched).
+
+FILES: holographic/sampling_and_signal/holographic_inpaint.py (harmonic_fill (H,W,C) per-channel path + N10 negative
++ dispatcher doc + selftest), holographic/misc/holographic_unified.py (inpaint + harmonic_fill faculty docs),
+holographic/caching_and_storage/holographic_catalog.py (_METHOD_ALIASES: inpaint, harmonic_fill),
+tests/test_holographic_nca_backlog.py (multi-channel mind-level test).
+
+DELETES app workaround: the per-channel loop in leStudio's Inpaint node -- callers pass an (H,W,C) field and get the
+same result in one call. (No latency change: the loop just lives in the engine now. That is the honest scope.)
+
+
+## BACKLOG ITEM 7 (leStudio): shader_pipeline batched channels + GPU switch -- a REAL batch win (unlike item 6)
+
+Backlog: "shader_pipeline.apply applies to one 2-D field; RGB callers loop. It is pure FFT algebra, so batch the
+channels and inherit use_gpu for free." This time the premise HOLDS -- FFT is diagonal/batchable in the Fourier
+basis and the transfer is composed ONCE, so batching over a channel axis is a genuine win (contrast item 6, where the
+solver was iterative and the loop was optimal -- I measured both rather than assume).
+
+CHANGE (holographic_shader.Pipeline):
+(a) apply now accepts the pipeline's spatial `shape` OR that shape + ONE trailing CHANNEL axis (an RGB image
+    (H,W,3)). The FFT runs over the SPATIAL axes only (self.axes) and the compiled transfer broadcasts over the
+    channel axis (H[..., None]) -- one batched rfftn/irfftn instead of a Python loop. _fwd/_inv gained an `xp` param
+    (default numpy) so the same code runs on either backend.
+(b) apply routes through the engine's array_module() GPU switch: xp = numpy unless use_gpu(True) is active AND cupy
+    is present, in which case field+transfer move to the device, the FFT/multiply/iFFT run there, and asnumpy brings
+    the result back. The pipeline inherits use_gpu FOR FREE -- it is pure FFT algebra. GPU off (default) is byte-
+    identical to before.
+
+MEASURED (measurement over narrative, and this one pays): 1080p RGB, real pipeline: per-channel loop 0.362s vs
+batched 0.256s = 1.42x on CPU, from the shared FFT plan/setup (the arithmetic is still C FFTs, so the CPU win is
+modest and HONESTLY stated as ~1.4x, not 3x). RGB batched == the per-channel loop EXACTLY (byte-for-byte), and the
+single-field path is byte-identical to the historic apply. GPU path: WIRED and falls back to numpy cleanly here (no
+CUDA device in this environment, so the "1080p apply beats CPU" GPU claim is IMPLEMENTED but not measurable here --
+stated honestly rather than fabricated). Throughput-only contract: the GPU path matches numpy to a tolerance, not
+bit-exact -- that is a CPU property (the backend's documented contract).
+
+VERIFY: shader module selftest green (single-field byte-identical; RGB batch == loop exact; shape guard; GPU-switch
+note); compileall + audit_imports clean; reachability/catalog_gaps/skill_lint 0 gating gaps; 227 shader/postfx/
+pipeline/spectral tests pass + new mind-level test_shader_pipeline_batches_rgb_channels_exactly_like_the_loop.
+Discoverability already 5/5 on the existing shader catalog entries (no new aliases needed). capdoc/docgen regenerated
+(capabilities.json unchanged -- Pipeline.apply is a method, default_catalog untouched).
+
+FILES: holographic/rendering/holographic_shader.py (_fwd/_inv xp param, apply channel-batch + array_module GPU
+switch, selftest), holographic/misc/holographic_unified.py (shader_pipeline faculty doc), tests/
+test_holographic_shader.py (RGB-batch mind-level test).
+
+DELETES app workaround: leStudio's per-channel stack in the Spectral chain node -- pass the (H,W,3) image to
+pipe.apply() and get the batched result in one call; flip use_gpu(True) for the device path.
+
+NOTE for the performance-conscious: the CPU batch win is modest (~1.4x) because the FFT arithmetic is unavoidably C
+transforms; the DEVICE path is where the big 1080p win lives, and it is wired and default-off. Not measurable in this
+CPU-only sandbox -- verify on a CUDA box.
+
+
+## BACKLOG ITEM 11 (leStudio): the app-neutral typed-section CONTAINER -- keystone for sharing one workspace across apps
+
+The strategic item: Moose is building several apps ON leCore (image editor/compositor, 3-D modeller, a video editor
+to come) and they all need to share ONE workspace file so a document from one app can travel into another. AUDITED
+first -- find_capability on "save typed sections to one file", "app-neutral project file format", "persist unknown
+kinds and round-trip them" etc. returned only fallbacks; workspace_manager exists but is a DIFFERENT thing (it
+checkpoints a live DB by REPLAY, not a file format). Genuine gap -> new module.
+
+BUILT holographic/io_and_interop/holographic_container.py (the path the backlog names). A container is a ZIP of a
+manifest.json + numeric array payloads whose body is a list of TYPED SECTIONS {kind, id, meta, arrays}. The whole
+point: a section whose `kind` a reader does not understand ROUND-TRIPS UNTOUCHED, so each app registers its own kinds
+and none owns the format. API: save_container(sections, meta=None, compress=True) -> bytes; load_container(bytes) ->
+{meta, sections}. leStudio's .lews v2 was the reference; this lifts the SECTION machinery into the core so leStudio
+deletes its local format and registers "lestudio.document"/"lestudio.brush" as kinds.
+
+THREE DESIGN DECISIONS, each with a WHY:
+- SAFETY: arrays serialise via numpy's .npy at allow_pickle=False -> a container can NEVER carry executable pickle;
+  loading a foreign file runs no code and reconstructs only plain numeric arrays. Object-dtype arrays are REFUSED at
+  save. This matters precisely because the format's job is to open files written by OTHER apps.
+- DETERMINISM / byte-identical save->load->save (a stated acceptance): three non-determinism sources removed -- .npy
+  carries no timestamp; every zip entry uses a FIXED date_time (the 1980 zip epoch), not the wall clock; entries are
+  emitted in a fixed order (manifest, then sections in order, arrays sorted by name) with sort_keys JSON. compress=
+  False (STORED) is byte-stable regardless of zlib; default compress=True (DEFLATE) is deterministic within an env
+  and smaller.
+- FILENAMES by INDEX (sections/{i}/{name}.npy), not by kind/id: collision-free and filesystem-safe regardless of what
+  a kind string contains (leStudio's reference embedded kind+id in the filename, which a shared multi-app format
+  cannot rely on staying tame).
+
+KEPT NEGATIVE / disambiguation (the discoverability tax the guide warns about): this is NOT workspace_manager. Two
+things must not both answer "save my workspace". The container is the FILE FORMAT for shipping typed data between
+apps; workspace_manager is a live-DB session checkpoint. Both docstrings and the catalog entry state the distinction,
+and find_capability("checkpoint a scene") still returns workspace_manager while "save a project file" returns the
+container -- verified no cannibalisation.
+
+VERIFY: module selftest green (round-trip preserves kinds/ids/meta/arrays + DTYPES; unknown kind untouched; save->
+load->save BYTE-IDENTICAL; determinism; object arrays + non-container bytes refused); wired as mind.save_container /
+mind.load_container (delegating); registered "Typed-section container (app-neutral workspace file)" with 12 aliases,
+5/5 discoverability; compileall + audit_imports clean; reachability (container is WIRED, not import-only) / catalog_
+gaps / skill_lint 0/0/0 (a 684->600 does-length regression caught by skill_lint and tightened before shipping);
+new tests/test_holographic_container.py (3 tests incl. the leStudio migration scenario + the byte-identical foreign-
+kind keystone) pass; catalog tests 14 pass (the registered example runs); selftest harness green. capdoc/docgen
+regenerated -- container now in capabilities.json / CAPABILITIES.md / REFERENCE.md (module count 519->520).
+
+FILES: holographic/io_and_interop/holographic_container.py (NEW), holographic/misc/holographic_unified.py
+(save_container + load_container faculties, placed by workspace_manager and explicitly disambiguated), holographic/
+caching_and_storage/holographic_catalog.py (container capability entry), tests/test_holographic_container.py (NEW).
+
+DELETES app workaround: leStudio's local save_workspace/load_workspace .lews implementation -- it registers its kinds
+and calls the core container instead. UNLOCKS backlog 9/10 (shipping shader/GLSL assets as sections) and the multi-
+app story: image editor + 3D app + video editor persist to ONE forward-compatible file.
+
+
+## BACKLOG ITEM 9 (leStudio): PostChain.to_glsl() -- the colour pipeline as a fragment shader (GPU grade at display rate)
+
+Motivation: emit a fragment shader for a postfx chain so a host runs the whole colour pipeline on the VIEWER's GPU at
+display rate -- live video grading in the browser, zero server cost per frame; pairs with the SDF emitter (item 8) so
+"leCore generates your GPU code" is an architecture, not a trick. AUDITED first: no existing PostChain GLSL emitter
+(only the SDF one). Genuine gap.
+
+CHANGE (holographic_postfx): chain_to_glsl(steps, name, skip_unsupported) + PostChain.to_glsl() + mind.postfx_to_glsl.
+Emits a complete Shadertoy-style fragment shader: a reusable vec3 postfx(vec3 c, vec2 uv) plus a mainImage that
+samples iChannel0.
+
+THE HONEST BOUNDARY (why only pointwise stages, stated loud): a single fragment shader computes one output pixel from
+the INPUT texture. POINTWISE stages -- exposure, reinhard, aces, gamma, color_grade, vignette -- compose perfectly
+(c = f_n(...f_1(texel))) and are emitted EXACTLY. A NEIGHBOUR-sampling stage (bloom/glare/dof/chromatic_aberration/
+denoise/sharpen/motion_blur) reads OTHER pixels, and after a prior stage it would need that prior stage's OUTPUT as a
+texture -- which one pass does not have (multi-pass render targets, or a depth texture for dof). So those RAISE with a
+precise message rather than emit a shader that silently disagrees with .apply; skip_unsupported=True emits the
+pointwise stages only with a `// skipped` marker, so a host still GPU-runs the colour pipeline and does bloom itself.
+This is EXACTLY the backlog acceptance chain -- exposure -> grade -> vignette -> ACES is all pointwise.
+
+MEASURED / verified (not eyeballed): (1) an INDEPENDENT numpy transcription of the emitted GLSL per-pixel semantics
+(uv = i/(N-1), matching numpy's grid) equals PostChain.apply to 3.3e-16 on the acceptance chain and on reinhard+gamma
+-- so the emitted shader is a FAITHFUL transcription, not an approximation. (2) The emitted shader, wrapped for WebGL2,
+PARSES as valid GLSL ES 3.00 (@shaderfrog/glsl-parser via node) -- the only note is the built-in gl_FragCoord.
+
+KEPT NEGATIVE (deferred, not shipped as a silent regression): a fixed-tap single-pass bloom/glare approximation is
+possible but is a LOSSY approximation of the FFT blur AND only faithful as the FIRST stage (single-pass has no
+intermediate texture). The backlog asked for it; it is DEFERRED with this reason rather than ship a shader that
+disagrees with .apply. When wanted, it is a multi-pass job (threshold->downsample->blur->upsample->add) the host owns.
+
+VERIFY: postfx module selftest green (GLSL math == .apply to <1e-9 on two chains; neighbour/blur stages refuse; skip
+works); wired PostChain.to_glsl() + mind.postfx_to_glsl (accepts a chain OR a step list); registered postfx_to_glsl in
+_METHOD_ALIASES, 5/5 discoverability; compileall + audit_imports clean; reachability/catalog_gaps/skill_lint 0/0/0;
+33 postfx tests + new mind-level test_postfx_to_glsl_matches_apply_through_the_mind. capdoc/docgen regenerated
+(capabilities.json unchanged -- faculty extension, default_catalog untouched).
+
+FILES: holographic/rendering/holographic_postfx.py (chain_to_glsl + _glsl_stage + _GLSL_POINTWISE + PostChain.to_glsl
++ selftest), holographic/misc/holographic_unified.py (postfx_to_glsl faculty), holographic/caching_and_storage/
+holographic_catalog.py (_METHOD_ALIASES: postfx_to_glsl), tests/test_integration.py (mind-level test).
+
+DELETES/UNLOCKS: leStudio can run its colour grade (exposure/grade/tonemap/vignette/gamma) entirely on the viewer's
+GPU via the emitted shader (zero per-frame server cost); with the container (item 11) it can SHIP that shader as a
+section. Item 10 (GLSL emitters for pattern_field / cosine_palette) is the natural next step -- both are closed-form
+and compose with this into fully GPU-resident looks.
+
+
+## BACKLOG ITEM 10 (leStudio): GLSL emitters for pattern_field / cosine_palette -- GPU-resident procedural looks
+
+Both are closed-form, so a `float pattern(vec3 p)` and a `vec3 palette(float t)` emitter make procedural backgrounds
+and palettes render client-side and COMPOSE with the item-9 postfx and item-8 SDF emitters into fully GPU-resident
+looks. AUDITED first: no existing pattern/palette GLSL emitters (genuine gap).
+
+CHANGE: pattern_to_glsl (holographic_pattern) emits a GLSL `float <fn>(vec3 p)` for the CLOSED-FORM kinds
+(checker/stripes/gradient/dots); cosine_palette_to_glsl (holographic_domain) emits `vec3 <fn>(float t)` =
+clamp(a+b*cos(2*pi*(c*t+d))). Both wired as mind.pattern_to_glsl / mind.cosine_palette_to_glsl.
+
+THE HONEST BOUNDARY (stated loud, same discipline as items 6/9): value_noise and fbm are NOT per-point emittable.
+Their determinism comes from an INTEGER-LATTICE hash done in int64 with wraparound (multipliers 73856093 /
+1274126177, >>13/>>16 shifts); GLSL ES 3.00 has only 32-bit ints, so the 64-bit wrap cannot be reproduced and a GPU
+noise would look similar but FAIL the probe-grid match (the backlog's stated acceptance). They RAISE with that reason
+rather than emit a shader that disagrees with the numpy field. KEPT NEGATIVE: deferred, not faked.
+
+MEASURED (the acceptance is per-point match on a probe grid, and it is exact): an INDEPENDENT numpy transcription of
+each emitted GLSL function matches the numpy pattern/palette to float precision on a 300-500 point probe grid --
+checker/gradient/dots/stripes-sharp EXACT (0.0), stripes 1.4e-14 (the sin), palette 3.7e-15 - 5.2e-15 across seeds
+(the cos). The emitted GLSL, composed into a pattern->palette WebGL2 background shader, PARSES as valid GLSL ES 3.00
+(@shaderfrog/glsl-parser). (Dots uses floor(x+0.5) vs numpy's banker's rounding -- differ only on exact .5, avoided
+on a generic probe grid; documented.)
+
+VERIFY: pattern + domain module selftests green (per-point match <1e-9; noise/fbm raise); wired two faculties
+(delegating); discoverability already 5/5 on the auto-registered faculty names (no aliases needed); compileall +
+audit_imports clean; reachability/catalog_gaps/skill_lint 0/0/0; 26 pattern/domain/palette tests + new mind-level
+test_pattern_and_palette_glsl_emitters_match_numpy_through_the_mind. capdoc/docgen regenerated (capabilities.json
+unchanged -- faculty extensions, default_catalog untouched).
+
+FILES: holographic/misc/holographic_pattern.py (pattern_to_glsl + _GLSL_CLOSED_FORM + _gf + selftest),
+holographic/mesh_and_geometry/holographic_domain.py (cosine_palette_to_glsl + _gf3 + selftest), holographic/misc/
+holographic_unified.py (pattern_to_glsl + cosine_palette_to_glsl faculties), tests/test_holographic_shader.py
+(mind-level test).
+
+UNLOCKS: with items 8 (SDF), 9 (postfx), and 10 (pattern/palette), leCore now emits the SDF geometry, the colour
+grade, AND the procedural background/palette as GLSL -- "leCore generates your GPU code" is an architecture. The
+container (item 11) ships those shaders as sections. THE ENTIRE leStudio BACKLOG'S GLSL STORY IS NOW REAL except the
+deferred blur/noise pieces (documented, multi-pass/host-owned).
+
+
+## BACKLOG ITEM 12 (leStudio): the FRAME-SOURCE protocol -- the temporal-media seam for the video editor (the FINAL item)
+
+Backlog (marked "design first"): leStudio built capture threads, seq-numbered frames, play/pause/seek, and signature-
+based invalidation ALL app-side. The reusable kernel is tiny -- a consumer only needs "the current frame and a number
+that changes when the frame changes" -- and if leCore wants first-class video (temporal NCA, optical-flow doors, video
+colour transfer) THIS is the seam. AUDITED first: no FrameSource protocol, no cv2 in core (constitution holds);
+TemporalReuse reuses frame OUTPUT (reprojection), orthogonal to a frame INPUT contract. Genuine gap.
+
+DESIGN (the "design first" made concrete) -- holographic/io_and_interop/holographic_framesource.py:
+THE CONTRACT (duck-typed, a host source need not subclass anything): a FrameSource has get() -> (frame, seq) where
+seq changes IFF the frame content changes; get() is IDEMPOTENT (reads current state, does not advance -- advancing is
+the source's job: a capture thread for live, advance()/seek() for deterministic). Plus seekable/pausable flags and
+optional seek(pos in [0,1]) / pause(flag). WHY seq NOT a pixel-hash: hashing every frame is O(pixels) per pull; the
+source already knows when it advanced, so it counts -- seq is the cheap honest invalidation signal (leStudio's
+media:src:seq).
+
+THE CONSTITUTIONAL LINE (the acceptance): the engine owns the CONTRACT, NOT decoding. cv2/ffmpeg/yt-dlp stay host-side
+(and are banned from core). A leCore door takes a host-provided FrameSource and calls .get(); it imports no decoder.
+The module imports numpy+hashlib+stdlib only, checked in the selftest via the AST's actual import statements (not a
+substring scan -- which would false-positive on the decoder names written in the test itself; that bug was found and
+fixed).
+
+COMPONENTS: FrameSource (base/contract doc), is_frame_source (structural duck-check, so a host source that never
+imported leCore qualifies), frame_key (hashlib memo key from the current seq -- deterministic, never Python hash()),
+map_frames(source, fn, cache) = THE consuming door (pull, memoise fn(frame) by seq, skip recompute while the frame is
+held), collect_frames (a window for temporal ops), SyntheticFrameSource (pure-numpy DECODER-FREE deterministic clip:
+clock/gradient/bars, advancing by index not wall-clock so a frame is a reproducible function of its index). Wired as
+mind.map_frames / mind.frame_key / mind.is_frame_source / mind.synthetic_frame_source.
+
+RENAME (caught before shipping): the reference class was TestPatternSource -> pytest tried to COLLECT it (Test* prefix)
+and the name wrongly implied test-only. Renamed SyntheticFrameSource / faculty synthetic_frame_source before it shipped
+-- cleaner public API, no CI warning.
+
+VERIFY: module selftest green (get() idempotent -> (ndarray, seq); advance/seek/pause honest; frame_key invalidates
+IFF seq changes; map_frames memoises by seq; a FOREIGN duck-typed host source is consumed; module imports NO decoder);
+wired 4 faculties (delegating); registered "Frame-source protocol (temporal media seam)" with 11 aliases, 5/5
+discoverability (does-field tightened 679->600 after a skill_lint regression); compileall + audit_imports clean;
+reachability (framesource WIRED, not import-only) / catalog_gaps / skill_lint 0/0/0; new tests/test_holographic_
+framesource.py (5 tests incl. the host-source-without-a-decoder acceptance, driving color_transfer per frame).
+capdoc/docgen regenerated -- framesource in capabilities.json / CAPABILITIES.md / REFERENCE.md (module count 520->521).
+
+FILES: holographic/io_and_interop/holographic_framesource.py (NEW), holographic/misc/holographic_unified.py (4
+faculties near frame_server), holographic/caching_and_storage/holographic_catalog.py (protocol entry), tests/
+test_holographic_framesource.py (NEW).
+
+DELETES/UNLOCKS: leStudio's app-side seq/invalidation machinery collapses to "honour get() -> (frame, seq)"; the
+engine now has the seam for temporal doors -- the door map_frames already drives a REAL faculty (color_transfer) per
+frame, memoised by seq, which IS video colour transfer. With the container (item 11) a graded clip's per-frame results
+persist as sections.
+
+*** THE ENTIRE 12-ITEM leStudio BACKLOG IS NOW COMPLETE. *** P0 (1-4), item 8 (uniform Shadertoy camera), performance
+(5-7; item 6 refuted and filed honestly), item 11 (container keystone), items 9/10 (GLSL colour + pattern/palette
+emitters), item 12 (frame-source seam). Every item shipped with the full close-out ritual and measured negatives kept
+loud (item 6's no-speedup, items 9/10's deferred blur/noise, item 7's honest ~1.4x-CPU/GPU-unmeasurable).
+
+
+## CAPSTONE + WIRING SWEEP over the whole 12-item arc (no half-implemented or buried functionality ships)
+
+CAPSTONE TEST (tests/test_holographic_container.py::test_cross_item_workspace_composes_all_backlog_pieces): one
+container carries a leStudio document, the emitted SDF/postfx/pattern+palette shaders (items 8/9/10, stored as uint8
+utf-8 sections -- the numeric-only rule holds), and a frame-source-graded clip (item 12: map_frames driving
+color_transfer per frame) -- and save->load->save of the whole thing is BYTE-IDENTICAL. The multi-app story pinned
+end-to-end as a regression trap.
+
+THE SWEEP (every surface this arc touched, re-verified in one pass):
+1. FACULTIES: all 18 arc-touched entry points callable + behaving on a fresh mind (image_colours as_float,
+   color_transfer aliases, palette_stops, segment max_dim, inpaint HWC, shader batch, to_shadertoy/sdf_shader camera,
+   postfx_to_glsl + PostChain.to_glsl, pattern/palette emitters, save/load_container, 4 framesource faculties,
+   make_pattern inert seed). 18/18.
+2. HTTP /invoke ROUND-TRIP (the guide's agent-facing proof, which the per-item passes had NOT yet done): service
+   started, all 10 new faculties present in GET /tools (1404 tools auto-introspected), and POST /invoke verified for
+   postfx_to_glsl / pattern_to_glsl / cosine_palette_to_glsl / palette_stops / save_container (bytes serialise
+   through the service's repr envelope). "It works in-process" and "an agent can call it" are now BOTH proven.
+3. AUDITS: compileall + audit_imports clean; reachability import-only list == the same PRE-EXISTING 8 (nothing this
+   arc added is buried); catalog_gaps 0; skill_lint 0/0/0.
+4. TESTS: 229 targeted tests green across container/framesource/postfx/pattern/shader/pipeline/emit/catalog/
+   colortransfer/sdf/vision/inpaint/segment.
+
+GENERALIZATION (the sweep's "which existing module is this in a different costume" catch): items 9 and 10 had
+quietly grown THREE private copies of the same GLSL float formatter (postfx._g, pattern._gf, domain._gf3's inner).
+PROMOTED: glsl_float / glsl_vec3 now live ONCE in holographic_emit (the code-emission family -- WGSL/C/JS/Zig
+dialects already live there, GLSL literals belong with them), and the three private names remain as thin delegating
+wrappers so nothing breaks. Behaviour verified byte-identical after consolidation (emitted shaders unchanged; edge
+cases pinned: glsl_float(2)=="2.0", 1e-6 keeps its exponent). One formatter, three call sites -- the next GLSL
+emitter imports it instead of writing a fourth.
+
+STALENESS CATCH: the per-item ritual ran capdoc.py + docgen.py but NOT the full generator set -- docs/DOC_MAP.md was
+stale at 518 modules and FACULTY_MAP predated the new faculties. tools/regen_docs.py (7 generators, 9 outputs) run:
+DOC_MAP now 520 modules, FACULTY_MAP now lists all new faculties among UnifiedMind's 1408 public methods. LESSON for
+the ritual: close-out step 7 should be `python3 tools/regen_docs.py`, not the two generators by name.
+
+Nothing found half-wired; two real catches (formatter triplication, doc-generator staleness) fixed and pinned.
+
+
+## BUILD SESSION (backlog holographic+research) -- B1: shared GLSL shader assembler (generalize + replace hand-rolled composition)
+
+AUDITED: no existing shader-assembly helper; the 4 GLSL emitters (sdf/postfx/pattern/palette) each hand-rolled their
+wrapper and the cross-item capstone concatenated strings by hand. Genuine generalization gap.
+
+BUILT in holographic_emit (the code-emission family, beside the sweep-consolidated glsl_float/glsl_vec3):
+- glsl_function_names(src): best-effort top-level function-name extractor (skips comments/preprocessor).
+- assemble_glsl(functions, entry, header): compose emitted GLSL pieces into ONE source, deterministically, and RAISE
+  on a duplicate top-level function name (compose two 'palette's -> error, not a silently shadowed shader; rename via
+  the emitter's fn_name=). The kept negative from the sweep, made into a guard.
+- webgl2_wrap(src, uniforms, entry): wrap a Shadertoy-style source into a COMPLETE GLSL ES 3.00 shader (#version +
+  precision + declared uniforms + out vec4 + main() bridge). The one true wrapper -- callers stop hand-rolling a
+  preamble that drifts.
+Wired mind.compose_shader / mind.wrap_webgl2. REPLACED the capstone test's manual pattern+palette string-concat with
+m.compose_shader([...]) -- the shared path now exercised in the composed-workspace test.
+
+BYTE-IDENTICAL: the assembler is ADDITIVE -- the 4 emitters are untouched, their output hashes unchanged (sdf
+e138246ac0e1, postfx 499241f38780, pattern 22f982923bf1, palette 1133a6f3a541). Composed+wrapped shader parses as
+valid GLSL ES 3.00 (shaderfrog).
+
+VERIFY: emit selftest green (compose + dup-raise + rename-resolves + webgl2 deterministic); 5/5 discoverability;
+compileall + audit_imports clean; reachability import-only == pre-existing 8; catalog_gaps/skill_lint 0/0;
+container/capstone tests 4/4. capabilities.json unchanged (faculties auto-catalogued; no default_catalog entry).
+FILES: holographic_emit.py (assembler + selftest), holographic_unified.py (2 faculties), test_holographic_container.py
+(capstone via compose_shader). UNBLOCKS C1/C4/C5 (they assemble via this).
+
+
+## C1: Khronos PBR Neutral tonemap (new pointwise postfx stage; AgX deferred as a kept negative)
+
+AUDITED: no existing pbr_neutral. Added pbr_neutral() to holographic_postfx (EXACT Khronos PBR Neutral formula,
+KhronosGroup/ToneMapping Apache-2.0 -- the glTF-standard ACES successor that HOLDS HUE and only desaturates near the
+top of range). Registered in EFFECTS; added to _GLSL_POINTWISE + a _glsl_stage case + a _pbr_neutral GLSL helper.
+
+BYTE-IDENTITY preserved: refactored chain_to_glsl so _aces is emitted UNCONDITIONALLY (helpers block starts as
+_ACES_GLSL) and a tonemapper helper (_pbr_neutral) is appended ONLY when that stage is present. A non-pbr chain keeps
+_aces immediately before the postfx fn -- verified structurally ("}\n\nvec3 postfx" unchanged) so every previously
+emitted shader is byte-identical.
+
+VERIFIED per-point: independent numpy transcription of the emitted GLSL == PostChain.apply to 0.0 (0.8-0.04 kept as an
+expression both sides so float32/float64 agree); pbr_neutral holds hue vs ACES (bright red stays redder); WebGL2
+parse OK. 5/5 discoverability via new post_process/postfx_chain aliases. 0/0/0 audits; 57 postfx/emit tests pass.
+
+KEPT NEGATIVE (deferred, loud): AgX NOT shipped. Its fitted-approximation constants (Filament/three.js variants) and
+output-colourspace handling vary by implementation; shipping it risks a subtly-wrong look. Deferred until the exact
+constants are reconciled against a canonical source / the research report -- ship what is exact (PBR Neutral), defer
+what is not (AgX), per "measurement over narrative."
+
+FILES: holographic_postfx.py (pbr_neutral fn + EFFECTS + _GLSL_POINTWISE + _glsl_stage + _ACES_GLSL/_PBR_NEUTRAL_GLSL/
+_GLSL_HELPERS + selftest), holographic_catalog.py (post_process/postfx_chain aliases).
+
+
+## C2: GPU-reproducible 32-bit hash -> unblock noise/fbm GLSL emit (closes item-10 kept negative)
+
+RULE 0: hash_unit/hash_u64 already exist but are 64-bit (GLSL ES 3.00 has only 32-bit ints) -- that is EXACTLY why
+item 10 refused noise/fbm. So this is NOT a duplicate hash; it is the 32-bit companion for the GPU-portability case.
+Verified numpy uint32 arithmetic wraps mod 2**32 identically to a GLSL uint.
+
+BUILT in holographic_determinism (beside hash_unit -- all stateless hashing in one family):
+- hash32_pcg(v): PCG output hash (Jarzynski & Olano, JCGT 2020), uint32->uint32, bit-identical to the exact GLSL
+  arithmetic (verified against a hand-computed uint32 reference for scalars + arrays).
+- hash32_unit(*coords, seed): lattice coords -> [0,1) via a distinct-prime fold + hash32_pcg.
+- hash32_pcg_glsl(fn): emits the matching GLSL `uint pcg(uint)`.
+BUILT in holographic_pattern (REUSING hash32_unit -- no second hash convention):
+- value_noise32/fbm32: 32-bit twins of value_noise/fbm (same quintic-trilinear structure). Registered as NEW PATTERNS
+  kinds "noise32"/"fbm32" (additive; the int64 "noise"/"fbm" default output is UNCHANGED -- hashes bd1938e7a7b5 /
+  1975b0de73ae preserved).
+- pattern_to_glsl now EMITS noise32/fbm32 (pcg helper + seed-parameterised _h01_32 + _vnoise32, octave loop for fbm);
+  the int64 noise/fbm still RAISE but now point the caller to the 32-bit twin.
+
+VERIFIED per-point CPU<->GLSL (independent float32 transcription, same PCG both sides): noise32 max err 6e-7..9e-7,
+fbm32 2.6e-7 -- all < 3e-6 (float32 precision). Both emitted shaders parse as GLSL ES 3.00 (shaderfrog). Selftests
+assert the pcg==reference identity, the per-point noise32 match, fbm32 one-call-per-octave, and noise32 != int64 noise
+(genuinely new, not an alias). 6/6 discoverability (pattern_to_glsl aliases + a curated hash32 capability, does<600).
+0/0/0 audits; import-only == pre-existing 8; 11 pattern/determinism tests pass.
+
+KEPT NEGATIVE (item 10, still standing): the DEFAULT int64 value_noise/fbm remain non-emittable (their 64-bit wrap
+can't be reproduced in 32-bit GLSL). C2 does not change them -- it adds the 32-bit twins. hash32_pcg is COARSER than
+hash_u64 (32 vs 53 bits) and must NOT be swapped into hash_u64's CPU-determinism uses.
+
+FILES: holographic_determinism.py (hash32_pcg/hash32_unit/hash32_pcg_glsl + selftest), holographic_pattern.py
+(value_noise32/fbm32 + PATTERNS + pattern_to_glsl emit + _glsl_noise_prelude + selftest), holographic_catalog.py
+(pattern_to_glsl aliases + curated hash32 entry). capabilities.json CHANGED (new curated entry) -> regen pending.
+
+
+## A1: spectral-accelerated harmonic inpaint -- MEASURED NEGATIVE (no code shipped; Jacobi stays)
+
+The marquee "use the FFT program not the Python loop" item. TESTED, does not pay:
+- Pure diffuse-and-reproject (fft-smooth whole field, re-impose known pixels, repeat): 20x SLOWER than Jacobi and
+  wrap-biased (~8e-4 off the true harmonic answer -- Dirichlet != periodic, mirror-pad only partially helps).
+- Coarse-to-fine alpha schedule + Jacobi finish: reaches Jacobi's steady state (agree 2e-9) but 0.75x -- still SLOWER.
+Root cause: a Jacobi sweep is one cheap cache-friendly real stencil; an FFT step (complex, 4x mirror-padded) costs
+~30x a sweep, and the spectral warm-start cuts Jacobi iterations only ~2-5x -- it never pays back. Would need multigrid
+(a different algorithm, NOT the FFT route) to win. Recorded LOUD in harmonic_fill's docstring so no session reinvents
+it. This is the same shape as item 6's negative: "possible but doesn't pay" != "impossible". Measurement over
+narrative -- the backlog's marquee idea was a trap, and that is the honest result.
+
+
+## C3: faster CPU blur (IIR / summed-area) -- MEASURED NEGATIVE in pure NumPy (no code shipped; FFT stays)
+
+Research flagged recursive-IIR (Deriche/Young-van Vliet) and summed-area/box blur as O(n) alternatives to FFT
+convolution. MEASURED against numpy's _fft_blur:
+- 3-pass box blur (cumsum SAT, box^3 ~ Gaussian, slicing-optimised): 0.34x-0.60x of FFT at 256/1080p/4K -- SLOWER
+  (needs ~12 memory-bound full-array passes vs the FFT's two transforms). Interior tolerance to FFT was fine
+  (max ~0.002-0.018), so the approximation is acceptable -- it just isn't faster.
+- Recursive IIR: a sequential per-axis scan; NumPy can't vectorise a recurrence, so pure-numpy IIR = a Python loop
+  over rows/cols = far slower (scipy.signal.lfilter is banned in core).
+numba is absent in this environment, so a compiled-IIR speedup could not be measured -- and per the constitution an
+accelerator's pure-numpy fallback (here: the FFT) must already win, which it does. Recorded LOUD at _fft_blur's
+docstring. The real IIR/SAT win is a COMPILED path (numba/Zig/GLSL); GPU separable blur is what the multi-pass shader
+emitter (C4) targets. "O(n) beats n log n" only with a small enough constant, and vectorised-numpy's FFT constant is
+smaller than a many-pass box's. Same discipline as A1/item 6: possible elsewhere, doesn't pay here, written down loud.
+
+
+## A2: bounded multi-frame frame cache via ColdStore (premise corrected)
+
+CORRECTED PREMISE: map_frames' dict cache was ALREADY single-slot (keys 'seq'/'out', latest frame only) -- O(1) in
+RAM, not the "unbounded {seq:out} dict" the backlog assumed. No leak to fix. The genuine value is a MULTI-frame
+cache for scrub/seek/loop (a leStudio timeline dragged back and forth). Delivered additively: `cache` may now be a
+ColdStore (holographic_coldstore) -> a bounded multi-frame LRU keyed by seq. Reuses the engine primitive rather than
+a hand-rolled growing dict. Dict path byte-identical (single-slot, streaming).
+
+GUARANTEE (measured in selftest): ColdStore RETAINS every processed frame's output (cools/compresses, never evicts),
+warming on demand -- so scrub-back NEVER recomputes -- while holding at most keep_warm live, so RAM is bounded.
+Verified: 6 frames compute once each, warm(live) <= keep_warm=3, scrub-back to 0/2/5 all HIT (0 recomputes).
+FILES: holographic_framesource.py (map_frames ColdStore branch + selftest). No capabilities.json change (faculty
+delegates; make_pattern-style). Discoverability via the Frame-source protocol + Fat-margin cache entries.
+
+
+## C4: multi-pass bloom emitter (opt-in GPU DAG) -- the honest form item 9 had to refuse
+
+Item 9 refused bloom/glare/dof in a single fragment pass (no intermediate texture). C4 emits BLOOM as an ordered
+multi-pass DAG: bright-pass -> separable blur H -> separable blur V -> composite, each a complete GLSL ES 3.00
+fragment shader, plus a machine-readable wiring spec (which sampler(s) each pass reads, which ping/pong target it
+writes). bloom_glsl_passes() returns {passes, targets}; the host allocates two ping-pong targets and runs them in
+order. Wired mind.bloom_passes.
+
+VERIFIED: an independent transcription of the emitted passes' DAG == the numpy DAG reference EXACTLY (0.0). The DAG
+APPROXIMATES the exact FFT bloom() within a measured interior tolerance of ~2e-4 (sigma 4) -- documented, because a
+2-D Gaussian is separable so H-then-V reproduces it, but a finite 3-sigma kernel with clamped edges is not the
+circular exact Gaussian. All 4 passes parse as GLSL ES 3.00. 5/5 discoverability; 0/0/0 audits; import-only == 8.
+
+KEPT NEGATIVE (loud): the multi-pass separable DAG is an APPROXIMATION of the exact FFT bloom (finite kernel + clamped
+edges), not bit-exact. That is the honest gap -- faithful bloom IS genuinely multi-pass, which is the whole reason C4
+exists. glare/dof follow the same shape (dof adds a CoC weight from a depth texture in the composite); emitted on
+demand later if needed -- bloom is the canonical case shipped and proven.
+FILES: holographic_postfx.py (_gauss_taps/_blur_pass_glsl/bloom_glsl_passes/_bloom_numpy_dag + selftest),
+holographic_unified.py (mind.bloom_passes), holographic_catalog.py (bloom_passes aliases).
+
+
+## C5: WGSL emitter beachhead (closed-form patterns) -- verified, scoped
+
+RULE 0: an existing emit_source(text, "wgsl") converts SCALAR PYTHON functions to WGSL; the pattern emitters produce
+vec3 GLSL from a per-kind spec, so this is a distinct surface (not a duplicate). WGSL is NOT GLSL renamed: no `mod`
+(spelled x - k*floor(x/k)), `select(false,true,cond)` for the ternary, vec3<f32>/let. So pattern_to_wgsl EMITS from
+the same math, it does not machine-translate the GLSL string (the backlog's kept-negative made concrete).
+
+BUILT pattern_to_wgsl(name, ...) for the closed-form kinds (checker/stripes/gradient/dots) -> `fn pattern(p: vec3<f32>)
+-> f32`. Wired mind.pattern_to_wgsl (sibling of pattern_to_glsl -- the user picks the target explicitly, so glsl/wgsl
+are genuinely different, not a discoverability-tax duplicate). VERIFIED per-point vs the numpy field to f32 (checker
+0.0, stripes 1.6e-6, gradient 6e-8, dots 9e-7, all < 3e-6). Structural asserts: real WGSL (select/let/vec3<f32>),
+no GLSL-isms (no `float`, no `mod(`). 5/5 discoverability; 0/0/0 audits; import-only == 8.
+
+DEFERRED (documented scope, raises): noise32/fbm32 WGSL (needs its own verified u32 bit-op pass -- WGSL u32 semantics
+differ enough to warrant separate verification), palette, and the texture-sampling shaders (postfx/sdf, which need
+WGSL's @group/@binding + textureSample entry model -- a much larger surface to reconcile against the WebGPU plan).
+LIMITATION: no in-sandbox WGSL validator (shaderfrog is GLSL); correctness rests on the exact per-point numeric match
++ structural checks, which is the strongest available signal that the emitted math is right.
+FILES: holographic_pattern.py (pattern_to_wgsl + selftest), holographic_unified.py (faculty), holographic_catalog.py
+(aliases).
+
+
+## A3: holographic segmentation via demux -- VALIDATED NON-GAP (no code shipped)
+
+RULE 0 settled it: packet_demux is a 1-D TEMPORAL stream demultiplexer (variable-length bursts from different sources
+over time -- statistics-shift boundaries + noise-calibrated source assignment); superposition-cleanup factors bound
+VSA vectors. NEITHER is a 2-D image segmenter -- category mismatch. And segment_image is ALREADY the purpose-built
+segmentation front-end ("Demux a photo into per-object REGIONS"): k-means in (r,g,b,x,y) + connected components,
+numpy-only, deterministic, with the 73x max_dim fast path (item 5). There is no faster holographic route hiding here
+that fits image segmentation; building a VSA "segmenter" would be an inferior DUPLICATE of segment_image. Recorded as
+a validated non-gap, not built -- "no duplicate functionality, don't ship a worse result."
+
+## B2: regen_docs.py as the close-out doc step -- ALREADY IN PLACE (process)
+
+The per-item ritual already runs tools/regen_docs.py (all 7 generators / 9 outputs) rather than capdoc.py+docgen.py
+by name -- fixed earlier this arc (DOC_MAP.md staleness). No code change; confirmed as the standing close-out step.
+
+## MERGE VERIFICATION: incoming branch audited — wired, functioning, one example fixed
+
+Verified a freshly-merged branch (2233 -> 2255 caps). Diffed against the prior tree: 2 NEW modules
+(holographic_container, holographic_framesource, each with a test), ~10 CHANGED modules (catalog, emit,
+colortransfer, domain, sdf, determinism, pattern, unified, vision, postfx, shader, inpaint), 4 NEW capabilities,
+0 removed (backward-compatible). 1 new forward-looking backlog doc (BACKLOG_holographic_research.md -- a plan, not
+a gap).
+
+WIRED: all three primary audits clean (no dark modules, 0 catalog gaps, 0 invocation gaps); full battery
+(tag_lint/structure/name_collisions/audit_imports) clean; docs drift-free. The 4 new capabilities
+(Frame-source protocol, Typed-section container, GPU-reproducible PCG hash, Palette colour stops) are all
+discoverable as the TOP find_capability hit for their natural queries, plus the two method-faculties bloom_passes
+and pattern_to_wgsl.
+
+FUNCTIONING: both new modules' selftests pass with real contracts (container: byte-identical deterministic
+round-trip, refuses object arrays / non-container bytes; framesource: idempotent get(), memoised map_frames,
+consumes a foreign duck-typed source, imports NO decoder). All ~10 changed modules' selftests pass (no
+regression). bloom_passes emits the 4-pass DAG (brightpass->blur H,V->composite, ping/pong targets);
+pattern_to_wgsl emits valid WGSL; palette_stops returns N stops; PCG hash is reproducible + seed-sensitive; engine
+routing deterministic across instances. 93 new/changed unit tests + 2 new integration tests + 281 dependent-module
+tests + an untouched shard all green.
+
+ONE REAL GAP FOUND + FIXED: the "GPU-reproducible 32-bit hash" catalog example used undefined placeholder vars
+`hash32_unit(ix, iy, iz, seed=0)` -- skill_lint passed it (it import-checks, does not exec free vars) but a user
+copy-pasting it hits NameError. Fixed to `hash32_unit(3, 5, 7, seed=0)` with a clarifying comment; now runs
+copy-paste. Regenerated docs, re-ran battery clean. LESSON: skill_lint's example check is structural, not an exec
+with undefined-name detection -- a runnable-looking example with free placeholder vars slips through, so spot-exec
+new examples in an empty namespace when auditing a merge.
+
+## CI FIX (round 2): flaky timing pin + ccrun/zigrun __call__ unified
+
+Two CI failures after the merge. Diagnosed each before touching:
+
+#1 test_holographic_machinemodel::test_the_two_measurements_that_were_fictions_now_measure_real_work -- PRE-EXISTING
+FLAKE, module AND test unchanged from the prior tree (neither the branch nor I touched them). `marginal_ns > 0.0`
+pins a wall-clock measurement: `_time` divides a perf_counter delta by the rep count, and on a fast/quiet CI runner
+the quick-mode loop finishes inside the timer resolution floor, so a genuine measurement rounds to exactly 0.0.
+Reproduced locally: 184831, 198538, then 0.0 across three runs. The module's OWN docstring says "a marginal_ns of
+exactly 0.0 is a real answer, not a missing one" -- so the strict-positive pin contradicts the module's semantics.
+FIX: assert the measurement is PRESENT (real, finite, non-negative float) rather than strictly positive -- the
+no-op "fictions" the test guards against had no entry to measure at all, so present+finite is the honest form of
+"measures real work" that doesn't fight the clock. Verified robust across 5 runs.
+
+#2 test_duplication_audit::test_the_duplicate_budget_does_not_grow -- NEW cross-module duplicate (['__call__'],
+['ccrun','zigrun']); the branch changed both runners so their __call__ bodies became a canonical-shape match. Read
+both: genuinely identical SoA ctypes marshalling (arg-count check -> ascontiguousarray each column -> 1-D
+same-length check -> np.concatenate into one buffer -> ctypes call -> return); ccrun's own comment said "inherited
+from zigrun's honest timing note" -- copied logic, not coincidental shape. The test demands unify-or-document,
+never raise the budget. UNIFIED (both already import from holographic_emit, their shared home): added
+`call_soa_kernel(n_params, np_dtype, ct, fn, arrays)` to holographic_emit (lazy-imports numpy+ctypes so the emitter
+stays import-light; carries the per-call-concatenate KEPT NEGATIVE), and both __call__ bodies are now one-line
+delegations (under min_statements, so no longer a duplicate). Behavior preserved: ccrun selftest still f64
+BIT-IDENTICAL on 500 pts; emit selftest still bit-identical sphere-SDF; zigrun asserts source emission (native run
+skipped, no toolchain). Budget NOT raised.
+
+VERIFICATION: both originally-failing files green (47) + ccrun/zigrun/emit surfaces (94) + audits 0/0/0 + docs
+drift-free. LESSON (reinforced): a wall-clock `> 0.0` pin is the same anti-pattern as a bit-exact BLAS pin -- it
+pins the machine, not the algorithm; assert presence/structure, not a strict-positive timing. And duplication-audit
+failures get unify-or-document (here: one home in emit both already import), never a budget bump.
