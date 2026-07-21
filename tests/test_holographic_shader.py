@@ -191,6 +191,62 @@ def test_pipeline_two_dimensional_and_through_the_mind():
     assert np.max(np.abs(piped - filter_k(F, K, 3))) < 1e-9
 
 
+def test_shader_pipeline_batches_rgb_channels_exactly_like_the_loop():
+    """ITEM 7: apply accepts an RGB image (H,W,3) and batches the channel axis -- exactly equal to the per-channel
+    loop it replaces (so leStudio's Spectral chain node drops its per-channel stack). Single-field path unchanged."""
+    from holographic.misc.holographic_unified import UnifiedMind
+    m = UnifiedMind(dim=64, seed=0)
+    rng = np.random.default_rng(3)
+    K = np.zeros((32, 32)); K[0, 0] = 0.5; K[0, 1] = 0.25; K[0, -1] = 0.25
+    rgb = rng.standard_normal((32, 32, 3))
+    pipe = m.shader_pipeline((32, 32)).blur(K, 2).gain(1.3)
+    batched = pipe.apply(rgb)
+    loop = np.stack([pipe.apply(rgb[..., c]) for c in range(3)], axis=-1)
+    assert batched.shape == (32, 32, 3)
+    assert np.array_equal(batched, loop)                        # RGB batch == the loop, byte-for-byte
+    # a field whose spatial shape mismatches (beyond one channel axis) is rejected
+    import pytest
+    with pytest.raises(ValueError):
+        pipe.apply(np.zeros((33, 32)))
+
+
+def test_pattern_and_palette_glsl_emitters_match_numpy_through_the_mind():
+    """ITEM 10: closed-form patterns compile to `float pattern(vec3 p)` and the cosine palette to `vec3 palette(float
+    t)`, each matching the numpy evaluation per-point to float precision (the backlog's probe-grid acceptance).
+    noise/fbm raise (int64 hash not GLSL-emittable)."""
+    from holographic.misc.holographic_unified import UnifiedMind
+    from holographic.misc.holographic_pattern import make_pattern
+    from holographic.mesh_and_geometry.holographic_domain import cosine_palette
+    m = UnifiedMind(dim=64, seed=0)
+    P = np.random.default_rng(1).uniform(-2.3, 2.3, (300, 3)) + 0.017
+
+    def pat_ref(nm, P, **kw):
+        if nm == "checker":
+            q = P * kw.get("scale", 2.0)
+            return np.where(np.mod(np.floor(q[:, 0]) + np.floor(q[:, 1]) + np.floor(q[:, 2]), 2.0) < 1.0, 1.0, 0.0)
+        if nm == "gradient":
+            return np.clip((P[:, kw.get("axis", 1)] - kw.get("lo", -1.0)) / (kw.get("hi", 1.0) - kw.get("lo", -1.0) + 1e-9), 0, 1)
+        if nm == "dots":
+            q = P * kw.get("scale", 3.0)
+            return np.clip(1 - np.linalg.norm(np.abs(q - np.floor(q + 0.5)), axis=1) / max(kw.get("radius", 0.3), 1e-3), 0, 1)
+
+    for nm, kw in [("checker", {"scale": 2.0}), ("gradient", {"axis": 2, "lo": -1.5, "hi": 1.5}),
+                   ("dots", {"scale": 3.0, "radius": 0.35})]:
+        g = m.pattern_to_glsl(nm, **kw)
+        assert "float pattern(vec3 p)" in g
+        assert np.abs(np.asarray(make_pattern(nm, **kw)(P), float) - pat_ref(nm, P, **kw)).max() < 1e-9
+
+    with pytest.raises(ValueError):
+        m.pattern_to_glsl("noise")
+
+    t = np.linspace(0, 1, 65)
+    a, b, c, d = m.random_palette(seed=7)
+    g = m.cosine_palette_to_glsl(a, b, c, d)
+    assert "vec3 palette(float t)" in g
+    glsl_col = np.clip(np.array(a) + np.array(b) * np.cos(6.28318530717959 * (np.array(c) * t[:, None] + np.array(d))), 0, 1)
+    assert np.abs(cosine_palette(t, a=a, b=b, c=c, d=d) - glsl_col).max() < 1e-9
+
+
 # ======================================================================================================
 # H2 -- the superposed gather. N weighted lookups in one dot product.
 # ======================================================================================================

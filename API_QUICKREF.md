@@ -77,7 +77,7 @@
     - `to_tree(self)` -- A nested tuple where the op name folds in the params (e.g.
     - `to_dsl(self)` -- A compact s-expression: (kind p0 p1 ...
     - `cost(self)` -- Estimate the per-ray evaluation COST of this SDF tree (W2) -- a machine-model annotation for deciding if a scene is cheap enough to raymarch in real time.
-    - `to_glsl(self, name='map')` -- Emit a complete Shadertoy-ready fragment shader for this SDF (see _emit_shader).
+    - `to_glsl(self, name='map', camera='fixed')` -- Emit a complete Shadertoy-ready fragment shader for this SDF (see _emit_shader).
 - `sphere(r=1.0)` -- A sphere of radius `r`, centred at the origin.
 - `box(bx=1.0, by=1.0, bz=1.0)` -- An axis-aligned box with half-extents (bx, by, bz) centred at the origin -- so the box spans [-bx, bx] on x, etc.
 - `torus(R=1.0, r=0.3)` -- A torus in the XZ plane: `R` is the ring radius (centre to tube centre), `r` the tube radius.

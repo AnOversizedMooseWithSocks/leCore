@@ -99,9 +99,17 @@ def hue_histogram(rgb, bins=12, sat_min=0.20, val_min=0.20):
     return hist / total if total else hist.astype(float)
 
 
-def dominant_colours(rgb, k=4, seed=0, sample=2000):
+def dominant_colours(rgb, k=4, seed=0, sample=2000, as_float=False):
     """The k most common colours, by clustering the pixels (k-means in RGB).
-    Returns (centres_uint8[k,3], weights[k]) sorted most-common first."""
+    Returns (centres[k,3], weights[k]) sorted most-common first.
+
+    `as_float`: WHY it exists -- the centres are computed in float [0,1] and the
+    rest of the image ecosystem (every other door consumes/produces float 0-1)
+    speaks that language, but this function has always quantised to uint8 0-255 on
+    the way out. Flipping that default would break existing callers (the never-
+    flip rule), so as_float stays OFF by default and float 0-1 is opt-in. Pass
+    as_float=True to get the palette in the ecosystem's native range with no
+    round-trip conversion (this is the recommended value for image pipelines)."""
     px = _as_float(rgb).reshape(-1, 3)
     rng = np.random.default_rng(seed)
     if len(px) > sample:                               # subsample big images
@@ -110,7 +118,10 @@ def dominant_colours(rgb, k=4, seed=0, sample=2000):
     counts = np.bincount(labels, minlength=k).astype(float)
     order = np.argsort(-counts)
     w = counts[order] / counts.sum()
-    return (np.clip(centres[order] * 255, 0, 255).astype(np.uint8), w)
+    pal = np.clip(centres[order], 0.0, 1.0)                    # centres already in [0,1]
+    if not as_float:                                          # legacy default: quantise to uint8 0-255
+        pal = np.clip(pal * 255, 0, 255).astype(np.uint8)
+    return (pal, w)
 
 
 # ======================================================================
@@ -362,7 +373,47 @@ def _region_record(rid, mask, rgb):
             "shape": classify_shape(m), "circularity": st["circularity"], "extent": st["extent"], "aspect": st["aspect"]}
 
 
-def segment_image(rgb, k=5, seed=0, spatial_weight=0.35, split_components=True, min_fraction=0.006):
+def _downsample_rgb_area(rgb, max_dim):
+    """Box-average downsample an image so its LONGEST side is <= max_dim, preserving aspect. Returns the same rank
+    as the input (H,W) or (H,W,C). WHY box-average and not nearest: segmentation clusters pixels by colour, and a
+    nearest downsample ALIASES thin features into whichever pixel it happened to land on, corrupting the clusters;
+    an area (box) average is the honest low-pass -- each output cell is the mean of the input pixels that fall in it.
+    Pure index-binning (np.add.at), so it is deterministic and numpy-only, and handles arbitrary (non-integer) ratios.
+    A no-op (returns the input) when the image already fits."""
+    a = np.asarray(rgb, float)
+    H, W = a.shape[:2]
+    if max(H, W) <= int(max_dim):
+        return a
+    scale = float(max_dim) / float(max(H, W))
+    nh = max(1, int(round(H * scale)))
+    nw = max(1, int(round(W * scale)))
+    flat = a.reshape(H, W, -1)                                   # unify (H,W) and (H,W,C) as (H,W,c)
+    C = flat.shape[2]
+    # each input pixel (iy,ix) falls into output cell (iy*nh//H, ix*nw//W); accumulate sums + counts, then divide.
+    iy = (np.arange(H) * nh) // H
+    ix = (np.arange(W) * nw) // W
+    iy2 = np.repeat(iy, W)
+    ix2 = np.tile(ix, H)
+    out = np.zeros((nh, nw, C), float)
+    cnt = np.zeros((nh, nw), float)
+    np.add.at(out, (iy2, ix2), flat.reshape(-1, C))
+    np.add.at(cnt, (iy2, ix2), 1.0)
+    out /= np.maximum(cnt[..., None], 1.0)                       # empty cells (impossible here) stay 0, not NaN
+    return out if a.ndim == 3 else out[..., 0]
+
+
+def _upsample_mask_nn(mask, H, W):
+    """Nearest-neighbour upsample a (h,w) boolean/label mask to (H,W). NEAREST is mandatory for a LABEL mask -- any
+    interpolation would invent in-between values that are not valid labels. Each output pixel maps to the input pixel
+    at floor(out*in/OUT), so it is deterministic and reversible with _downsample's binning. Pure fancy-indexing."""
+    a = np.asarray(mask)
+    h, w = a.shape[:2]
+    ry = (np.arange(H) * h) // H
+    rx = (np.arange(W) * w) // W
+    return a[ry][:, rx]
+
+
+def segment_image(rgb, k=5, seed=0, spatial_weight=0.35, split_components=True, min_fraction=0.006, max_dim=None):
     """Demux a photo into per-object REGIONS by colour (+ weak spatial coherence) -- the segmentation FRONT END of the
     photo->3D pipeline. k-means clusters pixels in (r,g,b,x,y) space (spatial_weight scales the normalised xy, so
     spatially-separated things of the same colour can split); with split_components each colour cluster is further cut
@@ -374,11 +425,30 @@ def segment_image(rgb, k=5, seed=0, spatial_weight=0.35, split_components=True, 
     Deterministic (seeded k-means). numpy + stdlib only -- no scipy/sklearn. HONEST: this splits on APPEARANCE, not
     semantics -- a two-tone object becomes two regions and a hard shadow can split a floor; the per-region shape/stats
     are a COARSE guess that the primitive-fit stage refines. Pass a downscaled image (~<=200 px) -- segmentation does
-    not need full resolution and the connected-components sweep scales with the longer side."""
+    not need full resolution and the connected-components sweep scales with the longer side. Or just set max_dim: when
+    given, the input is box-downsampled to that longest side internally, segmented, and the region masks are
+    nearest-upsampled back to full size (with all stats recomputed on the original image) -- the quality/latency trade
+    without every caller re-implementing it. max_dim=None (default) runs at full resolution, byte-identical to before."""
     rgb = np.asarray(rgb, float)
     if rgb.max() > 1.5:
         rgb = rgb / 255.0
     H, W = rgb.shape[:2]
+
+    # max_dim: bound the resolution the (pixel-bound) k-means + connected-components sweep runs at, then upsample the
+    # region masks back to full size. WHY it belongs here and not in every caller: the cost scales with pixel count,
+    # so interactive callers all independently learn to shrink the input and scale masks back up (leStudio bounded to
+    # 224 px in two places). The quality/latency trade lives next to the algorithm now. The masks come back FULL-SIZE
+    # and every per-region stat is RECOMPUTED from the upsampled mask + the ORIGINAL image via _region_record, so
+    # area/bbox/centroid are in original pixels and mean_color is the true mean over the full-res region (not the
+    # blurred thumbnail). Default max_dim=None is byte-identical to the historic full-resolution behaviour.
+    if max_dim is not None and max(H, W) > int(max_dim):
+        small = _downsample_rgb_area(rgb, int(max_dim))
+        regions_small = segment_image(small, k=k, seed=seed, spatial_weight=spatial_weight,
+                                      split_components=split_components, min_fraction=min_fraction, max_dim=None)
+        # upsample each mask to full res and rebuild its record on the ORIGINAL image (exact, consistent stats).
+        # nearest upsampling scales every area by the same factor, so the largest-first order is preserved.
+        return [_region_record(r["id"], _upsample_mask_nn(r["mask"], H, W), rgb) for r in regions_small]
+
     ys, xs = np.mgrid[0:H, 0:W]
     xy = np.stack([ys / max(H - 1, 1), xs / max(W - 1, 1)], axis=-1) * float(spatial_weight)
     feats = np.concatenate([rgb.reshape(-1, 3), xy.reshape(-1, 2)], axis=1)
@@ -706,8 +776,45 @@ def _selftest():
     _cc, ncc = _connected_components(two)
     assert ncc == 2, ncc
 
-    print("OK: holographic_vision self-test passed (RGB<->HSV round-trips to <1e-6, and the edge detector fires "
-          "on a vertical step while staying quiet on a flat field)")
+    # 3b. ITEM 5: max_dim bounds the segmentation resolution. Contracts: (a) max_dim=None is BYTE-IDENTICAL to the
+    #     historic call (never-flip); (b) with max_dim set, masks come back FULL-SIZE and the distinct colours are
+    #     still recovered; (c) the box downsample hits the target longest side and the nearest mask upsample is
+    #     label-safe (dtype/topology preserved).
+    big = np.zeros((160, 160, 3)); big[:, :, 2] = 1.0                  # blue field
+    yb, xb = np.mgrid[0:160, 0:160]
+    big[(yb - 64) ** 2 + (xb - 56) ** 2 <= 30 ** 2] = (1.0, 0.0, 0.0)  # red disc
+    a0 = segment_image(big, k=2, seed=0)                              # historic full-res
+    a1 = segment_image(big, k=2, seed=0, max_dim=None)               # explicit None
+    assert len(a0) == len(a1)
+    for r0, r1 in zip(a0, a1):
+        assert np.array_equal(r0["mask"], r1["mask"]) and r0["bbox"] == r1["bbox"]   # byte-identical
+    bounded = segment_image(big, k=2, seed=0, max_dim=64)
+    assert all(r["mask"].shape == (160, 160) for r in bounded)        # FULL-SIZE masks despite the 64px run
+    cols = [r["mean_color"] for r in bounded]
+    assert any(c[0] > c[2] for c in cols) and any(c[2] > c[0] for c in cols), cols   # red + blue both survive
+    ds = _downsample_rgb_area(big, 64); assert max(ds.shape[:2]) == 64 and ds.shape[2] == 3
+    up = _upsample_mask_nn(np.array([[True, False], [False, True]]), 6, 6)
+    assert up.shape == (6, 6) and up.dtype == bool and up[0, 0] and up[5, 5] and not up[0, 5]
+    # KEPT NEGATIVE: segmenting a downsampled image is a QUALITY/LATENCY TRADE, not free -- the result is the
+    # segmentation of the thumbnail (masks upsampled), NOT identical to the full-res segmentation; max_dim=None is
+    # the only path that reproduces the historic result exactly.
+
+    # 4. dominant_colours dtype contract (ITEM 1): the LEGACY default returns uint8 0-255; as_float=True returns the
+    #    SAME palette in float 0-1 (the ecosystem's range) with no round-trip loss. Assert both the dtype split and
+    #    that float == uint8/255 to the quantisation floor -- so a caller can trust the two are the same colours.
+    ci = np.zeros((24, 24, 3)); ci[:, :12] = (0.8, 0.1, 0.1); ci[:, 12:] = (0.1, 0.2, 0.9)
+    pal_u, w_u = dominant_colours(ci, k=2, seed=0)                      # legacy uint8 path
+    pal_f, w_f = dominant_colours(ci, k=2, seed=0, as_float=True)       # opt-in float path
+    assert pal_u.dtype == np.uint8 and pal_u.max() > 1, pal_u.dtype     # legacy really is 0-255
+    assert pal_f.dtype != np.uint8 and pal_f.max() <= 1.0 + 1e-9        # float really is 0-1
+    assert np.allclose(pal_f, pal_u.astype(float) / 255.0, atol=1.0/255)  # same colours, just the range differs
+    assert np.array_equal(w_u, w_f)                                     # weights untouched by the dtype flag
+    # KEPT NEGATIVE: default is uint8, NOT float, on purpose -- flipping it would break every existing caller
+    # (the never-flip rule). Float is correct for the ecosystem but must be opted into.
+
+    print("OK: holographic_vision self-test passed (RGB<->HSV round-trips to <1e-6, the edge detector fires "
+          "on a vertical step while staying quiet on a flat field, and dominant_colours returns uint8 0-255 by "
+          "default / float 0-1 under as_float=True with matching colours)")
 
 
 if __name__ == "__main__":

@@ -44,6 +44,26 @@ def test_dominant_colours_finds_two_blocks():
     assert centres.shape == (2, 3) and abs(w.sum() - 1.0) < 1e-6
 
 
+def test_segment_image_max_dim_bounds_resolution_through_the_mind():
+    """ITEM 5: max_dim bounds the segmentation sweep. Default (None) is byte-identical to the historic call; with
+    max_dim set, masks come back FULL-SIZE (nearest-upsampled) with stats recomputed on the original image."""
+    from holographic.misc.holographic_unified import UnifiedMind
+    um = UnifiedMind(dim=64, seed=0)
+    H = W = 128
+    img = np.zeros((H, W, 3)); img[:, :, 2] = 1.0
+    yy, xx = np.mgrid[0:H, 0:W]
+    img[(yy - 50) ** 2 + (xx - 44) ** 2 <= 24 ** 2] = (1.0, 0.0, 0.0)
+    base = um.segment_image(img, k=2, seed=0)
+    same = um.segment_image(img, k=2, seed=0, max_dim=None)
+    assert len(base) == len(same)
+    for a, b in zip(base, same):
+        assert np.array_equal(a["mask"], b["mask"]) and a["bbox"] == b["bbox"]      # None == historic
+    bounded = um.segment_image(img, k=2, seed=0, max_dim=48)
+    assert all(r["mask"].shape == (H, W) for r in bounded)                          # full-size masks
+    cols = [r["mean_color"] for r in bounded]
+    assert any(c[0] > c[2] for c in cols) and any(c[2] > c[0] for c in cols)        # red + blue recovered
+
+
 # ---- gradients / edges --------------------------------------------------
 def test_sobel_detects_vertical_edge():
     g = np.zeros((16, 16)); g[:, 8:] = 1.0          # vertical step

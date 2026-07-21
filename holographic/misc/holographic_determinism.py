@@ -153,6 +153,58 @@ def hash_unit(*keys):
     return float(out) if np.isscalar(out) or out.ndim == 0 else out
 
 
+# GPU-REPRODUCIBLE 32-bit hash (leStudio backlog C2). hash_u64 above is 64-bit -> it CANNOT be reproduced in GLSL
+# ES 3.00 / WGSL, whose ints are 32-bit; that is exactly why pattern_to_glsl REFUSED noise/fbm. This is the 32-bit
+# companion: the PCG output hash (Jarzynski & Olano, "Hash Functions for GPU Rendering", JCGT 2020) -- one uint in,
+# one uint out, using only mul/xor/shift that wrap mod 2**32 IDENTICALLY in NumPy uint32 and in a GLSL `uint`. So a
+# noise built on it matches per-point between the CPU reference and the emitted shader. It is COARSER than hash_u64
+# (32 bits, not 53) and NOT a replacement for it -- hash_u64 stays the CPU determinism hash; hash32_pcg is the one
+# you reach for when the SAME value must be recomputed on the GPU.
+_PCG_MULT = np.uint32(747796405)
+_PCG_INCR = np.uint32(2891336453)
+_PCG_XMUL = np.uint32(277803737)
+
+
+def hash32_pcg(v):
+    """PCG output hash: a uint32 -> uint32 permutation, bit-identical to this GLSL:
+
+        uint pcg(uint v){ uint s = v*747796405u + 2891336453u;
+                          uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+                          return (w >> 22u) ^ w; }
+
+    `v` may be a python int or a NumPy uint32 array; returns the same shape as uint32. Every op wraps mod 2**32, so
+    NumPy uint32 and GLSL `uint` agree exactly (that is the whole point -- see the module note)."""
+    with np.errstate(over="ignore"):
+        v = np.asarray(v, dtype=np.uint32)
+        state = v * _PCG_MULT + _PCG_INCR
+        shift = (state >> np.uint32(28)) + np.uint32(4)                 # per-element rotate amount in [4,19]
+        word = ((state >> shift) ^ state) * _PCG_XMUL
+        return (word >> np.uint32(22)) ^ word
+
+
+def hash32_unit(*coords, seed=0):
+    """A uniform float in [0,1) keyed on INTEGER lattice coords (+ seed), via hash32_pcg -- the GPU-reproducible twin
+    of hash_unit for grid/lattice sampling. Coords are folded into one uint32 with distinct odd multipliers (the
+    classic spatial-hash primes), then PCG-permuted and scaled by 1/2**32. Matches the emitted GLSL per-point."""
+    with np.errstate(over="ignore"):
+        primes = (np.uint32(1),) + (np.uint32(0x9E3779B1), np.uint32(0x85EBCA77), np.uint32(0xC2B2AE3D),
+                                    np.uint32(0x27D4EB2F))
+        acc = np.uint32(np.asarray(seed, dtype=np.uint32)) * np.uint32(0x9E3779B1)
+        for c, pr in zip(coords, primes[1:]):
+            acc = acc ^ (np.asarray(c, dtype=np.uint32) * pr)
+        return hash32_pcg(acc).astype(np.float64) * (1.0 / 4294967296.0)
+
+
+def hash32_pcg_glsl(fn_name="pcg"):
+    """Emit the GLSL `uint <fn_name>(uint v)` for hash32_pcg -- the SAME 32-bit permutation, so a GLSL noise built on
+    it reproduces the NumPy hash32_pcg per-point. See holographic_pattern.pattern_to_glsl (noise/fbm emit)."""
+    return ("uint %s(uint v){\n"
+            "    uint s = v * 747796405u + 2891336453u;\n"
+            "    uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;\n"
+            "    return (w >> 22u) ^ w;\n"
+            "}" % fn_name)
+
+
 def hash_direction(*keys, dim=3):
     """A uniform direction on the unit sphere (dim=3) or circle (dim=2), keyed statelessly. Uses the area-preserving
     map for the sphere (uniform in cos(theta)), so directions are genuinely uniform, not clustered at the poles."""
@@ -190,6 +242,25 @@ def _selftest():
     assert np.array_equal(Vc, V)                      # untouched
     out_inplace = fix_eigvec_signs(Vc, copy=False)
     assert out_inplace is Vc and np.array_equal(out_inplace, out_copy)
+
+    # C2: the 32-bit PCG hash is bit-identical to the exact uint32 GLSL arithmetic (mul/xor/shift wrapping mod 2**32),
+    # so a GLSL noise built on it reproduces the CPU value per-point. hash_u64 (64-bit) CANNOT do this -- kept as the
+    # WHY this 32-bit companion exists at all.
+    _M = (1 << 32) - 1
+    def _pcg_ref(v):
+        s = (v * 747796405 + 2891336453) & _M
+        w = (((s >> ((s >> 28) + 4)) ^ s) * 277803737) & _M
+        return ((w >> 22) ^ w) & _M
+    for v in (0, 1, 42, 123456789, 4000000000, _M):
+        assert int(hash32_pcg(v)) == _pcg_ref(v), (v, int(hash32_pcg(v)), _pcg_ref(v))
+    arr = np.array([0, 1, 42, 4000000000], np.uint32)                 # vectorised path matches elementwise
+    assert [int(x) for x in hash32_pcg(arr)] == [_pcg_ref(int(v)) for v in arr]
+    a = hash32_unit(3, 7, 0, seed=0); b = hash32_unit(3, 7, 0, seed=0); c = hash32_unit(3, 8, 0, seed=0)
+    assert a == b and 0.0 <= a < 1.0 and a != c                       # deterministic, in-range, coord-sensitive
+    g = hash32_pcg_glsl("pcg")
+    assert "747796405u" in g and "2891336453u" in g and "277803737u" in g and ">> 22u" in g
+    # KEPT NEGATIVE: hash32_pcg is 32-bit (coarser than hash_u64's 53) -- do NOT swap it in for hash_u64's CPU-only
+    # determinism uses; it exists ONLY for the GPU-portability case.
 
     # argmax tie-break: exact tie -> lowest index
     assert argmax_tiebreak(np.array([1.0, 3.0, 3.0, 2.0])) == 1

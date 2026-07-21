@@ -2365,6 +2365,14 @@ from holographic.misc.holographic_codec import ...; from holographic.misc.hologr
 ```
 *Find it by:* compress, compression, codec, entropy coding, rate distortion, quantize, content addressed storage, encode data
 
+### Frame-source protocol (temporal media seam)
+the CONTRACT for temporal media (holographic_framesource): a FrameSource is any object with get() -> (frame, seq) plus seekable/pausable flags; seq changes IFF the frame changes (cheap invalidation). The engine owns the contract, NOT decoding (cv2/ffmpeg stay host-side). mind.map_frames(source, fn, cache) pulls a host source's current frame and memoises fn(frame) by seq; mind.frame_key signs it; mind.synthetic_frame_source is a decoder-free synthetic clip. The seam for video colour transfer / temporal NCA / optical flow.
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); s=m.synthetic_frame_source(frames=4); print(m.map_frames(s, lambda f: float(f.mean()))[1])
+```
+*Find it by:* frame source protocol, process video frames with caching, per frame processing memoized by sequence, seekable pausable frame provider, apply an effect to each video frame, video frame contract, pull frames from a host source, temporal media seam
+
 ### Lossless set-packing for image families
 single-file codecs compress every image on its own, so a SET that shares structure (a logo suite, sprite variants, UI frames, scanned pages) pays for the shared part in every file. mind.pack_images(images) stores ONE reference plus per-image deltas, zlib-coded; mind.unpack_images(blob) returns them byte for byte (the residual is mod 256, so the round trip is bit-exact). Measured on a 6-logo suite: 1,744 B against 3,553 B of per-file PNG and 3,162 B of gzip-the-whole-set. KEPT NEGATIVE, loud: it LOSES by 16x on content that is already compressible on its own (smooth gradients, photographs) -- 32,274 B against 1,987 B. It is content-dependent, so mind.pack_benchmark(images) prints the table. Run it; do not guess..
 
@@ -2601,6 +2609,14 @@ from holographic.misc.holographic_determinism import hash_unit, hash_direction; 
 ```
 *Find it by:* stateless random, hash noise, coordinate keyed, no seed coordination, reproducible random, farm parallel sampling, hash_unit, random number per thread without a seed stream
 
+### Typed-section container (app-neutral workspace file)
+an app-neutral CONTAINER file (holographic_container): a zip of a manifest + numeric array payloads, its body a list of TYPED SECTIONS {kind, id, meta, arrays}. A section whose kind a reader does not understand ROUND-TRIPS UNTOUCHED, so an image editor, a 3D app, and a video editor share ONE forward-compatible file, each registering its own kinds. save_container(sections, meta) -> bytes; load_container(bytes) -> {meta, sections}. Numeric-only (no pickle); byte-identical save/load/save. Not workspace_manager (a live-DB checkpoint) -- the file FORMAT for typed data.
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=256,seed=0); b=m.save_container([{'kind':'demo','id':'A','meta':{'n':1},'arrays':{'x':np.arange(4)}}]); print(m.load_container(b)['sections'][0]['kind'])
+```
+*Find it by:* save a project file, workspace file for my app, app project file, bundle typed data into one file, share a document between apps, forward-compatible file format, save meshes and images in one file, container of arrays
+
 ### VSA programs as DB objects
 installable, runnable 'stored procedures' that are hypervectors the machine executes (LOAD/BIND/APPLY/HALT -- not arbitrary code): install, list a queryable catalog, find a program BY MEANING (fuzzy over its doc), EXPLAIN (dry run), and EXECUTE over query rows sandboxed to whitelisted handlers + step-bounded, result carrying a calibrated confidence. Safer than a SQL stored procedure.
 
@@ -2817,6 +2833,13 @@ one claim gets an honest CI from measure(); a TABLE of ablations is a scan, and 
 aug, n_load_bearing, n_survive = measure.fdr_gate(rows, alpha=0.1)
 ```
 
+### GPU-reproducible 32-bit hash (PCG, matches GLSL)
+hash_unit is 64-bit, so a GPU shader (GLSL ES 3.00 / WGSL, 32-bit ints) cannot reproduce it -- why value_noise could not emit. hash32_pcg is the 32-bit companion: a PCG output hash (Jarzynski & Olano 2020) of mul/xor/shift that wrap mod 2**32 identically in NumPy uint32 and a GLSL uint, so noise built on it matches per-point CPU vs GPU. hash32_unit keys it on lattice coords; hash32_pcg_glsl emits the GLSL. Coarser than hash_u64 -- reach for it only for the GPU case (it unblocked pattern_to_glsl('noise32'/'fbm32'))..
+
+```python
+from holographic.misc.holographic_determinism import hash32_pcg, hash32_unit; u = hash32_unit(3, 5, 7, seed=0)  # -> a deterministic [0,1) value per integer cell, identical to the GLSL PCG
+```
+
 ### Game world SSE streaming (per-client deltas)
 watch or drive a game world from a BROWSER (holographic_gameshard.WorldStreamer + service /game + /game/stream): POST /game creates a room, routes player commands, and advances the authoritative clock; GET /game/stream is an SSE push of per-client DELTAS -- first event is the full area-of-interest as 'added', later events only what changed, the wire format a three.js client feeds straight into its scene graph. advance=1 makes a stream the designated clock; a lock keeps mid-tick command POSTs replayable. Needs serve(threads=True) so an open stream never blocks input..
 
@@ -2934,6 +2957,13 @@ ORIENTED bounding box of a point set (holographic_fitshape.oriented_bbox): m.ori
 
 ```python
 import lecore, numpy as np; m=lecore.UnifiedMind(); pts=np.random.default_rng(0).uniform(0,1,(200,3))*[1,2,3]; r=m.oriented_bbox(pts); (r['half_extents'].round(2), round(r['volume'],3))
+```
+
+### Palette colour stops (plottable swatches)
+turn a cosine palette into a small table of plottable RGB colours -- the companion to random_palette, which returns cosine COEFFICIENTS (a,b,c,d), NOT colours. mind.palette_stops(seed, n) evaluates the palette at n even points -> an (n,3) float RGB array for a swatch strip, gradient ramp, or legend; pass coeffs=(a,b,c,d) to sample a KNOWN palette. Pure composition of random_palette + cosine_palette, so the stops ARE the palette's colours -- it exists so callers stop interpolating the coefficients as colours (which ships garbage). Deterministic per seed.
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); m.palette_stops(seed=7, n=8).tolist()
 ```
 
 ### Parametric surface analysis (curvature + draft)
@@ -3501,4 +3531,4 @@ import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors(
 
 ---
 
-*443 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*447 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

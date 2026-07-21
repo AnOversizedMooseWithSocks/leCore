@@ -350,6 +350,49 @@ _METHOD_ALIASES = {
     "scene": ('compose visual attribute scenes', 'scene coder', 'encode and decode a scene', 'compose decompose a scene', 'visual scene algebra'),
     "scene_to_render": ('flatten a scene for the path tracer', 'scene to sdf and material', 'prepare a scene for rendering', 'brain-to-muscle scene handoff', 'bake a scene to renderable'),
     "sdf_render": ('march an sdf to a mesh', 'sdf tree to triangles', 'turn an sdf into a mesh', 'marching cubes on an sdf', 'sdf to drawable mesh'),
+    # C1: PBR Neutral tonemap (a postfx stage) -- make the tonemapper discoverable via the chain faculties.
+    "post_process": ('apply a post processing chain', 'tonemap a rendered frame', 'pbr neutral tonemap',
+                     'khronos neutral tone mapping', 'tonemap that holds hue better than aces', 'colour grade a frame',
+                     'aces or pbr neutral tonemapping', 'gltf standard tonemapper', 'run a postfx chain on a frame'),
+    "postfx_chain": ('build a post processing chain', 'exposure bloom tonemap vignette chain', 'pbr neutral or aces stage',
+                     'assemble a colour grade pipeline', 'tonemapping and grading program'),
+    # ITEM 9: PostChain.to_glsl / mind.postfx_to_glsl compiles the pointwise colour pipeline to a fragment shader.
+    "postfx_to_glsl": ('emit glsl for a post processing chain', 'fragment shader for a color grading pipeline',
+                       'postfx to webgl', 'run the colour grade on the gpu', 'compile a postfx chain to a shader',
+                       'post processing chain to glsl', 'gpu color pipeline shader', 'live video grading shader',
+                       'export a colour pipeline as glsl', 'tone map and grade in a fragment shader'),
+    # C5: closed-form patterns emit to WGSL (WebGPU) too, not just GLSL.
+    "pattern_to_wgsl": ('emit a pattern as wgsl', 'webgpu shader for a pattern', 'checker or dots as wgsl',
+                        'procedural background for webgpu', 'wgsl fragment for a pattern', 'pattern field as wgsl'),
+    # C4: bloom as a multi-pass GPU DAG (single-pass postfx_to_glsl must refuse it -- no intermediate texture).
+    "bloom_passes": ('multi pass bloom shader', 'emit bloom as several gpu passes', 'render target ping pong bloom',
+                     'separable blur passes for glow', 'bloom pass dag with wiring', 'gpu bloom the honest way'),
+    # C2: pattern_to_glsl now emits the GPU-reproducible noise32/fbm32 (int64 noise/fbm still refuse -- see module note).
+    "pattern_to_glsl": ('emit a pattern as glsl', 'gpu reproducible noise', 'value noise that runs on the gpu',
+                        'fractal noise shader that matches cpu', 'emit noise to glsl', 'noise32 or fbm32 shader',
+                        'pattern field as a fragment shader', 'checker or stripes or noise as glsl'),
+    # ITEM 6: inpaint/harmonic_fill now accept (H,W,C) -- an RGB image fills in one call. The image-oriented phrasings
+    # ("inpaint an rgb image", "fill a masked area of a photo") did not rank on the field-oriented docstring alone.
+    "inpaint": ('fill the gaps in a field', 'impute missing values', 'inpaint an rgb image', 'fill missing regions in a color image',
+                'fill a masked area of a photo', 'inpaint all channels at once', 'fill holes in an image', 'fill in erased pixels',
+                'harmonic fill a field', 'label propagation into holes'),
+    "harmonic_fill": ('laplace fill a continuous field', 'harmonic inpaint an image', 'fill holes in an rgb image',
+                      'smooth interpolation into holes', 'minimal energy fill', 'inpaint a colour image per channel'),
+    # ITEM 5: segment_image gained max_dim (bound the pixel-scaled sweep, upsample masks back to full size). These
+    # latency-oriented phrasings did not rank on the docstring alone -- aliased from the interactive caller's mouth.
+    "segment_image": ('segment a photo into regions', 'demux an image by colour', 'segment a large image quickly',
+                      'bound the segmentation resolution', 'downsample before segmenting', 'fast segmentation of a big photo',
+                      'limit segmentation to a max dimension', 'segment at a capped resolution', 'object regions from a photo'),
+    # ITEM 8: the emitted shader gained a camera="uniforms" mode (orbit camera driven by host-bound uAngle/uHeight/
+    # uDist), so a WebGL2 host can spin/zoom without string-splicing the source. These abstract phrasings ("spin and
+    # zoom", "controllable camera") did not rank on the faculty docstring alone -- aliased from the host's mouth.
+    "to_shadertoy": ('export an sdf to shadertoy glsl', 'get the shadertoy code for a shape', 'sdf to glsl shader',
+                     'shadertoy shader with orbit camera', 'glsl with a controllable camera', 'movable camera shader',
+                     'spin and zoom the shadertoy scene', 'camera uniforms in the emitted glsl',
+                     'orbit camera uniforms uAngle uHeight uDist'),
+    "sdf_shader": ('emit a glsl fragment shader for an sdf', 'sdf to shadertoy shader', 'raymarch shader from an sdf',
+                   'glsl shader with orbit camera uniforms', 'controllable camera in the emitted glsl',
+                   'movable camera raymarcher', 'spin and zoom the emitted shader'),
     "selection": ('select objects in a scene', 'selection set', 'query objects into a selection', 'scene selection helper', 'pick a set of objects'),
     "simulation": ('wrap a solver in a step loop', 'generic simulation scaffold', 'step any time-stepped solver', 'simulation loop wrapper', 'run any solver step by step'),
     "step_at": ('the i-th step of a plan', 'get a plan step by index', 'which step is next', 'read a stored plan step', 'plan step at index'),
@@ -1672,6 +1715,35 @@ def default_catalog():
                                                 "persist a scene", "restore a workspace", "export a scene",
                                                 "workspace save and load", "manage scenes", "checkpoint a scene",
                                                 "named save point", "restore a checkpoint", "branch a workspace"))
+    c.register_capability("Typed-section container (app-neutral workspace file)", "an app-neutral CONTAINER file "
+                          "(holographic_container): a zip of a manifest + numeric array payloads, its body a list of "
+                          "TYPED SECTIONS {kind, id, meta, arrays}. A section whose kind a reader does not understand "
+                          "ROUND-TRIPS UNTOUCHED, so an image editor, a 3D app, and a video editor share ONE forward-"
+                          "compatible file, each registering its own kinds. save_container(sections, meta) -> bytes; "
+                          "load_container(bytes) -> {meta, sections}. Numeric-only (no pickle); byte-identical save/"
+                          "load/save. Not workspace_manager (a live-DB checkpoint) -- the file FORMAT for typed data",
+                          example="import numpy as np, lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          "b=m.save_container([{'kind':'demo','id':'A','meta':{'n':1},'arrays':{'x':np.arange(4)}}]); "
+                          "print(m.load_container(b)['sections'][0]['kind'])",
+                          native=True, aliases=("save a project file", "workspace file for my app", "app project file",
+                                                "bundle typed data into one file", "share a document between apps",
+                                                "forward-compatible file format", "save meshes and images in one file",
+                                                "container of arrays", "persist unknown kinds and round-trip them",
+                                                "typed sections file", "one file for multiple apps", "cross-app workspace file"))
+    c.register_capability("Frame-source protocol (temporal media seam)", "the CONTRACT for temporal media "
+                          "(holographic_framesource): a FrameSource is any object with get() -> (frame, seq) plus "
+                          "seekable/pausable flags; seq changes IFF the frame changes (cheap invalidation). The "
+                          "engine owns the contract, NOT decoding (cv2/ffmpeg stay host-side). mind.map_frames("
+                          "source, fn, cache) pulls a host source's current frame and memoises fn(frame) by seq; "
+                          "mind.frame_key signs it; mind.synthetic_frame_source is a decoder-free synthetic clip. The "
+                          "seam for video colour transfer / temporal NCA / optical flow",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); s=m.synthetic_frame_source(frames=4); "
+                          "print(m.map_frames(s, lambda f: float(f.mean()))[1])",
+                          native=True, aliases=("frame source protocol", "process video frames with caching",
+                                                "per frame processing memoized by sequence", "seekable pausable frame provider",
+                                                "apply an effect to each video frame", "video frame contract",
+                                                "pull frames from a host source", "temporal media seam", "sequence numbered frames",
+                                                "map a function over video frames", "frame invalidation by sequence"))
     c.register_capability("frame_server", "server-side REAL-TIME FRAME SERVING (holographic_framebudget) for "
                           "front-end clients that PULL frames -- the request/response form of a frame stream (the "
                           "HTTP service's POST /frame delegates to this). Keeps one frame-budget controller PER "
@@ -3775,6 +3847,19 @@ def default_catalog():
                                                 "blend two shapes smoothly", "cosine color palette", "cosine gradient",
                                                 "procedural palette", "random color palette", "iq palette", "demoscene",
                                                 "infinite lattice", "opRep", "smooth union of sdf"))
+    c.register_capability("Palette colour stops (plottable swatches)", "turn a cosine palette into a small table of "
+                          "plottable RGB colours -- the companion to random_palette, which returns cosine "
+                          "COEFFICIENTS (a,b,c,d), NOT colours. mind.palette_stops(seed, n) evaluates the palette at "
+                          "n even points -> an (n,3) float RGB array for a swatch strip, gradient ramp, or legend; "
+                          "pass coeffs=(a,b,c,d) to sample a KNOWN palette. Pure composition of random_palette + "
+                          "cosine_palette, so the stops ARE the palette's colours -- it exists so callers stop "
+                          "interpolating the coefficients as colours (which ships garbage). Deterministic per seed",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); m.palette_stops(seed=7, n=8).tolist()",
+                          native=True, aliases=("palette stops", "palette color stops", "list of rgb colors from a palette",
+                                                "sample a palette into colors", "swatches from a seed", "color swatches",
+                                                "generate n colors", "gradient stops", "rgb colors from random palette",
+                                                "palette to colors", "colors for a legend", "theme colors from a seed",
+                                                "sample cosine palette as rgb", "plottable palette colours"))
     c.register_capability("Navigation & planning", "find a way through a space or structure: A*/shortest-path route "
                           "planning (plan), slime-mould flow networks (flow), tree/graph navigation (navigator), and "
                           "maze solving. Pathfinding on the VSA substrate", example="from holographic.scene_and_pipeline.holographic_plan import ...; mind.solve_maze(world); from holographic.misc.holographic_flow import ...",
@@ -4306,6 +4391,17 @@ def default_catalog():
                                                 "random number per thread without a seed stream", "per thread rng",
                                                 "gpu random", "philox", "counter based rng", "thread id random",
                                                 "deterministic sampling", "per pixel random"))
+    c.register_capability("GPU-reproducible 32-bit hash (PCG, matches GLSL)", "hash_unit is 64-bit, so a GPU shader "
+                          "(GLSL ES 3.00 / WGSL, 32-bit ints) cannot reproduce it -- why value_noise could not emit. "
+                          "hash32_pcg is the 32-bit companion: a PCG output hash (Jarzynski & Olano 2020) of mul/xor/"
+                          "shift that wrap mod 2**32 identically in NumPy uint32 and a GLSL uint, so noise built on it "
+                          "matches per-point CPU vs GPU. hash32_unit keys it on lattice coords; hash32_pcg_glsl emits "
+                          "the GLSL. Coarser than hash_u64 -- reach for it only for the GPU case (it unblocked "
+                          "pattern_to_glsl('noise32'/'fbm32')).",
+                          example="from holographic.misc.holographic_determinism import hash32_pcg, hash32_unit; u = hash32_unit(3, 5, 7, seed=0)  # -> a deterministic [0,1) value per integer cell, identical to the GLSL PCG",
+                          native=True, aliases=("gpu reproducible hash", "32 bit hash for shaders", "pcg hash",
+                                                "hash that matches glsl", "hash32", "value noise hash for the gpu",
+                                                "cpu gpu matching noise hash", "jarzynski olano hash", "shader hash"))
     c.register_capability("Exact periodic PDE solve (spectral Laplace)", "on a PERIODIC grid the Laplacian is a "
                           "circular convolution, so it is DIAGONAL in the Fourier basis and the solve is closed "
                           "form. mind.solve_poisson_periodic(f) inverts laplacian(u)=f in one FFT; "
