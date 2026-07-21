@@ -3370,6 +3370,29 @@
     },
     {
       "aliases": [
+        "invite someone to my session",
+        "generate an invite link",
+        "share a join link",
+        "invite a friend to collaborate",
+        "create a room invite",
+        "get a link to invite people",
+        "invite button",
+        "let someone join my canvas",
+        "share my session",
+        "collaborate with a friend"
+      ],
+      "consumes": [],
+      "does": "The INVITE BUTTON in one call: mint an invite and return a ready-to-share LINK + bare code a friend uses to join this multi-user session. mind.create_invite_link(workspace, base_url, grants, kind) wraps invite/admit -- default grants let the guest READ the workspace scene. Returns {code, link, workspace, kind, grants}: link is base_url?join=<code> for a Copy button, code for a 'type the code' box. The join side is mind.join_from_link. Wraps the low-level invite/principal/grant primitives so a UI button is one call, not an access-control lesson. Delegates; deterministic token via secrets.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); inv=m.create_invite_link(workspace='lab'); ('join=' in inv['link'], bool(inv['code']))",
+      "method": "create_invite_link",
+      "name": "Invite button (shareable join link for a session)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "access control",
         "invite",
         "grant",
@@ -3532,6 +3555,29 @@
       "produces": [],
       "semantic": null,
       "theme": "Run it as a service / distributed"
+    },
+    {
+      "aliases": [
+        "join a session with a code",
+        "join from an invite link",
+        "enter a shared session",
+        "join a room by code",
+        "accept an invite",
+        "join button",
+        "join my friend's canvas",
+        "redeem an invite code",
+        "connect to a shared world",
+        "join a coop session"
+      ],
+      "consumes": [],
+      "does": "The JOIN BUTTON in one call: admit a guest from EITHER a pasted invite LINK (...?join=<code>) OR a bare code. mind.join_from_link(link_or_code, actor_id) extracts the code from a URL if needed, redeems it via admit, and returns the scoped guest Principal (read-only to exactly what the invite granted; the guest's writes stay in their own namespace). Raises AccessError on an unknown/used code. The counterpart to create_invite_link so a join box accepts whatever the user pastes. Delegates to admit.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); inv=m.create_invite_link(workspace='lab'); g=m.join_from_link(inv['link'], 'alice'); g.id",
+      "method": "create_invite_link",
+      "name": "Join button (enter a session from a link or code)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
     },
     {
       "aliases": [
@@ -6758,6 +6804,31 @@
     },
     {
       "aliases": [
+        "stream to obs",
+        "add leos to obs",
+        "obs browser source settings",
+        "capture the canvas in obs",
+        "how do I stream this",
+        "put this on a stream",
+        "obs capture profile",
+        "streaming setup for obs",
+        "browser source width and fps",
+        "transparent background for streaming",
+        "record or stream the canvas",
+        "use this in my stream"
+      ],
+      "consumes": [],
+      "does": "The settings a streamer pastes into OBS to capture the leOS canvas as a BROWSER SOURCE -- the in-constitution way to stream leOS (OBS renders the page and does the ENCODING; the engine serves the page + frames via /frame, /frame/stream). mind.obs_capture_profile(base_url, preset, fps, transparent): preset '720p'/'1080p'/'1440p'/'4k' (match your OBS canvas -> no scaling); transparent=True gives transparent-bg CSS + a URL hint. Returns url, width, height, fps, frame_budget_ms, custom_css and step-by-step obs_steps. NOT an RTMP/NDI/virtual-camera encoder (needs ffmpeg/OS video I/O, outside core).",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); p=m.obs_capture_profile(preset='1080p', fps=30); (p['width'], p['height'], p['fps'])",
+      "method": "obs_capture_profile",
+      "name": "Stream to OBS (browser-source capture profile)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "stripe pattern on a surface",
         "evenly spaced lines aligned to a direction field",
         "knoppel crane stripe patterns",
@@ -7101,6 +7172,31 @@
       "produces": [],
       "semantic": null,
       "theme": "Core algebra & datatypes"
+    },
+    {
+      "aliases": [
+        "auto shrink selection to drawn pixels",
+        "shrink selection to non-transparent pixels",
+        "tighten selection to content",
+        "exclude transparent pixels from selection",
+        "crop selection to opaque pixels",
+        "trim transparent border from a selection",
+        "bounding box of the drawn area",
+        "rotate about the drawing centre not the selection box",
+        "fix rotate pivot for a transparent selection",
+        "shrink marquee to content",
+        "selection bounds from alpha",
+        "auto crop selection to what I drew"
+      ],
+      "consumes": [],
+      "does": "SHRINK a rectangular raster selection to its NON-TRANSPARENT content -- the auto-shrink-to-opaque-pixels Photoshop/GIMP do, so a rotate/scale pivots about the DRAWING's centre, not the loose marquee's empty centre. mind.tighten_selection(alpha, bbox, threshold): alpha is (H,W) 0..1 or 0..255, an (H,W,4) RGBA image, or a bool mask; bbox=(r0,c0,r1,c1) inclusive is the marquee (None=whole image). Returns {empty, bbox, centre, area}: bbox is the tight box, centre the (row,col) pivot. empty=True means KEEP the original selection. Deterministic, numpy-only.",
+      "example": "import numpy as np, lecore; m=lecore.UnifiedMind(); a=np.zeros((100,100)); a[20:30,60:70]=1.0; r=m.tighten_selection(a, bbox=(0,0,99,99)); (r['bbox'], r['centre'])",
+      "method": "tighten_selection",
+      "name": "Tighten a selection to opaque pixels (auto-shrink marquee)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
     },
     {
       "aliases": [
@@ -10556,7 +10652,7 @@
       "theme": "Scenes you can describe & adjust"
     }
   ],
-  "count": 447,
+  "count": 451,
   "schema_version": "1.0",
   "scope": "curated capability homes only -- the full live catalog is served at runtime by mind.find_capability / mind.pipeline_map / GET /tools"
 }

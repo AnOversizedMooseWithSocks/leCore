@@ -2868,6 +2868,13 @@ IDENTIFY the element(s) whose categorical fingerprint {category, state} matches 
 import lecore; m=lecore.UnifiedMind(); r=m.identify_element({'category':'noble_gas','state':'gas'}); print([s for s,sc in r['ranked'][:3]], r['confident'])
 ```
 
+### Invite button (shareable join link for a session)
+The INVITE BUTTON in one call: mint an invite and return a ready-to-share LINK + bare code a friend uses to join this multi-user session. mind.create_invite_link(workspace, base_url, grants, kind) wraps invite/admit -- default grants let the guest READ the workspace scene. Returns {code, link, workspace, kind, grants}: link is base_url?join=<code> for a Copy button, code for a 'type the code' box. The join side is mind.join_from_link. Wraps the low-level invite/principal/grant primitives so a UI button is one call, not an access-control lesson. Delegates; deterministic token via secrets..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); inv=m.create_invite_link(workspace='lab'); ('join=' in inv['link'], bool(inv['code']))
+```
+
 ### Invite guests and share selectively (access control)
 control who reads what. mind.invite(kind, grants) mints a token admitting a guest with specific initial read grants; mind.admit(code, id) redeems it into a scoped Principal that reads ONLY what it was granted (default: nothing but its own namespace) and writes only its own. mind.grant / mind.revoke share and un-share namespaces later; holographic_access.require_readable is the read chokepoint (the symmetric twin of the DB's write-only-your-own rule)..
 
@@ -2880,6 +2887,13 @@ m.solve_linear_cg(A, b, x0=None) solves A x = b for Hermitian positive-definite 
 
 ```python
 import numpy as np, lecore; m=lecore.UnifiedMind(); A=np.array([[4.,1.],[1.,3.]]); b=np.array([1.,2.]); x=m.solve_linear_cg(A,b); bool(np.abs(A@x-b).max()<1e-9)
+```
+
+### Join button (enter a session from a link or code)
+The JOIN BUTTON in one call: admit a guest from EITHER a pasted invite LINK (...?join=<code>) OR a bare code. mind.join_from_link(link_or_code, actor_id) extracts the code from a URL if needed, redeems it via admit, and returns the scoped guest Principal (read-only to exactly what the invite granted; the guest's writes stay in their own namespace). Raises AccessError on an unknown/used code. The counterpart to create_invite_link so a join box accepts whatever the user pastes. Delegates to admit..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); inv=m.create_invite_link(workspace='lab'); g=m.join_from_link(inv['link'], 'alice'); g.id
 ```
 
 ### Learned chunk codebook (iterated pair promotion)
@@ -3095,6 +3109,13 @@ make any constraint SPRINGY instead of rigid, in physical units: mind.project_on
 x, n, ok = mind.project_onto_constraints(x0, [proj], iters=64, stiffness=(15.0, 1.0), dt=1/240)
 ```
 
+### Stream to OBS (browser-source capture profile)
+The settings a streamer pastes into OBS to capture the leOS canvas as a BROWSER SOURCE -- the in-constitution way to stream leOS (OBS renders the page and does the ENCODING; the engine serves the page + frames via /frame, /frame/stream). mind.obs_capture_profile(base_url, preset, fps, transparent): preset '720p'/'1080p'/'1440p'/'4k' (match your OBS canvas -> no scaling); transparent=True gives transparent-bg CSS + a URL hint. Returns url, width, height, fps, frame_budget_ms, custom_css and step-by-step obs_steps. NOT an RTMP/NDI/virtual-camera encoder (needs ffmpeg/OS video I/O, outside core)..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); p=m.obs_capture_profile(preset='1080p', fps=30); (p['width'], p['height'], p['fps'])
+```
+
 ### Subdivision limit surface (closed form)
 mind.mesh_limit_surface(mesh) returns where infinite Loop subdivision would put every vertex, plus the EXACT limit normal there -- in O(V), performing no subdivision at all. The ring-to-ring block of the local Loop operator is exactly a CIRCULANT, i.e. a bind operator, so iterate.transfer diagonalises it for free: mode 0 (eigenvalue 5/8 at every valence) gives the limit position, modes +-1 span the tangent plane so the normal is exact rather than area-weighted (0.0000 degrees against a 6x-subdivided icosphere), and Warren's beta is read off the spectrum instead of hard-coded. Deep subdivision converges to it: 6.0e-4 -> 3.7e-5 -> 2.3e-6 at k=4/6/8. HONEST SCOPE: this is the k -> infinity case; a FINITE number of levels on an irregular mesh still needs the full Stam evaluation, so use mind.mesh_subdivide(mesh, k) there..
 
@@ -3107,6 +3128,13 @@ trace the intersection curve of two implicit surfaces f=0, g=0 (K2, the kernel k
 
 ```python
 import numpy as np, lecore; m=lecore.UnifiedMind(); sA=lambda P: np.linalg.norm(np.asarray(P,float),axis=1)-1.0; sB=lambda P: np.linalg.norm(np.asarray(P,float)-np.array([1.,0,0]),axis=1)-1.0; len(m.surface_intersect(sA,sB,(-1.5,-1.5,-1.5),(2,1.5,1.5)))
+```
+
+### Tighten a selection to opaque pixels (auto-shrink marquee)
+SHRINK a rectangular raster selection to its NON-TRANSPARENT content -- the auto-shrink-to-opaque-pixels Photoshop/GIMP do, so a rotate/scale pivots about the DRAWING's centre, not the loose marquee's empty centre. mind.tighten_selection(alpha, bbox, threshold): alpha is (H,W) 0..1 or 0..255, an (H,W,4) RGBA image, or a bool mask; bbox=(r0,c0,r1,c1) inclusive is the marquee (None=whole image). Returns {empty, bbox, centre, area}: bbox is the tight box, centre the (row,col) pivot. empty=True means KEEP the original selection. Deterministic, numpy-only..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(); a=np.zeros((100,100)); a[20:30,60:70]=1.0; r=m.tighten_selection(a, bbox=(0,0,99,99)); (r['bbox'], r['centre'])
 ```
 
 ### Token sampling (temperature + nucleus)
@@ -3531,4 +3559,4 @@ import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors(
 
 ---
 
-*447 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*451 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

@@ -52,6 +52,81 @@ def frame_budget_ms(target_fps, headroom=0.15):
     return (1000.0 / target_fps) * (1.0 - headroom)
 
 
+# Standard streaming canvas sizes -- the resolutions OBS scenes are almost always built at, so a browser source
+# that matches one of these needs no scaling (scaling in OBS costs quality and CPU). Longest-edge keyed.
+_STREAM_PRESETS = {
+    "720p":  (1280, 720),
+    "1080p": (1920, 1080),
+    "1440p": (2560, 1440),
+    "4k":    (3840, 2160),
+}
+
+
+def obs_capture_profile(base_url="http://127.0.0.1:5050/", preset="1080p", fps=30,
+                        transparent=False, headroom=0.15):
+    """Produce the settings a streamer types into OBS to capture this canvas as a BROWSER SOURCE -- the realistic,
+    in-constitution way to put leOS on a stream. (A full RTMP/NDI/virtual-camera ENCODER is deliberately NOT here:
+    it needs ffmpeg / OS video I/O, which the NumPy-only core forbids. OBS itself does the encoding once it is
+    capturing the browser source, so the engine's job is only to serve a clean, correctly-sized page and tell the
+    streamer how to point OBS at it.)
+
+    base_url:    where the leOS web front end is served (the HTTP service root).
+    preset:      one of '720p','1080p','1440p','4k' -- match your OBS canvas so OBS does no scaling.
+    fps:         browser-source FPS. Kept modest by default (30) because the browser source re-renders the whole
+                 page each frame; 60 is fine for a fast machine.
+    transparent: if True, advertise a transparent background so OBS composites the canvas over other sources
+                 (the front end must actually render with an alpha/transparent clear for this to take effect --
+                 this profile only carries the flag + the OBS-side CSS, it cannot force the page to be transparent).
+    headroom:    passed to frame_budget_ms -- the per-frame ms budget the renderer must finish inside to hold `fps`.
+
+    Returns a plain dict (JSON-friendly, so it round-trips over /invoke) with:
+      url                 the browser-source URL (base_url; a fragment hint is added when transparent)
+      width, height       the browser-source size in px (from the preset)
+      fps                 the browser-source FPS to enter
+      frame_budget_ms     the wall-clock budget per frame at that fps (reuses frame_budget_ms)
+      transparent         echoed flag
+      custom_css          the OBS 'Custom CSS' to paste (empty background when transparent; else '')
+      obs_steps           an ordered list of human steps to add the source
+      note                the honest boundary (browser source vs a native encoder)
+
+    Deterministic, stdlib-only. This is guidance + numbers, not a live pipe; the live frames come from the existing
+    /frame and /frame/stream endpoints, which OBS's browser source consumes by simply rendering the page."""
+    if preset not in _STREAM_PRESETS:
+        raise ValueError("preset must be one of %s, got %r" % (sorted(_STREAM_PRESETS), preset))
+    if fps <= 0:
+        raise ValueError("fps must be positive")
+    w, h = _STREAM_PRESETS[preset]
+    # OBS's browser source honours a transparent page background; the canonical CSS is to clear the body so the
+    # page's own alpha shows through. When not transparent we leave custom CSS empty (OBS default is fine).
+    css = "body { background: rgba(0, 0, 0, 0); margin: 0; overflow: hidden; }" if transparent else ""
+    url = base_url
+    if transparent and "#" not in url:
+        url = url + "#transparent"        # a hint the front end can read to pick a transparent clear colour
+    steps = [
+        "In OBS, add a Source -> Browser.",
+        "Set URL to %s" % url,
+        "Set Width to %d and Height to %d (match your OBS canvas so there is no scaling)." % (w, h),
+        "Set FPS to %d." % fps,
+    ]
+    if transparent:
+        steps.append("Paste the custom_css below into the 'Custom CSS' box so the background is transparent, "
+                     "and make sure the leOS canvas is rendering with a transparent clear.")
+    steps.append("Click OK; the canvas appears as a source you can resize/crop like any other.")
+    return {
+        "url": url,
+        "width": w,
+        "height": h,
+        "fps": int(fps),
+        "frame_budget_ms": round(frame_budget_ms(fps, headroom=headroom), 3),
+        "transparent": bool(transparent),
+        "custom_css": css,
+        "obs_steps": steps,
+        "note": "Browser-source capture: OBS renders this page and does the video encoding. leOS serves the page "
+                "and (via /frame and /frame/stream) the frames; it does not itself encode RTMP/NDI/a virtual "
+                "camera (that needs ffmpeg/OS video I/O, outside the NumPy-only core).",
+    }
+
+
 class FrameBudgetController:
     """A closed-loop quality controller: hold a target FPS by moving up and down a quality ladder based on MEASURED
     frame time. Usage each frame:
@@ -637,6 +712,22 @@ def _selftest():
     dist = fs3.serve_frame_distributed("d", local_distribute, target_fps=30, tiles=(2, 2), t=0.5)
     assert dist["payload"]["pixels"] == _demo_pixels(dist["preset"], 0.5)["pixels"], "tiled == single-node render"
     assert dist["tiles_ran"] == 4 and "frame_ms" in dist
+
+    # (10) obs_capture_profile: the browser-source settings a streamer pastes into OBS. Preset -> exact size, fps ->
+    #      the same per-frame budget as frame_budget_ms, transparent flips the CSS + URL hint, bad input refused.
+    prof = obs_capture_profile(preset="1080p", fps=30)
+    assert prof["width"] == 1920 and prof["height"] == 1080 and prof["fps"] == 30
+    assert abs(prof["frame_budget_ms"] - round(frame_budget_ms(30), 3)) < 1e-9   # reuses the budget math
+    assert prof["transparent"] is False and prof["custom_css"] == ""             # opaque: no custom CSS
+    assert any("Browser" in s for s in prof["obs_steps"])                        # the human steps are present
+    tp = obs_capture_profile(preset="720p", fps=60, transparent=True)
+    assert tp["width"] == 1280 and tp["transparent"] and "rgba(0, 0, 0, 0)" in tp["custom_css"]
+    assert tp["url"].endswith("#transparent")                                    # front-end hint for a clear colour
+    for bad in (dict(preset="nope"), dict(fps=0)):                               # refuse loudly, never guess
+        try:
+            obs_capture_profile(**bad); assert False, "should have refused %r" % bad
+        except ValueError:
+            pass
 
     print("holographic_framebudget selftest OK (60fps->%.1fms / 30fps->%.1fms budgets; drops on a miss, climbs "
           "only after a streak (hysteresis); closed loop from ultra converges to the highest fitting level "

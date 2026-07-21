@@ -643,6 +643,14 @@ def default_catalog():
                                                 "separate objects in a photo", "colour segmentation", "color segmentation",
                                                 "region segmentation", "split an image into regions", "connected components of an image",
                                                 "find objects in an image", "extract objects from a photo", "foreground regions"))
+    c.register_capability("Tighten a selection to opaque pixels (auto-shrink marquee)", "SHRINK a rectangular raster selection to its NON-TRANSPARENT content -- the auto-shrink-to-opaque-pixels Photoshop/GIMP do, so a rotate/scale pivots about the DRAWING's centre, not the loose marquee's empty centre. mind.tighten_selection(alpha, bbox, threshold): alpha is (H,W) 0..1 or 0..255, an (H,W,4) RGBA image, or a bool mask; bbox=(r0,c0,r1,c1) inclusive is the marquee (None=whole image). Returns {empty, bbox, centre, area}: bbox is the tight box, centre the (row,col) pivot. empty=True means KEEP the original selection. Deterministic, numpy-only.",
+                          example="import numpy as np, lecore; m=lecore.UnifiedMind(); a=np.zeros((100,100)); a[20:30,60:70]=1.0; r=m.tighten_selection(a, bbox=(0,0,99,99)); (r['bbox'], r['centre'])",
+                          native=True, aliases=("auto shrink selection to drawn pixels", "shrink selection to non-transparent pixels",
+                                                "tighten selection to content", "exclude transparent pixels from selection",
+                                                "crop selection to opaque pixels", "trim transparent border from a selection",
+                                                "bounding box of the drawn area", "rotate about the drawing centre not the selection box",
+                                                "fix rotate pivot for a transparent selection", "shrink marquee to content",
+                                                "selection bounds from alpha", "auto crop selection to what I drew"))
     c.register_capability("Build a scene from a photo (image -> editable scene)", "BUILD A SCENE FROM A PHOTO (machine-initialised) -- the demux->fit->assemble front half of image->3D. mind.scene_from_image(image, k, max_objects) segments the photo, keeps the most object-like foreground regions, maps each region's silhouette+colour to a primitive, assembles a live SemanticScene you can adjust/render/refine_to_target/to_node_graph. Returns {scene, regions, roles, objects}. Deterministic. HONEST: shape from silhouette, colour from region mean; DEPTH not reconstructed (z=0) -- a STARTING POINT the critic + drill-down refine; quality bounded by the segmentation.",
                           example="import numpy as np, lecore; m=lecore.UnifiedMind(); img=np.ones((60,90,3)); yy,xx=np.mgrid[0:60,0:90]; img[(yy-30)**2+(xx-25)**2<=12**2]=(0.85,0.15,0.15); img[20:45,58:82]=(0.15,0.25,0.85); [o['shape'] for o in m.scene_from_image(img, k=3, max_objects=2)['objects']]",
                           native=True, aliases=("build a scene from a photo", "photo to scene", "image to editable scene",
@@ -1756,6 +1764,23 @@ def default_catalog():
                                                 "per-session frame serving", "pull frames at a target rate",
                                                 "adaptive frame server", "real-time frame endpoint",
                                                 "serve real-time simulation frames"))
+    c.register_capability("Stream to OBS (browser-source capture profile)", "The settings a streamer pastes into OBS to capture the leOS canvas as a BROWSER SOURCE -- the in-constitution way to stream leOS (OBS renders the page and does the ENCODING; the engine serves the page + frames via /frame, /frame/stream). mind.obs_capture_profile(base_url, preset, fps, transparent): preset '720p'/'1080p'/'1440p'/'4k' (match your OBS canvas -> no scaling); transparent=True gives transparent-bg CSS + a URL hint. Returns url, width, height, fps, frame_budget_ms, custom_css and step-by-step obs_steps. NOT an RTMP/NDI/virtual-camera encoder (needs ffmpeg/OS video I/O, outside core).",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); p=m.obs_capture_profile(preset='1080p', fps=30); (p['width'], p['height'], p['fps'])",
+                          native=True, aliases=("stream to obs", "add leos to obs", "obs browser source settings",
+                                                "capture the canvas in obs", "how do I stream this", "put this on a stream",
+                                                "obs capture profile", "streaming setup for obs", "browser source width and fps",
+                                                "transparent background for streaming", "record or stream the canvas",
+                                                "use this in my stream"))
+    c.register_capability("Invite button (shareable join link for a session)", "The INVITE BUTTON in one call: mint an invite and return a ready-to-share LINK + bare code a friend uses to join this multi-user session. mind.create_invite_link(workspace, base_url, grants, kind) wraps invite/admit -- default grants let the guest READ the workspace scene. Returns {code, link, workspace, kind, grants}: link is base_url?join=<code> for a Copy button, code for a 'type the code' box. The join side is mind.join_from_link. Wraps the low-level invite/principal/grant primitives so a UI button is one call, not an access-control lesson. Delegates; deterministic token via secrets.",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); inv=m.create_invite_link(workspace='lab'); ('join=' in inv['link'], bool(inv['code']))",
+                          native=True, aliases=("invite someone to my session", "generate an invite link", "share a join link",
+                                                "invite a friend to collaborate", "create a room invite", "get a link to invite people",
+                                                "invite button", "let someone join my canvas", "share my session", "collaborate with a friend"))
+    c.register_capability("Join button (enter a session from a link or code)", "The JOIN BUTTON in one call: admit a guest from EITHER a pasted invite LINK (...?join=<code>) OR a bare code. mind.join_from_link(link_or_code, actor_id) extracts the code from a URL if needed, redeems it via admit, and returns the scoped guest Principal (read-only to exactly what the invite granted; the guest's writes stay in their own namespace). Raises AccessError on an unknown/used code. The counterpart to create_invite_link so a join box accepts whatever the user pastes. Delegates to admit.",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); inv=m.create_invite_link(workspace='lab'); g=m.join_from_link(inv['link'], 'alice'); g.id",
+                          native=True, aliases=("join a session with a code", "join from an invite link", "enter a shared session",
+                                                "join a room by code", "accept an invite", "join button", "join my friend's canvas",
+                                                "redeem an invite code", "connect to a shared world", "join a coop session"))
     c.register_capability("frame_budget_controller", "the FRAME-BUDGET CONTROLLER (holographic_framebudget) -- one "
                           "knob from a target FPS to concrete render + simulation quality, held closed-loop against "
                           "MEASURED frame time. Each frame: current() gives the quality preset, report(frame_ms) "

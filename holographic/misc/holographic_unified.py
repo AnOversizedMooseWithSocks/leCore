@@ -4195,6 +4195,19 @@ class UnifiedMind:
         from holographic.scene_and_pipeline.holographic_framebudget import FrameServer
         return FrameServer(ladder=ladder, headroom=headroom)
 
+    def obs_capture_profile(self, base_url="http://127.0.0.1:5050/", preset="1080p", fps=30,
+                            transparent=False, headroom=0.15):
+        """The settings a streamer pastes into OBS to capture this canvas as a BROWSER SOURCE -- the realistic,
+        in-constitution way to put leOS on a stream (OBS does the video encoding; the engine serves the page + the
+        frames via /frame and /frame/stream). preset is '720p'/'1080p'/'1440p'/'4k' (match your OBS canvas so OBS
+        does no scaling); transparent=True advertises a transparent background + the OBS custom CSS so the canvas
+        composites over other sources. Returns {url, width, height, fps, frame_budget_ms, transparent, custom_css,
+        obs_steps, note}. NOT an RTMP/NDI/virtual-camera encoder -- that needs ffmpeg/OS video I/O, outside the
+        NumPy-only core. See holographic_framebudget.obs_capture_profile."""
+        from holographic.scene_and_pipeline.holographic_framebudget import obs_capture_profile
+        return obs_capture_profile(base_url=base_url, preset=preset, fps=fps,
+                                   transparent=transparent, headroom=headroom)
+
     def synthetic_frame_source(self, kind="clock", size=(64, 64), frames=120, seed=0):
         """Build a pure-NumPy, DECODER-FREE reference FrameSource -- a deterministic synthetic clip (holographic_
         framesource) for demos/tests of the temporal seam without any cv2/ffmpeg. kinds: 'clock'/'gradient'/'bars'.
@@ -10918,6 +10931,19 @@ class UnifiedMind:
                              split_components=split_components, min_fraction=min_fraction, max_dim=max_dim)
 
 
+    def tighten_selection(self, alpha, bbox=None, threshold=0.0):
+        """Shrink a rectangular raster selection to its NON-TRANSPARENT content -- the auto-shrink-to-opaque-pixels
+        Photoshop/GIMP do so a later rotate/scale pivots about the DRAWING's centre, not the loose marquee's centre
+        (a marquee whose centre lands in empty space spins the drawing around a point outside it). Pass the layer
+        alpha (H,W in 0..1 or 0..255), an (H,W,4) RGBA image, or a boolean mask, and optionally the dragged marquee
+        `bbox`=(r0,c0,r1,c1) inclusive. Returns {empty, bbox, centre, area}: `bbox` is the tight content box and
+        `centre` is the (row,col) pivot a transform should use. `empty=True` (blank marquee) means keep the original
+        selection rather than collapse it. Non-destructive; deterministic. See holographic_vision.tighten_selection.
+        """
+        from holographic.misc.holographic_vision import tighten_selection
+        return tighten_selection(alpha, bbox=bbox, threshold=threshold)
+
+
     def image_signature(self, rgb):
         """One fixed-length feature vector describing an image (holographic_vision.describe): colour histogram +
         edge-orientation histogram + coarse layout, concatenated -- the classic-CV descriptor behind
@@ -14596,6 +14622,41 @@ class UnifiedMind:
         apply_invite(p, inv)
         self.registry.announce(p)
         return p
+
+    def create_invite_link(self, workspace="default", base_url="http://127.0.0.1:5050/",
+                           grants=None, kind="user"):
+        """The INVITE BUTTON, one call: mint an invite and return a ready-to-share LINK (plus the raw code) that a
+        friend pastes/opens to join this session. Wraps mind.invite -- so the guest can be admitted later with
+        mind.join_from_link(link, actor_id). `grants` are the initial READ grants (default: read the workspace's
+        scene, i.e. {'read': [workspace+'/scene']}); pass your own to share more or less. Returns
+        {code, link, workspace, kind, grants}: `link` is base_url with ?join=<code> for the button to copy, `code`
+        is the bare token for a 'type the code' box.
+
+        WHY a wrapper: invite/admit are the low-level access primitives (kind, grants, namespaces); a front-end
+        invite button should not have to assemble a URL or know the grant vocabulary. This packages the common case
+        so the button is one call, while power users still have invite/admit/grant directly. Delegates -- it does
+        not reimplement the access logic. See holographic_access."""
+        from urllib.parse import urlencode
+        if grants is None:
+            grants = {"read": [workspace + "/scene"]}    # the sensible default: a guest can see the shared scene
+        inv = self.invite(kind=kind, grants=grants)
+        sep = "&" if ("?" in base_url) else "?"
+        link = base_url + sep + urlencode({"join": inv.code})
+        return {"code": inv.code, "link": link, "workspace": workspace, "kind": kind, "grants": grants}
+
+    def join_from_link(self, link_or_code, actor_id, workspace="default"):
+        """The JOIN BUTTON, one call: admit a guest from EITHER a full invite link (…?join=<code>) OR a bare code.
+        Extracts the code if given a URL, then redeems it via mind.admit -- returning the scoped guest Principal
+        (read-only to exactly what the invite granted; writes stay in the guest's own namespace). Raises AccessError
+        on an unknown/used code, same as admit. This is the front-end counterpart to create_invite_link so the join
+        box accepts whatever the user pastes. Delegates to admit. See holographic_principal / holographic_access."""
+        from urllib.parse import urlparse, parse_qs
+        code = link_or_code
+        if isinstance(link_or_code, str) and "join=" in link_or_code:
+            q = parse_qs(urlparse(link_or_code).query)
+            if q.get("join"):
+                code = q["join"][0]                      # pull the code out of a pasted link
+        return self.admit(code, actor_id, workspace=workspace)
 
     def grant(self, principal, read=None):
         """Share selectively: grant a principal READ access to a namespace (or list of them). See holographic_access."""
