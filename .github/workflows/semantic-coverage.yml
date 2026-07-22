@@ -130,15 +130,28 @@ jobs:
         # export_index.py pulls the routing vectors from the freshly-embedded cache and writes them to
         # the path the engine loads (lecore_data/routing/index_128d.npz). Instead of GATING (which forced
         # a manual rebuild), we COMMIT the refresh back -- same auto-commit pattern as docs.yml -- so the
-        # shipped index stays in lockstep with the code on every push, hands-free. [skip ci] on the commit
-        # prevents a re-trigger loop.
+        # shipped index stays in lockstep with the code on every push, hands-free. The commit deliberately
+        # RE-TRIGGERS CI (no [skip ci] -- see the WHY at the commit below): tests assert the lockstep, so the
+        # heal must run them; the second pass finds nothing to commit and the cycle terminates.
+        # THE SEED RIDES THE SAME COMMIT: the committed routing seed used to refresh only by hand, while the
+        # index refreshed itself here every push -- so any NEW module put the two out of lockstep until
+        # someone remembered (measured: seed 521 vs index 523 modules broke main after a merge, while both
+        # branches passed alone). seed_cache.py snapshots the SAME freshly-warmed cache this job just built;
+        # it is content-determined (sorted keys), so it only diffs when the corpus really moved.
         run: |
           python tools/semantic/export_index.py --dim 128 --repo .
+          (cd tools/semantic && python seed_cache.py)
           git config user.name  "semantic-bot"
           git config user.email "semantic-bot@users.noreply.github.com"
-          if ! git diff --quiet lecore_data/routing/index_128d.npz; then
-            git add lecore_data/routing/index_128d.npz
-            git commit -m "semantic: refresh routing index_128d.npz from embed [skip ci]"
+          if ! git diff --quiet lecore_data/routing/index_128d.npz tools/semantic/routing_seed.npz.xz; then
+            git add lecore_data/routing/index_128d.npz tools/semantic/routing_seed.npz.xz
+            # NO [skip ci] here, deliberately: the test suite ASSERTS seed/index lockstep, so a skipped
+            # re-run leaves main red until the next unrelated push -- a hidden wait-for-a-human step. The
+            # re-triggered run terminates by construction: both artifacts are content-determined, the cache
+            # is warm, so the second pass finds zero diff and commits nothing (measured semantics of
+            # seed_cache build + export_index). One extra CI run per real corpus change buys a main that
+            # heals itself in the same push cycle.
+            git commit -m "semantic: refresh routing index + seed from embed"
             # REBASE + RETRY: docs.yml fires on the SAME push and auto-commits generated docs, so the remote
             # head can move while this job runs -- a bare push then fails non-fast-forward (measured: first
             # live run). The two bots touch DISJOINT files (index npz vs generated md), so rebasing our one
