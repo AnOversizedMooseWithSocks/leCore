@@ -725,6 +725,19 @@ def _jsonable(o):
         return {str(k): _jsonable(v) for k, v in o.items()}
     if isinstance(o, (list, tuple)):
         return [_jsonable(v) for v in o]
+    if hasattr(o, "vertices") and hasattr(o, "faces"):
+        # a Mesh (or any duck-mesh) leaves the service as EXACTLY the dict shape as_mesh accepts coming in --
+        # {'vertices': [...], 'faces': [...]} -- so the HTTP boundary is symmetric: what /invoke returns can be
+        # posted straight back into the next /invoke. Found by the wiring sweep: sculpt_prepare's sculptable
+        # mesh degraded to a repr stub, a dead end for the app talking to this service over HTTP.
+        out = {"vertices": _jsonable(np.asarray(o.vertices)), "faces": [list(map(int, f)) for f in o.faces]}
+        uvs = getattr(o, "uvs", None)
+        if uvs is not None:
+            out["uvs"] = _jsonable(np.asarray(uvs))
+        cols = getattr(o, "colours", None)
+        if cols is not None:
+            out["colours"] = _jsonable(np.asarray(cols))
+        return out
     return {"type": type(o).__name__, "repr": repr(o)[:500]}    # object -> a typed summary, not a crash
 
 

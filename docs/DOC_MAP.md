@@ -30,7 +30,7 @@ The generators it runs, read from that list at generation time so this page cann
 - `pipelinemap.py` -> `docs/PIPELINE_MAP.md`, `pipelines.json`
 - `tools/unifiers.py --write` -> `docs/UNIFIERS.md`
 
-## Family layout (520 modules)
+## Family layout (522 modules)
 
 ```mermaid
 graph LR
@@ -38,13 +38,13 @@ graph LR
     H --> misc["misc (150)"]
     H --> mesh["mesh_and_geometry (79)"]
     H --> rend["rendering (63)"]
-    H --> simu["simulation_and_physics (48)"]
+    H --> simu["simulation_and_physics (49)"]
     H --> agen["agents_and_reasoning (47)"]
     H --> samp["sampling_and_signal (33)"]
     H --> io_a["io_and_interop (31)"]
     H --> scen["scene_and_pipeline (30)"]
     H --> cach["caching_and_storage (20)"]
-    H --> mate["materials_and_texture (14)"]
+    H --> mate["materials_and_texture (15)"]
     H --> sema["semantic_router (5)"]
 ```
 

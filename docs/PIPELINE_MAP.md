@@ -2,7 +2,7 @@
 
 *The workflow graph, auto-derived by `pipelinemap.py` from the catalog's `consumes`/`produces` tags. Nodes are io-kinds; an edge means some capability turns the source kind into the target kind. This is a VIEW of the live tags -- to change it, tag capabilities, not this file.*
 
-> **Coverage: 110 of 2263 capabilities carry io-kind tags (4%).** The graph below is that tagged subset. Untagged capabilities are real but do not yet declare a typed edge -- backfilling tags grows the map.
+> **Coverage: 110 of 2289 capabilities carry io-kind tags (4%).** The graph below is that tagged subset. Untagged capabilities are real but do not yet declare a typed edge -- backfilling tags grows the map.
 
 ```mermaid
 graph LR

@@ -294,3 +294,46 @@ def test_shell_build_matches_scatter_and_remarches():
     assert full[mid, mid, mid] < 0 < full[0, 0, 0]                # interior negative, corner positive
     re = marching_tetrahedra_vec(full, ax, 0.0)
     assert re.n_faces > 0 and re.is_closed()                      # re-marches to a closed surface
+
+
+def test_sculpt_prepare_guarded_conversion():
+    """The sculpt-mode bug, closed: the guard pulls the winding lever on touching shells (where flood fill
+    leaks and escalating resolution makes it WORSE), refuses unrecoverable slivers with the ladder report,
+    and returns a grid/mesh pair that are the same level of the same field."""
+    import numpy as np
+    import lecore
+    from holographic.mesh_and_geometry.holographic_mesh import Mesh
+    from holographic.mesh_and_geometry.holographic_meshbridge import marching_tetrahedra_vec
+    m = lecore.UnifiedMind(dim=64, seed=0)
+
+    def box_with_fin(fin):
+        def bx(cx, cy, cz, hx, hy, hz):
+            s = [(-1,-1,-1),(1,-1,-1),(1,1,-1),(-1,1,-1),(-1,-1,1),(1,-1,1),(1,1,1),(-1,1,1)]
+            return [(cx+hx*a, cy+hy*b, cz+hz*c) for a, b, c in s]
+        V = bx(0,0,0,0.7,0.35,0.5) + bx(0,0.55,0,fin,0.2,0.4)
+        Fq = [(0,3,2,1),(4,5,6,7),(0,1,5,4),(2,3,7,6),(0,4,7,3),(1,2,6,5)]
+        F = []
+        for base in (0, 8):
+            for q in Fq:
+                a,b,c,d = [x+base for x in q]; F += [(a,b,c),(a,c,d)]
+        return Mesh(np.array(V, float), F)
+
+    # the reproduced bug: auto fails on touching shells; the guard recovers via winding at EQUAL resolution
+    r = m.sculpt_prepare(box_with_fin(0.02), resolution=48)
+    assert r["report"]["sign"] == "winding" and r["report"]["iou"] >= 0.95
+    assert r["report"]["ladder"][0][1] == "auto" and r["report"]["ladder"][0][2] < 0.8
+
+    # the cache and the visible mesh are the SAME field: re-marching the grid reproduces the mesh
+    back = marching_tetrahedra_vec(r["grid"], r["axes"], level=0.0)
+    assert len(back.vertices) == len(r["mesh"].vertices)
+
+    # unrecoverable sliver -> loud refusal carrying the ladder
+    try:
+        m.sculpt_prepare(box_with_fin(0.002), resolution=32, max_resolution=96)
+        assert False, "must refuse"
+    except ValueError as exc:
+        assert "REFUSES" in str(exc)
+
+    # explicit opt-out is single-pass and says so
+    u = m.sculpt_prepare(box_with_fin(0.002), resolution=24, silhouette=None)
+    assert u["report"]["iou"] is None and u["report"]["ladder"] == []

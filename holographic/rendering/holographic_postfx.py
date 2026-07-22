@@ -328,6 +328,21 @@ def sharpen(img, amount=0.5, sigma=1.5):
 # --------------------------------------------------------------------------------------------------------------
 # Grain and sampling
 # --------------------------------------------------------------------------------------------------------------
+def style_transfer(img, reference=None, mode="covariance", strength=1.0):
+    """STYLE TRANSFER as a chain step: grade this frame toward a REFERENCE image's colour statistics
+    (Reinhard 2001 mean/std, or the Monge-Kantorovich full-covariance form -- see holographic_colortransfer,
+    which this delegates to). The composition seam the ST family was missing: putting it in the EFFECTS
+    registry lets a look ride ANY post chain -- e.g. ("style_transfer", {"reference": sunset, "strength": .8})
+    then ("film_grain", ...) -- so a whole sequence grades consistently toward one reference frame.
+    `reference` is required (an (H,W,3) image; sizes need not match -- only its statistics are used).
+    KEPT NEGATIVE (inherited, loud): GLOBAL colour statistics -- it moves colour, not content, and a linear
+    map can wash out when the palettes are wildly different."""
+    if reference is None:
+        raise ValueError("style_transfer needs a reference image: ('style_transfer', {'reference': ref_img})")
+    from holographic.materials_and_texture.holographic_colortransfer import color_transfer
+    return color_transfer(np.asarray(img, float), np.asarray(reference, float), mode=mode, strength=strength)
+
+
 def film_grain(img, amount=0.04, seed=0, mono=True):
     """Deterministic seeded additive grain -- breaks up flat gradients the way real film / sensor noise does. Seeded
     so the same frame always grains identically (the engine's determinism rule)."""
@@ -503,7 +518,7 @@ EFFECTS = {
     "color_grade": color_grade, "vignette": vignette, "pbr_neutral": pbr_neutral, "bloom": bloom, "glare": glare,
     "lens_flare": lens_flare, "chromatic_aberration": chromatic_aberration, "dof": dof,
     "motion_blur": motion_blur, "denoise": denoise, "sharpen": sharpen, "film_grain": film_grain,
-    "resample": resample, "supersample": supersample,
+    "resample": resample, "supersample": supersample, "style_transfer": style_transfer,
 }
 _NEEDS_DEPTH = {"dof"}                                       # effects that read the depth buffer
 
