@@ -41414,3 +41414,44 @@ is now the WHY-comment for the band. 25 VM tests green; lints clean; docs regene
 LESSON (appending to the QEM class): "hammered N cases, zero disagreements" is a sample, not a proof, when two
 float summation orders are compared -- equivalence claims across regrouped arithmetic need a STRUCTURAL
 mechanism (defer to the reference path in the ambiguous band), not more samples.
+
+## CI FIX (post-merge): routing seed lagged the auto-committed index -- seed now rides the same lockstep commit
+
+Main broke AFTER a merge that passed on both branches: test_seed_covers_the_shipped_index_module_set found the
+committed routing seed at 521 vectors vs 523 modules in the shipped index. MECHANISM: semantic-coverage.yml
+auto-commits the REBUILT INDEX on every push (lockstep by design), but the SEED refreshed only by hand -- so
+every NEW module (this arc's holographic_proctex + one from the merged branch) widened the gap until the count
+assert tripped. 20 cache keys were stale/missing in total (18 docstring-edit key moves + 2 new modules), but
+only the 2 new modules break the count invariant. Branch CI passed because each branch alone stayed within its
+own delta; the union crossed the line -- a classic merge-only failure.
+
+CANNOT FIX FROM THIS SANDBOX, by design: the embedding weights are not committed (CI fetches them from pinned
+repo variables; not release assets on this repo; not present locally here). The seed exists precisely so
+non-weight environments never embed.
+
+STRUCTURAL FIX (committed to the workflow): the index-refresh step now ALSO runs seed_cache.py against the
+same freshly-warmed cache and includes tools/semantic/routing_seed.npz.xz in the same commit-if-changed +
+rebase-retry push. Correct by construction: build() filters through _routing_keys over the CURRENT collectors,
+so stale keys from the restored old seed drop out and the snapshot is exactly the current corpus; the seed is
+content-determined (sorted keys) so it only diffs when the corpus moved. The index and seed can no longer
+drift apart -- the failure class is closed, not patched.
+
+SEQUENCING FOR THE HEAL: merge this workflow change; semantic-coverage's next run on main embeds the 20
+entries (weights are CI-cached), commits "routing index + seed" with [skip ci]; the currently-failing test
+goes green on the next test run against that HEAD. No local 80-minute embed needed.
+
+
+## ADDENDUM (CI-only correction): the heal is fully hands-free, including the red-until-next-push gap
+
+Moose's correction: nothing runs locally anymore -- the whole loop is CI's. Two residues fixed:
+  * seed_cache.py's USAGE docstring still described the retired local-run workflow ("after a local run has
+    populated .knowledge_cache.json") -- exactly the stale guidance that would send a future session down the
+    local path. Rewritten to the CI-lockstep story; --restore/--check documented as the CI verbs they are.
+  * The combined index+seed bot commit carried [skip ci], which left main RED after the heal until the next
+    unrelated push re-ran the tests -- a hidden wait-for-a-human step. [skip ci] removed FOR THIS COMMIT with
+    termination documented: both artifacts are content-determined and the cache is warm on the re-run, so the
+    second pass finds zero diff, commits nothing, and the cycle stops. One extra CI run per real corpus change
+    buys a main that heals in the same push cycle. docs.yml/package.yml keep their [skip ci] -- no test
+    asserts lockstep with THEIR outputs, so their skipped re-runs hide nothing.
+Cold-start trace verified step-by-step: committed seed (--restore), pinned-URL weights fetch, incremental
+embed, exam, rebuild+snapshot+commit -- every input exists CI-side even with all runner caches missed.

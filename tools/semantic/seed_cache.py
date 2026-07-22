@@ -15,9 +15,13 @@ CI then decompresses the seed on a cold cache and starts WARM (~1 min), so the r
 expensive embed at all. The live cache stays gitignored -- it grows per run and is content-addressed,
 so the seed is just a periodic snapshot you refresh when the corpus has drifted enough to matter.
 
-USAGE
-    # after a local run has populated .knowledge_cache.json (e.g. via run_all.py):
-    python3 seed_cache.py            # writes knowledge_cache_seed.json.xz next to it
+USAGE (CI-only since the lockstep change -- no local runs required or expected)
+    The semantic-coverage workflow owns the whole loop: it restores this seed (--restore), fetches the
+    weights from the pinned repo variables, incrementally embeds whatever docstrings changed, then runs
+    the DEFAULT action (build) and commits the refreshed seed IN THE SAME commit as the rebuilt index.
+    The seed and index therefore cannot drift apart, and nobody runs an embed locally.
+    python3 seed_cache.py            # (CI) snapshot the warmed cache -> routing_seed.npz.xz
+    python3 seed_cache.py --restore  # (CI) decompress the seed if the live cache is absent
     python3 seed_cache.py --check    # report drift: how many live entries are NOT in the seed
 """
 import argparse, io, json, lzma, pathlib, sys
