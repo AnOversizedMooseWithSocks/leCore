@@ -5418,16 +5418,22 @@ class UnifiedMind:
         return _t(volume, np.asarray(O, float), np.asarray(D, float), L, sigma_t=float(sigma_t))
 
     def cloud_single_scatter(self, volume, O, D, L, sun_dir, ceiling, view_steps=32, shadow_steps=0,
-                             sigma_t=1.0, sigma_s=0.9, g=0.4):
+                             sigma_t=1.0, sigma_s=0.9, g=0.4, integrate="rect"):
         """Single-scattered radiance, returning (radiance, density_evals). The VIEW ray must march -- its integrand
         contains the transmittance being accumulated -- but every SHADOW ray is one closed-form integral.
         MEASURED (64 rays, 32 view steps): 32 density evaluations against a 64-step marched shadow's 2,080 -- 65x
         fewer, 52x faster, and 13x MORE accurate (3.03e-07 vs 3.94e-06), because the closed form is the exact
-        integral and the march is the one carrying error. See holographic_cloud.single_scatter."""
+        integral and the march is the one carrying error.
+        `integrate="analytic"` (opt-in; default "rect" is bit-identical to before) integrates each segment against
+        its OWN extinction instead of assuming constant transmittance across the step -- Hillaire's Frostbite
+        SIGGRAPH 2015 form, Sint = (S - S exp(-sigma_e dt))/sigma_e. MEASURED: 8-step error 6.29e-03 -> 5.38e-05,
+        which beats even the 64-step rectangle rule (7.22e-04) -- an ~8x cut in density evals at better accuracy.
+        The advantage shrinks as extinction rises (a dense medium self-terminates inside one step).
+        See holographic_cloud.single_scatter."""
         from holographic.rendering.holographic_cloud import single_scatter as _ss
         return _ss(volume, np.asarray(O, float), np.asarray(D, float), float(L), sun_dir, float(ceiling),
                    view_steps=int(view_steps), shadow_steps=int(shadow_steps),
-                   sigma_t=float(sigma_t), sigma_s=float(sigma_s), g=float(g))
+                   sigma_t=float(sigma_t), sigma_s=float(sigma_s), g=float(g), integrate=integrate)
 
     def cloud_report(self, volume, O, D, L, sun_dir, ceiling, view_steps=32, reference_shadow_steps=64):
         """The bar, carried with the capability: {evals_closed, evals_reference, eval_ratio, max_error, mean_error}.
@@ -6659,6 +6665,33 @@ class UnifiedMind:
         # _as_mesh: accept {'vertices','faces'} JSON like voxel_remesh/render_mesh already do (C2) -- found by
         # the /invoke round-trip of THIS faculty failing on a plain-JSON mesh while its sibling accepted one
         return mesh_to_sdf_grid(self._as_mesh(mesh), bounds, res=res, band=band, sign=sign)
+
+    def render_water(self, container=None, level=0.72, preset="ocean", size=1.0, extent=40.0, res=192,
+                     t=0.0, seed=0, ripple=0.35, material="water", quality="fast", width=None, height=None,
+                     **wave_overrides):
+        """ONE-SHOT water render for JSON/agent clients: water_body(...) built AND rendered in a single call,
+        returning the (H,W,3) image -- because a WaterBody OBJECT cannot cross the HTTP boundary (/invoke
+        returns a repr stub for objects; found by the wiring sweep). Same parameters as water_body plus
+        render's quality/width/height. In-process callers who want the object (animation via .at_time,
+        custom cameras, the sdf scene) still use water_body. See holographic_ocean.water_body."""
+        wb = self.water_body(container=container, level=level, preset=preset, size=size, extent=extent,
+                             res=res, t=t, seed=seed, ripple=ripple, material=material, **wave_overrides)
+        return wb.render(quality, width=width, height=height)
+
+    def sculpt_prepare(self, mesh, resolution=48, silhouette=0.95, max_resolution=160, pad_frac=0.08,
+                       n_azimuth=6, band=None):
+        """Prepare a mesh for SCULPT MODE with the shape GUARDED: builds the SDF cache (grid + axes) and the
+        sculptable remesh in one call, held to a worst-view silhouette-IoU floor so the conversion cannot
+        silently change the shape. The ladder pulls TWO levers in cost order -- retry the sign method
+        (flood-fill leaks through TOUCHING/COINCIDENT shells and gets WORSE with resolution, measured
+        0.734@48 -> 0.250@96; the winding number is robust at 0.954+), then escalate resolution x1.5 for
+        sub-cell thin features -- and REFUSES with the full report if the floor is unreachable
+        (silhouette=None = explicit unguarded opt-out). Returns {mesh, grid, axes, bounds, report}; the grid
+        and mesh are the same level of the same field, so brushes and raycasts agree with what the user sees.
+        See holographic_meshbridge.sculpt_prepare; voxel_remesh is the mesh-only cousin."""
+        from holographic.mesh_and_geometry.holographic_meshbridge import sculpt_prepare as _sp
+        return _sp(self._as_mesh(mesh), resolution=resolution, silhouette=silhouette,
+                   max_resolution=max_resolution, pad_frac=pad_frac, n_azimuth=n_azimuth, band=band)
 
     def voxel_remesh(self, mesh, resolution=64, pad=0.2, sign="auto", keep_uv="auto", silhouette=0.95, topology=True):
         """VOXEL REMESH (Blender Voxel Remesh): rebuild a mesh as a UNIFORM, watertight surface by sampling it into
@@ -12855,7 +12888,7 @@ class UnifiedMind:
 
     def make_cloud(self, center=(0.0, 0.0, 0.0), radius=1.0, camera=None, width=384, height=384,
                    density=6.0, seed=0, grid=56, sky=(0.20, 0.42, 0.74), sun_dir=(-0.45, -0.55, -0.6),
-                   steps=160):
+                   steps=160, field=None):
         """Render a convincing volumetric CLOUD in ONE call and get back an (H,W,3) image in [0,1].
 
         This is the low-level shortcut behind `build_scene('a fluffy cloud')`: it builds a multi-lobe cumulus
@@ -12864,6 +12897,10 @@ class UnifiedMind:
         Henyey-Greenstein forward scattering for a silver-lining glow, the Beer-Powder term so thick faces read as
         round rather than flat, and a cheap multi-scatter approximation so shadowed regions aren't pitch black.
         A default 3/4 camera is used if none is given.
+
+        `field` (opt-in, default None = the cloud_field path, unchanged): a callable points(N,3)->density>=0 that
+        REPLACES the built-in cumulus density -- the seam that lets any density source (a proc_texture volume, a
+        simulation's smoke, a baked grid) borrow this exact lighting rig. cloud_scene(texture=...) rides this.
 
         Cost note: the fBm density is baked on a grid^3 lattice once (grid=32 ~60 s; see cloud_field); the
         lighting march is a further ~1-2 min at the defaults. Save it with mind.save_render(path, img).
@@ -12875,7 +12912,7 @@ class UnifiedMind:
         if camera is None:
             camera = Camera(eye=(c[0] + 2.5 * r, c[1] + 0.45 * r, c[2] + 3.4 * r),
                             target=tuple(c), up=(0, 1, 0), fov_deg=40, aspect=width / max(height, 1))
-        field = cloud_field(c, r * 1.3, density=density, seed=seed, grid=grid)
+        field = field if field is not None else cloud_field(c, r * 1.3, density=density, seed=seed, grid=grid)
         # tight, cloud-SHAPED bounds (not a naive symmetric cube): the multi-lobe body in cloud_field sits low
         # (flat base near -0.42 in its own radius units) and rises higher than it sits below centre, so a snug
         # asymmetric box keeps the fixed `steps` count sampling the cloud, not surrounding empty air -- a loose
@@ -12896,6 +12933,82 @@ class UnifiedMind:
         grad = top * (1 - yy) + bot * yy
         a = alpha[..., None]
         return _np.clip(img * a + grad * (1 - a), 0, 1)
+
+    def cloud_scene(self, preset="cumulus", quality="fast", center=(0.0, 0.0, 0.0), radius=1.0,
+                    seed=0, camera=None, texture=None, texture_params=None, erode=0.30, **overrides):
+        """The ONE-WORD cloud tool: presets x quality tiers over make_cloud, so 'good clouds, fast' is a
+        single call instead of tuning density/grid/steps/sun by hand.
+
+        preset -- the cloud's CHARACTER (each is a tuned parameter set over make_cloud):
+          'cumulus'  the classic fluffy fair-weather cloud (default)
+          'wispy'    thin, eroded, translucent (low density)
+          'storm'    dense, tall, dark-based under a moodier sky
+          'sunset'   cumulus lit low and warm against an orange-pink sky
+        quality -- the SPEED/QUALITY trade, measured on this box:
+          'fast'     ~6 s   (grid 28, 64 march steps, 192px)  -- iteration speed
+          'balanced' ~20 s  (grid 40, 100 steps, 288px)       -- everyday
+          'final'    ~2 min (grid 56, 160 steps, 384px)       -- the make_cloud defaults
+        texture -- OPT-IN density source from the procedural texture MENU instead of the built-in cumulus:
+          cloud_scene(texture='musgrave', texture_params={'kind':'ridged'}) shapes the cloud from ridged
+          multifractal (streaky/wispy), 'voronoi' gives cellular clump clusters, 'fbm' classic billow. The
+          texture is windowed by a soft spherical falloff and ERODED (density = falloff * max(tex - erode, 0))
+          so it reads as a blob in the sky, not a textured cube; the full lighting rig (self-shadow, silver
+          lining, multi-scatter) applies unchanged. Direct evaluation -- no grid bake, so texture clouds skip
+          the ~60 s lattice cost.
+        Any make_cloud keyword can be overridden explicitly (density, sun_dir, sky, width, ...).
+        Deterministic in seed. Returns the (H,W,3) image in [0,1]. See make_cloud for the density model and
+        holographic_render.volume_render for the lighting rig; holographic_proctex supplies texture= fields."""
+        import numpy as _np
+        presets = {
+            "cumulus": dict(density=6.0),
+            "wispy":   dict(density=2.4),
+            "storm":   dict(density=10.0, sky=(0.16, 0.20, 0.30), sun_dir=(-0.7, -0.25, -0.6)),
+            "sunset":  dict(density=6.5, sky=(0.42, 0.26, 0.30), sun_dir=(-0.85, -0.12, -0.5)),
+        }
+        tiers = {
+            "fast":     dict(grid=28, steps=64,  width=192, height=192),
+            "balanced": dict(grid=40, steps=100, width=288, height=288),
+            "final":    dict(grid=56, steps=160, width=384, height=384),
+        }
+        if preset not in presets:
+            raise ValueError("preset must be one of %s, got %r" % (sorted(presets), preset))
+        if quality not in tiers:
+            raise ValueError("quality must be one of %s, got %r" % (sorted(tiers), quality))
+        kw = dict(presets[preset]); kw.update(tiers[quality]); kw.update(overrides)
+        if texture is not None:
+            from holographic.materials_and_texture.holographic_proctex import proc_texture
+            tp = dict(texture_params or {})
+            tp.setdefault("seed", seed)
+            tex = proc_texture(texture, **tp)
+            c = _np.asarray(center, float); r = float(radius)
+            dens = float(kw.pop("density", 6.0))
+            ero = float(erode)
+
+            def field(P):
+                P = _np.atleast_2d(_np.asarray(P, float))
+                q = (P - c[None, :]) / r
+                q = q * _np.array([1.0, 1.6, 1.0])            # squash y: clouds are wider than tall
+                d2 = _np.sum(q * q, axis=1)
+                fall = _np.clip(1.0 - d2 / 1.9, 0.0, 1.0) ** 2   # soft spherical window -> a blob, not a cube
+                return dens * fall * _np.clip(_np.asarray(tex(q + 0.5)) - ero, 0.0, None)
+            kw["field"] = field
+        return self.make_cloud(center=center, radius=radius, seed=seed, camera=camera, **kw)
+
+    def water_body(self, container=None, level=0.72, preset="ocean", size=1.0, extent=40.0, res=192,
+                   t=0.0, seed=0, ripple=0.35, material="water", **wave_overrides):
+        """The CONTAINER-FIRST water tool: everything between 'I want water' and pixels. container=None ->
+        OPEN water (ocean/pond over `extent` m); 'glass'/'pool'/'bowl' -> a stock vessel filled to `level`
+        with real Gerstner RIPPLES on top (scaled to the vessel, animated by t); any SDF -> the cavity the
+        water fills. `material` picks the liquid from the material library (water/water_deep/oil/honey ...:
+        colour from matlib, IOR from the library -- oil really refracts at 1.47). Waves adjustable at every
+        scale via preset + gerstner_waves keywords (choppiness, wind_heading, wavelength_range ...).
+        Returns a WaterBody: .render('fast'|'final') with pre-balanced lighting (open: shaded-mesh raster
+        ~2 s / hi-res; contained: refractive path trace ~60 s @ 20 spp / 64 spp), .camera(), .at_time(t)
+        for coherent animation, plus .mesh/.surface (open) or .scene_sdf/.material_fn (contained) for
+        custom pipelines. See holographic_ocean.water_body."""
+        from holographic.simulation_and_physics.holographic_ocean import water_body as _wb
+        return _wb(container=container, level=level, preset=preset, size=size, extent=extent, res=res,
+                   t=t, seed=seed, ripple=ripple, material=material, **wave_overrides)
 
     # -- background job control (start/pause/resume/cancel/monitor a slow render) --------------------------
     # A shared JobManager, lazily built (same pattern as .mind on the HTTP service): every job_* method below
@@ -14126,10 +14239,14 @@ class UnifiedMind:
     # a vector in the mind's OWN space (seed it with a mind vector to transform it) and the format is
     # deterministic. This de-silos the stored-program machine: it is now a faculty, not an island.
     def _machine(self):
-        """The HoloMachine VM, lazily built at the mind's dim & seed so procedures share the substrate."""
+        """The HoloMachine VM, lazily built at the mind's dim & seed so procedures share the substrate.
+        `mind.vm_fast_cleanup = True` BEFORE first use opts the VM's decode into the cached-codebook SIMD cleanup
+        (measured 2x end-to-end with the atom cache; result-identical, pinned by test) -- default off per the
+        never-flip rule."""
         if getattr(self, "_machine_vm", None) is None:
             from holographic.agents_and_reasoning.holographic_machine import HoloMachine
-            self._machine_vm = HoloMachine(dim=self.dim, seed=self.seed)
+            self._machine_vm = HoloMachine(dim=self.dim, seed=self.seed,
+                                           fast_cleanup=bool(getattr(self, "vm_fast_cleanup", False)))
         return self._machine_vm
 
     def learn_procedure(self, name, program):
@@ -14372,6 +14489,121 @@ class UnifiedMind:
         float image in [0,1]. See holographic_preview."""
         from holographic.misc.holographic_preview import material_ball
         return material_ball(material, res=res, base_color=base_color)
+
+    def quick_material(self, color=(0.8, 0.8, 0.8), roughness=0.5, metallic=0.0, res=192):
+        """The material-editor SHORTCUT: plain numbers in, MATERIAL BALL image out -- no encoders, no channel
+        fields. quick_material(color=(1,0.2,0.1), roughness=0.15, metallic=1.0) renders a polished red metal ball.
+        This is the one-slider entry to the material system: it shades base_color with the SAME Cook-Torrance BRDF
+        the real renderer uses at the given roughness/metallic, so what the ball shows is what a render does. For
+        textured/layered materials build a real Material (channel fields) and use preview_material -- this shortcut
+        deliberately carries no textures. Returns (res,res,3) float in [0,1]."""
+        from holographic.misc.holographic_preview import material_ball
+
+        class _Const:                          # the minimal duck: constant channels, no encoder needed
+            channels = {"roughness": None, "metallic": None}
+
+            def __init__(self, rough, metal):
+                self._r, self._m = float(rough), float(metal)
+
+            def sample(self, channel, uv):
+                import numpy as np
+                n = len(uv)
+                if channel == "roughness":
+                    return np.full(n, self._r)
+                if channel == "metallic":
+                    return np.full(n, self._m)
+                return np.zeros(n)
+
+        return material_ball(_Const(roughness, metallic), res=res, base_color=color)
+
+    def proc_texture(self, name, **params):
+        """The standard 3D-app texture MENU as a FIELD: proc_texture('voronoi', kind='f2f1', scale=4) -> a
+        callable f(P (M,3)) -> values. Menu: noise, fbm, white, voronoi (f1/f2/f2f1/cell/smooth), musgrave
+        (ridged/hybrid/fbm), wave (bands/rings + distortion), marble, wood, brick, magic, checker, stripes,
+        gradient, dots. One field serves 2D (texture_image), 3D volumes (texture_volume -- cloud densities),
+        or any points (a mesh's surface, a Material channel). Deterministic in seed. See holographic_proctex."""
+        from holographic.materials_and_texture.holographic_proctex import proc_texture
+        return proc_texture(name, **params)
+
+    def texture_image(self, name, size=256, region=((0.0, 0.0), (1.0, 1.0)), z=0.0, **params):
+        """Rasterise a standard procedural texture to a 2D (size,size) image in [0,1] -- 2D texturing IS the
+        3D field sampled on a plane (change z to slide through the solid texture). texture_image('marble',
+        512) is the app's marble button. See holographic_proctex / proc_texture for the menu."""
+        from holographic.materials_and_texture.holographic_proctex import proc_texture_image
+        return proc_texture_image(name, size=size, region=region, z=z, **params)
+
+    def texture_volume(self, name, res=48, bounds=((0.0, 0.0, 0.0), (1.0, 1.0, 1.0)), **params):
+        """Sample a standard procedural texture on a (res,res,res) 3D grid in [0,1] -- cloud/smoke densities
+        (feed a volume render), 3D displacement, solid materials. Same menu/field as texture_image, sampled
+        in the volume. See holographic_proctex."""
+        from holographic.materials_and_texture.holographic_proctex import proc_texture_volume
+        return proc_texture_volume(name, res=res, bounds=bounds, **params)
+
+    def sample_image(self, image, uv, mode="bilinear", wrap="clamp"):
+        """READ a texture as NUMBERS: sample a raster (H,W) or (H,W,C) at uv (M,2) in [0,1]^2 -- bilinear
+        (GPU-default smooth) or nearest (exact texel reads); clamp or repeat wrapping; half-texel-centre
+        convention matching GPU samplers. The texture-as-numerical-input primitive: drive any parameter from
+        a painted map. Closing contract: sampling values_to_texture(v) at texel centres returns v exactly.
+        See holographic_proctex.sample_image."""
+        from holographic.materials_and_texture.holographic_proctex import sample_image
+        return sample_image(image, uv, mode=mode, wrap=wrap)
+
+    def image_field(self, image, scale=1.0, wrap="repeat", mode="bilinear"):
+        """WRAP a raster image as a FIELD f(P (M,3)) (x/y*scale = uv, z ignored) so a PAINTED map plugs in
+        anywhere the engine takes a field -- a Material channel, cloud_scene(texture=...) density via a
+        custom field, a displacement source. The raster sibling of proc_texture's analytic menu.
+        See holographic_proctex.image_field."""
+        from holographic.materials_and_texture.holographic_proctex import image_field
+        return image_field(image, scale=scale, wrap=wrap, mode=mode)
+
+    def ramp(self, positions, values, interp="linear"):
+        """A STOP RAMP (the ColorRamp node): map scalars in [0,1] through sorted stops -- values scalar or
+        RGB; interp 'linear' / 'constant' (hard bands) / 'smooth' (eased); ends clamp; a stop's own position
+        returns its exact value in every mode. Returns a callable t -> values; bake it with ramp_texture.
+        See holographic_proctex.ramp."""
+        from holographic.materials_and_texture.holographic_proctex import ramp
+        return ramp(positions, values, interp=interp)
+
+    def ramp_texture(self, positions, values, size=256, interp="linear"):
+        """ASSIGN a ramp's numbers to a TEXTURE: bake the stop ramp at texel centres to a (size,) or
+        (size,C) strip -- the 1-D gradient texture every 3D app ships; sample_image reads back exactly what
+        the ramp says there. See holographic_proctex.ramp_texture / values_to_texture for arbitrary arrays."""
+        from holographic.materials_and_texture.holographic_proctex import ramp_texture
+        return ramp_texture(positions, values, size=size, interp=interp)
+
+    def values_to_texture(self, values, normalize=False):
+        """ASSIGN arbitrary NUMBERS to a texture: (N,) becomes a one-row strip, (H,W)/(H,W,C) pass through;
+        normalize=True affinely maps to [0,1] for display; the default keeps values untouched because the
+        round trip is the point -- sample_image(values_to_texture(v), texel_centres) == v exactly.
+        See holographic_proctex.values_to_texture."""
+        from holographic.materials_and_texture.holographic_proctex import values_to_texture
+        return values_to_texture(values, normalize=normalize)
+
+    def mask_refraction(self, image, mask, strength=12.0, ior=1.33, profile="lens", edge_width=None,
+                        chromatic=0.0, ripple=None, seed=0):
+        """Refract an image through a 2D SHAPE: the mask is read as a LENS -- the jump-flood distance
+        transform gives distance-to-edge, a meniscus profile turns it into a height bump, and small-angle
+        Snell displaces each pixel by -(ior-1)*strength*grad(height): distortion is automatically STRONGEST
+        NEAR THE MASK EDGE and zero on the interior plateau and outside (a water droplet / glass blob over
+        the image). chromatic>0 adds dispersion fringes; ripple=(amp_px, scale) adds fbm water shimmer.
+        Screen-space single-interface approximation (no TIR/caustics -- true refraction is path_trace's
+        dielectric); the fast 2D water/glass compositing effect. See holographic_proctex.mask_refraction."""
+        from holographic.materials_and_texture.holographic_proctex import mask_refraction
+        import numpy as _np
+        return mask_refraction(_np.asarray(image, float), _np.asarray(mask), strength=strength, ior=ior,
+                               profile=profile, edge_width=edge_width, chromatic=chromatic,
+                               ripple=ripple, seed=seed)
+
+    def make_water(self, res=128, extent=40.0, t=0.0, seed=0, preset="ocean", shaded=False, **overrides):
+        """ONE CALL -> a WATER surface (Gerstner/trochoidal ocean; Fournier & Reeves 1986, Tessendorf 2001).
+        Returns {height, positions, normals, bank, ...} on a res x res grid over `extent` metres; `shaded=True`
+        adds a sun-shaded preview image. Presets: 'ocean' (default), 'calm', 'storm'; any gerstner_waves keyword
+        overrides (wind_heading, n_waves, choppiness, ...). Animate by calling again with a different `t` and the
+        SAME seed -- deterministic bank, coherent frames, dispersion kills visible looping. Height feeds
+        spectral_ocean to EVOLVE under real dispersion; positions feed the height-field mesh builders. Exact
+        analytic normals (no finite differences). See holographic_ocean."""
+        from holographic.simulation_and_physics.holographic_ocean import make_water as _mw
+        return _mw(res=res, extent=extent, t=t, seed=seed, preset=preset, shaded=shaded, **overrides)
 
     def render_textured(self, scene, textures, width=256, height=192, **kw):
         """Render a SemanticScene with COMPOSED textures/materials painted onto its objects -- the composability stack

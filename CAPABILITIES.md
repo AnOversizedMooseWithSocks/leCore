@@ -61,7 +61,7 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); v=m.perceive('a red cube','
 *Find it by:* corrupt a vector for testing, damage a hypervector, zero out random slots, simulate data loss, knock out part of a vector, robustness test mask, graceful degradation test, how much damage can it take
 
 ### Dialect emitters (WGSL / C / JS / Zig from the Python kernel)
-leCore's kernels are written once, in Python, and the browser needs them in WGSL. mind.emit_kernel(fn, dialect) walks the same AST that code_structure decomposes and a dialect table supplies the type names, the intrinsic names and the declaration syntax -- so the hand-written compute shader becomes a PROJECTION of the authoritative Python kernel: one source of truth, two runtimes, no drift. Dialects: wgsl, c_f64, c_f32, js, zig_f64, zig_f32. THE BAR IS EXECUTED, not asserted: mind.validate_kernel COMPILES the emitted C with cc and RUNS it on the same inputs. MEASURED on the sphere SDF, smoothstep and cosine over 200 random inputs: c_f64 is BIT-IDENTICAL to the Python original (same order of operations, same doubles); c_f32 differs by 8.0e-08 to 3.4e-07. KEPT NEGATIVE 1: A WGSL KERNEL CANNOT BE BIT-IDENTICAL TO ITS PYTHON ORIGINAL -- WGSL's f32 is single precision and NumPy is double, so the bar is 'to float tolerance' and THE TOLERANCE IS f32 EPSILON, not a number anybody chooses. c_f32 exists so that tolerance is measured by running it. KEPT NEGATIVE 2: the emitted WGSL is NOT executed by any test here -- there is no GPU and no browser. Its arithmetic semantics are validated through c_f32, which shares the IR and differs only in a table; what is NOT validated is WGSL's own precision guarantees, its fast-math latitude, or whether the shader compiles. That is a real gap, stated. KEPT NEGATIVE 3: `bind` is NOT emittable and that is not a missing feature -- it is a circular convolution by FFT, a whole-array cooperative algorithm, and its WGSL is a workgroup FFT, a different artifact. A scalar emitter that pretended otherwise would emit an O(D^2) loop nest and call it a bind. K10's rule is obeyed throughout: the emitter REFUSES rather than guesses, because a wrong int/double is a wrong answer at no tolerance. ZIG (opt-in, `pip install ziglang`, numba's exact contract -- every test passes without it): validate_kernel with a zig_* dialect compiles `-O ReleaseSafe` and RUNS. MEASURED: zig_f64 BIT-IDENTICAL on the round-box SDF over 200 inputs; zig_f32 max 7.0e-07. KEPT NEGATIVE 4: Zig REFUSES unused locals/params at compile time -- a dead assignment emits but will not build, and we do not suppress that. KEPT NEGATIVE 5: ReleaseFast licenses float reassociation and is NOT the deterministic mode. KEPT NEGATIVE 6: std.math.pow is not libm pow (measured 1-ulp gap), so f64 bit-identity is a property of the builtin intrinsics only. The zig wheel also backstops the C path: run_c falls back to `zig cc` when no system compiler exists..
+leCore's kernels are written once, in Python, and the browser needs them in WGSL. mind.emit_kernel(fn, dialect) walks the same AST that code_structure decomposes and a dialect table supplies the type names, the intrinsic names and the declaration syntax -- so the hand-written compute shader becomes a PROJECTION of the authoritative Python kernel: one source of truth, two runtimes, no drift. Dialects: wgsl, c_f64, c_f32, js, zig_f64, zig_f32. BOUNDED LOOPS EMIT: `for i in range(<int literal>)` -- the shader fBm/octave shape -- with explicit counter promotion ((double)i / f32(i) / @floatFromInt) and mutable accumulators; a variable trip count still refuses. THE BAR IS EXECUTED, not asserted: mind.validate_kernel COMPILES the emitted C with cc and RUNS it on the same inputs. MEASURED on the sphere SDF, smoothstep and cosine over 200 random inputs: c_f64 is BIT-IDENTICAL to the Python original (same order of operations, same doubles); c_f32 differs by 8.0e-08 to 3.4e-07. KEPT NEGATIVE 1: A WGSL KERNEL CANNOT BE BIT-IDENTICAL TO ITS PYTHON ORIGINAL -- WGSL's f32 is single precision and NumPy is double, so the bar is 'to float tolerance' and THE TOLERANCE IS f32 EPSILON, not a number anybody chooses. c_f32 exists so that tolerance is measured by running it. KEPT NEGATIVE 2: the emitted WGSL is NOT executed by any test here -- there is no GPU and no browser. Its arithmetic semantics are validated through c_f32, which shares the IR and differs only in a table; what is NOT validated is WGSL's own precision guarantees, its fast-math latitude, or whether the shader compiles. That is a real gap, stated. KEPT NEGATIVE 3: `bind` is NOT emittable and that is not a missing feature -- it is a circular convolution by FFT, a whole-array cooperative algorithm, and its WGSL is a workgroup FFT, a different artifact. A scalar emitter that pretended otherwise would emit an O(D^2) loop nest and call it a bind. K10's rule is obeyed throughout: the emitter REFUSES rather than guesses, because a wrong int/double is a wrong answer at no tolerance. ZIG (opt-in, `pip install ziglang`, numba's exact contract -- every test passes without it): validate_kernel with a zig_* dialect compiles `-O ReleaseSafe` and RUNS. MEASURED: zig_f64 BIT-IDENTICAL on the round-box SDF over 200 inputs; zig_f32 max 7.0e-07. KEPT NEGATIVE 4: Zig REFUSES unused locals/params at compile time -- a dead assignment emits but will not build, and we do not suppress that. KEPT NEGATIVE 5: ReleaseFast licenses float reassociation and is NOT the deterministic mode. KEPT NEGATIVE 6: std.math.pow is not libm pow (measured 1-ulp gap), so f64 bit-identity is a property of the builtin intrinsics only. The zig wheel also backstops the C path: run_c falls back to `zig cc` when no system compiler exists..
 
 ```python
 src = 'def sdf_sphere(px: float, py: float, pz: float, r: float) -> float:\n    d = sqrt(px * px + py * py + pz * pz)\n    return d - r\n'; print(mind.emit_kernel(src, 'wgsl')); print(mind.emit_kernel(src, 'c_f32'))
@@ -493,6 +493,14 @@ decide whether a Python function is PURE -- side-effect free and deterministic -
 src = 'def f(xs):\n    out = []\n    for x in xs: out.append(x*2)\n    return out\n'; print(mind.function_purity(src, 'f'), mind.purity_report(src)['fraction'])
 ```
 *Find it by:* purity, pure function, side effects, effect analysis, decide whether a python function is pure, is this function pure, can i cache this function, memoization gate
+
+### Sculpt-mode preparation (guarded mesh -> SDF cache)
+The SAFE switch into sculpting: mind.sculpt_prepare(mesh, resolution, silhouette=0.95) builds the SDF cache (grid+axes) AND the sculptable remesh in one call, held to a worst-view silhouette-IoU floor so conversion cannot silently change shape. Two levers in cost order: retry the SIGN (flood fill leaks through touching shells, WORSENING with resolution: 0.734@48 -> 0.250@96; winding robust 0.954+), then escalate resolution x1.5 for thin features; unreachable floor -> loud ValueError with the ladder. Sharp low-poly corners round intrinsically -- lower the floor or silhouette=None knowingly..
+
+```python
+import numpy as np; import lecore; from holographic.mesh_and_geometry.holographic_meshbridge import sculpt_prepare; from holographic.mesh_and_geometry.holographic_sdf import sphere; from holographic.mesh_and_geometry.holographic_meshbridge import marching_tetrahedra_vec, mesh_to_sdf_grid
+```
+*Find it by:* prepare a mesh for sculpting, sculpt mode conversion, sdf cache from a mesh, convert mesh to sculptable, switch to sculpt mode safely, guarded voxel conversion, mesh changes shape when sculpting, keep the shape when converting
 
 ### Semantic word index (find words by meaning)
 the fuzzy REVERSE of a dictionary: describe an idea and get the words whose definitions mean it. mind.build_semantic_index(words=...) places words in a meaning space by RANDOM INDEXING over their glosses, then idx.find('unexpected good luck') -> 'serendipity' and idx.similar('puppy') -> 'dog','kitten'. OPT-IN and separate: nothing loads or builds until you call it. Approximate by design (this is where leCore's geometry-preserving/lossy side belongs) -- reliable for the top hit, noisy in the tail, and word-sense sensitive..
@@ -1002,6 +1010,14 @@ import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_ge
 ```
 *Find it by:* make a mesh manifold, split non-manifold vertices, fix non-manifold edges, resolve a bowtie vertex, cut non-manifold edges, manifold repair, unfan a vertex
 
+### Make water (one-call Gerstner ocean preset)
+ONE CALL -> a WATER surface: mind.make_water(res, extent, t, seed, preset) sums deterministic Gerstner/trochoidal waves (Fournier & Reeves 1986; Tessendorf 2001 dispersion + steepness bound) into {height, positions, normals, bank}; shaded=True adds a sun-shaded preview. Presets 'ocean'/'calm'/'storm'; overrides: wind_heading, n_waves, choppiness, wavelength_range. Animate with t (same seed = coherent frames; dispersion kills looping). EXACT analytic normals. Height feeds spectral_ocean to EVOLVE; positions feed the meshers. KINEMATIC (no breaking) -- overturn via free_surface..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); w=m.make_water(res=64, preset='ocean', shaded=True); (w['height'].shape, w['image'].shape)
+```
+*Find it by:* make water for my scene, generate ocean water surface, water preset, gerstner waves, animated water surface, ocean heightfield generator, choppy waves, water waves heightfield
+
 ### Manifold cleanup (make a retopo strictly manifold for QEM/half-edge)
 Strict-manifold cleanup for retopo (R3): m.manifold_cleanup(mesh) splits non-manifold 'fin' edges so QEM decimate / half-edge consumers ACCEPT the result -- MEASURED on a scan retopo: 142 non-manifold edges -> 0, 1 component preserved, ~93% faces kept, QEM then accepts (LOD-on-retopo unblocked). process_scan(manifold=True) opts in. The cost is honest and REPORTED: a few small holes for strict manifoldness (24 on the mantis). KEPT NEGATIVES: four local surgeries all traded the defect for holes or fragments; a lossless fix needs a manifold-guaranteeing extraction (R3-proper, filed)..
 
@@ -1073,6 +1089,14 @@ METABALL MESH (Blender metaballs / soft-blob base mesh): sum-of-Gaussians field 
 import numpy as np, lecore; m=lecore.UnifiedMind(); mb=m.metaball_mesh(np.array([[0.0,0,0],[0.4,0,0]]), radius=0.4, resolution=32); (mb.n_faces>0, m.mesh_report(mb)['is_closed'])
 ```
 *Find it by:* metaball mesh, soft blob surface, sum of gaussians mesh, merge blobs into a mesh, metaballs, blob base mesh
+
+### Mixture matter model (oil & water, dye, smoke -- one advected-field core)
+Smoke, dye mixing, salt fingering, and oil-and-water SEPARATION are ONE advected-field matter model, not four simulators: mind.make_mixture(shape, buoyancy, tension) builds component channels riding one shared incompressible flow; mind.matter_step(mix, vx, vy, dt, drift_strength) advances it, DELEGATING to the fluid faculties -- no second solver. Channels diffuse at their own rates (salt fingering); drift + double-well hooks (off by default) give demixing/immiscible behaviour. KEPT NEGATIVE: sharp immiscible interfaces are the diffuse-interface trade; fractions clamp to a partition..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); mix=m.make_mixture((16,16)); type(mix).__name__
+```
+*Find it by:* oil and water separating mixture model, mixture model, phase separation, demixing simulation, immiscible fluids, dye mixing in water, salt fingering, multi component fluid
 
 ### Morse critical points (minima maxima saddles of a scalar field)
 Count and classify the CRITICAL POINTS (minima, maxima, saddles) of a scalar field on a mesh (m.morse_critical_points) -- the singularity structure a Morse-Smale complex is built from, for spectral quad layout and feature analysis. Discrete lower-star test on each 1-ring; obeys Euler-Poincare (minima - saddles + maxima = chi), verified chi=2 on a sphere. Deterministic (field ties broken by vertex id). Returns {minima, maxima, saddles, indices}..
@@ -1218,6 +1242,14 @@ img = mind.preview_texture(graph); ball = mind.preview_material(layered_material
 ```
 *Find it by:* preview, swatch, material ball, material preview, texture preview, see the texture, render swatch, thumbnail
 
+### Procedural texture menu (2D + 3D standard set)
+The texture menu every 3D app ships, by NAME: mind.proc_texture(name, **params) -> a field f(P (M,3)); mind.texture_image(name, size) -> a 2D image; mind.texture_volume(name, res) -> a 3D grid (cloud densities). Menu: noise, fbm, white, voronoi (f1/f2/f2f1/cell/smooth), musgrave (ridged/hybrid), wave (bands/rings), marble, wood, brick, magic, checker, stripes, gradient, dots. ONE field serves all three samplers -- 2D texturing is the 3D solid on a plane (slide z through the marble). Deterministic in seed; the direct-eval costume of texturehome's VSA fields..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); img=m.texture_image('voronoi', size=64, kind='f2f1', scale=5, seed=1); vol=m.texture_volume('fbm', res=16, seed=0); (img.shape, vol.shape)
+```
+*Find it by:* procedural texture, voronoi texture, musgrave texture, marble texture, wood grain texture, brick texture, 3d noise texture, cellular noise
+
 ### Progressive LOD stream (rank-ordered TT cores)
 the brain/muscle format contract: leCore bakes, the front end consumes. mind.stream_encode(X) emits {descriptor, levels} where every byte PREFIX is itself a valid, coarser field -- rank-ordered TT cores are a progressive LOD. mind.stream_prefix(payload, max_bytes) picks the richest level that fits, from the DESCRIPTOR alone (shape, dtype, full_ranks, per-level bytes, rel_rms, rel_max), so the consumer knows what a prefix costs and what it is worth before fetching it. mind.stream_decode reconstructs any level; mind.stream_report carries the ladder. MEASURED on a 6-mode separable field (20^3): 6 levels, 314 B at 57% RMS error to 3,914 B at 1.4e-15, and a 10% RMS budget costs 20.4x fewer bytes than dense. THE GUARANTEE IS IN RMS, NOT MAX-ABS -- TT truncation is Frobenius-optimal, so adding a rank always lowers the L2 error and can still make one voxel WORSE: on white noise the max-abs error rises at 4 of 15 levels while the RMS falls at every one. A progressive format must publish which norm its monotonicity is in. TWO MORE KEPT NEGATIVES: the ladder is a property of the FIELD's rank, not of the format -- white noise never reaches a 10% budget below FULL rank, where the TT is only 1.8x smaller than dense; and a coarse level is the same shape SMOOTHED, not a smaller field -- rank is not resolution, and a front end wanting fewer samples needs a mip chain, which is a different object..
 
@@ -1241,6 +1273,14 @@ a COMPLEX wavefunction psi on a grid -- the central quantum object; gaussian_pac
 import lecore; m=lecore.UnifiedMind(); qf=m.quantum_field((128,128),dx=0.2); qf.gaussian_packet((30,64),6.0,(0.8,0.0)); qf.norm()
 ```
 *Find it by:* quantum, wavefunction, complex field, psi, quantum state, electron wave, quantum simulation, wave function on a grid
+
+### Quick material ball (plain numbers, no channels)
+The material-editor SHORTCUT: mind.quick_material(color, roughness, metallic, res) -> the classic MATERIAL BALL image from plain numbers -- no encoder, no channel fields. Shades with the SAME Cook-Torrance BRDF the real renderer uses, so the ball predicts a render. quick_material((1,0.2,0.1), roughness=0.15, metallic=1.0) = polished red metal. Deliberately carries NO textures -- for textured/layered materials build a real Material and use preview_material; this is the one-slider entry..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); ball=m.quick_material(color=(1,0.3,0.1), roughness=0.2, metallic=1.0, res=64); ball.shape
+```
+*Find it by:* quick material preview, material ball from numbers, preview roughness and metallic, simple material ball, show me a shiny red metal, material editor preview, try a material without textures, one call material ball
 
 ### Rasterize a mesh (z-buffer, textured)
 RASTERISE a mesh to an (H,W,3) image, z-buffer + Lambert (rasterize_mesh; faculty m.render_mesh). TEXTURED (default-off): texture=(H,W,3) + per-vertex uvs -> each fragment BILINEARLY samples at its barycentric UV. VERTEX COLOURS (VCOL): vertex_colors=(V,3/4) or mesh.colours renders a mesh with NO texture, barycentric-interpolated -- what a recall bake / coloured DCC mesh needs. smooth=True = Gouraud normals (curved not faceted); two_sided=True = |n.l| for thin/unorientable meshes. All default-off, byte-identical absent. KEPT NEG: textured/vcol/smooth need vectorized=True..
@@ -1442,6 +1482,14 @@ import numpy as np, lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_ge
 ```
 *Find it by:* stripe pattern on a surface, evenly spaced lines aligned to a direction field, knoppel crane stripe patterns, phase texture following a vector field, co-oriented iso-stripes on a mesh, hatching aligned to a field
 
+### Style transfer (grade toward a reference image)
+Make one image FEEL like another: mind.color_transfer(img, reference, mode, strength) matches the reference's colour statistics -- 'meanstd' (Reinhard 2001) or 'covariance' (Monge-Kantorovich whiten-then-colour: handles correlated teal-orange grades). Sizes need not match; strength blends 0..1. COMPOSES: the 'style_transfer' step in postfx_chain grades a frame inside any chain -- ('style_transfer', {'reference': ref}) then bloom/grain/aces. Family: ST2 texture_synthesis, ST3 guided super-res. GLOBAL statistics: moves colour, not content; extreme palette gaps can wash out..
+
+```python
+import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); img=np.random.default_rng(0).uniform(0,1,(32,32,3)); ref=np.random.default_rng(1).uniform(0,1,(24,24,3)); out=m.color_transfer(img, ref, strength=0.8); out.shape
+```
+*Find it by:* style transfer, apply the style of one image to another, make my render look like a painting, match the colors of a reference image, stylize an image, transfer the look of a photo, neural style transfer, post process with a style
+
 ### Texture (domain)
 procedural + example-based surface detail as FIELDS you plug into a Material channel: fbm noise, Voronoi/cellular cracks, divergence-free curl, patch synthesis; plus the weathering set (burn/oxidation/inclusions).
 
@@ -1457,6 +1505,14 @@ build a texture as a TREE of maps: an op (mix/multiply/over/scale/remap/...) ove
 mind.texture_op('mix', a=mind.texture_leaf(value=[1,0,0]), b=mind.texture_leaf(value=[0,0,1]), t=mind.texture_leaf('fbm', n_dims=2)); mind.sample_texture(g, [0.3,0.7])
 ```
 *Find it by:* texture graph, map graph, shader graph, compose texture, layered texture, node graph, blend maps, mix textures
+
+### Texture sampler + ramps (textures as numbers, numbers as textures)
+The two directions of one identity. READ: mind.sample_image(image, uv) samples a raster bilinearly/nearest with clamp/repeat (GPU half-texel convention) -- drive any parameter from a painted map; mind.image_field(image) wraps it as f(P (M,3)) so a painted map plugs in anywhere a field goes (Material channels, cloud densities). WRITE: mind.values_to_texture(v) makes numbers sampleable (roundtrip EXACT at texel centres); mind.ramp(positions, values, interp='linear'/'constant'/'smooth') is the ColorRamp -- stops exact in every mode, ends clamp; mind.ramp_texture bakes the strip..
+
+```python
+import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); tex=m.values_to_texture(np.array([0.2,0.8,0.5])); v=m.sample_image(tex,[[0.5/3,0.5]]); r=m.ramp([0,1],[0.0,1.0]); (float(v[0]), float(r([0.25])[0]))
+```
+*Find it by:* texture sampler, sample an image at uv coordinates, use a texture as a number, color ramp with stops, gradient ramp, assign values to a texture, bake values into a texture, bilinear image sample
 
 ### Texture-preserving mesh repair & decimation (attribute-aware weld)
 FIX for 'losing texture information' in mesh optimization: merge_by_distance/mesh_repair are ATTRIBUTE-AWARE (attrs='auto') -- welds only vertices agreeing in position AND uv AND normal (the glTF render-duplicate weld), so UV-SEAM splits stay split and arrays are CARRIED corner-exact (pinned). Measured on a .glb scan: ALL 4956 duplicate groups were seams -- the old position-only weld scrambled the atlas and dropped uvs. cluster_decimate/voxel_remesh now PROJECT uvs via transfer_uv; qem already carried. Attr-free meshes: bit-identical old path..
@@ -1553,6 +1609,14 @@ turn a mesh or an SDF into a VOXEL occupancy grid (holographic_voxelize). voxeli
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); from holographic.mesh_and_geometry.holographic_curves import torus_knot, sweep_tube; V,F=sweep_tube(torus_knot(120,2,3),radius=0.18,closed=True); occ,o,s=m.voxelize_mesh(V,F,res=24); print(int(occ.sum()))
 ```
 *Find it by:* voxelize a mesh, mesh to voxel grid, occupancy grid from a mesh, sample an sdf onto a voxel grid, dense voxel volume, point in mesh test, inside outside mesh, winding number
+
+### Water body (container-first water tool)
+EVERYTHING between 'I want water' and pixels: mind.water_body(container, level, preset, ...) -> a WaterBody. container=None -> OPEN water over `extent` m; 'glass'/'pool'/'bowl' -> a vessel filled to `level` with real Gerstner RIPPLES on top (vessel-scaled, animated by t); any SDF -> the cavity. Liquid from the material library (colour from matlib, IOR from the library -- oil refracts at 1.47). Waves tunable at every scale (choppiness, wind_heading, wavelength_range). .render('fast'|'final') has PRE-BALANCED lighting (raster ~2s / refractive trace); .at_time(t) animates coherently..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); wb=m.water_body(extent=50.0, seed=1, res=96); img=wb.render('fast', width=160, height=120); img.shape
+```
+*Find it by:* fill a container with water, water in a glass, put water in an object, easy water tool, water scene helper, pool of water, bowl of water, assemble a water effect
 
 ### Whole-scene .glb import (multi-mesh, node transforms, per-face materials)
 glb_to_mesh reads the WHOLE glTF scene via gltf.scene_primitives -- THE canonical vertex order (node transforms composed, every primitive concatenated, normals via inverse-transpose, per-face material on Mesh.face_material). Every per-vertex reader rides that ONE walk: load_glb aligns JOINTS/WEIGHTS to the same table and remaps per-skin joint indices into one global list (lm.joint_nodes). WHY: the first-primitive reader returned a 24-vert cube from a 312,578-vert scan, and gave rigged scenes 16 positions against 8 weights. Engine-emitted files round-trip byte-identically..
@@ -1877,6 +1941,14 @@ a bind operator is DIAGONAL in the Fourier basis, so iterating it k times is one
 from holographic.misc.holographic_iterate import step_k, limit; x_k = step_k(x, U, k); x_inf = limit(x, U)
 ```
 *Find it by:* iterate a linear operator many steps, k steps at once, operator power, address a grid cell with a vector, grid address as a vector, transport a code to a neighbouring cell, shift is a binding, spatial semantic pointer
+
+### Cloud scene (presets x quality tiers)
+GOOD CLOUDS IN ONE WORD EACH: mind.cloud_scene(preset, quality) wraps make_cloud's tuning into named choices. Presets: 'cumulus', 'wispy', 'storm', 'sunset'. Quality tiers MEASURED: 'fast' ~6s (192px), 'balanced' ~20s (288px), 'final' ~2min (384px) -- the full lighting (self-shadow, HG silver lining, multi-scatter) is in EVERY tier; tiers trade resolution/steps only. texture='musgrave'/'voronoi'/'fbm' (opt-in) shapes the density from the procedural texture MENU instead of the built-in cumulus -- streaky/cellular/billow clouds, no grid bake. Any make_cloud keyword overrides..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); img=m.cloud_scene(preset='wispy', quality='fast', seed=1); img.shape
+```
+*Find it by:* easy clouds, cloud preset, make good clouds fast, cloud scene helper, storm clouds, sunset clouds, wispy clouds, fluffy cumulus
 
 ### Critique & refine a scene toward a target image (image->3D loop)
 THE CRITIC of the image->3D loop: scene.propose_edits(target_image[, geometry=True]) renders candidate edits (lighting/brightness/material/colour, and with geometry=True coarse move/scale), scores each by how much it cuts the perceptual distance, returns them RANKED by improvement -- nothing applied. scene.refine_to_target(target_image, max_steps) greedily applies the best edit until converged/out of budget. Deterministic; feed the top into adjust(). KEPT NEGATIVE: ranks colour/lighting/material and COARSE geometry well, blind to FINE geometry (node-graph drill-down's job)..
@@ -2454,7 +2526,7 @@ from holographic.scene_and_pipeline.holographic_plan import ...; mind.solve_maze
 *Find it by:* navigation, plan a route, pathfinding, shortest path, maze, slime mould, flow network, route
 
 ### Program & machine (VM)
-the VSA computer: a stored-program holographic machine (machine/HoloMachine) that runs vector programs, recipes with holes / hygienic templates (template), a content-addressed compile cache (compile), tool-orchestration planning (orchestrator/voidsynth), and reversible computation. Programs as data.
+the VSA computer: a stored-program holographic machine (machine/HoloMachine) that runs vector programs, recipes with holes / hygienic templates (template), a content-addressed compile cache (compile), tool-orchestration planning (orchestrator/voidsynth), and reversible computation. Programs as data. PERF: atoms are memoised (pure derivations -- bit-identical, always on), and HoloMachine(fast_cleanup=True) or mind.vm_fast_cleanup=True opts decode into one cached-codebook matmul per cleanup instead of a Python cosine loop -- measured 2x end-to-end, result-identical, opt-in.
 
 ```python
 from holographic.agents_and_reasoning.holographic_machine import HoloMachine; from holographic.simulation_and_physics.holographic_template import RecipeTemplate
@@ -2922,6 +2994,13 @@ see as a MANTIS SHRIMP does: 12 spectral receptors from deep UV to far red PLUS 
 
 ```python
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); L=np.linspace(300,720,140); b=np.exp(-0.5*((L-500)/60)**2); S=np.zeros(L.shape+(4,)); S[...,0]=b; S[...,3]=b; print(m.mantis_view(S,L)['handedness_sign'])
+```
+
+### Mask refraction (2D lens/droplet distortion)
+Refract an image through a 2D SHAPE: mind.mask_refraction(image, mask, strength, ior, ...) reads the mask as a LENS -- jump-flood distance-to-edge -> a meniscus height -> small-angle Snell displaces pixels by -(ior-1)*strength*grad(height): distortion is STRONGEST NEAR THE MASK EDGE, zero on the plateau and outside (a droplet or glass blob over the image). profile 'lens'/'dome'; chromatic adds dispersion fringes; ripple=(amp,scale) adds fbm shimmer. Screen-space single-interface (no TIR/caustics -- true refraction is path_trace's dielectric)..
+
+```python
+import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); yy,xx=np.mgrid[0:64,0:64]; bg=np.stack([np.mod(xx//8+yy//8,2).astype(float)]*3,-1); mask=(xx-32)**2+(yy-32)**2<20**2; r=m.mask_refraction(bg, mask, strength=8.0); r.shape
 ```
 
 ### Merge forked worlds (fork/merge)
@@ -3559,4 +3638,4 @@ import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors(
 
 ---
 
-*451 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*461 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

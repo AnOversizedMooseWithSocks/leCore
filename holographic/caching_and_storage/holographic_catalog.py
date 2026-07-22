@@ -2709,7 +2709,10 @@ def default_catalog():
                           "the same AST that code_structure decomposes and a dialect table supplies the type names, "
                           "the intrinsic names and the declaration syntax -- so the hand-written compute shader "
                           "becomes a PROJECTION of the authoritative Python kernel: one source of truth, two "
-                          "runtimes, no drift. Dialects: wgsl, c_f64, c_f32, js, zig_f64, zig_f32. THE BAR IS EXECUTED, "
+                          "runtimes, no drift. Dialects: wgsl, c_f64, c_f32, js, zig_f64, zig_f32. BOUNDED LOOPS "
+                          "EMIT: `for i in range(<int literal>)` -- the shader fBm/octave shape -- with explicit "
+                          "counter promotion ((double)i / f32(i) / @floatFromInt) and mutable accumulators; a "
+                          "variable trip count still refuses. THE BAR IS EXECUTED, "
                           "not asserted: "
                           "mind.validate_kernel COMPILES the emitted C with cc and RUNS it on the same inputs. "
                           "MEASURED on the sphere SDF, smoothstep and cosine over 200 random inputs: c_f64 is "
@@ -3190,7 +3193,11 @@ def default_catalog():
                           native=True, aliases=("render a cloud", "cloud stack", "volumetric clouds",
                                                 "closed form transmittance", "shadow ray without marching",
                                                 "single scattering", "henyey greenstein", "beer lambert",
-                                                "fog", "atmosphere", "participating media", "optical depth"))
+                                                "fog", "atmosphere", "participating media", "optical depth",
+                                                "volumetric scattering integration", "analytic segment integral",
+                                                "energy conserving fog accumulation", "frostbite volumetric integration",
+                                                "fewer steps for the same volume quality",
+                                                "reduce volumetric banding at low step counts"))
     c.register_capability("Points to mesh (isosurface / surface reconstruction)", "the inverse of "
                           "sdf_surface_points, which the engine could do in one direction only. "
                           "mind.sdf_from_points(points, normals, lo, hi, res) builds a signed distance grid from an "
@@ -4181,10 +4188,14 @@ def default_catalog():
     c.register_capability("Program & machine (VM)", "the VSA computer: a stored-program holographic machine "
                           "(machine/HoloMachine) that runs vector programs, recipes with holes / hygienic templates "
                           "(template), a content-addressed compile cache (compile), tool-orchestration planning "
-                          "(orchestrator/voidsynth), and reversible computation. Programs as data", example="from holographic.agents_and_reasoning.holographic_machine import HoloMachine; from holographic.simulation_and_physics.holographic_template import RecipeTemplate",
+                          "(orchestrator/voidsynth), and reversible computation. Programs as data. PERF: atoms are "
+                          "memoised (pure derivations -- bit-identical, always on), and HoloMachine(fast_cleanup=True) "
+                          "or mind.vm_fast_cleanup=True opts decode into one cached-codebook matmul per cleanup "
+                          "instead of a Python cosine loop -- measured 2x end-to-end, result-identical, opt-in", example="from holographic.agents_and_reasoning.holographic_machine import HoloMachine; from holographic.simulation_and_physics.holographic_template import RecipeTemplate",
                           native=True, aliases=("virtual machine", "stored program", "run a program", "vm", "recipe",
                                                 "template", "recipe with holes", "compile", "content addressed compile",
-                                                "orchestrate", "plan tools", "reversible computation", "bytecode"))
+                                                "orchestrate", "plan tools", "reversible computation", "bytecode",
+                                                "make the vm faster", "speed up program execution", "simd decode"))
     # --- vendored knowledge: a real dictionary + taxonomy for contextual awareness ---
     c.register_capability("Dictionary + taxonomy (vendored)", "a comprehensive vendored English DICTIONARY (~144k "
                           "words: definition, part of speech, synonyms, example) AND an is_a TAXONOMY (encyclopedia "
@@ -5075,7 +5086,9 @@ def default_catalog():
                           "up front, not rendered wrong. Encode a graph to a hypervector to cache/search it. CMP1",
                           example="mind.texture_op('mix', a=mind.texture_leaf(value=[1,0,0]), b=mind.texture_leaf(value=[0,0,1]), t=mind.texture_leaf('fbm', n_dims=2)); mind.sample_texture(g, [0.3,0.7])",
                           native=True, aliases=("texture graph", "map graph", "shader graph", "compose texture",
-                                                "layered texture", "node graph", "blend maps", "mix textures", "procedural graph"))
+                                                "layered texture", "node graph", "blend maps", "mix textures", "procedural graph",
+                                                "compose a texture from noise and colors", "combine noise and colours",
+                                                "mix noise with colors", "build a texture from nodes"))
     c.register_capability("Simulation (domain)", "a shared STEP LOOP over any solver (fluids/smoke, fire/combustion, "
                           "softbody/cloth, hair, MPM, collision, reaction-diffusion) -- each keeps its own math; the "
                           "scaffold gives them one step(dt) and exposes their field for the Pipeline to render. "
@@ -5126,6 +5139,67 @@ def default_catalog():
                           native=True, aliases=("preview", "swatch", "material ball", "material preview", "texture preview",
                                                 "see the texture", "render swatch", "thumbnail", "material sphere",
                                                 "visualize texture", "visualize material", "look at the material"))
+    c.register_capability("Make water (one-call Gerstner ocean preset)", "ONE CALL -> a WATER surface: mind.make_water(res, extent, t, seed, preset) sums deterministic Gerstner/trochoidal waves (Fournier & Reeves 1986; Tessendorf 2001 dispersion + steepness bound) into {height, positions, normals, bank}; shaded=True adds a sun-shaded preview. Presets 'ocean'/'calm'/'storm'; overrides: wind_heading, n_waves, choppiness, wavelength_range. Animate with t (same seed = coherent frames; dispersion kills looping). EXACT analytic normals. Height feeds spectral_ocean to EVOLVE; positions feed the meshers. KINEMATIC (no breaking) -- overturn via free_surface.",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); w=m.make_water(res=64, preset='ocean', shaded=True); (w['height'].shape, w['image'].shape)",
+                          native=True, aliases=("make water for my scene", "generate ocean water surface", "water preset",
+                                                "gerstner waves", "animated water surface", "ocean heightfield generator",
+                                                "choppy waves", "water waves heightfield", "sea surface", "waves for a lake",
+                                                "one call water", "procedural ocean"))
+    c.register_capability("Quick material ball (plain numbers, no channels)", "The material-editor SHORTCUT: mind.quick_material(color, roughness, metallic, res) -> the classic MATERIAL BALL image from plain numbers -- no encoder, no channel fields. Shades with the SAME Cook-Torrance BRDF the real renderer uses, so the ball predicts a render. quick_material((1,0.2,0.1), roughness=0.15, metallic=1.0) = polished red metal. Deliberately carries NO textures -- for textured/layered materials build a real Material and use preview_material; this is the one-slider entry.",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); ball=m.quick_material(color=(1,0.3,0.1), roughness=0.2, metallic=1.0, res=64); ball.shape",
+                          native=True, aliases=("quick material preview", "material ball from numbers", "preview roughness and metallic",
+                                                "simple material ball", "show me a shiny red metal", "material editor preview",
+                                                "try a material without textures", "one call material ball", "pbr sliders preview"))
+    c.register_capability("Water body (container-first water tool)", "EVERYTHING between 'I want water' and pixels: mind.water_body(container, level, preset, ...) -> a WaterBody. container=None -> OPEN water over `extent` m; 'glass'/'pool'/'bowl' -> a vessel filled to `level` with real Gerstner RIPPLES on top (vessel-scaled, animated by t); any SDF -> the cavity. Liquid from the material library (colour from matlib, IOR from the library -- oil refracts at 1.47). Waves tunable at every scale (choppiness, wind_heading, wavelength_range). .render('fast'|'final') has PRE-BALANCED lighting (raster ~2s / refractive trace); .at_time(t) animates coherently.",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); wb=m.water_body(extent=50.0, seed=1, res=96); img=wb.render('fast', width=160, height=120); img.shape",
+                          native=True, aliases=("fill a container with water", "water in a glass", "put water in an object",
+                                                "easy water tool", "water scene helper", "pool of water", "bowl of water",
+                                                "assemble a water effect", "water with ripples in a cup", "simple ocean scene",
+                                                "one call water scene with lighting", "ready to render water",
+                                                "render water in one call", "water render over http", "water image for an agent"))
+    c.register_capability("Cloud scene (presets x quality tiers)", "GOOD CLOUDS IN ONE WORD EACH: mind.cloud_scene(preset, quality) wraps make_cloud's tuning into named choices. Presets: 'cumulus', 'wispy', 'storm', 'sunset'. Quality tiers MEASURED: 'fast' ~6s (192px), 'balanced' ~20s (288px), 'final' ~2min (384px) -- the full lighting (self-shadow, HG silver lining, multi-scatter) is in EVERY tier; tiers trade resolution/steps only. texture='musgrave'/'voronoi'/'fbm' (opt-in) shapes the density from the procedural texture MENU instead of the built-in cumulus -- streaky/cellular/billow clouds, no grid bake. Any make_cloud keyword overrides.",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); img=m.cloud_scene(preset='wispy', quality='fast', seed=1); img.shape",
+                          native=True, aliases=("easy clouds", "cloud preset", "make good clouds fast", "cloud scene helper",
+                                                "storm clouds", "sunset clouds", "wispy clouds", "fluffy cumulus",
+                                                "clouds quality settings", "quick cloud render", "one word cloud tool",
+                                                "clouds from a texture", "musgrave clouds", "texture driven cloud density"))
+    c.register_capability("Procedural texture menu (2D + 3D standard set)", "The texture menu every 3D app ships, by NAME: mind.proc_texture(name, **params) -> a field f(P (M,3)); mind.texture_image(name, size) -> a 2D image; mind.texture_volume(name, res) -> a 3D grid (cloud densities). Menu: noise, fbm, white, voronoi (f1/f2/f2f1/cell/smooth), musgrave (ridged/hybrid), wave (bands/rings), marble, wood, brick, magic, checker, stripes, gradient, dots. ONE field serves all three samplers -- 2D texturing is the 3D solid on a plane (slide z through the marble). Deterministic in seed; the direct-eval costume of texturehome's VSA fields.",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); img=m.texture_image('voronoi', size=64, kind='f2f1', scale=5, seed=1); vol=m.texture_volume('fbm', res=16, seed=0); (img.shape, vol.shape)",
+                          native=True, aliases=("procedural texture", "voronoi texture", "musgrave texture", "marble texture",
+                                                "wood grain texture", "brick texture", "3d noise texture", "cellular noise",
+                                                "solid texture", "texture like blender", "standard texture set",
+                                                "noise texture for clouds", "texture menu"))
+    c.register_capability("Mask refraction (2D lens/droplet distortion)", "Refract an image through a 2D SHAPE: mind.mask_refraction(image, mask, strength, ior, ...) reads the mask as a LENS -- jump-flood distance-to-edge -> a meniscus height -> small-angle Snell displaces pixels by -(ior-1)*strength*grad(height): distortion is STRONGEST NEAR THE MASK EDGE, zero on the plateau and outside (a droplet or glass blob over the image). profile 'lens'/'dome'; chromatic adds dispersion fringes; ripple=(amp,scale) adds fbm shimmer. Screen-space single-interface (no TIR/caustics -- true refraction is path_trace's dielectric).",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); yy,xx=np.mgrid[0:64,0:64]; bg=np.stack([np.mod(xx//8+yy//8,2).astype(float)]*3,-1); mask=(xx-32)**2+(yy-32)**2<20**2; r=m.mask_refraction(bg, mask, strength=8.0); r.shape",
+                          native=True, aliases=("refraction effect", "refract through a mask", "water droplet distortion",
+                                                "glass blob effect", "2d refraction", "lens distortion from a shape",
+                                                "distort image near mask edge", "screen space refraction",
+                                                "water shimmer on an image", "droplet lens effect"))
+    c.register_capability("Sculpt-mode preparation (guarded mesh -> SDF cache)", "The SAFE switch into sculpting: mind.sculpt_prepare(mesh, resolution, silhouette=0.95) builds the SDF cache (grid+axes) AND the sculptable remesh in one call, held to a worst-view silhouette-IoU floor so conversion cannot silently change shape. Two levers in cost order: retry the SIGN (flood fill leaks through touching shells, WORSENING with resolution: 0.734@48 -> 0.250@96; winding robust 0.954+), then escalate resolution x1.5 for thin features; unreachable floor -> loud ValueError with the ladder. Sharp low-poly corners round intrinsically -- lower the floor or silhouette=None knowingly.",
+                          example="import numpy as np; import lecore; from holographic.mesh_and_geometry.holographic_meshbridge import sculpt_prepare; from holographic.mesh_and_geometry.holographic_sdf import sphere; from holographic.mesh_and_geometry.holographic_meshbridge import marching_tetrahedra_vec, mesh_to_sdf_grid",
+                          native=True, aliases=("prepare a mesh for sculpting", "sculpt mode conversion", "sdf cache from a mesh",
+                                                "convert mesh to sculptable", "switch to sculpt mode safely", "guarded voxel conversion",
+                                                "mesh changes shape when sculpting", "keep the shape when converting",
+                                                "silhouette guard for conversion", "sculpt cache"))
+    c.register_capability("Texture sampler + ramps (textures as numbers, numbers as textures)", "The two directions of one identity. READ: mind.sample_image(image, uv) samples a raster bilinearly/nearest with clamp/repeat (GPU half-texel convention) -- drive any parameter from a painted map; mind.image_field(image) wraps it as f(P (M,3)) so a painted map plugs in anywhere a field goes (Material channels, cloud densities). WRITE: mind.values_to_texture(v) makes numbers sampleable (roundtrip EXACT at texel centres); mind.ramp(positions, values, interp='linear'/'constant'/'smooth') is the ColorRamp -- stops exact in every mode, ends clamp; mind.ramp_texture bakes the strip.",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); tex=m.values_to_texture(np.array([0.2,0.8,0.5])); v=m.sample_image(tex,[[0.5/3,0.5]]); r=m.ramp([0,1],[0.0,1.0]); (float(v[0]), float(r([0.25])[0]))",
+                          native=True, aliases=("texture sampler", "sample an image at uv coordinates", "use a texture as a number",
+                                                "color ramp with stops", "gradient ramp", "assign values to a texture",
+                                                "bake values into a texture", "bilinear image sample", "ramp texture",
+                                                "map a value through a gradient", "lookup table texture", "drive a parameter from a map"))
+    c.register_capability("Mixture matter model (oil & water, dye, smoke -- one advected-field core)", "Smoke, dye mixing, salt fingering, and oil-and-water SEPARATION are ONE advected-field matter model, not four simulators: mind.make_mixture(shape, buoyancy, tension) builds component channels riding one shared incompressible flow; mind.matter_step(mix, vx, vy, dt, drift_strength) advances it, DELEGATING to the fluid faculties -- no second solver. Channels diffuse at their own rates (salt fingering); drift + double-well hooks (off by default) give demixing/immiscible behaviour. KEPT NEGATIVE: sharp immiscible interfaces are the diffuse-interface trade; fractions clamp to a partition.",
+                          example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); mix=m.make_mixture((16,16)); type(mix).__name__",
+                          native=True, module="mixture",
+                          aliases=("oil and water separating mixture model", "mixture model", "phase separation",
+                                   "demixing simulation", "immiscible fluids", "dye mixing in water",
+                                   "salt fingering", "multi component fluid", "matter model", "oil water demix"))
+    c.register_capability("Style transfer (grade toward a reference image)", "Make one image FEEL like another: mind.color_transfer(img, reference, mode, strength) matches the reference's colour statistics -- 'meanstd' (Reinhard 2001) or 'covariance' (Monge-Kantorovich whiten-then-colour: handles correlated teal-orange grades). Sizes need not match; strength blends 0..1. COMPOSES: the 'style_transfer' step in postfx_chain grades a frame inside any chain -- ('style_transfer', {'reference': ref}) then bloom/grain/aces. Family: ST2 texture_synthesis, ST3 guided super-res. GLOBAL statistics: moves colour, not content; extreme palette gaps can wash out.",
+                          example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); img=np.random.default_rng(0).uniform(0,1,(32,32,3)); ref=np.random.default_rng(1).uniform(0,1,(24,24,3)); out=m.color_transfer(img, ref, strength=0.8); out.shape",
+                          native=True, aliases=("style transfer", "apply the style of one image to another",
+                                                "make my render look like a painting", "match the colors of a reference image",
+                                                "stylize an image", "transfer the look of a photo", "neural style transfer",
+                                                "post process with a style", "color grade toward a reference",
+                                                "match a movie look", "consistent grade across frames"))
     c.register_capability("Textured object render (paint composed maps)", "paint a COMPOSED texture or material "
                           "(CMP1 graph / CMP2-3 material) onto an object and render it: "
                           "mind.render_textured(scene, {object_name: texture_graph}) marches the scene, UV-wraps each "

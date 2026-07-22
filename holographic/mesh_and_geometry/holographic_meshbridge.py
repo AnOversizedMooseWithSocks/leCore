@@ -1013,3 +1013,135 @@ def _selftest_soup_sign():
 
 if __name__ == "__main__":
     _selftest_soup_sign()
+
+
+# ======================================================================================================
+# SCULPT-MODE PREPARATION -- the GUARDED mesh -> sdf-cache conversion
+# ======================================================================================================
+
+def sculpt_prepare(mesh, resolution=48, silhouette=0.95, max_resolution=160, pad_frac=0.08,
+                   n_azimuth=6, band=None):
+    """Prepare a mesh for SCULPT MODE: build the SDF cache and the sculptable remesh, GUARDED so the
+    conversion cannot silently change the shape.
+
+    WHY THIS EXISTS (the measured bug it closes): the raw pipeline -- mesh_to_sdf_grid -> march -- has two
+    independent shape-drift modes, both reproduced and quantified before this was written:
+      * THIN FEATURES die at coarse resolution (a 0.04-thick fin on a test box: worst-view silhouette IoU
+        0.621 at res 32, the fin's top simply gone).
+      * TOUCHING/COINCIDENT SHELLS break the flood-fill sign, and escalating resolution makes it WORSE, not
+        better (the same box: IoU 0.734 @ 48 -> 0.460 @ 64 -> 0.250 @ 96 under sign='auto' -- higher res
+        resolves the zero-thickness contact and the fill floods through). The generalised winding number is
+        robust on the same mesh (0.954 / 0.967 / 0.967, monotone).
+    A resolution-only guard therefore CANNOT save the second mode; the guard must also switch the SIGN method.
+
+    THE LADDER, in cost order: (1) convert at `resolution` with sign='auto'; (2) if the worst-view IoU is
+    below `silhouette`, retry the SAME resolution with sign='winding' (the coincident-shell fix); (3) keep the
+    better sign and escalate resolution x1.5 (re-testing that sign) until the floor passes, `max_resolution`
+    is hit, or improvement stalls; (4) if the floor is still unmet, raise ValueError CARRYING THE FULL REPORT
+    -- the destructive conversion is REFUSED, not shipped, which is the point. `silhouette=None` runs exactly
+    one unguarded conversion (preservation is the default; destruction is the explicit opt-out, matching
+    silhouette_guarded's convention).
+
+    Returns {'mesh': the sculptable remarch, 'grid': (res,res,res) signed distances, 'axes': (xs,ys,zs),
+    'bounds': the padded box, 'report': {'iou': worst-view IoU, 'view': worst view, 'sign': sign used,
+    'resolution': final res, 'ladder': [(res, sign, iou), ...]}} -- everything sculpt mode needs in one call,
+    with the grid and mesh guaranteed to be the SAME level of the SAME field.
+    Deterministic; cost is the ladder's converts + one silhouette sweep per rung (~1 s per rung at res 48).
+
+    KEPT HONEST: SHARP low-poly shapes (a raw tetrahedron, hard-edged primitives) can plateau BELOW a 0.95
+    floor at any resolution -- corner rounding is intrinsic to a trilinear grid SDF, not a resolution bug
+    (measured: a tetrahedron stalls at IoU ~0.78 even at res 122). The refusal is then correct behaviour;
+    the caller chooses a lower floor or silhouette=None knowingly, which is the entire point of the guard."""
+    from holographic.rendering.holographic_render import silhouette_sweep
+    V = np.asarray(mesh.vertices, float)
+    lo, hi = V.min(0), V.max(0)
+    pad = float(pad_frac) * float((hi - lo).max())
+    bounds = (tuple(lo - pad), tuple(hi + pad))
+
+    def rung(res, sign):
+        grid, axes = mesh_to_sdf_grid(mesh, bounds, res=int(res), band=band, sign=sign)
+        back = marching_tetrahedra_vec(grid, axes, level=0.0)
+        if silhouette is None:
+            return grid, axes, back, None
+        sw = silhouette_sweep(mesh, back, n_azimuth=n_azimuth)
+        return grid, axes, back, sw
+
+    ladder = []
+    res = int(resolution)
+    grid, axes, back, sw = rung(res, "auto")
+    if silhouette is None:
+        return {"mesh": back, "grid": grid, "axes": axes, "bounds": bounds,
+                "report": {"iou": None, "view": None, "sign": "auto", "resolution": res, "ladder": []}}
+    floor = float(silhouette)
+    ladder.append((res, "auto", float(sw["worst"])))
+    best = ("auto", grid, axes, back, sw)
+    if sw["worst"] < floor:
+        g2, a2, b2, s2 = rung(res, "winding")                  # the coincident-shell lever, same cost rung
+        ladder.append((res, "winding", float(s2["worst"])))
+        if s2["worst"] > sw["worst"]:
+            best = ("winding", g2, a2, b2, s2)
+    while best[4]["worst"] < floor and res * 1.5 <= float(max_resolution):
+        prev = float(best[4]["worst"])
+        res = int(round(res * 1.5))
+        g2, a2, b2, s2 = rung(res, best[0])
+        ladder.append((res, best[0], float(s2["worst"])))
+        if s2["worst"] > best[4]["worst"]:
+            best = (best[0], g2, a2, b2, s2)
+        if float(s2["worst"]) <= prev + 1e-4:
+            break                                              # stalled: more cells are not the missing lever
+    sign_used, grid, axes, back, sw = best
+    report = {"iou": float(sw["worst"]), "view": sw["worst_view"], "sign": sign_used,
+              "resolution": res, "ladder": ladder}
+    if sw["worst"] < floor:
+        raise ValueError("sculpt_prepare REFUSES a destructive conversion: worst-view silhouette IoU %.3f "
+                         "< floor %.2f after the ladder %s. The mesh's shape would not survive sculpt mode; "
+                         "inspect the report, fix the mesh (coincident shells? sub-cell features?), or "
+                         "lower the floor / pass silhouette=None to accept the loss explicitly."
+                         % (sw["worst"], floor, ladder))
+    out = {"mesh": back, "grid": grid, "axes": axes, "bounds": bounds, "report": report}
+    return out
+
+
+def _selftest_sculpt_prepare():
+    """The guarded sculpt-cache conversion: the two measured drift modes and their levers, pinned."""
+    def _box_with_fin(fin):
+        def bx(cx, cy, cz, hx, hy, hz):
+            s = [(-1,-1,-1),(1,-1,-1),(1,1,-1),(-1,1,-1),(-1,-1,1),(1,-1,1),(1,1,1),(-1,1,1)]
+            return [(cx+hx*a, cy+hy*b, cz+hz*c) for a, b, c in s]
+        V = bx(0,0,0,0.7,0.35,0.5) + bx(0,0.55,0,fin,0.2,0.4)
+        Fq = [(0,3,2,1),(4,5,6,7),(0,1,5,4),(2,3,7,6),(0,4,7,3),(1,2,6,5)]
+        F = []
+        for base in (0, 8):
+            for q in Fq:
+                a,b,c,d = [x+base for x in q]; F += [(a,b,c),(a,c,d)]
+        from holographic.mesh_and_geometry.holographic_mesh import Mesh
+        return Mesh(np.array(V, float), F)
+
+    # touching shells: sign='auto' flood-leaks (measured 0.734@48, WORSENING with res: 0.460@64, 0.250@96);
+    # the guard must recover by pulling the WINDING lever at the same resolution, not by escalating cells
+    r = sculpt_prepare(_box_with_fin(0.02), resolution=48)
+    assert r["report"]["sign"] == "winding", r["report"]
+    assert r["report"]["iou"] >= 0.95, r["report"]
+    assert r["report"]["ladder"][0][1] == "auto" and r["report"]["ladder"][0][2] < 0.8, \
+        "the auto rung must have failed first (that IS the reproduced bug)"
+
+    # an unrecoverable sub-cell sliver REFUSES rather than shipping a decapitated mesh
+    try:
+        sculpt_prepare(_box_with_fin(0.002), resolution=32, max_resolution=96)
+        raise AssertionError("a sub-cell sliver must refuse")
+    except ValueError as exc:
+        assert "REFUSES" in str(exc) and "IoU" in str(exc)
+
+    # the cache IS the mesh's field: marching the returned grid reproduces the returned mesh
+    back = marching_tetrahedra_vec(r["grid"], r["axes"], level=0.0)
+    assert len(back.vertices) == len(r["mesh"].vertices)
+
+    # explicit opt-out: silhouette=None converts exactly once, unguarded, and says so in the report
+    u = sculpt_prepare(_box_with_fin(0.002), resolution=24, silhouette=None)
+    assert u["report"]["iou"] is None and u["report"]["ladder"] == []
+    print("OK: sculpt_prepare selftest passed (winding lever recovers the touching-shell leak at equal res; "
+          "sub-cell sliver refused with the report; grid==mesh field; opt-out is single-pass)")
+
+
+if __name__ == "__main__":
+    _selftest_sculpt_prepare()

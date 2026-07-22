@@ -222,3 +222,47 @@ def test_wired_to_the_mind_and_discoverable():
 
     for phrase in ("render a cloud", "shadow ray without marching", "participating media"):
         assert "Cloud stack" in str(m.find_capability(phrase)[:3]), phrase
+
+
+def test_analytic_segment_integral_beats_the_rectangle_rule():
+    """The opt-in analytic segment integral (Hillaire, Frostbite SIGGRAPH 2015) integrates each step against its
+    OWN extinction instead of assuming constant transmittance across it. Through the mind: it must beat the
+    rectangle rule at equal step count, both must converge to the same answer (so the reference is not a strawman),
+    and the DEFAULT must remain rect so no recorded decision moves."""
+    import warnings
+    import numpy as np
+    import lecore
+    from holographic.misc.holographic_volint import HolographicVolume
+    from holographic.sampling_and_signal.holographic_fpe import VectorFunctionEncoder
+
+    m = lecore.UnifiedMind(dim=64, seed=0)
+    rng = np.random.default_rng(0)
+    enc = VectorFunctionEncoder(3, dim=256, bounds=[(-1, 1)] * 3, bandwidth=2.5, seed=0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        vol = HolographicVolume.from_blobs(enc, rng.uniform(-0.5, 0.5, size=(16, 3)), calibration_steps=96)
+
+    O = np.stack([np.full(8, -0.95), np.zeros(8), np.linspace(-0.2, 0.2, 8)], axis=1)
+    D = np.tile([1.0, 0.0, 0.0], (8, 1))
+    kw = dict(L=1.9, sun_dir=(0, 1, 0), ceiling=0.95)
+
+    # both modes converge to the same answer -> the reference is trustworthy, not built from the winner
+    ref_r, _ = m.cloud_single_scatter(vol, O, D, view_steps=512, integrate="rect", **kw)
+    ref_a, _ = m.cloud_single_scatter(vol, O, D, view_steps=512, integrate="analytic", **kw)
+    assert np.abs(ref_r - ref_a).max() < 1e-3, np.abs(ref_r - ref_a).max()
+
+    err_rect = np.abs(m.cloud_single_scatter(vol, O, D, view_steps=8, integrate="rect", **kw)[0] - ref_r).mean()
+    err_anal = np.abs(m.cloud_single_scatter(vol, O, D, view_steps=8, integrate="analytic", **kw)[0] - ref_r).mean()
+    assert err_anal < err_rect, (err_anal, err_rect)
+
+    # the default is rect, exactly -- an existing decision must never flip
+    d1, e1 = m.cloud_single_scatter(vol, O, D, view_steps=32, **kw)
+    d2, e2 = m.cloud_single_scatter(vol, O, D, view_steps=32, integrate="rect", **kw)
+    assert np.array_equal(d1, d2) and e1 == e2
+
+    # an unknown mode is refused, never silently treated as rect
+    try:
+        m.cloud_single_scatter(vol, O, D, integrate="bogus", **kw)
+        assert False, "unknown integrate mode must raise"
+    except ValueError:
+        pass

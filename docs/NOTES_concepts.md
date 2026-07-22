@@ -40999,3 +40999,418 @@ plain, join returns a Principal the service summarizes). Integration tests in te
 test_holographic_access (invite/join). Audits 0/0/0, docs regenerated. FRONT-END TODO (not this repo): an Invite
 button -> create_invite_link -> copy link; a Join box -> join_from_link; a Stream/OBS panel -> obs_capture_profile
 showing the URL/size/fps + steps.
+
+## SHADERTOY TECHNIQUE AUDIT -> analytic volumetric segment integral (measured 117x)
+
+Moose supplied ~10 Shadertoy shaders. LICENSING: not vendored -- IQ's "Clouds" header forbids hosting/distributing
+in any form (and forbids AI training), and Shadertoy's default for the unlabelled ones is CC BY-NC-SA, which is
+incompatible with a PyPI-published, commercially-funded repo. TECHNIQUES are not copyrightable, so the shaders were
+read as a TECHNIQUE INDEX and each probed against the live engine (Rule 0), implementing only from the published
+source with attribution -- the existing advisory-panel discipline.
+
+AUDIT RESULT (probed, not assumed):
+  * Over-relaxed sphere tracing (mandelbulb's os = 0.4 d^2/pd overshoot) -- ALREADY SHIPPED: sphere_trace(relax>1)
+    is Keinert et al. 2014 "Enhanced Sphere Tracing", opt-in, with the overstep-detect-and-back-up path. NO BUILD.
+  * Analytic scattering integration (SebH/Frostbite VolumetricIntegration) -- GENUINE GAP -> BUILT (below).
+  * Secant/false-position heightfield trace (Seascape), directional-derivative cloud lighting (IQ), L2 SH
+    irradiance + split-sum EnvBRDF (PBS shader), tileable domain via mod(uv*TAU), ridged/warped fBm -- probes
+    returned fallbacks or partial coverage; NOT built this session, logged as candidates.
+
+BUILT: holographic_cloud.single_scatter gained `integrate=` ("rect" default | "analytic" opt-in). The rectangle
+rule accumulated `radiance += T*S*dt`, i.e. the whole segment's in-scatter reaches the eye under the transmittance
+measured at the segment's START. The analytic form integrates the segment against its OWN extinction (Hillaire,
+"Physically Based and Unified Volumetric Rendering in Frostbite", SIGGRAPH 2015):
+    Sint = integral_0^dt S exp(-sigma_e s) ds = (S - S exp(-sigma_e dt)) / sigma_e,  -> S*dt as sigma_e -> 0.
+
+MEASURED (mean abs radiance error vs a high-step reference):
+    sigma_t=1.0:  8 steps rect 8.3e-3 -> analytic 1.1e-5 (754x);  sigma_t=5.0: 8 steps 8.2e-4 -> 5.1e-5 (16x)
+    selftest field: 8 steps 6.29e-03 -> 5.38e-05, which BEATS the 64-step rectangle rule (7.22e-04)
+  => the practical claim is an ~8x cut in density evaluations at equal-or-better accuracy.
+STRAWMAN CHECK (the "great result -> hunt the bug first" rule): the first reference was built with the ANALYTIC
+method, which biases toward it. Re-measured against a NAIVE-built reference and confirmed both modes CONVERGE to
+the same answer at 8192 steps (max|diff| ~1e-6), so the reference is unbiased and the ratios stand.
+KEPT NEGATIVE: the advantage SHRINKS with extinction -- ~754x at sigma_t=1, ~16x at 5, ~4x at 20: a dense medium
+self-terminates inside one step, so the rectangle rule is already close. Large win for thin-to-moderate media only.
+KEPT NEGATIVE: it refines the SEGMENT integral only -- no multiple scattering, no wavelength dependence, and it
+cannot fix an under-resolved density field (if a step misses a filament, both modes miss it identically).
+
+BIT-IDENTITY (load-bearing): the default must not move. First refactor FAILED it -- hoisting the shared `S` changed
+the float ASSOCIATION ORDER (T*sigma_s*rho*exp*ph*dt grouped left-to-right vs (T*S)*dt) and moved results at ULP
+scale. Fixed by keeping the original expression character-for-character in the rect branch and computing S only in
+the analytic branch. VERIFIED by loading the pre-edit module side-by-side: bit-identical at 16/32/64 view steps x
+both shadow modes, with matching eval counts. LESSON: a "pure refactor" of a float expression is not pure --
+regrouping is a decision flip; verify against the actual old module, not a hand-retyped reconstruction (my first
+check was wrong because I omitted the sun-normalise +1e-12 guard).
+Wired through mind.cloud_single_scatter(integrate=); catalogued via new aliases (4/4 technique phrasings top-1).
+
+## VIRTUAL-GPU CAPABILITY EXAMINATION -> VM decode 2x (atom cache + opt-in SIMD cleanup)
+
+Moose asked for a systematic look at the holographic virtual GPU / VSA-program / VM stack -- "learn everything we
+can" with the Shadertoy real-time lens applied to the BACKEND. Mapped the whole stack, then measured.
+
+THE STACK (as mapped, all live):
+  * holographic_backend -- the LITERAL virtual GPU seam: CuPy follow-the-data with NumPy fallback; SELECTIVE
+    (heavy kernels opt in; tiny per-call ops stay CPU because PCIe transfer dwarfs the work). Determinism is a
+    CPU property; GPU mode is throughput-only, opt-in. Unmeasured here (no CUDA in sandbox), by design.
+  * holographic_machinemodel -- the GPU-unit MAP with MEASURED costs (spec_sheet): simd_lanes marginal 0.4ns/elem
+    ("numpy IS the vector unit"), gather_unit the ONLY O(1)-marginal unit (182,010x at N=2048 WHEN the rule is
+    reused; rule build O(N), 724ms at 2048 -- the do-not-use condition carried with the number), kernel_fusion
+    O(1) in passes but LINEAR+CIRCULAR only (Neumann heat 2.35e-02 WRONG, kept loud), texture_unit ~1% preview
+    tier with a Nyquist, simt_width fidelity 1/sqrt(K), operator_power needs k>=20*d and RAISES on a Jordan block.
+  * holographic_machine (HoloMachine) -- the stored-program VSA computer: 14-op ISA, program-as-one-hypervector,
+    noisy decode + codebook cleanup => EXACT accumulator. Kept negatives on record: capacity cliff (~32 instr
+    reliable at dim 1024, ~128 at 4096), inception depth 3-4 on busy disks / 8+ on clean ones. run_batch = the
+    data-parallel "as below" form (one decode, N accumulators; control-flow ops correctly refuse to batch).
+
+MEASURED, then BUILT (the audit's one actionable gap):
+  * Profiled run(): the REAL hot path was NOT the cleanup loop (12%) but re-deriving pos:i/role atoms EVERY decode
+    -- 940 FFT calls per 90 instructions (derived_atom -> unitary projection -> FFTs). My first microbenchmark
+    measured cleanup in isolation (148.5us -> 16.5us matmul, 9x) and NEARLY extrapolated it to the VM; the
+    program-level run showed almost nothing at dim 1024, which forced the profile. LESSON (reinforced): a
+    microbenchmark win is not a system win -- profile the system before attributing.
+  * ATOM CACHE (default ON -- bit-identical by construction): _atom memoises derived_atom, a pure function of
+    (seed, name, dim, unitary); the cache returns the same bytes the first call produced, callers never mutate
+    atoms. dim 4096 program: 10.57 -> 8.13 ms.
+  * FAST CLEANUP (opt-in, QEM rule): HoloMachine(fast_cleanup=True) / mind.vm_fast_cleanup=True routes _nearest
+    through one cached row-normalised codebook matmul + argmax. TIE SEMANTICS verified: both paths take the FIRST
+    maximum; hammered 3000 noisy decodes + an exact two-atom tie, zero disagreements -- but still opt-in because a
+    regrouped float path may flip a knife-edge tie somewhere unsampled, and decisions never flip silently.
+    Combined: 10.57 -> 5.15 ms (2.05x), BIT-IDENTICAL results verified against the pre-edit module loaded
+    side-by-side (assembly, run, both modes, both dims).
+  * _nearest became a ROUTER (loop default | fast opt-in) so all ~20 decode sites honour the flag without a sweep.
+Pinned by test_fast_cleanup_and_atom_cache_change_nothing_but_time (identity, tie hammer, cache-hit, fresh-equal).
+172 VM-dependent tests green; catalog notes the flag (does 577); audits 0/0/0.
+
+REMAINING measured headroom (logged, not built): unbind is 2 FFTs per address -- run() could hoist rfft(program_vec)
+once like run_batch already does (Residency Fill 1 pattern); assemble() re-binds per instruction and could batch.
+Both are bounded follow-ups with the same bit-identity bar. The WGSL-emitter bounded-loop item from the Shadertoy
+arc remains the front-end-speed complement to this backend work.
+
+## SHADERTOY ARC, USER-FACING ROUND: water preset BUILT; clouds + material preview were coverage gaps not code gaps
+
+Moose clarified the ask: presets/shortcuts that GENERATE water / clouds / material previews (the Shadertoy
+examples' user-visible output), not backend perf. Rule-0 probed all three:
+
+CLOUDS -- NO BUILD: make_cloud already renders a volumetric cloud in one call ((H,W,3) in [0,1], ~10s at 96^2).
+MATERIAL PREVIEW -- mostly existed: preview_material/material_ball renders the classic ball with the real
+Cook-Torrance BRDF, but ONLY for channel-field Materials (needs an encoder + fields). BUILT the missing shortcut
+mind.quick_material(color, roughness, metallic, res) -- plain numbers -> ball, via a minimal constant-channel duck
+(sample() returns constants); deliberately carries NO textures (use a real Material + preview_material for that).
+WATER -- GENUINE GAP -> BUILT holographic_ocean.py (simulation_and_physics). spectral_ocean EVOLVES an existing
+height array and free_surface overturns, but nothing GENERATED an ocean. New module:
+  * gerstner_waves(seed, ...): deterministic wave bank -- log-uniform wavelengths (equal per octave, so chop
+    doesn't drown swell), direction spread around a wind heading, amp ~ wavelength, deep-water dispersion
+    omega=sqrt(g k) (Tessendorf -- de-synchronises the sum, kills visible looping), and the no-self-intersection
+    steepness bound sum(q k a) < 1 ENFORCED BY SCALING (an artist sliding choppiness to 25 gets the steepest
+    legal ocean, never a loop; the scale is reported).
+  * water_surface(bank, X, Z, t): trochoidal displacement (Fournier & Reeves 1986) + EXACT analytic normals
+    (closed-form partials; matches central FD to 1.4e-9 in the selftest).
+  * make_water(res, extent, t, seed, preset, shaded): presets ocean/calm/storm; returns
+    {height, positions, normals, bank}; shaded=True adds a simple sun-shaded preview (lambert + fresnel rim +
+    glint) so the result is visible without the render pipeline. Handoffs stated: height -> spectral_ocean to
+    evolve; positions -> the height-field meshers.
+Implemented from the PAPERS (Fournier & Reeves SIGGRAPH 86, Tessendorf 2001, GPU Gems 1 ch.1 parameterisation),
+not from any shader source -- the licensing line from the earlier round holds.
+
+TEST-WRITING LESSONS (three flaked thresholds, each replaced by a measurement):
+  * Asserted skew of the raw height GRID for trochoidal sharpening -- got IDENTICAL values, because Gerstner q
+    displaces points HORIZONTALLY; py on the regular grid is independent of q. The sharpening lives in the
+    DISPLACED surface. Per-row profile skew was real but tiny (+0.004..0.006) -- too small to pin.
+  * The robust Gerstner signature: corr(displaced-x spacing, height) = -0.73..-0.87 across seeds (points compress
+    at crests) vs EXACTLY uniform spacing at q=0. That is what the selftest pins (r < -0.5).
+  * Two guessed round-number thresholds flaked (chop displacement 0.05 vs measured 0.038; storm/calm 2.0x vs
+    measured 1.8x). Replaced with margins UNDER the measurement (0.02, 1.5x). LESSON: never assert a threshold you
+    did not measure first; a guessed round number is a coin-flip test.
+
+Wired mind.make_water + mind.quick_material; catalogued (6/6 stranger phrasings top-1: "make water for my scene",
+"show me a shiny red metal", ...); does 583/490; module selftest LOUD; integration test through the mind; audits
+0/0/0; docs regenerated; 121 related tests green. KEPT NEGATIVE: Gerstner is KINEMATIC -- no mass conservation,
+shoaling, or breaking; the module says so and points at spectral_ocean/free_surface.
+
+## BUNDLED WATER + CLOUD TOOLS (water_body, cloud_scene) -- assembly complexity collapsed to one call
+
+Moose: making good clouds/water is too complicated for a user -- container-first water at any scale with
+adjustable waves, clouds with speed/quality control, "bundle it up as simple tools". Measured in-session: the
+glass-of-water assembly was ~40 lines of expert glue + 3 lighting iterations. That glue is now the product.
+
+BUILT water_body(container, level, preset, size, extent, res, t, seed, ripple, material, **waves) in
+holographic_ocean -> WaterBody:
+  * container=None -> OPEN water (make_water surface + _grid_mesh + shade_water_vertices -- the session-proven
+    relit recipe PROMOTED into the module: full radiance baked into vertex colours, rasterised ambient=1/lights=[]
+    so the surface is never lit twice).
+  * 'glass'/'pool'/'bowl' -> stock shell vessels (onion + open top), water = cavity capped by a RIPPLED top:
+    _ContainedWaterSDF = max(cavity, y - (level + gerstner_height(x,z,t))) -- an approximate SDF safe at small
+    ripple amplitudes; real adjustable waves in a glass, animated by .at_time(t). Any SDF accepted as the cavity.
+  * Liquid from the MATERIAL LIBRARY: colour from matlib RENDER_MATERIALS; IOR lookup order matlib _IOR ->
+    physical_properties -> class default. BUG CAUGHT + PINNED: first draft used physical_properties alone; it has
+    no 'oil', so oil silently fell back to 1.333 -- a wrong number delivered confidently. Exercising EVERY liquid
+    caught it; selftest pins oil==1.47.
+  * .render('fast'|'final'): open = shaded raster (~2 s / hi-res); contained = refractive path trace (measured
+    63-81 s @ 300x225/20spp; final 420x315/64spp) with the bright-sky + plain-gamma tone recipe (Reinhard
+    measured washing out these mid-range scenes last round -- the knowledge is now IN the tool).
+  * .camera() sensible defaults per kind; refusals loud (unknown container/material/quality).
+
+BUILT mind.cloud_scene(preset, quality, **overrides) -- thin faculty over make_cloud (presets are parameter
+sets, no new physics): cumulus / wispy(density 2.4) / storm(10.0, dark sky, low sun) / sunset(warm low sun).
+Quality tiers MEASURED: fast ~6-7 s (grid 28/steps 64/192px), balanced ~20-22 s (40/100/288), final ~2 min
+(56/160/384 = the make_cloud defaults). The tiers trade resolution/steps, never the lighting model (self-shadow,
+HG silver lining, multi-scatter in every tier).
+
+TEST LESSONS (2 new): (a) the __main__ guard must stay at the TRUE end of a module -- appending code after it
+means _selftest runs before the new names exist (hit, fixed by moving the guard); (b) a nearest-subfield material
+classifier is only meaningful at SURFACE hit points -- probing deep interior read IOR 0.0 legitimately; the test
+walks down to the free surface and probes there.
+
+Wired mind.water_body + mind.cloud_scene; catalogued (6/6 stranger phrasings top-1: "fill a container with
+water", "water in a glass", "make good clouds fast", "storm clouds"); does 587/576; selftest extended (lit-output
+pin: p50 luminance > 0.25 -- the bundled lighting is a CONTRACT now); integration tests; audits 0/0/0; docs
+regenerated; 189 related tests green. Demos: bowl of rippled water 81 s, storm clouds 22 s, both first-try lit.
+
+## PROCEDURAL TEXTURE MENU (2D+3D standard set) + MASK-EDGE REFRACTION (holographic_proctex)
+
+Moose: the standard 2D/3D texture types of 3D modeling apps, usable for clouds/water, plus a 2D refraction
+effect driven by distance-from-mask-edge. Rule-0: pattern has value_noise/fbm/checker/stripes/gradient/dots as
+(M,3) fields (REUSED, imported); texturehome's fbm/voronoi are the VSA-ENCODED costume; warped_noise is marble's
+ancestor; distance_transform (jump flood) in holographic_jit; no unified menu, no Worley variants, no musgrave/
+wave/brick/magic, no mask refraction -> BUILT holographic_proctex (materials_and_texture).
+
+THE MENU: proc_texture(name) -> field f(P (M,3)); proc_texture_image (2D plane sample) / proc_texture_volume
+(3D grid -- cloud densities). 14 names: noise, fbm, white, voronoi (f1/f2/f2f1/cell/smooth, euclidean/manhattan,
+jitter), musgrave (ridged/hybrid per Ebert et al. "Texturing & Modeling"), wave (bands/rings + fbm distortion),
+marble/wood (named presets over wave), brick (running bond, per-brick shade), magic, checker, stripes, gradient,
+dots. ONE field, three samplers -- 2D texturing IS the 3D solid on a plane (slide z through the marble).
+Deterministic (pattern's hashed lattice). Selftest contracts: F2>=F1, shared cell ids, bands depend only on
+their axis, rings radially exact, mortar fraction 34%, image==volume slice on the shared lattice.
+
+MASK REFRACTION: mask_refraction(image, mask, strength, ior, profile, chromatic, ripple) -- the mask read as a
+LENS: jump-flood distance-to-edge -> smoothstep meniscus height -> displacement = -(ior-1)*strength*grad(h) ->
+bilinear resample. Distortion is STRONGEST AT THE EDGE and zero on the plateau + outside BY CONSTRUCTION (the
+meniscus is steep only at the rim) -- exactly the requested distance-from-edge behaviour. chromatic = per-channel
+strength (dispersion fringes); ripple = fbm wobble (water shimmer), deterministic. KEPT NEGATIVE: screen-space
+single-interface small-angle Snell -- no TIR/caustics/second surface; true refraction stays path_trace's
+dielectric, and the docstring says so.
+
+TWO REGRESSIONS MY OWN AUDITS CAUGHT (the battery earning its keep):
+  * name_collisions --new: module-level texture_image collided with holographic_preview.texture_image (CMP1
+    GRAPH rasteriser -- different input, same natural name). Renamed mine proc_texture_image/proc_texture_volume
+    at module level (faculty names texture_image/texture_volume stand -- no faculty collision), reason in the
+    docstring.
+  * test_texture_graph_through_mind FAILED: my new capability's aliases outranked the texture-GRAPH capability
+    on its pinned query "compose a texture from noise and colors" -- a DISCOVERABILITY REGRESSION from adding a
+    neighbour. Fixed additively: the graph capability gained the composing phrasings; both now win their own
+    queries. LESSON: a new capability can break an old one's find_capability ranking without touching its code;
+    pinned discoverability tests are what catch it.
+Fixed brick mortar bug (mortar was scale-multiplied -> 82% mortar; now a cell fraction -> 34%).
+Wired proc_texture / texture_image / texture_volume / mask_refraction; catalogued (6/6 phrasings top-1,
+does 563/548); audits 0/0/0; docs regenerated; 20 texture-surface tests green. Demos: 6-texture menu strip +
+a rippled droplet refracting brick.
+
+## TEXTURE-DRIVEN CLOUDS (cloud_scene texture=) -- the menu feeds the cloud tool
+
+The flagged follow-up: proc textures as cloud density sources. ADDITIVE seam: make_cloud gained `field=None`
+(a callable points->density that replaces the built-in cumulus; default None = the cloud_field path, verified
+BIT-IDENTICAL: no-texture cloud_scene == make_cloud direct, pinned by test). cloud_scene gained
+texture=/texture_params=/erode=: density = dens * soft_spherical_falloff(y-squashed)^2 * max(tex(q+0.5)-erode, 0)
+-- windowed + eroded so it reads as a blob in the sky, not a textured cube; the full lighting rig (self-shadow,
+HG silver lining, multi-scatter) applies unchanged. musgrave/ridged -> streaky wisps, voronoi/smooth -> cellular
+clumps, fbm -> billow. Direct evaluation = NO grid bake: texture clouds render in the same ~6 s fast tier that
+the built-in path spends on the lattice alone at higher grids. Deterministic in seed (texture_params seed
+defaults to the scene seed). Catalog does retrimmed to 580 after the addition (one lint round-trip). 3 proctex
+tests green incl. the additive-contract pin; audits 0/0/0.
+
+## STYLE TRANSFER PROMOTED (discoverability + postfx composition)
+
+Moose: style transfer exists but is buried; make it accessible + promoted for composition and post-processing.
+MEASURED the burial: 8/8 natural phrasings ("style transfer", "make my render look like a painting", "stylize an
+image", "post process with a style", ...) returned NOTHING relevant -- the ST family (ST1 color_transfer
+Reinhard/Monge-Kantorovich in holographic_colortransfer, ST2 texture_synthesis quilting, ST3 guided super-res)
+was fully wired but hidden inside the "2D image editing" umbrella with no style-phrased aliases.
+
+TWO GAPS, TWO FIXES:
+  * COMPOSITION: the postfx EFFECTS registry had no style step, so a grade could not ride a chain. Added
+    `style_transfer(img, reference, mode, strength)` to holographic_postfx (a thin adapter DELEGATING to
+    colortransfer.color_transfer; refuses a missing reference loudly). Now
+    postfx_chain(("style_transfer", {"reference": ref}), ("film_grain", ...)) grades inside any chain --
+    the "whole sequence grades toward one reference frame" workflow. Chain step == direct faculty (allclose,
+    pinned). Registry-add only; no existing effect touched.
+  * DISCOVERABILITY: new catalog capability "Style transfer (grade toward a reference image)" carrying all 8
+    previously-dead phrasings as aliases + the ST2/ST3 family cross-reference and the inherited kept negative
+    (GLOBAL colour statistics -- moves colour not content, can wash out across extreme palette gaps).
+    RESULT: 8/8 previously-dead phrasings now top-1 (measured before AND after -- the promotion is a number,
+    not a feeling). Promotion pin lives in the test so a future neighbour cannot silently re-bury it (the
+    texture-graph lesson applied proactively this time).
+does 578; audits 0/0/0; postfx selftest + 47 related tests green.
+
+## BACKLOG SWEEP: water+clouds composition; VM hoist already-done; BOUNDED-LOOP EMISSION SHIPPED
+
+Moose: backlog the 3 flagged follow-ups and knock them out.
+
+B1 WATER+CLOUDS (shipped): WaterBody.render gained sky= -- an image (e.g. a cloud_scene render) composited as
+the open-water background. Mechanism: rasterize against a NEGATIVE sentinel background ((-1,-1,-1) -- shading is
+clipped >=0, so equality with the sentinel is an EXACT coverage mask; the rasteriser writes background values
+untouched, verified at line 209), nearest-resize the sky, composite through the mask. sky=None path unchanged.
+The one-liner: wb.render(sky=m.cloud_scene('sunset','fast')).
+
+B2 VM rfft HOIST (already done -- the memory was stale): probing LIVE code found prog_spec = _rfft(program_vec)
+already hoisted in run() with _read_addr reusing it (the Residency Fill-1 pattern). Rule 0's probe-live-code
+discipline vindicated: memory said "logged, not built"; the tree said built. CORRECT NEGATIVE filed for the
+other half: batching assemble()'s binds via bind_batch is possible but does NOT pay -- bind_batch matches
+scalar ops to ~1e-12 (epsilon, NOT bit-identical), assemble is one-time per program (not the hot loop), so the
+change risks knife-edge decode flips for a cost nobody pays repeatedly. Not built, on purpose, recorded.
+
+B3 BOUNDED-LOOP EMISSION (shipped -- the Shadertoy arc's front-end-speed complement): read the K10 rationale
+FIRST -- it is refuse-DON'T-GUESS, not a kept negative against loops; loops were refused only as absent
+capability. `for i in range(<non-negative int literal>)` is fully translatable with ZERO guessing: constant trip
+count (exactly the shader fBm/octave shape), int counter, EXPLICIT promotion per dialect ((double)i, f32(i),
+@as(T,@floatFromInt(i)), zigv splat-of-floatFromInt, js bare). Implementation: mutability analysis (a name
+assigned >1x, augmented, or assigned inside a loop body declares MUTABLE: wgsl var / zig var / js let; a
+single-assignment name keeps const/let -- so every previously-legal straight-line kernel emits
+CHARACTER-IDENTICALLY, pinned across all 8 dialects vs the pre-edit module). AugAssign supported (n = (n op e)).
+STILL REFUSED, loudly: while (unprovable trip), range(a,b), variable trip counts, return-inside-loop,
+counter shadowing, for-else. THE BAR STAYED EXECUTED: the fBm-shaped loop kernel (accumulator + counter-in-
+expression + AugAssign) emitted to C, COMPILED with cc, and matched the Python original to <1e-12 on all
+inputs; a real 4-octave fbm kernel likewise. Two stale test pins updated deliberately (they pinned the ABSENCE:
+"for -> unsupported statement"); the refusal pins moved to while/variable-range, and a positive loop pin added
+to the module selftest. UNLOCKED: the texture menu / fbm family can now emit through the GENERAL path to WGSL
+for the browser GPU -- the "CPU-verified truth, GPU-emitted speed" lane is open for octave loops.
+34 emit tests + 60 emitter-surface tests green; audits 0/0/0; docs regenerated.
+
+## SCULPT-MODE SHAPE DRIFT: REPRODUCED, DIAGNOSED, GUARDED (sculpt_prepare)
+
+Moose's app bug: switching to sculpt mode (mesh -> sdf cache -> sculptable mesh) sometimes changes the shape;
+silhouette checks exist but are not applied on that path. Rule-0 confirmed both halves: the conversion pair
+(mesh_to_sdf_grid + marching) and the guard machinery (silhouette_sweep, silhouette_guarded -- already default-on
+in voxel_remesh) all live; the sculpt-cache path simply bypasses the guard.
+
+REPRODUCED AND QUANTIFIED (worst-view silhouette IoU, 6-azimuth sweep) on a box with a thin fin whose base
+COINCIDES with the box top (touching shells -- the thing app users make constantly):
+  * thin-feature loss: res 32 decapitates the fin (IoU 0.621, fin top vertex gone).
+  * THE REAL KILLER -- sign leak on touching shells, WORSENING with resolution: sign='auto' (edge-closed ->
+    flood fill) gives 0.734@48 -> 0.460@64 -> 0.250@96. Higher res resolves the zero-thickness contact and the
+    fill floods through. A resolution-only guard CANNOT save this case.
+  * the generalised winding number is robust on the same mesh: 0.954@48 / 0.967@64 / 0.967@96, monotone.
+Also: the naive guard-by-escalation loop can run to OOM (killed a 547^3 attempt in repro) -- capped.
+
+BUILT sculpt_prepare(mesh, resolution=48, silhouette=0.95, max_resolution=160) in holographic_meshbridge +
+mind faculty: the ladder pulls TWO LEVERS IN COST ORDER -- (1) sign='auto' at res; (2) below floor -> retry
+SAME res with sign='winding' (the coincident-shell fix, and the cheap lever); (3) escalate res x1.5 on the
+better sign with a stall detector (<=1e-4 improvement stops the climb -- more cells are not the missing
+lever); (4) floor unreachable -> ValueError CARRYING THE LADDER ([(res, sign, iou), ...]) -- the destructive
+conversion is REFUSED, never shipped silently. silhouette=None = explicit single-pass opt-out (preservation
+default, destruction opt-out, the silhouette_guarded convention). Returns {mesh, grid, axes, bounds, report}:
+the grid and the sculptable mesh are THE SAME LEVEL OF THE SAME FIELD, so the app's brushes/raycasts agree
+with what the user sees.
+
+KEPT HONEST: sharp low-poly shapes plateau below 0.95 at ANY resolution (a tetrahedron stalls at IoU ~0.78
+even at res 122 -- corner rounding is intrinsic to trilinear grid SDFs, not a resolution bug). The refusal is
+then CORRECT; the caller lowers the floor or opts out knowingly. In-module selftest pins the winding-lever
+recovery, the sliver refusal, grid==mesh, and the opt-out; integration test through the mind; discoverability
+5/5 including the user's own phrasing ("mesh changes shape when sculpting" -> top-1). Audits 0/0/0.
+
+APP GUIDANCE (the actual fix on Moose's side): replace the raw mesh_to_sdf_grid call in the mode switch with
+mind.sculpt_prepare(mesh) and use the returned grid as the sdf cache and the returned mesh as the sculptable
+surface; catch ValueError to surface the refusal to the user instead of silently converting.
+
+## TEXTURE SAMPLER + RAMPS -- textures as numbers, numbers as textures (holographic_proctex)
+
+Moose: use a 2D texture as numerical input via a sampler; assign numerical values to a texture; ramps as the
+canonical example. Rule-0: sample_texture serves CMP1 GRAPHS; cosine palettes are continuous (no stops); no
+public raster sampler at (u,v); no value->texture; 8/8 natural phrasings dead.
+
+BUILT the two directions of one identity in holographic_proctex:
+  READ -- sample_image(image, uv, mode='bilinear'/'nearest', wrap='clamp'/'repeat'): (M,2) uv in [0,1]^2 over
+  (H,W)/(H,W,C), half-texel-CENTRE convention matching GPU samplers (a map painted for the three.js front end
+  reads the same numbers here). image_field(image) wraps a raster as f(P (M,3)) (x/y=uv, z ignored) -- a
+  PAINTED map becomes a first-class field: Material channels, cloud_scene density (integration test drives
+  make_cloud's field= from a painted 16x16 -- the composition that motivated the layer), displacement.
+  WRITE -- values_to_texture(v): (N,)->one-row strip, (H,W)/(H,W,C) pass through; normalize opt-in, default
+  UNTOUCHED because the round trip is the point. ramp(positions, values, interp='linear'/'constant'/'smooth'):
+  the ColorRamp -- sorted stops, scalar or RGB values, ends clamp, a stop's own position exact in EVERY mode;
+  constant holds hard bands. ramp_texture bakes at texel centres.
+
+CLOSING CONTRACT, pinned in selftest AND integration test: sample_image(values_to_texture(v), texel_centres)
+== v EXACTLY -- assign, sample, and the numbers come back bit-equal. Also pinned: bilinear midpoint = mean,
+repeat-vs-clamp semantics, baked-ramp == sampled-ramp, unknown mode/wrap refused. (values_to_texture makes NO
+guess on ambiguous (N,C) 2-D input -- taken as an image; strip-of-colours callers pass (1,N,C) or use
+ramp_texture. First draft had dead half-written guessing code; deleted, convention documented instead.)
+
+Wired 5 faculties (sample_image, image_field, ramp, ramp_texture, values_to_texture); catalogued as ONE
+capability (the identity is one idea); 8/8 previously-dead phrasings top-1; does 582; audits 0/0/0; docs
+regenerated; proctex file now 5 tests green. NOTE: mask_refraction keeps its own inline bilinear (hot loop with
+per-channel chromatic offsets on full grids; unifying through sample_image would risk character drift on a
+shipped surface for no measured win -- the duplication is conscious and documented here).
+
+## WIRING + UX SWEEP over the arc (water/cloud/proctex/sampler/style/sculpt/emit)
+
+Moose: sweep to confirm the recent changes are fully implemented. Ran four passes:
+
+1. AUDIT BATTERY: wiring_report / catalog_gaps / skill_lint / tag_lint / name_collisions / structure /
+   reachability all clean (one non-gating size canary noted).
+2. CROSS-BURIAL MATRIX: all 44 pinned phrasings across the arc's 8 capabilities re-verified top-1 IN ONE RUN
+   (each new registration can silently re-rank neighbours -- the texture-graph lesson, now swept wholesale).
+3. HTTP /invoke BAR: booted the real service (thread-in-process; nohup children do not survive between tool
+   calls in this sandbox -- noted for future sessions), confirmed all 12 new faculties in GET /tools (1426
+   total), POSTed 11 round-trips. TWO GENUINE GAPS FOUND AND FIXED:
+   * sculpt_prepare's Mesh degraded to a repr STUB over HTTP -- a dead end for the app. FIXED in
+     holographic_service._jsonable: a duck-mesh now leaves the service as EXACTLY the dict shape as_mesh
+     accepts coming in ({'vertices','faces'} + uvs/colours when present) -- the boundary is SYMMETRIC, and the
+     pin posts the returned mesh straight back into the next /invoke. Additive: only objects that previously
+     stubbed change form.
+   * water_body's WaterBody object cannot cross HTTP at all -- an agent had no path to water PIXELS. ADDED
+     mind.render_water(...): the one-shot build+render returning the (H,W,3) image (same params as water_body
+     + quality/width/height); in-process callers keep the object. Verified over the wire: 36x48x3 back clean.
+   Expected stubs kept as-is: proc_texture and ramp return CALLABLES by design; their JSON siblings are
+   texture_image/texture_volume and ramp_texture.
+4. UX COHERENCE: docstring cross-refs, seed presence, tier documentation, and ERROR QUALITY (every refusal
+   must name the valid options -- all 6 probes pass). One real finding fixed (cloud_scene docstring lacked
+   module cross-references); three false positives noted (proc_texture/texture_image/texture_volume take seed
+   via **params per-texture by design, and say "Deterministic in seed").
+
+Pins added: mesh boundary symmetry + render_water determinism (test_http_boundary_mesh_symmetry_and_render_water).
+render_water aliased under the Water body capability ("render water in one call" -> top-1). Battery 0/0/0;
+50 service/proctex tests green.
+
+## CI FIX: Water body displaced the mixture module on a SEED probe -- promoted Mixture to a first-class capability
+
+CI failed test_seed_from_modules_makes_all_domains_findable: the probe "oil and water separating mixture model"
+expects a "mixture"-named hit in top-3; the Water body capability (oil/water material aliases) now ranked in,
+displacing the auto-seeded holographic_mixture MODULE entry. Same regression class as the texture-graph lesson --
+and it hit a probe OUTSIDE my 44-phrase sweep matrix (the matrix covered the ARC's pins, not the pre-existing
+seed test's probes; the matrix now includes them).
+
+FIX (the honest one, not an alias band-aid on a module entry): holographic_mixture was wired (make_mixture /
+matter_step faculties) but discoverable ONLY through its auto-seeded module entry -- fragile by construction,
+one strong neighbour away from burial, which is exactly what happened. Registered a first-class capability
+"Mixture matter model (oil & water, dye, smoke -- one advected-field core)" with the module's real story
+(one advected-field model, channels on a shared flow, delegates to the fluid faculties, drift/double-well
+hooks, the diffuse-interface kept negative) and the probe phrasings as aliases.
+
+RE-SWEPT WHOLESALE: expanded matrix 48/48 top-1 (arc pins + mixture pins), all 6 seed-test probes green,
+12 catalog tests green, battery clean, docs regenerated. LESSON APPENDED TO THE CLASS: module-entry-only
+discoverability is a latent regression waiting for a neighbour; domains that matter get first-class
+capabilities with pinned phrasings.
+
+## CI FIX: fast_cleanup exact-tie flipped on CI's BLAS -- band re-arbitration makes agreement structural
+
+CI failed the fast_cleanup exact-equivalence pin: an exact LOAD+BIND opcode tie decoded 'BIND' via the loop and
+'LOAD' via the matmul path ON CI, while agreeing locally. Root cause is the QEM lesson verbatim: the matmul's
+summation order differs from the per-vector cosine at ~1 ULP, and the 1-ULP DIRECTION differs across BLAS
+builds -- our original docstring literally warned "a regrouped float path may flip a knife-edge tie somewhere
+we did not sample"; CI sampled it. (Note the loop itself orders the tie differently across machines -- CI's
+loop said BIND, ours says LOAD -- so no amount of matching OUR box could fix CI.)
+
+FIX, STRUCTURAL NOT STATISTICAL: _nearest_fast now band-re-arbitrates -- after the matmul argmax, any
+candidates within 1e-9 of the top score are handed (in codebook order) to _nearest_loop's exact arithmetic and
+ITS verdict returned. Loop/fast agreement is now true BY CONSTRUCTION on any BLAS: the fast path defers to
+whatever the loop's arithmetic says wherever the scores are indistinguishable at matmul precision. Ties are
+rare -> the measured speedup stands (re-measured 2.8x per-decode at the 20-atom codebook, dim 1024; the band
+branch did not fire once in 3000 noisy decodes).
+
+HAMMERED: every pairwise exact tie in the opcode codebook x jitters (364 probes) + 3000 noisy decodes, zero
+disagreements; the exact CI case agrees; new structural pin test_fast_cleanup_tie_band_survives_any_blas
+(passes on ANY BLAS by construction, not just the dev box). Docstring updated -- the warning that came true
+is now the WHY-comment for the band. 25 VM tests green; lints clean; docs regenerated.
+
+LESSON (appending to the QEM class): "hammered N cases, zero disagreements" is a sample, not a proof, when two
+float summation orders are compared -- equivalence claims across regrouped arithmetic need a STRUCTURAL
+mechanism (defer to the reference path in the ambiguous band), not more samples.

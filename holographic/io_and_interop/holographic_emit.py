@@ -81,23 +81,43 @@ for _n, _z in (("sqrt", "@sqrt"), ("exp", "@exp"), ("log", "@log"), ("sin", "@si
 
 DIALECTS = {
     "c_f64": {"scalar": "double", "decl": "{s} {n} = {e};", "typed_decl": True,
-              "sig": "{s} {name}({params})", "param": "{s} {n}", "suffix": "", "brace": True},
+              "sig": "{s} {name}({params})", "param": "{s} {n}", "suffix": "", "brace": True,
+              "mut_decl": "{s} {n} = {e};", "loop": "for (int {i} = 0; {i} < {n}; {i}++) {{",
+              "int_promote": "(double){i}"},
     "c_f32": {"scalar": "float", "decl": "{s} {n} = {e};", "typed_decl": True,
-              "sig": "{s} {name}({params})", "param": "{s} {n}", "suffix": "f", "brace": True},
+              "sig": "{s} {name}({params})", "param": "{s} {n}", "suffix": "f", "brace": True,
+              "mut_decl": "{s} {n} = {e};", "loop": "for (int {i} = 0; {i} < {n}; {i}++) {{",
+              "int_promote": "(float){i}"},
     "wgsl": {"scalar": "f32", "decl": "let {n} = {e};", "typed_decl": False,
-             "sig": "fn {name}({params}) -> {s}", "param": "{n}: {s}", "suffix": "f", "brace": True},
+             "sig": "fn {name}({params}) -> {s}", "param": "{n}: {s}", "suffix": "f", "brace": True,
+             "mut_decl": "var {n} = {e};", "loop": "for (var {i}: i32 = 0; {i} < {n}; {i} = {i} + 1) {{",
+             "int_promote": "f32({i})"},
     "zig_f64": {"scalar": "f64", "decl": "const {n}: {s} = {e};", "typed_decl": True,
-                "sig": "fn {name}({params}) {s}", "param": "{n}: {s}", "suffix": "", "brace": True},
+                "sig": "fn {name}({params}) {s}", "param": "{n}: {s}", "suffix": "", "brace": True,
+                "mut_decl": "var {n}: {s} = {e};",
+                "loop": "var {i}: usize = 0;\nwhile ({i} < {n}) : ({i} += 1) {{",
+                "int_promote": "@as(f64, @floatFromInt({i}))"},
     "zig_f32": {"scalar": "f32", "decl": "const {n}: {s} = {e};", "typed_decl": True,
-                "sig": "fn {name}({params}) {s}", "param": "{n}: {s}", "suffix": "", "brace": True},
+                "sig": "fn {name}({params}) {s}", "param": "{n}: {s}", "suffix": "", "brace": True,
+                "mut_decl": "var {n}: {s} = {e};",
+                "loop": "var {i}: usize = 0;\nwhile ({i} < {n}) : ({i} += 1) {{",
+                "int_promote": "@as(f32, @floatFromInt({i}))"},
     "zigv_f64": {"scalar": "V", "decl": "const {n}: {s} = {e};", "typed_decl": True,
                  "sig": "fn {name}({params}) {s}", "param": "{n}: {s}", "suffix": "",
-                 "const_fmt": "@as(V, @splat({v}))", "brace": True},
+                 "const_fmt": "@as(V, @splat({v}))", "brace": True,
+                 "mut_decl": "var {n}: {s} = {e};",
+                 "loop": "var {i}: usize = 0;\nwhile ({i} < {n}) : ({i} += 1) {{",
+                 "int_promote": "@as(V, @splat(@as(f64, @floatFromInt({i}))))"},
     "zigv_f32": {"scalar": "V", "decl": "const {n}: {s} = {e};", "typed_decl": True,
                  "sig": "fn {name}({params}) {s}", "param": "{n}: {s}", "suffix": "",
-                 "const_fmt": "@as(V, @splat({v}))", "brace": True},
+                 "const_fmt": "@as(V, @splat({v}))", "brace": True,
+                 "mut_decl": "var {n}: {s} = {e};",
+                 "loop": "var {i}: usize = 0;\nwhile ({i} < {n}) : ({i} += 1) {{",
+                 "int_promote": "@as(V, @splat(@as(f32, @floatFromInt({i}))))"},
     "js": {"scalar": "number", "decl": "const {n} = {e};", "typed_decl": False,
-           "sig": "function {name}({params})", "param": "{n}", "suffix": "", "brace": True},
+           "sig": "function {name}({params})", "param": "{n}", "suffix": "", "brace": True,
+           "mut_decl": "let {n} = {e};", "loop": "for (let {i} = 0; {i} < {n}; {i}++) {{",
+           "int_promote": "{i}"},
 }
 
 _BINOPS = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Div: "/"}
@@ -213,16 +233,21 @@ def call_soa_kernel(n_params, np_dtype, ct, fn, arrays):
     return out
 
 
-def _expr(node, dialect):
+def _expr(node, dialect, int_vars=frozenset()):
     d = DIALECTS[dialect]
     if isinstance(node, ast.BinOp):
         if type(node.op) not in _BINOPS:
             raise EmitError("unsupported operator %s; the emitter refuses rather than guessing"
                             % type(node.op).__name__)
-        return "(%s %s %s)" % (_expr(node.left, dialect), _BINOPS[type(node.op)], _expr(node.right, dialect))
+        return "(%s %s %s)" % (_expr(node.left, dialect, int_vars), _BINOPS[type(node.op)],
+                               _expr(node.right, dialect, int_vars))
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
-        return "(-%s)" % _expr(node.operand, dialect)
+        return "(-%s)" % _expr(node.operand, dialect, int_vars)
     if isinstance(node, ast.Name):
+        if node.id in int_vars:
+            # a bounded-loop counter used in a float expression: promote EXPLICITLY per dialect ((double)i /
+            # f32(i) / @floatFromInt) -- Python promotes silently, the target languages must not be left to guess.
+            return d["int_promote"].format(i=node.id)
         return node.id
     if isinstance(node, ast.Constant):
         if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
@@ -237,7 +262,7 @@ def _expr(node, dialect):
             name = getattr(node.func, "id", ast.dump(node.func))
             raise EmitError("unknown call %r: not in the intrinsic table for %r. A wrong intrinsic is a wrong "
                             "answer at no tolerance, so the emitter refuses." % (name, dialect))
-        args = ", ".join(_expr(a, dialect) for a in node.args)
+        args = ", ".join(_expr(a, dialect, int_vars) for a in node.args)
         if dialect not in INTRINSICS[node.func.id]:
             raise EmitError("intrinsic %r has no %r form (std.math.pow is scalar-only, e.g.); the emitter refuses "
                             "rather than guessing a lowering" % (node.func.id, dialect))
@@ -262,11 +287,15 @@ def emit_source(src, dialect="wgsl"):
 
 
 def emit(fn, dialect="wgsl"):
-    """Emit `fn` -- a scalar, straight-line, float kernel -- into `dialect`.
+    """Emit `fn` -- a scalar float kernel of assignments, BOUNDED `for i in range(<int literal>)` loops, and a
+    final return -- into `dialect`.
 
     Every parameter must carry a `float` annotation and the function a `-> float` return: **K10's rule is that the
-    emitter refuses rather than guesses**, and an unannotated parameter is an unresolved type. Only assignments and
-    a final `return` are supported; the body must be straight-line.
+    emitter refuses rather than guesses**, and an unannotated parameter is an unresolved type. Bounded loops are
+    emittable because nothing about them is a guess: the trip count is a compile-time constant (the shape every
+    shader fBm/octave loop takes), the counter is an int, and its use in a float expression promotes EXPLICITLY
+    per dialect ((double)i, f32(i), @floatFromInt). Variable trip counts, range(a, b), `return` inside a loop,
+    break/continue, and counter shadowing all still refuse by name.
 
     Returns the dialect source as a string. It is a projection of the Python, not a translation of it: the same AST
     with a different table."""
@@ -298,20 +327,90 @@ def _emit_node(node, dialect):
         raise EmitError("kernel %r must be annotated `-> float`" % (node.name,))
 
     body, seen_return = [], False
-    for st in node.body:
-        if isinstance(st, ast.Expr) and isinstance(st.value, ast.Constant) and isinstance(st.value.value, str):
-            continue                                          # the docstring
-        if seen_return:
-            raise EmitError("statements after `return` are unreachable and the emitter refuses them")
-        if isinstance(st, ast.Assign):
-            if len(st.targets) != 1 or not isinstance(st.targets[0], ast.Name):
-                raise EmitError("only single-name assignment is emittable")
-            body.append("  " + d["decl"].format(s=d["scalar"], n=st.targets[0].id, e=_expr(st.value, dialect)))
-        elif isinstance(st, ast.Return):
-            body.append("  return %s;" % _expr(st.value, dialect))
-            seen_return = True
-        else:
-            raise EmitError("unsupported statement %s: the body must be straight-line" % type(st).__name__)
+
+    # -- BOUNDED LOOPS (the Shadertoy-arc item): `for i in range(<int literal>)` is fully translatable with
+    # ZERO guessing -- the trip count is a compile-time constant (exactly the shape shader fBm/octave loops
+    # take), the loop var is an int counter, and its use inside a float expression promotes EXPLICITLY per
+    # dialect ((double)i / f32(i) / @floatFromInt). Everything outside that shape still refuses by name,
+    # keeping K10: range(a, b), range over a variable, break/continue, and `return` inside a loop all raise.
+    # MUTABILITY: a name assigned more than once (an accumulator) or augmented needs a MUTABLE declaration
+    # (wgsl `var`, zig `var`, js `let`); a name assigned once keeps the original const/let form, so every
+    # previously-legal straight-line kernel emits CHARACTER-IDENTICALLY (pinned by test).
+    def _assigned_names(stmts, counts):
+        for st in stmts:
+            if isinstance(st, ast.Assign) and len(st.targets) == 1 and isinstance(st.targets[0], ast.Name):
+                counts[st.targets[0].id] = counts.get(st.targets[0].id, 0) + 1
+            elif isinstance(st, ast.AugAssign) and isinstance(st.target, ast.Name):
+                counts[st.target.id] = counts.get(st.target.id, 0) + 2      # augment => mutable by definition
+            elif isinstance(st, ast.For):
+                inner = {}
+                _assigned_names(st.body, inner)
+                for k, v in inner.items():
+                    # any assignment INSIDE a loop body runs repeatedly -> mutable, even if it appears once
+                    counts[k] = counts.get(k, 0) + max(v, 2)
+        return counts
+
+    counts = _assigned_names(node.body, {})
+    mutable = {k for k, v in counts.items() if v > 1}
+    declared = set(a.arg for a in node.args.args)
+    int_vars = set()
+
+    def _stmts(stmts, indent, in_loop):
+        nonlocal seen_return
+        for st in stmts:
+            if isinstance(st, ast.Expr) and isinstance(st.value, ast.Constant) and isinstance(st.value.value, str):
+                continue                                      # the docstring
+            if seen_return:
+                raise EmitError("statements after `return` are unreachable and the emitter refuses them")
+            if isinstance(st, ast.Assign):
+                if len(st.targets) != 1 or not isinstance(st.targets[0], ast.Name):
+                    raise EmitError("only single-name assignment is emittable")
+                n = st.targets[0].id
+                e = _expr(st.value, dialect, int_vars)
+                if n in declared:
+                    body.append(indent + "%s = %s;" % (n, e))
+                else:
+                    declared.add(n)
+                    tmpl = d["mut_decl"] if n in mutable else d["decl"]
+                    body.append(indent + tmpl.format(s=d["scalar"], n=n, e=e))
+            elif isinstance(st, ast.AugAssign):
+                if not isinstance(st.target, ast.Name) or type(st.op) not in _BINOPS:
+                    raise EmitError("only name op= expr with +,-,*,/ is emittable")
+                n = st.target.id
+                if n not in declared:
+                    raise EmitError("augmented assignment to undeclared %r" % n)
+                body.append(indent + "%s = (%s %s %s);" % (n, n, _BINOPS[type(st.op)],
+                                                           _expr(st.value, dialect, int_vars)))
+            elif isinstance(st, ast.For):
+                it = st.iter
+                ok = (isinstance(it, ast.Call) and isinstance(it.func, ast.Name) and it.func.id == "range"
+                      and len(it.args) == 1 and not it.keywords
+                      and isinstance(it.args[0], ast.Constant) and isinstance(it.args[0].value, int)
+                      and not isinstance(it.args[0].value, bool) and it.args[0].value >= 0)
+                if not ok:
+                    raise EmitError("only `for <name> in range(<non-negative int literal>)` is emittable -- a "
+                                    "variable or multi-argument range is a trip count the emitter cannot prove")
+                if not isinstance(st.target, ast.Name) or st.orelse:
+                    raise EmitError("the loop target must be a single name and `for...else` is not emittable")
+                i, n_trip = st.target.id, it.args[0].value
+                if i in declared:
+                    raise EmitError("loop variable %r shadows an existing name; the emitter refuses the shadow" % i)
+                declared.add(i); int_vars.add(i)
+                for line in d["loop"].format(i=i, n=n_trip).split("\n"):
+                    body.append(indent + line)
+                _stmts(st.body, indent + "  ", True)
+                body.append(indent + "}")
+                declared.discard(i); int_vars.discard(i)      # the counter scopes to its loop
+            elif isinstance(st, ast.Return):
+                if in_loop:
+                    raise EmitError("`return` inside a loop is an early exit the emitter refuses (K10)")
+                body.append(indent + "return %s;" % _expr(st.value, dialect, int_vars))
+                seen_return = True
+            else:
+                raise EmitError("unsupported statement %s: the body must be assignments, bounded `for range(N)` "
+                                "loops, and a final return" % type(st).__name__)
+
+    _stmts(node.body, "  ", False)
     if not seen_return:
         raise EmitError("kernel %r never returns" % (node.name,))
 
@@ -508,8 +607,14 @@ def _selftest():
     def bad_call(x: float) -> float:
         return numpy_thing(x)                                  # noqa: F821
 
-    def has_loop(x: float) -> float:
-        for _i in range(3):
+    def has_while(x: float) -> float:
+        while x < 3.0:                                         # an unprovable trip count -- still refused
+            x = x + 1.0
+        return x
+
+    def var_range(x: float) -> float:
+        n = 3.0
+        for _i in range(n):                                    # a variable trip count -- still refused
             x = x + 1.0
         return x
 
@@ -517,13 +622,24 @@ def _selftest():
         y = x + 1.0                                            # noqa: F841
 
     for fn_, needle in ((unannotated, "annotation"), (bad_call, "unknown call"),
-                        (has_loop, "unsupported statement"), (no_return, "never returns")):
+                        (has_while, "unsupported statement"), (var_range, "range"),
+                        (no_return, "never returns")):
         try:
             emit(fn_, "wgsl")
         except EmitError as exc:
             assert needle in str(exc), (needle, str(exc))
         else:
             raise AssertionError("emit must refuse %s" % fn_.__name__)
+
+    # 4b. BOUNDED loops EMIT (the former has_loop refusal, retired deliberately: a literal trip count is not a
+    #     guess). The counter promotes explicitly and the accumulator declares mutable.
+    def octaves(x: float) -> float:
+        s = 0.0
+        for i in range(4):
+            s = s + x * (1.0 + i)
+        return s
+    w_loop = emit(octaves, "wgsl")
+    assert "for (var i: i32 = 0; i < 4; i = i + 1) {" in w_loop and "f32(i)" in w_loop and "var s = " in w_loop
 
     try:
         emit(sdf_sphere, "glsl")

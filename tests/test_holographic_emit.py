@@ -134,7 +134,10 @@ def test_emit_source_takes_text_because_a_kernel_is_text():
     ("def f(x, y: float) -> float:\n    return x + y\n", "annotation"),
     ("def f(x: int, y: float) -> float:\n    return y\n", "annotation"),
     ("def f(x: float) -> float:\n    return numpy_thing(x)\n", "unknown call"),
-    ("def f(x: float) -> float:\n    for i in range(3):\n        x = x + 1.0\n    return x\n", "unsupported statement"),
+    # bounded `for range(N)` became emittable (Shadertoy arc); the refusal pin moved to the still-refused
+    # shapes: a while loop (unprovable trip count) and a variable range.
+    ("def f(x: float) -> float:\n    while x < 3.0:\n        x = x + 1.0\n    return x\n", "unsupported statement"),
+    ("def f(x: float) -> float:\n    n = 3.0\n    for i in range(n):\n        x = x + 1.0\n    return x\n", "range"),
     ("def f(x: float) -> float:\n    if x > 0.0:\n        return x\n    return 0.0\n", "unsupported statement"),
     ("def f(x: float) -> float:\n    y = x + 1.0\n", "never returns"),
     ("def f(x: float):\n    return x\n", "-> float"),
@@ -205,3 +208,51 @@ def test_wired_to_the_mind_and_discoverable():
     assert rep32["bit_identical"] is False
 
     assert "Dialect emitters" in str(m.find_capability("emit wgsl")[:3])
+
+
+def test_bounded_loops_emit_and_execute():
+    """Bounded `for i in range(N)` loops (the Shadertoy-arc item): the fBm-shaped kernel -- accumulator,
+    AugAssign, counter used in a float expression -- emits in every dialect; the emitted C COMPILES AND RUNS
+    equal to the Python original; every previously-legal straight-line kernel still emits CHARACTER-
+    IDENTICALLY (the mutability analysis only switches names that are actually reassigned); and the refusal
+    set stays loud (K10)."""
+    from holographic.io_and_interop.holographic_emit import (DIALECTS, EmitError, emit_source, run_c, as_python)
+
+    LOOP = ("def fbm_ish(x: float) -> float:\n"
+            "    s = 0.0\n"
+            "    a = 1.0\n"
+            "    for i in range(5):\n"
+            "        s += a * sin(x * (1.0 + i))\n"
+            "        a = a * 0.5\n"
+            "    return s\n")
+
+    w = emit_source(LOOP, "wgsl")
+    assert "var s = 0.0f;" in w and "for (var i: i32 = 0; i < 5; i = i + 1) {" in w and "f32(i)" in w
+    c = emit_source(LOOP, "c_f64")
+    assert "for (int i = 0; i < 5; i++) {" in c and "(double)i" in c
+    for dz in ("zig_f64", "zigv_f32"):
+        z = emit_source(LOOP, dz)
+        assert "while (i < 5) : (i += 1) {" in z and "@floatFromInt(i)" in z
+
+    py = as_python(LOOP)
+    xs = [0.0, 0.7, 2.3, -1.9]
+    got = run_c(LOOP, [(x,) for x in xs])
+    for x, g in zip(xs, got):
+        assert abs(g - py(x)) < 1e-12
+
+    # single-assignment kernels keep the const/let form -- the character-identity claim, spot-pinned
+    straight = "def f(x: float, y: float) -> float:\n    a = x * y + 1.0\n    return a + exp(-a)"
+    assert "let a = " in emit_source(straight, "wgsl") and "var a" not in emit_source(straight, "wgsl")
+    assert "const a: f64" in emit_source(straight, "zig_f64")
+
+    for bad in (
+        "def f(x: float) -> float:\n    n = 3.0\n    for i in range(n):\n        x = x + 1.0\n    return x",
+        "def f(x: float) -> float:\n    for i in range(3):\n        return x\n    return x",
+        "def f(x: float) -> float:\n    i = 1.0\n    for i in range(3):\n        x = x + 1.0\n    return x",
+        "def f(x: float) -> float:\n    for i in range(2, 5):\n        x = x + 1.0\n    return x",
+    ):
+        try:
+            emit_source(bad, "wgsl")
+            assert False, "must refuse: %s" % bad.splitlines()[1]
+        except EmitError:
+            pass
