@@ -41389,3 +41389,28 @@ RE-SWEPT WHOLESALE: expanded matrix 48/48 top-1 (arc pins + mixture pins), all 6
 12 catalog tests green, battery clean, docs regenerated. LESSON APPENDED TO THE CLASS: module-entry-only
 discoverability is a latent regression waiting for a neighbour; domains that matter get first-class
 capabilities with pinned phrasings.
+
+## CI FIX: fast_cleanup exact-tie flipped on CI's BLAS -- band re-arbitration makes agreement structural
+
+CI failed the fast_cleanup exact-equivalence pin: an exact LOAD+BIND opcode tie decoded 'BIND' via the loop and
+'LOAD' via the matmul path ON CI, while agreeing locally. Root cause is the QEM lesson verbatim: the matmul's
+summation order differs from the per-vector cosine at ~1 ULP, and the 1-ULP DIRECTION differs across BLAS
+builds -- our original docstring literally warned "a regrouped float path may flip a knife-edge tie somewhere
+we did not sample"; CI sampled it. (Note the loop itself orders the tie differently across machines -- CI's
+loop said BIND, ours says LOAD -- so no amount of matching OUR box could fix CI.)
+
+FIX, STRUCTURAL NOT STATISTICAL: _nearest_fast now band-re-arbitrates -- after the matmul argmax, any
+candidates within 1e-9 of the top score are handed (in codebook order) to _nearest_loop's exact arithmetic and
+ITS verdict returned. Loop/fast agreement is now true BY CONSTRUCTION on any BLAS: the fast path defers to
+whatever the loop's arithmetic says wherever the scores are indistinguishable at matmul precision. Ties are
+rare -> the measured speedup stands (re-measured 2.8x per-decode at the 20-atom codebook, dim 1024; the band
+branch did not fire once in 3000 noisy decodes).
+
+HAMMERED: every pairwise exact tie in the opcode codebook x jitters (364 probes) + 3000 noisy decodes, zero
+disagreements; the exact CI case agrees; new structural pin test_fast_cleanup_tie_band_survives_any_blas
+(passes on ANY BLAS by construction, not just the dev box). Docstring updated -- the warning that came true
+is now the WHY-comment for the band. 25 VM tests green; lints clean; docs regenerated.
+
+LESSON (appending to the QEM class): "hammered N cases, zero disagreements" is a sample, not a proof, when two
+float summation orders are compared -- equivalence claims across regrouped arithmetic need a STRUCTURAL
+mechanism (defer to the reference path in the ambiguous band), not more samples.

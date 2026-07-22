@@ -307,3 +307,22 @@ def test_fast_cleanup_and_atom_cache_change_nothing_but_time():
     assert a1 is a2, "second call must hit the cache"
     assert np.array_equal(a1, derived_atom(slow.seed, "pos:3", slow.dim, unitary=True)), \
         "the cached atom must equal a fresh derivation bit-for-bit"
+
+
+def test_fast_cleanup_tie_band_survives_any_blas():
+    """The CI-sampled knife edge, pinned structurally: EVERY pairwise exact tie in the opcode codebook (plus
+    sub-epsilon scale jitters) must agree between the loop and the fast path -- the band re-arbitration makes
+    this true by construction, so this test passes on any BLAS, not just the one we developed on."""
+    import numpy as np
+    from holographic.agents_and_reasoning.holographic_machine import HoloMachine
+    slow = HoloMachine(dim=512, seed=0)
+    fast = HoloMachine(dim=512, seed=0, fast_cleanup=True)
+    names = list(slow.op_atoms)
+    rng = np.random.default_rng(7)
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            base = slow.op_atoms[names[i]] + slow.op_atoms[names[j]]
+            for _ in range(3):
+                probe = base * (1.0 + float(rng.uniform(-1, 1)) * 1e-13)
+                assert slow._nearest_loop(slow.op_atoms, probe) == fast._nearest_fast(fast.op_atoms, probe), \
+                    (names[i], names[j])

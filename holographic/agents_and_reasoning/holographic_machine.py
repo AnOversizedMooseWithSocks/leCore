@@ -179,11 +179,15 @@ class HoloMachine:
         unit -- do not reimplement it') applied to the VM's hottest inner loop. MEASURED: 148.5us -> 16.5us per
         decode (9.0x) on the 20-atom opcode+data codebook at dim 1024.
 
-        TIE SEMANTICS: _nearest keeps the FIRST maximum (strict >); np.argmax also returns the first maximum, and
-        cosine(noisy, v) == (v/|v|) . (noisy/|noisy|) up to float regrouping. Hammered with 3000 noisy decodes plus
-        an exact two-atom tie: zero disagreements. Still OPT-IN (fast_cleanup=False default) under the QEM rule --
-        a regrouped float path may flip a knife-edge tie somewhere we did not sample, and existing decisions must
-        never flip silently. The selftest pins loop/matmul agreement so any future drift is caught loudly.
+        TIE SEMANTICS: _nearest keeps the FIRST maximum (strict >). The matmul's summation order differs from the
+        loop's per-vector cosine at ~1 ULP, and the 1-ULP DIRECTION differs across BLAS builds -- the original
+        release warned 'a regrouped float path may flip a knife-edge tie somewhere we did not sample', and CI's
+        BLAS then sampled it (an exact LOAD+BIND tie flipped). The fix is structural, not statistical: wherever
+        the top matmul scores sit within a 1e-9 band, JUST those candidates are re-arbitrated by _nearest_loop's
+        exact arithmetic (codebook order preserved), so loop/fast agreement holds BY CONSTRUCTION on any BLAS.
+        Ties are rare; the measured speedup stands. Hammered: every pairwise exact-tie in the opcode codebook
+        x4 sub-epsilon jitters + 3000 noisy decodes, zero disagreements. Still OPT-IN (fast_cleanup=False
+        default) under the QEM rule.
 
         The cache is keyed by the table OBJECT's id -- the format's codebooks are built once in __init__ and never
         mutated, so identity is a stable key; a new table (new id) just builds a new entry."""
@@ -199,7 +203,20 @@ class HoloMachine:
         nv = float(np.linalg.norm(noisy))
         if nv == 0.0:
             return names[0]                                    # matches _nearest_loop: all cosines 0, first entry wins
-        return names[int(np.argmax(Mn @ (noisy / nv)))]
+        scores = Mn @ (noisy / nv)
+        k = int(np.argmax(scores))
+        # NEAR-TIE RE-ARBITRATION (the knife-edge the original docstring warned about, then CI sampled): the
+        # matmul's summation order differs from the loop's per-vector cosine at ~1 ULP, and on a DIFFERENT BLAS
+        # the 1-ULP direction differs too -- an exact two-atom tie flipped LOAD<->BIND on CI while agreeing
+        # locally. Batched-vs-scalar ULP drift cannot be regrouped away (the QEM lesson), so wherever the top
+        # scores are within a float-epsilon band we hand JUST THOSE candidates to the loop's exact arithmetic
+        # and take its verdict. Ties are rare, so the fast path's 9x stands; bit-identity with _nearest_loop is
+        # now true BY CONSTRUCTION on any BLAS, not true-where-we-happened-to-sample.
+        band = np.flatnonzero(scores >= scores[k] - 1e-9)
+        if len(band) > 1:
+            sub = {names[i]: table[names[i]] for i in sorted(band)}    # codebook order preserved -> same first-max
+            return self._nearest_loop(sub, noisy)
+        return names[k]
 
     def decode_instruction(self, program_vec, i):
         """Read address i: return (opcode, operand) after cleanup. The honest, noisy read step.
