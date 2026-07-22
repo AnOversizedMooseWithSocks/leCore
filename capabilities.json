@@ -4326,6 +4326,29 @@
     },
     {
       "aliases": [
+        "oil and water separating mixture model",
+        "mixture model",
+        "phase separation",
+        "demixing simulation",
+        "immiscible fluids",
+        "dye mixing in water",
+        "salt fingering",
+        "multi component fluid",
+        "matter model",
+        "oil water demix"
+      ],
+      "consumes": [],
+      "does": "Smoke, dye mixing, salt fingering, and oil-and-water SEPARATION are ONE advected-field matter model, not four simulators: mind.make_mixture(shape, buoyancy, tension) builds component channels riding one shared incompressible flow; mind.matter_step(mix, vx, vy, dt, drift_strength) advances it, DELEGATING to the fluid faculties -- no second solver. Channels diffuse at their own rates (salt fingering); drift + double-well hooks (off by default) give demixing/immiscible behaviour. KEPT NEGATIVE: sharp immiscible interfaces are the diffuse-interface trade; fractions clamp to a partition.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); mix=m.make_mixture((16,16)); type(mix).__name__",
+      "method": "make_mixture",
+      "name": "Mixture matter model (oil & water, dye, smoke -- one advected-field core)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
         "modal jump",
         "closed form physics",
         "skip substeps",
@@ -10888,7 +10911,7 @@
       "theme": "Scenes you can describe & adjust"
     }
   ],
-  "count": 460,
+  "count": 461,
   "schema_version": "1.0",
   "scope": "curated capability homes only -- the full live catalog is served at runtime by mind.find_capability / mind.pipeline_map / GET /tools"
 }

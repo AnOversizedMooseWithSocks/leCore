@@ -41369,3 +41369,23 @@ Moose: sweep to confirm the recent changes are fully implemented. Ran four passe
 Pins added: mesh boundary symmetry + render_water determinism (test_http_boundary_mesh_symmetry_and_render_water).
 render_water aliased under the Water body capability ("render water in one call" -> top-1). Battery 0/0/0;
 50 service/proctex tests green.
+
+## CI FIX: Water body displaced the mixture module on a SEED probe -- promoted Mixture to a first-class capability
+
+CI failed test_seed_from_modules_makes_all_domains_findable: the probe "oil and water separating mixture model"
+expects a "mixture"-named hit in top-3; the Water body capability (oil/water material aliases) now ranked in,
+displacing the auto-seeded holographic_mixture MODULE entry. Same regression class as the texture-graph lesson --
+and it hit a probe OUTSIDE my 44-phrase sweep matrix (the matrix covered the ARC's pins, not the pre-existing
+seed test's probes; the matrix now includes them).
+
+FIX (the honest one, not an alias band-aid on a module entry): holographic_mixture was wired (make_mixture /
+matter_step faculties) but discoverable ONLY through its auto-seeded module entry -- fragile by construction,
+one strong neighbour away from burial, which is exactly what happened. Registered a first-class capability
+"Mixture matter model (oil & water, dye, smoke -- one advected-field core)" with the module's real story
+(one advected-field model, channels on a shared flow, delegates to the fluid faculties, drift/double-well
+hooks, the diffuse-interface kept negative) and the probe phrasings as aliases.
+
+RE-SWEPT WHOLESALE: expanded matrix 48/48 top-1 (arc pins + mixture pins), all 6 seed-test probes green,
+12 catalog tests green, battery clean, docs regenerated. LESSON APPENDED TO THE CLASS: module-entry-only
+discoverability is a latent regression waiting for a neighbour; domains that matter get first-class
+capabilities with pinned phrasings.

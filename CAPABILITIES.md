@@ -1090,6 +1090,14 @@ import numpy as np, lecore; m=lecore.UnifiedMind(); mb=m.metaball_mesh(np.array(
 ```
 *Find it by:* metaball mesh, soft blob surface, sum of gaussians mesh, merge blobs into a mesh, metaballs, blob base mesh
 
+### Mixture matter model (oil & water, dye, smoke -- one advected-field core)
+Smoke, dye mixing, salt fingering, and oil-and-water SEPARATION are ONE advected-field matter model, not four simulators: mind.make_mixture(shape, buoyancy, tension) builds component channels riding one shared incompressible flow; mind.matter_step(mix, vx, vy, dt, drift_strength) advances it, DELEGATING to the fluid faculties -- no second solver. Channels diffuse at their own rates (salt fingering); drift + double-well hooks (off by default) give demixing/immiscible behaviour. KEPT NEGATIVE: sharp immiscible interfaces are the diffuse-interface trade; fractions clamp to a partition..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); mix=m.make_mixture((16,16)); type(mix).__name__
+```
+*Find it by:* oil and water separating mixture model, mixture model, phase separation, demixing simulation, immiscible fluids, dye mixing in water, salt fingering, multi component fluid
+
 ### Morse critical points (minima maxima saddles of a scalar field)
 Count and classify the CRITICAL POINTS (minima, maxima, saddles) of a scalar field on a mesh (m.morse_critical_points) -- the singularity structure a Morse-Smale complex is built from, for spectral quad layout and feature analysis. Discrete lower-star test on each 1-ring; obeys Euler-Poincare (minima - saddles + maxima = chi), verified chi=2 on a sphere. Deterministic (field ties broken by vertex id). Returns {minima, maxima, saddles, indices}..
 
@@ -3630,4 +3638,4 @@ import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors(
 
 ---
 
-*460 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*461 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
