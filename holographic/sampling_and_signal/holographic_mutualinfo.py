@@ -68,7 +68,15 @@ def mutual_information_vs_null(x, y, bins=16, n_shuffle=64, seed=0):
     finite-sample/binning bias remains), and reports how far the real MI exceeds the null. Returns a dict:
     `mi` (raw bits), `null_mean`, `null_std`, `excess` (mi - null_mean), and `z` (excess in null std devs -- the
     significance). A dependence counts as REAL only when z clears a few sigma; raw MI without this is a Rorschach
-    test (finite samples give ANY pair apparent MI). Deterministic given `seed`."""
+    test (finite samples give ANY pair apparent MI). Deterministic given `seed`.
+
+    READ `excess` (BITS) AS THE HEADLINE AND z AS SUPPORT, never the other way round. z answers "is the
+    dependence nonzero?" and grows without bound with sample size at FIXED dependence; excess answers "how much
+    is there?" and is what any downstream use is paid in. MEASURED (pinned in _selftest): the same ~0.01-bit
+    coupling reads z=2.5 at n=3k, z=11.7 at n=12k, z=31.5 at n=48k -- while a strong 0.9-bit dependence at
+    n=800 reads a comparable z. The campaign this rule comes from lost real time to exactly this: an MI of
+    z=+92 at n=12k that was ~0.02 bits of actual dependence (an untradeable microstructure bounce). Enormous z
+    + tiny excess = "definitely present, definitely useless"."""
     x = np.asarray(x).ravel()
     y = np.asarray(y).ravel()
     mi = mutual_information(x, y, bins=bins)
@@ -92,6 +100,8 @@ def _selftest():
     3. MI is symmetric: I(X;Y) == I(Y;X).
     4. Determinism: same inputs + seed -> same numbers.
     5. The shuffle null is NON-trivial: independent signals show apparent raw MI > 0 (the bias this guards).
+    6. THE SAMPLE-INFLATED-z TRAP: at fixed tiny dependence, z grows with n while excess (bits) does not --
+       so z ranks a weak-huge-n pair ABOVE a strong-small-n pair that excess ranks correctly.
     """
     rng = np.random.default_rng(0)
     n = 4000
@@ -120,6 +130,17 @@ def _selftest():
 
     # (5) the null is real: independent signals have apparent raw MI > 0 (finite-sample bias this guards against)
     assert ind["null_mean"] > 0.0
+
+    # (6) THE SAMPLE-INFLATED-z TRAP, pinned: same weak coupling, z inflates with n while excess does not.
+    #     A strong-but-small pair must OUTRANK a weak-but-huge pair on excess even while z says the opposite.
+    weak_small = mutual_information_vs_null(x[:3000], (0.12 * x + rng.normal(size=n))[:3000], bins=16, n_shuffle=48, seed=0)
+    xw = rng.normal(size=48000)
+    weak_huge = mutual_information_vs_null(xw, 0.12 * xw + rng.normal(size=48000), bins=16, n_shuffle=48, seed=0)
+    xs = rng.normal(size=800)
+    strong_small = mutual_information_vs_null(xs, 0.9 * xs + 0.5 * rng.normal(size=800), bins=16, n_shuffle=48, seed=0)
+    assert weak_huge["z"] > 3 * weak_small["z"], (weak_small["z"], weak_huge["z"])   # z inflates with n alone
+    assert abs(weak_huge["excess"] - weak_small["excess"]) < 0.02                    # bits do not
+    assert weak_huge["z"] > 0.5 * strong_small["z"] and strong_small["excess"] > 20 * weak_huge["excess"],         (weak_huge, strong_small)                                                    # z confuses them; excess does not
 
     print("holographic_mutualinfo selftest OK (self MI %.2f >> indep %.3f bits; dependent pair z=%.1f clears null, "
           "independent z=%.1f does not; symmetric; deterministic; null_mean %.3f > 0 confirms the finite-sample "

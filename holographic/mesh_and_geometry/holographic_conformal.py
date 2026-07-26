@@ -217,6 +217,57 @@ def coverage_report(residuals_calib, residuals_test, alphas=(0.01, 0.05, 0.1, 0.
     return rows
 
 
+def conditional_coverage(residuals_calib, residuals_test, condition_test, alphas=(0.05, 0.1, 0.2),
+                         min_side=25):
+    """D1 -- COVERAGE UNDER A CONDITION: the same guarantee check as coverage_report, but split by a boolean
+    condition on the TEST half (a regime flag, a storm gate's mask, a load-level indicator). Marginal coverage
+    is an AVERAGE, and an average can hold while both sides of a split are wrong in opposite directions -- the
+    campaign's canonical failure: a nominal-90% interval that covered ~97% in calm and ~70% in storms was
+    "calibrated" on paper and useless in exactly the state where it was needed.
+
+    condition_test : boolean flags aligned with residuals_test (build causally with mind.causal_gate when the
+                     condition will also be USED causally; any ex-post split is fine for diagnosis).
+    min_side       : a side with fewer cases than this reports its coverage with reliable=False rather than
+                     pretending a 7-sample percentage is a measurement.
+
+    Returns a list of rows {alpha, nominal, empirical_all, empirical_inside, empirical_outside, gap,
+    n_inside, n_outside, reliable, degraded}, where `gap` = inside - outside and `degraded` flags a row whose
+    worse side misses nominal by more than 2 binomial standard errors -- the "your guarantee is conditional"
+    alarm.
+
+    KEPT NEGATIVE: the split-conformal guarantee IS marginal; conditional coverage has no free guarantee (it
+    needs per-condition calibration, e.g. separate quantiles per regime -- which this report tells you whether
+    you need). This function DIAGNOSES the gap; closing it means calibrating within the condition, and rows
+    where that per-side recalibration would itself be data-starved are exactly the reliable=False ones."""
+    rc = np.abs(np.asarray(residuals_calib, float))
+    rt = np.abs(np.asarray(residuals_test, float))
+    m = np.asarray(condition_test, bool).ravel()
+    if m.size != rt.size:
+        raise ValueError("condition_test has %d flags for %d test residuals" % (m.size, rt.size))
+    rows = []
+    for a in alphas:
+        q = conformal_quantile(rc, a)
+        cov_all = empirical_coverage(rt <= q)
+        cov_in = empirical_coverage(rt[m] <= q)
+        cov_out = empirical_coverage(rt[~m] <= q)
+        n_in, n_out = int(m.sum()), int((~m).sum())
+        nominal = 1.0 - a
+        reliable = min(n_in, n_out) >= min_side
+        degraded = False
+        if reliable:
+            for cov, nn in ((cov_in, n_in), (cov_out, n_out)):
+                se = np.sqrt(max(nominal * (1 - nominal), 1e-12) / nn)
+                if cov == cov and cov < nominal - 2 * se:
+                    degraded = True
+        rows.append({"alpha": a, "nominal": nominal, "empirical_all": cov_all,
+                     "empirical_inside": cov_in, "empirical_outside": cov_out,
+                     "gap": (cov_in - cov_out) if (cov_in == cov_in and cov_out == cov_out) else float("nan"),
+                     "n_inside": n_in, "n_outside": n_out,
+                     "reliable": reliable, "degraded": degraded})
+    return rows
+
+
+
 # --- proper scoring rules (F8): coverage says the interval is WIDE ENOUGH; scoring says the forecast is GOOD ----
 
 def pinball_loss(pred, actual, q):
@@ -298,6 +349,22 @@ def _selftest():
     good = crps_sample(rng.standard_normal(500) * 0.3 + 1.0, 1.0)    # tight around the truth
     bad = crps_sample(rng.standard_normal(500) * 3.0 + 1.0, 1.0)     # vague around the truth
     assert good < bad
+
+    # D1 -- conditional coverage: heteroscedastic test residuals (storms 3x calm) under calm-dominated
+    # calibration -> the marginal number looks fine while the storm side is degraded. Pinned.
+    rng2 = np.random.default_rng(7)
+    calib = rng2.normal(0, 1, 600)
+    storm = np.arange(800) % 4 == 0                                # a quarter of test cases are storms
+    test = np.where(storm, rng2.normal(0, 3.0, 800), rng2.normal(0, 1.0, 800))
+    rows = conditional_coverage(calib, test, storm, alphas=(0.1,))
+    r0 = rows[0]
+    assert r0["reliable"] and r0["degraded"], r0                   # the alarm fires...
+    assert r0["empirical_inside"] < 0.75 < r0["empirical_outside"], r0     # storms uncovered, calm over-covered
+    assert r0["empirical_all"] > r0["empirical_inside"] + 0.1, r0  # ...and the marginal average hid it
+    homo = conditional_coverage(calib, rng2.normal(0, 1, 800), storm, alphas=(0.1,))[0]
+    assert not homo["degraded"], homo                              # a genuinely uniform forecaster passes
+    tiny = conditional_coverage(calib, test[:60], storm[:60], alphas=(0.1,), min_side=25)[0]
+    assert not tiny["reliable"], tiny                              # 15 storm cases are not a measurement
 
     print("holographic_conformal selftest OK: scalar coverage tracks nominal (within 3 pct); VSA-native vector "
           "conformal covers %.2f at 90%%; wrap abstains on a wide interval; ACI holds %.2f coverage on a drifting "

@@ -2777,7 +2777,7 @@ def rebake_texture(source_mesh, source_uv, texture, target_mesh, size=1024, marg
     tgt_nrm = np.concatenate(nrm_all)                             # (n_texel, 3) target-face normal per texel
 
     # ================= method="scatter": the HOLOGRAPHIC fast path (H1) ==============================
-    # MEASURED (BACKLOG_holographic_pipeline H1): the projection loop below is 1.05M closest-point calls /
+    # MEASURED (the H1 rebake arc; findings archived in docs/NOTES_concepts.md): the projection loop below is 1.05M closest-point calls /
     # 142s at 512^2 -- a hand-rolled scatter/gather. A texel's colour is `gather` reading a `scatter` bundle:
     # SCATTER each source vertex's colour onto a volumetric grid keyed by its 3-D position (bundle colour onto
     # space), then GATHER the colour at every texel's 3-D point in ONE vectorised call. Measured 0.02-0.06s vs

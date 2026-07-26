@@ -49,12 +49,18 @@ class Memory:
     """A namespace of staticmethods over the cache-hierarchy levers. Residency / batched layout / tiling / backend."""
 
     @staticmethod
-    def spectrum_cache(max_items=4096):
+    def spectrum_cache(max_items=4096, key="content"):
         """An LRU RESIDENCY cache mapping an atom to its real-FFT spectrum, so a repeated bind/unbind against a known
-        operand skips the forward transform. A pure speed-up that can never change a result. Routes to
-        holographic_residency.SpectrumCache."""
+        operand skips the forward transform. Bit-identical to recompute in both key modes.
+
+        `key="identity"` is the one you almost certainly want when the SAME atom objects recur (a codebook, a role
+        table): it keys on the array object, costs O(1), and measured 2.4x-2.6x on scalar bind_cached and 3.7x-4.3x
+        inside fuse_record. The `key="content"` default keys on a sha256 of the bytes, which costs MORE than the
+        transform it avoids (measured 0.50x-0.82x, i.e. a slowdown) and is only correct-and-necessary when
+        byte-identical arrays arrive as DIFFERENT objects. Default unchanged per the never-flip rule.
+        Routes to holographic_residency.SpectrumCache."""
         from holographic.caching_and_storage.holographic_residency import SpectrumCache
-        return SpectrumCache(max_items=max_items)
+        return SpectrumCache(max_items=max_items, key=key)
 
     @staticmethod
     def bind_cached(a, b, cache):
