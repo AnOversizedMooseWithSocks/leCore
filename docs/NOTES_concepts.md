@@ -43714,3 +43714,64 @@ average over several rows, or re-baseline is Moose's call, not a decision to sli
 Default corpus restored (552 entries, parts included) -- CI returns to its previous single failing criterion
 rather than two. `--exclude-private-modules` keeps the refuted experiment runnable. 5 corpus tests + 19
 routing/semantic tests green; lint_scripts 0 errors; 5 audits OK; docs drift-clean.
+
+
+## SESSION (2026-07-26c) -- THE REAL BUG WAS THE CI STEP ORDER, not the corpus
+
+Revert confirmed exact: 552 entries, flat @768d median 2 / worst 226, fused champion 6 -- byte-for-byte the
+pre-fix run. Back to ONE failing criterion. Then, reading all three CI runs side by side, the actual trap
+turned up, and it is not in the routing code at all.
+
+### THE SELF-REINFORCING TRAP
+semantic-coverage.yml step order:
+    111  embed what changed
+    118  routing suite (the exam)            <-- FAILS THE BUILD HERE
+    129  rebuild the index AND COMMIT THE REFRESHED SEED   <-- never runs
+No `if: always()`. So A FAILING EXAM PREVENTS THE SEED FROM REFRESHING. The committed seed has sat at 521
+entries against a 552-module corpus. Measured locally: `seed_cache.py --restore` yields 501/537 cache hits
+at wiring "1000.0|12|True|False" -- 36 docstrings short, and those 36 are exactly the modules added or
+edited recently. Reproducing the failure locally therefore needs the model weights, which arrive from
+`vars.NOMIC_WEIGHTS_URL` -- a repo variable, not in the tree.
+
+    exam fails -> seed stays stale -> nobody can reproduce -> fixes are blind -> exam keeps failing
+
+TWO BLIND PUSHES WERE BURNED BEFORE THIS LOOP WAS NOTICED, and the second made things worse (two failing
+criteria instead of one). The workflow's own comment even records the ancestor of this bug -- "measured:
+seed 521 vs index 523 modules broke main after a merge" -- and the seed is STILL AT 521. It has not
+refreshed since that note was written.
+
+### THE FIX, and what it deliberately does NOT do
+Added an `if: always()` step that snapshots the warmed cache and uploads routing_seed.npz.xz (731 KB) as a
+build artifact. Download it, `seed_cache.py --restore`, and the exam runs locally with a cold model absent.
+DELIBERATELY NOT CHANGED: the committed seed and index still ride the same commit and are still GATED ON A
+PASS. They are shipped artifacts and must not be refreshed from a corpus that fails routing; the lockstep
+invariant (asserted by test_routing_seed_canonical) is untouched. The upload is a debugging aid, not a
+release path. Fixing the loop and fixing the routing score are separate jobs and should not be mixed.
+
+### WHAT THE THREE RUNS ACTUALLY SHOW ABOUT THE ROUTING SCORE
+    run           entries   flat@768d med   flat@128d top-1   fused (0,0.5,128d)   exam fails
+    baseline        552          2                5                   6                1
+    exclusion       537          3                6                   6                2
+    revert          552          2                5                   6                1
+Three readings follow, and they matter more than any of them alone:
+  1. THE FUSION IS NOT BROKEN. It adds its designed +1 over flat at 128d (5 -> 6) in both 552 runs.
+  2. THE DENSE LAYER AT 128d HAS REGRESSED by 1 against the gate's calibration ("strict Pareto over flat
+     6/12 at 128d"). Excluding the 15 no-public-API modules RESTORES it to 6 -- so the 128d regression is
+     genuinely corpus dilution.
+  3. BUT THE SAME EXCLUSION COSTS THE 768d MEDIAN (2 -> 3). The two gates pull in opposite directions.
+     There is no corpus-hygiene fix that satisfies both.
+
+### THE GATE STRADDLES TWO DIMENSIONS -- reported, NOT changed
+    exam_top5, exam_median  <- flat @768d
+    fused top-1             <- fused @128d
+Three criteria, two different dimensionalities. The file's own comment says "the structural win lands at the
+SHIP dim (128d), not 768d", and export_index ships 128d -- yet top-5 and median are judged at 768d. That is
+why the exclusion can improve the shipped dimension and fail the exam simultaneously. Whether to move
+median/top-5 to 128d, widen the twelve-question suite (one question = 8.3% = the pass/fail margin), or
+re-baseline the gate is MOOSE'S CALL. Slipping a threshold change in under a bug fix is exactly the move
+this project forbids, so it is written down here instead of done.
+
+### State
+Default corpus restored (552). `--exclude-private-modules` keeps the refuted experiment runnable. Workflow
+gains two always-run steps; lockstep contract untouched. 19 routing/semantic + 5 corpus tests green;
+lint_scripts 0 errors; audits OK; YAML validated.
