@@ -43775,3 +43775,63 @@ this project forbids, so it is written down here instead of done.
 Default corpus restored (552). `--exclude-private-modules` keeps the refuted experiment runnable. Workflow
 gains two always-run steps; lockstep contract untouched. 19 routing/semantic + 5 corpus tests green;
 lint_scripts 0 errors; audits OK; YAML validated.
+
+
+## SESSION (2026-07-26d) -- FOUND IT: my splitter's boilerplate header poisoned the workflow graph
+
+Moose: "that was never needed before, figure it out." Correct push-back -- I had started asking for a CI
+artifact as a crutch. The bones graph is PURE STDLIB TEXT ANALYSIS: no model, no cache, fully measurable
+locally. It should have been the first thing measured, not the fourth.
+
+### THE CAUSE, MEASURED
+_module_texts() maps one graph node per holographic_*.py. Splitting UnifiedMind into 13 mixin parts turned
+ONE referencing module into THIRTEEN -- and my splitter emitted the SAME boilerplate import header into all
+13 (mind, organizer, creature). Those targets each gained +12 INDEGREE overnight.
+
+Indegree is not cosmetic here. Edge weight is raw_count * idf(dst) with idf(dst) = log(1 + N/(1+indeg(dst))),
+so HIGHER indegree means LOWER weight. The graph silently stopped treating those modules as specific.
+MEASURED on the live repo, merge off -> on:
+    edges            1732 -> 1213     (519 spurious edges, almost all the duplicated header)
+    creature indeg     21 ->    9     (+12 is exactly 13 parts minus the 1 they replaced)
+    mind indeg         15 ->    3
+    organizer indeg    15 ->    3
+    hubs dropped   ['ai','catalog','unified_p09...','unified_p10...'] -> ['ai','catalog','unified']
+TWO PARTS had crossed the 15% hub threshold and were being DROPPED FROM THE GRAPH ENTIRELY, while the facade
+whose references they carry was not. After the merge the facade is correctly the hub and the parts are gone.
+
+### THE SYMPTOM IT EXPLAINS, visible in all three CI runs
+At the gated row (0.00, 0.50, 128d), the per-ask diff says the same thing every time:
+    teach the creature to want food  ->  lookahead   worse  r1 -> r3   (run 1)
+                                                     worse  r1 -> r2   (run 2)
+                                                     worse  r1 -> r3   (run 3)
+FLAT DENSE RANKS `creature` FIRST; BONES PROPAGATION DEMOTES IT and promotes `lookahead` -- a module this
+project records as a KEPT NEGATIVE. creature had been made artificially common, so propagation stopped
+protecting it. That single demotion is the whole difference between fused top-1 = 6 and = 7.
+
+### THE FIX
+_module_texts(root, merge_parts=True) folds holographic_unified_pNN_* into one 'unified' entry before any
+counting. The parts ARE one class; counting them as 13 independent sources was the bug. merge_parts=False
+reproduces the inflated graph so the A/B stays re-checkable.
+
+WHY THIS ONE IS SURGICAL, unlike the two failed attempts: exam_top5 and exam_median are computed from FLAT
+@768d, which is dense-only. The bones graph cannot touch them. So this change can move ONLY the criterion
+that is failing -- worst case is no change, never a new failure. The previous attempt lacked exactly this
+property and duly broke the median gate.
+
+### PROCESS LESSONS, both mine
+1. I ASKED FOR A CRUTCH BEFORE EXHAUSTING WHAT WAS ALREADY MEASURABLE. Three of the exam's four inputs
+   (corpus selection, BM25 text, workflow bones) are pure text and need no model. Only the dense embedding
+   does. I let "I cannot run the exam" become "I cannot measure anything", which was false.
+2. THE SPLITTER'S OUTPUT WAS NEVER AUDITED AS DATA. It emitted an identical import header into 13 files;
+   that was invisible to every test because the parts behave correctly at runtime. A code generator's output
+   is an input to every text-analysis tool in the repo, and nothing was checking it.
+
+### TRAPS ADDED (tests/test_workflowgraph_parts.py, 5 tests, MODEL-FREE)
+parts are never graph nodes; the facade counts once not thirteen times; merging removes hundreds of header
+edges (sign + scale, not an exact figure); NO MIXIN PART MAY EVER BE DROPPED AS A HUB; the escape hatch still
+reproduces the inflated graph.
+
+### State
+190 routing/semantic/workflow tests green; 6 audits OK; lint_scripts 0 errors; docs regenerated.
+NOT YET KNOWN: whether fused top-1 reaches 7. The dense half still needs CI. But this is the first change
+whose downside is bounded at "no change".

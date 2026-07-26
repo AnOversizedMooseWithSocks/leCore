@@ -47,12 +47,47 @@ from pathlib import Path
 _REF = re.compile(r"holographic_([a-z0-9_]+)")
 
 
-def _module_texts(root):
+# UnifiedMind is ONE class assembled from mixin parts in holographic/unified/ by
+# holographic/misc/holographic_unified.py. On disk that is 13 files; as a REFERENCING ENTITY it is one
+# module, and this pattern is what folds them back before any counting happens.
+_PART_OF_UNIFIED = re.compile(r"^unified_p\d\d_")
+
+
+def _module_texts(root, merge_parts=True):
     """Map module stem -> its source text, for every holographic_*.py under `root`. The stem is the filename
-    without the holographic_ prefix (matching how the catalog's resolved_module names things)."""
+    without the holographic_ prefix (matching how the catalog's resolved_module names things).
+
+    merge_parts (default True): fold holographic_unified_pNN_* into a single 'unified' entry.
+
+    WHY, AND IT IS A MEASURED BUG NOT A TIDY-UP. Splitting UnifiedMind into 13 mixin parts turned ONE
+    referencing module into THIRTEEN. Every part carries the same boilerplate import header (mind, organizer,
+    creature), so those targets each gained +12 INDEGREE overnight -- and indegree is not cosmetic here: the
+    edge weight is raw_count * idf(dst) with idf(dst) = log(1 + N / (1 + indeg(dst))). Higher indegree means
+    LOWER idf, so every edge pointing at those modules got weaker, and the graph stopped treating them as
+    specific. MEASURED on the live repo (merge off -> on):
+
+        edges          1732 -> 1213      (519 spurious edges, almost all the duplicated header)
+        creature indeg   21 ->    9      (the +12 is exactly 13 parts minus the 1 they replaced)
+        mind indeg       15 ->    3
+        organizer indeg  15 ->    3
+        hubs dropped    ['ai','catalog','unified_p09...','unified_p10...']  ->  ['ai','catalog','unified']
+
+    Two PARTS had crossed the 15% hub threshold and were being dropped from the graph entirely, while the
+    facade they belong to was not. After the merge the facade is correctly the hub and the parts are gone.
+
+    THE SYMPTOM THIS EXPLAINS: in the routing exam, "teach the creature to want food" is rank 1 under flat
+    dense at 128d and is DEMOTED to rank 3 by bones propagation, which promotes `lookahead` -- a module this
+    project records as a KEPT NEGATIVE -- above it. creature had been made artificially common, so
+    propagation stopped protecting it. That single demotion is the difference between the gated fused top-1
+    scoring 6 and 7.
+
+    Set False to reproduce the inflated graph and re-measure rather than take the above on trust."""
     out = {}
     for f in Path(root).rglob("holographic_*.py"):
-        out[f.stem[len("holographic_"):]] = f.read_text(errors="ignore")
+        stem = f.stem[len("holographic_"):]
+        if merge_parts and _PART_OF_UNIFIED.match(stem):
+            stem = "unified"                 # concatenate: the parts are slices of one class body
+        out[stem] = out.get(stem, "") + f.read_text(errors="ignore")
     return out
 
 
