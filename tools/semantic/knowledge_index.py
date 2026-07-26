@@ -209,9 +209,25 @@ def _has_public_api(txt, path):
     that centroid, so the correction subtracted from EVERY vector shifts -- and ranks move globally without
     any part ever appearing near the top. Corpus hygiene is not cosmetic; it is part of the estimator.
 
-    Excluding them is MONOTONIC on this suite by construction: no accepted answer in ASKS_MODULE is a
-    no-public-API module, and removing candidates that can never be correct cannot lower the rank of a
-    correct one. top-1/top-5 can only rise or hold; median and worst can only improve or hold."""
+    THE MONOTONICITY ARGUMENT WAS WRONG AND CI DISPROVED IT. The claim was: no accepted answer is a
+    no-public-API module, so removing candidates that can never be correct cannot lower a correct answer's
+    rank. That holds for a FIXED scoring function. It does not hold here, and the reason is the paragraph
+    directly above -- AllButTheTop REFITS ON THE CORPUS MEAN, so dropping 15 vectors changes the correction
+    subtracted from every vector and moves every score. Ranks are free to go either way.
+
+    MEASURED (CI, 552-entry corpus -> 537):
+        flat @768d   median  2 -> 3   worst 226 -> 251   ("less grainy" r226 -> r251)
+        flat @128d   top-1   5 -> 6   top-5   8 -> 7     worst 112 -> 122
+        fused champion (0.0, 0.5, 128d)  top-1  6 -> 6   UNCHANGED -- the gated number did not move
+        EXAM: one failing criterion -> TWO (median joined fused top-1)
+
+    SO THE EXCLUSION IS A KEPT NEGATIVE, and it also REFUTES the hypothesis that the 13 mixin parts caused
+    the original 7 -> 6 fused regression: removing them did not restore 7. Whatever moved the exam is
+    elsewhere -- most likely diffuse, since this session rewrote several module docstrings substantially
+    (holographic_residency's was largely replaced), and every docstring edit shifts the same corpus centroid.
+
+    A CHEAP-LOOKING CORPUS CHANGE IS NOT CHEAP WHEN AN ESTIMATOR IS FITTED ON THE CORPUS. That is the
+    transferable lesson, and it applies to any future bulk add of generated modules, shims or parts."""
     try:
         tree = ast.parse(txt, filename=path)
     except SyntaxError:
@@ -220,16 +236,17 @@ def _has_public_api(txt, path):
                and not n.name.startswith('_') for n in tree.body)
 
 
-def collect_code(repo, enrich_aliases=False, include_private_modules=False):
+def collect_code(repo, enrich_aliases=False, include_private_modules=True):
     """One entry per module: its module docstring is the authoritative description (per the guide).
 
     enrich_aliases (default False -> byte-identical old behavior): append the module's catalog aliases
     (joined via the module= link) to its docstring text before it is embedded, so the routing vector is
     pulled toward the paraphrases users type. Tests the 'richer target' hypothesis against bare routing.
 
-    include_private_modules (default False): keep modules with no public top-level symbol. They cannot be
-    routed to, so they are excluded by default -- see _has_public_api for the measured reason. Pass True to
-    reproduce the pre-fix corpus exactly, which is what makes the A/B measurable rather than asserted."""
+    include_private_modules (DEFAULT TRUE -- the exclusion was tried and REFUTED, see _has_public_api):
+    keep modules with no public top-level symbol. They cannot be routed to, so excluding them looked
+    obviously right; measured on CI it was not. False reproduces the excluded corpus so the A/B stays
+    repeatable rather than becoming folklore."""
     enr = _alias_enrichment() if enrich_aliases else {}
     out = []
     for root, _, files in os.walk(repo):
@@ -413,10 +430,11 @@ def main():
     # the hours-long step that times out. With --no-md the committed routing seed already holds every
     # entry this run needs, so a cold CI run embeds ~nothing. Full local builds omit --no-md to keep md.
     ap.add_argument('--no-md', action='store_true', help='skip markdown windows (routing-only; CI uses this)')
-    ap.add_argument('--include-private-modules', action='store_true',
-                    help='keep modules with no public top-level symbol in the routing corpus. Off by '
-                         'default: they cannot be routed to. Pass this to reproduce the pre-fix corpus '
-                         'and measure the A/B rather than trust it (see _has_public_api).')
+    ap.add_argument('--exclude-private-modules', action='store_true',
+                    help='drop modules with no public top-level symbol from the routing corpus. OFF by '
+                         'default because it was MEASURED on CI and did not pay (see _has_public_api): it '
+                         'left the gated fused top-1 at 6 and moved the 768d median 2 -> 3. Kept runnable '
+                         'so the negative can be re-checked instead of re-argued.')
     ap.add_argument('--require-top5', type=int, default=8)
     ap.add_argument('--require-median', type=float, default=2)
     ap.add_argument('--require-fused-top1', type=int, default=None,
@@ -504,7 +522,7 @@ def main():
     print("[2] BUILDING THE INDEX: code docstrings + markdown sections")
     print("=" * 90)
     entries = collect_code(args.repo, enrich_aliases=getattr(args, 'enrich_aliases', False),
-                           include_private_modules=args.include_private_modules)
+                           include_private_modules=not args.exclude_private_modules)
     if not args.no_md:
         entries = entries + collect_md(args.repo, args.window, args.stride)
     kinds = collections.Counter(e[0] for e in entries)

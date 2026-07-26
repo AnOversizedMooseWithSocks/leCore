@@ -43658,3 +43658,59 @@ Corpus selection is pure text/AST work, so the property that broke CI is testabl
 
 ### Session state
 9 audits green; lint_scripts 0 errors; 47 routing/semantic tests + 4 new corpus tests green.
+
+
+## SESSION (2026-07-26b) -- THE CORPUS FIX WAS MEASURED AND REFUTED. Two errors of mine, both loud.
+
+Pushed the no-public-API corpus exclusion; CI ran it; it did not pay. Reverted to default-off, machinery
+kept so the negative stays re-checkable.
+
+### ERROR 1 -- I ASSERTED A MONOTONICITY GUARANTEE I HAD ALREADY DISPROVED IN THE SAME DOCSTRING
+The claim: "no accepted answer is a no-public-API module, so removing candidates that can never be correct
+cannot lower the rank of a correct one -- top-1/top-5 can only rise or hold". That is true for a FIXED
+scoring function. It is false here, and the reason was written three paragraphs earlier BY ME: AllButTheTop
+REFITS ITS ANISOTROPY CORRECTION ON THE CORPUS MEAN. Drop 15 vectors and the correction subtracted from
+EVERY vector changes, so every score moves and ranks are free to go either way.
+CI's numbers, apples to apples (552 -> 537 entries):
+    flat @768d   median  2 -> 3   worst 226 -> 251   ("less grainy" r226 -> r251, "near this point" r2 -> r3)
+    flat @128d   top-1   5 -> 6   top-5   8 -> 7     worst 112 -> 122
+    fused champion (0.0, 0.5, 128d)  top-1  6 -> 6   -- THE GATED NUMBER DID NOT MOVE AT ALL
+    EXAM: one failing criterion -> TWO (median joined fused top-1)
+I wrote the mechanism down and then reasoned as if it did not exist. THE LESSON IS NOT "be careful": it is
+that A CORPUS CHANGE IS NEVER LOCAL WHEN AN ESTIMATOR IS FITTED ON THE CORPUS. Any future bulk add or
+removal of modules (generated code, shims, mixin parts) moves every rank in the index.
+
+### ERROR 2 -- THE TEST OVERCLAIMED AND WOULD NOT HAVE CAUGHT IT
+test_the_exclusion_is_monotonic_on_the_exam_suite only checked that no ACCEPTED ANSWER WAS REMOVED --
+necessary, nowhere near sufficient for rank monotonicity. It was named for the property I wanted rather than
+the property it tested, so it passed green while the actual claim was false. Renamed
+test_the_exclusion_never_removes_an_accepted_answer, with the weaker true property stated in the docstring
+and the refutation recorded. A TEST NAMED FOR A HOPE IS WORSE THAN NO TEST: it converts an unverified claim
+into an apparently verified one.
+
+### THE HYPOTHESIS IS ALSO REFUTED -- the 13 mixin parts did NOT cause the original regression
+Removing them left the gated fused top-1 at 6. So whatever took it 7 -> 6 is elsewhere. Most likely DIFFUSE:
+this session rewrote several module docstrings substantially (holographic_residency's was largely replaced
+by the SpectrumCache correction; machine, catalog, codeedit and others were edited), and every docstring
+edit shifts the same corpus centroid the correction is fitted on. There may be no single cause to find.
+
+### WHY I COULD NOT MEASURE IT MYSELF, and what would fix that
+The exam needs the nomic weights, which arrive from `vars.NOMIC_WEIGHTS_URL` -- a repo variable, not in the
+tree. `seed_cache.py --restore` gives 521 cached embeddings but the current corpus needs 537, so 36
+docstrings (the modules added or edited this session) are uncached and REQUIRE the model. Measured, not
+guessed: 501/537 cache hits at wiring "1000.0|12|True|False".
+CONSEQUENCE: every change to this exam is a BLIND PUSH, and two blind pushes have now failed. That is the
+actual bottleneck, and it is fixable in exactly one of two ways -- commit the weights (137 MB, probably no),
+or refresh the committed routing seed whenever the corpus drifts so a local run is warm. The seed is already
+the mechanism; it is just stale relative to the corpus.
+
+### A GATE-DESIGN OBSERVATION, offered not acted on
+--require-fused-top1 pins ONE hardcoded row (0.0, 0.5, 128d) out of a 45-row sweep, on a TWELVE-question
+suite. One question flipping is 8.3% and the difference between pass and fail. The gate is knife-edge by
+construction, and normal development -- editing docstrings -- perturbs it. Whether to widen the suite,
+average over several rows, or re-baseline is Moose's call, not a decision to slip in under a bug fix.
+
+### State
+Default corpus restored (552 entries, parts included) -- CI returns to its previous single failing criterion
+rather than two. `--exclude-private-modules` keeps the refuted experiment runnable. 5 corpus tests + 19
+routing/semantic tests green; lint_scripts 0 errors; 5 audits OK; docs drift-clean.

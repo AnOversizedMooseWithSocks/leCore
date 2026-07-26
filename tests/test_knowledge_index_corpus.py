@@ -31,33 +31,39 @@ def _collectors():
     return ns
 
 
-def test_modules_with_no_public_api_are_not_routing_targets():
-    """The fix. A module with no public top-level symbol cannot be routed to -- nothing in it can be named --
-    so it must not be a routing candidate."""
+def test_the_exclusion_filter_still_works_when_asked_for():
+    """The filter is now OFF by default (it was measured on CI and did not pay -- see _has_public_api), but it
+    must stay correct and runnable so the negative can be re-checked rather than re-argued."""
     ns = _collectors()
-    kept = {n for _k, n, _b in ns["collect_code"](_REPO)}
+    kept = {n for _k, n, _b in ns["collect_code"](_REPO, include_private_modules=False)}
     for i in range(1, 14):
         assert not any(n.startswith("holographic_unified_p%02d" % i) for n in kept), \
             "unified mixin part p%02d is back in the routing corpus" % i
 
 
-def test_the_flag_reproduces_the_pre_fix_corpus():
-    """The A/B must stay runnable, or the claim 'excluding them helps' becomes unfalsifiable."""
+def test_the_default_corpus_keeps_every_module():
+    """DEFAULT IS NOW THE FULL CORPUS. The exclusion was tried, measured, and refuted; the default must not
+    quietly drift back to it."""
     ns = _collectors()
-    without = ns["collect_code"](_REPO)
+    without = ns["collect_code"](_REPO, include_private_modules=False)
     with_priv = ns["collect_code"](_REPO, include_private_modules=True)
     assert len(with_priv) > len(without), "the flag no longer restores the old corpus"
     assert len(with_priv) - len(without) >= 13, \
         "expected at least the 13 mixin parts to differ, got %d" % (len(with_priv) - len(without))
 
 
-def test_the_exclusion_is_monotonic_on_the_exam_suite():
-    """THE LOAD-BEARING PROPERTY, and the reason this fix is safe without running the model.
+def test_the_exclusion_never_removes_an_accepted_answer():
+    """NECESSARY BUT NOT SUFFICIENT -- and the earlier version of this test claimed otherwise.
 
-    No accepted answer in ASKS_MODULE is a no-public-API module. Removing candidates that can never be
-    correct cannot lower the rank of a correct one, so top-1/top-5 can only rise or hold and median/worst can
-    only improve or hold. If a future edit ever excludes a module that IS an accepted answer, that guarantee
-    silently dies -- and this test is what catches it."""
+    It was originally named ..._is_monotonic_on_the_exam_suite and used to argue that excluding no-public-API
+    modules could only improve ranks. CI DISPROVED THAT: the 768d median went 2 -> 3 and worst 226 -> 251.
+    The flaw is that AllButTheTop REFITS ON THE CORPUS MEAN, so removing any vector changes the correction
+    applied to every other vector; rank monotonicity simply does not follow from 'the answer is still in the
+    candidate set'.
+
+    What this test still legitimately pins is the weaker property in its new name: whatever the corpus filter
+    does, it must never delete a module that the exam accepts as correct. That failure would be unambiguous
+    and silent, so it is worth a trap -- just not the trap it was advertised as."""
     ns = _collectors()
     src = open(os.path.join(_SEM, "knowledge_index.py"), encoding="utf-8").read()
     tree = ast.parse(src)
@@ -81,3 +87,13 @@ def test_unparseable_files_are_kept_not_silently_dropped():
     assert ns["_has_public_api"]("def (((", "broken.py") is True
     assert ns["_has_public_api"]("def public_thing():\n    pass\n", "ok.py") is True
     assert ns["_has_public_api"]("class _Private:\n    pass\n", "priv.py") is False
+
+
+def test_the_default_is_the_full_corpus():
+    """Pins the refutation. If someone re-enables the exclusion by default without new measurements, the
+    kept negative has been silently overturned."""
+    ns = _collectors()
+    default = {n for _k, n, _b in ns["collect_code"](_REPO)}
+    assert any("unified_p" in n for n in default), \
+        "the no-public-API exclusion is on by default again -- it was MEASURED and refuted (768d median " \
+        "2 -> 3, gated fused top-1 unchanged at 6). Re-enable it only with a CI run that shows it pays."
