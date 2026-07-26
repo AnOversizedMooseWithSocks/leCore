@@ -43835,3 +43835,55 @@ reproduces the inflated graph.
 190 routing/semantic/workflow tests green; 6 audits OK; lint_scripts 0 errors; docs regenerated.
 NOT YET KNOWN: whether fused top-1 reaches 7. The dense half still needs CI. But this is the first change
 whose downside is bounded at "no change".
+
+
+## SESSION (2026-07-26e) -- THE BONES FIX WORKED (6 -> 7). The remaining failure was a DISPLAY LIE.
+
+CI on the merge_parts fix: `fused top-1 7 (require >= 7) -> PASS`. The workflow-graph repair did exactly what
+the measurement predicted -- and the per-ask line confirms the mechanism, not just the number:
+    teach the creature to want food  ->  creature_mind   same  r1      (was: -> lookahead  worse r1 -> r3)
+The demotion is gone. `lookahead` -- a kept negative -- no longer outranks the correct answer. Bones now also
+IMPROVE the shipped row's median to 1 and worst to 86 (was 2 / 81 with the inflated graph at a worse top-1).
+
+### BUT THE VERDICT WAS STILL FAIL, AND THE REASON WAS A LIE IN THE LOG
+    printed:  "median 2 (require <= 2.0)"          reads as a pass
+    actual:   median = 2.5, and 2.5 <= 2.0 is False
+The 768d flat ranks this run: [1,1,1,1,1,2,3,3,8,21,43,226]. ASKS_MODULE has TWELVE entries -- an EVEN count
+-- so numpy's median interpolates between the 6th (2) and 7th (3) ranks and returns 2.5. THE MEDIAN IS A
+HALF-INTEGER BY CONSTRUCTION. The gate printed it with ':.0f', and Python renders 2.5 as "2".
+
+SO THE MEDIAN CRITERION HAS BEEN FAILING IN EVERY RUN OF THIS INVESTIGATION, INVISIBLY. It stayed hidden
+because the fused gate was failing too, so the verdict was FAIL either way and nobody read past it. Fixing
+the fused gate is what exposed it. Four CI runs were spent partly chasing a number the log was misreporting.
+A DISPLAYED NUMBER THAT DISAGREES WITH THE COMPARED NUMBER IS WORSE THAN NO NUMBER: it does not merely fail
+to inform, it actively redirects the search.
+
+### FIXED (display only -- NO gate semantics touched)
+  * median now prints ':.1f' with its own PASS/FAIL, so 2.5 can never again read as 2.
+  * the log now also prints the SHIPPED row's own scores next to the gated ones.
+
+### WHAT THAT SECOND LINE REVEALS, and it is the open question for Moose
+    gate reads:   top-5 and median  <-  FLAT @768d        ("the gate reads full-width only")
+                  fused top-1       <-  FUSED @128d, gamma=0.50
+    this run:     flat @768d        top-5 8  median 2.5  top-1 5
+                  SHIPPED row @128d top-5 8  median 1.0  top-1 7   <- ALL THREE BARS PASS
+Three criteria, TWO DIFFERENT CONFIGURATIONS, one verdict. And 128d gamma=0.5 is what actually ships:
+export_index writes the 128d index and route_semantic defaults to gamma=0.5 on it. The file's own comment
+already says "the structural win lands at the SHIP dim (128d), not 768d".
+The likely history is that the exam originally gated flat@768d only, a fused@128d criterion was added later,
+and the two halves were never reconciled. WHETHER TO MOVE top-5/median ONTO THE SHIPPED ROW IS MOOSE'S CALL
+-- it is a gate redefinition, not a bug fix, and this project forbids slipping one in under the other.
+For the record, if the gate measured the shipped row consistently, this run passes on all three.
+
+### TO PASS AS THE GATE CURRENTLY STANDS
+The 7th-best rank at flat @768d must reach 2 (giving (2+2)/2 = 2.0). Today the 7th is 3 -- either "how sure
+are we this match isn't luck" (honesty @ r3) or "water flowing and swirling" (fluid @ r3). That is a DENSE
+improvement at full width, which needs the embedding model; the bones layer cannot reach it by construction.
+
+### TRAPS ADDED
+test_the_exam_median_is_printed_at_the_precision_it_is_compared_at (the ':.0f' can never come back) and
+test_an_even_ask_count_produces_half_integer_medians (asserts WHY, and reproduces the exact 2.5 -> "2").
+
+### State
+Bones fix confirmed by CI: fused top-1 6 -> 7, PASS. 26 routing/semantic/workflow/corpus tests green; audits
+OK; lint clean; docs regenerated.

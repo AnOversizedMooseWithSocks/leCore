@@ -754,6 +754,11 @@ def main():
                     detail_rows[(beta, gamma, d)] = detail
                 if args.structural and (beta, gamma, d) == (0.0, 0.5, 128):
                     fused_top1_128 = t1                        # the champion row, for the --require-fused-top1 gate
+                    # ALSO capture the champion row's OWN median/top-5. The gate reads top-5 and median from
+                    # flat @768d ("full-width only") but reads top-1 from fused @128d -- three criteria, two
+                    # different configurations, and 128d is what export_index actually SHIPS. Printing both
+                    # makes that mismatch visible instead of something a reader has to reconstruct.
+                    fused_med_128, fused_top5_128 = float(np.median(ranks)), t5
                 elif not args.structural and (beta, gamma, d) in {(0.1, 0.0, 128), (0.1, 0.0, 768)}:
                     detail_rows[(beta, gamma, d)] = detail
         # PER-ASK DIFF vs the flat baseline -- shows exactly WHICH asks the fusion moved, and by how much.
@@ -1000,6 +1005,11 @@ def main():
 
     # THE GATE, last: only --exam turns a miss into a nonzero exit; it always prints its verdict.
     ok = exam_top5 >= args.require_top5 and exam_median <= args.require_median
+    _fm, _f5 = locals().get("fused_med_128"), locals().get("fused_top5_128")
+    if _fm is not None:
+        print(f"  [note] the SHIPPED row (fused, gamma=0.50, 128d) scores top-5 {_f5} | median {_fm:.1f} | "
+              f"top-1 {locals().get('fused_top1_128')}. The gate takes top-5 and median from FLAT @768d and "
+              f"top-1 from this row -- two configurations, one verdict.")
     fused_msg = ""
     if args.require_fused_top1 is not None:
         # the FUSED gate guards the production default (route_semantic gamma=0.5 on the 128d index). A bones
@@ -1013,8 +1023,15 @@ def main():
             f_ok = ft >= args.require_fused_top1
             fused_msg = f" | fused top-1 {ft} (require >= {args.require_fused_top1}) -> {'PASS' if f_ok else 'FAIL'}"
             ok = ok and f_ok
-    print(f"  EXAM: top-5 {exam_top5} (require >= {args.require_top5}) | median {exam_median:.0f} "
-          f"(require <= {args.require_median}){fused_msg} -> {'PASS' if ok else 'FAIL'}")
+    # MEDIAN IS PRINTED AT ONE DECIMAL, DELIBERATELY. It was ":.0f", and with an EVEN number of asks the
+    # median is the mean of the 6th and 7th ranks -- a half-integer by construction. A true median of 2.5
+    # printed as "2" next to "(require <= 2.0)", so the log read like a PASS while the gate compared 2.5 and
+    # failed. That mismatch hid a failing criterion across four CI runs: the fused gate was failing too, so
+    # the verdict was FAIL either way and nobody looked further. A displayed number that disagrees with the
+    # compared number is worse than no number.
+    med_ok = "PASS" if exam_median <= args.require_median else "FAIL"
+    print(f"  EXAM: top-5 {exam_top5} (require >= {args.require_top5}) | median {exam_median:.1f} "
+          f"(require <= {args.require_median}) -> {med_ok}{fused_msg} -> {'PASS' if ok else 'FAIL'}")
     if args.exam and not ok:
         raise SystemExit(1)
 

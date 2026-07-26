@@ -97,3 +97,35 @@ def test_the_default_is_the_full_corpus():
     assert any("unified_p" in n for n in default), \
         "the no-public-API exclusion is on by default again -- it was MEASURED and refuted (768d median " \
         "2 -> 3, gated fused top-1 unchanged at 6). Re-enable it only with a CI run that shows it pays."
+
+
+def test_the_exam_median_is_printed_at_the_precision_it_is_compared_at():
+    """THE DISPLAY LIE, pinned.
+
+    With an EVEN number of asks the median is the mean of the 6th and 7th ranks -- a half-integer by
+    construction. The gate printed it with ':.0f', so a true median of 2.5 rendered as "2" directly beside
+    "(require <= 2.0)". The log read like a PASS while the comparison used 2.5 and failed. It hid a failing
+    criterion across four CI runs, because the fused gate was failing too and the verdict was FAIL either way.
+
+    A number shown to the reader must be the number the machine compared."""
+    src = open(os.path.join(_SEM, "knowledge_index.py"), encoding="utf-8").read()
+    assert "{exam_median:.0f}" not in src, \
+        "exam median is back to :.0f -- a 2.5 will print as '2' next to 'require <= 2.0' and read as a pass"
+    assert "{exam_median:.1f}" in src, "exam median should print at the precision it is compared at"
+
+
+def test_an_even_ask_count_produces_half_integer_medians():
+    """Why the precision matters, asserted rather than asserted-in-prose: ASKS_MODULE has an even length, so
+    numpy's median interpolates between two ranks and .5 values are normal, not exotic."""
+    import ast as _ast
+    import numpy as _np
+    src = open(os.path.join(_SEM, "knowledge_index.py"), encoding="utf-8").read()
+    tree = _ast.parse(src)
+    n = None
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Assign) and any(getattr(t, "id", None) == "ASKS_MODULE" for t in node.targets):
+            n = len(node.value.elts)
+    assert n and n % 2 == 0, "ASKS_MODULE is expected to have an even length (got %r)" % n
+    ranks = [1, 1, 1, 1, 1, 2, 3, 3, 8, 21, 43, 226]          # the real 768d flat ranks from CI
+    assert float(_np.median(ranks)) == 2.5
+    assert f"{float(_np.median(ranks)):.0f}" == "2", "the rounding that caused the lie no longer reproduces"
