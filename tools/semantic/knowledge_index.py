@@ -191,12 +191,45 @@ def _alias_enrichment():
     return {k: ' '.join(v) for k, v in out.items()}
 
 
-def collect_code(repo, enrich_aliases=False):
+def _has_public_api(txt, path):
+    """True if the module declares any PUBLIC top-level function or class.
+
+    A module with none cannot be routed to -- there is nothing in it a caller can name -- so it must not be
+    a routing TARGET. This is the same notion reachability_audit already reports as its "NO PUBLIC API"
+    bucket, reused here rather than reinvented, so the two agree by construction.
+
+    WHY THIS EXISTS (measured regression). Splitting UnifiedMind into 13 mixin parts added 13 files matching
+    holographic_*.py whose only top-level symbols are `_UnifiedPartNN` and `_selftest`. Their own docstrings
+    say "NOT A STANDALONE MODULE", yet collect_code was embedding all 13 as routing candidates with ~90%
+    identical boilerplate text. The routing exam regressed by exactly one on BOTH flat and fused top-1
+    (6->5 and 7->6) -- a uniform delta, which is what says the fault is upstream of the fusion.
+
+    THE MECHANISM IS NOT "a part outranked the right answer". It is subtler and worth writing down:
+    AllButTheTop fits its anisotropy correction ON THE CORPUS MEAN. Thirteen near-identical vectors drag
+    that centroid, so the correction subtracted from EVERY vector shifts -- and ranks move globally without
+    any part ever appearing near the top. Corpus hygiene is not cosmetic; it is part of the estimator.
+
+    Excluding them is MONOTONIC on this suite by construction: no accepted answer in ASKS_MODULE is a
+    no-public-API module, and removing candidates that can never be correct cannot lower the rank of a
+    correct one. top-1/top-5 can only rise or hold; median and worst can only improve or hold."""
+    try:
+        tree = ast.parse(txt, filename=path)
+    except SyntaxError:
+        return True                      # unparseable: keep the old behaviour rather than silently dropping it
+    return any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+               and not n.name.startswith('_') for n in tree.body)
+
+
+def collect_code(repo, enrich_aliases=False, include_private_modules=False):
     """One entry per module: its module docstring is the authoritative description (per the guide).
 
     enrich_aliases (default False -> byte-identical old behavior): append the module's catalog aliases
     (joined via the module= link) to its docstring text before it is embedded, so the routing vector is
-    pulled toward the paraphrases users type. Tests the 'richer target' hypothesis against bare routing."""
+    pulled toward the paraphrases users type. Tests the 'richer target' hypothesis against bare routing.
+
+    include_private_modules (default False): keep modules with no public top-level symbol. They cannot be
+    routed to, so they are excluded by default -- see _has_public_api for the measured reason. Pass True to
+    reproduce the pre-fix corpus exactly, which is what makes the A/B measurable rather than asserted."""
     enr = _alias_enrichment() if enrich_aliases else {}
     out = []
     for root, _, files in os.walk(repo):
@@ -206,6 +239,8 @@ def collect_code(repo, enrich_aliases=False):
             if not (f.startswith('holographic_') and f.endswith('.py')):
                 continue
             txt = open(os.path.join(root, f), encoding='utf-8', errors='ignore').read()
+            if not include_private_modules and not _has_public_api(txt, f):
+                continue
             m = re.search(r'"""(.*?)"""', txt, re.S)
             if m:
                 stem = f[:-3].replace('holographic_', '')
@@ -378,6 +413,10 @@ def main():
     # the hours-long step that times out. With --no-md the committed routing seed already holds every
     # entry this run needs, so a cold CI run embeds ~nothing. Full local builds omit --no-md to keep md.
     ap.add_argument('--no-md', action='store_true', help='skip markdown windows (routing-only; CI uses this)')
+    ap.add_argument('--include-private-modules', action='store_true',
+                    help='keep modules with no public top-level symbol in the routing corpus. Off by '
+                         'default: they cannot be routed to. Pass this to reproduce the pre-fix corpus '
+                         'and measure the A/B rather than trust it (see _has_public_api).')
     ap.add_argument('--require-top5', type=int, default=8)
     ap.add_argument('--require-median', type=float, default=2)
     ap.add_argument('--require-fused-top1', type=int, default=None,
@@ -464,7 +503,8 @@ def main():
     print("\n" + "=" * 90)
     print("[2] BUILDING THE INDEX: code docstrings + markdown sections")
     print("=" * 90)
-    entries = collect_code(args.repo, enrich_aliases=getattr(args, 'enrich_aliases', False))
+    entries = collect_code(args.repo, enrich_aliases=getattr(args, 'enrich_aliases', False),
+                           include_private_modules=args.include_private_modules)
     if not args.no_md:
         entries = entries + collect_md(args.repo, args.window, args.stride)
     kinds = collections.Counter(e[0] for e in entries)
