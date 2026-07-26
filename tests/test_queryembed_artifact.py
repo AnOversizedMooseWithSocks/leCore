@@ -4,7 +4,7 @@ small breaks, each invisible alone:
   1. `export_query_embed` sat BELOW `if __name__ == '__main__'` in distill_map.py and was never called -- a
      passing fit printed its verdict and wrote nothing.
   2. The artifact was therefore never produced (that part is real work: the fit needs the nomic token table,
-     so it runs where the weights live -- see SEMANTIC_BACKLOG.md S2).
+     so it runs where the weights live -- see NOTES_concepts.md, backlog dissolution, S2).
   3. The loader and the exporter disagreed on the FILENAME three ways (`queryembed_64d.npz` / `query_map_64d.npz`
      wanted vs `query_embed.npz` recommended) -- so even a fitted artifact would have landed in the right
      directory under a name nothing checks, and route_semantic would keep returning None with the cure on disk.
@@ -83,7 +83,11 @@ def test_embedded_query_routes_through_a_real_router(tmp_path):
 def test_loader_and_exporter_agree_on_the_filename():
     """The three-way name mismatch, pinned. The exporter's recommended name must be in the loader's search
     list -- FIRST, so a fresh artifact wins over any legacy one."""
-    unified = (_ROOT / "holographic" / "misc" / "holographic_unified.py").read_text(encoding="utf-8")
+    # READ THE WHOLE SURFACE, not just the shim: UnifiedMind's body was split into mixin parts, and
+    # _query_embedder now lives in one of them. unified_source_text() is the authoritative concatenation
+    # (derived from the live base classes), so this test cannot rot again the next time a part is added.
+    from holographic.misc.holographic_unified import unified_source_text
+    unified = unified_source_text()
     m = re.search(r'for name in \(([^)]*)\):\s*\n\s*path = os\.path\.join\(root, "lecore_data", "routing"', unified)
     assert m, "could not find _query_embedder's search list"
     names = re.findall(r'"([^"]+\.npz)"', m.group(1))
@@ -150,5 +154,5 @@ def test_no_query_embed_artifact_was_committed():
     for stray in (root / "lecore_data" / "routing").glob("query_embed_*.npz"):
         raise AssertionError(
             "%s exists, but the S2 gate FAILED at 128d ([ours] 1/12 vs floor 3/12). If a later run genuinely "
-            "cleared the bar, update docs/SEMANTIC_BACKLOG.md S2 with the numbers and delete this test -- do not "
+            "cleared the bar, record the numbers in docs/NOTES_concepts.md and delete this test -- do not "
             "just let the file sit here." % stray)

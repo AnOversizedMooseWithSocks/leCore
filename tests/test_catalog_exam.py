@@ -1,6 +1,6 @@
 """Pin the CATALOG-corpus retrieval baseline so it cannot rot silently.
 
-This suite (tools/semantic/catalog_exam.py) is the prerequisite SEMANTIC_BACKLOG S4 demands EXIST before any
+This suite (tools/semantic/catalog_exam.py) is the prerequisite the S4 retrieval arc (NOTES_concepts.md, backlog dissolution) demands EXIST before any
 front-door hybrid is wired -- so that "better" is a measured claim against a real baseline rather than a strawman.
 These tests do NOT assert a score is good. They assert:
 

@@ -60,6 +60,13 @@ def test_the_embedding_cache_is_ignored_where_it_actually_lives(rules):
     "docs/BACKLOG_photo3d_retopo.md",
     "docs/PRIMITIVE_APPLICATION_BACKLOG.md",
     "docs/wiring_audit_backlog.md",
+    # the five that ACCUMULATED PAST the name list above and were dissolved into NOTES 2026-07-22 --
+    # now covered by the docs/*BACKLOG*/*backlog* glob so the class stays out, not just these names:
+    "docs/BACKLOG.md",
+    "docs/SEMANTIC_BACKLOG.md",
+    "docs/BACKLOG_holographic_research.md",
+    "docs/CLIENT_INTEGRATION_BACKLOG.md",
+    "docs/OPEN_ITEMS.md",
 ])
 def test_backlogs_are_not_committed(rules, doc):
     """Working backlogs are local notes, not repo content -- they reached a delivery zip once."""

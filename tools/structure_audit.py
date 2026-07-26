@@ -71,10 +71,23 @@ def family_distribution(rows):
 
 
 def unified_marker_count():
-    """How many '# ----' section markers unified.py still carries -- its only human navigation aid."""
-    p = os.path.join(REPO, "holographic", "misc", "holographic_unified.py")
-    txt = open(p, encoding="utf-8", errors="ignore").read()
-    return len(re.findall(r"^\s*# ----", txt, flags=re.M))
+    """How many '# ----' section markers the UnifiedMind surface still carries -- once its only human
+    navigation aid, now its second one.
+
+    COUNTS THE SHIM PLUS ITS PARTS. The class was split out of a single 17.4k-line file (131% of the 1 MB
+    an agent can read in one pass) into holographic/unified/holographic_unified_p*.py mixin parts. The
+    markers travelled with the code they mark, so counting only the shim would report a collapse that never
+    happened. The budget stays because the markers are still the in-file navigation; the FILE SPLIT is now
+    the coarse navigation the marker count used to have to carry alone."""
+    paths = [os.path.join(REPO, "holographic", "misc", "holographic_unified.py")]
+    paths += sorted(glob.glob(os.path.join(REPO, "holographic", "unified", "holographic_unified_p*.py")))
+    total = 0
+    for p in paths:
+        try:
+            total += len(re.findall(r"^\s*# ----", open(p, encoding="utf-8", errors="ignore").read(), flags=re.M))
+        except OSError:
+            continue
+    return total
 
 
 def prefix_clusters(min_size=3):

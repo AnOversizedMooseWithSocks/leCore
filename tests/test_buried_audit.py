@@ -46,8 +46,9 @@ def test_no_module_is_buried():
     """No engine module is left unwired AND unhomed AND not-declared -- the whole point of the audit."""
     holo_paths = glob.glob(os.path.join(_REPO_ROOT, "holographic", "**", "holographic_*.py"), recursive=True)
     mods = [os.path.basename(p)[:-3] for p in holo_paths if not os.path.basename(p).startswith("test_")]
-    unified_path = _find_module_path("holographic_unified")
-    unified = open(unified_path, encoding="utf-8").read()
+    # the whole assembled surface (shim + mixin parts), not just the shim -- see unified_source_text's docstring
+    from holographic.misc.holographic_unified import unified_source_text
+    unified = unified_source_text()
     from holographic.caching_and_storage.holographic_catalog import default_catalog
     blob = " ".join((c.name + " " + c.does + " " + c.example + " " + " ".join(c.aliases)).lower()
                     for c in default_catalog().all())

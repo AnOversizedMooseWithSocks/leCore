@@ -147,6 +147,186 @@ def iaaft_surrogate(x, n_iter=100, tol=1e-8, seed=0):
     return surr
 
 
+def sign_flip(x, seed=0):
+    """SIGN-FLIP surrogate -- randomise the DIRECTION of every sample while keeping its MAGNITUDE, and hence
+    keeping magnitude clustering (volatility clustering) EXACTLY intact. |surrogate| == |x| elementwise.
+
+    This is the workhorse null for a DIRECTIONAL claim ("this signal predicts which way the next move goes").
+    A plain shuffle would also destroy the magnitude clustering, so a directional statistic measured against it
+    is credited for structure that lives in the magnitudes -- which was never the claim. Sign-flipping destroys
+    exactly the thing under test and nothing else, which is what a procedure-matched null is supposed to do.
+
+    KEPT NEGATIVE (pinned in _selftest): this is the WRONG null for any statistic that is a function of |x|
+    alone -- variance, energy, absolute-value autocorrelation, drawdown magnitude. Such a statistic is IDENTICAL
+    on every sign-flip surrogate, so the null has ZERO spread and the z-score is meaningless (a divide-by-nothing
+    that a naive harness will report as an enormous z). If your statistic does not change sign when the data
+    does, use `iid_shuffle` or `phase_randomize` instead. Deterministic given `seed`."""
+    x = np.asarray(x, float).ravel()
+    rng = np.random.default_rng(seed)
+    # +-1 per sample, drawn independently: the sign channel is destroyed, the magnitude channel untouched.
+    signs = rng.integers(0, 2, size=len(x)) * 2 - 1
+    return x * signs
+
+
+def iid_shuffle(x, seed=0):
+    """IID-SHUFFLE surrogate -- a plain random permutation. Preserves the exact value histogram and destroys ALL
+    ordering (short and long range alike). The strongest, bluntest null: use it when the claim is "there is ANY
+    temporal structure here at all".
+
+    KEPT NEGATIVE: too strong a null for most continuous signals. Because it destroys the autocorrelation that
+    even a trivial forecaster (persistence, a smoother) exploits, ANY such method looks brilliant against it --
+    the module docstring's founding complaint. Reach for `phase_randomize` (keeps the spectrum) or
+    `block_shuffle` (keeps short-range structure) unless you really mean to test against total disorder.
+    Deterministic given `seed`."""
+    x = np.asarray(x, float).ravel()
+    rng = np.random.default_rng(seed)
+    return x[rng.permutation(len(x))]
+
+
+def block_shuffle(x, block, seed=0):
+    """BLOCK-SHUFFLE surrogate (the moving-block bootstrap's null) -- cut `x` into contiguous blocks of length
+    `block` and shuffle the BLOCK ORDER. Structure SHORTER than `block` survives intact inside each block;
+    structure LONGER than `block` is destroyed. The block length is therefore a dial that says which scale the
+    claim is about: "is there structure beyond `block` samples?"
+
+    Use it to separate scales -- e.g. keep intraday shape but destroy day-to-day ordering. A trailing partial
+    block is kept whole and shuffled with the rest, so no samples are dropped and the value histogram is exact.
+
+    KEPT NEGATIVE: the JOINS between reordered blocks are discontinuities that did not exist in `x`. Any
+    statistic sensitive to jumps (a range/gap detector, a high-order difference, an event counter keyed on large
+    moves) sees roughly `len(x)/block` fake events per surrogate and will read as significant in the WRONG
+    direction. With block=1 this degenerates to `iid_shuffle` (every sample is a join). Deterministic given
+    `seed`."""
+    x = np.asarray(x, float).ravel()
+    block = int(block)
+    if block < 1:
+        raise ValueError("block must be >= 1, got %r (use block=1 for the iid_shuffle degenerate case)" % (block,))
+    rng = np.random.default_rng(seed)
+    # split into contiguous chunks; the last one may be short and is shuffled along with the rest (no drops).
+    edges = list(range(0, len(x), block))
+    chunks = [x[i:i + block] for i in edges]
+    order = rng.permutation(len(chunks))
+    return np.concatenate([chunks[i] for i in order]) if chunks else x.copy()
+
+
+# The surrogate kinds a caller can name by string, so a pipeline/null harness can take `surrogate="sign_flip"`
+# from a config or an HTTP request instead of a callable. Each entry is fn(x, seed) -> surrogate.
+_SURROGATE_KINDS = {
+    "phase": lambda x, seed: phase_randomize(x, seed=seed),
+    "aaft": lambda x, seed: amplitude_adjusted_surrogate(x, seed=seed),
+    "iaaft": lambda x, seed: iaaft_surrogate(x, seed=seed),
+    "sign_flip": lambda x, seed: sign_flip(x, seed=seed),
+    "iid_shuffle": lambda x, seed: iid_shuffle(x, seed=seed),
+}
+
+
+def make_surrogate(kind, **kwargs):
+    """Resolve a surrogate NAME to a callable fn(x, seed) -> surrogate, so harnesses can take the null as a
+    string ("phase", "aaft", "iaaft", "sign_flip", "iid_shuffle", "block_shuffle") from config or over HTTP
+    instead of requiring a Python callable. `block_shuffle` needs its scale: make_surrogate("block_shuffle",
+    block=24). Extra kwargs are bound into the returned callable. Raises ValueError naming the valid kinds.
+
+    Passing an already-callable `kind` returns it unchanged, so every harness in the engine can accept either
+    form on the same parameter."""
+    if callable(kind):
+        return kind
+    if kind == "block_shuffle":
+        block = kwargs.get("block")
+        if block is None:
+            raise ValueError("surrogate 'block_shuffle' requires block=<int> (the scale below which structure "
+                             "survives); e.g. make_surrogate('block_shuffle', block=24)")
+        return lambda x, seed: block_shuffle(x, block, seed=seed)
+    if kind not in _SURROGATE_KINDS:
+        raise ValueError("unknown surrogate %r; valid kinds are: %s, block_shuffle (or pass a callable "
+                         "fn(x, seed))" % (kind, ", ".join(sorted(_SURROGATE_KINDS))))
+    return _SURROGATE_KINDS[kind]
+
+
+def surrogate_ensemble(x, kind="phase", n=200, seed=0, **kwargs):
+    """Yield `n` surrogates of `x` one at a time as a GENERATOR -- the memory-light form for long series, where
+    materialising n x len(x) floats is the difference between fitting in cache and swapping. Each surrogate gets
+    its own sub-seed (seed + i + 1), so the ensemble is reproducible and no two members share a draw.
+
+    `kind` is any name `make_surrogate` accepts, or a callable fn(x, seed). Consume it in a loop:
+
+        null = np.array([stat(s) for s in surrogate_ensemble(x, "sign_flip", n=500)])
+
+    The existing single-surrogate functions are unchanged and still return arrays -- this is an additive,
+    opt-in streaming form, not a replacement."""
+    fn = make_surrogate(kind, **kwargs)
+    x = np.asarray(x, float).ravel()
+    for i in range(int(n)):
+        yield fn(x, seed + i + 1)
+
+
+def surrogate_batch(x, kind="phase", n=200, seed=0, **kwargs):
+    """The MATERIALISED form of surrogate_ensemble: an (n, len(x)) array instead of a generator. Same members,
+    same sub-seeds, same order -- surrogate_batch(...)[i] is bit-identical to the i-th yield of
+    surrogate_ensemble(...) at the same seed.
+
+    Exists because a generator cannot cross a process boundary: over the HTTP service a generator degrades to a
+    repr stub, which is a dead end for an agent. The in-process caller keeps the memory-light generator; the
+    remote caller asks for the array. Same split as proc_texture (a callable) vs texture_image (its JSON
+    sibling). Cost is explicit: n * len(x) floats resident at once, so keep  modest over the wire."""
+    return np.array(list(surrogate_ensemble(x, kind=kind, n=n, seed=seed, **kwargs)), dtype=float)
+
+
+def trev(x, lag=1):
+    """TIME-REVERSAL ASYMMETRY statistic (Ramsey & Rothman 1996; Theiler's `trev`) -- the normalised third moment
+    of the lagged difference:
+
+        trev = mean((x[t+lag] - x[t])**3) / mean((x[t+lag] - x[t])**2)**1.5
+
+    A series played BACKWARDS has its differences negated, so the odd moment flips sign while the even one does
+    not: trev is exactly zero for any process whose statistics are invariant under time reversal, and non-zero
+    when the rises and the falls have different SHAPES (slow grind up / fast crash down being the archetype).
+    Normalising by the variance term makes it scale-free and comparable across series.
+
+    A non-zero value on its own means nothing -- finite samples give non-zero odd moments by luck. Pair it with
+    `time_arrow_test`, which measures it against a surrogate ensemble that shares the signal's spectrum.
+
+    Time-irreversibility implies the generating process is NONLINEAR (a linear Gaussian process is time-
+    reversible), which is why this is a standard first-pass triage flag on an unfamiliar signal."""
+    v = np.asarray(x, float).ravel()
+    lag = int(lag)
+    if lag < 1 or lag >= len(v):
+        raise ValueError("lag must satisfy 1 <= lag < len(x) (got lag=%r, len=%d)" % (lag, len(v)))
+    d = v[lag:] - v[:-lag]
+    denom = float(np.mean(d ** 2)) ** 1.5
+    if denom < 1e-300:
+        return 0.0                                             # a constant series has no arrow to measure
+    return float(np.mean(d ** 3) / denom)
+
+
+def time_arrow_test(x, lag=1, n_surrogates=200, seed=0, kind="iaaft"):
+    """Does this series have an ARROW OF TIME? Measures `trev` on `x` against an ensemble of surrogates and
+    reports {value, null_mean, null_std, z, p, n_surrogates, kind}. `p` is the two-sided fraction of the null at
+    least as extreme, with the +1 plug so it is never exactly 0. A large |z| says the rises and falls have
+    genuinely different shapes -- the signal was produced by a NONLINEAR process (linear Gaussian processes are
+    time-reversible), which is a triage flag for "look harder here", not a detection of anything in particular.
+
+    Default `kind="iaaft"` on purpose. Basic `phase_randomize` also GAUSSIANISES the marginal, and a skewed
+    marginal alone produces a non-zero trev -- so against a phase-randomised null a merely SKEWED series scores
+    a large z that has nothing to do with its dynamics. IAAFT keeps the exact amplitude distribution, so what is
+    left to explain is the ORDERING. Pass kind="phase" only when the marginal is known to be symmetric.
+
+    KEPT NEGATIVE, measured and expensive: a significant global arrow can be entirely DIFFUSE. In the campaign
+    this statistic reached z=+6.4 (daily) and z=+4.0 (5-minute) on a real instrument, and all three attempts to
+    LOCALISE that asymmetry -- to find windows where it concentrated and condition on them -- came back null. An
+    arrow in aggregate does NOT imply per-window predictability. Report it as a property of the process, never
+    as a signal."""
+    x = np.asarray(x, float).ravel()
+    value = trev(x, lag=lag)
+    null = np.array([trev(s, lag=lag) for s in surrogate_ensemble(x, kind, n=n_surrogates, seed=seed)], float)
+    null_mean = float(null.mean())
+    null_std = float(null.std())
+    z = (value - null_mean) / (null_std + 1e-300)
+    # two-sided p about the NULL's own centre (the +1 plug, North et al. 2002 -- never exactly zero).
+    extreme = int(np.sum(np.abs(null - null_mean) >= abs(value - null_mean)))
+    p = (extreme + 1) / (len(null) + 1)
+    return {"value": value, "null_mean": null_mean, "null_std": null_std, "z": float(z),
+            "p": float(p), "n_surrogates": int(len(null)), "kind": kind if isinstance(kind, str) else "callable"}
+
 def _selftest():
     """Contracts:
 
@@ -254,12 +434,91 @@ def _selftest():
     assert np.allclose(np.sort(ia), np.sort(coloured_heavy))  # and it still keeps the EXACT amplitude distribution
     assert np.array_equal(iaaft_surrogate(coloured_heavy, seed=9), iaaft_surrogate(coloured_heavy, seed=9))  # deterministic
 
+    # (7) SIGN-FLIP: the directional null. |surrogate| == |x| EXACTLY, so magnitude clustering (volatility
+    #     clustering) is untouched while the direction channel is destroyed -- exactly what a claim about
+    #     DIRECTION should be measured against.
+    sf = sign_flip(walk, seed=1)
+    assert np.array_equal(np.abs(sf), np.abs(walk)), "sign_flip must preserve every magnitude exactly"
+    assert ac1(walk) > 0.9 and abs(ac1(sf)) < 0.2                      # signed structure destroyed...
+    assert abs(ac1(np.abs(sf)) - ac1(np.abs(walk))) < 1e-12            # ...magnitude structure identical
+    # KEPT NEGATIVE, pinned: a MAGNITUDE-ONLY statistic is constant across sign-flip surrogates, so its null has
+    # zero spread and any z computed from it is a divide-by-nothing. A naive harness reports that as a huge z.
+    mag_null = np.array([float(np.mean(np.abs(s))) for s in surrogate_ensemble(walk, "sign_flip", n=16, seed=0)])
+    assert mag_null.std() < 1e-12, ("sign_flip is the WRONG null for a magnitude-only statistic -- expected a "
+                                    "degenerate (zero-spread) null, got std=%g" % mag_null.std())
+
+    # (8) IID-SHUFFLE: exact histogram, all ordering gone.
+    ii = iid_shuffle(walk, seed=1)
+    assert np.allclose(np.sort(ii), np.sort(walk)) and abs(ac1(ii)) < 0.2
+
+    # (9) BLOCK-SHUFFLE: structure shorter than `block` survives, longer is destroyed; histogram exact.
+    bs = block_shuffle(walk, 64, seed=1)
+    assert np.allclose(np.sort(bs), np.sort(walk))
+    assert ac1(bs) > 0.9, ac1(bs)                                      # within-block smoothness survives (0.98)
+    # block=1 IS iid_shuffle, bit-for-bit at the same seed -- the documented degenerate case, pinned so the
+    # two paths can never drift apart.
+    assert np.array_equal(block_shuffle(walk, 1, seed=3), iid_shuffle(walk, seed=3))
+    # KEPT NEGATIVE, pinned: the block JOINS are discontinuities the real signal never had. A jump detector sees
+    # roughly len(x)/block fake events per surrogate (0 -> 10 here) and reads significant in the WRONG direction.
+    thr = 5.0 * float(np.std(np.diff(walk)))
+    jumps_real = int(np.sum(np.abs(np.diff(walk)) > thr))
+    jumps_bs = int(np.sum(np.abs(np.diff(bs)) > thr))
+    assert jumps_real == 0 and jumps_bs >= 5, (jumps_real, jumps_bs)
+
+    # (10) make_surrogate: names resolve, callables pass through, and every refusal NAMES the valid options.
+    assert np.array_equal(make_surrogate("sign_flip")(walk, 1), sf)
+    assert make_surrogate(len) is len                                   # a callable is returned unchanged
+    for bad, needle in ((("no_such_kind",), "unknown surrogate"), (("block_shuffle",), "requires block")):
+        try:
+            make_surrogate(*bad)
+            raise AssertionError("expected ValueError for %r" % (bad,))
+        except ValueError as e:
+            assert needle in str(e) and "block_shuffle" in str(e), str(e)
+
+    # (11) surrogate_ensemble: a generator of n DISTINCT, reproducible members (memory-light for long series).
+    ens = list(surrogate_ensemble(walk, "phase", n=5, seed=7))
+    assert len(ens) == 5 and not np.array_equal(ens[0], ens[1])
+    assert all(np.array_equal(a, b) for a, b in zip(ens, surrogate_ensemble(walk, "phase", n=5, seed=7)))
+    # surrogate_batch is the SAME members materialised -- the JSON-boundary sibling must never drift from the
+    # generator it wraps, so the identity is pinned member-for-member rather than merely by shape.
+    batch = surrogate_batch(walk, "phase", n=5, seed=7)
+    assert batch.shape == (5, len(walk)) and all(np.array_equal(batch[i], ens[i]) for i in range(5))
+
+    # (12) TREV / time_arrow_test: a slow-rise/instant-fall sawtooth is blatantly time-IRREVERSIBLE (its falls
+    #      have a different shape from its rises, so the odd moment of the lagged difference is large and
+    #      negative); a linear-Gaussian AR(1) is time-REVERSIBLE and must not flag.
+    t_idx = np.arange(n)
+    saw = (t_idx % 50) / 50.0
+    saw = saw - saw.mean()
+    arrow_saw = time_arrow_test(saw, n_surrogates=60, seed=1)
+    arrow_ar = time_arrow_test(ar, n_surrogates=60, seed=1)
+    assert trev(saw) < -1.0, trev(saw)                                  # measured -6.93
+    assert arrow_saw["z"] < -10.0, arrow_saw                            # measured z = -26.9
+    # The AR(1) control lands at z=+2.28 (p=0.049) in THIS realisation -- a genuinely time-reversible process
+    # throwing a 2-sigma reading on one draw. Kept loud rather than reseeded away: it is the in-file reminder
+    # that a single z is not a result, which is why split_half and bh_fdr exist next door.
+    assert abs(arrow_ar["z"]) < 3.0, arrow_ar
+    assert arrow_saw["p"] < arrow_ar["p"]
+    assert abs(trev(np.ones(n))) == 0.0                                 # a constant series has no arrow
+    try:
+        trev(saw, lag=0)
+        raise AssertionError("expected ValueError for lag=0")
+    except ValueError as e:
+        assert "lag" in str(e)
+
     print("holographic_surrogate selftest OK (surrogate preserves the power spectrum exactly; permutation kills "
           "the lag-1 autocorrelation (%.2f->%.2f) while the surrogate keeps it (%.2f); the logistic map's "
           "predictability scores z=%.1f against its phase-randomized null vs z=%.1f for a linear AR(1); AAFT keeps "
           "fat tails (kurtosis %.1f vs basic %.1f, truth %.1f); IAAFT matches the spectrum better than AAFT "
           "(rel err %.3f vs %.3f) with the exact distribution; deterministic)"
           % (ac1(walk), ac1(perm), ac1(surr), znl["z"], zlin["z"], k_aaft, k_basic, k_orig, err_ia, err_aa))
+    print("  + directional/scale nulls: sign_flip keeps every magnitude exactly (|abs| ac1 %.3f both sides) while "
+          "killing signed ac1 (%.3f->%.3f) -- and its null is DEGENERATE for a magnitude-only statistic "
+          "(std %.1e, kept negative); block_shuffle(64) keeps within-block structure (ac1 %.3f) but injects "
+          "%d fake jumps at the joins (kept negative), and block=1 is bit-identical to iid_shuffle; "
+          "time arrow: sawtooth trev=%.2f z=%.1f vs AR(1) z=%.2f (p %.3f vs %.3f)"
+          % (ac1(np.abs(walk)), ac1(walk), ac1(sf), mag_null.std(), ac1(bs), jumps_bs,
+             trev(saw), arrow_saw["z"], arrow_ar["z"], arrow_saw["p"], arrow_ar["p"]))
 
 
 if __name__ == "__main__":

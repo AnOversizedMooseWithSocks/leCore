@@ -82,9 +82,17 @@ def stack_pop(stack, codebook):
 class HoloMachine:
     """A formatted holographic drive that can store and execute stored programs."""
 
-    def __init__(self, dim=4096, seed=7, data=None, faculties=None, fast_cleanup=False):
+    def __init__(self, dim=4096, seed=7, data=None, faculties=None, fast_cleanup=False, decode_plan=False):
         self.dim = dim
         self.seed = seed
+        # OPT-IN DECODE PLAN (holographic_vmplan): decode is a pure function of (program, address) and
+        # never reads ACC, so re-deriving it on every visit is waste -- 26x redundancy measured on a
+        # 64-iteration ITERATE. True routes every address decode through a batched, content-addressed
+        # instruction cache whose answers are identical to the scalar path (pinned, 264 comparisons).
+        # Default False under the same rule fast_cleanup lives by: a shipped decision never flips itself.
+        self._plan_on = bool(decode_plan)
+        self._plan = None                                      # built lazily -- costs nothing when off
+        self._body_cache = {}                                  # fn name -> extracted body vector (see _body)
         # OPT-IN SIMD cleanup (see _nearest_fast): False keeps the original Python-loop cleanup, the recorded
         # decision. True routes every decode through one cached-codebook matmul -- measured 9x per decode.
         self.fast_cleanup = bool(fast_cleanup)
@@ -121,6 +129,34 @@ class HoloMachine:
             self._atom_cache[key] = v
         return v
 
+    def plan(self):
+        """The DecodePlan backing this machine, or None when decode_plan=False. Built on first use so an
+        unplanned machine pays nothing. `plan().stats()` is the telemetry: watch `sweeps`, the count of
+        times real spectral decode work happened."""
+        if self._plan_on and self._plan is None:
+            from holographic.agents_and_reasoning.holographic_vmplan import DecodePlan
+            self._plan = DecodePlan(self)
+        return self._plan
+
+    def _body(self, fn):
+        """The body vector of library function `fn`, memoised.
+
+        WHY: CALL and ITERATE both extract the callee with unbind(library, fn_atom) -- three transforms --
+        and ITERATE does it again on EVERY iteration of a loop whose library has not changed. This is the
+        same pure-derivation memo as _atom_cache above (identical bytes by construction, invalidated in
+        define() where the library actually moves), so it is unconditional rather than flag-gated."""
+        v = self._body_cache.get(fn)
+        if v is None:
+            v = unbind(self.library, self.fn_atoms[fn])
+            self._body_cache[fn] = v
+        return v
+
+    def _operand(self, raw, table, planned):
+        """The operand name for the instruction currently being executed: served from the decode plan when
+        one is active (raw is None), else cleaned from the raw read the scalar way. One helper so the plan
+        short-circuits every opcode branch without eight copies of the same conditional."""
+        return planned if raw is None else self._nearest(table, unbind(raw, self.ARG))
+
     def pos(self, i):
         """Address of the i-th instruction -- a deterministic unitary 'cylinder' atom."""
         return self._atom(f"pos:{i}", unitary=True)
@@ -149,6 +185,12 @@ class HoloMachine:
         self.functions[name] = self.assemble(program)
         self.fn_atoms[name] = self._atom(f"fn:{name}", unitary=True)
         self.library = bundle([bind(self.fn_atoms[n], self.functions[n]) for n in self.functions])
+        # THE LIBRARY MOVED, so both derived caches are stale: every extracted body changes, and every
+        # CALL/ITERATE operand now cleans against a LARGER fn_atoms codebook (which can legitimately
+        # change a decode). Dropping them here is what keeps the caches from ever serving a stale answer.
+        self._body_cache.clear()
+        if self._plan is not None:
+            self._plan.clear()
         return self
 
     def assemble(self, program):
@@ -220,6 +262,11 @@ class HoloMachine:
 
     def decode_instruction(self, program_vec, i):
         """Read address i: return (opcode, operand) after cleanup. The honest, noisy read step.
+
+        DELIBERATELY NEVER ROUTED THROUGH THE DECODE PLAN, even when one is active. This method is the
+        REFERENCE ORACLE the plan is tested against (holographic_vmplan asserts plan.at() == this, address by
+        address, including the crosstalk addresses past HALT). Routing it through the plan would make that
+        comparison compare the plan to itself, and the equivalence guarantee would quietly become vacuous.
         The operand is cleaned against the codebook the opcode implies -- function names for CALL,
         faculty names for APPLY, data atoms otherwise."""
         raw = unbind(program_vec, self.pos(i))
@@ -278,32 +325,39 @@ class HoloMachine:
         stack = init_stack                           # exact carry -> no crosstalk added at a seam (ISA-4/5)
         trace = []
         pc = 0
+        plan = self.plan()
         for _step in range(max_steps):              # cap on TOTAL instructions executed (the safety net)
-            raw = self._read_addr(prog_spec, pc, n)          # residency: reuse the program's spectrum
-            op = self._nearest(self.op_atoms, unbind(raw, self.OP))
+            if plan is not None:
+                # PLANNED FETCH: one dict lookup. raw stays None, which is the signal every branch below
+                # reads via _operand to take its operand from the plan instead of re-cleaning it.
+                op, planned_arg = plan.at(program_vec, pc)
+                raw = None
+            else:
+                raw = self._read_addr(prog_spec, pc, n)      # residency: reuse the program's spectrum
+                op, planned_arg = self._nearest(self.op_atoms, unbind(raw, self.OP)), None
             if op == "HALT":
                 break
             if op == "CALL":
-                fn = self._nearest(self.fn_atoms, unbind(raw, self.ARG))   # operand cleaned vs function names
+                fn = self._operand(raw, self.fn_atoms, planned_arg)        # operand cleaned vs function names
                 trace.append(("CALL", fn))
                 if _depth < 8 and fn in self.functions:                    # guard against runaway recursion
-                    sub = unbind(self.library, self.fn_atoms[fn])          # pull the function body out of the library
+                    sub = self._body(fn)                                   # pull the function body out of the library
                     acc, _ = self.run(sub, init_acc=acc, _depth=_depth + 1, handlers=handlers,
                                       stop=stop, max_loop=max_loop, converge_tol=converge_tol, branch_tol=branch_tol)
                 pc += 1
                 continue
             if op == "APPLY":
-                fac = self._nearest(self.fac_atoms, unbind(raw, self.ARG))  # operand cleaned vs faculty names
+                fac = self._operand(raw, self.fac_atoms, planned_arg)       # operand cleaned vs faculty names
                 trace.append(("APPLY", fac))
                 if acc is not None and fac in handlers:                     # the host runs the faculty on ACC
                     acc = handlers[fac](acc)
                 pc += 1
                 continue
             if op == "ITERATE":                                            # fixed-point loop over a library function
-                fn = self._nearest(self.fn_atoms, unbind(raw, self.ARG))
+                fn = self._operand(raw, self.fn_atoms, planned_arg)
                 iters, reason = 0, "maxloop"
                 if _depth < 8 and fn in self.functions and acc is not None:
-                    body = unbind(self.library, self.fn_atoms[fn])
+                    body = self._body(fn)
                     for iters in range(1, max_loop + 1):
                         prev = acc
                         acc, _ = self.run(body, init_acc=acc, _depth=_depth + 1, handlers=handlers,
@@ -318,14 +372,19 @@ class HoloMachine:
                 pc += 1
                 continue
             if op == "REPEAT":                                         # counted loop: run the next CALL n times
-                cnt = self._nearest(self.cnt_atoms, unbind(raw, self.ARG))
+                cnt = self._operand(raw, self.cnt_atoms, planned_arg)
                 trace.append(("REPEAT", cnt))
-                nraw = self._read_addr(prog_spec, pc + 1, n)             # the instruction to repeat (expects a CALL)
-                if self._nearest(self.op_atoms, unbind(nraw, self.OP)) == "CALL":
-                    fn = self._nearest(self.fn_atoms, unbind(nraw, self.ARG))
+                # the instruction to repeat (expects a CALL) -- one address ahead, same fetch discipline
+                if plan is not None:
+                    nop, nfn, nraw = plan.at(program_vec, pc + 1) + (None,)
+                else:
+                    nraw = self._read_addr(prog_spec, pc + 1, n)
+                    nop, nfn = self._nearest(self.op_atoms, unbind(nraw, self.OP)), None
+                if nop == "CALL":
+                    fn = self._operand(nraw, self.fn_atoms, nfn)
                     trace.append(("CALL", fn))
                     if _depth < 8 and fn in self.functions:
-                        body = unbind(self.library, self.fn_atoms[fn])
+                        body = self._body(fn)
                         for _ in range(max(1, cnt)):
                             acc, _ = self.run(body, init_acc=acc, _depth=_depth + 1, handlers=handlers,
                                               stop=stop, max_loop=max_loop, converge_tol=converge_tol, branch_tol=branch_tol)
@@ -334,19 +393,19 @@ class HoloMachine:
                     pc += 1                                            # not a CALL -> REPEAT is a no-op
                 continue
             if op == "IFMATCH":                                            # conditional: gate the NEXT instruction
-                tgt = self._nearest(self.data_atoms, unbind(raw, self.ARG))
+                tgt = self._operand(raw, self.data_atoms, planned_arg)
                 matched = acc is not None and cosine(acc, self.data_atoms[tgt]) >= branch_tol
                 trace.append(("IFMATCH", tgt))
                 pc += 1 if matched else 2                                   # skip the guarded instruction on no-match
                 continue
             if op == "STORE":                                              # ACC -> register slot (exact)
-                reg = self._nearest(self.reg_atoms, unbind(raw, self.ARG))
+                reg = self._operand(raw, self.reg_atoms, planned_arg)
                 regs[reg] = acc                                            # separate named slot: no crosstalk
                 trace.append(("STORE", reg))
                 pc += 1
                 continue
             if op == "RECALL":                                             # register slot -> ACC (exact)
-                reg = self._nearest(self.reg_atoms, unbind(raw, self.ARG))
+                reg = self._operand(raw, self.reg_atoms, planned_arg)
                 if reg in regs:
                     acc = regs[reg]                                        # exact read -- the value is returned verbatim
                 trace.append(("RECALL", reg))
@@ -364,7 +423,7 @@ class HoloMachine:
                 trace.append(("POP",))
                 pc += 1
                 continue
-            arg = self._nearest(self.data_atoms, unbind(raw, self.ARG))
+            arg = self._operand(raw, self.data_atoms, planned_arg)
             trace.append((op, arg))
             d = self.data_atoms[arg]
             if op == "LOAD" or acc is None:        # guard: a value-op before any LOAD acts as LOAD,
@@ -409,24 +468,33 @@ class HoloMachine:
         n = program_vec.shape[0]
         regs = {}
         _unbatchable = {"CALL", "ITERATE", "REPEAT", "APPLY", "IFMATCH", "PUSH", "POP"}
+        # THE OTHER HALF OF THE AMORTISATION. run_batch already decodes once per instruction for the whole
+        # batch of N rows -- but re-running the SAME program (a sweep, an optimiser, a frame loop) re-decoded
+        # every instruction from scratch on every call. The decode plan makes that second call free too, so
+        # the two amortisations compose: once across the batch, once across the calls.
+        plan = self.plan()
         pc = 0
         for _step in range(max_steps):
-            raw = self._read_addr(prog_spec, pc, n)
-            op = self._nearest(self.op_atoms, unbind(raw, self.OP))        # decoded ONCE for the whole batch
+            if plan is not None:
+                op, planned_arg = plan.at(program_vec, pc)
+                raw = None
+            else:
+                raw = self._read_addr(prog_spec, pc, n)
+                op, planned_arg = self._nearest(self.op_atoms, unbind(raw, self.OP)), None  # once for the batch
             if op == "HALT":
                 break
             if op in _unbatchable:
                 raise ValueError(f"run_batch does not support the control/host op {op!r} -- straight-line "
                                  f"value+register programs only; loop run() per item for control-flow programs")
             if op == "STORE":
-                regs[self._nearest(self.reg_atoms, unbind(raw, self.ARG))] = acc
+                regs[self._operand(raw, self.reg_atoms, planned_arg)] = acc
                 pc += 1; continue
             if op == "RECALL":
-                reg = self._nearest(self.reg_atoms, unbind(raw, self.ARG))
+                reg = self._operand(raw, self.reg_atoms, planned_arg)
                 if reg in regs:
                     acc = regs[reg]
                 pc += 1; continue
-            arg = self._nearest(self.data_atoms, unbind(raw, self.ARG))
+            arg = self._operand(raw, self.data_atoms, planned_arg)
             d = self.data_atoms[arg]
             if op == "LOAD":
                 acc = np.broadcast_to(d, (N, D)).copy()                   # a program constant -> same for all rows

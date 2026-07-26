@@ -26,6 +26,14 @@ import numpy as np; rng = np.random.default_rng(0); base = rng.normal(size=(50,3
 ```
 *Find it by:* store a mesh as canonical plus deltas, canonical element, recognize that two triangles are the same up to a transform, instancing generalized, delta chain for geometry, shape recognition, congruent, similar shapes
 
+### Circular encoder (angles and clocks with an EXACT wrap)
+mind.circular_encoder(dim, period): encode a CIRCULAR variable (angle, hour, weekday, phase) so encode(x) == encode(x+period) to 1e-12 and similarity depends ONLY on the circular gap: 23:59 and 00:01 read as 2-minute neighbours where the LINE ScalarEncoder reads cos 0.21 (periodicity needs INTEGER harmonics -- a construction, not a parameter). Poisson-minus-DC kernel: small antipodal dip (<0.25, measured); concentration trades lobe width for dip. decode() = circular cleanup. Audit carried: SignedEncoder REFUTED -- signed is native to ScalarEncoder..
+
+```python
+import numpy as np; e=mind.circular_encoder(512, period=24.0); a=e.encode(23.9); b=e.encode(0.1); c=e.encode(12.0); print(round(float(a@b),2), round(float(a@c),2), round(e.decode(a),1))
+```
+*Find it by:* circular variable encoding, encode an angle as a vector, hour of day encoder, day of week embedding, encode a phase with wraparound, periodic value to hypervector, clock arithmetic similarity, wraparound aware encoder
+
 ### Coarse-first refine (re-enable)
 run the cheap method everywhere, measure a per-cell residual/uncertainty, and escalate to the expensive method ONLY where it's high. mind.refine_where_uncertain(coarse, uncertainty, refine_fn, frac=0.25). Measured on adaptive anti-aliasing of a hard edge: 6.2x fewer samples than supersampling everywhere, for a 21% RMSE cost -- and the same budget spent at RANDOM cells is 3x worse, so it is the SIGNAL that pays, not the budget. TWO NECESSARY CONDITIONS: (1) the uncertainty must be CONCENTRATED -- mind.uncertainty_concentration is the free gate, and near 0 rules coarse-first out entirely; (2) the expensive method must be priced PER CELL, because a greedy placement method (matching pursuit) is already adaptive and a mask tells it nothing -- measured 21.0 dB with and without, at 0.9x the speed. THE TRAP: a GREEDY coarse pass destroys the concentration its own refinement needs (0.416 for a uniform base, 0.106 for a greedy one). Coarse-first wants a cheap, uniform, dumb base pass. THE LAW BOTH CONDITIONS COLLAPSE INTO: coarse-first buys adaptivity for a method that has NONE. RETIRED CLIENTS, each already adaptive: splat (greedy placement), volint (a closed form -- no cells to escalate), and volume_render (empty_skip + early_term ARE coarse-first, buying 15.2x where a residual mask buys 1.0x)..
 
@@ -51,6 +59,14 @@ stay in the vector/frequency domain with no Python hops: FUSE a bind/bundle/perm
 from holographic.misc.holographic_computehome import Compute; Compute.fuse_record(keys, values)
 ```
 *Find it by:* compute, fuse, fused, schedule, execute, program, machine, fft
+
+### DPI guard (is this feature NEW information or a re-dressing?)
+mind.dpi_guard(features, new_feature): fit the proposal from a linear/quadratic expansion of the existing set on a train split, report R^2 on train AND HOLDOUT (never train alone); novel_frac = the reproducibly-unexplained share, the MOST it could add. DPI: a transform CONCENTRATES information, never creates it (canon: kernel lifts / embeddings / foreign clocks, weeks spent, ~0 new bits). KEPT NEGATIVES: novel may be noise (owes a target-side test in bits); exotic transforms outside the basis can slip. mind.holdout_auc pairs separability the same way..
+
+```python
+import numpy as np; r=np.random.default_rng(0); F=r.normal(size=(500,3)); g=np.tanh(F[:,0]+0.3*F[:,1]*F[:,2]); print(mind.dpi_guard(F,g)['verdict'][:9], round(mind.dpi_guard(F,g)['r2_holdout'],2))
+```
+*Find it by:* is this feature actually new information, is it just a transform of existing features, data processing inequality guard, dpi guard, does this embedding add anything, new feature or re-representation, feature redundancy check, train and holdout auc
 
 ### Damage a vector (graceful-degradation probe)
 mind.damage_mask(destroy_fraction, seed, dim): a keep-mask zeroing a random fraction of a vector's slots. Multiply a stored hypervector by it to simulate a scratched plate or lossy channel, then measure surviving recall -- how you PROVE holography degrades smoothly instead of taking it on faith (dim=256: 20%% slots lost -> cos 0.89, 40%% -> 0.80, 80%% -> 0.54; no cliff). Exactly int(dim*fraction) slots zeroed, deterministic in (dim, fraction, seed) so a curve is reproducible in a test. D2 consolidation: Hologram/HolographicImage/HolographicArchive all delegate here..
@@ -172,6 +188,14 @@ import numpy as np; b = mind.transform_bank(512); [b.add_random_unitary('t%d' % 
 ```
 *Find it by:* transform bank, prebuilt map of transforms, cache a transform operator, precomputed rotation vectors, reuse a bind operator, compose a chain of transforms, spectrum cache, group representation
 
+### Wave-state encoder (carrier + envelope as one recallable state)
+mind.wave_state_encoder(dim, window): one OHLC window -> one unit state vector carrying carrier SHAPE (close-based, unit-RMS), both envelope excursion channels in scale units (their amplitude is exactly what a close-only encoder cannot see; identical closes with 4x swing separate at cos 0.77), and an energy term. Offset/scale invariant (same shape at 10x level: cos 0.94 -- the invariance IS the level-blindness kept negative). Feeds causal_index recall (5/5 right-regime neighbours, fitless) and signal_program screening. D4 note travels with it: calibration on these states is NOT exploitability..
+
+```python
+import numpy as np; e=mind.wave_state_encoder(256, window=8); o=np.arange(8.0); w=np.stack([o,o+1,o-1,o+0.5],axis=1); v=e.encode(w); print(round(float(v@v),2))
+```
+*Find it by:* wave state encoder carrier and envelope, encode candle high low as one vector, carrier plus envelope state, within interval extremes encoding, envelope excursion state vector, resonance recall state for candles, ohlc window to hypervector, state vector with intra bar swing
+
 ### analytic_signal
 represent a signed series as ROTATION (holographic_analytic): the analytic signal z = value + i*Hilbert(value) = amplitude * exp(i*phase). Returns the instantaneous amplitude (envelope / circle radius), unwrapped phase (how far it has rotated), and instantaneous frequency (how fast the sign turns over). amplitude*cos(phase) reconstructs the signal EXACTLY. The 'sign as rotation' framework: a negative value is a rotation, magnitude is the radius. NumPy-only Hilbert transform, no scipy.
 
@@ -280,6 +304,14 @@ import lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.hologr
 ```
 *Find it by:* route a mesh defect to the right repair, minimal mesh repair, pick the repair a mesh needs, diagnose and fix a mesh, targeted mesh cleanup, which mesh repair to run
 
+### Route or abstain (find_capability judged against its own noise floor)
+mind.route_or_abstain(query): null-referenced routing (J1) -- the top-1 find_capability score judged against a null of scrambled queries drawn from the CATALOG'S OWN vocabulary at matched token count (out-of-vocab gibberish scores 0 and gates nothing). Below z_min the router says 'no capability matches' WITH the z, instead of returning its argmax on noise. Logged misroutes abstain at z=-0.9/-1.5; real queries route from z=+1.0; z_min=0.8 sits in the measured gap. KEPT NEG: a genuine query in words the catalog never uses abstains CORRECTLY -- the fix is aliases..
+
+```python
+r=mind.route_or_abstain('counter traders'); print(r['abstain'], round(r['z'],1))
+```
+*Find it by:* no capability matches, router that can abstain, abstain instead of misroute, routing confidence against a null, is this query answerable by the catalog, gate the capability search, refuse to route a query it cannot match, abstain instead of guessing
+
 ### Surface-route retopology (field-aligned quads, silhouette-safe by construction)
 m.surface_retopo(mesh, density) gives a SCAN or dense mesh field-aligned QUAD topology whose vertices never leave the source surface, so the silhouette survives BY CONSTRUCTION (measured: 323 faces at IoU 0.989, 77% quads). Chain: cross_field -> position_field (IFAM 4-PoSy) -> extract_quads (IFAM 4.4) -> shrinkwrap. Use INSTEAD of auto_retopo for scans: voxelising fails the 0.95 gate at every affordable resolution on thin features (0.785/0.825/0.884/0.935 at res 12/20/32/48) -- an SDF cannot represent what it cannot sample. guide_dirs puts loops where deformation lives. Guarded, linear knob..
 
@@ -380,6 +412,22 @@ from holographic.caching_and_storage.holographic_cachehome import Cache; Cache.b
 ```
 *Find it by:* bake, precompute, lookup, cache, memoise, irradiance, lut, grid
 
+### Cache key cost (identity vs content addressing)
+the price of a cache KEY, measured rather than assumed. SpectrumCache shipped keying on a sha256 of the whole atom -- and hashing D floats costs MORE than transforming them (D=1024: 21.5us hash vs 13.0us rfft), so the cache measured 0.40x-0.82x scalar and 0.50x-0.70x inside fusion: SLOWER than no cache, while its docstring claimed 1.4x. key='identity' keys on the array object (O(1), pinned so the id cannot be recycled): 2.4x-2.6x scalar, 3.7x-4.3x in fuse_record, bit-identical. Content keying stays the default and is required when byte-identical arrays arrive as distinct objects.
+
+```python
+c = mind.spectrum_cache(key='identity'); mind.fuse_record(keys, values, spectrum_cache=c)
+```
+*Find it by:* cache key cost, identity keyed cache, content addressing cost, is my cache slower than no cache, cheap cache key for a big array, avoid rehashing an immutable array, hashing costs more than the work, make the spectrum cache actually fast
+
+### Causal recall (an index that cannot see the future)
+mind.causal_index() -> CausalIndex: append(vector, t) in time order -- backfilling the past refuses by name -- and nearest(query, t, k, lag>=1) searches ONLY items with time <= t - lag (lag=0 refused: simultaneous is not past). audit_causality VERIFIES the mask by perturbing future items and checking results are bit-identical. The demo it pins: naive full-history k=1 history-matching finds the query ITSELF -- perfect fake skill, 100% inflation -- while this index cannot self-match at any k. Exact scan only: a similarity forest cannot be time-masked (declared, not a TODO)..
+
+```python
+ci=mind.causal_index(); import numpy as np; r=np.random.default_rng(0); [ci.append(r.standard_normal(8), float(t)) for t in range(50)]; print(ci.nearest(r.standard_normal(8), 25.0, k=2), ci.nearest(r.standard_normal(8), 0.0))
+```
+*Find it by:* nearest neighbour search restricted to the past, recall only older items, time filtered index, append only memory before t, history matching without look ahead, what did similar past states lead to, analog lookup that cannot see the future, knn over trailing history only
+
 ### Code / file editing (agentic)
 read, view (line-numbered), write, exact-string replace, replace-lines, insert/delete lines, grep, find-definition, list, tree, archive, move, and UNDO -- structured source-file editing for an agent working the codebase, scoped to a project ROOT so a path can never escape it. Atomic writes; replace requires a unique match; every mutation is reversible with file_undo; replace_across renames a string across many files (with a dry-run preview); python_check (syntax) and import_check (real import in a subprocess) catch a broken edit immediately. Exposed as mind.file_* methods, so callable over the HTTP tool protocol (GET /tools, POST /invoke) like any faculty.
 
@@ -395,6 +443,14 @@ shrink INACTIVE data to save memory and disk, and inflate it back on demand: sto
 store = mind.cold_store(keep_warm=4); store.put('t1', big_table); store.get('t1')  # transparently warmed
 ```
 *Find it by:* cold storage, compress inactive, evict, spill to disk, cool, warm, fold up, shrink memory
+
+### Decoded-instruction cache (fetch/decode split from execute)
+decoding a VM instruction is a PURE function of (program vector, address) -- it never reads the accumulator -- so the plain interpreter re-derives eight transforms every time the program counter revisits an address (26x redundancy measured on a 64-iteration ITERATE over a 2-instruction body). DecodePlan decodes a whole BLOCK of addresses in ONE batched spectral sweep and answers every later visit from a content-addressed cache. MEASURED 6.7x-14x end-to-end; accumulators bit-identical and traces identical across 126 programs x 3 dims x 3 seeds. Opt-in, never-flip rule.
+
+```python
+mind.vm_decode_plan(True); mind.run_procedure([('LOAD','a'),('BIND','b'),('HALT',None)]); mind.vm_plan_stats()
+```
+*Find it by:* decoded instruction cache, instruction cache, decode cache, vectorize the interpreter, batch decode a program, decode once execute many times, why is my program slow, speed up run_procedure
 
 ### Dependency-keyed cache (key on what the operator reads)
 Part C's compute model: every triangle is THE canonical triangle plus a recognised chain of deltas; a computation runs on the canonical ONCE and its RESULT is transformed through the deltas, while deltas the computation never reads -- a material, for a geometric quantity -- never enter the cache key at all. mind.delta_cache(op, canonical, policy=...) and mind.delta_cache_report carry the comparison. Which deltas an operator reads is MEASURED, not guessed: mind.equivariance_table decides. MEASURED on 400 triangles (64 rotation deltas x 8 materials; the first 400 contain 50 distinct shapes): brute 400 computes; `read_set` 50 computes, 8.0x, BIT-IDENTICAL, because the material never enters the key; `equivariant` 1 compute, 400x, because `area` is measured INVARIANT under rotation so the shape delta drops out too. KEPT NEGATIVE: the equivariant path is NOT bit-identical -- max|diff| 8.3e-17. Rotating a triangle and re-integrating accumulates round-off the canonical evaluation never incurs, so the CACHE is the one that is right and the BRUTE path carries the error; `max_abs_diff` is reported rather than a boolean, and `equivariant` is opt-in because this engine's constitution says a change at 1e-12 has still flipped a creature's trajectory. C4: THE CACHE IS ONLY SOUND OVER DETERMINISTIC EVALUATORS. mind.is_deterministic is the gate, and DeltaCache REFUSES an evaluator that draws from a global RNG stream (measured: the same input returned 0.4019 then 0.3188) -- the cache would serve its first draw forever while the uncached path kept drawing, and the cache would get blamed. Key the sampler by its input's coordinates with hash_unit. PART C, END TO END: mind.evaluate_elements(elements, op, op_name, family) takes RAW point sets with no shape ids -- canonmesh.recognize derives the classes (C3), the equivariance table says what the operator reads (C2), and the cache keys on that (C1). MEASURED on 200 raw triangles from 5 base shapes: area under `similarity` is 5 classes, 5 computes, exact to 1.4e-14 -- 40x. A COMPOSITE FAMILY'S VERDICT IS THE WEAKEST OF ITS PARTS (mind.family_verdict): area is invariant under `rigid` but only equivariant under `similarity`, because a uniform scale moves it. AND RECOGNITION ALONE IS NOT ENOUGH -- reusing the canonical's area directly under `similarity` is wrong by 8.54. `max_x` finds 5 classes and still does 200 computes, because `recompute` means there is no dividend and it says so..
@@ -501,6 +557,14 @@ The SAFE switch into sculpting: mind.sculpt_prepare(mesh, resolution, silhouette
 import numpy as np; import lecore; from holographic.mesh_and_geometry.holographic_meshbridge import sculpt_prepare; from holographic.mesh_and_geometry.holographic_sdf import sphere; from holographic.mesh_and_geometry.holographic_meshbridge import marching_tetrahedra_vec, mesh_to_sdf_grid
 ```
 *Find it by:* prepare a mesh for sculpting, sculpt mode conversion, sdf cache from a mesh, convert mesh to sculptable, switch to sculpt mode safely, guarded voxel conversion, mesh changes shape when sculpting, keep the shape when converting
+
+### Search the engine's own source by meaning
+find_capability searches the CATALOG -- 674 of 7,572 functions; for the other 6,898 there was nothing. This indexes every public engine function by name tokens, first docstring line and CALLEE NAMES (who you call is what you do) and answers 'what else looks like this?', which is Rule 0's actual question. KEPT NEGATIVE IN THE DEFAULT: the hypervector encoding LOST to token-set Jaccard on the same features (recall@1 0.175 vs 0.542) and uses 2.8x more memory, winning only query latency 8.3x -- so Jaccard is the default and the vector path is opt-in.
+
+```python
+import lecore; m=lecore.UnifiedMind(); [l for l,_s in m.code_search('subdivide a mesh', k=3)]
+```
+*Find it by:* find similar code, search the codebase semantically, what other function looks like this one, code similarity, semantic search over my own source, find near duplicate functions, what else does what this does, search my source
 
 ### Semantic word index (find words by meaning)
 the fuzzy REVERSE of a dictionary: describe an idea and get the words whose definitions mean it. mind.build_semantic_index(words=...) places words in a meaning space by RANDOM INDEXING over their glosses, then idx.find('unexpected good luck') -> 'serendipity' and idx.similar('puppy') -> 'dog','kitten'. OPT-IN and separate: nothing loads or builds until you call it. Approximate by design (this is where leCore's geometry-preserving/lossy side belongs) -- reliable for the top hit, noisy in the tail, and word-sense sensitive..
@@ -930,6 +994,14 @@ import numpy as np, lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_ge
 ```
 *Find it by:* fast texture bake, holographic rebake, scatter gather texture bake, bake texture without the closest point loop, speed up texture reprojection, volumetric colour bake
 
+### Hostile-data guide (the honesty layer's field manual)
+docs/HOSTILE_DATA_GUIDE.md: find real structure in noisy sequential data and refuse to be fooled -- pipelines that manufacture (79.4% persistence on white noise), evaluations that leak (self-matching kNN at MSE 0.0; 28% false-alarm under overlap), batteries that select (p=4e-4 dies on a 64-look book), aggregates hiding the loss shape. Names the tool per failure and THE ORDER TO RUN THEM (lint -> pipeline_null -> effects -> battery+ledger -> events -> conditions -> costs -> committee); a refusal is a result. Every snippet is executed by its test, so the guide cannot rot without a failure..
+
+```python
+import pathlib; p=pathlib.Path('docs/HOSTILE_DATA_GUIDE.md'); t=p.read_text(); print(t.splitlines()[0], len(t) > 4000)
+```
+*Find it by:* guide to analyzing hostile data, how to find real structure in noisy data, honest analysis workflow, which honesty tool do I use when, recipe for validating a signal, hostile data checklist, field manual for the honesty layer, order to run the honesty tools
+
 ### Import artist file formats (OBJ/glTF/textures/volume)
 import the files artists hand you: mind.load_obj('model.obj') reads Wavefront geometry + its .mtl (UVs, normals, per-face material, map_* textures); mind.load_glb('model.glb') reads glTF/GLB geometry AND its full PBR channels (base colour / metallic-roughness / normal / occlusion / emissive) with embedded textures and per-vertex UVs/normals, AND for rigged models its ANIMATIONS (keyframed node transforms -- clip.sample(t), rotations slerped) and SKINS (joints + inverse-bind + weights); mind.load_texture_set(folder) turns a folder of Adobe Substance 3D Painter export maps (basecolor/roughness/metallic/normal/height/ao/emissive, matched by name) into one PBRMaterial; mind.load_volume('grid.npy') wraps a 3-D density grid as a field for render_volume. mind.import_asset(path) dispatches by extension. Once a rigged glTF is loaded, mind.deform_mesh(loaded, clip, t) actually MOVES it -- linear-blend skinning by the animated skeleton plus morph-target blending, returning the deformed mesh at time t. Stdlib+NumPy; PIL lazy for textures. HONEST: proprietary .sbsar/.spp and sparse OpenVDB .vdb need their vendor tools -- import the exported open forms..
 
@@ -1201,6 +1273,14 @@ compose a render or sim run as ordered stages that declare what they need/produc
 from holographic.scene_and_pipeline.holographic_pipeline import build_pipeline, PipelineConfig, RenderSpec
 ```
 *Find it by:* pipeline, stage, compose, run, render, strategy, dispatch, route
+
+### Pipeline null (did my PROCESSING manufacture the structure?)
+mind.pipeline_null(pipeline_fn, x, surrogate): run your WHOLE chain on surrogates and score the statistic against the null the pipeline itself produces. Any smoothing, quantising, re-clocking or clustering step imposes correlations on whatever it is fed, INCLUDING pure noise, so a null on the raw input credits the pipeline's artifacts to the data. Measured: a re-clock made 72% direction persistence on noise (referenced truth: ANTI-persistence z=-7.3); a denoiser made 83.6%. Returns z/p/collapsed. KEPT NEGATIVE: a bad surrogate gives a healthy-looking meaningless z..
+
+```python
+import numpy as np; d=np.random.default_rng(0).normal(size=1500); pipe=lambda v:(lambda s: float(np.mean(s[1:]==s[:-1])))(np.sign(np.convolve(v,np.ones(9)/9,'valid'))); r=mind.pipeline_null(pipe,d,surrogate='iid_shuffle',n=50); print(round(r['observed'],3), round(r['z'],2))
+```
+*Find it by:* run my whole pipeline on surrogates, does my pipeline manufacture structure, null for a processing chain, is my smoothing creating the signal, test the pipeline not just the statistic, baseline for a multi step analysis, did the preprocessing invent this, surrogate through the same steps
 
 ### Points to mesh (isosurface / surface reconstruction)
 the inverse of sdf_surface_points, which the engine could do in one direction only. mind.sdf_from_points(points, normals, lo, hi, res) builds a signed distance grid from an ORIENTED point cloud -- distance to the nearest sample, signed by that sample's normal -- and mind.surface_nets(field, grids) extracts a WATERTIGHT quad mesh by dual isosurface extraction: one vertex per sign-changing cell at the mean of its edge crossings, one quad per sign-changing grid edge. mind.points_to_mesh runs both; mind.mesh_report scores it (watertight, Euler characteristic, max surface error). MEASURED on a unit sphere, 600 samples, 32^3 grid (cell 0.1032): 1,804 vertices, 1,802 quads, watertight, Euler = 2, max vertex error 0.0454 -- 0.44 CELLS, and the cell size is the honest baseline because a dual extractor cannot place a vertex better than the cell it lives in. HONEST SCOPE: this is naive surface nets, NOT Dual Contouring -- averaging the crossings rounds off SHARP features, which DC's QEF solve (Ju et al., SIGGRAPH 2002) recovers. Smooth surfaces. THREE KEPT NEGATIVES: (1) the point-cloud SDF is LEAST accurate near the surface, exactly where the extractor reads it (max err 0.2225 within 0.1 of the surface, 0.0695 beyond 0.6) -- distance-to-nearest-SAMPLE overestimates distance-to-SURFACE by up to the sample spacing; (2) accuracy is set by the CLOUD, not the grid -- the near-surface error tracks the spacing at 1.3-1.7x, so refining the grid under a sparse cloud buys nothing; (3) the MESH is watertight AND ORIENTED -- every directed edge once, every normal along +grad -- which `watertight` alone cannot see: mind.mesh_is_oriented(quads) is the stronger check, and before it existed the sphere was watertight with 228 duplicated directed edges and 98 of 200 normals pointing inward, so Mesh.half_edges() refused it. Orienting needs TWO sign flips composed (the crossing's direction AND the frame's parity, since (1,0,2) is an odd permutation); fixing only the first left 136 of 408 normals outward. The MESH is 4.7x more accurate than the FIELD it came from, because averaging twelve edge crossings cancels per-sample noise -- do not read one error as the other, in either direction. The all-pairs distance matrix is chunked: unchunked, a 24^3 grid against 9,600 points allocated 133M floats and the process was killed..
@@ -2195,6 +2275,14 @@ alice = mind.principal('alice', workspace='lab', kind='user'); alice.send(mind.b
 ```
 *Find it by:* principal, identity, scoped identity, per-agent state, per-user namespace, multiplayer, multi-user, swarm
 
+### Selection ledger (correct over everything you TRIED, not what survived)
+mind.selection_ledger() -> SelectionLedger: record(name, p, family) every test AT THE MOMENT IT IS RUN, correct(alpha) computes FDR q-values over the WHOLE book or a named family; report() shows, per family, how many pass in-family but DIE on the book -- the look-elsewhere effect made visible (a p=4e-4 family winner dies on a 64-look book). Append-only: withdraw() needs a reason and keeps the multiplicity cost; re-runs are sequences. to_json/from_json persist behind a hashlib chain that refuses a book with a deleted row. KEPT NEGATIVE: covers only what is written down..
+
+```python
+led=mind.selection_ledger(); led.record('effect_a', 0.0004, family='routing'); [led.record('sweep_%d'%i, 0.5, family='sweep') for i in range(60)]; r=led.correct(alpha=0.05); print(r['family_size'], r['n_passed'])
+```
+*Find it by:* ledger of every test I ran, record all hypotheses tried this session, did I run it until it passed, ledger record over http, session ledger for an agent, family wise correction across batteries, look elsewhere effect bookkeeping, how many things did I try before this worked
+
 ### Serve leCore as a tool (/tools + /invoke)
 run the HTTP service (holographic_service.serve) and any harness, LLM, or another leCore drives this node over two endpoints: GET /tools returns the manifest of every public faculty (name, description, params); POST /invoke with {name, args} runs one faculty and returns its result as JSON. Token-gated; private methods are refused. This is leCore AS a tool provider -- the same shape every node speaks..
 
@@ -2223,6 +2311,14 @@ ch = mind.opponent_channels(est_a, est_b); if ch['divergence_score'] < 0.2: use 
 ```
 *Find it by:* opponent, agreement, disagreement, purple channel, consensus, vote, voting, ensemble
 
+### Arrow of time (is this series time-reversible?)
+mind.trev(x, lag) and mind.time_arrow_test(x, kind): the normalised third moment of the lagged difference is exactly zero for a time-reversal-invariant process and non-zero when rises and falls have different SHAPES; time_arrow_test scores it against a surrogate ensemble (value/null_mean/z/p). Large |z| says NONLINEAR -- a triage flag, not a detection. Defaults to the IAAFT null because a merely SKEWED series scores big against a phase-randomised one. KEPT NEGATIVE, measured: a global arrow can be entirely DIFFUSE (z=+6.4, all three localisation attempts null) -- never a per-window signal..
+
+```python
+import numpy as np; saw=(np.arange(1024)%50)/50.0; print(round(mind.trev(saw),2), round(mind.time_arrow_test(saw,n_surrogates=40)['z'],1))
+```
+*Find it by:* time reversal asymmetry, is this series time reversible, arrow of time in a signal, trev statistic, does the series look different backwards, detect nonlinearity in a time series, irreversibility test, asymmetry between rises and falls
+
 ### Blend M shader variants into one transfer
 an LOD stack, a multi-scale filter, an MIS-weighted combination, a parameter sweep you intend to average -- any FIXED linear combination of compiled pipelines is itself linear and shift-invariant, so the transfers just add. mind.shader_combine(pipes, weights) returns one Pipeline; the cost does not depend on M (measured exact to 2.2e-16, and 4.3x / 9.3x / 30.0x faster at M = 4 / 16 / 64 than staging the variants and blending their images). KEPT NEGATIVE: superposing the variants under distinct keys so you can unbind any one back out does NOT work -- unbinding recovers a variant at 1/sqrt(M), real variants are correlated copies of one field so cleanup cannot resolve them, and the bank still pays M inverse transforms, so it measured slower than the direct path. Superposition buys width only when items are near-orthogonal AND a cleanup follows the readout..
 
@@ -2249,6 +2345,22 @@ import numpy as np; from holographic.sampling_and_signal.holographic_registratio
 ```
 *Find it by:* recover a scale and shift between two signals, recover_affine, fourier mellin registration, estimate the dilation, canonical affine edit, register two signals, image registration 1d, log polar
 
+### Causal gates (act only on what you knew at the time)
+mind.causal_gate(stat, window, threshold, compare): a condition that sees only TRAILING data, so it can be ACTED on, not merely described. Causal by construction and PROVABLY so -- audit_causality scrambles the future and checks the past does not move, catching full-sample normalisations and global-quantile thresholds. Composable with & | ~. Measured: a storm gate (trailing drawdown <=-15% OR vol top decile) left entries untouched and moved a book +22% -> +58.4% CAGR, maxDD -85.9% -> -47.1%. KEPT NEGATIVE: a hand-written mask claiming causal=True is a claim, not a proof..
+
+```python
+import numpy as np, lecore; path=np.cumsum(np.random.default_rng(0).normal(size=300))+100.0; g=mind.causal_gate('drawdown',window=60,threshold=-0.05,compare='le'); print(mind.causal_gate('std',window=60,threshold=1.0,compare='ge',context=path)['audit']['passed'], int(g.mask(path).sum()))
+```
+*Find it by:* only act on information available at the time, stand aside when conditions are bad, causal filter no look ahead, trailing window condition, did I accidentally use future data to filter, ex ante versus ex post, risk off switch, gate my signal on volatility
+
+### Cost wall + actionable fills (was the edge real at the moment of ACTION?)
+The action layer's two honesty gates. mind.net_of_costs(values, cost): net mean/t, wall_ratio, survives, breakeven ('survives at 5 bp, dies at 9' travels; 'survives' does not) -- per-event cost arrays supported, since a constant cost is a model. mind.realizable_fills(events, path, horizon): entry at the first REACHABLE state after the event is known vs the idealized emission price; latency_cost = the move that completed during recognition (canon: z=+20 at emission, NEGATIVE actionable). lag=0 refused by name; sweep the lag before believing an edge..
+
+```python
+import numpy as np; r=np.random.default_rng(0); v=r.normal(10,20,300); print(mind.net_of_costs(v,cost=17)['survives'], round(mind.net_of_costs(v,cost=17)['breakeven_cost'],1))
+```
+*Find it by:* does the signal survive costs, gross edge versus transaction costs, net of costs per trade, cost wall evaluator, breakeven cost of a signal, enter at the price when the signal is known, emission versus actionable price, signal known too late
+
 ### Data analysis
 analyse data with VSA-native methods: optimal transport / Wasserstein (transport), graph Laplacian + spectral filtering (graphsignal), Nystrom embedding / dimensionality reduction, persistent-homology topology, kernel density estimate, point-cloud structure (cosmic), and time-series / market analysis.
 
@@ -2256,6 +2368,14 @@ analyse data with VSA-native methods: optimal transport / Wasserstein (transport
 from holographic.misc.holographic_transport import wasserstein; from holographic.misc.holographic_graphsignal import laplacian_filter
 ```
 *Find it by:* data analysis, cluster, optimal transport, wasserstein, graph laplacian, spectral, dimensionality reduction, embedding
+
+### Decomposition contract (do the pieces sum back, and may you use them at time t)
+mind.decomposition_contract(decompose_fn, x): judge ANY decomposition on its three implicit promises. COMPLETE: components sum back within atol, else it is a projection wearing a decomposition's name. CAUSAL: lookahead_lint PER COMPONENT -- which parts are usable at time t vs diagnosis-only. HONEST RESIDUAL: flags when 'residual' carries the majority (a sliver removed, the rest renamed). Energy shares NOT normalised: correlated components stay visibly double-counted. Dogfood on record: smooth_sharp_split certifies COMPLETE + NON-CAUSAL..
+
+```python
+import numpy as np; x=np.cumsum(np.random.default_rng(0).standard_normal(200)); f=lambda s:{'mean':np.full(s.size,0.0),'residual':s}; print(mind.decomposition_contract(f,x)['residual_dominates'])
+```
+*Find it by:* decomposition contract components plus residual, split a signal into parts that sum back, trend seasonal residual split audit, decompose then verify the pieces add up, causal decomposition of a series, audit a decomposition for leakage, is my residual secretly the signal, which decomposition parts are usable live
 
 ### Detrend before you bake (non-periodic functions)
 the bandwidth probe is an FFT, and an FFT treats its samples as PERIODIC. Any function whose endpoints disagree carries an implicit jump at the wrap, and a jump has an unbounded spectrum -- so a STRAIGHT LINE probes at 607.9 where sqrt probes at 789.7 and a real 2-cycle sine probes at 12.5, and the bake spends its capacity on frequencies that do not exist. mind.bake_field(xs, ys, detrend=True) subtracts the endpoint line, bakes the residual, and restores the line analytically at fetch time. Measured absolute relative error, mean +- sd over 12 seeds, plain vs detrended: sqrt 0.111 +- 0.038 -> 0.009 +- 0.005 (12.6x), cube root 0.140 -> 0.017 (8.3x), f(x)=x 0.133 -> exactly 0.000. The plain bake is also UNSTABLE (1/(x+0.05) scores 1.83 +- 4.25) because an inflated bandwidth collapses the kernel toward a delta. It costs nothing when the endpoints already agree. RETIRED NEGATIVE: 'near-singular functions need domain warping' -- wrong cause (the wrap, not the singularity) and the weaker fix (warping buys 1.9x where detrending buys 8-16x)..
@@ -2265,6 +2385,14 @@ b = mind.bake_field(xs, ys, detrend=True); y = mind.fetch_field(b, 0.37, normali
 ```
 *Find it by:* detrend, bake a lookup table, bake sqrt, non-periodic bake, endpoint jump, spectral leakage, lut, near singular function
 
+### Directional & scale surrogates (pick the null that destroys YOUR claim)
+mind.sign_flip / iid_shuffle / block_shuffle / surrogate_ensemble: the null is a CHOICE -- destroy exactly what you claim, preserve everything else. sign_flip randomises DIRECTION keeping every magnitude exactly (a plain shuffle would over-credit magnitude structure). block_shuffle keeps structure shorter than `block`, destroys longer (the SCALE dial). iid_shuffle destroys all order. surrogate_ensemble streams n of any kind, memory-light. KEPT NEGATIVES: sign_flip is degenerate for magnitude-only statistics; block joins are fake jumps; block=1 IS iid_shuffle..
+
+```python
+import numpy as np; x=np.cumsum(np.random.default_rng(0).normal(size=512)); s=mind.sign_flip(x); print(bool(np.array_equal(np.abs(s),np.abs(x))), len(list(mind.surrogate_ensemble(x,'block_shuffle',n=3,block=64))))
+```
+*Find it by:* sign flipped surrogate, flip the signs of my data randomly, randomize direction keep magnitudes, shuffle in blocks, block bootstrap, destroy short range structure keep long, null that keeps volatility but randomizes direction, which null should I use
+
 ### Doppler velocity & drift acceleration
 read VELOCITY and ACCELERATION out of a spectral shift or drift (holographic_dedoppler). doppler_velocity turns an observed vs rest wavelength into a line-of-sight velocity (classical v=c*z, or relativistic, which stays below c); redshift gives z; doppler_shift is the forward model (velocity -> observed wavelength). drift_acceleration turns a narrowband frequency drift rate (Hz/s -- what detect_drifting finds) into the emitter's acceleration a=-c*(df/dt)/f: the SETI reading of a drifting tone. Field-native. doppler_velocity / redshift / doppler_shift / drift_acceleration.
 
@@ -2273,6 +2401,22 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); lr=656.28e-9; print(round(f
 ```
 *Find it by:* doppler velocity, redshift to velocity, radial velocity from wavelength, relativistic doppler, doppler shift, wavelength shift to speed, drift rate to acceleration, how fast is it moving
 
+### Envelope forecast (predict the SIZE of the next move, not its direction)
+mind.envelope_forecast(series): a calibrated band for |next move| from trailing scale + conformal RATIO residuals -- one quantile serves every volatility state; an additive margin under-covers storms, over-covers calm (pinned). Ships with holdout coverage and a zero-directional-bits note (never launders scale skill into direction). envelope_vs_constant is the mandatory baseline; verdict names the case: BOTH-COVER (ratio is the score), CONSTANT-FAILED (drift broke the constant band; ratio is not a ranking), CONDITIONAL-FAILED (do not quote)..
+
+```python
+import numpy as np; r=np.random.default_rng(0); s=np.where((np.arange(2000)//250)%2==0,0.5,2.5); x=np.cumsum(r.normal(size=2000)*s); e=mind.envelope_forecast(x); print(round(e['coverage_holdout'],2), round(e['upper'],2))
+```
+*Find it by:* predict the size of the next move not its direction, volatility forecast band, how big will the next change be, magnitude forecast band, scale of the next move, envelope forecast with intervals, forecast a band not a point, volatility clustering forecast
+
+### Event study (what happens after the signal fires, vs a shift null)
+mind.event_study(outcome, events, horizon): cumulative mean path around each event vs the CIRCULAR-SHIFT null -- the whole pattern slid by a random offset, preserving count and every spacing, so the null inherits clustering AND overlap; only alignment is tested. Returns forward {z,p}, pre_trend {z,p} (large pre-trend z = the event DEFINITION already contains the move), n_overlapping, shared_fraction. KEPT NEGATIVE, measured: overlap makes the naive across-events t false-alarm at 28% on noise where this null holds 2% -- never rebuild a CI from mean_path. Edges dropped, never truncated..
+
+```python
+import numpy as np; r=np.random.default_rng(0); y=r.standard_normal(3000); ev=list(range(100,2900,140)); [y.__setitem__(slice(e+1,e+9), y[e+1:e+9]+0.4) for e in ev]; res=mind.event_study(y, ev, horizon=15); print(round(res['forward']['z'],1), res['n_events'])
+```
+*Find it by:* event study forward paths, average path after an event, forward returns after a trigger, what happens after the signal fires, aligned windows around events, post event drift measurement, superposed epoch analysis, does my trigger predict anything
+
 ### Exact periodic PDE solve (spectral Laplace)
 on a PERIODIC grid the Laplacian is a circular convolution, so it is DIAGONAL in the Fourier basis and the solve is closed form. mind.solve_poisson_periodic(f) inverts laplacian(u)=f in one FFT; mind.diffuse_periodic(T, alpha, t) evolves the heat equation to ANY time t in one evaluation (each mode decays by exp(-alpha k^2 t)) -- no time step, no stability limit, no substepping. Measured exact to 6.7e-16 where 1000 iterative steps sit at 1.5e-4. Periodic only: the Neumann/edge-replicated Laplacian is NOT circular..
 
@@ -2280,6 +2424,14 @@ on a PERIODIC grid the Laplacian is a circular convolution, so it is DIAGONAL in
 u = mind.solve_poisson_periodic(f, dx=1/64); T = mind.diffuse_periodic(T0, alpha=0.01, t=1e6, dx=1/64)
 ```
 *Find it by:* spectral laplace, poisson fft, closed form heat, exact diffusion, periodic pde, fourier solve, no time step, steady state exact
+
+### Look-ahead linter (prove the signal only used the past)
+mind.lookahead_lint(signal_fn, x): recomputes signal_fn on truncated prefixes and demands the shared range be IDENTICAL -- a causal pipeline cannot know whether data exists after t, so drift IS leakage: full-sample z-score, centred smoother, global min-max and detrend all caught at machine precision with a first-bad index; trailing EMA/z pass at exactly 0.0. Pair with mind.target_shift_probe (signal AHEAD of its target or explaining it? catches the contemporaneous leak; a symmetric centred-label leak belongs to the lint). Necessary, not sufficient..
+
+```python
+import numpy as np; x=np.cumsum(np.random.default_rng(0).standard_normal(300)); bad=lambda s:(s-s.mean())/s.std(); good=lambda s: np.concatenate([[0.],np.diff(s)]); print(mind.lookahead_lint(bad,x)['causal'], mind.lookahead_lint(good,x)['causal'])
+```
+*Find it by:* look ahead linter, detect future leakage in an evaluation, did the mask use future data, find look ahead bias in my backtest, check an evaluation for future information, leak detector for a signal pipeline, is my feature peeking at the future, prefix consistency check
 
 ### Nystrom kernel (re-enable)
 apply a kernel-weighted field in O(N*m) instead of exact O(N^2), gated by a low-rank probe: if a cheap held-out probe says the kernel is low-rank (smooth) use Nystrom (measured 6-14x faster, near-exact), else fall back to exact. The exact fallback is always correct, so the gate can't be wrong.
@@ -2394,7 +2546,7 @@ import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); x=np.co
 *Find it by:* clockwise only rotation, one way rotation cost, monotone phase, irreversible rotation, ratchet cost, group versus monoid, can only rotate one direction, cost of one directional rotation
 
 ### mutual_information
-MUTUAL INFORMATION between two signals (holographic_mutualinfo) -- bits of shared information, zero iff independent (discrete or continuous, continuous quantile-binned). Raw MI is biased upward by finite samples, so mutual_information_vs_null reports MI ABOVE a SHUFFLE NULL as a z-score -- a dependence counts only when it clears the null (raw MI without its null is a Rorschach test). The honest dependence gate.
+MUTUAL INFORMATION between two signals (holographic_mutualinfo) -- bits of shared information, zero iff independent (discrete or continuous, continuous quantile-binned). Raw MI is biased upward by finite samples, so mutual_information_vs_null reports MI ABOVE a SHUFFLE NULL -- read `excess` (BITS) as the HEADLINE, z as support: z answers is-it-nonzero and inflates with sample size at fixed dependence (same ~0.01-bit coupling: z=2.5 at n=3k, z=31.5 at n=48k; canon z=+92 that was ~0.02 bits -- present, useless). Raw MI without its null is a Rorschach test..
 
 ```python
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); x=np.random.default_rng(0).normal(size=2000); print(round(m.mutual_information_vs_null(x, x)['z'],1))
@@ -2488,6 +2640,14 @@ measure claims honestly: error bars + significance (measure), ablation studies (
 from holographic.misc.holographic_measure import ...; from holographic.misc.holographic_ablate import ...
 ```
 *Find it by:* measure, error bars, significance, ablation, false discovery rate, calibrated, benchmark, variance
+
+### Screen a battery of detectors (honesty gates inside the loop)
+mind.signal_program() -> SignalProgram: add_check registers detectors, screen(states, targets) evaluates ALL at once -- every effect returns WITH its split-half replication and FDR verdict; no path yields the seductive number alone. Passers are correlation-clustered (0.9-correlated checks = ONE finding); an empty pass-list is a RESULT with a reason. build_committee seats a VETO COMMITTEE (one rep per cluster, tie=abstain) that must pass ITS OWN gates on fresh data; empty committee refuses. program_vector fingerprints the battery..
+
+```python
+import numpy as np; r=np.random.default_rng(0); s=r.standard_normal((600,4)); t=np.sign(s[:,0])*np.abs(r.standard_normal(600)); p=mind.signal_program(seed=0); p.add_check('real', lambda x: x[:,0]); p.add_check('noise', lambda x: x[:,1]); rep=p.screen(s,t); print(rep['passed'], rep['clusters'], rep['refused'])
+```
+*Find it by:* screen many detectors in one pass, battery of checks as one program, evaluate all signal checks simultaneously, test many hypotheses with fdr built in, committee of detectors that refuses to overfit, which of my signals actually survive, multiple comparisons across a detector family, screen candidates honestly
 
 ### Textured LOD that routes by measurement (atlas report + re-bake)
 A decimated mesh that STILL WEARS ITS TEXTURE: m.mesh_textured_lod(mesh, texture) measures the atlas (m.uv_atlas_report) and picks the route -- coherent atlas -> cheap uv transfer; fragmented scan atlas -> re-bake into a new per-face atlas (m.mesh_rebake_texture). WHY: a scan's atlas had 4079 islands at a MEDIAN OF 1 FACE, so per-vertex transfer put 90% of LOD faces across island boundaries and rendered as speckle, no error raised. Measured: speckle energy 0.136 -> 0.054 (source 0.055); render error 0.120 -> 0.057. keep_uv='auto' now REFUSES fragmented transfers and names the right route..
@@ -2751,6 +2911,13 @@ thread magnetic flux through a ring interferometer and MEASURE the Aharonov-Bohm
 import lecore; m=lecore.UnifiedMind(); m.aharonov_bohm_phase(1.0,ring_radius=30)
 ```
 
+### Antiperiodic (Mobius) fraction -- is a circle the wrong carrier?
+a circular encoding CANNOT hold a sign-flipping pattern: it wraps theta and theta+pi onto the same point, destroying the antiperiodic half on encode. Split two periods by halves -- (a+b)/2 periodic, (a-b)/2 antiperiodic -- an exact orthogonal split with no FFT bin-parity bookkeeping, parts summing back bit-for-bit. Reads ~1.0 for f(t+T)=-f(t), ~0.0 for f(t+T)=+f(t), 0.5 for a 50/50 sum. The diagnostic that turns 'circle or Mobius strip?' from a guess into a measurement.
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(); t=np.arange(256); (round(m.antiperiodic_fraction(np.cos(np.pi*t/128)),3), round(m.antiperiodic_fraction(np.cos(2*np.pi*t/128)),3))
+```
+
 ### Auto-retopo (blockout to quad cage)
 AUTO-RETOPO: turn a messy BLOCK-OUT (skin_skeleton blob, metaball, boolean mess) into a clean quad-dominant cage in ONE call (m.auto_retopo): voxel_remesh COARSE (keep ~12-20) -> quad_remesh -> optional catmull_clark(subdivide). With target=, shrinkwraps onto it and scores IoU. Returns {mesh, quad_fraction, report, iou?}. ENDS the base-mesh pipeline: place joints -> skin -> auto_retopo -> clean model. MEASURED: a skinned blob -> 0.77-1.00 quad fraction, watertight. KEPT NEG: uniform topology not artist edge FLOW -- a base asset, not a hero face; quad_remesh cost rises fast with tris..
 
@@ -2793,6 +2960,13 @@ combine things into one: bundle (superposition, weighted = soft mixture), lerp /
 from holographic.misc.holographic_blendhome import Blend; Blend.bundle(vectors, weights)
 ```
 
+### Calibration vs value (a good forecast is not yet a good decision)
+mind.calibration_vs_value(probs, outcomes): Murphy-decomposed Brier (reliability / resolution / uncertainty) beside realized net under act-if-p>=tau (tau sweep, never/always baselines), verdicts SEPARATE. Pinned: a calibrated CONSTANT forecast is worthless -- resolution is the number that failed, and the verdict names it -- while the same forecast monotone-squashed to 38x worse reliability keeps 100% of its achievable value: calibration is a REPAIR, resolution is the SOURCE. KEPT NEG: value_best is an argmax over taus (a selection) -- pick tau elsewhere or ledger the sweep..
+
+```python
+import numpy as np; r=np.random.default_rng(0); p=np.clip(r.beta(2,2,500),.01,.99); y=(r.random(500)<p).astype(float); res=mind.calibration_vs_value(p,y,cost=0.05); print(res['verdicts']['value'][:40], round(res['resolution'],3))
+```
+
 ### Call a faculty by name (JSON dispatch)
 mind.invoke(name, args): run ONE public faculty by name with a dict of args -- the dispatch every non-HTTP client used to re-implement. m.invoke('double', {'x':21}) -> 42. Private/unknown names raise ValueError, never a silent wrong result. args may be a dict (kwargs), a list (positional), or None. Returns the RAW result -- JSON coercion is the service's boundary job. holographic_service now delegates here, so /invoke and in-process callers share ONE set of rules instead of two copies that drift..
 
@@ -2828,11 +3002,32 @@ IMPORT GRAPH with positions (holographic_deptrace.trace / import_edges): m.trace
 import lecore; m=lecore.UnifiedMind(); t=m.trace_imports('holographic.io_and_interop.holographic_ccrun'); (t['modules'], t['edges_by_kind'])
 ```
 
+### Code health: complexity x exposure x exercise (risk, not size)
+raw cyclomatic complexity ranks the WRONG thing, and measuring it proved it: the top-scoring functions here (parse_description 65, mesh_parts 57, rebake_texture 54) are all exercised -- they score high BECAUSE they are load-bearing, and load-bearing code got tests. Risk is the cross product: 1858 functions no test mentions, 22 at CC>=20, and the worst cell is an ADVERTISED catalog capability at CC 46 that nothing tests. Stdlib ast; 0.92 top-100 rank agreement with radon. Mention scan, not coverage.
+
+```python
+import lecore; m=lecore.UnifiedMind(); m.audit_complexity(limit=3)['totals']
+```
+
 ### Collapse nodes into one reusable subgraph node
 GROUP a selection into ONE node (NodeGraph.collapse): g.collapse([n1, n2]) contracts the selection into a single subgraph node, re-pointing every external wire so the graph computes EXACTLY what it did before -- a refactor, not an edit. External sources become typed group INPUT sockets (deduped); inner outputs that feed outside, PLUS any with no consumer, become OUTPUTS (so collapsing a TERMINAL selection stays readable). Nests recursively; JSON-serializable into a FRESH registry. REFUSES a cycle-creating collapse, leaving the graph untouched. g.expand(id) is the inverse..
 
 ```python
 import lecore; m=lecore.UnifiedMind(); g=m.node_graph(); a=g.add('sdf_sphere', {'radius':1.0}); b=g.add('sdf_box'); u=g.add('sdf_union'); g.connect(a,'out',u,'a'); g.connect(b,'out',u,'b'); gid=g.collapse([a,b]); (gid, sorted(g.nodes))
+```
+
+### Conditional coverage (is the interval's guarantee real in every state?)
+mind.conditional_coverage(resid_calib, resid_test, condition): the conformal coverage check split inside/outside a condition (regime, storm gate, load level). Marginal coverage is an AVERAGE and can hold while both sides fail in opposite directions -- canon: nominal 90%, ~97% calm / ~70% storm, calibrated on paper, useless where needed. `degraded` flags a side missing nominal by >2 binomial SEs; thin sides report reliable=False. KEPT NEGATIVE: the split-conformal guarantee IS marginal; closing a gap needs per-condition calibration -- this says whether..
+
+```python
+import numpy as np; r=np.random.default_rng(0); storm=np.arange(400)%4==0; test=np.where(storm,r.normal(0,3,400),r.normal(0,1,400)); print(mind.conditional_coverage(r.normal(0,1,400), test, storm, alphas=(0.1,))[0]['degraded'])
+```
+
+### Conditional statistics (all / inside / outside / difference)
+mind.conditional(values, condition): any measurement FOUR ways in one call -- overall, inside the condition, outside, and the difference (Welch z + p) -- with detection floors and a loud warning when the split is EX-POST. condition is a Gate (causal), an ExPostMask, or a raw boolean array (deliberately ex-post: trusting the caller is how look-ahead gets in). Measured reframe: an unconditional average hid two OPPOSITE behaviours -- trending when calm, whipsawing in storms, flat on average. Condition a weak effect before abandoning it, a strong one before believing it..
+
+```python
+import numpy as np; r=np.random.default_rng(0); v=r.normal(0,1,600); f=np.zeros(600,bool); f[::3]=True; v[f]+=1.0; c=mind.conditional(v,f); print(round(c['diff'],2), c['separates'], c['causal'])
 ```
 
 ### Curve-curve intersection
@@ -2861,6 +3056,13 @@ clean a render or signal with one home: image SVGF (variance-guided a-trous) or 
 
 ```python
 from holographic.rendering.holographic_denoisehome import Denoise; Denoise.image(img, N, A, D, method='svgf')
+```
+
+### Detection floor (no effect above X)
+mind.min_detectable_effect(test_fn, x, effect_grid, surrogate, power): turn 'we found nothing' into 'nothing here above X' -- the only null result that can be argued with. Injects effects of known size into surrogates of your OWN x (so the noise level is the one you face) and reports the smallest size the test catches at the target power, plus the power curve. floor=None means extend the grid upward, not that the floor is zero. KEPT NEGATIVE: a floor is conditional on the injection SHAPE, and the surrogate must DESTROY the statistic tested or the curve degenerates to 0/1..
+
+```python
+import numpy as np, math; x=np.random.default_rng(0).normal(size=400); t=lambda v: math.erfc(abs(v.mean()/(v.std(ddof=1)/math.sqrt(len(v))))/math.sqrt(2)); print(mind.min_detectable_effect(t,x,[0.05,0.1,0.15,0.2],surrogate='sign_flip',n_trials=40)['floor'])
 ```
 
 ### Documentation map (which doc answers which question)
@@ -2905,6 +3107,13 @@ one claim gets an honest CI from measure(); a TABLE of ablations is a scan, and 
 aug, n_load_bearing, n_survive = measure.fdr_gate(rows, alpha=0.1)
 ```
 
+### Function-granularity reachability (the engine audits itself)
+the other audits reason about MODULES and all report zero gaps -- a module passes if it has a docstring, public exports and a reference from UnifiedMind. None looks INSIDE the file, so functions can be reachable by nothing while their module passes. This one partitions every public engine function into faculty / catalogued / called / TEST-ONLY / orphan. TEST-ONLY is the valuable bucket: works, tested, exposed nowhere -- so by this repo's own rule it does not exist. Conservative, never deletes.
+
+```python
+mind.audit_orphans()['counts']
+```
+
 ### GPU-reproducible 32-bit hash (PCG, matches GLSL)
 hash_unit is 64-bit, so a GPU shader (GLSL ES 3.00 / WGSL, 32-bit ints) cannot reproduce it -- why value_noise could not emit. hash32_pcg is the 32-bit companion: a PCG output hash (Jarzynski & Olano 2020) of mul/xor/shift that wrap mod 2**32 identically in NumPy uint32 and a GLSL uint, so noise built on it matches per-point CPU vs GPU. hash32_unit keys it on lattice coords; hash32_pcg_glsl emits the GLSL. Coarser than hash_u64 -- reach for it only for the GPU case (it unblocked pattern_to_glsl('noise32'/'fbm32'))..
 
@@ -2933,11 +3142,25 @@ Partition nodes into CONNECTED COMPONENTS under an undirected edge list -- the g
 import lecore; m=lecore.UnifiedMind(); comps=m.graph_connected_components(5, [(0,1),(1,2),(3,4)]); (len(comps)==2, comps[0]==[0,1,2], comps[1]==[3,4])
 ```
 
+### IES photometric file (a real luminaire's measured falloff)
+parse an IESNA LM-63 file -- the format lighting manufacturers actually publish -- into a (candela_profile, max_vertical_angle) pair usable as a light's angular falloff. Takes the file TEXT not a path, so it works on an upload, a string inside a scene description, or a file you read yourself. This is how a render stops using an invented cosine falloff and starts using the measured distribution of an actual fixture.
+
+```python
+import lecore; m=lecore.UnifiedMind(); m.load_ies('IESNA:LM-63-2002\nTILT=NONE\n1 1000 1 3 1 1 -1 0 0 0\n1.0 1.0 0.0\n0 45 90\n0\n1000 500 0\n')[1]
+```
+
 ### Identify an element by its properties
 IDENTIFY the element(s) whose categorical fingerprint {category, state} matches given properties (holographic_elements.identify_element) -- the REVERSE of element() (which looks up BY name). m.identify_element({'category':'noble_gas','state':'gas'}) -> the noble gases, ranked by match_record over all 43 element records, gated by decide_or_abstain. confident is False when several elements share the fingerprint (honest under-determined answer; narrow with more fields). KEPT NEG: categorical only -- atomic number/mass excluded..
 
 ```python
 import lecore; m=lecore.UnifiedMind(); r=m.identify_element({'category':'noble_gas','state':'gas'}); print([s for s,sc in r['ranked'][:3]], r['confident'])
+```
+
+### Insurance profile (does filtering delete the effect?)
+mind.insurance_profile(values, condition): before excluding the ugly periods, ask whether the payoff LIVES there. Reports share_inside, frac_events, lift and `premium_inside` -- a minority of events carrying a majority of the value. Measured: an effect paid +36bp per event inside storms, +4bp outside; it WAS storm insurance, and filtering them removed ~90% of the edge while every other statistic improved. Applies to code and caches: pruning a rarely-hit path deletes error-path insurance. KEPT NEGATIVE: a premium in a rare state also signals too little data there..
+
+```python
+import numpy as np; f=np.zeros(500,bool); f[:60]=True; pay=np.where(f,0.36,0.04); i=mind.insurance_profile(pay,f); print(i['premium_inside'], round(i['lift'],1))
 ```
 
 ### Invite button (shareable join link for a session)
@@ -2975,8 +3198,15 @@ learn the RECURRING CHUNKS of a symbol stream by iterated pair promotion (BPE --
 from holographic.agents_and_reasoning.holographic_chunkcodebook import workflow_stream; s = workflow_stream(); cb = mind.learn_chunks(s); assert mind.chunk_decode(mind.chunk_encode(s, cb), cb) == s; print(mind.chunk_stats(s, cb))
 ```
 
+### Loss space report (where the losses live, per axis, vs its own null)
+mind.loss_space_report(values, conditions=None): the SHAPE of a loss record on three axes, each vs the null erasing only the structure under test. TAIL: worst-5% share of loss vs a matched Gaussian (heavier = the mean is a comfort blanket). TIME: longest losing streak vs the permutation null (z>2 = losses arrive together). CONDITION: per mask, loss share vs occupancy under the circular-shift null -- 10% occupancy carrying 60% of loss is the gate candidate. Loss-side sibling of the insurance profile. Too few losses -> a scarcity report, not a z..
+
+```python
+import numpy as np; r=np.random.default_rng(0); v=r.normal(0.05,1,500); storm=np.zeros(500,bool); storm[100:160]=True; v[storm]-=1.5; rep=mind.loss_space_report(v, conditions={'storm': storm}); print(rep['verdict'][:60])
+```
+
 ### Low eigenvectors of an operator (matvec-only, no scipy)
-The k LOWEST eigenvectors of a Hermitian PSD operator from its MATVEC alone (m.low_eigenvectors) -- the band a spectral analysis needs (mesh eigenmaps, Fiedler order, modal shapes) at sizes where a dense O(n^3) eigh is unaffordable. Block SHIFTED INVERSE ITERATION on the shared conjugate gradient: solve (A - shift*I) Y = X, orthonormalise, repeat; a small negative shift pulls out the bottom of the spectrum. VERIFIED vs dense eigh on a sphere: l=1 eigenspace residual 2.5e-11. Deterministic (seeded start, fixed Gram-Schmidt). Returns (eigenvalues, eigenvectors)..
+The k LOWEST eigenvectors of a Hermitian PSD operator from its MATVEC alone (m.low_eigenvectors) -- the low band (mesh eigenmaps, Fiedler order, modal shapes) where dense eigh is unaffordable. Block shifted inverse iteration on the shared cg. VERIFIED vs eigh on a sphere: residual 2.5e-11. Also reachable as laplacian_eigenbasis(L, n_basis, method='iterative') -- the H3 fold; dense stays the default (KEPT NEG, measured: eigh wins ~30x on a DENSE matvec; this pays only for sparse/implicit operators). Deterministic. Returns (eigenvalues, eigenvectors)..
 
 ```python
 import numpy as np, lecore; m=lecore.UnifiedMind(); A=np.random.default_rng(0).standard_normal((30,30)); A=A@A.T; w,U=m.low_eigenvectors(lambda x:A@x,30,float(np.abs(A).sum(1).max()),k=4,dtype=float,shift=float(np.linalg.eigvalsh(A)[0]-0.5),iters=80); np.allclose(np.sort(w),np.linalg.eigvalsh(A)[:4],atol=1e-2)
@@ -3066,6 +3296,13 @@ curvature ON a parametric surface (K9), not sampled off a mesh: Gaussian/mean/pr
 import numpy as np, lecore; m=lecore.UnifiedMind(); sph=lambda u,v: np.array([2*np.cos(u)*np.sin(v),2*np.sin(u)*np.sin(v),2*np.cos(v)]); round(m.surface_curvature(sph,0.7,1.0)['gaussian'],3)
 ```
 
+### Per-regime validation (one effect, or one regime's story?)
+mind.across_regimes(values, series=...): evaluate an effect inside EVERY measured regime -- pass segments, or pass the series and they are measured by the engine's change-point segmenter. Per segment: n/mean/t/p plus a DETECTION FLOOR, so an empty regime reports 'nothing above X', not 'nothing'. Across segments: sign consistency, a sign test, and `concentration` (share carried by one regime). Measured: a real effect was positive in 3 of 4 regimes; an artifact with a comparable headline had >0.9 in one. KEPT NEGATIVE: the sign test is underpowered -- read concentration first..
+
+```python
+import numpy as np; r=np.random.default_rng(0); v=r.normal(0,1,600); v[150:300]+=1.2; a=mind.across_regimes(v,segments=[(0,150),(150,300),(300,450),(450,600)]); print(round(a['concentration'],2), a['consistent'])
+```
+
 ### Polarized light (Stokes state)
 the STATE of polarized light as a Stokes vector [S0,S1,S2,S3] (holographic_stokes): total intensity plus linear (Q,U) and CIRCULAR (V / handedness) polarization. Field-native (a whole image is (...,4)); reports degree-of-polarization, e-vector angle and handedness; scalar radiance lifts/round-trips byte-identically. The circular channel is the one the mantis shrimp uniquely sees.
 
@@ -3094,6 +3331,13 @@ a quantum dot as a potential well or barrier, and the MEASURED transmission of a
 import lecore; m=lecore.UnifiedMind(); d=m.quantum_dot_well((160,80),(80,40),depth=-8.0,width=2.5); m.quantum_transmission(0.7,dot_V=d,shape=(160,80),steps=300)
 ```
 
+### Re-clock a series (sample when it moves, not when time passes)
+mind.reclock(series, step, axis) emits one event per `step` of axis movement -- quiet stretches cheap, busy dense; per-event DURATION is the activity channel with magnitude divided out. axis=None is the price clock (cumulative |diff| of the series itself), the only configuration whose sharpening is MEASURED; foreign axes added nothing (|z|<1.4). duration_stats + duration_resolution_check read the channel honestly. KEPT NEGATIVES: events completing inside one sample are counted (skipped_gap), never fabricated; a quantised duration grid makes stats artifacts..
+
+```python
+import numpy as np; x=np.cumsum(np.random.default_rng(0).normal(size=800)); ev=mind.reclock(x, step=2.0); print(ev['n_events'], mind.duration_resolution_check(ev)['ok'])
+```
+
 ### Realtime session (draft frames, refine pass, multi-format payload)
 a viewport wants a frame NOW; a render wants it RIGHT. mind.realtime_session(render_session) gives both: `frame(camera, known_shift=)` is a DRAFT that reprojects the previous frame and re-shades only the news (an exact-k oldest-age budget plus the disocclusion border, which must be shaded because the previous frame never saw it); `refine()` traces every pixel; `payload(kinds)` pushes the same scene as PIXELS, MESH, SPLATS, SHADER (WGSL) and LOD (progressive TT descriptor) -- every value plain data, strict-JSON safe. THE MISSING HALF, NOW SHIPPED: RefreshRenderer computed a budget and called shade(mask), and its own docstring admitted 'a real renderer WOULD shade only those pixels' -- nothing did, because render_surface traced every pixel. The famous '5x fewer shader evaluations' was an arithmetic statement about a mask, not a saving anyone had realised. render_surface now takes pixel_mask= and base=: MEASURED 3.2x faster at a 20% mask and 6.2x at 5%, BIT-IDENTICAL on the pixels it shades, base preserved elsewhere, and bit-identical to before when no mask is given. KEPT NEGATIVE: PASS `known_shift` -- recovering the camera's motion from the pixels costs 2,280 extra traces, 3.7 dB, and a -4.52 dB TAIL SLOPE (the loop warps its own output and the error compounds); with a known shift the tail is +0.16 dB. THE CONTRACT'S HONEST ASYMMETRY: a draft frame CONVERGES to the refined frame, but a draft SIMULATION does not converge to its refinement -- mind.draft_vs_refine_simulation measures it, and `fluid` at grid 32 against 48 has relative error 1.000 while grid 24 has 0.669, NON-MONOTONIC. The coarse run is a different trajectory of a chaotic system, not a blurred one. Refining a render sharpens it; refining a chaotic solve replaces it. CACHES: the previous frame and a per-pixel AGE buffer; `scene_version` keys the mesh/splat/lod payloads so a camera move rebuilds no geometry; the RenderSession's fat-margin preview cache is deliberately left alone, because serving a stale frame into a warp compounds..
 
@@ -3102,6 +3346,13 @@ import numpy as np; from holographic.mesh_and_geometry.holographic_surface impor
     def eval(self, P): return np.linalg.norm(P, axis=1) - 0.9
     def ids(self, P): return np.zeros(len(P), int)
 sess = RenderSession(S(), {0: SurfaceMaterial.from_name('plastic')}, Camera(eye=(0,0,3.2), target=(0,0,0), fov_deg=50), width=32, height=32); rt = mind.realtime_session(sess, budget=0.2); print(rt.frame(known_shift=(0.0, -0.3))); print(rt.stats())
+```
+
+### Reclock persistence vs its own null (the manufactured-momentum trap)
+mind.rotation_persistence(events) is the NAIVE readout; mind.null_persistence(series, step) is the honest one -- the full reclock chain run on surrogates via pipeline_null. The manufactured DIRECTION is a property of the mechanism: renko made +72% fake momentum on pure noise, this total-variation clock makes ~25% fake reversion on the SAME noise -- two clocks, two confident opposite stories, one structureless input. null_mean far from 0.5 IS the manufacturing, on display. KEPT NEGATIVE: price clock only -- an external axis has no defined reordering under a surrogate..
+
+```python
+import numpy as np; x=np.random.default_rng(0).normal(size=2000); r=mind.null_persistence(x, step=2.0, n=60); print(round(r['observed'],2), round(r['null_mean'],2), round(r['z'],1))
 ```
 
 ### Recursive factoring (past the resonator's cliff)
@@ -3130,6 +3381,20 @@ borrowed from ocean physics: a FAST component tracks the present while a SLOW on
 
 ```python
 d = mind.regime_detector(); div, layer, new = d.observe(x)
+```
+
+### Resting fills + paper book (passive adverse selection; forward test with gates)
+mind.resting_fill_sim(path, events, delta): unconditional mark-out is +delta by construction (the discount a naive backtest banks); FILLED mark-out on a random walk is NEGATIVE -- being chosen claws back more than the discount. Extra adverse: momentum -2.45 << rw -0.53 < reversion -0.21; depth shrinks the per-fill extra while fills collapse. Price-path only: real queues are WORSE. mind.paper_book(lag, cost): forward harness with gates attached -- actionable entries (lag>=1), costs, gate masks, sleeves with the MEDIAN beside the mean. Proves plumbing, not edge..
+
+```python
+import numpy as np; r=np.random.default_rng(0); p=list(np.cumsum(r.standard_normal(3000))); res=mind.resting_fill_sim(p, list(range(50,2900,40)), delta=1.0); print(round(res['selection_cost'],2), round(res['fill_rate'],2))
+```
+
+### Rolling / streaming statistics (causal by construction, exact by default)
+mind.rolling_stats(x, window, stats=(...)): trailing mean/std/min/max/range/quantile/drawdown/ewma/ewm_std series -- window ENDING at each position, NaN in warm-up (never a silently-shrunk window), every stat lint-causal at 0.0 drift and BIT-identical to the conditioning gate's TRAILING_STATS. Exact per-window default; the O(n) cumsum path is opt-in (1e8 offset: fast std off by 8.75 vs 2e-9 exact). mind.streaming_stats(window) is the live sibling: Welford + monotonic deques; warm_start replays history through the same push() so live == backtest tail..
+
+```python
+import numpy as np; x=np.cumsum(np.random.default_rng(0).standard_normal(100)); r=mind.rolling_stats(x, 20, stats=('std','drawdown')); s=mind.streaming_stats(window=20).warm_start(x); print(round(r['std'][-1],6), round(s.std(),6))
 ```
 
 ### Sampling
@@ -3186,6 +3451,13 @@ make any constraint SPRINGY instead of rigid, in physical units: mind.project_on
 
 ```python
 x, n, ok = mind.project_onto_constraints(x0, [proj], iters=64, stiffness=(15.0, 1.0), dt=1/240)
+```
+
+### Split-half replication (the gate that kills artifacts)
+mind.split_half(values) or mind.split_half(events, values): cut the measurements in two, measure the effect in each half, PASS only if both halves agree in SIGN and each is significant. mode='contiguous' (default) does the killing; mode='interleave' shares the regime, so passing interleaved while failing contiguous means REGIME-BOUND. Returns per-half mean/t/p plus `passed`. Measured: killed four artifacts every other readout called real, no false rejections. KEPT NEGATIVE: normal-approx p (small_sample flags halves under 30); replication is not multiplicity control -- run bh_fdr too..
+
+```python
+import numpy as np; r=np.random.default_rng(0); v=np.concatenate([r.normal(0.6,1,200), r.normal(0.0,1,200)]); print(mind.split_half(v)['passed'], mind.split_half(v,mode='interleave')['passed'])
 ```
 
 ### Stream to OBS (browser-source capture profile)
@@ -3638,4 +3910,4 @@ import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors(
 
 ---
 
-*461 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*497 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

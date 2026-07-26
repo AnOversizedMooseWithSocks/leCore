@@ -7,7 +7,7 @@ families are domain-based, and a private cross-family import is exactly what the
 Fragmented specialized copies of one mathematical move go stale independently; this module is where such moves
 get GENERALIZED AND PROMOTED, one at a time, with every existing caller pinned bit-identical. The inventory of
 remaining candidates was tracked in docs/PROMOTION_LEDGER.md, now archived into docs/NOTES_concepts.md
-(all promotions P1-P5 shipped; P6 closed; P7 resolved as audit-only). New candidates go in docs/OPEN_ITEMS.md.
+(all promotions P1-P5 shipped; P6 closed; P7 resolved as audit-only). The promotion lessons live in docs/NOTES_concepts.md.
 
 DESIGN RULES for anything promoted here:
   * matvec closures, never materialized matrices -- the operator IS the interface.

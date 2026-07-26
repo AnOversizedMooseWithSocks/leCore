@@ -177,6 +177,76 @@ class Catalog:
         scored.sort(key=lambda s: (-s[0], s[1]))                     # best score first, then name (stable)
         return [cap for _, _, cap in scored[:k]]
 
+    def route_or_abstain(self, problem, k=3, n_null=64, z_min=0.8, seed=0):
+        """J1 -- NULL-REFERENCED ROUTING: find_capability that can say "no capability matches" instead of
+        returning its argmax on noise. The router failure this closes, from the campaign's own logs:
+        'counter traders' confidently routed to dialect emitters and 'purple monkey dishwasher' to an
+        opponent-agreement tool -- the renko lesson (machinery manufactures confident-looking output on
+        nothing) applied to retrieval.
+
+        THE NULL: n_null scrambled queries with the SAME token count as the real one, each token drawn
+        uniformly from the CATALOG'S OWN vocabulary. In-domain word salad is exactly what a misroutable
+        query is, so the null must be built from in-domain words -- a null of out-of-vocabulary gibberish
+        ('flurb granp') scores 0 by construction and gates nothing (the null that cannot fire is
+        decoration; measured before choosing this one). The top-1 match score becomes a z against that
+        null; below z_min the router ABSTAINS with the z on record. Token COUNT is matched, so query
+        length is controlled for by construction.
+
+        z_min=0.8 was CHOSEN FROM THE MEASURED SEPARATION, not principle: the two logged misroutes score
+        z=-0.9 and z=-1.5 (below the null MEAN -- word salad matches scattered prose better than a wrong
+        real query does), while the weakest genuine queries tested ('screen a battery of detectors',
+        'non-manifold repair') sit at z=+1.02; a first draft at z_min=2.0 abstained on them outright, and a
+        line AT 1.0 clipped them (rounding is not a margin). 0.8 leaves the weakest-true population 0.2
+        above the line and the misroutes 1.7 sigma below it; recalibration is owed whenever the catalog's
+        vocabulary shifts substantially (kept negative 1 below).
+
+        Returns {"abstain": bool, "z": float, "score": float, "null_mean": float, "null_std": float,
+        "hits": [(capability, score), ...] or [], "reason": str}. Deterministic given seed.
+
+        KEPT NEGATIVES: (1) abstention is calibrated to the catalog's CURRENT vocabulary -- a new family of
+        capabilities shifts the null, so z values are not comparable across catalog versions; (2) a genuine
+        query phrased entirely in words the catalog never uses will abstain -- that abstention is CORRECT
+        behaviour (the catalog truly has no purchase on it), but it reads as a false negative to a user who
+        knows a capability exists under other words; the fix is aliases, not a lower z_min."""
+        real = self.find_scored(problem, k=k)
+        top = real[0][1] if real else 0.0
+        q_tokens = _tokens(problem)
+        if not q_tokens:
+            return {"abstain": True, "z": 0.0, "score": 0.0, "null_mean": 0.0, "null_std": 0.0,
+                    "hits": [], "reason": "empty query"}
+        # The null depends only on (token count, n_null, seed) -- not on the query's words -- so it is
+        # memoised per catalog state: without this, a 7-query battery re-ran 64*7 full-catalog searches and
+        # blew the test-time budget (measured 26s -> the cache takes repeats to ~0). The cache is keyed on
+        # the capability COUNT as a cheap staleness proxy; register_capability growth invalidates it.
+        np = __import__("numpy")
+        key = (len(q_tokens), int(n_null), int(seed), len(self._by_name))
+        cache = getattr(self, "_null_floor_cache", None)
+        if cache is None:
+            cache = self._null_floor_cache = {}
+        if key in cache:
+            mu, sd = cache[key]
+        else:
+            vocab = sorted(set(t for cap in self._by_name.values()
+                               for t in (set(_tokens(cap.name)) | set(_tokens(cap.does))
+                                         | set(_alias_tokens(cap.aliases)))))
+            rng = np.random.default_rng(seed)
+            null = np.empty(int(n_null))
+            for i in range(int(n_null)):
+                fake = " ".join(vocab[int(j)] for j in rng.integers(0, len(vocab), len(q_tokens)))
+                fs = self.find_scored(fake, k=1)
+                null[i] = fs[0][1] if fs else 0.0
+            mu, sd = float(null.mean()), float(null.std()) or 1.0
+            cache[key] = (mu, sd)
+        z = (top - mu) / sd
+        if z < float(z_min):
+            return {"abstain": True, "z": float(z), "score": float(top), "null_mean": mu, "null_std": sd,
+                    "hits": [], "reason": "top score %.2f does not clear the in-vocabulary noise floor "
+                                          "(null %.2f +/- %.2f, z=%.1f < %.1f) -- no capability matches"
+                                          % (top, mu, sd, z, z_min)}
+        return {"abstain": False, "z": float(z), "score": float(top), "null_mean": mu, "null_std": sd,
+                "hits": real, "reason": "top score clears the noise floor (z=%.1f)" % z}
+
+
     def find_scored(self, problem, k=3):
         """Like find_capability, but returns [(capability, score)] best-first -- so an agentic layer can turn the raw
         match scores into a CONFIDENCE (how dominant the top hit is). Same scoring, same deterministic tie-break."""
@@ -1351,7 +1421,7 @@ def default_catalog():
 
     c.register_capability('Holistic lattice cleanup (FHRR resonator factoring of FPE coordinates)', 'R6 (gated) -- factor a BOUND PRODUCT of fractional-power-encoded integer coordinates back to its integers via a Fourier-HRR RESONATOR (Frady/Kent 2020; m.fpe_lattice_resonator). For the HOLISTIC-ONLY regime: coordinates never observed, only the single bound product prod z_a^k (a lattice point stored inside a structure, or under correlated phase noise). Iterated cleanup over power-codebooks converges to the integer tuple -- VERIFIED 200/200 at 0.6 rad noise, 51x51 codebooks in dim 1024. KEPT NEGATIVE: for DIRECT noisy coords np.round dominates (83% at sigma 0.3); do NOT use the resonator there.', example="import numpy as np, hashlib, lecore; m=lecore.UnifiedMind(); b=lambda s:np.exp(1j*np.random.default_rng(int.from_bytes(hashlib.sha256(s.encode()).digest()[:8],'big')).uniform(-np.pi,np.pi,1024)); zu,zv=b('u'),b('v'); coords,rep=m.fpe_lattice_resonator((zu**7)*(zv**13),[zu,zv],[21,21]); coords==[7,13]", native=True, module='fpe', aliases=('factor a bound product of lattice coordinates', 'recover integer coordinates from a hypervector', 'resonator cleanup to nearest lattice point', 'decode a fractional-power-encoded position', 'snap a holographic coordinate to a lattice', 'factor an fpe product back to integers'), semantic='analyze/measure')
 
-    c.register_capability('Low eigenvectors of an operator (matvec-only, no scipy)', 'The k LOWEST eigenvectors of a Hermitian PSD operator from its MATVEC alone (m.low_eigenvectors) -- the band a spectral analysis needs (mesh eigenmaps, Fiedler order, modal shapes) at sizes where a dense O(n^3) eigh is unaffordable. Block SHIFTED INVERSE ITERATION on the shared conjugate gradient: solve (A - shift*I) Y = X, orthonormalise, repeat; a small negative shift pulls out the bottom of the spectrum. VERIFIED vs dense eigh on a sphere: l=1 eigenspace residual 2.5e-11. Deterministic (seeded start, fixed Gram-Schmidt). Returns (eigenvalues, eigenvectors).', example='import numpy as np, lecore; m=lecore.UnifiedMind(); A=np.random.default_rng(0).standard_normal((30,30)); A=A@A.T; w,U=m.low_eigenvectors(lambda x:A@x,30,float(np.abs(A).sum(1).max()),k=4,dtype=float,shift=float(np.linalg.eigvalsh(A)[0]-0.5),iters=80); np.allclose(np.sort(w),np.linalg.eigvalsh(A)[:4],atol=1e-2)', native=True, module='numerics', aliases=('smallest eigenvectors of a large matrix', 'sparse eigensolver without scipy', 'a few low eigenvectors near a shift', 'inverse iteration eigenpairs', 'fiedler vector via matvec', 'modal shapes of an operator'), semantic='analyze/measure')
+    c.register_capability('Low eigenvectors of an operator (matvec-only, no scipy)', 'The k LOWEST eigenvectors of a Hermitian PSD operator from its MATVEC alone (m.low_eigenvectors) -- the low band (mesh eigenmaps, Fiedler order, modal shapes) where dense eigh is unaffordable. Block shifted inverse iteration on the shared cg. VERIFIED vs eigh on a sphere: residual 2.5e-11. Also reachable as laplacian_eigenbasis(L, n_basis, method=\'iterative\') -- the H3 fold; dense stays the default (KEPT NEG, measured: eigh wins ~30x on a DENSE matvec; this pays only for sparse/implicit operators). Deterministic. Returns (eigenvalues, eigenvectors).', example='import numpy as np, lecore; m=lecore.UnifiedMind(); A=np.random.default_rng(0).standard_normal((30,30)); A=A@A.T; w,U=m.low_eigenvectors(lambda x:A@x,30,float(np.abs(A).sum(1).max()),k=4,dtype=float,shift=float(np.linalg.eigvalsh(A)[0]-0.5),iters=80); np.allclose(np.sort(w),np.linalg.eigvalsh(A)[:4],atol=1e-2)', native=True, module='numerics', aliases=('smallest eigenvectors of a large matrix', 'sparse eigensolver without scipy', 'a few low eigenvectors near a shift', 'inverse iteration eigenpairs', 'fiedler vector via matvec', 'modal shapes of an operator'), semantic='analyze/measure')
 
     c.register_capability('Mesh as a sequence (SATO-SEQ: stable serialization + hypervector encode)', 'SATO-SEQ -- serialise a mesh to a STABLE token sequence (m.mesh_to_tokens) and bind a sequence into one FHRR hypervector (m.seq_encode / m.seq_decode). Three deterministic vertex orders: morton (Z-order curve, byte-stable under input permutation), zyx (PolyGen lexicographic), fiedler (spectral seriation). Coords quantised to `bits` bits (3 tokens/vertex). Sequence -> hypervector by permutation-power binding; past the ~dim/8 capacity cliff it stores block vectors (round-trips exactly). Clean-room from Morton/PolyGen, NOT the GPL-3.0 SATO code. Returns (tokens, order, grid).', example="import lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; toks,idx,grid=m.mesh_to_tokens(box(),order='morton',bits=8); H=m.seq_encode(toks[:48],dim=1024,seed=0,vocab_size=256); m.seq_decode(H,48,dim=1024,seed=0,vocab_size=256)==toks[:48]", native=True, module='meshseq', aliases=('turn a mesh into a sequence', 'serialize a mesh to tokens', "morton order a mesh's vertices", 'encode a mesh as a hypervector', 'spectral vertex ordering of a mesh', 'tokenize a mesh for a sequence model'), semantic='analyze/measure')
 
@@ -1889,6 +1959,613 @@ def default_catalog():
                                                 "is a time series more than autocorrelation",
                                                 "structure beyond the spectrum", "spectrum-preserving shuffle",
                                                 "honest baseline for a continuous signal"))
+    c.register_capability("Route or abstain (find_capability judged against its own noise floor)",
+                          "mind.route_or_abstain(query): null-referenced routing (J1) -- the top-1 "
+                          "find_capability score judged against a null of scrambled queries drawn from the "
+                          "CATALOG'S OWN vocabulary at matched token count (out-of-vocab gibberish scores 0 "
+                          "and gates nothing). Below z_min the router says 'no capability matches' WITH the "
+                          "z, instead of returning its argmax on noise. Logged misroutes abstain at "
+                          "z=-0.9/-1.5; real queries route from z=+1.0; z_min=0.8 sits in the measured gap. "
+                          "KEPT NEG: a genuine query in words the catalog never uses abstains CORRECTLY -- "
+                          "the fix is aliases.",
+                          example="r=mind.route_or_abstain('counter traders'); "
+                                  "print(r['abstain'], round(r['z'],1))",
+                          native=True, aliases=("no capability matches", "router that can abstain",
+                                                "abstain instead of misroute",
+                                                "routing confidence against a null",
+                                                "is this query answerable by the catalog",
+                                                "gate the capability search",
+                                                # WAS "refuse to route nonsense" -- the bare token `nonsense` made
+                                                # the garbage query "qwzx nonsense zzzq" match THIS entry at 0.333,
+                                                # which is precisely the failure test_pure_nonsense_routes_to_unknown
+                                                # exists to catch (and had already caught once, in a does-field).
+                                                # The irony is instructive: the capability whose whole job is to
+                                                # abstain on gibberish was the one gibberish routed to. Reworded, not
+                                                # deleted -- the user intent is real, only the bare token was toxic,
+                                                # and two additive phrasings replace the reach it lost.
+                                                "refuse to route a query it cannot match",
+                                                "abstain instead of guessing",
+                                                "say no capability matches instead of guessing",
+                                                "null referenced retrieval"),
+                          semantic="analyze/measure", consumes=(), produces=())
+
+    c.register_capability("Wave-state encoder (carrier + envelope as one recallable state)",
+                          "mind.wave_state_encoder(dim, window): one OHLC window -> one unit state vector "
+                          "carrying carrier SHAPE (close-based, unit-RMS), both envelope excursion channels "
+                          "in scale units (their amplitude is exactly what a close-only encoder cannot see; "
+                          "identical closes with 4x swing separate at cos 0.77), and an energy term. Offset/"
+                          "scale invariant (same shape at 10x level: cos 0.94 -- the invariance IS the "
+                          "level-blindness kept negative). Feeds causal_index recall (5/5 right-regime "
+                          "neighbours, fitless) and signal_program screening. D4 note travels with it: "
+                          "calibration on these states is NOT exploitability.",
+                          example="import numpy as np; e=mind.wave_state_encoder(256, window=8); "
+                                  "o=np.arange(8.0); w=np.stack([o,o+1,o-1,o+0.5],axis=1); "
+                                  "v=e.encode(w); print(round(float(v@v),2))",
+                          native=True, aliases=("wave state encoder carrier and envelope",
+                                                "encode candle high low as one vector",
+                                                "carrier plus envelope state",
+                                                "within interval extremes encoding",
+                                                "envelope excursion state vector",
+                                                "resonance recall state for candles",
+                                                "ohlc window to hypervector",
+                                                "state vector with intra bar swing"),
+                          semantic="create/emit", consumes=(), produces=())
+
+    c.register_capability("Decomposition contract (do the pieces sum back, and may you use them at time t)",
+                          "mind.decomposition_contract(decompose_fn, x): judge ANY decomposition on its three "
+                          "implicit promises. COMPLETE: components sum back within atol, else it is a "
+                          "projection wearing a decomposition's name. CAUSAL: lookahead_lint PER COMPONENT "
+                          "-- which parts are usable at time t vs diagnosis-only. HONEST RESIDUAL: flags "
+                          "when 'residual' carries the majority (a sliver removed, the rest renamed). Energy "
+                          "shares NOT normalised: correlated components stay visibly double-counted. Dogfood "
+                          "on record: smooth_sharp_split certifies COMPLETE + NON-CAUSAL.",
+                          example="import numpy as np; x=np.cumsum(np.random.default_rng(0).standard_normal(200)); "
+                                  "f=lambda s:{'mean':np.full(s.size,0.0),'residual':s}; "
+                                  "print(mind.decomposition_contract(f,x)['residual_dominates'])",
+                          native=True, aliases=("decomposition contract components plus residual",
+                                                "split a signal into parts that sum back",
+                                                "trend seasonal residual split audit",
+                                                "decompose then verify the pieces add up",
+                                                "causal decomposition of a series",
+                                                "audit a decomposition for leakage",
+                                                "is my residual secretly the signal",
+                                                "which decomposition parts are usable live"),
+                          semantic="analyze/measure", consumes=(), produces=())
+
+    c.register_capability("Resting fills + paper book (passive adverse selection; forward test with gates)",
+                          "mind.resting_fill_sim(path, events, delta): unconditional mark-out is +delta by "
+                          "construction (the discount a naive backtest banks); FILLED mark-out on a random "
+                          "walk is NEGATIVE -- being chosen claws back more than the discount. Extra "
+                          "adverse: momentum -2.45 << rw -0.53 < reversion -0.21; depth shrinks the per-fill "
+                          "extra while fills collapse. Price-path only: real queues are WORSE. "
+                          "mind.paper_book(lag, cost): forward harness with gates attached -- actionable "
+                          "entries (lag>=1), costs, gate masks, sleeves with the MEDIAN beside the mean. "
+                          "Proves plumbing, not edge.",
+                          example="import numpy as np; r=np.random.default_rng(0); p=list(np.cumsum(r.standard_normal(3000))); "
+                                  "res=mind.resting_fill_sim(p, list(range(50,2900,40)), delta=1.0); "
+                                  "print(round(res['selection_cost'],2), round(res['fill_rate'],2))",
+                          native=True, aliases=("resting order adverse selection",
+                                                "limit order fill simulator", "who fills against me",
+                                                "passive fill toxicity", "queue position fill model",
+                                                "paper trading harness", "forward test book with gates",
+                                                "walk forward paper account",
+                                                "simulated account with sleeves and medians",
+                                                "cost of being filled passively"),
+                          semantic="analyze/measure", consumes=(), produces=())
+
+    c.register_capability("Hostile-data guide (the honesty layer's field manual)",
+                          "docs/HOSTILE_DATA_GUIDE.md: find real structure in noisy sequential data and "
+                          "refuse to be fooled -- pipelines that manufacture (79.4% persistence on white "
+                          "noise), evaluations that leak (self-matching kNN at MSE 0.0; 28% false-alarm "
+                          "under overlap), batteries that select (p=4e-4 dies on a 64-look book), aggregates "
+                          "hiding the loss shape. Names the tool per failure and THE ORDER TO RUN THEM (lint "
+                          "-> pipeline_null -> effects -> battery+ledger -> events -> conditions -> costs -> "
+                          "committee); a refusal is a result. Every snippet is executed by its test, so the "
+                          "guide cannot rot without a failure.",
+                          example="import pathlib; p=pathlib.Path('docs/HOSTILE_DATA_GUIDE.md'); "
+                                  "t=p.read_text(); print(t.splitlines()[0], len(t) > 4000)",
+                          native=True, aliases=("guide to analyzing hostile data",
+                                                "how to find real structure in noisy data",
+                                                "honest analysis workflow",
+                                                "which honesty tool do I use when",
+                                                "recipe for validating a signal",
+                                                "hostile data checklist",
+                                                "field manual for the honesty layer",
+                                                "order to run the honesty tools"),
+                          semantic="analyze/measure", consumes=(), produces=())
+
+    c.register_capability("Circular encoder (angles and clocks with an EXACT wrap)",
+                          "mind.circular_encoder(dim, period): encode a CIRCULAR variable (angle, hour, "
+                          "weekday, phase) so encode(x) == encode(x+period) to 1e-12 and similarity depends "
+                          "ONLY on the circular gap: 23:59 and 00:01 read as 2-minute neighbours where the "
+                          "LINE ScalarEncoder reads cos 0.21 (periodicity needs INTEGER harmonics -- a "
+                          "construction, not a parameter). Poisson-minus-DC kernel: small antipodal dip "
+                          "(<0.25, measured); concentration trades lobe width for dip. decode() = circular "
+                          "cleanup. Audit carried: SignedEncoder REFUTED -- signed is native to "
+                          "ScalarEncoder.",
+                          example="import numpy as np; e=mind.circular_encoder(512, period=24.0); "
+                                  "a=e.encode(23.9); b=e.encode(0.1); c=e.encode(12.0); "
+                                  "print(round(float(a@b),2), round(float(a@c),2), round(e.decode(a),1))",
+                          native=True, aliases=("circular variable encoding", "encode an angle as a vector",
+                                                "hour of day encoder", "day of week embedding",
+                                                "encode a phase with wraparound",
+                                                "periodic value to hypervector",
+                                                "clock arithmetic similarity",
+                                                "wraparound aware encoder", "encode headings or bearings"),
+                          semantic="create/emit", consumes=(), produces=())
+
+    c.register_capability("Loss space report (where the losses live, per axis, vs its own null)",
+                          "mind.loss_space_report(values, conditions=None): the SHAPE of a loss record on "
+                          "three axes, each vs the null erasing only the structure under test. TAIL: worst-5% "
+                          "share of loss vs a matched Gaussian (heavier = the mean is a comfort blanket). "
+                          "TIME: longest losing streak vs the permutation null (z>2 = losses arrive "
+                          "together). CONDITION: per mask, loss share vs occupancy under the circular-shift "
+                          "null -- 10% occupancy carrying 60% of loss is the gate candidate. Loss-side "
+                          "sibling of the insurance profile. Too few losses -> a scarcity report, not a z.",
+                          example="import numpy as np; r=np.random.default_rng(0); v=r.normal(0.05,1,500); "
+                                  "storm=np.zeros(500,bool); storm[100:160]=True; v[storm]-=1.5; "
+                                  "rep=mind.loss_space_report(v, conditions={'storm': storm}); "
+                                  "print(rep['verdict'][:60])",
+                          native=True, aliases=("where do the losses concentrate",
+                                                "characterize my failures", "loss concentration report",
+                                                "which states lose the money",
+                                                "are losses clustered in time",
+                                                "breakdown of losses by condition",
+                                                "longest losing streak versus chance",
+                                                "loss tail heavier than gaussian",
+                                                "profile of the worst outcomes"),
+                          semantic="analyze/measure", consumes=(), produces=())
+
+    c.register_capability("Calibration vs value (a good forecast is not yet a good decision)",
+                          "mind.calibration_vs_value(probs, outcomes): Murphy-decomposed Brier (reliability /"
+                          " resolution / uncertainty) beside realized net under act-if-p>=tau (tau sweep, "
+                          "never/always baselines), verdicts SEPARATE. Pinned: a calibrated CONSTANT forecast "
+                          "is worthless -- resolution is the number that failed, and the verdict names it -- "
+                          "while the same forecast monotone-squashed to 38x worse reliability keeps 100% of "
+                          "its achievable value: calibration is a REPAIR, resolution is the SOURCE. KEPT NEG: "
+                          "value_best is an argmax over taus (a selection) -- pick tau elsewhere or ledger "
+                          "the sweep.",
+                          example="import numpy as np; r=np.random.default_rng(0); p=np.clip(r.beta(2,2,500),.01,.99); "
+                                  "y=(r.random(500)<p).astype(float); "
+                                  "res=mind.calibration_vs_value(p,y,cost=0.05); "
+                                  "print(res['verdicts']['value'][:40], round(res['resolution'],3))",
+                          native=True, aliases=("calibration is not profit",
+                                                "does my good forecast make money",
+                                                "forecast quality versus decision value",
+                                                "well calibrated but worthless",
+                                                "score a forecast by the decisions it drives",
+                                                "value of a forecast under an action rule",
+                                                "brier score versus realized payoff",
+                                                "reliability diagram with payoffs",
+                                                "resolution versus reliability"),
+                          semantic="analyze/measure", consumes=(), produces=())
+
+    c.register_capability("Event study (what happens after the signal fires, vs a shift null)",
+                          "mind.event_study(outcome, events, horizon): cumulative mean path around each "
+                          "event vs the CIRCULAR-SHIFT null -- the whole pattern slid by a random offset, "
+                          "preserving count and every spacing, so the null inherits clustering AND overlap; "
+                          "only alignment is tested. Returns forward {z,p}, pre_trend {z,p} (large pre-trend "
+                          "z = the event DEFINITION already contains the move), n_overlapping, "
+                          "shared_fraction. KEPT NEGATIVE, measured: overlap makes the naive across-events t "
+                          "false-alarm at 28% on noise where this null holds 2% -- never rebuild a CI from "
+                          "mean_path. Edges dropped, never truncated.",
+                          example="import numpy as np; r=np.random.default_rng(0); y=r.standard_normal(3000); "
+                                  "ev=list(range(100,2900,140)); "
+                                  "[y.__setitem__(slice(e+1,e+9), y[e+1:e+9]+0.4) for e in ev]; "
+                                  "res=mind.event_study(y, ev, horizon=15); print(round(res['forward']['z'],1), res['n_events'])",
+                          native=True, aliases=("event study forward paths",
+                                                "average path after an event",
+                                                "forward returns after a trigger",
+                                                "what happens after the signal fires",
+                                                "aligned windows around events",
+                                                "post event drift measurement",
+                                                "superposed epoch analysis",
+                                                "does my trigger predict anything",
+                                                "pre event trend check"),
+                          semantic="analyze/measure", consumes=(), produces=())
+
+    c.register_capability("Rolling / streaming statistics (causal by construction, exact by default)",
+                          "mind.rolling_stats(x, window, stats=(...)): trailing mean/std/min/max/range/"
+                          "quantile/drawdown/ewma/ewm_std series -- window ENDING at each position, NaN in "
+                          "warm-up (never a silently-shrunk window), every stat lint-causal at 0.0 drift and "
+                          "BIT-identical to the conditioning gate's TRAILING_STATS. Exact per-window default; "
+                          "the O(n) cumsum path is opt-in (1e8 offset: fast std off by 8.75 vs 2e-9 exact). "
+                          "mind.streaming_stats(window) is the live sibling: Welford + monotonic deques; "
+                          "warm_start replays history through the same push() so live == backtest tail.",
+                          example="import numpy as np; x=np.cumsum(np.random.default_rng(0).standard_normal(100)); "
+                                  "r=mind.rolling_stats(x, 20, stats=('std','drawdown')); "
+                                  "s=mind.streaming_stats(window=20).warm_start(x); "
+                                  "print(round(r['std'][-1],6), round(s.std(),6))",
+                          native=True, aliases=("causal rolling standard deviation",
+                                                "trailing window statistics kit",
+                                                "rolling statistics without look ahead",
+                                                "streaming quantile", "running percentile of a stream",
+                                                "trailing drawdown series", "online mean and variance",
+                                                "ewma volatility series", "rolling quantile",
+                                                "warm start live statistics from a backtest",
+                                                # the everyday names a stranger reaches for FIRST: the
+                                                # specialist aliases above all missed "moving average",
+                                                # which lost to a reprojection-VELOCITY entry on lexical
+                                                # gravity ("moving"/"motion") in the post-merge sweep.
+                                                "moving average", "moving average over a window",
+                                                "simple moving average", "rolling mean",
+                                                "smooth a series with a sliding window"),
+                          semantic="analyze/measure", consumes=(), produces=())
+
+    c.register_capability("Look-ahead linter (prove the signal only used the past)",
+                          "mind.lookahead_lint(signal_fn, x): recomputes signal_fn on truncated prefixes and "
+                          "demands the shared range be IDENTICAL -- a causal pipeline cannot know whether "
+                          "data exists after t, so drift IS leakage: full-sample z-score, centred smoother, "
+                          "global min-max and detrend all caught at machine precision with a first-bad index; "
+                          "trailing EMA/z pass at exactly 0.0. Pair with mind.target_shift_probe (signal "
+                          "AHEAD of its target or explaining it? catches the contemporaneous leak; a "
+                          "symmetric centred-label leak belongs to the lint). Necessary, not sufficient.",
+                          example="import numpy as np; x=np.cumsum(np.random.default_rng(0).standard_normal(300)); "
+                                  "bad=lambda s:(s-s.mean())/s.std(); good=lambda s: np.concatenate([[0.],np.diff(s)]); "
+                                  "print(mind.lookahead_lint(bad,x)['causal'], mind.lookahead_lint(good,x)['causal'])",
+                          native=True, aliases=("look ahead linter", "detect future leakage in an evaluation",
+                                                "did the mask use future data",
+                                                "find look ahead bias in my backtest",
+                                                "check an evaluation for future information",
+                                                "leak detector for a signal pipeline",
+                                                "is my feature peeking at the future",
+                                                "prefix consistency check", "prove a pipeline is causal",
+                                                "is the signal ahead of its target"),
+                          semantic="analyze/measure", consumes=(), produces=())
+
+    c.register_capability("Causal recall (an index that cannot see the future)",
+                          "mind.causal_index() -> CausalIndex: append(vector, t) in time order -- backfilling "
+                          "the past refuses by name -- and nearest(query, t, k, lag>=1) searches ONLY items "
+                          "with time <= t - lag (lag=0 refused: simultaneous is not past). audit_causality "
+                          "VERIFIES the mask by perturbing future items and checking results are bit-identical. "
+                          "The demo it pins: naive full-history k=1 history-matching finds the query ITSELF -- "
+                          "perfect fake skill, 100% inflation -- while this index cannot self-match at any k. "
+                          "Exact scan only: a similarity forest cannot be time-masked (declared, not a TODO).",
+                          example="ci=mind.causal_index(); import numpy as np; r=np.random.default_rng(0); "
+                                  "[ci.append(r.standard_normal(8), float(t)) for t in range(50)]; "
+                                  "print(ci.nearest(r.standard_normal(8), 25.0, k=2), ci.nearest(r.standard_normal(8), 0.0))",
+                          native=True, aliases=("nearest neighbour search restricted to the past",
+                                                "recall only older items", "time filtered index",
+                                                "append only memory before t",
+                                                "history matching without look ahead",
+                                                "what did similar past states lead to",
+                                                "analog lookup that cannot see the future",
+                                                "knn over trailing history only",
+                                                "point in time similarity search"),
+                          semantic="analyze/measure", consumes=(), produces=())
+
+    c.register_capability("Selection ledger (correct over everything you TRIED, not what survived)",
+                          "mind.selection_ledger() -> SelectionLedger: record(name, p, family) every test AT "
+                          "THE MOMENT IT IS RUN, correct(alpha) computes FDR q-values over the WHOLE book or a "
+                          "named family; report() shows, per family, how many pass in-family but DIE on the "
+                          "book -- the look-elsewhere effect made visible (a p=4e-4 family winner dies on a "
+                          "64-look book). Append-only: withdraw() needs a reason and keeps the multiplicity "
+                          "cost; re-runs are sequences. to_json/from_json persist behind a hashlib chain that "
+                          "refuses a book with a deleted row. KEPT NEGATIVE: covers only what is written down.",
+                          example="led=mind.selection_ledger(); led.record('effect_a', 0.0004, family='routing'); "
+                                  "[led.record('sweep_%d'%i, 0.5, family='sweep') for i in range(60)]; "
+                                  "r=led.correct(alpha=0.05); print(r['family_size'], r['n_passed'])",
+                          native=True, aliases=("ledger of every test I ran",
+                                                "record all hypotheses tried this session",
+                                                "did I run it until it passed",
+                                                "ledger record over http", "session ledger for an agent",
+                                                "family wise correction across batteries",
+                                                "look elsewhere effect bookkeeping",
+                                                "how many things did I try before this worked",
+                                                "selection debt tracker",
+                                                "append a test result to a running ledger",
+                                                "session wide false discovery correction",
+                                                "multiple testing across the whole project"),
+                          semantic="analyze/measure", consumes=(), produces=())
+
+    c.register_capability("Screen a battery of detectors (honesty gates inside the loop)",
+                          "mind.signal_program() -> SignalProgram: add_check registers detectors, "
+                          "screen(states, targets) evaluates ALL at once -- every effect returns WITH its "
+                          "split-half replication and FDR verdict; no path yields the seductive number "
+                          "alone. Passers are correlation-clustered (0.9-correlated checks = ONE finding); "
+                          "an empty pass-list is a RESULT with a reason. build_committee seats a VETO "
+                          "COMMITTEE (one rep per cluster, tie=abstain) that must pass ITS OWN gates on "
+                          "fresh data; empty committee refuses. program_vector fingerprints the battery.",
+                          example="import numpy as np; r=np.random.default_rng(0); s=r.standard_normal((600,4)); "
+                                  "t=np.sign(s[:,0])*np.abs(r.standard_normal(600)); p=mind.signal_program(seed=0); "
+                                  "p.add_check('real', lambda x: x[:,0]); p.add_check('noise', lambda x: x[:,1]); "
+                                  "rep=p.screen(s,t); print(rep['passed'], rep['clusters'], rep['refused'])",
+                          native=True, aliases=("screen many detectors in one pass",
+                                                "battery of checks as one program",
+                                                "evaluate all signal checks simultaneously",
+                                                "test many hypotheses with fdr built in",
+                                                "committee of detectors that refuses to overfit",
+                                                "which of my signals actually survive",
+                                                "multiple comparisons across a detector family",
+                                                "screen candidates honestly", "detector battery",
+                                                "veto committee", "build a committee of detectors",
+                                                "combine signals with survival gates",
+                                                "majority vote of gated signals",
+                                                "empty committee as a result"),
+                          semantic="analyze/measure", consumes=(), produces=())
+
+    c.register_capability("Re-clock a series (sample when it moves, not when time passes)",
+                          "mind.reclock(series, step, axis) emits one event per `step` of axis movement -- "
+                          "quiet stretches cheap, busy dense; per-event DURATION is the activity channel with "
+                          "magnitude divided out. axis=None is the price clock (cumulative |diff| of the "
+                          "series itself), the only configuration whose sharpening is MEASURED; foreign axes "
+                          "added nothing (|z|<1.4). duration_stats + duration_resolution_check read the "
+                          "channel honestly. KEPT NEGATIVES: events completing inside one sample are counted "
+                          "(skipped_gap), never fabricated; a quantised duration grid makes stats artifacts.",
+                          example="import numpy as np; x=np.cumsum(np.random.default_rng(0).normal(size=800)); "
+                                  "ev=mind.reclock(x, step=2.0); "
+                                  "print(ev['n_events'], mind.duration_resolution_check(ev)['ok'])",
+                          native=True, aliases=("reclock a series by movement", "renko bricks",
+                                                "sample when it moves not when time passes",
+                                                "event time sampling", "emit an event per unit of change",
+                                                "price clock", "volume clock", "photon count clock",
+                                                "duration per event", "activity channel of a series",
+                                                "time per unit of progress"),
+                          semantic="analyze/measure", consumes=(), produces=())
+    c.register_capability("Reclock persistence vs its own null (the manufactured-momentum trap)",
+                          "mind.rotation_persistence(events) is the NAIVE readout; mind.null_persistence("
+                          "series, step) is the honest one -- the full reclock chain run on surrogates via "
+                          "pipeline_null. The manufactured DIRECTION is a property of the mechanism: renko "
+                          "made +72% fake momentum on pure noise, this total-variation clock makes ~25% fake "
+                          "reversion on the SAME noise -- two clocks, two confident opposite stories, one "
+                          "structureless input. null_mean far from 0.5 IS the manufacturing, on display. KEPT "
+                          "NEGATIVE: price clock only -- an external axis has no defined reordering under a "
+                          "surrogate.",
+                          example="import numpy as np; x=np.random.default_rng(0).normal(size=2000); "
+                                  "r=mind.null_persistence(x, step=2.0, n=60); "
+                                  "print(round(r['observed'],2), round(r['null_mean'],2), round(r['z'],1))",
+                          native=True, aliases=("brick direction persistence", "renko momentum test",
+                                                "is my reclocked momentum real",
+                                                "persistence of reclocked events against null",
+                                                "did the re-clocking invent the momentum",
+                                                "honest brick persistence", "event clock direction bias"),
+                          semantic="analyze/measure", consumes=(), produces=())
+
+    c.register_capability("Envelope forecast (predict the SIZE of the next move, not its direction)",
+                          "mind.envelope_forecast(series): a calibrated band for |next move| from trailing "
+                          "scale + conformal RATIO residuals -- one quantile serves every volatility state; "
+                          "an additive margin under-covers storms, over-covers calm (pinned). Ships with "
+                          "holdout coverage and a zero-directional-bits note (never launders scale skill "
+                          "into direction). envelope_vs_constant is the mandatory baseline; verdict names "
+                          "the case: BOTH-COVER (ratio is the score), CONSTANT-FAILED (drift broke the "
+                          "constant band; ratio is not a ranking), CONDITIONAL-FAILED (do not quote).",
+                          example="import numpy as np; r=np.random.default_rng(0); "
+                                  "s=np.where((np.arange(2000)//250)%2==0,0.5,2.5); x=np.cumsum(r.normal(size=2000)*s); "
+                                  "e=mind.envelope_forecast(x); print(round(e['coverage_holdout'],2), round(e['upper'],2))",
+                          native=True, aliases=("predict the size of the next move not its direction",
+                                                "volatility forecast band", "how big will the next change be",
+                                                "magnitude forecast band", "scale of the next move",
+                                                "envelope forecast with intervals", "forecast a band not a point",
+                                                "volatility clustering forecast", "range forecast calibrated"),
+                          semantic="analyze/measure", consumes=(), produces=())
+
+    c.register_capability("Conditional coverage (is the interval's guarantee real in every state?)",
+                          "mind.conditional_coverage(resid_calib, resid_test, condition): the conformal "
+                          "coverage check split inside/outside a condition (regime, storm gate, load level). "
+                          "Marginal coverage is an AVERAGE and can hold while both sides fail in opposite "
+                          "directions -- canon: nominal 90%, ~97% calm / ~70% storm, calibrated on paper, "
+                          "useless where needed. `degraded` flags a side missing nominal by >2 binomial SEs; "
+                          "thin sides report reliable=False. KEPT NEGATIVE: the split-conformal guarantee IS "
+                          "marginal; closing a gap needs per-condition calibration -- this says whether.",
+                          example="import numpy as np; r=np.random.default_rng(0); "
+                                  "storm=np.arange(400)%4==0; test=np.where(storm,r.normal(0,3,400),r.normal(0,1,400)); "
+                                  "print(mind.conditional_coverage(r.normal(0,1,400), test, storm, alphas=(0.1,))[0]['degraded'])",
+                          native=True, aliases=("conformal coverage by regime", "coverage report conditional",
+                                                "does the interval hold in storms",
+                                                "per regime interval coverage", "coverage inside a condition",
+                                                "is my forecast interval calibrated in every state",
+                                                "conditional conformal check"),
+                          semantic="analyze/measure", consumes=(), produces=())
+
+    c.register_capability("Cost wall + actionable fills (was the edge real at the moment of ACTION?)",
+                          "The action layer's two honesty gates. mind.net_of_costs(values, cost): net mean/t, "
+                          "wall_ratio, survives, breakeven ('survives at 5 bp, dies at 9' travels; 'survives' "
+                          "does not) -- per-event cost arrays supported, since a constant cost is a model. "
+                          "mind.realizable_fills(events, path, horizon): entry at the first REACHABLE state "
+                          "after the event is known vs the idealized emission price; latency_cost = the move "
+                          "that completed during recognition (canon: z=+20 at emission, NEGATIVE actionable). "
+                          "lag=0 refused by name; sweep the lag before believing an edge.",
+                          example="import numpy as np; r=np.random.default_rng(0); "
+                                  "v=r.normal(10,20,300); print(mind.net_of_costs(v,cost=17)['survives'], "
+                                  "round(mind.net_of_costs(v,cost=17)['breakeven_cost'],1))",
+                          native=True, aliases=("does the signal survive costs", "gross edge versus transaction costs",
+                                                "net of costs per trade", "cost wall evaluator",
+                                                "breakeven cost of a signal",
+                                                "enter at the price when the signal is known",
+                                                "emission versus actionable price", "signal known too late",
+                                                "backtest fill at the actionable price", "latency cost of acting",
+                                                "detection latency versus action latency",
+                                                "is my signal late by construction", "latency artifact check",
+                                                "can I actually trade this signal", "fees eat my profit"),
+                          semantic="analyze/measure", consumes=(), produces=())
+
+    c.register_capability("DPI guard (is this feature NEW information or a re-dressing?)",
+                          "mind.dpi_guard(features, new_feature): fit the proposal from a linear/quadratic "
+                          "expansion of the existing set on a train split, report R^2 on train AND HOLDOUT "
+                          "(never train alone); novel_frac = the reproducibly-unexplained share, the MOST it "
+                          "could add. DPI: a transform CONCENTRATES information, never creates it (canon: "
+                          "kernel lifts / embeddings / foreign clocks, weeks spent, ~0 new bits). KEPT "
+                          "NEGATIVES: novel may be noise (owes a target-side test in bits); exotic transforms "
+                          "outside the basis can slip. mind.holdout_auc pairs separability the same way.",
+                          example="import numpy as np; r=np.random.default_rng(0); F=r.normal(size=(500,3)); "
+                                  "g=np.tanh(F[:,0]+0.3*F[:,1]*F[:,2]); "
+                                  "print(mind.dpi_guard(F,g)['verdict'][:9], round(mind.dpi_guard(F,g)['r2_holdout'],2))",
+                          native=True, aliases=("is this feature actually new information",
+                                                "is it just a transform of existing features",
+                                                "data processing inequality guard", "dpi guard",
+                                                "does this embedding add anything",
+                                                "new feature or re-representation", "feature redundancy check",
+                                                "train and holdout auc", "overfit separability check",
+                                                "holdout auc"),
+                          semantic="analyze/measure", consumes=(), produces=())
+
+    c.register_capability("Split-half replication (the gate that kills artifacts)", "mind.split_half(values) or "
+                          "mind.split_half(events, values): cut the measurements in two, measure the effect in "
+                          "each half, PASS only if both halves agree in SIGN and each is significant. "
+                          "mode='contiguous' (default) does the killing; mode='interleave' shares the regime, "
+                          "so passing interleaved while failing contiguous means REGIME-BOUND. Returns per-half "
+                          "mean/t/p plus `passed`. Measured: killed four artifacts every other readout called "
+                          "real, no false rejections. KEPT NEGATIVE: normal-approx p (small_sample flags halves "
+                          "under 30); replication is not multiplicity control -- run bh_fdr too.",
+                          example="import numpy as np; r=np.random.default_rng(0); "
+                                  "v=np.concatenate([r.normal(0.6,1,200), r.normal(0.0,1,200)]); "
+                                  "print(mind.split_half(v)['passed'], mind.split_half(v,mode='interleave')['passed'])",
+                          native=True, aliases=("split half replication", "does it hold in both halves",
+                                                "check the effect replicates", "first half second half agreement",
+                                                "did this survive out of sample", "is this result an artifact",
+                                                "replicate on two halves", "sanity check my effect",
+                                                "did the edge decay", "test stability over time"),
+                          semantic="analyze/measure", consumes=(), produces=())
+    c.register_capability("Pipeline null (did my PROCESSING manufacture the structure?)",
+                          "mind.pipeline_null(pipeline_fn, x, surrogate): run your WHOLE chain on surrogates "
+                          "and score the statistic against the null the pipeline itself produces. Any smoothing, "
+                          "quantising, re-clocking or clustering step imposes correlations on whatever it is fed, "
+                          "INCLUDING pure noise, so a null on the raw input credits the pipeline's artifacts to "
+                          "the data. Measured: a re-clock made 72% direction persistence on noise (referenced "
+                          "truth: ANTI-persistence z=-7.3); a denoiser made 83.6%. Returns z/p/collapsed. KEPT "
+                          "NEGATIVE: a bad surrogate gives a healthy-looking meaningless z.",
+                          example="import numpy as np; d=np.random.default_rng(0).normal(size=1500); "
+                                  "pipe=lambda v:(lambda s: float(np.mean(s[1:]==s[:-1])))(np.sign(np.convolve(v,np.ones(9)/9,'valid'))); "
+                                  "r=mind.pipeline_null(pipe,d,surrogate='iid_shuffle',n=50); "
+                                  "print(round(r['observed'],3), round(r['z'],2))",
+                          native=True, aliases=("run my whole pipeline on surrogates",
+                                                "does my pipeline manufacture structure",
+                                                "null for a processing chain", "is my smoothing creating the signal",
+                                                "test the pipeline not just the statistic",
+                                                "baseline for a multi step analysis",
+                                                "did the preprocessing invent this", "surrogate through the same steps",
+                                                "am I fooling myself with resampling"),
+                          semantic="analyze/measure", consumes=(), produces=())
+    c.register_capability("Detection floor (no effect above X)", "mind.min_detectable_effect(test_fn, x, "
+                          "effect_grid, surrogate, power): turn 'we found nothing' into 'nothing here above X' "
+                          "-- the only null result that can be argued with. Injects effects of known size into "
+                          "surrogates of your OWN x (so the noise level is the one you face) and reports the "
+                          "smallest size the test catches at the target power, plus the power curve. floor=None "
+                          "means extend the grid upward, not that the floor is zero. KEPT NEGATIVE: a floor is "
+                          "conditional on the injection SHAPE, and the surrogate must DESTROY the statistic "
+                          "tested or the curve degenerates to 0/1.",
+                          example="import numpy as np, math; x=np.random.default_rng(0).normal(size=400); "
+                                  "t=lambda v: math.erfc(abs(v.mean()/(v.std(ddof=1)/math.sqrt(len(v))))/math.sqrt(2)); "
+                                  "print(mind.min_detectable_effect(t,x,[0.05,0.1,0.15,0.2],surrogate='sign_flip',n_trials=40)['floor'])",
+                          native=True, aliases=("smallest effect I could detect", "detection floor",
+                                                "minimum detectable effect", "statistical power curve",
+                                                "how big would an effect need to be", "how strong is my null result",
+                                                "could my test even have seen it", "power analysis",
+                                                "quantify what I ruled out"),
+                          semantic="analyze/measure", consumes=(), produces=())
+    c.register_capability("Arrow of time (is this series time-reversible?)", "mind.trev(x, lag) and "
+                          "mind.time_arrow_test(x, kind): the normalised third moment of the lagged difference "
+                          "is exactly zero for a time-reversal-invariant process and non-zero when rises and "
+                          "falls have different SHAPES; time_arrow_test scores it against a surrogate ensemble "
+                          "(value/null_mean/z/p). Large |z| says NONLINEAR -- a triage flag, not a detection. "
+                          "Defaults to the IAAFT null because a merely SKEWED series scores big against a "
+                          "phase-randomised one. KEPT NEGATIVE, measured: a global arrow can be entirely DIFFUSE "
+                          "(z=+6.4, all three localisation attempts null) -- never a per-window signal.",
+                          example="import numpy as np; saw=(np.arange(1024)%50)/50.0; "
+                                  "print(round(mind.trev(saw),2), round(mind.time_arrow_test(saw,n_surrogates=40)['z'],1))",
+                          native=True, aliases=("time reversal asymmetry", "is this series time reversible",
+                                                "arrow of time in a signal", "trev statistic",
+                                                "does the series look different backwards",
+                                                "detect nonlinearity in a time series",
+                                                "irreversibility test", "asymmetry between rises and falls"),
+                          semantic="analyze/measure", consumes=(), produces=())
+    c.register_capability("Directional & scale surrogates (pick the null that destroys YOUR claim)",
+                          "mind.sign_flip / iid_shuffle / block_shuffle / surrogate_ensemble: the null is a "
+                          "CHOICE -- destroy exactly what you claim, preserve everything else. sign_flip "
+                          "randomises DIRECTION keeping every magnitude exactly (a plain shuffle would "
+                          "over-credit magnitude structure). block_shuffle keeps structure shorter than `block`, "
+                          "destroys longer (the SCALE dial). iid_shuffle destroys all order. surrogate_ensemble "
+                          "streams n of any kind, memory-light. KEPT NEGATIVES: sign_flip is degenerate for "
+                          "magnitude-only statistics; block joins are fake jumps; block=1 IS iid_shuffle.",
+                          example="import numpy as np; x=np.cumsum(np.random.default_rng(0).normal(size=512)); "
+                                  "s=mind.sign_flip(x); "
+                                  "print(bool(np.array_equal(np.abs(s),np.abs(x))), "
+                                  "len(list(mind.surrogate_ensemble(x,'block_shuffle',n=3,block=64))))",
+                          native=True, aliases=("sign flipped surrogate", "flip the signs of my data randomly",
+                                                "randomize direction keep magnitudes", "shuffle in blocks",
+                                                "block bootstrap", "destroy short range structure keep long",
+                                                "null that keeps volatility but randomizes direction",
+                                                "which null should I use", "shuffle my data as a baseline",
+                                                "generate many surrogates cheaply"),
+                          semantic="analyze/measure", consumes=(), produces=())
+    c.register_capability("Causal gates (act only on what you knew at the time)",
+                          "mind.causal_gate(stat, window, threshold, compare): a condition that sees only "
+                          "TRAILING data, so it can be ACTED on, not merely described. Causal by construction "
+                          "and PROVABLY so -- audit_causality scrambles the future and checks the past does not "
+                          "move, catching full-sample normalisations and global-quantile thresholds. Composable "
+                          "with & | ~. Measured: a storm gate (trailing drawdown <=-15% OR vol top decile) left "
+                          "entries untouched and moved a book +22% -> +58.4% CAGR, maxDD -85.9% -> -47.1%. KEPT "
+                          "NEGATIVE: a hand-written mask claiming causal=True is a claim, not a proof.",
+                          example="import numpy as np, lecore; "
+                                  "path=np.cumsum(np.random.default_rng(0).normal(size=300))+100.0; "
+                                  "g=mind.causal_gate('drawdown',window=60,threshold=-0.05,compare='le'); "
+                                  "print(mind.causal_gate('std',window=60,threshold=1.0,compare='ge',"
+                                  "context=path)['audit']['passed'], int(g.mask(path).sum()))",
+                          native=True, aliases=("only act on information available at the time",
+                                                "stand aside when conditions are bad",
+                                                "causal filter no look ahead", "trailing window condition",
+                                                "did I accidentally use future data to filter",
+                                                "ex ante versus ex post", "risk off switch",
+                                                "gate my signal on volatility", "drawdown gate",
+                                                "prove my filter is not peeking"),
+                          semantic="analyze/measure", consumes=(), produces=())
+    c.register_capability("Conditional statistics (all / inside / outside / difference)",
+                          "mind.conditional(values, condition): any measurement FOUR ways in one call -- "
+                          "overall, inside the condition, outside, and the difference (Welch z + p) -- with "
+                          "detection floors and a loud warning when the split is EX-POST. condition is a Gate "
+                          "(causal), an ExPostMask, or a raw boolean array (deliberately ex-post: trusting the "
+                          "caller is how look-ahead gets in). Measured reframe: an unconditional average hid two "
+                          "OPPOSITE behaviours -- trending when calm, whipsawing in storms, flat on average. "
+                          "Condition a weak effect before abandoning it, a strong one before believing it.",
+                          example="import numpy as np; r=np.random.default_rng(0); v=r.normal(0,1,600); "
+                                  "f=np.zeros(600,bool); f[::3]=True; v[f]+=1.0; "
+                                  "c=mind.conditional(v,f); print(round(c['diff'],2), c['separates'], c['causal'])",
+                          native=True, aliases=("compare the statistic inside and outside a condition",
+                                                "break down a result by condition",
+                                                "split my results by market state",
+                                                "does the effect depend on conditions",
+                                                "conditional average", "subgroup analysis",
+                                                "is the effect different when x is true",
+                                                "measure inside versus outside"),
+                          semantic="analyze/measure", consumes=(), produces=())
+    c.register_capability("Per-regime validation (one effect, or one regime's story?)",
+                          "mind.across_regimes(values, series=...): evaluate an effect inside EVERY measured "
+                          "regime -- pass segments, or pass the series and they are measured by the engine's "
+                          "change-point segmenter. Per segment: n/mean/t/p plus a DETECTION FLOOR, so an empty "
+                          "regime reports 'nothing above X', not 'nothing'. Across segments: sign consistency, a "
+                          "sign test, and `concentration` (share carried by one regime). Measured: a real effect "
+                          "was positive in 3 of 4 regimes; an artifact with a comparable headline had >0.9 in "
+                          "one. KEPT NEGATIVE: the sign test is underpowered -- read concentration first.",
+                          example="import numpy as np; r=np.random.default_rng(0); v=r.normal(0,1,600); "
+                                  "v[150:300]+=1.2; a=mind.across_regimes(v,segments=[(0,150),(150,300),"
+                                  "(300,450),(450,600)]); print(round(a['concentration'],2), a['consistent'])",
+                          native=True, aliases=("measure the effect separately in each regime",
+                                                "does the effect hold in every period or just one",
+                                                "per regime breakdown", "did this work in all market conditions",
+                                                "is one period carrying my result",
+                                                "validate across time periods", "regime by regime table",
+                                                "check stability across segments"),
+                          semantic="analyze/measure", consumes=(), produces=())
+    c.register_capability("Insurance profile (does filtering delete the effect?)",
+                          "mind.insurance_profile(values, condition): before excluding the ugly periods, ask "
+                          "whether the payoff LIVES there. Reports share_inside, frac_events, lift and "
+                          "`premium_inside` -- a minority of events carrying a majority of the value. Measured: "
+                          "an effect paid +36bp per event inside storms, +4bp outside; it WAS storm insurance, "
+                          "and filtering them removed ~90% of the edge while every other statistic improved. "
+                          "Applies to code and caches: pruning a rarely-hit path deletes error-path insurance. "
+                          "KEPT NEGATIVE: a premium in a rare state also signals too little data there.",
+                          example="import numpy as np; f=np.zeros(500,bool); f[:60]=True; "
+                                  "pay=np.where(f,0.36,0.04); i=mind.insurance_profile(pay,f); "
+                                  "print(i['premium_inside'], round(i['lift'],1))",
+                          native=True, aliases=("is the payoff concentrated in the times I would exclude",
+                                               "should I filter out the bad periods",
+                                               "does removing the worst cases hurt me",
+                                               "where does my profit actually come from",
+                                               "is this effect insurance", "rare event pays for everything",
+                                               "safe to prune this rarely used path",
+                                               "value concentrated in few events"),
+                          semantic="analyze/measure", consumes=(), produces=())
+
     c.register_capability("ladder_predict", "predict what comes NEXT after a history using the ladder's learned "
                           "HIERARCHICAL alphabet (holographic_ladder) -- the compression<->prediction duality (a "
                           "good compressor is a good predictor). Predicts the next CHUNK and decodes it, so one "
@@ -1968,14 +2645,18 @@ def default_catalog():
     c.register_capability("mutual_information", "MUTUAL INFORMATION between two signals (holographic_mutualinfo) "
                           "-- bits of shared information, zero iff independent (discrete or continuous, continuous "
                           "quantile-binned). Raw MI is biased upward by finite samples, so mutual_information_vs_null "
-                          "reports MI ABOVE a SHUFFLE NULL as a z-score -- a dependence counts only when it clears "
-                          "the null (raw MI without its null is a Rorschach test). The honest dependence gate",
+                          "reports MI ABOVE a SHUFFLE NULL -- read `excess` (BITS) as the HEADLINE, z as "
+                          "support: z answers is-it-nonzero and inflates with sample size at fixed dependence "
+                          "(same ~0.01-bit coupling: z=2.5 at n=3k, z=31.5 at n=48k; canon z=+92 that was "
+                          "~0.02 bits -- present, useless). Raw MI without its null is a Rorschach test.",
                           example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
                           "x=np.random.default_rng(0).normal(size=2000); print(round(m.mutual_information_vs_null(x, x)['z'],1))",
                           native=True, aliases=("mutual information between two signals", "how much does x tell me about y",
                                                 "dependence between two variables", "information shared between signals",
                                                 "are two signals related", "statistical dependence", "shared information",
-                                                "does one signal predict another"))
+                                                "does one signal predict another", "effect size in bits",
+                                                "excess bits of dependence", "mutual information in bits",
+                                                "is my z score sample inflated"))
     c.register_capability("Capability URI namespace", "address every public function by a URI "
                           "'family/module/name' (holographic_capuri) so the 42 colliding short names disambiguate "
                           "by PATH -- 'sphere' -> mesh_and_geometry/sdf/sphere vs misc/codegen/sphere. Browse the "
@@ -4196,6 +4877,20 @@ def default_catalog():
                                                 "template", "recipe with holes", "compile", "content addressed compile",
                                                 "orchestrate", "plan tools", "reversible computation", "bytecode",
                                                 "make the vm faster", "speed up program execution", "simd decode"))
+    c.register_capability("Decoded-instruction cache (fetch/decode split from execute)", "decoding a VM "
+                          "instruction is a PURE function of (program vector, address) -- it never reads the "
+                          "accumulator -- so the plain interpreter re-derives eight transforms every time the "
+                          "program counter revisits an address (26x redundancy measured on a 64-iteration "
+                          "ITERATE over a 2-instruction body). DecodePlan decodes a whole BLOCK of addresses in "
+                          "ONE batched spectral sweep and answers every later visit from a content-addressed "
+                          "cache. MEASURED 6.7x-14x end-to-end; accumulators bit-identical and traces identical "
+                          "across 126 programs x 3 dims x 3 seeds. Opt-in, never-flip rule",
+                          example="mind.vm_decode_plan(True); mind.run_procedure([('LOAD','a'),('BIND','b'),('HALT',None)]); mind.vm_plan_stats()",
+                          native=True, aliases=("decoded instruction cache", "instruction cache", "decode cache",
+                                                "vectorize the interpreter", "batch decode a program",
+                                                "decode once execute many times", "why is my program slow",
+                                                "speed up run_procedure", "make the interpreter faster",
+                                                "cache decoded instructions", "fetch decode execute"))
     # --- vendored knowledge: a real dictionary + taxonomy for contextual awareness ---
     c.register_capability("Dictionary + taxonomy (vendored)", "a comprehensive vendored English DICTIONARY (~144k "
                           "words: definition, part of speech, synonyms, example) AND an is_a TAXONOMY (encyclopedia "
@@ -5227,6 +5922,83 @@ def default_catalog():
                           example="from holographic.simulation_and_physics.holographic_memoryhome import Memory; Memory.bind_cached(a, b, cache)",
                           native=True, aliases=("memory", "cache", "residency", "resident", "spectrum cache", "batch",
                                                 "bind_batch", "backend", "gpu", "jit", "working set", "hot"))
+    c.register_capability("Cache key cost (identity vs content addressing)", "the price of a cache KEY, measured "
+                          "rather than assumed. SpectrumCache shipped keying on a sha256 of the whole atom -- and "
+                          "hashing D floats costs MORE than transforming them (D=1024: 21.5us hash vs 13.0us rfft), "
+                          "so the cache measured 0.40x-0.82x scalar and 0.50x-0.70x inside fusion: SLOWER than no "
+                          "cache, while its docstring claimed 1.4x. key='identity' keys on the array object (O(1), "
+                          "pinned so the id cannot be recycled): 2.4x-2.6x scalar, 3.7x-4.3x in fuse_record, "
+                          "bit-identical. Content keying stays the default and is required when byte-identical "
+                          "arrays arrive as distinct objects",
+                          example="c = mind.spectrum_cache(key='identity'); mind.fuse_record(keys, values, spectrum_cache=c)",
+                          native=True, aliases=("cache key cost", "identity keyed cache", "content addressing cost",
+                                                "is my cache slower than no cache", "cheap cache key for a big array",
+                                                "avoid rehashing an immutable array", "hashing costs more than the work",
+                                                "make the spectrum cache actually fast", "cache without hashing the contents",
+                                                "why is my cache slow"))
+    c.register_capability("Function-granularity reachability (the engine audits itself)", "the other audits "
+                          "reason about MODULES and all report zero gaps -- a module passes if it has a "
+                          "docstring, public exports and a reference from UnifiedMind. None looks INSIDE the "
+                          "file, so functions can be reachable by nothing while their module passes. This one "
+                          "partitions every public engine function into faculty / catalogued / called / "
+                          "TEST-ONLY / orphan. TEST-ONLY is the valuable bucket: works, tested, exposed "
+                          "nowhere -- so by this repo's own rule it does not exist. Conservative, never deletes",
+                          example="mind.audit_orphans()['counts']",
+                          native=True, aliases=("find dead code", "which functions are never called",
+                                                "unused methods", "audit the codebase", "map the codebase",
+                                                "what is built but not wired", "orphan functions",
+                                                "code that exists but cannot be reached", "self audit",
+                                                "is anything unreachable", "audit my own code"))
+    c.register_capability("Search the engine's own source by meaning", "find_capability searches the CATALOG "
+                          "-- 674 of 7,572 functions; for the other 6,898 there was nothing. This indexes every "
+                          "public engine function by name tokens, first docstring line and CALLEE NAMES (who "
+                          "you call is what you do) and answers 'what else looks like this?', which is Rule 0's "
+                          "actual question. KEPT NEGATIVE IN THE DEFAULT: the hypervector encoding LOST to "
+                          "token-set Jaccard on the same features (recall@1 0.175 vs 0.542) and uses 2.8x more "
+                          "memory, winning only query latency 8.3x -- so Jaccard is the default and the vector "
+                          "path is opt-in",
+                          example="import lecore; m=lecore.UnifiedMind(); [l for l,_s in m.code_search('subdivide a mesh', k=3)]",
+                          native=True, aliases=("find similar code", "search the codebase semantically",
+                                                "what other function looks like this one", "code similarity",
+                                                "semantic search over my own source", "find near duplicate functions",
+                                                "what else does what this does", "search my source",
+                                                "which function does this already", "analogy over code"))
+    c.register_capability("Code health: complexity x exposure x exercise (risk, not size)", "raw cyclomatic "
+                          "complexity ranks the WRONG thing, and measuring it proved it: the top-scoring "
+                          "functions here (parse_description 65, mesh_parts 57, rebake_texture 54) are all "
+                          "exercised -- they score high BECAUSE they are load-bearing, and load-bearing code "
+                          "got tests. Risk is the cross product: 1858 functions no test mentions, 22 at "
+                          "CC>=20, and the worst cell is an ADVERTISED catalog capability at CC 46 that "
+                          "nothing tests. Stdlib ast; 0.92 top-100 rank agreement with radon. Mention scan, "
+                          "not coverage",
+                          example="import lecore; m=lecore.UnifiedMind(); m.audit_complexity(limit=3)['totals']",
+                          native=True, aliases=("cyclomatic complexity", "code complexity", "code health",
+                                                "how complex is this function", "which code is risky",
+                                                "complex and untested", "where should i add tests",
+                                                "code metrics", "maintainability", "technical debt map"))
+    c.register_capability("Antiperiodic (Mobius) fraction -- is a circle the wrong carrier?", "a circular "
+                          "encoding CANNOT hold a sign-flipping pattern: it wraps theta and theta+pi onto the "
+                          "same point, destroying the antiperiodic half on encode. Split two periods by halves "
+                          "-- (a+b)/2 periodic, (a-b)/2 antiperiodic -- an exact orthogonal split with no FFT "
+                          "bin-parity bookkeeping, parts summing back bit-for-bit. Reads ~1.0 for f(t+T)=-f(t), "
+                          "~0.0 for f(t+T)=+f(t), 0.5 for a 50/50 sum. The diagnostic that turns 'circle or "
+                          "Mobius strip?' from a guess into a measurement",
+                          example="import numpy as np, lecore; m=lecore.UnifiedMind(); t=np.arange(256); (round(m.antiperiodic_fraction(np.cos(np.pi*t/128)),3), round(m.antiperiodic_fraction(np.cos(2*np.pi*t/128)),3))",
+                          native=True, aliases=("antiperiodic fraction", "mobius strip or circle",
+                                                "sign flipping component", "antiperiodic split",
+                                                "does this repeat or invert", "half period sign flip",
+                                                "is a circular encoding wrong here", "axial vs circular"))
+    c.register_capability("IES photometric file (a real luminaire's measured falloff)", "parse an IESNA LM-63 "
+                          "file -- the format lighting manufacturers actually publish -- into a "
+                          "(candela_profile, max_vertical_angle) pair usable as a light's angular falloff. "
+                          "Takes the file TEXT not a path, so it works on an upload, a string inside a scene "
+                          "description, or a file you read yourself. This is how a render stops using an "
+                          "invented cosine falloff and starts using the measured distribution of an actual "
+                          "fixture",
+                          example="import lecore; m=lecore.UnifiedMind(); m.load_ies('IESNA:LM-63-2002\\nTILT=NONE\\n1 1000 1 3 1 1 -1 0 0 0\\n1.0 1.0 0.0\\n0 45 90\\n0\\n1000 500 0\\n')[1]",
+                          native=True, aliases=("ies file", "photometric file", "lm-63", "luminaire profile",
+                                                "real world light falloff", "load a light profile",
+                                                "manufacturer light data", "measured light distribution"))
     c.register_capability("Transform (warp)", "move / rotate / warp across representations: VSA bind (rigid) + "
                           "permute (order), 4x4 matrices (translate/scale/rotate/compose/decompose/look_at + "
                           "quaternions), clifford rotors, anisotropic steering -- one facade",

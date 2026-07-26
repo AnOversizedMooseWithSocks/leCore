@@ -4,7 +4,7 @@ WHY A SECOND EXAM. The 12-ask suite in the routing tooling grades the MODULE cor
 FILE should I read?". This one grades the CATALOG corpus (~2,100 entries: curated homes, faculties, modules): "which
 CAPABILITY should I CALL?". Different corpus, different baseline, different answer -- conflating them is exactly the
 RS-1b mistake (a per-dim table read as a router prediction, costing 80 minutes of cold embed on a wrong premise).
-SEMANTIC_BACKLOG S4 requires this suite to EXIST BEFORE any hybrid is wired, so that "better" is a measured claim.
+The S4 retrieval arc (NOTES_concepts.md, backlog dissolution) requires this suite to EXIST BEFORE any hybrid is wired, so that "better" is a measured claim.
 
 THE ASKS are phrased the way a stranger types, not the way the implementer named things -- several are lifted
 verbatim from a downstream integrator's bug report, which is the best possible source of un-coached phrasing. Each
@@ -176,7 +176,7 @@ def main():
         print("  %-20s %5d/%d %5d/%d %8.1f %7d" % (arm, s["top1"], s["n"], s["top5"], s["n"], s["median"], s["worst"]))
     print("\n  Read WORST first: an agent cannot see rank 200. top-1 is the headline but worst rank is the")
     print("  capability that is invisible in practice. A hybrid ships only on a strict-Pareto win over the")
-    print("  BASELINE row -- see docs/SEMANTIC_BACKLOG.md S4.")
+    print("  BASELINE row -- see docs/NOTES_concepts.md (S4, backlog dissolution).")
 
 
 if __name__ == "__main__":
