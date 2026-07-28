@@ -242,3 +242,177 @@ def test_r3_the_codebook_learned_by_r1_is_the_one_r2_factors_against():
     assert got["solved"] and got["verified"]
     assert got["leaves"] == [0, 1, 2, 3, 4, 5, 6, 7]
     assert got["level"] == 4                                         # solved at the LEARNED chunk level
+
+
+# --------------------------------------------------------------------------------------
+# Per-level failure reasons (work plan item 5.3).
+# --------------------------------------------------------------------------------------
+
+def test_a_failure_now_says_which_level_failed_and_why():
+    """THE DEFECT: three different things produced an IDENTICAL record -- a level too small to run at all,
+    a resonator that did not converge, and a candidate the verify gate rejected. "Nothing fits your arity"
+    and "I tried and the coherence was 0.31" are OPPOSITE diagnoses (raise the arity vs the composite is
+    not factorable here), and collapsing them made a solvable problem read as impossible."""
+    vocab = _vocab()
+    cb = _two_level_codebook()
+    junk = np.random.default_rng(3).standard_normal(D)
+    junk /= np.linalg.norm(junk)
+    got = recursive_factor(junk, cb, vocab, restarts=2, iters=40)
+    assert not got["solved"]
+    assert got["reasons"], "a failure with no reasons is the defect this fixes"
+    for row in got["reasons"]:
+        assert row["reason"] in ("level-too-small", "arity-unreachable",
+                                 "resonator-unconverged", "verify-failed")
+        assert row["detail"], "a reason without a detail is not a diagnosis"
+        assert isinstance(row["level"], int)
+
+
+def test_arity_unreachable_is_named_distinctly():
+    # The one arity mismatch the code can diagnose with CERTAINTY: fewer distinct tokens at a level than
+    # the arity being searched. The fix is to lower the arity or promote more chunks -- the opposite advice
+    # from "not factorable here", which is exactly why it needs its own name.
+    vocab = _vocab()
+    cb = _two_level_codebook()
+    _, ids4 = level_codebook(cb, vocab, 4)
+    comp = map_bind(chunk_vector(ids4[0], cb, vocab), chunk_vector(ids4[1], cb, vocab))
+    got = recursive_factor(comp, cb, vocab, arity=5, restarts=2, iters=40)
+    unreachable = [r for r in got["reasons"] if r["reason"] == "arity-unreachable"]
+    assert unreachable, got["reasons"]
+    assert 4 not in got["tried"], "a level that could not be attempted was counted as tried"
+
+
+def test_a_level_too_small_to_run_is_recorded_not_skipped_silently():
+    # Previously this level never appeared in `tried` OR anywhere else, so a run that attempted nothing was
+    # indistinguishable from one that attempted everything and was rejected.
+    vocab = _vocab()
+    cb = _two_level_codebook()
+    junk = np.random.default_rng(5).standard_normal(D)
+    junk /= np.linalg.norm(junk)
+    got = recursive_factor(junk, cb, vocab, arity=2, restarts=1, iters=20)
+    levels_accounted = {r["level"] for r in got["reasons"]} | set(got["tried"])
+    assert levels_accounted, "no level was accounted for at all"
+
+
+def test_a_solved_run_also_carries_reasons_for_the_levels_it_rejected():
+    # The levels tried BEFORE the winning one are evidence about the search, not noise -- a solve at level 4
+    # after rejecting level 8 means something different from a solve at level 4 reached first.
+    vocab = _vocab()
+    cb = _two_level_codebook()
+    _, ids4 = level_codebook(cb, vocab, 4)
+    comp = map_bind(chunk_vector(ids4[0], cb, vocab), chunk_vector(ids4[1], cb, vocab))
+    got = recursive_factor(comp, cb, vocab, restarts=8, iters=200)
+    assert got["solved"] and "reasons" in got
+
+
+# --------------------------------------------------------------------------------------
+# The 5.3b gate: is the F=4 failure a capacity limit or a search budget?
+# --------------------------------------------------------------------------------------
+
+@pytest.mark.slow                       # a restart sweep at N=2048
+def test_the_f4_cliff_is_a_search_budget_not_a_capacity_limit():
+    """THE GATE RESULT FOR THE PROPOSED ALGORITHMIC REPLACEMENT. It was proposed that this resonator needs a
+    new update rule because it fails at F=4. Measured at N=2048, V=16, F=4 (search space 65,536): the SAME
+    network on the SAME codebooks goes from 25% at restarts=4 to 100% at restarts=256.
+
+    So a published method must be benchmarked against a BUDGET-MATCHED baseline. Comparing a new update rule
+    against this one at restarts=4 would be a strawman, and a win without a proper baseline is not a result.
+    """
+    from holographic.misc.holographic_resonator import ResonatorNetwork, map_bind, map_codebook
+
+    F, V, N = 4, 16, 2048
+    books = [map_codebook(V, N, seed=100 + i) for i in range(F)]
+
+    def rate(restarts, iters, trials=8):
+        ok = 0
+        for t in range(trials):
+            rng = np.random.default_rng(t)
+            idx = [int(rng.integers(V)) for _ in range(F)]
+            comp = map_bind(*[books[i][idx[i]] for i in range(F)])
+            got = ResonatorNetwork(books).factor(comp, restarts=restarts, iters=iters)
+            ok += bool(got["solved"] and [int(x) for x in got["factors"]] == idx)
+        return ok / trials
+
+    assert rate(4, 150) < 0.6, "the low-budget arm no longer fails; re-read the budget finding"
+    assert rate(256, 600) > 0.9, "the high-budget arm no longer succeeds; the cliff may be real after all"
+
+
+def test_the_budget_finding_is_recorded_where_it_will_be_reproposed():
+    import inspect
+    from holographic.misc import holographic_resonator as mod
+    src = inspect.getsource(mod.ResonatorNetwork.factor)
+    assert "SEARCH BUDGET, NOT A CAPACITY LIMIT" in src
+    assert "NOT SUFFICIENT" in src, "the Df/N insufficiency finding left the comment"
+
+
+# --------------------------------------------------------------------------------------
+# Restart budget advisor, and why the default was not simply raised.
+# --------------------------------------------------------------------------------------
+
+def test_the_restart_sequence_is_prefix_stable():
+    """The determinism question, settled: raising the budget cannot flip an existing answer. On every
+    already-solved case, restarts=64 returns the identical factors AND the identical restart count as
+    restarts=20 -- so the objection to a higher default is COST, not correctness."""
+    from holographic.misc.holographic_resonator import ResonatorNetwork, map_bind, map_codebook
+
+    N = 1024
+    for F, V in ((2, 8), (3, 8)):
+        books = [map_codebook(V, N, seed=100 + i) for i in range(F)]
+        for t in range(3):
+            rng = np.random.default_rng(t)
+            idx = [int(rng.integers(V)) for _ in range(F)]
+            comp = map_bind(*[books[i][idx[i]] for i in range(F)])
+            low = ResonatorNetwork(books).factor(comp, restarts=20, iters=300)
+            high = ResonatorNetwork(books).factor(comp, restarts=64, iters=300)
+            if low["solved"]:
+                assert low["factors"] == high["factors"]
+                assert low["restarts"] == high["restarts"], "a bigger cap changed the winning restart"
+
+
+@pytest.mark.slow                       # a budget sweep over several codebooks
+def test_the_advisor_asks_for_more_restarts_as_factors_grow():
+    from holographic.misc.holographic_resonator import advise_restarts, map_codebook
+
+    easy = advise_restarts([map_codebook(16, 2048, seed=100 + i) for i in range(2)],
+                           targets=(0.9,), budgets=(4, 16, 64, 256), trials=6)[0]
+    hard = advise_restarts([map_codebook(16, 2048, seed=100 + i) for i in range(4)],
+                           targets=(0.9,), budgets=(4, 16, 64, 256), trials=6)[0]
+    assert easy["restarts"] is not None and hard["restarts"] is not None
+    assert hard["restarts"] > easy["restarts"], \
+        "F=4 no longer needs a bigger budget than F=2 (%r vs %r)" % (hard["restarts"], easy["restarts"])
+
+
+def test_the_advisor_reports_the_curve_not_just_a_number():
+    # A budget without its curve is another number-without-its-variable; the caller needs to see where it
+    # saturates to know whether more would help.
+    from holographic.misc.holographic_resonator import advise_restarts, map_codebook
+
+    got = advise_restarts([map_codebook(8, 512, seed=1), map_codebook(8, 512, seed=2)],
+                          targets=(0.9,), budgets=(4, 16), trials=4)[0]
+    assert "measured" in got and len(got["measured"]) == 2
+    assert all(isinstance(b, int) and 0.0 <= r <= 1.0 for b, r in got["measured"])
+
+
+def test_the_attention_update_negative_is_recorded():
+    """KEPT NEGATIVE, PINNED (backlog item 5.3b). A softmax/attention weighting was raced against the shipped
+    linear one at EQUAL BUDGET and does not win — it ties inside a narrow tuned band and is worse outside.
+    If someone proposes it again, this points them at the measurement rather than the paper."""
+    import inspect
+
+    from holographic.misc import holographic_resonator as mod
+    doc = inspect.getdoc(mod.ResonatorNetwork._cleanup) or ""
+    assert "ATTENTION (SOFTMAX) WEIGHTING WAS RACED HERE AND DOES NOT WIN" in doc
+    assert "BETA IS MEANINGLESS WITHOUT THE SCALE IT MULTIPLIES" in doc
+
+
+def test_a_one_hot_cleanup_would_destroy_the_search():
+    """THE FINDING WORTH MORE THAN THE NEGATIVE. The shipped cleanup superposes codevectors weighted by raw
+    similarity; as a softmax sharpens toward one-hot — committing to a single codevector each iteration —
+    the solve rate goes to ZERO. Holding a weighted blend is what lets the search escape a wrong commitment.
+
+    Pinned as a property of the shipped rule: its cleanup must NOT be a bare argmax."""
+    import inspect
+
+    from holographic.misc import holographic_resonator as mod
+    src = inspect.getsource(mod.ResonatorNetwork._cleanup)
+    assert "B.T @ (B @ est)" in src, "the cleanup became something other than a weighted superposition"
+    assert "argmax" not in src, "the cleanup committed to a single codevector; measured at 0% solve rate"

@@ -924,6 +924,35 @@ class _UnifiedPart01:
         return CausalIndex()
 
 
+    def tied_candidates(self, ranked, margin=0.1, min_score=None):
+        """THE DECISION WITH THE TIE STILL ATTACHED (holographic_relations) -- everything decide_or_abstain
+        returns, PLUS the candidates it was nearly and by how little. decide_or_abstain detects a knife-edge
+        and then throws the alternatives away, so a caller gets confident=False and one name and cannot see
+        what the answer was nearly. This is the missing half of adapt-don't-break: the detection and the
+        canonical tie-break already ship, but nothing exposed the SET that needs deciding between.
+        A CLEAR WINNER RETURNS A ONE-ELEMENT SET, never an empty one -- "no ambiguity" and "no answer" must
+        not look alike. Reports the tie; does NOT resolve it, so determinism is untouched.
+        MEASURED, and it is a DEGRADED-REGIME feature: 0% ties on a random codebook at moderate noise, 32% at
+        extreme noise, and 84% on a COHERENT codebook under heavy noise. A well-separated store never pays for
+        this; an overloaded or near-duplicate one pays constantly."""
+        from holographic.misc.holographic_relations import tied_candidates
+        return tied_candidates(ranked, margin=margin, min_score=min_score)
+
+    def verify_and_keep(self, candidates, verifier):
+        """TRY THE CANDIDATES AND KEEP THE ONE THAT WORKS (holographic_relations) -- rank order, first that
+        verifies wins, and all-failed is REPORTED rather than falling back to the top-ranked guess.
+        THE RESONATOR'S PATTERN GENERALISED: recursive_factor proposes, re-composes, checks, and reports
+        unsolved instead of guessing. That is the honest way to resolve an ambiguity a score could not --
+        not by learning a preference, but by TESTING which candidate actually works. Where a downstream
+        oracle exists, verification beats learning outright: it is exact, deterministic, needs no training
+        data, and returns a proof rather than a probability.
+        DETERMINISTIC: candidate order and verifier are both deterministic, so this never makes a run
+        irreproducible. ADAPTING AND BEING NON-DETERMINISTIC ARE DIFFERENT THINGS -- returning a verified
+        candidate is adaptation; returning a different answer each run is not.
+        A raising verifier counts as a failure for that candidate and does not take the search down."""
+        from holographic.misc.holographic_relations import verify_and_keep
+        return verify_and_keep(candidates, verifier)
+
     def selection_ledger(self):
         """The SESSION-LEVEL selection ledger (F3): record() every hypothesis test AT THE MOMENT IT IS RUN --
         including the discarded ones -- and correct() computes FDR q-values over the WHOLE book, so the

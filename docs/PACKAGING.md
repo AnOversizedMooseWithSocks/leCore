@@ -130,14 +130,28 @@ The core requires **only NumPy**. Everything else is declared as a named "extra"
 | `fft` | `pyfftw` | FFTW-backed FFT with plan caching (`holographic_fft`), opt-in via `mind.fft_backend(use_pyfftw=True)`; NumPy FFT stays the deterministic default |
 | `symbolic` | `sympy` | design-time symbolic gradients (`holographic_codegen`, `sdf_render`) |
 | `zig` | `ziglang` | native batch kernels + raymarcher (`holographic_zigrun`, `zigmarch`); ships the whole Zig toolchain, no system compiler needed |
-| `gpu` | `cupy` | the GPU backend (`holographic_backend`) — see the CuPy note |
+| `wgsl` | `wgpu` | **the vendor-neutral GPU path** (`holographic_wgpurun`): compute on Vulkan / Metal / DX12 / WebGPU, so it works on Apple silicon, AMD and Intel Arc as well as NVIDIA. Prebuilt wheels, no system toolchain |
+| `gpu` | `cupy` | the CuPy backend (`holographic_backend`) — **NVIDIA/CUDA only**; see the CuPy note |
 | `ui` | `flask`, `pillow` | the browser UI (`app.py`) and image load/save |
 | `images` | `pillow` | image I/O beyond stdlib PNG (jpg/webp/…) without pulling in Flask — a headless subset of `ui` |
 | `dev` | `pytest`, `matplotlib`, `nltk` | running the test suite, generating plots, and loading the text corpora the benchmarks/ablations use |
-| `all` | numba, pyfftw, sympy, flask, pillow, pytest, matplotlib, ziglang, nltk | everything portable, in one shot (CuPy excluded) |
+| `all` | numba, pyfftw, sympy, flask, pillow, pytest, matplotlib, ziglang, nltk, **wgpu** | everything portable, in one shot (CuPy excluded — wgpu is not) |
 
 **CuPy note:** CuPy is tied to your installed CUDA version, so plain `pip install cupy` often isn't what you
 want — install the matching wheel by hand instead (e.g. `cupy-cuda12x`). That's why `gpu` is kept out of `all`.
+
+**Why `wgsl` and `gpu` are two extras and not one.** They are not interchangeable, and the asymmetry is the
+whole reason for the split. `gpu` (CuPy) is NVIDIA-only and CUDA-version coupled, so it stays opt-in and out
+of `all`. `wgsl` (wgpu) ships prebuilt wheels for every platform, needs no system toolchain, and runs on a
+**software adapter** (llvmpipe / WARP) when no GPU is present at all — which is how the `wgsl` CI lane
+verifies shader correctness on an ordinary runner. None of the reasons to hold CuPy back apply to it, so it
+IS included in `all`.
+
+Both degrade cleanly when absent, and that is verified rather than assumed: on a bare `pip install
+leos-core`, `mind.gpu_report()` reports `wgpu is not installed (pip install wgpu)`, `mind.use_gpu(True)`
+returns `False`, `mind.place_work(...)` answers `cpu`, and the device kernels raise a clear ImportError
+naming the install rather than silently falling back — a caller who explicitly asked for the device deserves
+to know they did not get it.
 
 To add a new optional dependency later, add a line to `extras_require` in `setup.py` — nothing else changes,
 and the core stays NumPy-only.

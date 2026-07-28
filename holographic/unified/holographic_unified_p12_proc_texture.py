@@ -887,7 +887,184 @@ class _UnifiedPart12:
         paths -- it matches NumPy only to a tolerance and can vary run-to-run, so the bit-exact guarantees are a
         CPU property. Falls back to NumPy silently when no GPU is available."""
         from holographic.misc.holographic_backend import enable_gpu
+        # THE RESOURCE POLICY IS A VETO, and it is checked BEFORE touching the backend rather than after:
+        # gpu='off' must mean the device is never initialised, not merely that we stop using it. An operator
+        # who forbids the GPU on a machine that HAS one gets False, which is the observable that makes the
+        # setting testable without owning a device.
+        if enable and not self._resource_policy().gpu_allowed():
+            return False
         return enable_gpu(enable)
+
+    def gpu_crossover(self, kind="cleanup", dims=(512, 1024), counts=(256, 1024, 4096),
+                      batches=(1, 8, 64, 256), repeats=5, seed=0, text=False):
+        """MEASURE WHERE A DEVICE STARTS WINNING (holographic_gpubench, M1) -> {adapter, trustworthy, rows,
+        crossover, note}, or the readable table with text=True.
+        THE ONE NUMBER THAT BLOCKS THE COMPUTE BACKLOG. Everything else is wired and waiting on it:
+        cleanup_batch(backend='wgsl') and wgsl_bind_batch exist, should_offload gates them, place_work
+        composes the decision and resource_policy caps it -- but should_offload's thresholds are ARITHMETIC
+        FROM PCIe BANDWIDTH, not measurements, and are marked provisional everywhere they surface. Feed
+        `crossover` into MIN_BYTES_PROVISIONAL and the intensity at that point into
+        MIN_INTENSITY_PROVISIONAL.
+        HANDLES THE TIMING TRAP: GPU calls are ASYNCHRONOUS, so timing a dispatch without forcing completion
+        measures KERNEL LAUNCH rather than execution and yields numbers that look spectacular and are wrong.
+        Every device timing here READS ITS RESULT BACK, which forces completion and measures the round trip
+        a real caller actually pays, transfer included -- which is the number should_offload needs.
+        REFUSES TO FLATTER A SOFTWARE ADAPTER: on llvmpipe or WARP (adapter_type='CPU') the report sets
+        trustworthy=False and leads with a MEANINGLESS banner, because a timing there is NumPy against a CPU
+        driver emulating a GPU. `crossover: never` is a RESULT and should be published as one, not hidden.
+        kind='cleanup' (codebook similarity + argmax) or 'bind' (batched circular convolution)."""
+        from holographic.io_and_interop.holographic_gpubench import crossover, crossover_report
+        result = crossover(kind=kind, dims=dims, counts=counts, batches=batches, repeats=repeats, seed=seed)
+        return crossover_report(result) if text else result
+
+    def gpu_report(self):
+        """WHAT GPU COMPUTE IS REACHABLE, PER PATH, AND WHY NOT WHEN IT IS NOT (holographic_gpureport).
+        use_gpu(True) returns a bare bool that conflates FOUR different states -- no CuPy installed, CuPy
+        present but no device, a device present but the resource policy forbids it, and actually enabled --
+        and three of those four are fixable by the user while one is not. This distinguishes them.
+        Covers BOTH paths, because a report that only knew about CuPy would tell an Apple or AMD user they
+        have no GPU, which is false: CuPy is NVIDIA-only and transparent; WGSL is vendor-neutral
+        (Vulkan/Metal/DX12/WebGPU) and explicit. Also lists which modules actually route through the CuPy
+        backend, DISCOVERED from the live tree rather than typed -- a hand-maintained second copy of a list
+        is always the stale one. Never raises: the common case is a machine with no GPU."""
+        from holographic.io_and_interop.holographic_gpureport import gpu_report
+        return gpu_report(policy=self._resource_policy())
+
+    def should_offload(self, n_bytes, flops_per_byte, round_trips=1):
+        """WOULD MOVING THIS JOB TO THE GPU PAY (holographic_gpureport) -> (verdict, why). The GPU mirror of
+        should_pool, same shape and same discipline. Refuses on four independent grounds: no device or the
+        policy forbids one; too little DATA (the round trip dominates); too little WORK PER BYTE (an
+        elementwise pass is transfer-bound by construction -- it reads and writes everything and computes
+        almost nothing); or REPEATED ROUND TRIPS, where the answer is not 'offload' but 'fuse first', and
+        shader_pipeline collapses N linear stages into one before any transfer.
+        THE THRESHOLDS ARE PROVISIONAL AND THE VERDICT SAYS SO -- no host<->device crossover has ever been
+        measured in this project, so they are arithmetic from PCIe bandwidth, not results. Replace them the
+        first time this runs on a real device."""
+        from holographic.io_and_interop.holographic_gpureport import should_offload
+        return should_offload(n_bytes, flops_per_byte, round_trips=round_trips,
+                              policy=self._resource_policy())
+
+    def wgsl_device(self):
+        """WHAT DEVICE WOULD RUN AN EMITTED WGSL KERNEL (holographic_wgpurun, WGPU-1) --
+        {available, device, backend, type} or {available: False, why}. This is the VENDOR-NEUTRAL path:
+        WGSL runs on Vulkan, Metal, DX12 and WebGPU, where use_gpu()'s CuPy backend is CUDA/NVIDIA ONLY.
+        Reports software adapters (llvmpipe, WARP) as available too, deliberately -- that is what makes
+        correctness CI-testable on a runner with no GPU."""
+        from holographic.io_and_interop.holographic_wgpurun import device_info
+        return device_info()
+
+    def run_wgsl_kernel(self, fn, data, extra_args=(), workgroup=64):
+        """RUN AN ANNOTATED PYTHON KERNEL ON ANY GPU via its own WGSL projection (holographic_wgpurun).
+        emit_kernel already turned `fn` into WGSL; this wraps it in a @compute entry point with storage
+        bindings and a bounds guard, dispatches it, and returns float32.
+        SCOPE: elementwise maps over a 1-D array, f32 only (WGSL has no f64). A bounded `for range(N)` is
+        fine; a CROSS-INVOCATION REDUCTION -- what bundle and cleanup need -- is not solved here.
+        RAISES rather than falling back when wgpu is absent: a caller who explicitly asked for the device
+        path deserves to know they did not get it. (use_gpu falls back silently, which is right for a
+        transparent accelerator and wrong for an explicit request.)
+        Use verify_wgsl_kernel to check the projection against the Python original on your own data --
+        exactness holds for single-expression kernels and NOT for accumulating ones."""
+        from holographic.io_and_interop.holographic_wgpurun import run_kernel
+        from holographic.io_and_interop.holographic_emit import emit
+        return run_kernel(emit(fn, "wgsl"), fn.__name__, data, extra_args=extra_args, workgroup=workgroup)
+
+    def wgsl_reduce(self, op, data, workgroup=64):
+        """REDUCE A 1-D ARRAY ON ANY GPU: 'sum' | 'max' | 'min' (holographic_wgpurun, W1).
+        The primitive that unlocks the VSA half of the kernels -- run_wgsl_kernel does elementwise maps,
+        which serve the rendering path and NONE of bundle / cleanup / resonator / amp / htcodebook, every one
+        of which is a cross-invocation reduction.
+        TWO-STAGE BY DESIGN: each workgroup reduces its slice in shared memory and writes one partial; the
+        host finishes the much shorter partial array. A single-pass whole-array reduction would need a
+        grid-wide barrier (WGSL has none) or atomics, which are float-nondeterministic -- the wrong side of
+        this engine's determinism rule. Two stages keep the device work order-defined within a workgroup.
+        NOT bit-exact with NumPy in general: the device sums in tree order and f32 throughout. Measure."""
+        from holographic.io_and_interop.holographic_wgpurun import reduce_kernel
+        return reduce_kernel(op, data, workgroup=workgroup)
+
+    def wgsl_matvec(self, matrix, vector, workgroup=64):
+        """MATRIX @ VECTOR ON ANY GPU (holographic_wgpurun, W2) -- ONE WORKGROUP PER ROW, so the rows never
+        communicate and no cross-workgroup reduction is needed. Each lane walks its row with a stride, so D
+        need not be a multiple of the workgroup size.
+        THIS IS THE KERNEL THAT MATTERS FOR VSA: measured on CPU, the codebook similarity is 98-100% of a
+        cleanup's cost at any real codebook size, while the argmax is single-digit microseconds -- so the
+        argmax was the wrong thing to offload and this is the right one."""
+        from holographic.io_and_interop.holographic_wgpurun import matvec_kernel
+        return matvec_kernel(matrix, vector, workgroup=workgroup)
+
+    def wgsl_bind_batch(self, a_stack, b_stack, workgroup=64):
+        """BIND over stacks of (K, D) on any GPU (holographic_wgpurun, W3) -- the vendor-neutral batched
+        circular convolution. Matches the shipped bind_batch within f32 tolerance.
+        WHY DIRECT CONVOLUTION AND NOT AN FFT: bind IS a plain circular convolution (verified to 7e-15), so
+        it can be done as rfft->multiply->irfft in O(D log D) or DIRECTLY in O(D^2). Direct is ~100x more
+        arithmetic at D=1024 and is the right trade here -- it reuses the SAME workgroup-reduction shape as
+        wgsl_matvec and wgsl_matmul (proven, tail-safe, no bit-reversal or twiddle tables), and ARITHMETIC IS
+        WHAT A GPU HAS. That turned an L item into an M one.
+        THE TRADE IS NOT MEASURED: whether 100x more arithmetic is recovered by parallelism depends entirely
+        on the device, and this box has only a CPU adapter. Correctness is established; the crossover is not.
+        If a real device shows direct convolution losing to the CPU FFT, the Stockham route is the fallback
+        and its constraints are recorded (one dispatch per row, D <= 4096 fits shared memory).
+        BATCHED ON PURPOSE: a SINGLE bind costs ~0.03 ms on CPU at D=1024, below any plausible dispatch
+        floor -- the batch is the only shape that can pay."""
+        from holographic.io_and_interop.holographic_wgpurun import bind_batch_kernel
+        return bind_batch_kernel(a_stack, b_stack, workgroup=workgroup)
+
+    def wgsl_matmul(self, matrix, queries, workgroup=64):
+        """`queries @ matrix.T` on any GPU -- the BATCHED form, and the one that pays (holographic_wgpurun).
+        ONE WORKGROUP PER OUTPUT ELEMENT (row, query) on a 2-D grid, a direct extension of wgsl_matvec's
+        one-per-row, with still no cross-workgroup communication.
+        WHY BATCHED: measured on CPU at M=1024 D=512, ONE query costs 0.095 ms -- below any plausible
+        dispatch floor, so it can never pay -- while 256 queries cost 2.98 ms, comfortably above it. Building
+        the single-query form first was the same mistake this path made with argmax and with a single bind:
+        THE NATURAL UNIT OF WORK IS USUALLY SMALLER THAN THE DISPATCH FLOOR."""
+        from holographic.io_and_interop.holographic_wgpurun import matmul_kernel
+        return matmul_kernel(matrix, queries, workgroup=workgroup)
+
+    def wgsl_cleanup_batch(self, codebook, queries, workgroup=64):
+        """Cleanup a STACK of queries on any GPU -> (indices, scores) (holographic_wgpurun). The shape a
+        device can actually win on; the single-query wgsl_cleanup is kept for the K=1 case and should stay on
+        CPU in practice. Indices resolve host-side by lowest index, so BATCHING DOES NOT CHANGE THE CANONICAL
+        TIE RULE."""
+        from holographic.io_and_interop.holographic_wgpurun import cleanup_batch_kernel
+        return cleanup_batch_kernel(codebook, queries, workgroup=workgroup)
+
+    def wgsl_cleanup(self, codebook, query, workgroup=64):
+        """A FULL VSA CLEANUP ON ANY GPU -> (index, score) (holographic_wgpurun, W2). Similarity and argmax
+        FUSED in one dispatch: splitting them would pay the submission cost twice and ship the M-length
+        intermediate back across the bus, the same 'fuse before you dispatch' rule shader_pipeline and
+        should_offload's round_trips gate both encode.
+        The INDEX resolves host-side by lowest index (the canonical tie rule), because an argmax is a
+        DECISION and existing decisions may never flip.
+        MEASURED RESIDUAL RISK: the matvec is not bit-exact, so a similarity gap at or below ~1e-7 can flip
+        the decision (3/150 at 1e-7; 0/150 at 1e-6 and above). That is FOUR ORDERS below the smallest
+        sensible tie margin, so pair this with tied_candidates and every flippable case arrives as a
+        DECLARED AMBIGUITY rather than a silent difference."""
+        from holographic.io_and_interop.holographic_wgpurun import cleanup_kernel
+        return cleanup_kernel(codebook, query, workgroup=workgroup)
+
+    def wgsl_argmax(self, data, workgroup=64):
+        """DEVICE ARGMAX over a 1-D array -> (index, value) (holographic_wgpurun, W1).
+        ARGMAX IS A DECISION, NOT A VALUE, so this is deliberately split: the VALUE reduction runs on the
+        device, and the INDEX is resolved on the host by taking the FIRST index attaining the max. Ties
+        therefore break by LOWEST INDEX -- the same canonical rule determinism.argmax_tiebreak uses -- rather
+        than by whichever workgroup finished first, which is exactly the property that must not vary when
+        existing decisions may never flip.
+        MEASURED on adversarial exact ties (random data almost never ties, so a random-data test would prove
+        nothing): 200/200 agreement with CPU argmax, and 40/40 on real VSA cleanup queries.
+        A fully device-side (value, index) reduction is NOT built: it would make tie resolution depend on
+        reduction order. Revisit only if the host-side finish is measured to dominate -- with a tie test."""
+        from holographic.io_and_interop.holographic_wgpurun import argmax_kernel
+        return argmax_kernel(data, workgroup=workgroup)
+
+    def verify_wgsl_kernel(self, fn, data, extra_args=(), workgroup=64):
+        """DIFFERENTIALLY TEST a kernel: run `fn` in Python AND as its own WGSL projection, report
+        {max_abs, max_rel, exact, n} (holographic_wgpurun).
+        THIS IS THE POINT OF THE PROJECTION DESIGN, made executable -- the shader is generated from the same
+        function that runs on CPU, so the two can be CHECKED rather than trusted. A CuPy kernel cannot be
+        tested this way: there is no shared source, only two implementations supposed to agree.
+        MEASURED: x*g+0.5 is bit-exact; a 4-term accumulating loop deviates 5.7e-06 relative, because Python
+        accumulates in float64 and casts while WGSL accumulates in f32 throughout."""
+        from holographic.io_and_interop.holographic_wgpurun import verify_against_numpy
+        return verify_against_numpy(fn, data, extra_args=extra_args, workgroup=workgroup)
 
     def import_footprint(self, entry, root="."):
         """What does `entry` ACTUALLY need at import time? Returns {required, naive, ratio, required_modules,

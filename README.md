@@ -131,6 +131,27 @@ It's a controlled vocabulary, on purpose — deterministic and honest about its 
 
 **Run it as a standalone HTTP service.** leCore ships a small, dependency-free server (`holographic_service.py`, standard-library `http.server`) so you can drive it over HTTP — a SQL/GraphQL data store, long-running jobs you can pause and resume, and an agent-facing skills API (`GET /skills`, `POST /skills/suggest`, `POST /skills/route`) that lets a program discover and call capabilities the same way the `mind` methods above do. See **[`SERVICE.md`](SERVICE.md)** for the endpoints and `curl` examples.
 
+## What "holographic" actually buys you
+
+Every item is spread across *every* number, so destroying storage destroys a little of everything rather
+than all of a few things. Measured — 16 key/value pairs in 1024 floats, random slots zeroed, against a
+plain contiguous store holding the same 16 items in the *same* 1024 floats (64 each):
+
+| slots destroyed | holographic recall@1 | contiguous items intact |
+|---|---|---|
+| 10% | **100.0%** | 0.5% |
+| 40% | **100.0%** | 0.0% |
+| 80% | **97.0%** | 0.0% |
+| 90% | 75.6% | 0.0% |
+
+Read the right-hand column first: a contiguous store is *already gone* at 10% damage, because every item
+needs all 64 of its own floats and the chance all 64 survive is about one in a thousand. The holographic
+store still answers every query correctly at **40% loss**, and most of them at 80%.
+
+Reproduce it with `python3 -m pytest tests/test_degradation_table.py -q`. Harness: `bind`/`unbind` with
+cleanup by nearest value in the codebook, 40 trials per row, seeded. These are **means over 40 trials** —
+a single draw of 16 items reports in steps of 6.25% and will look tidier and better than the truth.
+
 ## The rules it plays by
 
 If you contribute or build on it, these are the load-bearing rules — they're what keep it trustworthy:

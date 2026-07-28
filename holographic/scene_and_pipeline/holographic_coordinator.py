@@ -191,6 +191,83 @@ def _run_with_cache(worker, bucket, handle):
     return worker(bucket, handle[1] if kind == "direct" else None)
 
 
+def cpu_budget():
+    """How many cores may this process ACTUALLY use? Returns an int >= 1.
+
+    WHY NOT os.cpu_count(): IT LIES IN A CONTAINER. It reports the HOST's core count and knows nothing about
+    cgroup quota or CPU affinity, so `docker run --cpus=2` on a 64-core box gives 64 -- and a pool sized from
+    it spawns 64 interpreters to time-share 2 cores, which is slower than sequential AND costs 64x the
+    memory. That matters here specifically: this engine is meant to run on small devices, and a wrong core
+    count is a memory-bloat bug, not just a speed one.
+
+    Takes the MINIMUM of every limit that is actually enforceable:
+      * sched_getaffinity -- taskset / cpuset pinning (Linux; absent on macOS and Windows)
+      * cgroup v2 cpu.max and v1 cfs quota/period -- the `--cpus` limit, rounded UP so a 1.5-core quota
+        reports 2 rather than 1 (a fractional quota still lets two workers make progress)
+      * os.cpu_count() -- the floor when nothing else is readable
+    Anything unreadable is skipped rather than guessed at; the answer is never below 1."""
+    import os
+
+    limits = []
+    count = os.cpu_count()
+    if count:
+        limits.append(int(count))
+    try:
+        limits.append(len(os.sched_getaffinity(0)))        # not present on every platform
+    except (AttributeError, OSError):
+        pass
+    try:                                                   # cgroup v2
+        with open("/sys/fs/cgroup/cpu.max") as fh:
+            quota, period = fh.read().split()
+        if quota != "max":
+            limits.append(max(1, -(-int(quota) // int(period))))
+    except (OSError, ValueError):
+        pass
+    try:                                                   # cgroup v1
+        with open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us") as fh:
+            quota = int(fh.read())
+        with open("/sys/fs/cgroup/cpu/cpu.cfs_period_us") as fh:
+            period = int(fh.read())
+        if quota > 0 and period > 0:
+            limits.append(max(1, -(-quota // period)))
+    except (OSError, ValueError):
+        pass
+    return max(1, min(limits)) if limits else 1
+
+
+#: Measured dispatch cost of handing ONE bucket to a pool worker (submit + pickle + collect), in
+#: milliseconds. A bucket doing less work than this can never pay for being sent away, whatever the core
+#: count -- which is why `should_pool` gates on work per bucket and not on core count alone.
+DISPATCH_MS_PER_BUCKET = 0.2
+
+
+def should_pool(n_buckets, est_ms_per_bucket, cores=None, margin=4.0):
+    """Would a process pool pay for this job? Returns (verdict, why).
+
+    Refuses on any of three grounds, each of which is fatal on its own:
+      * ONE USABLE CORE -- a pool cannot win by construction, only add overhead and memory.
+      * FEWER THAN 2 BUCKETS -- nothing to run in parallel.
+      * WORK PER BUCKET BELOW `margin` x DISPATCH -- the default margin of 4 is deliberately conservative:
+        near break-even a pool costs memory and process lifetime for no gain, so 'roughly equal' should
+        decline. This is the same shape as the machine model's placement oracle, and the same lesson --
+        the answer depends on the CALLER'S numbers, so it is computed, never assumed.
+
+    `est_ms_per_bucket` is the caller's estimate; time one bucket if you do not have it. Deliberately not
+    measured here: timing a bucket means RUNNING one, and a gate that runs the work to decide whether to
+    run the work has to be the caller's choice, not a hidden cost."""
+    cores = int(cpu_budget() if cores is None else cores)
+    if cores < 2:
+        return False, "only %d usable core(s); a pool adds overhead and memory but cannot add speed" % cores
+    if int(n_buckets) < 2:
+        return False, "%d bucket(s); nothing to run in parallel" % int(n_buckets)
+    floor = float(margin) * DISPATCH_MS_PER_BUCKET
+    if float(est_ms_per_bucket) < floor:
+        return False, ("%.2f ms/bucket is below the %.2f ms floor (%.0fx dispatch); dispatch would dominate"
+                       % (float(est_ms_per_bucket), floor, float(margin)))
+    return True, ("%d cores, %d buckets at %.2f ms each -- above the %.2f ms floor"
+                  % (cores, int(n_buckets), float(est_ms_per_bucket), floor))
+
+
 class LocalPool:
     """A persistent local process pool. Each worker is its own interpreter (its own GIL), so GIL-bound Python work
     actually runs in parallel. A large read-only cache is published ONCE into shared_memory (zero-copy) rather than
@@ -384,7 +461,22 @@ class NetworkFarm:
         return ("carry", _encode(cache))
 
     def submit(self, worker, bucket, handle):
-        """Pick the next node (round-robin) and POST the run there, off the thread pool -> a real Future."""
+        """Pick the next node (round-robin) and POST the run there, off the thread pool -> a real Future.
+
+        WORKERS CROSS THIS BOUNDARY BY NAME. That is the security property of the farm -- only DATA travels,
+        never code -- and it is why `farm` is the right door for off-machine work and `command_tool` (which
+        runs an allowlisted binary locally) is not the same kind of thing at all.
+        The property USED TO HOLD BY ACCIDENT: handing a callable got you
+        `TypeError: Object of type function is not JSON serializable` from deep inside the encoder, which
+        enforces the rule without ever stating it and sends the reader to the serializer instead of to the
+        design. An accidental guarantee is one refactor away from not being a guarantee, so it is now
+        explicit. In-process and pool backends legitimately DO take callables, which is why this check lives
+        here rather than in Coordinator.run."""
+        if not isinstance(worker, str):
+            raise TypeError(
+                "a farm worker must be a NAME (str) registered on the nodes, got %r. Only data crosses the "
+                "wire, never code -- that is the point of the farm. Register the function on each node with "
+                "serve_worker and pass its name." % type(worker).__name__)
         node = self.nodes[self._rr % len(self.nodes)]
         self._rr += 1
         return self.pool.submit(self._run_remote, node, worker, bucket, handle)

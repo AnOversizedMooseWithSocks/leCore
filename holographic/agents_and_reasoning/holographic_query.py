@@ -220,9 +220,31 @@ class UserTable(Table):
         """B6 -- restore the state captured by _snapshot (roll back to before the transaction)."""
         self.records, self.rows, self._pk_index = snap[0], snap[1], snap[2]
 
+    def require_columns(self, cols):
+        """Raise QueryError naming any column that does not exist on this table.
+
+        THE SHARED VALIDATOR (defect 5.1). The READ path has always checked this and produced a good message;
+        the WRITE path did not run it, so `INSERT INTO t (zzz) VALUES (1)` returned {'inserted': 1}, appended
+        a row of Nones, and reported `_confidence: 1.0` -- FULL CONFIDENCE IN AN EMPTY ROW. The write path was
+        guarding the TIER (the read-only system namespace is correctly protected) but not the SCHEMA.
+        A PARTIAL row is still legal: only UNKNOWN columns are refused, missing ones stay None.
+
+        ENGINE-INTERNAL COLUMNS (leading underscore) ARE EXEMPT, and that exemption is not a loophole -- it
+        was found by the standalone-database integration test, which failed on `_deleted`, the tombstone the
+        DELETE path writes. `_confidence` is the same kind of column and already appears in every result row.
+        These are not user schema and are not declared in CREATE TABLE, so validating them would have made
+        the first version of this fix refuse the engine's own writes."""
+        unknown = [c for c in cols if c not in self.roles and not str(c).startswith("_")]
+        if unknown:
+            raise QueryError("column %r does not exist (columns: %s)"
+                             % (unknown[0], ", ".join(self.roles)))
+
     def insert(self, row):
         """Append one row: encode it to a record (same encoding as from_rows) and store the exact values. B5:
-        constraints are enforced FIRST, so a violating row is refused and the table is left unchanged."""
+        constraints are enforced FIRST, so a violating row is refused and the table is left unchanged.
+        The SCHEMA is checked before the constraints, so an unknown column is refused by name rather than
+        silently becoming a row of Nones (defect 5.1)."""
+        self.require_columns(row.keys())                      # 5.1: schema, not just tier
         self._enforce_constraints(row)                        # B5: refuse the row before any state changes
         rec = _encode_row(row, self.roles, self.role_vocab, self.value_vocab, self.dim)
         self.records = rec[None, :] if len(self.records) == 0 else np.vstack([self.records, rec[None, :]])
@@ -585,6 +607,31 @@ class Database:
         return db
 
 
+#: SQL type tokens a CREATE TABLE column may carry. Recognised ones are STRIPPED; anything unrecognised is
+#: left alone, so a genuinely odd column name is preserved rather than silently truncated.
+_SQL_TYPES = {"int", "integer", "bigint", "smallint", "tinyint", "text", "varchar", "char", "string",
+              "float", "double", "real", "decimal", "numeric", "bool", "boolean", "blob", "bytes",
+              "date", "datetime", "timestamp", "time", "json", "uuid"}
+
+
+def _column_name(raw):
+    """Normalise one CREATE TABLE column spec to a column NAME (defect 5.2).
+
+    `CREATE TABLE lab.runs (id INT, name TEXT, score FLOAT)` used to create columns literally called
+    "id INT", "name TEXT" and "score FLOAT". THIS COMPOUNDS WITH 5.1 AND THAT IS WHY THEY WERE FIXED
+    TOGETHER: 5.2 MANUFACTURES a schema nobody can hit, and 5.1 then SWALLOWS every INSERT that tries --
+    `INSERT INTO lab.runs (id) VALUES (1)` reported success and wrote a row of Nones with _confidence 1.0.
+    Fixing either alone leaves a system that still cannot round-trip an ordinary CREATE/INSERT pair.
+
+    Only a RECOGNISED trailing type token is stripped. An unrecognised second word is left in place: better
+    to keep a strange column name than to truncate a deliberate one, and the 5.1 validator will now name it
+    plainly the first time an INSERT misses it."""
+    parts = str(raw).strip().split()
+    if len(parts) == 2 and parts[1].lower().split("(")[0] in _SQL_TYPES:
+        return parts[0]
+    return " ".join(parts)
+
+
 def _parse_values(text):
     """Parse a VALUES tuple's contents into Python values: quoted -> str, numeric -> int/float, else bareword str.
     A tiny readable parser -- not a full SQL literal grammar."""
@@ -616,10 +663,11 @@ def run_db_sql(sql, db):
         db.create_database(name)
         return {"created_database": name}
     if low.startswith("create table"):
+        # 5.2 is handled by _column_name below -- see it for why this compounds with 5.1.
         m = re.match(r"(?is)^create\s+table\s+([\w.]+)\s*\(([^)]*)\)\s*$", s)
         if not m:
             raise QueryError("CREATE TABLE ns.name (col1, col2, ...)")
-        db.create_table(m.group(1), [c.strip() for c in m.group(2).split(",")])
+        db.create_table(m.group(1), [_column_name(c) for c in m.group(2).split(",")])
         return {"created_table": m.group(1)}
     if low.startswith("insert into"):
         m = re.match(r"(?is)^insert\s+into\s+([\w.]+)\s*\(([^)]*)\)\s*values\s*\((.*)\)\s*$", s)

@@ -79,7 +79,32 @@ class ResonatorNetwork:
 
     def _cleanup(self, est, B):
         """Project an estimate onto a codebook and sharpen: similarity to each
-        codevector, superpose them back weighted by those similarities, take sign."""
+        codevector, superpose them back weighted by those similarities, take sign.
+
+        KEPT NEGATIVE -- AN ATTENTION (SOFTMAX) WEIGHTING WAS RACED HERE AND DOES NOT WIN. The published
+        attention-resonator update replaces the raw-similarity weighting below with a softmax. Measured at
+        EQUAL BUDGET (restarts=64 x iters=150, F=4, V=16, D=2048, 12 trials -- same loop, same restarts,
+        ONLY the weighting differs):
+
+            linear (this)        100%
+            softmax beta=0.50    100%      beta=1.50     92%
+            softmax beta=0.75    100%      beta=2.00     42%
+            softmax beta=1.00    100%      beta=16       0%
+
+        It TIES inside a narrow tuned band and is worse everywhere outside it. It never beats this. So the
+        engine would be trading a hyperparameter -- one that must be rescaled to the score spread -- for no
+        measured gain, and the item is filed rather than built.
+
+        TWO THINGS THE RACE TAUGHT, both worth more than the negative:
+          * BETA IS MEANINGLESS WITHOUT THE SCALE IT MULTIPLIES. Similarities here have std ~39 at D=2048, so
+            a "temperature" of beta=1 is already ONE-HOT (max weight 0.79) and beta=4 is 0.999. A first pass
+            swept beta=1..16 and measured 0% at every value -- it was testing a HARD ARGMAX, not attention.
+            Beta must be divided by the score std to mean anything.
+          * THE LINEAR SUPERPOSITION IS LOAD-BEARING, NOT INCIDENTAL. As beta grows the softmax becomes
+            one-hot -- committing to a single codevector each iteration -- and the solve rate goes to ZERO.
+            Holding a weighted blend of candidates is what lets the search escape a wrong commitment, which
+            is the same reason `tied_candidates` exists one level up.
+        """
         return np.sign(B.T @ (B @ est))
 
     def _run(self, c, iters, seed):
@@ -124,6 +149,25 @@ class ResonatorNetwork:
         return idx, iters, False
 
     def factor(self, composite, restarts=20, iters=400):
+        # BEFORE BLAMING THE UPDATE RULE, SPEND THE BUDGET. It was proposed that this resonator needs an
+        # algorithmic replacement (attention-based update, recursive factorization) because it fails at
+        # F=4. Measured at N=2048, V=16, F=4 -- a search space of 65,536, Df/N = 0.031:
+        #     restarts=4   iters=150   ->  25%
+        #     restarts=16  iters=150   ->  42%
+        #     restarts=64  iters=150   ->  83%
+        #     restarts=64  iters=600   ->  92%
+        #     restarts=256 iters=600   -> 100%
+        # THE F=4 "CAPACITY CLIFF" IS A SEARCH BUDGET, NOT A CAPACITY LIMIT. The same network, same
+        # dimension, same codebooks, solves every instance given enough restarts. So any comparison against
+        # a published method must use a BUDGET-MATCHED baseline: benchmarking a new update rule against this
+        # one at restarts=4 would be a strawman, and the project's rule is that a win without a proper
+        # baseline is not a result.
+        # Related and measured at the same time: RAISING THE DIMENSION DOES NOT RESCUE IT. At V=16, F=4 and
+        # restarts=4, success runs 0% / 17% / 25% / 33% / 17% at N = 512 / 1024 / 2048 / 4096 / 8192 -- it
+        # plateaus around a third and does not converge, even at Df/N = 0.008. The published stability
+        # precondition (a phase change near Df/N = 0.056) is therefore NOT SUFFICIENT here: being below the
+        # bound does not predict success, so a guard that abstained above it would hand out false confidence
+        # below it. Recorded so nobody ships that guard on the strength of the citation alone.
         """Recover the factor indices (one per codebook) whose binding equals the
         composite. Returns {'factors', 'solved', 'restarts', 'iterations',
         'search_space'}. Tries random restarts because a single run may not converge,
@@ -229,6 +273,52 @@ def reduce_involution(leaves):
     return sorted(t for t, n in counts.items() for _ in range(n % 2))
 
 
+def advise_restarts(codebooks, targets=(0.95,), budgets=(4, 16, 64, 256), iters=300, trials=8, seed=0):
+    """How many restarts does THIS factoring problem need? Measured on the caller's own codebooks.
+
+    WHY THIS EXISTS INSTEAD OF A HIGHER DEFAULT. The F>=4 "capacity cliff" is a SEARCH BUDGET (see
+    ResonatorNetwork.factor): the same network solves every instance at restarts=256 that it fails at
+    restarts=4. The obvious fix -- raise the default -- was measured and rejected, and the reason is the
+    COST PROFILE rather than the correctness:
+
+        N=2048, V=16, F=4      restarts=20   restarts=64   restarts=256
+        solvable composite      1071 ms       1460 ms        1465 ms
+        UNSOLVABLE composite    1488 ms       4743 ms       19439 ms
+
+    A higher cap is nearly free when the answer is found (factor() returns at the restart that succeeds) and
+    costs 13x WHEN THERE IS NO ANSWER, because a refusal must exhaust the whole budget to be a refusal. So
+    the price of a bigger default is paid entirely by the problems that were never going to work -- exactly
+    backwards. The restart sequence is also PREFIX-STABLE (verified: restarts=64 returns the identical
+    factors AND the identical restart count as restarts=20 on every already-solved case), so raising it
+    could never flip an existing answer -- the objection is cost, not determinism.
+
+    Hence: measure, advise, and let the caller spend. Returns [{target, restarts, rate}] giving the smallest
+    budget from `budgets` that reaches each target success rate, or None for `restarts` when no budget tried
+    reaches it -- which is itself the useful answer ("more restarts will not save this")."""
+    books = [np.asarray(B, float) for B in codebooks]
+    n_f = len(books)
+    sizes = [B.shape[0] for B in books]
+
+    def _rate(restarts):
+        ok = 0
+        for t in range(int(trials)):
+            rng = np.random.default_rng(int(seed) + t)
+            idx = [int(rng.integers(s)) for s in sizes]
+            comp = map_bind(*[books[i][idx[i]] for i in range(n_f)])
+            got = ResonatorNetwork(books).factor(comp, restarts=int(restarts), iters=int(iters))
+            ok += bool(got["solved"] and [int(x) for x in got["factors"]] == idx)
+        return ok / float(trials)
+
+    measured = [(int(b), _rate(b)) for b in budgets]
+    out = []
+    for target in targets:
+        hit = next((b for b, r in measured if r >= float(target)), None)
+        out.append({"target": float(target), "restarts": hit,
+                    "rate": dict(measured).get(hit) if hit is not None else max(r for _, r in measured),
+                    "measured": measured})
+    return out
+
+
 def recursive_factor(composite, codebook, vocab, arity=2, restarts=10, iters=300, tol=1e-6):
     """Factor a deep composite by searching a SHALLOW problem over composed chunks, then expanding by lookup.
 
@@ -237,7 +327,11 @@ def recursive_factor(composite, codebook, vocab, arity=2, restarts=10, iters=300
     `composite`. On failure, fall back one level down, ending at the flat base vocabulary. So the answer is either
     verified correct or reported unsolved; it is never a silent guess.
 
-    Returns {leaves, solved, level, verified, tried, search_space}. `leaves` is sorted and reduced modulo the MAP
+    Returns {leaves, solved, level, verified, tried, reasons, search_space}. `reasons` carries a PER-LEVEL
+    diagnosis -- level-too-small / resonator-unconverged / verify-failed -- because those three used to
+    produce an identical failure record, and "no level fits this arity" is the opposite advice from "a level
+    was tried and rejected it". An empty `tried` alongside a non-empty `reasons` means NOTHING WAS EVER
+    ATTEMPTED, which is the case that made trivially solvable problems read as impossible. `leaves` is sorted and reduced modulo the MAP
     involution (see `reduce_involution`): binding is commutative AND self-inverse, so the recoverable object is the
     leaf multiset with duplicate pairs cancelled -- not the sequence, and not the raw expansion.
 
@@ -245,14 +339,35 @@ def recursive_factor(composite, codebook, vocab, arity=2, restarts=10, iters=300
     here, 86.7% flat, at 5x the time. Use it past the cliff; below it, the flat resonator is already working."""
     c = np.asarray(composite, float)
     vocab = np.asarray(vocab, float)
-    tried = []
+    tried, reasons = [], []
     for depth in available_levels(codebook, vocab):
         book, ids = level_codebook(codebook, vocab, depth)
         if len(ids) < 2:
+            # PREVIOUSLY SILENT: this level was skipped without even appearing in `tried`, so a run that
+            # never attempted anything was indistinguishable from one that attempted everything and was
+            # rejected. Both read {solved: False, level: None, leaves: []}, and a trivially solvable problem
+            # therefore read as impossible.
+            reasons.append({"level": int(depth), "reason": "level-too-small",
+                            "detail": "%d token(s) at this level; a resonator needs at least 2" % len(ids)})
+            continue
+        if len(ids) < int(arity):
+            # NAMED SEPARATELY because it is the one arity mismatch the code can diagnose with certainty:
+            # searching for `arity` factors among fewer than `arity` distinct tokens is structurally
+            # unreachable, and the fix is to LOWER the arity or promote more chunks -- the opposite advice
+            # from "the composite is not factorable here". (The general case is undecidable from inside:
+            # whether a level fits depends on the composite's true depth, which is the unknown being solved
+            # for. What the code CAN always do is name the arity and the token count, which every `detail`
+            # below does.)
+            reasons.append({"level": int(depth), "reason": "arity-unreachable",
+                            "detail": "arity=%d needs at least %d distinct tokens, this level has %d"
+                                      % (int(arity), int(arity), len(ids))})
             continue
         tried.append(int(depth))
         res = ResonatorNetwork([book] * int(arity)).factor(c, restarts=restarts, iters=iters)
         if not res["solved"]:
+            reasons.append({"level": int(depth), "reason": "resonator-unconverged",
+                            "detail": "arity=%d over %d tokens did not converge in %d iters x %d restarts"
+                                      % (int(arity), len(ids), int(iters), int(restarts))})
             continue
         leaves = []
         for f in res["factors"]:
@@ -261,10 +376,21 @@ def recursive_factor(composite, codebook, vocab, arity=2, restarts=10, iters=300
         # costs a fallback, not a wrong answer.
         # THE VERIFY GATE runs on the RAW expansion (that is what the resonator actually claimed), and only then
         # is the answer reduced modulo the involution -- reducing first would be assuming the thing being checked.
-        if np.max(np.abs(map_bind(*[vocab[int(i)] for i in leaves]) - c)) <= tol:
+        err = float(np.max(np.abs(map_bind(*[vocab[int(i)] for i in leaves]) - c)))
+        if err <= tol:
             return {"leaves": reduce_involution(leaves), "solved": True, "level": int(depth),
-                    "verified": True, "tried": tried, "search_space": int(res["search_space"])}
-    return {"leaves": [], "solved": False, "level": None, "verified": False, "tried": tried, "search_space": 0}
+                    "verified": True, "tried": tried, "reasons": reasons,
+                    "search_space": int(res["search_space"])}
+        reasons.append({"level": int(depth), "reason": "verify-failed",
+                        "detail": "re-composition error %.3g exceeds tol %.3g" % (err, tol)})
+    # WHY `reasons` IS A FIRST-CLASS RETURN VALUE. Three different things used to produce the identical
+    # record: a level too small to run at all, a resonator that did not converge, and a candidate the verify
+    # gate rejected. "Nothing here fits your arity" and "I tried and the coherence was 0.31" are opposite
+    # diagnoses -- the first says raise the arity, the second says the composite is not factorable at that
+    # level -- and collapsing them made a solvable problem read as impossible. An empty `tried` with a
+    # non-empty `reasons` is now the unmistakable signature of the former.
+    return {"leaves": [], "solved": False, "level": None, "verified": False, "tried": tried,
+            "reasons": reasons, "search_space": 0}
 
 
 def _selftest():

@@ -277,6 +277,513 @@ class _UnifiedPart03:
         from holographic.sampling_and_signal.holographic_cosamp import cosamp_recall
         return cosamp_recall(cue, codebook, K, iters=iters, tol=tol, stats=stats)
 
+    def wods_solve(self, interface, boundary_value, lo=(0.0, 0.0), hi=(1.0, 1.0), capture_r=None,
+                   walks=256, max_steps=64, eps=1e-3, seed=0, iters=500, tol=1e-12, stats=None):
+        """WALK ON DECOMPOSED SUBDOMAINS (holographic_wods, WoDS-1) -- solve Laplace by having short random
+        walks estimate LOCAL COUPLING OPERATORS between interface points, then solving the resulting sparse
+        system DETERMINISTICALLY with the engine's shared conjugate gradient. The shipped pointwise solvers
+        (wos / wost) send long walks all the way to the boundary for every query; here a walk only has to
+        reach a neighbour, and the long-range structure is resolved by exact linear algebra instead of by
+        sampling. Two of leCore's own levers stacked: partition, then tile under an orchestrator.
+        MEASURED vs pure WoS at matched budget (unit square, u=x^2-y^2, 10 seeds): 0.043 vs 0.075 mean abs
+        error at 32 walks, 0.034 vs 0.048 at 64 -- roughly HALF the error at a tight budget.
+        KEPT NEGATIVES, both from measurement: (1) IT IS BIASED. The capture radius is a discretisation, and
+        no number of walks removes it -- only a finer interface does; pure WoS is unbiased and OVERTAKES at
+        high budgets (0.0238 vs 0.0260 at 256 walks). (2) THE PAPER'S LOW-VARIANCE HEADLINE IS NOT
+        REPRODUCED HERE -- pure WoS often has the smaller across-seed spread (0.0021 vs 0.0042). What this
+        earns is SAMPLE EFFICIENCY, not variance reduction. Scope: 2-D axis-aligned rectangle with Dirichlet
+        data; use wost for general SDFs and Neumann."""
+        from holographic.simulation_and_physics.holographic_wods import solve_decomposed
+        return solve_decomposed(interface, boundary_value, lo=lo, hi=hi, capture_r=capture_r, walks=walks,
+                                max_steps=max_steps, eps=eps, seed=seed, iters=iters, tol=tol, stats=stats)
+
+    def wods_interface_grid(self, nx, ny, lo=(0.0, 0.0), hi=(1.0, 1.0)):
+        """The interior lattice nodes a WoDS solve treats as unknowns (holographic_wods). Boundary nodes are
+        excluded because their values are given data. Fixed row-major order, so the linear system's indexing
+        is reproducible run to run."""
+        from holographic.simulation_and_physics.holographic_wods import interface_grid
+        return interface_grid(nx, ny, lo=lo, hi=hi)
+
+    def wods_measure_vs_pure_wos(self, nx=6, ny=6, walks=128, seeds=5, seed0=0):
+        """MEASURE WoDS against the SHIPPED pointwise WoS solver at matched walk budget on a problem with a
+        known analytic answer (holographic_wods.measure_vs_pure_wos). Wired because two claims written for
+        this module BEFORE measuring were refuted by it: the paper's low-variance headline does not
+        reproduce on this simplified operator, and the accuracy advantage is not monotone -- unbiased WoS
+        overtakes at high budgets. Returns wods_err/sd/ms and wos_err/sd/ms so both halves stay visible."""
+        from holographic.simulation_and_physics.holographic_wods import measure_vs_pure_wos
+        return measure_vs_pure_wos(nx=nx, ny=ny, walks=walks, seeds=seeds, seed0=seed0)
+
+    def advise_restarts(self, codebooks, targets=(0.95,), budgets=(4, 16, 64, 256), iters=300,
+                        trials=8, seed=0):
+        """HOW MANY RESTARTS DOES THIS FACTORING PROBLEM NEED (holographic_resonator.advise_restarts) --
+        measured on YOUR codebooks, not looked up. The F>=4 'capacity cliff' is a SEARCH BUDGET: the same
+        network, dimension and codebooks solve at restarts=256 what they fail at restarts=4 (25% -> 100% at
+        N=2048, V=16, F=4).
+        WHY THE DEFAULT WAS NOT SIMPLY RAISED -- measured, and it is the cost profile, not correctness:
+            N=2048 V=16 F=4       r=20      r=64      r=256
+            solvable             1071 ms   1460 ms    1465 ms
+            UNSOLVABLE           1488 ms   4743 ms   19439 ms
+        A bigger cap is nearly free when an answer exists (factor returns at the restart that succeeds) and
+        costs 13x when there is NONE, because a refusal must exhaust the budget to be a refusal. The price of
+        a bigger default falls entirely on the problems that were never going to work. The sequence is also
+        PREFIX-STABLE (restarts=64 returns the identical factors AND restart count as restarts=20 on every
+        already-solved case), so raising it could not flip an existing answer -- the objection is cost alone.
+        Returns the smallest budget reaching each target rate, with the full curve; restarts=None means no
+        budget tried reached it, which is itself the answer."""
+        from holographic.misc.holographic_resonator import advise_restarts
+        return advise_restarts(codebooks, targets=targets, budgets=budgets, iters=iters,
+                               trials=trials, seed=seed)
+
+    def agent_benchmark(self, n_has=60, n_no=20, seed=0, z_min=0.8):
+        """THE AGENT-SOCKET BENCHMARK (holographic_agentbench, BENCH-1). PRE-REGISTERED PRIMARY METRIC:
+        FALSE-ACTION RATE ON A NO-TOOL SET -- the number the reference system (97.9% on capability records)
+        does not publish, and the one tool-calling benchmarks are documented as missing.
+        THE NO-TOOL SET IS BUILT BY REMOVAL, which is what makes it worth running: each task is a REAL
+        capability's own author-written alias, asked against an index REBUILT WITHOUT that capability. So it
+        is a coherent, idiomatic request with genuinely nothing behind it, and every near neighbour is still
+        present to tempt a match -- strictly harder than word salad, which is merely incoherent.
+        MEASURED, 60 has-tool / 20 no-tool, seeded: resolution 100.0%, FALSE-ACTION RATE 0.0%, run-to-run
+        variance ZERO at max_rung=5, model calls 0.
+        KEPT NEGATIVE, reported because the plan demands it: RUNGS 1-5 FIRED ON 0/60 BODIES. Rung 0 answered
+        everything. That is not 'ceremony around an LLM call' -- no model was reached at all -- but it does
+        mean rungs 1-3 are UNEXERCISED and their gates unproven on real traffic. The fixture is free-text-to-
+        faculty requests, which is precisely rung 0's job, so the FIXTURE may be the limiting factor rather
+        than the ladder; a fixture with typed or vector goals would be needed to exercise the rest.
+        Returns resolution_rate, false_action_rate, rung_distribution, model_calls and the raw counts."""
+        from holographic.agents_and_reasoning.holographic_agentbench import run_benchmark
+        return run_benchmark(self, n_has=n_has, n_no=n_no, seed=seed, z_min=z_min)
+
+    def catalog_without(self, names):
+        """A Catalog holding every capability EXCEPT `names` (holographic_agentbench) -- the instrument
+        behind the benchmark's no-tool arm. Removes the answer while leaving every distractor in place, so a
+        task can be asked in a world where nothing serves it. REBUILT, never mutated: a benchmark that damages
+        the system it measures is measuring something else by the second run."""
+        from holographic.agents_and_reasoning.holographic_agentbench import catalog_without
+        return catalog_without(names)
+
+    def expand_query(self, query, llm=None, min_faithfulness=0.5, z_min=0.8, seed=0):
+        """MODEL-PROPOSED QUERY EXPANSION, GATED ON FAITHFULNESS (holographic_queryexpand, EXPAND-1). Asks a
+        model to rewrite a request into catalog vocabulary before retrieval -- the model proposes, the engine
+        disposes -- and REFUSES the rewrite unless it retains the original's meaning.
+        WHY FAITHFULNESS AND NOT JUST THE NULL, which was the stated gate: MEASURED FIRST, random padding
+        cannot smuggle a no-tool query past the router (0/8) because the null is built at MATCHED TOKEN
+        COUNT, so lengthening a query lengthens its null and dilution scores WORSE. But a TARGETED rewrite
+        sails through (1/3 smuggled: 'purple monkey dishwasher' -> 'smooth a bumpy mesh surface' routes
+        confidently), because the rewrite IS a perfectly valid query. A NULL CANNOT DETECT INFIDELITY, ONLY
+        IRRELEVANCE. So the primary gate is overlap with the ORIGINAL: an expansion sharing no content word
+        with what the user asked is a SUBSTITUTION, and is refused however well it scores.
+        Both gates apply, not either -- the expansion must also still clear the null floor.
+        Returns {query, expanded, faithfulness, proposal, why}; the ORIGINAL query is returned whenever the
+        expansion is refused, so a caller can use the result unconditionally and a bad model degrades to
+        today's behaviour rather than to a wrong answer."""
+        from holographic.semantic_router.holographic_queryexpand import expand_query
+        fn = llm if llm is not None else getattr(self, "_llm", None)
+        if fn is None:
+            raise RuntimeError("no LLM attached -- call mind.attach_llm(callable) first, or pass llm=")
+        return expand_query(self, query, fn, min_faithfulness=min_faithfulness, z_min=z_min, seed=seed)
+
+    def agent_loop(self, task, llm=None, max_steps=6, z_min=0.8, k_tools=6, seed=0):
+        """THE IN-PROCESS TOOL-USE LOOP (holographic_agentloop, LOOP-1). Hands a model the RELEVANT slice of
+        the manifest, parses a tool call from its reply, dispatches through invoke(), feeds the result back
+        and iterates. Over HTTP this already worked (/tools + /invoke); in process there was no loop, so
+        every embedder wrote their own -- routing around the choke point invoke() exists to be.
+        THE DIFFERENTIATOR IS NOT THE LOOP, IT IS THE GATE BELOW IT. Before any step runs, route_or_abstain
+        scores the task against a null built from the catalog's own vocabulary at matched token count; below
+        the floor the loop REFUSES AND SAYS WHY, and THE MODEL IS NEVER CONSULTED. Measured with a scripted
+        stub that always claims completion (worst case): has-tool 20/20 completed, no-tool 0/20 -- FALSE-
+        ACTION RATE 0%, with 20/20 refused before the model was reached. The stub never abstains, so every
+        refusal is the engine, not the model's restraint -- which matters because models measurably do NOT
+        abstain reliably for themselves.
+        Refuses non-finite args (json parses bare NaN, so a model can emit one), refuses any tool outside the
+        offered manifest, and NEVER GUESSES at an unparsed reply. Args are recorded as a blake2b digest plus
+        a short repr, never the live object: a live object in a job's args once crashed a worker after the
+        job had already succeeded. Returns {done, refused, answer, why, steps, gate}.
+        Pass llm= or attach one first with attach_llm()."""
+        from holographic.agents_and_reasoning.holographic_agentloop import AgentLoop
+        fn = llm if llm is not None else getattr(self, "_llm", None)
+        if fn is None:
+            raise RuntimeError("no LLM attached -- call mind.attach_llm(callable) first, or pass llm=")
+        return AgentLoop(self, fn, max_steps=max_steps, z_min=z_min, k_tools=k_tools, seed=seed).run(task)
+
+    def llm_tool(self, name="llm", description="", in_type="text", out_type="text", on_error="raise",
+                 llm=None):
+        """MAKE THE ATTACHED LLM PLANNER-VISIBLE (holographic_orchestrator.register_llm). attach_llm() sets
+        this mind's _llm and wires a bus bridge, but it does NOT register the model as a tool -- so
+        Planner.plan, optimize_toolchain, CircuitBreaker and SkeletonLibrary have all been blind to it. The
+        one tool that can do fuzzy language work was the one the planner could not reach. This closes that.
+        Registers on THIS mind's orchestrator and returns the Tool. Pass llm= to register a callable directly
+        without attaching it; otherwise the attached model is used and a missing one raises rather than
+        silently registering nothing.
+        WHY IT MATTERS BEYOND PLUMBING: a registered model can be FAILED OVER AWAY FROM. Wrap a flaky model,
+        watch its breaker open, watch the planner reroute onto a deterministic faculty -- which a system
+        whose only mechanism IS the model structurally cannot do, because you cannot fail over away from the
+        thing doing your planning.
+        on_error='raise' (default) lets failures reach the breaker; 'empty' degrades instead, and HIDES the
+        failure from the breaker, which is why it is not the default."""
+        fn = llm if llm is not None else getattr(self, "_llm", None)
+        if fn is None:
+            raise RuntimeError("no LLM attached -- call mind.attach_llm(callable) first, or pass llm=")
+        return self.orchestrator.register_llm(fn, name=name, description=description, in_type=in_type,
+                                              out_type=out_type, on_error=on_error)
+
+    def bundle_capacity(self, dim=None, method="cosamp", floor=0.95, seeds=range(4), codebook=None,
+                        ratios=(0.02, 0.05, 0.10, 0.17, 0.25, 0.33, 0.40)):
+        """HOW MANY THINGS FIT IN A BUNDLE -- answered as a MEASURED LOAD RATIO with its variables attached,
+        never as a constant (holographic_capacity, CAP-1). The folklore answer ("20-32 instructions") was a
+        LINEAR-READOUT ARTIFACT: measured here, naive cosine readout holds safe M/D = 0.02 while cosamp/amp
+        hold 0.17 at floor 0.95 -- 44 items at D=256, 87 at D=512, 174 at D=1024, an 8.7x difference the
+        constant hid. The safe ratio COLLAPSES across dims (0.17 at every D tested), which is why capacity
+        is a RATIO m/D, not a count: per-item signal-to-crosstalk is governed by m/D.
+        MEASURES AT CALL TIME rather than shipping a table, because the reference numbers hold for an
+        INCOHERENT dictionary only -- coherence inverts the method ranking (AMP collapses to 0.052 where
+        CoSaMP holds 1.000 at coherence 0.5, measured). Pass codebook= to answer on YOUR atoms.
+        The gate is mean MINUS sd across seeds: a capacity only the lucky seed reaches is not a capacity.
+        Returns {capacity, safe_ratio, method, dim, floor, curve} -- the curve travels with the number so it
+        cannot be quoted without the configuration that produced it. dim defaults to this mind's."""
+        from holographic.sampling_and_signal.holographic_capacity import bundle_capacity
+        return bundle_capacity(int(dim or self.dim), method=method, floor=floor, seeds=seeds,
+                               codebook=codebook, ratios=ratios)
+
+    def cleanup_batch(self, codebook, queries, backend=None, workgroup=64):
+        """CLEAN UP MANY CUES AT ONCE -> (indices, scores) (holographic_capacity). The missing `UP` direction
+        of cleanup, and IT PAYS ON THE CPU ALONE: one (K,D)x(D,M) matmul instead of K separate matvecs is
+        2.58x at K=32, 5.36x at K=64 and 5.92x at K=128 (measured, no device involved) -- BLAS getting one
+        big matmul rather than K small ones. The argmax is microseconds either way.
+        backend='wgsl' routes the same computation to any GPU. DEFAULT OFF, DELIBERATELY: the host<->device
+        crossover has never been measured on real hardware, so enabling it by default would act on arithmetic
+        rather than a measurement, and the one thing worse than not using a device is using it ON A GUESS.
+        The seam exists so somebody WITH a device can measure it without editing the engine.
+        Indices resolve by LOWEST INDEX on both paths, so the backend cannot change which atom wins a tie."""
+        from holographic.sampling_and_signal.holographic_capacity import cleanup_batch
+        return cleanup_batch(codebook, queries, backend=backend, workgroup=workgroup)
+
+    def drop_budget(self, dim=None, n_items=1, safe_ratio=0.02, floor=0.95):
+        """HOW MANY SLOTS CAN BE DROPPED under memory pressure and still recall (holographic_capacity, W6).
+        Dropping slots to save memory reduces the EFFECTIVE DIMENSION, so the constraint is the load-ratio
+        law already measured here: recall holds while n_items / (keep * dim) stays under the safe ratio. NO
+        NEW THEORY WAS NEEDED -- verified across five configurations, every one at or below ~0.02 holding and
+        every one above degrading.
+        A CORRECTION KEPT LOUD: the README's 100%-recall-at-40%-slots-destroyed figure is about DAMAGE, where
+        slots are ZEROED and NO MEMORY IS SAVED. It does NOT transfer to memory saving -- TRUNCATING to 40%
+        of dimensions at the same load gives 85%, not 100%, because a zeroed slot still occupies its
+        dimension in the readout while a dropped one does not. Corruption-robustness and a memory budget are
+        DIFFERENT QUANTITIES.
+        safe_ratio defaults to the LINEAR-readout figure; pass bundle_capacity's measured ratio for your
+        decoder (0.17 for cosamp/amp) to drop far more aggressively."""
+        from holographic.sampling_and_signal.holographic_capacity import drop_budget
+        return drop_budget(int(dim or self.dim), n_items, safe_ratio=safe_ratio, floor=floor)
+
+    def measure_recovery_curve(self, dim=None, method="cosamp", ratios=(0.05, 0.10, 0.17, 0.25, 0.33),
+                               n_atoms=None, seeds=range(4), codebook=None):
+        """Support-recovery F1 as a function of LOAD RATIO M/D, measured live for one readout method
+        (holographic_capacity). The raw curve behind bundle_capacity, for when the shape matters more than
+        the single safe number -- e.g. reading where a method's phase transition sits, or comparing readouts
+        on your own codebook. Returns [{ratio, m, f1_mean, f1_sd}] across seeds."""
+        from holographic.sampling_and_signal.holographic_capacity import measure_recovery_curve
+        return measure_recovery_curve(int(dim or self.dim), method, ratios=ratios, n_atoms=n_atoms,
+                                      seeds=seeds, codebook=codebook)
+
+    def gap_gate_null(self, library, goal_sig, threshold=0.85, max_length=4, steps=200, n_null=64,
+                      seed=0, alpha=0.05):
+        """NULL-REFERENCE the capability-synthesis coherence gate (holographic_voidsynth): is `threshold` a
+        meaningful bar ON YOUR LIBRARY? synthesize_for_goal accepts a chain when coherence clears a bare
+        0.85 -- and that constant encodes an assumption about how coherent a RANDOM goal can get, which is
+        a property of the library, not of the algorithm. Near-orthogonal atoms and near-duplicates give
+        random goals very different ceilings; one constant cannot be right for both.
+        Scores the real goal, re-runs the IDENTICAL synthesis on n_null random unit goals (which have no
+        chain behind them by construction -- the procedure match), and reports where the real score sits.
+        MEASURED on random unit libraries, 12 seeds: real goals 1.000 +/- 0.000, random goals 0.136-0.237
+        depending on dim and library size, so 0.85 separates comfortably HERE -- which is exactly the number
+        the bare constant hides and that a caller must confirm on their own data.
+        Returns p / collapsed / null_mean / observed plus separation and threshold_is_meaningful."""
+        from holographic.misc.holographic_voidsynth import gap_gate_null
+        return gap_gate_null(library, goal_sig, threshold=threshold, max_length=max_length, steps=steps,
+                             n_null=n_null, seed=seed, alpha=alpha)
+
+    def declare(self, request, args=None, max_rung=5, z_min=0.8, seed=0, dry_run=False,
+                null_check=False, n_null=64, cache=None):
+        """DECLARED BODY, FILLED BY AN ESCALATING LADDER (holographic_declare, DECLARE-1). Describe what you
+        want in plain English; the engine walks rungs cheapest-and-most-provable FIRST and stops at the
+        first that clears its own gate:
+            0  route_or_abstain -> invoke        INHERITS  a shipped faculty answered
+            1  Planner.plan typed chain          INHERITS  a typed chain composed and ran
+            2  synthesize_procedure -> run       EXACT     EXECUTION-VERIFIED, it proves its answer
+            3  fill_capability_gap -> chain      TOL       cleared a coherence gate
+        Returns a Resolution carrying {rung, mechanism, exactness, reversibility, confidence, why} plus a
+        DESCENT LOG saying why every rung above the answering one declined -- that log IS the explanation.
+        Two axes on purpose: exactness answers 'can I reproduce it', reversibility 'can I recover what went
+        in', and cleanup is EXACT and LOSSY at once, so one field could not carry both.
+        REFUSAL IS A RESULT: an unresolvable request returns ok=False with the full descent rather than a
+        confident guess. That is the whole point -- a fluent filler always returns something.
+        max_rung DEFAULTS TO 5 so 'stay deterministic' is a hard guarantee: rungs 6-7 are the model and are
+        opt-in per call. Every gate is NaN-guarded, because argmax_tiebreak([0.1, nan, 0.9]) returns 1 --
+        the NaN's index, not the maximum -- and json parses bare NaN, so one can arrive over /invoke and
+        WIN a gate. The descent log is stored BESIDE the result, never bundled into it: this engine's own
+        measurement says nesting stays cheap only while each level is uncluttered.
+        PASS cache={} (any dict-like) TO MEMOISE BY CONTENT. MEASURED: a warm walk costs ~45.6 ms because
+        find_scored runs over ~2,374 capabilities every call, so a repeat served from cache is ~2 us; a COLD
+        walk at a new token count costs ~4.3 s while the router's null is built. Against the machine model's
+        break_even_n=1.63 a request repeating even twice pays for it.
+        THE HARD RULE IS ENFORCED IN CODE, NOT DOCUMENTED: a resolution whose exactness is NONDETERMINISTIC
+        is NEVER stored -- caching a model's answer is a bug, not a slowdown, because it is a fact about one
+        moment rather than a value you can key on. Rungs 0-3 never produce one, which is exactly why the
+        guard is written before rungs 6-7 exist. Args are hashed to a blake2b digest, never held: a LIVE
+        OBJECT in cached args once crashed a worker after its job had already succeeded."""
+        from holographic.agents_and_reasoning.holographic_declare import Ladder
+        return Ladder(self, max_rung=max_rung, z_min=z_min, seed=seed, null_check=null_check,
+                      n_null=n_null, cache=cache).resolve(request, args=args, dry_run=dry_run)
+
+    def declare_explain(self, request, args=None, max_rung=5, z_min=0.8, seed=0):
+        """DRY RUN of declare(): report which rung WOULD answer and why the ones above would decline,
+        without executing anything (holographic_declare). Same descent log, no side effects -- for asking
+        'what will this do, and on what evidence' before letting it do it."""
+        from holographic.agents_and_reasoning.holographic_declare import Ladder
+        return Ladder(self, max_rung=max_rung, z_min=z_min, seed=seed).resolve(
+            request, args=args, dry_run=True)
+
+    def declares(self, fn):
+        """DECORATOR form of declare(): attach the ladder to a function whose body is `...`, using its
+        DOCSTRING as the request and its keyword arguments as the args (holographic_declare).
+
+            @mind.declares
+            def smooth_the_surface(mesh, iters: int = 8):
+                \"\"\"Remove bumps from a 3D model without it shrinking.\"\"\"
+                ...
+
+        Calling the wrapped function returns a Resolution, not a bare value, so the caller cannot
+        accidentally use an answer without its provenance -- which is the failure mode the whole ladder
+        exists to prevent. The undecorated function is kept on `.declared` for inspection."""
+        import functools
+        request = (fn.__doc__ or fn.__name__.replace("_", " ")).strip()
+
+        @functools.wraps(fn)
+        def wrapper(*a, **kw):
+            return self.declare(request, args=kw)
+
+        wrapper.declared = fn
+        wrapper.request = request
+        return wrapper
+
+    def decision_flip_rate(self, vectors, queries, bits=8, mode="uniform", half_step=True, seed=0):
+        """DECISION-SAFE rate-distortion (holographic_ratedistortion, B5b): what fraction of queries change
+        their TOP-1 ANSWER when the index is quantized? Every other distortion measure here asks how close
+        the reconstructed vector is; this asks whether the DECISION survives -- and a flipped argmax is a
+        different answer, not a slightly worse one. Returns flips / n / flip_rate plus the margin
+        distribution (median, p05, min) at full precision, because a rate without margins says what happened
+        and not why.
+        WHY IT EXISTS: no published paper measures top-1 flip rate under quantization at 500-2,000 items --
+        the retrieval literature reports recall@k and nDCG@10 at 100K-1M scale, where a few flips vanish
+        into a rank metric. MEASURED here on the shipped 509x128 index: exact-row and even +60%-noise
+        queries flip 0.00% (margins ~0.53-0.58), while queries sitting MIDWAY BETWEEN TWO DOCUMENTS collapse
+        to margin ~0.058 and flip ~1%. By bit width on those ambiguous queries: 8b 1.3%, 5b 5.7%, 3b 22.3%,
+        2b 37.3% -- while normal queries stay 0.00% at EVERY width down to 2 bits.
+        THE FINDING: FLIP RATE IS GOVERNED BY MARGIN, NOT BY CORPUS SIZE OR BIT WIDTH. So decision-safety is
+        not answerable from N and bits; it needs the margin distribution of the queries you actually serve.
+        KEPT NEGATIVE: a uint8-vs-float8 verdict CANNOT be taken on the shipped index, which is already
+        uint8 -- uniform re-quantization there is a no-op (max|err| 0.000000) while float8 genuinely
+        re-quantizes, so the comparison would measure the source grid, not the quantizers."""
+        from holographic.misc.holographic_ratedistortion import decision_flip_rate
+        return decision_flip_rate(vectors, queries, bits=bits, mode=mode, half_step=half_step, seed=seed)
+
+    def crowded_subset(self, vectors, size, seed=0):
+        """The `size` mutually MOST SIMILAR rows of `vectors` (holographic_ratedistortion) -- a synthetic
+        stand-in for a catalog whose entries are variations on a theme, grown greedily from the closest pair
+        because crowding is a cluster, not a random sample. Pair with decision_flip_rate to test whether a
+        decision-safety proof taken on a well-separated corpus still holds on a crowded one; it is exactly
+        the transfer that must NOT be assumed."""
+        from holographic.misc.holographic_ratedistortion import crowded_subset
+        return crowded_subset(vectors, size, seed=seed)
+
+    def qfhrr_quantize(self, v, levels=16):
+        """QUANTIZED INTEGER-PHASE FHRR (holographic_qfhrr, qFHRR-1) -- turn a complex FHRR phasor vector
+        into integer phase indices in {0..levels-1}. At 16 levels that is 4 bits per dimension against
+        complex128's 128, a 96.9% storage cut, and everything downstream (bind/unbind/similarity) becomes
+        pure integer arithmetic. This is the ONLY lossy step; use qfhrr_dequantize to go back. Opt-in tier
+        over the existing complex FHRR -- nothing in holographic_fhrr or the real-valued defaults changes."""
+        from holographic.sampling_and_signal.holographic_qfhrr import quantize_phases
+        return quantize_phases(v, levels)
+
+    def qfhrr_dequantize(self, q, levels=16):
+        """Integer phase indices back to complex unit phasors (holographic_qfhrr) -- the inverse of
+        qfhrr_quantize up to the bin width already discarded. Use it to hand a quantized vector back to the
+        complex FHRR path."""
+        from holographic.sampling_and_signal.holographic_qfhrr import dequantize_phases
+        return dequantize_phases(q, levels)
+
+    def qfhrr_bind(self, qa, qb, levels=16):
+        """Bind quantized phase vectors EXACTLY (holographic_qfhrr): phases add, so indices add mod levels.
+        Pure integer, no floating point, identical on every machine."""
+        from holographic.sampling_and_signal.holographic_qfhrr import qfhrr_bind
+        return qfhrr_bind(qa, qb, levels)
+
+    def qfhrr_unbind(self, qc, qa, levels=16):
+        """Unbind quantized phase vectors EXACTLY (holographic_qfhrr) -- and this is a TRUE inverse, not the
+        quasi-inverse the real-valued path gives. Phases subtract, so unbind(bind(a,b),a) returns b's
+        indices BIT FOR BIT at every K, needing no cleanup at all; real HRR recovers b at cosine ~0.70 and
+        does need it. The strongest exactness guarantee in the engine -- bought by giving up closed
+        bundling (see qfhrr_bundle)."""
+        from holographic.sampling_and_signal.holographic_qfhrr import qfhrr_unbind
+        return qfhrr_unbind(qc, qa, levels)
+
+    def qfhrr_bundle(self, qs, levels=16):
+        """Superpose quantized phase vectors -- BY LEAVING THE REPRESENTATION, because no closed integer
+        operation does this (holographic_qfhrr). Dequantize to Cartesian, sum, re-quantize via atan2 +
+        round. KEPT NEGATIVE, AND IT IS THE ONE THIS RESEARCH LINE KEEPS ARRIVING AT: the round() at a bin
+        boundary IS a tie-arbitration point and the atan2 is floating point, so this single call is where
+        the tier's exactness and machine-independence stop. QUANTIZED VSA DOES NOT LET THE ENGINE DELETE ITS
+        TIE-ARBITRATION MACHINERY -- exactness holds for bind/unbind only."""
+        from holographic.sampling_and_signal.holographic_qfhrr import qfhrr_bundle
+        return qfhrr_bundle(qs, levels)
+
+    def qfhrr_measure_fidelity(self, dim=1024, levels_list=(4, 8, 16, 32, 64, 256), bundle_n=16, seeds=8):
+        """RE-MEASURE the quantized-vs-complex fidelity table on this substrate (holographic_qfhrr).
+        Wired because RESEARCH_CONSOLIDATED.md quotes the qFHRR preprint's numbers and explicitly flags them
+        as UNVERIFIABLE from the abstract. Measured here: BIND fidelity matches the paper almost exactly
+        (0.9498 / 0.9875 / 0.9999 at K=8/16/256 vs the paper's 0.9497 / 0.9872 / 0.9999). BUNDLE fidelity
+        matches ONLY against a PHASE-ONLY reference (0.9156 / 0.9738 / 0.9998 vs 0.9147 / 0.9731 / 0.9997);
+        against the actual complex bundle it SATURATES AT ~0.892 and more phase levels do not help, because
+        the ceiling is discarding the MAGNITUDE. Both are returned -- bundle_fid and bundle_fid_phase -- so
+        the optimistic figure cannot silently stand in for the one an engineer gets."""
+        from holographic.sampling_and_signal.holographic_qfhrr import measure_fidelity
+        return measure_fidelity(dim=dim, levels_list=levels_list, bundle_n=bundle_n, seeds=seeds)
+
+    def amp_recall(self, cue, codebook, K=None, iters=30, alpha=None, tol=1e-12, stats=None):
+        """AMP RECALL (holographic_amp, AMP-1) -- the FIFTH member of the bundle-recovery family. IHT with
+        one extra term: the ONSAGER CORRECTION, a memory term proportional to the fraction of active
+        coefficients, which cancels the estimate/design correlations that make a plain gradient residual
+        non-Gaussian. With it the residual behaves like AWGN, so the threshold is read from the residual norm
+        (STATE EVOLUTION) instead of tuned -- which is why K IS OPTIONAL here and required by every other
+        member. Returns (index, weight) descending by |weight|, the same shape as cosamp_recall.
+        MEASURED vs CoSaMP (D=512, N=2048, 8 seeds): TIE at 1.000 through M/D=0.17, then AMP WINS -- 0.896
+        vs 0.709 at M/D=0.25, 0.558 vs 0.167 at M/D=0.33 -- at a flat ~21 ms while CoSaMP's per-round
+        least-squares climbs to ~1 s (48x faster at M=200). The baseline is not a strawman: CoSaMP at 120
+        iterations (6.5 s) still scores 0.154 there.
+        KEPT NEGATIVES, and neither method dominates: (1) A COHERENT DICTIONARY DESTROYS AMP -- at coherence
+        0.5 it scores 0.052 where CoSaMP holds 1.000, because state evolution assumes a roughly i.i.d.
+        design. CoSaMP stays the method there. (2) AMP is SLOWER at light load (21 ms vs 3 ms at M=16), its
+        cost being flat in M. (3) K-free operation only works at LIGHT load; at heavy load supply K."""
+        from holographic.sampling_and_signal.holographic_amp import amp_recall
+        return amp_recall(cue, codebook, K=K, iters=iters, alpha=alpha, tol=tol, stats=stats)
+
+    def amp_measure_vs_cosamp(self, dim=512, n_atoms=2048, loads=(16, 32, 64, 86, 128, 171), seeds=6, seed0=0):
+        """MEASURE AMP against the HONEST baseline -- CoSaMP, already shipped -- at matched load with variance
+        (holographic_amp.measure_vs_cosamp). Wired because the research consolidation ranks AMP #1 by scoring
+        it against Bottleneck 2's '20-32 instruction' ceiling, which was measured with the LINEAR readout and
+        never existed. Benchmarking AMP against that figure manufactures a 5x win; against CoSaMP the honest
+        result is a CROSSOVER -- a win in the M/D 0.25-0.39 band, a catastrophic loss on coherent
+        dictionaries. Returns dicts with M, M_over_D, amp_f1/sd, cosamp_f1/sd, amp_ms, cosamp_ms."""
+        from holographic.sampling_and_signal.holographic_amp import measure_vs_cosamp
+        return measure_vs_cosamp(dim=dim, n_atoms=n_atoms, loads=loads, seeds=seeds, seed0=seed0)
+
+    def ntt_bind(self, a, b):
+        """EXACT INTEGER BINDING via the Number-Theoretic Transform (holographic_ntt, NTT-1). The same algebra
+        as bind() -- circular convolution -- but computed in modular integer arithmetic over Z_q, so nothing
+        rounds and nothing depends on floating-point summation order. WHY: numpy.fft (pocketfft) is not
+        guaranteed bit-identical across CPUs (SIMD width changes the summation order; NumPy #11926 reports up
+        to 0.1% divergence between two Xeons), and here a ULP flip is an argmax flip. Integer input only; the
+        modulus bound 2*n*max|a|*max|b| < q is CHECKED and raises rather than wrapping silently.
+        KEPT NEGATIVE, measured: 19-50x SLOWER than the float FFT bind across D=256..4096 (a Python loop over
+        log2(n) modular stages against C-level pocketfft). This buys EXACTNESS AND REPRODUCIBILITY, not speed
+        -- call ntt_measure_vs_fft() rather than trusting this sentence."""
+        from holographic.sampling_and_signal.holographic_ntt import ntt_bind
+        return ntt_bind(a, b)
+
+    def ntt_unbind(self, c, a):
+        """Unbind exactly-computed integer bindings by correlation with the involution (holographic_ntt).
+        KEPT NEGATIVE, AND IT IS THE IMPORTANT ONE: this does NOT make unbinding exact. The involution is
+        HRR's QUASI-inverse, so unbind(bind(a,b), a) recovers b in DIRECTION only and cleanup is still
+        required -- exactly as with the float path. What the NTT removes is floating-point nondeterminism
+        from the OPERATION, not the algebraic approximation inside HRR. True exact deconvolution would need
+        a's spectrum to be invertible mod q, which no arbitrary atom guarantees. The standing claim that
+        integer VSA lets the engine delete its tie-arbitration machinery remains REFUTED."""
+        from holographic.sampling_and_signal.holographic_ntt import ntt_unbind
+        return ntt_unbind(c, a)
+
+    def ntt_convolve(self, a, b):
+        """EXACT cyclic convolution of two integer vectors (holographic_ntt) -- the exact-arithmetic
+        replacement for irfft(rfft(a)*rfft(b)), bit-identical on every machine. ntt_bind is this under its
+        VSA name; use this spelling for signal work. Verified against a naive O(n^2) integer convolution with
+        array_equal, never a tolerance. Raises if the modulus cannot hold the signed result."""
+        from holographic.sampling_and_signal.holographic_ntt import ntt_convolve
+        return ntt_convolve(a, b)
+
+    def ntt_measure_vs_fft(self, sizes=(256, 512, 1024, 2048, 4096), repeats=40, seed=0):
+        """MEASURE exact NTT convolution against the float FFT convolution bind() actually uses
+        (holographic_ntt.measure_vs_fft), warmed, medians with spread. Wired because the research
+        consolidation flagged that NO NumPy NTT-vs-FFT benchmark exists and the NTT might well lose: it does,
+        by 19-50x. A cost that is not runnable becomes folklore. ratio > 1 means the NTT is slower."""
+        from holographic.sampling_and_signal.holographic_ntt import measure_ntt_vs_fft
+        return measure_ntt_vs_fft(sizes=sizes, repeats=repeats, seed=seed)
+
+    def hadamard_codebook(self, dim, seed=0, signed=True):
+        """STRUCTURED CODEBOOK whose cleanup is ONE TRANSFORM, not a K-scan (holographic_htcodebook, HT-1).
+        Atoms are the sign-permuted rows of a Hadamard matrix, so correlating a cue against ALL of them is a
+        single Walsh-Hadamard transform: cleanup costs O(D log D) instead of O(K*D), the atoms are generated
+        rather than stored (a sign vector, not a K x D matrix), and because the rows are mutually ORTHOGONAL
+        the crosstalk between distinct atoms is exactly zero. argmax of the correlations is then the exact
+        maximum-likelihood nearest-codeword decode -- the classic Reed-Muller 'Green machine', reached from the
+        VSA side. Returns a HadamardCodebook with .cleanup(cue) -> (index, score), .atom(i), .K.
+        MEASURED at equal K and D, transform vs matmul scan: 2.3x at D=512, 6.9x at D=1024 (628 us -> 91 us),
+        39x at D=2048, 219x at D=8192 (77 ms -> 0.35 ms) -- the win GROWS with D.
+        KEPT NEGATIVES, both load-bearing: (1) it LOSES at D=256 (0.49x) -- the Python-level transform loop
+        costs more than a small matmul, so the crossover is around D=512, below which use the scan. (2) K IS
+        CAPPED AT 2*D by the construction and cannot be raised; the backlog item that asked for this proposed
+        replacing a K=16384 scan at D=1024, which no Hadamard codebook can hold (that needs D=8192). (3) the
+        SIGNED codebook is a DEGENERATE RECOVERY DICTIONARY -- signed=True adds each atom's exact negation, so
+        coherence is exactly 1.000 and cosamp_recall/iht_recall return a WRONG support (measured 0/3 signed vs
+        3/3 unsigned at D=256); pass signed=False for anything that unbundles. The atom set is fixed, so this
+        is an opt-in codebook TYPE -- Vocabulary and every existing cleanup path are untouched."""
+        from holographic.caching_and_storage.holographic_htcodebook import HadamardCodebook
+        return HadamardCodebook(dim, seed=seed, signed=signed)
+
+    def hadamard_codebook_measure(self, dims=(256, 512, 1024, 2048, 4096), repeats=60, seed=0):
+        """MEASURE transform cleanup against a matmul scan at EQUAL K and EQUAL D (holographic_htcodebook).
+        Wired so the crossover and the cap stay runnable rather than quotable: equal-K is the only honest
+        comparison, because the structured codebook cannot hold more than 2*D atoms. Returns dicts with dim, K,
+        wht_us, scan_us, speedup (>1 = the transform wins; it is BELOW 1 at D=256)."""
+        from holographic.caching_and_storage.holographic_htcodebook import measure_vs_scan
+        return measure_vs_scan(dims=dims, repeats=repeats, seed=seed)
+
+    def wht(self, a):
+        """FAST WALSH-HADAMARD TRANSFORM (holographic_wht, WHT-1) -- the O(D log D) matrix-free transform, D a
+        power of two, unnormalised so wht(wht(x)) == D*x. Every butterfly is one add and one subtract: no twiddle
+        factors, no stored matrix, nothing to round. Integer dtypes are PRESERVED (see wht_exact); float input is
+        promoted to float64. Use it for structured matrix-free operators (this is what HolographicArchive's key
+        operator has always run on) and wherever the transform must be reorder-independent. Kept negative, measured:
+        it is NOT an FFT speedup -- 4-9x SLOWER than numpy.rfft across D=256..16384 on this codebase, because it is a
+        Python loop over log2(D) vectorised passes against C-level pocketfft. Call wht_measure_vs_fft() to re-run
+        that comparison rather than trusting this sentence."""
+        from holographic.sampling_and_signal.holographic_wht import fwht
+        return fwht(a)
+
+    def wht_exact(self, a):
+        """EXACT INTEGER Walsh-Hadamard transform (holographic_wht) -- identical to wht() but REFUSES float input,
+        so the bit-exactness guarantee is enforced by a TypeError instead of trusted from a docstring. On integer
+        input every butterfly is integer add/subtract, so the result is bit-exact and IDENTICAL ON EVERY MACHINE.
+        That is the point: numpy.fft (pocketfft) can return bitwise-different results across CPUs because SIMD
+        width changes the summation order (NumPy issue #11926 reports up to 0.1% divergence between two Xeons),
+        and in this engine a ULP difference flips a cleanup argmax, which is a different creature. Input is widened
+        to int64 first -- int8/int16 would silently wrap, since a bipolar transform reaches |tap| <= D."""
+        from holographic.sampling_and_signal.holographic_wht import fwht_exact
+        return fwht_exact(a)
+
+    def wht_inverse(self, a):
+        """INVERSE fast Walsh-Hadamard transform (holographic_wht): the WHT is its own inverse up to a 1/D scale,
+        so this is wht(a)/D. Returns float -- the division is what breaks integrality. For an exact integer round
+        trip call wht_exact twice and divide by D yourself, which stays exact whenever D divides every entry."""
+        from holographic.sampling_and_signal.holographic_wht import ifwht
+        return ifwht(a)
+
+    def wht_measure_vs_fft(self, sizes=(256, 512, 1024, 2048, 4096), repeats=200, seed=0):
+        """MEASURE the Walsh-Hadamard transform against numpy.rfft, per size, warmed, median plus spread
+        (holographic_wht.measure_vs_fft). This is wired as a faculty ON PURPOSE: the research shortlist floats the
+        WHT as a possible speed win over the FFT, this codebase measures it as a 4-9x LOSS, and a negative that is
+        not runnable decays into folklore. Returns dicts with dim / wht_us / fft_us / ratio (>1 means SLOWER) plus
+        the means, so the skew stays visible. The harness warms up and takes medians because the first version of
+        it did neither and duly asserted the wrong direction off first-call noise."""
+        from holographic.sampling_and_signal.holographic_wht import measure_wht_vs_fft
+        return measure_wht_vs_fft(sizes=sizes, repeats=repeats, seed=seed)
+
     def factor_composite(self, composite, codebooks, restarts=20, L=None, iters=None, seed=0, confidence=False,
                          readout="softmax"):
         """Pull a single bound composite APART into the factors that built it -- the inverse of binding,

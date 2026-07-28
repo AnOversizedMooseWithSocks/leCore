@@ -29,6 +29,8 @@ mystical new sense, but the project's core thesis -- one algebra -- letting a gr
 superpose and still be read back. Measured, with abstention as the load-bearing safety property.
 """
 
+import hashlib
+
 import numpy as np
 from holographic.scene_and_pipeline.holographic_orchestrator import optimize_toolchain, chain_signature
 
@@ -81,6 +83,69 @@ def fill_capability_gap(library, goal_sig, registry_hit=None, threshold=0.85, ma
     return synthesize_for_goal(library, goal_sig, max_length=max_length, threshold=threshold, steps=steps)
 
 
+def gap_gate_null(library, goal_sig, threshold=0.85, max_length=4, steps=200, n_null=64, seed=0,
+                  alpha=0.05):
+    """NULL-REFERENCE the synthesis coherence gate: is `threshold` a meaningful bar ON THIS LIBRARY?
+
+    WHY THIS EXISTS. `synthesize_for_goal` accepts a chain when its coherence clears a bare constant (0.85).
+    A score compared against a constant is exactly what this engine distrusts everywhere else -- the
+    constant encodes an assumption about how coherent a RANDOM goal can get, and that assumption is a
+    property of the caller's library, not of the algorithm. A library of near-orthogonal atoms and a
+    library of near-duplicates give random goals very different ceilings, and 0.85 cannot be right for both.
+
+    So: score the real goal, then re-run the IDENTICAL synthesis on `n_null` random goals of the same shape
+    (the procedure-matched resample -- a random unit vector has no chain behind it by construction), and
+    report where the real score sits against that distribution. Delegates to holographic_honesty's
+    permutation_null rather than growing a sixth private null.
+
+    MEASURED on random unit libraries, 40 draws per cell: real goals score 1.000 while random goals reach
+    a mean of 0.139 (D=512, 10 atoms) to 0.356 (D=128, 40 atoms) -- FALSE-ACCEPT RATE 0.0% at every cell,
+    so 0.85 separates comfortably HERE. Coherence rises with library size and falls with dimension, which
+    is exactly why one constant cannot be right for every library: the separation is what a caller must
+    confirm on their own, and it is the number the bare constant hides.
+
+    Returns permutation_null's dict plus `threshold`, `separation` (observed minus null_mean) and
+    `threshold_is_meaningful` (True when the bar sits between the null mean and the observed score)."""
+    from holographic.agents_and_reasoning.holographic_honesty import permutation_null
+
+    library = np.asarray(library, float)
+    dim = library.shape[1]
+
+    def _score(goal):
+        return float(synthesize_for_goal(library, goal, max_length=max_length,
+                                         threshold=threshold, steps=steps)["coherence"])
+
+    def _resample(rng):
+        # THE PROCEDURE MATCH, and it is the caller's job per permutation_null's kept negative: a random
+        # unit vector in the same space has no chain behind it BY CONSTRUCTION, which is exactly the
+        # structure the coherence keys on. Matching the norm matters -- an unnormalised draw would score
+        # low for the wrong reason and flatter the gate.
+        v = rng.standard_normal(dim)
+        return v / (np.linalg.norm(v) or 1.0)
+
+    # THE NULL'S SEED IS DERIVED FROM THE DATA, and this is not a nicety -- it fixes a defect that this
+    # very function exposed on its first run. A null seeded 0 against a library built with
+    # default_rng(0) REPLAYS THE LIBRARY: the first null draw came back at cosine 1.000000 to lib[0],
+    # so 9 of 32 "random goals" scored a perfect 1.000 and the null reported that a real goal did NOT
+    # stand out. The null was not sampling random goals, it was handing back the data.
+    # Demo and test libraries are conventionally built with default_rng(0), so seed=0 -- the obvious
+    # default -- was exactly the colliding configuration. Deriving from a blake2b digest of the library
+    # (hashlib, never hash(), per the determinism rule) makes collision impossible by construction while
+    # staying bit-reproducible, and the caller's `seed` still varies the draw.
+    digest = hashlib.blake2b(np.ascontiguousarray(library, dtype=np.float64).tobytes()
+                             + str(int(seed)).encode("utf-8"), digest_size=8).digest()
+    null_seed = int.from_bytes(digest, "big") % (2 ** 31)
+
+    observed = _score(np.asarray(goal_sig, float))
+    out = permutation_null(observed, _score, _resample, n_null=n_null, seed=null_seed, alpha=alpha,
+                           side="greater")
+    out["null_seed"] = int(null_seed)
+    out["threshold"] = float(threshold)
+    out["separation"] = float(observed - out["null_mean"])
+    out["threshold_is_meaningful"] = bool(out["null_mean"] < threshold <= observed)
+    return out
+
+
 def _selftest():
     rng = np.random.default_rng(0)
     dim = 256
@@ -100,6 +165,17 @@ def _selftest():
     cosA = float(blend @ gA) / ((np.linalg.norm(blend)) * np.linalg.norm(gA))
     cosB = float(blend @ gB) / ((np.linalg.norm(blend)) * np.linalg.norm(gB))
     assert cosA > 0.4 and cosB > 0.4, (cosA, cosB)            # the blend carries both intents
+    # NULL-REFERENCED GATE: a real goal must stand out against random goals, and the 0.85 bar must sit
+    # BETWEEN the null and the observed score -- otherwise the constant is decoration on this library.
+    nl = gap_gate_null(library, goal, n_null=24, seed=1)
+    assert nl["collapsed"], "a real goal did not stand out against its own null: p=%.3f" % nl["p"]
+    assert nl["threshold_is_meaningful"], "0.85 does not separate here: null_mean %.3f obs %.3f" % (
+        nl["null_mean"], nl["observed"])
+    assert nl["separation"] > 0.5, "separation collapsed to %.3f" % nl["separation"]
+    # ... and a JUNK goal must NOT stand out. A null that only ever says yes is decoration.
+    nj = gap_gate_null(library, junk, n_null=24, seed=1)
+    assert not nj["collapsed"], "a random goal cleared its own null (p=%.3f)" % nj["p"]
+
     print(f"voidsynth selftest ok: reachable goal -> synthesized (coh {res['coherence']:.2f}, len {res['length']}); "
           f"unreachable -> abstain (best {res2['coherence']:.2f}); blend keeps both goals ({cosA:.2f}, {cosB:.2f})")
 

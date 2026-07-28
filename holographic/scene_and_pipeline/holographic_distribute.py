@@ -332,18 +332,34 @@ def reduce_bundle(parts):
 
 # ---- the distributor ------------------------------------------------------------------------------------------------
 
-def distribute(buckets, worker, reduce=reduce_sum, cache=None):
+def distribute(buckets, worker, reduce=reduce_sum, cache=None, backend=None):
     """Run worker(bucket, cache) on each bucket and reassemble with a COMMUTATIVE reduce. Because reduce is a commutative
     monoid, the result does not depend on bucket order -- so the buckets could be dispatched to separate machines / VMs
     and combined with no stitch pass. `cache` is the shared, read-only precompute handed to every worker (the "GI cache
     on the main node"). In-process the workers run sequentially; on a farm each is a node. Returns the reassembled
     result plus a small info dict (bucket count, per-bucket sizes)."""
-    parts = [worker(b, cache) for b in buckets]
+    if backend is None:
+        parts = [worker(b, cache) for b in buckets]        # unchanged default: sequential, in this process
+    else:
+        # BACKEND SEAM (additive). A Coordinator owns the cache publish/release lifecycle, so delegate rather
+        # than reimplementing it here -- LocalPool publishes a big read-only cache ONCE into shared_memory
+        # and that bookkeeping must not be duplicated in two places.
+        from holographic.scene_and_pipeline.holographic_coordinator import Coordinator
+        parts = Coordinator(backend=backend).run(buckets, worker, cache=cache, reduce=lambda p: p)
     info = {"buckets": len(buckets), "sizes": [int(len(b)) for b in buckets]}
     return reduce(parts), info
 
 
 def distribute_exact(buckets, worker, cache=None, bits=40):
+    # THE PUBLISHED ALGORITHM THIS IMPLEMENTS: the SUPERACCUMULATOR / correctly-rounded parallel summation
+    # line (Collange, Defour, Graillat, Iakymchuk) -- a long fixed-point accumulator wide enough to hold every
+    # exponent in play, so addition becomes exact integer addition and the result is bit-identical regardless
+    # of how the work was partitioned. Cited because the guarantee below is otherwise easy to read as a lucky
+    # implementation detail rather than a known-correct method with a known cost profile ("no additional cost
+    # for large sums", across ~90 orders of magnitude of dynamic range).
+    # Corroborating and consistent with the reason this matters on GPUs: reduction ORDER -- warp-scheduler
+    # dependent atomicAdd -- is the genuine source of non-determinism, and controlling it is what buys bitwise
+    # reproducibility. The fixed-point accumulator removes the dependence on order entirely instead.
     """`distribute`, but the answer is BIT-IDENTICAL under any bucketing -- 4-way, 7-way, or one bucket per item.
 
     THE BUG THIS FIXES, measured. `distribute`'s default `reduce=reduce_sum` is a FLOAT sum, so a 4-way and a 7-way

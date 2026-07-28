@@ -113,6 +113,21 @@ class _UnifiedPart04:
         never guessed: shuffled parts are structureless to 'sequence' but highly compressible to 'structure'. A
         ladder that tops out shallow is a RESULT (most data does), logged loudly. See holographic_ladder.climb."""
         from holographic.agents_and_reasoning.holographic_ladder import climb
+        # INPUT GUARD (defect 5.4). `climb` wants list[list[int]] -- a corpus of token-id sequences. Handed a
+        # list of STRINGS it died 100 lines deep in a private helper with
+        # "TypeError: unsupported operand type(s) for -: 'str' and 'str'", which names neither the argument
+        # nor the expectation. This faculty is reachable from /invoke, where free-form data is the DEFAULT
+        # case, so the guard belongs at the boundary rather than in the algorithm.
+        if not isinstance(corpus, (list, tuple)) or not corpus:
+            raise TypeError("climb_ladder(corpus) wants a non-empty list of sequences, got %r"
+                            % type(corpus).__name__)
+        first = corpus[0]
+        if isinstance(first, str) or not isinstance(first, (list, tuple)):
+            raise TypeError(
+                "climb_ladder(corpus) wants list[list[int]] -- a corpus of TOKEN-ID sequences -- but the "
+                "first item is %r. Map your symbols to integer ids first (e.g. "
+                "[[vocab[w] for w in doc] for doc in docs]); a list of strings is the common mistake."
+                % type(first).__name__)
         return climb(corpus, lens=lens, max_depth=max_depth, min_gain=min_gain)
 
     def ladder_summary(self, tower):
@@ -1293,8 +1308,16 @@ class _UnifiedPart04:
     def emit_kernel(self, fn, dialect="wgsl"):
         """Emit a scalar, straight-line, float kernel into `wgsl` | `c_f64` | `c_f32` | `js` | `zig_f64` | `zig_f32`. The hand-written
         compute shader becomes a PROJECTION of the authoritative Python kernel. K10's rule: the emitter REFUSES
-        rather than guesses -- an unannotated parameter, an unknown call, a loop, a missing return each raise with
-        the construct named. See holographic_emit.emit."""
+        rather than guesses -- an unannotated parameter, an unknown call, a `while`, a range whose bound is not a
+        literal, or a missing return each raise with
+        the construct named.
+        BOUNDED `for i in range(N)` WITH A LITERAL BOUND *IS* SUPPORTED and emits a correct counted loop --
+        this docstring previously said "a loop" was refused outright, which was wrong and hid a working
+        feature. What is refused is UNBOUNDED or DATA-DEPENDENT iteration (`while`, or `range(n)` where n is
+        a parameter), because a shader invocation must have a statically known trip count. A scalar
+        straight-line kernel with a bounded loop is exactly the shape a compute-shader invocation runs, so
+        this covers per-element maps; a CROSS-INVOCATION REDUCTION is a different problem and is not emitted.
+        See holographic_emit.emit."""
         from holographic.io_and_interop.holographic_emit import emit, emit_source
         if isinstance(fn, str):
             return emit_source(fn, dialect=str(dialect))     # the kernel is text; a string is a valid kernel
