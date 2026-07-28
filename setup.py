@@ -70,9 +70,20 @@ setup(
                                           #   3.8x on the raymarch demo, BIT-IDENTICAL in safe mode. The wheel
                                           #   ships the whole Zig toolchain (~45 MB) -- no system compiler needed;
                                           #   it also backstops the C validation path via `zig cc`.
-        "gpu":      ["cupy"],             # GPU backend (holographic_backend). NOTE: CuPy is tied to your CUDA
-                                          #   version -- you often need a specific wheel like `cupy-cuda12x`
-                                          #   instead, so it is best installed by hand (and left out of `all`).
+        "wgsl":     ["wgpu"],             # THE VENDOR-NEUTRAL GPU PATH (holographic_wgpurun): compute on
+                                          #   Vulkan / Metal / DX12 / WebGPU, so it works on Apple silicon, AMD
+                                          #   and Intel Arc as well as NVIDIA -- and on a SOFTWARE adapter
+                                          #   (llvmpipe / WARP) with no GPU at all, which is how the CI lane
+                                          #   verifies correctness on an ordinary runner.
+                                          #   Prebuilt wheels, no CUDA coupling, so unlike `gpu` this one IS
+                                          #   safe to include in `all`.
+        "gpu":      ["cupy"],             # NVIDIA/CUDA ONLY -- the transparent CuPy backend
+                                          #   (holographic_backend). Kept and supported; it receives no new
+                                          #   investment, and `wgsl` above is the general path. NOTE: CuPy is
+                                          #   tied to your CUDA version -- you often need a specific wheel like
+                                          #   `cupy-cuda12x` instead, so it is best installed by hand (and left
+                                          #   out of `all`, which is why `wgsl` and `gpu` are separate extras
+                                          #   rather than one).
         # -- optional tooling --
         "ui":       ["flask", "pillow"],  # the browser UI (app.py) + image load/save
         "images":   ["pillow"],           # image I/O beyond stdlib PNG (jpg/webp/... via mind.save_render) --
@@ -80,7 +91,10 @@ setup(
         "dev":      ["pytest", "matplotlib", "nltk"],   # run the test suite, generate the plots, and load the text
                                           #   corpora the benchmarks/ablations use (nltk is guarded everywhere -- the
                                           #   engine returns None / skips a benchmark when it is absent, never errors)
-        # -- convenience: everything portable in one shot (CuPy excluded -- see the note above) --
-        "all":      ["numba", "pyfftw", "sympy", "flask", "pillow", "pytest", "matplotlib", "ziglang", "nltk"],
+        # -- convenience: everything PORTABLE in one shot. CuPy is excluded (CUDA-version coupling, see the
+        #    note above); wgpu is INCLUDED, because it ships prebuilt wheels for every platform and needs no
+        #    system toolchain -- the reason to leave CuPy out simply does not apply to it. --
+        "all":      ["numba", "pyfftw", "sympy", "flask", "pillow", "pytest", "matplotlib", "ziglang", "nltk",
+                     "wgpu"],
     },
 )

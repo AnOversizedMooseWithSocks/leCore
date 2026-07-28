@@ -66,6 +66,11 @@ _KNOWN_INFRASTRUCTURE = {
     "holographic_service", "holographic_toolclient", "holographic_uri", "holographic_sync", "holographic_farm",
     "holographic_provenance", "holographic_determinism", "holographic_query_durable", "holographic_queryfolder",
     "holographic_querygraph", "holographic_queryprog", "holographic_querytime",
+    # A SHARED PARSE CACHE, not a faculty: codehealth / codemap / orphanaudit all reach it, and each of THOSE
+    # is wired (audit_complexity, code_search/code_similar, audit_orphans). Giving it its own mind method
+    # would publish a cache-warming detail as a user-facing verb; declaring it keeps the import-only list
+    # meaningful instead of carrying a permanent known-good entry nobody reviews.
+    "holographic_srcindex",
 }
 
 

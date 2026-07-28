@@ -584,6 +584,41 @@ class Orchestrator:
 
         return self.registry.add(Tool(name, "any", "any", self._vec(name + " " + description), fn=run))
 
+    def register_llm(self, fn, name="llm", description="", in_type="text", out_type="text",
+                     on_error="raise"):
+        """Register a text->text CALLABLE (typically an attached LLM) as a planner-visible Tool.
+
+        WHY THIS IS NOT THE SAME AS attach_llm. attach_llm sets the mind's _llm and builds a bus bridge, and
+        its docstring's "now usable as a tool" was ASPIRATIONAL: nothing registered it here, so Planner.plan,
+        optimize_toolchain, CircuitBreaker and SkeletonLibrary were ALL BLIND TO IT. The one tool that can do
+        fuzzy language work was the one the planner could not reach.
+
+        Modelled on register_command deliberately -- same shape, same wrapping, same registry -- rather than
+        growing a parallel path for "the special tool". Once registered, the model is just a tool: it gets a
+        keyword vector, a success rate, and a breaker like everything else.
+
+        THE POINT OF DOING IT THIS WAY: a registered model can be FAILED OVER AWAY FROM. Wrap a flaky model,
+        watch its breaker open, watch the planner reroute onto a deterministic faculty. A system whose only
+        mechanism IS the model cannot do that -- you cannot fail over away from the thing doing your planning.
+
+        on_error='raise' (default) lets a failure propagate so the caller's breaker can see it; 'empty'
+        returns "" instead, for a caller that would rather degrade than raise. Note 'empty' HIDES failures
+        from the breaker, which is why it is not the default."""
+        if not callable(fn):
+            raise TypeError("register_llm needs a callable text->text, got %r" % type(fn))
+
+        def run(value):
+            try:
+                return fn(str(value))
+            except Exception:
+                if on_error == "empty":
+                    return ""
+                raise                       # let the breaker SEE the failure -- a swallowed error trips nothing
+
+        return self.registry.add(Tool(name, in_type, out_type,
+                                      self._vec(name + " " + (description or "language model text")),
+                                      fn=run))
+
     def register_remote(self, base_url, token=None):
         """Fetch a remote node's /tools and register every one (as RemoteTools). Returns the list of registered Tools."""
         from holographic.io_and_interop.holographic_toolclient import remote_tools

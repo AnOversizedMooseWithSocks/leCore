@@ -229,6 +229,64 @@ class _UnifiedPart08:
         self._query_embedder_cache = False
         return None
 
+    def set_embedder(self, fn, verify=True, min_rate=0.30, sample=12, k=5, seed=0):
+        """BRING YOUR OWN QUERY EMBEDDER (holographic_embedseam, SEAM-1) -- install ANY callable text->vector
+        so route_semantic can reach the dense index from free text. Same contract as attach_llm: leCore
+        imports no model SDK; you bring the model. Pass fn=None to remove it.
+
+        WHY IT IS NEEDED, AND WHY THE OBVIOUS ALTERNATIVE IS NOT COMING: the shipped artifact is the
+        DOCUMENT side only (509 modules x 128d), so free text routes to an honest None. The natural fix --
+        distil the encoder into a token table plus one ridge matrix W (tools/semantic/distill_map.py) and
+        ship that as the query side -- WAS TRIED, MEASURED ON THE REAL CORPUS, AND REFUSED. At the shipped
+        128d:
+            [floor] SIF token-pool, NO learned map    top-1 3/12   median 13
+            [ours]  SIF @ W, the distilled map        top-1 1/12   median 19
+        The learned map is WORSE THAN NOT HAVING ONE: ridge explained R^2 +0.06 of held-out variance and
+        cost 2 top-1 and 6 median rank to apply. distill_map's export gate (EXPORT_BAR_TOP1=4,
+        EXPORT_BAR_MEDIAN=8) refuses it, and tests/test_queryembed_artifact.py pins BOTH halves -- the gate
+        and the absence of any committed artifact. So this seam is not a stopgap while the distilled path
+        matures; IT IS THE ROUTE. Do not re-propose shipping a distilled query artifact without new numbers
+        that beat the floor.
+
+        VERIFICATION IS ON BY DEFAULT, and this is the point of the seam rather than a bare setter. The index
+        lives in ONE embedding space (nomic, ABTT-corrected). A cosine between a query embedded by a
+        DIFFERENT model and a nomic document is not a weak signal, it is a MEANINGLESS one -- and it still
+        returns five ranked names with confident-looking scores. Dimension is checkable and is checked;
+        SPACE IS NOT, so verify=True runs a round-trip probe: sample modules that are in the index, embed
+        each one's OWN docstring summary, and require it to self-recall at top-k. Chance is 5/509 = 0.0098,
+        so the default 0.30 bar is ~30x chance -- loose on purpose, because the job is separating "right
+        space" from "unrelated space", not grading embedding quality.
+
+        Raises ValueError with the measured rate and the misses when the probe fails. Pass verify=False to
+        install unchecked (documented, not recommended). Returns the probe dict on success, None when
+        clearing. NOTE the probe is necessary, not sufficient: it cannot tell a good in-space embedder from
+        a mediocre one."""
+        if fn is None:
+            self._user_embedder = None
+            return None
+        if not callable(fn):
+            raise TypeError("set_embedder needs a callable text->vector, got %r" % type(fn))
+        report = None
+        if verify:
+            r = self._embedding_router()
+            if r is None:
+                raise ValueError("no routing index is present, so an embedder cannot be verified against it; "
+                                 "pass verify=False to install it unchecked")
+            from holographic.semantic_router.holographic_embedseam import probe_embedder_space
+            import os
+            root = os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__import__("holographic").__file__))))
+            report = probe_embedder_space(fn, r, root, sample=sample, k=k, seed=seed)
+            if report.get("ok") is False or report["rate"] < min_rate:
+                raise ValueError(
+                    "embedder failed the space-agreement probe: %s -- required rate >= %.2f. This almost "
+                    "always means the model is not in the shipped index's space (nomic/128d), in which case "
+                    "its cosines against the index are meaningless. Misses: %s"
+                    % (report["reason"], min_rate, report["misses"][:5]))
+            report["ok"] = True
+        self._user_embedder = fn
+        return report
+
     def route_semantic(self, problem, k=5, query_vec=None, gamma=0.5):
         """N28 -- route a request to the right MODULE by cosine in nomic's embedding space, not token
         overlap. Uses the shipped q8 index (lecore_data/routing/index_128d.npz preferred, 64d fallback)
@@ -252,6 +310,20 @@ class _UnifiedPart08:
             return None
         if query_vec is not None:
             return r.route(query_vec, k=k, gamma=gamma)       # gamma>0 = measured dense+bones fusion (7/12)
+        # USER-SUPPLIED EMBEDDER (set_embedder) comes BEFORE the build-time cache, and the order is a
+        # correctness call, not a preference: the cache holds vectors in the SHIPPED index's space, while a
+        # user embedder is in whatever space its model uses. Mixing the two inside one ranking would compare
+        # cosines from two different geometries -- so once a caller installs an embedder, every query goes
+        # through it and the ranking stays internally consistent. An explicit query_vec above still wins,
+        # because that is the caller being explicit.
+        fn = getattr(self, "_user_embedder", None)
+        if fn is not None:
+            try:
+                v = fn(problem)
+            except Exception:
+                v = None                                        # a broken embedder is a miss, never a raise
+            if v is not None:
+                return r.route(v, k=k, gamma=gamma)
         cache = getattr(self, "_query_cache", None)
         if cache is not None:
             hit = r.route_cached(problem, cache, k=k)

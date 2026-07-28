@@ -196,6 +196,83 @@ def decide_or_abstain(ranked, margin=0.1, min_score=None):
     return (top_name, top_score, gap >= margin)
 
 
+def tied_candidates(ranked, margin=0.1, min_score=None):
+    """The DECISION WITH THE TIE STILL ATTACHED: everything decide_or_abstain returns, plus the candidates it
+    was nearly, and by how little.
+
+    WHY THIS EXISTS. decide_or_abstain DETECTS a knife-edge and then throws the alternatives away -- a caller
+    gets confident=False and one name, and cannot see what the answer was nearly. That is the missing half of
+    the adapt-don't-break design: the detection and the canonical tie-break already ship, but nothing exposes
+    the SET that needs deciding between.
+
+    WHY THE ANSWER IS CANDIDATES AND NOT A LEARNED TIE-BREAKER. At a genuine knife-edge the candidates are
+    EQUALLY GOOD -- the ambiguity is in the data, not in a failure to decide -- so there is frequently no
+    correct answer to learn, and training a preference would be fitting noise. Where a downstream check DOES
+    exist, VERIFICATION BEATS LEARNING OUTRIGHT: recursive_factor already generates a candidate, re-composes
+    it, and reports unsolved rather than guessing -- exact, deterministic, no training data, and it returns a
+    proof instead of a probability. So the engine's job is to surface the tie honestly and let a caller who
+    HAS an oracle test the candidates (see verify_and_keep).
+
+    MEASURED -- WHEN DOES THIS ACTUALLY MATTER? Near-ties are absent in the healthy regime and common under
+    stress, which is the useful shape: this is a DEGRADED-REGIME feature, not a hot-path one.
+        random codebook, moderate noise (D=256..1024, M=16..256)   0% ties at margin 0.01
+        random codebook, extreme noise                            32%
+        COHERENT codebook, light noise                             0%
+        COHERENT codebook, heavy noise                            84%
+    So a well-separated store never pays for this, and a store that is overloaded or built from near-duplicate
+    atoms pays for it constantly -- which is exactly where breaking versus adapting is the difference.
+
+    Returns {winner, score, confident, candidates, margin_used, separation}:
+      candidates  every (name, score) within `margin` of the top, ALWAYS including the winner, in rank order.
+      separation  top-1 minus top-2, or None when there is no runner-up.
+    A CLEAR WINNER RETURNS A ONE-ELEMENT SET, NOT AN EMPTY ONE -- "no ambiguity" and "no answer" must never
+    look alike to a caller. The empty list is reserved for an empty input.
+
+    Determinism is preserved: this reports the tie, it does not resolve it. Callers that need one answer keep
+    using the canonical rule (determinism.argmax_tiebreak), which every distributed node agrees on."""
+    winner, score, confident = decide_or_abstain(ranked, margin=margin, min_score=min_score)
+    if not ranked:
+        return {"winner": None, "score": None, "confident": False, "candidates": [],
+                "margin_used": float(margin), "separation": None}
+    top_score = ranked[0][1]
+    near = [(n, s) for n, s in ranked if (top_score - s) <= float(margin)]
+    separation = (top_score - ranked[1][1]) if len(ranked) > 1 else None
+    return {"winner": winner, "score": score, "confident": confident, "candidates": near,
+            "margin_used": float(margin),
+            "separation": float(separation) if separation is not None else None}
+
+
+def verify_and_keep(candidates, verifier):
+    """Try candidates in rank order and keep the FIRST THAT VERIFIES; report all-failed rather than falling
+    back to the top-ranked guess.
+
+    THE RESONATOR'S PATTERN, GENERALISED. recursive_factor does exactly this -- propose, re-compose, check,
+    and report unsolved instead of guessing -- and it is the honest way to resolve an ambiguity that a score
+    could not: not by learning a preference, but by TESTING which candidate actually works.
+
+    Deterministic: the candidate order and the verifier are both deterministic, so this never makes a run
+    irreproducible. That is the distinction worth holding on to -- ADAPTING AND BEING NON-DETERMINISTIC ARE
+    DIFFERENT THINGS. Returning a verified candidate is adaptation; returning a different answer each run is
+    not.
+
+    `verifier(name, score) -> bool` may raise; a raising verifier counts as a failure for that candidate and
+    does not take the search down. Returns {winner, score, verified, tried, why}."""
+    tried = []
+    for name, score in candidates or []:
+        try:
+            ok = bool(verifier(name, score))
+        except Exception as exc:
+            tried.append({"name": name, "verified": False, "why": "verifier raised: %s" % exc})
+            continue
+        tried.append({"name": name, "verified": ok, "why": "verified" if ok else "rejected"})
+        if ok:
+            return {"winner": name, "score": score, "verified": True, "tried": tried,
+                    "why": "candidate %r verified after %d attempt(s)" % (name, len(tried))}
+    return {"winner": None, "score": None, "verified": False, "tried": tried,
+            "why": ("no candidate verified (%d tried) -- REFUSAL IS A RESULT, and returning the top-ranked "
+                    "guess here would be exactly the failure this replaces" % len(tried))}
+
+
 class KnowledgeStore:
     """A tiny store of role-bound records that answers WHY/HOW questions and
     multi-hop chains. Owns its vocabularies, so all structure is reproducible

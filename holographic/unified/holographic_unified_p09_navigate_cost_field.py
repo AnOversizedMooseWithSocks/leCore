@@ -184,7 +184,8 @@ class _UnifiedPart09:
         from holographic.misc.holographic_adaptive import plan_render
         return plan_render(objects, frames=frames, relight=relight)
 
-    def distribute_compute(self, buckets, worker, reduce="sum", cache=None):
+    def distribute_compute(self, buckets, worker, reduce="sum", cache=None, backend=None,
+                           est_ms_per_bucket=None, n_bytes=None, flops_per_byte=None):
         """DISTRIBUTED COMPUTATION the holostuff way -- decompose a job into buckets, hand every bucket the same shared
         read-only `cache` (the "GI cache on the main node"), run `worker(bucket, cache)` on each, and reassemble with a
         COMMUTATIVE monoid so the result is independent of bucket order (=> the buckets could run on separate machines /
@@ -193,7 +194,151 @@ class _UnifiedPart09:
         scene/memory), or a callable. Runs in-process here (no speedup claimed); it builds the STRUCTURE that makes
         distribution correct. Returns (result, info). See holographic_distribute."""
         from holographic.misc.holographic_scalehome import Scale                      # the Scale home  consolidation H3
-        return Scale.map_reduce(buckets, worker, reduce=reduce, cache=cache)
+        if backend == "auto":
+            # AUTOMATIC DECISION, NOT AUTOMATIC SPAWN. The pool is created only when the gate says it pays,
+            # and it is CLOSED again before returning -- so "auto" never leaves worker processes alive after
+            # the call. That costs one pool setup per call, which is precisely why auto is not the default:
+            # a caller making many calls should hold ONE pool via local_pool() and pass it, rather than
+            # paying setup every time. A hidden persistent pool would be faster and would also mean a
+            # library call silently left interpreters running, which is not a library's decision to make.
+            # ONE ORACLE, NOT TWO. This used to call should_pool directly, which meant `auto` could only ever
+            # answer "pool or not" -- it could not see the device at all, and it ignored the resource policy
+            # unless should_pool happened to be handed it. place_work already composes all three (unit, pool,
+            # device) with the policy veto first, so asking IT keeps one decision in one place. A second
+            # copy of the routing logic here would be the "three unrelated switches" problem re-created
+            # inside the thing built to fix it.
+            decision = self.place_work(n_buckets=len(buckets),
+                                       est_ms_per_bucket=est_ms_per_bucket,
+                                       n_bytes=n_bytes, flops_per_byte=flops_per_byte)
+            self._last_placement = decision          # readable via last_placement() -- the WHY is auditable
+            ok = decision["placement"] == "pool"
+            if not ok:
+                # A 'device' verdict does NOT dispatch here: this seam partitions BUCKETS across workers,
+                # and a device kernel is a different shape entirely (one dispatch over an array, not N
+                # independent Python callables). Reporting it and running on CPU is honest; silently doing
+                # nothing about it would not be. Callers with a device-shaped kernel use wgsl_* directly.
+                backend = None                       # today's exact behaviour, no processes
+            else:
+                pool = self.local_pool()
+                try:
+                    return Scale.map_reduce(buckets, worker, reduce=reduce, cache=cache, backend=pool)
+                finally:
+                    pool.close()
+        return Scale.map_reduce(buckets, worker, reduce=reduce, cache=cache, backend=backend)
+
+    def resource_policy(self, **kwargs):
+        """SET OR READ WHAT THIS PROCESS IS ALLOWED TO USE (holographic_policy, POLICY-1).
+        With keywords, sets the policy: cpu_cores (int cap), pool ('allow'|'deny'), gpu
+        ('auto'|'on'|'off'), device_memory_mb. With no arguments, returns the EFFECTIVE policy plus the
+        SOURCE of every value (policy / env / default) -- provenance, so a recorded run says what it was
+        allowed to use, not just what it did.
+        WHY THIS EXISTS: cpu_budget() answers what is PHYSICALLY AVAILABLE, which is not the same question
+        as what this process MAY TAKE. On a shared box, a CI runner, or a machine running leOS beside the
+        user's real work, the operator's answer is smaller and the engine cannot infer it.
+        A POLICY CAPS, IT DOES NOT COMMAND: cpu_cores=4 means never more than 4, and the measured gates
+        still decide inside the cap (should_pool may still refuse). Asking for more cores than exist gives
+        you what exists -- permission is not hardware.
+        NUMERICS: cpu_cores and pool are PERFORMANCE-ONLY (the pooled path is verified bit-identical), but
+        gpu is NOT -- GPU matches NumPy only to a tolerance. describe() flags which is which and reports
+        bit_exact, so nobody flips GPU on globally and silently changes their results."""
+        if kwargs:
+            from holographic.scene_and_pipeline.holographic_policy import ResourcePolicy
+            self._policy = ResourcePolicy(**kwargs)
+            return self._policy.describe()
+        return self._resource_policy().describe()
+
+    def _resource_policy(self):
+        """The active policy, defaulting to a permissive one. Private: callers use resource_policy()."""
+        policy = getattr(self, "_policy", None)
+        if policy is None:
+            from holographic.scene_and_pipeline.holographic_policy import ResourcePolicy
+            policy = self._policy = ResourcePolicy()
+        return policy
+
+    def place_work(self, n_bytes=None, flops_per_byte=None, n_buckets=None, est_ms_per_bucket=None,
+                   baseline_ns=None, n_calls=1, unit=None):
+        """WHERE SHOULD THIS WORK RUN -- one decision over CPU / process pool / device / machine-model unit
+        (holographic_placement, PLACE-1). Returns {placement, why, considered, provisional}.
+        WHY IT EXISTS: three oracles already answered three placement questions and NONE knew about the
+        others -- machine_place_unit for units, should_pool for processes, should_offload for the device --
+        so a caller had to consult all three and reconcile them by hand, and nothing reconciled them with
+        resource_policy at all. An oracle could recommend a device the operator had FORBIDDEN.
+        IT COMPOSES, IT DOES NOT REIMPLEMENT: every verdict comes from the existing oracle for that question.
+        This contributes the ORDER, the policy veto, and one honest report.
+        THE ORDER IS THE ARGUMENT. (1) The POLICY VETO comes first -- no arithmetic makes a forbidden device
+        faster. (2) CHEAPEST-CORRECT WINS TIES: unit, then pool, then device, because a pool costs a process
+        and a device costs a transfer AND CHANGES THE NUMBERS (GPU matches NumPy only to a tolerance, while
+        the pooled path is verified bit-identical). Those are not equivalent risks.
+        A candidate with missing inputs is reported as NOT EVALUATED rather than skipped -- a placement
+        nobody costed and a placement that lost are different facts. A device recommendation comes back
+        marked `provisional`, because should_offload's thresholds are arithmetic from PCIe bandwidth and no
+        host<->device crossover has ever been measured here."""
+        from holographic.scene_and_pipeline.holographic_placement import place_work
+        return place_work(n_bytes=n_bytes, flops_per_byte=flops_per_byte, n_buckets=n_buckets,
+                          est_ms_per_bucket=est_ms_per_bucket, baseline_ns=baseline_ns, n_calls=n_calls,
+                          unit=unit, policy=self._resource_policy(), mind=self)
+
+    def cpu_budget(self):
+        """HOW MANY CORES THIS PROCESS MAY ACTUALLY USE (holographic_coordinator.cpu_budget), >= 1.
+        NOT os.cpu_count(), WHICH LIES IN A CONTAINER: it reports the HOST's cores and ignores cgroup quota
+        and CPU affinity, so `docker run --cpus=2` on a 64-core box answers 64 -- and a pool sized from that
+        spawns 64 interpreters to time-share 2 cores, slower than sequential and 64x the memory. On an engine
+        meant for small devices that is a memory-bloat bug, not just a speed one.
+        Takes the MINIMUM of sched_getaffinity, cgroup v2 cpu.max, cgroup v1 cfs quota, and os.cpu_count();
+        anything unreadable is skipped rather than guessed."""
+        # Honours the resource policy: this reports what may be USED, not merely what exists, so every
+        # caller that sizes work from it inherits the operator's cap for free.
+        return self._resource_policy().cores()
+
+    def should_pool(self, n_buckets, est_ms_per_bucket, cores=None, margin=4.0):
+        """WOULD A PROCESS POOL PAY FOR THIS JOB (holographic_coordinator.should_pool) -> (verdict, why).
+        Refuses on three independent grounds: fewer than 2 usable CORES (a pool cannot add speed, only
+        overhead and memory), fewer than 2 BUCKETS (nothing to parallelise), or WORK PER BUCKET below
+        margin x the ~0.2 ms dispatch cost (dispatch would dominate). The default margin of 4 is
+        deliberately conservative -- near break-even a pool costs memory and process lifetime for no gain,
+        so 'roughly equal' should decline.
+        Same shape as the machine model's placement oracle, and the same lesson: the answer depends on the
+        CALLER'S numbers, so it is computed rather than assumed."""
+        from holographic.scene_and_pipeline.holographic_coordinator import should_pool
+        policy = self._resource_policy()
+        if not policy.pool_allowed():
+            return False, "the resource policy forbids process pools (pool='deny')"
+        return should_pool(n_buckets, est_ms_per_bucket,
+                           cores=policy.cores() if cores is None else cores, margin=margin)
+
+    def last_placement(self):
+        """WHY did the last backend='auto' call route the way it did? Returns the full place_work decision
+        (placement, why, every candidate considered, provisional) or None if `auto` has not run.
+        AN AUTOMATIC DECISION THAT CANNOT BE INSPECTED IS INDISTINGUISHABLE FROM A BUG. The routing gate can
+        decline for four different reasons -- one core, too few buckets, work below the dispatch floor, or a
+        policy veto -- and a caller seeing 'it stayed on CPU' deserves to know which."""
+        return getattr(self, "_last_placement", None)
+
+    def local_pool(self, n=None):
+        """SPIN UP LOCAL WORKER PROCESSES (holographic_coordinator.LocalPool) -- a PERSISTENT process pool
+        (not spawn-per-task) where each worker is its own interpreter with its own GIL, so GIL-bound NumPy
+        and Python work actually runs in parallel on one machine. A large read-only cache is published ONCE
+        into shared_memory (zero-copy, mapped by every worker) rather than pickled per bucket.
+        THIS IS THE ANSWER TO 'spin up another instance' ON ONE BOX. `farm` is its cross-machine sibling and
+        does NOT provision anything -- it consumes hosts you already started. LocalPool is the one that
+        actually creates workers.
+        Pass n= for the worker count (default: one per core). Hand the result to
+        distribute_compute(backend=...) or Coordinator(backend=...). The worker must be a TOP-LEVEL,
+        PICKLABLE function -- a lambda or a closure cannot cross a process boundary.
+        CLOSE IT when done (pool.close()) or use it as a context manager: the pool is persistent BY DESIGN,
+        so nothing reclaims it for you.
+
+        THE DEFAULT REMAINS SINGLE-PROCESS, and the honest reason is that the break-even HAS NOT BEEN
+        MEASURED ON REPRESENTATIVE HARDWARE. Measured here: bit-identical to in-process (verified), and
+        0.09x on light buckets rising only to ~1.00x at 200 ms/bucket -- but THIS MACHINE HAS ONE CORE
+        (os.sched_getaffinity -> 1), so a process pool cannot win here by construction and those numbers
+        say nothing about a real box. They are recorded as a CONFOUND, not as a result.
+        What IS established regardless of core count: dispatch overhead is roughly 0.2 ms per bucket, so
+        buckets doing less work than that can never pay. Measure `local_pool` on YOUR hardware before making
+        it a default -- and note the constraint that decides it is not speed but DETERMINISM: the reduce is a
+        commutative monoid and the pooled path is bit-identical, so parallelism here is safe to opt into."""
+        from holographic.scene_and_pipeline.holographic_coordinator import LocalPool
+        return LocalPool(n=n)
 
     def partition_domain(self, n, k, costs=None):
         """Decompose a domain of n items into k disjoint buckets for distribution. With `costs` (a per-item work

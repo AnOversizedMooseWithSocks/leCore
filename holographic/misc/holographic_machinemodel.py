@@ -1,3 +1,33 @@
+# KEPT NEGATIVE -- THERE IS NO BASELINE-FREE PRE-GATE ON PLACEMENT, AND break_even_n IS NOT A CONSTANT.
+#
+# It was proposed that placement could be short-circuited without measuring anything: `machine_place_unit`
+# needs a measured `baseline_ns`, which means running the thing to time it, so the idea was to skip that
+# whenever `n_calls` falls below the tier's break-even -- quoted as 1.63 for the baked-grid tier and asserted
+# to be "independent of the baseline".
+#
+# MEASURED, and it is not:
+#
+#     baseline_ns     break_even_n      use_unit @ n_calls=1
+#     1e2             inf               False
+#     1e3             130.12            False
+#     1e4             6.72              True
+#     1e5             0.60              True
+#     1e6             0.073             True
+#     1e9             0.0001            True
+#
+# break_even_n is (unit setup cost) / (per-call saving), and the per-call saving is a FUNCTION OF HOW SLOW THE
+# BASELINE IS. A fast baseline leaves little to save, so it takes many calls to amortise; a slow one pays back
+# before the first call finishes. 1.63 is ONE POINT ON THAT CURVE, not a property of the tier.
+#
+# And there is no floor to fall back on: break_even_n tends to 0 as the baseline grows, and `use_unit` is
+# already True at n_calls=1 for any sufficiently slow baseline. So NO threshold on n_calls alone can be
+# correct for every baseline -- a pre-gate that skipped at n_calls<1.63 would wrongly refuse the exact case
+# where placement pays most, a slow operation called once.
+#
+# The oracle already gives the right answer cheaply once it has a baseline. The baseline is the irreducible
+# cost, and this is a case where the measurement cannot be optimised away -- which is the whole reason the
+# oracle takes it as an argument.
+
 """holographic_machinemodel.py -- THE leCORE VIRTUAL MACHINE, named and measured.
 
 The engine has, piece by piece, grown the parts of a GPU and of a memory hierarchy. They were built in different

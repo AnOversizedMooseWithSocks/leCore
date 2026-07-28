@@ -45,13 +45,16 @@ def _cg(matvec, b, iters=250, tol=1e-13):
 
 
 # --- fast Walsh-Hadamard transform (O(D log D), matrix-free), D = 2^m ---
+# CONSOLIDATED: the implementation now lives in holographic_wht, where a Rule-0 audit can actually find it
+# (as `_fwht` in an IMAGE module it was invisible -- the audit for "fast walsh hadamard transform" returned
+# only flat fallbacks). Same pattern as `_cg` above: the name and signature stay so every historical call
+# site here reads unchanged, and the delegation is pinned bit-identical in holographic_wht._selftest.
+# The explicit float64 cast is NOT redundant -- the old body did `astype(np.float64)` unconditionally, while
+# holographic_wht.fwht deliberately PRESERVES integer dtypes for its exactness guarantee. Casting here keeps
+# this module's behaviour byte-for-byte what it always was, including for an integer caller.
 def _fwht(a):
-    a = a.astype(np.float64).copy(); n = len(a); h = 1
-    while h < n:
-        a = a.reshape(n // (2 * h), 2, h)
-        a = np.concatenate([a[:, 0, :] + a[:, 1, :], a[:, 0, :] - a[:, 1, :]], axis=1).reshape(n)
-        h *= 2
-    return a
+    from holographic.sampling_and_signal.holographic_wht import fwht
+    return fwht(np.asarray(a, dtype=np.float64))
 
 
 def _next_pow2(n):

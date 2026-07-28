@@ -20,7 +20,32 @@ USE REAL DATA. The point of the harness is to characterise the real distribution
 real claim; running it on a toy makes the spread meaningless. The measurements wired
 through it here all run on real corpora (Gutenberg Alice, UDHR, Reuters, Brown).
 """
+import time
+
 import numpy as np
+
+
+def time_call(fn, repeats=100, warmup=5):
+    """Time `fn()` honestly: warm up first, then take the MEDIAN of `repeats` timings in microseconds.
+    Returns (median_us, std_us, mean_us).
+
+    WHY WARMUP AND MEDIAN, AND WHY THIS LIVES IN ONE PLACE. Written inline the first time, without either,
+    it produced a measurement that asserted the WRONG DIRECTION and failed its own test: numpy.fft's spread
+    at D=256 was +/-91 us against an 11 us mean, so the sample was almost entirely first-call and allocator
+    noise. The transform under test was never in doubt; the instrument was. Median over warmed repeats is
+    robust to that tail, and the mean is returned as well so the skew stays visible instead of smoothed away.
+
+    It lives HERE, next to the variance harness, because that same helper was then copy-pasted into three
+    modules and the duplication audit correctly caught it. One home, one import -- and the lesson above gets
+    recorded once instead of three times, or (more likely) not at all in the fourth module."""
+    for _ in range(warmup):
+        fn()
+    samples = []
+    for _ in range(repeats):
+        t0 = time.perf_counter()
+        fn()
+        samples.append((time.perf_counter() - t0) * 1e6)
+    return float(np.median(samples)), float(np.std(samples)), float(np.mean(samples))
 
 
 def measure(run_once, seeds=range(10), n_boot=2000, boot_seed=0):

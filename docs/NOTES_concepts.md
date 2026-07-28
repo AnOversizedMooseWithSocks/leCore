@@ -43934,3 +43934,3430 @@ it needs the embedding model; the bones and corpus layers cannot reach it by con
 ### State
 Gate re-targeted; 10 corpus tests (incl. an arithmetic check against this run's real numbers), 5 workflow-
 graph tests, 14 routing tests -- 29 green. 6 audits OK, lint clean, docs regenerated, YAML valid.
+
+
+## SESSION (2026-07-26g) -- BACKLOG PASS 1: two of the three "new" items were already built, and the
+## flagship measurement was measuring the wrong readout
+
+Moose: implement the research backlog, go down the list. Rule 0 first, and it changed the list before a
+line was written. RESEARCH_CONSOLIDATED.md is a good document, but three of its load-bearing claims did not
+survive contact with the live engine.
+
+### REFUTATION 1 -- "the cheapest actionable item" was already done
+The doc's headline zero-cost experiment: "leCore already ships `cosamp` and `iht` modules that are apparently
+NOT WIRED into unbundling." Measured: `cosamp_recall`, `iht_recall` and `occlusion_recall` are ALL live mind
+faculties, wired in unified p03, and holographic_cosamp's own docstring documents a FOUR-MEMBER recovery
+family (linear / occlusion / IHT / CoSaMP) already measured across dictionary coherence.
+The word "apparently" was doing all the work. What the sweep actually hit was a DISCOVERABILITY hole:
+    stranger phrasings ("recover many items from one bundle", "what went into this bundle",
+    "sparse recovery against a dictionary", ...)   -> 0/6 hits
+    implementer names  ("cosamp", "iterative hard thresholding")            -> 2/2 hits
+`cosamp` had NO catalog entry at all -- it was findable only via the auto-registered method name. By this
+project's own governing rule the family did not exist for anyone who had not read the papers, which is
+exactly how a research sweep concluded it was unwired and filed re-doing it as work. THE DEFECT WAS THE
+VOCABULARY, NOT THE CODE -- the same finding as mesh_box/camera, now twice-earned.
+
+### REFUTATION 2 -- the capacity cliff is a property of the READOUT, not of the engine
+Bottleneck 2 tabulates min-member-cosine against a bundle (0.96 -> 0.19 as M goes 4 -> 64 at D=1024) and
+concludes a VSA program caps at "roughly 20-32 instructions". That metric IS the one-shot linear readout.
+Re-measured at D=1024, 8 seeds, codebook N=256:
+    M      min member cosine     linear top-M F1      IHT F1        CoSaMP F1
+    16          0.198               1.000             1.000           1.000
+    64          0.054               0.949 +/- 0.028   1.000           1.000
+    128         0.012               0.887 +/- 0.011   1.000 +/- 0.000 1.000 +/- 0.000
+The cosine collapses exactly as documented while EXACT-SUPPORT RECOVERY STAYS PERFECT. Honest break point,
+hunted with a non-degenerate codebook (D=512, N=2048 >> M so no row is trivially satisfiable): CoSaMP holds
+F1 1.000 to M=86, wobbles at M=128 (0.693 +/- 0.215 -- that variance IS the phase transition), collapses
+past M/D ~ 0.33. So the real ceiling is ~86 at D=512, THREE TO FOUR TIMES the doc's figure, and it already
+ships.
+CONSEQUENCE FOR THE SHORTLIST: the #1 ranked transplant (SPARCs + AMP) is scored against a bottleneck the
+engine already clears. AMP may still win on cost or on coherent dictionaries, but ITS BASELINE IS COSAMP AT
+M/D ~ 0.17, NOT LINEAR READOUT AT M=32. Anyone who builds AMP against the doc's number will manufacture a
+win. (Caveat kept: these probes use incoherent random dictionaries with unit weights; real programs bind
+role-filler pairs. CoSaMP's docstring claims robustness to coherence -- NOT re-verified this session.)
+
+### REFUTATION 3 -- the WHT is not an FFT speedup, measured
+Shortlist item 3 floats WHT binding as "potentially faster". On this codebase, warmed medians over 300
+repeats:  4.39x SLOWER at D=256, 8.59x at D=512, 7.65x at D=1024, 6.64x at D=4096, 4.55x at D=16384.
+A Python loop over log2(D) vectorised passes cannot beat C-level pocketfft. THE WIN IS EXACTNESS, and only
+exactness. Wired as `mind.wht_measure_vs_fft()` so the negative stays runnable instead of quotable.
+
+### THE INSTRUMENT FAILED BEFORE THE CLAIM DID -- worth recording on its own
+The first version of that harness asserted the WRONG DIRECTION and failed: bare mean, no warmup, and rfft's
+spread at D=256 was +/-91 us against an 11 us mean. The sample was almost entirely first-call and allocator
+noise. I fixed the INSTRUMENT (warmup + medians, mean still reported so skew stays visible), NOT the bar.
+Pattern, now recurring: a measurement that disagrees with a well-founded expectation is a broken measurement
+until proven otherwise -- the same shape as the flat dimension sweep.
+
+### BUILT (all three shipped, wired, catalogued, audited)
+1. DISCOVERABILITY, no new module. _METHOD_ALIASES for cosamp_recall / iht_recall / occlusion_recall, plus a
+   curated one-door entry "Bundle recovery (unmix a superposition)" naming all four members with the measured
+   ceiling in the does-field. Stranger-phrasing recall 0/6 -> 6/6.
+2. holographic_wht (WHT-1). The fast Walsh-Hadamard transform PROMOTED from `_fwht`, a private function in an
+   IMAGE module, to a first-class primitive beside holographic_fft. A Rule-0 audit for "fast walsh hadamard
+   transform" had returned flat fallbacks and the only symbol in the tree was `image._fwht`. Nothing was
+   reimplemented: holographic_image now DELEGATES (the `_cg` pattern), pinned BIT-IDENTICAL across 160 cases
+   including dtype -- load-bearing, because every HolographicArchive plate ever stored was encoded through it.
+   The explicit float64 cast at the boundary is NOT redundant: the old body coerced unconditionally while
+   fwht preserves integer dtypes for its exactness guarantee. fwht_exact REFUSES float, so the bit-exactness
+   guarantee is a TypeError rather than a docstring somebody stops believing. Faculties: wht / wht_exact /
+   wht_inverse / wht_measure_vs_fft.
+3. holographic_htcodebook (HT-1). Hadamard-structured codebook: cleanup as ONE TRANSFORM, not a K-scan.
+   Atoms are sign-permuted Hadamard rows, so all K correlations are one WHT -- O(D log D) not O(K*D), atoms
+   GENERATED not stored, rows mutually orthogonal so crosstalk is exactly zero, argmax is the exact ML
+   nearest-codeword decode (Reed-Muller's Green machine, reached from the VSA side).
+   MEASURED at equal K and equal D:  0.49x at D=256 | 2.27x at D=512 | 6.91x at D=1024 (628 us -> 91 us) |
+   38.97x at D=2048 | 96.50x at D=4096 | 219.05x at D=8192 (77 ms -> 0.35 ms). The win GROWS with D.
+
+### KEPT NEGATIVES (loud, in docstrings + faculty docstrings + pinned tests)
+  * WHT IS 4-9x SLOWER THAN numpy.rfft. Exactness tool, not a speedup. Asserted with a LOOSE bound (1.5x)
+    on purpose -- a tight timing assertion is a machine-load detector, not a numeric contract.
+  * THE HADAMARD CODEBOOK LOSES BELOW ~D=512 (0.49x at D=256). The Python-level transform loop costs more
+    than a small matmul. Use the scan below the crossover.
+  * K IS CAPPED AT 2*D BY CONSTRUCTION, AND THIS CORRECTS THE BACKLOG ITEM. The doc proposes replacing "the
+    5,682 us matmul at D=1024, K=16384" with one transform. A Hadamard matrix of order D has exactly D
+    orthogonal rows, so that codebook CANNOT EXIST at D=1024 -- it needs D=8192. Equal-K is the only honest
+    comparison and is the one measured above. Pinned in test_the_codebook_size_cap_is_real.
+  * THE SIGNED CODEBOOK IS A DEGENERATE SPARSE-RECOVERY DICTIONARY -- and the cross-faculty test FOUND this
+    on its first run rather than my reasoning finding it. signed=True reaches K=2D by adding each atom's
+    exact NEGATION, so the dictionary holds +v/-v pairs and its coherence is EXACTLY 1.000: index i and
+    index i+D explain any cue equally well with opposite-sign coefficients. CoSaMP returns a wrong support
+    (measured 0/3 exact-support signed vs 3/3 unsigned, D=256). The signed half is correct and useful for
+    CLEANUP, where the sign is part of the answer; it must NOT be handed to the recovery family.
+    A SHARED KERNEL IS NOT A SHARED MANIFOLD -- third time this lesson has been paid for.
+
+### NOT DONE, deliberately
+Items 4-7 of the shortlist are untouched: NTT binding, AMP, qFHRR, Walk-on-Decomposed-Subdomains. Two notes
+for whoever picks them up: (a) AMP must baseline against CoSaMP, per Refutation 2; (b) qFHRR's core claim --
+exact binding as (q_a + q_b) mod K -- is ALREADY SHIPPED as holographic_sbc's block binding,
+(position_a + position_b) mod L, "exact and lossless for clean atoms". Same algebra, different costume.
+Audit before building.
+
+### State
++17 tests (tests/test_wht_htcodebook.py), 5,675 collected. 108 tests green across the touched catalog /
+recovery / archive surfaces, 28 across the new traps + algebra properties. 6 audits clean (skill_lint 0,
+catalog_gaps 0, reachability 0 undocumented / 7 import-only unchanged, wiring_report / structure_audit /
+audit_imports exit 0). regen_docs --check clean, 9 outputs, capabilities 497 -> 500. HTTP /invoke round-trip
+proven live for wht_exact and wht_measure_vs_fft. README has no numeric count markers to update (the counts
+are qualitative there) -- verified, not skipped.
+
+
+## SESSION (2026-07-26h) -- BACKLOG ITEM 4: NTT exact binding. The flagship "genuine gap", built and costed.
+
+Shortlist item 3 (ranked #3) and genuine-gap #1: NTT binding for HRR/VSA, which the research consolidation
+records as apparently unpublished. Rule 0 confirmed it absent for real this time -- `def .*ntt` and
+`number_theoretic` both returned zero, the only symbol match in the whole tree was the substring inside
+`EventTrace`, and modmul / modular_inverse / primitive_root did not exist. Unlike items 1-3, nothing here
+was already built.
+
+### BUILT -- holographic_ntt (NTT-1)
+Iterative Cooley-Tukey NTT over Z_q, vectorised per stage. Same butterfly structure as the FFT, integer
+twiddles, everything mod q, so nothing rounds and nothing depends on summation order.
+  * ntt / intt            -- forward and inverse, exact inverses of each other
+  * ntt_convolve          -- EXACT cyclic convolution of integer vectors
+  * ntt_bind / ntt_unbind -- the VSA spelling
+  * measure_vs_fft        -- the cost, kept runnable
+
+MODULUS: q = 167772161 = 5*2^25 + 1, primitive root 3. Two constraints picked it. (a) n must divide q-1 for
+a length-n cyclic NTT to have a root; q-1 = 5*2^25 covers every power of two to 2^25. (b) q must exceed
+twice the largest tap or the signed result cannot be recovered from its residue: |tap| <= n*A^2, so the
+requirement is 2*n*A^2 < q -- for bipolar atoms at n=4096 that is 8192 < 167772161, four orders of headroom.
+The bound is CHECKED at call time and RAISES; a silent modular wrap is a confident wrong answer, which is
+precisely the failure class this module exists to remove. q^2 ~ 2.8e16 also clears int64 (9.2e18), so the
+butterfly products cannot overflow either -- both bounds asserted in tests.
+
+### WHY IT IS WORTH HAVING, GIVEN IT IS SLOWER
+It is a DETERMINISM fix, not a speed play. numpy.fft (pocketfft) is not guaranteed bit-identical across
+CPUs -- SIMD width reorders the summation inside the butterflies, and NumPy #11926 reports up to 0.1%
+divergence between two Xeon models on identical input. In this engine a ULP difference flips a cleanup
+argmax. The NTT has no floating-point addition anywhere, so an integer bind is bit-identical on every
+machine by construction.
+
+VERIFIED IT IS THE ENGINE'S OWN ALGEBRA, not a lookalike: rounding the float FFT convolution of bipolar
+atoms reproduces the NTT result with array_equal at n=64 and n=512. Same operation, made exact.
+
+### KEPT NEGATIVES (loud, in module + faculty docstrings + pinned tests)
+  * COST, MEASURED (warmed medians): 18.9x slower at D=256, 41.2x at 512, 43.4x at 1024, 49.9x at 2048,
+    45.9x at 4096. A Python loop over log2(n) modular stages cannot approach C-level pocketfft. The
+    consolidation predicted exactly this and said to record it honestly rather than bury it -- done, and
+    wired as mind.ntt_measure_vs_fft() so it stays runnable rather than quotable.
+  * UNBIND IS STILL A QUASI-INVERSE, AND THIS IS THE ONE THAT MATTERS. The involution is HRR's approximate
+    inverse; unbind(bind(a,b),a) recovers b in DIRECTION only -- measured cosine 0.701, sitting exactly in
+    the float path's documented ~0.71 band. THE NTT REMOVES FLOATING-POINT NONDETERMINISM FROM THE
+    OPERATION; IT DOES NOT REMOVE THE ALGEBRAIC APPROXIMATION INSIDE HRR. Cleanup is not deleted. True exact
+    deconvolution would need a's spectrum invertible mod q, which no arbitrary atom guarantees.
+    So the hypothesis that started this whole research line -- integer VSA lets leCore delete its
+    tie-arbitration machinery -- REMAINS REFUTED, now on this engine's own measurements rather than on a
+    literature survey. Pinned with an UPPER bound (cos < 0.999) so that if it ever does become exact, the
+    claim gets rewritten instead of the test.
+
+### CROSS-FACULTY
+test_exact_bind_cleans_up_through_a_hadamard_codebook pairs NTT binding with the transform cleanup built
+earlier this session: bind an atom to a key, unbind, clean up, recover the atom. Both halves are
+integer-exact, so bind -> cleanup is machine-independent END TO END, which is the actual reason to want
+both. Neither module's selftest can see that pairing.
+
+### State
++13 tests (tests/test_ntt_exact_binding.py), all green; selftest passed on first run including the naive
+O(n^2) oracle. 6 audits clean (skill_lint 0, catalog_gaps 0, reachability 0 undocumented, 7 import-only
+unchanged; wiring/structure/imports exit 0). regen_docs --check clean, 9 outputs. HTTP /invoke round-trip
+proven live for ntt_bind and ntt_measure_vs_fft. Discoverability 5/5 on stranger phrasings.
+
+### REMAINING
+Items 5-7 untouched: AMP (must baseline against CoSaMP at M/D~0.17, NOT the doc's linear-readout figure),
+qFHRR (core claim already ships as holographic_sbc block binding -- audit before building), and
+Walk-on-Decomposed-Subdomains (an extension of the shipped holographic_wost, not a new faculty).
+
+
+## SESSION (2026-07-26i) -- BACKLOG ITEM 5: AMP. My own prediction was WRONG, and the trap I wrote to
+## pin it is the only reason I found out.
+
+Shortlist #1, the highest-ranked transplant. Rule 0 confirmed genuinely absent: no soft_threshold, no
+onsager, no state_evolution anywhere in the tree; nearest neighbour is holographic_iht, which is AMP without
+the correction term.
+
+### PREDICTIONS RECORDED BEFORE MEASURING (the discipline, followed, and it paid)
+  P1 tie at low load                                   -> CORRECT
+  P2 AMP faster at large K (no least-squares solve)    -> CORRECT, and stronger than predicted
+  P3 phase-transition band genuinely unknown           -> resolved IN AMP'S FAVOUR
+  P4 AMP degrades on coherent dictionaries             -> CORRECT, catastrophically
+  P5 "AMP does NOT lift the ceiling; likely possible-but-doesn't-pay"  -> **WRONG**
+
+I wrote P5 into the module docstring as fact BEFORE the measurement existed, and wrote a selftest assertion
+to pin it. THE ASSERTION FIRED. That is the only reason the wrong claim did not ship. Recorded as a process
+failure in its own right: A CLAIM WRITTEN AHEAD OF ITS MEASUREMENT IS A CLAIM YOU WILL HAVE TO RETRACT. The
+docstring was rewritten FROM the data; the test was not relaxed.
+
+### THE MEASURED RESULT -- a CROSSOVER, not a win (D=512, N=2048, 8 seeds)
+    M      M/D    AMP F1            CoSaMP F1         AMP ms   CoSaMP ms
+    16     0.03   1.000 +/- 0.000   1.000 +/- 0.000     21.5         3.3
+    64     0.12   1.000 +/- 0.000   1.000 +/- 0.000     21.5        25.4
+    86     0.17   1.000 +/- 0.000   1.000 +/- 0.000     21.5        52.6
+    128    0.25   0.896 +/- 0.078   0.709 +/- 0.224     22.1       499.7
+    171    0.33   0.558 +/- 0.053   0.167 +/- 0.037     20.6       792.4
+    200    0.39   0.466 +/- 0.024   0.290 +/- 0.019     21.1      1026.6
+AMP pushes past the wall where CoSaMP falls apart, with TIGHTER variance, at FLAT ~21 ms while CoSaMP's
+per-round least-squares climbs to a full second (48x faster at M=200).
+
+STRAWMAN CHECK, done BEFORE claiming any of it: CoSaMP at 120 iterations -- 6.5 SECONDS -- still scores
+0.154 at M=171 against AMP's 0.559 at 30 iterations. Both converged; more budget helps neither. The gap is
+the algorithm, not the iteration count. (Pinned as its own test.)
+
+### THE OTHER HALF -- AMP IS THE WORST MEMBER THE MOMENT THE DICTIONARY IS COHERENT
+M=32, D=512, atoms pulled toward 8 shared directions:
+    coherence   0.0     0.5     1.0     2.0     4.0
+    AMP       1.000   0.052   0.026   0.021   0.026
+    CoSaMP    1.000   1.000   1.000   0.562   0.135
+    IHT       0.984   0.693   0.411   0.224   0.099
+State evolution assumes a roughly i.i.d. design matrix and a coherent dictionary violates it. COSAMP
+REMAINS THE METHOD THERE. Same shape as the IHT-vs-occlusion crossover the family already documents: AMP is
+a FIFTH MEMBER, NOT AN UPGRADE. Both directions are now pinned as tests, because a ONE-SIDED assertion is
+exactly what produced the wrong docstring.
+
+### THE ALPHA FINDING -- the two modes want OPPOSITE constants
+The state-evolution threshold scale has no single good value; measured D=512, N=2048, 5 seeds:
+    with K supplied (F1 of top-K):  alpha 1.5 -> 1.000 to M=86, 0.908 at M=128 | alpha 3.0 -> 0.594 at M=64
+    K-free (support size, true M=8): alpha 1.5 -> ~150 atoms returned (useless) | alpha 3.0 -> 8, 100% capture
+The reason is structural, not a fudge: WITH K, precision is enforced downstream by the top-K cut, so the
+threshold should be permissive and maximise RECALL; WITHOUT K, the threshold IS the support decision and
+must be conservative. So the default is `1.5 if K is not None else 3.0`, chosen once from the sweep and
+recorded in the code. A fixed documented constant, not a fitted weight -- same standing as the role-emphasis
+repeat count. K-FREE OPERATION ONLY WORKS AT LIGHT LOAD; at heavy load supply K.
+
+### WHY THE DOC'S #1 RANKING IS RIGHT FOR THE WRONG REASON
+RESEARCH_CONSOLIDATED.md ranks AMP first on beating Bottleneck 2's "20-32 instruction" ceiling. That ceiling
+was measured with the LINEAR readout and NEVER EXISTED -- CoSaMP already held exact support to M=86 (session
+26g). Benchmarked against the linear figure AMP would have looked like a 5x capacity win. The honest figure
+is a win over CoSaMP in the M/D 0.25-0.39 band -- which the doc does not mention -- and a catastrophic loss
+on coherent dictionaries, which it also does not mention.
+
+### WIRED AS AN EXTENSION, NOT A SIBLING
+The "Bundle recovery" catalog entry now names FIVE members with the crossover in its does-field, rather than
+a competing AMP door appearing beside it. A test asserts the family entry names all five -- a fifth member
+nobody can reach from the one door is a fifth member nobody will use.
+
+### State
++12 tests (tests/test_amp_recovery.py); 53 green across the session's four new files + algebra properties;
+90 green across recovery/catalog surfaces. 6 audits clean. regen_docs --check clean. Discoverability 5/5.
+
+### REMAINING
+Items 6-7: qFHRR (core claim already ships as holographic_sbc block binding -- audit hard before building)
+and Walk-on-Decomposed-Subdomains (an extension of the shipped holographic_wost, not a new faculty).
+
+
+## SESSION (2026-07-26j) -- BACKLOG ITEM 6: qFHRR. The preprint's table IS reproducible -- against a
+## reference it never names, and the number an engineer actually gets is 11 points worse.
+
+Rule 0, run hard because the previous session's audit predicted this one was already built. The prediction
+was HALF right and the distinction mattered: holographic_fhrr ships the COMPLETE complex-phasor tier
+(phasor_atom, fhrr_bind/unbind/bundle/sim, PhasorVocabulary, PhasorMemory, all measured), and
+holographic_sbc ships modular block binding (pos_a + pos_b) mod L. What did NOT exist is the QUANTIZED
+storage tier: no fhrr quantizer, no phase_bind, no quantize_phase symbol anywhere. So qFHRR is a genuine
+gap bolted ONTO an existing faculty, not a new algebra -- built by delegating to phasor_atom so quantized
+experiments stay comparable with their complex baseline.
+
+### PREDICTIONS RECORDED BEFORE MEASURING
+  Q1 unbind EXACTLY invertible in the quantized domain   -> CORRECT, and it is the headline
+  Q2 bundling NOT closed                                 -> CORRECT
+  Q3 paper's fidelity table roughly reproducible         -> CORRECT FOR BIND, MISLEADING FOR BUNDLE (below)
+  Q4 K=16 is 4 bits = 96.9% cut vs complex128            -> CORRECT
+  Q5 tie-arbitration NOT deleted                         -> CORRECT, confirmed again
+
+### THE HEADLINE: UNBIND IS EXACT, WHICH NO OTHER PATH IN THE ENGINE MANAGES
+qfhrr_unbind(qfhrr_bind(a,b), a) returns b's phase indices BIT FOR BIT, at every K (4, 8, 16, 256),
+asserted with array_equal. No cleanup required at all. Contrast, measured last session: the real-valued
+path recovers b at cosine ~0.70 even when the convolution itself is computed EXACTLY by the NTT, because
+the involution is a quasi-inverse -- an ALGEBRAIC limit, not a numerical one. Pinned as a cross-faculty
+test that runs both paths side by side.
+
+### THE MEASUREMENT THAT CORRECTED THE PAPER'S FRAMING
+The consolidation flagged the qFHRR fidelity figures as UNVERIFIABLE from the abstract and said to confirm
+before quoting. Re-measured, D=1024, 8 seeds:
+  * BIND fidelity reproduces almost exactly -- paper 0.9497 / 0.9872 / 0.9999 at K=8/16/256, measured
+    0.9498 / 0.9875 / 0.9999. The table is real.
+  * BUNDLE fidelity did NOT reproduce: measured 0.8458 / 0.8797 / 0.8913 against the paper's
+    0.9147 / 0.9731 / 0.9997 -- and worse, MINE SATURATED near 0.89 instead of climbing to ~1.0.
+    A saturating curve where the paper reports a climbing one is a structural disagreement, not noise, so
+    it got chased rather than reported.
+CAUSE FOUND by changing only the REFERENCE:
+       K        vs COMPLEX bundle    vs PHASE of that bundle    paper
+       8            0.8471                  0.9156              0.9147
+       16           0.8808                  0.9738              0.9731
+       256          0.8923                  0.9998              0.9997
+       4096         0.8923                  1.0000                --
+THE PAPER'S BUNDLE COLUMN IS MEASURED PHASE-TO-PHASE. Strip the magnitude from the reference too and the
+numbers land on top of the published ones to three decimals. Keep it, and fidelity SATURATES AT ~0.892 with
+MORE PHASE LEVELS BUYING NOTHING -- because the ceiling is discarding the MAGNITUDE, which is independent
+of K entirely.
+
+WHY THIS MATTERS RATHER THAN BEING A PEDANTIC FOOTNOTE: an engineer swapping a complex FHRR bundle for this
+tier loses ~11% similarity PERMANENTLY, and 0.9997 does not describe that. measure_fidelity now returns
+BOTH columns (bundle_fid and bundle_fid_phase) and a test asserts they stay apart by >0.05, so the
+optimistic figure can never quietly stand in for the real one. THE PAPER IS NOT WRONG; ITS METRIC IS JUST
+NOT THE ONE A REPLACEMENT DECISION NEEDS.
+
+### KEPT NEGATIVES
+  * BUNDLING IS NOT CLOSED. No integer operation superposes phase indices; qfhrr_bundle dequantizes to
+    Cartesian, sums, and re-quantizes through atan2 + round(). THAT ROUND AT A BIN BOUNDARY IS ITSELF A
+    TIE, and the atan2 is floating point -- so that single function is where the tier's exactness AND its
+    machine-independence both stop. Everything else is pure integer.
+    THEREFORE, for the third time on this arc and now on our own measurements: QUANTIZED VSA DOES NOT LET
+    leCore DELETE ITS TIE-ARBITRATION MACHINERY. Exactness holds for bind/unbind only.
+  * THE MAGNITUDE CEILING (above): ~0.892 against a true complex bundle, invariant in K.
+  * NO CORDIC. The paper uses integer CORDIC for atan2; this uses numpy's, which is deterministic on a
+    given machine but is floating point. Not a gap worth closing until something needs cross-machine
+    bundling -- recorded rather than silently skipped.
+
+### State
++12 tests (tests/test_qfhrr_quantized.py). 6 audits clean; reachability 517 referenced, 0 undocumented,
+7 import-only unchanged. regen_docs --check clean. Discoverability 4/4 on stranger phrasings.
+
+### REMAINING
+Item 7 only: Walk-on-Decomposed-Subdomains, an extension of the shipped holographic_wost (WoS/WoSt), not a
+new faculty. Audit before building -- that module already covers the grid-free solve.
+
+
+## SESSION (2026-07-26k) -- BACKLOG ITEM 7 (LAST): Walk on Decomposed Subdomains. Two claims written
+## before measuring; the measurement refuted BOTH.
+
+Rule 0, run hard because this arc has now caught three "new" items that were partly built. Split verdict
+again: "low variance monte carlo pde solve" comes back SHIPPED (holographic_wost, Walk on Stars, general
+SDFs + Neumann), and holographic_wos ships pointwise WoS with a source term. But `subdomain`,
+`poisson_kernel` and `domain_decomp` do not exist anywhere. THE POINTWISE SOLVERS SHIP; THE DECOMPOSITION
+LAYER DOES NOT. So WoDS is a genuine gap layered over an existing faculty.
+
+### BUILT -- holographic_wods (WoDS-1)
+Short walks from each interface point estimate the discrete harmonic measure P[i,j] (probability of reaching
+interface point j first) plus a boundary term b[i]; the interface solution then satisfies (I-P)u = b, solved
+DETERMINISTICALLY. The solve DELEGATES to holographic_numerics.cg via the normal equations rather than
+shipping a second Krylov method -- (I-P) is non-symmetric, so A^T A is what CG is handed. Two of leCore's
+own five levers stacked: partition into a monoid, then tile under an orchestrator.
+Also returns an ESCAPE FRACTION as an honesty channel: walks that reach neither an interface point nor the
+boundary mean the operator rows do not sum to one and the solve is quietly extrapolating. Returned, not
+swallowed, and asserted < 0.05.
+
+### THE MEASUREMENT REFUTED TWO CLAIMS I HAD ALREADY WRITTEN DOWN
+Unit square, u = x^2 - y^2, matched walk budget, 10 seeds, mean abs error +/- across-seed sd:
+    interface  walks    WoDS                   pure WoS
+    5x5         32      0.0431 +/- 0.0105      0.0755 +/- 0.0074
+    5x5         64      0.0338 +/- 0.0087      0.0480 +/- 0.0095
+    5x5        256      0.0260 +/- 0.0070      0.0238 +/- 0.0051   <-- WoS has OVERTAKEN
+    8x8         64      0.0323 +/- 0.0042      0.0454 +/- 0.0021
+    8x8        256      0.0197 +/- 0.0026      0.0218 +/- 0.0021
+
+  REFUTATION 1 -- "LOW VARIANCE" DOES NOT REPRODUCE. That is the paper's headline and I wrote it into the
+  docstring before measuring. PURE WoS OFTEN HAS THE SMALLER ACROSS-SEED SPREAD (0.0021 vs 0.0042 at
+  8x8/64). What this implementation actually buys is SAMPLE EFFICIENCY -- about half the error at a tight
+  budget. The paper estimates proper subdomain solution operators; this estimates the harmonic measure
+  between interface points, which is the same IDEA and a WEAKER INSTRUMENT. Claiming the paper's number for
+  this code would have been transplanting a result rather than reproducing one.
+  REFUTATION 2 -- THE ADVANTAGE IS NOT MONOTONE. The bias floor means WoDS stops improving while unbiased
+  WoS keeps converging, so WoS overtakes at 256 walks. Pinned as a test on the SHRINKING EDGE (tight-budget
+  edge must exceed rich-budget edge), not on a single number.
+
+The selftest assertion I wrote to pin the variance claim FAILED at 0.00397 vs 0.00395 -- a tie inside noise.
+That near-miss is what forced a proper sweep instead of a shrug. SECOND TIME THIS SESSION ARC that a
+pre-written claim was caught by its own assertion (the first was AMP's P5). The pattern is now unambiguous:
+WRITE THE ASSERTION BEFORE THE PROSE, AND LET IT DECIDE WHAT THE PROSE SAYS.
+
+### A DEFECT THE PYTHON CHECK CANNOT SEE
+The first draft of solve_decomposed contained a garbled expression -- an `if False else` with a pile of
+zero-valued terms -- that I generated while fumbling the normal equations. file_python_check passed it: IT
+WAS SYNTACTICALLY VALID. Caught only by reading the file back. A syntax check is not a review, and generated
+code needs to be read as prose before it is trusted.
+
+### OTHER KEPT NEGATIVES
+  * SCOPE IS NARROWER THAN wost: 2-D axis-aligned rectangle with Dirichlet data only. holographic_wost
+    handles arbitrary SDFs and Neumann and remains the general tool. Recorded rather than implied.
+  * skill_lint caught the catalog does-field at >600 chars; TIGHTENED the description rather than budgeting
+    a new regression, per the standing rule.
+
+### State
++11 tests (tests/test_wods_decomposed.py). 6 audits clean (skill_lint back to 0 after the tighten),
+reachability 518 referenced / 0 undocumented / 7 import-only unchanged. regen_docs --check clean.
+Discoverability 3/3 on stranger phrasings.
+
+### THE BACKLOG ARC IS NOW CLOSED -- items 1-7 all landed. Summary of what the research doc got wrong:
+  1. "cosamp/iht apparently not wired"          -> WIRED ALL ALONG; the hole was vocabulary (0/6 -> 6/6).
+  2. "capacity cliff caps programs at 20-32"    -> a LINEAR-READOUT artefact; CoSaMP already held M=86.
+  3. "WHT possibly faster than FFT"             -> 4-9x SLOWER; the win is exactness.
+  4. "Hadamard codebook replaces K=16384@D=1024"-> IMPOSSIBLE; K is capped at 2D. Needs D=8192.
+  5. "NTT may let us delete tie-arbitration"    -> REFUTED on our own numbers; unbind stays quasi-inverse.
+  6. "AMP is the #1 transplant"                 -> RIGHT, WRONG REASON: it wins in the M/D 0.25-0.39 band
+                                                   the doc never mentions, and collapses on coherent
+                                                   dictionaries, which it also never mentions.
+  7. "qFHRR bundle fidelity 0.9997 at K=256"    -> only PHASE-REFERENCED; against a true complex bundle it
+                                                   saturates at ~0.892 because magnitude is discarded.
+  8. "WoDS delivers low variance"               -> not reproduced here; sample efficiency instead.
+
+
+## SESSION (2026-07-26l) -- VERIFICATION PASS: the audits I had NOT run caught two real defects the six
+## I did run could not see.
+
+Backlog items 1-7 were all closed and every audit I had been running was green. I had flagged one loose end
+myself -- only targeted tests, while p03 gained fifteen faculties and holographic_image started delegating.
+Chasing that loose end found two defects that would have broken CI.
+
+### THE INSTRUMENT THAT FOUND THEM
+tools/select_tests.py, asked which tests the changed files affect, answered 482 FILES -- because
+holographic_catalog and the unified mixin are imported by nearly everything. That is precisely why the
+standing rule says CI owns the full suite. But "CI owns it" is not the same as "I cannot check anything":
+the STRUCTURAL audits are cheap and I had simply not run all nine. Two of the nine were red.
+
+### DEFECT 1 -- a public name collision, caught by tools/name_collisions.py
+    * measure_vs_fft     ntt, wht
+I defined `measure_vs_fft` in BOTH holographic_wht and holographic_ntt, three sessions apart, without
+noticing. tests/test_duplication_audit.py::test_no_unreviewed_public_name_collisions FAILED.
+FIXED BY RENAMING, NOT ALLOWLISTING -- measure_wht_vs_fft / measure_ntt_vs_fft -- per the rule this repo
+already paid for twice: A PUBLIC NAME THAT DOES NOT SAY WHAT IT OPERATES ON IS A BAD PUBLIC NAME.
+"measure_vs_fft" never said what was being measured. Callers updated in the faculties and both test files.
+
+### DEFECT 2 -- a copy-pasted body, caught by the duplicate budget
+    new cross-module duplicate(s): [(['_t'], ['htcodebook', 'ntt'])]
+I wrote the same warmed-median timing helper THREE times (wht's `_time`, htcodebook's `_t`, ntt's `_t`) --
+and, worse, copied the WHY-comment explaining the warmup lesson along with it, so the same paragraph now
+existed in three places and would have rotted independently.
+FIXED BY UNIFYING, per the audit's own guidance ("one home, an import"): `time_call(fn, repeats, warmup)`
+now lives in holographic_measure, NEXT TO THE VARIANCE HARNESS, which is where a measurement-honesty helper
+belongs. All three modules delegate; the dead `import time` came out of each. The warmup lesson is recorded
+ONCE, in the one place a fourth module will find it.
+
+### WHAT THIS SAYS ABOUT THE PREVIOUS FIVE SESSIONS
+Every one of them ended with "6 audits clean". THERE ARE NINE. The six I habitually ran (skill_lint,
+catalog_gaps, reachability, wiring, structure, imports) are the DISCOVERABILITY audits -- they check that
+work is findable and wired. The three I did not run (name_collisions, orphan_audit, tag_lint) are the
+DUPLICATION audits -- they check that work is not REDUNDANT. I had been auditing exactly the half of the
+problem I was thinking about, and the defects landed squarely in the other half.
+This mirrors a finding already on record from 2026-07-25j: "the audits are green" was, for one release, not
+the same statement as "the tests are green". The generalisation is now clear enough to state plainly: A
+GREEN AUDIT SET PROVES ONLY WHAT THE SET COVERS. Run all nine, or say which six you ran.
+
+### VERIFICATION PERFORMED THIS PASS
+  * ALL NINE audits exit 0 (previously six were being run).
+  * tests/test_duplication_audit.py 11 passed (was 2 failed).
+  * Structural surfaces: test_unified_split, test_wiring_affected_tests, test_unifier_wiring_p4_p7,
+    test_wiring_p8_p9_p10, test_unifier_adoption, test_semantictag, test_servicedoc, test_srcindex
+    -- 79 passed, 3 skipped.
+  * test_routing_pins / test_codemap / test_variance -- 15 passed, 5 skipped.
+  * All six new test files -- 65 passed.
+  * All four touched module selftests OK; regen_docs --check clean.
+  * End-to-end through the mind after the rename: WHT 8.0x slower than rfft, NTT 35.2x slower, Hadamard
+    cleanup 22.3x faster at D=2048, AMP exact support True, qFHRR exact unbind True, WoDS err 0.0269.
+
+### KEPT NEGATIVE
+The 482-file affected set is NOT reduced by any of this -- touching the catalog or the unified mixin
+genuinely reaches most of the suite, and that remains CI's job. What changed is that the cheap structural
+checks are now all run before pushing, rather than six of them.
+
+
+## SESSION (2026-07-26m) -- NEW BACKLOG (Agent Architecture Work Plan v2), ITEM 1.1: the plan's fix is
+## right, its DIAGNOSIS is wrong, and the difference decides whether the fix does anything.
+
+Plan inventory verified against the live tree before starting, since this arc has already caught four
+"already built" items. It holds up: set_embedder / declare / declares / llm_tool / agent_loop are all
+genuinely ABSENT; route_semantic, invoke, attach_llm, route_or_abstain, capability_confidence,
+synthesize_procedure, fill_capability_gap, climb_ladder, diagnose_scaling, permutation_null,
+selection_ledger, compile_program, distribute_exact, recursive_factor all EXIST. Counts have drifted
+(plan says 545 modules / 1,475 faculties; live is 557 / 1,518) but nothing structural.
+
+### THE DEFECT IS REAL AND REPRODUCES
+150 author aliases (>=4 words), committed seeded fixture: exact phrasing top-1 99.3%, mixed filler arm
+90.0%. The plan predicted 89.3% -> 99.2%. Close enough to trust the fixture definition.
+
+### BUT THE PLAN'S STATED MECHANISM IS WRONG, AND IT MATTERS
+The plan says "strip leading conversational prefixes BEFORE MATCHING", implying the tokens are polluted.
+THEY ARE NOT. The stop-word list has always dropped how/do/i, and it is measurable:
+    _tokens('how do i smooth a bumpy mesh') == _tokens('smooth a bumpy mesh')   -> True
+A fix applied to the tokenizer would have SHIPPED GREEN AND MOVED NOTHING.
+
+The per-filler breakdown is what gave it away -- six of seven fillers scored IDENTICALLY at 91.3%,
+including ones whose tokens are fully stopped. Identical numbers across different inputs mean a single
+shared cause, not seven small ones:
+
+    filler                      survives tokenizer   top-1
+    'how do i'                  (all stopped)        91.3%
+    'can you help me'           ['help']             91.3%
+    'please'                    ['please']           91.3%
+    "what's the best way to"    ['best','way']       81.3%
+
+THE CAUSE IS THE EXACT-ALIAS BONUS. `q_phrase` is a WHOLE-STRING equality test worth +5.0 -- much the
+largest term in the score. ANY prefix, even one whose every token is a stop word, makes q_phrase != alias
+and silently forfeits it. ("what's the best way to" is worse only because it ALSO leaks 'best'/'way',
+adding spurious overlap elsewhere.) So the fix had to reach the PHRASE, not the tokens.
+
+### THE REGRESSION THE OBVIOUS IMPLEMENTATION WOULD HAVE CAUSED
+FOUR SHIPPED ALIASES THEMSELVES BEGIN WITH A FILLER -- "how do I get from points to a mesh"
+(suggest_pipeline), "how do I stream this", "how do i speed this up", "how do I texture a mesh I
+decimated myself". Stripping the query before the exact-alias test would have destroyed the +5.0 bonus
+for precisely those four -- breaking the feature in order to fix it.
+FIX: test BOTH the raw phrase and the stripped one. Purely additive; a query can only GAIN a bonus,
+never lose one it already had. All four still resolve, pinned as a test.
+
+### APPLIED TO BOTH SCORING PATHS
+find_scored's docstring promises "same scoring, same deterministic tie-break" as find_capability. Fixing
+one and not the other would make them disagree on exactly the queries the change repairs -- the seam
+defect shape the plan's own 6.2 predicts. Both patched; a test asserts they agree on the filler arm.
+
+### MEASURED RESULT (committed seeded fixture, n=150)
+    arm                    before    after
+    exact alias             99.3%    99.3%   (unmoved -- the other half of the gate)
+    every individual filler 91.3%    99.3%
+    "what's the best way to" 81.3%   99.3%
+    mixed filler arm        90.0%    99.3%   (+9.3 points; plan predicted +9.9)
+
+### A TEST OF MINE THAT WAS WRONG
+test_strip_filler_never_consumes_the_whole_query asserted pure-filler input comes back UNCHANGED. It
+failed on 'can you help me' -> 'help me': 'can you' matches, the remainder is non-empty so it strips,
+and 'help me' then has nothing left to give up. That chaining is CORRECT -- the guard's job is to never
+hand the router an EMPTY string, not to freeze meaningless input. The test was over-specified; it now
+asserts the real invariant (never empty) and the reasoning is in the test body.
+
+### State
++8 tests (tests/test_filler_stripping.py, committed seeded fixture). ALL NINE audits exit 0.
+regen_docs --check clean. No new module, no new catalog entry -- this is a repair to an existing
+capability, so nothing to register.
+
+### REMAINING IN THIS PLAN
+1.3 set_embedder seam, 1.2 query-side artifact, 1.4 hybrid dense index (float8, flat scan, SUPPLEMENT
+not swap), 2.1 declare() ladder, 2.2-2.4, 3.x, 4.x, 5.1-5.6 defects, 6.x. Note for whoever continues:
+5.1/5.2 land together (they compound), and 3.1/4.4 are UNTESTED PROPOSALS whose gates must be run
+before committing.
+
+
+## SESSION (2026-07-26n) -- WORK PLAN ITEM 1.3: the seam is three lines; the PROBE is the item.
+
+Rule 0: `set_embedder` genuinely absent (no symbol anywhere). `QueryEmbedder` exists but requires an
+artifact that does not ship, so free text really does route to None -- verified live:
+    route_semantic('smooth a bumpy mesh')  ->  None
+The plan's diagnosis of 1.3 is correct as written.
+
+### THE TRAP THE PLAN DOES NOT MENTION, AND A BARE SETTER WOULD HAVE WALKED INTO IT
+The shipped index is ONE embedding space: 509 modules x 128d nomic, ABTT-corrected (mu, pc), plus a
+1,110-edge bone graph. A cosine between a query embedded by SOME OTHER model and a nomic document is not
+a weak signal -- IT IS A MEANINGLESS ONE. And it still returns five ranked module names with
+confident-looking scores. That is exactly the confident-wrong-answer class this engine refuses
+everywhere else.
+
+DIMENSION IS CHECKABLE. SPACE IS NOT. Any 128d model passes a shape test and then produces nonsense. So
+the seam ships with an instrument instead of a warning in a docstring.
+
+### THE PROBE (holographic_embedseam.probe_embedder_space)
+Sample modules that are IN the index, read each one's OWN docstring summary from the tree, embed it with
+the supplied callable, route it, and require the module to self-recall at top-k. A model in the index's
+space recalls itself; a model in another space scores at chance.
+    chance at k=5 over 509 modules = 5/509 = 0.0098
+Default bar 0.30 is ~30x chance. Deliberately LOOSE: the job is separating "right space" from "unrelated
+space", not grading embedding quality -- that is item 1.4's paired fixture, not this.
+
+MEASURED, BOTH DIRECTIONS (this is the part that matters -- a probe that rejects everything would pass a
+one-sided test and be useless):
+    wrong-space embedder (128d random)   ->   0/12 self-recall, REFUSED
+    in-space oracle (the index's own rows) -> 12/12 self-recall, ACCEPTED
+Clean separation. The oracle is built by dequantizing the shipped index rows, so it is in-space by
+construction and needs no model -- which means the positive control is committed and runnable forever.
+
+WHAT THE PROBE CANNOT DO, recorded so nobody over-trusts it: it cannot distinguish a GOOD in-space
+embedder from a MEDIOCRE one, and it cannot catch same-space-different-pooling. It separates catastrophe
+from plausibility. PASSING IT IS NECESSARY, NOT SUFFICIENT.
+
+### A PRECEDENCE DECISION THAT IS CORRECTNESS, NOT PREFERENCE
+route_semantic's fallback order is now: explicit query_vec -> USER EMBEDDER -> build-time cache ->
+offline distilled artifact -> None. The user embedder goes BEFORE the cache deliberately: the cache holds
+vectors in the SHIPPED space while a user embedder is in its own, and letting a query fall through to the
+cache would mix two geometries inside one ranking. Once a caller installs an embedder, every query goes
+through it and the ranking stays internally consistent. An explicit query_vec still wins, because that is
+the caller being explicit.
+
+### DELEGATION
+module_summaries() reuses holographic_workflowgraph._module_texts for the file walk rather than opening a
+second one, then pulls docstrings with `ast` -- no imports, so a module with a heavy or optional
+dependency still contributes its text.
+
+### KEPT NEGATIVES
+  * A broken embedder is a MISS, never a raise -- route_semantic's contract is an honest None, and an
+    exception escaping into a request path would be a regression. Pinned.
+  * verify=False exists and is documented as not recommended; it is the only way to install an unchecked
+    embedder, and the test suite uses it exactly once, to prove the broken-callable path.
+  * The probe needs an index. With none present, set_embedder(verify=True) RAISES rather than silently
+    installing -- an unverifiable install is not the same as a verified one.
+
+### State
++9 tests (tests/test_embedder_seam.py, positive control committed). ALL NINE audits exit 0. regen_docs
+--check clean. 133 passed across routing/semantic/router/filler/embedder surfaces. Discoverability 4/4.
+New module in semantic_router/ (5 -> 6), NOT misc/ (at 150, its budget).
+
+### REMAINING IN THIS PLAN
+1.2 query-side artifact (de-risked by this item -- if the distilled W fails its R2 gate, 1.3 carries the
+feature); 1.4 hybrid dense index (float8, flat scan, SUPPLEMENT not swap, and Gate B's flip-rate test is
+UNMEASURED IN THE LITERATURE so it must be run in-house); 2.1 declare() ladder; 2.2-2.4; 3.x; 4.x;
+5.1-5.6 defects; 6.x.
+
+
+## SESSION (2026-07-26o) -- WORK PLAN ITEM 1.2: NOT BLOCKED. **REFUTED.** The repo already measured it,
+## already refused it, and already pinned the refusal in two tests.
+
+Moose's instruction on this backlog was "make sure we don't implement any duplicate functionality". Item
+1.2 is worse than duplicate -- it is REFUTED WORK, and building it as written would have shipped a
+routing-DEGRADING artifact and broken two committed tests.
+
+### WHAT ITEM 1.2 ASKS FOR
+"Run tools/semantic/distill_map.py on the real corpus, commit the artifact to lecore_data/routing/, give
+QueryEmbedder default path resolution." Its stated Known Risk: "whether W is good enough is an EMPIRICAL
+question distill_map.py answers on the real corpus ... the real R^2 is the gate." The plan treats that as
+an OPEN question.
+
+### IT IS CLOSED, AND IT WAS CLOSED BEFORE THE PLAN WAS WRITTEN
+distill_map.py's own docstring carries the measured verdict at the shipped 128d, warm cache + real nomic
+weights -- the config that would actually ship:
+
+    [ceiling] full encoder (137 MB)      top-1  5/12   top-5  8/12   median  2
+    [floor]   SIF token-pool (23 MB q8)  top-1  3/12   top-5  5/12   median 13
+    [m2v]     whitened table (no W)      top-1  3/12   top-5  5/12   median 17
+    [ours]    SIF @ W (23 MB + 0.1 MB)   top-1  1/12   top-5  2/12   median 19
+
+THE LEARNED RIDGE MAP IS WORSE THAN NOT HAVING ONE. [ours] 1/12 against [floor] 3/12; median 19 against
+13. The ridge explained R^2 +0.06 of held-out variance and cost 2 top-1 and 6 median rank to apply.
+The export gate refuses it in code (EXPORT_BAR_TOP1=4, EXPORT_BAR_MEDIAN=8), and
+tests/test_queryembed_artifact.py pins BOTH halves: test_the_export_gate_refuses_a_losing_map (the bar)
+and test_no_query_embed_artifact_was_committed (the absence). Six tests, all green.
+
+So shipping the artifact would have (1) made routing worse, (2) broken a committed test that exists
+precisely to catch someone exporting past a failed gate, and (3) reinvented a negative the project had
+already paid to learn.
+
+### THE ENVIRONMENT BLOCKER IS REAL BUT SECONDARY -- and worth separating from the refutation
+distill_map cannot even RUN here: seed_cache.py --restore recovers 521 cached entries (503/559 docs hit,
+56 modules newer than the cache including this arc's six), but the fit then needs the nomic weights via
+dr.read_st(paths.nomic_weights()) and tools/semantic/nomic_text does not exist -- the weights arrive from
+a CI repo variable whose host is not on this environment's network allowlist.
+THAT IS NOT WHY WE ARE NOT BUILDING IT. If the weights were here, the numbers above say the answer is
+still no. Recording both so nobody re-runs this expecting the blocker to be the whole story.
+
+### ITEM 1.3 DOES NOT DE-RISK 1.2 -- IT REPLACES IT
+The plan says of 1.3: "Do both; if the distilled path fails its R^2 gate, this one carries the feature."
+The distilled path DID fail its gate, measured, on record. So set_embedder (shipped last session) is not
+a stopgap while the distilled route matures -- IT IS THE ROUTE. The plan's own conditional resolves to
+"1.3 carries the feature", and 1.2 should be struck from the plan rather than scheduled.
+
+Item 1.2's OTHER stated gate -- "route_semantic('smooth a bumpy mesh') returns a ranked list instead of
+None; this assertion does not currently exist and would have caught the gap" -- is now SATISFIED, by
+tests/test_embedder_seam.py::test_set_embedder_accepts_the_oracle_and_unlocks_free_text. It asserts the
+None -> ranked-list transition end to end, using an in-space oracle built from the shipped index's own
+rows so it needs no model and cannot rot.
+
+### WHAT WAS ACTUALLY DONE
+No new module, no artifact, no code path. The REFUTATION was made to travel with the capability instead
+of living only in a tool's docstring and a test file: set_embedder's faculty docstring now carries the
+measured table, the gate constants, the two pinning tests, and the sentence "do not re-propose shipping a
+distilled query artifact without new numbers that beat the floor". A future session asking find_capability
+about "distilled query embedder" or "why does free text routing return none" lands on that entry.
+The restored 7.9 MB cache was deleted after the probe (gitignored anyway) so the tree is as found.
+
+### THE GENERAL LESSON, now paid for twice in this arc
+A work plan is a HYPOTHESIS ABOUT THE CODEBASE, not a description of it. This one is well-researched and
+its literature sweep is sound, but it asserted an open empirical question that the repo had already
+answered in the negative -- and the answer was sitting in the docstring of the very tool the item tells
+you to run. RULE 0 APPLIES TO PLANS, NOT JUST TO CAPABILITIES: read the tool before running it, and read
+the tests before shipping past them.
+
+### State
+No code change beyond one docstring. ALL NINE audits exit 0. regen_docs --check clean. 23 passed, 1
+skipped across queryembed/embedder-seam/filler surfaces (the skip is the None-fallback case, correctly
+skipped only when an artifact ships -- it does not).
+
+### REMAINING IN THIS PLAN
+1.4 hybrid dense index -- NOTE it depends on "1.2 or 1.3" and 1.3 is the surviving branch, so 1.4 is
+unblocked. Its Gate B (top-1 flip rate under quantization at 500-2,000 items) is explicitly UNMEASURED IN
+THE PUBLISHED LITERATURE and must be produced in-house; if it exceeds ~1%, the plan says drop quantization
+entirely. Then 2.1 declare(), 2.2-2.4, 3.x, 4.x, 5.1-5.6 defects, 6.x.
+
+
+## SESSION (2026-07-26p) -- WORK PLAN ITEM 1.4: the INDEX is blocked, but its one unpublished question
+## is now answered -- and the answer is a mechanism, not a number.
+
+### THE INDEX CANNOT BE BUILT HERE, and it is the same wall as 1.2
+export_index.py pulls vectors from the .knowledge_cache.json rather than the weights, which looked
+promising -- but the cache holds MODULE DOCSTRING vectors, and a capability index needs the 506 catalog
+does-fields embedded, which were never in it. Embedding them needs the model. Same missing weights as
+1.2. Recorded rather than worked around: a capability index built from a substitute encoder would be a
+different artifact wearing the same filename.
+
+### BUT GATE B IS THE PART NOBODY HAS PUBLISHED, AND IT NEEDED NO MODEL
+The plan is explicit: "no published paper measures a top-1 FLIP RATE as a function of quantization at
+500-2,000 items; all available numbers are recall@k/nDCG@10 at 100K-1M scale. leCore must measure its
+own." The shipped 509x128 index is a real quantized artifact sitting right there, so the question is
+answerable today even though the new index is not buildable.
+
+MEASURED, 300 queries, D=128, N=509:
+    query construction                 flip rate   margin median   margin min
+    exact index row                       0.00%        0.583          0.245
+    row + 30% noise                       0.00%        0.565          0.236
+    row + 60% noise                       0.00%        0.532          0.228
+    midpoint of two rows (ambiguous)      1.00%        0.058          0.000
+and by bit width, ambiguous queries only:
+    bits   8      6      5      4      3      2
+    flip   1.3%   2.0%   5.7%  10.7%  22.3%  37.3%     (normal queries 0.00% at EVERY width)
+
+**FLIP RATE IS GOVERNED BY MARGIN, NOT BY CORPUS SIZE OR BIT WIDTH.** A well-separated query survives
+quantization down to TWO BITS; a query sitting equidistant between two documents is unsafe at EIGHT. So
+the plan's framing -- "if the flip rate exceeds ~1%, drop quantization entirely" -- is asking the wrong
+question of the wrong variable. The answerable question is the MARGIN DISTRIBUTION OF THE QUERIES YOU
+ACTUALLY SERVE, which decision_flip_rate now returns alongside the rate.
+
+This also closes an open item from the engine's own research consolidation -- gap #3, "a rate-distortion
+theory whose distortion metric is cleanup-decision preservation, not reconstruction MSE". It landed as an
+EXTENSION of holographic_ratedistortion rather than a sibling module: that module already measures
+distortion as cosine fidelity, and the decision metric is the thing it was missing.
+
+### TWO STRAWMEN CAUGHT IN MY OWN MEASUREMENT, both before publishing
+1. FIRST RUN SHOWED 0.000% FLIPS EVERYWHERE, with margins RISING under "crowding" (0.579 -> 0.623). A
+   crowding knob that raises margins is not measuring crowding. Cause: I used index rows AS the queries,
+   so every query had an exact match in the corpus -- the easiest possible case. Real queries sit NEAR
+   documents, not on them. Re-run with noised and interpolated queries produced the table above.
+2. uint8 vs float8 LOOKED like a clean 7.5x win for uint8 (1.33% vs 10.00% flips), which would have
+   directly contradicted the plan's [v2 CHANGED] "use float8, not uint8". IT IS CONFOUNDED AND IS NOT
+   REPORTED AS A RESULT: the shipped index is ALREADY uint8, so uniform re-quantization is a NO-OP
+   (measured max|err| exactly 0.000000) while float8 must genuinely re-quantize (max|err| 0.003845). The
+   comparison measures the source grid, not the quantizers. A real verdict needs a float32 corpus.
+   Pinned as a test so it cannot be quietly revived on this artifact.
+   NOTE this does NOT vindicate the plan's float8 choice either -- it leaves it untested at this scale.
+   The cited paper (arXiv:2505.00105) measures nDCG@10 on 384-768d embeddings at MTEB scale; whether that
+   transfers to top-1 decisions on 128d at 500 items remains open.
+
+### A THIRD, SMALLER ONE
+My float8 selftest demanded sign preservation for -1e-9 and failed. Correctly: with 4 exponent bits the
+smallest normal magnitude is 2^-7 ~ 0.0078, so smaller values FLUSH TO ZERO. That floor is a real
+property and matters here -- a small component does not lose precision, it DISAPPEARS. Asserted rather
+than papered over.
+
+### State
++9 tests (tests/test_decision_safe_quantization.py). ALL NINE audits exit 0; regen_docs --check clean;
+87 passed across ratedistortion/quantization/compression surfaces. Discoverability 4/4. Two new faculties
+(decision_flip_rate, crowded_subset) extending an existing module -- no new module, no new family entry.
+
+### WHAT REMAINS OF 1.4
+The dense arm itself, blocked on the model. When it is buildable: the plan's Gate A (paired McNemar-style
+CI on the difference) and Gate C (zero per-ask regressions) are still the right gates, and the SUPPLEMENT-
+NOT-SWAP rule is now firmer than when the plan was written -- after item 1.1 the lexical arm sits at 99.3%
+on the filler arm with a clean 0% null, so a dense replacement has almost no headroom and plenty of
+downside. Gate B should be re-run with decision_flip_rate on the new index, and read for MARGINS.
+
+
+## SESSION (2026-07-26q) -- WORK PLAN ITEM 2.1: declare(), the ladder. FALSE-ACTION RATE 0.0%.
+
+The plan's core item, and the first in this backlog that needed no model. Rule 0: `declare`/`declares`
+genuinely absent (only fallbacks). All four rung mechanisms verified live before delegating to them --
+route_or_abstain, orchestrator.plan, synthesize_procedure, fill_capability_gap.
+
+### THE NaN DEFECT IS REAL, VERIFIED ON THIS TREE
+    argmax_tiebreak([0.1, nan, 0.9])  ->  1      the NaN's index, NOT the maximum at 2
+    json.loads('{"x": NaN}')          ->  parses
+So a NaN can arrive over /invoke or from a model and WIN a gate, because every `>` against NaN is False
+and the scan keeps its incumbent. A NaN score does not lose comparisons -- it wins them. Every gate in the
+ladder is guarded by finite_score(); a non-finite confidence is NO confidence and the rung declines with
+that as its reason. The ISA-level fix (item 5.5) stays separate and lower-urgency, as the plan says; the
+ladder does not wait on it. Both the guard AND the underlying defect are pinned, so if argmax_tiebreak is
+ever fixed we find out and can downgrade the rationale.
+
+### THE PRIMARY METRIC, MEASURED (committed seeded fixture, n=60 per arm)
+    HAS-TOOL arm (real author aliases, callable capability)   59/60 resolved   98.3%
+    NO-TOOL  arm (word salad, catalog's own vocabulary,
+                  MATCHED TOKEN COUNT)                          0/60 resolved
+    ------------------------------------------------------------------------------
+    FALSE-ACTION RATE                                                    0.0%
+
+That is the number the reference system (NOOA, 4,309/4,400 = 97.9% capability records) DOES NOT PUBLISH,
+and the axis this architecture exists to compete on. Both arms are drawn from the same vocabulary at
+matched token count, so they differ in whether a tool EXISTS, not in length or word choice.
+
+HONEST LIMIT, PINNED AS ITS OWN TEST: word salad is still SEMANTICALLY easier to refuse than the plan's
+preferred construction (take a real capability description and REMOVE that capability from the index).
+0.0% is a real result on the easier no-tool set, not the hardest one. Recorded rather than rounded up.
+
+### WHAT THE RUNG DISTRIBUTION SAYS
+Every one of the 59 resolutions came from RUNG 0. Rungs 1-3 fired 0% on this fixture -- because the
+fixture is free-text-to-faculty requests, which is exactly what rung 0 is for, and rungs 1-3 need typed
+goals / vector goals / a library+goal_sig that a plain declaration does not carry.
+THIS IS NOT THE PLAN'S "ceremony" NEGATIVE, and the distinction matters. Its bar was "if rungs 1-5 fire on
+under ~20% of realistic bodies, the ladder is ceremony AROUND AN LLM CALL". Here the CHEAPEST, FULLY
+DETERMINISTIC rung answers 98.3% and no model is reached at all -- the ladder is doing its job by not
+needing its upper rungs. The open question is different and should be stated as such: rungs 1-3 are
+UNEXERCISED IN THE WILD, so their gates are unproven on real traffic. They decline cleanly and for stated
+reasons, which is all that is currently established about them.
+
+### DESIGN DECISIONS WORTH KEEPING
+  * PROVENANCE FROM THE FIRST COMMIT, six fields plus a descent log, because retrofitting provenance is
+    how provenance ends up wrong. Two axes on purpose: exactness ("can I reproduce it") and reversibility
+    ("can I recover what went in") -- cleanup is EXACT and LOSSY at once, so one field cannot carry both.
+  * RUNG 0 CLAIMS `INHERITS`, NOT `EXACT`. It cannot be more exact than the faculty it dispatched to.
+    Only rung 2 claims EXACT, and only because synthesize_procedure verifies by EXECUTION.
+  * THE DESCENT LOG LIVES BESIDE THE RESULT, never folded into it -- the clutter law is a measured
+    property of this engine, not tidiness.
+  * THE DECORATOR RETURNS A RESOLUTION, NOT A BARE VALUE, so a caller cannot use an answer without its
+    provenance. That is the failure mode the ladder exists to prevent, so the API should not permit it.
+  * max_rung=5 by default makes "stay deterministic" a hard guarantee, not a convention.
+
+### A BUG THE DESCENT LOG CAUGHT ON ITSELF
+Rung 0 first reported `top hit '?' is import-only (no callable faculty)` for a request that resolves fine.
+Cause: route_or_abstain returns (Capability, score) TUPLES while find_capability returns bare
+Capabilities, and I read the tuple as a capability -- so `.method` was None. THE ANSWER WAS RIGHT (decline)
+FOR A WRONG REASON, which is worse than a wrong answer: a wrong reason sends the next reader to the wrong
+place. Only visible because the log states its reason rather than just its verdict. Both shapes are now
+accepted and the wrong reason is pinned as a test.
+
+### State
++14 tests, 1 skipped (tests/test_declare_ladder.py, committed seeded fixture). ALL NINE audits exit 0.
+regen_docs --check clean. HTTP /invoke round-trip proven live for declare_explain. New module in
+agents_and_reasoning/ (56 -> 57), NOT misc/ (150, at budget). Discoverability 3/3.
+
+### REMAINING IN THIS PLAN
+2.2 capacity gate in load-ratio terms; 2.3 permutation_null as the ladder's first client (the ladder now
+EXISTS to be that client); 2.4 selection_ledger look-book -- note the ladder ranks N rungs and reports a
+winner, so it IS an N-look battery whether or not anyone calls it one. Then 3.x, 4.x, 5.1-5.6 defects,
+6.x. 5.1/5.2 still land together. 3.1 and 4.4 remain UNTESTED PROPOSALS whose gates decide whether they
+are worth building.
+
+
+## SESSION (2026-07-26r) -- WORK PLAN ITEM 2.3: the null found a defect on its FIRST RUN, and the defect
+## was in the null itself.
+
+The item: "permutation_null is a promoted unifier with 0 clients; wire the ladder's gates through it,
+0/0 -> 1/1." Adoption-metric motivation is exactly the shape this project calls ceremony, so the first
+question was WHICH gate actually lacks a null.
+
+### ONLY ONE OF THE FOUR RUNGS NEEDED IT -- wiring all four WOULD have been ceremony
+    rung 0  route_or_abstain     ALREADY null-referenced (its own null: scrambled queries at matched
+                                 token count from the catalog's own vocabulary). A second null would be
+                                 double-counting, not rigour.
+    rung 1  Planner.plan         binary -- a chain exists or it does not. No score, so no null.
+    rung 2  synthesize_procedure verified BY EXECUTION. Exact. A null adds nothing to a proof.
+    rung 3  fill_capability_gap  A BARE CONSTANT: coherence >= 0.85, no null anywhere in the module.
+Rung 3 is the client. The other three were left alone and that is the finding, not a shortcut.
+
+### WHY THE CONSTANT IS WRONG IN PRINCIPLE (even though it is fine in practice here)
+0.85 encodes an assumption about how coherent a RANDOM goal can get -- and that is a property of the
+CALLER'S LIBRARY, not of the algorithm. Measured over 40 draws per cell, random-goal coherence rises with
+library size and falls with dimension: mean 0.139 at D=512/10 atoms, 0.356 at D=128/40 atoms. False-accept
+rate 0.0% at every cell, so the bar separates comfortably HERE -- but a library of near-duplicate atoms
+would push that mean up, and one constant cannot be right for every library. gap_gate_null makes the
+separation measurable instead of assumed.
+
+### THE DEFECT, AND IT WAS MINE: A NULL SEEDED LIKE ITS DATA REPLAYS THE DATA
+First live run of the wired gate reported a REAL goal failing its own null -- observed 1.000, null_mean
+0.440, p=0.333, collapsed False. Nine of thirty-two "random goals" had scored a perfect 1.000.
+CAUSE: the library was built with default_rng(0) and permutation_null defaults to seed=0, so the null's
+first draws re-emitted the very vectors the library was made from. Verified directly:
+    cosine(first null draw, lib[0]) = 1.000000
+The null was not sampling random goals. IT WAS HANDING BACK THE DATA. And because demo and test libraries
+are conventionally built with default_rng(0), seed=0 -- the obvious default -- was precisely the colliding
+configuration. A null that quietly samples its own data does not fail loudly; it reports that real signal
+is unremarkable, which is the most expensive possible wrong answer from an honesty instrument.
+
+FIX: derive the null's seed from a blake2b digest of the library bytes plus the caller's seed (hashlib,
+never hash(), per the determinism rule). Collision becomes impossible BY CONSTRUCTION rather than avoided
+by convention, the result stays bit-reproducible, and the caller's seed still varies the draw. After it:
+    real goal    obs 1.000  null 0.179  p 0.0303  collapsed True
+    random goal  obs 0.169  null 0.179  p 0.5152  collapsed False
+Both directions correct. The reproduction is pinned as a test so the rationale cannot rot.
+
+### A MEASUREMENT OF MINE THAT WAS ALSO WRONG, and how it hid the bug
+My first sweep reported random-goal coherence 0.136-0.237 and NO false accepts -- because it rebuilt the
+library from a fresh seed on every draw, which accidentally avoided the collision. The bug only appeared
+when the library was held FIXED across draws, which is the realistic case and the one gap_gate_null runs.
+A SWEEP THAT VARIES THE WRONG THING CAN HIDE THE DEFECT IT IS MEANT TO FIND. Third time this arc that an
+instrument, not a hypothesis, was the thing at fault.
+
+### WIRED
+gap_gate_null in holographic_voidsynth (where the gate lives, so a standalone caller benefits too), a
+faculty on the mind, and Ladder(null_check=False) -- DEFAULT OFF, additive, so every existing caller is
+byte-identical. permutation_null now has its first live client, and it earned the wiring rather than
+receiving it for adoption's sake.
+
+### State
++9 tests (tests/test_gap_gate_null.py); 23 passed, 1 skipped with the ladder suite. ALL NINE audits exit 0.
+regen_docs --check clean. No new module -- gap_gate_null extends voidsynth.
+
+### REMAINING
+2.4 selection_ledger look-book (the ladder ranks N rungs and reports a winner, so it IS an N-look battery
+whether or not anyone calls it one); 2.2 capacity gate in load-ratio terms; then 3.x, 4.x, 5.1-5.6, 6.x.
+5.1/5.2 land together. 3.1 and 4.4 remain UNTESTED PROPOSALS -- run their gates before committing.
+
+
+## SESSION (2026-07-26s) -- WORK PLAN ITEM 2.4: the plan's premise does not describe this ladder, and
+## acting on it would have produced a meaningless correction.
+
+The item: "A system that ranks N rungs and reports the winner IS a battery whether or not anyone calls it
+one. Wire selection_ledger so the number of looks is on record." Correct instinct, wrong object.
+
+### WHERE THE MULTIPLICITY ACTUALLY IS -- three places, and only one is uncorrected
+  1. ACROSS THE FOUR RUNGS -- NOT a battery. The ladder walks them IN ORDER and stops at the first that
+     passes, and the declines are STRUCTURAL ("no typed goal", "no vector goal"), not statistical. Nothing
+     is being maximised over, so correcting for "4 looks" would be arithmetic without meaning.
+  2. INSIDE RUNG 0, over ~2,374 capabilities -- REAL multiplicity, and ALREADY CORRECTED BY CONSTRUCTION.
+     route_or_abstain's null draws `find_scored(fake, k=1)`, i.e. the TOP-1 score of each scrambled query,
+     so the null is a distribution of MAXIMA. Comparing a max against a distribution of maxes prices the
+     selection in. Pinned as a test: if that null ever becomes a mean-over-all-scores, this reasoning dies.
+  3. ACROSS CALLS -- genuinely uncorrected, and nothing was counting. Ask declare() a hundred times and
+     report the one that worked, and that is a hundred looks nobody booked.
+(3) is the scope, and it is exactly what SelectionLedger already claims for itself: "batteries correct
+within themselves; the ledger corrects across them."
+
+### THE PART THAT HAD TO BE RIGHT: THE P-VALUE
+The ledger feeds an FDR correction, so it needs a p, and rung 0 only had a z. The obvious move -- p =
+1 - Phi(z) -- IS WRONG HERE and wrong in the dangerous direction. The null is a distribution of MAXIMA and
+therefore right-skewed; a normal approximation understates that tail and returns an ANTI-CONSERVATIVE p.
+Feeding anti-conservative p-values to a false-discovery-rate procedure is worse than having no ledger.
+FIX: route_or_abstain now caches the null SAMPLES and returns an EMPIRICAL p, counted directly with the
+same +1 plug permutation_null uses -- non-parametric, correct for any null shape, never exactly 0. Additive
+field; the abstain/pass decision is untouched. A test asserts the p is a multiple of 1/(n_null+1), so a
+future "simplification" back to a parametric formula fails loudly.
+
+### AN HONEST CALIBRATION FACT THIS SURFACED
+    'smooth a bumpy mesh'   z = 1.45 (clears z_min=0.8)   p = 0.108
+THE Z FLOOR IS NOT A SIGNIFICANCE TEST. A query that routes successfully can sit at p ~ 0.11, and over a
+5-call book NOTHING survived BH correction -- including a legitimate route at p=0.0154. That is not a bug:
+z_min is a practical routing threshold, not a 0.05-level claim. But reading a successful route as
+statistical evidence would overstate it substantially, and now the ledger says so out loud. Pinned.
+
+### WIRED
+Ladder(ledger=None) -- default OFF, additive, existing callers byte-identical. Only rung 0 is ever
+recorded (it is the only rung with a score), failed looks are booked as well as successes (a ledger that
+sees only survivors corrects for nothing), and a bookkeeping exception can never take down a resolution.
+
+### State
++11 tests (tests/test_ladder_lookbook.py); 31 passed / 2 skipped across the declare, gate-null and filler
+suites. ALL NINE audits exit 0. regen_docs --check clean. No new module.
+
+### RUNNING NOTE ON THIS BACKLOG
+Four of the five items attempted so far needed their PREMISE corrected before their code:
+    1.1  right fix, wrong mechanism (tokens were already clean; the exact-alias PHRASE bonus was the bug)
+    1.2  not blocked -- REFUTED, and the refutation was already committed in two tests
+    1.4  the index is blocked, but Gate B's real answer is "margin governs, not corpus size or bit width"
+    2.3  only ONE of four rungs needed a null; wiring all four would have been ceremony
+    2.4  not a battery over rungs; the uncorrected multiplicity is across CALLS
+The plan's literature sweep is sound and its instincts are good. What it does not have is the tree in
+front of it. RULE 0 APPLIES TO PLANS.
+
+### REMAINING
+2.2 capacity gate in load-ratio terms; 3.1 fusion rung (UNTESTED PROPOSAL -- measure the all-LSI hit rate
+first; under ~10% and the plan says file it as a kept negative and remove it); 3.2 compile; 3.3 placement;
+4.1 llm_tool; 4.2 agent_loop; 4.3 query expansion; 4.4 'wall' trigger (also UNTESTED); 4.5 farm;
+5.1-5.6 defects (5.1+5.2 TOGETHER -- CREATE TABLE manufactures the mismatch INSERT swallows); 6.x.
+
+
+## SESSION (2026-07-26t) -- WORK PLAN ITEM 2.2: the capacity question, finally answered with its
+## variables attached.
+
+Rule 0 split verdict: "how many things fit in a bundle" surfaces the RECOVERY family (how to unmix), but
+the ANSWER to "how many can I safely bundle" existed only as folklore ("20-32 instructions") and as
+scattered measurements in NOTES. No load_ratio, no capacity advisor, anywhere. Genuine gap.
+
+### BUILT -- holographic_capacity (CAP-1), an advisor that MEASURES instead of remembering
+    bundle_capacity(dim, method, floor)  ->  {capacity, safe_ratio, method, dim, floor, curve}
+The curve TRAVELS WITH the number, so a capacity can never again be quoted without the configuration that
+produced it -- which is precisely how "20-32" became folklore: a number measured on one readout, quoted
+with no readout attached.
+
+### THE MEASURED TABLE (floor 0.95, incoherent dictionary, mean - sd gate, 3 seeds)
+    dim    linear    cosamp     amp
+    256    5 (0.02)  44 (0.17)  44 (0.17)
+    512   10 (0.02)  87 (0.17)  87 (0.17)
+    1024  20 (0.02) 174 (0.17) 174 (0.17)
+
+Three facts, each pinned as a test rather than narrated:
+  1. THE FOLKLORE CONSTANT IS THE LINEAR ROW. Safe M/D = 0.02 for naive cosine readout at D=1024 is
+     ~20 items -- exactly the "20-32" claim. Same bundle, sparse decoder: 174. The constant was an
+     artifact of measuring only the weakest readout, an 8.7x error.
+  2. THE SAFE RATIO COLLAPSES ACROSS DIMS -- 0.17 at 128, 256, 384, 512, 1024. Capacity is a RATIO m/D,
+     not a count; per-item signal-to-crosstalk is governed by m/D, and the collapse is the executable form
+     of that law. (Stated carefully, with the variable named, because number-without-variable has caused
+     three recorded errors in this project.)
+  3. A LUCKY SEED IS NOT A CAPACITY. The gate is mean MINUS sd across seeds, so a high-variance row
+     cannot set the safe ratio.
+
+### WHY IT MEASURES AT CALL TIME rather than shipping this table
+The reference numbers hold for an INCOHERENT dictionary only, and the earlier arc measured that coherence
+INVERTS the method ranking (AMP 0.052 vs CoSaMP 1.000 at coherence 0.5). A shipped table silently inherits
+the incoherence assumption; a measurement on the caller's own codebook does not. Pinned: a near-duplicate
+codebook must report LESS capacity than random atoms, so the codebook= path cannot be quietly bypassed.
+'linear' is kept as a method precisely so the advisor can SHOW the artifact rather than assert it.
+
+### One trivial defect en route
+Imported `cosamp` where the shipped name is `cosamp_recall` -- the public-name discipline (names say what
+they operate on) working as intended; the import error was the rename doing its job.
+
+### State
++9 tests (tests/test_bundle_capacity.py). ALL NINE audits exit 0. regen_docs --check clean. New module in
+sampling_and_signal/ (40 -> 41); two faculties (bundle_capacity, measure_recovery_curve); discoverability
+4/4; adjacent recovery suites (amp, wht/htcodebook) still green.
+
+### TIER 1 AND TIER 2 OF THIS WORK PLAN ARE NOW CLOSED.
+    1.1 shipped (mechanism corrected)     1.2 REFUTED, struck      1.3 shipped (probe is the item)
+    1.4 index blocked / Gate B answered   2.1 shipped (0.0% FAR)   2.2 shipped (this)
+    2.3 shipped (null found its own bug)  2.4 shipped (scope corrected)
+Remaining: 3.1 (UNTESTED -- gate first), 3.2, 3.3, 4.1 llm_tool, 4.2 agent_loop, 4.3, 4.4 (UNTESTED),
+4.5, 5.1-5.6 defects (5.1+5.2 together), 6.1-6.3.
+
+
+## SESSION (2026-07-26u) -- WORK PLAN ITEM 3.1: GATED, FAILED, NOT BUILT. The deliverable is the number.
+
+The plan flagged 3.1 as an UNTESTED PROPOSAL with its own kill condition: "measure the fusion hit rate on
+real resolved chains. If under ~10% are all-LSI, this rung is ceremony -- file it as a kept negative with
+the number and remove it." So the measurement WAS the work. No fusion rung was written.
+
+### RULE 0 FIRST: THE MECHANISM ALREADY SHIPS TWICE
+    "Compile a filter graph to one pass (shader pipeline)"   -- SHIPPED
+    "Post-effect kernel fusion (N linear passes, one FFT pair)" -- SHIPPED
+3.1 was never about building fusion. It was about adding it as a LADDER RUNG. That distinction is the whole
+finding, and it would have been easy to miss by reading the item as "build fusion".
+
+### THE GATE FAILED ON TWO INDEPENDENT GROUNDS
+  1. A FUSION RUNG CAN ONLY ACT ON A CHAIN, AND REAL RESOLUTIONS DO NOT PRODUCE ONE.
+     Committed 60-request fixture: 59 resolved at RUNG 0 (single faculty invoke), 1 refused,
+     0/60 = 0.0% produced a chain at rungs 1-3. Zero is the rung's CEILING on real traffic, not its
+     current value -- there is nothing for it to fuse.
+  2. EVEN IN THE io-KIND GRAPH THE LSI SLICE IS TINY. 125 tagged edges, 54 same-kind (chainable at all),
+     but only 4 `image` and 3 `spectrum` -- the kinds where shift-invariance actually holds. mesh (20) and
+     field (10) dominate and mesh ops are NOT shift-invariant. 3.2% image-kind against a ~10% bar.
+Both under the bar, by different mechanisms. Filed, not built.
+
+### THE DISTINCTION WORTH KEEPING
+FUSION IS VALUABLE; A FUSION RUNG IS CEREMONY. The 10-stages-to-one-transfer result (2.11 ms,
+bit-identical) is real and stands -- call shader_pipeline directly when you HAVE an all-LSI chain. What
+does not pay is a ladder rung that inspects chains this ladder does not build. Recorded in
+holographic_declare's module docstring (where a future session proposing rung 4 will read it) and pinned by
+test_there_is_no_fusion_rung_and_the_reason_is_recorded, which fails if a `_rung4` appears.
+Re-open condition stated explicitly: only if rung 1 starts firing on real traffic, and re-measure (1) first.
+Scope note carried with it: the LSI->Fourier identity provably does NOT hold for nonlinear or
+non-shift-invariant chains, so any future rung needs a per-stage test, not an io-kind tag.
+
+### WHY THIS IS A GOOD OUTCOME RATHER THAN A WASTED ITEM
+Three of this backlog's items have now been resolved by MEASUREMENT INSTEAD OF CODE -- 1.2 (refuted,
+already-committed negative), part of 1.4 (index blocked, Gate B answered), and 3.1 (gated, failed). Each
+produced a number and a pinned test in place of a module nobody needed. That is the plan's own house rule
+working ("Probe for function, not existence... Two items were cut from this plan for exactly that error"),
+and it is cheaper than the alternative by the entire cost of the module plus its future maintenance.
+
+### State
++1 test (the negative's pin), 16 total in test_declare_ladder.py. ALL NINE audits exit 0. regen_docs
+--check clean. NO new module, NO new faculty, NO catalog entry -- correctly.
+
+### REMAINING IN THIS PLAN
+3.2 compile the resolution (compile_program, 239x, SHIPPED -- likely a small wiring item);
+3.3 placement + the NONDETERMINISTIC-must-not-be-cached rule; 4.1 llm_tool; 4.2 agent_loop; 4.3 query
+expansion; 4.4 'wall' trigger (the OTHER untested proposal -- gate it the same way before writing code);
+4.5 farm; 5.1-5.6 defects (5.1+5.2 land TOGETHER); 6.1-6.3.
+
+
+## SESSION (2026-07-26v) -- WORK PLAN ITEMS 3.2 + 3.3: they interact, so they LANDED TOGETHER.
+
+3.2 asks to cache the resolution keyed by content. 3.3 carries the hard rule that a NONDETERMINISTIC result
+must never reach the content-addressed tier. Those are the same code path: you cannot add content-keyed
+caching and then remember not to cache model output. Same reasoning the plan applies to 5.1+5.2.
+
+### GATED BEFORE BUILDING, and it PASSED (unlike 3.1)
+    declare_explain COLD (new token count, router null built):  4269.9 ms
+    declare_explain WARM:                                         45.6 ms
+    cache HIT:                                                     0.002 ms
+    speedup on a repeated request:                             ~25,600x
+The warm cost is not the ladder walking -- it is find_scored running over ~2,374 capabilities on EVERY
+call, even with the router's null already cached. Against the machine model's break_even_n = 1.63, a request
+that repeats even twice pays for the cache. Measured first, built second.
+(Framing note: 25,600x is the cost of NOT DOING THE WORK, not an optimisation of the walk. Worth stating
+plainly so nobody quotes it as a speedup of retrieval.)
+
+### THE HARD RULE IS ENFORCED IN CODE, NOT DOCUMENTED
+    UNCACHEABLE = ("NONDETERMINISTIC",)      # _store refuses these outright
+A docstring cannot refuse a write. Rungs 0-3 are all deterministic so the guard NEVER FIRES TODAY -- which
+is precisely why it was written now: before rungs 6-7 exist, it costs three lines; after they exist and
+something has been silently cached, it costs a debugging session and a wrong answer served from disk.
+Verified live in both directions: NONDETERMINISTIC refused, EXACT stored.
+
+### DESIGN DECISIONS
+  * ARGS ARE HASHED TO A blake2b DIGEST, NEVER HELD. The precedent is on record: a LIVE OBJECT kept in a
+    job's args crashed a worker AFTER the job had already succeeded, on stderr, uncatchable. Holding the
+    caller's arrays would also pin them in memory and let them be mutated underneath the key they were
+    hashed from. numpy arrays are digested by bytes+shape, so equal arrays key equal and a changed array
+    does not.
+  * CONFIG IS PART OF THE KEY. max_rung and z_min change the ANSWER, so keying on the request alone would
+    serve a max_rung=0 refusal to a max_rung=5 caller. Pinned.
+  * A REFUSAL IS CACHED. "Nothing here answers this as asked" is exactly as reproducible as an answer and
+    costs the same 45.6 ms to re-derive. Refusal is a result, including for caching.
+  * DRY RUNS ARE NOT CACHED. A dry run carries no value and says "would"; serving it for a real call would
+    be wrong.
+  * A BROKEN CACHE IS A MISS, never an exception into the caller's request path. Pinned.
+
+### AN HONEST OBSERVATION FROM WIRING IT
+`m.declare('smooth a bumpy mesh')` (not dry-run) REFUSES, because rung 0 resolves to mesh_smooth and then
+invoke() fails -- the faculty needs a mesh and the declaration supplied none. That is correct and worth
+recording: declare_explain reports what WOULD be invoked, while declare actually invokes, so a bare
+free-text declaration with no args routes correctly and then fails honestly at the call boundary. The
+descent log says exactly that ("invoke(mesh_smooth) raised: missing 1 required positional argument"), which
+is the useful message rather than a bare False.
+
+### State
++8 tests (23 total in test_declare_ladder.py, 1 skipped). ALL NINE audits exit 0. regen_docs --check clean.
+No new module; the cache is a default-None parameter on the existing Ladder, so every existing caller is
+byte-identical.
+
+### REMAINING IN THIS PLAN
+4.1 llm_tool (wrap the attached LLM as an orchestrator Tool -- model it on command_tool; the flaky-LLM
+failover demo is the thing NOOA structurally cannot match); 4.2 agent_loop; 4.3 query expansion (must not
+regress the null's 0% false-positive rate); 4.4 'wall' trigger -- THE OTHER UNTESTED PROPOSAL, gate it the
+way 3.1 was gated; 4.5 prefer farm off-machine; 5.1-5.6 defects with 5.1+5.2 TOGETHER; 6.1-6.3.
+Note 3.3's remaining half (machine_place_unit pre-gate on break_even_n) is a smaller item than the caching
+rule and is not yet done.
+
+
+## SESSION (2026-07-26w) -- WORK PLAN ITEM 4.1: llm_tool. The plumbing is four lines; the point is that a
+## registered model can be FAILED OVER AWAY FROM.
+
+### THE GAP WAS REAL AND THE DOCSTRING WAS ASPIRATIONAL
+attach_llm() sets the mind's _llm and builds a bus bridge, and its docstring says the model is "now usable
+as a tool". IT IS NOT REGISTERED ANYWHERE. Verified: attaching a model leaves orchestrator.tools() unchanged,
+so Planner.plan, optimize_toolchain, CircuitBreaker and SkeletonLibrary have all been blind to it. THE ONE
+TOOL THAT CAN DO FUZZY LANGUAGE WORK WAS THE ONE THE PLANNER COULD NOT REACH.
+Pinned as a test: if a later change makes attach_llm register automatically, llm_tool's rationale is stale
+and the test says so.
+
+Notably, Orchestrator.register's own docstring ALREADY advertises accepting "an LLM wrapper" -- the
+machinery was there, only the wiring was missing. So this is a wiring item, not a mechanism item, and it was
+modelled on register_command rather than growing a parallel path for "the special tool".
+
+### THE DEMONSTRATION -- measured, and it is the competitive claim
+    cycle  llm breaker   available  chosen
+    0      closed        2          llm                    <- fails
+    1      closed        2          llm                    <- fails
+    2      open          2          llm                    <- fails, breaker opens on the 3rd
+    3      open          1          deterministic_rewrite  <- REROUTED
+    4      open          1          deterministic_rewrite
+    5      open          1          deterministic_rewrite
+    flaky model called exactly 3 times, then STOPPED BEING OFFERED.
+
+YOU CANNOT FAIL OVER AWAY FROM THE THING DOING YOUR PLANNING. A system whose only mechanism is the model
+has no state in which the model is unavailable and the work still proceeds; leCore does, because the model
+is one tool among many with the same breaker, keyword vector and success rate as the rest. That asymmetry is
+structural, not a matter of degree, and it is now a test rather than an argument.
+PRECISION on the table above: the breaker OPENS on the third failure and exclusion takes effect the NEXT
+cycle (new_cycle decrements the cooldown before availability is read). Stated because "opens at 3" and
+"excluded at 3" are different claims and only the first is true.
+
+### ONE DESIGN DECISION WORTH THE COMMENT
+on_error='raise' is the DEFAULT so that failures reach the breaker. 'empty' exists for a caller who would
+rather degrade than raise, but it HIDES the failure from the breaker -- which would leave a dead model in
+the plan forever. That is why it is not the default, and the reason is in the code, not just here.
+A missing model RAISES rather than registering nothing: silently registering nothing would leave the planner
+looking complete while never reaching a language tool -- the exact failure this item exists to fix.
+
+### A SMALL WRONG ASSUMPTION OF MINE
+My first test read `t.name` over `orchestrator.tools()`, which returns NAMES, not Tool objects. Fixed, and
+the correction is in the test body so the next reader does not repeat it.
+
+### State
++10 tests (tests/test_llm_tool.py). ALL NINE audits exit 0. regen_docs --check clean. 22 passed across
+orchestrator/planner/toolchain/agent-bridge surfaces. New method on Orchestrator (register_llm) + one
+faculty (llm_tool); no new module. Discoverability 4/4.
+
+### REMAINING IN THIS PLAN
+4.2 agent_loop (L -- the in-process tool-use loop; route_or_abstain BEFORE each step, args as a hashlib
+digest never the live object, and the differentiator is refusing a step below the null floor rather than
+letting the model guess); 4.3 query expansion (must not regress the null's 0% false-positive rate);
+4.4 'wall' trigger -- THE OTHER UNTESTED PROPOSAL, gate it the way 3.1 was gated; 4.5 prefer farm
+off-machine; 5.1-5.6 defects with 5.1+5.2 TOGETHER; 6.1-6.3. Also still open: 3.3's smaller half, the
+machine_place_unit pre-gate on break_even_n.
+
+
+## SESSION (2026-07-26x) -- WORK PLAN ITEM 4.2: agent_loop. The loop is easy; the ORDERING is the item.
+
+### THE GAP
+Over HTTP the tool-use loop already worked (/tools + /invoke). IN PROCESS there was nothing -- no code that
+hands a model the manifest, parses its tool call, dispatches, feeds the result back and iterates. So every
+embedder wrote their own, which is exactly the drift invoke() was created to stop: invoke is the single
+choke point, and a hand-rolled loop routes around it.
+
+### THE DIFFERENTIATOR IS NOT THE LOOP, IT IS WHAT SITS BELOW IT
+Before any step runs, route_or_abstain scores the TASK against a null built from the catalog's own
+vocabulary at matched token count. Below the floor the loop refuses AND THE MODEL IS NEVER CONSULTED.
+
+MEASURED with a scripted stub that ALWAYS claims completion -- deliberately the worst case, because a stub
+that never abstains means every refusal must come from the engine rather than the model's restraint:
+    HAS-TOOL completed : 20/20 = 100%
+    NO-TOOL  completed :  0/20  ->  FALSE-ACTION RATE 0%
+    NO-TOOL  refused   : 20/20 = 100%   (all before the model was reached)
+Arms drawn at MATCHED TOKEN COUNT (4) from the same vocabulary, so they differ in tool presence only.
+
+The ordering is the architecture and it is why a counting stub is used to test it: A LOOP THAT ASKS THE
+MODEL FIRST AND CHECKS AFTERWARDS WOULD PASS EVERY OTHER TEST HERE and only fail once the model has a side
+effect. test_the_model_is_never_consulted_on_a_no_tool_task counts calls and asserts zero.
+
+### WHAT IT REFUSES, each pinned
+  * A tool OUTSIDE the offered manifest -- invoke() would also refuse an unknown name, but refusing here
+    keeps the REASON specific instead of surfacing a generic dispatch error.
+  * NON-FINITE ARGS. json parses bare NaN and Infinity by default, so a model can emit one and it arrives
+    as a float. Same reasoning as the declare ladder's gates: a NaN does not lose comparisons, it wins them.
+  * AN UNPARSED REPLY IS NEVER GUESSED AT. It is recorded and retried with the same manifest. Guessing the
+    intent of an unclear tool call is precisely how a loop takes an action nobody asked for.
+  * Import-only capabilities are NOT advertised: a manifest you cannot act on is worse than a shorter one.
+
+### TRANSCRIPT HYGIENE
+Args are recorded as a blake2b digest plus a 120-char repr, NEVER the live object. Precedent on record: a
+live object in a job's args crashed a worker AFTER the job had already succeeded, on stderr, uncatchable.
+A transcript holding caller objects also pins them in memory and lets them be mutated after the fact, which
+makes it evidence of nothing.
+
+### A DISCIPLINE POINT I ALMOST LET SLIDE
+The first run showed "11 passed, 2 skipped" -- and this repo's own notes say a watchdog skip is
+INDISTINGUISHABLE FROM A PASS in the summary line, and has twice hidden a broken assertion. Ran them with
+LECORE_RUN_SLOW=1: all 13 pass (180 s). The two measurement arms are ~90 s each because every distinct token
+count triggers a COLD router null build. Both are now @pytest.mark.slow, so they are honestly DESELECTED
+rather than silently skipped -- the distinction the earlier lesson asks for.
+
+### State
++13 tests (tests/test_agent_loop.py, 2 marked slow). ALL NINE audits exit 0. regen_docs --check clean.
+New module in agents_and_reasoning/ (57 -> 58); one faculty (agent_loop); discoverability 4/4.
+4.1 was a genuine prerequisite -- the loop needs the model reachable, which llm_tool made true.
+
+### REMAINING IN THIS PLAN
+4.3 query expansion at rung 0 (gate: must NOT regress the null's 0% false-positive rate -- and note the
+loop now depends on that null, so a regression there is a regression here);
+4.4 'wall' trigger -- THE LAST UNTESTED PROPOSAL, gate it the way 3.1 was gated;
+4.5 prefer farm over command_tool off-machine;
+5.1-5.6 defects, with 5.1+5.2 TOGETHER (CREATE TABLE manufactures the mismatch INSERT swallows);
+6.1 the benchmark (much of its apparatus now exists: two false-action measurements and two committed
+matched-token fixtures are already in the suite), 6.2, 6.3.
+Also still open: 3.3's smaller half, the machine_place_unit pre-gate on break_even_n.
+
+
+## SESSION (2026-07-26y) -- WORK PLAN ITEM 4.3: the stated gate was NECESSARY AND NOT SUFFICIENT, and
+## measuring it first is what showed that.
+
+The item: let a model rewrite a query into catalog vocabulary before retrieval. Its stated gate: "must not
+regress the null arm's 0.0% false-positive rate. A hallucinated expansion must not be able to smuggle in a
+wrong capability." Correct worry. Wrong instrument.
+
+### MEASURED BEFORE WRITING ANY CODE
+    RANDOM expansion  (append 4 catalog words to a no-tool query)    0/8 smuggled
+    TARGETED rewrite  ('purple monkey dishwasher'
+                       -> 'smooth a bumpy mesh surface')             1/3 SMUGGLED
+
+RANDOM PADDING CANNOT GET THROUGH, and the reason is a genuinely good structural property worth recording:
+the router's null is built at MATCHED TOKEN COUNT, so lengthening a query lengthens its null too, and
+dilution scores WORSE rather than better. z went from -1.32 to -1.59 on padding. The null defends against
+that attack for free.
+
+A TARGETED REWRITE SAILS STRAIGHT THROUGH, because the rewrite IS A PERFECTLY VALID QUERY. The null is
+being asked "does this text match a capability?" when the question that matters is "does this text still
+mean what the user asked?"
+    **A NULL DETECTS IRRELEVANCE, NOT INFIDELITY.**
+No amount of null-referencing closes this, because the null has nothing to object to. The plan's gate would
+have been satisfied by a build that smuggles.
+
+### SO THE PRIMARY GATE IS FAITHFULNESS, CHECKED AGAINST THE ORIGINAL
+An expansion must RETAIN the original's content words. One that shares none is a SUBSTITUTION, not an
+expansion, and is refused however well it scores. Scored against the ORIGINAL deliberately: an expansion is
+allowed to ADD vocabulary (that is the entire point) but not to DROP the user's meaning -- scoring
+overlap-over-expansion would let a long rewrite bury the original and still pass.
+BOTH GATES APPLY, NOT EITHER: the expansion must also still clear the null floor, or a faithful-but-useless
+rewrite would route confidently.
+
+### DESIGN DECISION
+Every path returns a USABLE query -- the ORIGINAL whenever the expansion is refused -- so a caller never
+branches on refusal and a bad model degrades to today's behaviour rather than to a wrong answer. Pinned for
+a raising model, an empty reply, and a None reply.
+
+### WHAT THIS DOES NOT DO, stated so the limit is not mistaken for a bug
+An unfaithful rewrite CANNOT rescue a query the router abstained on. A poorly-worded query that shares
+vocabulary with its expansion still can -- which is the actual use case -- while a rewrite into something
+else entirely cannot, which is the actual risk. That is the trade, made on purpose.
+
+### DEPENDENCY NOTE
+The plan lists 4.3 as depending on 1.4 and 4.1. 1.4's dense index is BLOCKED (no model in this environment),
+but 4.3 never needed it: expansion is a query-side rewrite and works against the lexical arm exactly as
+well. 4.1 was the real dependency and it shipped. Recorded so nobody re-blocks this on 1.4.
+
+### State
++10 tests (tests/test_query_expansion.py). ALL NINE audits exit 0. regen_docs --check clean. 27 passed / 2
+skipped (the marked-slow agent-loop arms) across filler/embedder/agent-loop surfaces. New module in
+semantic_router/ (6 -> 7); one faculty; discoverability 4/4.
+
+### REMAINING IN THIS PLAN
+4.4 'wall' trigger -- THE LAST UNTESTED PROPOSAL; gate it the way 3.1 was gated (run diagnose_scaling on
+real ladder failures and confirm 'wall' correlates with what the deterministic rungs cannot serve, BEFORE
+wiring). 4.5 prefer farm off-machine. 5.1-5.6 defects, 5.1+5.2 TOGETHER. 6.1-6.3 (6.1's apparatus is now
+largely built: THREE independent false-action measurements and three committed matched-token fixtures are
+in the suite). Still open: 3.3's smaller half, the machine_place_unit pre-gate.
+
+
+## SESSION (2026-07-26z) -- WORK PLAN ITEM 4.4: GATED, FAILED, NOT BUILT. A verdict that is always true
+## partitions nothing.
+
+The plan's last UNTESTED PROPOSAL, and it got the same treatment as 3.1: prediction registered first, gate
+run, decision made on the number.
+
+### PREDICTION, ON RECORD BEFORE THE PROBE
+"'wall' will fire on essentially ALL ladder failures -- serviceable and not -- because they are dominated by
+missing arguments and vocabulary, neither of which responds to a knob. If it fires on everything it has no
+discriminative power, which is the kill condition."
+
+### MEASURED (knob = dim, error = 1 - ladder confidence; the most charitable construction available)
+    wall on UNSERVICEABLE tasks (word salad, n=5):   5/5
+    wall on SERVICEABLE tasks (real aliases, n=5):   5/5
+    DISCRIMINATION:                                  0
+Prediction held.
+
+### TWO REASONS, AND THE SECOND IS THE ONE WORTH KEEPING
+  1. CATEGORY MISMATCH, visible in the signature before any measurement. diagnose_scaling(eval_fn, knobs)
+     answers "which RESOURCE limit is this workload hitting?" over numeric knobs. A ladder failure is not a
+     resource limit -- it is a vocabulary miss, or a faculty invoked without an argument it needs. Doubling
+     `dim` cannot fix "you did not pass a mesh". There is nothing for the instrument to measure.
+  2. **THE VERDICT IS TRUE OF EVERYTHING HERE, WHICH IS PRECISELY WHY IT CANNOT TRIGGER ANYTHING.** 'wall'
+     is the RIGHT answer for a ladder failure -- scaling genuinely IS the wrong tool -- and it is equally
+     the right answer for a ladder SUCCESS. A verdict that is always correct and always the same carries no
+     information.
+     THE TEST OF A TRIGGER IS NOT WHETHER IT IS TRUE BUT WHETHER IT PARTITIONS.
+     That is a sharper statement of the same error the fusion rung made, and worth carrying forward as a
+     general check on any proposed signal: measure it on the class you want to EXCLUDE as well as the class
+     you want to catch, or you will wire a constant.
+
+### WHAT ESCALATION STAYS ON
+The confidence/abstention path, which DOES partition -- measured 0.0% false-action on the no-tool arm
+against 98.3% resolution on the has-tool arm. Re-open condition stated: only with a construction where
+'wall' separates the two classes. The one tried was the most favourable available.
+
+### State
++1 test pinning the negative (25 in test_declare_ladder.py, 1 skipped). ALL NINE audits exit 0. regen_docs
+--check clean. NO new module, NO faculty, NO catalog entry -- correctly.
+
+### TIER 4 IS NOW CLOSED except 4.5
+    4.1 llm_tool SHIPPED (failover demonstrated)   4.2 agent_loop SHIPPED (0% false action)
+    4.3 expansion SHIPPED (faithfulness gate)      4.4 GATED, FAILED, FILED
+BOTH of the plan's flagged untested proposals (3.1, 4.4) failed their gates and were filed rather than
+built. That is 2 for 2, and it is the single strongest argument for the gate-before-build discipline this
+plan asked for: both would have shipped, both would have been dead weight, and neither failure was
+predictable from the prose alone -- 3.1 needed a hit-rate measurement, 4.4 needed a discrimination
+measurement.
+
+### REMAINING
+4.5 prefer farm over command_tool off-machine; 5.1-5.6 defects (5.1+5.2 TOGETHER); 6.1-6.3; and 3.3's
+smaller half (the machine_place_unit pre-gate on break_even_n).
+
+
+## SESSION (2026-07-26aa) -- WORK PLAN ITEMS 5.1 + 5.2: landed TOGETHER, because they compound.
+
+Both defects reproduced EXACTLY as the plan states -- the first items in this backlog whose description
+needed no correction. Tier 5 is confirmed bugs, not proposals, and it shows.
+
+    5.1  INSERT INTO d.t (zzz) VALUES (1)   ->  {'inserted': 1}
+         SELECT * FROM d.t                  ->  [{'a': None, 'b': None, '_confidence': 1.0}]
+         ...FULL CONFIDENCE IN AN EMPTY ROW. The READ path had the right check and the right message all
+         along; the WRITE path simply never ran it. It was guarding the TIER (the read-only system namespace
+         IS correctly protected) but not the SCHEMA.
+    5.2  CREATE TABLE lab.runs (id INT, name TEXT, score FLOAT)
+         ->  columns literally named 'id INT', 'name TEXT', 'score FLOAT'
+
+### WHY TOGETHER, demonstrated rather than asserted
+5.2 MANUFACTURES a schema nobody can hit; 5.1 then SWALLOWS every INSERT that tries. `INSERT INTO lab.runs
+(id) VALUES (1)` reported success and wrote Nones, because the real column was 'id INT'. Fixing either alone
+leaves a system that STILL cannot round-trip an ordinary CREATE/INSERT pair -- with only 5.1 the insert
+raises on a schema the user cannot satisfy; with only 5.2 nothing catches the next mismatch. Pinned as
+test_the_compound_case_round_trips.
+
+### THE FIXES
+  * ONE SHARED VALIDATOR, two call sites, per the plan. UserTable.require_columns() raises the SAME message
+    the read path already produced -- a test asserts the two wordings are byte-identical, so they cannot
+    drift into two different explanations of one condition.
+  * Only RECOGNISED trailing SQL type tokens are stripped (int/text/float/varchar(32)/...). An unrecognised
+    second word is LEFT ALONE: better to keep a strange column name than truncate a deliberate one -- and
+    with 5.1 fixed, an unrecognised name is now reported plainly the first time an INSERT misses it.
+
+### MY FIX WAS OVER-STRICT, AND THE INTEGRATION SUITE CAUGHT IT
+First version refused `_deleted` -- the TOMBSTONE the DELETE path writes -- so the engine's own writes
+started failing. `_confidence` is the same kind of column and appears in every result row. Engine-internal
+(leading-underscore) columns are not user schema, are not declared in CREATE TABLE, and are now exempt.
+LESSON: a validator added to a write path must be tested against the writes the ENGINE makes, not only the
+ones a user makes. My unit tests all passed; only test_standalone_database_full_surface_over_http failed.
+
+### A TEST OF MINE THAT WAS OVER-FITTED, corrected in the same pass
+test_a_nonsense_query_gets_p_one asserted p == 1.0 exactly, and broke the moment seven capabilities were
+added THIS SESSION: the router's null draws from the CATALOG'S OWN vocabulary, so growing the catalog
+legitimately moves every p ('purple monkey dishwasher' 1.0 -> 0.538, still abstaining). The contract is
+"nonsense does not look significant and does not route", not a snapshot of one catalog state. Rewritten to
+assert the contract.
+A TEST THAT PINS A NUMBER THE SYSTEM IS ALLOWED TO CHANGE IS A TEST THAT WILL BE EDITED RATHER THAN
+BELIEVED -- and I wrote it two sessions ago, which is how easy it is.
+
+### State
++9 tests (tests/test_query_schema_defects.py); 233 passed across query/database surfaces; integration
+database-over-HTTP green. ALL NINE audits exit 0. regen_docs --check clean. No new module, no new faculty --
+two repairs and one shared helper.
+
+### REMAINING IN THIS PLAN
+5.3 recursive_factor arity lock + per-level reasons (M -- the algorithmic half now has published methods:
+attention-based resonator update, recursive factorization, and the Df/N = 0.056 stability precondition);
+5.4 climb_ladder input guard (XS); 5.5 NaN in ISA.md (contract hygiene -- the URGENT half already landed as
+the ladder's finite_score guard); 5.6 cite the superaccumulator in distribute_exact (XS);
+4.5 prefer farm off-machine; 6.1-6.3; and 3.3's smaller half (machine_place_unit pre-gate).
+
+
+## SESSION (2026-07-26ab) -- WORK PLAN ITEM 5.3: the REPORTING half shipped; the ALGORITHMIC half is
+## scoped out with its reason.
+
+### THE DEFECT, READ FROM THE CODE
+    tried = []
+    for depth in available_levels(...):
+        if len(ids) < 2: continue          <- SILENT: not even recorded in `tried`
+        tried.append(depth)
+        if not res["solved"]: continue     <- in `tried`, NO REASON
+        if verify fails: (falls through)   <- in `tried`, NO REASON, identical to the line above
+THREE DISTINCT FAILURES COLLAPSED INTO ONE RECORD, and one of them was not recorded at all. Every path
+returns {solved: False, level: None, leaves: []}, so "nothing here fits your arity" and "I tried and the
+coherence was 0.31" are indistinguishable -- and they are OPPOSITE DIAGNOSES. The first says raise the
+arity or promote more chunks; the second says the composite is not factorable at that level. Collapsing
+them is what made a trivially solvable problem read as impossible.
+
+### SHIPPED -- `reasons`, a per-level diagnosis, additive alongside `tried`
+    level-too-small        this level has fewer than 2 tokens; a resonator cannot run at all
+    arity-unreachable      arity=N needs >= N distinct tokens, this level has fewer
+    resonator-unconverged  names the arity, token count, iters and restarts
+    verify-failed          re-composition error X exceeds tol Y  (the actual numbers)
+An EMPTY `tried` with a NON-EMPTY `reasons` is now the unmistakable signature of "nothing was ever
+attempted". A solved run carries `reasons` too: the levels rejected BEFORE the winner are evidence about
+the search, not noise -- solving at level 4 after rejecting 8 means something different from reaching 4
+first.
+
+### AN HONEST LIMIT ON `arity-unreachable`, written into the code
+Only ONE arity mismatch is decidable from inside: fewer distinct tokens at a level than the arity being
+searched. The GENERAL case is not -- whether a level "fits" depends on the composite's TRUE DEPTH, which is
+precisely the unknown being solved for. So the code names the certain case and, for every other reason,
+puts the arity and token count in the `detail` string where a reader can see the mismatch themselves. That
+is the honest boundary between a diagnosis and a guess, and pretending otherwise would have put a confident
+wrong label on an undecidable question.
+
+### THE ALGORITHMIC HALF IS NOT BUILT, and the reason is not laziness
+The plan adds three published methods -- attention-based resonator update (arXiv:2403.13218), recursive
+factorization via convolutional sparse coding (arXiv:2404.19126), and the Frady et al. Df/N = 0.056
+stability precondition. Each REPLACES the resonator's update rule or its decomposition strategy, so each
+needs its own measured comparison against the current implementation across search space, factor count and
+dimension -- that is a research arc, not a defect fix, and it is a different item from the one the plan
+sized as M. The reporting fix stands alone and is what makes the algorithmic work DIAGNOSABLE when someone
+does it: you cannot compare two resonators on failure modes you cannot tell apart.
+RECOMMENDATION FOR THE PLAN: split 5.3 into 5.3a (reporting, DONE) and 5.3b (algorithmic, unsized).
+
+### State
++4 tests (18 in test_holographic_recursive_factor.py). 105 passed across resonator/factor/chunk surfaces.
+ALL NINE audits exit 0. regen_docs --check clean. No new module, no faculty -- one repair, additive return
+key, every existing caller unaffected.
+
+### REMAINING
+5.4 climb_ladder input guard (XS); 5.5 NaN in ISA.md (contract hygiene; the URGENT half already shipped as
+the ladder's finite_score guard); 5.6 cite the superaccumulator in distribute_exact (XS); 4.5 prefer farm
+off-machine; 6.1-6.3; 3.3's smaller half (machine_place_unit pre-gate); and 5.3b above.
+
+
+## SESSION (2026-07-26ac) -- WORK PLAN ITEMS 5.4, 5.5, 5.6: three small repairs, and one lesson that cost
+## more than all three.
+
+All three reproduced exactly as written. Tier 5 continues to be the only tier whose descriptions needed no
+correction -- confirmed bugs, not proposals.
+
+### 5.4 -- climb_ladder input guard (XS)
+    m.climb_ladder(['hello','world'])  ->  TypeError: unsupported operand type(s) for -: 'str' and 'str'
+100 lines deep in a private helper, naming NEITHER the argument NOR the expectation. The faculty is
+reachable from /invoke where free-form data is the DEFAULT case, so the guard went at the BOUNDARY rather
+than in the algorithm. It now says what it wants (list[list[int]]), names itself, and points at the common
+mistake ("map your symbols to integer ids first"). Valid input is unaffected -- asserted, because a guard
+that narrows what already worked is a worse bug than the one it fixes.
+
+### 5.5 -- the NaN edge, PINNED AS A CONTRACT RATHER THAN FIXED
+docs/ISA.md pins zero-norm and zero-sum edges and mentioned NaN NOWHERE. It now carries the observed
+behaviour, the mechanism, and the position:
+    argmax_tiebreak([0.1, nan, 0.9]) -> 1     the NaN's index, not the maximum
+    Vocabulary.cleanup(<NaN query>)  -> ('alpha', nan)
+Class: DETERMINISTIC BUT WRONG -- reproducible, passes every determinism test, names an atom that did not
+win. The score is honest; the atom name is not.
+NOT FIXED IN THE ISA, DELIBERATELY: an isfinite check inside argmax_tiebreak would flip an existing decision
+path, and this engine's rule is that existing decisions never flip. The contract is therefore GUARD AT THE
+BOUNDARY, NOT IN THE ISA -- and it names the two guards that already ship (holographic_declare.finite_score,
+holographic_agentloop._finite) as the pattern to copy. A test asserts BOTH the documented behaviour and that
+the two named guards actually exist, because a contract naming guards is only worth having if they are real.
+
+### 5.6 -- the citation (XS)
+distribute_exact now names the SUPERACCUMULATOR / correctly-rounded parallel summation line (Collange,
+Defour, Graillat, Iakymchuk) in its WHY-comment. The point of citing it: the guarantee otherwise reads as a
+lucky implementation detail rather than a known-correct method with a known cost profile.
+
+### THE LESSON, AND IT COST MORE THAN THE THREE FIXES COMBINED
+To back up the citation I wrote a fresh partition-invariance test AND GOT THE HARNESS WRONG TWICE:
+  1. worker returned `sum(chunk)` -- putting the float non-determinism INSIDE the worker, where no amount of
+     exact combining can reach it. Totals differed at ~1e-8 and I briefly read that as a regression.
+  2. worker scattered into an accumulator -- same error in a better costume: `acc[i] += v` over varying
+     bucket membership is still order-dependent float arithmetic inside the worker.
+Both drifts were MINE. The guarantee is about the COMBINATION of worker outputs; it cannot rescue arithmetic
+the worker already rounded.
+
+tests/test_holographic_exact_and_swept.py ALREADY covers this, correctly, and its module docstring states
+the contract in ONE LINE: "the worker returns CONTRIBUTIONS, not a sum." Reading it first would have
+prevented both attempts.
+**RULE 0 APPLIES TO TESTS.** I have applied it religiously to capabilities all backlog and did not think to
+apply it to a verification I was about to write. My redundant test is replaced by a pointer that asserts the
+real coverage still exists -- so the next reader finds the right test instead of writing a third wrong one.
+
+### State
++8 tests (tests/test_tier5_small_defects.py). 109 passed across ladder/distribute/determinism surfaces.
+ALL NINE audits exit 0. regen_docs --check clean. No new module, no faculty -- two guards, one doc section,
+one citation.
+
+### REMAINING IN THIS PLAN
+4.5 prefer farm over command_tool off-machine; 6.1 the benchmark (its apparatus is now largely built --
+THREE independent false-action measurements and three committed matched-token fixtures ship in the suite);
+6.2 audit three predicted seams; 6.3 degradation table into README (XS); 3.3's smaller half
+(machine_place_unit pre-gate); and 5.3b (the algorithmic resonator work, unsized).
+
+
+## SESSION (2026-07-26ad) -- WORK PLAN ITEM 4.5: the preference had nothing to apply to yet, and auditing
+## it anyway found a real defect.
+
+### THE PREMISE IS CONDITIONAL ON SOMETHING THAT DOES NOT EXIST
+"Prefer farm over command_tool for off-machine rungs." NO RUNG LEAVES THE MACHINE: 0-3 are local and 6-7
+do not exist (max_rung=5 is the default precisely to keep it that way). So there was no wiring to do, and
+building an off-machine rung to justify the preference would have been inventing demand.
+
+### SO THE DELIVERABLE WAS TO AUDIT THE CLAIM -- AND THE CLAIM WAS TRUE BY ACCIDENT
+The stated property: "workers run BY NAME, so no code crosses the wire, only data." Tested it:
+    NetworkFarm.submit(<a callable>)  ->  TypeError: Object of type function is not JSON serializable
+IT HELD BECAUSE JSON COULD NOT SERIALISE A FUNCTION -- not because anything checked. `Coordinator.run`'s
+parameter is even named `worker`, not `worker_name`, and there is no `callable()` test anywhere on the path.
+An accidental guarantee is ONE REFACTOR AWAY FROM NOT BEING A GUARANTEE, and the error message sends the
+reader to the encoder rather than to the design.
+FIXED: an explicit refusal in NetworkFarm.submit naming the property ("a farm worker must be a NAME ... only
+data crosses the wire, never code -- register it with serve_worker and pass its name"). The guard lives in
+the NETWORK backend, NOT in Coordinator.run, because in-process and pool backends legitimately DO take
+callables -- putting it in the shared path would have broken the local case to protect the remote one.
+
+THIS IS ONE OF THE THREE SEAMS ITEM 6.2 PREDICTS -- "the worker boundary (farm ships JSON and reassembles
+NumPy)". 6.2 predicted it from the SHAPE of three earlier defects, and the prediction paid out on the first
+one examined. Worth noting for whoever runs 6.2: the other two predicted seams (the service boundary
+/invoke JSON<->objects, and persistence to_state/from_state) have not been audited yet.
+
+### THE PREFERENCE IS RECORDED WHERE IT WILL BE READ
+holographic_declare's module docstring now carries the off-machine decision, written BEFORE it is needed,
+because the two mechanisms look interchangeable from a distance and are not:
+    farm          workers by NAME on nodes that already have the code; only DATA crosses. Plus a
+                  margin-gated canonical tie-break so distributed results agree on knife-edge decisions
+                  rather than drifting by scheduling order -- invisible in testing, fatal in a trajectory.
+    command_tool  an ALLOWLISTED binary run LOCALLY, no shell, time-boxed. A different guarantee for a
+                  different job; NOT a remote-execution mechanism and should not be pressed into being one.
+Both halves pinned as tests: the callable refusal, and the presence of the recorded decision.
+
+### State
++2 tests (12 in test_llm_tool.py). 89 passed across farm/coordinator/distribute/declare surfaces. ALL NINE
+audits exit 0. regen_docs --check clean. No new module, no faculty -- one guard and one recorded decision.
+
+### TIER 4 IS NOW COMPLETE
+    4.1 llm_tool SHIPPED          4.2 agent_loop SHIPPED       4.3 expansion SHIPPED
+    4.4 GATED, FAILED, FILED      4.5 audited; guard added, preference recorded
+
+### REMAINING
+6.1 the benchmark (apparatus largely built: THREE independent false-action measurements and three committed
+matched-token fixtures ship in the suite); 6.2 audit the other two predicted seams; 6.3 degradation table
+into README (XS); 3.3's smaller half (machine_place_unit pre-gate); 5.3b (algorithmic resonator, unsized).
+
+
+## SESSION (2026-07-26ae) -- WORK PLAN ITEM 6.2: the prediction scored 2 of 3, and the miss is kept.
+
+6.2 predicted, from the SHAPE of three earlier defects rather than from any new evidence, that the next
+failures would sit at LAYER BOUNDARIES -- "a condition fully detectable on one side becomes an answer on the
+other" -- and named three in order. All three are now audited.
+
+### SEAM 1: THE SERVICE BOUNDARY -- REAL, and it was invisible from inside Python
+    json.dumps({'result': float('nan')})  ->  {"result": NaN}
+BARE `NaN` AND `Infinity` ARE NOT IN THE JSON GRAMMAR. Python's own json.loads ACCEPTS them, which is
+precisely why this survived every in-process test: it looked fine from inside, while Go, Java and every
+browser's JSON.parse reject the response outright. _jsonable's docstring says its job is to stop /invoke
+crashing on an UN-SERIALIZABLE return -- it guarded serialisability and not CONFORMANCE, and those are
+different properties.
+FIXED two ways, deliberately belt AND braces:
+  * _jsonable now maps non-finite floats to null, recursively (np.float64 subclasses float, so numpy's
+    non-finites are caught by the same branch). null is the one representation every parser agrees on.
+  * the response writer uses allow_nan=False, so anything that slips past the sanitiser RAISES LOUDLY
+    instead of silently emitting an unparseable body. Straight from the worker-boundary lesson: an
+    accidental guarantee is one refactor away from not being a guarantee.
+Finite values verified untouched -- a sanitiser that mangles good data is a worse bug than the one it fixes.
+
+### SEAM 2: THE WORKER BOUNDARY -- REAL (audited last session under 4.5)
+"No code crosses the wire" held ONLY because JSON could not serialise a function. Now an explicit refusal
+in NetworkFarm.submit, placed in the network backend because in-process backends legitimately take
+callables.
+
+### SEAM 3: PERSISTENCE -- CLEAN, AND THAT IS THE RESULT
+to_state/from_state preserves non-finite values exactly (1, 2.5, nan, inf all survive, NaN compared with
+isnan rather than ==). NO DEFECT. Kept as a test anyway, and recorded loudly, because:
+**THE PREDICTION METHOD SCORED 2 OF 3, NOT 3 OF 3.** Reporting only the two hits would have made a
+structural argument look like a law. The honest accuracy of "reason from the shape of past defects" is that
+it is a good SEARCH ORDER and not a proof -- it told us where to look first, and one of the three places it
+pointed at was fine.
+
+### WHY THIS ITEM WAS WORTH MORE THAN THE BENCHMARK IT PRECEDED
+Every seam here was found by asking "what is knowable on one side and unanswerable on the other?", not by
+running a test suite. All three predicted locations were checkable in under an hour each, and two contained
+live defects that every existing test passed over -- the service one because Python is lenient about its own
+malformed output, the worker one because a TypeError from a serialiser reads like a guard.
+
+### State
++7 tests (tests/test_boundary_seams.py). ALL NINE audits exit 0. regen_docs --check clean. Service-facing
+integration tests green. No new module, no faculty -- one sanitiser, one strictness flag, one negative
+result recorded.
+
+### REMAINING IN THIS PLAN
+6.1 the benchmark (apparatus largely built already: THREE independent false-action measurements and three
+committed matched-token fixtures ship in the suite); 6.3 degradation table into README (XS); 3.3's smaller
+half (machine_place_unit pre-gate); 5.3b (algorithmic resonator, unsized).
+
+
+## SESSION (2026-07-26af) -- WORK PLAN ITEM 6.3: an XS item that turned out to need a re-measurement.
+
+The item: "the §2.5 degradation table reproduces in ~15 lines and is the most convincing single artifact
+about what this engine is. It is not currently stated anywhere as a headline." True -- the README described
+graceful degradation in prose and never showed the number.
+
+### THE TABLE AS DRAFTED DID NOT REPRODUCE
+    slots destroyed    drafted    measured (40 trials)
+    10%                100.0%     100.0%
+    40%                100.0%     100.0%
+    80%                100.0%      97.0%
+    90%                 87.5%      75.6%
+
+**87.5% IS EXACTLY 14/16, AND 100.0% IS 16/16.** With 16 items a single draw can only report in steps of
+6.25%, so both drafted figures are consistent with ONE TRIAL rather than an average -- and a single draw
+will always look tidier and better than the truth. Averaged over 40 seeded trials the honest figures are
+97.0% and 75.6%. A number destined for a README is a promise, so it got measured before it got written.
+
+The right-hand column reproduced as claimed and is the one that matters: the contiguous baseline is at 0.5%
+by 10% damage. That is not "worse" -- it is DESTROYED, and for a reason worth stating plainly: each item
+needs all 64 of its own floats, so P(survive) = 0.9^64 ~ 0.001.
+
+### WHAT WENT INTO THE README
+The table, the equal-budget framing (16 items in the SAME 1024 floats, 64 each -- given more space the
+contiguous store simply wins, and the claim is about a FIXED size), the reproduce command, and the
+methodology note that these are means over 40 trials. Backed by tests/test_degradation_table.py so the
+headline cannot drift from the code.
+
+### State
++3 tests. ALL NINE audits exit 0. regen_docs --check clean. No new module, no faculty -- one README section
+and its test.
+
+### THE RUNNING PATTERN, NOW AT SIX
+Items in this backlog resolved by MEASUREMENT rather than by the code they asked for:
+    1.2  refuted -- the repo had already measured and refused it, in two committed tests
+    1.4  index blocked; Gate B answered ("margin governs, not corpus size or bit width")
+    3.1  fusion rung gated, failed (0/60 chains), filed
+    4.4  'wall' trigger gated, failed (discrimination 0), filed
+    6.2  three predicted seams audited: two real, one clean -- and the clean one is kept
+    6.3  the headline table re-measured before publication; two of four rows were single-draw artifacts
+Six of the plan's items produced a NUMBER and a PINNED TEST instead of a module. None of those outcomes was
+visible from the prose.
+
+### REMAINING
+6.1 the benchmark (apparatus largely built -- three independent false-action measurements and three
+committed matched-token fixtures ship in the suite); 3.3's smaller half (machine_place_unit pre-gate on
+break_even_n); 5.3b (algorithmic resonator work, unsized).
+
+
+## SESSION (2026-07-26af) -- ITEM 6.3 WAS ALREADY DONE (better than specified); ITEM 3.3's PRE-GATE IS
+## REFUTED AND CANNOT EXIST.
+
+### 6.3 -- ALREADY SHIPPED, and the plan's premise about it is wrong
+"Put the degradation table in the README. It is not currently stated anywhere as a headline."
+IT IS. README has its own section, "What 'holographic' actually buys you", with the table, a plain-English
+read of the right-hand column, AND a reproduction command (tests/test_degradation_table.py, 2 tests green).
+The shipped version is BETTER than the plan's: 40 trials per row against the plan's unstated count, plus a
+caveat the plan does not carry -- "a single draw of 16 items reports in steps of 6.25% and will look tidier
+and better than the truth."
+I re-measured before touching it, as a README headline deserves, and got 100 / 100 / 95.3 / 83.6 at 8 seeds
+against the shipped 100 / 100 / 97.0 / 75.6 at 40 trials and the plan's 100 / 100 / 100 / 87.5. All three
+sit inside the trial-count variance the shipped caveat describes -- which is the caveat EARNING ITS PLACE.
+NOTHING CHANGED. Fourth item this backlog resolved by finding the work already done.
+
+MY FIRST REPRODUCTION WAS BROKEN and worth recording: I bundled 16 atoms with no keys and measured recall
+at 6.2% = 1/16 = CHANCE. A plain superposition has no per-item cue -- recall needs key-binding
+(bind(key,val), unbind by key, clean up against the codebook). Third time this session the HARNESS, not the
+system, was the thing at fault. The tell was the number landing exactly on chance.
+
+### 3.3 (second half) -- THE PRE-GATE CANNOT EXIST, refuted by measurement
+Proposed: skip placement entirely when n_calls is below the tier's break_even_n, quoted as 1.63 for the
+baked-grid tier and asserted "independent of the baseline". If true, you could decide WITHOUT measuring.
+MEASURED on t2_baked_grid:
+    baseline_ns     50    100    500   1000   5000  10000  50000  70000  100000
+    break_even_n   inf    inf   1185    190     25     12    2.3   1.62    1.13
+IT SPANS 1.13 TO INFINITY. The quoted 1.63 is the value at ONE baseline (~70k ns), reported as a constant
+of the tier. So the pre-gate is CIRCULAR: it needs the baseline it exists to avoid measuring, and applying
+1.63 at any other baseline would be off by up to three orders of magnitude -- refusing placements that
+would pay 1000x over, or accepting ones that never pay.
+
+THIS IS THE ENGINE'S OWN RECURRING ERROR IN A NEW COSTUME, and the NOTES already name it:
+**A NUMBER WITHOUT ITS VARIABLE IS NOT A RESULT.** break_even_n = f(baseline_ns); quoting it bare drops the
+argument. Filed as a kept negative in holographic_declare's docstring and pinned by a test that fails if
+break_even_n ever DOES go flat -- at which point the pre-gate becomes possible and the negative should be
+revisited.
+WHAT IS SOUND INSTEAD: measure the baseline once, cache it per rung, and let machine_place_unit answer
+exactly. Placement was never the expensive part; the pre-gate was solving a problem that did not exist.
+
+### State
++1 test (26 in test_declare_ladder.py, 1 skipped). ALL NINE audits exit 0. regen_docs --check clean. No new
+module, no faculty, no catalog entry -- one negative filed, one item found already complete.
+
+### THE PLAN IS NOW ESSENTIALLY CLOSED
+Remaining: 6.1 the benchmark, and 5.3b (algorithmic resonator work, unsized and properly a research arc).
+Everything else is shipped, refuted, or found already done.
+
+
+## SESSION (2026-07-26ag) -- WORK PLAN ITEM 6.1: the benchmark, on the STRICT no-tool construction.
+## And the negative it demanded be published, published.
+
+### THE CONSTRUCTION IS THE ITEM
+Three false-action numbers already existed in this repo, all measured against WORD SALAD drawn from the
+catalog's own vocabulary at matched token count. That fixes length and vocabulary and leaves the tasks
+SEMANTICALLY INCOHERENT -- and incoherence is easy to refuse. Every one of those 0.0% figures was honest and
+easy.
+BENCH-1 builds the no-tool set the hard way, as the plan specifies: take a REAL capability's own
+author-written alias as the task, then REBUILD THE INDEX WITHOUT THAT CAPABILITY. The task is now a
+coherent, idiomatic request phrased exactly as the catalog's authors phrase things, with genuinely nothing
+behind it -- and every near neighbour still present to tempt a match.
+
+### MEASURED (60 has-tool / 20 no-tool, seeded, committed)
+    has-tool resolved       60/60 = 100.0%
+    NO-TOOL false actions    0/20 =   0.0%   <-- PRE-REGISTERED PRIMARY METRIC
+    no-tool refused         20/20
+    rung distribution       {0: 60}
+    model calls             0
+    run-to-run variance     ZERO
+0.0% on the STRICT construction is a materially stronger claim than 0.0% on word salad, and it is the number
+the reference system (97.9% on capability records) does not publish at all.
+
+### THE REQUIRED NEGATIVE, PUBLISHED
+The plan: "if rungs 1-5 fire on under ~20% of realistic declared bodies, the ladder is ceremony around an
+LLM call and the notes must say so in bold."
+**RUNGS 1-5 FIRED ON 0 OF 60 BODIES. RUNG 0 ANSWERED EVERY ONE.**
+Now the honest reading, both halves:
+  * It is NOT "ceremony around an LLM call". No model was reached at all -- the cheapest, fully
+    deterministic rung sufficed for 100% of the fixture, and model_calls is 0. A ladder whose first rung
+    suffices is a ladder working, not a ladder wasted.
+  * It IS a real gap in evidence: RUNGS 1-3 ARE UNEXERCISED, so their gates are unproven on real traffic.
+    Everything known about them is that they decline cleanly and for stated reasons.
+  * AND THE FIXTURE IS A PLAUSIBLE LIMITING FACTOR, WHICH IS A CRITICISM OF MY BENCHMARK, NOT OF THE LADDER.
+    Every task is a free-text-to-faculty request -- precisely rung 0's job. Rungs 1-2 need typed goals and
+    vector goals, and the fixture contains none, because it is built from catalog ALIASES and aliases are by
+    construction the phrasings rung 0 was designed to catch. Exercising the upper rungs needs a DIFFERENT
+    fixture, not a different ladder.
+Filed as a test that fails if any rung above 0 ever fires -- because that would be news.
+
+### THE INSTRUMENT IS TESTED HARDER THAN THE METRIC
+If catalog_without silently failed to remove, every no-tool measurement would be a has-tool measurement
+wearing a different label and the headline would be meaningless. So: removal verified, non-mutation of the
+original verified, the removed capability's own alias verified to no longer surface it, and distractors
+verified still present (an empty index would refuse trivially and 0% would mean nothing).
+
+### State
++12 tests (tests/test_agent_benchmark.py, 3 marked slow). ALL NINE audits exit 0. regen_docs --check clean.
+New module in agents_and_reasoning/ (58 -> 59); two faculties (agent_benchmark, catalog_without);
+discoverability 4/4.
+
+### REMAINING IN THIS PLAN
+3.3's smaller half (the machine_place_unit pre-gate on break_even_n) and 5.3b (algorithmic resonator,
+unsized). Tiers 1, 2, 4, 5 and 6 are otherwise closed; Tier 3 is closed except that pre-gate.
+
+
+## SESSION (2026-07-26ah) -- WORK PLAN ITEM 3.3 (second half): REFUTED. The plan's constant is a function.
+## AND THIS CLOSES THE WORK PLAN.
+
+### THE PROPOSAL
+"machine_place_unit needs a measured baseline_ns, which means running the rung to time it. If n_calls is
+below the tier's break_even_n (1.63 for the baked-grid tier -- reported by the oracle and INDEPENDENT OF THE
+BASELINE), skip placement entirely and never measure."
+
+### MEASURED, AND THE PARENTHESIS IS FALSE
+    baseline_ns    break_even_n    use_unit @ n_calls=1
+    1e2            inf             False
+    1e3            130.12          False
+    1e4            6.72            True
+    1e5            0.60            True
+    1e6            0.073           True
+    1e9            0.0001          True
+break_even_n is (setup cost)/(per-call saving), and the SAVING IS A FUNCTION OF HOW SLOW THE BASELINE IS. A
+fast baseline leaves little to save so it takes many calls to amortise; a slow one pays back before the
+first call finishes. **1.63 IS ONE POINT ON THAT CURVE, NOT A PROPERTY OF THE TIER.**
+
+And there is no floor to retreat to: break_even_n tends to 0 as the baseline grows, and use_unit is already
+True at n_calls=1 for any sufficiently slow baseline. So NO threshold on n_calls alone is correct for every
+baseline -- and a gate that skipped at n_calls<1.63 would wrongly refuse THE EXACT CASE WHERE PLACEMENT PAYS
+MOST: a slow operation called once.
+
+The baseline is the irreducible cost here. This is a case where the measurement cannot be optimised away,
+which is precisely why the oracle takes it as an argument rather than deriving it.
+
+### THE SAME ERROR SHAPE AS 4.4, WHICH IS WORTH NAMING
+4.4 wired a signal that was CONSTANT (the 'wall' verdict, true of everything, discrimination 0). 3.3 wired
+a constant that is actually a FUNCTION (break_even_n, varying over five orders of magnitude). Both are the
+same mistake seen from opposite sides: **A QUANTITY WAS ASSUMED TO BE THE OTHER KIND OF THING THAN IT IS.**
+The check that catches both is the same one -- vary the input you believe is irrelevant and see whether the
+output moves. It takes one probe and it caught two items.
+
+### THE WORK PLAN IS NOW CLOSED. Final tally across all six tiers:
+    SHIPPED (12)   1.1 filler stripping        1.3 embedder seam        2.1 declare() ladder
+                   2.2 capacity advisor        2.3 gate null            2.4 look-book
+                   3.2+3.3a resolution cache   4.1 llm_tool             4.2 agent_loop
+                   4.3 query expansion         5.1+5.2 db defects       5.3a factor reasons
+                   5.4/5.5/5.6 small defects   4.5 farm guard           6.1 benchmark
+                   6.2 seam audit              6.3 README table
+    REFUTED / FILED (5)   1.2 query artifact (already refuted in-repo, two committed tests)
+                          3.1 fusion rung (0/60 chains, 3.2% LSI edges)
+                          4.4 'wall' trigger (discrimination 0)
+                          3.3b placement pre-gate (break_even_n is not a constant)
+                          [and 1.4's dense index, BLOCKED on absent model weights, not refuted]
+    NOT BUILT, SCOPED     5.3b algorithmic resonator (three published methods, each a research arc)
+
+SEVEN of the plan's items were resolved by MEASUREMENT PRODUCING A NUMBER AND A PINNED TEST rather than by
+the code they asked for. Not one of those outcomes was visible from the prose, and the plan's own literature
+sweep was sound in every case -- what it lacked was the tree in front of it.
+
+**RULE 0 APPLIES TO PLANS.** That is the single most valuable thing this backlog established, and it was
+paid for repeatedly: an already-refuted item, two proposals that failed their gates, a constant that was a
+function, a signal that was constant, a headline table with two single-draw rows, and three "gates" whose
+stated mechanism was wrong even though the defect was real.
+
+### State
++3 tests (13 in test_boundary_seams.py). ALL NINE audits exit 0. regen_docs --check clean. No new module,
+no faculty -- one refutation recorded where it will be re-proposed.
+
+
+## SESSION (2026-07-26ai) -- VERIFIED THE COMPETITIVE FRAMING AGAINST THE ACTUAL NOOA PAPER.
+## The metric gap is real. The characterisation of NOOA was not, and WE ARE NOT AT PARITY.
+
+Fetched arXiv:2607.20709 (NVIDIA-labs OO Agents, submitted 22 Jul 2026) and checked every claim the work
+plan made. Full analysis in docs/COMPETITIVE_NOOA.md.
+
+### THE PLAN'S NUMBERS ARE RIGHT
+4,309/4,400 = 97.9%; small 96.0%, frontier 99.2%; agent-as-Python-object with a `...` body filled at
+runtime. All verbatim correct.
+
+### AND THE CENTRAL CLAIM SURVIVES
+**NOOA PUBLISHES NO FALSE-ACTION RATE AND NO ABSTENTION METRIC.** Confirmed across all five evaluations --
+capability tests, SWE-bench Verified, Terminal-Bench 2.0, CyberGym L1, ARC-AGI-3. Every one reports a pass
+rate or a solve rate. That gap is real and it is the axis leCore competes on.
+
+### BUT TWO CHARACTERISATIONS DID NOT SURVIVE, AND ONE OF THEM MATTERS
+  * "Cannot express 'no tool fits'" -- OVERSTATED. NOOA has VALIDATED TERMINATION: the model must return a
+    typed result carrying EVIDENCE and a VERIFICATION COMMAND, harness-checked before the call returns.
+    The paper's trace analysis is pointed: a comparison harness "stops whenever the model responds without
+    a tool call", and 77% of its failed Terminal-Bench trials terminate within ten steps. NOOA's contract
+    prevents exactly that.
+    THE DISTINCTION THAT IS ACTUALLY OURS:
+        validated termination  = "did you prove you finished?"   -- a gate on the EXIT
+        null-referenced abstention = "should you have started?"  -- a gate on the ENTRY
+    NOOA has the first. leCore has the second and measures it. Still a real edge, but NARROWER than
+    claimed: a no-tool task is still ATTEMPTED by NOOA, it just fails its return contract afterwards.
+  * "Is not reproducible" -- WRONG. Open-source repo, pinned commits and package versions for all fourteen
+    compared systems, public ARC-AGI-3 scorecards, full suite in-repo.
+
+### WHAT NOOA HAS THAT WE DO NOT -- audited live, FOUR OF SIX ABSENT
+    pass-by-reference + bounded previews   ABSENT   (we pass JSON; this is their scale-past-context trick)
+    code as action (model writes Python)   ABSENT   (we do one JSON tool call per turn -- the modality
+                                                     their paper argues against directly)
+    typed return validation with retry     ABSENT
+    long-term memory (ACT-R activation,
+      decay, reflection, SQLite)           PARTIAL  (recall exists; measured +11.8 RHAE for the subsystem)
+    sandboxed cell execution               ABSENT   (though we never execute model-written code)
+    model-queryable event history          PARTIAL  (ask_traced)
+Plus: NOOA has REAL EXTERNAL BENCHMARK RESULTS -- SWE-bench Verified 82.2%, Terminal-Bench 73.0%,
+CyberGym L1 86.8% (TOP OPEN-SOURCE, beating most closed systems), ARC-AGI-3 85.1% under $20/game.
+**leCore has NO result on any external agentic benchmark.** Our benchmark measures our own catalog.
+
+### THE HONEST POSITION, and it should not be softened
+leCore is NOT "everything NOOA does plus more". It is a different bet:
+    NOOA maximises what a capable model can do through a clean interface.
+    leCore maximises what can be answered WITHOUT a model, and refuses -- measurably -- when nothing fits.
+Our socket is better at NOT ACTING. Theirs is better at ACTING, and has the external numbers to prove it
+while we have none.
+
+### RECOMMENDED ORDER IF PARITY IS THE GOAL
+  1. Bounded object previews + pass-by-reference in agent_loop -- biggest gap, most self-contained.
+  2. Typed return validation with retry -- small, and it closes the EXIT gate we lack; paired with our
+     entry gate that would be strictly ahead of NOOA on both.
+  3. An external benchmark result -- without one every leCore number is self-referential. Terminal-Bench
+     is the most tractable.
+  4. Code-as-action -- large, and COLLIDES WITH the no-exec-REPL decision already on record. Do not start
+     without revisiting that decision explicitly.
+  5. Memory curation/decay/reflection -- +11.8 RHAE is the strongest published evidence on this list.
+
+**DO NOT CLAIM PARITY MEANWHILE.** The 0.0% false-action result on a removal-built no-tool set is strong
+and defensible standing alone; attaching it to an overstated comparison is the fastest way to lose the
+argument.
+
+### A NOTE ON HOW THIS WAS MISSED
+The plan cited NOOA six times and characterised it as optimising "interface fluency". The paper is a
+systems paper with four external benchmarks, a memory subsystem with an ablation, and a red-team audit.
+RULE 0 APPLIES TO CITATIONS AS WELL AS TO PLANS AND TESTS: the paper was one fetch away for the entire
+backlog, and reading it would have changed how several items were scoped.
+
+### State
++1 test pinning the corrected scope. docs/COMPETITIVE_NOOA.md added. ALL NINE audits exit 0.
+regen_docs --check clean.
+
+
+## SESSION (2026-07-26ai) -- ITEM 5.3b GATED: the premise is wrong. The "capacity cliff" is a SEARCH BUDGET.
+
+5.3b was the one item left open, scoped as "a research arc, unsized" -- three published methods, each
+replacing the resonator's update rule or decomposition strategy. Before sizing it, the bounded question:
+DOES THE CURRENT RESONATOR ACTUALLY FAIL THE WAY THE PROPOSAL ASSUMES?
+
+### FINDING 1 -- THE F=4 COLLAPSE IS A BUDGET, NOT A CAPACITY LIMIT
+N=2048, V=16, F=4 (search space 65,536, Df/N = 0.031). SAME network, SAME codebooks, SAME dimension:
+    restarts=4   iters=150   ->  25%
+    restarts=16  iters=150   ->  42%
+    restarts=64  iters=150   ->  83%
+    restarts=64  iters=600   ->  92%
+    restarts=256 iters=600   -> 100%
+It solves EVERY instance given enough restarts. Nothing about the update rule is failing; the search is
+being stopped early. The defaults are restarts=20 in ResonatorNetwork.factor and restarts=10 in
+recursive_factor -- both well inside the failing region for F=4.
+
+**CONSEQUENCE FOR 5.3b: any comparison against a published method MUST use a BUDGET-MATCHED baseline.**
+Benchmarking an attention-based update rule against this resonator at restarts=4 would be a strawman, and
+this project's standing rule is that a win without a proper baseline is not a result. The proposal as
+written would very likely have produced exactly that: a large, real-looking improvement over an
+under-searched control.
+
+### FINDING 2 -- THE PUBLISHED STABILITY PRECONDITION IS NOT SUFFICIENT HERE
+The plan wanted a guard: abstain above the Frady et al. phase change at Df/N = 0.056. Measured at V=16,
+F=4, restarts=4 across dimension:
+    N       512    1024   2048   4096   8192
+    Df/N    0.125  0.063  0.031  0.016  0.008
+    solved  0%     17%    25%    33%    17%
+RAISING THE DIMENSION DOES NOT RESCUE IT. Success plateaus around a third and never converges, even at
+Df/N = 0.008 -- SEVEN TIMES below the bound. So being under the threshold does NOT predict success, and a
+guard that abstained above 0.056 would hand out FALSE CONFIDENCE below it. That guard is the one piece of
+5.3b that looked cheap and safe (a citation and an if-statement); it is the piece the measurement refuted.
+Recorded in the code so nobody ships it on the strength of the citation alone.
+
+### WHAT 5.3b ACTUALLY IS NOW
+Not "the resonator fails at F=4, replace it". The honest statement is: the resonator UNDER-SEARCHES AT ITS
+DEFAULTS for F>=4, and the published methods claim to win specifically when ITERATIONS << SEARCH SPACE --
+which is the same regime, approached from the other side. That is still worth investigating, but it is a
+DIFFERENT AND SMALLER QUESTION than the plan posed: "can an attention update reach at restarts=4 what this
+reaches at restarts=256?" -- a cost question with a budget-matched control, not a capability question.
+NOT changing the defaults in this session: raising restarts silently would slow every existing caller and
+change tie-sensitive trajectories. That is its own item with its own measurement.
+
+### THE PATTERN, ONE LAST TIME
+Every one of this backlog's gated items failed for the same underlying reason: A QUANTITY WAS ASSUMED TO BE
+SOMETHING IT IS NOT.
+    3.1   a chain existed to fuse                  -> 0/60 resolutions produce a chain
+    4.4   'wall' was a signal                      -> constant, discrimination 0
+    3.3b  break_even_n was a constant              -> a function, varying 5 orders of magnitude
+    5.3b  F=4 was a capacity limit                 -> a search budget
+    6.3   a table row was a measurement            -> a single draw
+Five proposals, five wrong premises, all five caught by one probe each. None was visible from the prose,
+and the prose was well-researched in every case.
+
+### State
++2 tests (22 in test_holographic_recursive_factor.py, 1 slow). ALL NINE audits exit 0. regen_docs --check
+clean. No new module, no faculty -- two measured findings recorded where they will be re-proposed.
+
+### THE WORK PLAN AND ITS FOLLOW-ON ARE NOW BOTH CLOSED.
+Open, and honestly sized for a future session:
+  * 5.3b-revised: budget-matched comparison of an attention update against this resonator at equal cost.
+  * resonator default restarts: CLOSED by session 26aj -- measured, and the default STAYS. The cost of a
+    bigger cap falls entirely on the REFUSAL path (13x slower when there is no answer, near-free when there
+    is), so the fix was advise_restarts (measure the caller's own codebooks) rather than a new constant.
+    This line originally read "open"; corrected here rather than left to rot.
+  * 1.4's dense capability index: blocked on model weights absent from this environment, not refuted.
+
+
+## SESSION (2026-07-26aj) -- THE RESTART-DEFAULT QUESTION: measured, and the default STAYS. An advisor
+## ships instead.
+
+Left open last session as "tie-sensitive, needs its own measurement". Two questions had to be separated:
+CAN the default be raised (determinism), and SHOULD it be (cost). They have different answers.
+
+### CAN IT? YES -- THE SEQUENCE IS PREFIX-STABLE
+factor() EARLY-EXITS on success, returning the restart index that won. Verified across F=2,3 and V=8,16:
+on every already-solved case, restarts=64 returns the IDENTICAL factors AND the IDENTICAL restart count as
+restarts=20. A bigger cap cannot flip an existing answer -- it only ever appends attempts after the point
+where the old budget gave up. So the "existing decisions never flip" constraint is NOT the obstacle here,
+which is what I assumed going in and had to check rather than assert.
+
+### SHOULD IT? NO -- THE COST FALLS ENTIRELY ON THE REFUSAL PATH
+    N=2048, V=16, F=4      restarts=20   restarts=64   restarts=256
+    solvable composite      1071 ms       1460 ms        1465 ms
+    UNSOLVABLE composite    1488 ms       4743 ms       19439 ms      <- 13x
+A bigger cap is nearly FREE when an answer exists, because the search stops at the restart that succeeds.
+It is 13x SLOWER WHEN THERE IS NO ANSWER, because a refusal has to exhaust the whole budget in order to BE
+a refusal. **THE PRICE OF A BIGGER DEFAULT IS PAID ENTIRELY BY THE PROBLEMS THAT WERE NEVER GOING TO WORK.**
+That is exactly backwards, and it is a good argument against a change that otherwise looked free.
+
+Worth stating precisely: the solvable column rises 1071 -> 1460 ms not because success got slower, but
+because at r=20 that instance FAILED FAST and at r=64 it actually succeeds. Paying 1.4x to convert a
+refusal into a verified answer is the good trade; paying 13x to refuse more slowly is not.
+
+### SO: MEASURE, ADVISE, LET THE CALLER SPEND
+advise_restarts(codebooks, targets) reports the smallest budget reaching each target success rate ON THE
+CALLER'S OWN CODEBOOKS, with the full curve attached so they can see where it saturates. Measured:
+    F=2, V=16, N=2048  ->  restarts=16 for 90%   (curve: 4->0.67, 16->1.00)
+    F=4, V=16, N=2048  ->  restarts=64 for 90%   (curve: 4->0.33, 16->0.67, 64->1.00)
+restarts=None means no budget tried reached the target -- itself the useful answer ("more will not save
+this"). Same shape as bundle_capacity from earlier in this arc: the number travels with its curve, because
+a budget without its curve is another number without its variable.
+
+### WHY THIS IS THE RIGHT SHAPE OF ANSWER
+The tempting move was to raise a constant. The measurement said the constant is fine and the COST MODEL is
+what makes it fine -- so the fix is to tell callers what their problem needs, not to guess for them. That is
+the third time this arc a "just change the default/threshold" proposal turned into an advisor
+(bundle_capacity, gap_gate_null, and now this), and the reason is the same each time: THE RIGHT VALUE IS A
+PROPERTY OF THE CALLER'S DATA, NOT OF THE ALGORITHM.
+
+### State
++3 tests (23 in test_holographic_recursive_factor.py). ALL NINE audits exit 0. regen_docs --check clean.
+One new function + faculty (advise_restarts) in an existing module; discoverability 4/4.
+
+### STILL OPEN, honestly sized
+  * 5.3b-revised: budget-matched comparison of an attention-based update against this resonator at EQUAL
+    cost. The baseline is now defined -- restarts=64 at F=4, not the default -- which is the piece that was
+    missing before.
+  * 1.4's dense capability index: blocked on model weights absent from this environment. Not refuted.
+
+
+## SESSION (2026-07-26ak) -- LocalPool: BUILT AND UNREACHABLE. The gap was discoverability, not mechanism.
+## And the break-even measurement is CONFOUNDED -- one core.
+
+Moose pushed back on my claim that leCore has no instance spin-up ("I'm pretty sure that was added and
+wired up"). HE WAS RIGHT AND I WAS WRONG, and the way I was wrong matters: my audit was a REGEX OVER
+FACULTY NAMES (dir(m) filtered for 'pool|farm|worker'), which is exactly the weak audit Rule 0 exists to
+prevent. LocalPool's faculty did not exist, so a name scan could not find it. Asking find_capability the way
+a user would is the audit; grep is not.
+
+### WHAT EXISTED, AND WHY IT DID NOT EXIST
+holographic_coordinator.LocalPool -- a PERSISTENT ProcessPoolExecutor (not spawn-per-task), each worker its
+own interpreter with its own GIL, and a read-only cache published ONCE into shared_memory (zero-copy) rather
+than pickled per bucket. Written, correct, tested.
+BUT: Coordinator defaults to InProcessBackend(); distribute_compute had NO backend parameter at all; no
+faculty exposed LocalPool; and find_capability('spin up another instance') returned "Describe a scene",
+"Texture graph", "convert_up_axis".
+BY THE GOVERNING RULE -- a capability find_capability cannot surface and /invoke cannot call DOES NOT EXIST
+-- LocalPool did not exist. This is the canonical instance of the failure mode this repo is organised
+around, and it was sitting in the scale-out path the whole time.
+
+### WHAT SHIPPED
+  * mind.local_pool(n) faculty + catalog entry with the user's own phrasings. Discoverability 0/5 -> 5/5.
+  * A `backend=` seam threaded distribute -> Scale.map_reduce -> distribute_compute. ADDITIVE, default None
+    = today's behaviour byte-for-byte. distribute() had no seam at all before -- it ran `[worker(b, cache)
+    for b in buckets]` inline -- so the seam DELEGATES to Coordinator rather than reimplementing the cache
+    publish/release lifecycle in a second place.
+  * BIT-IDENTITY VERIFIED: pooled and sequential agree exactly (38926347.719347715 both), which is the
+    property that decides whether parallelism is safe here. The reduce is a commutative monoid and buckets
+    are disjoint, so partitioning across processes must not move a bit -- and does not. A faster wrong
+    answer is not a result.
+
+### THE BREAK-EVEN MEASUREMENT IS CONFOUNDED, AND THE DEFAULT THEREFORE DID NOT CHANGE
+    light buckets            0.09x
+    heavy buckets            0.78x
+    200 ms/bucket, 8 buckets 0.96x  (plateaus at ~1.00x, never wins)
+A 4-worker pool that never beats sequential at 200 ms/bucket is not a result, it is a broken measurement --
+and it was: **os.sched_getaffinity(0) -> 1. THIS MACHINE HAS ONE CORE.** A process pool cannot win here by
+construction. Every speedup number above says nothing about real hardware and is recorded as a CONFOUND.
+I nearly reported "pools never pay" from it, which would have been a strawman of the pool -- the same error
+as benchmarking a resonator at restarts=4.
+WHAT SURVIVES THE CONFOUND: dispatch overhead is ~0.2 ms/bucket regardless of cores, so buckets doing less
+work than that can never pay. And bit-identity is core-count independent.
+SO THE DEFAULT STAYS SINGLE-PROCESS -- not because pools were shown not to pay, but because THE NUMBER THAT
+WOULD DECIDE IT CANNOT BE MEASURED HERE. Recorded in the faculty docstring and pinned as a test, so the next
+session on a multi-core box knows exactly which measurement to redo and why.
+
+### ON THE "one extra instance by default" INSTINCT
+Right direction, and the blocker is evidence rather than design: with bit-identity established, opting in is
+already safe TODAY. What is missing is the crossover on representative hardware. The pre-gate is cheap --
+buckets x ms-per-bucket against ~0.2 ms dispatch -- and that is a one-probe measurement on any real box.
+
+### DELTA STORAGE -- audited, present, with a measured limit
+delta_chain (DELTA-1) stores a sequence as base + per-chunk deltas, each against the BASE or the PRIOR chunk
+whichever is SMALLER, so memory is O(actual change); SHA-256 hash chain + Merkle root make integrity
+provable and bit-exact. Plus dedup_chunks, scene_dedup_saving, delta_cache/delta_cache_report.
+KEPT NEGATIVE, already on record and worth repeating here: on DENSE mutation a DeltaChain measured 614,144
+bytes against a raw 460,800 -- A 33% SIZE LOSS. Deltas win on sparse change and LOSE when nearly everything
+changes, so "store deltas not raw" is a good default and NOT a law; the pre-gate is how much actually
+changes between versions.
+
+### State
++7 tests (tests/test_local_pool.py; helper in tests/poolwork.py -- multiprocessing needs a TOP-LEVEL
+picklable worker, and pytest puts the test dir on sys.path so child processes can import it).
+429 passed / 5 skipped across distribute/scale/coordinator/pool/exact surfaces. ALL NINE audits exit 0.
+regen_docs --check clean. One new faculty, one additive parameter, no new module.
+
+### STILL OPEN
+  * local_pool break-even on multi-core hardware -> then decide the default.
+  * 5.3b-revised (budget-matched attention-update comparison); 1.4's dense index (blocked on model weights).
+
+
+## SESSION (2026-07-26al) -- CORE DETECTION SHIPPED. AUTO-SPAWN DELIBERATELY NOT.
+
+Moose: "can we automatically query how many cores an environment has and auto spin up instances if more than
+1 core exists?" Detection: yes, and it closed a latent bug. Auto-SPAWN: split into decision vs spawn, and
+only the decision was automated. Reasons below.
+
+### THE LATENT BUG DETECTION CLOSED
+LocalPool(n=None) fell through to ProcessPoolExecutor's default, which is os.cpu_count(). **os.cpu_count()
+LIES IN A CONTAINER**: it reports the HOST's cores and knows nothing about cgroup quota or CPU affinity. So
+`docker run --cpus=2` on a 64-core host answers 64, and a pool sized from it SPAWNS 64 INTERPRETERS TO
+TIME-SHARE 2 CORES -- slower than sequential AND 64x the memory. On an engine whose whole point is running
+on a wide variety of devices, that is a MEMORY-BLOAT BUG, not merely a speed one.
+cpu_budget() takes the MINIMUM of: sched_getaffinity (taskset/cpuset), cgroup v2 cpu.max, cgroup v1 cfs
+quota/period, os.cpu_count(). Unreadable sources are SKIPPED rather than guessed. Fractional quota rounds UP
+(1.5 cores -> 2: two workers can still make progress). Never below 1.
+
+### WHY NOT AUTO-SPAWN, stated as a design decision rather than a preference
+Eager spawn at construction was rejected on four grounds, any one sufficient:
+  1. A LIBRARY MUST NOT START PROCESSES NOBODY ASKED FOR. Importing leCore and building a mind currently
+     starts ZERO threads; a mind that silently forks N interpreters changes what `import` means, and on a
+     small device is the difference between idle and out of memory.
+  2. MEMORY IS THE SCARCE RESOURCE HERE, NOT CORES. Each worker is a full interpreter. "More than 1 core"
+     is not sufficient evidence that a second interpreter is affordable -- a 2-core Pi and a 2-core VM with
+     512 MB are the same core count and different answers.
+  3. CORE COUNT DOES NOT DECIDE IT ANYWAY. Dispatch is ~0.2 ms/bucket; a job of 8 buckets at 0.1 ms each
+     LOSES on any number of cores. The deciding variable is WORK PER BUCKET, which is not knowable at
+     construction time -- only at the call.
+  4. FORK SAFETY. Spawning at import/construction breaks under uWSGI/gunicorn pre-fork, in notebooks on
+     Windows spawn-start, and in sandboxes without /dev/shm. Failing at import is the worst possible place.
+
+### WHAT SHIPPED INSTEAD -- automatic DECISION at the call site
+  * cpu_budget() and should_pool(n_buckets, est_ms_per_bucket) faculties, catalogued, 4/4 discoverable.
+    should_pool refuses on THREE independent grounds -- <2 usable cores, <2 buckets, or work per bucket
+    below 4x dispatch -- each verified to fire on its own with cores forced.
+  * distribute_compute(..., backend="auto", est_ms_per_bucket=...) creates a pool ONLY when the gate passes,
+    and CLOSES IT before returning. Verified: bit-identical to sequential, and ZERO child processes left
+    behind. Auto without an estimate DECLINES rather than guessing -- no evidence, no parallelism.
+  * The per-call setup cost of "auto" is why it is not the default: a caller making many calls should hold
+    ONE pool via local_pool() and pass it. A hidden PERSISTENT pool would be faster and would also mean a
+    library call silently left interpreters running -- not a library's decision to make.
+
+### THE MARGIN IS CONSERVATIVE ON PURPOSE
+should_pool's default margin is 4x dispatch, so "roughly break-even" DECLINES. Near break-even a pool costs
+memory and process lifetime for no speed, and this engine's constraint is device reach, not peak throughput.
+
+### STILL UNMEASURABLE HERE
+This box has ONE core (cpu_budget() -> 1), so should_pool refuses everything and the crossover still cannot
+be measured. The gate is verified by FORCING cores=8, which tests the logic but not the payoff. The
+outstanding measurement is unchanged: run the crossover on multi-core hardware, then decide whether "auto"
+should become the default for distribute_compute.
+
+### State
++8 tests (15 in tests/test_local_pool.py). 128 passed / 3 skipped across distribute/coordinator/pool/scale.
+ALL NINE audits exit 0. regen_docs --check clean. Two faculties + one additive parameter; no new module.
+
+
+## SESSION (2026-07-26am) -- GPU BACKLOG WRITTEN (docs/BACKLOG_gpu.md), gated and evidence-based.
+
+Moose: "we haven't given gpu stuff much attention because we have been busy building a virtual one." Exactly
+right, and worth stating as the framing: the shader pipeline, the WGSL/GLSL emitters, the machine model's
+seven tiers and compile_program's 239x ARE a virtual GPU. That was a reasonable order -- the virtual one is
+deterministic and testable on any box, the real one is neither -- but it has left the cheapest remaining
+performance work undone for anyone with a card.
+
+### MEASURED TODAY, not estimated
+    modules consulting holographic_backend   5   (fluid, shader, deptrace, proc_texture, memoryhome)
+    GPU discoverability                      1/6 natural phrasings hit use_gpu
+    test files touching the backend          2
+    CI lanes exercising a GPU                0
+    speedup of ANY gpu path                  NEVER MEASURED -- no CUDA device in any environment used
+GPU-shaped but NOT on the backend (batched matmul counts): htcodebook 10, amp 4, resonator 2, pathtrace 1.
+
+### THE HEADLINE FINDING
+**NO GPU PATH IN THIS ENGINE HAS EVER BEEN MEASURED.** The backend is wired, well-designed and
+code-reviewed; the numbers are entirely absent. Every current claim about GPU benefit is a DESIGN ARGUMENT,
+not a result. That is B1 and everything in Tier C waits on it -- the same discipline that killed the fusion
+rung (0/60 chains) and the 'wall' trigger (discrimination 0).
+
+### THE BACKLOG IS TIERED BY WHAT CAN BE VERIFIED WHERE
+  A (no GPU needed): discoverability, gpu_report(), transfer pre-gate, fallback-equivalence tests.
+  B (needs one CUDA box): MEASURE IT, the tolerance envelope, a CI lane.
+  C (only if B1 pays): route more kernels, WGSL expansion, multi-device.
+Tier A is real work that pays on a GPU-less box, which is the state this project has been in for its entire
+life -- notably A4, because the FALLBACK is what everyone actually runs and only 2 test files touch it.
+
+### TWO TRAPS WRITTEN INTO THE DOC
+  * GPU TIMING NEEDS AN EXPLICIT DEVICE SYNC before stopping the clock, or the numbers measure kernel LAUNCH
+    rather than EXECUTION -- they will look spectacular and be wrong. time_call needs a sync hook first.
+  * THE RESONATOR'S CPU BASELINE IS restarts=64, NOT THE DEFAULT. Benchmarking a GPU resonator against the
+    under-searched default would manufacture a win. (And the interesting case there is not speed: restarts
+    are independent, so GPU could make a LARGE restart budget affordable -- a CAPABILITY change.)
+
+### DISCOVERABILITY IS THE LocalPool DEFECT AGAIN
+1/6 phrasings. 'offload work to cuda' returns Distributed coordinator; 'do i have a gpu' returns nothing
+relevant. Third time this session that a built, correct, well-documented capability was unreachable -- after
+LocalPool and (earlier in the arc) the recovery family. The pattern is now unmistakable: THIS CODEBASE'S
+FAILURE MODE IS NOT BUGS, IT IS REACH. Writing the code is the easy half.
+
+### DO-NOT-BUILD, with reasons
+GPU on tie-sensitive paths (determinism is a CPU property -- the one hard constraint); `import cupy as np`
+globally (the backend's own docstring refutes it); AUTO-ENABLING GPU WHEN A DEVICE IS PRESENT (same
+reasoning as auto-spawn: a device's presence is not evidence the workload is GPU-shaped, and a silent
+ACCURACY change is worse than a silent slowdown); a second GPU abstraction layer; anything in C before B1.
+
+
+## SESSION (2026-07-26an) -- GPU BACKLOG REFRAMED: EXTEND, don't emulate. And "not just CUDA" kills the
+## current path as the general answer.
+
+Moose: "our virtual gpu stuff can do things a normal gpu can't ... an opportunity to EXTEND gpu capabilities
+rather than just try to emulate ... (again, when gpu is available, not just cuda)."
+Both halves check out against the tree, and together they change what this backlog is FOR.
+
+### THE CAPABILITY DIFFERENCE IS ALREADY IN THE CODE, stated by shader_pipeline itself
+    "a filter GRAPH compiled to ONE transfer before any data is touched ...
+     A GPU runs three passes over the image; this runs one."
+That is not emulation and a GPU cannot do it: at the moment it runs a pass it has NO REPRESENTATION of the
+rest of the pipeline. leCore holds the ALGEBRA of the computation, which is one level UP from where silicon
+operates -- a GPU executes, leCore can TRANSFORM. Three such capabilities exist today: fusion before data
+(LSI stages are spectra, so an N-stage graph collapses symbolically), content-addressed reuse
+(compile_program 239x, bit-identical), and graceful degradation (100% recall at 40% slot loss, where 40% of
+a GPU buffer zeroed is garbage).
+
+**THE CORRECT ARCHITECTURE INVERTS THE PIPELINE ORDER.** Naive: hand N passes to the GPU. Correct: collapse
+N passes to 1 in the algebra, THEN hand 1 pass to the GPU. The second is faster on any hardware and faster
+than the GPU can be alone, because the win happened BEFORE dispatch. leCore as the optimizing layer ABOVE
+any device; the GPU as the backend for the residue that survives fusion.
+
+### "NOT JUST CUDA" IS A HARD REQUIREMENT AND THE CURRENT PATH FAILS IT
+holographic_backend IS CuPy, i.e. NVIDIA ONLY. On Apple M-series, AMD, Intel Arc or a browser,
+use_gpu(True) returns False and silently falls back. For an engine whose stated purpose is running on a
+WIDE VARIETY OF DEVICES, the one GPU path it has is the NARROWEST POSSIBLE. That is a strategic gap, not a
+missing feature.
+THE VENDOR-NEUTRAL PATH ALREADY EXISTS AND IS NOT BEING USED AS ONE: emit_kernel already emits WGSL, and
+WGSL runs on Vulkan / Metal / DX12 / the browser via wgpu. What is missing is only a RUNTIME -- nothing
+dispatches the emitted WGSL and brings results back.
+
+### TIER D ADDED (the extension items), and it outranks Tier C
+  D1 fuse-then-dispatch -- flagship. GATE IS fused-GPU vs UNFUSED-GPU, NOT fused-CPU vs unfused-GPU: the
+     latter conflates the algebra's contribution with the silicon's and would flatter us.
+  D2 a wgpu runtime for emit_kernel -- the vendor-neutral unlock, and it carries a property CuPy CANNOT:
+     the shader is a PROJECTION of the authoritative Python, so CPU and GPU cannot silently diverge and can
+     be differentially tested every run. **AND ITS CORRECTNESS IS CI-TESTABLE WITHOUT A DISCRETE GPU** --
+     llvmpipe / WARP software adapters implement Vulkan/DX12, so a normal runner can verify correctness (not
+     speed). The CuPy path can be tested NOWHERE without NVIDIA hardware. That asymmetry alone is decisive.
+  D3 put the GPU in the machine model as another tier -- transfer cost as setup, throughput as per-call
+     saving -- so CPU / process pool / GPU becomes ONE measured decision from one oracle instead of three
+     unrelated switches. Today a caller flips use_gpu(True) globally and hopes.
+  D4 degradation as a device-memory strategy -- speculative. Device memory is a hard ceiling with no swap,
+     so pressure means failure; a distributed representation could DEGRADE instead. GATE FIRST: does
+     recall-under-slot-loss survive fp16 at all? If not, the item dies there.
+
+### DO-NOT-BUILD, three added
+  * Emulating GPU features leCore lacks (texture units, fixed-function raster) -- wrong direction; the value
+    is the layer ABOVE the GPU, not reimplementing what silicon already does well.
+  * Treating CuPy as "the GPU story" -- it is NVIDIA-only.
+  * A fused-CPU vs unfused-GPU comparison -- flatters the algebra by conflating it with the device.
+
+### RECOMMENDATION ON ORDER
+D BEFORE C. C makes existing things faster ON NVIDIA. D makes the engine work on hardware it currently
+cannot touch and adds capability no GPU has. If there is appetite for only one item, D2 is worth more than
+all of C -- it is the difference between "GPU support" meaning NVIDIA-only and meaning ANY DEVICE INCLUDING
+A BROWSER, which matters for a Blender-class app people will want to run without a CUDA toolchain.
+
+
+## SESSION (2026-07-26ao) -- AUDITED MY OWN GPU BACKLOG. Four of five claims changed. One is decisive.
+
+Rule 0 applied to the backlog itself, on the principle that every ungated item in the previous plan had a
+wrong premise. Five claims checked against the live tree; FOUR CHANGED.
+
+### THE DECISIVE FINDING: D2 IS NOT BLOCKED ON HARDWARE. IT RUNS HERE, TODAY.
+    pip install wgpu           -> 0.32.0 from PyPI, installs clean
+    adapter                    -> llvmpipe (Mesa 25.2.8), adapter_type='CPU', backend OpenGL
+    emit_kernel body -> WGSL -> dispatched -> read back
+    max abs deviation vs NumPy float32:  0.0    ** BIT-EXACT **
+On a box with ONE CPU CORE AND NO GPU. The vendor-neutral path is verifiable in ORDINARY CI with no hardware
+budget, while every CuPy item (Tier B, Tier C) is blocked on acquiring an NVIDIA machine. That asymmetry was
+an ARGUMENT in the previous draft; it is now a DEMONSTRATED FACT and it should decide the order of work.
+D2 downgraded L -> M: this is not research, it is wiring -- emit_kernel produces a bare `fn`, and the runtime
+owns the @compute entry point, storage bindings, workgroup sizing and the arrayLength bounds guard.
+
+### emit_kernel's DOCSTRING IS STALE AND UNDERSTATES THE FEATURE
+Docstring: "a loop ... raise[s] with the construct named". Actual behaviour: emits a correct bounded WGSL
+`for`. The live behaviour is authoritative, so THE DOC IS WRONG AND IS SUPPRESSING USE OF A WORKING FEATURE.
+Filed as A5 (XS) with a test to pin the bounded-loop case so the two cannot drift again. Note the direction
+of this error -- documentation that UNDERSTATES capability is invisible in testing and costs adoption
+silently. Worth watching for elsewhere.
+
+### D4's PRECISION GATE PASSED, and the reason is more interesting than the result
+    slots lost     fp64      fp32      fp16
+    0%            100.0%    100.0%    100.0%
+    40%           100.0%    100.0%    100.0%
+    80%            96.1%     96.1%     96.1%
+IDENTICAL TO THE DIGIT across three precisions. Why: recall is an ARGMAX OVER COSINES, and the margin
+between winner and runner-up is far wider than fp16's error. THE PROPERTY IS ABOUT DISTRIBUTION, NOT
+PRECISION -- so halving the bit width is a free 2x memory saving on device. The remaining risk for D4 is NOT
+precision (closed) but the drop/re-address MECHANISM: which slots to drop under pressure, and how addressing
+survives it.
+
+### D1 WAS OVERSTATED BY ME
+I wrote "a 10-stage graph becomes one transfer". shader_pipeline has SIX stages (blur, gain, translate,
+unsharp, stage, from_transfer) and all are LSI BY CONSTRUCTION -- so that sentence describes a graph built
+only from those six. Real pipelines interleave NONLINEAR stages (tonemap, clamp, threshold, colour grade)
+and each one BREAKS THE RUN. The realistic win is proportional to the LONGEST LSI RUN, not to graph length.
+So D1's actual first task is a pass that FINDS maximal LSI runs in a mixed graph, treating nonlinear stages
+as barriers. Without that, D1 only helps all-linear graphs -- and the io-kind audit found only 4 image-kind
+edges of 125 tagged, so those are rare.
+
+### REVISED ORDER
+  1. A1 + A5      XS each -- pure discoverability/doc defects (1/6 phrasings; a doc hiding a live feature)
+  2. D2           the vendor-neutral runtime, CI-verifiable on a software adapter TODAY
+  3. A2/A3/A4     report, transfer pre-gate, fallback tests
+  4. B1           measure CuPy, once a machine exists
+  5. D1/D3/D4, then C -- each behind its own gate
+
+### THE META-LESSON, PAID AGAIN
+I wrote this backlog three hours ago, carefully, from measurements. Four of its five load-bearing claims
+were still wrong -- not from carelessness but because I reasoned from DOCSTRINGS AND PLAUSIBILITY where I
+could have run the thing. Two of the four (wgpu on llvmpipe, fp16 degradation) took under five minutes each
+to settle definitively.
+**A BACKLOG IS A SET OF PREDICTIONS, AND PREDICTIONS GET AUDITED LIKE ANY OTHER CLAIM.**
+
+
+## SESSION (2026-07-26ap) -- A6 ADDED: a resource policy the OPERATOR sets. Audited first; the gap is real.
+
+Moose: "a system configuration setting that specifies cpu cores allowed, gpu allowed, etc. rather than being
+fully automated."
+
+### AUDITED: THERE IS NO WAY TO TELL leCore WHAT IT MAY USE
+What exists is scattered and unrelated:
+    HOLOSTUFF_GPU / LECORE_CC_CACHE / LECORE_ZIG_CACHE   env vars, three different prefixes
+    use_gpu(True)                                        a global toggle with no cap
+    cpu_budget()                                         pure AUTO-DETECTION, no override path
+    zig_dispatch_policy / cache_policy                   ADVISORY ORACLES -- they answer "what WOULD be
+                                                         chosen" and nobody can constrain the choice
+A deployer wanting "four cores, no GPU" has nowhere to say it. This is the same "three unrelated switches"
+complaint D3 makes about placement, one level up.
+
+### THE ARGUMENT THAT SETTLES IT
+cpu_budget() answers WHAT IS PHYSICALLY AVAILABLE. That is NOT the same question as WHAT THIS PROCESS IS
+ALLOWED TO TAKE. On a shared box, a CI runner, a laptop on battery, or a machine running leOS alongside the
+user's actual work, the operator's answer is SMALLER and THE ENGINE CANNOT INFER IT. Auto-detection is a
+good default for a library and the wrong default for a deployed system.
+
+### DESIGN RULES, each with its reason
+  1. A POLICY CAPS, IT DOES NOT COMMAND. cpu_cores=4 means "never more than 4", not "always 4" -- the
+     measured gates still decide inside the cap. A setting that FORCED parallelism would discard the
+     measurement discipline the whole engine rests on, and would be a way to make things slower.
+  2. PRECEDENCE: explicit call arg > policy > environment > auto-detect. Never reversed, or debugging
+     becomes non-local.
+  3. SEPARATE PERFORMANCE-ONLY FROM NUMERICS-CHANGING SETTINGS AND SAY WHICH IS WHICH. cpu_cores and pool
+     are performance-only -- THE POOLED PATH IS VERIFIED BIT-IDENTICAL, so capping cores cannot change an
+     answer. gpu is NOT: it matches NumPy only to a tolerance. Presenting them as the same kind of knob
+     invites someone to flip GPU on globally and silently change their results.
+  4. THE EFFECTIVE POLICY IS PART OF A RESULT'S PROVENANCE. A run on 4 cores with no GPU is not the same
+     experiment as one on 32 with a device. resource_policy() returns the effective values AND WHERE EACH
+     CAME FROM -- same discipline as bundle_capacity carrying its curve and machine_place_unit its baseline.
+  5. FOLD IN THE EXISTING ENV VARS, DO NOT ADD A SECOND LIST. make_repo_zip already taught this: a
+     hand-maintained second copy of a list is always the stale one.
+  6. NO CONFIG FILE FORMAT IN CORE. Dict, kwargs, env. File formats are the host application's job; core
+     stays NumPy/Flask/stdlib.
+
+### PLACED SECOND IN THE ORDER, ahead of D2
+Everything after this dispatches SOMEWHERE. Building the dispatchers first and retrofitting limits later
+means each grows its own switch -- which is EXACTLY the state we are in with use_gpu, HOLOSTUFF_GPU and
+cpu_budget, and the reason the item exists at all. A6 before more dispatchers.
+
+### RELATIONSHIP TO D3, worth keeping straight
+D3 puts the GPU in the machine model so placement is ONE MEASURED DECISION. A6 is the other half: the
+operator's CONSTRAINTS on that decision. The oracle answers "what would pay"; the policy answers "what am I
+allowed to use". **A6 FIRST -- an oracle that recommends a device the operator has forbidden is worse than
+no oracle.**
+
+### GATE (both testable on this box)
+cpu_cores=1 -> should_pool refuses regardless of physical cores; gpu="off" -> use_gpu(True) returns False
+even on a machine that HAS a device (refusal is observable without owning one).
+
+
+## SESSION (2026-07-26aq) -- GPU BACKLOG: A1, A5, A6, D2 SHIPPED. Three overclaims of mine caught by tests.
+
+### A1 -- discoverability 1/6 -> 6/6
+Root cause was not weak aliases: THERE WAS NO CATALOG ENTRY FOR THE GPU AT ALL. The single hit was the bare
+faculty name matching. Third instance this session of built-but-unfindable (LocalPool, recovery family, GPU).
+
+### A5 -- the stale docstring, now precise
+Docstring claimed "a loop" is refused. Measured: bounded `for i in range(N)` with a LITERAL bound emits a
+correct WGSL counted loop; `while` is refused ("the body must be assignments, bounded for range(N)"), and
+`range(n)` with a parameter bound is refused on the annotation. Corrected to say exactly that, plus the
+scope note that a CROSS-INVOCATION REDUCTION is a different problem and is not emitted.
+
+### A6 -- the resource policy, and it VETOES rather than advises
+holographic_policy (moved misc/ -> scene_and_pipeline/ when structure_audit flagged misc at 151 > budget
+150 -- the budget did its job; the module belongs beside the coordinator it constrains anyway).
+Wired so it actually bites: cpu_budget() now reports what may be USED not what exists; should_pool refuses
+outright under pool='deny'; use_gpu(True) returns False under gpu='off' BEFORE the backend is touched.
+describe() reports the SOURCE of every value and flags bit_exact -- verified flipping to False under
+gpu='on' and staying True for cores/pool, which is the safety property: capping cores cannot change an
+answer (the pooled path is bit-identical) but enabling GPU can.
+
+### D2 -- the vendor-neutral runtime, RUNNING
+wrap_kernel supplies what emit_kernel does not: @compute entry, storage bindings, workgroup size, and the
+arrayLength bounds guard (dispatch rounds UP, so the tail invocations must not write past the buffer -- the
+100-element / 64-workgroup case is pinned). Runs on llvmpipe with no GPU present.
+
+### THREE OVERCLAIMS OF MINE, EACH CAUGHT BY A TEST -- and the same root cause twice
+  1. "bit-exact vs NumPy" -- true for arange, FALSE for linspace(-3,3). Exactness is DATA-DEPENDENT.
+  2. Harness bug #1: the array was cast to f32 for dispatch while Python evaluated the ORIGINAL float64.
+  3. Harness bug #2: extra_args were emitted as f32 LITERALS while Python got float64 -- and 1.7 is not
+     exactly representable, so the two sides multiplied by DIFFERENT CONSTANTS.
+(2) and (3) are one lesson: **A DIFFERENTIAL TEST THAT DOES NOT FEED BOTH SIDES IDENTICAL INPUTS MEASURES
+ITS OWN CONVERSIONS.** Both made a correct kernel look broken. Fixed by casting array AND scalars before
+either side runs.
+Final honest contract, pinned as a TOLERANCE not an equality: single-expression kernels stay within f32
+rounding (max_rel < 1e-5, often exactly 0); accumulating ones drift further (~3e-06) because Python
+accumulates in float64 and casts while WGSL accumulates in f32 throughout. `exact` is an OBSERVATION ABOUT
+ONE RUN, never a property -- which is exactly why verify_wgsl_kernel exists.
+
+### State
++13 (policy) +9 (wgsl) tests. ALL NINE audits exit 0. regen_docs --check clean. Two new modules
+(scene_and_pipeline/holographic_policy, io_and_interop/holographic_wgpurun); five faculties
+(resource_policy, wgsl_device, run_wgsl_kernel, verify_wgsl_kernel, + policy-aware cpu_budget/should_pool);
+discoverability 6/6, 5/5, 4/4 on the three new entries. wgpu is an OPTIONAL dependency -- tests skip cleanly
+without it.
+
+### REMAINING IN THE GPU BACKLOG
+A2 gpu_report, A3 transfer pre-gate, A4 fallback-equivalence tests (all doable here); B1-B3 blocked on a
+CUDA box; C1-C3 and D1/D3/D4 behind their gates. D4's PRECISION gate already passed (fp16 == fp64 exactly).
+
+
+## SESSION (2026-07-26ar) -- GPU BACKLOG TIER A CLOSED: A2, A3, A4 shipped. Two of my own audits were wrong.
+
+### A2 -- gpu_report(): the bare bool was hiding FOUR states
+use_gpu(True) returns False for four different reasons -- no CuPy installed, CuPy present but no device, a
+device the resource policy forbids, and actually enabled -- and THREE OF THE FOUR ARE FIXABLE BY THE USER
+while one is not. A bool cannot say which. gpu_report() separates them and covers BOTH paths, because a
+CuPy-only report would tell an Apple or AMD user they have no GPU, which is false.
+
+### THE DEFECT IN MY OWN AUDIT, caught by writing the discovery walk properly
+My earlier count of "5 modules consult the backend" -- and the report's first implementation -- SUBSTRING
+MATCHED "holographic_backend", which counts every module that merely NAMES it in a docstring. That included
+two modules written the same afternoon that discuss it in prose. THE REAL COUNT IS 4, discovered by parsing
+IMPORTS with ast. `deptrace` is the standing example: it documents holographic_backend.accelerator_report
+and never imports it.
+**A CAPABILITY AUDIT THAT COUNTS DOCUMENTATION AS WIRING IS EXACTLY THE KIND OF NUMBER THIS PROJECT REFUSES
+TO PUBLISH** -- and I published it twice before checking. Pinned by a test that fails if deptrace, gpureport
+or wgpurun ever count as consumers again.
+
+### A3 -- should_offload(), and the interesting refusal is not the obvious one
+Four grounds: no device / policy veto; too little DATA; too little WORK PER BYTE (an elementwise pass reads
+and writes everything and computes almost nothing -- transfer-bound by construction); and REPEATED ROUND
+TRIPS, where the right answer is NOT "is it big enough" but "collapse the passes first", so the refusal
+points at shader_pipeline. That last one is the gate that encodes the extend-don't-emulate architecture:
+fusion happens BEFORE dispatch, so a job crossing the bus N times should be fused, not offloaded.
+THRESHOLDS ARE PROVISIONAL AND THE VERDICT SAYS SO -- ~100 KB and 4 flops/byte are arithmetic from PCIe
+bandwidth against launch latency, NOT measurements. No host<->device crossover has ever been measured in
+this project. Saying so in the returned string is what stops it becoming a folklore constant.
+
+### A4 -- pinning the path everyone actually runs
+No environment this engine has run in has had a CUDA device, so the NumPy fallback is what every user
+executes, and before this only 2 test files touched the backend at all. 9 tests now assert the fallback
+produces the DOCUMENTED result rather than merely not raising -- including that shader_pipeline's fused
+output is reproducible, which is a NUMERIC contract a silently-changed fallback would break.
+The wired-module SET is pinned: if a fifth module starts importing the backend, the suite fails and tells
+whoever wired it to add a fallback test. That is the anti-rot mechanism, not the individual assertions.
+
+### THREE API GUESSES OF MINE, ALL WRONG, ALL CAUGHT
+    mind.fluid_sim(...)          -> does not exist; it is fluid_solver((32,32)) and step() takes NO args
+    pattern_field(size=, seed=)  -> it is pattern_field(name, **params) returning a CALLABLE field
+    field(points) with 2 columns -> the field indexes z; it needs 3-D points
+The first is the dangerous one: my test had `if not hasattr: pytest.skip(...)`, so guessing the name wrong
+would have SILENTLY SKIPPED the heaviest declared GPU kernel while the suite looked green. A skip-on-missing
+guard around a name you guessed is a test that cannot fail. Replaced with the real call.
+
+### State
++13 (gpu_report) +9 (fallback) tests. ALL NINE audits exit 0. regen_docs --check clean. One new module
+(io_and_interop/holographic_gpureport); two faculties (gpu_report, should_offload); discoverability 4/4.
+
+### GPU BACKLOG STATUS
+TIER A COMPLETE: A1 discoverability, A2 report, A3 pre-gate, A4 fallback tests, A5 docstring, A6 policy.
+TIER D: D2 SHIPPED (wgpu runtime, runs on llvmpipe); D4's precision gate PASSED (fp16 == fp64 exactly).
+BLOCKED ON HARDWARE: B1 measure CuPy, B2 tolerance envelope, B3 GPU CI lane -- and every Tier C item waits
+on B1. REMAINING AND DOABLE: D1 (find maximal LSI runs in a mixed graph), D3 (GPU as a machine-model tier),
+D4's mechanism half (which slots to drop, and re-addressing after).
+
+
+## SESSION (2026-07-26as) -- D1 GATED: the first task already shipped, and it found NO TARGET.
+
+D1 ("fuse-then-dispatch") named its own first task: "a pass that walks a mixed graph and identifies maximal
+LSI segments to fuse, leaving nonlinear stages as barriers."
+
+### RULE 0 CAUGHT IT: THAT PASS IS `postfx_fusable_runs` AND IT ALREADY SHIPS
+Worse (better), its docstring ALREADY CARRIED THE MEASUREMENT I was about to make: "the shipped chains have
+NO adjacent linear stages -- every blur is separated by a nonlinear tone curve -- so fusion is a capability
+for chains that HAVE such runs, not a speedup of default_chain."
+Verified live rather than trusted: the default chain's 7 stages (exposure, bloom, aces,
+chromatic_aberration, vignette, film_grain, gamma) come back as ONE non-fused run. **ZERO fusable runs.**
+
+### AND FROM THE OTHER SIDE, THE ITEM COLLAPSES TOO
+shader_pipeline is all-LSI BY CONSTRUCTION -- a graph built with it is ALREADY one transfer, so there is no
+run-finding to do there either. So:
+    postfx chains        have stages to fuse, but NONE ADJACENT       -> nothing to collapse
+    shader_pipeline      fuses by construction                        -> nothing left to find
+FUSE-THEN-DISPATCH HAS NO TARGET IN SHIPPED CODE. What remains is "dispatch the already-fused operator to a
+device", which is one kernel's worth of B1/C work gated on B1, not a flagship extension item.
+
+### THIS IS THE FUSION RUNG AGAIN, EXACTLY
+Third time in this arc: a real, correct, well-built mechanism with nothing in the shipped code to act on.
+    3.1  fusion rung        0/60 resolutions produce a chain
+    D1   fuse-then-dispatch 0/7 stages adjacent-linear
+Both were argued from the MECHANISM being good, which it is, rather than from anything needing it. THE
+QUESTION IS NEVER "IS THIS MECHANISM GOOD" BUT "WHAT IN THE SHIPPED CODE WOULD USE IT" -- and that is a
+counting question with a cheap answer, every time.
+
+### KEPT AS A LIVE GATE, NOT DELETED
+test_the_shipped_postfx_chain_has_no_fusable_runs FAILS the moment a chain gains adjacent linear stages,
+which is precisely when D1 becomes worth costing again. A refuted item with a live re-open trigger is worth
+more than a deleted one.
+
+### State
++2 tests (17 in test_gpu_report.py). ALL NINE audits exit 0. No new module, no faculty -- one re-scope and
+one pinned measurement.
+
+### GPU BACKLOG NOW
+DONE: A1-A6 (Tier A complete), D2 (wgpu runtime), D4 precision gate.
+GATED/REFUTED: D1 (no target in shipped code).
+BLOCKED ON A CUDA BOX: B1 measure, B2 tolerance envelope, B3 CI lane -- and all of Tier C waits on B1.
+REMAINING AND DOABLE: D3 (GPU as a machine-model tier -- the placement oracle; A6 is its prerequisite and
+is now done), D4's mechanism half (which slots to drop under pressure, and re-addressing after).
+
+
+## SESSION (2026-07-26at) -- DIRECTION SET: CUDA IS NOT THE FOCUS. And that UNBLOCKS the backlog.
+
+Moose: "I am not particularly interested in CUDA support as a focus. There are lots of non-cuda gpu out
+there that can't take advantage of it. I would prefer to not really do CUDA things at this time if we have
+alternatives that work on any gpu."
+
+### THE RE-TIERING
+    B1-B3 (measure CuPy, tolerance envelope, CUDA CI lane)   PARKED -- NVIDIA-only AND hardware-blocked
+    C1-C3 (route more kernels through CuPy, multi-device)    PARKED with B1; C2 (WGSL) moves to main line
+    WGSL / wgpu                                              THE MAIN LINE
+CuPy is NOT removed -- it is a perfectly good transparent accelerator for people who have NVIDIA, and
+ripping it out would be a regression for them. It simply gets no new investment while the vendor-neutral
+path has gaps.
+
+### THE UNLOCK NOBODY HAD NOTICED
+**EVERY BLOCKED ITEM IN THIS BACKLOG WAS BLOCKED BECAUSE IT WAS A CuPy ITEM.** The WGSL path runs on
+llvmpipe in ordinary CI. Changing which path is the focus takes the backlog from mostly-blocked-on-hardware
+to fully actionable. That is a strategic point worth remembering: "we are blocked on hardware" was actually
+"we chose the path that needs hardware".
+
+### THE REAL BLOCKER ON THE MAIN LINE IS REDUCTIONS, NOT DEVICES -- and I gated it before writing the item
+holographic_wgpurun ships ELEMENTWISE MAPS ONLY. Measured against what the heavy kernels need:
+    pathtrace, shader/postfx      elementwise             SERVED TODAY
+    bind/unbind                   rfft->multiply->irfft   PARTIAL (multiply yes, FFT no)
+    bundle, cleanup, resonator,   reduction (+ argmax)    NOT SERVED
+    amp, htcodebook
+So elementwise-only serves the RENDERING half and NONE of the VSA half -- the half that makes this engine
+what it is.
+GATE: wrote a workgroup reduction (shared memory + workgroupBarrier, tree halving) and ran it on llvmpipe
+with NO GPU: 1024 elements -> 16 workgroup partials -> total 523776.0 vs numpy 523776.0, EXACT.
+Reductions are an IMPLEMENTATION item on this path, not a research risk. Five minutes to establish, before
+committing a whole tier to it.
+
+### REVISED MAIN LINE
+    W1 reduction primitive (workgroup reduction + argmax)   -- gate PASSED, unlocks the VSA kernels
+    W2 route ONE VSA kernel                                 -- see the determinism constraint
+    W3 FFT on WGSL (Stockham radix-2)                        -- bind/unbind need it
+    W4 wgpu in the machine model                             -- D3 retargeted; A6 (its prerequisite) is done
+    W5 WGSL CI lane on llvmpipe                              -- what stops this path rotting like CuPy's did
+
+### A DETERMINISM CONSTRAINT ON W2 THAT MUST NOT BE WISHED AWAY
+cleanup is an ARGMAX, and an argmax is a DECISION, not a continuous value -- exactly the tie-sensitive class
+this engine keeps on CPU. A GPU reduction sums in a DIFFERENT ORDER, so a knife-edge tie can land
+differently, and the rule is that existing decisions never flip.
+So W2's gate is NOT only "is it faster" but **"does it return the same index"**, measured on ADVERSARIAL
+NEAR-TIES rather than random data (random data almost never produces a tie, so a random-data test would pass
+and prove nothing). If it does not hold, cleanup stays on CPU and W2 retargets to amp/htcodebook, which
+produce continuous values and are TOL-class rather than EXACT-class.
+Note the float-order problem here is the SAME ONE distribute_exact already solves on CPU with a
+superaccumulator. Whether that is worth porting to WGSL is its own gate and must not be assumed.
+
+### State
+Backlog re-tiered; do-not-build gained four entries including "no new CuPy work while the WGSL path has
+gaps". No code this session beyond the gate probe. ALL audits clean.
+
+
+## SESSION (2026-07-26au) -- BACKLOG REWRITTEN LEAN. C1+C2 SHIPPED: return the tie, then VERIFY it.
+
+Backlog stripped to open work only (docs/BACKLOG_gpu.md); full history preserved in NOTES and in the code's
+WHY-comments. Everything done, refuted, or parked is gone from the document -- including all CuPy work.
+
+### THE IDEA, AND WHERE IT WAS RIGHT
+Moose: at a knife-edge, "return the 2 potential values that need to be decided between, and have some manner
+of machine learning ensure the correct one is used by testing both out and seeing which one works ... if the
+machine has an inconsistency we should not be fragile and break, we should adapt."
+MOSTLY ALREADY BUILT, and the coordinator's docstring says so: distributed float sums agree only to ~1e-12
+across bucket orders, "but that only matters if a TIE-SENSITIVE decision consumes the sum ... resolve only
+the rare knife-edge with the CANONICAL rule so every node agrees." Detection (margin) and canonical
+tie-break both ship.
+
+### THE REAL GAP, CLOSED
+decide_or_abstain DETECTED the knife-edge and then THREW THE ALTERNATIVES AWAY -- ('alpha', 0.7071, False).
+The caller learns not to be confident and cannot learn WHAT IT WAS NEARLY. tied_candidates now returns the
+set within margin plus the separation.
+A CLEAR WINNER RETURNS A ONE-ELEMENT SET, NEVER EMPTY -- "no ambiguity" and "no answer" must not look alike
+to a caller branching on truthiness. Empty is reserved for empty input.
+
+### WHY VERIFICATION, NOT MACHINE LEARNING -- the one place I pushed back
+  1. AT A GENUINE TIE THE CANDIDATES ARE EQUALLY GOOD. The ambiguity is in the DATA, not in a failure to
+     decide, so there is frequently NO CORRECT ANSWER TO LEARN and training a preference is fitting noise.
+  2. WHERE A DOWNSTREAM ORACLE EXISTS, VERIFICATION BEATS LEARNING OUTRIGHT -- and recursive_factor already
+     does exactly this: propose, re-compose, CHECK, report unsolved rather than guess. Exact, deterministic,
+     no training data, and it returns a PROOF instead of a probability.
+  3. (Learned weights also violate the core constraint, but I would argue against ML here even if they did
+     not.)
+verify_and_keep generalises the resonator's pattern: try candidates in rank order, keep the first that
+verifies, and REPORT ALL-FAILED rather than falling back to the top-ranked guess -- because falling back is
+precisely the failure being replaced.
+
+### THE DISTINCTION WORTH KEEPING
+**ADAPTING AND BEING NON-DETERMINISTIC ARE DIFFERENT THINGS.** Candidate sets plus a deterministic verifier
+plus a canonical tie-break give adaptation with full reproducibility -- same input, same answer, every node,
+every run. A GPU reduction that silently lands differently run-to-run is not adaptation, it is
+unreproducibility. The design gets the first without buying the second.
+
+### C2's GATE PASSED, AND THE SHAPE IS THE FINDING
+Ties at margin 0.01, D=512, M=64:
+    random codebook,  moderate noise    0%
+    random codebook,  extreme noise    32%
+    COHERENT codebook, light noise      0%
+    COHERENT codebook, heavy noise     84%
+NEAR-TIES ARE ABSENT WHEN HEALTHY AND COMMON UNDER STRESS. That is the ideal result: a well-separated store
+never pays for this machinery, and an overloaded or near-duplicate one pays constantly -- which is exactly
+the regime where breaking versus adapting is the difference. Had it been 0% everywhere, C2 would have been
+ceremony and C1 the right stopping point (the test the fusion rung and 'wall' trigger failed). Pinned both
+directions, so the case dies if either end stops holding.
+
+### State
++14 tests (tests/test_candidate_sets.py, 1 slow). ALL NINE audits exit 0 (skill_lint caught the catalog
+600-char budget at 641 -- trimmed rather than let a regression through). regen_docs --check clean. Two new
+functions in an existing module, two faculties, discoverability 4/4.
+
+### BACKLOG NOW
+C1 DONE, C2 DONE. Next: W1 (WGSL reduction primitive -- gate already passed, exact on llvmpipe), then W2
+(route one VSA kernel, two-part gate including adversarial near-ties), W3 (FFT), W4 (device as placement
+tier), W5 (WGSL CI lane), W6 (degradation mechanism -- precision half already passed).
+
+
+## SESSION (2026-07-26av) -- W1 SHIPPED: reductions on any GPU, and the tie rule survives the device.
+
+### THE PRIMITIVE
+wgsl_reduce (sum/max/min) + wgsl_argmax on Vulkan/Metal/DX12/WebGPU. This is what unlocks the VSA half:
+run_wgsl_kernel does ELEMENTWISE MAPS ONLY, which serve rendering and NONE of bundle / cleanup / resonator /
+amp / htcodebook -- every one a cross-invocation reduction.
+
+### TWO DESIGN DECISIONS, BOTH FORCED BY DETERMINISM RATHER THAN BY PERFORMANCE
+  1. TWO-STAGE, NOT SINGLE-PASS. Each workgroup reduces its slice in shared memory and writes ONE partial;
+     the host finishes the short partial array. A whole-array device reduction would need a grid-wide
+     barrier (WGSL HAS NONE) or atomics (FLOAT-NONDETERMINISTIC) -- the wrong side of the engine's rule.
+     Two stages keep the device work order-defined within a workgroup.
+  2. ARGMAX IS SPLIT: VALUE ON DEVICE, INDEX ON HOST. Argmax is a DECISION, not a value, and existing
+     decisions may never flip. So the device finds the max and the host takes the FIRST index attaining it
+     -- ties break by LOWEST INDEX, the same canonical rule determinism.argmax_tiebreak uses, rather than by
+     whichever workgroup finished first. A fully device-side (value,index) reduction is possible and was
+     DELIBERATELY NOT BUILT: it would make tie resolution depend on reduction order.
+
+### MEASURED
+    sum / max / min over arange(1024)        EXACT vs numpy
+    tails n = 1,7,63,65,100,1000             EXACT (identity-fill for out-of-range lanes)
+    real VSA cleanup queries, device argmax  40/40 agree with CPU
+    ADVERSARIAL EXACT TIES                   200/200 agree with CPU
+The tie result is the one that matters, and it is EARNED BY THE DESIGN rather than lucky -- which is why the
+host-side index resolution is worth its cost. RANDOM DATA ALMOST NEVER TIES, so a random-data tie test would
+have passed while proving nothing; the ties are constructed.
+
+### A SUBTLE SHADER BUG AVOIDED, worth recording
+Out-of-range lanes must write the IDENTITY into shared memory, not skip the write. A skipped write leaves
+whatever was in workgroup memory from a PREVIOUS DISPATCH and the reduction tree folds it in -- silent,
+data-dependent, and it would only show up on sizes that are not a whole number of workgroups. Pinned by the
+tail test at six different sizes. Likewise every barrier sits OUTSIDE the `if (lid.x < s)`, because a
+barrier inside a divergent branch deadlocks.
+
+### CONSEQUENCE FOR W2
+W2's gate was two-part: (a) faster through the transfer, (b) same index on adversarial near-ties. **(b) IS
+NOW ANSWERED** for argmax by construction. What remains is (a), the speed half -- plus whether the host-side
+index finish dominates at realistic M.
+
+### State
++8 tests (17 in test_wgsl_runtime.py). ALL NINE audits exit 0. regen_docs --check clean. Two functions in an
+existing module, two faculties, discoverability 4/4. wgpu stays OPTIONAL -- the suite skips cleanly without
+it.
+
+
+## SESSION (2026-07-26aw) -- W2 GATED AND RETARGETED: the argmax was the wrong thing to offload.
+
+### THE UNCONFOUNDED FINDING -- it does not depend on this box at all
+Offloading cleanup's ARGMAX ALONE CANNOT PAY ON ANY DEVICE:
+    numpy argmax reaches 0.1 ms (an OPTIMISTIC real-GPU dispatch floor) at M ~ 500,000
+    real VSA codebooks are M = 64..4096, where argmax is SINGLE-DIGIT MICROSECONDS
+Both inputs are real-CPU measurements plus the universal fact that any GPU has a nonzero submission cost.
+So this survives the llvmpipe confound entirely, which is what makes it worth acting on.
+(The raw llvmpipe comparison -- wgsl ~1.5-24 ms vs numpy 0.002-0.02 ms -- IS confounded and is recorded only
+as the dispatch-floor measurement: the wgsl time is FLAT at ~1.5 ms from M=64 to M=1024, which is dispatch,
+not compute.)
+
+### WHERE CLEANUP'S TIME ACTUALLY GOES -- I measured the wrong half first
+    M      D      similarity   argmax     similarity share
+    64     512    0.0029 ms    0.0015 ms   66%
+    1024   512    0.0732 ms    0.0019 ms   98%
+    4096   1024   0.5895 ms    0.0026 ms  100%
+    16384  2048   9.83 ms      0.0054 ms  100%
+The codebook similarity is M*D work; the argmax is only M. I gated the M part and nearly concluded "cleanup
+cannot be offloaded" from it. **CHECK WHICH PART OF THE KERNEL YOU ARE ACTUALLY TIMING** -- the same
+number-without-variable error this project keeps catching, in a new costume.
+
+### THE RETARGET, AND IT LANDS ON A RULE ALREADY ESTABLISHED
+W2 becomes: OFFLOAD THE SIMILARITY, FUSED WITH THE ARGMAX IN ONE DISPATCH. Splitting them pays the dispatch
+floor TWICE and ships the intermediate vector back. That is the SAME "fuse before you dispatch" rule that
+governs shader_pipeline and that should_offload's round_trips gate encodes -- arrived at independently from
+a third direction. When a rule keeps reappearing from unrelated measurements it is probably structural.
+
+### WHAT CANNOT BE CLOSED HERE, STATED PLAINLY
+llvmpipe is a CPU adapter, so ANY speed comparison on this box is numpy against a CPU driver emulating a GPU
+and is meaningless. CORRECTNESS is verifiable here; the CROSSOVER needs one real device. Honest expectation
+from the numbers: the win begins somewhere around M*D > ~10^6.
+
+### State
++2 tests (19 in test_wgsl_runtime.py, both marked slow). Backlog W2 rewritten with the measured table and
+the remaining work (an M x D matvec kernel -- a per-row dot product is a workgroup reduction, which W1
+already provides the shape for). ALL audits clean.
+
+
+## SESSION (2026-07-26ax) -- W2 SHIPPED: VSA cleanup on ANY GPU, with its flip boundary measured and bounded.
+
+### BUILT
+wgsl_matvec (M x D, ONE WORKGROUP PER ROW -- rows never communicate, so no cross-workgroup reduction and no
+grid-wide barrier; each lane walks its row with a STRIDE, so D need not be a multiple of the workgroup) and
+wgsl_cleanup (similarity + argmax FUSED in one dispatch). Correct on 64x512, 129x300, 256x1024, 17x300 --
+non-multiples included deliberately.
+
+### THE RESIDUAL RISK, MEASURED -- and the counter-intuitive half is the important one
+The matvec is NOT bit-exact (device sums each row in tree order in f32; NumPy sums differently), so a
+similarity near-tie CAN flip the decision. Boundary, with INDEPENDENT rows tuned to a controlled gap:
+    gap 1e-3, 1e-5, 1e-6   ->  0/150 disagreements
+    gap 1e-7               ->  3/150 DISAGREE
+**NEAR-DUPLICATE ATOMS DO NOT FLIP (0/120), AND THAT IS THE OPPOSITE OF THE NATURAL WORRY.** The rounding
+error is CORRELATED across near-identical rows and largely CANCELS IN THEIR DIFFERENCE. The dangerous case
+is INDEPENDENT rows landing coincidentally close, where the errors are uncorrelated. I tested the
+near-duplicate case first, got 0/120, and would have concluded "no risk" had I stopped there -- the
+adversarial construction had to be built deliberately.
+
+### THE MITIGATION WAS ALREADY BUILT, TWO ITEMS AGO
+A flip needs a gap <= ~1e-7. The smallest tie margin anyone would sensibly use is 1e-3 -- FOUR ORDERS
+LARGER. So tied_candidates reports BOTH candidates for every gap that could possibly flip, and a caller
+pairing device cleanup with candidate sets receives a DECLARED AMBIGUITY rather than a silent difference.
+C1 was built to expose ties in degraded regimes; it turns out to be exactly the mitigation for GPU
+non-determinism, arrived at from a completely unrelated direction. Pinned as a test.
+
+### THE FUSION RULE, NOW FROM A FOURTH DIRECTION
+similarity and argmax are fused in ONE dispatch because splitting pays submission twice and ships the
+M-length intermediate back. Same rule as shader_pipeline, same rule as should_offload's round_trips gate,
+same rule as the retarget that produced this item. FOUR INDEPENDENT MEASUREMENTS POINTING AT ONE RULE MEANS
+IT IS STRUCTURAL, not a coincidence of this codebase.
+
+### State
++8 tests (27 in test_wgsl_runtime.py). ALL NINE audits exit 0. regen_docs --check clean. Two functions in an
+existing module, two faculties, discoverability 4/4.
+The SPEED crossover remains unmeasurable here (llvmpipe is a CPU adapter). Correctness is done; the number
+needs one real device, and the honest expectation from the CPU measurements is M*D > ~10^6.
+
+### BACKLOG
+DONE: C1, C2, W1, W2. NEXT: W3 (FFT on WGSL -- bind/unbind), W4 (device as a placement tier), W5 (WGSL CI
+lane), W6 (degradation mechanism -- precision half already passed).
+
+
+## SESSION (2026-07-26ay) -- W3 GATED AND FEASIBILITY-CHECKED: single bind can't pay; batched can; D<=4096
+## fits in shared memory.
+
+### THE GATE MOVED THE TARGET, EXACTLY AS IT DID FOR W2
+A SINGLE bind at realistic D costs TENS OF MICROSECONDS on CPU:
+    D=512  0.024 ms | D=1024  0.031 ms | D=4096  0.087 ms | D=16384  0.497 ms
+Below even an optimistic 0.1 ms real-hardware dispatch floor. **OFFLOADING ONE BIND IS THE ARGMAX MISTAKE
+AGAIN** -- third time in this arc that the obvious unit of work is too small to pay and the BATCHED form is
+the real target.
+    W2   offload argmax        -> no: offload the M x D similarity
+    W3   offload one bind      -> no: offload bind_batch
+    (and 3.1/D1 fusion         -> no: nothing adjacent to fuse)
+THE UNIT OF WORK YOU NATURALLY REACH FOR IS USUALLY SMALLER THAN THE DISPATCH FLOOR. Check the cost of the
+unit BEFORE designing the kernel.
+Batched: N=64 D=1024 -> 0.92 ms; N=1024 -> 13.7 ms; N=8192 -> 123 ms. Those clear any floor comfortably, and
+bind_batch(A, B) over (k, dim) stacks ALREADY EXISTS as the target.
+
+### FEASIBILITY CHECKED AGAINST REAL DEVICE LIMITS, and it decides the design
+Read live from the adapter:
+    max-compute-invocations-per-workgroup   1024
+    max-compute-workgroup-storage-size      32768 bytes = 4096 complex f32
+So the ENTIRE log2(D)-stage FFT FITS IN SHARED MEMORY FOR D <= 4096 -- which covers every realistic VSA
+dimension. That is what makes it ONE DISPATCH PER ROW with workgroupBarrier between stages, instead of
+log2(D) SEPARATE DISPATCHES (10 round trips at D=1024) which would violate the fuse-before-dispatch rule
+four independent measurements have now established.
+The fallback boundary above D=4096 is therefore A DEVICE LIMIT, not a guess -- worth having because "why
+does it fall back at 4096" has a citable answer.
+
+### DESIGN RECORDED, BUILD NOT STARTED
+One workgroup per batch row (the wgsl_matvec shape), Stockham radix-2 with all stages in shared memory,
+forward -> complex multiply -> inverse in a SINGLE dispatch. Correctness is verifiable here against
+bind_batch; the crossover in N needs a real device.
+Recorded rather than built because it is an L item and the design constraints were the valuable part -- a
+future session starts from "one dispatch, D<=4096, one workgroup per row" instead of rediscovering that a
+naive multi-pass FFT is disqualified by its own round trips.
+
+### State
+No code this session. Backlog W3 rewritten with both measured tables and the device limits. All audits clean.
+
+
+## SESSION (2026-07-26az) -- W5 SHIPPED: a WGSL CI lane that CANNOT PASS BY SKIPPING.
+
+### WHY THE LANE EXISTS, in one sentence
+The CuPy backend was wired, code-reviewed, and NEVER ONCE EXECUTED IN CI -- for the entire life of the
+project -- because testing it needs an NVIDIA machine nobody had. The WGSL path does not have to repeat
+that: llvmpipe implements Vulkan/GL in SOFTWARE, so a runner with no GPU compiles and RUNS the same shaders.
+That asymmetry is the strongest single argument for the vendor-neutral path being the main line, and this
+lane is where it cashes out.
+
+### THE FAILURE MODE THE LANE IS BUILT AROUND
+A SKIPPED SUITE MUST NOT PASS FOR A GREEN LANE. The wgsl tests skip themselves when no adapter is reachable
+-- correct on a developer machine, catastrophic in CI, because a broken driver install would turn every test
+into a skip and the lane would report success HAVING RUN NOTHING. This project has ALREADY been bitten by a
+skip indistinguishable from a pass (twice, per the earlier watchdog lesson).
+So the lane asserts an adapter is present BEFORE running anything, and asserts tests were collected AFTER.
+A test pins that the lane still does both -- if someone strips the mesa install or the assertion, the suite
+fails rather than the lane going quietly hollow.
+
+### SCOPE, STATED IN THE WORKFLOW ITSELF
+  CHECKS:     shaders compile, dispatch, match NumPy, handle partial workgroups, break argmax ties by the
+              canonical lowest-index rule.
+  DOES NOT:   measure speed. llvmpipe is a CPU adapter, so timing here is numpy vs a CPU driver emulating a
+              GPU -- meaningless, and PUBLISHING IT WOULD BE WORSE THAN NOT MEASURING.
+The crossover needs one real device; CORRECTNESS DOES NOT, AND CORRECTNESS IS WHAT ROTS.
+
+### THE OPTIONAL-DEPENDENCY CONTRACT, VERIFIED
+wgpu is NOT in requirements.txt (asserted by a test) and is installed by the lane alone. With wgpu blocked at
+import, available() -> False and device_info() -> {'available': False, 'why': 'wgpu is not installed (pip
+install wgpu)'} -- a clear message, not a crash. The pure-NumPy install remains the one everyone runs.
+
+### State
++2 tests (29 in test_wgsl_runtime.py; 42 pass across the two wgsl-facing suites with slow lifted). New
+.github/workflows/wgsl.yml. ALL audits clean, regen_docs --check clean. No new module or faculty.
+
+### BACKLOG
+DONE: C1, C2, W1, W2, W5. OPEN: W3 (batched bind -- design and device limits recorded, build not started),
+W4 (device as a placement tier -- do next, fully doable here), W6 (degradation mechanism; precision half
+already passed).
+
+
+## SESSION (2026-07-26ba) -- W4 SHIPPED: one placement oracle. It COMPOSES the three that existed.
+
+### THE GAP
+Three oracles answered three placement questions and NONE knew about the others:
+    machine_place_unit(name, baseline_ns, n_calls)   units
+    should_pool(n_buckets, est_ms_per_bucket)        processes
+    should_offload(n_bytes, flops_per_byte)          device
+A caller had to consult all three and reconcile by hand -- and NOTHING reconciled them with resource_policy,
+so an oracle could cheerfully recommend a device THE OPERATOR HAD FORBIDDEN. That is worse than no oracle:
+it produces a plan that cannot be executed and a user who stops trusting the advice.
+
+### IT COMPOSES, IT DOES NOT REIMPLEMENT -- pinned by a test
+Every verdict comes from the existing oracle for that question. This contributes the ORDER, the VETO and one
+honest REPORT. machine_place already does break-even arithmetic for any unit, and A DEVICE IS SIMPLY A UNIT
+WHOSE SETUP COST IS THE TRANSFER -- so no fourth cost model was needed, and a fourth one could only drift
+from the other three.
+
+### THE ORDER IS THE ARGUMENT, and both halves are tested
+  1. POLICY VETO FIRST. No arithmetic makes a forbidden device faster.
+  2. CHEAPEST-CORRECT WINS TIES: unit -> pool -> device. A pool costs a process and an interpreter; a device
+     costs a transfer AND CHANGES THE NUMBERS -- GPU matches NumPy only to a tolerance while the pooled path
+     is VERIFIED BIT-IDENTICAL. THOSE ARE NOT EQUIVALENT RISKS, and the ordering is where that distinction
+     becomes operational rather than a docstring.
+
+### TWO REPORTING DECISIONS WORTH KEEPING
+  * A candidate with missing inputs is 'NOT EVALUATED', never 'rejected'. A placement nobody costed and a
+    placement that lost are DIFFERENT FACTS, and collapsing them hides that the caller never supplied
+    numbers.
+  * A DEVICE ANSWER COMES BACK MARKED `provisional`, because should_offload's thresholds are arithmetic from
+    PCIe bandwidth and no host<->device crossover has ever been measured here. A caller can act on it;
+    nobody should mistake it for a measurement. This is the same honesty should_pool carries about its
+    0.2 ms dispatch figure.
+
+### State
++9 tests (tests/test_placement.py). New module in scene_and_pipeline/; one faculty (place_work);
+discoverability 4/4. ALL NINE audits exit 0. regen_docs --check clean.
+
+### BACKLOG
+DONE: C1, C2, W1, W2, W4, W5. OPEN: W3 (batched bind -- design + device limits recorded, build not started),
+W6 (degradation mechanism -- precision half already passed; the open half is which slots to drop and how
+addressing survives).
+
+
+## SESSION (2026-07-26bb) -- W6 SHIPPED, and its gate CORRECTED A NUMBER I HAD ALREADY PUBLISHED.
+
+### THE FLAW IN MY OWN EARLIER GATE
+The D4/W6 precision gate measured recall with slots ZEROED, and reported "identical at fp64/fp32/fp16, 100%
+at 40% loss". **ZEROING SAVES NO MEMORY.** A zeroed slot still occupies its dimension. For a memory-saving
+scheme the operation is TRUNCATION -- store only the kept slots -- and that is a different measurement:
+    keep    ZEROED recall   TRUNCATED recall
+    100%        100%             100%
+     60%        100%             100%
+     40%        100%              92%
+     20%         98%              46%
+     10%         78%              25%
+So the README's headline (100% recall at 40% of slots DESTROYED) is CORRECT FOR WHAT IT CLAIMS -- robustness
+to DAMAGE, where slots really are zeroed -- and DOES NOT TRANSFER to memory saving. Corruption-robustness
+and a memory budget are DIFFERENT QUANTITIES and I briefly conflated them. The README is unchanged (its
+claim is sound); the distinction is now pinned by a test that fails if truncated recall ever matches the
+damage figure.
+
+### THE MECHANISM HALF NEEDED NO NEW THEORY
+Dropping slots reduces the EFFECTIVE DIMENSION, so the constraint is the load-ratio law bundle_capacity
+already measures. PREDICTED, THEN VERIFIED:
+    D=1024 M=8  keep 40%  -> M/eff 0.0196 -> 100%
+    D=1024 M=16 keep 40%  -> M/eff 0.0391 ->  85%
+    D=2048 M=16 keep 40%  -> M/eff 0.0195 ->  98%
+    D=512  M=16 keep 50%  -> M/eff 0.0625 ->  88%
+    D=4096 M=16 keep 25%  -> M/eff 0.0156 ->  98%
+EVERY configuration at or below ~0.02 held; EVERY one above it degraded. One law, both regimes -- the
+"which slots to drop and how much" question that looked like the hard open half turned out to be an
+application of a measurement already on file.
+
+### SHIPPED
+drop_budget(dim, n_items, safe_ratio) -> {keep, keep_fraction, dropped, bytes_saved, effective_ratio, safe}.
+safe_ratio defaults to the LINEAR readout (0.02); a caller with a sparse decoder passes bundle_capacity's
+measured ratio for their method (0.17 for cosamp/amp) and drops far more aggressively -- so the budget is a
+property of the READOUT, not a constant, which is the same lesson bundle_capacity itself exists to teach.
+
+### State
++5 tests (14 in test_bundle_capacity.py). ALL NINE audits exit 0. regen_docs --check clean. One function in
+an existing module, one faculty, discoverability 4/4.
+
+### THE BACKLOG IS NOW DOWN TO ONE ITEM
+DONE: C1, C2, W1, W2, W4, W5, W6. OPEN: W3 only -- batched bind on WGSL, design and device limits recorded
+(one dispatch per row, D<=4096 fits shared memory, Stockham radix-2), build not started. Its correctness is
+verifiable here; its crossover needs a real device.
+
+
+## SESSION (2026-07-26bc) -- PYPI PACKAGING FOR THE GPU WORK. Verified by INSTALLING, not by reading setup.py.
+
+### THE GAP
+setup.py had `"gpu": ["cupy"]` and NOTHING for wgpu -- so the vendor-neutral path, which is now the main
+line, WAS NOT INSTALLABLE AS AN EXTRA AT ALL. The modules themselves were fine (find_packages() picks up
+anything under holographic/, so new modules need no setup.py edit) but the optional dependency was missing.
+
+### THE ASYMMETRY THAT JUSTIFIES TWO EXTRAS RATHER THAN ONE
+    gpu  = cupy   NVIDIA/CUDA only, TIED TO YOUR CUDA VERSION -> stays opt-in, stays OUT of `all`
+    wgsl = wgpu   Vulkan/Metal/DX12/WebGPU, PREBUILT WHEELS, no system toolchain -> goes IN `all`
+Checked rather than assumed: wgpu's runtime deps are cffi + rendercanvas (+ rubicon-objc on macOS only), all
+pure wheels, NO CUDA COUPLING. **THE REASON CuPy IS EXCLUDED FROM `all` SIMPLY DOES NOT APPLY TO wgpu**, and
+leaving it out would deny the portable GPU path to everyone who installs the convenience extra.
+`gpu` was NOT redefined to mean wgpu, even though the name now reads oddly -- that would change what an
+existing `pip install leos-core[gpu]` pulls in, which is a silent behaviour flip for current users.
+
+### VERIFIED BY BUILDING AND INSTALLING, in two clean venvs
+    wheel:  596 files, all four new modules PRESENT, metadata carries Provides-Extra: wgsl and
+            Requires-Dist: wgpu; extra == "wgsl" AND extra == "all"
+    venv A  pip install leos_core-0.2.0.whl[wgsl]  -> wgsl_device llvmpipe, wgsl_reduce 130816.0,
+            wgsl_cleanup (7, 7.0), gpu_report cupy=False wgsl=True, place_work -> device
+    venv B  pip install leos_core-0.2.0.whl (BARE) -> gpu_report 'wgpu is not installed (pip install wgpu)',
+            use_gpu(True) False, place_work -> cpu, wgsl_reduce raises a NAMED ImportError, core unaffected
+READING setup.py WOULD HAVE PROVED NEITHER. The wheel-contents check in particular is the one that catches a
+module dropped outside the packaged tree -- a gap that otherwise shows up only AFTER publishing.
+
+### PINNED
+Three tests in test_packaging.py: the wgsl extra exists and is SEPARATE from gpu; wgpu is in `all` and cupy
+is NOT (the asymmetry is the point, so both directions are asserted); the four GPU modules live inside the
+discovered package tree. PACKAGING.md's extras table updated with both rows and the why.
+
+### State
++3 tests (8 in test_packaging.py). ALL audits clean, regen_docs --check clean. setup.py and docs/PACKAGING.md
+updated; no module changes.
+
+
+## SESSION (2026-07-26bd) -- UP/DOWN/SIDEWAYS PASS ON THE WGSL WORK. It found the same mistake A THIRD TIME.
+
+Moose asked whether we are FULLY taking advantage of WGSL, whether the backlogs are done, and whether an
+up/down/sideways pass had been done. Honest answers: NO, NO, and NO -- I had skipped the pass, which is a
+documented design habit, and it found a real gap immediately.
+
+### THE UP DIRECTION WAS MISSING -- and it is the same error as W2 and W3
+    DOWN      one row of a matvec = a dot product                        covered
+    SIDEWAYS  amp / htcodebook / resonator all need the same matvec      covered by the shape
+    UP        MANY QUERIES AT ONCE                                       ** NOT BUILT **
+Measured, M=1024 D=512:
+    ONE query     0.095 ms  -- BELOW any plausible dispatch floor; can never pay
+    256 queries   2.98 ms   -- comfortably above it
+So the form I built (single query) is the form that can never win, and the form that pays did not exist.
+THIRD TIME THIS EXACT ERROR:
+    W2  offload the argmax        -> no, the M x D similarity
+    W3  offload one bind          -> no, bind_batch
+    now offload one cleanup       -> no, a BATCH of cleanups
+**THE NATURAL UNIT OF WORK IS USUALLY SMALLER THAN THE DISPATCH FLOOR.** I now have three instances and I
+still built the small one first. The up/down/sideways check catches it mechanically, which is precisely why
+it is in the habits list -- and I skipped it three times.
+
+### SHIPPED
+matmul_kernel (queries @ matrix.T, ONE WORKGROUP PER OUTPUT ELEMENT on a 2-D grid -- a direct extension of
+the matvec's one-per-row, still no cross-workgroup communication) and cleanup_batch_kernel. Faculties
+wgsl_matmul + wgsl_cleanup_batch. Verified across 64x128x8, 256x512x32, 129x300x7 (non-multiples included),
+batch cleanup 64/64 against CPU, and BATCHING DOES NOT CHANGE THE TIE RULE (a batch agrees with K separate
+single calls, because both resolve the index host-side by lowest index).
+
+### THE SECOND FINDING: NOTHING IN THE ENGINE CALLS ANY OF IT
+Audited every wgsl faculty for internal callers. THE ONLY INTERNAL REFERENCE IS THE CATALOG REGISTRATION.
+The kernels are reachable, catalogued and discoverable -- and a device is used ONLY when a human knows to ask
+for it by name. place_work can decide where work should run and NO FACULTY CONSULTS IT.
+In one line: **cleanup does not ask place_work whether it should be wgsl_cleanup_batch.**
+Filed as W7 (route to the device automatically) rather than built, for a stated reason: the crossover
+place_work needs is still PROVISIONAL, so auto-routing today would act on arithmetic rather than a
+measurement. The seam should ship default-off and be enabled when real-device numbers exist.
+
+### SO: ARE WE FULLY TAKING ADVANTAGE OF WGSL? NO, AND NOW THE GAPS ARE NAMED
+  * W3  batched bind (FFT) -- designed, not built
+  * W7  automatic routing -- nothing calls the kernels
+  * the speed crossover -- unmeasurable here; llvmpipe is a CPU adapter
+What IS done: reductions, argmax, matvec, matmul, single and batched cleanup, all correct on a software
+adapter, all discoverable, all tie-rule-preserving, with a CI lane that fails rather than skips.
+
+### State
++5 tests (34 in test_wgsl_runtime.py). ALL NINE audits exit 0. regen_docs --check clean. Two functions, two
+faculties; no new module.
+
+
+## SESSION (2026-07-26be) -- WIRING PASS ACROSS POOL / DEVICE / SERVICE / FARM. One oracle, one env layer.
+
+Moose: make sure the pool spinup, the distributed computation and the multi-user/agent surfaces all take
+advantage. Audited all four; THREE HAD REAL GAPS.
+
+### GAP 1 -- `auto` COULD NOT SEE THE DEVICE, AND IGNORED THE POLICY
+backend="auto" called should_pool DIRECTLY, so it could only ever answer "pool or not". It could not see a
+device at all, and it bypassed resource_policy unless should_pool happened to be handed it. Now it calls
+place_work -- the oracle that already composes unit + pool + device WITH THE POLICY VETO FIRST.
+A SECOND COPY OF THE ROUTING LOGIC INSIDE `auto` WOULD HAVE RE-CREATED THE THREE-UNRELATED-SWITCHES PROBLEM
+INSIDE THE THING BUILT TO FIX IT.
+Added last_placement(): AN AUTOMATIC DECISION THAT CANNOT BE INSPECTED IS INDISTINGUISHABLE FROM A BUG. The
+gate declines for four different reasons (one core / too few buckets / below the dispatch floor / policy
+veto) and a caller seeing "stayed on CPU" deserves to know which.
+A `device` verdict is REPORTED but runs on CPU, deliberately: this seam partitions N independent Python
+callables and a device kernel is ONE DISPATCH OVER AN ARRAY. Silently discarding the recommendation would be
+worse; so would pretending the seam fits.
+
+### GAP 2 -- THE MULTI-USER SURFACE HAD NO CAP AT ALL
+The HTTP service builds a mind and never set a policy. Every /invoke shares one process, so without a cap
+ONE REQUEST THAT SPINS UP A POOL DOES IT ON BEHALF OF EVERYBODY and nothing else can decline.
+MY FIRST FIX WAS WRONG AND I CAUGHT IT: I parsed LECORE_CPU_CORES inside the service. That would have capped
+the service and LEFT EVERY FARM WORKER NODE UNCAPPED, and it was a second copy of the env list -- the exact
+"a hand-maintained second copy of a list is always the stale one" failure. Moved into ResourcePolicy._ENV
+where the precedence layer already lives, so ANY mind inherits it: service, worker node, notebook alike.
+A MALFORMED CAP IS IGNORED, NOT GUESSED AT: LECORE_CPU_CORES="lots" must not silently become 1 (a crippling
+cap nobody asked for) nor unlimited (a cap that does not cap). Falling through to auto-detect is the only
+reading that cannot surprise an operator. Pinned for "lots", "", "-2", "0", "3.5".
+
+### GAP 3 -- THE FARM, and the honest answer is a DESIGN POINT not a build
+A coordinator CANNOT AND SHOULD NOT decide how much of a remote box it may consume. Node-local resources are
+the NODE operator's business -- and with the env layer in ResourcePolicy, a node caps itself by setting its
+own environment, which is the only honest place for it. No fake plumbing added; the reasoning is recorded
+where someone will look for it.
+
+### STILL OPEN, and stated plainly
+NO VSA FACULTY ROUTES TO A DEVICE KERNEL. cleanup still does not ask whether it should be
+wgsl_cleanup_batch. Not wired for two reasons, both kept: (1) the crossover is PROVISIONAL, and the one
+thing worse than not using a device is using it ON A GUESS; (2) the bucket seam is the wrong shape. The right
+home is a backend= argument on the batch-shaped VSA faculties, default off.
+
+### A SELF-INFLICTED DEFECT, caught by the suite
+I overwrote tests/poolwork.py with an older probe copy and dropped with_cache, breaking the shared-memory
+test. Restored. The shared-cache test is the one that would otherwise let a regression to per-bucket
+pickling pass silently -- it is still CORRECT without the cache, just slower, so only a test that USES the
+cache notices.
+
+### State
++8 tests (17 in test_resource_policy.py, 19 in test_local_pool.py). ALL NINE audits exit 0. regen_docs
+--check clean. Service integration green.
+
+
+## SESSION (2026-07-26bf) -- W3 SHIPPED, and a GATE TURNED AN L ITEM INTO AN M ONE.
+
+### THE QUESTION I ASKED BEFORE WRITING A STOCKHAM FFT
+bind = rfft -> multiply -> irfft. But WHAT IS bind ACTUALLY? Measured: **bind IS A PLAIN CIRCULAR
+CONVOLUTION**, matching a direct sum to 7e-15. That reframes the whole item, because a circular convolution
+can be computed DIRECTLY in O(D^2) using the workgroup-reduction shape ALREADY PROVEN TWICE (matvec,
+matmul) -- no bit-reversal, no twiddle tables, no multi-stage shared-memory barriers.
+
+### THE TRADE, STATED HONESTLY
+    FFT route     O(D log D)   2.6M ops for a 256x1024 batch   -- but an L-sized, error-prone kernel
+    DIRECT route  O(D^2)     268M ops for the same batch       -- ~100x arithmetic, M-sized, proven shape
+Chosen DIRECT, for two reasons: it reuses a shape that is already tail-safe and tested, and ARITHMETIC IS
+WHAT A GPU HAS -- 100x more MACs across thousands of lanes is a different proposition from 100x more work on
+a CPU.
+**THE TRADE IS NOT MEASURED.** Whether the parallelism recovers 100x depends entirely on the device, and
+this box has a CPU adapter only. Correctness is established; the crossover is not. If a real device shows
+direct convolution losing to the CPU FFT, THE STOCKHAM ROUTE IS THE FALLBACK and its constraints are already
+on record (one dispatch per row, D <= 4096 fits shared memory) -- so the L item is not lost, it is deferred
+with its design intact.
+
+### VERIFIED
+Against the SHIPPED bind_batch (not against my own idea of convolution) at K/D = 4/64, 8/256, 3/100.
+D=100 is deliberate: a non-power-of-two exercises both the modular index and the strided lane walk, and an
+FFT route would have needed PADDING there while the direct form does not. That is a real secondary
+advantage, not a consolation.
+One shader detail worth keeping: (n - k) mod D is computed as (n + D - k) % D, because a u32 subtraction
+underflows into a huge index rather than wrapping negative.
+
+### BATCHED, FOR THE FOURTH TIME ON THIS PATH
+A single bind is ~0.03 ms on CPU at D=1024 -- below any plausible dispatch floor. Only the batch can pay.
+argmax, one bind, one cleanup, one query: FOUR TIMES the natural unit was too small. The rule is now
+thoroughly earned: THE NATURAL UNIT OF WORK IS USUALLY SMALLER THAN THE DISPATCH FLOOR.
+
+### State
++5 tests (39 in test_wgsl_runtime.py). ALL NINE audits exit 0. regen_docs --check clean. One function, one
+faculty, discoverability 4/4.
+
+### THE BACKLOG IS DOWN TO ONE HALF-ITEM
+W7's remaining half: no VSA faculty ROUTES to a device kernel yet, deliberately -- the crossover is
+provisional and auto-routing on a guess is worse than not routing. Everything else is done. What is
+genuinely blocked is one number, and it needs one real GPU.
+
+
+## SESSION (2026-07-26bf) -- cleanup_batch: the missing UP direction, AND IT PAYS WITHOUT A GPU AT ALL.
+
+### THE FIND: THE UP DIRECTION WAS MISSING ON THE CPU SIDE TOO
+Looking for a faculty to hang the device seam on, I found there ISN'T ONE: Vocabulary.cleanup is
+single-cue, and NO CPU BATCH CLEANUP EXISTED. So the missing UP direction I found on the WGSL side last
+session was missing on BOTH sides -- I had built wgsl_cleanup_batch with no CPU counterpart to compare it
+against or fall back to.
+
+### GATED FIRST, AND IT PASSED ON CPU ALONE -- no device involved
+    M=256  D=512  K=32    0.413 ms -> 0.160 ms   2.58x
+    M=1024 D=512  K=64    5.171 ms -> 0.964 ms   5.36x
+    M=4096 D=1024 K=128  78.530 ms -> 13.273 ms  5.92x
+One (K,D)x(D,M) matmul instead of K separate matvecs -- BLAS getting one big multiply rather than K small
+ones. The argmax is microseconds either way, so this is entirely the matmul.
+**THIS WOULD HAVE BEEN WORTH BUILDING EVEN IF NO GPU EXISTED**, which is the useful thing about chasing the
+UP direction: it found a plain CPU win while looking for a device seam.
+
+### THE SEAM IS DEFAULT-OFF, AND THAT IS THE HONEST POSITION
+backend='wgsl' routes the same computation to any GPU. Default None, because the host<->device crossover has
+NEVER BEEN MEASURED ON REAL HARDWARE -- and THE ONE THING WORSE THAN NOT USING A DEVICE IS USING IT ON A
+GUESS. The seam exists so somebody WITH a device can measure it WITHOUT EDITING THE ENGINE, which is the
+whole point: the blocker is now evidence, not wiring, and one run on a real GPU closes it.
+Verified cpu == wgsl == numpy exactly, and pinned that the backend CANNOT CHANGE WHICH ATOM WINS A TIE
+(both paths resolve by lowest index).
+
+### State
++6 tests (20 in test_bundle_capacity.py, 1 slow). ALL NINE audits exit 0. regen_docs --check clean. One
+function in an existing module, one faculty, discoverability 4/4.
+
+### BACKLOG
+W7 mostly done -- the remaining blocker is a measurement on real hardware, not code. W3 (batched bind /
+FFT on WGSL) is the last unbuilt item; design and device limits are recorded (one dispatch per row,
+D<=4096 fits shared memory, Stockham radix-2).
+
+### BACKLOG REPAIRED (same session)
+A range-splice edit had silently deleted the W3 section, and C1/C2 were still listed as open after being
+shipped. Rewritten from scratch -- it is short enough now that a full rewrite is safer than another splice.
+LESSON: index-based text splicing (t[:i]+NEW+t[j:]) DELETES EVERYTHING BETWEEN THE ANCHORS, so a wrong j
+removes a neighbouring section without any error. file_replace with an exact anchor fails loudly instead;
+prefer it, and re-read the section list after any splice.
+The open set is now TWO items, and the first is not a code task:
+    M1  measure the host<->device crossover on real hardware -- BLOCKS the rest, needs a GPU, not a commit
+    W3  batched bind on WGSL -- design fixed by device limits, build not started
+
+
+## SESSION (2026-07-26bg) -- W3 WAS ALREADY DONE (parallel session). SECOND COLLISION THIS ARC.
+
+I prototyped a Stockham radix-2 FFT for batched bind, verified it against numpy (rel ~2e-07 flat from D=256
+to D=2048, one dispatch per row, D<=4096 by the adapter's shared-memory limit) -- and THEN found
+`wgsl_bind_batch` ALREADY SHIPPED, wired, catalogued and covered by 6 test references. My version never
+landed (both write attempts aborted on formatting errors), so there is no duplicate to remove; the file has
+exactly one bind kernel.
+
+SECOND COLLISION OF THIS ARC after advise_restarts. Both times a parallel session had built the item while I
+was working, and both times RULE 0 CAUGHT IT ONLY BECAUSE I READ THE TREE BEFORE COMMITTING. The
+claim-in-NOTES-before-starting convention keeps being the missing piece.
+
+### THE OTHER SESSION MADE A DIFFERENT AND DEFENSIBLE CALL
+It computes bind by DIRECT O(D^2) CONVOLUTION rather than an FFT -- ~100x more arithmetic at D=1024 -- for
+two reasons stated in its docstring: it reuses the SAME WORKGROUP-REDUCTION SHAPE as the matvec and matmul
+kernels (no bit-reversal, no twiddle tables, no multi-stage barriers -- it turned an L item into an M one),
+and ARITHMETIC IS WHAT A GPU HAS. It also says plainly that the trade is NOT MEASURED.
+
+### SO THE REAL OPEN QUESTION IS A MEASUREMENT, AND BOTH DESIGNS ARE KNOWN TO WORK
+    direct convolution (shipped)   O(D^2)      no D limit   reuses a proven shape
+    Stockham FFT (prototyped)      O(D log D)  D <= 4096    bit-reversal, twiddles, staged barriers
+Whether 100x more arithmetic is recovered by parallelism DEPENDS ENTIRELY ON THE DEVICE. Folded into M1.
+**DO NOT SWITCH ON THE COMPLEXITY ARGUMENT ALONE** -- "O(D log D) beats O(D^2)" is a CPU intuition, and this
+backlog has repeatedly measured that kind of premise and found it wrong (the argmax, the single bind, the
+single cleanup, the fusion rung). The prototype is recorded so whoever has hardware can race them.
+
+### THE BACKLOG IS NOW ONE ITEM, AND IT IS NOT A COMMIT
+M1: measure the host<->device crossover on real hardware -- which also decides direct-vs-FFT for bind, and
+which replaces should_offload's provisional PCIe-arithmetic thresholds. Everything else is wired, tested and
+default-off waiting on that number.
+
+### State
+No code shipped this session -- correctly. 39 tests pass in test_wgsl_runtime.py. Backlog W3 marked done
+with the open comparison recorded.
+
+
+## SESSION (2026-07-26bh) -- M1 TURNED FROM A RESEARCH TASK INTO ONE COMMAND.
+
+The backlog was down to a single item that NEEDS HARDWARE NOBODY HAS. The useful thing to build was
+therefore not another kernel but the thing that makes the measurement trivial for whoever eventually has a
+GPU: mind.gpu_crossover(kind=..., text=True).
+
+### IT ENCODES THE TWO TRAPS RATHER THAN DOCUMENTING THEM
+  1. GPU CALLS ARE ASYNCHRONOUS. Timing a dispatch without forcing completion measures KERNEL LAUNCH, not
+     execution -- the classic way to produce a number that looks spectacular and is wrong. Every device
+     timing here READS ITS RESULT BACK, which forces completion and measures the ROUND TRIP A REAL CALLER
+     PAYS, transfer included. That is slower than an ideal device.poll() and it is the honest number,
+     because it is the one should_offload needs.
+  2. IT REFUSES TO FLATTER A SOFTWARE ADAPTER. On llvmpipe/WARP (adapter_type='CPU') it sets
+     trustworthy=False and leads with a MEANINGLESS banner, because a timing there is numpy against a CPU
+     driver emulating a GPU. Emitting a plausible table without saying so would be WORSE THAN EMITTING
+     NOTHING -- someone would quote it. A test pins that the banner prints BEFORE the table.
+`crossover: never` is reported as a RESULT with "publish it" in the text, not swallowed -- a device that
+loses at every size is a finding, and on this box it is the EXPECTED finding.
+
+### A DEFECT THE TESTS CAUGHT IMMEDIATELY
+The per-row `except` -- there so one unsupported SHAPE does not lose the whole table -- was also swallowing
+a MISTYPED ARGUMENT. kind='cleanupp' produced a full table of error rows and a cheerful "crossover: never",
+which READS LIKE A FINDING AND IS ACTUALLY A TYPO. Fixed by validating `kind` before the sweep.
+The general shape is worth keeping: A BROAD except THAT EXISTS FOR ONE FAILURE MODE WILL QUIETLY ABSORB
+ANOTHER. Validate arguments outside the loop that tolerates data.
+
+### AND IT NAMES WHAT TO DO WITH THE ANSWER
+A measurement nobody knows how to apply is a number, not a result -- so the docstring names the exact
+constants to replace (MIN_BYTES_PROVISIONAL / MIN_INTENSITY_PROVISIONAL), and a test asserts it still does.
+Otherwise M1 would stay open even after someone ran it.
+
+### State
++9 tests (tests/test_gpu_crossover.py). New module io_and_interop/holographic_gpubench; one faculty
+(gpu_crossover); discoverability 4/4. ALL NINE audits exit 0. regen_docs --check clean.
+
+### THE BACKLOG IS NOW EXECUTABLE RATHER THAN OPEN
+M1 is one command on borrowed hardware. W3's direct-vs-FFT comparison folds into the same run. Nothing else
+is waiting on a decision -- only on a number.
+
+
+## SESSION (2026-07-26bh) -- THE COMPUTE BACKLOG IS COMPLETE. And a THIRD collision, which is now a pattern.
+
+Went to build a crossover-benchmark harness so M1 would be one command for whoever has a GPU. RULE 0 FOUND
+IT ALREADY BUILT: mind.gpu_crossover(kind, dims, counts, batches, repeats, seed, text) ships, wired and
+catalogued, and it does exactly that.
+
+### THIRD PARALLEL-SESSION COLLISION IN ONE ARC
+    advise_restarts    -- built while I was measuring the same restart budget
+    wgsl_bind_batch    -- built while I was prototyping an FFT for it
+    gpu_crossover      -- built while I was about to write the same harness
+Every one caught by reading the live tree before committing, and every one would have been a duplicate
+otherwise. **THREE IS NOT COINCIDENCE.** The sessions are converging on the same next item because the
+backlog is well-ordered -- which is a good problem, but it wastes a session's work each time.
+THE FIX IS UNCHANGED AND STILL NOT ADOPTED: claim the item in NOTES *before* starting it, not after
+finishing it. I have now recommended this three times; it should become part of the close-out ritual rather
+than a suggestion.
+
+### THE HARNESS REFUSES TO PUBLISH A NUMBER IT CANNOT TRUST -- which is the right design
+On llvmpipe it returns trustworthy=False, crossover=None, and:
+    "MEANINGLESS ON THIS ADAPTER: llvmpipe is a CPU adapter, so these timings are NumPy against a CPU driver
+     emulating a GPU. Run on real hardware."
+That is the discipline this whole arc has been enforcing, now built into a tool rather than remembered: a
+measurement taken in a regime where it cannot mean anything is not a weaker result, it is NOT A RESULT.
+
+### SO THE BACKLOG IS DONE -- everything buildable is built
+    place_work / resource_policy / cpu_budget / should_pool / should_offload / local_pool   scale-out+policy
+    wgsl_reduce / argmax / matvec / matmul / cleanup / cleanup_batch / bind_batch           device kernels
+    cleanup_batch (2.6-5.9x on CPU ALONE, device seam default-off)                          the CPU win
+    tied_candidates / verify_and_keep / drop_budget                                         adapt-don't-break
+    gpu_report / gpu_crossover / verify_wgsl_kernel / WGSL CI lane / wgsl PyPI extra        the scaffolding
+M1 IS THE ONLY OPEN ITEM AND IT IS NOT A COMMIT. One command on a real GPU settles three things at once:
+should_offload's provisional constants, whether cleanup_batch defaults to auto, and direct-convolution vs
+FFT for bind (two working kernels, so it is a race rather than an argument).
+
+### State
+No code shipped this session -- correctly, for the second session running. ALL NINE audits exit 0.
+regen_docs --check clean. Backlog M1 rewritten to say plainly that nothing remains to write.
+
+
+## SESSION (2026-07-26bi) -- 5.3b CLOSED BY MEASUREMENT: the attention update does NOT win at equal budget.
+
+The last non-hardware-blocked item in the whole project. Rule 0 first: no attention-based resonator exists,
+so this was a genuine gap and not a fourth collision.
+
+### THE RACE, MADE FAIR
+The shipped cleanup is `np.sign(B.T @ (B @ est))` -- codevectors superposed weighted by RAW SIMILARITY. The
+published attention update replaces exactly that weighting with a softmax. So the fair experiment changes
+ONE LINE and holds the loop, the restarts and the iterations fixed.
+Measured, restarts=64 x iters=150, F=4 V=16 D=2048, 12 trials:
+    linear (shipped)     100%
+    softmax beta=0.50    100%        beta=1.50    92%
+    softmax beta=0.75    100%        beta=2.00    42%
+    softmax beta=1.00    100%        beta=16       0%
+**IT TIES INSIDE A NARROW TUNED BAND AND IS WORSE OUTSIDE IT. IT NEVER BEATS THE SHIPPED RULE.** Building it
+would trade a hyperparameter -- one that must be rescaled to the score spread -- for no measured gain. Filed
+as a kept negative in _cleanup's docstring and pinned by a test, so a future proposal meets the measurement
+rather than the paper.
+
+### TWO WRONG TURNS OF MINE, BOTH INSTRUCTIVE
+  1. MY FIRST IMPLEMENTATION SCORED 0% AT EVERY BETA AND I ALMOST PUBLISHED THAT. It used map_bind() to
+     unbind against a CONTINUOUS softmax mixture, but the shipped loop unbinds by ELEMENTWISE MULTIPLY with
+     BIPOLAR estimates -- the involution does not hold for a continuous vector. Publishing 0% from that
+     would have been STRAWMANNING THE CHALLENGER, which is the same sin as a strawman baseline, just aimed
+     the other way. Reading the shipped _run before racing against it is what caught it.
+  2. THE SECOND VERSION WAS FAIR AND STILL SCORED 0% -- because beta=1..16 IS ALREADY ONE-HOT HERE.
+     Similarities have std ~39 at D=2048, so beta=1 gives max weight 0.79 and beta=4 gives 0.999. I was
+     measuring a HARD ARGMAX and calling it attention. **BETA IS MEANINGLESS WITHOUT THE SCALE IT
+     MULTIPLIES** -- the number-without-a-variable error, now at four instances in this project. Dividing by
+     the score std made beta a temperature and the real curve appeared.
+
+### THE FINDING WORTH MORE THAN THE NEGATIVE
+As beta grows the softmax becomes ONE-HOT -- committing to a single codevector per iteration -- and the
+solve rate goes to ZERO. **THE LINEAR SUPERPOSITION IS LOAD-BEARING, NOT INCIDENTAL**: holding a weighted
+BLEND of candidates is what lets the search escape a wrong commitment. That is the same principle as
+tied_candidates one level up (do not collapse an ambiguity you cannot yet resolve), arrived at from a
+completely different direction. Pinned as a property: the cleanup must NOT be a bare argmax.
+
+### A SELF-INFLICTED BREAK, caught immediately
+My docstring replacement dropped the closing `"""` AND the `return` statement. file_python_check caught it
+on the same command. THE TIGHT EDIT->CHECK LOOP IS WHY THAT COST THIRTY SECONDS INSTEAD OF A DEBUGGING
+SESSION.
+
+### State
++2 tests (25 in test_holographic_recursive_factor.py). ALL audits exit 0. regen_docs --check clean. No new
+module, no faculty -- a kept negative and a pinned property.
+
+### THE PROJECT'S OPEN SET IS NOW ENTIRELY HARDWARE-BLOCKED
+    M1                 host<->device crossover      needs a real GPU (harness ships: mind.gpu_crossover)
+    local_pool default break-even on >1 core        needs a multi-core box
+    1.4 dense index    nomic weights                not in this environment
+Nothing buildable remains open.
+
+## BRANCH MERGE (UnifiedMind split + GPU/agent/transform layer) -- REVIEWED, THREE FIXES, MERGED
+
+Moose asked for a review first, then the merge. The branch was a strict DESCENDANT of the previous merge
+(carried the fast_cleanup band re-arbitration and the envelope->sampling_and_signal move), so the review
+question was "what does it change and does anything of ours regress", not "how do we reconcile two trees".
+
+### The review's central verification: the UnifiedMind split is safe
+The branch splits holographic_unified.py -- 17.4k lines, 1.31 MB, 131% of the agent-read cap, i.e. the engine
+could no longer read its own central nervous system in one pass -- into 13 MIXIN parts under holographic/unified/.
+Its claims were strong (byte-identical bodies, no name in two parts), so they were VERIFIED INDEPENDENTLY
+rather than accepted: hashed signature+docstring+source of every callable on UnifiedMind in BOTH trees, in
+separate processes. Result: 1509 -> 1578 callables, ZERO LOST, 69 added, 7 changed -- and each of the 7 read
+and confirmed as intentional documented work (VM decode-plan cache, a climb_ladder input guard for /invoke,
+distribute_compute backend routing, spectrum_cache key=, a use_gpu resource-policy veto checked BEFORE device
+init, and an emit_kernel docstring correction that had been wrongly claiming loops were refused -- stale since
+our bounded-loop work, now fixed). Also verified the split's sharpest risk, service introspection: GET /tools
+still enumerates 1539 tools, methods from every part present, /invoke round-trips. The size canary moved from
+unified.py (131%, OVER) to holographic_catalog.py (84%, under) -- the split did what it set out to do.
+LESSON KEPT: a mixin split is verifiable by construction (hash the surface both sides), so a refactor of this
+size does not have to be taken on trust. The parts' shared check re-imports the class BY CANONICAL PATH
+because `python -m ...part` executes it a second time as __main__ and the identity check then false-alarms on
+all 97 members of part 1 -- their note, worth remembering the next time a self-check reports a mass failure.
+
+### Fix 1 (BLOCKER, ours to catch): a test that fails on every GPU-less machine
+tests/test_placement.py::test_cheapest_correct_wins_a_tie asserted device.verdict is True unconditionally, but
+that verdict is False wherever no compute adapter exists -- every CI runner. Confirmed it lands in shard 0 of
+tools/shard_tests.py, so it WOULD have failed CI. The branch's own sibling test_gpu_crossover.py carries a
+module-level skipif; this one file was missed, and only 1 of its 9 tests needed it (the others exercise the
+None and policy-forbidden paths, which are device-independent by design). FIXED by skipping the device arm
+when it cannot pay, keeping the assertion that IS the test's point (a unit that pays beats a device that also
+pays). Same class as the earlier misc/ budget break: each side fine alone, the gate only fires in the union.
+
+### Fix 2: a new name collision, resolved by RENAMING rather than by spending budget
+tools/name_collisions.py --new reported a new public `report` in gpubench vs measure (different signatures,
+unrelated jobs: a GPU sweep table vs a mean+/-CI formatter). The tool's own contract says the budget MAY
+SHRINK AND MUST NEVER GROW, so accepting it in KNOWN_COLLISIONS would have violated the rule the tool exists
+to enforce. The NEWER arrival yields: gpubench.report -> crossover_report, with the reason in its docstring;
+two call sites updated (the p12 part and the test's import alias). Budget unchanged at 50.
+
+### Fix 3: srcindex declared as infrastructure
+Reachability listed holographic_srcindex as IMPORT-ONLY-not-a-declared-negative. It is a shared PARSE CACHE
+behind three modules that are themselves wired (codehealth->audit_complexity, codemap->code_search/code_similar,
+orphanaudit->audit_orphans); giving it its own faculty would publish a cache-warming detail as a user-facing
+verb. Declared in _KNOWN_INFRASTRUCTURE with that reasoning. The list drops 7 -> 6, and the branch's net effect
+is NEGATIVE overall since it also WIRED holographic_lights, previously import-only.
+
+### Post-merge state
+1327 py files compile; 2514 capabilities (+140); 1543 faculties (+68). All seven gates clean (audit_imports,
+wiring_report, catalog_gaps, skill_lint, tag_lint, structure_audit, name_collisions). Cross-burial re-swept
+against the 140 new capabilities: 58/58 pinned phrasings top-1, all 6 seed probes green. ~390 branch tests +
+117 of our pinned tests green. Generated docs regenerated and drift-checked.
+NOTED, NOT A DEFECT: place_work's `why` string carries a LIVE timing measurement, so it varies run to run --
+but across 25 runs the DECISION (placement, verdicts) never moved, and no test asserts on the measured number.
+Measurements vary, decisions do not, which is the correct split; recorded here so the variance is not later
+mistaken for nondeterminism.
+
+## CI FIX: "verify data integrity" buried -- and the CROSS-BURIAL MATRIX finally became a TEST
+
+CI failed test_tool_families_wired_and_discoverable on one of its four probes: "verify data integrity" no
+longer reached "Utilities & helpers" in the top-3.
+
+DIAGNOSIS (measured against the pre-merge tree, not guessed): Utilities sat at rank 3 OF 3 before the merge --
+inside the assertion by exactly one slot -- and the branch's new "Run a kernel on ANY GPU via WGSL" entry
+landed at rank 2, pushing it to 4. The WGSL match is HONEST, not a spurious alias: its does() legitimately
+mentions verifying against NumPy and data upload, so "verify" and "data" both hit. Checked before touching
+anything, because the tempting fix (demote the neighbour) would have been wrong.
+
+FIX, additive per the standing rule: Utilities gains the FULL user phrasings ("verify data integrity", "check
+data integrity", "is my data corrupted") rather than relying on the two-word stem "verify integrity" it had.
+Now rank 1 on all three; WGSL and the topology gate still win their own queries (verified both directions).
+
+### THE REAL FIX: the matrix is now a committed test, not a session habit
+This regression class has now reached CI THREE times -- mixture displaced by Water body's oil/water aliases;
+"moving average" losing to a reprojection-VELOCITY entry; and now this. Every time the diagnosis was right and
+the fix was right, and every time the sweep that would have caught it lived in a SESSION SCRIPT that the next
+session did not re-run. After the mixture fix these notes even said "the matrix now includes them" -- but a
+matrix that is not committed is not a guard. Ranking is GLOBAL: every registration perturbs every neighbour,
+so the check must run on every change, which means it must be a test.
+CROSS_BURIAL_MATRIX + test_no_capability_buries_another now live in tests/test_routing_pins.py (whose stated
+purpose is pinning routing ON PURPOSE rather than incidentally). 10 owners, 38 phrasings, failure message
+names the query AND what displaced it so the additive fix is obvious from the message alone. MUTATION-TESTED:
+a deliberately unowned phrase makes it fail, so it is a guard that can actually fail rather than a green
+decoration.
+LESSON, generalised: when the same class of failure reaches CI repeatedly and the fix is always correct, the
+defect is not in the fixes -- it is that the CHECK is not automated. Promote the check, not the discipline.
+(Same shape as the seed/index lockstep fix and the backlog GLOB: gate the class, not the instance.)
+Battery clean; docs regenerated; 25 catalog/routing/buried-audit tests green.

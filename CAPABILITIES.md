@@ -108,6 +108,14 @@ import numpy as np; from holographic.rendering.holographic_reproject import warp
 ```
 *Find it by:* est_dx, reprojection velocity, motion vectors between frames, estimate the shift between two images, phase correlation, temporal reprojection, TAA, optical flow
 
+### Hadamard codebook (cleanup as one transform)
+cleanup WITHOUT scanning every atom: atoms are the sign-permuted rows of a Hadamard matrix, so correlating against ALL of them is one Walsh-Hadamard transform -- O(D log D) not O(K*D), atoms generated not stored, rows mutually orthogonal so crosstalk is exactly zero, and argmax is the exact ML nearest-codeword decode (Reed-Muller's Green machine). MEASURED at equal K and D: 6.9x at D=1024, 219x at D=8192. KEPT NEGATIVES: LOSES at D=256 (0.49x, crossover ~D=512), and K is CAPPED at 2*D by construction.
+
+```python
+cb = mind.hadamard_codebook(1024); cb.cleanup(cue); mind.hadamard_codebook_measure()
+```
+*Find it by:* cleanup without comparing against every codebook entry, find the nearest codebook entry without scanning every one, structured codebook so cleanup is a transform, nearest codeword in log time, speed up cleanup when the codebook is huge, sublinear cleanup, reed muller decoding, maximum likelihood nearest codeword
+
 ### Holistic lattice cleanup (FHRR resonator factoring of FPE coordinates)
 R6 (gated) -- factor a BOUND PRODUCT of fractional-power-encoded integer coordinates back to its integers via a Fourier-HRR RESONATOR (Frady/Kent 2020; m.fpe_lattice_resonator). For the HOLISTIC-ONLY regime: coordinates never observed, only the single bound product prod z_a^k (a lattice point stored inside a structure, or under correlated phase noise). Iterated cleanup over power-codebooks converges to the integer tuple -- VERIFIED 200/200 at 0.6 rad noise, 51x51 codebooks in dim 1024. KEPT NEGATIVE: for DIRECT noisy coords np.round dominates (83% at sigma 0.3); do NOT use the resonator there..
 
@@ -140,6 +148,14 @@ import lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.hologr
 ```
 *Find it by:* turn a mesh into a sequence, serialize a mesh to tokens, morton order a mesh's vertices, encode a mesh as a hypervector, spectral vertex ordering of a mesh, tokenize a mesh for a sequence model
 
+### NTT exact integer binding
+bind/convolve with ZERO rounding error: the same circular convolution bind() does, computed as a Number-Theoretic Transform over Z_q, so it is EXACT and BIT-IDENTICAL ON EVERY MACHINE -- numpy.fft is not (SIMD width reorders the summation; NumPy #11926), and here a ULP flip is an argmax flip. Integer input only; the modulus bound is checked and RAISES rather than wrapping. KEPT NEGATIVES: 19-50x SLOWER than the float bind (exactness, never speed), and unbind is still HRR's QUASI-inverse -- cleanup is not deleted.
+
+```python
+mind.ntt_bind(a, b); mind.ntt_unbind(c, a); mind.ntt_convolve(a, b); mind.ntt_measure_vs_fft()
+```
+*Find it by:* exact circular convolution with integers, bind two vectors with no rounding error, modular arithmetic convolution, number theoretic transform, convolution that is identical on every machine, integer only binding, bind without floating point, exact bind
+
 ### Optical elements (Mueller matrices)
 how optical elements TRANSFORM polarized light, as real 4x4 Mueller matrices (holographic_mueller): polarizer, wave plate / retarder (a quarter-wave plate converts linear<->circular -- the mantis R8 mechanism), optical ROTATOR (= Faraday rotation), depolarizer, and polarizing dielectric (Fresnel) reflection. Elements COMPOSE (a light path folds to one matrix) and apply to a Stokes vector or a whole field.
 
@@ -147,6 +163,14 @@ how optical elements TRANSFORM polarized light, as real 4x4 Mueller matrices (ho
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.stokes_report(m.apply_mueller(m.mueller_matrix('quarter_wave', angle=np.pi/4), m.stokes_linear(1.0, 0.0)))['docp'])
 ```
 *Find it by:* mueller matrix, polarizer, wave plate, quarter wave plate, half wave plate, retarder, optical rotator, faraday rotation
+
+### Run a kernel on ANY GPU via WGSL (vendor-neutral)
+emit_kernel already projects an annotated Python kernel into WGSL; this DISPATCHES it -- @compute entry point, storage bindings, bounds guard -- on Vulkan / Metal / DX12 / WebGPU, where use_gpu's CuPy backend is CUDA/NVIDIA ONLY. The shader is a PROJECTION of the authoritative Python, so verify_wgsl_kernel can DIFFERENTIALLY TEST the two on real data (CuPy cannot: no shared source). Works on software adapters, so correctness is CI-testable with no GPU. SCOPE: elementwise f32 maps; a cross-invocation reduction is not solved.
+
+```python
+info = mind.wgsl_device(); mind.verify_wgsl_kernel(my_fn, data, extra_args=(2.0,))
+```
+*Find it by:* run this on any gpu, use my amd or intel gpu, gpu without cuda, run a kernel on metal or vulkan, webgpu compute, check my shader matches the python, vendor neutral gpu
 
 ### The projective ceiling (where the transform tower stops)
 compose any chain of transform generators and you get ONE 4x4, exactly (3.3e-16 against applying the chain step by step). So the whole transform IS the composed group element. **BUT A GROUP IS NOT A LANGUAGE**: in a language a word is not a letter, while in a group the composition of generators is another group element drawn from the SAME set. Words and letters live in one alphabet -- that is what CLOSURE means, and it is why DL11's edit chain collapses to a single (S,T) instead of needing a sequence: the recoverable object is the group element, not the spelling. So the hierarchy is real and it is NOT letters -> words -> sentences. It is a chain of subgroups ordered by NORMALITY: translations <| Aff(3) < PGL(4). 'Which layer am I on' is not a question about length; it is the question 'can I push a delta through?', and the answer is yes exactly when the layer below is normal. THE CEILING: a 4x4 is AFFINE when its bottom row is [0,0,0,1] -- when it fixes the plane at infinity. mind.is_affine_matrix is that boolean. Conjugating a translation by a ROTATION gives T(A t) to 1.1e-16, but conjugating it by a PERSPECTIVE gives a matrix that is not a translation and NOT EVEN AFFINE (mind.affine_normality measures both). **Aff is a subgroup of PGL but NOT a normal one**, and the tower's whole mechanism -- push the delta onto the other operand, collapse the chain, read the equivariance table -- rests on normality and stops here. TEXTURE PROJECTION IS THAT CEILING IN A RENDERER: interpolating (u,v) linearly in screen space assumes the triangle-to-texture map is affine, and under perspective it is not. mind.texture_projection_error, at vertex depths (1, 4, 1.5): affine max error 0.3310 -- A THIRD OF THE TEXTURE -- against 2.2e-16 for the homogeneous (u/w, v/w, 1/w) divide. **The extra parameter is not another letter in the same alphabet. It is an extra COORDINATE**, carried through the transform and divided out at the end -- the `q` of a homogeneous (u,v,q) texture coordinate. It enlarges the space the alphabet acts on, and by doing so breaks the affine group's normality. That is why the fix is a divide and not a matrix. KEPT NEGATIVE: a projective map is not 'affine plus a bit' -- it is linear on a HIGHER-dimensional homogeneous space whose shadow on the affine chart is nonlinear, and `nearest_affine` deliberately does not exist, because projecting a perspective onto the affine subgroup throws away the only thing that made it perspective. With equal depths the affine map is exact: the ceiling only bites under perspective..
@@ -187,6 +211,14 @@ keep the engine's transforms -- patterns, shifts, rotations -- in a prebuilt map
 import numpy as np; b = mind.transform_bank(512); [b.add_random_unitary('t%d' % i) for i in range(4)]; b.add_rotation('rot7', 7); v = np.random.default_rng(0).normal(size=512); print(np.abs(b.apply('rot7', v) - np.roll(v, 7)).max()); print(b.stats(), round(mind.scale_is_not_a_bind(), 3))
 ```
 *Find it by:* transform bank, prebuilt map of transforms, cache a transform operator, precomputed rotation vectors, reuse a bind operator, compose a chain of transforms, spectrum cache, group representation
+
+### Walsh-Hadamard transform (exact, matrix-free)
+the O(D log D) WHT, D a power of two: every butterfly is one add and one subtract -- no twiddles, no stored matrix, nothing to round. On INTEGER input it is BIT-EXACT and machine-independent, which numpy.fft is not (pocketfft's SIMD summation order is microarchitecture-dependent, NumPy #11926) -- and in this engine a ULP flip is an argmax flip. wht_exact refuses float so the guarantee is enforced. KEPT NEGATIVE, measured: 4-9x SLOWER than numpy.rfft at D=256..16384 -- it is an EXACTNESS tool, not an FFT speedup.
+
+```python
+mind.wht(x); mind.wht_exact(x); mind.wht_inverse(y); mind.wht_measure_vs_fft()
+```
+*Find it by:* fast walsh hadamard transform, walsh hadamard, hadamard transform, transform that uses only additions and subtractions, exact integer orthogonal transform, matrix free transform, deterministic transform across cpus, transform without rounding error
 
 ### Wave-state encoder (carrier + envelope as one recallable state)
 mind.wave_state_encoder(dim, window): one OHLC window -> one unit state vector carrying carrier SHAPE (close-based, unit-RMS), both envelope excursion channels in scale units (their amplitude is exactly what a close-only encoder cannot see; identical closes with 4x swing separate at cos 0.77), and an energy term. Offset/scale invariant (same shape at 10x level: cos 0.94 -- the invariance IS the level-blindness kept negative). Feeds causal_index recall (5/5 right-regime neighbours, fitless) and signal_program screening. D4 note travels with it: calibration on these states is NOT exploitability..
@@ -235,6 +267,14 @@ resolve the PIVOT for a transform (holographic_transform_space) -- 'median' (cen
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.pivot_point([[0,0,0],[2,0,0]],[0,1],'bbox'))
 ```
 *Find it by:* pivot point, transform pivot, center of a selection, rotation center, where to rotate around
+
+### qFHRR quantized phase (3-8 bits per dimension)
+store FHRR phasors as INTEGER phase indices instead of complex128: 4 bits/dim at 16 levels, a 96.9% cut, and bind/unbind become EXACT modular integer arithmetic -- unbind is a TRUE inverse returning the indices bit for bit, unlike the real-valued path's ~0.70 quasi-inverse. KEPT NEGATIVES: BUNDLING IS NOT CLOSED (it leaves the representation via atan2 + round, and that round is itself a tie), so this does NOT delete tie-arbitration; and bundle fidelity saturates at ~0.892 vs a complex bundle however fine the phase grid, because magnitude is discarded.
+
+```python
+q = mind.qfhrr_quantize(v); mind.qfhrr_bind(q, k); mind.qfhrr_unbind(c, k); mind.qfhrr_measure_fidelity()
+```
+*Find it by:* store a hypervector at three or four bits per dimension, quantize phase angles to integers, bind by adding phase indices modulo k, shrink a codebook by quantizing, low bit width vector representation, integer phase binding, compress hypervectors, quantized vsa
 
 ### skin_bind_weights
 AUTO-SKIN BINDING (holographic_meshskin) -- compute per-vertex bone weights from bone anchor points, the 'bind' step that produces the weights skin_mesh consumes. Inverse-distance falloff to the nearest bones, keeping max_influences and renormalizing to a PARTITION OF UNITY (rigid motion stays exact). The distance-based auto-bind a rig starts from.
@@ -428,6 +468,14 @@ ci=mind.causal_index(); import numpy as np; r=np.random.default_rng(0); [ci.appe
 ```
 *Find it by:* nearest neighbour search restricted to the past, recall only older items, time filtered index, append only memory before t, history matching without look ahead, what did similar past states lead to, analog lookup that cannot see the future, knn over trailing history only
 
+### Clean up many cues at once (batched cleanup)
+the missing UP direction of cleanup, and it pays on the CPU ALONE: one (K,D)x(D,M) matmul instead of K separate matvecs is 2.58x at K=32, 5.36x at K=64, 5.92x at K=128 -- BLAS getting one big matmul rather than K small ones, with no device involved. backend='wgsl' routes the same computation to ANY GPU, DEFAULT OFF because the host<->device crossover has never been measured on real hardware and the one thing worse than not using a device is using it on a guess. Indices resolve by lowest index on both paths, so ties cannot move.
+
+```python
+idx, scores = mind.cleanup_batch(codebook, queries)   # backend='wgsl' to try a device
+```
+*Find it by:* clean up many cues at once, batch cleanup, recall many vectors at once, nearest atom for a stack of queries, batched nearest neighbour
+
 ### Code / file editing (agentic)
 read, view (line-numbered), write, exact-string replace, replace-lines, insert/delete lines, grep, find-definition, list, tree, archive, move, and UNDO -- structured source-file editing for an agent working the codebase, scoped to a project ROOT so a path can never escape it. Atomic writes; replace requires a unique match; every mutation is reversible with file_undo; replace_across renames a string across many files (with a dry-run preview); python_check (syntax) and import_check (real import in a subprocess) catch a broken edit immediately. Exposed as mind.file_* methods, so callable over the HTTP tool protocol (GET /tools, POST /invoke) like any faculty.
 
@@ -443,6 +491,14 @@ shrink INACTIVE data to save memory and disk, and inflate it back on demand: sto
 store = mind.cold_store(keep_warm=4); store.put('t1', big_table); store.get('t1')  # transparently warmed
 ```
 *Find it by:* cold storage, compress inactive, evict, spill to disk, cool, warm, fold up, shrink memory
+
+### Decision-safe quantization (does the ARGMAX survive?)
+measure the top-1 FLIP RATE when an index is quantized -- not reconstruction error, the DECISION. A code can hold cosine 0.9999 and still change which entry wins, and a flipped argmax is a different answer. Returns flip_rate plus the margin distribution, because a rate without margins says what happened, not why. MEASURED on the 509x128 routing index: normal queries flip 0.00% down to 2 BITS; queries midway between two documents collapse to margin ~0.058 and flip at 8. FLIP RATE IS GOVERNED BY MARGIN, not by corpus size or bit width.
+
+```python
+mind.decision_flip_rate(index, queries, bits=8); mind.crowded_subset(index, 200)
+```
+*Find it by:* does quantization change the answer, top 1 flip rate, is this index decision safe, argmax flips under compression, how few bits can i use for retrieval, quantization decision safety, will compressing my vectors change which one wins, margin distribution of a codebook
 
 ### Decoded-instruction cache (fetch/decode split from execute)
 decoding a VM instruction is a PURE function of (program vector, address) -- it never reads the accumulator -- so the plain interpreter re-derives eight transforms every time the program counter revisits an address (26x redundancy measured on a 64-iteration ITERATE over a 2-instruction body). DecodePlan decodes a whole BLOCK of addresses in ONE batched spectral sweep and answers every later visit from a content-addressed cache. MEASURED 6.7x-14x end-to-end; accumulators bit-identical and traces identical across 126 programs x 3 dims x 3 seeds. Opt-in, never-flip rule.
@@ -508,6 +564,14 @@ import numpy as np; from holographic.agents_and_reasoning.holographic_ai import 
 ```
 *Find it by:* hierarchical superposition, chunked memory, mid-level cleanup, cleanup between levels, store many items in one vector and recall them, how many items can i bundle before recall fails, capacity, chunked memory with a shared codebook
 
+### How many slots can I drop under memory pressure
+device memory is a hard ceiling with no swap, so pressure means failure rather than slowdown -- a distributed representation can DEGRADE instead. Dropping slots reduces the EFFECTIVE DIMENSION, so the budget is the load-ratio law: recall holds while n_items/(keep*dim) stays under the safe ratio. NO NEW THEORY -- verified across 5 configs. CORRECTION KEPT LOUD: the 100%-at-40%-destroyed figure is about DAMAGE (zeroed slots, no memory saved); TRUNCATING to 40% at the same load gives 85%, not 100%. Different quantities.
+
+```python
+mind.drop_budget(dim=1024, n_items=16)   # -> keep 78%, 1792 bytes saved
+```
+*Find it by:* how many slots can i drop, degrade instead of running out of memory, shrink a vector under memory pressure, memory budget for a bundle, how much can i truncate
+
 ### Index (search)
 nearest-neighbour / recall over a pile of vectors with ONE interface (Index.nearest(q,k)): exact cosine scan for small sets, sub-linear RP-forest for large, plus a calibrated abstain.
 
@@ -550,6 +614,14 @@ src = 'def f(xs):\n    out = []\n    for x in xs: out.append(x*2)\n    return ou
 ```
 *Find it by:* purity, pure function, side effects, effect analysis, decide whether a python function is pure, is this function pure, can i cache this function, memoization gate
 
+### Resonator restart budget advisor
+how many restarts does YOUR factoring problem need -- measured on your own codebooks. The F>=4 'capacity cliff' is a SEARCH BUDGET, not a capacity limit: same network, same dimension, 25% at restarts=4 and 100% at 256. The default was NOT raised, and the reason is the cost profile: a bigger cap is nearly free when an answer exists (early exit) and 13x slower when there is NONE, because a refusal must exhaust the budget. The sequence is PREFIX-STABLE, so raising it could not flip an existing answer -- the objection is cost alone.
+
+```python
+mind.advise_restarts([bookA, bookB], targets=(0.95,))
+```
+*Find it by:* how many restarts does my resonator need, pick a search budget, how long should i search before giving up, advise a restart count, is my factoring failing from budget or capacity
+
 ### Sculpt-mode preparation (guarded mesh -> SDF cache)
 The SAFE switch into sculpting: mind.sculpt_prepare(mesh, resolution, silhouette=0.95) builds the SDF cache (grid+axes) AND the sculptable remesh in one call, held to a worst-view silhouette-IoU floor so conversion cannot silently change shape. Two levers in cost order: retry the SIGN (flood fill leaks through touching shells, WORSENING with resolution: 0.734@48 -> 0.250@96; winding robust 0.954+), then escalate resolution x1.5 for thin features; unreachable floor -> loud ValueError with the ladder. Sharp low-poly corners round intrinsically -- lower the floor or silhouette=None knowingly..
 
@@ -589,6 +661,14 @@ THE SPEC SHEET, and the first thing to read before building anything that smells
 sheet = mind.machine_spec_sheet(); print(mind.machine_place_unit('t2_baked_grid', baseline_ns=50_000, n_calls=10**6, sheet=sheet)); print(mind.machine_unit('gather_unit')['do_not_use_when'])
 ```
 *Find it by:* machine model, hardware units, spec sheet, cost model, what hardware units does this engine have, gpu equivalent, what is the gpu equivalent here, memory hierarchy
+
+### VSA cleanup on ANY GPU (matvec + argmax, fused)
+the codebook similarity is 98-100% of a cleanup's cost at any real M (the argmax is single-digit microseconds), so the SIMILARITY is what to offload. One workgroup per row, rows never communicate. Similarity and argmax FUSED in one dispatch -- splitting pays submission twice and ships the intermediate back. Index resolves host-side by lowest index (canonical tie rule). MEASURED RISK: a similarity gap <=1e-7 can flip (3/150); that is 4 orders below any sensible tie margin, so pair with tied_candidates.
+
+```python
+idx, sc = mind.wgsl_cleanup_batch(codebook, queries); mind.wgsl_matmul(codebook, queries)
+```
+*Find it by:* cleanup on the gpu, matrix times vector on the gpu, codebook similarity on any gpu, nearest atom on the graphics card, matvec on the gpu, vsa recall on the gpu, clean up many cues at once, batched cleanup on the gpu
 
 ### bank_or_formula
 decide whether to BANK computed values or keep the FORMULA and regenerate on demand (holographic_ladder, Quilez Q1 'store the formula not the samples'). The demoscene economy as a measured gate: banking pays iff hit_rate*eval - lookup > 0 (a miss must build the entry, so only reused evals amortize; break-even = lookup/eval). A bank of things a cheap formula gives for free is negative storage.
@@ -2214,6 +2294,14 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); import numpy as np; t=m.tra
 
 *generate text, teach the engine language, and look words up in a real vendored dictionary.*
 
+### Bundle recovery (unmix a superposition)
+recover the components of cue = sum_i w_i * codebook[i] -- FIVE members: LINEAR one-shot correlate + top-m (washes out at load); occlusion_recall GREEDY matching pursuit (cheap, never revisits); iht_recall projected gradient (revises its support); cosamp_recall batch-select + least-squares (exact coefficients, best on COHERENT dictionaries); amp_recall Onsager-corrected AMP (K OPTIONAL, flat cost, best at HEAVY load). NEITHER DOMINATES -- measured D=512/N=2048: all tie at 1.000 to M/D=0.17; AMP 0.558 vs CoSaMP 0.167 at M/D=0.33; but on a coherent dictionary AMP 0.052 vs CoSaMP 1.000.
+
+```python
+mind.cosamp_recall(cue, codebook, K); mind.iht_recall(cue, codebook, K); mind.occlusion_recall(cue, codebook, K)
+```
+*Find it by:* recover many items from one bundle, find which codebook entries are in this sum, unmix a superposition into its parts, what went into this bundle, sparse recovery against a dictionary, greedy solver for a mixture of atoms, decode a superposition one piece at a time, unbundle
+
 ### Dictionary + taxonomy (vendored)
 a comprehensive vendored English DICTIONARY (~144k words: definition, part of speech, synonyms, example) AND an is_a TAXONOMY (encyclopedia side: 'a dog is a kind of domestic animal...'), giving the engine real world-knowledge for contextual awareness beyond its internal machinery. OPT-IN + lazy: it never loads from importing leCore or building a mind -- only the first language call decompresses it (lzma, ~3.3 MB on disk) into a plain dict in RAM (~22 MB), after which lookups are instant. Control it explicitly with holographic.misc.holographic_dictionary.is_loaded()/preload()/unload()/stats(). Stdlib-only (lzma+json); the mind can also LEARN meaning from it. Princeton WordNet, free with attribution.
 
@@ -2250,6 +2338,30 @@ mind.generate('once upon a', length=120); mind.respond('describe a sunset'); min
 ## Learning & agents
 
 *gradient-free learners and agents -- an RL creature, a classifier, a reservoir, mixtures of experts.*
+
+### Agent tool-use loop (with a gate below the model)
+hands a model the relevant manifest, parses its tool call, dispatches through invoke(), feeds the result back, iterates. Over HTTP this worked; in process every embedder wrote their own loop, routing around the choke point. THE DIFFERENTIATOR IS THE GATE BELOW IT: route_or_abstain scores the task against a null BEFORE any step, and below the floor the loop refuses and the MODEL IS NEVER CONSULTED. Measured with a stub that always claims done: has-tool 20/20, no-tool 0/20 -- FALSE-ACTION RATE 0%. Refuses non-finite args and off-manifest tools; never guesses an unparsed reply.
+
+```python
+mind.attach_llm(my_fn); mind.agent_loop('smooth a bumpy mesh')
+```
+*Find it by:* let a model use my tools, in process tool use loop, run an agent against the catalog, agent loop, refuse a step when no tool fits, model picks tools and i run them, tool calling loop without http
+
+### Agent-socket benchmark (false-action rate)
+PRE-REGISTERED primary metric: false-action rate on a NO-TOOL set -- the number reference systems do not publish. The no-tool set is built by REMOVAL: each task is a real capability's own author-written alias asked against an index rebuilt WITHOUT that capability, so it is a coherent idiomatic request with nothing behind it and every near neighbour still present. Strictly harder than word salad. MEASURED 60/20 seeded: resolution 100.0%, FALSE-ACTION RATE 0.0%, variance ZERO, model calls 0. KEPT NEGATIVE: rungs 1-5 fired 0/60.
+
+```python
+mind.agent_benchmark(n_has=60, n_no=20); mind.catalog_without(['some capability'])
+```
+*Find it by:* measure the false action rate, benchmark the agent socket, how often does it act when no tool exists, agent benchmark, remove a capability and see if it still answers, does it refuse when nothing fits
+
+### Declare a body, let the ladder fill it
+describe what you want; the engine walks rungs cheapest-and-most-provable FIRST and stops at the first clearing its gate: 0 route_or_abstain -> invoke, 1 typed plan, 2 synthesize_procedure (EXACT, execution-verified), 3 fill_capability_gap (TOL). Every result carries rung/mechanism/exactness/reversibility/confidence/why PLUS a descent log saying why each rung above declined -- that log IS the explanation. REFUSAL IS A RESULT: an unresolvable request returns ok=False, never a guess. max_rung=5 keeps it deterministic; every gate is NaN-guarded because a NaN score WINS an unguarded argmax.
+
+```python
+mind.declare('smooth a bumpy mesh'); mind.declare_explain('...'); f = mind.declares(fn)
+```
+*Find it by:* declare a method and let the engine fill it in, resolve an empty function body at runtime, try cheap deterministic ways before calling a model, which rung answered my request, escalating ladder of mechanisms, fill in a stub, agent socket, let the engine work out how
 
 ### Learning & agents
 gradient-free learning on the substrate: an RL agent with a value head + drives (agent), a holographic classifier, an echo-state reservoir (reservoir), mixture-of-experts (moe), KAN, forward-forward, recurrent/predictive nets, and dreaming. NPC brains and on-line learners with NO autodiff.
@@ -2701,9 +2813,25 @@ info = mind.run_command('probe', {'path': 'clip.mp4'})  # 'probe' registered in 
 ```
 *Find it by:* run a command, external program, shell out, run ffmpeg, call an external tool, run a script, job runner, wrap a program as a tool
 
+### Spin up local worker processes (parallel execution)
+a PERSISTENT process pool -- each worker its own interpreter with its own GIL, so GIL-bound work actually runs in parallel on ONE machine, and a big read-only cache is published ONCE into shared_memory (zero-copy) instead of pickled per bucket. This is the one that CREATES workers; `farm` is the cross-machine sibling and only CONSUMES hosts you already started. Pass it as distribute_compute(backend=...). VERIFIED bit-identical to in-process. Workers must be TOP-LEVEL picklable functions. Default stays single-process -- measure on your own hardware first.
+
+```python
+pool = mind.local_pool(n=4); mind.distribute_compute(buckets, my_fn, backend=pool); pool.close()
+```
+*Find it by:* spin up another instance, start a second worker, use more cores, launch a local worker pool, run work in parallel across processes, parallel execution on one machine, balance load across instances, make it use all my cpus
+
 ## Run it as a service / distributed
 
 *stand leCore up as an HTTP app, and scale work across a farm with jobs you can pause and resume.*
+
+### Bring your own query embedder (dense routing seam)
+install ANY callable text->vector so route_semantic can reach the dense index from FREE TEXT -- today the shipped artifact is the document side only (509 modules x 128d) and free text returns an honest None. Same contract as attach_llm: leCore imports no model SDK. VERIFIED BY DEFAULT with a round-trip space probe: the index lives in ONE space, a cosine against a different model's vectors is MEANINGLESS yet still returns confident ranks. Dimension is checkable, space is not -- so sampled modules must self-recall on their own docstrings (chance 5/509).
+
+```python
+mind.set_embedder(my_encode); mind.route_semantic('smooth a bumpy mesh'); mind.set_embedder(None)
+```
+*Find it by:* supply my own embedding model, bring your own vector encoder, plug in an external embedder, use a sentence transformer for routing, dense retrieval with my own model, set embedder, make free text routing work, external encoder for capability search
 
 ### Command runner (external tools)
 run any registered ALLOWLISTED program/script as a task (subprocess, no shell, time-boxed) and wire it as an orchestrator Tool the Planner can chain, with a CircuitBreaker on a flaky one -- the door to external tools and services. SECURITY: allowlist only, never a command from untrusted input, values fill placeholders.
@@ -2800,6 +2928,14 @@ treat VSA stores as a database: SQL over tables, similarity/time-travel/diff, du
 from holographic.agents_and_reasoning.holographic_query import run_sql, UserTable
 ```
 *Find it by:* query, sql, database, table, history, diff, time travel
+
+### Query expansion gated on faithfulness
+let a model rewrite a request into catalog vocabulary before retrieval, then REFUSE the rewrite unless it keeps the original's meaning. MEASURED: random padding cannot smuggle a no-tool query past the router (0/8 -- the null is built at MATCHED TOKEN COUNT so dilution scores worse), but a TARGETED rewrite sails through (1/3: 'purple monkey dishwasher' -> 'smooth a bumpy mesh' routes confidently). A NULL DETECTS IRRELEVANCE, NOT INFIDELITY. So the primary gate is overlap with the ORIGINAL; both gates apply, not either.
+
+```python
+mind.attach_llm(my_fn); mind.expand_query('how do i fix a lumpy model')
+```
+*Find it by:* rewrite my query into catalog words, query expansion, let the model rephrase before searching, stop a rewrite from changing what i asked, expand a search query, is this rewrite faithful
 
 ### Query time-travel & audit
 git-for-data on a query table: SELECT as-of a past version (time travel), blame a row across versions, diff two versions (added/removed/changed with field detail), revert, branch/compare/discard, and prove/locate-tampering (Merkle root + O(log n) which-row-changed). Wires the shipped versioning faculties into the query layer.
@@ -2953,11 +3089,25 @@ the boundary-representation foundation (K6): the vertex/edge/loop/face/shell top
 import lecore; m=lecore.UnifiedMind(); m.brep_validate(m.brep_box())['genus']
 ```
 
+### Batched bind on ANY GPU (circular convolution)
+bind IS a plain circular convolution (verified to 7e-15), so it can be rfft->multiply->irfft in O(D log D) or DIRECT in O(D^2). Direct is ~100x more arithmetic and is the right trade: it reuses the SAME workgroup-reduction shape as the matvec and matmul kernels -- no bit-reversal, no twiddle tables, no multi-stage barriers -- and ARITHMETIC IS WHAT A GPU HAS. Batched on purpose: a single bind is ~0.03ms on CPU, below any dispatch floor. Correctness verified against bind_batch; the crossover needs a real device.
+
+```python
+out = mind.wgsl_bind_batch(a_stack, b_stack)   # (K, D) each
+```
+
 ### Blend (combine)
 combine things into one: bundle (superposition, weighted = soft mixture), lerp / slerp interpolation, Frechet mean on the sphere, front-to-back alpha composite, and dict/scene merge with a conflict policy.
 
 ```python
 from holographic.misc.holographic_blendhome import Blend; Blend.bundle(vectors, weights)
+```
+
+### Bundle capacity as a measured load ratio
+how many things fit in a bundle -- answered with its THREE VARIABLES attached (readout, dimension, quality floor), measured at call time, never a constant. The folklore '20-32 instructions' was a LINEAR-readout artifact: naive cosine holds safe M/D = 0.02 while cosamp/amp hold 0.17 (44 items at D=256, 174 at D=1024 -- 8.7x more, and the ratio COLLAPSES across dims, which is why capacity is m/D not a count). Reference numbers are for an INCOHERENT dictionary; coherence inverts the ranking, so pass codebook= for your atoms. Gate is mean minus sd: a lucky-seed capacity is not a capacity.
+
+```python
+mind.bundle_capacity(512, 'cosamp'); mind.measure_recovery_curve(512, 'amp')
 ```
 
 ### Calibration vs value (a good forecast is not yet a good decision)
@@ -3142,6 +3292,13 @@ Partition nodes into CONNECTED COMPONENTS under an undirected edge list -- the g
 import lecore; m=lecore.UnifiedMind(); comps=m.graph_connected_components(5, [(0,1),(1,2),(3,4)]); (len(comps)==2, comps[0]==[0,1,2], comps[1]==[3,4])
 ```
 
+### How many cores can I actually use (+ should I pool?)
+cpu_budget() is NOT os.cpu_count(), which LIES IN A CONTAINER -- it reports the HOST's cores and ignores cgroup quota and affinity, so --cpus=2 on a 64-core box answers 64 and a pool sized from it spawns 64 interpreters to share 2 cores: slower than sequential and 64x the memory. Takes the MINIMUM of affinity, cgroup v2/v1 quota and cpu_count. should_pool() then decides if a pool pays, refusing on <2 cores, <2 buckets, or work per bucket below ~4x the 0.2ms dispatch cost.
+
+```python
+mind.cpu_budget(); mind.should_pool(n_buckets=8, est_ms_per_bucket=50.0)
+```
+
 ### IES photometric file (a real luminaire's measured falloff)
 parse an IESNA LM-63 file -- the format lighting manufacturers actually publish -- into a (candela_profile, max_vertical_angle) pair usable as a light's angular falloff. Takes the file TEXT not a path, so it works on an upload, a string inside a scene description, or a file you read yourself. This is how a render stops using an invented cosine falloff and starts using the measured distribution of an actual fixture.
 
@@ -3212,6 +3369,13 @@ The k LOWEST eigenvectors of a Hermitian PSD operator from its MATVEC alone (m.l
 import numpy as np, lecore; m=lecore.UnifiedMind(); A=np.random.default_rng(0).standard_normal((30,30)); A=A@A.T; w,U=m.low_eigenvectors(lambda x:A@x,30,float(np.abs(A).sum(1).max()),k=4,dtype=float,shift=float(np.linalg.eigvalsh(A)[0]-0.5),iters=80); np.allclose(np.sort(w),np.linalg.eigvalsh(A)[:4],atol=1e-2)
 ```
 
+### Make the attached LLM a planner-visible tool
+attach_llm sets the mind's _llm and a bus bridge but does NOT register the model as a tool -- so Planner.plan, optimize_toolchain, CircuitBreaker and SkeletonLibrary were all BLIND to it: the one tool that can do fuzzy language work was the one the planner could not reach. llm_tool() registers it like any other tool (keyword vector, success rate, breaker). THE POINT: a registered model can be FAILED OVER AWAY FROM -- measured, a flaky model's breaker opens after 3 failures and the planner is then only offered the deterministic tool. A system whose only mechanism IS the model cannot do that.
+
+```python
+mind.attach_llm(my_fn); tool = mind.llm_tool(description='rewrite text')
+```
+
 ### Manifold-correct normal quantization (octnormal)
 quantize a unit normal on its own manifold (octahedral mapping) instead of packing three floats and re-normalizing, which distorts the sphere. The canonical home for compressing normals in meshes, g-buffers, splats and curvature..
 
@@ -3231,6 +3395,13 @@ Refract an image through a 2D SHAPE: mind.mask_refraction(image, mask, strength,
 
 ```python
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); yy,xx=np.mgrid[0:64,0:64]; bg=np.stack([np.mod(xx//8+yy//8,2).astype(float)]*3,-1); mask=(xx-32)**2+(yy-32)**2<20**2; r=m.mask_refraction(bg, mask, strength=8.0); r.shape
+```
+
+### Measure where the GPU starts winning (crossover)
+the ONE number blocking the compute backlog: should_offload's thresholds are ARITHMETIC FROM PCIe BANDWIDTH, not measurements, and everything downstream is wired and default-off waiting on them. Sweeps CPU vs device across dim/count/batch and reports the crossover in bytes. HANDLES THE TIMING TRAP -- GPU calls are async, so it reads every result back to force completion; timing a launch instead of an execution is the classic spectacular wrong number. REFUSES TO FLATTER A SOFTWARE ADAPTER: llvmpipe/WARP get a MEANINGLESS banner.
+
+```python
+print(mind.gpu_crossover(kind='cleanup', text=True))
 ```
 
 ### Merge forked worlds (fork/merge)
@@ -3259,6 +3430,13 @@ compile a scalar Python kernel ONCE to a native .so (content-hash cached), batch
 
 ```python
 src = 'def k(px: float, r: float) -> float:\n    return sqrt(px * px) - r\n'; print(mind.zig_batch_eval(src, [[1.5, 2.0, -0.7], [0.5, 0.5, 0.5]]))
+```
+
+### Null-reference a synthesis threshold
+is the 0.85 coherence bar MEANINGFUL on your library? synthesize_for_goal accepts a chain when coherence clears a bare constant -- and that constant encodes an assumption about how coherent a RANDOM goal can get, which is a property of the LIBRARY, not the algorithm. Re-runs the identical synthesis on random unit goals (no chain behind them by construction) and reports where the real score sits. MEASURED: real goals 1.000, random 0.14-0.24, so 0.85 separates -- the number the constant hides. Wired into declare(null_check=True).
+
+```python
+mind.gap_gate_null(library, goal_sig); mind.declare(req, args=..., null_check=True)
 ```
 
 ### Object snap: midpoint + intersection
@@ -3362,6 +3540,13 @@ factor a DEEP bound composite by solving a SHALLOW problem over composed chunks,
 vocab = mind.map_codebook(16, 2048, seed=0); cb = mind.learn_chunks(stream); res = mind.recursive_factor(mind.map_bind(*[vocab[i] for i in [0,1,2,3,4,5,6,7]]), cb, vocab)
 ```
 
+### Reduce and argmax on ANY GPU (WGSL)
+sum/max/min and argmax over a 1-D array on Vulkan/Metal/DX12/WebGPU. The primitive that unlocks the VSA kernels: elementwise maps serve rendering and NONE of bundle/cleanup/resonator/amp/htcodebook, which are all cross-invocation reductions. TWO-STAGE -- workgroup partials in shared memory, host finishes -- because a grid-wide barrier does not exist in WGSL and atomics are float-nondeterministic. ARGMAX splits deliberately: value on device, INDEX on host by lowest index, so ties break canonically. Measured 200/200 on adversarial exact ties.
+
+```python
+mind.wgsl_reduce('sum', data); idx, val = mind.wgsl_argmax(similarities)
+```
+
 ### Refine loop (produce / critique / adjust)
 mind.refine(produce, critique, adjust, accept, budget) makes a result, has a CRITIC score it (a metric, opponent agreement, a model, or a human), adjusts, and retries until it's good enough or the budget runs out -- the pipeline middle that sits leCore between a big compute and a checker. Returns {result, score, accepted, tries}. The callable-critic sibling of project_onto_constraints..
 
@@ -3383,11 +3568,25 @@ borrowed from ocean physics: a FAST component tracks the present while a SLOW on
 d = mind.regime_detector(); div, layer, new = d.observe(x)
 ```
 
+### Resource policy (what this process may use)
+the OPERATOR says what is allowed -- cpu_cores cap, pool allow/deny, gpu auto/on/off, device_memory_mb -- because cpu_budget() answers what is PHYSICALLY AVAILABLE, which is not what this process MAY TAKE on a shared box or beside the user's real work. A POLICY CAPS, IT DOES NOT COMMAND: cpu_cores=4 means never more than 4 and the measured gates still decide inside it. Precedence explicit > policy > env > auto. Reports the SOURCE of every value and flags which settings change NUMERICS (gpu) versus only speed (cores, pool).
+
+```python
+mind.resource_policy(cpu_cores=4, gpu='off'); mind.resource_policy()
+```
+
 ### Resting fills + paper book (passive adverse selection; forward test with gates)
 mind.resting_fill_sim(path, events, delta): unconditional mark-out is +delta by construction (the discount a naive backtest banks); FILLED mark-out on a random walk is NEGATIVE -- being chosen claws back more than the discount. Extra adverse: momentum -2.45 << rw -0.53 < reversion -0.21; depth shrinks the per-fill extra while fills collapse. Price-path only: real queues are WORSE. mind.paper_book(lag, cost): forward harness with gates attached -- actionable entries (lag>=1), costs, gate masks, sleeves with the MEDIAN beside the mean. Proves plumbing, not edge..
 
 ```python
 import numpy as np; r=np.random.default_rng(0); p=list(np.cumsum(r.standard_normal(3000))); res=mind.resting_fill_sim(p, list(range(50,2900,40)), delta=1.0); print(round(res['selection_cost'],2), round(res['fill_rate'],2))
+```
+
+### Return the tie, then verify which candidate works
+decide_or_abstain detects a knife-edge then THROWS THE ALTERNATIVES AWAY. tied_candidates returns the set within margin (a clear winner gives a ONE-element set, never empty -- 'no ambiguity' and 'no answer' must not look alike); verify_and_keep tries them in rank order and keeps the first that VERIFIES, reporting all-failed instead of guessing. Not a learned tie-breaker: at a real tie candidates are EQUALLY GOOD, so verification beats learning. MEASURED: 0% ties on a random codebook, 84% on a coherent one under noise -- a degraded-regime tool.
+
+```python
+t = mind.tied_candidates(ranked, margin=0.01); mind.verify_and_keep(t['candidates'], check)
 ```
 
 ### Rolling / streaming statistics (causal by construction, exact by default)
@@ -3544,6 +3743,13 @@ leCore CALLS tools in the same shape it serves them. holographic.io_and_interop.
 for t in remote_tools('http://host:8080', token='x'): mind.orchestrator.register(t)  # + mind.attach_llm(llm); mind.orchestrator.register_command('ffmpeg', ['ffmpeg','-i','{}'])
 ```
 
+### Use the GPU (optional CuPy backend, NVIDIA only)
+turn the optional CuPy backend on for the heavy array-parallel kernels (fluid, shader, deptrace, proc_texture, memoryhome -- 5 modules). Returns whether the GPU is now ACTIVE: requested AND a CUDA device present. Falls back to NumPy silently otherwise. SELECTIVE BY DESIGN -- a big FFT or matmul wins because the transfer amortises, a small per-vector op LOSES to the transfer. HONEST: this is CUDA/NVIDIA ONLY, and GPU matches NumPy only to a TOLERANCE, so the bit-exact and tie-sensitive paths stay on CPU. Throughput, not determinism.
+
+```python
+mind.use_gpu(True)   # -> False when no CUDA device is present
+```
+
 ### Utilities & helpers
 the engine's cross-cutting UTILITY tools: content addressing & hashing (uri), tamper-evident verification (verify), erasure/rateless coding for reliability (fountain), chunked delta chains with integrity proofs (deltachain), versioned rollback history (history), lossless compression (compress/codec), and the determinism contract (determinism). The plumbing every faculty leans on.
 
@@ -3551,11 +3757,32 @@ the engine's cross-cutting UTILITY tools: content addressing & hashing (uri), ta
 from holographic.io_and_interop.holographic_uri import address_from_content, make_key; from holographic.misc.holographic_verify import CompositionTree
 ```
 
+### Walk on Decomposed Subdomains (short walks + exact solve)
+SHORT random walks estimate local coupling between interface points; the sparse system is then solved DETERMINISTICALLY by the shared conjugate gradient. Sampling does local coupling, exact linear algebra does the rest. MEASURED vs pure WoS at 32 walks: 0.043 vs 0.075 error (about HALF). KEPT NEGATIVES: BIASED by interface resolution, so unbiased WoS OVERTAKES at high budgets; the paper's low-variance headline does NOT reproduce -- this earns sample efficiency. 2-D rectangle + Dirichlet; use wost for general SDFs.
+
+```python
+pts = mind.wods_interface_grid(6, 6); mind.wods_solve(pts, g); mind.wods_measure_vs_pure_wos()
+```
+
+### What GPU do I have, and would offloading pay?
+use_gpu() returns a bare bool that conflates FOUR states -- no CuPy, CuPy but no device, a device the resource policy forbids, and enabled -- three of which the user can fix. gpu_report() separates them and covers BOTH paths (CuPy = NVIDIA-only and transparent; WGSL = vendor-neutral and explicit), because a CuPy-only report tells an Apple or AMD user they have no GPU. should_offload() is the pre-gate: refuses on no device, too little data, too little work per byte, or REPEATED ROUND TRIPS (fuse first). Thresholds PROVISIONAL, unmeasured.
+
+```python
+mind.gpu_report(); mind.should_offload(n_bytes=10**8, flops_per_byte=50.0)
+```
+
 ### What this build has (feature manifest)
 mind.features(names) -> {name: bool} answers a preflight in ONE call ('does this build have pipeline_map?'); mind.features() maps every public faculty to True. mind.version() -> {engine, capabilities_schema, dim, seed} says WHICH BUILD it is. Together they replace a hardcoded client-side list of faculty names -- which rots SILENTLY, because a missing faculty and a renamed one both look like an absent attribute from outside. Private names are always False: they are not part of the contract..
 
 ```python
 import lecore; m=lecore.UnifiedMind(dim=64,seed=0); print(m.features(['pipeline_map','io_kinds','job_submit'])); print(m.version())
+```
+
+### Where should this work run (one placement oracle)
+three oracles answered three placement questions and none knew about the others -- machine_place_unit, should_pool, should_offload -- so a caller reconciled them by hand and NOTHING reconciled them with resource_policy: an oracle could recommend a device the operator had forbidden. This composes them. POLICY VETO FIRST (no arithmetic makes a banned device faster), then CHEAPEST-CORRECT: unit, pool, device -- the device last because it is the only one that changes the NUMBERS, not just the speed. Device answers are marked provisional.
+
+```python
+mind.place_work(n_buckets=64, est_ms_per_bucket=50.0, n_bytes=10**8, flops_per_byte=40.0)
 ```
 
 ### amplitude_adjusted_surrogate
@@ -3910,4 +4137,4 @@ import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors(
 
 ---
 
-*497 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*527 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

@@ -27,6 +27,49 @@ _STOP = {
 }
 
 
+#: Leading conversational scaffolding a person types before the actual request. Stripped from the QUERY
+#: PHRASE before the exact-alias check -- see _strip_filler for why the stop-word list is not enough.
+_FILLER_PREFIXES = (
+    "what's the best way to", "whats the best way to", "what is the best way to",
+    "can you help me", "could you help me", "can you", "could you",
+    "how do i", "how do you", "how can i", "how would i",
+    "i want to", "i need to", "i would like to", "i'd like to",
+    "please", "help me",
+)
+
+
+def _strip_filler(text):
+    """Remove leading conversational prefixes from a query, repeatedly, until none matches.
+
+    WHY THIS IS NOT REDUNDANT WITH _STOP, which is the obvious objection: the stop-word list ALREADY drops
+    'how', 'do', 'i', so `_tokens('how do i smooth a bumpy mesh')` and `_tokens('smooth a bumpy mesh')` are
+    ALREADY identical. Stripping fillers to help the TOKEN match would therefore be pure ceremony.
+
+    What actually breaks is the EXACT-ALIAS BONUS below, which is a whole-string equality test worth +5.0 --
+    by far the largest term in the score. Any prefix at all, even one whose every token is a stop word, makes
+    `q_phrase != alias` and silently forfeits it. MEASURED over 150 author aliases (>=4 words): exact phrasing
+    top-1 99.3%, and EVERY fully-stopped filler lands on exactly 91.3% -- identical, because they all destroy
+    the same bonus and nothing else. ("what's the best way to" is worse at 81.3%: it also leaks the content
+    words 'best' and 'way', which add spurious overlap elsewhere.)
+
+    So the fix has to reach the PHRASE, not the tokens. A change that only touched tokenization would ship
+    green and move nothing.
+
+    Returns the normalised, stripped phrase. If stripping would consume the whole query, the original is kept
+    -- 'please' alone is a query about nothing, but it is not improved by becoming the empty string."""
+    s = " ".join((text or "").lower().split())
+    changed = True
+    while changed:
+        changed = False
+        for p in _FILLER_PREFIXES:
+            if s.startswith(p + " "):
+                rest = s[len(p) + 1:].strip()
+                if rest:                       # never strip away the entire query
+                    s, changed = rest, True
+                    break
+    return s
+
+
 def _tokens(text):
     """Lower-cased content words of `text` (drop stop-words and 1-char tokens). Readable and deterministic."""
     return [w for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if w not in _STOP and len(w) > 1]
@@ -153,6 +196,11 @@ class Catalog:
         if not q:
             return []
         q_phrase = " ".join((problem or "").lower().split())        # normalised whole query, for exact-alias hits
+        # ... and the same query with conversational scaffolding removed, so "how do i <alias>" still earns the
+        # exact-alias bonus below. BOTH forms are tested, never just the stripped one: four shipped aliases
+        # THEMSELVES begin with a filler ("how do I get from points to a mesh"), and stripping the query would
+        # destroy the very bonus this exists to protect. Testing both can only ADD a match, never remove one.
+        q_stripped = _strip_filler(problem)
         scored = []
         for cap in self._by_name.values():
             # S3 pre-filter: skip a capability whose declared shape is incompatible. Untagged (empty) = always shown.
@@ -171,7 +219,7 @@ class Catalog:
             # ties with siblings that merely scatter the same words across their prose, and the alphabetical
             # tie-break can bury it below k (measured: ascii_view, exact alias 'render image to terminal', lost to
             # ascii_animate/field/sdf all tied at 3.0). Additive -- only raises exact matches, never demotes.
-            if any(q_phrase == a.lower() for a in cap.aliases):
+            if any(q_phrase == a.lower() or q_stripped == a.lower() for a in cap.aliases):
                 score += 5.0
             scored.append((score, cap.name, cap))
         scored.sort(key=lambda s: (-s[0], s[1]))                     # best score first, then name (stable)
@@ -224,7 +272,10 @@ class Catalog:
         if cache is None:
             cache = self._null_floor_cache = {}
         if key in cache:
-            mu, sd = cache[key]
+            # 3-tuple since the empirical p landed; tolerate a 2-tuple so a cache warmed by older code in
+            # the same process cannot raise. p is simply unavailable in that case, never fabricated.
+            entry = cache[key]
+            mu, sd = entry[0], entry[1]
         else:
             vocab = sorted(set(t for cap in self._by_name.values()
                                for t in (set(_tokens(cap.name)) | set(_tokens(cap.does))
@@ -236,14 +287,24 @@ class Catalog:
                 fs = self.find_scored(fake, k=1)
                 null[i] = fs[0][1] if fs else 0.0
             mu, sd = float(null.mean()), float(null.std()) or 1.0
-            cache[key] = (mu, sd)
+            cache[key] = (mu, sd, null)
         z = (top - mu) / sd
+        # EMPIRICAL p, additive and exact. The z above is fine as a floor test, but it is NOT a p-value:
+        # this null is a distribution of MAXIMA (each draw takes find_scored(fake, k=1)), which is
+        # right-skewed, so a normal approximation 1-Phi(z) understates the tail and yields an
+        # ANTI-CONSERVATIVE p -- the wrong direction for anything feeding an FDR correction. Counting
+        # directly is non-parametric and correct for any null shape. The +1 plug matches permutation_null,
+        # so p is never exactly 0 and never claims more evidence than n_null draws can support.
+        _n = cache[key][2] if len(cache[key]) > 2 else None
+        p = float((int((_n >= top).sum()) + 1) / (len(_n) + 1)) if _n is not None else None
         if z < float(z_min):
             return {"abstain": True, "z": float(z), "score": float(top), "null_mean": mu, "null_std": sd,
+                    "p": p,
                     "hits": [], "reason": "top score %.2f does not clear the in-vocabulary noise floor "
                                           "(null %.2f +/- %.2f, z=%.1f < %.1f) -- no capability matches"
                                           % (top, mu, sd, z, z_min)}
         return {"abstain": False, "z": float(z), "score": float(top), "null_mean": mu, "null_std": sd,
+                "p": p,
                 "hits": real, "reason": "top score clears the noise floor (z=%.1f)" % z}
 
 
@@ -254,6 +315,11 @@ class Catalog:
         if not q:
             return []
         q_phrase = " ".join((problem or "").lower().split())        # normalised whole query, for exact-alias hits
+        # ... and the same query with conversational scaffolding removed, so "how do i <alias>" still earns the
+        # exact-alias bonus below. BOTH forms are tested, never just the stripped one: four shipped aliases
+        # THEMSELVES begin with a filler ("how do I get from points to a mesh"), and stripping the query would
+        # destroy the very bonus this exists to protect. Testing both can only ADD a match, never remove one.
+        q_stripped = _strip_filler(problem)
         scored = []
         for cap in self._by_name.values():
             name_words = set(_tokens(cap.name))
@@ -262,7 +328,7 @@ class Catalog:
             if overlap == 0:
                 continue
             score = overlap + 0.5 * len(q & name_words)
-            if any(q_phrase == a.lower() for a in cap.aliases):     # exact-alias bonus (see find_capability)
+            if any(q_phrase == a.lower() or q_stripped == a.lower() for a in cap.aliases):  # see find_capability
                 score += 5.0
             scored.append((score, cap.name, cap))
         scored.sort(key=lambda s: (-s[0], s[1]))
@@ -393,12 +459,23 @@ _METHOD_ALIASES = {
     "build_index": ('build a nearest neighbour index', 'index vectors for search', 'make a search index', 'knn index over vectors', 'build an ann index'),
     "build_scene": ('describe a scene in words and build it', 'text to scene', 'make a scene from a description', 'natural language scene builder', 'scene from prompt'),
     "bus": ('shared message bus', 'event bus for the mind', 'publish subscribe channel', 'inter-agent messaging', 'one shared bus'),
+    "amp_recall": ('recover a bundle without knowing how many items are in it', 'approximate message passing',
+                   'onsager corrected recovery', 'soft threshold iteration', 'state evolution recovery',
+                   'unmix a heavily loaded bundle', 'recover a superposition past the usual ceiling'),
+    "cosamp_recall": ('recover many items from one bundle', 'find which codebook entries are in this sum',
+                      'unmix a superposition into its parts', 'what went into this bundle',
+                      'sparse recovery against a dictionary', 'compressed sensing recovery',
+                      'decode a superposition one piece at a time', 'batch matching pursuit',
+                      'least squares support recovery', 'strongest bundle recovery'),
     "database": ('a database you own', 'user namespaces over records', 'owned query database', 'personal database', 'namespaced data store'),
     "denoise": ('clean a noisy signal', 'remove noise from a vector', 'denoise by projecting onto a manifold', 'plug and play denoiser', 'restore a corrupted signal'),
     "encyclopedia_is_a": ('parent in the taxonomy', 'one hop up the is-a tree', 'get the category of a concept', 'taxonomic parent', 'what is this a kind of'),
     "find": ('which record holds this binding', 'find the record with a role filler', 'locate a bound pair', 'search absorbed records', 'find bind role filler'),
     "game_world": ('massive sharded game world', 'open world of game shards', 'lazy grid game world', 'streaming game world', 'huge multiplayer world'),
     "hypervector": ('encode as a first-class hypervector', 'raw vector plus metadata', 'hypervector object', 'typed hypervector', 'encode to a hypervector wrapper'),
+    "iht_recall": ('recover a bundle by gradient descent', 'iterative hard thresholding',
+                   'projected gradient sparse recovery', 'unmix a superposition when the codebook is coherent',
+                   'revise the support while recovering', 'keep the k largest coefficients'),
     "is_a": ('is this a kind of that', 'taxonomic membership', 'does concept belong to category', 'check is-a relationship', 'subtype check'),
     "is_deterministic": ('is this function deterministic', 'does it return the same result every time', 'check determinism', 'bit-identical repeatability', 'is the output reproducible'),
     "light": ('add a light to a scene', 'directional or point light', 'sun light source', 'scene lighting object', 'place a light'),
@@ -408,6 +485,9 @@ _METHOD_ALIASES = {
     "make_table": ('ingest tabular data', 'load a table of records', 'rows into a vsa table', 'tabular data to vectors', 'make a table from dicts'),
     "material": ('a pbr material', 'physically based material', 'material with textures', 'role-filler material record', 'surface material'),
     "measure": ('variance harness', 'mean spread and confidence interval', 'measure with error bars', 'bootstrap a number honestly', 'report a metric with variance'),
+    "occlusion_recall": ('greedy solver for a mixture of atoms', 'matching pursuit recovery',
+                         'subtract what i already found from a mixture', 'peel a bundle one atom at a time',
+                         'cheapest bundle recovery', 'greedy unbundling'),
     "plan": ('bake a route to the next decision', 'short executable plan', 'corridor to the next waypoint', 'plan a path to a goal', 'route to decision point'),
     "query": ('run a sql query', 'select from where', 'query records with sql', 'small sql over a table', 'sql subset query'),
     "read": ('pre-learn word co-occurrence', 'learn word meanings from text', 'read a corpus', 'warm up text meaning', 'learn from reading'),
@@ -655,6 +735,419 @@ def default_catalog():
                           example="from holographic.misc.holographic_pivot import ...", native=True, aliases=("pivot", "index"))
     c.register_capability("holographic_archive", "content-addressable image memory (WHT plates), damage-tolerant",
                           example="from holographic.misc.holographic_archive import ...", native=True, aliases=("image", "store", "recall"), module="archive", consumes=('image',), produces=('image',))
+
+    c.register_capability(
+        "Resonator restart budget advisor", "how many restarts does YOUR factoring problem need -- measured "
+        "on your own codebooks. The F>=4 'capacity cliff' is a SEARCH BUDGET, not a capacity limit: same "
+        "network, same dimension, 25% at restarts=4 and 100% at 256. The default was NOT raised, and the "
+        "reason is the cost profile: a bigger cap is nearly free when an answer exists (early exit) and 13x "
+        "slower when there is NONE, because a refusal must exhaust the budget. The sequence is PREFIX-STABLE, "
+        "so raising it could not flip an existing answer -- the objection is cost alone",
+        example="mind.advise_restarts([bookA, bookB], targets=(0.95,))",
+        native=True, aliases=("how many restarts does my resonator need", "pick a search budget",
+                              "how long should i search before giving up", "advise a restart count",
+                              "is my factoring failing from budget or capacity"))
+
+    c.register_capability(
+        "Return the tie, then verify which candidate works", "decide_or_abstain detects a knife-edge then THROWS THE "
+        "ALTERNATIVES AWAY. tied_candidates returns the set within margin (a clear winner gives a ONE-element "
+        "set, never empty -- 'no ambiguity' and 'no answer' must not look alike); verify_and_keep tries them "
+        "in rank order and keeps the first that VERIFIES, reporting all-failed instead of guessing. Not a "
+        "learned tie-breaker: at a real tie candidates are EQUALLY GOOD, so verification beats learning. "
+        "MEASURED: 0% ties on a random codebook, 84% on a coherent one under noise -- a degraded-regime tool",
+        example="t = mind.tied_candidates(ranked, margin=0.01); mind.verify_and_keep(t['candidates'], check)",
+        native=True, aliases=("what were the runner up matches", "return several candidates instead of one",
+                              "how close was the second best answer", "try both and see which works",
+                              "handle an ambiguous match", "dont guess when its a tie",
+                              "adapt instead of breaking on a tie"))
+
+    c.register_capability(
+        "Measure where the GPU starts winning (crossover)", "the ONE number blocking the compute backlog: "
+        "should_offload's thresholds are ARITHMETIC FROM PCIe BANDWIDTH, not measurements, and everything "
+        "downstream is wired and default-off waiting on them. Sweeps CPU vs device across dim/count/batch and "
+        "reports the crossover in bytes. HANDLES THE TIMING TRAP -- GPU calls are async, so it reads every "
+        "result back to force completion; timing a launch instead of an execution is the classic spectacular "
+        "wrong number. REFUSES TO FLATTER A SOFTWARE ADAPTER: llvmpipe/WARP get a MEANINGLESS banner",
+        example="print(mind.gpu_crossover(kind='cleanup', text=True))",
+        native=True, aliases=("measure the gpu crossover", "benchmark cpu vs gpu",
+                              "find where the device starts winning", "is my gpu actually faster",
+                              "when should i use the gpu", "gpu benchmark"))
+
+    c.register_capability(
+        "What GPU do I have, and would offloading pay?", "use_gpu() returns a bare bool that conflates FOUR "
+        "states -- no CuPy, CuPy but no device, a device the resource policy forbids, and enabled -- three "
+        "of which the user can fix. gpu_report() separates them and covers BOTH paths (CuPy = NVIDIA-only "
+        "and transparent; WGSL = vendor-neutral and explicit), because a CuPy-only report tells an Apple or "
+        "AMD user they have no GPU. should_offload() is the pre-gate: refuses on no device, too little data, "
+        "too little work per byte, or REPEATED ROUND TRIPS (fuse first). Thresholds PROVISIONAL, unmeasured",
+        example="mind.gpu_report(); mind.should_offload(n_bytes=10**8, flops_per_byte=50.0)",
+        native=True, aliases=("what gpu do i have", "is the gpu worth using here",
+                              "should i offload this to the gpu", "why is my gpu not being used",
+                              "check gpu availability", "is my graphics card being used"))
+
+    c.register_capability(
+        "Batched bind on ANY GPU (circular convolution)", "bind IS a plain circular convolution (verified to "
+        "7e-15), so it can be rfft->multiply->irfft in O(D log D) or DIRECT in O(D^2). Direct is ~100x more "
+        "arithmetic and is the right trade: it reuses the SAME workgroup-reduction shape as the matvec and "
+        "matmul kernels -- no bit-reversal, no twiddle tables, no multi-stage barriers -- and ARITHMETIC IS "
+        "WHAT A GPU HAS. Batched on purpose: a single bind is ~0.03ms on CPU, below any dispatch floor. "
+        "Correctness verified against bind_batch; the crossover needs a real device",
+        example="out = mind.wgsl_bind_batch(a_stack, b_stack)   # (K, D) each",
+        native=True, aliases=("bind many vectors at once on the gpu", "batched bind on any gpu",
+                              "circular convolution on the gpu", "gpu bind", "convolve a batch on the gpu"))
+
+    c.register_capability(
+        "VSA cleanup on ANY GPU (matvec + argmax, fused)", "the codebook similarity is 98-100% of a cleanup's "
+        "cost at any real M (the argmax is single-digit microseconds), so the SIMILARITY is what to offload. "
+        "One workgroup per row, rows never communicate. Similarity and argmax FUSED in one dispatch -- "
+        "splitting pays submission twice and ships the intermediate back. Index resolves host-side by lowest "
+        "index (canonical tie rule). MEASURED RISK: a similarity gap <=1e-7 can flip (3/150); that is 4 orders "
+        "below any sensible tie margin, so pair with tied_candidates",
+        example="idx, sc = mind.wgsl_cleanup_batch(codebook, queries); mind.wgsl_matmul(codebook, queries)",
+        native=True, aliases=("cleanup on the gpu", "matrix times vector on the gpu",
+                              "codebook similarity on any gpu", "nearest atom on the graphics card",
+                              "matvec on the gpu", "vsa recall on the gpu",
+                              "clean up many cues at once", "batched cleanup on the gpu"))
+
+    c.register_capability(
+        "Reduce and argmax on ANY GPU (WGSL)", "sum/max/min and argmax over a 1-D array on Vulkan/Metal/DX12/"
+        "WebGPU. The primitive that unlocks the VSA kernels: elementwise maps serve rendering and NONE of "
+        "bundle/cleanup/resonator/amp/htcodebook, which are all cross-invocation reductions. TWO-STAGE -- "
+        "workgroup partials in shared memory, host finishes -- because a grid-wide barrier does not exist in "
+        "WGSL and atomics are float-nondeterministic. ARGMAX splits deliberately: value on device, INDEX on "
+        "host by lowest index, so ties break canonically. Measured 200/200 on adversarial exact ties",
+        example="mind.wgsl_reduce('sum', data); idx, val = mind.wgsl_argmax(similarities)",
+        native=True, aliases=("sum an array on the gpu", "gpu reduction", "argmax on the gpu",
+                              "reduce a vector on any gpu", "find the max on the graphics card",
+                              "cleanup on the gpu"))
+
+    c.register_capability(
+        "Run a kernel on ANY GPU via WGSL (vendor-neutral)", "emit_kernel already projects an annotated "
+        "Python kernel into WGSL; this DISPATCHES it -- @compute entry point, storage bindings, bounds guard "
+        "-- on Vulkan / Metal / DX12 / WebGPU, where use_gpu's CuPy backend is CUDA/NVIDIA ONLY. The shader "
+        "is a PROJECTION of the authoritative Python, so verify_wgsl_kernel can DIFFERENTIALLY TEST the two "
+        "on real data (CuPy cannot: no shared source). Works on software adapters, so correctness is "
+        "CI-testable with no GPU. SCOPE: elementwise f32 maps; a cross-invocation reduction is not solved",
+        example="info = mind.wgsl_device(); mind.verify_wgsl_kernel(my_fn, data, extra_args=(2.0,))",
+        native=True, aliases=("run this on any gpu", "use my amd or intel gpu", "gpu without cuda",
+                              "run a kernel on metal or vulkan", "webgpu compute",
+                              "check my shader matches the python", "vendor neutral gpu"))
+
+    c.register_capability(
+        "Resource policy (what this process may use)", "the OPERATOR says what is allowed -- cpu_cores cap, "
+        "pool allow/deny, gpu auto/on/off, device_memory_mb -- because cpu_budget() answers what is "
+        "PHYSICALLY AVAILABLE, which is not what this process MAY TAKE on a shared box or beside the user's "
+        "real work. A POLICY CAPS, IT DOES NOT COMMAND: cpu_cores=4 means never more than 4 and the measured "
+        "gates still decide inside it. Precedence explicit > policy > env > auto. Reports the SOURCE of every "
+        "value and flags which settings change NUMERICS (gpu) versus only speed (cores, pool)",
+        example="mind.resource_policy(cpu_cores=4, gpu='off'); mind.resource_policy()",
+        native=True, aliases=("limit how many cores it uses", "turn off the gpu",
+                              "configure resource limits", "set a cpu limit",
+                              "stop it using all my cores", "system configuration settings",
+                              "what is it allowed to use", "restrict hardware usage"))
+
+    c.register_capability(
+        "Use the GPU (optional CuPy backend, NVIDIA only)", "turn the optional CuPy backend on for the heavy "
+        "array-parallel kernels (fluid, shader, deptrace, proc_texture, memoryhome -- 5 modules). Returns "
+        "whether the GPU is now ACTIVE: requested AND a CUDA device present. Falls back to NumPy silently "
+        "otherwise. SELECTIVE BY DESIGN -- a big FFT or matmul wins because the transfer amortises, a small "
+        "per-vector op LOSES to the transfer. HONEST: this is CUDA/NVIDIA ONLY, and GPU matches NumPy only "
+        "to a TOLERANCE, so the bit-exact and tie-sensitive paths stay on CPU. Throughput, not determinism",
+        example="mind.use_gpu(True)   # -> False when no CUDA device is present",
+        native=True, aliases=("use my gpu", "offload work to cuda", "run this on the graphics card",
+                              "do i have a gpu", "enable cuda acceleration",
+                              "make it faster with my graphics card", "use hardware acceleration",
+                              "turn on the gpu", "gpu acceleration"))
+
+    c.register_capability(
+        "Where should this work run (one placement oracle)", "three oracles answered three placement "
+        "questions and none knew about the others -- machine_place_unit, should_pool, should_offload -- so a "
+        "caller reconciled them by hand and NOTHING reconciled them with resource_policy: an oracle could "
+        "recommend a device the operator had forbidden. This composes them. POLICY VETO FIRST (no arithmetic "
+        "makes a banned device faster), then CHEAPEST-CORRECT: unit, pool, device -- the device last because "
+        "it is the only one that changes the NUMBERS, not just the speed. Device answers are marked provisional",
+        example="mind.place_work(n_buckets=64, est_ms_per_bucket=50.0, n_bytes=10**8, flops_per_byte=40.0)",
+        native=True, aliases=("where should this work run", "should this go on the gpu or cpu",
+                              "pick the best place to run this", "cpu pool or gpu",
+                              "one answer for where to run", "placement decision"))
+
+    c.register_capability(
+        "How many cores can I actually use (+ should I pool?)", "cpu_budget() is NOT os.cpu_count(), which "
+        "LIES IN A CONTAINER -- it reports the HOST's cores and ignores cgroup quota and affinity, so "
+        "--cpus=2 on a 64-core box answers 64 and a pool sized from it spawns 64 interpreters to share 2 "
+        "cores: slower than sequential and 64x the memory. Takes the MINIMUM of affinity, cgroup v2/v1 quota "
+        "and cpu_count. should_pool() then decides if a pool pays, refusing on <2 cores, <2 buckets, or work "
+        "per bucket below ~4x the 0.2ms dispatch cost",
+        example="mind.cpu_budget(); mind.should_pool(n_buckets=8, est_ms_per_bucket=50.0)",
+        native=True, aliases=("how many cores do i have", "detect available cpus",
+                              "pick a worker count automatically", "should i use a process pool",
+                              "is parallelism worth it here", "how many workers should i start",
+                              "cpu count in a container"))
+
+    c.register_capability(
+        "Spin up local worker processes (parallel execution)", "a PERSISTENT process pool -- each worker its "
+        "own interpreter with its own GIL, so GIL-bound work actually runs in parallel on ONE machine, and a "
+        "big read-only cache is published ONCE into shared_memory (zero-copy) instead of pickled per bucket. "
+        "This is the one that CREATES workers; `farm` is the cross-machine sibling and only CONSUMES hosts "
+        "you already started. Pass it as distribute_compute(backend=...). VERIFIED bit-identical to "
+        "in-process. Workers must be TOP-LEVEL picklable functions. Default stays single-process -- measure "
+        "on your own hardware first",
+        example="pool = mind.local_pool(n=4); mind.distribute_compute(buckets, my_fn, backend=pool); pool.close()",
+        native=True, aliases=("spin up another instance", "start a second worker", "use more cores",
+                              "launch a local worker pool", "run work in parallel across processes",
+                              "parallel execution on one machine", "balance load across instances",
+                              "make it use all my cpus", "local process pool"))
+
+    c.register_capability(
+        "Agent-socket benchmark (false-action rate)", "PRE-REGISTERED primary metric: false-action rate on a "
+        "NO-TOOL set -- the number reference systems do not publish. The no-tool set is built by REMOVAL: each "
+        "task is a real capability's own author-written alias asked against an index rebuilt WITHOUT that "
+        "capability, so it is a coherent idiomatic request with nothing behind it and every near neighbour "
+        "still present. Strictly harder than word salad. MEASURED 60/20 seeded: resolution 100.0%, FALSE-ACTION "
+        "RATE 0.0%, variance ZERO, model calls 0. KEPT NEGATIVE: rungs 1-5 fired 0/60",
+        example="mind.agent_benchmark(n_has=60, n_no=20); mind.catalog_without(['some capability'])",
+        native=True, aliases=("measure the false action rate", "benchmark the agent socket",
+                             "how often does it act when no tool exists", "agent benchmark",
+                             "remove a capability and see if it still answers",
+                             "does it refuse when nothing fits"))
+
+    c.register_capability(
+        "Query expansion gated on faithfulness", "let a model rewrite a request into catalog vocabulary "
+        "before retrieval, then REFUSE the rewrite unless it keeps the original's meaning. MEASURED: random "
+        "padding cannot smuggle a no-tool query past the router (0/8 -- the null is built at MATCHED TOKEN "
+        "COUNT so dilution scores worse), but a TARGETED rewrite sails through (1/3: 'purple monkey "
+        "dishwasher' -> 'smooth a bumpy mesh' routes confidently). A NULL DETECTS IRRELEVANCE, NOT "
+        "INFIDELITY. So the primary gate is overlap with the ORIGINAL; both gates apply, not either",
+        example="mind.attach_llm(my_fn); mind.expand_query('how do i fix a lumpy model')",
+        native=True, aliases=("rewrite my query into catalog words", "query expansion",
+                              "let the model rephrase before searching",
+                              "stop a rewrite from changing what i asked", "expand a search query",
+                              "is this rewrite faithful"))
+
+    c.register_capability(
+        "Agent tool-use loop (with a gate below the model)", "hands a model the relevant manifest, parses "
+        "its tool call, dispatches through invoke(), feeds the result back, iterates. Over HTTP this worked; "
+        "in process every embedder wrote their own loop, routing around the choke point. THE DIFFERENTIATOR "
+        "IS THE GATE BELOW IT: route_or_abstain scores the task against a null BEFORE any step, and below the "
+        "floor the loop refuses and the MODEL IS NEVER CONSULTED. Measured with a stub that always claims "
+        "done: has-tool 20/20, no-tool 0/20 -- FALSE-ACTION RATE 0%. Refuses non-finite args and off-manifest "
+        "tools; never guesses an unparsed reply",
+        example="mind.attach_llm(my_fn); mind.agent_loop('smooth a bumpy mesh')",
+        native=True, aliases=("let a model use my tools", "in process tool use loop",
+                              "run an agent against the catalog", "agent loop",
+                              "refuse a step when no tool fits", "model picks tools and i run them",
+                              "tool calling loop without http"))
+
+    c.register_capability(
+        "Make the attached LLM a planner-visible tool", "attach_llm sets the mind's _llm and a bus bridge "
+        "but does NOT register the model as a tool -- so Planner.plan, optimize_toolchain, CircuitBreaker and "
+        "SkeletonLibrary were all BLIND to it: the one tool that can do fuzzy language work was the one the "
+        "planner could not reach. llm_tool() registers it like any other tool (keyword vector, success rate, "
+        "breaker). THE POINT: a registered model can be FAILED OVER AWAY FROM -- measured, a flaky model's "
+        "breaker opens after 3 failures and the planner is then only offered the deterministic tool. A system "
+        "whose only mechanism IS the model cannot do that",
+        example="mind.attach_llm(my_fn); tool = mind.llm_tool(description='rewrite text')",
+        native=True, aliases=("let the planner use the language model", "register an llm as a tool",
+                              "make the model visible to the planner", "fail over away from a flaky model",
+                              "llm as a tool", "use my model in a plan",
+                              "what happens when the model keeps failing"))
+
+    c.register_capability(
+        "Clean up many cues at once (batched cleanup)", "the missing UP direction of cleanup, and it pays on "
+        "the CPU ALONE: one (K,D)x(D,M) matmul instead of K separate matvecs is 2.58x at K=32, 5.36x at K=64, "
+        "5.92x at K=128 -- BLAS getting one big matmul rather than K small ones, with no device involved. "
+        "backend='wgsl' routes the same computation to ANY GPU, DEFAULT OFF because the host<->device "
+        "crossover has never been measured on real hardware and the one thing worse than not using a device "
+        "is using it on a guess. Indices resolve by lowest index on both paths, so ties cannot move",
+        example="idx, scores = mind.cleanup_batch(codebook, queries)   # backend='wgsl' to try a device",
+        native=True, aliases=("clean up many cues at once", "batch cleanup", "recall many vectors at once",
+                              "nearest atom for a stack of queries", "batched nearest neighbour"))
+
+    c.register_capability(
+        "How many slots can I drop under memory pressure", "device memory is a hard ceiling with no swap, so "
+        "pressure means failure rather than slowdown -- a distributed representation can DEGRADE instead. "
+        "Dropping slots reduces the EFFECTIVE DIMENSION, so the budget is the load-ratio law: recall holds "
+        "while n_items/(keep*dim) stays under the safe ratio. NO NEW THEORY -- verified across 5 configs. "
+        "CORRECTION KEPT LOUD: the 100%-at-40%-destroyed figure is about DAMAGE (zeroed slots, no memory "
+        "saved); TRUNCATING to 40% at the same load gives 85%, not 100%. Different quantities",
+        example="mind.drop_budget(dim=1024, n_items=16)   # -> keep 78%, 1792 bytes saved",
+        native=True, aliases=("how many slots can i drop", "degrade instead of running out of memory",
+                              "shrink a vector under memory pressure", "memory budget for a bundle",
+                              "how much can i truncate"))
+
+    c.register_capability(
+        "Bundle capacity as a measured load ratio", "how many things fit in a bundle -- answered with its "
+        "THREE VARIABLES attached (readout, dimension, quality floor), measured at call time, never a "
+        "constant. The folklore '20-32 instructions' was a LINEAR-readout artifact: naive cosine holds safe "
+        "M/D = 0.02 while cosamp/amp hold 0.17 (44 items at D=256, 174 at D=1024 -- 8.7x more, and the "
+        "ratio COLLAPSES across dims, which is why capacity is m/D not a count). Reference numbers are for "
+        "an INCOHERENT dictionary; coherence inverts the ranking, so pass codebook= for your atoms. Gate is "
+        "mean minus sd: a lucky-seed capacity is not a capacity",
+        example="mind.bundle_capacity(512, 'cosamp'); mind.measure_recovery_curve(512, 'amp')",
+        native=True, aliases=("how many things fit in a bundle", "safe number of items to superpose",
+                              "capacity of a bundle at this dimension", "load ratio before recovery fails",
+                              "will recovery still work with this many items", "bundle capacity",
+                              "how many items can i pack into one vector", "superposition limit"))
+
+    c.register_capability(
+        "Null-reference a synthesis threshold", "is the 0.85 coherence bar MEANINGFUL on your library? "
+        "synthesize_for_goal accepts a chain when coherence clears a bare constant -- and that constant "
+        "encodes an assumption about how coherent a RANDOM goal can get, which is a property of the LIBRARY, "
+        "not the algorithm. Re-runs the identical synthesis on random unit goals (no chain behind them by "
+        "construction) and reports where the real score sits. MEASURED: real goals 1.000, random 0.14-0.24, "
+        "so 0.85 separates -- the number the constant hides. Wired into declare(null_check=True)",
+        example="mind.gap_gate_null(library, goal_sig); mind.declare(req, args=..., null_check=True)",
+        native=True, aliases=("is my threshold meaningful", "null reference a coherence gate",
+                              "check a synthesis threshold against chance",
+                              "score versus its own null for capability synthesis",
+                              "is 0.85 a real bar", "validate a gate constant"))
+
+    c.register_capability(
+        "Declare a body, let the ladder fill it", "describe what you want; the engine walks rungs "
+        "cheapest-and-most-provable FIRST and stops at the first clearing its gate: 0 route_or_abstain -> "
+        "invoke, 1 typed plan, 2 synthesize_procedure (EXACT, execution-verified), 3 fill_capability_gap "
+        "(TOL). Every result carries rung/mechanism/exactness/reversibility/confidence/why PLUS a descent "
+        "log saying why each rung above declined -- that log IS the explanation. REFUSAL IS A RESULT: an "
+        "unresolvable request returns ok=False, never a guess. max_rung=5 keeps it deterministic; every "
+        "gate is NaN-guarded because a NaN score WINS an unguarded argmax",
+        example="mind.declare('smooth a bumpy mesh'); mind.declare_explain('...'); f = mind.declares(fn)",
+        native=True, aliases=("declare a method and let the engine fill it in",
+                              "resolve an empty function body at runtime",
+                              "try cheap deterministic ways before calling a model",
+                              "which rung answered my request", "escalating ladder of mechanisms",
+                              "fill in a stub", "agent socket", "let the engine work out how",
+                              "explain how this would be answered", "refuse instead of guessing"))
+
+    c.register_capability(
+        "Decision-safe quantization (does the ARGMAX survive?)", "measure the top-1 FLIP RATE when an index "
+        "is quantized -- not reconstruction error, the DECISION. A code can hold cosine 0.9999 and still "
+        "change which entry wins, and a flipped argmax is a different answer. Returns flip_rate plus the "
+        "margin distribution, because a rate without margins says what happened, not why. MEASURED on the "
+        "509x128 routing index: normal queries flip 0.00% down to 2 BITS; queries midway between two "
+        "documents collapse to margin ~0.058 and flip at 8. FLIP RATE IS GOVERNED BY MARGIN, not by corpus "
+        "size or bit width",
+        example="mind.decision_flip_rate(index, queries, bits=8); mind.crowded_subset(index, 200)",
+        native=True, aliases=("does quantization change the answer", "top 1 flip rate",
+                              "is this index decision safe", "argmax flips under compression",
+                              "how few bits can i use for retrieval", "quantization decision safety",
+                              "will compressing my vectors change which one wins",
+                              "margin distribution of a codebook", "re-prove quantization on a new index"))
+
+    c.register_capability(
+        "Bring your own query embedder (dense routing seam)", "install ANY callable text->vector so "
+        "route_semantic can reach the dense index from FREE TEXT -- today the shipped artifact is the "
+        "document side only (509 modules x 128d) and free text returns an honest None. Same contract as "
+        "attach_llm: leCore imports no model SDK. VERIFIED BY DEFAULT with a round-trip space probe: the "
+        "index lives in ONE space, a cosine against a different model's vectors is MEANINGLESS yet still "
+        "returns confident ranks. Dimension is checkable, space is not -- so sampled modules must self-recall "
+        "on their own docstrings (chance 5/509)",
+        example="mind.set_embedder(my_encode); mind.route_semantic('smooth a bumpy mesh'); mind.set_embedder(None)",
+        native=True, aliases=("supply my own embedding model", "bring your own vector encoder",
+                              "plug in an external embedder", "use a sentence transformer for routing",
+                              "dense retrieval with my own model", "set embedder",
+                              "make free text routing work", "external encoder for capability search",
+                              "route by meaning with my own embeddings"))
+
+    # --- exact / matrix-free TRANSFORMS ---
+    c.register_capability(
+        "Walk on Decomposed Subdomains (short walks + exact solve)", "SHORT random walks estimate local "
+        "coupling between interface points; the sparse system is then solved DETERMINISTICALLY by the shared "
+        "conjugate gradient. Sampling does local coupling, exact linear algebra does the rest. MEASURED vs "
+        "pure WoS at 32 walks: 0.043 vs 0.075 error (about HALF). KEPT NEGATIVES: BIASED by interface "
+        "resolution, so unbiased WoS OVERTAKES at high budgets; the paper's low-variance headline does NOT "
+        "reproduce -- this earns sample efficiency. 2-D rectangle + Dirichlet; use wost for general SDFs",
+        example="pts = mind.wods_interface_grid(6, 6); mind.wods_solve(pts, g); mind.wods_measure_vs_pure_wos()",
+        native=True, aliases=("split a domain into pieces and solve each one",
+                              "estimate a local solution operator by random walks",
+                              "combine local solvers into one global sparse system",
+                              "monte carlo pde with fewer samples", "domain decomposition",
+                              "subdomain solver", "cheaper grid free solve", "walk on decomposed subdomains",
+                              "solve a pde with a tight sample budget"))
+
+    c.register_capability(
+        "qFHRR quantized phase (3-8 bits per dimension)", "store FHRR phasors as INTEGER phase indices "
+        "instead of complex128: 4 bits/dim at 16 levels, a 96.9% cut, and bind/unbind become EXACT modular "
+        "integer arithmetic -- unbind is a TRUE inverse returning the indices bit for bit, unlike the "
+        "real-valued path's ~0.70 quasi-inverse. KEPT NEGATIVES: BUNDLING IS NOT CLOSED (it leaves the "
+        "representation via atan2 + round, and that round is itself a tie), so this does NOT delete "
+        "tie-arbitration; and bundle fidelity saturates at ~0.892 vs a complex bundle however fine the "
+        "phase grid, because magnitude is discarded",
+        example="q = mind.qfhrr_quantize(v); mind.qfhrr_bind(q, k); mind.qfhrr_unbind(c, k); mind.qfhrr_measure_fidelity()",
+        native=True, aliases=("store a hypervector at three or four bits per dimension",
+                              "quantize phase angles to integers", "bind by adding phase indices modulo k",
+                              "shrink a codebook by quantizing", "low bit width vector representation",
+                              "integer phase binding", "compress hypervectors", "quantized vsa",
+                              "exact unbind", "fewer bits per dimension", "qfhrr", "quantized fhrr",
+                              "shrink hypervector memory footprint"))
+
+    c.register_capability(
+        "NTT exact integer binding", "bind/convolve with ZERO rounding error: the same circular convolution "
+        "bind() does, computed as a Number-Theoretic Transform over Z_q, so it is EXACT and BIT-IDENTICAL ON "
+        "EVERY MACHINE -- numpy.fft is not (SIMD width reorders the summation; NumPy #11926), and here a ULP "
+        "flip is an argmax flip. Integer input only; the modulus bound is checked and RAISES rather than "
+        "wrapping. KEPT NEGATIVES: 19-50x SLOWER than the float bind (exactness, never speed), and unbind is "
+        "still HRR's QUASI-inverse -- cleanup is not deleted",
+        example="mind.ntt_bind(a, b); mind.ntt_unbind(c, a); mind.ntt_convolve(a, b); mind.ntt_measure_vs_fft()",
+        native=True, aliases=("exact circular convolution with integers", "bind two vectors with no rounding error",
+                              "modular arithmetic convolution", "number theoretic transform",
+                              "convolution that is identical on every machine", "integer only binding",
+                              "bind without floating point", "exact bind", "reproducible convolution",
+                              "deterministic binding across cpus", "ntt", "exact convolution",
+                              "binding with no rounding", "bit exact binding"))
+
+    c.register_capability(
+        "Hadamard codebook (cleanup as one transform)", "cleanup WITHOUT scanning every atom: atoms are the "
+        "sign-permuted rows of a Hadamard matrix, so correlating against ALL of them is one Walsh-Hadamard "
+        "transform -- O(D log D) not O(K*D), atoms generated not stored, rows mutually orthogonal so crosstalk "
+        "is exactly zero, and argmax is the exact ML nearest-codeword decode (Reed-Muller's Green machine). "
+        "MEASURED at equal K and D: 6.9x at D=1024, 219x at D=8192. KEPT NEGATIVES: LOSES at D=256 (0.49x, "
+        "crossover ~D=512), and K is CAPPED at 2*D by construction",
+        example="cb = mind.hadamard_codebook(1024); cb.cleanup(cue); mind.hadamard_codebook_measure()",
+        native=True, aliases=("cleanup without comparing against every codebook entry",
+                              "find the nearest codebook entry without scanning every one",
+                              "structured codebook so cleanup is a transform", "nearest codeword in log time",
+                              "speed up cleanup when the codebook is huge", "sublinear cleanup",
+                              "reed muller decoding", "maximum likelihood nearest codeword",
+                              "green machine decoder", "fast nearest atom", "orthogonal codebook",
+                              "cleanup faster than a matmul", "decode a codeword with a fast transform"))
+
+    c.register_capability(
+        "Walsh-Hadamard transform (exact, matrix-free)", "the O(D log D) WHT, D a power of two: every butterfly is "
+        "one add and one subtract -- no twiddles, no stored matrix, nothing to round. On INTEGER input it is "
+        "BIT-EXACT and machine-independent, which numpy.fft is not (pocketfft's SIMD summation order is "
+        "microarchitecture-dependent, NumPy #11926) -- and in this engine a ULP flip is an argmax flip. "
+        "wht_exact refuses float so the guarantee is enforced. KEPT NEGATIVE, measured: 4-9x SLOWER than "
+        "numpy.rfft at D=256..16384 -- it is an EXACTNESS tool, not an FFT speedup",
+        example="mind.wht(x); mind.wht_exact(x); mind.wht_inverse(y); mind.wht_measure_vs_fft()",
+        native=True, aliases=("fast walsh hadamard transform", "walsh hadamard", "hadamard transform",
+                              "transform that uses only additions and subtractions",
+                              "exact integer orthogonal transform", "matrix free transform",
+                              "deterministic transform across cpus", "transform without rounding error",
+                              "fwht", "wht", "sequency transform", "exact transform for integers",
+                              "bit exact transform", "structured operator without a stored matrix"))
+
+    # --- bundle RECOVERY: unmix a superposition (the four-member family) ---
+    # WHY A CURATED HOME: all four members were wired mind faculties and auto-registered from their
+    # docstrings, so they answered to their PAPERS' names (cosamp, iterative hard thresholding) and to
+    # nothing else. Measured before this entry: 0/6 stranger phrasings surfaced any of them, 2/2
+    # implementer names did. A research sweep duly read that hole as "ships but is not wired into
+    # unbundling" and filed re-wiring them as an actionable item -- work that was already done. The
+    # defect was the vocabulary, exactly as with mesh_box/camera above.
+    c.register_capability(
+        "Bundle recovery (unmix a superposition)", "recover the components of cue = sum_i w_i * codebook[i] -- FIVE "
+        "members: LINEAR one-shot correlate + top-m (washes out at load); occlusion_recall GREEDY matching pursuit "
+        "(cheap, never revisits); iht_recall projected gradient (revises its support); cosamp_recall batch-select + "
+        "least-squares (exact coefficients, best on COHERENT dictionaries); amp_recall Onsager-corrected AMP (K "
+        "OPTIONAL, flat cost, best at HEAVY load). NEITHER DOMINATES -- measured D=512/N=2048: all tie at 1.000 to "
+        "M/D=0.17; AMP 0.558 vs CoSaMP 0.167 at M/D=0.33; but on a coherent dictionary AMP 0.052 vs CoSaMP 1.000",
+        example="mind.cosamp_recall(cue, codebook, K); mind.iht_recall(cue, codebook, K); mind.occlusion_recall(cue, codebook, K)",
+        native=True, aliases=("recover many items from one bundle", "find which codebook entries are in this sum",
+                              "unmix a superposition into its parts", "what went into this bundle",
+                              "sparse recovery against a dictionary", "greedy solver for a mixture of atoms",
+                              "decode a superposition one piece at a time", "unbundle", "unbundling",
+                              "compressed sensing", "matching pursuit", "sparse recovery", "demix",
+                              "how many things fit in a bundle", "pull the parts out of a sum of vectors",
+                              "which atoms are in this mixture", "recovery family"))
 
     # --- caching / baking: the CACHES (audit named ~9) = bake_and_query ---
     c.register_capability(
@@ -2877,7 +3370,14 @@ def default_catalog():
                           "(determinism). The plumbing every faculty leans on",
                           example="from holographic.io_and_interop.holographic_uri import address_from_content, make_key; from holographic.misc.holographic_verify import CompositionTree",
                           native=True, aliases=("utility", "helper", "tool", "hash", "checksum", "content address",
-                                                "content id", "verify integrity", "tamper", "erasure code", "reliability",
+                                                "content id", "verify integrity", "verify data integrity", "check data integrity", "is my data corrupted",
+                                                # ^ the FULL user phrasing, not just the two-word stem: this entry
+                                                # sat at rank 3 of 3 on "verify data integrity" -- inside the
+                                                # assertion by one slot -- until a new GPU capability whose does
+                                                # honestly mentions "verify" and "data" landed at rank 2 and
+                                                # pushed it out. Additive fix: strengthen the target, never
+                                                # weaken the honest neighbour.
+                                                "tamper", "erasure code", "reliability",
                                                 "delta chain", "version history", "rollback", "compress", "determinism",
                                                 "plumbing", "reliability code"))
     # --- describe a scene in words, build it, adjust named objects, render or simulate ---

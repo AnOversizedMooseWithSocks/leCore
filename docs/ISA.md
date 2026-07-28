@@ -42,6 +42,45 @@ vary within a stated tolerance."**
 
 ---
 
+## Non-finite inputs: the contract (NaN, +/-Inf)
+
+**NaN IS NOT GUARDED AT THE ISA LEVEL, AND THAT IS A DOCUMENTED POSITION RATHER THAN AN OVERSIGHT.** Every
+edge below pins zero-norm and zero-sum cases; this section pins the non-finite one, which previously appeared
+nowhere.
+
+Observed, on this tree:
+
+```
+argmax_tiebreak([0.1, nan, 0.9])   ->  1        the NaN's index, NOT the maximum at 2
+Vocabulary.cleanup(<NaN query>)    ->  ('alpha', nan)
+```
+
+The mechanism: every `>` comparison against NaN is False, so a scanning argmax keeps its incumbent and a NaN
+*wins* rather than losing. NaN also propagates visibly through `bind` / `unbind` / `bundle` / `cosine`, and
+Python's `json` parses bare `NaN` and `Infinity` by default -- so a non-finite value can arrive over `/invoke`
+or from a language model and then take a decision.
+
+**Class.** DETERMINISTIC BUT WRONG. `cleanup` returning `('alpha', nan)` is reproducible, passes every
+determinism test, and names an atom that did not win. The score is honest; the atom name is not.
+
+**Why the ISA does not guard it.** Adding an `isfinite` check inside `argmax_tiebreak` would change an
+existing decision path, and this engine's rule is that existing decisions never flip. The cost of a guard here
+is paid on every comparison in the hot path; the cost of NOT guarding is paid only by callers who admit
+non-finite input.
+
+**So the contract is: GUARD AT THE BOUNDARY, NOT IN THE ISA.** Any surface that accepts outside data --
+`/invoke`, a model's output, a parsed file -- must reject non-finite values before they reach a decision.
+Two such guards ship today and are the pattern to copy:
+
+- `holographic_declare.finite_score` -- every ladder gate; a non-finite confidence is treated as NO
+  confidence and the rung declines with that as its stated reason.
+- `holographic_agentloop` -- refuses a tool call whose arguments contain a non-finite number, before dispatch.
+
+**No shipped path was found that reaches the `cleanup` case unguarded.** The realistic candidate -- a
+zero-area triangle, which is legal and common in real mesh data -- is correctly handled: `vertex_normals`
+uses a double `np.where` so the division never computes 0/0, verified with warnings promoted to errors. This
+is therefore contract hygiene, not an open defect.
+
 ## The base instructions
 
 Each entry: signature · observable semantics · exactness class (EXACT = bit-for-bit / a decision; TOL = a

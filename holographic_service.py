@@ -157,6 +157,13 @@ class Service:
         if getattr(self, "_mind", None) is None:
             from holographic.misc.holographic_unified import UnifiedMind
             self._mind = UnifiedMind()
+            # THE SERVICE IS THE MULTI-USER SURFACE, so a resource cap matters most here: every /invoke
+            # shares this one process, and without a cap one request that spins up a pool or grabs a device
+            # does it on behalf of everybody. NOTHING IS NEEDED HERE -- ResourcePolicy reads
+            # LECORE_CPU_CORES / LECORE_ALLOW_POOL / HOLOSTUFF_GPU as a precedence layer, so this mind
+            # inherits the deployer's environment for free, and so does a mind built inside a farm worker
+            # node. Putting the env parsing here instead would have capped the service and left every worker
+            # uncapped.
         return self._mind
 
     def _tools(self, _payload):
@@ -567,7 +574,10 @@ def make_handler(service):
                 return None                                 # signals a bad body
 
         def _reply(self, status, obj):
-            body = json.dumps(obj, default=_json_default).encode()
+            # allow_nan=False makes the guarantee ENFORCED rather than hoped for: if a non-finite ever
+            # reaches here it raises loudly instead of silently emitting a response no strict client can
+            # parse. An accidental guarantee is one refactor away from not being a guarantee.
+            body = json.dumps(obj, default=_json_default, allow_nan=False).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -714,11 +724,22 @@ def _jsonable(o):
     """Coerce a faculty result into something JSON can carry. Basic types and numpy pass straight through; dicts and
     lists recurse; anything else (a Mesh, a LoadedMesh, ...) becomes a typed summary so /invoke never crashes on an
     un-serializable return value."""
+    import math
+
     import numpy as np
+    if isinstance(o, float) and not math.isfinite(o):
+        # NON-FINITE FLOATS BECOME null. json.dumps emits BARE `NaN` / `Infinity` by default, which are NOT
+        # in the JSON grammar: Python's own parser is lenient and accepts them, so this looked fine from
+        # inside, while Go, Java and every browser's JSON.parse REJECT the response outright. The condition
+        # is fully detectable here and became an unparseable answer on the client's side of the boundary --
+        # the exact seam shape this audit was looking for. null is the one representation every parser
+        # agrees on. (np.float64 subclasses float, so this catches numpy's non-finites too.)
+        return None
     if o is None or isinstance(o, (bool, int, float, str)):
         return o
     if isinstance(o, (np.floating, np.integer)):
-        return float(o)
+        v = float(o)
+        return None if not math.isfinite(v) else v
     if isinstance(o, np.ndarray):
         return o.tolist()
     if isinstance(o, dict):

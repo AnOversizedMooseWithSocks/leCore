@@ -215,6 +215,205 @@ def load_rd(path):
         return reconstruct(unpack_code(f.read()))
 
 
+# ---------------------------------------------------------------------------------------------------
+# DECISION-SAFE rate-distortion (B5b). Everything above measures distortion as COSINE FIDELITY. That is
+# the right metric for reconstruction and the WRONG one for retrieval, where what must survive is not the
+# vector but the ARGMAX -- which entry wins. A code can hold cosine 0.9999 and still flip a decision when
+# two entries are close, and a flipped decision is a different answer, not a slightly worse one.
+#
+# WHY THIS LANDED HERE. A capability-index plan needed the top-1 FLIP RATE under quantization at ~500-2,000
+# items and found NO PUBLISHED NUMBER: the retrieval literature reports recall@k and nDCG@10 at 100K-1M
+# scale, where a handful of flips vanish into a rank metric. At 500 crowded items they do not. The same gap
+# was independently flagged in the engine's research consolidation -- "a rate-distortion theory whose
+# distortion metric is cleanup-decision preservation, not reconstruction MSE". This is that metric, made
+# runnable so any index is re-proved rather than inheriting someone else's proof on someone else's corpus.
+#
+# MEASURED on the shipped 509 x 128 routing index, 300 queries, flip rate by query construction:
+#
+#     query construction                 flip rate   margin median   margin min
+#     exact index row                       0.00%        0.583          0.245
+#     row + 30% noise                       0.00%        0.565          0.236
+#     row + 60% noise                       0.00%        0.532          0.228
+#     midpoint of two rows (ambiguous)      1.00%        0.058          0.000
+#
+# and by BIT WIDTH (genuine coarsening below the source grid), ambiguous queries only:
+#     bits   8      6      5      4      3      2
+#     flip   1.3%   2.0%   5.7%  10.7%  22.3%  37.3%      (normal queries: 0.00% at EVERY width)
+#
+# THE FINDING: FLIP RATE IS GOVERNED BY MARGIN, NOT BY CORPUS SIZE OR BIT WIDTH. A well-separated query
+# survives quantization down to 2 BITS; a query sitting equidistant between two documents is unsafe at
+# EIGHT. So "is this index decision-safe?" is not answerable from N and bits alone -- it needs the margin
+# distribution of the QUERIES you actually serve, which is what this function returns alongside the rate.
+#
+# KEPT NEGATIVE -- A COMPARISON THIS CANNOT MAKE ON THIS ARTIFACT. The shipped index is ALREADY uint8, so
+# re-quantizing it uniformly at 8 bits is a NO-OP (measured max|err| exactly 0.000000) while float8 must
+# genuinely re-quantize (max|err| 0.003845). Any uint8-vs-float8 verdict taken here measures the source
+# grid, not the quantizers, and IS NOT REPORTED as one. That comparison needs a float32 corpus. Recorded
+# because the confounded numbers looked like a clean 7.5x win for uint8 and would have been easy to ship.
+# ---------------------------------------------------------------------------------------------------
+
+def quantize_uniform(v, bits=8, axis=-1):
+    """Per-row uniform (scalar) quantization to `bits`, the scheme the shipped routing index uses: store a
+    per-row lo/hi and an integer code. Returns (dequantized, step) where `step` is the per-row bin width --
+    the quantity a decision-safety probe must perturb by half of."""
+    v = np.asarray(v, float)
+    lo = v.min(axis=axis, keepdims=True)
+    hi = v.max(axis=axis, keepdims=True)
+    span = np.where(hi > lo, hi - lo, 1.0)
+    levels = float(2 ** bits - 1)
+    q = np.rint((v - lo) / span * levels)
+    return lo + q / levels * span, span / levels
+
+
+def quantize_float8(v, exp_bits=4, mant_bits=3):
+    """E4M3-style float8: quantize each entry to a sign, a power-of-two exponent, and `mant_bits` of
+    mantissa. Unlike uniform quantization the step size SCALES WITH MAGNITUDE, so small components keep
+    relative precision -- which is the published argument for preferring float8 to int8 at equal width
+    (int8 needs a calibration set and loses more). Implemented directly because NumPy has no float8 dtype;
+    this is the arithmetic, not a hardware format."""
+    v = np.asarray(v, float)
+    out = np.zeros_like(v)
+    nz = v != 0
+    if not np.any(nz):
+        return out
+    a = np.abs(v[nz])
+    e = np.floor(np.log2(a))
+    bias = 2 ** (exp_bits - 1) - 1
+    e = np.clip(e, -bias, bias)                       # saturate rather than wrap; a wrapped exponent is a lie
+    scale = 2.0 ** e
+    mant = a / scale                                  # in [1, 2)
+    steps = float(2 ** mant_bits)
+    mant = np.rint(mant * steps) / steps
+    out[nz] = np.sign(v[nz]) * mant * scale
+    return out
+
+
+def decision_flip_rate(vectors, queries, bits=8, mode="uniform", half_step=True, seed=0):
+    """THE DECISION-SAFETY METRIC: what fraction of queries change their top-1 answer under quantization?
+
+    For each query, rank `vectors` by cosine at full precision, then re-rank after quantizing the index
+    (and, when `half_step`, nudging the query by HALF a quantization step -- the worst-case rounding a
+    stored value can hide). A flip is a different winner, not a different score.
+
+    Returns a dict: flips, n, flip_rate, and the MARGIN distribution (median/p05/min) between the top-1 and
+    runner-up at full precision -- because flip rate without margins says what happened but not why. A code
+    is decision-safe on this corpus when flip_rate is ~0 AND the margins are not sitting on the step size.
+
+    `mode` is 'uniform' (per-row scalar, what the shipped index uses) or 'float8' (E4M3-style)."""
+    V = np.asarray(vectors, float)
+    Q = np.atleast_2d(np.asarray(queries, float))
+    if V.ndim != 2 or Q.shape[1] != V.shape[1]:
+        raise ValueError("vectors (N,D) and queries (M,D) must share D; got %r and %r" % (V.shape, Q.shape))
+
+    if mode == "uniform":
+        Vq, step = quantize_uniform(V, bits=bits)
+    elif mode == "float8":
+        Vq = quantize_float8(V)
+        step = np.full((V.shape[0], 1), 0.0)
+        nzs = np.abs(V).max(axis=1, keepdims=True)
+        step = nzs * (2.0 ** -3)                       # mantissa step at the row's own scale
+    else:
+        raise ValueError("mode must be 'uniform' or 'float8', got %r" % mode)
+
+    def _rank(mat, q):
+        n = np.linalg.norm(mat, axis=1) * (np.linalg.norm(q) or 1.0)
+        n = np.where(n > 0, n, 1.0)
+        return (mat @ q) / n
+
+    rng = np.random.default_rng(seed)
+    flips, margins = 0, []
+    for q in Q:
+        base = _rank(V, q)
+        order = np.argsort(-base)
+        margins.append(float(base[order[0]] - base[order[1]]) if len(order) > 1 else float("inf"))
+        qq = q
+        if half_step:
+            # perturb the QUERY by half a step in a random direction: the worst-case error a quantized
+            # store can hide, applied where it can actually change a comparison.
+            qq = q + 0.5 * float(np.mean(step)) * rng.choice([-1.0, 1.0], size=q.shape[0])
+        if int(np.argmax(_rank(Vq, qq))) != int(order[0]):
+            flips += 1
+
+    margins = np.asarray(margins, float)
+    n = Q.shape[0]
+    return {"flips": int(flips), "n": int(n), "flip_rate": flips / n if n else 0.0,
+            "margin_median": float(np.median(margins)), "margin_p05": float(np.percentile(margins, 5)),
+            "margin_min": float(margins.min()), "bits": bits, "mode": mode}
+
+
+def crowded_subset(vectors, size, seed=0):
+    """The `size` mutually MOST SIMILAR rows of `vectors` -- a synthetic stand-in for a catalog whose
+    entries are variations on a theme. Grown greedily from the single most-similar pair, because that is
+    what crowding actually looks like: a cluster, not a random sample. Crowding is what destroys margin, so
+    a decision-safety proof taken on a well-separated corpus does NOT transfer to a crowded one, and this
+    is the knob that shows it."""
+    V = np.asarray(vectors, float)
+    norm = np.linalg.norm(V, axis=1, keepdims=True)
+    U = V / np.where(norm > 0, norm, 1.0)
+    G = U @ U.T
+    np.fill_diagonal(G, -np.inf)
+    i, j = np.unravel_index(int(np.argmax(G)), G.shape)
+    chosen = [int(i), int(j)]
+    while len(chosen) < min(size, V.shape[0]):
+        sim = U[chosen].mean(axis=0) @ U.T
+        sim[chosen] = -np.inf
+        chosen.append(int(np.argmax(sim)))
+    return V[sorted(chosen)]
+
+
+def _selftest_decision_safety():
+    """Asserts the decision-safety contracts. Split out from the module's original _selftest so the two
+    concerns fail independently -- a rate-distortion regression and a decision-safety regression are
+    different bugs and should not hide behind one another."""
+    rng = np.random.default_rng(0)
+    V = rng.standard_normal((120, 32))
+
+    # 1. A query that IS a row must win by construction; quantization must not change that.
+    r = decision_flip_rate(V, V[:40], bits=8, mode="uniform", half_step=False)
+    assert r["flip_rate"] == 0.0, "exact-row queries flipped at 8 bits: %r" % r
+
+    # 2. MARGIN GOVERNS THE RATE. Midpoints between two rows are ambiguous by construction, so their
+    #    margins must collapse relative to exact rows -- the mechanism the module docstring claims.
+    amb = 0.5 * (V[rng.choice(120, 60)] + V[rng.choice(120, 60)])
+    r_amb = decision_flip_rate(V, amb, bits=8, mode="uniform")
+    r_row = decision_flip_rate(V, V[:60], bits=8, mode="uniform")
+    assert r_amb["margin_median"] < r_row["margin_median"], "ambiguous queries are not lower-margin"
+
+    # 3. COARSER QUANTIZATION CANNOT HELP. Monotonicity is the sanity check on the whole measurement: if a
+    #    2-bit code beat an 8-bit one, the instrument is broken, not the code.
+    coarse = decision_flip_rate(V, amb, bits=2, mode="uniform")
+    assert coarse["flip_rate"] >= r_amb["flip_rate"] - 1e-9, "2-bit beat 8-bit -- the probe is broken"
+
+    # 4. float8 preserves sign for REPRESENTABLE magnitudes, and FLUSHES SMALLER ONES TO ZERO. The first
+    #    version of this assertion demanded sign preservation for -1e-9 and failed, correctly: with 4
+    #    exponent bits the smallest normal magnitude is 2^-7 ~ 0.0078, so anything below it underflows.
+    #    That floor is a real property of the format and matters for decision safety -- a small component
+    #    does not merely lose precision, it DISAPPEARS -- so it is asserted rather than papered over.
+    x = np.array([0.0, 1.0, -1.0, 0.03, -0.02])
+    f = quantize_float8(x)
+    assert f[0] == 0.0
+    assert np.all(np.sign(f[1:]) == np.sign(x[1:])), "sign flipped on a representable magnitude"
+    assert quantize_float8(np.array([-1e-9]))[0] == 0.0, "sub-normal magnitude did not flush to zero"
+
+    # 5. uniform quantization is EXACT on data already on its own grid -- the confound recorded above, made
+    #    executable so nobody re-derives a uint8-vs-float8 verdict from an already-uint8 corpus.
+    g, _ = quantize_uniform(V, bits=8)
+    assert np.abs(quantize_uniform(g, bits=8)[0] - g).max() < 1e-12
+
+    # 6. crowded_subset returns the requested size and is deterministic.
+    a, b = crowded_subset(V, 20), crowded_subset(V, 20)
+    assert a.shape == (20, 32) and np.array_equal(a, b)
+
+    # 7. Shape guards.
+    for bad in (np.zeros((5, 7)),):
+        try:
+            decision_flip_rate(V, bad)
+            raise AssertionError("accepted mismatched query width")
+        except ValueError:
+            pass
+    print("  decision-safety: flip rate, margin mechanism, monotonicity, guards -- OK")
+
+
 def _selftest():
     # Assert the REAL contract, and keep the negative LOUD: geometry_preserving_code holds a target cosine, the
     # pack/unpack round-trip is exact, and -- the honest scope -- the code only PAYS (beats float32) when the vectors
@@ -253,3 +452,4 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+    _selftest_decision_safety()

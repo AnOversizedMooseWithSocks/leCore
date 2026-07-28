@@ -44,7 +44,7 @@ class Scale:
         return table.get(reduce, reduce) if isinstance(reduce, str) else reduce
 
     @staticmethod
-    def map_reduce(buckets, worker, reduce="sum", cache=None):
+    def map_reduce(buckets, worker, reduce="sum", cache=None, backend=None):
         """The core scale-out: decompose a job into `buckets`, hand each the SAME shared read-only `cache`, run
         worker(bucket, cache) on each, and reassemble with a COMMUTATIVE monoid `reduce` so the result does not
         depend on bucket order -- which is exactly the property that lets the buckets run on separate machines with
@@ -52,7 +52,7 @@ class Scale:
         superposition), 'exact' (fixed-point deterministic sum), or your own callable. Routes to
         holographic_distribute.distribute."""
         from holographic.scene_and_pipeline.holographic_distribute import distribute
-        return distribute(buckets, worker, reduce=Scale._reducer(reduce), cache=cache)
+        return distribute(buckets, worker, reduce=Scale._reducer(reduce), cache=cache, backend=backend)
 
     @staticmethod
     def partition(n, k, costs=None):
