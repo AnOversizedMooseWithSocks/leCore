@@ -3370,7 +3370,14 @@ def default_catalog():
                           "(determinism). The plumbing every faculty leans on",
                           example="from holographic.io_and_interop.holographic_uri import address_from_content, make_key; from holographic.misc.holographic_verify import CompositionTree",
                           native=True, aliases=("utility", "helper", "tool", "hash", "checksum", "content address",
-                                                "content id", "verify integrity", "tamper", "erasure code", "reliability",
+                                                "content id", "verify integrity", "verify data integrity", "check data integrity", "is my data corrupted",
+                                                # ^ the FULL user phrasing, not just the two-word stem: this entry
+                                                # sat at rank 3 of 3 on "verify data integrity" -- inside the
+                                                # assertion by one slot -- until a new GPU capability whose does
+                                                # honestly mentions "verify" and "data" landed at rank 2 and
+                                                # pushed it out. Additive fix: strengthen the target, never
+                                                # weaken the honest neighbour.
+                                                "tamper", "erasure code", "reliability",
                                                 "delta chain", "version history", "rollback", "compress", "determinism",
                                                 "plumbing", "reliability code"))
     # --- describe a scene in words, build it, adjust named objects, render or simulate ---

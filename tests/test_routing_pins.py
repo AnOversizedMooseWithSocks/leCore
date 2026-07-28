@@ -96,3 +96,51 @@ def test_route_still_distinguishes_act_from_choose_generally():
     clear = sk.route("render a scene with global illumination")
     assert clear["decision"] in ("act", "choose")           # a real routed decision, not 'unknown'
     assert "confidence" in clear
+
+
+# ---------------------------------------------------------------------------------------------------------
+# THE CROSS-BURIAL MATRIX. Every capability that a session deliberately made discoverable, pinned in ONE
+# place so that adding a new entry cannot quietly re-rank an old one.
+#
+# WHY THIS EXISTS AS A TEST rather than a session habit: this exact regression class has now reached CI three
+# times (the mixture module displaced by Water body's oil/water aliases; "moving average" losing to a
+# reprojection-VELOCITY entry; "verify data integrity" pushed from rank 3 to rank 4 by a new GPU capability
+# whose does() honestly mentions "verify" and "data"). Each time the fix was correct and each time the sweep
+# that would have caught it lived in a session script that nobody re-ran. A matrix that is not committed is
+# not a guard. Ranking is GLOBAL -- every registration perturbs every neighbour -- so the check has to run on
+# every change, which means it has to be a test.
+#
+# THE FIX WHEN THIS FAILS IS ALWAYS ADDITIVE: strengthen the target entry's aliases with the phrasing a user
+# would type. Never weaken the neighbour that outranked it -- its match is usually honest, and demoting it
+# just moves the failure to whichever probe that neighbour was itself holding by one slot.
+CROSS_BURIAL_MATRIX = {
+    "water body": ["fill a container with water", "water in a glass", "easy water tool", "pool of water",
+                   "render water in one call"],
+    "cloud scene": ["easy clouds", "make good clouds fast", "storm clouds", "clouds from a texture"],
+    "procedural texture menu": ["voronoi texture", "musgrave texture", "marble texture", "brick texture",
+                                "3d noise texture"],
+    "mask refraction": ["refraction effect", "water droplet distortion", "glass blob effect"],
+    "style transfer": ["style transfer", "stylize an image", "make my render look like a painting"],
+    "sculpt-mode": ["prepare a mesh for sculpting", "sculpt mode conversion",
+                    "mesh changes shape when sculpting", "sdf cache from a mesh"],
+    "texture sampler": ["texture sampler", "sample an image at uv coordinates", "color ramp with stops",
+                        "bake values into a texture", "use a texture as a number"],
+    "mixture matter": ["oil and water separating mixture model", "phase separation", "immiscible fluids"],
+    "rolling / streaming": ["moving average over a window", "moving average", "rolling mean"],
+    "utilities & helpers": ["verify data integrity", "check data integrity", "is my data corrupted"],
+}
+
+
+def test_no_capability_buries_another():
+    """Every pinned phrasing still reaches the entry a human decided owns it. A failure here names the query
+    and what displaced it, so the additive fix is obvious from the message alone."""
+    m = _mind()
+    buried = []
+    for owner, queries in sorted(CROSS_BURIAL_MATRIX.items()):
+        for q in queries:
+            hits = m.find_capability(q)
+            if not any(owner in h.name.lower() for h in hits):
+                buried.append("%r should reach %r, got %s"
+                              % (q, owner, [h.name[:44] for h in hits[:3]]))
+    assert not buried, ("capabilities buried by a newer neighbour -- strengthen the TARGET's aliases, do not "
+                        "weaken the neighbour:\n  " + "\n  ".join(buried))

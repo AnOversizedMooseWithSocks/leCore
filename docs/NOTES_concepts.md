@@ -47329,3 +47329,35 @@ NOTED, NOT A DEFECT: place_work's `why` string carries a LIVE timing measurement
 but across 25 runs the DECISION (placement, verdicts) never moved, and no test asserts on the measured number.
 Measurements vary, decisions do not, which is the correct split; recorded here so the variance is not later
 mistaken for nondeterminism.
+
+## CI FIX: "verify data integrity" buried -- and the CROSS-BURIAL MATRIX finally became a TEST
+
+CI failed test_tool_families_wired_and_discoverable on one of its four probes: "verify data integrity" no
+longer reached "Utilities & helpers" in the top-3.
+
+DIAGNOSIS (measured against the pre-merge tree, not guessed): Utilities sat at rank 3 OF 3 before the merge --
+inside the assertion by exactly one slot -- and the branch's new "Run a kernel on ANY GPU via WGSL" entry
+landed at rank 2, pushing it to 4. The WGSL match is HONEST, not a spurious alias: its does() legitimately
+mentions verifying against NumPy and data upload, so "verify" and "data" both hit. Checked before touching
+anything, because the tempting fix (demote the neighbour) would have been wrong.
+
+FIX, additive per the standing rule: Utilities gains the FULL user phrasings ("verify data integrity", "check
+data integrity", "is my data corrupted") rather than relying on the two-word stem "verify integrity" it had.
+Now rank 1 on all three; WGSL and the topology gate still win their own queries (verified both directions).
+
+### THE REAL FIX: the matrix is now a committed test, not a session habit
+This regression class has now reached CI THREE times -- mixture displaced by Water body's oil/water aliases;
+"moving average" losing to a reprojection-VELOCITY entry; and now this. Every time the diagnosis was right and
+the fix was right, and every time the sweep that would have caught it lived in a SESSION SCRIPT that the next
+session did not re-run. After the mixture fix these notes even said "the matrix now includes them" -- but a
+matrix that is not committed is not a guard. Ranking is GLOBAL: every registration perturbs every neighbour,
+so the check must run on every change, which means it must be a test.
+CROSS_BURIAL_MATRIX + test_no_capability_buries_another now live in tests/test_routing_pins.py (whose stated
+purpose is pinning routing ON PURPOSE rather than incidentally). 10 owners, 38 phrasings, failure message
+names the query AND what displaced it so the additive fix is obvious from the message alone. MUTATION-TESTED:
+a deliberately unowned phrase makes it fail, so it is a guard that can actually fail rather than a green
+decoration.
+LESSON, generalised: when the same class of failure reaches CI repeatedly and the fix is always correct, the
+defect is not in the fixes -- it is that the CHECK is not automated. Promote the check, not the discipline.
+(Same shape as the seed/index lockstep fix and the backlog GLOB: gate the class, not the instance.)
+Battery clean; docs regenerated; 25 catalog/routing/buried-audit tests green.
