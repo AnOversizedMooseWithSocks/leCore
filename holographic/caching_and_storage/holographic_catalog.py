@@ -27,6 +27,49 @@ _STOP = {
 }
 
 
+#: Leading conversational scaffolding a person types before the actual request. Stripped from the QUERY
+#: PHRASE before the exact-alias check -- see _strip_filler for why the stop-word list is not enough.
+_FILLER_PREFIXES = (
+    "what's the best way to", "whats the best way to", "what is the best way to",
+    "can you help me", "could you help me", "can you", "could you",
+    "how do i", "how do you", "how can i", "how would i",
+    "i want to", "i need to", "i would like to", "i'd like to",
+    "please", "help me",
+)
+
+
+def _strip_filler(text):
+    """Remove leading conversational prefixes from a query, repeatedly, until none matches.
+
+    WHY THIS IS NOT REDUNDANT WITH _STOP, which is the obvious objection: the stop-word list ALREADY drops
+    'how', 'do', 'i', so `_tokens('how do i smooth a bumpy mesh')` and `_tokens('smooth a bumpy mesh')` are
+    ALREADY identical. Stripping fillers to help the TOKEN match would therefore be pure ceremony.
+
+    What actually breaks is the EXACT-ALIAS BONUS below, which is a whole-string equality test worth +5.0 --
+    by far the largest term in the score. Any prefix at all, even one whose every token is a stop word, makes
+    `q_phrase != alias` and silently forfeits it. MEASURED over 150 author aliases (>=4 words): exact phrasing
+    top-1 99.3%, and EVERY fully-stopped filler lands on exactly 91.3% -- identical, because they all destroy
+    the same bonus and nothing else. ("what's the best way to" is worse at 81.3%: it also leaks the content
+    words 'best' and 'way', which add spurious overlap elsewhere.)
+
+    So the fix has to reach the PHRASE, not the tokens. A change that only touched tokenization would ship
+    green and move nothing.
+
+    Returns the normalised, stripped phrase. If stripping would consume the whole query, the original is kept
+    -- 'please' alone is a query about nothing, but it is not improved by becoming the empty string."""
+    s = " ".join((text or "").lower().split())
+    changed = True
+    while changed:
+        changed = False
+        for p in _FILLER_PREFIXES:
+            if s.startswith(p + " "):
+                rest = s[len(p) + 1:].strip()
+                if rest:                       # never strip away the entire query
+                    s, changed = rest, True
+                    break
+    return s
+
+
 def _tokens(text):
     """Lower-cased content words of `text` (drop stop-words and 1-char tokens). Readable and deterministic."""
     return [w for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if w not in _STOP and len(w) > 1]
@@ -153,6 +196,12 @@ class Catalog:
         if not q:
             return []
         q_phrase = " ".join((problem or "").lower().split())        # normalised whole query, for exact-alias hits
+        # FILLER-STRIPPED FORM, restored: the split kept q_phrase but dropped this and the alias comparison
+        # that used it, silently deleting the fix. BOTH forms are tested, never just the stripped one --
+        # four shipped aliases THEMSELVES begin with a filler ("how do I get from points to a mesh"), so
+        # stripping the query alone would destroy the very +5.0 bonus this exists to protect. Testing both
+        # can only ADD a match, never remove one.
+        q_stripped = _strip_filler(problem)
         scored = []
         for cap in self._by_name.values():
             # S3 pre-filter: skip a capability whose declared shape is incompatible. Untagged (empty) = always shown.
@@ -171,7 +220,7 @@ class Catalog:
             # ties with siblings that merely scatter the same words across their prose, and the alphabetical
             # tie-break can bury it below k (measured: ascii_view, exact alias 'render image to terminal', lost to
             # ascii_animate/field/sdf all tied at 3.0). Additive -- only raises exact matches, never demotes.
-            if any(q_phrase == a.lower() for a in cap.aliases):
+            if any(q_phrase == a.lower() or q_stripped == a.lower() for a in cap.aliases):
                 score += 5.0
             scored.append((score, cap.name, cap))
         scored.sort(key=lambda s: (-s[0], s[1]))                     # best score first, then name (stable)
@@ -224,7 +273,10 @@ class Catalog:
         if cache is None:
             cache = self._null_floor_cache = {}
         if key in cache:
-            mu, sd = cache[key]
+            # 3-tuple since the empirical p landed; tolerate a 2-tuple so a cache warmed by older code in
+            # the same process cannot raise. p is simply unavailable in that case, never fabricated.
+            entry = cache[key]
+            mu, sd = entry[0], entry[1]
         else:
             vocab = sorted(set(t for cap in self._by_name.values()
                                for t in (set(_tokens(cap.name)) | set(_tokens(cap.does))
@@ -236,14 +288,24 @@ class Catalog:
                 fs = self.find_scored(fake, k=1)
                 null[i] = fs[0][1] if fs else 0.0
             mu, sd = float(null.mean()), float(null.std()) or 1.0
-            cache[key] = (mu, sd)
+            cache[key] = (mu, sd, null)
         z = (top - mu) / sd
+        # EMPIRICAL p, additive and exact. The z above is fine as a floor test, but it is NOT a p-value:
+        # this null is a distribution of MAXIMA (each draw takes find_scored(fake, k=1)), which is
+        # right-skewed, so a normal approximation 1-Phi(z) understates the tail and yields an
+        # ANTI-CONSERVATIVE p -- the wrong direction for anything feeding an FDR correction. Counting
+        # directly is non-parametric and correct for any null shape. The +1 plug matches permutation_null,
+        # so p is never exactly 0 and never claims more evidence than n_null draws can support.
+        _n = cache[key][2] if len(cache[key]) > 2 else None
+        p = float((int((_n >= top).sum()) + 1) / (len(_n) + 1)) if _n is not None else None
         if z < float(z_min):
             return {"abstain": True, "z": float(z), "score": float(top), "null_mean": mu, "null_std": sd,
+                    "p": p,
                     "hits": [], "reason": "top score %.2f does not clear the in-vocabulary noise floor "
                                           "(null %.2f +/- %.2f, z=%.1f < %.1f) -- no capability matches"
                                           % (top, mu, sd, z, z_min)}
         return {"abstain": False, "z": float(z), "score": float(top), "null_mean": mu, "null_std": sd,
+                "p": p,
                 "hits": real, "reason": "top score clears the noise floor (z=%.1f)" % z}
 
 
@@ -254,6 +316,12 @@ class Catalog:
         if not q:
             return []
         q_phrase = " ".join((problem or "").lower().split())        # normalised whole query, for exact-alias hits
+        # FILLER-STRIPPED FORM, restored: the split kept q_phrase but dropped this and the alias comparison
+        # that used it, silently deleting the fix. BOTH forms are tested, never just the stripped one --
+        # four shipped aliases THEMSELVES begin with a filler ("how do I get from points to a mesh"), so
+        # stripping the query alone would destroy the very +5.0 bonus this exists to protect. Testing both
+        # can only ADD a match, never remove one.
+        q_stripped = _strip_filler(problem)
         scored = []
         for cap in self._by_name.values():
             name_words = set(_tokens(cap.name))
@@ -262,7 +330,7 @@ class Catalog:
             if overlap == 0:
                 continue
             score = overlap + 0.5 * len(q & name_words)
-            if any(q_phrase == a.lower() for a in cap.aliases):     # exact-alias bonus (see find_capability)
+            if any(q_phrase == a.lower() or q_stripped == a.lower() for a in cap.aliases):  # see find_capability
                 score += 5.0
             scored.append((score, cap.name, cap))
         scored.sort(key=lambda s: (-s[0], s[1]))
@@ -374,6 +442,35 @@ class Catalog:
 #: find_capability by a descriptively-titled sibling and become UNDISCOVERABLE. These are stranger-phrasings a
 #: user would actually type, so each method surfaces for its own concept. (Discoverability audit D1.)
 _METHOD_ALIASES = {
+    # D1 REGRESSION, SECOND WAVE (post-merge). Ranking is GLOBAL: ~57 capabilities arrived with two merges and
+    # pushed these 25 bare method-names out of the top-15 for their OWN name, which is the audit's definition
+    # of dark. Nothing about them changed -- their neighbours did. Fixed the documented way: stranger
+    # phrasings, written from a user's mouth rather than the implementer's.
+    "bake_texture": ("bake a texture", "bake lighting to a texture", "bake to uv", "texture baking"),
+    "forecast": ("predict the next value", "forecast a series", "time series prediction", "what comes next"),
+    "forward_forward": ("forward-forward learning", "train without backprop", "local learning rule"),
+    "from_file": ("load from a file", "read a saved mind", "restore from disk"),
+    "from_state": ("restore from a state dict", "rebuild from saved state", "resume a mind"),
+    "gather": ("gather values by index", "collect entries", "index into a table"),
+    "invite": ("invite a collaborator", "share access", "add a participant"),
+    "invoke": ("call a faculty by name", "dispatch a method by name", "call a tool by name"),
+    "is_manifold": ("is the mesh manifold", "check mesh manifoldness", "watertight check"),
+    "load": ("load a saved mind", "open a saved session", "read a mind from disk"),
+    "make_water": ("make water", "create a water surface", "water material"),
+    "materials": ("list the materials", "what materials are available", "material library"),
+    "mesh_repair": ("repair a broken mesh", "fix mesh errors", "clean up a mesh"),
+    "mesh_report": ("mesh statistics", "report on a mesh", "mesh health check"),
+    "mesh_to_field": ("turn a mesh into a field", "mesh as a field", "sample a mesh as a function"),
+    "mesh_to_sdf": ("mesh to sdf", "convert a mesh to a distance field", "signed distance from a mesh"),
+    "node_graph": ("build a node graph", "node based pipeline", "wire nodes together"),
+    "reproject": ("reproject to a new view", "warp between viewpoints", "reprojection"),
+    "scan": ("scan an object", "capture a scan", "photogrammetry scan"),
+    "scene_from_image": ("build a scene from a photo", "image to scene", "reconstruct a scene from a picture"),
+    "sculpt": ("sculpt a mesh", "push and pull geometry", "digital sculpting"),
+    "semantic_scene": ("describe the scene semantically", "scene meaning", "what is in this scene"),
+    "shape": ("make a shape by name", "build a primitive shape", "named shape"),
+    "use_gpu": ("turn the gpu on", "enable gpu acceleration", "switch to the device"),
+    "weld_mesh": ("weld duplicate vertices", "merge coincident vertices", "stitch a mesh"),
     # C2/D1: these constructors ALWAYS existed and worked -- m.render_mesh(m.mesh_box(), m.camera(...)) renders
     # today with no class imports. A downstream audit still reported them "absent", because it searched for
     # make_box / box_mesh / cube / primitive / make_camera and find_capability answered "Catmull-Clark
@@ -750,6 +847,25 @@ def seed_from_modules(catalog, module_dir=None):
         # item 8) -- you reach a module through `import`, which is what the example already says.
         cap.method = None
     return catalog
+
+
+def check_catalog_part(part_module, register_fn):
+    """The contract EVERY catalog part must satisfy, in ONE home -- the mirror of holographic.unified.check_part.
+
+    A part must register onto a fresh Catalog, register a NON-EMPTY set, and not collide with itself. Those are
+    the failures a mechanical split actually threatens: a chunk boundary that swallowed a registration or
+    repeated one. WHY THIS IS SHARED RATHER THAN COPIED SIX TIMES: six byte-identical `_selftest` bodies are a
+    real cross-module duplicate and the duplication budget caught them -- correctly. Budgeting them would have
+    silenced a working alarm; unifying keeps the assertion AND removes the duplicate, which is what the budget
+    exists to push you toward."""
+    c = Catalog()
+    register_fn(c)
+    caps = c.all()
+    assert caps, "%s registered NOTHING -- a part that registers nothing is a silently missing chunk" % part_module
+    names = [x.name for x in caps]
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    assert not dupes, "%s registers the same name twice: %s" % (part_module, dupes)
+    return len(caps)
 
 
 def _selftest():

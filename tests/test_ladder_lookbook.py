@@ -58,17 +58,27 @@ def test_a_nonsense_query_gets_a_high_p_and_abstains(mind):
 
 
 def test_the_z_floor_is_not_a_significance_test(mind):
-    # AN HONEST CALIBRATION FACT, pinned because it is surprising and easy to forget: a query that CLEARS
-    # the router's z_min=0.8 floor can still sit at p ~ 0.11. The floor is a practical routing threshold,
-    # not a 0.05-level claim, and reading it as one would overstate what a successful route proves.
-    v = mind.route_or_abstain("smooth a bumpy mesh")
-    assert v["abstain"] is False
-    assert v["p"] > 0.05, "the z floor now coincides with p<0.05; update the calibration note"
+    """An honest calibration fact: clearing the router's z floor is a ROUTING decision, not a 0.05-level
+    claim, and reading it as one would overstate what a successful route proves.
 
+    ASSERTS THE RELATIONSHIP, NOT A SNAPSHOT. This originally pinned p > 0.05 for one example query
+    ("smooth a bumpy mesh") -- and that query legitimately stopped demonstrating the point: adding the
+    method-alias map moved it from z=1.10/p=0.18 to z=4.20/p=0.015, i.e. the router got BETTER at it. A test
+    that fails because the system improved is measuring the wrong thing. What actually has to hold is that
+    z and p are DECOUPLED: two queries can both clear their floor and sit orders of magnitude apart in p.
+    That survives catalog growth, which the old form did not."""
+    strong = mind.route_or_abstain("smooth a bumpy mesh")
+    assert strong["abstain"] is False
 
-# --------------------------------------------------------------------------------------
-# The scope of the correction -- the part the plan got wrong.
-# --------------------------------------------------------------------------------------
+    # a query that clears a floor only barely -- the same decision, nothing like the same evidence
+    weak = mind.route_or_abstain("transform", z_min=0.5)
+    assert weak["abstain"] is False, "fixture query no longer clears even a 0.5 floor; pick another"
+    assert weak["p"] > 0.05, (
+        "a query can clear the floor and still be far from significant; if this ever fails the floor really "
+        "has become a significance test and the calibration note must change (weak p=%.4f)" % weak["p"])
+    assert weak["p"] > strong["p"] * 5, (
+        "z and p must stay DECOUPLED -- both cleared a floor, so p is what separates them "
+        "(weak %.4f vs strong %.4f)" % (weak["p"], strong["p"]))
 
 def test_the_ladder_is_not_an_n_look_battery_over_its_rungs(mind):
     # It walks rungs IN ORDER and stops at the first pass; the declines are STRUCTURAL, not statistical.

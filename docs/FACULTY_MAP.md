@@ -314,7 +314,7 @@
 
 ## compare
 
-- **`compare_image_files`** -- Perceptual similarity in [0,1] (1 = identical) between two images given as FILE PATHS (e.g. two rendered
+- **`compare_image_files`** -- Perceptual similarity in [0,1] (1 = identical) between two images given as FILE PATHS (e.g. two
 - **`compare_images`** -- Inverse-rendering IR4: a PERCEPTUAL render-vs-target similarity in [0,1] (1 = identical) -- multi-scale
 - **`compare_structures`** -- Superpose two assembled structures (assemble() outputs) and read their OVERLAP -- the Baker seat's
 

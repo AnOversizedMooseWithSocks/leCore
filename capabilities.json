@@ -847,7 +847,10 @@
         "aim a light at something",
         "studio light",
         "light for the path tracer",
-        "why does my light crash the renderer"
+        "why does my light crash the renderer",
+        "my placed light has speckle noise",
+        "noisy speckled light",
+        "fireflies in my render"
       ],
       "consumes": [],
       "does": "ten light classes shipped and NINE were reachable by nothing -- and mind.light() returns the RASTERISER's Light, which raises inside the path tracer. This is the one door for render_scene_document: kind is a word you'd type ('softbox', 'sun', 'hdri', 'spot'), and `target` AIMS the panel/disk/spot for you instead of making you hand-build u_vec/v_vec half-edges -- measured as where 3-D authoring stalls. Reach for 'dome' first: an environment light is shadowed, so contact AO is free. KEPT NEG: dome + a bright sky double-counts the environment for diffuse -- use one or the other",
@@ -3317,7 +3320,10 @@
         "density",
         "sdf",
         "sample",
-        "voxel"
+        "voxel",
+        "represent a density volume over space",
+        "density volume",
+        "volumetric field"
       ],
       "consumes": [],
       "does": "sample a scalar/vector field at points with ONE interface (field.sample(points)); the backend is chosen by cost: callable/oracle, dense grid, narrow-band sparse (spectral/FPE/region/dirty are backends too)",

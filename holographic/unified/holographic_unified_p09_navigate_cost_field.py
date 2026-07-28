@@ -587,19 +587,44 @@ class _UnifiedPart09:
 
 
     def compare_image_files(self, path_a, path_b, w_struct=0.5, w_color=0.3, w_edge=0.2):
-        """Perceptual similarity in [0,1] (1 = identical) between two images given as FILE PATHS (e.g. two rendered
-        PNGs) -- the on-disk companion to compare_images, which takes arrays. Loads both via PIL, resizes the
-        second to the first's shape if needed, and runs the same SSIM+colour+edge metric. This is the call an agent
+        """Perceptual similarity in [0,1] (1 = identical) between two images given as FILE PATHS (e.g. two
+        rendered PNGs) -- the on-disk companion to compare_images, which takes arrays. This is the call an agent
         makes to check 'did my render change / match the target?' when the images are files on disk. Returns
-        {similarity, distance, shape_a, shape_b}."""
+        {similarity, distance, shape_a, shape_b}.
+
+        PNG IS READ WITH THE STDLIB DECODER, no dependency. This faculty used to open both files with Pillow --
+        an unguarded third-party import in a core that promises NumPy/Flask/stdlib/hashlib, sitting in the one
+        method whose own docstring calls it the check an agent runs after a render. On a clean install it raised
+        ImportError. Other formats still fall back to Pillow, and now say so instead of assuming it is there.
+
+        `b` is resized to `a`'s shape when they differ, by bilinear resample rather than PIL's Lanczos. KEPT
+        NEGATIVE: bilinear is softer, so a mismatched-size comparison scores slightly differently than it did
+        under Lanczos -- compare like-sized renders if the absolute number matters. Same-size images, which is
+        the case an agent actually hits, take no resample at all and are unaffected.
+        See holographic_render.load_png / holographic_imagecompare.perceptual_similarity."""
         import numpy as _np
-        from PIL import Image
         from holographic.io_and_interop.holographic_imagecompare import perceptual_similarity
-        a = _np.asarray(Image.open(path_a).convert("RGB"), float) / 255.0
-        b_img = Image.open(path_b).convert("RGB")
-        if b_img.size != (a.shape[1], a.shape[0]):
-            b_img = b_img.resize((a.shape[1], a.shape[0]), Image.LANCZOS)
-        b = _np.asarray(b_img, float) / 255.0
+        from holographic.rendering.holographic_render import load_png
+
+        def _read(path):
+            if str(path).lower().endswith(".png"):
+                return load_png(path)                      # stdlib, always available, deterministic
+            try:
+                from PIL import Image
+            except ImportError:
+                raise RuntimeError("reading %r needs Pillow (opt-in, like every accelerator): "
+                                   "pip install pillow   (or the `images` extra). PNG needs nothing." % path)
+            return _np.asarray(Image.open(path).convert("RGB"), float) / 255.0
+
+        a = _read(path_a)
+        b = _read(path_b)
+        if b.shape[:2] != a.shape[:2]:
+            from holographic.rendering.holographic_postfx import resample
+            b = _np.asarray(resample(b, float(a.shape[0]) / b.shape[0]), float)
+            b = b[:a.shape[0], :a.shape[1]]                # trim the rounding slack so the shapes match exactly
+            if b.shape[:2] != a.shape[:2]:                 # ...or pad, if the resample landed short
+                pad = ((0, a.shape[0] - b.shape[0]), (0, a.shape[1] - b.shape[1]), (0, 0))
+                b = _np.pad(b, pad, mode="edge")
         sim = perceptual_similarity(a, b, w_struct=w_struct, w_color=w_color, w_edge=w_edge)
         return {"similarity": float(sim), "distance": float(1.0 - sim),
                 "shape_a": list(a.shape), "shape_b": list(b.shape)}

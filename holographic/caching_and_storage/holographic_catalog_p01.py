@@ -774,23 +774,10 @@ _PART = "holographic_catalog_p01"
 
 
 def _selftest():
-    """A part must REGISTER something and must not duplicate a name inside itself.
-
-    WHY A REAL SELFTEST RATHER THAN A BUDGET LINE. The split created six modules with no `__main__`, and the
-    selftest-budget test caught it immediately -- correctly, because a module that asserts nothing is a false
-    green. Budgeting them would have been the lazy fix: it silences the alarm without testing anything. These
-    parts have a real, cheap contract -- register onto a fresh Catalog, register a NON-EMPTY set, and do not
-    collide with themselves -- so it costs nothing to assert it, and it catches the failure that actually
-    threatens a mechanical split: a chunk boundary that swallowed or repeated a registration."""
-    from holographic.caching_and_storage.holographic_catalog import Catalog
-    c = Catalog()
-    register_p01(c)
-    caps = c.all()
-    assert caps, "%s registered NOTHING -- a part that registers nothing is a silently missing chunk" % _PART
-    names = [x.name for x in caps]
-    dupes = sorted({n for n in names if names.count(n) > 1})
-    assert not dupes, "%s registers the same name twice: %s" % (_PART, dupes)
-    print("%s selftest OK -- %d capabilities, no internal duplicates" % (_PART, len(caps)))
+    """Delegates to holographic_catalog.check_catalog_part -- one home for the shared contract."""
+    from holographic.caching_and_storage.holographic_catalog import check_catalog_part
+    n = check_catalog_part(_PART, register_p01)
+    print("%s selftest OK -- %d capabilities, no internal duplicates" % (_PART, n))
 
 
 if __name__ == "__main__":
