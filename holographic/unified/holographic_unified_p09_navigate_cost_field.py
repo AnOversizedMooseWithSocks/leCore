@@ -1125,6 +1125,197 @@ class _UnifiedPart09:
         from holographic.scene_and_pipeline.holographic_scene_doc import Scene
         return Scene(dim=dim if dim is not None else self.dim, seed=seed)
 
+    def scene_info(self, scene, verbose=True):
+        """WHAT IS IN THIS SCENE -- the first call to make, before adding to it or rendering it.
+
+        The document could be built (new_scene/add) and rendered (render_scene_document) and could NOT be
+        read: an agent that added four objects had no way to confirm it, recall what it named them, or spot
+        a mistake before paying for a trace. Returns JSON-safe types only, because this crosses /invoke.
+
+        {n_objects, empty, objects[handle,name,geometry,material,position,scale,rotated,parent,tags],
+         cameras, lights, selection, materials, problems}
+
+        `problems` is a PRE-FLIGHT check, and it is why the call is worth making rather than a nicety. In
+        milliseconds it catches the three failures that otherwise cost minutes or go unnoticed entirely: a
+        material name absent from the library (which raises at RENDER time, after the whole scene is built);
+        an object with no geometry; and a ROTATED transform, which scene_to_render silently drops -- so the
+        picture disagrees with the document and nothing says so.
+
+        KEPT NEGATIVE: no bounding box. An SDF is a function, not an extent (a plane is infinite), so the
+        honest answer is position + geometry kind. Mesh the object first if you need a real extent.
+        See holographic_scene_doc.scene_info."""
+        from holographic.scene_and_pipeline.holographic_scene_doc import scene_info
+        return scene_info(scene, verbose=verbose)
+
+    # ---- SCENE MUTATION over a faculty surface (J-3D-24) -------------------------------------------------
+    # WHY THESE EXIST AND ARE NOT "just call scene.add()". The Scene document's whole mutation API lives on
+    # the OBJECT (scene.add / .edit / .remove / .undo), and object methods are invisible to GET /tools and
+    # uncallable by POST /invoke. MEASURED: with object handles working, an HTTP agent could mint a Scene,
+    # parse three SDFs, and then had NO WAY TO PUT ONE IN THE OTHER -- the authoring path dead-ended one
+    # step past "new_scene". Four thin delegators, ONE catalog entry: four registrations would cost four
+    # times the catalog budget (already at 80% of the read cap) for one workflow.
+
+    def scene_add(self, scene, name=None, geometry=None, material=None, transform=None,
+                  tags=None, params=None, parent=None):
+        """Add an object to a Scene document and return its STABLE handle (survives every later edit).
+
+        The handle is what selections, materials and edits refer to -- keep it. Validation is deliberately
+        NOT done here: a half-built scene mid-edit is normal, so a bad material is reported by scene_info's
+        pre-flight rather than refused at the point of the add. See holographic_scene_doc.Scene.add."""
+        return scene.add(name=name, geometry=geometry, material=material, transform=transform,
+                         tags=tags, params=params, parent=parent)
+
+    def scene_edit(self, scene, handle, **changes):
+        """Change an object's fields in place (name/transform/geometry/material/tags/params).
+
+        THE HANDLE DOES NOT CHANGE -- identity survives the edit, which is the keystone that lets a
+        selection or a material assignment keep pointing at the object. Records an undo entry and fires a
+        change event, both for free. See holographic_scene_doc.Scene.edit."""
+        return scene.edit(handle, **changes)
+
+    def scene_remove(self, scene, handle):
+        """Remove an object from the document. Undoable like any other edit. See Scene.remove."""
+        return scene.remove(handle)
+
+    def place(self, scene, handle, position=None, rotation=None, scale=None, degrees=True):
+        """MOVE / ROTATE / SCALE an object -- the transform verb, instead of hand-building a 4x4.
+
+        Every argument is optional and each REPLACES that component, leaving the others as they are, so
+        `place(s, h, rotation=(0, 45, 0))` turns an object without also moving it back to the origin.
+          position  (x, y, z) world position.
+          rotation  (rx, ry, rz) Euler angles applied X then Y then Z, degrees by default -- pass
+                    degrees=False for radians. A (3, 3) matrix or an (axis, angle) pair also works.
+          scale     a single number. UNIFORM ONLY, and that is a real limit, not laziness: a non-uniform
+                    scale breaks the distance-field property an SDF sphere-trace depends on, so a
+                    (2, 1, 1) stretch would make the tracer overshoot and punch through surfaces.
+
+        Records one undo entry and fires one change event, like any other scene edit.
+
+        IMPORTANT AND EASY TO TRIP OVER: a rotation written here is only RENDERED when you pass
+        affine=True to render_scene_document (or render_preview). The default drops it, because turning
+        that on moves the picture of every existing scene that has a rotated object in it and shipped
+        output does not move without an explicit decision. scene_info's pre-flight says so per object."""
+        import numpy as _np
+        obj = scene.get(handle)
+        T = _np.asarray(obj.transform, float).copy()
+        if T.shape != (4, 4):
+            T = _np.eye(4)
+        lengths = _np.linalg.norm(T[:3, :3], axis=0)
+        cur_scale = float(_np.mean(lengths)) if _np.all(lengths > 1e-9) else 1.0
+        R = (T[:3, :3] / lengths) if _np.all(lengths > 1e-9) else _np.eye(3)
+
+        if rotation is not None:
+            R = self._rotation_matrix(rotation, degrees=degrees)
+        if scale is not None:
+            cur_scale = float(scale)
+        T[:3, :3] = R * cur_scale
+        if position is not None:
+            T[:3, 3] = _np.asarray(position, float)
+        return scene.edit(handle, transform=T)
+
+    @staticmethod
+    def _rotation_matrix(rotation, degrees=True):
+        """(rx, ry, rz) Euler angles, an (axis, angle) pair, or a 3x3 matrix -> a 3x3 rotation matrix.
+
+        Three accepted spellings because callers genuinely arrive with all three: a person says '45 degrees
+        about Y', a tool hands over an axis and an angle, and a file format stores a matrix. Rejecting two
+        of them would just push the conversion into every caller."""
+        import numpy as _np
+        r = _np.asarray(rotation[0], float) if (isinstance(rotation, (tuple, list)) and len(rotation) == 2
+                                                and _np.size(rotation[0]) == 3
+                                                and _np.size(rotation[1]) == 1) else None
+        if r is not None:                                        # (axis, angle)
+            axis = r / max(_np.linalg.norm(r), 1e-12)
+            ang = float(rotation[1]) * (_np.pi / 180.0 if degrees else 1.0)
+            K = _np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+            return _np.eye(3) + _np.sin(ang) * K + (1 - _np.cos(ang)) * (K @ K)
+        arr = _np.asarray(rotation, float)
+        if arr.shape == (3, 3):
+            return arr
+        rx, ry, rz = (arr.ravel() * (_np.pi / 180.0 if degrees else 1.0))
+        cx, sx, cy, sy, cz, sz = (_np.cos(rx), _np.sin(rx), _np.cos(ry),
+                                  _np.sin(ry), _np.cos(rz), _np.sin(rz))
+        Rx = _np.array([[1, 0, 0], [0, cx, -sx], [0, sx, cx]])
+        Ry = _np.array([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]])
+        Rz = _np.array([[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]])
+        return Rz @ Ry @ Rx                                      # X, then Y, then Z
+
+    def scene_undo(self, scene, redo=False):
+        """Undo (or with redo=True, re-apply) the last scene edit. Returns True if anything moved.
+
+        The document owns its own history, so this works across every tool that edited it -- that is the
+        point of having one source of truth rather than a per-tool copy. See Scene.undo / Scene.redo."""
+        return scene.redo() if redo else scene.undo()
+
+    def scene_set_texture(self, scene, handle, texture, scale=4.0, seed=0, colors=None, **params):
+        """Texture a Scene-document object BY NAME -- 'wood', 'marble', 'checker', an (H,W,3) image, or None
+        to remove. JSON-safe end to end, which is the entire reason this exists.
+
+        THE MECHANISM WAS ALREADY THERE AND A REMOTE AGENT COULD NOT REACH IT. scene_to_render honours an
+        `albedo_socket` override -- a callable f(P (M,3))->rgb sampled at world hit points -- and
+        proc_texture() builds exactly that callable from a name. Verified live before writing this: setting
+        a socket moves the render by 0.094 mean abs. But a CALLABLE cannot cross POST /invoke, so over HTTP
+        texturing was impossible even though every part of it worked in-process -- the same
+        reachable-in-process/dead-at-the-boundary failure this arc keeps finding, one layer down. This
+        faculty takes JSON (a texture NAME + numbers, or a plain nested-list image) and builds the callable
+        on the server side, where callables are allowed to live.
+
+        `texture`: one of proc_texture's names (noise, fbm, white, voronoi, musgrave, wave, marble, wood,
+        brick, magic, checker, stripes, gradient, dots), OR an (H,W,3) array/nested list (mapped by world
+        XZ -- a floor decal / ground texture projection), OR None to remove the texture.
+        `colors`: optional (rgb_low, rgb_high) pair; a scalar field lerps between them, so 'wood' can be
+        oak-coloured rather than greyscale. Extra **params go to proc_texture (kind=, octaves=, ...).
+
+        The texture is SOLID (evaluated at 3-D world points), so it carves through the object like real wood
+        grain rather than wallpapering the surface -- no UVs required, which for SDF objects is the honest
+        choice, since an SDF has no intrinsic parameterisation to unwrap.
+
+        KEPT NEGATIVES: albedo only -- roughness/metallic stay the library material's (a full material-
+        socket system is its own design, not a texture patch). Image mapping is world-XZ planar only:
+        triplanar needs the surface NORMAL, and the socket contract is f(P) without normals -- extending
+        that contract touches every socket consumer and wants its own item. And the override participates in
+        undo like any other edit, because it goes through set_override rather than poking the record."""
+        import numpy as np
+
+        if texture is None:
+            return self.set_override(scene, handle, "albedo_socket", None)
+        if isinstance(texture, str):
+            from holographic.materials_and_texture.holographic_proctex import proc_texture
+            # not every texture takes every knob -- checker has no seed, gradient no octaves. Retrying
+            # without `seed` beats making every caller memorise which of 14 names is deterministic-by-nature;
+            # any OTHER unexpected keyword still raises, because a silently dropped octaves= is a lie.
+            try:
+                field = proc_texture(texture, scale=scale, seed=seed, **params)
+            except TypeError:
+                field = proc_texture(texture, scale=scale, **params)
+
+            if colors is not None:
+                lo = np.asarray(colors[0], float)
+                hi = np.asarray(colors[1], float)
+
+                def socket(P, _f=field, _lo=lo, _hi=hi):
+                    v = np.asarray(_f(np.atleast_2d(P)), float)
+                    if v.ndim == 1:                              # scalar field -> lerp the two colours
+                        return _lo + np.clip(v, 0.0, 1.0)[:, None] * (_hi - _lo)
+                    return v                                     # already rgb: colours ignored, field wins
+            else:
+                def socket(P, _f=field):
+                    v = np.asarray(_f(np.atleast_2d(P)), float)
+                    return np.repeat(v[:, None], 3, axis=1) if v.ndim == 1 else v
+        else:
+            img = np.asarray(texture, float)
+            if img.ndim != 3 or img.shape[2] < 3:
+                raise ValueError("an image texture must be (H,W,3); got %s -- for a named procedural "
+                                 "texture pass a string like 'wood'" % (img.shape,))
+            from holographic.materials_and_texture.holographic_proctex import sample_image
+
+            def socket(P, _img=img[..., :3], _s=float(scale)):
+                P = np.atleast_2d(P)
+                uv = (P[:, [0, 2]] / _s) % 1.0                   # world XZ, tiled every `scale` units
+                return np.asarray(sample_image(_img, uv), float)
+
+        return self.set_override(scene, handle, "albedo_socket", socket)
+
     def scatter_to_grid(self, points, values, shape, kernel="bilinear", periodic=False):
         """The shared kernel SCATTER = a BUNDLE: deposit each point's value onto a grid through a kernel (bilinear
         or B-spline) -- the superposition that MPM's P2G, a fluid deposit, and a splat all are. `points` (N,D) in
@@ -1523,6 +1714,262 @@ class _UnifiedPart09:
         abstain mask + coverage. See holographic_photo3d."""
         from holographic.rendering.holographic_photo3d import photo_to_gaussians
         return photo_to_gaussians(depth, colour, fx, fy, cx, cy, confidence_floor=confidence_floor)
+
+
+    def sky_model(self, hour=12.0, clouds=(), stars_seed=None, star_density=0.9985, moon=None,
+                  sun_intensity=18.0, cloud_seed=0, time_s=0.0, wind=(0.05, 0.02), evolve=0.10):
+        """A PARAMETRIC sky -- time of day, sun arc, moon, deterministic stars, HIGH cloud layers -- as one
+        radiance callable f(dirs)->rgb, pluggable anywhere sky_dome is (the tracer's sky=, a dome light's
+        color=). hour drives a keyed gradient palette AND the sun's position; clouds=[(kind, coverage)] with SEVEN kinds -- cirrus
+        (streaks), cirrostratus (veil), cirrocumulus (mackerel sky), altocumulus (clumps), altostratus
+        (milky sun), stratocumulus (broken deck), nimbostratus (rain blanket) -- composing as Beer-Lambert
+        shells with per-KIND extinction and threshold sharpness (cellular kinds keep real GAPS, base
+        shading keeps texture in even a full deck);
+        stars_seed makes a hash-of-direction starfield (same seed = same sky forever) that fades by daylight
+        and by cloud; moon=True auto-places opposite the sun. MEASURED under one fixed transform: noon
+        linear mean 0.529, sunset+cirrus 0.260, midnight+stars 0.019 -- a 28x day/night range the
+        auto-exposing display view will happily hide, so compare skies with view=None. LOW puffy clouds are
+        deliberately refused toward cloud_scene (the volumetric stack -- real depth and self-shadowing);
+        this model owns only what reads as a textured dome from the ground. See holographic_skymodel."""
+        from holographic.rendering.holographic_skymodel import sky_model
+        return sky_model(hour=hour, clouds=clouds, stars_seed=stars_seed, star_density=star_density,
+                         moon=moon, sun_intensity=sun_intensity, cloud_seed=cloud_seed,
+                         time_s=time_s, wind=tuple(wind), evolve=evolve)
+
+    def load_hdr(self, path, exposure=1.0):
+        """Read a Radiance .hdr / .pic (RGBE) environment map -> (H,W,3) float32 LINEAR radiance, UNBOUNDED.
+
+        THE LAST MISSING PIECE OF IMAGE-BASED LIGHTING. Everything else was already here: DomeLight's `color`
+        accepts a callable f(dirs)->rgb, and sky_dome() samples an equirectangular env by lon/lat. What there
+        was no way to do was GET a real environment map in -- load_image reads 8 bits, and an 8-bit env is
+        precisely the wrong input, because the whole point of an HDRI is that the sun is thousands of times
+        brighter than the sky. A tone-mapped picture of a sky is not an environment light.
+
+        MEASURED, and it is why this and not a sky-field wrapper (160x120, 2 bounces, dome only, matched
+        mean radiance): a flat-colour dome and a procedural sky FIELD differ by 0.0054 mean abs -- invisible.
+        The same env mirrored left/right differs by 0.0336, six times larger. Smooth gradients do not pay;
+        DIRECTIONAL STRUCTURE does, and only a real HDRI has it.
+
+        Use it: `env = m.load_hdr(path)` then `m.scene_light('dome', color=lambda d: m.sky_dome(d, env=env))`.
+        Pair with a DARK sky= or the environment is counted twice for diffuse.
+
+        KEPT NEGATIVES: .exr is not supported (a whole container format -- multi-part, tiled, several
+        compressors -- and its own project); XYZE files RAISE rather than decode wrongly, because their
+        primaries are CIE XYZ and returning them as RGB would silently shift every colour; and the result is
+        UNBOUNDED on purpose -- clipping the sun to 1.0 is the exact information loss this exists to avoid.
+        See holographic_render.load_hdr."""
+        from holographic.rendering.holographic_render import load_hdr
+        return load_hdr(path, exposure=exposure)
+
+    def load_image(self, path, mode="rgb01"):
+        """Read a PNG back into an array -- the inverse of save_render, and the step that closes a see-then-fix loop.
+
+        The engine could WRITE a PNG and could not READ one: a grep for IHDR found only the encoder. That one
+        missing direction blocked every render -> look -> adjust -> render cycle, because "look" had nowhere to
+        start, and it is why compare_image_files reached for Pillow. Pure stdlib (zlib + struct), no dependency.
+
+        mode='rgb01' (default) gives (H,W,3) float in [0,1] -- the shape every render and image call here takes,
+        so it feeds straight back into compare_images, a denoiser, or another render. mode='raw' gives the array
+        as stored (uint8/uint16, 1-4 channels). Greyscale, palette, and both alpha forms decode; alpha is dropped
+        in rgb01 because the caller asked for RGB.
+
+        KEPT NEGATIVE: the round trip is to about 1/255, not exact -- save_png quantises to 8 bits, so assert
+        against a tolerance and never against equality. Interlaced (Adam7) PNGs RAISE rather than decode
+        wrongly. See holographic_render.load_png / png_decode."""
+        from holographic.rendering.holographic_render import load_png
+        return load_png(path, mode=mode)
+
+    def fetch_asset(self, url, cache_dir=None, sha256=None, timeout=30.0):
+        """Fetch an external asset (HDRI/model/texture) into the content-addressed cache -> {path, sha256,
+        bytes, cached}. THE NETWORK MEETS THE DETERMINISM RULE the same way randomness does: BY PINNING.
+        An unpinned fetch returns the hash to record; a PINNED fetch that is cached is served from disk
+        with NO network I/O -- so a scene recipe of (url, sha256) pairs replays bit-identically offline,
+        forever, which downloaded-on-demand can never do. A pinned fetch whose bytes mismatch is deleted
+        and raises naming BOTH hashes (a silently-different asset is the supply-chain version of a flipped
+        decision). Opt-in only: nothing in core imports this; http(s) only; 512 MB ceiling. Feed the result
+        straight to load_hdr / import_asset / asset_library.add_hashes. See holographic_assetfetch."""
+        from holographic.io_and_interop.holographic_assetfetch import fetch_asset
+        return fetch_asset(url, cache_dir=cache_dir, sha256=sha256, timeout=timeout)
+
+    def render_animation(self, scene, camera, keys, n_frames=24, fps=12.0, width=160, height=120,
+                         gif=None, interp="smooth", seed=0, lights=None, sky=None, sky_keys=None,
+                         **render_kw):
+        """ANIMATE the Scene document and render it -- keyframes in, frames (and optionally a GIF) out.
+
+        NOTHING HERE IS NEW MACHINERY, and that is the point. The keyframe Timeline (key/sample, easing,
+        vectorised) existed. place() existed. render_preview existed. save_gif was the one missing writer.
+        What did not exist was any path that COMPOSES them -- 'animate an object in my scene document'
+        returned scene_info, 'render frames over time' returned a cache -- and no JSON client could build
+        the composition itself, because a Timeline object cannot cross POST /invoke. This is the bridge, in
+        the same sense scene_set_texture is: JSON-safe values in, the callables live server-side.
+
+        `keys` (JSON-safe): {handle: {property: [[t, value], ...]}} with property one of
+        'position' ([x,y,z]), 'rotation' (Euler degrees [rx,ry,rz]), 'scale' (a number). Times are in
+        SECONDS; the animation spans [0, n_frames/fps]. `interp` is the Timeline's easing for every key
+        ('linear', 'step', 'smooth', 'ease_in', 'ease_out').
+
+        Returns the list of rendered frames ((H,W,3) float each); with `gif=` set, also writes an animated
+        GIF there -- the see->fix loop for MOTION.
+
+        KEPT NEGATIVES, stated rather than discovered later:
+          * Frames render at PREVIEW quality (draft, 1 bounce) -- measured at 12x the full path. An
+            N-frame final-quality animation is N full renders and wants the job system, not a loop that
+            holds an HTTP request open for an hour.
+          * Edits go through place(), so the LAST FRAME'S transforms persist on the document afterwards --
+            deliberate (undo works, and 'where did it end up' is a real question), but a caller re-rendering
+            stills afterwards should place() things back or undo.
+          * Rotation keys interpolate EULER ANGLES componentwise. Fine for turntables and tilts; a path
+            that swings past gimbal territory wants quaternions, which the Timeline does not speak. That is
+            a real limitation of composing existing parts and it is documented instead of hidden."""
+        import numpy as np
+        from holographic.rendering.holographic_scene_render import render_preview
+
+        tl = self.timeline()
+        tracks = []                                            # (handle, property, channel_name)
+        for handle, props in keys.items():
+            for prop, kvs in props.items():
+                if prop not in ("position", "rotation", "scale"):
+                    raise ValueError("unknown animatable property %r -- position, rotation, scale "
+                                     "(what place() can apply)" % (prop,))
+                chan = "%s.%s" % (handle, prop)
+                for t, value in kvs:
+                    tl.key(chan, float(t), np.asarray(value, float) if prop != "scale" else float(value),
+                           interp=interp)
+                tracks.append((handle, prop, chan))
+
+        # sky_keys: the TIMELAPSE half, default off (additive). {'hour': [[t, hour], ...]} plus any
+        # static sky_model kwargs ('clouds', 'stars_seed', 'moon', ...). Discovery already routed
+        # 'day to night timelapse' at sky_model + render_animation -- but neither could DO it: keys move
+        # objects, and the sky was frozen per call. The hour rides the SAME Timeline as the object keys
+        # (delegation, per the hand-roll audit), and the sky closure is rebuilt per frame -- closure
+        # construction only, the texture fields inside are built per call by sky_model as before.
+        sky_tl = None
+        sky_static = {}
+        if sky_keys is not None:
+            if sky is not None:
+                raise ValueError("pass sky= (fixed) OR sky_keys= (animated), not both -- one sky per frame")
+            sky_static = {k: v for k, v in sky_keys.items() if k != "hour"}
+            if "hour" not in sky_keys:
+                raise ValueError("sky_keys needs 'hour': [[t, hour], ...] -- the keyed part; everything "
+                                 "else in sky_keys is passed to sky_model unchanged")
+            sky_tl = self.timeline()
+            for tt, hh in sky_keys["hour"]:
+                sky_tl.key("hour", float(tt), float(hh), interp=interp)
+
+        frames = []
+        for i in range(int(n_frames)):
+            t = i / float(fps)
+            for handle, prop, chan in tracks:
+                self.place(scene, handle, **{prop: tl.sample(chan, t)})
+            frame_sky = sky
+            frame_lights = lights
+            if sky_tl is not None:
+                # clouds MOVE during a timelapse (review: "changing shape and moving naturally"): the
+                # frame time feeds sky_model's wind-drift + solid-noise evolution unless the caller pinned
+                # time_s themselves. A timelapse compresses hours into seconds, so the animation time is
+                # scaled up (x240: one real second of animation ~ four minutes of sky) -- override with an
+                # explicit 'time_scale' in sky_keys, or freeze the clouds with 'time_s': 0.
+                if "time_s" not in sky_static:
+                    sky_static_frame = dict(sky_static)
+                    scale_t = float(sky_static_frame.pop("time_scale", 240.0))
+                    sky_static_frame["time_s"] = t * scale_t
+                else:
+                    sky_static_frame = {k: v for k, v in sky_static.items() if k != "time_scale"}
+                frame_sky = self.sky_model(hour=float(sky_tl.sample("hour", t)), **sky_static_frame)
+                # a timelapse whose LIGHTING ignores the sky is two different times of day in one frame;
+                # if the caller gave no lights, the animated sky drives a dome so the ground follows the sky
+                if lights is None:
+                    frame_lights = [self.scene_light("dome", color=frame_sky, intensity=1.0)]
+            frames.append(np.asarray(render_preview(scene, camera, width=width, height=height,
+                                                    seed=seed, lights=frame_lights, sky=frame_sky,
+                                                    **render_kw), float))
+        if gif is not None:
+            from holographic.rendering.holographic_render import save_gif
+            save_gif(gif, frames, fps=fps)
+        return frames
+
+    def describe_to_scene(self, text, scene=None):
+        """Words -> the CANONICAL Scene document: 'a red cube on the left and a green sphere on the right'
+        becomes real, named, handled objects you can then texture, place, keyframe, and path-trace.
+
+        WHY A BRIDGE, when build_scene already exists. leCore grew TWO scene systems that could not talk:
+        build_scene -> a SemanticScene (parses text, resolves 'on'/'beside'/'inside' into positions, renders
+        itself, adjusts by sentence) and new_scene -> the Scene DOCUMENT (handles, undo, selection -- the
+        thing scene_set_texture, place, render_animation, render_scene_document and the whole HTTP surface
+        operate on). Every parity capability of this arc landed on the document side, so an agent that
+        started from words was cut off from all of it: 8/8 audit phrasings for this conversion returned
+        nothing relevant. The parser and the layout heuristics are REUSED (interpret_description +
+        realize_scene), not reimplemented -- this is a join, and both halves keep their own behaviour.
+
+        Returns {scene, handles: {object name: handle}, unknown: [words the parser could not ground],
+        suggestions: [...]} -- unknown words are REPORTED rather than silently dropped, because 'a wooden
+        gnome' quietly becoming an empty scene is the kind of no-op that sends an agent debugging its
+        camera. Pass `scene=` to add into an existing document instead of a fresh one.
+
+        Parsed colours become per-object PBRMaterials (base colour + modest roughness), so 'red' survives
+        into the path tracer without the caller mapping words to library names.
+
+        KEPT NEGATIVES, inherited honestly from the halves rather than papered over:
+          * realize_scene's own limitation stands: rotation is not modelled -- 'diagonal' is an offset +
+            stretch, not a tilt. Fix it there if it matters; a bridge is the wrong layer.
+          * The realized SDFs arrive PRE-PLACED (position baked into the geometry), so each object's
+            document transform starts as identity. place()/keyframes still work -- they COMPOSE on top --
+            but scene_info reports position [0,0,0] for a freshly described object. Re-deriving the baked
+            offset to normalise it would mean probing the SDF for its own centre: guessy, and wrong for
+            'inside'. Reported as-is instead.
+          * The controlled vocabulary is the parser's (SHAPES/COLORS/RELATIONS in scene_semantic). This
+            bridge adds no words; `unknown` tells you what fell through."""
+        from holographic.simulation_and_physics.holographic_scene_semantic import (interpret_description,
+                                                                                   realize_scene)
+        import holographic.materials_and_texture.holographic_matlib as ML
+
+        parsed = interpret_description(text)
+        renderables = realize_scene(parsed["objects"]) if parsed["objects"] else []
+        sc = scene if scene is not None else self.new_scene()
+        handles = {}
+        for r in renderables:
+            col = tuple(r.get("color", (0.7, 0.7, 0.7)))
+            mat = r.get("mat_name") or ML.PBRMaterial(name="described:%s" % r["name"],
+                                                      base_color=col + (1.0,), roughness=0.6)
+            handles[r["name"]] = sc.add(name=r["name"], geometry=r["sdf"], material=mat)
+        return {"scene": sc, "handles": handles,
+                "unknown": list(parsed.get("unknown", ())),
+                "suggestions": list(parsed.get("suggestions", ()))}
+
+    def refine_scene(self, scene, target_image, max_steps=4, apply=True, geometry=False, focus=None,
+                     width=96, height=72):
+        """CLOSE THE LOOP: hand a described scene a TARGET IMAGE and let the engine improve itself toward
+        it -- the capability that goes past screenshot-and-hope. The reference Blender integration can show
+        an agent its render; it cannot score candidate edits against a goal and apply the best one. This
+        can, deterministically, with the trail on record.
+
+        `scene` is a SemanticScene (from build_scene / describe-side work); `target_image` is (H,W,3) --
+        MUST match `width` x `height`, because the critic compares like with like (a size mismatch used to
+        surface as a broadcast error from deep inside SSIM; it is checked HERE now, with the fix named).
+        apply=True runs the bounded greedy driver (refine_to_target) and returns {applied,
+        start_distance, final_distance, steps, history}; apply=False only SCORES (propose_edits) and
+        returns the ranked candidates without touching the scene -- the read-only critic an agent can
+        consult before deciding. geometry=True lets it also move/scale objects; `focus` scores a subject
+        region only.
+
+        Verified live before wiring: from 'a red sphere' toward a night-time target, distance 0.2625 ->
+        0.0000 in one applied edit -- the loop rediscovered 'make it night' by itself.
+
+        KEPT NEGATIVES: the edit vocabulary is the semantic scene's (lighting/brightness/material/colour,
+        coarse move/scale with geometry=True) -- it proposes from what it can say, not from arbitrary
+        parameter space; and it operates on the SEMANTIC scene, not the Scene document, because candidate
+        edits are sentences. Use describe_to_scene afterwards to promote the refined result. See
+        holographic_scene_semantic.SemanticScene.refine_to_target / propose_edits."""
+        import numpy as np
+        tgt = np.asarray(target_image, float)
+        if tgt.shape[:2] != (height, width):
+            raise ValueError("target_image is %dx%d but the critic renders %dx%d -- pass a target at the "
+                             "loop's own size (width=/height=), or set width/height to match the target"
+                             % (tgt.shape[1], tgt.shape[0], width, height))
+        if apply:
+            return scene.refine_to_target(tgt, max_steps=max_steps, geometry=geometry, focus=focus,
+                                          width=width, height=height)
+        return scene.propose_edits(tgt, geometry=geometry, width=width, height=height)
 
 
 def _selftest():

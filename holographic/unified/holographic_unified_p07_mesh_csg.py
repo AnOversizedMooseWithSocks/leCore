@@ -975,6 +975,36 @@ class _UnifiedPart07:
         from holographic.mesh_and_geometry.holographic_sdf import parse_dsl
         return parse_dsl(dsl_text)
 
+    def shape(self, kind="sphere", position=None, scale=None, rotate=None, **kw):
+        """Build a 3-D primitive by NAME, optionally placed -- the first call when you are making a scene.
+
+        `kind` is a word you would actually type: 'cube'/'box', 'ball'/'sphere', 'floor'/'ground'/'plane',
+        'donut'/'ring'/'torus', 'cylinder', 'cone', 'capsule', 'ellipsoid', 'octahedron', plus the fractals
+        ('menger', 'mandelbulb'). Size parameters pass through (r, bx/by/bz, h, R, ...); an unknown kind
+        raises with the full list rather than a bare KeyError.
+
+        PLACEMENT IS BUILT IN, in the order scale -> rotate -> translate, so it cannot be got wrong: rotating
+        after translating swings the object around the world ORIGIN instead of spinning it in place, which
+        reads as "my object jumped" and is invisible in a single frame. `rotate` is (ax, ay, az, radians).
+
+        The result is an SDF you can hand straight to scene.add(geometry=...), render_sdf, or combine with
+        .union / .subtract / .intersect / .smooth_union. WHY THIS EXISTS: every primitive here was reachable
+        only by import -- asked for a sphere, this mind used to return a Lipschitz bound.
+        See holographic_sdf.make_sdf_shape."""
+        from holographic.mesh_and_geometry.holographic_sdf import make_sdf_shape
+        return make_sdf_shape(kind=kind, position=position, scale=scale, rotate=rotate, **kw)
+
+    def sdf_grammar(self):
+        """The SDF DSL described well enough to WRITE one: every node kind, what its numbers mean, an example.
+
+        sdf_parse has always accepted a compact s-expression for a whole shape tree, and the node names and
+        their parameter counts lived in a module-level dict nothing surfaced -- a grammar you could only use
+        if you already knew it. Returns {syntax, nodes: [{kind, params, children, does}], example}, sorted
+        primitives -> modifiers -> combinators, which is the order you build in.
+        See holographic_sdf.dsl_grammar."""
+        from holographic.mesh_and_geometry.holographic_sdf import dsl_grammar
+        return dsl_grammar()
+
     def menger_fractal(self, iterations=3, size=1.0):
         """S1 -- the canonical Menger-sponge FRACTAL model as an SDF (a box minus recursive crosses). Evals,
         marches to a mesh, AND emits a GLSL loop -- the demoscene fractal. Seat: Quilez."""
@@ -1375,7 +1405,7 @@ class _UnifiedPart07:
     def render_scene_document(self, scene, camera, width=96, height=72, quality="medium", max_bounce=4,
                               seed=0, sky=None, default_material="matte_gray", return_stats=False, sss_dir=None,
                               sss_depth=0.6, sss_sigma=4.0, lights=None, dome_cache=False, demodulate=False, soft_light_cache=False,
-                              indirect_cache=False):
+                              indirect_cache=False, view=None, affine=False):
         """Render the canonical SCENE DOCUMENT (holographic_scene_doc.Scene) -- the 'a modeling app builds a
         document, then renders it' path. The document is a table of objects (each a stable handle + transform +
         SDF geometry + library material); this flattens it to ONE scene SDF (nearest-object distance) plus a
@@ -1385,14 +1415,47 @@ class _UnifiedPart07:
         `dome_cache` (default off) serves any DomeLight via the cheap cached-dome pass (holographic_domecache)
         instead of ray-traced ambient occlusion. `demodulate` (default off) denoises by dividing the albedo out
         (holographic_modulate, M4) -- cleaner on textured diffuse surfaces. See
-        holographic_scene_render.render_scene_document."""
+        `view` (default None = the raw scene-referred buffer, unchanged) applies a DISPLAY transform on the
+        way out: the tracer emits linear radiance with no upper bound, and MEASURED on a dome + area-light
+        still life 15.5% of pixels left it above 1.0 and clipped flat when saved. view="display" is the
+        correctness step (metered auto-exposure -> ACES -> gamma: 0.0000 clipped, 0.0000 crushed);
+        view="graded" adds the look (bloom/vignette/grain); or pass a PostChain. It stays OFF by default
+        because a caller measuring radiance or diffing two renders needs the linear buffer and would be
+        silently wrong if a tone curve appeared under it. See
+        `affine` (default False = shipped behaviour) also applies the object's ROTATION. Off by default
+        because turning it on changes the picture of every scene containing a rotated object -- the current
+        picture is wrong, but shipped output does not move without an explicit decision. mind.place() writes
+        transforms that expect affine=True. See holographic_scene_render.render_scene_document."""
         from holographic.rendering.holographic_scene_render import render_scene_document
         return render_scene_document(scene, camera, width=width, height=height, quality=quality,
                                      max_bounce=max_bounce, seed=seed, sky=sky,
                                      default_material=default_material, return_stats=return_stats, sss_dir=sss_dir,
                                      sss_depth=sss_depth, sss_sigma=sss_sigma, lights=lights, dome_cache=dome_cache,
                                      demodulate=demodulate, soft_light_cache=soft_light_cache,
-                                     indirect_cache=indirect_cache)
+                                     indirect_cache=indirect_cache, view=view, affine=affine)
+
+    def render_preview(self, scene, camera, width=240, height=180, scale=0.5, max_bounce=1,
+                       quality="draft", seed=0, sky=None, lights=None, view="display", **kw):
+        """A FAST, deliberately rough look at a Scene document -- the 'is it roughly right?' pass.
+
+        MEASURED against render_scene_document at the SAME 240x180 output, same scene/lights/seed:
+            preview 3.81s (sd 0.02)   full 45.85s (sd 0.06)   -> 12.0x, mean abs error 0.0159
+        Use it for the see->fix loop, where eight looks beat one render; use render_scene_document for
+        anything you will keep.
+
+        THE OBVIOUS PLAN WAS WRONG AND THE MEASUREMENT SAID SO. "Render small and upscale" buys under 2x:
+        the tracer is DISPATCH-bound at preview sizes (16x the pixels cost 2.8x the time, log-log slope
+        ~0.3), so pixels are nearly free and the cost is a fixed number of numpy passes. The win is in
+        PASSES -- max_bounce=1 is 2.76x and quality='draft' another 1.72x. Upscaling stays in the path as
+        an OUTPUT-SIZE lever, not a speed one.
+
+        The trade is exactly what one bounce costs: indirect light. A preview is flatter, with darker
+        shadows, than the final. See holographic_scene_render.render_preview for the full measurements and
+        for why bake_sdf is NOT used here (measured 0.5-0.6x on scenes like this)."""
+        from holographic.rendering.holographic_scene_render import render_preview
+        return render_preview(scene, camera, width=width, height=height, scale=scale,
+                              max_bounce=max_bounce, quality=quality, seed=seed, sky=sky,
+                              lights=lights, view=view, **kw)
 
 
 def _selftest():

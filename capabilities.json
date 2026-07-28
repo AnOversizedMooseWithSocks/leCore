@@ -217,6 +217,31 @@
     },
     {
       "aliases": [
+        "can an agent actually call this",
+        "which classes can I not construct",
+        "what can I not reach through the mind",
+        "half wired module",
+        "built but I cannot call it",
+        "why can't I use this class",
+        "is this class exposed anywhere",
+        "dark classes",
+        "shadowed functions",
+        "does the import chain go anywhere",
+        "agent reachable surface",
+        "alive in the graph but dead to a caller"
+      ],
+      "consumes": [],
+      "does": "the orphan audit asks 'is this name referenced anywhere?' and answers YES for a symbol whose only caller is itself import-only by design -- a consolidation home, a declared negative. Alive in the import graph, dead to /invoke. This asks whether the route GOES anywhere. shadowed = referenced only from cul-de-sacs; dark = a public CLASS with no faculty and no catalog entry (the orphan audit collects functions only, so classes were invisible to it). MEASURED: 9 of 10 path-tracer light classes are dark while every module audit read 0 gaps. ADVISORY, under-reports, never a delete list",
+      "example": "mind.audit_agent_reach()['counts']",
+      "method": "audit_agent_reach",
+      "name": "Agent reachability (referenced somewhere vs callable from /invoke)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Learning & agents"
+    },
+    {
+      "aliases": [
         "agent",
         "agentic",
         "skills",
@@ -339,6 +364,32 @@
       ],
       "semantic": "simulate/step",
       "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "animate an object in my scene document",
+        "keyframe the cube position",
+        "render an animation of my scene",
+        "render frames over time",
+        "turn my scene into a video",
+        "animate the scene and save frames",
+        "make a gif of my scene",
+        "bouncing ball animation",
+        "move an object between two keyframes",
+        "save an animated gif",
+        "day to night timelapse animation",
+        "animate the time of day",
+        "sunset timelapse render"
+      ],
+      "consumes": [],
+      "does": "keyframes in, frames out, optionally an animated GIF -- the see->fix loop for MOTION. Composes Timeline + place + render_preview (a Timeline cannot cross /invoke). keys = {handle: {position/rotation/scale: [[t,value],...]}}, seconds. save_gif is stdlib GIF89a, deterministic (fixed 252-colour lattice, no median-cut). sky_keys={'hour':[[t,h],...],...} animates the sky per frame (timelapse; with no lights given the sky drives the dome so the ground follows). KEPT NEG: preview quality; Euler lerp, no quaternions; the last frame's transforms persist (undoable)",
+      "example": "import lecore; m=lecore.UnifiedMind(); s=m.new_scene(); h=s.add(name='b', geometry=m.shape('sphere')); f=m.render_animation(s, m.camera(eye=(0,1,3), target=(0,0,0)), {h: {'position': [[0,[-1,0,0]],[1,[1,0,0]]]}}, n_frames=4, width=32, height=24)",
+      "method": "new_scene",
+      "name": "Animate the scene document (keyframes -> frames -> GIF)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Scenes you can describe & adjust"
     },
     {
       "aliases": [
@@ -781,6 +832,32 @@
       "produces": [],
       "semantic": null,
       "theme": "Run it as a service / distributed"
+    },
+    {
+      "aliases": [
+        "add a softbox light to my scene",
+        "area light with soft shadows",
+        "environment lighting from a sky dome",
+        "hdri lighting",
+        "make a spotlight",
+        "key light and fill light",
+        "sun lamp",
+        "point light in my render",
+        "how do I light a scene",
+        "aim a light at something",
+        "studio light",
+        "light for the path tracer",
+        "why does my light crash the renderer"
+      ],
+      "consumes": [],
+      "does": "ten light classes shipped and NINE were reachable by nothing -- and mind.light() returns the RASTERISER's Light, which raises inside the path tracer. This is the one door for render_scene_document: kind is a word you'd type ('softbox', 'sun', 'hdri', 'spot'), and `target` AIMS the panel/disk/spot for you instead of making you hand-build u_vec/v_vec half-edges -- measured as where 3-D authoring stalls. Reach for 'dome' first: an environment light is shadowed, so contact AO is free. KEPT NEG: dome + a bright sky double-counts the environment for diffuse -- use one or the other",
+      "example": "import lecore; m=lecore.UnifiedMind(); print(type(m.scene_light('softbox', position=(2,3,2), target=(0,0,0), intensity=60.0)).__name__)",
+      "method": "scene_light",
+      "name": "Build a path-tracer light by name (aimed, one door)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
     },
     {
       "aliases": [
@@ -2301,6 +2378,8 @@
         "build a scene",
         "make a scene",
         "create a scene",
+        "describe a scene and build it",
+        "describe it and build it",
         "describe and build",
         "build what I describe",
         "build from a description",
@@ -2392,6 +2471,28 @@
       "example": "scene = mind.build_scene('a red metal sphere and a blue box'); scene.name('the sphere','hero'); scene.adjust('give hero a rusty texture'); scene.render()",
       "method": "build_scene",
       "name": "Describe a scene (scene from description, semantic)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Scenes you can describe & adjust"
+    },
+    {
+      "aliases": [
+        "turn a text description into scene document objects",
+        "convert build_scene output to the scene document",
+        "semantic scene into editable document",
+        "describe a scene then keyframe it",
+        "from words to objects I can texture and animate",
+        "promote a described scene to the real document",
+        "make a described scene renderable with the path tracer",
+        "words to primitives with handles",
+        "create a scene by describing it"
+      ],
+      "consumes": [],
+      "does": "words -> the CANONICAL Scene document: named, handled objects you can texture, place, keyframe and path-trace. leCore had TWO scene systems that could not talk -- build_scene's SemanticScene and the Scene document (handles/undo, where every parity faculty landed) -- so an agent starting from words was cut off from all of it (8/8 audit phrasings missed). REUSES interpret_description + realize_scene; parsed colours become PBRMaterials; unknown words are REPORTED, never dropped. KEPT NEG: realizer has no rotation; SDFs arrive pre-placed so document transforms start identity",
+      "example": "import lecore; m=lecore.UnifiedMind(); r=m.describe_to_scene('a red cube and a green sphere'); print(sorted(r['handles']), r['unknown'])",
+      "method": "describe_to_scene",
+      "name": "Describe to document (words -> handled, renderable scene objects)",
       "native": true,
       "produces": [],
       "semantic": null,
@@ -2621,6 +2722,26 @@
       "produces": [],
       "semantic": null,
       "theme": "Run it as a service / distributed"
+    },
+    {
+      "aliases": [
+        "do the two shader emitters agree",
+        "validate the glsl emitter",
+        "is the shadertoy shader correct",
+        "check emitted glsl against python",
+        "run the glsl without a gpu",
+        "compare shader to the sdf tree",
+        "shader emitter regression"
+      ],
+      "consumes": [],
+      "does": "holographic_sdf.to_glsl and sdfemit.sdf_dialect both emit a map() for one tree, and sdfemit's own header warns that TWO TABLES FOR ONE CONCEPT WILL DISAGREE -- but only one was ever executed, so agreement was narrative. mind.sdf_emitters_agree(tree) now RUNS both: the GLSL through a vec3 shim under g++ (no GL runtime needed), the C dialect under cc, each compared to the Python tree. Bars differ on purpose: C must be EXACT, GLSL gets 1e-5 because GLSL float is 32-bit and to_glsl writes 6-significant-digit literals (cos(0.7) -> 0.764842). MEASURED worst 4.3e-7; they agree.",
+      "example": "import numpy as np; import lecore; import holographic.mesh_and_geometry.holographic_sdf as S; m=lecore.UnifiedMind(dim=256,seed=0); r=m.sdf_emitters_agree(S.sphere(1.0)); (r['agree'], round(r['worst'],9))",
+      "method": "sdf_emitters_agree",
+      "name": "Do the two SDF emitters agree? (both executed, not asserted)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
     },
     {
       "aliases": [
@@ -3113,6 +3234,30 @@
     },
     {
       "aliases": [
+        "make a quick preview before the full render",
+        "draft quality fast render",
+        "render small and enlarge",
+        "my render is too slow to iterate on",
+        "rough look at my scene",
+        "speed up my render",
+        "preview the scene quickly",
+        "low quality fast render",
+        "iterate faster on a 3d scene",
+        "cheap render to check framing",
+        "render a thumbnail of my scene"
+      ],
+      "consumes": [],
+      "does": "a rough look in 3.81s where the full render takes 45.85s (12.0x, same 240x180 output, mean abs err 0.0159) -- for the see->fix loop, where eight looks beat one render. THE OBVIOUS PLAN WAS WRONG: 'render small and upscale' buys under 2x, because the tracer is DISPATCH-bound at preview sizes (16x the pixels cost 2.8x the time). The win is PASSES -- max_bounce=1 is 2.76x, quality='draft' another 1.72x. Upscaling is an OUTPUT-SIZE lever, not a speed one. Trade: one bounce means no indirect light, so a preview is flatter with darker shadows",
+      "example": "import lecore; m=lecore.UnifiedMind(); s=m.new_scene(); s.add(name='b', geometry=m.shape('sphere'), material='copper'); print(m.render_preview(s, m.camera(eye=(2,2,3), target=(0,0,0)), 64, 48).shape)",
+      "method": "new_scene",
+      "name": "Fast preview render (a rough look, 12x, for the see-fix loop)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
         "fat margin",
         "margin cache",
         "drifting query",
@@ -3136,6 +3281,29 @@
       "example": "import numpy as np; q = np.cumsum(np.random.default_rng(0).normal(size=(400,2)), axis=0); mc = mind.margin_cache(lambda p: ('bake', tuple(p)), margin=mind.suggest_margin(q, 0.9)); vals = [mc.get(x) for x in q]; print(mc.stats())",
       "method": "margin_cache",
       "name": "Fat-margin cache (for a query that drifts)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Memory, search & recall"
+    },
+    {
+      "aliases": [
+        "download a file from a url",
+        "fetch an asset from the internet",
+        "get a model file from polyhaven",
+        "http download with checksum",
+        "cache a downloaded file",
+        "verify a download against a hash",
+        "download an hdri",
+        "pin an external asset",
+        "reproducible asset download",
+        "pull a file from the web reproducibly"
+      ],
+      "consumes": [],
+      "does": "fetch an external asset (HDRI/model/texture) into a CONTENT-ADDRESSED cache. The network meets the determinism rule the way randomness does: BY PINNING. Unpinned fetch returns the sha256 to record; a PINNED fetch that is cached is served from disk with NO network I/O -- a recipe of (url, sha256) pairs replays bit-identically offline forever, which download-on-demand can never do. Mismatch = deleted + raises naming BOTH hashes. Opt-in (nothing in core imports it), http(s) only, 512 MB ceiling. Feed results to load_hdr / import_asset / asset_library",
+      "example": "import lecore; m=lecore.UnifiedMind(); # r=m.fetch_asset('https://example.com/sky.hdr'); print(r['sha256'])  # then pin it:\n# env=m.load_hdr(m.fetch_asset(url, sha256=r['sha256'])['path'])\nprint('see holographic_assetfetch')",
+      "method": "fetch_asset",
+      "name": "Fetch an external asset (pinned, content-addressed, replayable)",
       "native": true,
       "produces": [],
       "semantic": null,
@@ -4539,6 +4707,30 @@
     },
     {
       "aliases": [
+        "load an hdri environment map",
+        "image based lighting",
+        "light my scene with a real sky photo",
+        "read a radiance hdr file",
+        "load a high dynamic range image",
+        "use a panorama to light the scene",
+        "equirectangular environment map",
+        "rgbe encoded image",
+        "ibl environment",
+        "hdri lighting",
+        "open an hdr file"
+      ],
+      "consumes": [],
+      "does": "image-based lighting needed one missing piece and this is it: a Radiance .hdr/.pic (RGBE) reader giving UNBOUNDED linear radiance. DomeLight's color already took a callable and sky_dome already sampled an equirectangular env -- but load_image reads 8 bits, and an 8-bit env is the wrong input because an HDRI's sun is thousands of times brighter than its sky. MEASURED: a flat dome vs a procedural sky FIELD differ 0.0054 (invisible); the same env mirrored differs 0.0336. Gradients don't pay, DIRECTIONAL structure does. KEPT NEG: no .exr; XYZE raises; never clip the result",
+      "example": "import lecore; m=lecore.UnifiedMind(); # env=m.load_hdr('sky.hdr'); L=m.scene_light('dome', color=lambda d: m.sky_dome(d, env=env))\nprint(m.sky_dome([[0,1,0]]).shape)",
+      "method": "load_hdr",
+      "name": "Load an HDRI environment map (.hdr RGBE -> unbounded radiance)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
         "look ahead linter",
         "detect future leakage in an evaluation",
         "did the mask use future data",
@@ -4620,6 +4812,31 @@
       "produces": [],
       "semantic": "analyze/measure",
       "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "make a sphere",
+        "add a cube",
+        "create a box shape",
+        "give me a ground plane",
+        "build a cylinder",
+        "a torus shape",
+        "basic 3d shapes to start with",
+        "primitive shapes",
+        "put a ball in the scene",
+        "make a floor",
+        "what shapes can I make",
+        "add geometry to my scene"
+      ],
+      "consumes": [],
+      "does": "every SDF primitive shipped reachable only by import: asked for a sphere this mind returned a Lipschitz worst-view bound, asked for a cube the sky-observation capability. Ten phrasings, ten unrelated fallbacks. kind is a word you'd type -- cube/ball/floor/donut/cone/capsule/ellipsoid/torus/cylinder/octahedron plus the fractals -- and position/rotate/scale are applied in the ONE order that cannot go wrong (scale, rotate, THEN translate: rotating after translating orbits the world origin instead of spinning in place). Feed the result to scene.add(geometry=...) or render_sdf",
+      "example": "import lecore; m=lecore.UnifiedMind(); print(m.shape('cube', bx=0.4, by=0.4, bz=0.4, position=(1,0.5,0)).to_dsl())",
+      "method": "shape",
+      "name": "Make a 3-D primitive by name (placed, one door)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
     },
     {
       "aliases": [
@@ -5269,6 +5486,30 @@
     },
     {
       "aliases": [
+        "move an object in the scene",
+        "rotate an object I already placed",
+        "set position rotation scale of an object",
+        "turn a cube 45 degrees",
+        "place an object at a location",
+        "tilt an object",
+        "my rotation is not showing up in the render",
+        "orient an object",
+        "why did my object not rotate",
+        "position an object in the scene document",
+        "scale an object"
+      ],
+      "consumes": [],
+      "does": "scene_to_render placed objects by translation + uniform scale and DROPPED any rotation -- documented, invisible to the caller, with NO downstream error, so the picture silently disagreed with the document. mind.place(scene, handle, position=, rotation=, scale=) writes the transform (Euler degrees, axis+angle, or a 3x3; each argument replaces only its own component); render with affine=True to have the rotation actually RENDERED. Exact to 1e-12 against the matrix. OFF BY DEFAULT: turning it on moves every scene with a rotated object. KEPT NEG: uniform scale only",
+      "example": "import lecore; m=lecore.UnifiedMind(); s=m.new_scene(); h=m.scene_add(s, name='c', geometry=m.shape('cube')); m.place(s, h, position=(1,0,0), rotation=(0,45,0)); print(m.scene_info(s)['objects'][0]['rotated'])",
+      "method": "new_scene",
+      "name": "Move / rotate / scale an object (and actually render the rotation)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
         "multi-material",
         "multimaterial",
         "blend materials",
@@ -5665,6 +5906,31 @@
     },
     {
       "aliases": [
+        "add an object to my scene",
+        "put a sphere into the scene document",
+        "change an object I already added",
+        "delete an object from the scene",
+        "undo my last scene edit",
+        "insert an object and get its handle",
+        "keep a python object between two api calls",
+        "reference a returned object in the next call",
+        "pass a scene to invoke over http",
+        "server side object registry",
+        "stateful tool calls",
+        "handle for a non serializable result"
+      ],
+      "consumes": [],
+      "does": "POST /invoke new_scene used to return '<Scene object at 0x7fe17ba58fe0>' -- a memory address is not a handle, so the whole Scene family was listed in /tools and IMPOSSIBLE to call. Now every un-serialisable result also carries ref:Type:N, and any ref passed as an argument resolves back to the live object. With scene_add/scene_edit/scene_remove/scene_undo an HTTP-only agent can build, inspect, FIX and render a scene end to end. Handles are a counter (never id(): a reused address would silently alias). KEPT NEG: process-local, bounded, evicted oldest-first",
+      "example": "import lecore; m=lecore.UnifiedMind(); s=m.new_scene(); h=m.scene_add(s, name='ball', geometry=m.shape('sphere')); print(m.scene_info(s)['n_objects'])",
+      "method": "new_scene",
+      "name": "Object handles over /invoke (name a live object across calls)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Scenes you can describe & adjust"
+    },
+    {
+      "aliases": [
         "midpoint snap",
         "snap to midpoint",
         "intersection snap",
@@ -5874,6 +6140,36 @@
       "produces": [],
       "semantic": null,
       "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "time of day sky gradient",
+        "night sky with stars",
+        "render the moon in the sky",
+        "starfield generator",
+        "sunset sky colors",
+        "cloudy sky with sun shining through",
+        "cirrus or stratus cloud layer",
+        "procedural sky model",
+        "sunny daytime sky",
+        "partially cloudy sky",
+        "environmental sky primitive",
+        "sky sphere environment",
+        "mackerel sky",
+        "broken cloud deck",
+        "thin cloud veil",
+        "animated moving clouds",
+        "clouds changing shape over time"
+      ],
+      "consumes": [],
+      "does": "a PARAMETRIC sky: hour drives a keyed gradient palette AND the sun's arc; stars are a hash of direction (same seed = same sky forever), fading by daylight and by cloud; moon=True auto-places opposite the sun; SEVEN cloud kinds (cirrus/cirrostratus/cirrocumulus/altocumulus/altostratus/stratocumulus/nimbostratus): Beer-Lambert shells, per-kind extinction/threshold/warp/erosion; cellular kinds keep GAPS. time_s/wind/evolve ANIMATE clouds (wind drifts; evolve slides through the solid noise so shapes MORPH; sky_keys feeds frame time). KEPT NEG: low clouds refused toward cloud_scene",
+      "example": "import lecore, numpy as np; m=lecore.UnifiedMind(); sky=m.sky_model(hour=19.0, clouds=[('cirrus',0.5)]); print(np.round(sky([[0,1,0]]),3))",
+      "method": "sky_model",
+      "name": "Parametric sky (time of day, sun, moon, stars, high cloud layers)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
     },
     {
       "aliases": [
@@ -6639,6 +6935,29 @@
     },
     {
       "aliases": [
+        "read a png file into an array",
+        "load an image from disk",
+        "open a render I saved earlier",
+        "decode a png",
+        "get pixels out of an image file",
+        "look at my own render",
+        "did my render change",
+        "check the image I just saved",
+        "read an image back in",
+        "png to numpy array"
+      ],
+      "consumes": [],
+      "does": "the engine could WRITE a PNG and could not READ one -- a grep for IHDR found only the encoder. That single missing direction blocked every render->look->adjust->render cycle, because 'look' had nowhere to start, and it is why compare_image_files reached for Pillow (an unguarded third-party import in a stdlib-only core). Pure zlib+struct. rgb01 gives (H,W,3) float ready to feed straight back in. KEPT NEG: round trip is to ~1/255, not exact -- save_png is 8-bit, so assert a tolerance. Interlaced PNGs RAISE rather than decode wrongly",
+      "example": "import lecore; m=lecore.UnifiedMind(); m.save_render('/tmp/x.png', __import__('numpy').zeros((8,8,3))); print(m.load_image('/tmp/x.png').shape)",
+      "method": "save_render",
+      "name": "Read a render back (PNG -> array, the see-then-fix loop)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
         "realtime",
         "realtime preview then refine",
         "viewport",
@@ -6732,6 +7051,27 @@
       "produces": [],
       "semantic": null,
       "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "critique my render and improve it",
+        "match my scene to this image",
+        "automatically refine a scene toward a target image",
+        "score candidate edits against a goal",
+        "self improving render loop",
+        "make my scene look like this picture",
+        "close the loop on a render",
+        "propose edits ranked by improvement"
+      ],
+      "consumes": [],
+      "does": "hand a described scene a TARGET IMAGE and the engine improves itself toward it -- past screenshot-and-hope: Blender's integration shows an agent its render but cannot score candidate edits against a goal and apply the best. apply=True runs the bounded greedy loop (applied/start/final/history); apply=False only SCORES, ranked, touching nothing. Verified live: 'a red sphere' toward a night target, 0.2625 -> 0.0000 -- it rediscovered 'make it night' itself. Deterministic. KEPT NEG: edits are sentences, so it works on SemanticScene; promote via describe_to_scene after",
+      "example": "import lecore, numpy as np; m=lecore.UnifiedMind(); g=m.build_scene('a red sphere'); g.adjust('make it night'); t=np.asarray(g.render(width=96,height=72),float); s=m.build_scene('a red sphere'); print(m.refine_scene(s, t)['applied'])",
+      "method": "build_scene",
+      "name": "Refine a scene toward a target image (the self-improving loop)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Scenes you can describe & adjust"
     },
     {
       "aliases": [
@@ -7178,6 +7518,30 @@
       "produces": [],
       "semantic": null,
       "theme": "Core algebra & datatypes"
+    },
+    {
+      "aliases": [
+        "run an sdf on the gpu",
+        "raymarch on the gpu",
+        "sdf compute shader",
+        "render an sdf scene on the device",
+        "gpu accelerated sdf render",
+        "dispatch a shader from an sdf tree",
+        "sphere trace on the device",
+        "sdf depth buffer on the gpu",
+        "should i offload the render",
+        "is it worth putting this on the gpu",
+        "where should this trace run"
+      ],
+      "consumes": [],
+      "does": "Bridges the shader EMITTER to the shader RUNNER, which two parallel merges left open: sdf_dialect emitted WGSL nothing dispatched; wgpurun dispatched WGSL nothing emitted. mind.sdf_depth_device(tree,w,h) sphere-traces an SDF ON ANY GPU -> (H,W) depth, -1 on miss; sdf_trace_shader returns the WGSL as inspectable TEXT (no device needed); sdf_depth_cpu is the NumPy reference on the SAME rays; sdf_depth_agrees differentially tests the two. Reuses run_wgsl_kernel bindings; raises without an adapter. sdf_trace_placement asks whether a device pays (144 flops/byte vs a 4.0 bar).",
+      "example": "import lecore; from holographic.mesh_and_geometry.holographic_sdf import sphere; m=lecore.UnifiedMind(dim=256,seed=0); d=m.sdf_depth_cpu(sphere(1.0), 17, 13); (d.shape, round(float(d[6,8]),3))",
+      "method": "sdf_depth_cpu",
+      "name": "Run an SDF on the GPU (emitted map + per-pixel sphere trace)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
     },
     {
       "aliases": [
@@ -7936,6 +8300,27 @@
     },
     {
       "aliases": [
+        "sun light for my scene",
+        "light that follows the sun in the sky",
+        "directional light synced to the sky",
+        "cloud shadows on the ground",
+        "sunlight through the clouds",
+        "automatic sun position lighting",
+        "patches of sun and shade",
+        "sun light driven by time of day"
+      ],
+      "consumes": [],
+      "does": "scene_light('sun', sky=<sky_model closure>) -- direction, colour, and day-scaling read from the SKY'S OWN sun state (one source of truth: the disk overhead and the light on the ground cannot disagree; below the horizon it contributes nothing). cloud_shadows=True gates intensity per shading point by the sky's cloud transmittance toward the sun -- the SAME shell and layer densities the sky paints, riding the existing intensity-field mechanism (no tracer changes). shadow_scale (default 60) is declared artistic licence: scene metres vs shell km. Custom directional lighting: omit sky=",
+      "example": "import lecore; m=lecore.UnifiedMind(); sky=m.sky_model(hour=9.5, clouds=[('stratocumulus',0.6)]); sun=m.scene_light('sun', sky=sky, cloud_shadows=True)",
+      "method": "sky_model",
+      "name": "Sky-synced sun light (auto position/colour, optional cloud shadows)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
         "smallest eigenvector of an operator",
         "dominant eigenpair without scipy",
         "matvec only eigensolver",
@@ -7955,6 +8340,9 @@
     },
     {
       "aliases": [
+        "smooth a bumpy mesh",
+        "denoise a mesh",
+        "remove mesh noise",
         "smooth out the bumpy surface",
         "smooth a mesh",
         "remove bumps from a mesh",
@@ -8460,6 +8848,32 @@
     },
     {
       "aliases": [
+        "put an image on the cube",
+        "wood grain texture on my object",
+        "apply an image texture to an object",
+        "texture an object in my scene",
+        "procedural texture on a scene object",
+        "make the ball checkered",
+        "marble texture",
+        "paint a texture onto a shape",
+        "remove the texture from an object",
+        "tile an image over the floor",
+        "make the cube look like wood",
+        "slap a texture on it",
+        "give the sphere a pattern"
+      ],
+      "consumes": [],
+      "does": "texture a Scene object BY NAME ('wood','marble','checker',... or an (H,W,3) image, None removes) -- JSON-safe end to end, which is the point: scene_to_render already honoured an albedo_socket callable and proc_texture already built one, but a CALLABLE cannot cross POST /invoke, so over HTTP texturing was impossible while every part worked in-process. This builds the callable server-side from JSON. SOLID texture (evaluated at world points -- grain carves through, no UVs needed). KEPT NEG: albedo only; image mapping is world-XZ planar (triplanar needs normals the socket contract lacks)",
+      "example": "import lecore; m=lecore.UnifiedMind(); s=m.new_scene(); h=s.add(name='b', geometry=m.shape('sphere')); m.scene_set_texture(s, h, 'wood', scale=3.0, colors=((0.35,0.2,0.08),(0.75,0.55,0.3)))",
+      "method": "new_scene",
+      "name": "Texture a scene object (named procedural or image, JSON-safe)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
         "texture graph",
         "map graph",
         "shader graph",
@@ -8562,6 +8976,28 @@
       "example": "tex = mind.texture_op('mix', a=mind.texture_leaf(value='orange'), b=mind.texture_leaf(value='purple'), t=mind.texture_leaf('fbm', n_dims=2)); mind.render_textured(scene, {scene.names()[0]: tex})",
       "method": "texture_op",
       "name": "Textured object render (paint composed maps)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
+        "how do I write an sdf string",
+        "what nodes does the sdf dsl have",
+        "sdf syntax",
+        "shape language reference",
+        "what can I put in sdf_parse",
+        "csg operators available",
+        "union two shapes together",
+        "subtract one shape from another",
+        "smooth blend two blobs"
+      ],
+      "consumes": [],
+      "does": "sdf_parse has always taken a compact s-expression for a whole shape tree -- (kind params... children...) -- and the node names and parameter counts lived in a module-level dict nothing surfaced. A grammar you can only use if you already know it is not a usable grammar. Returns every node kind with what its numbers MEAN, sorted primitives -> modifiers -> combinators (the order you build in), plus an example that parses",
+      "example": "import lecore; m=lecore.UnifiedMind(); print(m.sdf_grammar()['example'])",
+      "method": "sdf_grammar",
+      "name": "The SDF DSL, described well enough to write one",
       "native": true,
       "produces": [],
       "semantic": null,
@@ -9287,6 +9723,31 @@
     },
     {
       "aliases": [
+        "my render is blown out",
+        "the image is too bright",
+        "why does my render look washed out",
+        "my highlights are clipping",
+        "tonemap an hdr render",
+        "aces filmic view transform",
+        "convert a linear render to a display image",
+        "exposure for a render",
+        "the render looks flat and grey",
+        "fix the exposure on my image",
+        "make the render look cinematic",
+        "auto exposure"
+      ],
+      "consumes": [],
+      "does": "a path tracer emits LINEAR radiance with no upper bound; saving that straight to a PNG is a wrong answer, not a missing polish step. MEASURED on a dome + area-light still life: 15.5% of pixels left the tracer above 1.0 and clipped flat. view='display' meters the frame then ACES+gamma (0.0000 clipped, 0.0000 crushed); view='graded' adds bloom/vignette/grain but its FIXED stop crushes 1.97% to black. DEFAULT OFF: a caller measuring radiance or diffing renders needs the linear buffer. KEPT NEG: auto-exposure hides a brightness difference, so hold ev fixed to A/B two light rigs",
+      "example": "import lecore; m=lecore.UnifiedMind(); print(m.postfx_chain(('auto_exposure', {}), ('aces', {}), ('gamma', {})))",
+      "method": "postfx_chain",
+      "name": "View transform (linear render -> a display image)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Core algebra & datatypes"
+    },
+    {
+      "aliases": [
         "voxel remesh",
         "remesh a mesh uniformly",
         "clean up a messy mesh",
@@ -9450,6 +9911,31 @@
       "produces": [],
       "semantic": null,
       "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "what is in my scene right now",
+        "list the objects in the scene",
+        "is my scene empty",
+        "how many objects have I added",
+        "what did I name that object",
+        "inspect the scene before I edit it",
+        "summarise the scene",
+        "show me the scene contents",
+        "what are the handles of my objects",
+        "check my scene for mistakes",
+        "which materials is my scene using",
+        "did my object get added"
+      ],
+      "consumes": [],
+      "does": "the Scene document could be BUILT and RENDERED and not READ -- an agent that added four objects could not confirm it, recall the names, or spot a mistake before paying for a trace. Read this FIRST; never assume the scene is empty. JSON-safe: objects (handle/name/geometry/material/position/scale/rotated/parent), cameras, lights, selection, materials, problems. `problems` is a PRE-FLIGHT check catching in ms what costs minutes: an unknown material (raises at RENDER time), no geometry, or a ROTATION scene_to_render silently DROPS. KEPT NEG: no bbox, an SDF has no extent",
+      "example": "import lecore; m=lecore.UnifiedMind(); s=m.new_scene(); print(m.scene_info(s)['empty'])",
+      "method": "new_scene",
+      "name": "What is in my scene (read the document before you edit it)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Scenes you can describe & adjust"
     },
     {
       "aliases": [
@@ -12370,7 +12856,7 @@
       "theme": "Scenes you can describe & adjust"
     }
   ],
-  "count": 527,
+  "count": 547,
   "schema_version": "1.0",
   "scope": "curated capability homes only -- the full live catalog is served at runtime by mind.find_capability / mind.pipeline_map / GET /tools"
 }

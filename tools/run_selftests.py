@@ -115,7 +115,7 @@ def run_one(mod, timeout):
     return mod, (OK if r.returncode == 0 else FAIL), time.time() - t0, tail
 
 
-def walk(jobs=8, timeout=120, only=None):
+def walk(jobs=8, timeout=120, only=None, stream=None):
     """Run all runnable selftests (optionally filtered by substring), in parallel, reported deterministically.
     Returns (results, missing): results is a name-sorted list of (module, verdict, seconds, tail).
 
@@ -124,7 +124,15 @@ def walk(jobs=8, timeout=120, only=None):
     by 8 CPU-bound neighbours crosses the wall for a reason that has nothing to do with its real cost -- the serial
     retry gives it a fair run and it passes. Only a REAL hang (or a selftest slower than `timeout` even alone)
     fails twice and is reported. This replaces hand-maintaining _HEAVY: the walk MEASURES slowness instead of
-    remembering it, so a newly-slow module never silently becomes a false CI red the way four did before this."""
+    remembering it, so a newly-slow module never silently becomes a false CI red the way four did before this.
+
+    `stream` (a file object, default None) gets ONE LINE PER MODULE as each finishes. WHY IT WAS ADDED: the
+    walk takes ~20 minutes on a slow box, and with everything buffered until the end an interrupted run
+    yielded NOTHING -- not a partial list, not even a count. That is not a cosmetic problem: it is why this
+    walk is something people start and abandon rather than something they read, and two dead selftests
+    (meshqem's six, killed by a mid-file __main__; workflowgraph's hub assertion) sat undiscovered behind
+    exactly that. A partial run must still be a partial ANSWER. Default None keeps the pytest wrapper's
+    behaviour byte-identical -- the returned list, its sort order and the exit code are untouched."""
     runnable, missing = discover()
     if only:
         subs = [s.strip() for s in only.split(",") if s.strip()]
@@ -133,17 +141,43 @@ def walk(jobs=8, timeout=120, only=None):
     # only an optimization -- correctness no longer depends on it being complete, because of the retry below.
     heavy = [m for m in runnable if m in _HEAVY]
     light = [m for m in runnable if m not in _HEAVY]
-    results = [run_one(m, timeout) for m in heavy]
+    total = len(runnable)
+
+    done = [0]                                  # a counter, NOT len(results): the first draft closed over
+                                                # `results` before the list existed, and the heavy-first
+                                                # path (any module in _HEAVY, e.g. holographic_render) died
+                                                # with NameError on the very first tick. Found because the
+                                                # close-out re-ran the touched module's selftest -- the walk
+                                                # over modules NOT in _HEAVY had passed and looked green.
+
+    def _tick(res):
+        """Emit one line as a result lands. Flushed every time -- an unflushed progress stream is the same
+        silence it exists to remove, and this is precisely the run someone kills halfway."""
+        if stream is None:
+            return res
+        mod, verdict, secs, tail = res
+        done[0] += 1
+        stream.write("[%3d/%3d] %-8s %-52s %6.1fs%s\n"
+                     % (done[0], total, verdict, mod.split(".")[-1], secs,
+                        ("  " + tail[:110]) if verdict != OK else ""))
+        stream.flush()
+        return res
+
+    results = [_tick(run_one(m, timeout)) for m in heavy]
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:   # subprocesses do the work; threads just wait
         for res in ex.map(lambda m: run_one(m, timeout), light):
-            results.append(res)
+            results.append(_tick(res))
     # SELF-HEAL: anything that timed out under contention gets one serial retry with the full box. A serial run
     # with a generous wall (2x) distinguishes "slow, starved" (now passes) from "actually hung" (times out again).
     timed_out = [r for r in results if r[1] == TIMEOUT]
     if timed_out:
         results = [r for r in results if r[1] != TIMEOUT]
+        if stream is not None:
+            stream.write("-- serial retry of %d timed-out module(s) with the full box and a 2x wall --\n"
+                         % len(timed_out))
+            stream.flush()
         for mod, _, _, _ in timed_out:
-            results.append(run_one(mod, timeout * 2))    # alone, double wall -- a true hang still fails here
+            results.append(_tick(run_one(mod, timeout * 2)))   # alone, double wall -- a true hang still fails
     results.sort(key=lambda r: r[0])                 # deterministic report order, whatever finished first
     return results, missing
 
@@ -152,6 +186,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--timeout", type=int, default=120)
+    ap.add_argument("--quiet", action="store_true",
+                    help="no per-module progress on stderr (buffered, summary only)")
     ap.add_argument("--only", default=None, help="comma-separated substrings; run only matching modules")
     ap.add_argument("--list-missing", action="store_true")
     args = ap.parse_args(argv)
@@ -164,7 +200,11 @@ def main(argv=None):
         return 0
 
     t0 = time.time()
-    results, missing = walk(jobs=args.jobs, timeout=args.timeout, only=args.only)
+    # The CLI streams to stderr by default: this is the invocation a person watches, and a 20-minute
+    # silence is the reason walks get abandoned. --quiet restores the old buffered behaviour for
+    # scripts that only want the summary. stdout stays clean either way, so piping still works.
+    results, missing = walk(jobs=args.jobs, timeout=args.timeout, only=args.only,
+                            stream=None if args.quiet else sys.stderr)
     bad = [r for r in results if r[1] in (FAIL, TIMEOUT)]
     for mod, verdict, dt, tail in results:
         if verdict != OK:

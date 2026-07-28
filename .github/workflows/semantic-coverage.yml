@@ -46,6 +46,7 @@ jobs:
     timeout-minutes: 180
     permissions:
       contents: write            # so the job can commit the refreshed index_128d.npz back (like docs.yml)
+      actions: write             # so the heal can DISPATCH `tests` -- a GITHUB_TOKEN push cannot trigger it
     env:
       # SAME determinism pins as ci.yml, for the same reason it documents: multi-threaded BLAS sums
       # in a different order per run and flips knife-edge cosines. One thread, fixed hash seed.
@@ -177,12 +178,14 @@ jobs:
           git config user.email "semantic-bot@users.noreply.github.com"
           if ! git diff --quiet lecore_data/routing/index_128d.npz tools/semantic/routing_seed.npz.xz; then
             git add lecore_data/routing/index_128d.npz tools/semantic/routing_seed.npz.xz
-            # NO [skip ci] here, deliberately: the test suite ASSERTS seed/index lockstep, so a skipped
-            # re-run leaves main red until the next unrelated push -- a hidden wait-for-a-human step. The
-            # re-triggered run terminates by construction: both artifacts are content-determined, the cache
-            # is warm, so the second pass finds zero diff and commits nothing (measured semantics of
-            # seed_cache build + export_index). One extra CI run per real corpus change buys a main that
-            # heals itself in the same push cycle.
+            # NO [skip ci] -- but NOT because it re-triggers anything on its own. A push authenticated with
+            # the default GITHUB_TOKEN DOES NOT CREATE WORKFLOW RUNS (GitHub's documented loop-breaker), so
+            # this commit is invisible to `tests` either way. The earlier note here claimed the opposite and
+            # was WRONG, and the consequence was not cosmetic: the suite ASSERTS seed/index lockstep, so a
+            # red main stayed red -- and package.yml only publishes when the `tests` run it followed
+            # concluded SUCCESS, which is why PyPI publishing sat skipped run after run. The heal is
+            # therefore dispatched EXPLICITLY in the next step; workflow_dispatch IS honoured for
+            # GITHUB_TOKEN and does create a run.
             git commit -m "semantic: refresh routing index + seed from embed"
             # REBASE + RETRY: docs.yml fires on the SAME push and auto-commits generated docs, so the remote
             # head can move while this job runs -- a bare push then fails non-fast-forward (measured: first
@@ -198,9 +201,19 @@ jobs:
               echo "::error::could not push the refreshed routing index after 3 rebase+push attempts."
               exit 1
             fi
+            # RE-VERIFY MAIN EXPLICITLY. The commit above cannot trigger `tests` (GITHUB_TOKEN), and until
+            # `tests` concludes SUCCESS on main, package.yml's gate keeps the PyPI publish skipped. A
+            # dispatch is the one trigger GITHUB_TOKEN may fire, so the heal finishes the job it started.
+            # Non-fatal on failure: a refreshed index is still worth having, and the weekly full run and the
+            # next human push both reach the same place.
+            gh workflow run ci.yml --ref "${{ github.ref_name }}" \
+              || echo "::warning::could not dispatch tests; main stays unverified until the next push"
           else
             echo "routing index already up to date -- nothing to commit."
           fi
+
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: upload the index as a build artifact (inspectable; the committed copy is authoritative)
         uses: actions/upload-artifact@v4

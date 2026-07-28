@@ -128,6 +128,11 @@ CROSS_BURIAL_MATRIX = {
     "mixture matter": ["oil and water separating mixture model", "phase separation", "immiscible fluids"],
     "rolling / streaming": ["moving average over a window", "moving average", "rolling mean"],
     "utilities & helpers": ["verify data integrity", "check data integrity", "is my data corrupted"],
+    # added by the J-3D merge, where a catalog REORGANISATION (the six-part split, authored against a
+    # pre-fork catalog) silently dropped 30 registrations and a new scene capability tied with an incumbent:
+    "where should this work run": ["where should this work run", "should this go on the gpu or cpu"],
+    "describe a scene": ["describe a scene and build it"],
+    "smooth a bumpy mesh": ["smooth a bumpy mesh", "denoise a mesh"],
 }
 
 

@@ -242,3 +242,252 @@ def test_empty_skip_and_early_term_are_the_engines_own_coarse_first():
     volume_render(field, cam, B, empty_skip=False, early_term=False, **kw)
     dumb = volume_render.last_samples
     assert dumb > 8 * smart, (dumb, smart)                 # measured 15.2x on a larger frame
+
+
+# ---------------------------------------------------------------------------
+# PNG READ-BACK -- the direction the engine never had (J-3D-03/04)
+# ---------------------------------------------------------------------------
+
+def test_png_round_trips_to_one_eight_bit_step():
+    """save_png -> load_png must return the image, to the tolerance the FILE FORMAT allows and no further.
+
+    Asserting equality here would be asserting something false about PNG: save_png quantises to 8 bits. A
+    test that demanded exactness would fail for the wrong reason and teach the next reader the wrong thing."""
+    import tempfile
+    import numpy as np
+    from holographic.rendering.holographic_render import save_png, load_png
+    rng = np.random.default_rng(0)
+    x = rng.random((17, 23, 3))
+    with tempfile.TemporaryDirectory() as d:
+        p = d + "/rt.png"
+        save_png(p, x)
+        y = load_png(p)
+        assert y.shape == x.shape
+        assert np.abs(x - y).max() <= 1.0 / 255.0 + 1e-9
+
+
+def test_decoder_handles_the_adaptive_filters_the_encoder_actually_picks():
+    """MEASURED on a 192x144 path-traced frame: 114 of 144 rows chose Paeth, 27 Up, 3 Sub. A decoder that
+    only did None/Up would pass a random-noise test and fail on every real render, so the fixture here is a
+    SMOOTH gradient -- the case that makes the encoder reach for the expensive filters."""
+    import tempfile
+    import numpy as np
+    from holographic.rendering.holographic_render import save_png, load_png
+    grad = np.clip(np.mgrid[0:48, 0:48][0][..., None] / 47.0 * np.ones(3), 0, 1)
+    with tempfile.TemporaryDirectory() as d:
+        p = d + "/grad.png"
+        save_png(p, grad)
+        assert np.abs(grad - load_png(p)).max() <= 1.0 / 255.0 + 1e-9
+        save_png(p, grad, filters=False)                  # and the legacy unfiltered stream
+        assert np.abs(grad - load_png(p)).max() <= 1.0 / 255.0 + 1e-9
+
+
+def test_unsupported_png_refuses_instead_of_returning_garbage():
+    """A quietly wrong decode is worse than a loud refusal: nothing downstream can tell a scrambled image
+    from a real one, so the failure would surface as a mysterious render diff hours later."""
+    from holographic.rendering.holographic_render import png_decode
+    for bad, expect in ((b"not a png at all", "signature"), (b"\x89PNG\r\n\x1a\n", "IHDR")):
+        try:
+            png_decode(bad)
+            raise AssertionError("expected a refusal for %r" % bad[:12])
+        except ValueError as exc:
+            assert expect in str(exc)
+
+
+def test_compare_image_files_needs_no_pillow():
+    """The core promises NumPy/Flask/stdlib/hashlib. This faculty -- the one whose own docstring calls it the
+    check an agent runs after a render -- used to hard-import Pillow and raise ImportError on a clean install.
+    Pinned by BLOCKING the import, because 'it works on a machine that happens to have PIL' is not the claim."""
+    import builtins
+    import lecore
+    import numpy as np
+    import tempfile
+    real_import = builtins.__import__
+
+    def no_pil(name, *a, **kw):
+        if name == "PIL" or name.startswith("PIL."):
+            raise ImportError("PIL blocked by the test -- core must not need it")
+        return real_import(name, *a, **kw)
+
+    m = lecore.UnifiedMind(dim=128, seed=0)
+    with tempfile.TemporaryDirectory() as d:
+        a, b = d + "/a.png", d + "/b.png"
+        # NOT a flat image on purpose -- see test_edge_agreement_is_degenerate_on_constant_gradients.
+        tex = np.clip(np.mgrid[0:16, 0:16][0][..., None] / 15.0 * np.ones(3), 0, 1)
+        tex[4:9, 4:9] = 0.9                              # a block, so the gradient map is not constant
+        m.save_render(a, tex)
+        m.save_render(b, tex)
+        builtins.__import__ = no_pil
+        try:
+            r = m.compare_image_files(a, b)
+        finally:
+            builtins.__import__ = real_import
+    assert r["similarity"] > 0.999, "two identical images must score ~1.0"
+
+
+def test_see_then_fix_loop_closes_through_the_mind():
+    """The whole point of the item: render -> save -> LOOK -> compare, with nothing imported past lecore.
+
+    Before this, 'look' had nowhere to start and the loop could not be written at all."""
+    import lecore
+    import numpy as np
+    import tempfile
+    m = lecore.UnifiedMind(dim=128, seed=0)
+    with tempfile.TemporaryDirectory() as d:
+        p = d + "/frame.png"
+        frame = np.clip(np.mgrid[0:24, 0:24][1][..., None] / 23.0 * np.ones(3), 0, 1)
+        m.save_render(p, frame)
+        back = m.load_image(p)                            # the step that did not exist
+        assert back.shape == frame.shape
+        assert np.abs(frame - back).max() <= 1.0 / 255.0 + 1e-9
+        assert "Read a render back" in str(m.find_capability("look at my own render")[0])
+
+
+def test_edge_agreement_is_degenerate_on_constant_gradients():
+    """KNOWN DEFECT, pinned rather than fixed -- found by a test fixture that used a flat image.
+
+    `edge_agreement` correlates the two gradient-MAGNITUDE maps after subtracting their means. An image whose
+    gradient magnitude is CONSTANT -- a flat colour, or a linear ramp -- leaves both vectors identically zero,
+    so the correlation is 0/0, falls through the 1e-12 guard, and returns 0.5. An image compared WITH ITSELF
+    then scores 0.9 instead of 1.0 at the default weights (w_edge=0.2).
+
+    MEASURED: constant at 0.5 across 8x8 through 128x128, so it is not a small-image artefact. Real renders
+    are unaffected (a 192x144 path-traced frame self-scores 0.99999) because their gradient maps vary.
+
+    NOT FIXED HERE, deliberately. perceptual_distance is what the analysis-by-synthesis loop MINIMISES, so
+    changing this changes an optimiser's landscape and every score it has ever recorded -- that is exactly
+    the kind of existing decision this repo does not flip inside an unrelated item. Filed as J-3D-23. When it
+    IS fixed (identity must be 1.0: if both gradient maps are constant, they agree perfectly), this test
+    should fail -- update it, do not relax it."""
+    import numpy as np
+    from holographic.io_and_interop import holographic_imagecompare as IC
+    ramp = np.clip(np.mgrid[0:32, 0:32][1][..., None] / 31.0 * np.ones(3), 0, 1)
+    assert abs(IC.ms_ssim(ramp, ramp) - 1.0) < 1e-9, "structure term is fine"
+    assert abs(IC.color_agreement(ramp, ramp) - 1.0) < 1e-9, "colour term is fine"
+    assert abs(IC.edge_agreement(ramp, ramp) - 0.5) < 1e-9, "the edge term is the degenerate one"
+    assert abs(IC.perceptual_similarity(ramp, ramp) - 0.9) < 1e-9, "identity scores 0.9, not 1.0"
+    # and the case that matters in practice is NOT affected
+    varied = ramp.copy(); varied[8:16, 8:16] = 0.9
+    assert IC.perceptual_similarity(varied, varied) > 0.999, "a non-degenerate image self-scores ~1.0"
+
+
+# ---------------------------------------------------------------------------
+# J-3D-19: Radiance .hdr (RGBE) -- the missing piece of image-based lighting.
+# ---------------------------------------------------------------------------
+
+def _rgbe(rgb):
+    import numpy as np
+    m = rgb.max(axis=-1)
+    e = np.where(m <= 1e-32, 0, np.floor(np.log2(np.maximum(m, 1e-32))) + 129).astype(np.int32)
+    s = np.where(e == 0, 0.0, np.ldexp(1.0, -(e - 128 - 8)))
+    out = np.zeros(rgb.shape[:2] + (4,), np.uint8)
+    out[..., :3] = np.clip(rgb * s[..., None], 0, 255).astype(np.uint8)
+    out[..., 3] = e.astype(np.uint8)
+    return out
+
+
+def _write_hdr(path, rgb, rle=False):
+    import numpy as np
+    h, w = rgb.shape[:2]
+    px = _rgbe(rgb)
+    head = b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y %d +X %d\n" % (h, w)
+    if not rle:
+        body = px.tobytes()
+    else:
+        body = b""
+        for y in range(h):
+            body += bytes([2, 2, (w >> 8) & 255, w & 255])
+            for c in range(4):
+                row = px[y, :, c].tobytes()
+                i = 0
+                while i < len(row):
+                    n = min(128, len(row) - i)
+                    body += bytes([n]) + row[i:i + n]
+                    i += n
+    with open(path, "wb") as f:
+        f.write(head + body)
+
+
+def test_hdr_preserves_dynamic_range(tmp_path):
+    """THE assertion. A reader that got the pixels right and lost the RANGE would be worse than none: it
+    would look like it worked while every render it lit was quietly lit by a flat sky. An 8-bit path would
+    collapse this planted 2000x sun/sky ratio to about 2x, which is the whole reason load_png is not enough."""
+    import numpy as np
+    from holographic.rendering.holographic_render import load_hdr
+
+    img = np.zeros((8, 16, 3))
+    img[:, :8] = (0.4, 0.5, 0.7)
+    img[2:4, 10:12] = (900.0, 850.0, 700.0)
+    p = tmp_path / "sun.hdr"
+    _write_hdr(str(p), img)
+    a = load_hdr(str(p))
+    assert a.shape == (8, 16, 3) and a.dtype.name == "float32"
+    assert a.max() > 100.0, "the sun was clipped -- a bounded HDR reader defeats the purpose"
+    assert a[2, 10, 0] / a[0, 0, 0] > 1000.0
+    assert a[0, 12, 0] == 0.0, "exponent 0 must be exactly black, not a denormal smear"
+
+
+def test_rle_and_flat_scanlines_agree(tmp_path):
+    """Same pixels, two containers. Every HDRI a person downloads is adaptive-RLE, so a decoder that only
+    handled flat scanlines would work on every file this repo writes and none that anyone actually uses."""
+    import numpy as np
+    from holographic.rendering.holographic_render import load_hdr
+
+    rng = np.random.default_rng(0)
+    img = rng.uniform(0, 6, (6, 24, 3))
+    _write_hdr(str(tmp_path / "a.hdr"), img, rle=False)
+    _write_hdr(str(tmp_path / "b.hdr"), img, rle=True)
+    assert np.array_equal(load_hdr(str(tmp_path / "a.hdr")), load_hdr(str(tmp_path / "b.hdr")))
+
+
+def test_wrong_formats_raise_rather_than_decode_wrongly(tmp_path):
+    """KEPT NEGATIVE, asserted. XYZE files carry CIE XYZ primaries; returning them as RGB would silently
+    shift every colour in the render -- the kind of wrong that looks plausible. Refusing is the correct
+    answer, and so is refusing a PNG rather than reading its bytes as radiance."""
+    import numpy as np
+    import pytest
+    from holographic.rendering.holographic_render import load_hdr, save_png
+
+    save_png(str(tmp_path / "x.hdr"), np.zeros((4, 4, 3)))
+    with pytest.raises(ValueError, match="RADIANCE"):
+        load_hdr(str(tmp_path / "x.hdr"))
+    with open(tmp_path / "xyze.hdr", "wb") as f:
+        f.write(b"#?RADIANCE\nFORMAT=32-bit_rle_xyze\n\n-Y 2 +X 2\n" + b"\0" * 16)
+    with pytest.raises(ValueError, match="XYZ"):
+        load_hdr(str(tmp_path / "xyze.hdr"))
+
+
+def test_an_hdri_actually_lights_a_scene_directionally(tmp_path):
+    """Cross-faculty, and the point of the whole item: load_hdr -> sky_dome -> DomeLight -> a render.
+
+    MEASURED and pinned as the reason this is a capability rather than a docs fix: a flat dome and a smooth
+    procedural sky field differ by only 0.0054 mean abs, while the SAME env mirrored left/right differs by
+    0.0336. Gradients do not pay; directional structure does. So the test mirrors an env and requires the
+    image to change -- if it does not, the mapping is not oriented and the HDRI is just a tint."""
+    import numpy as np
+    import lecore
+
+    m = lecore.UnifiedMind(dim=128, seed=0)
+    env_img = np.zeros((16, 32, 3))
+    env_img[:, :16] = (1.2, 1.1, 0.9)
+    env_img[:, 16:] = (0.03, 0.03, 0.05)
+    p = tmp_path / "half.hdr"
+    _write_hdr(str(p), env_img)
+    env = m.load_hdr(str(p))
+    assert env.shape == (16, 32, 3)
+
+    sc = m.new_scene()
+    sc.add(name="ball", geometry=m.sdf_parse("(sphere 0.6)"), material="matte_gray")
+    sc.add(name="floor", geometry=m.sdf_parse("(plane -0.7)"), material="matte_gray")
+    cam = m.camera(eye=(0.0, 0.8, 2.6), target=(0.0, 0.0, 0.0), fov_deg=40.0, aspect=4 / 3.)
+    dark = lambda d: np.broadcast_to(np.array([0.01, 0.01, 0.01]), (len(d), 3))
+
+    def shot(e):
+        L = [m.scene_light("dome", color=lambda d: m.sky_dome(d, env=e), intensity=1.0)]
+        return np.asarray(m.render_scene_document(sc, cam, 32, 24, quality="fast", max_bounce=1,
+                                                  seed=0, lights=L, sky=dark), float)
+
+    left, right = shot(env), shot(env[:, ::-1].copy())
+    assert np.abs(left - right).mean() > 1e-3, \
+        "mirroring the environment changed nothing -- the map is a tint, not a light"
+    assert "HDRI environment" in str(m.find_capability("image based lighting")[0])

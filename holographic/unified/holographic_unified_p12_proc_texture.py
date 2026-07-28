@@ -1055,6 +1055,59 @@ class _UnifiedPart12:
         from holographic.io_and_interop.holographic_wgpurun import argmax_kernel
         return argmax_kernel(data, workgroup=workgroup)
 
+    def sdf_trace_shader(self, node, width, height, steps=96, eps=1e-3):
+        """The WGSL for a per-pixel sphere trace of an SDF: the tree's own emitted map() plus an elementwise
+        entry point run_wgsl_kernel can dispatch. Returned as TEXT, so it is inspectable and testable with no
+        device present. `node` is a live SDF or its DSL text. See holographic_wgpurun.sdf_trace_shader."""
+        from holographic.io_and_interop.holographic_wgpurun import sdf_trace_shader
+        return sdf_trace_shader(node, width, height, steps=steps, eps=eps)
+
+    def sdf_depth_device(self, node, width, height, eye=(0.0, 0.0, 3.0), fov=1.0, near=0.01, far=50.0,
+                         steps=96, eps=1e-3, workgroup=64):
+        """SPHERE-TRACE AN SDF ON ANY GPU -> (H,W) float32 depth, -1 where the ray missed. The bridge two
+        parallel merges left open: sdf_dialect emitted WGSL that nothing dispatched, while wgpurun could
+        dispatch WGSL that nothing emitted. Sphere tracing is elementwise over PIXELS, so this reuses
+        run_wgsl_kernel's 1-D binding layout unchanged rather than adding a second dispatch path.
+        RAISES without an adapter rather than falling back -- an explicit device request that silently ran on
+        the CPU makes its own timing meaningless. Pair with sdf_depth_cpu (same rays) and sdf_depth_agrees.
+        See holographic_wgpurun.sdf_depth_device."""
+        from holographic.io_and_interop.holographic_wgpurun import sdf_depth_device
+        return sdf_depth_device(node, width, height, eye=eye, fov=fov, near=near, far=far, steps=steps,
+                                eps=eps, workgroup=workgroup)
+
+    def sdf_trace_placement(self, width, height, steps=96):
+        """WHERE SHOULD THIS SPHERE TRACE RUN -> place_work's verdict computed from the trace's OWN numbers,
+        so a caller never hand-derives n_bytes/flops_per_byte (the two everyone gets wrong: bytes MOVED not
+        touched, flops per BYTE not per pixel). The seam the post-merge sweep found missing -- the render arc
+        never consulted the placement layer, so the one path that pays for a device could not ask.
+        MEASURED: the trace presents 144 flops/byte at ANY resolution (both terms scale with pixel count)
+        against a 4.0 bar, while an elementwise postfx pass presents 0.8 and is correctly refused.
+        A 'cpu' verdict is a RESULT, not a failure. See holographic_wgpurun.sdf_trace_placement."""
+        from holographic.io_and_interop.holographic_wgpurun import sdf_trace_placement
+        return sdf_trace_placement(width, height, steps=steps, mind=self)
+
+    def sdf_trace_workload(self, width, height, steps=96):
+        """The (n_bytes, flops_per_byte) a sphere trace of this size actually presents -- the arithmetic
+        behind sdf_trace_placement, exposed so the numbers can be inspected rather than trusted.
+        See holographic_wgpurun.sdf_trace_workload."""
+        from holographic.io_and_interop.holographic_wgpurun import sdf_trace_workload
+        return sdf_trace_workload(width, height, steps=steps)
+
+    def sdf_depth_cpu(self, node, width, height, eye=(0.0, 0.0, 3.0), fov=1.0, near=0.01, far=50.0,
+                      steps=96, eps=1e-3):
+        """The NumPy reference for sdf_depth_device -- same rays, same bounded march, same miss sentinel.
+        The baseline that makes the device number checkable. See holographic_wgpurun.sdf_depth_cpu."""
+        from holographic.io_and_interop.holographic_wgpurun import sdf_depth_cpu
+        return sdf_depth_cpu(node, width, height, eye=eye, fov=fov, near=near, far=far, steps=steps, eps=eps)
+
+    def sdf_depth_agrees(self, node, width=32, height=24, tol=2e-2, **kw):
+        """Differentially test the device sphere trace against the NumPy one -> {max_abs, miss_mismatch,
+        agrees, n}. Both sides trace the SAME emitted tree, so they are CHECKED rather than trusted; a
+        MISS/HIT disagreement is counted apart from rounding because it is a decision.
+        See holographic_wgpurun.sdf_depth_agrees."""
+        from holographic.io_and_interop.holographic_wgpurun import sdf_depth_agrees
+        return sdf_depth_agrees(node, width=width, height=height, tol=tol, **kw)
+
     def verify_wgsl_kernel(self, fn, data, extra_args=(), workgroup=64):
         """DIFFERENTIALLY TEST a kernel: run `fn` in Python AND as its own WGSL projection, report
         {max_abs, max_rel, exact, n} (holographic_wgpurun).

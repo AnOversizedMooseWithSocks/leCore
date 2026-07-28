@@ -214,3 +214,38 @@ def test_surface_deviation_fast_path_matches_brute_and_falls_back():
     gm, gx = surface_deviation(m, far, fast=True)
     hm, hx = surface_deviation(m, far, fast=False)
     assert abs(gm - hm) < 1e-9 and np.isfinite(gx)               # far apart: fast falls back to brute
+
+
+def test_the_module_has_exactly_one_main_block():
+    """A mid-file `__main__` silently truncates a module, and this one did for an unknown length of time.
+
+    holographic_meshqem had TWO. The first sat mid-file and called `_selftest_cvt_remesh()`, defined ~110
+    lines BELOW it -- so running `python -m` hit the call before the def and died with NameError every time.
+    Worse, that crash landed before the file's real `__main__` at the bottom, so the FOUR selftests down
+    there had never executed either. Six real selftests, dark, with no audit noticing.
+
+    Guarding the shape rather than the symptom: one `__main__`, and it must be the last thing in the file."""
+    from pathlib import Path
+    from holographic.mesh_and_geometry import holographic_meshqem as M
+
+    lines = Path(M.__file__).read_text().split("\n")
+    mains = [i for i, l in enumerate(lines) if l.startswith('if __name__ == "__main__":')]
+    assert len(mains) == 1, "expected exactly one __main__ block, found %d at lines %s" % (
+        len(mains), [i + 1 for i in mains])
+    after = [l for l in lines[mains[0] + 1:] if l.strip() and not l.startswith((" ", "\t", "#"))]
+    assert not after, "code follows the __main__ block -- it will not run under `python -m`: %s" % after[:3]
+
+
+def test_every_selftest_in_the_module_is_actually_invoked():
+    """Defining a `_selftest_*` and never calling it is the same false green as not writing it. All six of
+    this module's selftests are named in the one __main__ block; a seventh added without a call fails here."""
+    import re
+    from pathlib import Path
+    from holographic.mesh_and_geometry import holographic_meshqem as M
+
+    text = Path(M.__file__).read_text()
+    defined = set(re.findall(r"^def (_selftest\w*)\(", text, re.M))
+    main_block = text.split('if __name__ == "__main__":')[1]
+    called = set(re.findall(r"(_selftest\w*)\(\)", main_block))
+    assert defined == called, "defined but never run: %s | run but not defined: %s" % (
+        sorted(defined - called), sorted(called - defined))

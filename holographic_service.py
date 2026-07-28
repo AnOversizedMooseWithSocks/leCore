@@ -166,6 +166,18 @@ class Service:
             # uncapped.
         return self._mind
 
+    @property
+    def refs(self):
+        """This node's object-handle registry: live Python objects an agent can name across /invoke calls.
+
+        Lazy and per-service, exactly like `mind`, so a service that only serves SQL never allocates one.
+        PROCESS-LOCAL by design -- handles do not survive a restart and are not shared between forked
+        workers. See holographic_objectref for why persisting live objects would be a worse problem."""
+        if getattr(self, "_refs", None) is None:
+            from holographic.io_and_interop.holographic_objectref import ObjectRefs
+            self._refs = ObjectRefs()
+        return self._refs
+
     def _tools(self, _payload):
         """The standard tool manifest: every public faculty an /invoke can run, as {name, description, params}. Body:
         none. Returns: {ok, tools:[...]}. This is the shape a harness, an LLM, or another leCore reads to drive us."""
@@ -195,11 +207,18 @@ class Service:
         # other client agree by construction instead of by two copies happening to match. The HTTP shape is
         # unchanged -- errors still come back as {ok: False, error} rather than an exception -- and _jsonable
         # stays here because JSON-safety is this boundary's job, not the mind's.
+        # RESOLVE handles on the way IN, mint them on the way OUT (J-3D-24). This is what makes the boundary
+        # symmetric for objects JSON cannot carry: what /invoke hands back can be posted straight into the
+        # next /invoke, which is already the rule for meshes and was impossible for a Scene.
+        try:
+            args = self.refs.resolve(args)
+        except KeyError as e:
+            return {"ok": False, "error": str(e).strip('"')}      # a bad handle is a CALLER error, not a 500
         try:
             result = self.mind.invoke(name, args)
         except ValueError as e:
             return {"ok": False, "error": str(e)}
-        return {"ok": True, "name": name, "result": _jsonable(result)}
+        return {"ok": True, "name": name, "result": _jsonable(result, self.refs)}
 
     def _frame_stream_doc(self, _payload):
         """SSE PUSH channel (Server-Sent Events): GET /frame/stream?session=&target_fps=&frames= keeps the
@@ -720,10 +739,14 @@ def _json_default(o):
     raise TypeError("not JSON serializable: %r" % type(o))
 
 
-def _jsonable(o):
+def _jsonable(o, refs=None):
     """Coerce a faculty result into something JSON can carry. Basic types and numpy pass straight through; dicts and
     lists recurse; anything else (a Mesh, a LoadedMesh, ...) becomes a typed summary so /invoke never crashes on an
-    un-serializable return value."""
+    un-serializable return value.
+
+    `refs` (an ObjectRefs registry, optional) adds a "ref" key to that typed summary and keeps the live object
+    addressable, so the caller can pass the handle straight back into the next /invoke. DEFAULT None reproduces
+    the previous output byte for byte -- an existing client sees exactly the keys it saw before, plus nothing."""
     import math
 
     import numpy as np
@@ -743,9 +766,9 @@ def _jsonable(o):
     if isinstance(o, np.ndarray):
         return o.tolist()
     if isinstance(o, dict):
-        return {str(k): _jsonable(v) for k, v in o.items()}
+        return {str(k): _jsonable(v, refs) for k, v in o.items()}
     if isinstance(o, (list, tuple)):
-        return [_jsonable(v) for v in o]
+        return [_jsonable(v, refs) for v in o]
     if hasattr(o, "vertices") and hasattr(o, "faces"):
         # a Mesh (or any duck-mesh) leaves the service as EXACTLY the dict shape as_mesh accepts coming in --
         # {'vertices': [...], 'faces': [...]} -- so the HTTP boundary is symmetric: what /invoke returns can be
@@ -759,7 +782,13 @@ def _jsonable(o):
         if cols is not None:
             out["colours"] = _jsonable(np.asarray(cols))
         return out
-    return {"type": type(o).__name__, "repr": repr(o)[:500]}    # object -> a typed summary, not a crash
+    summary = {"type": type(o).__name__, "repr": repr(o)[:500]}   # object -> a typed summary, not a crash
+    if refs is not None:
+        # THE MISSING HALF OF THE SYMMETRIC BOUNDARY. Without this the summary is a dead end: an agent gets
+        # "<Scene object at 0x7fe17ba58fe0>" and has no way to name that object in its next call, so every
+        # Scene-document faculty was listed in /tools and impossible to invoke. See holographic_objectref.
+        summary["ref"] = refs.put(o)
+    return summary
 
 
 def serve(host="127.0.0.1", port=8080, token=None, persist_path=None, mind=None, threads=False):

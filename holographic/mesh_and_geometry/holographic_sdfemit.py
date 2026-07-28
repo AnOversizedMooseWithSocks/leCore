@@ -520,3 +520,138 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+# ======================================================================================================
+# THE SECOND EMITTER, EXECUTED -- closing the "two tables will disagree" risk this module warned about
+# ======================================================================================================
+#
+# The header of this module states the rule: TWO TABLES FOR ONE CONCEPT WILL DISAGREE, and the disagreement
+# will be a bug in one of them. `sdf_dialect` (here) and `SDF.to_glsl` (holographic_sdf) both emit a map()
+# for the SAME tree, and only the first one was ever executed. The existing test compares DIALECT FIELDS;
+# nothing compared the two emitters' ARITHMETIC, so "they agree" was a narrative, not a measurement.
+#
+# WHY IT LOOKED UNTESTABLE, AND WHY THAT WAS WRONG: judging GLSL seemed to need a GL runtime this project
+# does not have. But the GLSL these emitters produce is a tiny subset -- vec3, +-*/, abs/min/max/length/
+# clamp/dot -- and C++ has operator overloading, so a ~30-line vec3 shim makes the SAME TEXT compile and RUN
+# under g++. The bar stays EXECUTED rather than asserted, which is the standard the C dialect already set.
+# The shim is deliberately minimal: anything it cannot express raises instead of silently mis-comparing.
+
+_GLSL_SHIM = """#include <stdio.h>
+#include <math.h>
+struct vec3 {
+  double x, y, z;
+  vec3() : x(0), y(0), z(0) {}
+  vec3(double a) : x(a), y(a), z(a) {}
+  vec3(double a, double b, double c) : x(a), y(b), z(c) {}
+};
+static inline vec3 operator+(vec3 a, vec3 b){ return vec3(a.x+b.x, a.y+b.y, a.z+b.z); }
+static inline vec3 operator-(vec3 a, vec3 b){ return vec3(a.x-b.x, a.y-b.y, a.z-b.z); }
+static inline vec3 operator*(vec3 a, vec3 b){ return vec3(a.x*b.x, a.y*b.y, a.z*b.z); }
+static inline vec3 operator*(vec3 a, double s){ return vec3(a.x*s, a.y*s, a.z*s); }
+static inline vec3 operator*(double s, vec3 a){ return vec3(a.x*s, a.y*s, a.z*s); }
+static inline vec3 operator/(vec3 a, double s){ return vec3(a.x/s, a.y/s, a.z/s); }
+static inline vec3 operator-(vec3 a){ return vec3(-a.x, -a.y, -a.z); }
+static inline vec3 abs(vec3 a){ return vec3(fabs(a.x), fabs(a.y), fabs(a.z)); }
+static inline vec3 max(vec3 a, double s){ return vec3(fmax(a.x,s), fmax(a.y,s), fmax(a.z,s)); }
+static inline vec3 max(vec3 a, vec3 b){ return vec3(fmax(a.x,b.x), fmax(a.y,b.y), fmax(a.z,b.z)); }
+static inline vec3 min(vec3 a, double s){ return vec3(fmin(a.x,s), fmin(a.y,s), fmin(a.z,s)); }
+static inline double max(double a, double b){ return fmax(a,b); }
+static inline double min(double a, double b){ return fmin(a,b); }
+static inline double length(vec3 a){ return sqrt(a.x*a.x + a.y*a.y + a.z*a.z); }
+static inline double dot(vec3 a, vec3 b){ return a.x*b.x + a.y*b.y + a.z*b.z; }
+static inline double clamp(double v, double lo, double hi){ return fmin(fmax(v, lo), hi); }
+static inline vec3 normalize(vec3 a){ double l = length(a); return l > 0.0 ? a/l : a; }
+static inline double mix(double a, double b, double t){ return a + (b-a)*t; }
+static inline vec3 mod(vec3 a, double m){ return vec3(fmod(a.x,m), fmod(a.y,m), fmod(a.z,m)); }
+struct mat3 {
+  // COLUMN-MAJOR, as GLSL defines it: mat3(c0x,c0y,c0z, c1x,c1y,c1z, c2x,c2y,c2z). Getting this
+  // transposed would silently rotate the other way and still "compile", so it is spelled out.
+  double m[9];
+  mat3(double a,double b,double c,double d,double e,double f,double g,double h,double i){
+    m[0]=a; m[1]=b; m[2]=c; m[3]=d; m[4]=e; m[5]=f; m[6]=g; m[7]=h; m[8]=i;
+  }
+};
+static inline vec3 operator*(mat3 M, vec3 v){
+  return vec3(M.m[0]*v.x + M.m[3]*v.y + M.m[6]*v.z,
+              M.m[1]*v.x + M.m[4]*v.y + M.m[7]*v.z,
+              M.m[2]*v.x + M.m[5]*v.y + M.m[8]*v.z);
+}
+typedef double vec2_unused;
+"""
+
+#: GLSL that the shim cannot faithfully execute. Refuse rather than compare something we mis-modelled --
+#: a validator that quietly gets the semantics wrong is worse than no validator.
+_GLSL_UNSUPPORTED = ("mat2", "mat4", "texture", "sampler", "iTime", "iResolution", "discard")
+
+
+def validate_glsl(node, points, timeout=60):
+    """Compile `SDF.to_glsl()`'s OWN map() with g++ (a vec3 shim gives GLSL semantics), RUN it on `points`,
+    and compare to the Python `_eval` -> {n, max_abs_diff, bit_identical, source}.
+
+    THE POINT: holographic_sdf.to_glsl and sdf_dialect are two emitters for one concept, and this module's
+    own header warns that two tables will disagree. This executes the OTHER one, so agreement is measured
+    rather than assumed. Only the helper functions and map() are compiled -- calcNormal/mainImage need
+    iResolution and are display code, not the arithmetic under test.
+    Raises SdfEmitError when the shader uses GLSL the shim does not model, rather than comparing wrongly."""
+    import os
+    import subprocess
+    import tempfile
+
+    node = as_tree(node)
+    P = np.asarray(points, float).reshape(-1, 3)
+    full = node.to_glsl()
+    cut = full.find("vec3 calcNormal")                         # everything before it is helpers + map()
+    if cut < 0:
+        cut = full.find("void mainImage")
+    body = full[:cut] if cut > 0 else full
+    body = "\n".join(l for l in body.splitlines() if not l.strip().startswith("//"))
+    for bad in _GLSL_UNSUPPORTED:
+        if bad in body:
+            raise SdfEmitError("the GLSL shim does not model %r; refusing to compare rather than "
+                               "mis-model it" % bad)
+    calls = "".join('printf("%%.17g\\n", map(vec3(%r, %r, %r)));' % tuple(float(v) for v in row) for row in P)
+    prog = _GLSL_SHIM + body + "\nint main(){ " + calls + " return 0; }\n"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        src, exe = os.path.join(tmp, "m.cpp"), os.path.join(tmp, "m")
+        with open(src, "w") as fh:
+            fh.write(prog)
+        subprocess.run(["g++", "-O0", src, "-o", exe, "-lm"], check=True, capture_output=True,
+                       timeout=timeout)
+        out = subprocess.run([exe], check=True, capture_output=True, text=True, timeout=timeout).stdout
+
+    got = np.array([float(x) for x in out.split()])
+    want = np.asarray(node.eval(P), float)
+    return {"n": len(P), "max_abs_diff": float(np.abs(got - want).max()),
+            "bit_identical": bool(np.array_equal(got, want)), "source": "to_glsl"}
+
+
+#: The bar the GLSL emitter is judged against. NOT bit-identity: GLSL `float` is 32-bit BY LANGUAGE
+#: DEFINITION, so a shader can never reproduce a float64 tree exactly and demanding it would be asserting a
+#: wish rather than the contract. MEASURED across the node zoo: 1e-7 for plain trees (f32 return types) and
+#: 3.7e-7 once a rotation lands, because to_glsl formats literals to SIX significant digits -- cos(0.7)
+#: ships as 0.764842, itself 1.9e-7 off. 1e-5 sits two orders above the worst measured value and far below
+#: any geometrically meaningful distance, so a REAL divergence still trips it.
+GLSL_AGREEMENT_TOL = 1e-5
+
+
+def emitters_agree(node, points, timeout=60, tol=GLSL_AGREEMENT_TOL):
+    """Do the project's TWO SDF emitters compute the same map()? -> {glsl, c_f64, worst, agree, why}.
+
+    Runs BOTH through their own executable path (to_glsl via the g++ vec3 shim, sdf_dialect via cc) and
+    compares each to the Python `_eval`. THE MEASUREMENT THE 'two tables will disagree' WARNING ALWAYS
+    DESERVED AND NEVER HAD -- previously the two were asserted to agree because nobody could run the GLSL.
+    THE TWO SIDES ARE HELD TO DIFFERENT BARS ON PURPOSE: the C dialect is EXACT (f64, bit-identical for
+    plain trees) because nothing stops it being; the GLSL gets `tol`, because a 32-bit shader with
+    6-significant-digit literals cannot do better and pretending otherwise would hide the real question,
+    which is whether the ARITHMETIC matches -- it does."""
+    g = validate_glsl(node, points, timeout=timeout)
+    c = validate_c(node, points, dialect="c_f64", timeout=timeout)
+    ok_g = g["max_abs_diff"] <= float(tol)
+    ok_c = c["max_abs_diff"] <= 1e-12
+    return {"glsl": g, "c_f64": c, "worst": max(g["max_abs_diff"], c["max_abs_diff"]),
+            "agree": bool(ok_g and ok_c),
+            "why": ("both emitters match the tree (glsl within %.1e, c f64 exact)" % float(tol)) if (ok_g and ok_c)
+                   else ("GLSL differs by %.3e" % g["max_abs_diff"] if not ok_g
+                         else "C differs by %.3e" % c["max_abs_diff"])}

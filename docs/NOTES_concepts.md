@@ -47361,3 +47361,315 @@ LESSON, generalised: when the same class of failure reaches CI repeatedly and th
 defect is not in the fixes -- it is that the CHECK is not automated. Promote the check, not the discipline.
 (Same shape as the seed/index lockstep fix and the backlog GLOB: gate the class, not the instance.)
 Battery clean; docs regenerated; 25 catalog/routing/buried-audit tests green.
+
+## POST-MERGE INTEGRATION SWEEP: the two arcs could not see each other (W1 shipped)
+
+Moose: sweep both merges for things built but not utilised -- e.g. the new 3-D work not using the new GPU
+speed. The two arcs were developed IN PARALLEL FROM DIVERGENT BASES, so neither could reference the other by
+construction. MEASURED: zero of the 11 arc-B (3-D/scene/render) modules reference any of the 18 arc-A
+(GPU/agent) modules, and none of them accepts a backend/pool/gpu parameter at all.
+
+NOT every absence is a gap -- checked before filing:
+  * objectref IS properly wired to holographic_service (3 sites): the object-handle registry (the old C4
+    item) landed correctly. Not a gap.
+  * run_wgsl_kernel having no internal consumers is BY DESIGN -- it raises rather than falling back, because
+    an explicit device request must not silently run on the CPU. Not a gap.
+  * arc-B faculty discoverability is 9/10 on stranger phrasings. The single MISS was "run an sdf on the gpu",
+    which is exactly W1 -- a missing capability announcing itself as a missing capability.
+
+### W1 SHIPPED -- the emitter and the runner had no bridge
+sdfemit.sdf_dialect(tree,'wgsl') emitted a real `fn map(p: vec3<f32>) -> f32`; holographic_wgpurun could
+dispatch WGSL on any adapter. NOTHING CONNECTED THEM: text produced, never run. Rule-0 across 6 phrasings
+returned only emitters (produce text) and CPU renderers -- the license to build.
+THE SHAPE THAT FIT: run_kernel maps a 1-D f32 array elementwise, and sphere tracing is elementwise over
+PIXELS -- so passing arange(W*H) as the input makes the pixel INDEX the kernel argument and the traced depth
+the output. That reuses run_kernel/wrap_kernel UNCHANGED: no second dispatch path, no new binding layout,
+additive by construction. The trace loop is a BOUNDED `for` (static trip count), which is exactly the loop
+shape the bounded-loop emission work unlocked earlier in this arc -- the two pieces met here.
+Built in holographic_wgpurun: sdf_trace_shader (WGSL as inspectable TEXT), sdf_depth_device (dispatch, RAISES
+without an adapter), sdf_depth_cpu (the NumPy reference on the SAME rays), sdf_depth_agrees (differential
+test, counting MISS/HIT disagreement separately from rounding because it is a decision, not an error).
+VERIFIED WITHOUT A DEVICE, which is the point of a projection design: the shader is well-formed text; the CPU
+reference is checkable against ANALYTIC truth (unit sphere at z=3 -> centre depth 2.0000, corners -1); and the
+emitted map() is BIT-IDENTICAL to Python through the C dialect (validate_c, 0.00e+00 on sphere and box) --
+the same executable bar sdfemit itself uses because WGSL cannot run here. 4 faculties, 1 capability, 7/7
+phrasings top-1 (the Rule-0 miss now resolves), audits 0/0/0.
+TEST-PLACEMENT LESSON: the pin first went into tests/test_wgsl_runtime.py, which carries a module-level
+skipif(not available()) -- so it reported "36 skipped" and proved nothing. A test that verifies the DEVICE-FREE
+half must not live behind the device gate; moved to test_holographic_sdf.py, where it actually runs (15 passed).
+
+### W4 RESOLVED BY MEASUREMENT AS A NON-DUPLICATE (kept negative)
+sdf.to_glsl and sdfemit.sdf_dialect looked like two emitters for one concept. They are NOT: to_glsl emits a
+COMPLETE Shadertoy fragment shader (map + raymarch + normals + lighting, 904 chars) while sdf_dialect emits
+map() ALONE (52 chars) in four dialects. Different scopes, complementary, no unification owed.
+THE RESIDUAL RISK IS REAL AND RECORDED: their map() bodies differ in STYLE -- to_glsl calls library helpers
+(sdSphere/sdBox), sdf_dialect inlines the arithmetic -- and NOTHING PROVES THEM NUMERICALLY EQUAL. sdfemit's
+own docstring warns that two tables for one concept will disagree and that the disagreement will be a bug in
+one of them; the existing test covers the DIALECT TABLE, not to_glsl. Settling it needs a GL runtime this box
+does not have. Filed as measured, unresolved -- not as done.
+
+### STILL OPEN (reported in chat, deliberately not filed as a backlog document)
+W2: no arc-B module accepts a backend/pool/gpu parameter, so even where offload would pay there is no seam to
+ask for it. Needs a MEASUREMENT first (does any render path clear should_offload's data/intensity bars?) --
+building a seam nothing can pay for is the failure mode this project keeps on record.
+W3: place_work's unit oracle knows machine-model units; the new render work registered none, so it cannot
+reason about render jobs at all.
+
+## BRANCH MERGE (J-3D scene/asset/objectref + catalog split) -- A WRONG-BASE MERGE, AND WHAT IT COST
+
+Moose: a branch based on a version PRIOR to the last merge, to be brought up to speed and merged.
+
+### THE SHAPE OF THE PROBLEM: the fork point was an INTERMEDIATE snapshot nobody has
+The branch carried the UnifiedMind split and the code-health modules but PREDATED the entire GPU/agent layer.
+So neither of our two known trees is its base. Relative to the newest common tree it appears to DELETE 48
+files and hundreds of methods, when in truth it never had them. THIS IS THE CENTRAL HAZARD OF A WRONG-BASE
+MERGE: age is indistinguishable from intent, and every standard tool takes it as intent.
+  * `git merge-file --diff3` merged 46 files with only 3 textual conflicts -- and silently removed place_work,
+    declare and agent_loop, because a one-sided removal relative to the WRONG base is a clean, conflict-free
+    delete. A green merge is not a correct merge.
+  * `--union` does NOT fix it: union resolves CONFLICTING hunks by keeping both sides, but a clean one-sided
+    deletion never conflicts, so it is applied either way. Measured, not assumed.
+  * THE CORRECT SEMANTIC when the base is wrong is ADD-ONLY: take their addition hunks, never their deletions.
+    Implemented by filtering the unified diff to hunks with no '-' lines.
+
+### WHAT ADD-ONLY COSTS, AND THE SWEEPS THAT PAID IT
+An addition-only filter drops any hunk that MIXES an addition with a change -- so it loses signature edits and
+helpers defined next to them. Three sweeps found every instance, and each sweep is reusable:
+  1. FACULTY SURFACE (hash every callable on UnifiedMind in all three trees): found 10 lost scene faculties.
+  2. MODULE SYMBOLS (ast walk, public AND private): found _view_transform, _fit_to, _PlacedEval, render_preview,
+     _selftest_hdr. Private helpers matter -- a body referencing an undefined name compiles fine and fails at
+     runtime with a bare NameError.
+  3. SIGNATURE PARAMETERS (compare arg-name sets per function): found render_scene_document/_place/
+     scene_to_render missing view= and affine=, and walk() missing stream=. This is the sneakiest class: the
+     BODY arrived (pure addition) while the DEF LINE did not (a modification), leaving code that references a
+     parameter its signature never declares.
+Where a file's symbol sets matched exactly between branch and merge, taking their whole file was provably safe
+and was done instead of further patching (scene_render, p07, run_selftests).
+
+### THE ONE A SURFACE HASH COULD NOT SEE: a REORGANISED registry
+The branch also split holographic_catalog.py into six parts -- authored against its PRE-FORK catalog. Taking
+that split wholesale silently dropped THIRTY capability registrations: the entire GPU/agent/compute layer
+(place_work, wgsl_*, declare, resource policy, agent loop, ...). The FACULTIES were all present and callable,
+so every faculty-level check passed. NO AUDIT CAUGHT IT: catalog_gaps and skill_lint verify that REGISTERED
+capabilities have homes and runnable examples, and neither can see an ABSENCE. Only a test asserting that a
+specific phrasing still routes ("where should this work run") noticed.
+LESSON, now the rule: WHEN A REGISTRY IS REORGANISED ON A BRANCH, DIFF THE RESULTING NAME SET AGAINST THE
+BASE, NEVER JUST THE FILE. Restored all 30 at the end of the last part (tie-break order preserved), and the
+catalog is now provably the union: 2566 = pre-merge 2514 + branch 2455, zero lost from either parent.
+
+### DEFECTS IN THE BRANCH ITSELF (each confirmed failing on the branch standalone)
+  * wiring_report --check (a CI GATE) failed: all six catalog parts reported dark, because
+    `from PKG import MODULE` is INVISIBLE to the audit -- the same facade-import lesson that once cost a
+    43-import sweep. Fixed the import style AND declared the parts as registry body in EXEMPT.
+  * TWO new name collisions: `make_shape` (new SDF entry vs the incumbent holographic_vision) and a six-way
+    `register` across the catalog parts. Both resolved by RENAMING THE NEWER ARRIVAL (make_sdf_shape,
+    register_pNN) rather than growing a budget whose own contract says it may shrink and must never grow.
+    register_pNN also matches the unified split's precedent of distinct _UnifiedPartNN names, and makes a
+    traceback name its own part. The branch's part-registration test was updated to pin THAT contract.
+  * A ROUTING PIN broke: the branch's new "Describe to document" shares the incumbent "Describe a scene"'s
+    whole vocabulary; the two tied and the decision fell act -> choose at 0.5. Additive fix (give the
+    incumbent its exact probe phrasing) restored act at 0.727 -- ABOVE the pre-merge 0.667.
+  * A duplicated __main__ guard in meshqem from the union pass, folded back to the true end of module.
+
+### A SECOND-ORDER EFFECT WORTH REMEMBERING: the abstain floor RISES with the catalog
+Restoring the 30 capabilities pushed route_or_abstain's in-vocabulary noise floor from null_mean 2.88 to 3.49.
+A correct top hit whose score never moved (4.50) went from z=1.08 (answer) to z=0.63 (ABSTAIN), breaking the
+declare ladder's rung 0. The fix is to raise the TARGET (exact phrasings as aliases -> score 4.5 to 8.5,
+z=3.78), never to lower the floor, which would weaken every gate that uses it. NOTE THE NEAR-MISS: the first
+attempt put those aliases on the neighbouring "Mesh editing (DCC)" entry, which dispatches to `deform` -- the
+ladder then resolved, but TO THE WRONG FACULTY, and only the test asserting the faculty NAME caught it.
+Getting a green is not the same as getting it right.
+
+### Post-merge state
+1340 py files compile; 2566 capabilities; 1599-method faculty surface PROVEN to be the union of both parents
+(zero lost from either, by source hash). All seven gates green. Cross-burial matrix extended with the three
+pins this merge discovered, so the class is guarded rather than rediscovered. Branch's 35 new tests + 147
+pinned/regression tests green; 9 generated docs regenerated and drift-checked.
+
+## W2/W3 CLOSED: the render arc now asks the placement layer -- and MOST of it correctly gets "no"
+
+W2 asked whether the new render modules need a backend=/pool= seam. MEASUREMENT FIRST, because building a
+seam nothing can pay for is a failure mode already on record. Against should_offload's provisional bars
+(>= 100 KB moved, >= 4.0 flops/byte):
+
+    sdf sphere trace   256x192 / 512x384 / 1024x768   144.0 flops/byte   CLEARS BOTH (by ~36x)
+    postfx elementwise 512x384 / 1920x1080              0.8 flops/byte   refused  (transfer-bound)
+    rasterize 50k tris                                  1.7 flops/byte   refused
+    qem decimate 20k verts                              5.0 flops/byte   marginal -- see below
+
+THE ANSWER IS AN ASYMMETRY, and it is the useful result: exactly ONE render path pays for a device, and it is
+the one W1 just built. Wiring backend= across the render arc -- the obvious reading of the sweep -- would have
+been WRONG for postfx and the rasterizer, which are transfer-bound BY CONSTRUCTION (they read and write
+everything and compute almost nothing; should_offload's own docstring says so and the numbers agree). KEPT
+NEGATIVE, pinned in test_holographic_sdf so a future session cannot re-propose it from narrative.
+QEM at 5.0 vs a 4.0 bar is NOT a green light: those thresholds are arithmetic from PCIe bandwidth and are
+marked provisional everywhere they surface, so a 25% margin sits inside the uncertainty of an unmeasured
+number. Not built, on purpose, recorded.
+
+W3's framing was slightly WRONG and the probe corrected it: machine_units() holds 17 HARDWARE/caching units
+(simd_lanes, rt_core, t2_baked_grid...), not workload registrations, so "register a render unit" was never
+the gap. The real gap was that NOTHING IN ARC B EVER CALLED THE DECISION LAYER.
+BUILT sdf_trace_workload + sdf_trace_placement (holographic_wgpurun + 2 faculties): they derive
+(n_bytes, flops_per_byte) FROM THE TRACE'S OWN PARAMETERS and hand them to place_work. WHY AT THIS SEAM
+rather than the call site: should_offload answers honestly but only about the numbers it is GIVEN, and those
+two are precisely what a caller gets wrong -- bytes TOUCHED instead of bytes MOVED, flops per PIXEL instead
+of per byte -- and a wrong input yields a CONFIDENT wrong verdict. The verdict carries the numbers that
+produced it so nobody re-derives them.
+PINNED PROPERTY WORTH KNOWING: the trace's intensity is RESOLUTION-INDEPENDENT (both terms scale with pixel
+count), so the offload question turns on MARCH DEPTH and tree cost, never on image size -- halving `steps`
+halves the intensity exactly. A 'cpu' verdict on a box with no adapter is a RESULT, not a failure.
+Aliases folded into the existing GPU-SDF capability rather than a sibling entry (one idea, one home);
+"should i offload the render" / "where should this trace run" now top-1. Audits 0/0/0; 16 sdf tests green.
+
+## W4 CLOSED: the second emitter is now EXECUTED -- the "two tables will disagree" warning, finally measured
+
+Carried forward as the sweep's one unresolved item: holographic_sdf.to_glsl and sdfemit.sdf_dialect both emit
+a map() for the same tree, sdfemit's own header warns that TWO TABLES FOR ONE CONCEPT WILL DISAGREE and that
+the disagreement will be a bug in one of them -- and only sdf_dialect had ever been run. "They agree" was a
+narrative. The existing test compares DIALECT FIELDS, not arithmetic.
+
+THE BLOCKER WAS FALSE, which is the lesson. Judging GLSL looked like it needed a GL runtime this project does
+not have -- I said so myself last session. But the GLSL these emitters produce is a tiny subset (vec3, +-*/,
+abs/min/max/length/clamp/dot, and mat3), and C++ HAS OPERATOR OVERLOADING, so a ~40-line vec3/mat3 shim makes
+the SAME TEXT compile and run under g++. Cost: one probe for the compiler. The bar stayed EXECUTED, the
+standard the C dialect already set. GENERALISED: "we cannot test this without <runtime X>" deserves the same
+five-lever treatment as any other wall -- the subset actually used is usually far smaller than the language.
+
+BUILT in holographic_sdfemit: validate_glsl (compile to_glsl's helpers+map() with a shim, run, compare to the
+Python _eval), emitters_agree (runs BOTH paths and judges each), GLSL_AGREEMENT_TOL, plus 2 faculties and a
+capability (5/5 phrasings top-1). The shim REFUSES what it cannot model (mat2/mat4/textures/iResolution)
+rather than comparing something mis-modelled -- a validator that quietly gets semantics wrong is worse than
+none.
+
+THE RESULT: THE TWO EMITTERS AGREE, and the residual is fully explained rather than merely small.
+    sphere / box / translated / union / smooth_union     ~1e-7
+    rotated box / compound (mat3 present)                 3.7e-7 / 4.3e-7
+    sdf_dialect c_f64 (same trees)                        0.0 -- 6.7e-16
+TWO SOURCES, BOTH IDENTIFIED: (1) GLSL `float` is 32-BIT BY LANGUAGE DEFINITION, so a shader can never match
+a float64 tree exactly -- bit-identity was the WRONG BAR and demanding it would have been asserting a wish
+rather than the contract; (2) to_glsl formats literals to SIX SIGNIFICANT DIGITS -- cos(0.7) ships as
+0.764842, itself 1.9e-7 off -- which is why a rotation is the worst case. GLSL_AGREEMENT_TOL = 1e-5 sits two
+orders above the worst measured value and far below any geometrically meaningful distance, so a REAL
+divergence still trips it. The C dialect keeps the exact bar because nothing stops it being exact: holding
+the two sides to DIFFERENT bars is the honest choice, not a concession.
+STATUS OF to_glsl, now sayable: a DISPLAY PROJECTION accurate to ~4e-7, not the authoritative geometry. That
+sentence was unavailable before this ran.
+EDIT-DISCIPLINE SLIP, recorded: the faculty insertion used `t[:i] + add + t[i:]` with `add` ALSO ending in the
+anchor, which duplicated `def _selftest(` and broke the module at import. Caught immediately by
+file_python_check; the repair script then failed too because it imported lecore at the top, which cannot
+import a broken tree -- REPAIR SCRIPTS MUST USE PLAIN FILE I/O. Both re-learned the cheap way.
+Battery 0/0/0; 65 tests green across sdf/sdfemit/routing/split/realtime; docs regenerated.
+
+## PYPI PUBLISH KEPT SKIPPING -- a false premise I wrote, with a real consequence
+
+Moose: something is making the PyPI publish skip. Traced without guessing, by reading the gate chain.
+
+package.yml's publish job is gated on `workflow_run.conclusion == 'success'` AND head_branch main/master. A
+"Skipped" in the UI therefore means one of exactly two things, and BOTH are worth separating:
+
+1. EXPECTED NOISE, not a defect: package.yml triggers on EVERY completion of `tests`, including PULL REQUEST
+   runs, whose head_branch is the feature branch. Those runs can never publish and always render as Skipped.
+   Anyone scanning the Actions list sees a wall of them. This is by design and should not be "fixed".
+2. THE REAL ONE: a red `tests` on main. The publish then skips CORRECTLY -- and stays skipped, because
+   nothing re-verifies main afterwards.
+
+ROOT CAUSE OF (2), AND IT IS MINE: the semantic-coverage heal commit carried a WHY-comment I wrote claiming it
+"RE-TRIGGERS CI (no [skip ci])". THAT IS FALSE. A push authenticated with the default GITHUB_TOKEN DOES NOT
+CREATE WORKFLOW RUNS -- GitHub's documented loop-breaker -- so the heal commit is invisible to `tests` whether
+or not [skip ci] is present. My removal of [skip ci] was INERT, and the stated goal ("a main that heals itself
+in the same push cycle") was never achieved. The consequence was not cosmetic: seed/index lockstep is
+ASSERTED by the suite, so a stale seed makes `tests` fail on main; the heal fixes the artifact but cannot
+re-run the suite; main's last conclusion stays FAILURE; and package.yml keeps skipping the publish run after
+run. A wrong sentence in a comment became a silent release outage.
+
+FIX: after the heal pushes, DISPATCH `tests` explicitly -- workflow_dispatch IS honoured for GITHUB_TOKEN and
+does create a run, which is the one trigger available. Added `actions: write` to the job (the permission the
+dispatch needs) and a non-fatal `gh workflow run ci.yml --ref <branch>` with GH_TOKEN in the step env; a
+refreshed index is still worth having if the dispatch fails, and the weekly full run reaches the same place.
+VERIFIED THE DISPATCH ACTUALLY LEADS TO A PUBLISH rather than assuming: on workflow_dispatch ci.yml runs
+`full-suite` and SKIPS `pytest` (their `if`s are complementary), a skipped job does not fail a run, so a green
+dispatch concludes SUCCESS with head_branch=main -- exactly what package.yml's gate wants. All five workflows
+re-validated as YAML.
+
+LESSONS, both cheap to state and expensive to have missed:
+  * A CI comment asserting a PLATFORM BEHAVIOUR is a claim like any other and deserves the same standard as a
+    performance number. "This re-triggers CI" was never tested and was wrong.
+  * When a gate is DOWNSTREAM of a conclusion (workflow_run + conclusion == success), anything that leaves the
+    upstream red is not a test failure but a RELEASE failure. The blast radius of a red main is larger than
+    the test that is red.
+  * Also fixed a self-inflicted YAML slip: the `env:` block was patched INSIDE the run script's shell body,
+    which yaml caught immediately -- workflows get parsed after every edit, same discipline as
+    file_python_check for Python.
+
+## "137 CHANGED FILES WITH EMPTY DIFFS" -- measured: NOT our line endings, but now guarded
+
+Moose saw ~137 modified files whose diffs looked empty and suspected line-ending churn. MEASURED BEFORE
+ANSWERING, because "probably line endings" is exactly the kind of plausible story that wastes a day:
+
+  * every .py file in EVERY tree (delivery, both incoming branches, the pre-merge tree) is PURE LF:
+    CRLF=0, LF=1341, MIXED=0. No CRLF/LF flip was introduced by any edit in this arc.
+  * whitespace-only churn between trees: ZERO. Comparing each differing file with
+    `diff --strip-trailing-cr -B -b`, 46 differ vs the pre-merge tree and 54 vs the branch -- and NONE of
+    them collapses to whitespace. Every diff is real content.
+  * permission/mode-only diffs: ZERO.
+  * ranking the diffs by size shows no trivial ones -- the smallest are tens of real lines.
+  * the delivery ships ZERO text files containing CRLF. (83 files contain the bytes 0D 0A, all of them
+    PNG/npy/hsp binaries where that sequence occurs naturally in compressed data -- git treats them as
+    binary because they carry NUL early. The only non-obvious case, LICENSE, is genuinely text.)
+  * a FIRST-PASS SCRIPT SAID THE OPPOSITE -- "1339 files contain CR" -- because `grep -q $"\r"` in bash is
+    locale-translation syntax, not an escape, so it searched for a literal backslash-r and matched every
+    Python file containing "\r\n" IN A STRING. The number was garbage and was thrown out. Worth keeping: a
+    measurement that confirms the suspicion on the first try deserves MORE scrutiny, not less.
+
+SO WHERE DO THE PHANTOM DIFFS COME FROM? Not the file contents -- the INDEX. .gitattributes declares
+`* text=auto`, so git stores text LF-normalised. Anything committed before that took effect (or committed
+from a Windows checkout with core.autocrlf) sits in the index with CRLF, while the working tree is now LF.
+Git then reports EVERY LINE of those files as changed and the rendered diff looks empty, because the content
+IS identical. It is a one-time index/worktree mismatch, and the canonical fix is a renormalisation commit:
+    git ls-files --eol | grep -v "i/lf"      # names exactly the files whose INDEX copy is not LF
+    git add --renormalize .                  # rewrite the index to match the declared policy
+    git commit -m "normalize line endings"   # one commit, after which the phantom diffs are gone for good
+
+GUARD ADDED so this cannot drift back in from our side: test_no_text_file_ships_crlf walks every tracked
+text file and fails with the offenders NAMED, plus test_gitattributes_declares_lf_normalisation, which pins
+the policy the first test enforces (a guard for a setting nobody set is a lie). MUTATION-TESTED: a planted
+CRLF file makes it fail and the message names that file. This is the same rule as the cross-burial matrix --
+when a class of problem reaches a human as "the tooling looks broken", promote the CHECK, not the discipline.
+
+## THE PHANTOM DIFFS, PART 2: not line endings at all -- the delivery was reverting CI-OWNED FILES
+
+The first pass proved our text is LF-only and found no whitespace churn, but the count barely moved (137 ->
+128), so the first answer was INCOMPLETE. Widened the measurement -- and the earlier scan had a hole worth
+naming: it globbed `*.py` ONLY, so .md/.yml/.json were never checked. Re-scanned every text type across all
+four trees: still ZERO CRLF anywhere. Line endings are conclusively not the cause from our side.
+
+WHAT THE WIDER MEASUREMENT FOUND INSTEAD. Against the pre-merge tree the delivery touches 62 files (44 text
+changed, 14 added, 4 removed -- and the 4 removed are .pytest_cache junk, which is gitignored, so nothing
+real is lost). 62 is not 128. The gap is files whose live copy on main is written BY CI, not by us:
+
+    VERSION                              package.yml bumps the patch digit EVERY release
+    lecore_data/routing/index_128d.npz   semantic-coverage.yml rebuilds and commits it every push
+    tools/semantic/routing_seed.npz.xz   same commit, the other half of the lockstep pair
+    REFERENCE / CAPABILITIES / capabilities.json / API_QUICKREF / FACULTY_MAP / DOC_MAP / PIPELINE_MAP / pipelines.json
+                                         docs.yml regenerates and commits them
+
+A source snapshot carries whatever those files were when it was cut, so applying it over a live main REVERTS
+every one of them -- and they are exactly the files a human scrolls past without recognising a real change.
+THE HARMFUL ONE IS VERSION: our snapshot said 0.2.0. Reverting it makes the next auto-bump collide with a
+number already on PyPI, and PyPI REJECTS re-uploads of an existing version. That is a second, independent
+cause of publishing trouble sitting behind the workflow_run gate fixed earlier -- and it would have been
+invisible until the next release attempt.
+
+FIX (delivery-side, not repo-side): the archive now EXCLUDES the three files CI genuinely owns (VERSION and
+the routing index + seed) so it cannot revert them, and ships DELIVERY_NOTES.md stating who owns what, what
+breaks if each is overwritten, and the three commands that tell a human WHICH kind of empty-looking diff they
+are looking at (`git diff --numstat` zero/zero rows = mode or binary; `git diff --summary` = mode changes;
+`git ls-files --eol | grep -v i/lf` = index/worktree EOL mismatch). Generated docs stay IN the archive
+deliberately -- a standalone extract must be complete, and the next push regenerates them harmlessly.
+VERIFIED the trimmed archive still boots standalone: 2571 caps, find_capability works, 0 CRLF text files.
+
+LESSON: "which of these files does something OTHER than this snapshot own?" is a question a delivery should
+answer explicitly. An artifact that is regenerated by CI is not source, and shipping it as if it were makes
+every delivery look like a large uninterpretable change -- and, in VERSION's case, breaks a release.
+Also: when a fix moves the number from 137 to 128, that is not confirmation, it is a SECOND CAUSE announcing
+itself. The first explanation was true and insufficient; both had to be found.

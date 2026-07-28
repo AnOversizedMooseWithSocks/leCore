@@ -64,3 +64,29 @@ def test_the_escape_hatch_reproduces_the_inflated_graph():
     """Keep the A/B runnable so the measurement can be re-checked instead of re-argued."""
     inflated = _module_texts(_REPO, merge_parts=False)
     assert any(k.startswith("unified_p") for k in inflated), "merge_parts=False no longer reproduces the old graph"
+
+
+def test_a_split_facade_is_re_merged_or_it_stops_looking_like_a_hub():
+    """THE SAME BUG, TWICE, AND THE SECOND TIME WAS MINE.
+
+    Hub detection here is by DEGREE, and splitting a facade into parts is precisely the operation that hides
+    its degree. It happened first to `unified` (13 mixin parts) and this module already documents that with a
+    measured before/after. It then happened to `catalog`: splitting it into six parts to get under the 1 MB
+    agent-read cap collapsed its out-degree below the 15% threshold, so it stopped being dropped and started
+    injecting a spurious routing edge into all ~188 modules it names. The module's own selftest caught it --
+    and only because someone finally ran the full selftest walk, since that walk is marked slow.
+
+    This pins the general rule rather than the one instance: any facade that gets split must be re-merged
+    here, and both known facades must still be caught as hubs."""
+    from pathlib import Path
+    from holographic.semantic_router.holographic_workflowgraph import build_workflow_graph
+
+    root = Path(__file__).resolve().parents[1]
+    g = build_workflow_graph(root)
+    for facade in ("unified", "catalog"):
+        assert facade in g["dropped_hubs"], "%s is no longer detected as a hub -- was it split again?" % facade
+        assert facade not in g["out"] and facade not in g["in"]
+    # ...and no PART may survive as a module in its own right; that is what "re-merged" means.
+    for name in list(g["out"]) + list(g["in"]):
+        assert not name.startswith(("unified_p", "catalog_p")), \
+            "%s survived as its own node -- a facade part is not a collaborator" % name

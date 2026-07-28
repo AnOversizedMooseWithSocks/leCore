@@ -542,3 +542,160 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+# ======================================================================================================
+# SDF -> DEVICE: the bridge between the shader EMITTER and the shader RUNNER
+# ======================================================================================================
+#
+# WHY THIS EXISTS (a merge-integration gap, found by sweep). Two arcs landed in parallel from divergent
+# bases and neither could see the other: one shipped sdfemit.sdf_dialect(tree, 'wgsl'), which emits a real
+# `fn map(p: vec3<f32>) -> f32`, and the other shipped THIS module, which dispatches WGSL on any adapter.
+# The text was produced and never run. `find_capability("run an sdf on the gpu")` returned only emitters
+# and CPU renderers -- the honest signature of a capability that does not exist.
+#
+# THE SHAPE THAT FITS: run_kernel maps a 1-D f32 array elementwise. Sphere-tracing is elementwise over
+# PIXELS, so passing arange(W*H) as the input makes the pixel INDEX the kernel argument and the traced
+# depth the output. That reuses run_kernel/wrap_kernel UNCHANGED -- this bridge adds no new dispatch path
+# and no new binding layout, which is why it is additive rather than a second engine.
+
+_SDF_TRACE = """%(map)s
+
+fn sdf_depth(idx: f32, w: f32, h: f32, px: f32, py: f32, pz: f32, fov: f32, near: f32, far: f32) -> f32 {
+  let i = u32(idx);
+  let x = (f32(i %% u32(w)) + 0.5) / w * 2.0 - 1.0;
+  let y = 1.0 - (f32(i / u32(w)) + 0.5) / h * 2.0;
+  let aspect = w / h;
+  let dir = normalize(vec3<f32>(x * aspect * fov, y * fov, -1.0));
+  let ro = vec3<f32>(px, py, pz);
+  var t = near;
+  var hit = -1.0;
+  for (var s: i32 = 0; s < %(steps)d; s = s + 1) {
+    let d = map(ro + dir * t);
+    if (d < %(eps).8ef) { hit = t; break; }
+    t = t + d;
+    if (t > far) { break; }
+  }
+  return hit;
+}
+"""
+
+
+def sdf_trace_shader(node, width, height, steps=96, eps=1e-3):
+    """Build the WGSL for a per-pixel sphere trace of `node` -- the SDF tree's own `map()` plus an
+    elementwise `sdf_depth(idx, ...)` entry that run_kernel can dispatch.
+
+    Returned as TEXT so it is inspectable and testable without a device (the whole reason the emitters are
+    worth having). `node` may be a live SDF or its DSL text, exactly as sdf_dialect accepts.
+    The trace loop is BOUNDED by `steps`: a shader invocation must have a statically known trip count, and
+    a bounded `for` is the one loop shape the emitter and WGSL both accept."""
+    from holographic.mesh_and_geometry.holographic_sdfemit import sdf_dialect
+    return _SDF_TRACE % {"map": sdf_dialect(node, "wgsl"), "steps": int(steps), "eps": float(eps)}
+
+
+def sdf_depth_cpu(node, width, height, eye=(0.0, 0.0, 3.0), fov=1.0, near=0.01, far=50.0, steps=96,
+                  eps=1e-3):
+    """The NumPy reference for sdf_trace_shader, vectorised over pixels -- same rays, same bounded march,
+    same miss sentinel (-1). This is the baseline the device result is judged against; a device path with
+    no reference on the same rays is a number nobody can check."""
+    import numpy as np
+    from holographic.mesh_and_geometry.holographic_sdfemit import as_tree
+    tree = as_tree(node)
+    i = np.arange(int(width) * int(height))
+    x = (i % int(width) + 0.5) / float(width) * 2.0 - 1.0
+    y = 1.0 - (i // int(width) + 0.5) / float(height) * 2.0
+    aspect = float(width) / float(height)
+    dirs = np.stack([x * aspect * float(fov), y * float(fov), -np.ones_like(x)], axis=1)
+    dirs /= np.linalg.norm(dirs, axis=1, keepdims=True)
+    ro = np.asarray(eye, float)
+    t = np.full(i.shape, float(near))
+    hit = np.full(i.shape, -1.0)
+    live = np.ones(i.shape, bool)
+    for _ in range(int(steps)):
+        if not live.any():
+            break
+        P = ro[None, :] + dirs[live] * t[live][:, None]
+        d = np.asarray(tree.eval(P), float).reshape(-1)
+        idx = np.flatnonzero(live)
+        got = d < float(eps)
+        hit[idx[got]] = t[idx[got]]
+        t[idx] = t[idx] + d
+        live[idx[got]] = False
+        live[idx[t[idx] > float(far)]] = False
+    return hit.reshape(int(height), int(width))
+
+
+def sdf_depth_device(node, width, height, eye=(0.0, 0.0, 3.0), fov=1.0, near=0.01, far=50.0, steps=96,
+                     eps=1e-3, workgroup=64):
+    """Sphere-trace an SDF ON THE DEVICE -> (height, width) float32 depth, -1 where the ray missed.
+
+    The bridge the two merges left open: the tree's own emitted `map()` runs where the pixels are.
+    RAISES when no adapter is present rather than falling back, matching run_kernel's contract -- an
+    explicit device request that silently ran on the CPU would make the timing meaningless. Use
+    sdf_depth_cpu for the reference (same rays, same march) and sdf_depth_agrees to compare them."""
+    import numpy as np
+    body = sdf_trace_shader(node, width, height, steps=steps, eps=eps)
+    idx = np.arange(int(width) * int(height), dtype=np.float32)
+    out = run_kernel(body, "sdf_depth", idx,
+                     extra_args=(float(width), float(height), float(eye[0]), float(eye[1]), float(eye[2]),
+                                 float(fov), float(near), float(far)),
+                     workgroup=workgroup)
+    return np.asarray(out, np.float32).reshape(int(height), int(width))
+
+
+def sdf_depth_agrees(node, width=32, height=24, tol=2e-2, **kw):
+    """Differentially test the device trace against the NumPy one -> {max_abs, miss_mismatch, agrees, n}.
+
+    THE POINT OF A PROJECTION DESIGN, made executable: both sides trace the SAME emitted tree, so they can
+    be CHECKED rather than trusted. `tol` is loose on purpose -- the device marches in f32 and the CPU in
+    float64, so hit distances differ by the accumulated step error, NOT bit-exactly. A MISS/HIT disagreement
+    is counted separately because that is a decision, not a rounding difference."""
+    import numpy as np
+    dev = sdf_depth_device(node, width, height, **kw)
+    ref = sdf_depth_cpu(node, width, height, **kw)
+    dmiss, rmiss = dev < 0, ref < 0
+    both = ~dmiss & ~rmiss
+    max_abs = float(np.max(np.abs(dev[both] - ref[both]))) if both.any() else 0.0
+    mism = int(np.sum(dmiss != rmiss))
+    return {"max_abs": max_abs, "miss_mismatch": mism, "n": int(dev.size),
+            "agrees": bool(max_abs <= float(tol) and mism == 0)}
+
+
+# WORKLOAD ARITHMETIC for the sphere trace, so a caller never has to derive it by hand.
+# WHY IT IS HERE AND NOT AT THE CALL SITE: should_offload/place_work answer honestly but only about the
+# numbers they are GIVEN, and n_bytes / flops_per_byte are exactly the two a caller gets wrong -- counting
+# bytes TOUCHED instead of bytes MOVED, or flops per pixel instead of per byte, yields a confident wrong
+# verdict. MEASURED with these numbers, the trace clears both provisional bars by ~36x (144 vs 4.0
+# flops/byte at any resolution, because both terms scale with the pixel count) while an elementwise postfx
+# pass comes out at 0.8 and is correctly refused -- the sweep's kept negative for the rest of the render arc.
+_TRACE_FLOPS_PER_STEP = 12.0        # map() + the step/compare, for a small tree; a conservative order
+
+def sdf_trace_workload(width, height, steps=96, flops_per_step=_TRACE_FLOPS_PER_STEP):
+    """The (n_bytes, flops_per_byte) a sphere trace of this size actually presents -> dict.
+
+    Bytes MOVED, not touched: one f32 pixel index in, one f32 depth out. The intensity is resolution-
+    INDEPENDENT (both terms scale with the pixel count), so the verdict turns on `steps` and tree cost --
+    which is the honest shape of the trade and worth seeing rather than guessing."""
+    n = int(width) * int(height)
+    n_bytes = n * 4 * 2
+    return {"n_bytes": n_bytes, "flops_per_byte": (n * int(steps) * float(flops_per_step)) / n_bytes,
+            "pixels": n, "steps": int(steps)}
+
+
+def sdf_trace_placement(width, height, steps=96, mind=None, flops_per_step=_TRACE_FLOPS_PER_STEP):
+    """WHERE SHOULD THIS SPHERE TRACE RUN -> place_work's verdict, computed from the trace's own numbers.
+
+    The seam the post-merge sweep found missing: the render arc never consulted the placement layer, so the
+    one path that genuinely pays for a device could not ask. Pass a UnifiedMind as `mind` to use its
+    resource policy; without one this reports the workload and the device bars only.
+    A 'cpu' verdict here is a RESULT, not a failure -- on a box with no adapter it is the correct answer,
+    and the numbers that produced it come back with it so nobody has to re-derive them."""
+    w = sdf_trace_workload(width, height, steps=steps, flops_per_step=flops_per_step)
+    if mind is not None:
+        r = mind.place_work(n_bytes=w["n_bytes"], flops_per_byte=w["flops_per_byte"])
+        r = dict(r); r["workload"] = w
+        return r
+    from holographic.io_and_interop.holographic_gpureport import should_offload
+    verdict, why = should_offload(w["n_bytes"], w["flops_per_byte"])
+    return {"placement": "device" if verdict else "cpu", "why": why, "workload": w,
+            "considered": {"device": {"verdict": verdict, "why": why}}}

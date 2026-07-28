@@ -253,6 +253,31 @@ class UnifiedMind(_UnifiedPart01, _UnifiedPart02, _UnifiedPart03, _UnifiedPart04
         import holographic.io_and_interop.holographic_orphanaudit as _oa
         return _oa.orphan_report(root=root, limit=limit)
 
+    def audit_agent_reach(self, root=None, limit=40):
+        """Which public symbols can an AGENT actually reach -- functions AND classes, chains checked to the end.
+
+        audit_orphans asks a lexical question: is this name referenced anywhere? That is the right question
+        for dead code, and it answers YES for a symbol whose only reference lives in a module that is itself
+        import-only by design -- a consolidation home, a declared negative. The chain is alive in the import
+        graph and dead to an agent, because it never terminates at a faculty. This asks the second question:
+        does the reference GO anywhere?
+
+        Returns {counts, shadowed, dark, budget, ok}.
+          shadowed -- referenced, but every referencing file is import-only by design. A cul-de-sac.
+          dark     -- a public CLASS that is neither a faculty nor named in the catalog. audit_orphans never
+                      saw these at all: it collects functions only, so a class an agent cannot construct was
+                      invisible by construction.
+
+        MEASURED, and why it exists: nine of the ten path-tracer light classes -- DomeLight (environment/IBL)
+        and the area lights among them, between them most of what makes a render read as a photograph -- are
+        unreachable from this class, while every module-level audit reported 0 gaps over the same tree.
+
+        ADVISORY, and it does not gate: it shares audit_orphans' no-type-inference rule, so it UNDER-reports
+        (a class merely named in catalog prose reads as reachable). A review queue, never a delete list, and
+        never a completeness claim. See holographic_orphanaudit.agent_reach_report."""
+        import holographic.io_and_interop.holographic_orphanaudit as _oa
+        return _oa.agent_reach_report(root=root, limit=limit)
+
 
 def unified_sources():
     """Every file the UnifiedMind class body lives in: this shim first, then each mixin part, in base order.
