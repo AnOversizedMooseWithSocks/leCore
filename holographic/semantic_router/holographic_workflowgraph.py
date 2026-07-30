@@ -51,6 +51,14 @@ _REF = re.compile(r"holographic_([a-z0-9_]+)")
 # holographic/misc/holographic_unified.py. On disk that is 13 files; as a REFERENCING ENTITY it is one
 # module, and this pattern is what folds them back before any counting happens.
 _PART_OF_UNIFIED = re.compile(r"^unified_p\d\d_")
+# THE SAME BUG, A SECOND TIME, AND CAUGHT THE SAME WAY. Splitting holographic_catalog into six parts (it had
+# reached 81% of the 1 MB agent-read cap) did to `catalog` exactly what the UnifiedMind split did to
+# `unified`: the facade's out-degree collapsed below the 15% hub threshold, so it STOPPED being dropped as a
+# hub and started injecting a spurious bone into all ~188 modules it names. This module's own selftest caught
+# it -- "facade catalog must be dropped as a hub" -- on the very next full selftest walk.
+# The lesson generalises past both cases: ANY facade split into parts must be re-merged here, because hub
+# detection is by DEGREE and splitting a facade is precisely the operation that hides its degree.
+_PART_OF_CATALOG = re.compile(r"^catalog_p\d\d$")
 
 
 def _module_texts(root, merge_parts=True):
@@ -87,6 +95,8 @@ def _module_texts(root, merge_parts=True):
         stem = f.stem[len("holographic_"):]
         if merge_parts and _PART_OF_UNIFIED.match(stem):
             stem = "unified"                 # concatenate: the parts are slices of one class body
+        elif merge_parts and _PART_OF_CATALOG.match(stem):
+            stem = "catalog"                 # ...and these are slices of one registry function
         out[stem] = out.get(stem, "") + f.read_text(errors="ignore")
     return out
 

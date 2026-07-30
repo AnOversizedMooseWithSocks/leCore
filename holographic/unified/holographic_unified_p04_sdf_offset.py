@@ -1400,6 +1400,34 @@ class _UnifiedPart04:
         return triage_report(str(src)) if as_text else triage(str(src))
 
 
+    def sdf_emitters_agree(self, node, points=None, tol=1e-5, seed=0):
+        """DO THE TWO SDF EMITTERS COMPUTE THE SAME SHAPE? -> {glsl, c_f64, worst, agree, why}.
+
+        holographic_sdf.to_glsl and sdfemit.sdf_dialect both emit a map() for one tree, and sdfemit's own
+        header warns that two tables for one concept WILL disagree. This EXECUTES both -- the GLSL through a
+        vec3 shim under g++, the C dialect under cc -- and compares each to the Python evaluation, so the
+        agreement is measured rather than asserted. `points` defaults to 200 seeded samples in [-2,2]^3.
+        THE BARS DIFFER ON PURPOSE: the C dialect must be EXACT; the GLSL gets `tol`, because GLSL float is
+        32-bit by language definition and to_glsl writes literals to six significant digits (cos(0.7) ships
+        as 0.764842). MEASURED worst case across the node zoo: 4.3e-7. See holographic_sdfemit.emitters_agree."""
+        import numpy as _np
+        from holographic.mesh_and_geometry.holographic_sdfemit import emitters_agree
+        if points is None:
+            points = _np.random.default_rng(seed).uniform(-2.0, 2.0, (200, 3))
+        return emitters_agree(node, points, tol=tol)
+
+    def sdf_validate_glsl(self, node, points=None, seed=0):
+        """Compile the Shadertoy GLSL's own map() and RUN it, comparing to the Python tree ->
+        {n, max_abs_diff, bit_identical, source}. The half nobody could execute before: a vec3 shim under
+        g++ gives GLSL semantics without a GL runtime. Refuses on GLSL the shim does not model (mat2/mat4,
+        textures) rather than comparing wrongly. See holographic_sdfemit.validate_glsl."""
+        import numpy as _np
+        from holographic.mesh_and_geometry.holographic_sdfemit import validate_glsl
+        if points is None:
+            points = _np.random.default_rng(seed).uniform(-2.0, 2.0, (200, 3))
+        return validate_glsl(node, points)
+
+
 def _selftest():
     """Delegates to holographic.unified.check_part -- one home for the shared contract."""
     n = check_part("holographic.unified.holographic_unified_p04_sdf_offset", "_UnifiedPart04")

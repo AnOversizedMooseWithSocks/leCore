@@ -1413,6 +1413,62 @@ class _UnifiedPart01:
                                  n_shuffle=n_shuffle, seed=seed)
 
 
+    def fetch_asset(self, url, cache_dir=None, sha256=None, timeout=30.0):
+        """Fetch an external asset (HDRI/model/texture) into the content-addressed cache -> {path, sha256,
+        bytes, cached}. THE NETWORK MEETS THE DETERMINISM RULE the same way randomness does: BY PINNING.
+        An unpinned fetch returns the hash to record; a PINNED fetch that is cached is served from disk
+        with NO network I/O -- so a scene recipe of (url, sha256) pairs replays bit-identically offline,
+        forever, which downloaded-on-demand can never do. A pinned fetch whose bytes mismatch is deleted
+        and raises naming BOTH hashes (a silently-different asset is the supply-chain version of a flipped
+        decision). Opt-in only: nothing in core imports this; http(s) only; 512 MB ceiling. Feed the result
+        straight to load_hdr / import_asset / asset_library.add_hashes. See holographic_assetfetch."""
+        from holographic.io_and_interop.holographic_assetfetch import fetch_asset
+        return fetch_asset(url, cache_dir=cache_dir, sha256=sha256, timeout=timeout)
+
+    def load_hdr(self, path, exposure=1.0):
+        """Read a Radiance .hdr / .pic (RGBE) environment map -> (H,W,3) float32 LINEAR radiance, UNBOUNDED.
+
+        THE LAST MISSING PIECE OF IMAGE-BASED LIGHTING. Everything else was already here: DomeLight's `color`
+        accepts a callable f(dirs)->rgb, and sky_dome() samples an equirectangular env by lon/lat. What there
+        was no way to do was GET a real environment map in -- load_image reads 8 bits, and an 8-bit env is
+        precisely the wrong input, because the whole point of an HDRI is that the sun is thousands of times
+        brighter than the sky. A tone-mapped picture of a sky is not an environment light.
+
+        MEASURED, and it is why this and not a sky-field wrapper (160x120, 2 bounces, dome only, matched
+        mean radiance): a flat-colour dome and a procedural sky FIELD differ by 0.0054 mean abs -- invisible.
+        The same env mirrored left/right differs by 0.0336, six times larger. Smooth gradients do not pay;
+        DIRECTIONAL STRUCTURE does, and only a real HDRI has it.
+
+        Use it: `env = m.load_hdr(path)` then `m.scene_light('dome', color=lambda d: m.sky_dome(d, env=env))`.
+        Pair with a DARK sky= or the environment is counted twice for diffuse.
+
+        KEPT NEGATIVES: .exr is not supported (a whole container format -- multi-part, tiled, several
+        compressors -- and its own project); XYZE files RAISE rather than decode wrongly, because their
+        primaries are CIE XYZ and returning them as RGB would silently shift every colour; and the result is
+        UNBOUNDED on purpose -- clipping the sun to 1.0 is the exact information loss this exists to avoid.
+        See holographic_render.load_hdr."""
+        from holographic.rendering.holographic_render import load_hdr
+        return load_hdr(path, exposure=exposure)
+
+    def load_image(self, path, mode="rgb01"):
+        """Read a PNG back into an array -- the inverse of save_render, and the step that closes a see-then-fix loop.
+
+        The engine could WRITE a PNG and could not READ one: a grep for IHDR found only the encoder. That one
+        missing direction blocked every render -> look -> adjust -> render cycle, because "look" had nowhere to
+        start, and it is why compare_image_files reached for Pillow. Pure stdlib (zlib + struct), no dependency.
+
+        mode='rgb01' (default) gives (H,W,3) float in [0,1] -- the shape every render and image call here takes,
+        so it feeds straight back into compare_images, a denoiser, or another render. mode='raw' gives the array
+        as stored (uint8/uint16, 1-4 channels). Greyscale, palette, and both alpha forms decode; alpha is dropped
+        in rgb01 because the caller asked for RGB.
+
+        KEPT NEGATIVE: the round trip is to about 1/255, not exact -- save_png quantises to 8 bits, so assert
+        against a tolerance and never against equality. Interlaced (Adam7) PNGs RAISE rather than decode
+        wrongly. See holographic_render.load_png / png_decode."""
+        from holographic.rendering.holographic_render import load_png
+        return load_png(path, mode=mode)
+
+
 def _selftest():
     """Delegates to holographic.unified.check_part -- one home for the shared contract."""
     n = check_part("holographic.unified.holographic_unified_p01_read", "_UnifiedPart01")

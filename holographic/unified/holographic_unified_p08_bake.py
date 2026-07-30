@@ -1454,6 +1454,39 @@ class _UnifiedPart08:
         return sparse_reconstruct(oracle, lo, hi, n_seed=n_seed, n_refine=n_refine, bandwidth=bandwidth, seed=seed)
 
 
+    def scene_light(self, kind="sun", target=None, width=1.0, height=1.0, up=(0.0, 1.0, 0.0), **kw):
+        """Build a PATH-TRACER light by name -- the one door to all ten types, for render_scene_document.
+
+        kind is a word an agent would actually type: 'sun'/'directional', 'point'/'lamp', 'spot',
+        'rect'/'area'/'softbox'/'panel', 'disk', 'sphere', 'dome'/'environment'/'sky'/'hdri'/'ibl',
+        'ambient'/'fill', 'mesh'/'emissive', 'ies'. An unknown kind raises with the full list rather than a
+        bare KeyError, because guessing is what a caller does when it has never seen the API.
+
+        `target` is the part that saves real work: give it a point to light and the panel/disk/spot/sun is
+        ORIENTED for you. Without it, aiming a softbox means hand-building an orthonormal basis out of
+        u_vec/v_vec half-edges -- measured as the place 3-D authoring stalls. Everything else is passed
+        straight to the class (position, color, intensity, radius, inner_deg/outer_deg, ground_color, ...).
+
+        'dome' is the one to reach for first: an environment/IBL light is shadowed, so soft contact shadows
+        (ambient occlusion) fall out for free, and it is most of what makes a render read as a photograph.
+        Pair a dome with a DARK sky -- a bright sky AND a dome counts the environment twice for diffuse.
+
+        WHY THIS FACULTY EXISTS: nine of these ten classes shipped reachable by nothing. See
+        holographic_lights.make_light."""
+        import holographic.rendering.holographic_lights as _lg
+        return _lg.make_light(kind=kind, target=target, width=width, height=height, up=up, **kw)
+
+    def aim_light_basis(self, position, target, width=1.0, height=1.0, up=(0.0, 1.0, 0.0)):
+        """Half-edge vectors (u_vec, v_vec) for a rectangular panel at `position` FACING `target`.
+
+        The low-level half of scene_light('softbox', target=...), exposed on its own for callers building a
+        RectLight directly or reusing the basis for something else (a gobo frame, a camera-facing card).
+        Ordering is chosen so the emitting face points at the target: reversed, you get a valid light that
+        renders the scene black. See holographic_lights.aim_basis."""
+        import holographic.rendering.holographic_lights as _lg
+        return _lg.aim_basis(position, target, width=width, height=height, up=up)
+
+
 def _selftest():
     """Delegates to holographic.unified.check_part -- one home for the shared contract."""
     n = check_part("holographic.unified.holographic_unified_p08_bake", "_UnifiedPart08")

@@ -211,3 +211,97 @@ def test_area_light_multisampling_reduces_variance():
     a32 = np.array([direct_lighting(occl, P, N, V, np.full((1, 3), 0.8), np.zeros(1), np.full(1, 0.5),
                                     [rect], np.random.default_rng(s), area_samples=32).sum() for s in range(24)])
     assert a32.std() <= a4.std()
+
+
+# ---------------------------------------------------------------------------
+# AIMING + the one-door factory -- the reach half, not the physics half
+# ---------------------------------------------------------------------------
+
+def test_aimed_panel_faces_its_target():
+    """The handedness is the contract. cross(u_vec, v_vec) is RectLight's emitting direction, so an inverted
+    basis gives a perfectly valid light that renders the scene BLACK -- a miserable thing to debug from an
+    image alone, and the reason this is pinned rather than eyeballed."""
+    from holographic.rendering.holographic_lights import aim_basis
+    u, v = aim_basis((2.0, 3.0, 2.0), (0.0, 0.5, 0.0), width=2.0, height=1.0)
+    n = np.cross(u, v); n = n / np.linalg.norm(n)
+    aim = np.array([0.0, 0.5, 0.0]) - np.array([2.0, 3.0, 2.0]); aim = aim / np.linalg.norm(aim)
+    assert float(n @ aim) > 1.0 - 1e-9
+    assert abs(np.linalg.norm(u) - 1.0) < 1e-9, "u must be width/2 -- HALF-edges, RectLight's convention"
+    assert abs(np.linalg.norm(v) - 0.5) < 1e-9
+
+
+def test_overhead_panel_is_not_degenerate():
+    """A light straight overhead pointing down is the most common studio placement and it is exactly the case
+    where the aim direction is parallel to `up`, so the roll reference is useless. A naive cross product
+    returns zeros here and the light silently emits nothing."""
+    from holographic.rendering.holographic_lights import aim_basis
+    u, v = aim_basis((0.0, 3.0, 0.0), (0.0, 0.0, 0.0), width=2.0, height=2.0)
+    n = np.cross(u, v); n = n / np.linalg.norm(n)
+    assert np.allclose(n, [0.0, -1.0, 0.0], atol=1e-9)
+
+
+def test_aim_basis_is_json_serialisable():
+    """Agent-facing means it crosses POST /invoke. numpy scalars work in-process and fail over HTTP -- the
+    exact 'it works here but an agent cannot call it' split this repo keeps paying for."""
+    import json
+    from holographic.rendering.holographic_lights import aim_basis
+    u, v = aim_basis((0.0, 3.0, 0.0), (1.0, 0.0, 0.0))
+    assert all(type(x) is float for x in u + v)
+    json.dumps({"u": u, "v": v})
+
+
+def test_every_advertised_kind_builds_and_a_wrong_guess_teaches():
+    from holographic.rendering.holographic_lights import make_light, LIGHT_KINDS, MeshLight
+    for k, cls in LIGHT_KINDS.items():
+        got = (make_light(k, vertices=np.array([[-1, 3, -1.0], [1, 3, -1], [1, 3, 1]]),
+                          faces=np.array([[0, 1, 2]])) if cls is MeshLight else make_light(k))
+        assert isinstance(got, cls)
+    try:
+        make_light("flashlight")                                    # a plausible-but-wrong agent guess
+        raise AssertionError("an unknown kind must raise, not silently pick a default")
+    except KeyError as exc:
+        assert "softbox" in str(exc), "the error must TEACH the vocabulary, not just refuse"
+
+
+def test_aimed_softbox_lights_its_target_and_stays_one_sided():
+    """Constructing an object is not the same as it working. Both halves asserted."""
+    from holographic.rendering.holographic_lights import make_light
+    rng = np.random.default_rng(0)
+    box = make_light("softbox", position=(2, 3, 2), target=(0, 0, 0), width=2.0, height=2.0, intensity=60.0)
+    _, _, at_target = box.sample(np.array([[0.0, 0.0, 0.0]]), rng)
+    _, _, behind = box.sample(np.array([[6.0, 9.0, 6.0]]), rng)
+    assert at_target.max() > 1e-4 and behind.max() < 1e-6
+
+
+def test_rasteriser_light_is_rejected_legibly():
+    """Two classes are called Light -- one per renderer -- and the rasteriser's has no .sample(). This used to
+    die twelve frames deep as a bare AttributeError, which tells a caller nothing about WHICH Light it holds.
+    The error TEXT is the fix, so the text is what is pinned."""
+    import lecore
+    m = lecore.UnifiedMind(dim=128, seed=0)
+    try:
+        direct_lighting(sphere(0.4), np.array([[1.5, 0.0, 0.0]]), np.array([[0.0, 1.0, 0.0]]),
+                        np.array([[0.0, 0.0, 1.0]]), np.full((1, 3), 0.8), np.zeros(1), np.full(1, 0.5),
+                        [m.light(kind="point")], np.random.default_rng(0))
+        raise AssertionError("the rasteriser Light must be rejected, not silently contribute zero")
+    except TypeError as exc:
+        assert "scene_light" in str(exc) and "holographic_render" in str(exc)
+
+
+def test_lights_are_reachable_through_the_mind():
+    """Cross-faculty, and the whole point of the item: an agent builds a dome + an aimed softbox and renders
+    with them WITHOUT importing anything past the front door.
+
+    KEPT NEGATIVE, loud and unfixed here: the raw output of area lights clips ~15% of pixels because no view
+    transform is applied by default. Wiring the lights made the linear buffer MORE correct and the saved PNG
+    LOOK worse. That is backlog J-3D-10, not a defect in this item, and it is asserted below so nobody can
+    quietly believe the lighting work alone finished the job."""
+    import lecore
+    m = lecore.UnifiedMind(dim=128, seed=0)
+    dome = m.scene_light("dome", intensity=1.2)
+    box = m.scene_light("softbox", position=(2, 3, 2), target=(0, 0.5, 0), width=2.0, intensity=60.0)
+    assert type(dome).__name__ == "DomeLight" and type(box).__name__ == "RectLight"
+    assert hasattr(box, "sample"), "a mind-built light must be usable by the path tracer"
+    assert "path-tracer light" in str(m.find_capability("add a softbox light to my scene")[0])
+    u, v = m.aim_light_basis((0, 3, 0), (0, 0, 0))
+    assert np.allclose(np.cross(u, v) / np.linalg.norm(np.cross(u, v)), [0, -1, 0], atol=1e-9)

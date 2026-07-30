@@ -463,6 +463,129 @@ def load_ies(text):
 
 
 # =====================================================================================================
+# AIMING + one factory door -- what an agent needs before any of the classes above are usable
+# =====================================================================================================
+# WHY THIS EXISTS (measured, agent-authoring probe). Ten light classes shipped here and NINE were
+# unreachable from a UnifiedMind: an agent asking "add a softbox" got the atmosphere/fog capability, and
+# `mind.light()` returned the rasteriser's Light, which raises inside the path tracer. Worse, the two
+# classes that most change how a render READS -- DomeLight (environment/IBL) and RectLight (area/softbox) --
+# are also the two with the least guessable constructors. RectLight takes u_vec/v_vec HALF-EDGES, so
+# pointing a softbox at the subject means hand-building an orthonormal basis. That is a paper-and-pencil
+# step in the middle of a conversation, and it is where the probe watched authoring stall.
+#
+# So: one aiming helper, one factory. Not ten new faculties -- two faculties that do 80% of the same thing
+# is a discoverability tax, and the audit should push toward parameterising one door.
+
+def aim_basis(position, target, width=1.0, height=1.0, up=(0.0, 1.0, 0.0)):
+    """Half-edge vectors (u_vec, v_vec) for a panel at `position` FACING `target`, sized width x height.
+
+    RectLight emits along u_vec x v_vec, so the ordering here is load-bearing, not cosmetic: it is chosen so
+    the emitting face points AT the target rather than away from it. Getting that backwards yields a
+    perfectly valid light that renders the scene black, which is a miserable thing to debug.
+
+    `up` only breaks the roll degeneracy. When the aim direction is parallel to it -- a light straight
+    overhead pointing down, which is the single most common studio placement -- we swap in a different
+    reference axis rather than returning a degenerate basis full of zeros."""
+    P = np.asarray(position, float)
+    fwd = _unit(np.asarray(target, float) - P)                  # from the panel toward what it lights
+    u_ref = np.asarray(up, float)
+    if abs(float(np.dot(fwd, _unit(u_ref)))) > 0.999:           # aim || up: the roll reference is useless here
+        u_ref = np.array([0.0, 0.0, 1.0]) if abs(fwd[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+    u = _unit(np.cross(u_ref, fwd)) * (0.5 * float(width))      # half-edges, matching RectLight's convention
+    v = _unit(np.cross(fwd, u)) * (0.5 * float(height))
+    # cross(u, v) must land on `fwd`; if the handedness came out inverted the panel would emit backwards.
+    if float(np.dot(_unit(np.cross(u, v)), fwd)) < 0.0:
+        u = -u
+    # PLAIN FLOATS, not np.float64: this is agent-facing and crosses POST /invoke as JSON, where a numpy
+    # scalar is not serialisable. Returning the array types would work in-process and fail over HTTP -- the
+    # exact "it works here but an agent cannot call it" split this repo keeps paying for.
+    return tuple(float(x) for x in u), tuple(float(x) for x in v)
+
+
+# The kinds this factory accepts, and the class each builds. Aliases are the words an AGENT reaches for
+# ('softbox', 'sun', 'lamp') rather than the class names an implementer knows.
+LIGHT_KINDS = {
+    "point": PointLight, "lamp": PointLight, "bulb": PointLight,
+    "sun": DirectionalLight, "directional": DirectionalLight, "distant": DirectionalLight,
+    "ambient": AmbientLight, "fill": AmbientLight,
+    "spot": SpotLight, "spotlight": SpotLight,
+    "rect": RectLight, "area": RectLight, "softbox": RectLight, "panel": RectLight,
+    "disk": DiskLight, "round": DiskLight,
+    "sphere": SphereLight, "ball": SphereLight,
+    "dome": DomeLight, "environment": DomeLight, "sky": DomeLight, "hdri": DomeLight, "ibl": DomeLight,
+    "mesh": MeshLight, "emissive": MeshLight,
+    "ies": IESLight, "profile": IESLight,
+}
+
+
+def make_light(kind="sun", target=None, width=1.0, height=1.0, up=(0.0, 1.0, 0.0), **kw):
+    """Build any path-tracer light by NAME -- the one door, so an agent never has to know ten constructors.
+
+    SKY-SYNCED SUN (review request: "when they want a light to act like the sun, it should be automatically
+    positioned and driven by the sky"): pass `sky=` (a sky_model closure) with kind 'sun' and the light's
+    DIRECTION, COLOUR, and INTENSITY are read from the sky's own sun state -- one source of truth, so the
+    disk in the sky and the light on the ground can never point different ways or disagree about golden-
+    hour colour. Intensity scales with the sky's `day` term (the sun below the horizon lights nothing).
+    Add `cloud_shadows=True` and the intensity becomes a per-point FIELD gated by the sky's own cloud
+    transmittance toward the sun -- the SAME shell, SAME layer densities the sky paints, so the shadow on
+    the ground and the cloud overhead cannot disagree (one machinery, two consumers). `shadow_scale`
+    (default 60) is declared artistic licence: scene metres vs shell kilometres means the physical
+    projection is one constant across a small scene; the scale makes cloud features sweep at a visible
+    size (1.0 for the physical answer). A caller who wants CUSTOM directional lighting simply omits
+    `sky=` -- the plain 'sun'/'directional' path is untouched.
+
+    `target` is the convenience that matters: give it a point to light and the panel/disk/spot/IES is
+    oriented for you, in whichever parameter that kind actually uses (u_vec/v_vec for a rect, `normal` for
+    a disk, `direction` for a spot or IES). Without it an agent must hand-build an orthonormal basis, which
+    is exactly where authoring was measured to stall.
+
+    Unknown kinds raise with the full sorted list rather than a bare KeyError: a wrong guess should teach
+    the caller the vocabulary, since guessing is what an agent does when it has never seen this API."""
+    sky = kw.pop("sky", None)
+    if sky is not None:
+        if kind not in ("sun", "directional"):
+            raise ValueError("sky= syncs a SUN light; for %r build the light directly and aim it yourself"
+                             % (kind,))
+        if not hasattr(sky, "sun_direction"):
+            raise ValueError("sky= must be a sky_model closure (it carries sun_direction/sun_color/day); "
+                             "got %r" % (type(sky).__name__,))
+        cloud_shadows = kw.pop("cloud_shadows", False)
+        shadow_scale = float(kw.pop("shadow_scale", 60.0))
+        base = float(kw.pop("intensity", 3.0)) * float(sky.day)
+        kw.setdefault("direction", tuple(np.asarray(sky.sun_direction, float)))
+        kw.setdefault("color", sky.sun_color)
+        if cloud_shadows:
+            # a FIELD, not a number: _emit resolves callables per shading point, which is the entire
+            # existing mechanism this rides on -- no tracer changes, the light class is unmodified.
+            kw["intensity"] = (lambda P, _b=base, _s=sky, _sc=shadow_scale:
+                               _b * _s.sun_transmittance(P, shadow_scale=_sc))
+        else:
+            kw["intensity"] = base
+        kind = "sun"
+    key = str(kind).strip().lower()
+    if key not in LIGHT_KINDS:
+        raise KeyError("unknown light kind %r -- pick one of: %s" % (kind, ", ".join(sorted(LIGHT_KINDS))))
+    cls = LIGHT_KINDS[key]
+    if target is not None:
+        pos = np.asarray(kw.get("position", (0.0, 3.0, 0.0)), float)
+        if cls is RectLight:
+            kw.setdefault("u_vec", None)
+            u, v = aim_basis(pos, target, width, height, up)
+            kw["u_vec"], kw["v_vec"] = u, v
+        elif cls is DiskLight:
+            kw["normal"] = tuple(_unit(np.asarray(target, float) - pos))
+            kw.setdefault("radius", 0.5 * float(width))
+        elif cls in (SpotLight, IESLight):
+            kw["direction"] = tuple(_unit(np.asarray(target, float) - pos))
+        elif cls is DirectionalLight:
+            # a sun has no position: aiming it means the direction light TRAVELS, from `position` to target
+            kw["direction"] = tuple(_unit(np.asarray(target, float) - pos))
+        # point / sphere / dome / ambient / mesh have no orientation to aim; silently ignoring `target`
+        # there is correct, not a swallowed error -- there is nothing to point.
+    return cls(**kw)
+
+
+# =====================================================================================================
 # next-event estimation -- the direct-light term the path tracer adds at each hit
 # =====================================================================================================
 def _one_light_sample(light, sdf, P, N, V, albedo, metallic, roughness, rng, shadow_eps):
@@ -470,6 +593,18 @@ def _one_light_sample(light, sdf, P, N, V, albedo, metallic, roughness, rng, sha
     Sample the light, gate to points that face it and that it actually reaches, shadow-ray, then add f_r * L for
     the visible ones. Area lights call this several times (each with a fresh random light point) and average."""
     out = np.zeros_like(P)
+    # WHY THIS CHECK EXISTS (measured, agent-authoring probe). `mind.light()` hands back the RASTERISER's
+    # Light (holographic_render.Light) -- a different class with the same name and no .sample(). Passing it
+    # here used to die twelve frames deep as "AttributeError: 'Light' object has no attribute 'sample'",
+    # which tells an agent nothing about which of two identically-named classes it holds or where to get the
+    # other one. Naming both classes and the fix at the point of failure is the whole repair: the bad object
+    # is a discoverability problem, not a numerical one.
+    if not hasattr(light, "sample"):
+        raise TypeError(
+            "%s has no .sample() -- the PATH TRACER needs a holographic_lights light, and this looks like "
+            "the RASTERISER's holographic_render.Light (what mind.light() returns). Build path-tracer "
+            "lights with mind.scene_light('sun'/'point'/'rect'/'dome'/...) instead."
+            % type(light).__name__)
     L, dist, radiance = light.sample(P, rng)
     ndl = np.sum(N * L, axis=1)                                 # cos(theta); <=0 -> light is below the horizon here
     lit = (ndl > 1e-4) & (np.max(radiance, axis=1) > 1e-9)      # skip back-facing and unreached (e.g. outside a cone)

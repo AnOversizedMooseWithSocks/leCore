@@ -246,7 +246,186 @@ def orphan_report(root=None, limit=40):
             "ok": len(b["orphan"]) <= ORPHAN_BUDGET}
 
 
+# ---------------------------------------------------------------------------
+# AGENT REACHABILITY -- the second question, asked after "is this referenced?"
+#
+# WHY THIS EXISTS (found by measurement, 3-D authoring probe). `audit()` above asks a LEXICAL question:
+# does this name appear anywhere outside its own definition? That is the right question for dead code and
+# it is deliberately conservative. But it answers YES for a symbol whose only reference is inside a module
+# that is ITSELF import-only by design -- a consolidation home, a declared negative, the plumbing. The
+# chain is alive in the import graph and dead to an agent, because it never terminates at a faculty.
+#
+# MEASURED, and the reason this pass exists: holographic_lights defines ten light classes. DomeLight and
+# RectLight -- environment/IBL lighting and area lights, between them most of what makes a render look
+# like a photograph -- are referenced ONLY by holographic_lightinghome (a consolidation home) and
+# holographic_lightcache. `audit()` filed them under "engine: reachable". An agent asking the mind for a
+# light gets `mind.light()`, which returns the RASTERISER's Light class and raises
+# AttributeError: 'Light' object has no attribute 'sample' the moment the path tracer touches it.
+# Every module-level audit read 0 gaps while that was true.
+#
+# TWO NEW BUCKETS, and the distinction matters:
+#   shadowed -- referenced, but every referencing engine file is itself import-only by design. Alive in the
+#               graph, unreachable from /invoke. This is the bucket the 3-D probe was looking for.
+#   dark     -- a public CLASS that is neither a faculty nor named in the catalog. audit() never saw these
+#               at all: public_definitions collects FunctionDef only, so a class an agent cannot construct
+#               was invisible to the audit by construction, not by judgement.
+#
+# KEPT NEGATIVE, loudly: this shares audit()'s no-type-inference limitation, so it inherits the same
+# conservatism -- a name is credited to a module if it appears there at all. It therefore UNDER-reports.
+# It is a review queue, never a delete list, and it does not gate CI: the counts are a starting baseline,
+# and a budget pinned before anyone has looked at the list is a number pretending to be a decision.
+#
+# SECOND KEPT NEGATIVE, found the hard way one item later: THE FACTORY BLIND SPOT. `dark` asks whether the
+# CLASS NAME is a faculty or appears in catalog text. A class reachable only through a factory --
+# mind.scene_light('dome') -> holographic_lights.make_light -> DomeLight -- is genuinely constructible by
+# an agent and this pass still calls it dark. Measured: after nine light classes were wired behind one
+# factory door, dark_classes moved 312 -> 311, and the only one that moved was moved by catalog prose.
+# The pass scored the fix as a no-op.
+#
+# NOT PAPERED OVER, deliberately. Crediting "any class constructed by a faculty-reachable function in the
+# same module" would clear all nine in one line and would also credit every class any wired function
+# happens to mention -- trading a known under-report for an unknown over-report, in the direction that
+# makes the number look good. A metric edited to score its author's work is worth nothing. The honest read
+# of `dark` is "not constructible BY NAME", which is a real and narrower claim than "unreachable", and the
+# name-by-name reading is how it must be used until someone builds the constructor-edge version properly.
+
+# Import-only BY DESIGN. Kept in sync with tools/reachability_audit.py's _KNOWN_NEGATIVES /
+# _KNOWN_INFRASTRUCTURE -- duplicated rather than imported because core must not depend on tools/.
+_NON_TERMINAL = {
+    # declared negatives: deliberately unwired, named in the dev guide and their own docstrings
+    "holographic_misgen", "holographic_ldexplore", "holographic_lookahead", "holographic_jittersplat",
+    "holographic_splatsharpen", "holographic_graph_memory", "holographic_probesweep",
+    # infrastructure / plumbing: reached THROUGH a faculty or the transport, never called directly.
+    # KEPT NEGATIVE, found by running this pass on the live tree: holographic_service was in this list on
+    # the first draft and it produced five false positives at once (serve_frame, drop_session, load_all,
+    # demo_frame_payload, serve_frame_distributed). It does not belong here. reachability_audit calls the
+    # service "infrastructure" because it is not a CAPABILITY -- true for that audit's question. For THIS
+    # question the service is the opposite of a cul-de-sac: it is the door agents come through. A reference
+    # from an HTTP route is the most terminal reference in the repo.
+    "holographic_toolclient", "holographic_uri", "holographic_sync", "holographic_farm",
+    "holographic_provenance", "holographic_determinism", "holographic_query_durable", "holographic_queryfolder",
+    "holographic_querygraph", "holographic_queryprog", "holographic_querytime",
+}
+
+
+def _is_terminal(path):
+    """Can a reference living in `path` ever reach an agent?
+
+    NO for a consolidation home (`*home.py` -- 'one door', import-only by design), for a declared negative,
+    and for the plumbing. A reference from one of those is not a route to the mind, it is a cul-de-sac.
+    Everything else counts as terminal, which is the conservative direction: we credit reachability we
+    cannot prove rather than manufacture a finding."""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    return not (stem.endswith("home") or stem in _NON_TERMINAL)
+
+
+def public_classes(paths, trees=None):
+    """Every public CLASS defined in `paths`, as {name: [(path, lineno), ...]}.
+
+    Classes are a surface: `DomeLight`, `RectLight`, `PostChain` are things an agent CONSTRUCTS, and a class
+    it cannot construct is exactly as unreachable as a function it cannot call. public_definitions() walks
+    FunctionDef only, so this is the half of the surface that audit() was never looking at."""
+    out = {}
+    for path in paths:
+        tree = _tree(path, trees)
+        if tree is None:
+            continue
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and not node.name.startswith("_"):
+                out.setdefault(node.name, []).append((path, node.lineno))
+    return out
+
+
+def _referenced_in(paths, trees=None):
+    """{name -> set(paths that mention it)}. Same lexical rule as referenced_names -- attributes and string
+    mentions count -- but it keeps WHERE each mention was, which is the whole point: 'referenced' and
+    'referenced from somewhere an agent can get to' are different claims."""
+    where = {}
+    for path in paths:
+        tree = _tree(path, trees)
+        if tree is None:
+            continue
+        for node in ast.walk(tree):
+            names = ()
+            if isinstance(node, ast.Name):
+                names = (node.id,)
+            elif isinstance(node, ast.Attribute):
+                names = (node.attr,)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                # `from holographic_lights import DomeLight` binds a name that NEVER appears as a Name or
+                # Attribute node. This repo has been bitten by exactly that before -- a sweep found 43
+                # facade imports in `from PKG import MODULE as X` style that the wiring audit could not
+                # see -- so the import statement itself has to be read. Both the real name and the alias
+                # count: the alias is how the file refers to it, the real name is what we are auditing.
+                names = tuple(x for a in node.names for x in (a.name.split(".")[0], a.asname) if x)
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                names = tuple(t for t in node.value.replace("(", " ").replace(".", " ").replace(",", " ").split()
+                              if t.isidentifier())
+            for nm in names:
+                where.setdefault(nm, set()).add(path)
+    return where
+
+
+def agent_reach_report(root=None, limit=40):
+    """Which public symbols can an AGENT actually reach -- functions AND classes, chains checked to the end.
+
+    Returns {counts, shadowed, dark, budget, ok}. `shadowed` = referenced, but only from modules that are
+    themselves import-only by design, so the chain never terminates at a faculty. `dark` = a public class
+    that is neither a faculty nor named in the catalog.
+
+    This is the companion to orphan_report, not a replacement: that one asks "is anything unreferenced?",
+    this one asks "does the reference go anywhere?". Advisory only -- see the module notes for why it does
+    not gate."""
+    global REPO
+    if root:
+        REPO = os.path.abspath(root)
+    engine = _py("holographic/**/*.py", "lecore.py", "app.py", "holographic_service.py")
+    try:
+        from holographic.io_and_interop.holographic_srcindex import parsed_trees
+        trees = parsed_trees()
+    except Exception:
+        trees = None                          # the index is an optimisation; never let it break the audit
+    faculties, catalog = dynamic_surface()
+    where = _referenced_in(engine, trees)
+
+    def rel(p):
+        return os.path.relpath(p, REPO)
+
+    shadowed = []
+    for name, sites in sorted(public_definitions(engine, trees).items()):
+        if name in faculties or name in catalog:
+            continue
+        sites_seen = where.get(name, set())
+        # its OWN file always mentions it (the def itself); a self-mention is not a route out
+        outside = {p for p in sites_seen if p not in {s[0] for s in sites}}
+        if outside and not any(_is_terminal(p) for p in outside):
+            shadowed.append({"name": name, "path": rel(sites[0][0]), "line": sites[0][1],
+                             "only_from": sorted(rel(p) for p in outside)[:4]})
+
+    dark = []
+    for name, sites in sorted(public_classes(engine, trees).items()):
+        if name in faculties or name in catalog:
+            continue
+        dark.append({"name": name, "path": rel(sites[0][0]), "line": sites[0][1]})
+
+    return {"counts": {"shadowed": len(shadowed), "dark_classes": len(dark)},
+            "shadowed": shadowed[:limit], "dark": dark[:limit],
+            "budget": None, "ok": True}
+
+
 def main(argv):
+    if "--agent" in argv:
+        r = agent_reach_report(limit=200 if "--list" in argv else 12)
+        print("AGENT REACHABILITY (advisory -- does the reference chain end at a faculty?)")
+        print("  %5d  SHADOWED     -- referenced only from import-only-by-design modules" % r["counts"]["shadowed"])
+        print("  %5d  DARK CLASS   -- public class, no faculty, no catalog entry" % r["counts"]["dark_classes"])
+        for kind in ("shadowed", "dark"):
+            print("\n--- %s ---" % kind.upper())
+            for e in r[kind]:
+                extra = ("  <- only from %s" % ", ".join(e["only_from"])) if e.get("only_from") else ""
+                print("  %-34s %s:%d%s" % (e["name"], e["path"], e["line"], extra))
+        return 0
+
     b = audit()
     total = sum(len(v) for v in b.values())
     print("FUNCTION-GRANULARITY REACHABILITY  (%d public engine functions)" % total)
@@ -306,6 +485,60 @@ def _selftest():
     assert len(b["faculty"]) > 500, "faculty bucket implausibly small (%d)" % len(b["faculty"])
     print("orphan_audit selftest OK -- %d public functions partitioned, %d orphan(s), string-mentions honoured"
           % (len(names), len(b["orphan"])))
+    _selftest_agent_reach()
+
+
+def _selftest_agent_reach():
+    """Regression trap for the agent-reachability pass. Asserts the exact contract, not 'no exception'.
+
+    The load-bearing assertion is the terminality one: a reference from a `*home.py` consolidation facade
+    must NOT count as reaching an agent. That single rule is why this pass sees what audit() cannot, and if
+    it ever silently inverts, every count below goes to zero and the audit looks CLEAN while being blind --
+    the exact failure this whole pass was built to catch."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        # a symbol referenced ONLY from a consolidation home is shadowed; the same symbol referenced from
+        # an ordinary module is not. Both cases in one fixture, so the rule is pinned from both sides.
+        with open(os.path.join(d, "holographic_thing.py"), "w") as f:
+            f.write("def only_from_home():\n    pass\n\n\ndef from_a_real_module():\n    pass\n\n\n"
+                    "class Widget:\n    pass\n")
+        with open(os.path.join(d, "holographic_thinghome.py"), "w") as f:
+            f.write("from holographic_thing import only_from_home\n")
+        with open(os.path.join(d, "holographic_caller.py"), "w") as f:
+            f.write("from holographic_thing import from_a_real_module\n")
+        paths = sorted(glob.glob(os.path.join(d, "*.py")))
+        home = os.path.join(d, "holographic_thinghome.py")
+        real = os.path.join(d, "holographic_caller.py")
+        assert not _is_terminal(home), "a consolidation home must be a cul-de-sac, not a route to an agent"
+        assert _is_terminal(real), "an ordinary module must count as terminal"
+        assert not _is_terminal(os.path.join(d, "holographic_lookahead.py")), "declared negatives are cul-de-sacs"
+        # the SERVICE is terminal -- it is the agent's door. Pinned because the first draft got this
+        # backwards and manufactured five false positives in one run.
+        assert _is_terminal(os.path.join(d, "holographic_service.py")), \
+            "the HTTP service is the door agents come through -- a reference from it IS terminal"
+        assert set(public_classes(paths)) == {"Widget"}, "public classes must be collected -- audit() sees none"
+        where = _referenced_in(paths)
+        assert where["only_from_home"] == {home}, "reference sites must be kept, not just counted"
+
+    # ...and on the real tree the pass must still SEE something. A zero here is a broken oracle, not a
+    # clean repo: 312 dark classes were measured the day this was written, and audit() reported 0 gaps
+    # over the same tree on the same day.
+    r = agent_reach_report(limit=10000)
+    assert r["counts"]["dark_classes"] > 100, \
+        "only %d dark classes -- the class scan is not seeing the tree" % r["counts"]["dark_classes"]
+    dark = {e["name"] for e in r["dark"]}
+    assert "DomeLight" in dark, \
+        "DomeLight must read as dark -- environment lighting an agent cannot construct is the finding " \
+        "that motivated this pass; if it ever goes green, WIRE it, do not relax the assert"
+    # KEPT NEGATIVE, loud: this shares audit()'s no-type-inference rule, so a class merely NAMED in catalog
+    # prose reads as reachable even when no faculty constructs it. RectLight is exactly that case -- it is
+    # unreachable from the mind today and this pass does NOT report it. The pass under-reports by design;
+    # it is a review queue, never a completeness claim.
+    assert "RectLight" not in dark, \
+        "RectLight is expected to be MISSED (catalog prose mentions it) -- if this fires the lexical " \
+        "catalog oracle changed and the under-reporting note above needs rewriting"
+    print("agent_reach selftest OK -- %d shadowed, %d dark class(es); homes non-terminal, service terminal"
+          % (r["counts"]["shadowed"], r["counts"]["dark_classes"]))
 
 
 if __name__ == "__main__":

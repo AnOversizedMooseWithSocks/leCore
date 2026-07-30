@@ -17,6 +17,7 @@ made that gate fire on builds where nothing was wrong, and both are pinned here:
 """
 
 import re
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -67,16 +68,25 @@ def test_gated_generators_are_deterministic():
         if not (ROOT / gen).exists():
             pytest.skip("%s not present in this tree" % gen)
         first = {}
-        for _ in range(2):
-            proc = subprocess.run([sys.executable, gen], cwd=str(ROOT),
+        # TWO DIFFERENT HASH SEEDS, not two runs of the same one. The docstring above claims this catches
+        # dict-order bugs -- it could not, while both passes inherited one PYTHONHASHSEED: an
+        # order-dependent generator produces the SAME bytes twice under a fixed seed and sails through.
+        # Varying the seed is what actually exercises the claim (str hashing, and therefore set/dict
+        # iteration order, is salted per process). Verified by hand first: every gated output is currently
+        # byte-identical across seeds, so this pins a property that already holds rather than announcing one.
+        for seed in ("0", "1618033"):
+            env = dict(os.environ, PYTHONHASHSEED=seed)
+            proc = subprocess.run([sys.executable, gen], cwd=str(ROOT), env=env,
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             assert proc.returncode == 0, "%s failed: %s" % (gen, proc.stdout.decode("utf-8", "replace")[-500:])
             for o in outs:
                 data = (ROOT / o).read_bytes()
                 if o in first:
-                    assert data == first[o], ("%s is NON-DETERMINISTIC -- %s changed between two runs with no "
-                                              "source edit (a date/hostname/dict-order stamp?). ci.yml gates "
-                                              "this file, so that is a guaranteed red build." % (gen, o))
+                    assert data == first[o], ("%s is NON-DETERMINISTIC -- %s changed between two runs under "
+                                              "DIFFERENT hash seeds with no source edit (a date/hostname stamp, "
+                                              "or iteration over an unsorted set/dict). ci.yml gates this file, "
+                                              "so that is a guaranteed red build -- and docs.yml would commit "
+                                              "the churn." % (gen, o))
                 first[o] = data
 
 

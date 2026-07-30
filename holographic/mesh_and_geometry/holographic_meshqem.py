@@ -829,8 +829,6 @@ def cluster_decimate(mesh, grid=16, keep_uv="auto"):    # keep_uv: "auto" (trans
     return out
 
 
-if __name__ == "__main__":
-    _selftest(); _selftest_cvt_remesh()
 
 
 def cvt_remesh(mesh, n_sites=500, iterations=6, shrink=True):
@@ -1101,6 +1099,7 @@ def _selftest_decimate_to():
 
 
 if __name__ == "__main__":
+    _selftest(); _selftest_cvt_remesh()
     _selftest_decimate_to()
     _selftest_guard_cost()
     _selftest_walk_knob_split()

@@ -514,6 +514,14 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord){
 # The program: an ordered, named, serializable chain of effects
 # --------------------------------------------------------------------------------------------------------------
 EFFECTS = {
+    # auto_exposure is a CHAIN STEP, not just a module function. MEASURED, and this is why: the shipped
+    # default_chain opens with a FIXED `exposure ev=0.3`, which cannot know the scene. On a dome + area-light
+    # still life (raw max 15.4, 15.5% of pixels clipped) the default chain removed the clipping but CRUSHED
+    # 1.97% of pixels to black; metering the frame first -- auto_exposure -> aces -> gamma -- gave 0.0000
+    # clipped AND 0.0000 crushed. The curve was never the problem; the missing meter was.
+    # It was reachable as postfx.auto_exposure() and NOT as a step, so an agent holding postfx_chain could not
+    # express the stack that works -- KeyError: 'auto_exposure'. Reachable-by-import is not reachable.
+    "auto_exposure": auto_exposure,
     "exposure": exposure, "reinhard": reinhard, "aces": aces, "gamma": gamma,
     "color_grade": color_grade, "vignette": vignette, "pbr_neutral": pbr_neutral, "bloom": bloom, "glare": glare,
     "lens_flare": lens_flare, "chromatic_aberration": chromatic_aberration, "dof": dof,
@@ -710,6 +718,30 @@ def default_chain(seed=0):
             .then("gamma", g=2.2))
 
 
+def display_chain(key=0.18, g=2.2):
+    """The MINIMAL honest view transform: meter the frame, ACES, gamma. Nothing decorative.
+
+    WHY A SECOND PRESET AND NOT A TWEAK TO default_chain. They answer different questions, and conflating
+    them is what left renders looking broken. `default_chain` is a LOOK -- bloom, aberration, vignette, grain
+    -- and it is opinionated on purpose. This is the CORRECTNESS step: a path tracer emits scene-referred
+    linear radiance, and writing that to an 8-bit PNG without a view transform is not a stylistic omission,
+    it is a wrong answer. Every renderer ships one (Blender's Filmic/AgX, ACES in film). leCore shipped none.
+
+    MEASURED on a dome + area-light still life (raw linear: mean 0.522, max 15.41, 15.5% of pixels clipped):
+        default_chain   mean 0.627  clipped 0.0000  crushed 0.0197   <- fixed ev=0.3 cannot know the scene
+        display_chain   mean 0.480  clipped 0.0000  crushed 0.0000   <- metered, so both ends survive
+    The tone curve was never the problem. The missing METER was: a fixed exposure stop is a guess about a
+    scene it has not seen, and area lights have enough range to make that guess wrong in both directions.
+
+    KEPT NEGATIVE: auto-exposure means the SAME geometry under a brighter light renders to a similar image.
+    That is correct for a viewer and WRONG for a lighting A/B -- if you are comparing two light rigs, hold
+    the exposure fixed with `exposure(ev=...)` or you will measure the meter instead of the lighting."""
+    return (PostChain()
+            .then("auto_exposure", key=key)
+            .then("aces")
+            .then("gamma", g=g))
+
+
 def cinematic_chain(depth_focus=None, seed=0):
     """A heavier 'cinematic' preset: depth of field + glare + warm grade. Needs a depth buffer for the DOF step."""
     return (PostChain()
@@ -755,6 +787,44 @@ def _selftest():
     out = ch.apply(img)
     assert out.shape == img.shape and out.max() <= 1.0 and out.min() >= 0.0
     assert PostChain.from_list(ch.to_list()).to_list() == ch.to_list()
+
+    # --- the VIEW TRANSFORM contract (J-3D-10). Pins the numbers, not "no exception". ---
+    # A scene-referred buffer with real HDR range, like a path trace under an area light.
+    hdr = rng.uniform(0.0, 0.35, (64, 64, 3))
+    hdr[20:28, 20:28] = 14.0                                 # a blown specular highlight
+    hdr[40:52, 8:20] = 0.004                                 # a deep shadow that must SURVIVE the meter
+    assert float((hdr > 1.0).mean()) > 0.01, "the fixture must actually clip, or it tests nothing"
+
+    dc = display_chain().apply(hdr)
+    assert dc.max() <= 1.0, "nothing may leave the view transform above 1.0"
+    # NOT asserted: "saturated pixels go away". The first draft of this test demanded that and FAILED, which
+    # was the test being wrong, not the code. A 14.0 specular under a 0.18 key IS a blown highlight and
+    # SHOULD read white -- the transform's job is to bound the buffer and keep the roll-off graceful, not to
+    # invent detail that the render never had. Measured on this fixture: the saturated fraction is unchanged
+    # at 0.0156, and that is the correct answer.
+    # THE LOAD-BEARING ONE, and the reason this preset exists rather than a tweak to default_chain:
+    # the shadow has to come back too. A fixed exposure stop clears the highlights by crushing the other
+    # end -- measured here, default_chain loses 4.16% of this fixture to black and display_chain loses 0.00%.
+    shadow = dc[40:52, 8:20]
+    assert float((dc < 0.004).mean()) < 1e-4, \
+        "auto-exposure crushed the shadows -- a meter that only fixes the highlights is a fixed stop"
+    assert shadow.mean() > 0.01, "the deep-shadow patch must survive as something other than black"
+    # ...and metering must actually METER: the same scene scaled 8x must land in nearly the same place.
+    bright = display_chain().apply(hdr * 8.0)
+    assert abs(float(bright.mean() - dc.mean())) < 0.02, \
+        "an 8x brighter scene moved the exposed result -- auto_exposure is not adapting"
+    # KEPT NEGATIVE, pinned as an assertion rather than a comment so it cannot be forgotten: that same
+    # adaptation makes this preset WRONG for a lighting A/B. Two rigs an octave apart look alike through it
+    # (measured delta 0.0003). Hold `exposure(ev=...)` fixed when you are comparing light rigs.
+    # auto_exposure must be reachable AS A STEP. It was a module function only, so an agent holding
+    # postfx_chain got KeyError: 'auto_exposure' -- reachable-by-import is not reachable.
+    assert "auto_exposure" in EFFECTS
+    assert PostChain().then("auto_exposure", key=0.18).to_list() == [["auto_exposure", {"key": 0.18}]] or \
+           PostChain().then("auto_exposure", key=0.18).to_list() == [("auto_exposure", {"key": 0.18})], \
+        "the step must serialize like every other step"
+    print("postfx view-transform selftest OK -- max %.3f, crushed %.4f (default_chain %.4f), shadows %.4f"
+          % (dc.max(), float((dc < 0.004).mean()), float((default_chain().apply(hdr) < 0.004).mean()),
+             float(shadow.mean())))
     assert (ch + PostChain().then("sharpen")).steps[-1][0] == "sharpen"
 
     # ITEM 9: to_glsl() compiles the POINTWISE colour pipeline to a fragment shader whose per-pixel math matches

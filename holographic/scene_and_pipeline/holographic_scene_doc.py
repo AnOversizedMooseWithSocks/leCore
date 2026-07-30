@@ -356,6 +356,117 @@ class Scene:
         return bool(self._redo)
 
 
+def _decompose_transform(T):
+    """Position, uniform scale, and whether the matrix carries a ROTATION, off one 4x4.
+
+    The rotation flag is not decoration. `scene_to_render` places objects by translation and uniform scale
+    only and DROPS any rotation silently -- documented in its own docstring, invisible to a caller. Reporting
+    it here turns a silent wrong render into a line an agent can read before it wastes a trace."""
+    T = np.asarray(T, float)
+    if T.shape != (4, 4):
+        return (0.0, 0.0, 0.0), 1.0, False
+    pos = tuple(float(x) for x in T[:3, 3])
+    basis = T[:3, :3]
+    lengths = np.linalg.norm(basis, axis=0)
+    scale = float(np.mean(lengths))
+    if not np.isfinite(scale) or scale <= 1e-9:
+        scale = 1.0
+    # a pure translate+uniform-scale matrix has an upper-left block that is scale * I; anything else rotates
+    rotated = bool(np.max(np.abs(basis - np.diag(lengths))) > 1e-9)
+    return pos, scale, rotated
+
+
+def _geometry_kind(geometry):
+    """A short, readable description of an object's geometry -- 'sphere', 'translate(box)', 'mesh(842 tris)'.
+
+    An agent inspecting a scene needs to recognise what it built. Returning repr() would dump an SDF tree
+    across the whole reply, and returning nothing would make the report useless for the one question people
+    actually ask ('is my cube in there?')."""
+    if geometry is None:
+        return "none"
+    kind = getattr(geometry, "kind", None)
+    if kind is not None:                                  # an SDF node: name it, and name what it wraps
+        child = getattr(geometry, "children", None)
+        if child:
+            return "%s(%s)" % (kind, _geometry_kind(child[0]))
+        return str(kind)
+    faces = getattr(geometry, "faces", None)
+    if faces is not None:
+        return "mesh(%d faces)" % len(faces)
+    return type(geometry).__name__
+
+
+def scene_info(scene, verbose=True):
+    """WHAT IS IN THIS SCENE -- the first call to make, before adding to it or rendering it.
+
+    WHY THIS EXISTS. The reference agent-facing 3-D integrations give an agent very few tools, and the
+    guidance shipped with them is blunt: read the scene FIRST, never assume it is empty. leCore had a
+    canonical Scene document that could be built and rendered and could not be READ: an agent that added
+    four objects had no way to confirm it, recall what it named them, or notice a mistake before paying for
+    a trace. Twelve stranger phrasings ('what is in my scene right now', 'is my scene empty') returned zero
+    relevant capabilities.
+
+    Returns plain JSON-safe types -- no numpy scalars, no object handles -- because this crosses POST
+    /invoke, where an np.float64 is not serialisable:
+
+        {n_objects, empty, objects: [{handle, name, geometry, material, position, scale, rotated,
+                                      parent, tags}], cameras, lights, selection, materials, problems}
+
+    `problems` IS THE POINT, not a nicety. It is a PRE-FLIGHT check that answers, in milliseconds, the
+    questions that otherwise surface as a failure minutes later:
+      * a material name that is not in the library -- today this raises at RENDER time, after the whole
+        scene is built, with a 'did you mean' that arrives far too late to be cheap;
+      * an object with no geometry, which contributes nothing and renders as absence;
+      * a ROTATED transform, which the scene->render bridge silently drops (translation + uniform scale
+        only), so the render disagrees with the document and nothing says so.
+
+    KEPT NEGATIVE, and it is a real limit: there is NO BOUNDING BOX. An SDF is a function, not an extent --
+    a plane is infinite and a fold_fractal has no closed-form bound -- so the honest answer is the object's
+    POSITION plus its geometry kind. Reporting a bbox would mean sampling the field and quietly guessing,
+    and a confident wrong extent is worse than an absent one. Ask `mesh_bounds` after `sdf_to_mesh` if you
+    need a real extent for a specific object."""
+    from holographic.materials_and_texture import holographic_matlib as ML
+    try:
+        known = set(ML.names())
+    except Exception:
+        known = None                                      # library unavailable: report nothing rather than lie
+
+    objects, problems, materials = [], [], {}
+    for handle, obj in scene.objects.items():
+        pos, scale, rotated = _decompose_transform(obj.transform)
+        name = obj.name if obj.name is not None else "<unnamed>"
+        entry = {"handle": str(handle), "name": name,
+                 "geometry": _geometry_kind(obj.geometry),
+                 "material": obj.material if isinstance(obj.material, str) else (
+                     None if obj.material is None else type(obj.material).__name__),
+                 "position": [round(v, 6) for v in pos], "scale": round(scale, 6),
+                 "rotated": rotated,
+                 "parent": None if obj.parent is None else str(obj.parent),
+                 "tags": sorted(obj.tags)}
+        objects.append(entry)
+        if isinstance(obj.material, str):
+            materials[obj.material] = materials.get(obj.material, 0) + 1
+            if known is not None and obj.material not in known:
+                near = sorted(n for n in known if obj.material.split("_")[-1] in n)[:3]
+                problems.append("%s: material %r is not in the library%s -- this raises at RENDER time"
+                                % (name, obj.material, (" (did you mean %s?)" % near) if near else ""))
+        if obj.geometry is None:
+            problems.append("%s: no geometry -- it will not appear in a render" % name)
+        if rotated:
+            problems.append("%s: the transform carries a ROTATION, which is DROPPED unless you render "
+                            "with affine=True -- otherwise the picture will not match the document"
+                            % name)
+
+    info = {"n_objects": len(objects), "empty": not objects,
+            "cameras": sorted(str(k) for k in scene.cameras),
+            "lights": sorted(str(k) for k in scene.lights),
+            "selection": [str(h) for h in scene.selection],
+            "materials": materials, "problems": problems}
+    if verbose:
+        info["objects"] = objects
+    return info
+
+
 def _selftest():
     """A handle is stable across edits (identity != content -- the key B guarantee); every mutation fires a change
     event (E); undo/redo restore state and preserve identity; a selection survives an edit of the selected object;
@@ -429,6 +540,57 @@ def _selftest():
     s3 = Scene(dim=256, seed=0); a3 = s3.add(name="something-else")
     assert np.array_equal(s2.handle_vector(a2), s3.handle_vector(a3))
 
+    # --- scene_info (J-3D-15): the read side. `problems` is what makes it worth a call. ---
+    from holographic.mesh_and_geometry.holographic_sdf import sphere, torus
+
+    def _T(x=0.0, y=0.0, z=0.0):
+        M = np.eye(4); M[:3, 3] = (x, y, z); return M
+
+    look = Scene(seed=0)
+    assert scene_info(look)["empty"] is True and scene_info(look)["n_objects"] == 0, \
+        "an empty scene must SAY it is empty -- 'never assume the scene is empty' is the whole point"
+
+    ok = look.add(name="ball", geometry=sphere(0.6), material="copper", transform=_T(1.0, 0.5, 0.0))
+    bad_mat = look.add(name="cube", geometry=sphere(0.4), material="oak")        # 'wood_oak' is the real name
+    R = np.eye(4); R[0, 0] = R[2, 2] = np.cos(0.6); R[0, 2] = np.sin(0.6); R[2, 0] = -np.sin(0.6)
+    spun = look.add(name="spun", geometry=torus(0.4, 0.15), material="glass_clear", transform=R)
+    ghost = look.add(name="ghost", material="marble")                            # no geometry at all
+
+    info = scene_info(look)
+    assert info["n_objects"] == 4 and info["empty"] is False
+    by_name = {o["name"]: o for o in info["objects"]}
+    assert by_name["ball"]["position"] == [1.0, 0.5, 0.0] and by_name["ball"]["geometry"] == "sphere"
+    assert by_name["spun"]["rotated"] is True and by_name["ball"]["rotated"] is False
+    assert by_name["ghost"]["geometry"] == "none"
+
+    # THE THREE PROBLEM CLASSES, each pinned by the thing it prevents. Every one of these is a failure that
+    # otherwise surfaces MINUTES later (a render raises) or NEVER (a rotation is silently dropped and the
+    # picture is just wrong). Catching them in milliseconds is the entire value of the call.
+    problems = " | ".join(info["problems"])
+    assert "oak" in problems and "wood_oak" in problems, "a bad material must be caught HERE, not at render"
+    assert "ROTATION" in problems, "a dropped rotation must be reported -- scene_to_render loses it silently"
+    assert "no geometry" in problems, "an object that cannot render must say so"
+    assert len(info["problems"]) == 3, "expected exactly the three seeded defects: %s" % problems
+
+    # a clean scene reports NO problems -- a checker that always complains gets ignored
+    clean = Scene(seed=0)
+    clean.add(name="ball", geometry=sphere(0.6), material="copper")
+    assert scene_info(clean)["problems"] == []
+
+    # JSON-SAFE. This crosses POST /invoke, where an np.float64 is not serialisable -- the exact
+    # "works in-process, fails for an agent" split this repo keeps paying for.
+    import json
+    json.dumps(info)
+    assert isinstance(by_name["ball"]["scale"], float) and type(by_name["ball"]["scale"]) is float
+    assert isinstance(info["objects"][0]["handle"], str)
+
+    # KEPT NEGATIVE, asserted so it cannot quietly acquire a wrong answer: there is NO bounding box. An SDF
+    # is a function, not an extent (a plane is infinite); a confident wrong extent is worse than none.
+    assert "bbox" not in info and "bounds" not in info, \
+        "no bbox by design -- an SDF has no closed-form extent; mesh it first if you need one"
+
+    print("scene_info selftest OK: %d objects, %d problems caught pre-flight (bad material, dropped "
+          "rotation, missing geometry), JSON-safe" % (info["n_objects"], len(info["problems"])))
     print("holographic_scene_doc selftest OK: one document owns objects/selection/history; handles are STABLE "
           "across edits (content hash changed, identity atom and handle did not, so the selection survived); every "
           "mutation fires a change event; undo/redo restore state and preserve identity; hierarchy parenting works")

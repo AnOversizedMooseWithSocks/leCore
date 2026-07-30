@@ -42,3 +42,46 @@ def test_no_broken_imports_anywhere():
     broken, _flat = audit(REPO)
     assert not broken, "imports that resolve to nothing on disk:\n" + "\n".join(
         "  %s:%d imports %r" % (rel, line, name) for rel, line, name, _hint in broken[:20])
+
+
+# ---------------------------------------------------------------------------------------------------------
+# LINE ENDINGS. .gitattributes declares `* text=auto`, i.e. every text file is stored LF-normalised. A file
+# that ships with CRLF fights that declaration: git normalises it on commit, so the working tree and the
+# index disagree and EVERY LINE of the file shows as changed while the rendered diff looks empty. That is a
+# real failure mode here -- a whole delivery once read as ~137 modified files with nothing visible in them --
+# and it is invisible to every other audit because the CONTENT is identical.
+# ---------------------------------------------------------------------------------------------------------
+
+_TEXT_SUFFIXES = {".py", ".md", ".yml", ".yaml", ".json", ".txt", ".sh", ".cfg", ".toml", ".in", ".bat"}
+_TEXT_NAMES = {".gitignore", ".gitattributes", "VERSION", "LICENSE", "MANIFEST.in", "requirements.txt"}
+
+
+def _repo_root():
+    import pathlib
+    return pathlib.Path(__file__).resolve().parent.parent
+
+
+def test_no_text_file_ships_crlf():
+    """Every tracked TEXT file is LF-only, matching `* text=auto`.
+
+    Fails LOUDLY with the offenders named, because the symptom otherwise reaches a human as 'lots of files
+    changed but the diff is empty' -- which reads like a tooling bug rather than a line-ending one."""
+    bad = []
+    for p in _repo_root().rglob("*"):
+        if not p.is_file() or "__pycache__" in str(p) or "/.git/" in str(p):
+            continue
+        if p.suffix.lower() not in _TEXT_SUFFIXES and p.name not in _TEXT_NAMES:
+            continue
+        data = p.read_bytes()
+        if b"\r\n" in data:
+            bad.append("%s (%d CRLF)" % (p.relative_to(_repo_root()), data.count(b"\r\n")))
+    assert not bad, ("text files with CRLF endings -- they fight `* text=auto` and show as whole-file "
+                     "diffs with no visible change:\n  " + "\n  ".join(sorted(bad)[:40]))
+
+
+def test_gitattributes_declares_lf_normalisation():
+    """The policy the test above enforces must actually be declared, or a fresh clone on Windows reintroduces
+    CRLF and the guard becomes a lie about a setting nobody set."""
+    ga = _repo_root() / ".gitattributes"
+    assert ga.is_file(), ".gitattributes is missing: nothing declares the line-ending policy"
+    assert "text=auto" in ga.read_text(), ".gitattributes no longer declares text=auto"

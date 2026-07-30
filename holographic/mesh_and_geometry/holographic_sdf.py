@@ -597,6 +597,122 @@ def _tokenize(s):
     return s.replace("(", " ( ").replace(")", " ) ").split()
 
 
+# =====================================================================================================
+# ONE DOOR for shapes -- the step an agent hits before anything else in this module is usable
+# =====================================================================================================
+# WHY THIS EXISTS (measured, agent-authoring probe). Every primitive above shipped reachable only by
+# importing this module. Asked "make a sphere", a mind returned a Lipschitz worst-view bound; asked "add a
+# cube", the sky-observation capability; asked "union two shapes", a cosine palette. Ten stranger phrasings,
+# ten unrelated fallbacks. The ONLY door was parse_dsl("(sphere 1.0)"), whose grammar lived in a module-level
+# dict nothing surfaced -- so the one working path required already knowing the thing you were looking up.
+#
+# Same shape of answer as holographic_lights.make_light, deliberately: one factory keyed by a word a caller
+# would type, not N sibling faculties. Two doors that do 80% of the same thing is a discoverability tax, and
+# a caller who has learned one factory has learned both.
+
+SHAPE_KINDS = {
+    "sphere": (sphere, ("r",)), "ball": (sphere, ("r",)),
+    "box": (box, ("bx", "by", "bz")), "cube": (box, ("bx", "by", "bz")),
+    "plane": (plane, ("h",)), "floor": (plane, ("h",)), "ground": (plane, ("h",)),
+    "cylinder": (cylinder, ("h", "r")), "tube": (cylinder, ("h", "r")),
+    "cone": (cone, ("h", "r")),
+    "capsule": (capsule, ("h", "r")), "pill": (capsule, ("h", "r")),
+    "torus": (torus, ("R", "r")), "donut": (torus, ("R", "r")), "ring": (torus, ("R", "r")),
+    "ellipsoid": (ellipsoid, ("ax", "ay", "az")), "egg": (ellipsoid, ("ax", "ay", "az")),
+    "octahedron": (octahedron, ("s",)), "diamond": (octahedron, ("s",)),
+    "menger": (menger, ("iterations", "scale")),
+    "mandelbulb": (mandelbulb, ("power", "iterations", "bailout")),
+}
+
+
+def make_sdf_shape(kind="sphere", position=None, scale=None, rotate=None, **kw):
+    """Build an SDF primitive by NAME, optionally placed -- the one door to the shapes above.
+
+    NAMED make_sdf_shape, not `make_shape`: holographic_vision.make_shape already owns that name for a
+    different job (drawing a 2-D shape image + mask). The name-collision budget MAY SHRINK AND MUST
+    NEVER GROW, so the newer arrival takes the qualified name rather than spending budget on a homonym.
+
+    `kind` is a word a caller would actually type: 'cube' and 'box' both give a box, 'floor' and 'ground'
+    both give a plane, 'donut' gives a torus. Size parameters pass straight through (r, bx/by/bz, h, R, ...).
+
+    PLACEMENT IS INCLUDED ON PURPOSE, in the order scale -> rotate -> translate. Every real use immediately
+    wants "a sphere, over there", and doing it in the wrong order is a classic quiet bug: rotating after
+    translating swings the object around the world origin instead of spinning it in place. Fixing the order
+    here means a caller cannot get it wrong. `rotate` is (axis_x, axis_y, axis_z, radians).
+
+    An unknown kind raises with the full sorted list rather than a bare KeyError -- guessing is what a caller
+    does when it has never seen the API, and a wrong guess should teach the vocabulary."""
+    key = str(kind).strip().lower()
+    if key not in SHAPE_KINDS:
+        raise KeyError("unknown shape kind %r -- pick one of: %s" % (kind, ", ".join(sorted(SHAPE_KINDS))))
+    fn, params = SHAPE_KINDS[key]
+    bad = [k for k in kw if k not in params]
+    if bad:
+        raise TypeError("shape %r takes %s, not %s" % (kind, list(params), bad))
+    node = fn(**kw)
+    if scale is not None and abs(float(scale) - 1.0) > 1e-12:
+        node = node.scale(float(scale))
+    if rotate is not None:
+        ax, ay, az, ang = rotate
+        node = node.rotate((ax, ay, az), float(ang))
+    if position is not None and float(np.linalg.norm(np.asarray(position, float))) > 1e-12:
+        node = node.translate(tuple(float(v) for v in position))
+    return node
+
+
+# One line per DSL node: what it is, and what its numeric parameters mean. The ARITY table above is the
+# machine-readable half and was already correct; this is the half a caller needs to WRITE one, and without
+# it the DSL is a cipher you can only read if you already know the answer.
+DSL_HELP = {
+    "sphere": "solid ball. params: radius",
+    "box": "axis-aligned box. params: half-extent x, y, z (so it spans -bx..+bx)",
+    "plane": "infinite ground plane. params: height y",
+    "cylinder": "capped cylinder up the y axis. params: half-height, radius",
+    "cone": "cone up the y axis. params: height, base radius",
+    "capsule": "cylinder with rounded ends. params: half-height, radius",
+    "torus": "donut in the xz plane. params: ring radius, tube radius",
+    "ellipsoid": "stretched sphere. params: radius x, y, z",
+    "octahedron": "eight-sided diamond. params: size",
+    "menger": "menger sponge fractal. params: iterations, scale",
+    "mandelbulb": "mandelbulb fractal. params: power, iterations, bailout",
+    "fold_fractal": "kaleidoscopic folded fractal. params: iterations, scale, offset, min_radius",
+    "union": "both shapes (nearest surface wins). 2 children, no params",
+    "intersect": "only where both overlap. 2 children, no params",
+    "subtract": "the first shape minus the second. 2 children, no params",
+    "smooth_union": "union with a soft blend. params: blend radius k. 2 children",
+    "translate": "move a shape. params: dx, dy, dz. 1 child",
+    "rotate": "spin a shape about an axis through the origin. params: axis x, y, z, radians. 1 child",
+    "scale": "resize about the origin. params: factor. 1 child",
+    "round": "inflate the surface, rounding every edge. params: radius. 1 child",
+    "onion": "hollow shell of a solid. params: thickness. 1 child",
+    "twist": "twist about the y axis. params: turns per unit. 1 child",
+    "bend": "bend along an axis. params: amount, axis. 1 child",
+    "mirror": "mirror across a plane. params: axis, offset. 1 child",
+    "elongate": "stretch the middle without distorting the caps. params: dx, dy, dz. 1 child",
+    "displace": "add a wobble to the surface. params: amplitude, frequency. 1 child",
+    "repeat": "tile the shape infinitely on a grid. params: spacing x, y, z. 1 child",
+}
+
+
+def dsl_grammar():
+    """The SDF DSL, described well enough to WRITE one -- node kinds, parameter meanings, and an example.
+
+    parse_dsl has always been the compact way to state a whole shape tree in one string, and it was
+    effectively secret: the node names and their parameter counts lived in the module-level ARITY dict, and
+    nothing surfaced either. A grammar you can only use if you already know it is not a usable grammar.
+
+    Returns {syntax, nodes: [{kind, params, children, does}], example}. Sorted primitives first, then
+    modifiers, then combinators -- the order you build in."""
+    rows = []
+    for kind, (npar, nch) in ARITY.items():
+        rows.append({"kind": kind, "params": int(npar), "children": int(nch),
+                     "does": DSL_HELP.get(kind, "")})
+    rows.sort(key=lambda r: (r["children"], r["kind"]))
+    return {"syntax": "(kind param0 param1 ... child0 child1 ...) -- an s-expression; the inverse of node.to_dsl()",
+            "nodes": rows,
+            "example": "(smooth_union 0.3 (translate 0.0 0.6 0.0 (sphere 0.6)) (box 1.0 0.2 1.0))"}
+
+
 def parse_dsl(text):
     """Parse a (kind p0 ... child0 ...) s-expression back into an SDF tree."""
     toks = _tokenize(text)
@@ -1039,6 +1155,35 @@ def _selftest():
     # ellipsoid now emits too (iq's bounded k1*(k1-1)/k2 form) -- needed by the humanoid muscle/breast morphs.
     _esh = _emit_shader(SDF("smooth_union", (0.1,), (sphere(0.3), ellipsoid(0.2, 0.3, 0.2))), name="map")
     assert "sdEllipsoid(" in _esh and "opSmin(" in _esh, "ellipsoid + smooth_union emit"
+
+    # ---- make_shape + dsl_grammar (J-3D-13/14): the reach half, not the geometry half ----
+    _s = make_sdf_shape("ball", r=0.5)
+    assert abs(float(_s.eval(np.array([[0.0, 0.0, 0.5]]))[0])) < 1e-12, "alias 'ball' must build a sphere"
+    # TRANSFORM ORDER IS THE ASSERTION THAT MATTERS. scale -> rotate -> translate. Rotating AFTER translating
+    # swings the object around the world origin instead of spinning it in place -- a classic quiet bug that
+    # looks like "my object jumped somewhere else" and is invisible in a single still frame.
+    _bar = make_sdf_shape("box", bx=1.0, by=0.1, bz=0.1, position=(3.0, 0.0, 0.0), rotate=(0, 0, 1, np.pi / 2))
+    assert float(_bar.eval(np.array([[3.0, 0.0, 0.0]]))[0]) < 0.0, "the bar must still be centred at (3,0,0)"
+    assert float(_bar.eval(np.array([[3.0, 0.9, 0.0]]))[0]) < 0.0, "after a 90deg z-turn it must extend along y"
+    assert float(_bar.eval(np.array([[3.9, 0.0, 0.0]]))[0]) > 0.0, "...and no longer along x"
+    for _k, (_fn, _p) in SHAPE_KINDS.items():
+        assert isinstance(make_sdf_shape(_k), SDF), "kind %r did not build" % _k
+    try:
+        make_sdf_shape("blob")                                   # a plausible-but-wrong guess
+        raise AssertionError("an unknown kind must raise, not silently pick a default")
+    except KeyError as _exc:
+        assert "sphere" in str(_exc), "the error must TEACH the vocabulary, not just refuse"
+    try:
+        make_sdf_shape("sphere", bx=1.0)                         # right kind, wrong parameter name
+        raise AssertionError("a wrong parameter must raise rather than be silently dropped")
+    except TypeError as _exc:
+        assert "'r'" in str(_exc) or "['r']" in str(_exc), "the error must name the parameters that DO apply"
+    # the grammar must describe EVERY node the parser accepts, and its own example must round-trip -- a
+    # grammar that documents a node set the parser does not implement is worse than none.
+    _g = dsl_grammar()
+    assert {r["kind"] for r in _g["nodes"]} == set(ARITY), "grammar and parser disagree on the node set"
+    assert all(r["does"] for r in _g["nodes"]), "every node needs a plain-language line or the table is a cipher"
+    assert parse_dsl(_g["example"]) is not None, "the grammar's own example must parse"
 
     print("holographic_sdf selftest passed:",
           f"seam hard={kink_hard:.3f} soft={kink_soft:.3f} mesh_faces={mesh.n_faces} "

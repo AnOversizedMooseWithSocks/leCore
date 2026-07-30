@@ -212,6 +212,14 @@ import numpy as np; b = mind.transform_bank(512); [b.add_random_unitary('t%d' % 
 ```
 *Find it by:* transform bank, prebuilt map of transforms, cache a transform operator, precomputed rotation vectors, reuse a bind operator, compose a chain of transforms, spectrum cache, group representation
 
+### View transform (linear render -> a display image)
+a path tracer emits LINEAR radiance with no upper bound; saving that straight to a PNG is a wrong answer, not a missing polish step. MEASURED on a dome + area-light still life: 15.5% of pixels left the tracer above 1.0 and clipped flat. view='display' meters the frame then ACES+gamma (0.0000 clipped, 0.0000 crushed); view='graded' adds bloom/vignette/grain but its FIXED stop crushes 1.97% to black. DEFAULT OFF: a caller measuring radiance or diffing renders needs the linear buffer. KEPT NEG: auto-exposure hides a brightness difference, so hold ev fixed to A/B two light rigs.
+
+```python
+import lecore; m=lecore.UnifiedMind(); print(m.postfx_chain(('auto_exposure', {}), ('aces', {}), ('gamma', {})))
+```
+*Find it by:* my render is blown out, the image is too bright, why does my render look washed out, my highlights are clipping, tonemap an hdr render, aces filmic view transform, convert a linear render to a display image, exposure for a render
+
 ### Walsh-Hadamard transform (exact, matrix-free)
 the O(D log D) WHT, D a power of two: every butterfly is one add and one subtract -- no twiddles, no stored matrix, nothing to round. On INTEGER input it is BIT-EXACT and machine-independent, which numpy.fft is not (pocketfft's SIMD summation order is microarchitecture-dependent, NumPy #11926) -- and in this engine a ULP flip is an argmax flip. wht_exact refuses float so the guarantee is enforced. KEPT NEGATIVE, measured: 4-9x SLOWER than numpy.rfft at D=256..16384 -- it is an EXACTNESS tool, not an FFT speedup.
 
@@ -540,6 +548,16 @@ import numpy as np; q = np.cumsum(np.random.default_rng(0).normal(size=(400,2)),
 ```
 *Find it by:* fat margin, margin cache, drifting query, cache reuse, cache a result for a query that keeps moving slightly, avoid rebuilding a cache every frame, hysteresis cache, reuse a render tile when the camera barely moved
 
+### Fetch an external asset (pinned, content-addressed, replayable)
+fetch an external asset (HDRI/model/texture) into a CONTENT-ADDRESSED cache. The network meets the determinism rule the way randomness does: BY PINNING. Unpinned fetch returns the sha256 to record; a PINNED fetch that is cached is served from disk with NO network I/O -- a recipe of (url, sha256) pairs replays bit-identically offline forever, which download-on-demand can never do. Mismatch = deleted + raises naming BOTH hashes. Opt-in (nothing in core imports it), http(s) only, 512 MB ceiling. Feed results to load_hdr / import_asset / asset_library.
+
+```python
+import lecore; m=lecore.UnifiedMind(); # r=m.fetch_asset('https://example.com/sky.hdr'); print(r['sha256'])  # then pin it:
+# env=m.load_hdr(m.fetch_asset(url, sha256=r['sha256'])['path'])
+print('see holographic_assetfetch')
+```
+*Find it by:* download a file from a url, fetch an asset from the internet, get a model file from polyhaven, http download with checksum, cache a downloaded file, verify a download against a hash, download an hdri, pin an external asset
+
 ### File map ingest (folder / zip -> queryable)
 point at a FOLDER, a .zip, or a file and digest it into a queryable FILE MAP: fm = mind.ingest_files('project/') (or 'bundle.zip'). Query it by NAME/glob (fm.find('*.png')), KIND (fm.by_kind('model'): image/text/model/data/code/archive), METADATA (larger_than/newer_than/by_ext), text CONTENT (fm.search_text('shader normal') -- an inverted index over the text files), and MEANING (fm.build_meaning_index() then fm.find_by_meaning('lighting')). fm.tree() is the folder hierarchy. Every file is also tracked for RELOCATION/CHANGE (fm.missing()/changed()/relink(one,new)/resolve_assets(roots)), so a moved/edited tree self-heals. Stdlib only; text indexing is size-capped..
 
@@ -794,6 +812,14 @@ b = mind.bake_field_nd([xs, ys], V); v = mind.fetch_field_nd(b, [0.3, 0.7])
 ```
 *Find it by:* bake a 2d function, n-d texture unit, bake a volume, multivariate lookup table, encode a 2d point, bake a grid, n dimensional function encoding, bake a field over a grid
 
+### Build a path-tracer light by name (aimed, one door)
+ten light classes shipped and NINE were reachable by nothing -- and mind.light() returns the RASTERISER's Light, which raises inside the path tracer. This is the one door for render_scene_document: kind is a word you'd type ('softbox', 'sun', 'hdri', 'spot'), and `target` AIMS the panel/disk/spot for you instead of making you hand-build u_vec/v_vec half-edges -- measured as where 3-D authoring stalls. Reach for 'dome' first: an environment light is shadowed, so contact AO is free. KEPT NEG: dome + a bright sky double-counts the environment for diffuse -- use one or the other.
+
+```python
+import lecore; m=lecore.UnifiedMind(); print(type(m.scene_light('softbox', position=(2,3,2), target=(0,0,0), intensity=60.0)).__name__)
+```
+*Find it by:* add a softbox light to my scene, area light with soft shadows, environment lighting from a sky dome, hdri lighting, make a spotlight, key light and fill light, sun lamp, point light in my render
+
 ### CAD export: STL + DXF
 write geometry OUT in the two open exchange formats a modeler needs (K7): mesh_to_stl (ASCII STL for 3-D meshes, tris/quads/ngons, per-facet normals) and polylines_to_dxf (minimal DXF R12 for 2-D drawings, POLYLINE/VERTEX, closed loops flagged -- the format Rhino/AutoCAD read). Pure strings; the caller writes the file. See holographic_cadexport..
 
@@ -930,6 +956,14 @@ import numpy as np, lecore; m=lecore.UnifiedMind(); img=np.zeros((40,60,3)); yy,
 ```
 *Find it by:* depth map to mesh, height field mesh from depth, mesh a depth map, photo to a clean mesh, triangulate a depth image, relief mesh from a photo, turn a depth map into geometry
 
+### Do the two SDF emitters agree? (both executed, not asserted)
+holographic_sdf.to_glsl and sdfemit.sdf_dialect both emit a map() for one tree, and sdfemit's own header warns that TWO TABLES FOR ONE CONCEPT WILL DISAGREE -- but only one was ever executed, so agreement was narrative. mind.sdf_emitters_agree(tree) now RUNS both: the GLSL through a vec3 shim under g++ (no GL runtime needed), the C dialect under cc, each compared to the Python tree. Bars differ on purpose: C must be EXACT, GLSL gets 1e-5 because GLSL float is 32-bit and to_glsl writes 6-significant-digit literals (cos(0.7) -> 0.764842). MEASURED worst 4.3e-7; they agree..
+
+```python
+import numpy as np; import lecore; import holographic.mesh_and_geometry.holographic_sdf as S; m=lecore.UnifiedMind(dim=256,seed=0); r=m.sdf_emitters_agree(S.sphere(1.0)); (r['agree'], round(r['worst'],9))
+```
+*Find it by:* do the two shader emitters agree, validate the glsl emitter, is the shadertoy shader correct, check emitted glsl against python, run the glsl without a gpu, compare shader to the sdf tree, shader emitter regression
+
 ### Domain operators & cosine palette (demoscene)
 infinite procedural worlds from a tiny kernel (holographic_domain, Quilez/Shadertoy style): domain WARPS that pre-transform the query point of any SDF or field -- domain_repeat (tile into an infinite or finite lattice), domain_fold (kaleidoscopic mirror symmetry), domain_twist / domain_bend (helix / arc). smooth_min / smooth_max are the crease-free metaball union / intersection / subtraction (iq's smin). cosine_palette turns one scalar into a smooth colour, random_palette makes a seed-driven scheme. One shape becomes a crystal; no assets.
 
@@ -978,13 +1012,21 @@ import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); L=np.li
 ```
 *Find it by:* faraday rotation, faraday rotate a sky, rotation measure map, RM map, line of sight magnetism map, recover magnetic field per pixel, polarization sky cube to RM, simulate faraday rotation
 
+### Fast preview render (a rough look, 12x, for the see-fix loop)
+a rough look in 3.81s where the full render takes 45.85s (12.0x, same 240x180 output, mean abs err 0.0159) -- for the see->fix loop, where eight looks beat one render. THE OBVIOUS PLAN WAS WRONG: 'render small and upscale' buys under 2x, because the tracer is DISPATCH-bound at preview sizes (16x the pixels cost 2.8x the time). The win is PASSES -- max_bounce=1 is 2.76x, quality='draft' another 1.72x. Upscaling is an OUTPUT-SIZE lever, not a speed one. Trade: one bounce means no indirect light, so a preview is flatter with darker shadows.
+
+```python
+import lecore; m=lecore.UnifiedMind(); s=m.new_scene(); s.add(name='b', geometry=m.shape('sphere'), material='copper'); print(m.render_preview(s, m.camera(eye=(2,2,3), target=(0,0,0)), 64, 48).shape)
+```
+*Find it by:* make a quick preview before the full render, draft quality fast render, render small and enlarge, my render is too slow to iterate on, rough look at my scene, speed up my render, preview the scene quickly, low quality fast render
+
 ### Field
 sample a scalar/vector field at points with ONE interface (field.sample(points)); the backend is chosen by cost: callable/oracle, dense grid, narrow-band sparse (spectral/FPE/region/dirty are backends too).
 
 ```python
 from holographic.misc.holographic_fieldhome import Field; Field.grid(arr, lo, hi).sample(pts)
 ```
-*Find it by:* field, grid, volume, density, sdf, sample, voxel
+*Find it by:* field, grid, volume, density, sdf, sample, voxel, represent a density volume over space
 
 ### Fill the gaps in a field (inpaint / impute)
 fill the unknown cells of a field, dispatched on TYPE. mind.inpaint(field, known) sends a float array to a harmonic (Laplace) solve -- each hole relaxes to the mean of its four neighbours, known cells pinned -- and an integer array to a majority neighbour vote, because a discrete field has no mean and averaging it is a category error. mind.fill_report scores ON THE HOLES ONLY. MEASURED (48x48, 59% erased, 8 seeds): harmonic MAE 0.0015 mean (range 0.0012-0.0018); majority accuracy 0.9653 mean (0.9553-0.9749), and 0.9990 in region INTERIORS -- nearly all the error is boundary error, so the overall number is a property of the FIELD while the interior number is a property of the ALGORITHM. THE BOUNDARY CONDITION IS THE GATE: periodic=False (edge-clamped) is the default, because wrapping a non-periodic field with np.roll solves a different problem and costs 5.4x (MAE 0.00666 vs 0.00123). DECLARED NEGATIVES, measured, do not rebuild them: a VSA record (one vector per cell, roles bound per channel) LOSES to both of these on both channels -- temperature MAE 0.0248 vs harmonic 0.0077, material accuracy 94.2% vs majority 96.0%; per-step cleanup in a multi-role NCA DOUBLES the continuous error (0.0248 -> 0.0485) for zero categorical benefit, because cleanup is per-role but the bundle is shared; and merely encoding a scalar into a 2-role record and reading it back costs MAE 0.0160, more than twice what a harmonic solve achieves while actually reconstructing missing values..
@@ -1154,6 +1196,23 @@ from holographic.rendering.holographic_lightinghome import Lighting, RectLight
 ```
 *Find it by:* lighting, light, lamp, shadow, dome, area, ies, spot
 
+### Load an HDRI environment map (.hdr RGBE -> unbounded radiance)
+image-based lighting needed one missing piece and this is it: a Radiance .hdr/.pic (RGBE) reader giving UNBOUNDED linear radiance. DomeLight's color already took a callable and sky_dome already sampled an equirectangular env -- but load_image reads 8 bits, and an 8-bit env is the wrong input because an HDRI's sun is thousands of times brighter than its sky. MEASURED: a flat dome vs a procedural sky FIELD differ 0.0054 (invisible); the same env mirrored differs 0.0336. Gradients don't pay, DIRECTIONAL structure does. KEPT NEG: no .exr; XYZE raises; never clip the result.
+
+```python
+import lecore; m=lecore.UnifiedMind(); # env=m.load_hdr('sky.hdr'); L=m.scene_light('dome', color=lambda d: m.sky_dome(d, env=env))
+print(m.sky_dome([[0,1,0]]).shape)
+```
+*Find it by:* load an hdri environment map, image based lighting, light my scene with a real sky photo, read a radiance hdr file, load a high dynamic range image, use a panorama to light the scene, equirectangular environment map, rgbe encoded image
+
+### Make a 3-D primitive by name (placed, one door)
+every SDF primitive shipped reachable only by import: asked for a sphere this mind returned a Lipschitz worst-view bound, asked for a cube the sky-observation capability. Ten phrasings, ten unrelated fallbacks. kind is a word you'd type -- cube/ball/floor/donut/cone/capsule/ellipsoid/torus/cylinder/octahedron plus the fractals -- and position/rotate/scale are applied in the ONE order that cannot go wrong (scale, rotate, THEN translate: rotating after translating orbits the world origin instead of spinning in place). Feed the result to scene.add(geometry=...) or render_sdf.
+
+```python
+import lecore; m=lecore.UnifiedMind(); print(m.shape('cube', bx=0.4, by=0.4, bz=0.4, position=(1,0.5,0)).to_dsl())
+```
+*Find it by:* make a sphere, add a cube, create a box shape, give me a ground plane, build a cylinder, a torus shape, basic 3d shapes to start with, primitive shapes
+
 ### Make a mesh manifold (split non-manifold vertices)
 MAKE A MESH MANIFOLD by splitting non-manifold vertices into connected UMBRELLAS (split_nonmanifold_vertices): incident faces are grouped across MANIFOLD edges only; a vertex whose faces form >1 umbrella (a bowtie, or an edge shared by >2 faces) is duplicated per umbrella. Resolves non-manifold EDGES too, so a cross-field retopo (which REFUSES a non-manifold mesh) accepts it. Unlike mesh_rip_vertex or mesh_split_vertices, this is the MINIMAL cut, a NO-OP on a clean mesh. Returns (mesh, report). KEPT NEG: a pure X-junction over-splits into disconnected sheets..
 
@@ -1258,6 +1317,14 @@ import numpy as np, lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_ge
 ```
 *Find it by:* critical points of a function on a surface, minima maxima and saddles of a field, morse smale singularities, count saddles on a mesh, topological features of a scalar field, euler characteristic from critical points
 
+### Move / rotate / scale an object (and actually render the rotation)
+scene_to_render placed objects by translation + uniform scale and DROPPED any rotation -- documented, invisible to the caller, with NO downstream error, so the picture silently disagreed with the document. mind.place(scene, handle, position=, rotation=, scale=) writes the transform (Euler degrees, axis+angle, or a 3x3; each argument replaces only its own component); render with affine=True to have the rotation actually RENDERED. Exact to 1e-12 against the matrix. OFF BY DEFAULT: turning it on moves every scene with a rotated object. KEPT NEG: uniform scale only.
+
+```python
+import lecore; m=lecore.UnifiedMind(); s=m.new_scene(); h=m.scene_add(s, name='c', geometry=m.shape('cube')); m.place(s, h, position=(1,0,0), rotation=(0,45,0)); print(m.scene_info(s)['objects'][0]['rotated'])
+```
+*Find it by:* move an object in the scene, rotate an object I already placed, set position rotation scale of an object, turn a cube 45 degrees, place an object at a location, tilt an object, my rotation is not showing up in the render, orient an object
+
 ### Multi-material (mask-blended)
 combine N materials by per-point MASKS -- generalises the 2-way Material.blend to a weighted mix where each material's weight is a mask (a texture graph, a field, or a constant) that varies over the surface: paint rust into metal, moss onto stone, a decal onto a surface. 'blend' = soft weighted sum (weights normalised so brightness stays put); 'select' = hard pick the dominant material (a material-ID / splat map). CMP3.
 
@@ -1337,6 +1404,14 @@ m.mesh_egi_compare(ref, mesh) measures ORIENTATION-FIELD preservation: the Exten
 import lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons; b=triangulate_ngons(box()); r=m.mesh_egi_compare(b, b); r['similarity']
 ```
 *Find it by:* did decimation destroy surface detail, compare normal distributions of two meshes, check shading character survived optimization, normal field similarity, extended gaussian image compare, surface orientation preserved
+
+### Parametric sky (time of day, sun, moon, stars, high cloud layers)
+a PARAMETRIC sky: hour drives a keyed gradient palette AND the sun's arc; stars are a hash of direction (same seed = same sky forever), fading by daylight and by cloud; moon=True auto-places opposite the sun; SEVEN cloud kinds (cirrus/cirrostratus/cirrocumulus/altocumulus/altostratus/stratocumulus/nimbostratus): Beer-Lambert shells, per-kind extinction/threshold/warp/erosion; cellular kinds keep GAPS. time_s/wind/evolve ANIMATE clouds (wind drifts; evolve slides through the solid noise so shapes MORPH; sky_keys feeds frame time). KEPT NEG: low clouds refused toward cloud_scene.
+
+```python
+import lecore, numpy as np; m=lecore.UnifiedMind(); sky=m.sky_model(hour=19.0, clouds=[('cirrus',0.5)]); print(np.round(sky([[0,1,0]]),3))
+```
+*Find it by:* time of day sky gradient, night sky with stars, render the moon in the sky, starfield generator, sunset sky colors, cloudy sky with sun shining through, cirrus or stratus cloud layer, procedural sky model
 
 ### Per-object render passes (which object made each pixel)
 BIDIRECTIONAL LOOKUP: scene.render_passes(want=['mask','depth','normal','position']) returns, per pixel, WHICH object produced it -- one Cryptomatte-style matte per object keyed by NAME ('object:<name>'), plus the requested G-buffer passes and a 'beauty'. The trace-back the renderer already computes (union SDF's nearest-object id at each hit), now surfaced: an EXACT per-object mask for OUR renders (no colour segmentation), which the FOCUSED critic (propose_edits(focus=...)) and per-object material/texture work build on. Deterministic..
@@ -1458,6 +1533,14 @@ import numpy as np; rng=np.random.default_rng(0); B=rng.normal(size=(3,64)); A=[
 ```
 *Find it by:* bits per vector, how many bits to store a vector, rate distortion, compress a codebook, entropy code vectors, geometry preserving compression, cheapest bit budget, will these vectors compress
 
+### Read a render back (PNG -> array, the see-then-fix loop)
+the engine could WRITE a PNG and could not READ one -- a grep for IHDR found only the encoder. That single missing direction blocked every render->look->adjust->render cycle, because 'look' had nowhere to start, and it is why compare_image_files reached for Pillow (an unguarded third-party import in a stdlib-only core). Pure zlib+struct. rgb01 gives (H,W,3) float ready to feed straight back in. KEPT NEG: round trip is to ~1/255, not exact -- save_png is 8-bit, so assert a tolerance. Interlaced PNGs RAISE rather than decode wrongly.
+
+```python
+import lecore; m=lecore.UnifiedMind(); m.save_render('/tmp/x.png', __import__('numpy').zeros((8,8,3))); print(m.load_image('/tmp/x.png').shape)
+```
+*Find it by:* read a png file into an array, load an image from disk, open a render I saved earlier, decode a png, get pixels out of an image file, look at my own render, did my render change, check the image I just saved
+
 ### Render graph (bake vs live)
 the PIPELINE composing the texture/material/scene graphs: mind.render_graph() registers texture graphs (static or dynamic) + a CMP4 instanced scene, then plan() shows what it will do and WHY and prepare() runs it. The adaptive decision it adds is BAKE a static texture graph to a grid (O(1) bilinear lookup, mind.bake_texture) vs SAMPLE it live -- baking amortises a deep graph over many hits, live avoids re-baking a changing map every frame. Trade: memory + interpolation error. CMP5.
 
@@ -1521,6 +1604,14 @@ recover the FARADAY DEPTH of polarized light -- the line-of-sight magnetic field
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); L=np.linspace(0.03,0.24,200); P=2.0*np.exp(2j*(0.5+42.0*L)); g=m.rm_phi_grid(L); print(round(m.rm_peak(m.rm_synthesis(L,g,P=P),g)['rm'],1))
 ```
 *Find it by:* rotation measure synthesis, faraday depth, faraday rotation measure, RM synthesis, line of sight magnetic field, polarization angle vs wavelength, magnetic field from polarization, faraday dispersion function
+
+### Run an SDF on the GPU (emitted map + per-pixel sphere trace)
+Bridges the shader EMITTER to the shader RUNNER, which two parallel merges left open: sdf_dialect emitted WGSL nothing dispatched; wgpurun dispatched WGSL nothing emitted. mind.sdf_depth_device(tree,w,h) sphere-traces an SDF ON ANY GPU -> (H,W) depth, -1 on miss; sdf_trace_shader returns the WGSL as inspectable TEXT (no device needed); sdf_depth_cpu is the NumPy reference on the SAME rays; sdf_depth_agrees differentially tests the two. Reuses run_wgsl_kernel bindings; raises without an adapter. sdf_trace_placement asks whether a device pays (144 flops/byte vs a 4.0 bar)..
+
+```python
+import lecore; from holographic.mesh_and_geometry.holographic_sdf import sphere; m=lecore.UnifiedMind(dim=256,seed=0); d=m.sdf_depth_cpu(sphere(1.0), 17, 13); (d.shape, round(float(d[6,8]),3))
+```
+*Find it by:* run an sdf on the gpu, raymarch on the gpu, sdf compute shader, render an sdf scene on the device, gpu accelerated sdf render, dispatch a shader from an sdf tree, sphere trace on the device, sdf depth buffer on the gpu
 
 ### SDF & procedural geometry
 implicit + procedural geometry: signed distance fields (sdf), sphere-trace raymarching with ambient occlusion (raymarch), sculpting, procedural terrain (procgen), spatial tiling + octree, and voxelization. Native-first shape building.
@@ -1586,13 +1677,21 @@ import numpy as np, lecore; m=lecore.UnifiedMind(); sk=m.skin_skeleton(np.array(
 ```
 *Find it by:* skin a skeleton, skin modifier, base mesh from a stick figure, tube mesh from edges with radii, creature from joints, b-mesh, blockout mesh from a skeleton
 
+### Sky-synced sun light (auto position/colour, optional cloud shadows)
+scene_light('sun', sky=<sky_model closure>) -- direction, colour, and day-scaling read from the SKY'S OWN sun state (one source of truth: the disk overhead and the light on the ground cannot disagree; below the horizon it contributes nothing). cloud_shadows=True gates intensity per shading point by the sky's cloud transmittance toward the sun -- the SAME shell and layer densities the sky paints, riding the existing intensity-field mechanism (no tracer changes). shadow_scale (default 60) is declared artistic licence: scene metres vs shell km. Custom directional lighting: omit sky=.
+
+```python
+import lecore; m=lecore.UnifiedMind(); sky=m.sky_model(hour=9.5, clouds=[('stratocumulus',0.6)]); sun=m.scene_light('sun', sky=sky, cloud_shadows=True)
+```
+*Find it by:* sun light for my scene, light that follows the sun in the sky, directional light synced to the sky, cloud shadows on the ground, sunlight through the clouds, automatic sun position lighting, patches of sun and shade, sun light driven by time of day
+
 ### Smooth a bumpy mesh surface (Taubin no-shrink)
 SMOOTH / denoise a bumpy mesh surface (holographic_meshsmooth): m.mesh_smooth(mesh) runs Taubin lambda|mu no-shrink smoothing -- a low-pass over vertex positions using cotangent weights that removes surface noise/bumps WITHOUT the shrinkage plain Laplacian smoothing causes. Exposes lam/mu/iters. The go-to for a jagged / noisy / faceted mesh from marching-cubes, scanning, or photogrammetry. KEPT NEG: it is a low-pass, so it also softens INTENDED sharp features; and it over-smooths an already-clean mesh (needs a noise estimate, no auto-tune)..
 
 ```python
 import lecore; from holographic.mesh_and_geometry.holographic_mesh import box; m=lecore.UnifiedMind(); sm=m.mesh_smooth(box()); print(len(sm.vertices))
 ```
-*Find it by:* smooth out the bumpy surface, smooth a mesh, remove bumps from a mesh, denoise a mesh surface, make a jagged mesh smooth, taubin smoothing, relax mesh vertices, smooth a noisy scan
+*Find it by:* smooth a bumpy mesh, denoise a mesh, remove mesh noise, smooth out the bumpy surface, smooth a mesh, remove bumps from a mesh, denoise a mesh surface, make a jagged mesh smooth
 
 ### Splat aniso-refine (re-enable)
 full-3DGS anisotropic refinement composed coarse-first: fit cheap isotropic splats, then gradient-refine the RESIDUAL (what iso missed -- sharp / oriented features) with anisotropic Gaussians. Strictly >= the isotropic baseline (no harm mode); big win on sharp edges. Opt-in (no reliable cheap detector for WHEN it pays).
@@ -1658,6 +1757,14 @@ from holographic.materials_and_texture.holographic_texturehome import Texture; P
 ```
 *Find it by:* texture, noise, fbm, voronoi, curl, procedural, weathering, pattern
 
+### Texture a scene object (named procedural or image, JSON-safe)
+texture a Scene object BY NAME ('wood','marble','checker',... or an (H,W,3) image, None removes) -- JSON-safe end to end, which is the point: scene_to_render already honoured an albedo_socket callable and proc_texture already built one, but a CALLABLE cannot cross POST /invoke, so over HTTP texturing was impossible while every part worked in-process. This builds the callable server-side from JSON. SOLID texture (evaluated at world points -- grain carves through, no UVs needed). KEPT NEG: albedo only; image mapping is world-XZ planar (triplanar needs normals the socket contract lacks).
+
+```python
+import lecore; m=lecore.UnifiedMind(); s=m.new_scene(); h=s.add(name='b', geometry=m.shape('sphere')); m.scene_set_texture(s, h, 'wood', scale=3.0, colors=((0.35,0.2,0.08),(0.75,0.55,0.3)))
+```
+*Find it by:* put an image on the cube, wood grain texture on my object, apply an image texture to an object, texture an object in my scene, procedural texture on a scene object, make the ball checkered, marble texture, paint a texture onto a shape
+
 ### Texture graph (composable maps)
 build a texture as a TREE of maps: an op (mix/multiply/over/scale/remap/...) over TYPED inputs -- map | color | field | number -- each of which may be another map, so graphs nest to any depth. Sampling walks the tree; the input types are checked at COMPOSE time so a bad graph (a colour used as a weight, a missing input) is refused up front, not rendered wrong. Encode a graph to a hypervector to cache/search it. CMP1.
 
@@ -1689,6 +1796,14 @@ paint a COMPOSED texture or material (CMP1 graph / CMP2-3 material) onto an obje
 tex = mind.texture_op('mix', a=mind.texture_leaf(value='orange'), b=mind.texture_leaf(value='purple'), t=mind.texture_leaf('fbm', n_dims=2)); mind.render_textured(scene, {scene.names()[0]: tex})
 ```
 *Find it by:* textured render, paint texture on object, wrap texture, uv render, texture the sphere, composed texture render, map onto object
+
+### The SDF DSL, described well enough to write one
+sdf_parse has always taken a compact s-expression for a whole shape tree -- (kind params... children...) -- and the node names and parameter counts lived in a module-level dict nothing surfaced. A grammar you can only use if you already know it is not a usable grammar. Returns every node kind with what its numbers MEAN, sorted primitives -> modifiers -> combinators (the order you build in), plus an example that parses.
+
+```python
+import lecore; m=lecore.UnifiedMind(); print(m.sdf_grammar()['example'])
+```
+*Find it by:* how do I write an sdf string, what nodes does the sdf dsl have, sdf syntax, shape language reference, what can I put in sdf_parse, csg operators available, union two shapes together, subtract one shape from another
 
 ### The scene's own SDF, emitted (brain/muscle, realised)
 the backlog's brain/muscle claim is 'the compute shaders the demos hand-write become a PROJECTION of the authoritative Python kernel -- one source of truth, two runtimes, no drift.' It was NOT realised: sdf.to_glsl() emitted GLSL for a tree, emit_kernel emitted WGSL from a scalar function's SOURCE TEXT, and THE TWO NEVER MET -- so RealtimeSession.payload('shader') carried whatever kernel_src the caller passed: a shader written by hand, about a scene the engine never saw. That is drift by construction. mind.sdf_dialect(tree, dialect) walks the SAME tree that _eval walks and emits map(p) -> distance in wgsl | glsl | c_f64 | c_f32, and payload('shader') now emits the SCENE's own map(). THE BAR IS EXECUTED: WGSL cannot run here, so mind.sdf_validate_c COMPILES the C twin with cc and RUNS it against the Python _eval. MEASURED on a scaled smooth-union of a translated sphere and a rotated box, 200 points: c_f64 agrees to 6.7e-16 and is NOT bit-identical -- because np.linalg.norm rescales to avoid overflow and sums in a different order than sqrt(x*x+y*y+z*z), so the emitted C computes the same FUNCTION by a different summation (K8's scalar kernel WAS bit-identical, because it emitted the same expression). c_f32 differs by 3.3e-07, which IS the tolerance a WGSL port is judged against -- and the `f` literal suffix is LOAD-BEARING: unsuffixed, a C literal is a DOUBLE and the whole expression evaluates in double before truncating, so the first table published an optimistic 2.83e-07. An audit found it because holographic_emit's dialect table used `f` and this one did not: TWO TABLES FOR ONE CONCEPT WILL DISAGREE, AND THE DISAGREEMENT WILL BE A BUG IN ONE OF THEM. A test now pins the shared dialects to agree, field by field. And mind.sdf_dialect takes an SDF tree OR ITS DSL TEXT, because a live tree does not survive JSON and parse_dsl(to_dsl(t)) round-trips to 0.0e+00 -- the kernel is text; so is the scene. THREE KEPT NEGATIVES: (1) `menger` and `repeat` fold the domain ITERATIVELY -- unrolling makes the shader's size a parameter -- and `twist`/`displace` are inexact distance warps; all four are REFUSED by name, and mind.sdf_emit_coverage asserts emitted + refused == every one of the 18 node kinds, because a gap there is a shader that silently omits geometry. (2) `scale` is not `p / s`, it is `map(p / s) * s`; drop the outer factor and the shape renders correctly with WRONG DISTANCES, and a raymarcher oversteps it. (3) WGSL IS NOT C: it infers a local's type with `let`, and rejects `vec3<f32> name = ...`. The first emitter wrote the C form for every dialect and the structural test -- which checked only the signature and the brace balance -- passed the invalid WGSL. An emitted shader is not a rendered image: this validates the DISTANCE FUNCTION, not WGSL's precision rules, its fast-math latitude, or whether it compiles..
@@ -2086,6 +2201,14 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print('mainImage' in m.to_s
 
 *talk a 3-D scene into being, then adjust its named objects in words, and render or simulate it.*
 
+### Animate the scene document (keyframes -> frames -> GIF)
+keyframes in, frames out, optionally an animated GIF -- the see->fix loop for MOTION. Composes Timeline + place + render_preview (a Timeline cannot cross /invoke). keys = {handle: {position/rotation/scale: [[t,value],...]}}, seconds. save_gif is stdlib GIF89a, deterministic (fixed 252-colour lattice, no median-cut). sky_keys={'hour':[[t,h],...],...} animates the sky per frame (timelapse; with no lights given the sky drives the dome so the ground follows). KEPT NEG: preview quality; Euler lerp, no quaternions; the last frame's transforms persist (undoable).
+
+```python
+import lecore; m=lecore.UnifiedMind(); s=m.new_scene(); h=s.add(name='b', geometry=m.shape('sphere')); f=m.render_animation(s, m.camera(eye=(0,1,3), target=(0,0,0)), {h: {'position': [[0,[-1,0,0]],[1,[1,0,0]]]}}, n_frames=4, width=32, height=24)
+```
+*Find it by:* animate an object in my scene document, keyframe the cube position, render an animation of my scene, render frames over time, turn my scene into a video, animate the scene and save frames, make a gif of my scene, bouncing ball animation
+
 ### Build a scene from a photo (image -> editable scene)
 BUILD A SCENE FROM A PHOTO (machine-initialised) -- the demux->fit->assemble front half of image->3D. mind.scene_from_image(image, k, max_objects) segments the photo, keeps the most object-like foreground regions, maps each region's silhouette+colour to a primitive, assembles a live SemanticScene you can adjust/render/refine_to_target/to_node_graph. Returns {scene, regions, roles, objects}. Deterministic. HONEST: shape from silhouette, colour from region mean; DEPTH not reconstructed (z=0) -- a STARTING POINT the critic + drill-down refine; quality bounded by the segmentation..
 
@@ -2124,7 +2247,15 @@ DESCRIBE a 3-D scene in plain words and the engine builds it, then you ADJUST it
 ```python
 scene = mind.build_scene('a red metal sphere and a blue box'); scene.name('the sphere','hero'); scene.adjust('give hero a rusty texture'); scene.render()
 ```
-*Find it by:* scene, describe a scene, build a scene, make a scene, create a scene, describe and build, build what I describe, build from a description
+*Find it by:* scene, describe a scene, build a scene, make a scene, create a scene, describe a scene and build it, describe it and build it, describe and build
+
+### Describe to document (words -> handled, renderable scene objects)
+words -> the CANONICAL Scene document: named, handled objects you can texture, place, keyframe and path-trace. leCore had TWO scene systems that could not talk -- build_scene's SemanticScene and the Scene document (handles/undo, where every parity faculty landed) -- so an agent starting from words was cut off from all of it (8/8 audit phrasings missed). REUSES interpret_description + realize_scene; parsed colours become PBRMaterials; unknown words are REPORTED, never dropped. KEPT NEG: realizer has no rotation; SDFs arrive pre-placed so document transforms start identity.
+
+```python
+import lecore; m=lecore.UnifiedMind(); r=m.describe_to_scene('a red cube and a green sphere'); print(sorted(r['handles']), r['unknown'])
+```
+*Find it by:* turn a text description into scene document objects, convert build_scene output to the scene document, semantic scene into editable document, describe a scene then keyframe it, from words to objects I can texture and animate, promote a described scene to the real document, make a described scene renderable with the path tracer, words to primitives with handles
 
 ### Floor and wall backdrop for a scene
 give a scene a matching FLOOR and WALL so a render competes with a photo's whole frame instead of empty sky. Set scene.environment['ground_color']=(r,g,b) to recolour the floor and scene.environment['backdrop_color']=(r,g,b) to add a vertical wall behind the scene; render() applies both (default None -> neutral gray floor + sky, byte-identical old behaviour). scene_from_image(background=True) sets them AUTOMATICALLY from the photo's floor/wall regions. Measured: a matching backdrop is the single biggest fidelity lever when matching a photo (it is most of the frame)..
@@ -2141,6 +2272,22 @@ GROUND-PLANE DEPTH from linear perspective (m.ground_plane_depth): for a forward
 import numpy as np, lecore; m=lecore.UnifiedMind(); img=np.zeros((60,80,3)); yy,xx=np.mgrid[0:60,0:80]; img[:]=(0.2+0.6*yy/59.0)[...,None]; d=m.ground_plane_depth(img, vp=(40,5)); (d.shape==(60,80), float(d[50:].mean())>float(d[:10].mean()))
 ```
 *Find it by:* ground plane depth, perspective depth ramp, road recession depth, depth from linear perspective, forward-looking depth, horizon depth ramp, depth for a road or track scene
+
+### Object handles over /invoke (name a live object across calls)
+POST /invoke new_scene used to return '<Scene object at 0x7fe17ba58fe0>' -- a memory address is not a handle, so the whole Scene family was listed in /tools and IMPOSSIBLE to call. Now every un-serialisable result also carries ref:Type:N, and any ref passed as an argument resolves back to the live object. With scene_add/scene_edit/scene_remove/scene_undo an HTTP-only agent can build, inspect, FIX and render a scene end to end. Handles are a counter (never id(): a reused address would silently alias). KEPT NEG: process-local, bounded, evicted oldest-first.
+
+```python
+import lecore; m=lecore.UnifiedMind(); s=m.new_scene(); h=m.scene_add(s, name='ball', geometry=m.shape('sphere')); print(m.scene_info(s)['n_objects'])
+```
+*Find it by:* add an object to my scene, put a sphere into the scene document, change an object I already added, delete an object from the scene, undo my last scene edit, insert an object and get its handle, keep a python object between two api calls, reference a returned object in the next call
+
+### Refine a scene toward a target image (the self-improving loop)
+hand a described scene a TARGET IMAGE and the engine improves itself toward it -- past screenshot-and-hope: Blender's integration shows an agent its render but cannot score candidate edits against a goal and apply the best. apply=True runs the bounded greedy loop (applied/start/final/history); apply=False only SCORES, ranked, touching nothing. Verified live: 'a red sphere' toward a night target, 0.2625 -> 0.0000 -- it rediscovered 'make it night' itself. Deterministic. KEPT NEG: edits are sentences, so it works on SemanticScene; promote via describe_to_scene after.
+
+```python
+import lecore, numpy as np; m=lecore.UnifiedMind(); g=m.build_scene('a red sphere'); g.adjust('make it night'); t=np.asarray(g.render(width=96,height=72),float); s=m.build_scene('a red sphere'); print(m.refine_scene(s, t)['applied'])
+```
+*Find it by:* critique my render and improve it, match my scene to this image, automatically refine a scene toward a target image, score candidate edits against a goal, self improving render loop, make my scene look like this picture, close the loop on a render, propose edits ranked by improvement
 
 ### Rotate or tilt a scene object
 ROTATE / TILT a scene object about an axis (closes the axis-aligned limitation, so leaves can splay into a rosette): scene.adjust('tilt the cone 30 degrees'), scene.adjust('rotate the box 45 about y'), scene.adjust('lean it left'). Sets rotation (axis, angle_deg); the realizer wraps it in a rotation-EXACT SDF (query points rotated about the centre, distance-preserving). tilt/lean default to x, rotate/turn/spin to y (turntable); 'about x/y/z' picks the axis; a left/down/back word negates; repeats on the same axis ACCUMULATE..
@@ -2173,6 +2320,14 @@ bridge the high-level SEMANTIC scene to an exact, editable NODE GRAPH ('as above
 import lecore; m=lecore.UnifiedMind(); s=m.build_scene('a big red sphere and a box'); ng=s.to_node_graph(); g=ng['graph']; sid=[i for n,i in ng['objects'].items() if 'sphere' in n][0]; g.set_param(sid, radius=3.0); g.describe(sid)['params']['radius']
 ```
 *Find it by:* drill down from a command to exact settings, semantic scene to node graph, convert a described scene to nodes, adjust exact settings of a described object, fine tune a semantic scene, as above so below, high level command to exact node, edit exact parameters of a scene object
+
+### What is in my scene (read the document before you edit it)
+the Scene document could be BUILT and RENDERED and not READ -- an agent that added four objects could not confirm it, recall the names, or spot a mistake before paying for a trace. Read this FIRST; never assume the scene is empty. JSON-safe: objects (handle/name/geometry/material/position/scale/rotated/parent), cameras, lights, selection, materials, problems. `problems` is a PRE-FLIGHT check catching in ms what costs minutes: an unknown material (raises at RENDER time), no geometry, or a ROTATION scene_to_render silently DROPS. KEPT NEG: no bbox, an SDF has no extent.
+
+```python
+import lecore; m=lecore.UnifiedMind(); s=m.new_scene(); print(m.scene_info(s)['empty'])
+```
+*Find it by:* what is in my scene right now, list the objects in the scene, is my scene empty, how many objects have I added, what did I name that object, inspect the scene before I edit it, summarise the scene, show me the scene contents
 
 ### audio_param_bus
 drive scene PARAMETERS from audio (W5') -- build a per-frame bus of band-energy envelopes (bass / low-mid / high-mid / treble, normalised 0..1) plus an onset/beat signal, then subscribe a scene knob to a band. bus.subscribe(band, lo, hi, frame) maps a band onto a parameter range (metaball viscosity from the bass, palette phase from the treble); bus.onset gives beats. Reuses the existing STFT -- only the band binning is new. The wire that makes a demo react to music.
@@ -2338,6 +2493,14 @@ mind.generate('once upon a', length=120); mind.respond('describe a sunset'); min
 ## Learning & agents
 
 *gradient-free learners and agents -- an RL creature, a classifier, a reservoir, mixtures of experts.*
+
+### Agent reachability (referenced somewhere vs callable from /invoke)
+the orphan audit asks 'is this name referenced anywhere?' and answers YES for a symbol whose only caller is itself import-only by design -- a consolidation home, a declared negative. Alive in the import graph, dead to /invoke. This asks whether the route GOES anywhere. shadowed = referenced only from cul-de-sacs; dark = a public CLASS with no faculty and no catalog entry (the orphan audit collects functions only, so classes were invisible to it). MEASURED: 9 of 10 path-tracer light classes are dark while every module audit read 0 gaps. ADVISORY, under-reports, never a delete list.
+
+```python
+mind.audit_agent_reach()['counts']
+```
+*Find it by:* can an agent actually call this, which classes can I not construct, what can I not reach through the mind, half wired module, built but I cannot call it, why can't I use this class, is this class exposed anywhere, dark classes
 
 ### Agent tool-use loop (with a gate below the model)
 hands a model the relevant manifest, parses its tool call, dispatches through invoke(), feeds the result back, iterates. Over HTTP this worked; in process every embedder wrote their own loop, routing around the choke point. THE DIFFERENTIATOR IS THE GATE BELOW IT: route_or_abstain scores the task against a null BEFORE any step, and below the floor the loop refuses and the MODEL IS NEVER CONSULTED. Measured with a stub that always claims done: has-tool 20/20, no-tool 0/20 -- FALSE-ACTION RATE 0%. Refuses non-finite args and off-manifest tools; never guesses an unparsed reply.
@@ -4137,4 +4300,4 @@ import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors(
 
 ---
 
-*527 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*547 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

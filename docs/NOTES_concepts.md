@@ -47361,3 +47361,525 @@ LESSON, generalised: when the same class of failure reaches CI repeatedly and th
 defect is not in the fixes -- it is that the CHECK is not automated. Promote the check, not the discipline.
 (Same shape as the seed/index lockstep fix and the backlog GLOB: gate the class, not the instance.)
 Battery clean; docs regenerated; 25 catalog/routing/buried-audit tests green.
+
+## POST-MERGE INTEGRATION SWEEP: the two arcs could not see each other (W1 shipped)
+
+Moose: sweep both merges for things built but not utilised -- e.g. the new 3-D work not using the new GPU
+speed. The two arcs were developed IN PARALLEL FROM DIVERGENT BASES, so neither could reference the other by
+construction. MEASURED: zero of the 11 arc-B (3-D/scene/render) modules reference any of the 18 arc-A
+(GPU/agent) modules, and none of them accepts a backend/pool/gpu parameter at all.
+
+NOT every absence is a gap -- checked before filing:
+  * objectref IS properly wired to holographic_service (3 sites): the object-handle registry (the old C4
+    item) landed correctly. Not a gap.
+  * run_wgsl_kernel having no internal consumers is BY DESIGN -- it raises rather than falling back, because
+    an explicit device request must not silently run on the CPU. Not a gap.
+  * arc-B faculty discoverability is 9/10 on stranger phrasings. The single MISS was "run an sdf on the gpu",
+    which is exactly W1 -- a missing capability announcing itself as a missing capability.
+
+### W1 SHIPPED -- the emitter and the runner had no bridge
+sdfemit.sdf_dialect(tree,'wgsl') emitted a real `fn map(p: vec3<f32>) -> f32`; holographic_wgpurun could
+dispatch WGSL on any adapter. NOTHING CONNECTED THEM: text produced, never run. Rule-0 across 6 phrasings
+returned only emitters (produce text) and CPU renderers -- the license to build.
+THE SHAPE THAT FIT: run_kernel maps a 1-D f32 array elementwise, and sphere tracing is elementwise over
+PIXELS -- so passing arange(W*H) as the input makes the pixel INDEX the kernel argument and the traced depth
+the output. That reuses run_kernel/wrap_kernel UNCHANGED: no second dispatch path, no new binding layout,
+additive by construction. The trace loop is a BOUNDED `for` (static trip count), which is exactly the loop
+shape the bounded-loop emission work unlocked earlier in this arc -- the two pieces met here.
+Built in holographic_wgpurun: sdf_trace_shader (WGSL as inspectable TEXT), sdf_depth_device (dispatch, RAISES
+without an adapter), sdf_depth_cpu (the NumPy reference on the SAME rays), sdf_depth_agrees (differential
+test, counting MISS/HIT disagreement separately from rounding because it is a decision, not an error).
+VERIFIED WITHOUT A DEVICE, which is the point of a projection design: the shader is well-formed text; the CPU
+reference is checkable against ANALYTIC truth (unit sphere at z=3 -> centre depth 2.0000, corners -1); and the
+emitted map() is BIT-IDENTICAL to Python through the C dialect (validate_c, 0.00e+00 on sphere and box) --
+the same executable bar sdfemit itself uses because WGSL cannot run here. 4 faculties, 1 capability, 7/7
+phrasings top-1 (the Rule-0 miss now resolves), audits 0/0/0.
+TEST-PLACEMENT LESSON: the pin first went into tests/test_wgsl_runtime.py, which carries a module-level
+skipif(not available()) -- so it reported "36 skipped" and proved nothing. A test that verifies the DEVICE-FREE
+half must not live behind the device gate; moved to test_holographic_sdf.py, where it actually runs (15 passed).
+
+### W4 RESOLVED BY MEASUREMENT AS A NON-DUPLICATE (kept negative)
+sdf.to_glsl and sdfemit.sdf_dialect looked like two emitters for one concept. They are NOT: to_glsl emits a
+COMPLETE Shadertoy fragment shader (map + raymarch + normals + lighting, 904 chars) while sdf_dialect emits
+map() ALONE (52 chars) in four dialects. Different scopes, complementary, no unification owed.
+THE RESIDUAL RISK IS REAL AND RECORDED: their map() bodies differ in STYLE -- to_glsl calls library helpers
+(sdSphere/sdBox), sdf_dialect inlines the arithmetic -- and NOTHING PROVES THEM NUMERICALLY EQUAL. sdfemit's
+own docstring warns that two tables for one concept will disagree and that the disagreement will be a bug in
+one of them; the existing test covers the DIALECT TABLE, not to_glsl. Settling it needs a GL runtime this box
+does not have. Filed as measured, unresolved -- not as done.
+
+### STILL OPEN (reported in chat, deliberately not filed as a backlog document)
+W2: no arc-B module accepts a backend/pool/gpu parameter, so even where offload would pay there is no seam to
+ask for it. Needs a MEASUREMENT first (does any render path clear should_offload's data/intensity bars?) --
+building a seam nothing can pay for is the failure mode this project keeps on record.
+W3: place_work's unit oracle knows machine-model units; the new render work registered none, so it cannot
+reason about render jobs at all.
+
+## BRANCH MERGE (J-3D scene/asset/objectref + catalog split) -- A WRONG-BASE MERGE, AND WHAT IT COST
+
+Moose: a branch based on a version PRIOR to the last merge, to be brought up to speed and merged.
+
+### THE SHAPE OF THE PROBLEM: the fork point was an INTERMEDIATE snapshot nobody has
+The branch carried the UnifiedMind split and the code-health modules but PREDATED the entire GPU/agent layer.
+So neither of our two known trees is its base. Relative to the newest common tree it appears to DELETE 48
+files and hundreds of methods, when in truth it never had them. THIS IS THE CENTRAL HAZARD OF A WRONG-BASE
+MERGE: age is indistinguishable from intent, and every standard tool takes it as intent.
+  * `git merge-file --diff3` merged 46 files with only 3 textual conflicts -- and silently removed place_work,
+    declare and agent_loop, because a one-sided removal relative to the WRONG base is a clean, conflict-free
+    delete. A green merge is not a correct merge.
+  * `--union` does NOT fix it: union resolves CONFLICTING hunks by keeping both sides, but a clean one-sided
+    deletion never conflicts, so it is applied either way. Measured, not assumed.
+  * THE CORRECT SEMANTIC when the base is wrong is ADD-ONLY: take their addition hunks, never their deletions.
+    Implemented by filtering the unified diff to hunks with no '-' lines.
+
+### WHAT ADD-ONLY COSTS, AND THE SWEEPS THAT PAID IT
+An addition-only filter drops any hunk that MIXES an addition with a change -- so it loses signature edits and
+helpers defined next to them. Three sweeps found every instance, and each sweep is reusable:
+  1. FACULTY SURFACE (hash every callable on UnifiedMind in all three trees): found 10 lost scene faculties.
+  2. MODULE SYMBOLS (ast walk, public AND private): found _view_transform, _fit_to, _PlacedEval, render_preview,
+     _selftest_hdr. Private helpers matter -- a body referencing an undefined name compiles fine and fails at
+     runtime with a bare NameError.
+  3. SIGNATURE PARAMETERS (compare arg-name sets per function): found render_scene_document/_place/
+     scene_to_render missing view= and affine=, and walk() missing stream=. This is the sneakiest class: the
+     BODY arrived (pure addition) while the DEF LINE did not (a modification), leaving code that references a
+     parameter its signature never declares.
+Where a file's symbol sets matched exactly between branch and merge, taking their whole file was provably safe
+and was done instead of further patching (scene_render, p07, run_selftests).
+
+### THE ONE A SURFACE HASH COULD NOT SEE: a REORGANISED registry
+The branch also split holographic_catalog.py into six parts -- authored against its PRE-FORK catalog. Taking
+that split wholesale silently dropped THIRTY capability registrations: the entire GPU/agent/compute layer
+(place_work, wgsl_*, declare, resource policy, agent loop, ...). The FACULTIES were all present and callable,
+so every faculty-level check passed. NO AUDIT CAUGHT IT: catalog_gaps and skill_lint verify that REGISTERED
+capabilities have homes and runnable examples, and neither can see an ABSENCE. Only a test asserting that a
+specific phrasing still routes ("where should this work run") noticed.
+LESSON, now the rule: WHEN A REGISTRY IS REORGANISED ON A BRANCH, DIFF THE RESULTING NAME SET AGAINST THE
+BASE, NEVER JUST THE FILE. Restored all 30 at the end of the last part (tie-break order preserved), and the
+catalog is now provably the union: 2566 = pre-merge 2514 + branch 2455, zero lost from either parent.
+
+### DEFECTS IN THE BRANCH ITSELF (each confirmed failing on the branch standalone)
+  * wiring_report --check (a CI GATE) failed: all six catalog parts reported dark, because
+    `from PKG import MODULE` is INVISIBLE to the audit -- the same facade-import lesson that once cost a
+    43-import sweep. Fixed the import style AND declared the parts as registry body in EXEMPT.
+  * TWO new name collisions: `make_shape` (new SDF entry vs the incumbent holographic_vision) and a six-way
+    `register` across the catalog parts. Both resolved by RENAMING THE NEWER ARRIVAL (make_sdf_shape,
+    register_pNN) rather than growing a budget whose own contract says it may shrink and must never grow.
+    register_pNN also matches the unified split's precedent of distinct _UnifiedPartNN names, and makes a
+    traceback name its own part. The branch's part-registration test was updated to pin THAT contract.
+  * A ROUTING PIN broke: the branch's new "Describe to document" shares the incumbent "Describe a scene"'s
+    whole vocabulary; the two tied and the decision fell act -> choose at 0.5. Additive fix (give the
+    incumbent its exact probe phrasing) restored act at 0.727 -- ABOVE the pre-merge 0.667.
+  * A duplicated __main__ guard in meshqem from the union pass, folded back to the true end of module.
+
+### A SECOND-ORDER EFFECT WORTH REMEMBERING: the abstain floor RISES with the catalog
+Restoring the 30 capabilities pushed route_or_abstain's in-vocabulary noise floor from null_mean 2.88 to 3.49.
+A correct top hit whose score never moved (4.50) went from z=1.08 (answer) to z=0.63 (ABSTAIN), breaking the
+declare ladder's rung 0. The fix is to raise the TARGET (exact phrasings as aliases -> score 4.5 to 8.5,
+z=3.78), never to lower the floor, which would weaken every gate that uses it. NOTE THE NEAR-MISS: the first
+attempt put those aliases on the neighbouring "Mesh editing (DCC)" entry, which dispatches to `deform` -- the
+ladder then resolved, but TO THE WRONG FACULTY, and only the test asserting the faculty NAME caught it.
+Getting a green is not the same as getting it right.
+
+### Post-merge state
+1340 py files compile; 2566 capabilities; 1599-method faculty surface PROVEN to be the union of both parents
+(zero lost from either, by source hash). All seven gates green. Cross-burial matrix extended with the three
+pins this merge discovered, so the class is guarded rather than rediscovered. Branch's 35 new tests + 147
+pinned/regression tests green; 9 generated docs regenerated and drift-checked.
+
+## W2/W3 CLOSED: the render arc now asks the placement layer -- and MOST of it correctly gets "no"
+
+W2 asked whether the new render modules need a backend=/pool= seam. MEASUREMENT FIRST, because building a
+seam nothing can pay for is a failure mode already on record. Against should_offload's provisional bars
+(>= 100 KB moved, >= 4.0 flops/byte):
+
+    sdf sphere trace   256x192 / 512x384 / 1024x768   144.0 flops/byte   CLEARS BOTH (by ~36x)
+    postfx elementwise 512x384 / 1920x1080              0.8 flops/byte   refused  (transfer-bound)
+    rasterize 50k tris                                  1.7 flops/byte   refused
+    qem decimate 20k verts                              5.0 flops/byte   marginal -- see below
+
+THE ANSWER IS AN ASYMMETRY, and it is the useful result: exactly ONE render path pays for a device, and it is
+the one W1 just built. Wiring backend= across the render arc -- the obvious reading of the sweep -- would have
+been WRONG for postfx and the rasterizer, which are transfer-bound BY CONSTRUCTION (they read and write
+everything and compute almost nothing; should_offload's own docstring says so and the numbers agree). KEPT
+NEGATIVE, pinned in test_holographic_sdf so a future session cannot re-propose it from narrative.
+QEM at 5.0 vs a 4.0 bar is NOT a green light: those thresholds are arithmetic from PCIe bandwidth and are
+marked provisional everywhere they surface, so a 25% margin sits inside the uncertainty of an unmeasured
+number. Not built, on purpose, recorded.
+
+W3's framing was slightly WRONG and the probe corrected it: machine_units() holds 17 HARDWARE/caching units
+(simd_lanes, rt_core, t2_baked_grid...), not workload registrations, so "register a render unit" was never
+the gap. The real gap was that NOTHING IN ARC B EVER CALLED THE DECISION LAYER.
+BUILT sdf_trace_workload + sdf_trace_placement (holographic_wgpurun + 2 faculties): they derive
+(n_bytes, flops_per_byte) FROM THE TRACE'S OWN PARAMETERS and hand them to place_work. WHY AT THIS SEAM
+rather than the call site: should_offload answers honestly but only about the numbers it is GIVEN, and those
+two are precisely what a caller gets wrong -- bytes TOUCHED instead of bytes MOVED, flops per PIXEL instead
+of per byte -- and a wrong input yields a CONFIDENT wrong verdict. The verdict carries the numbers that
+produced it so nobody re-derives them.
+PINNED PROPERTY WORTH KNOWING: the trace's intensity is RESOLUTION-INDEPENDENT (both terms scale with pixel
+count), so the offload question turns on MARCH DEPTH and tree cost, never on image size -- halving `steps`
+halves the intensity exactly. A 'cpu' verdict on a box with no adapter is a RESULT, not a failure.
+Aliases folded into the existing GPU-SDF capability rather than a sibling entry (one idea, one home);
+"should i offload the render" / "where should this trace run" now top-1. Audits 0/0/0; 16 sdf tests green.
+
+## W4 CLOSED: the second emitter is now EXECUTED -- the "two tables will disagree" warning, finally measured
+
+Carried forward as the sweep's one unresolved item: holographic_sdf.to_glsl and sdfemit.sdf_dialect both emit
+a map() for the same tree, sdfemit's own header warns that TWO TABLES FOR ONE CONCEPT WILL DISAGREE and that
+the disagreement will be a bug in one of them -- and only sdf_dialect had ever been run. "They agree" was a
+narrative. The existing test compares DIALECT FIELDS, not arithmetic.
+
+THE BLOCKER WAS FALSE, which is the lesson. Judging GLSL looked like it needed a GL runtime this project does
+not have -- I said so myself last session. But the GLSL these emitters produce is a tiny subset (vec3, +-*/,
+abs/min/max/length/clamp/dot, and mat3), and C++ HAS OPERATOR OVERLOADING, so a ~40-line vec3/mat3 shim makes
+the SAME TEXT compile and run under g++. Cost: one probe for the compiler. The bar stayed EXECUTED, the
+standard the C dialect already set. GENERALISED: "we cannot test this without <runtime X>" deserves the same
+five-lever treatment as any other wall -- the subset actually used is usually far smaller than the language.
+
+BUILT in holographic_sdfemit: validate_glsl (compile to_glsl's helpers+map() with a shim, run, compare to the
+Python _eval), emitters_agree (runs BOTH paths and judges each), GLSL_AGREEMENT_TOL, plus 2 faculties and a
+capability (5/5 phrasings top-1). The shim REFUSES what it cannot model (mat2/mat4/textures/iResolution)
+rather than comparing something mis-modelled -- a validator that quietly gets semantics wrong is worse than
+none.
+
+THE RESULT: THE TWO EMITTERS AGREE, and the residual is fully explained rather than merely small.
+    sphere / box / translated / union / smooth_union     ~1e-7
+    rotated box / compound (mat3 present)                 3.7e-7 / 4.3e-7
+    sdf_dialect c_f64 (same trees)                        0.0 -- 6.7e-16
+TWO SOURCES, BOTH IDENTIFIED: (1) GLSL `float` is 32-BIT BY LANGUAGE DEFINITION, so a shader can never match
+a float64 tree exactly -- bit-identity was the WRONG BAR and demanding it would have been asserting a wish
+rather than the contract; (2) to_glsl formats literals to SIX SIGNIFICANT DIGITS -- cos(0.7) ships as
+0.764842, itself 1.9e-7 off -- which is why a rotation is the worst case. GLSL_AGREEMENT_TOL = 1e-5 sits two
+orders above the worst measured value and far below any geometrically meaningful distance, so a REAL
+divergence still trips it. The C dialect keeps the exact bar because nothing stops it being exact: holding
+the two sides to DIFFERENT bars is the honest choice, not a concession.
+STATUS OF to_glsl, now sayable: a DISPLAY PROJECTION accurate to ~4e-7, not the authoritative geometry. That
+sentence was unavailable before this ran.
+EDIT-DISCIPLINE SLIP, recorded: the faculty insertion used `t[:i] + add + t[i:]` with `add` ALSO ending in the
+anchor, which duplicated `def _selftest(` and broke the module at import. Caught immediately by
+file_python_check; the repair script then failed too because it imported lecore at the top, which cannot
+import a broken tree -- REPAIR SCRIPTS MUST USE PLAIN FILE I/O. Both re-learned the cheap way.
+Battery 0/0/0; 65 tests green across sdf/sdfemit/routing/split/realtime; docs regenerated.
+
+## PYPI PUBLISH KEPT SKIPPING -- a false premise I wrote, with a real consequence
+
+Moose: something is making the PyPI publish skip. Traced without guessing, by reading the gate chain.
+
+package.yml's publish job is gated on `workflow_run.conclusion == 'success'` AND head_branch main/master. A
+"Skipped" in the UI therefore means one of exactly two things, and BOTH are worth separating:
+
+1. EXPECTED NOISE, not a defect: package.yml triggers on EVERY completion of `tests`, including PULL REQUEST
+   runs, whose head_branch is the feature branch. Those runs can never publish and always render as Skipped.
+   Anyone scanning the Actions list sees a wall of them. This is by design and should not be "fixed".
+2. THE REAL ONE: a red `tests` on main. The publish then skips CORRECTLY -- and stays skipped, because
+   nothing re-verifies main afterwards.
+
+ROOT CAUSE OF (2), AND IT IS MINE: the semantic-coverage heal commit carried a WHY-comment I wrote claiming it
+"RE-TRIGGERS CI (no [skip ci])". THAT IS FALSE. A push authenticated with the default GITHUB_TOKEN DOES NOT
+CREATE WORKFLOW RUNS -- GitHub's documented loop-breaker -- so the heal commit is invisible to `tests` whether
+or not [skip ci] is present. My removal of [skip ci] was INERT, and the stated goal ("a main that heals itself
+in the same push cycle") was never achieved. The consequence was not cosmetic: seed/index lockstep is
+ASSERTED by the suite, so a stale seed makes `tests` fail on main; the heal fixes the artifact but cannot
+re-run the suite; main's last conclusion stays FAILURE; and package.yml keeps skipping the publish run after
+run. A wrong sentence in a comment became a silent release outage.
+
+FIX: after the heal pushes, DISPATCH `tests` explicitly -- workflow_dispatch IS honoured for GITHUB_TOKEN and
+does create a run, which is the one trigger available. Added `actions: write` to the job (the permission the
+dispatch needs) and a non-fatal `gh workflow run ci.yml --ref <branch>` with GH_TOKEN in the step env; a
+refreshed index is still worth having if the dispatch fails, and the weekly full run reaches the same place.
+VERIFIED THE DISPATCH ACTUALLY LEADS TO A PUBLISH rather than assuming: on workflow_dispatch ci.yml runs
+`full-suite` and SKIPS `pytest` (their `if`s are complementary), a skipped job does not fail a run, so a green
+dispatch concludes SUCCESS with head_branch=main -- exactly what package.yml's gate wants. All five workflows
+re-validated as YAML.
+
+LESSONS, both cheap to state and expensive to have missed:
+  * A CI comment asserting a PLATFORM BEHAVIOUR is a claim like any other and deserves the same standard as a
+    performance number. "This re-triggers CI" was never tested and was wrong.
+  * When a gate is DOWNSTREAM of a conclusion (workflow_run + conclusion == success), anything that leaves the
+    upstream red is not a test failure but a RELEASE failure. The blast radius of a red main is larger than
+    the test that is red.
+  * Also fixed a self-inflicted YAML slip: the `env:` block was patched INSIDE the run script's shell body,
+    which yaml caught immediately -- workflows get parsed after every edit, same discipline as
+    file_python_check for Python.
+
+## "137 CHANGED FILES WITH EMPTY DIFFS" -- measured: NOT our line endings, but now guarded
+
+Moose saw ~137 modified files whose diffs looked empty and suspected line-ending churn. MEASURED BEFORE
+ANSWERING, because "probably line endings" is exactly the kind of plausible story that wastes a day:
+
+  * every .py file in EVERY tree (delivery, both incoming branches, the pre-merge tree) is PURE LF:
+    CRLF=0, LF=1341, MIXED=0. No CRLF/LF flip was introduced by any edit in this arc.
+  * whitespace-only churn between trees: ZERO. Comparing each differing file with
+    `diff --strip-trailing-cr -B -b`, 46 differ vs the pre-merge tree and 54 vs the branch -- and NONE of
+    them collapses to whitespace. Every diff is real content.
+  * permission/mode-only diffs: ZERO.
+  * ranking the diffs by size shows no trivial ones -- the smallest are tens of real lines.
+  * the delivery ships ZERO text files containing CRLF. (83 files contain the bytes 0D 0A, all of them
+    PNG/npy/hsp binaries where that sequence occurs naturally in compressed data -- git treats them as
+    binary because they carry NUL early. The only non-obvious case, LICENSE, is genuinely text.)
+  * a FIRST-PASS SCRIPT SAID THE OPPOSITE -- "1339 files contain CR" -- because `grep -q $"\r"` in bash is
+    locale-translation syntax, not an escape, so it searched for a literal backslash-r and matched every
+    Python file containing "\r\n" IN A STRING. The number was garbage and was thrown out. Worth keeping: a
+    measurement that confirms the suspicion on the first try deserves MORE scrutiny, not less.
+
+SO WHERE DO THE PHANTOM DIFFS COME FROM? Not the file contents -- the INDEX. .gitattributes declares
+`* text=auto`, so git stores text LF-normalised. Anything committed before that took effect (or committed
+from a Windows checkout with core.autocrlf) sits in the index with CRLF, while the working tree is now LF.
+Git then reports EVERY LINE of those files as changed and the rendered diff looks empty, because the content
+IS identical. It is a one-time index/worktree mismatch, and the canonical fix is a renormalisation commit:
+    git ls-files --eol | grep -v "i/lf"      # names exactly the files whose INDEX copy is not LF
+    git add --renormalize .                  # rewrite the index to match the declared policy
+    git commit -m "normalize line endings"   # one commit, after which the phantom diffs are gone for good
+
+GUARD ADDED so this cannot drift back in from our side: test_no_text_file_ships_crlf walks every tracked
+text file and fails with the offenders NAMED, plus test_gitattributes_declares_lf_normalisation, which pins
+the policy the first test enforces (a guard for a setting nobody set is a lie). MUTATION-TESTED: a planted
+CRLF file makes it fail and the message names that file. This is the same rule as the cross-burial matrix --
+when a class of problem reaches a human as "the tooling looks broken", promote the CHECK, not the discipline.
+
+## THE PHANTOM DIFFS, PART 2: not line endings at all -- the delivery was reverting CI-OWNED FILES
+
+The first pass proved our text is LF-only and found no whitespace churn, but the count barely moved (137 ->
+128), so the first answer was INCOMPLETE. Widened the measurement -- and the earlier scan had a hole worth
+naming: it globbed `*.py` ONLY, so .md/.yml/.json were never checked. Re-scanned every text type across all
+four trees: still ZERO CRLF anywhere. Line endings are conclusively not the cause from our side.
+
+WHAT THE WIDER MEASUREMENT FOUND INSTEAD. Against the pre-merge tree the delivery touches 62 files (44 text
+changed, 14 added, 4 removed -- and the 4 removed are .pytest_cache junk, which is gitignored, so nothing
+real is lost). 62 is not 128. The gap is files whose live copy on main is written BY CI, not by us:
+
+    VERSION                              package.yml bumps the patch digit EVERY release
+    lecore_data/routing/index_128d.npz   semantic-coverage.yml rebuilds and commits it every push
+    tools/semantic/routing_seed.npz.xz   same commit, the other half of the lockstep pair
+    REFERENCE / CAPABILITIES / capabilities.json / API_QUICKREF / FACULTY_MAP / DOC_MAP / PIPELINE_MAP / pipelines.json
+                                         docs.yml regenerates and commits them
+
+A source snapshot carries whatever those files were when it was cut, so applying it over a live main REVERTS
+every one of them -- and they are exactly the files a human scrolls past without recognising a real change.
+THE HARMFUL ONE IS VERSION: our snapshot said 0.2.0. Reverting it makes the next auto-bump collide with a
+number already on PyPI, and PyPI REJECTS re-uploads of an existing version. That is a second, independent
+cause of publishing trouble sitting behind the workflow_run gate fixed earlier -- and it would have been
+invisible until the next release attempt.
+
+FIX (delivery-side, not repo-side): the archive now EXCLUDES the three files CI genuinely owns (VERSION and
+the routing index + seed) so it cannot revert them, and ships DELIVERY_NOTES.md stating who owns what, what
+breaks if each is overwritten, and the three commands that tell a human WHICH kind of empty-looking diff they
+are looking at (`git diff --numstat` zero/zero rows = mode or binary; `git diff --summary` = mode changes;
+`git ls-files --eol | grep -v i/lf` = index/worktree EOL mismatch). Generated docs stay IN the archive
+deliberately -- a standalone extract must be complete, and the next push regenerates them harmlessly.
+VERIFIED the trimmed archive still boots standalone: 2571 caps, find_capability works, 0 CRLF text files.
+
+LESSON: "which of these files does something OTHER than this snapshot own?" is a question a delivery should
+answer explicitly. An artifact that is regenerated by CI is not source, and shipping it as if it were makes
+every delivery look like a large uninterpretable change -- and, in VERSION's case, breaks a release.
+Also: when a fix moves the number from 137 to 128, that is not confirmation, it is a SECOND CAUSE announcing
+itself. The first explanation was true and insufficient; both had to be found.
+
+## CI RED AFTER THE THIRD MERGE: the split REVERTED shipped work, and my merge filter dropped fixes
+
+Eleven failures across seven suites. ONE ROOT CAUSE PAIR, both worth naming because both were self-inflicted
+and both are structural, not sloppiness:
+
+(A) THE CATALOG SPLIT REBUILT holographic_catalog.py FROM AN OLDER COPY. The six parts were extracted
+correctly, but the surrounding module came back without work that had shipped in it. Silently reverted:
+  * `_strip_filler` + `_FILLER_PREFIXES` + BOTH `q_stripped` call sites -- the whole filler-stripping fix,
+    which two modules and two test files import. The function was gone AND the exact-alias comparison that
+    used it. Restored all three pieces.
+  * `route_or_abstain`'s EMPIRICAL p -- the 3-tuple null cache and the counted (not normal-approximated) p.
+    The split's copy returned the older 2-tuple version with no `p` key at all, breaking six ladder tests.
+    Ported the 83-line body back from the pre-split tree.
+(B) MY ADDITION-ONLY MERGE FILTER DROPPED FIXES EXPRESSED AS MODIFICATIONS. Filtering the branch's diff to
+addition-only hunks was the right call for a wrong-base merge (it stopped age being read as deletion), but a
+FIX is usually a deletion plus an addition, so every fix in a modified hunk was silently skipped. Caught:
+`compare_image_files` still hard-importing PIL -- the branch shipped BOTH the fix and the test pinning it, my
+filter took the test and dropped the fix. Ported their PIL-free implementation.
+  -> SWEPT FOR MORE rather than assuming that was the only one: hashed every callable on UnifiedMind AND
+     every catalog function, pre-split vs now, at METHOD granularity. 1589 vs 1619 callables, ZERO lost, 5
+     changed -- four are the fixes above plus my crossover_report rename, and the fifth (render_scene_document
+     gaining view=/affine=) is the branch's own new work correctly merged. The class is closed, measured.
+
+CROSS-BURIAL, THIRD WAVE. ~57 new capabilities re-ranked older ones out of their own probes: the catalog
+selftest lost two ("represent a density volume over space", "my placed light has speckle noise") and 25 bare
+method-names fell out of their own top-15. Fixed additively -- aliases in the parts, and the 25 through the
+existing _METHOD_ALIASES map (the documented D1 mechanism) rather than 25 ad-hoc edits.
+
+SIX BYTE-IDENTICAL `_selftest` BODIES across the catalog parts tripped the duplication budget. Unified into
+holographic_catalog.check_catalog_part, mirroring the precedent holographic.unified.check_part already set.
+The budget says MAY SHRINK, MUST NEVER GROW -- so the fix is one home, not a budget line.
+
+TWO TESTS PINNED SNAPSHOTS OF THINGS THE SYSTEM IS ALLOWED TO CHANGE, and both failed BECAUSE THE SYSTEM GOT
+BETTER. Rewritten to assert the relationship instead:
+  * the z-floor calibration test demanded p > 0.05 for "smooth a bumpy mesh". Adding the alias map moved that
+    query from z=1.10/p=0.18 to z=4.20/p=0.015 -- the router improved. The real claim is that z and p are
+    DECOUPLED, so it now asserts a barely-clearing query (z=0.68, p=0.40) sits >5x above a strong one, which
+    survives catalog growth.
+  * the 2-bit quantization test demanded flip_rate == 0.0. That is a statement about INDEX DENSITY, which CI
+    regenerates: 509 rows flips nothing, 578 rows flips 1 in 150 at the most aggressive width. A denser index
+    having tighter margins is "margin governs, not bit width" WORKING. Now: 8/4-bit decision-exact, 2-bit
+    bounded at 2/150, AND the margin separation from ambiguous queries re-checked at the same width -- so the
+    tolerance is a statement about margins, not a licence for the claim to rot.
+LESSON: a test that fails when the system IMPROVES is measuring the wrong thing. Pin the relationship the
+claim is about, never a number the system is allowed to move.
+All seven gates green; 90 tests across the nine affected suites pass; both repaired module selftests green.
+
+## J-3D-26 CLOSED: a TRIPWIRE test fired because the thing it guarded got fixed
+
+CI showed one F early in the fast suite. Reproduced locally by running the RANKING-SENSITIVE tests first
+rather than bisecting 629 files blind -- the reasoning being that this session's fixes (restoring q_stripped,
+adding 25 _METHOD_ALIASES entries, pinning Field and the light probe) all move GLOBAL ranking, so a
+discoverability test was the likely casualty. It was, in one shot.
+
+WHAT IT WAS, AND IT IS A GOOD OUTCOME: test_field_query_regression_is_recorded_not_hidden asserted the BROKEN
+state -- that "represent a density volume over space" does NOT surface Field. It was written as a deliberate
+tripwire when the previous branch found holographic_catalog._selftest() failing on that probe: rather than
+relax the selftest (which would file a real discoverability regression as noise), they pinned the breakage and
+left instructions in the assertion message -- "the Field ranking appears FIXED -- delete this test, restore
+the assertion in _selftest(), and close J-3D-26". Fixing the ranking earlier this session tripped it exactly
+as designed. The test worked.
+
+RESOLVED BY FOLLOWING ITS OWN INSTRUCTION, with one improvement: rather than DELETE the slot, it now holds
+the mirror-image pin -- Field MUST be in the top-3 for that phrase -- with the reason the fix was additive
+(Field carried only single-word aliases: 'field', 'grid', 'volume'; single words lose to descriptively-titled
+siblings as the catalog grows, so the PHRASE a user types was added, nothing was demoted or relaxed). Keeping
+the slot matters because of the tripwire's OWN bigger finding: this module's _selftest is only reached by
+`python -m`, which is how the original rot sat green -- so the suite pins it too now.
+
+VERIFIED THE FIX DID NOT BURY ANYTHING ELSE, since that is this session's recurring class: ran every test file
+that calls find_capability / find_scored / route_or_abstain -- 395 passed, 92 skipped, zero failures -- plus
+the module-selftest walker (test_all_selftests) green, which is the audit that would catch another rotting
+selftest. All seven gates clean; docs regenerated.
+
+LESSON WORTH KEEPING: a test asserting a KNOWN-BROKEN state is a legitimate and underused artifact. It cannot
+rot silently (fixing the bug fails the test), it carries the fix instructions to whoever trips it, and it
+prevents a real regression being quietly downgraded to a relaxed assertion. The failure mode it guards
+against -- "just loosen the selftest" -- is exactly what would have happened otherwise.
+
+## PART SIZE GATE TRIPPED BY MY OWN PORT -- p09 rebalanced; two parts now near the cap
+
+Two failures reported. ONE WAS STALE, ONE WAS REAL, and separating them mattered:
+
+STALE: test_field_query_regression_is_recorded_not_hidden failed again -- but that test NO LONGER EXISTS in
+this tree (replaced last session by test_the_field_query_ranking_stays_fixed, and verified absent from the
+delivered archive). That CI run predates applying the delivery. Nothing to fix; recorded so the next reader
+does not go looking for a bug that was already closed.
+
+REAL, AND MINE: holographic_unified_p09 hit 2007 lines against a 2000 cap. Cause is traceable to this
+session: recovering the branch's scene/asset faculties after the addition-only filter dropped them, I ported
+SEVEN methods into p09 (sky_model, load_hdr, load_image, fetch_asset, render_animation, describe_to_scene,
+refine_scene) plus the PIL-free compare_image_files -- all correct work, all landed in one part because that
+is where the branch had them, and the part was already the largest.
+FIXED BY THEME, NOT BY THE FIRST CUT THAT FITS: moved fetch_asset / load_hdr / load_image to p01_READ, which
+is literally the part about input -- an asset fetch and two image loads are reads. sky_model, render_animation,
+describe_to_scene and refine_scene stayed in p09 with the scene/render work they belong to. p09 2007 -> 1952,
+p01 1423 -> 1479, all 1571 faculties still reachable (checked through the mind, not by reading the diff),
+split gate green, 85 tests across the affected suites pass.
+DID NOT raise PART_MAX_LOC. The budget is the whole point of the split; raising it to fit my own port would
+have been the exact move the unified split existed to prevent.
+
+HEADROOM WARNING, worth acting on before the next feature lands: p09 is at 1952 and p03_build_predictor at
+1941 -- both within ~50 lines of the cap, i.e. ONE faculty from tripping the gate again. The split's own test
+message says "split it again"; the cheap version is a further rebalance (p09's navigation/cost-field group and
+p03's predictor group are each coherent enough to become their own part). Flagged rather than done, because a
+speculative refactor of the faculty surface is not something to slip into a bugfix pass.
+
+## SAME TWO FAILURES, IDENTICAL LINE NUMBERS: the delivery is not reaching CI
+
+Third report of the same two failures, byte-identical to the previous one (same test name, same "2007").
+Checked the DELIVERED ARCHIVE directly rather than re-fixing what was already fixed: it contains
+test_the_field_query_ranking_stays_fixed at line 200 (the tripwire is absent) and p09 at 1952 lines. CI
+reports the tripwire and 2007. THE FIXES ARE IN THE ARCHIVE AND NOT IN THE TREE CI RUNS -- so the problem is
+the APPLY STEP, not the work. Most likely: the archive was not applied to the branch CI builds, or a
+phantom-diff cleanup (`git checkout .` / `git restore .` against the ~128 line-ending diffs) discarded real
+edits along with the noise, which is exactly the trap that class of churn sets.
+
+SHIPPED A DIFFERENT APPLY MECHANISM: tools/apply_ci_fixes.py, idempotent, finds its targets BY NAME.
+WHY NOT A PATCH: a unified diff needs exact surrounding context, and this tree has drifted (a delivery may
+have been applied in whole, in part, or not at all). A reconstruction of CI's state came out 11 lines off my
+own tree, which is precisely the drift that makes `git apply` fail. A script that no-ops when the work is
+already done applies correctly from EITHER state.
+
+THE SCRIPT'S OWN BUG, CAUGHT BY TESTING IT ON THE STATE IT REPAIRS. First run against the reconstructed
+broken tree aborted: "p01 has no module-level _selftest". The cut helper bounded a method by the next
+`    def ` only -- so when the method is the LAST in its class it ran to EOF and swallowed the module-level
+_selftest and the __main__ guard. My reconstruction had used the same logic and corrupted its own p01.
+Fixed to bound by the next sibling OR the first line back at column 0. VERIFIED PROPERLY AFTERWARDS: rebuilt
+a faithful broken tree (p09 2008 lines, both tests failing), ran the script, both tests pass, second run
+no-ops, 1571 faculties intact and the moved three still reachable.
+LESSON: a fix script tested only against an ALREADY-FIXED tree proves nothing -- it must be run against a
+reconstruction of the state it exists to repair. The no-op path is the easy half; the repair path is where
+the bug was.
+
+## CI GATE AUDIT: two checks were enforcing FILING, not correctness -- demoted to reports
+
+Moose: the pipeline should check for ERRORS, not character counts and file counts. Audited every gate against
+one question -- WHAT BREAKS IF THIS FAILS? -- rather than whether it looked tidy.
+
+KEPT GATING (each names something genuinely BROKEN, and each has caught a real defect on record):
+  audit_imports      an import that does not resolve
+  wiring_report      a module nothing can reach (caught the catalog parts' invisible import style)
+  catalog_gaps       a capability with no home or no runnable example
+  skill_lint CRITICAL/BROKEN/inert  a method an agent cannot call, an example that does not resolve,
+                     an alias that reaches nothing
+  tag_lint           io tags that LIE about what a converter consumes/produces
+  test_all_selftests caught the rotting catalog selftest this very session
+  part max LOC       maps to a HARD constraint: a file past the ~1 MB agent-read cap cannot be read in one
+                     pass, so the engine actually loses a capability. The number is a proxy; the loss is real.
+
+DEMOTED TO REPORTS (they were failing builds over filing decisions):
+  * skill_lint's 600-char does-field budget. Its OWN section comment already called it "a WARNING tier, not
+    a hard gate" -- but the regression count was added to `total`, which is the exit code, so a 620-character
+    description failed the build. Behaviour contradicted documented intent. MEASURED COST: six separate
+    prose-trimming rounds in one session, every one of them rewording a correct sentence to satisfy an
+    arithmetic threshold. CAUGHT-DEFECT COUNT: zero. An over-long entry is still correct, still discoverable,
+    still invocable. Now reported, not gated.
+  * structure_audit's misc/ file-count budget. 151 modules instead of 150 breaks nothing -- every one of them
+    imports, is wired, is discoverable, is tested. It blocked a merge until a correct module was relocated:
+    a filing decision enforced as an error. Still REPORTED (a swelling misc/ is a real smell and the nudge to
+    a real family is a good one), no longer fatal. Mutation-tested: an over-budget misc/ now exits 0 with a
+    NOTE. The giant-module budget beside it STAYS gating, because that one maps to the agent-read cap.
+
+NOT CHANGED, and why: the up-to-date checks on generated docs are drift gates, and stale generated docs LIE
+to whoever reads them -- that is an error, not bookkeeping. Same for the SERVICE.md endpoint gate: an
+undocumented endpoint is an agent-facing gap.
+
+THE REAL BLOAT IS ELSEWHERE, and it is worth a decision rather than a unilateral change: 3.4 MB of generated
+docs are regenerated AND COMMITTED on every push -- REFERENCE.md 1.86 MB, capabilities.json 740 KB,
+CAPABILITIES.md 509 KB, FACULTY_MAP 195 KB. The CONTENT is not padding (REFERENCE is aggregated module
+docstrings, ~42 lines per module across 578 modules), so there is nothing to trim inside it; the cost is that
+every push rewrites megabytes of derived files, which is also what makes a delivery look like a huge
+uninterpretable diff. RECOMMENDATION, for Moose to call: keep committing capabilities.json (it is the
+machine-readable contract other things consume and the drift gate protects it) and publish REFERENCE.md as a
+CI ARTIFACT instead of a committed file. That removes ~1.9 MB of per-push churn without losing anything a
+reader cannot regenerate. Not done unilaterally -- it changes what the repo publishes.
+
+PRINCIPLE, recorded: a gate should fail only when something is BROKEN. "Would a user or an agent be unable to
+do something?" is the test. If the honest answer is "no, but it is untidy", it is a report.
+
+## "IS REFERENCE.md SLOPPED TOGETHER IN NO PARTICULAR ORDER?" -- measured: NO, but the TEST could not tell
+
+Moose's hypothesis: the generated docs churn because they are assembled non-deterministically, so a rerun
+reshuffles megabytes with no real change. TESTED RATHER THAN ARGUED -- regenerate, compare bytes:
+  REFERENCE.md / CAPABILITIES.md / capabilities.json: IDENTICAL on a second run, and IDENTICAL AGAIN under
+  PYTHONHASHSEED=random. The generators are pure functions of the source. Hypothesis refuted.
+ALSO CORRECTED A CLAIM OF MY OWN from the previous entry: I wrote that 3.4 MB is "regenerated AND COMMITTED
+on every push". The regeneration happens every push; the COMMIT is guarded by `git diff --quiet $DOCS`, so
+derived files only land when they genuinely changed. The churn is real work, not noise. Imprecise the first
+time, corrected here.
+
+BUT THE QUESTION EXPOSED TWO REAL HOLES, both in the machinery that was supposed to guarantee the answer:
+  1. docs.yml -- THE ONE WORKFLOW THAT WRITES GENERATED DOCS -- did not pin PYTHONHASHSEED. ci.yml,
+     semantic-coverage.yml and wgsl.yml all do. Harmless today because the generators are deterministic
+     anyway, but it is precisely where a hash-order dependency would do its damage silently: an unpinned
+     generator iterating a set rewrites megabytes with no content change, and the commit-if-changed guard
+     faithfully commits the churn. Pinned.
+  2. test_gated_generators_are_deterministic ran the generator TWICE IN THE SAME ENVIRONMENT, so both passes
+     inherited ONE hash seed -- and its own docstring claimed it caught "dict-order" bugs. It could not: an
+     order-dependent generator emits the SAME bytes twice under a fixed seed and passes. Now runs the two
+     passes under DIFFERENT seeds (0 and 1618033), which is what actually exercises the claim. Verified the
+     seeds bite: the same 5-element set iterates as alpha,beta,gamma,delta,epsilon vs
+     beta,delta,epsilon,alpha,gamma across them.
+
+LESSON, and it is the same shape as the CI-comment-asserting-platform-behaviour one: A TEST THAT CANNOT FAIL
+FOR THE REASON ITS DOCSTRING NAMES IS A FALSE GREEN. This one had been passing for a while while being
+structurally incapable of catching its stated target. Checking the CHECK is worth doing whenever a question
+like "is this actually deterministic?" gets asked -- the honest answer came from measurement, and the
+measurement is now automated instead of being a thing I did once by hand.

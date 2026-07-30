@@ -121,3 +121,96 @@ def test_exact_alias_phrase_ranks_into_top_k():
     # a NON-exact query still ranks by overlap only (no bonus fires) -- the bonus is surgical, not a blanket boost
     hits2 = cat.find_capability("render an image", k=4)
     assert "the_target" in [h.name for h in hits2] or len(hits2) == 4   # still findable, not specially boosted
+
+
+# ---------------------------------------------------------------------------
+# J-3D-25: the catalog is split across parts. These pin what the split promised.
+# ---------------------------------------------------------------------------
+
+def test_every_part_is_registered_and_in_order():
+    """A part that exists on disk and is not called by default_catalog() registers NOTHING -- its
+    capabilities silently cease to exist, which is the exact failure mode this repo calls a gap. And the
+    ORDER is contractual: find_capability ranks by score and ties break by registration order, so calling
+    the parts in a different sequence would quietly move search results."""
+    import re
+    from pathlib import Path
+    from holographic.caching_and_storage import holographic_catalog as CAT
+
+    here = Path(CAT.__file__).parent
+    on_disk = sorted(p.stem for p in here.glob("holographic_catalog_p*.py"))
+    src = Path(CAT.__file__).read_text()
+    # each part exports register_pNN, not a shared `register`: six modules with the same public name is a
+    # name-collision the budget must not grow to absorb (tools/name_collisions), and distinct names make
+    # a traceback name its own part. The pattern below pins THAT contract too -- part pNN must be entered
+    # through register_pNN, so a copy-paste that calls the wrong part's entry point fails here.
+    called = [mod for mod, tag in re.findall(r"(holographic_catalog_p(\d+))\.register_p\2\(c\)", src)]
+    assert called == sorted(called), "the parts must be called in sorted order"
+    assert called == on_disk, "part files and register() calls disagree: %s vs %s" % (on_disk, called)
+
+
+def test_no_part_exceeds_the_agent_read_cap():
+    """The whole reason for the split. The file that makes capabilities discoverable must stay openable by
+    the agents doing the discovering -- holographic_catalog.py had reached 81% of 1 MB before this."""
+    from pathlib import Path
+    from holographic.caching_and_storage import holographic_catalog as CAT
+
+    here = Path(CAT.__file__).parent
+    for path in [Path(CAT.__file__)] + sorted(here.glob("holographic_catalog_p*.py")):
+        size = path.stat().st_size
+        assert size < 800_000, "%s is %d bytes -- at 80%% of the 1 MB cap, split again" % (path.name, size)
+
+
+def test_the_split_preserved_every_capability():
+    """The split's only promise was that it changes NOTHING. 522 capabilities were registered before it.
+
+    THIS TEST WAS WRONG WHEN FIRST WRITTEN and is kept as a lesson rather than quietly rewritten: it
+    asserted `== 522` exactly, and the very next item that registered a capability failed it. An exact count
+    is a CHANGE-DETECTOR, not a contract -- it fires on the intended, routine act of adding a capability,
+    which trains people to edit the number instead of reading the failure. The real contract is that the
+    split never LOSES one and never registers the same name twice; a floor plus a duplicate check says that
+    without punishing normal work."""
+    from holographic.caching_and_storage.holographic_catalog import default_catalog
+    caps = default_catalog().all()
+    assert len(caps) >= 522, "capability count FELL to %d -- the split baseline was 522, so a part is " \
+                             "no longer registering" % len(caps)
+    names = [c.name for c in caps]
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    assert not dupes, "the same capability name is registered twice: %s" % dupes
+
+
+def test_every_part_has_a_real_selftest():
+    """The split shipped six modules with no `__main__` and no `_selftest`, and the selftest-budget test
+    caught it on the next run -- correctly, because a module that asserts nothing is a false green.
+
+    Budgeting them would have silenced the alarm without testing anything. The parts have a real, cheap
+    contract, so they assert it. This pins that a future part is not added to the budget instead."""
+    import pathlib
+    from holographic.caching_and_storage import holographic_catalog as CAT
+
+    here = pathlib.Path(CAT.__file__).parent
+    parts = sorted(here.glob("holographic_catalog_p*.py"))
+    assert parts, "no catalog parts found -- the split is gone?"
+    for path in parts:
+        text = path.read_text()
+        assert "def _selftest():" in text and '__name__ == "__main__"' in text, \
+            "%s has no runnable selftest -- do NOT add it to _NO_SELFTEST_BUDGET, give it the three-line " \
+            "contract the others have" % path.name
+
+
+def test_the_field_query_ranking_stays_fixed():
+    """J-3D-26, CLOSED. This slot used to hold a TRIPWIRE that asserted the BROKEN state: 'represent a
+    density volume over space' did not surface the Field capability, the module _selftest asserted that it
+    did, and the selftest had been failing unnoticed. The tripwire existed so that whoever fixed the ranking
+    would be told, rather than the regression being quietly relaxed into noise. It did its job.
+
+    THE FIX WAS ADDITIVE, which is the part worth keeping: Field carried only single-word aliases ('field',
+    'grid', 'volume', ...), and single words lose to descriptively-titled siblings as a catalog grows -- so
+    the PHRASE a person actually types was added, not a threshold lowered and not a neighbour demoted. The
+    assertion now lives in holographic_catalog._selftest() where it started; this pins it from the suite too,
+    because a selftest that only runs under `python -m` is exactly how the original rot went unseen."""
+    from holographic.caching_and_storage.holographic_catalog import default_catalog
+    hits = [h.name for h in default_catalog().find_capability("represent a density volume over space")]
+    assert any("Field" in n for n in hits[:3]), \
+        "the Field ranking regressed again (top-3: %r) -- strengthen Field's aliases with the phrasing a " \
+        "user types; do NOT relax this or demote the neighbour that outranked it" % hits[:3]
+

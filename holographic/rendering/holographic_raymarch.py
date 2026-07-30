@@ -86,6 +86,7 @@ def sphere_trace(sdf, O, D, max_steps=96, max_dist=20.0, surf_eps=1e-3, relax=1.
             t[active] = t[active] + np.where(conv, 0.0, np.clip(d, 0.0, None))   # advance the non-converged ones
             keep = (~conv) & (t[active] < max_dist)             # drop converged AND escaped rays
             active = active[keep]
+        _finish_exhausted(sdf, O, D, t, hit, active, surf_eps)
         return hit, t, O + t[:, None] * D
     # -- over-relaxed (enhanced sphere tracing), opt-in -----------------------------------------------------------
     prev_r = np.zeros(M)                                          # radius of the previous safe sphere (per ray)
@@ -113,7 +114,34 @@ def sphere_trace(sdf, O, D, max_steps=96, max_dist=20.0, surf_eps=1e-3, relax=1.
         t[a] = t[a] + np.where(conv, 0.0, step)
         keep = (~conv) & (t[a] < max_dist)
         active = a[keep]
+    _finish_exhausted(sdf, O, D, t, hit, active, surf_eps)
     return hit, t, O + t[:, None] * D
+
+
+def _finish_exhausted(sdf, O, D, t, hit, active, surf_eps):
+    """Close the step budget honestly: an exhausted ray HOVERING AT a surface is a hit, not sky.
+
+    THE SILHOUETTE HALO ("lensing"), diagnosed live from Moose's review of the timelapse: rays grazing an
+    object's edge get safe steps the size of their distance to the surface -- near a silhouette that
+    distance stays tiny, so they inch along, exhaust max_steps mid-flight, and the old code classified
+    every unfinished ray as a MISS. Background leaked around every object boundary: a gap where the ground
+    plane "lensed" around the ball. Measured on the exact review scene: at the default 96 steps, 102 of
+    160 rays across the silhouette scanline were stuck ~0.0075 from a surface and painted as sky; at 384
+    steps all 160 land -- proving the geometry was fine and the CLASSIFICATION was the bug.
+
+    The rule is CONE acceptance: on loop exit, an active ray whose residual distance is inside
+    8*surf_eps + t * 4e-3 counts as a hit at its current t. The absolute term is from the measurement
+    (silhouette stragglers cluster at 5-8x eps); the t-PROPORTIONAL term is the pixel's own footprint --
+    at distance t a preview pixel subtends roughly t * 4 mrad, so a ray within that of a surface is
+    inside the pixel that surface paints, and calling it sky is wrong BY CONSTRUCTION at any distance.
+    The far stragglers made the case: rays at t ~ 18-20 with residual/t of 4e-4 (a tenth of a pixel) were
+    still being painted as sky under a purely absolute threshold. Rays genuinely passing an object have
+    residuals orders of magnitude past the cone and stay misses. The alternative -- a bigger budget --
+    pays on every complex scene forever; this pays one extra SDF eval on only the rays that ran out."""
+    if active.size == 0:
+        return
+    d_res = np.abs(np.asarray(sdf.eval(O[active] + t[active, None] * D[active]), float))
+    hit[active[d_res < 8.0 * surf_eps + t[active] * 4e-3]] = True
 
 
 def _trap_distance(P, trap, kind):
@@ -172,6 +200,12 @@ def sphere_trace_trapped(sdf, O, D, trap=(0.0, 0.0, 0.0), trap_kind="origin",
         t[active] = t[active] + np.where(conv, 0.0, np.clip(d, 0.0, None))
         keep = (~conv) & (t[active] < max_dist)
         active = active[keep]
+    # THE SAME CONE ACCEPTANCE THE PLAIN MARCH USES. sphere_trace_trapped is a SECOND march loop, and the
+    # silhouette-halo fix originally landed in only one of them: the plain march then counted an exhausted
+    # ray hovering at a surface as a HIT while this one still called it sky, so the two disagreed on exactly
+    # the grazing pixels -- breaking the invariant that adding a trap does not change the march (a colouring
+    # statistic must never move geometry). Duplicate logic, fixed in one copy, is the whole hazard.
+    _finish_exhausted(sdf, O, D, t, hit, active, surf_eps)
     # rays that never marched (empty) keep inf; clamp to max_dist so a palette gets a finite value
     trap_val = np.where(np.isfinite(trap_val), trap_val, max_dist)
     return hit, t, O + t[:, None] * D, trap_val
@@ -342,7 +376,31 @@ def render_sdf(sdf, camera, width=256, height=256, light_dir=(-0.4, 0.7, -0.3), 
     return frame
 
 
+def _selftest_silhouette_halo():
+    """The 'lensing' regression (Moose, from the timelapse review): rays grazing a silhouette exhaust the
+    step budget hovering at the surface, and the old exit classified every unfinished ray as SKY -- a gap
+    where the ground 'lensed' around the ball. Pinned on the exact diagnostic scanline: 96 steps used to
+    land 58/160; the cone-acceptance exit must land nearly all of them, while a ray aimed at open sky must
+    STAY a miss (the finisher must not dilate objects into the background)."""
+    class _Ball:
+        def eval(self, P):
+            P = np.atleast_2d(np.asarray(P, float))
+            ball = np.linalg.norm(P - np.array([0.0, 0.6, 0.0]), axis=1) - 0.6
+            floor = P[:, 1] + 0.0
+            return np.minimum(ball, floor)
+    O = np.repeat(np.array([[0.0, 1.0, 4.5]]), 160, axis=0)
+    xs = np.linspace(-0.35, 0.35, 160)
+    D = np.stack([xs, np.full(160, -0.052), np.full(160, -1.0)], axis=1)
+    D = D / np.linalg.norm(D, axis=1, keepdims=True)
+    hit, t, _ = sphere_trace(_Ball(), O, D, max_steps=96, max_dist=200.0)
+    assert hit.sum() >= 150, "silhouette halo is back: only %d/160 grazing rays landed" % hit.sum()
+    up = np.array([[0.0, 0.4, -1.0]]) / np.linalg.norm([0.0, 0.4, -1.0])
+    h2, _, _ = sphere_trace(_Ball(), O[:1], up, max_steps=96, max_dist=200.0)
+    assert not h2[0], "a clear-sky ray was claimed as a hit -- the finisher is dilating objects"
+
+
 def _selftest():
+    _selftest_silhouette_halo()
     from holographic.mesh_and_geometry.holographic_sdf import sphere, plane
     from holographic.rendering.holographic_render import Camera
     scene = sphere(0.8).union(plane(-0.8))

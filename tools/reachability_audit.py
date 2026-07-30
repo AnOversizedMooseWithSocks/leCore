@@ -62,6 +62,19 @@ _KNOWN_NEGATIVES = {
 #   determinism             -- the determinism harness (imported by ~15 modules to pin seeds); infrastructure, not a op.
 #   query_durable/queryfolder/querygraph/queryprog/querytime -- EXTENSIONS of the wired query-database faculty; the
 #                              agent reaches them through mind's query/database doors, not as standalone methods.
+#   objectref               -- the /invoke object-handle registry. It belongs to the SERVICE, not the mind: it is
+#                              minted and resolved by the HTTP boundary on the agent's behalf, and the agent uses
+#                              it by passing a 'ref:Type:N' string back as an argument, never by calling it. Wiring
+#                              a mind faculty for it would be forced -- a mind running in-process has no registry
+#                              and no need of one. Its capability IS catalogued (agents must discover the ref
+#                              convention); what is import-only is the implementation, which is the definition of
+#                              plumbing.
+#   catalog_p01..p06        -- the capability REGISTRY, split off holographic_catalog when it reached 81% of the
+#                              1 MB agent-read cap. They are the catalog itself, not separate capabilities:
+#                              default_catalog() calls register(c) on each IN ORDER (the sequence is part of the
+#                              contract -- find_capability ranks by score and ties break by registration order).
+#                              A mind faculty per part would be nonsense; every capability they register is
+#                              already discoverable through the one door they exist to fill.
 _KNOWN_INFRASTRUCTURE = {
     "holographic_service", "holographic_toolclient", "holographic_uri", "holographic_sync", "holographic_farm",
     "holographic_provenance", "holographic_determinism", "holographic_query_durable", "holographic_queryfolder",
@@ -71,6 +84,12 @@ _KNOWN_INFRASTRUCTURE = {
     # would publish a cache-warming detail as a user-facing verb; declaring it keeps the import-only list
     # meaningful instead of carrying a permanent known-good entry nobody reviews.
     "holographic_srcindex",
+    # THE CATALOG'S OWN PARTS + the object-handle registry: same reasoning one level up. The parts are
+    # reached through holographic_catalog (their only door, exactly as the unified parts are reached
+    # through holographic_unified), and objectref is plumbing the service holds on the caller's behalf.
+    "holographic_objectref",
+    "holographic_catalog_p01", "holographic_catalog_p02", "holographic_catalog_p03",
+    "holographic_catalog_p04", "holographic_catalog_p05", "holographic_catalog_p06",
 }
 
 

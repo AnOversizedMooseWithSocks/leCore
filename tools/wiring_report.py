@@ -36,6 +36,16 @@ _NEGATIVE_MARKERS = ("KEPT NEGATIVE", "KEPT NO-OP")
 EXEMPT = {
     "holographic_unified": "the top-level facade: it imports everything, nothing imports it",
     "holographic_catalog": "the discoverability registry itself",
+    # THE REGISTRY, SPLIT. Same status as holographic_catalog above and for the same reason -- these are
+    # its body, not independent modules: holographic_catalog.default_catalog() calls each part's
+    # register(c) in order, and nothing else may import them. Exempting them here rather than raising a
+    # budget keeps the audit meaningful; the parts are still reachable, still documented, still linted.
+    "holographic_catalog_p01": "the discoverability registry itself, part 1 of 6",
+    "holographic_catalog_p02": "the discoverability registry itself, part 2 of 6",
+    "holographic_catalog_p03": "the discoverability registry itself, part 3 of 6",
+    "holographic_catalog_p04": "the discoverability registry itself, part 4 of 6",
+    "holographic_catalog_p05": "the discoverability registry itself, part 5 of 6",
+    "holographic_catalog_p06": "the discoverability registry itself, part 6 of 6",
     "holographic_reference": "definitional reference implementations, used by the conformance harness (tests)",
     "benchmark_holographic": "a benchmark entry point",
     "stress_holographic": "an adversarial benchmark entry point",

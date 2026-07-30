@@ -164,7 +164,7 @@ def _selftest():
             assert out["trustworthy"] is False
             assert "MEANINGLESS" in out["note"]
 
-    text = report(out)
+    text = crossover_report(out)
     assert "crossover:" in text and out["note"].split(":")[0] in text
 
     try:

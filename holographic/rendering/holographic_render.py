@@ -685,6 +685,151 @@ def png_bytes(rgb01, level=6, filters=True):
     return sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", idat) + chunk(b"IEND", b"")
 
 
+def _png_unfilter(raw, height, stride, bpp):
+    """Reverse PNG's per-scanline filters -> (height, stride) uint8.
+
+    THE SHAPE OF THIS LOOP IS FORCED, and it is worth saying why rather than leaving it looking lazy. Filters
+    1 (Sub), 3 (Average) and 4 (Paeth) reference the pixel to the LEFT of the one being reconstructed, in the
+    row currently being reconstructed -- a serial dependency along x that no array op removes. Encoding picks
+    per row from all five (libpng's heuristic), and a real render leans on the expensive one: measured on a
+    192x144 path-traced frame, 114 of 144 rows chose Paeth, 27 chose Up, 3 chose Sub. A decoder that only
+    handled the cheap two would fail on this module's own output.
+
+    KEPT NEGATIVE -- NUMPY LOST HERE, and by a lot. The first version did each pixel's `bpp` channels as a
+    numpy slice, on the reasoning that vectorising is what this engine does. Measured on that same frame,
+    7 repeats: numpy-per-pixel 0.2081s (sd 0.0067), pure-Python bytearray 0.0149s (sd 0.0005) -- 14x, with
+    bit-identical output (asserted in _selftest). The reason is not subtle once measured: the vectors are
+    THREE BYTES LONG, so every row pays numpy's per-call dispatch ~576 times and gets nothing back for it.
+    Vectorisation pays on the size of the array, not on the fact that an array is present."""
+    out = []
+    prev = bytearray(stride)
+    pos = 0
+    for y in range(height):
+        ftype = raw[pos]; pos += 1
+        line = bytearray(raw[pos:pos + stride]); pos += stride
+        if ftype == 0:
+            pass                                                # None: the bytes are already the pixels
+        elif ftype == 1:
+            for x in range(bpp, stride):                         # Sub: + the pixel to the left
+                line[x] = (line[x] + line[x - bpp]) & 255
+        elif ftype == 2:
+            for x in range(stride):                              # Up: + the pixel above
+                line[x] = (line[x] + prev[x]) & 255
+        elif ftype == 3:
+            for x in range(stride):                              # Average: + floor((left + up) / 2)
+                a = line[x - bpp] if x >= bpp else 0
+                line[x] = (line[x] + ((a + prev[x]) >> 1)) & 255
+        elif ftype == 4:
+            for x in range(stride):                              # Paeth: + whichever of left/up/up-left is
+                a = line[x - bpp] if x >= bpp else 0             # nearest to their linear prediction
+                b = prev[x]
+                c = prev[x - bpp] if x >= bpp else 0
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                pred = a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
+                line[x] = (line[x] + pred) & 255
+        else:
+            raise ValueError("PNG scanline %d uses unknown filter type %d (valid: 0-4)" % (y, ftype))
+        out.append(bytes(line))
+        prev = line
+    return np.frombuffer(b"".join(out), np.uint8).reshape(height, stride)
+
+
+def png_decode(data):
+    """Decode PNG *bytes* to (array, info) -- the read side of `png_bytes`, pure stdlib (zlib + struct).
+
+    WHY THIS EXISTS. The engine could WRITE a PNG and could not READ one back: grepping the tree for IHDR
+    found only the encoder. That single missing direction blocked every see-then-fix loop an agent could
+    run -- render, look at the result, adjust, render again -- because "look at the result" had nowhere to
+    start. `compare_image_files`, the one faculty whose own docstring calls itself the check an agent makes
+    after a render, reached for Pillow instead, which is a hard third-party import in a core that promises
+    NumPy/Flask/stdlib/hashlib. This closes the loop with no new dependency.
+
+    Returns (arr, info): `arr` is (H, W, C) uint8 for 8-bit files and uint16 for 16-bit, C being 1/2/3/4 by
+    colour type; `info` carries width/height/bit_depth/color_type/channels. Handles greyscale, RGB, palette,
+    and both alpha forms.
+
+    NOT SUPPORTED, loudly rather than silently wrong: Adam7 INTERLACED files raise. They are rare, nothing in
+    this engine writes one, and a decoder that quietly returned a scrambled image would be far worse than one
+    that refuses. tRNS transparency chunks are ignored for palette images (the palette's RGB is returned) --
+    stated because a caller compositing on alpha would otherwise never learn it."""
+    import struct
+    import zlib
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("not a PNG file (bad signature) -- png_decode reads PNG only")
+    pos, idat, palette, width, height, depth, ctype = 8, [], None, 0, 0, 8, 2
+    while pos + 8 <= len(data):
+        (length,) = struct.unpack(">I", data[pos:pos + 4])
+        ctag = data[pos + 4:pos + 8]
+        body = data[pos + 8:pos + 8 + length]
+        if ctag == b"IHDR":
+            width, height, depth, ctype, _comp, _filt, interlace = struct.unpack(">IIBBBBB", body[:13])
+            if interlace:
+                raise ValueError("interlaced (Adam7) PNGs are not supported -- re-save without interlacing")
+            if depth not in (8, 16):
+                raise ValueError("bit depth %d is not supported (8 and 16 are); sub-byte depths would need "
+                                 "bit unpacking this decoder deliberately does not carry" % depth)
+        elif ctag == b"PLTE":
+            palette = np.frombuffer(body, np.uint8).reshape(-1, 3)
+        elif ctag == b"IDAT":
+            idat.append(body)                                    # IDAT may be SPLIT across chunks; concatenate
+        elif ctag == b"IEND":
+            break
+        pos += 12 + length                                       # 4 length + 4 tag + body + 4 CRC
+    if not width or not height:
+        raise ValueError("PNG has no IHDR chunk")
+    channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}.get(ctype)
+    if channels is None:
+        raise ValueError("unknown PNG colour type %d" % ctype)
+    sample_bytes = depth // 8
+    bpp = max(1, channels * sample_bytes)                        # bytes per pixel: the filter stride
+    stride = width * bpp
+    raw = zlib.decompress(b"".join(idat))
+    if len(raw) < height * (stride + 1):
+        raise ValueError("truncated PNG: %d bytes of scanline data, expected %d"
+                         % (len(raw), height * (stride + 1)))
+    flat = _png_unfilter(raw, height, stride, bpp)
+    if depth == 16:
+        arr = flat.reshape(height, width, channels, 2).astype(np.uint16)
+        arr = (arr[..., 0] << 8) | arr[..., 1]                   # PNG is big-endian
+    else:
+        arr = flat.reshape(height, width, channels)
+    if ctype == 3:
+        if palette is None:
+            raise ValueError("palette PNG has no PLTE chunk")
+        arr = palette[arr[..., 0].astype(np.int32)]              # index -> RGB; tRNS ignored, see the docstring
+    return arr, {"width": int(width), "height": int(height), "bit_depth": int(depth),
+                 "color_type": int(ctype), "channels": int(arr.shape[2])}
+
+
+def load_png(path, mode="rgb01"):
+    """Read a PNG file back into an array -- the exact inverse of `save_png`, so a render survives a round trip.
+
+    mode='rgb01' (default) returns (H,W,3) float in [0,1], which is what every renderer and image call in this
+    engine takes, so the value that comes back can be fed straight to compare_images, a denoiser, or another
+    render. Alpha is dropped and greyscale is broadcast to three channels, because the caller asked for RGB.
+    mode='raw' returns the array exactly as stored (uint8/uint16, 1-4 channels) plus nothing lost.
+
+    ROUND-TRIP IS NOT EXACT and pretending otherwise would be a lie: save_png quantises to 8 bits, so
+    load_png(save_png(x)) matches x to about 1/255 (~0.004), not to floating point. That is a property of the
+    file format, not of this decoder -- assert against a tolerance, never against equality."""
+    with open(path, "rb") as f:
+        arr, info = png_decode(f.read())
+    if mode == "raw":
+        return arr
+    if mode != "rgb01":
+        raise ValueError("unknown mode %r -- use 'rgb01' (float RGB in [0,1]) or 'raw'" % (mode,))
+    peak = 65535.0 if arr.dtype == np.uint16 else 255.0
+    x = arr.astype(np.float64) / peak
+    if x.shape[2] == 1:
+        x = np.repeat(x, 3, axis=2)                              # grey -> RGB
+    elif x.shape[2] == 2:
+        x = np.repeat(x[..., :1], 3, axis=2)                     # grey+alpha -> RGB, alpha dropped
+    elif x.shape[2] >= 4:
+        x = x[..., :3]                                           # RGBA -> RGB
+    return x
+
+
 def save_image(path, rgb01, level=6, filters=True):
     """Save an (H,W,3) [0,1] image, routed by extension: .png uses the stdlib encoder (deterministic,
     zero-dependency, always available); anything else (.jpg, .webp, .bmp, ...) uses Pillow when installed and
@@ -705,6 +850,263 @@ def save_image(path, rgb01, level=6, filters=True):
     arr = np.clip(np.asarray(rgb01, float) * 255.0 + 0.5, 0, 255).astype(np.uint8)
     Image.fromarray(arr).save(str(path))
     return str(path)
+
+
+def load_hdr(path, exposure=1.0):
+    """Read a Radiance .hdr / .pic (RGBE) file -> (H,W,3) float32 of LINEAR radiance, UNBOUNDED.
+
+    WHY THIS IS THE BLOCKER AND NOT A NICETY. Environment lighting is most of what makes a render read as a
+    photograph, and leCore already has every piece except this one: DomeLight's `color` accepts a callable
+    f(dirs)->rgb, sky_dome() samples an equirectangular env by lon/lat, and both were reachable. What was
+    missing is a way to GET a real environment map in. load_png reads 8 bits, and an 8-bit env is exactly the
+    wrong input: the whole point of an HDRI is that the sun is thousands of times brighter than the sky, and
+    quantising that to 0..255 throws away the dynamic range that produces the highlights and the directional
+    shaping. A tone-mapped JPEG of a sky is not an environment light; it is a picture of one.
+
+    MEASURED, and it is the reason to bother (160x120, 2 bounces, dome only, matched mean radiance):
+        flat-colour dome vs procedural sky FIELD   mean abs diff 0.0054   <- essentially invisible
+        bright-LEFT env  vs the same env MIRRORED  mean abs diff 0.0336   <- 6x larger, and clearly directional
+    A smooth sky field is NOT worth reaching for over a well-chosen flat colour. DIRECTIONAL STRUCTURE is what
+    pays, and only a real HDRI has it. That measurement is why this function exists and the sky-field
+    convenience wrapper does not.
+
+    RGBE packs three 8-bit mantissas and one shared 8-bit exponent per pixel: value = mantissa * 2^(E-128-8).
+    Handles both the old flat scanlines and the new-style adaptive RLE (the common case from every HDRI site).
+    `exposure` scales the result linearly -- a convenience, since env maps arrive at arbitrary absolute scale.
+
+    KEPT NEGATIVES:
+      * .exr is NOT supported. It is a whole container format (multi-part, tiled, half/float, several
+        compressors) and reading it properly is its own project. Radiance .hdr covers the free-HDRI ecosystem.
+      * XYZE files raise rather than decode wrongly: their primaries are CIE XYZ, not sRGB, and returning them
+        as if they were RGB would silently shift every colour in the render.
+      * The result is UNBOUNDED on purpose -- do not clip it. Clipping the sun to 1.0 is exactly the
+        information loss that makes an 8-bit env useless, and it would make this function pointless."""
+    import numpy as np
+    with open(path, "rb") as fh:
+        data = fh.read()
+    if not data.startswith(b"#?"):
+        raise ValueError("%s is not a Radiance HDR file (no '#?RADIANCE' signature)" % path)
+    nl = data.index(b"\n\n") if b"\n\n" in data else data.index(b"\r\n\r\n")
+    header = data[:nl].decode("latin-1")
+    if "FORMAT=32-bit_rle_xyze" in header:
+        raise ValueError("XYZE Radiance files are not supported -- their primaries are CIE XYZ, not RGB, and "
+                         "returning them as RGB would silently shift every colour. Convert to RGBE first.")
+    pos = nl + (2 if data[nl:nl + 2] == b"\n\n" else 4)
+    eol = data.index(b"\n", pos)
+    dims = data[pos:eol].decode("latin-1").split()          # e.g. '-Y 512 +X 1024'
+    if len(dims) != 4 or dims[0] != "-Y" or dims[2] != "+X":
+        raise ValueError("unsupported Radiance scanline order %r -- only '-Y h +X w' is handled" % " ".join(dims))
+    h, w = int(dims[1]), int(dims[3])
+    buf, pos = data, eol + 1
+
+    rgbe = np.empty((h, w, 4), np.uint8)
+    for y in range(h):
+        # NEW-STYLE ADAPTIVE RLE: a 4-byte header of 2,2,hi,lo with (hi<<8|lo)==width, then each of the four
+        # channels run-length coded SEPARATELY across the scanline. Anything else is a flat scanline.
+        if w >= 8 and w < 32768 and buf[pos] == 2 and buf[pos + 1] == 2 and \
+                ((buf[pos + 2] << 8) | buf[pos + 3]) == w:
+            pos += 4
+            for c in range(4):
+                x = 0
+                while x < w:
+                    n = buf[pos]; pos += 1
+                    if n > 128:                              # a RUN of (n-128) copies of one byte
+                        rgbe[y, x:x + n - 128, c] = buf[pos]; pos += 1; x += n - 128
+                    else:                                    # a LITERAL span of n bytes
+                        rgbe[y, x:x + n, c] = np.frombuffer(buf, np.uint8, n, pos); pos += n; x += n
+        else:
+            rgbe[y] = np.frombuffer(buf, np.uint8, w * 4, pos).reshape(w, 4); pos += w * 4
+
+    e = rgbe[..., 3].astype(np.int32)
+    # exponent 0 means the pixel is exactly black; ldexp on it would give a denormal-ish smear instead of zero
+    scale = np.where(e == 0, 0.0, np.ldexp(1.0, e - (128 + 8))).astype(np.float64)
+    out = rgbe[..., :3].astype(np.float64) * scale[..., None] * float(exposure)
+    return out.astype(np.float32)
+
+
+_BAYER8 = (np.array([[0, 32, 8, 40, 2, 34, 10, 42], [48, 16, 56, 24, 50, 18, 58, 26],
+                     [12, 44, 4, 36, 14, 46, 6, 38], [60, 28, 52, 20, 62, 30, 54, 22],
+                     [3, 35, 11, 43, 1, 33, 9, 41], [51, 19, 59, 27, 49, 17, 57, 25],
+                     [15, 47, 7, 39, 13, 45, 5, 37], [63, 31, 55, 23, 61, 29, 53, 21]],
+                    float) + 0.5) / 64.0    # the classic index matrix, normalised to (0,1)
+
+
+def save_gif(path, frames, fps=12.0, loop=0, palette="fixed", dither=False):
+    import struct
+    """Write frames -> an animated GIF89a, pure stdlib, deterministic. The 'watch my animation' output.
+
+    WHY GIF AND NOT MP4. An MP4 needs an H.264 encoder, which is a licensing question and a large project;
+    a GIF needs a palette and LZW, both of which fit in a page of readable code -- the same call the PNG
+    codec made (zlib + five filters beats linking libpng). A GIF plays in every browser and chat window an
+    agent might paste it into, which is the actual requirement: the see->fix loop for MOTION.
+
+    Colour: uniform 6x7x6 quantisation (252 colours) with the SAME palette every frame. Deterministic by
+    construction -- no median-cut, whose splits depend on content and would make two runs of the same
+    animation differ. The cost is banding on smooth gradients; for a preview of motion that trade is right.
+
+    KEPT NEGATIVES: no dithering (it would animate as crawling noise between near-identical frames, which
+    reads as artefact, not texture); no per-frame palettes (smaller banding, non-deterministic sizes, and
+    the frame-to-frame palette swaps flicker in some viewers); no transparency/disposal tricks. 8-bit
+    output -- apply a view transform first, an unbounded linear buffer will just clip."""
+    frames = [np.clip(np.asarray(f, float), 0.0, 1.0) for f in frames]
+    if not frames:
+        raise ValueError("save_gif needs at least one frame")
+    h, w = frames[0].shape[:2]
+    for f in frames:
+        if f.shape[:2] != (h, w):
+            raise ValueError("all frames must share one size; got %s then %s" % ((h, w), f.shape[:2]))
+
+    # ---- palette --------------------------------------------------------------------------------------
+    # palette="fixed": the 6x7x6 lattice (252 colours) -- deterministic BY CONSTRUCTION, content-blind,
+    #   and it BANDS on smooth gradients (a sky sweep gets ~6 blue levels). The first delivered timelapse
+    #   showed exactly that, and the review called it.
+    # palette="adaptive": median-cut over pixels sampled from ALL FRAMES AT ONCE. Deterministic GIVEN the
+    #   frames (fixed sampling stride, fixed split rule: widest channel of the biggest box, split at the
+    #   median) -- the same input still produces the same bytes, which is the determinism the engine
+    #   promises. ONE palette for the whole animation on purpose: per-frame palettes were declined as a
+    #   kept negative (palette swaps flicker in some viewers), and computing over all frames means the
+    #   gradient's levels sit where the animation actually spends its pixels.
+    # dither=True: ordered 8x8 Bayer. The declined dithering was ERROR-DIFFUSION/noise, which crawls
+    #   between near-identical frames; Bayer is a FIXED spatial pattern, so consecutive frames dither
+    #   identically and the animation stays still. Trades banding for a fine stable checker texture.
+    if palette == "adaptive":
+        stride = max(1, int(np.sqrt(sum(f.shape[0] * f.shape[1] for f in frames) / 60000.0)))
+        sample = np.concatenate([(f[::stride, ::stride, :3].reshape(-1, 3) * 255).astype(np.uint8)
+                                 for f in frames], axis=0)
+        boxes = [sample]
+        while len(boxes) < 256:
+            widths = [(b.max(axis=0).astype(int) - b.min(axis=0).astype(int)).max() if len(b) > 1 else -1
+                      for b in boxes]
+            i = int(np.argmax(widths))
+            if widths[i] <= 0:
+                break                                          # fewer distinct colours than slots: done
+            box = boxes.pop(i)
+            ch = int(np.argmax(box.max(axis=0).astype(int) - box.min(axis=0).astype(int)))
+            order = np.argsort(box[:, ch], kind="stable")      # stable sort: determinism under ties
+            half = len(order) // 2
+            boxes.insert(i, box[order[:half]])
+            boxes.append(box[order[half:]])
+        pal = np.zeros((256, 3), np.uint8)
+        for i, b in enumerate(boxes):
+            pal[i] = b.mean(axis=0).round().astype(np.uint8)
+
+        pal_f = pal[:len(boxes)].astype(float)
+        pal_sq = (pal_f ** 2).sum(axis=1)                      # |p|^2 per palette entry, once
+
+        def quantise(img):
+            """Nearest-palette via the GEMM identity: argmin |x-p|^2 = argmin (|p|^2 - 2 x.p), since |x|^2
+            is constant per pixel. One matmul against the palette instead of a (H,W,256,3) broadcast --
+            profiled at 0.49 s and an 84 MB temporary per 240x180 frame the old way. TIE CAVEAT, stated:
+            a pixel EXACTLY equidistant from two palette entries could round differently under the two
+            formulas; for continuous float pixels that set is measure-zero, and the identity is asserted
+            against real frames in tests -- recorded rather than silently assumed."""
+            px = (np.clip(img[..., :3], 0, 1) * 255)
+            if dither:
+                px = px + (_BAYER8[np.arange(px.shape[0])[:, None] % 8,
+                                   np.arange(px.shape[1])[None, :] % 8] - 0.5)[..., None] * 8.0
+            flat = px.reshape(-1, 3)
+            score = pal_sq[None, :] - 2.0 * (flat @ pal_f.T)
+            return np.argmin(score, axis=1).astype(np.int32).reshape(px.shape[:2])
+    elif palette == "fixed":
+        rl, gl, bl = 6, 7, 6
+        pal = np.zeros((256, 3), np.uint8)
+        idx = 0
+        for r in range(rl):
+            for g in range(gl):
+                for b in range(bl):
+                    pal[idx] = (round(255 * r / (rl - 1)), round(255 * g / (gl - 1)),
+                                round(255 * b / (bl - 1)))
+                    idx += 1
+
+        def quantise(img):
+            im = img[..., :3]
+            if dither:
+                im = np.clip(im + (_BAYER8[np.arange(im.shape[0])[:, None] % 8,
+                                           np.arange(im.shape[1])[None, :] % 8] - 0.5)[..., None] / 24.0,
+                             0.0, 1.0)
+            r = np.clip((im[..., 0] * (rl - 1)).round(), 0, rl - 1)
+            g = np.clip((im[..., 1] * (gl - 1)).round(), 0, gl - 1)
+            b = np.clip((im[..., 2] * (bl - 1)).round(), 0, bl - 1)
+            return (r * gl * bl + g * bl + b).astype(np.int32)
+    else:
+        raise ValueError("palette must be 'fixed' or 'adaptive'; got %r" % (palette,))
+
+    def lzw(indices, code_bits=8):
+        """GIF-flavoured LZW: dictionary resets on overflow, codes packed LSB-first.
+
+        PACKING: codes go into a running integer accumulator flushed a byte at a time. The first version
+        appended every BIT to a Python list and re-assembled bytes afterwards -- ~0.9 s/frame at 240x180,
+        profiled as the larger half of the adaptive-GIF bill. Same codes, same LSB-first order, so the
+        output is byte-identical by construction (asserted in tests against real frames); this is
+        repackaging, not re-encoding. Dictionary keys are ints (prev_code << 8 | symbol) instead of
+        tuples for the same reason: identical dictionary contents, cheaper hashing."""
+        clear, end = 1 << code_bits, (1 << code_bits) + 1
+        by = bytearray()
+        acc = 0                                                # bit accumulator, LSB-first
+        acc_n = 0
+
+        def emit(code, size):
+            nonlocal acc, acc_n
+            acc |= code << acc_n
+            acc_n += size
+            while acc_n >= 8:
+                by.append(acc & 0xFF)
+                acc >>= 8
+                acc_n -= 8
+
+        nbits = code_bits + 1
+        table = {}
+        nxt = end + 1
+        emit(clear, nbits)
+        it = iter(int(s) for s in indices)
+        try:
+            buf = next(it)                                    # a bare symbol IS its own code
+        except StopIteration:
+            emit(end, nbits)
+            if acc_n:
+                by.append(acc & 0xFF)
+            return bytes(by)
+        for sym in it:
+            key = (buf << 8) | sym
+            code = table.get(key)
+            if code is not None:
+                buf = code
+            else:
+                emit(buf, nbits)
+                table[key] = nxt
+                nxt += 1
+                if nxt > (1 << nbits) and nbits < 12:
+                    nbits += 1
+                elif nxt >= (1 << 12):
+                    emit(clear, nbits)                        # dictionary full: reset, like every encoder
+                    table = {}
+                    nxt = end + 1
+                    nbits = code_bits + 1
+                buf = sym
+        emit(buf, nbits)
+        emit(end, nbits)
+        if acc_n:
+            by.append(acc & 0xFF)
+        return bytes(by)
+
+    delay = max(2, int(round(100.0 / float(fps))))            # GIF time unit is 1/100 s; <2 is ignored by viewers
+    out = bytearray(b"GIF89a")
+    out += struct.pack("<HHBBB", w, h, 0xF7, 0, 0)            # global palette, 256 entries, 8 bpp
+    out += pal.tobytes()
+    out += b"\x21\xff\x0bNETSCAPE2.0\x03\x01" + struct.pack("<H", int(loop)) + b"\x00"
+    for f in frames:
+        out += b"\x21\xf9\x04\x00" + struct.pack("<H", delay) + b"\x00\x00"     # graphic control: delay
+        out += b"\x2c" + struct.pack("<HHHH", 0, 0, w, h) + b"\x00"                # image descriptor
+        out += bytes([8])                                                            # LZW minimum code size
+        data = lzw(quantise(f).ravel())
+        for i in range(0, len(data), 255):                                           # 255-byte sub-blocks
+            chunk = data[i:i + 255]
+            out += bytes([len(chunk)]) + chunk
+        out += b"\x00"
+    out += b"\x3b"
+    with open(path, "wb") as fh:
+        fh.write(bytes(out))
+    return path
 
 
 def save_png(path, rgb01, level=6, filters=True):
@@ -1162,3 +1564,79 @@ def _selftest_silhouette():
 
 if __name__ == "__main__":
     _selftest(); _selftest_silhouette()
+
+
+def _selftest_hdr():
+    """The RGBE contract, with the dynamic range as the load-bearing assertion.
+
+    An HDR reader that decoded the pixels correctly and lost the RANGE would be worse than none: it would
+    look like it worked, and every render lit by it would quietly be lit by a flat sky. So the test plants a
+    sun ~2000x the sky and requires the ratio to SURVIVE."""
+    import os
+    import tempfile
+
+    def _to_rgbe(rgb):
+        m = rgb.max(axis=-1)
+        e = np.where(m <= 1e-32, 0, np.floor(np.log2(np.maximum(m, 1e-32))) + 129).astype(np.int32)
+        s = np.where(e == 0, 0.0, np.ldexp(1.0, -(e - 128 - 8)))
+        out = np.zeros(rgb.shape[:2] + (4,), np.uint8)
+        out[..., :3] = np.clip(rgb * s[..., None], 0, 255).astype(np.uint8)
+        out[..., 3] = e.astype(np.uint8)
+        return out
+
+    h, w = 8, 16
+    img = np.zeros((h, w, 3))
+    img[:, :8] = (0.4, 0.5, 0.7)
+    img[2:4, 10:12] = (900.0, 850.0, 700.0)              # a sun, ~2000x the sky
+    rgbe = _to_rgbe(img)
+    head = b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y %d +X %d\n" % (h, w)
+
+    d = tempfile.mkdtemp()
+    flat_p = os.path.join(d, "flat.hdr")
+    with open(flat_p, "wb") as f:
+        f.write(head + rgbe.tobytes())
+    a = load_hdr(flat_p)
+    assert a.shape == (h, w, 3) and a.dtype == np.float32
+
+    # THE ASSERTION THAT MATTERS: unbounded output, range intact. An 8-bit path would collapse this to ~2x.
+    assert a.max() > 100.0, "the sun was clipped -- a bounded HDR reader defeats the entire purpose"
+    assert a[2, 10, 0] / a[0, 0, 0] > 1000.0, "dynamic range lost: ratio %.1f" % (a[2, 10, 0] / a[0, 0, 0])
+    assert a[0, 12, 0] == 0.0, "exponent 0 must decode to exactly black, not a denormal smear"
+
+    # NEW-STYLE ADAPTIVE RLE must decode BIT-IDENTICALLY to the flat form -- same pixels, different container.
+    body = b""
+    for y in range(h):
+        body += bytes([2, 2, (w >> 8) & 255, w & 255])
+        for c in range(4):
+            row = rgbe[y, :, c].tobytes()
+            i = 0
+            while i < len(row):
+                n = min(128, len(row) - i)
+                body += bytes([n]) + row[i:i + n]
+                i += n
+    rle_p = os.path.join(d, "rle.hdr")
+    with open(rle_p, "wb") as f:
+        f.write(head + body)
+    assert np.array_equal(a, load_hdr(rle_p)), "RLE and flat scanlines must decode identically"
+
+    # a PNG must be REFUSED, not misread as garbage radiance
+    png_p = os.path.join(d, "not.hdr")
+    save_png(png_p, np.zeros((4, 4, 3)))
+    try:
+        load_hdr(png_p)
+        raise AssertionError("a non-Radiance file must raise")
+    except ValueError as exc:
+        assert "RADIANCE" in str(exc)
+
+    # XYZE is REFUSED rather than silently colour-shifted (kept negative, asserted)
+    xyz_p = os.path.join(d, "xyze.hdr")
+    with open(xyz_p, "wb") as f:
+        f.write(b"#?RADIANCE\nFORMAT=32-bit_rle_xyze\n\n-Y 2 +X 2\n" + b"\0" * 16)
+    try:
+        load_hdr(xyz_p)
+        raise AssertionError("XYZE must raise, not decode as RGB")
+    except ValueError as exc:
+        assert "XYZ" in str(exc)
+
+    print("load_hdr selftest OK -- RLE == flat, sun/sky ratio %.0fx preserved unbounded (max %.0f), "
+          "black exact, PNG and XYZE refused" % (a[2, 10, 0] / a[0, 0, 0], a.max()))

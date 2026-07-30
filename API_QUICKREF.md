@@ -30,6 +30,7 @@
     - `redo_history(self)` -- The redo stack's step labels (most-recently-undone last).
     - `can_undo(self)` -- 
     - `can_redo(self)` -- 
+- `scene_info(scene, verbose=True)` -- WHAT IS IN THIS SCENE -- the first call to make, before adding to it or rendering it.
 
 ### `holographic_modifier`
 *holographic_modifier.py -- the per-object MODIFIER STACK + dependency graph (modeling-app backlog, items C + D).*
@@ -92,6 +93,8 @@
 - `octahedron(s=1.0)` -- A regular octahedron of 'radius' `s` (vertex distance along each axis).
 - `escape_time(width=256, height=256, center=(-0.5, 0.0), span=3.0, max_iter=100, power=2.0, julia_c=None, bounds_ratio=None)` -- The 2D ESCAPE-TIME fractal FIELD -- Mandelbrot (`julia_c=None`) or Julia (`julia_c=(re,im)`), the classic z -> z^power + c iteration in the complex plane.
 - `to_callable(node)` -- Wrap an SDF tree as a plain `sdf(P)->dist` callable for mesh_from_sdf / marching.
+- `make_sdf_shape(kind='sphere', position=None, scale=None, rotate=None, **kw)` -- Build an SDF primitive by NAME, optionally placed -- the one door to the shapes above.
+- `dsl_grammar()` -- The SDF DSL, described well enough to WRITE one -- node kinds, parameter meanings, and an example.
 - `parse_dsl(text)` -- Parse a (kind p0 ...
 - `node_kinds(node)` -- The set of kinds used anywhere in the tree (for the inexact-warp warning and for tests).
 
@@ -184,7 +187,11 @@
 - `rasterize_mesh(mesh, camera, width=512, height=512, lights=None, base_color=(0.8, 0.8, 0.8), background=(0.05, 0.06, 0.08), ambient=0.15, vectorized=True, texture=None, uvs=None, smooth=False, two_sided=False, vertex_colors=None)` -- Rasterise a triangle mesh to an (H, W, 3) RGB image in [0,1] with a z-buffer and per-face Lambert shading.
 - `volume_render(field, camera, bounds, width=256, height=256, steps=96, mode='smoke', sigma=12.0, emission_color=None, albedo=(0.9, 0.9, 0.95), lights=None, background=(0.0, 0.0, 0.0), early_term=True, empty_skip=True, occ_res=24, occ_thresh=0.001, term_eps=0.002, self_shadow=False, shadow_steps=16, shadow_sigma=None, ambient=(0.42, 0.52, 0.66), phase_g=0.0, powder=False, multi_scatter=1, only=None)` -- Render a density FIELD (callable points(N,3)->density>=0) volumetrically by marching camera rays through `bounds`=(min_corner, max_corner) and accumulating the volume-rendering integral.
 - `png_bytes(rgb01, level=6, filters=True)` -- Encode an (H,W,3) image in [0,1] to PNG *bytes* -- a minimal, pure-stdlib encoder (zlib + struct), so the render module carries no image-library dependency.
+- `png_decode(data)` -- Decode PNG *bytes* to (array, info) -- the read side of `png_bytes`, pure stdlib (zlib + struct).
+- `load_png(path, mode='rgb01')` -- Read a PNG file back into an array -- the exact inverse of `save_png`, so a render survives a round trip.
 - `save_image(path, rgb01, level=6, filters=True)` -- Save an (H,W,3) [0,1] image, routed by extension: .png uses the stdlib encoder (deterministic, zero-dependency, always available); anything else (.jpg, .webp, .bmp, ...) uses Pillow when installed and otherwise refuses with the install command -- the same opt-in contract as every accelerator (`pip install pillow`, or the `images` extra).
+- `load_hdr(path, exposure=1.0)` -- Read a Radiance .hdr / .pic (RGBE) file -> (H,W,3) float32 of LINEAR radiance, UNBOUNDED.
+- `save_gif(path, frames, fps=12.0, loop=0, palette='fixed', dither=False)` -- 
 - `save_png(path, rgb01, level=6, filters=True)` -- Write an (H,W,3) image in [0,1] to a PNG file.
 - `frame_delta_tiles(prev, curr, tile=32, thresh=0.001)` -- The pixel-streaming primitive: split two frames into `tile`x`tile` blocks and return only the tiles that CHANGED, as a list of (row, col, tile_pixels).
 - `fit_camera(mesh, direction=(1.0, 0.75, 1.1), up=(0.0, 1.0, 0.0), fov_deg=50.0, aspect=1.0, margin=1.06)` -- Solve for the camera that FRAMES a mesh: the closest eye along `direction` that keeps every vertex inside the frustum, with the target chosen so the subject is CENTRED.
