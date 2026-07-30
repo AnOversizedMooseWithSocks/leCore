@@ -16,6 +16,15 @@ permissions:
 jobs:
   reference:
     runs-on: ubuntu-latest
+    env:
+      # THE ONE WORKFLOW THAT WRITES GENERATED DOCS, and the only one that was missing this pin (ci.yml,
+      # semantic-coverage.yml and wgsl.yml all set it). The generators are deterministic today -- verified
+      # byte-identical across regenerations under a RANDOM seed -- so this changes nothing now. It is here
+      # because this is the exact place a hash-order dependency would do its damage silently: an unpinned
+      # generator that iterates a set would rewrite megabytes of derived files with no content change, and
+      # the commit-if-changed guard below would faithfully commit the churn. Pinned, plus an idempotence
+      # test (tests/test_regen_docs.py) so the property is checked rather than assumed.
+      PYTHONHASHSEED: "0"
     steps:
       - uses: actions/checkout@v4
 

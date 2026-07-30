@@ -197,23 +197,20 @@ def test_every_part_has_a_real_selftest():
             "contract the others have" % path.name
 
 
-def test_field_query_regression_is_recorded_not_hidden():
-    """A KEPT NEGATIVE, pinned so it cannot be mistaken for noise.
+def test_the_field_query_ranking_stays_fixed():
+    """J-3D-26, CLOSED. This slot used to hold a TRIPWIRE that asserted the BROKEN state: 'represent a
+    density volume over space' did not surface the Field capability, the module _selftest asserted that it
+    did, and the selftest had been failing unnoticed. The tripwire existed so that whoever fixed the ranking
+    would be told, rather than the regression being quietly relaxed into noise. It did its job.
 
-    holographic_catalog._selftest() asserts that 'represent a density volume over space' surfaces the Field
-    capability. IT DOES NOT, and has not for some time: the top hits are CAD mass properties and Gabor cloud
-    render. Verified against the PRISTINE uploaded repo, so this pre-dates the current work -- the catalog's
-    ranking for that query degraded as entries accumulated.
-
-    This is deliberately NOT fixed by relaxing the assertion, which would file a real discoverability
-    regression as noise. Filed J-3D-26. This test asserts the CURRENT broken state so the day someone fixes
-    the ranking, it fails and points at the real work.
-
-    THE BIGGER FINDING: no audit caught this. skill_lint, catalog_gaps and reachability_audit are all clean
-    while `python3 -m holographic.caching_and_storage.holographic_catalog` raises. 105 of 599 test files
-    call a module _selftest(); this module's is not among them, so a rotting selftest sat green."""
+    THE FIX WAS ADDITIVE, which is the part worth keeping: Field carried only single-word aliases ('field',
+    'grid', 'volume', ...), and single words lose to descriptively-titled siblings as a catalog grows -- so
+    the PHRASE a person actually types was added, not a threshold lowered and not a neighbour demoted. The
+    assertion now lives in holographic_catalog._selftest() where it started; this pins it from the suite too,
+    because a selftest that only runs under `python -m` is exactly how the original rot went unseen."""
     from holographic.caching_and_storage.holographic_catalog import default_catalog
     hits = [h.name for h in default_catalog().find_capability("represent a density volume over space")]
-    assert not any("Field" in n for n in hits[:3]), \
-        "the Field ranking appears FIXED -- delete this test, restore the assertion in _selftest(), and " \
-        "close J-3D-26"
+    assert any("Field" in n for n in hits[:3]), \
+        "the Field ranking regressed again (top-3: %r) -- strengthen Field's aliases with the phrasing a " \
+        "user types; do NOT relax this or demote the neighbour that outranked it" % hits[:3]
+

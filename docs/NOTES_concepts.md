@@ -47720,3 +47720,166 @@ BETTER. Rewritten to assert the relationship instead:
 LESSON: a test that fails when the system IMPROVES is measuring the wrong thing. Pin the relationship the
 claim is about, never a number the system is allowed to move.
 All seven gates green; 90 tests across the nine affected suites pass; both repaired module selftests green.
+
+## J-3D-26 CLOSED: a TRIPWIRE test fired because the thing it guarded got fixed
+
+CI showed one F early in the fast suite. Reproduced locally by running the RANKING-SENSITIVE tests first
+rather than bisecting 629 files blind -- the reasoning being that this session's fixes (restoring q_stripped,
+adding 25 _METHOD_ALIASES entries, pinning Field and the light probe) all move GLOBAL ranking, so a
+discoverability test was the likely casualty. It was, in one shot.
+
+WHAT IT WAS, AND IT IS A GOOD OUTCOME: test_field_query_regression_is_recorded_not_hidden asserted the BROKEN
+state -- that "represent a density volume over space" does NOT surface Field. It was written as a deliberate
+tripwire when the previous branch found holographic_catalog._selftest() failing on that probe: rather than
+relax the selftest (which would file a real discoverability regression as noise), they pinned the breakage and
+left instructions in the assertion message -- "the Field ranking appears FIXED -- delete this test, restore
+the assertion in _selftest(), and close J-3D-26". Fixing the ranking earlier this session tripped it exactly
+as designed. The test worked.
+
+RESOLVED BY FOLLOWING ITS OWN INSTRUCTION, with one improvement: rather than DELETE the slot, it now holds
+the mirror-image pin -- Field MUST be in the top-3 for that phrase -- with the reason the fix was additive
+(Field carried only single-word aliases: 'field', 'grid', 'volume'; single words lose to descriptively-titled
+siblings as the catalog grows, so the PHRASE a user types was added, nothing was demoted or relaxed). Keeping
+the slot matters because of the tripwire's OWN bigger finding: this module's _selftest is only reached by
+`python -m`, which is how the original rot sat green -- so the suite pins it too now.
+
+VERIFIED THE FIX DID NOT BURY ANYTHING ELSE, since that is this session's recurring class: ran every test file
+that calls find_capability / find_scored / route_or_abstain -- 395 passed, 92 skipped, zero failures -- plus
+the module-selftest walker (test_all_selftests) green, which is the audit that would catch another rotting
+selftest. All seven gates clean; docs regenerated.
+
+LESSON WORTH KEEPING: a test asserting a KNOWN-BROKEN state is a legitimate and underused artifact. It cannot
+rot silently (fixing the bug fails the test), it carries the fix instructions to whoever trips it, and it
+prevents a real regression being quietly downgraded to a relaxed assertion. The failure mode it guards
+against -- "just loosen the selftest" -- is exactly what would have happened otherwise.
+
+## PART SIZE GATE TRIPPED BY MY OWN PORT -- p09 rebalanced; two parts now near the cap
+
+Two failures reported. ONE WAS STALE, ONE WAS REAL, and separating them mattered:
+
+STALE: test_field_query_regression_is_recorded_not_hidden failed again -- but that test NO LONGER EXISTS in
+this tree (replaced last session by test_the_field_query_ranking_stays_fixed, and verified absent from the
+delivered archive). That CI run predates applying the delivery. Nothing to fix; recorded so the next reader
+does not go looking for a bug that was already closed.
+
+REAL, AND MINE: holographic_unified_p09 hit 2007 lines against a 2000 cap. Cause is traceable to this
+session: recovering the branch's scene/asset faculties after the addition-only filter dropped them, I ported
+SEVEN methods into p09 (sky_model, load_hdr, load_image, fetch_asset, render_animation, describe_to_scene,
+refine_scene) plus the PIL-free compare_image_files -- all correct work, all landed in one part because that
+is where the branch had them, and the part was already the largest.
+FIXED BY THEME, NOT BY THE FIRST CUT THAT FITS: moved fetch_asset / load_hdr / load_image to p01_READ, which
+is literally the part about input -- an asset fetch and two image loads are reads. sky_model, render_animation,
+describe_to_scene and refine_scene stayed in p09 with the scene/render work they belong to. p09 2007 -> 1952,
+p01 1423 -> 1479, all 1571 faculties still reachable (checked through the mind, not by reading the diff),
+split gate green, 85 tests across the affected suites pass.
+DID NOT raise PART_MAX_LOC. The budget is the whole point of the split; raising it to fit my own port would
+have been the exact move the unified split existed to prevent.
+
+HEADROOM WARNING, worth acting on before the next feature lands: p09 is at 1952 and p03_build_predictor at
+1941 -- both within ~50 lines of the cap, i.e. ONE faculty from tripping the gate again. The split's own test
+message says "split it again"; the cheap version is a further rebalance (p09's navigation/cost-field group and
+p03's predictor group are each coherent enough to become their own part). Flagged rather than done, because a
+speculative refactor of the faculty surface is not something to slip into a bugfix pass.
+
+## SAME TWO FAILURES, IDENTICAL LINE NUMBERS: the delivery is not reaching CI
+
+Third report of the same two failures, byte-identical to the previous one (same test name, same "2007").
+Checked the DELIVERED ARCHIVE directly rather than re-fixing what was already fixed: it contains
+test_the_field_query_ranking_stays_fixed at line 200 (the tripwire is absent) and p09 at 1952 lines. CI
+reports the tripwire and 2007. THE FIXES ARE IN THE ARCHIVE AND NOT IN THE TREE CI RUNS -- so the problem is
+the APPLY STEP, not the work. Most likely: the archive was not applied to the branch CI builds, or a
+phantom-diff cleanup (`git checkout .` / `git restore .` against the ~128 line-ending diffs) discarded real
+edits along with the noise, which is exactly the trap that class of churn sets.
+
+SHIPPED A DIFFERENT APPLY MECHANISM: tools/apply_ci_fixes.py, idempotent, finds its targets BY NAME.
+WHY NOT A PATCH: a unified diff needs exact surrounding context, and this tree has drifted (a delivery may
+have been applied in whole, in part, or not at all). A reconstruction of CI's state came out 11 lines off my
+own tree, which is precisely the drift that makes `git apply` fail. A script that no-ops when the work is
+already done applies correctly from EITHER state.
+
+THE SCRIPT'S OWN BUG, CAUGHT BY TESTING IT ON THE STATE IT REPAIRS. First run against the reconstructed
+broken tree aborted: "p01 has no module-level _selftest". The cut helper bounded a method by the next
+`    def ` only -- so when the method is the LAST in its class it ran to EOF and swallowed the module-level
+_selftest and the __main__ guard. My reconstruction had used the same logic and corrupted its own p01.
+Fixed to bound by the next sibling OR the first line back at column 0. VERIFIED PROPERLY AFTERWARDS: rebuilt
+a faithful broken tree (p09 2008 lines, both tests failing), ran the script, both tests pass, second run
+no-ops, 1571 faculties intact and the moved three still reachable.
+LESSON: a fix script tested only against an ALREADY-FIXED tree proves nothing -- it must be run against a
+reconstruction of the state it exists to repair. The no-op path is the easy half; the repair path is where
+the bug was.
+
+## CI GATE AUDIT: two checks were enforcing FILING, not correctness -- demoted to reports
+
+Moose: the pipeline should check for ERRORS, not character counts and file counts. Audited every gate against
+one question -- WHAT BREAKS IF THIS FAILS? -- rather than whether it looked tidy.
+
+KEPT GATING (each names something genuinely BROKEN, and each has caught a real defect on record):
+  audit_imports      an import that does not resolve
+  wiring_report      a module nothing can reach (caught the catalog parts' invisible import style)
+  catalog_gaps       a capability with no home or no runnable example
+  skill_lint CRITICAL/BROKEN/inert  a method an agent cannot call, an example that does not resolve,
+                     an alias that reaches nothing
+  tag_lint           io tags that LIE about what a converter consumes/produces
+  test_all_selftests caught the rotting catalog selftest this very session
+  part max LOC       maps to a HARD constraint: a file past the ~1 MB agent-read cap cannot be read in one
+                     pass, so the engine actually loses a capability. The number is a proxy; the loss is real.
+
+DEMOTED TO REPORTS (they were failing builds over filing decisions):
+  * skill_lint's 600-char does-field budget. Its OWN section comment already called it "a WARNING tier, not
+    a hard gate" -- but the regression count was added to `total`, which is the exit code, so a 620-character
+    description failed the build. Behaviour contradicted documented intent. MEASURED COST: six separate
+    prose-trimming rounds in one session, every one of them rewording a correct sentence to satisfy an
+    arithmetic threshold. CAUGHT-DEFECT COUNT: zero. An over-long entry is still correct, still discoverable,
+    still invocable. Now reported, not gated.
+  * structure_audit's misc/ file-count budget. 151 modules instead of 150 breaks nothing -- every one of them
+    imports, is wired, is discoverable, is tested. It blocked a merge until a correct module was relocated:
+    a filing decision enforced as an error. Still REPORTED (a swelling misc/ is a real smell and the nudge to
+    a real family is a good one), no longer fatal. Mutation-tested: an over-budget misc/ now exits 0 with a
+    NOTE. The giant-module budget beside it STAYS gating, because that one maps to the agent-read cap.
+
+NOT CHANGED, and why: the up-to-date checks on generated docs are drift gates, and stale generated docs LIE
+to whoever reads them -- that is an error, not bookkeeping. Same for the SERVICE.md endpoint gate: an
+undocumented endpoint is an agent-facing gap.
+
+THE REAL BLOAT IS ELSEWHERE, and it is worth a decision rather than a unilateral change: 3.4 MB of generated
+docs are regenerated AND COMMITTED on every push -- REFERENCE.md 1.86 MB, capabilities.json 740 KB,
+CAPABILITIES.md 509 KB, FACULTY_MAP 195 KB. The CONTENT is not padding (REFERENCE is aggregated module
+docstrings, ~42 lines per module across 578 modules), so there is nothing to trim inside it; the cost is that
+every push rewrites megabytes of derived files, which is also what makes a delivery look like a huge
+uninterpretable diff. RECOMMENDATION, for Moose to call: keep committing capabilities.json (it is the
+machine-readable contract other things consume and the drift gate protects it) and publish REFERENCE.md as a
+CI ARTIFACT instead of a committed file. That removes ~1.9 MB of per-push churn without losing anything a
+reader cannot regenerate. Not done unilaterally -- it changes what the repo publishes.
+
+PRINCIPLE, recorded: a gate should fail only when something is BROKEN. "Would a user or an agent be unable to
+do something?" is the test. If the honest answer is "no, but it is untidy", it is a report.
+
+## "IS REFERENCE.md SLOPPED TOGETHER IN NO PARTICULAR ORDER?" -- measured: NO, but the TEST could not tell
+
+Moose's hypothesis: the generated docs churn because they are assembled non-deterministically, so a rerun
+reshuffles megabytes with no real change. TESTED RATHER THAN ARGUED -- regenerate, compare bytes:
+  REFERENCE.md / CAPABILITIES.md / capabilities.json: IDENTICAL on a second run, and IDENTICAL AGAIN under
+  PYTHONHASHSEED=random. The generators are pure functions of the source. Hypothesis refuted.
+ALSO CORRECTED A CLAIM OF MY OWN from the previous entry: I wrote that 3.4 MB is "regenerated AND COMMITTED
+on every push". The regeneration happens every push; the COMMIT is guarded by `git diff --quiet $DOCS`, so
+derived files only land when they genuinely changed. The churn is real work, not noise. Imprecise the first
+time, corrected here.
+
+BUT THE QUESTION EXPOSED TWO REAL HOLES, both in the machinery that was supposed to guarantee the answer:
+  1. docs.yml -- THE ONE WORKFLOW THAT WRITES GENERATED DOCS -- did not pin PYTHONHASHSEED. ci.yml,
+     semantic-coverage.yml and wgsl.yml all do. Harmless today because the generators are deterministic
+     anyway, but it is precisely where a hash-order dependency would do its damage silently: an unpinned
+     generator iterating a set rewrites megabytes with no content change, and the commit-if-changed guard
+     faithfully commits the churn. Pinned.
+  2. test_gated_generators_are_deterministic ran the generator TWICE IN THE SAME ENVIRONMENT, so both passes
+     inherited ONE hash seed -- and its own docstring claimed it caught "dict-order" bugs. It could not: an
+     order-dependent generator emits the SAME bytes twice under a fixed seed and passes. Now runs the two
+     passes under DIFFERENT seeds (0 and 1618033), which is what actually exercises the claim. Verified the
+     seeds bite: the same 5-element set iterates as alpha,beta,gamma,delta,epsilon vs
+     beta,delta,epsilon,alpha,gamma across them.
+
+LESSON, and it is the same shape as the CI-comment-asserting-platform-behaviour one: A TEST THAT CANNOT FAIL
+FOR THE REASON ITS DOCSTRING NAMES IS A FALSE GREEN. This one had been passing for a while while being
+structurally incapable of catching its stated target. Checking the CHECK is worth doing whenever a question
+like "is this actually deterministic?" gets asked -- the honest answer came from measurement, and the
+measurement is now automated instead of being a thing I did once by hand.
