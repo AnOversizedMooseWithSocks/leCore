@@ -3,6 +3,7 @@ import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools"))
 from select_tests import affected_tests, build_graph, _transitive
+import io
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -73,3 +74,27 @@ def test_build_artifacts_are_inert():
 def test_unknown_archive_elsewhere_still_forces_full():
     # a .zip that ISN'T the build artifact could be genuine capability/test data -> stay safe, run everything
     assert affected_tests(["features/mystery_dataset.zip"], root=ROOT) == "ALL"
+
+
+def test_a_committed_data_artifact_scopes_to_its_readers_not_the_world():
+    """The CI-cost fix, pinned. Non-.py changes used to return ALL unconditionally, so ROUTINE BOT PUSHES --
+    docs.yml commits capabilities.json, semantic-coverage.yml commits the routing index and seed -- took the
+    full-suite path every time. A committed artifact whose readers are DEMONSTRABLY a handful of tests now
+    selects those tests.
+
+    The safety half matters more than the speed half, so both directions are asserted: a file that is not in
+    the tree, and one that a NON-test module reads (unbounded reach), must still force ALL."""
+    idx = os.path.join(ROOT, "lecore_data", "routing", "index_128d.npz")
+    if not os.path.exists(idx):
+        pytest.skip("no shipped routing index in this tree")
+    picked = affected_tests(["lecore_data/routing/index_128d.npz"], root=ROOT)
+    assert picked != "ALL", "a committed artifact with known readers should not drag in the whole suite"
+    assert picked, "...but it must still select the tests that actually read it"
+    assert len(picked) < 20, "scoped selection ballooned to %d tests -- the read-detection is matching prose" % len(picked)
+    for p in picked:
+        src = io.open(os.path.join(ROOT, p), encoding="utf-8", errors="ignore").read()
+        assert "index_128d" in src, "%s was selected but never names the artifact" % p
+
+    # SAFETY, both ways
+    assert affected_tests(["features/mystery_dataset.zip"], root=ROOT) == "ALL", \
+        "a path not in the tree cannot be reasoned about -- it must stay ALL"
