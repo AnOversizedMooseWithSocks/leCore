@@ -47919,3 +47919,34 @@ LESSON: a fail-safe default is correct and should stay, but it is worth measurin
 the answer was "our own bots, on every push", and the fallback was doing its job on inputs that never needed
 it. The fix is to make the tool able to reason about the known cases -- not to weaken the fallback for the
 unknown ones.
+
+## CI TIMEOUT AT 20 MINUTES: the fast path was the whole suite in ONE box; sharded, and gates pulled out
+
+Moose: too many tests in one job. Correct -- and the infrastructure to fix it was already here, unused on
+this path. `full-suite` has run as a 4-way shard matrix for a while, and its own comment calls --num-shards
+"the whole tuning knob"; the per-change `pytest` job never used it, so whenever selection fell back to the
+full suite (which, per the previous entry, our own bots were forcing on routine pushes) 629 files ran in a
+single 20-minute box. timeout-minutes is PER JOB, so four shards give that path 4x the budget.
+
+WHAT CHANGED, and the two judgement calls in it:
+  * The unscoped path now runs shard i of 4, using the SAME deterministic bin-packing as full-suite (verified:
+    150/159/160/160 files, union exactly 629).
+  * SCOPED runs are deliberately NOT sharded. When select_tests returns a real list it is small (14 files for
+    a tools change), and splitting that across four runners costs more in startup than it saves -- shard 0
+    runs it whole, the other three exit immediately.
+  * THE GATES MOVED OUT into their own unsharded `gates` job. This is the part that would have quietly made
+    things WORSE: the lint/audit/doc-drift gates lived inside the `pytest` job, so sharding it four ways would
+    have run every one of them FOUR TIMES per push for identical results -- more waste than the fix removed.
+    They are seconds each, share nothing with the test run, and a gate failure is now reported separately
+    instead of buried in whichever shard reached it first.
+  * ONE STABLE CHECK NAME: a matrix reports as "pytest (0)".."pytest (3)", so a required check pinned to
+    "pytest" would match nothing. Added `pytest-gate`, which needs [pytest, gates] and fails if either did.
+    ** MOOSE: branch protection must be repointed at `pytest-gate`. ** That is a repo setting, not a file.
+
+PINNED, because both failure modes here are SILENT: test_ci_gates_run_once_and_every_shard_is_covered asserts
+(a) no sharded job runs gate steps, and (b) the matrix length EQUALS the --num-shards passed to the tool -- a
+matrix of 4 with `--num-shards 3` would drop a quarter of the suite and still go green, which is the worst
+outcome this file can produce. Mutation-tested: changing the matrix to 3 shards fails it.
+AND THE PIN'S OWN INSTRUMENT WAS BROKEN FIRST: yaml.dump WRAPS at 80 columns, which split "--num-shards"
+across a newline so the search found nothing -- a false green inside the test written to prevent a false
+green. Fixed with width=10**9. Third time this session that checking the check mattered.

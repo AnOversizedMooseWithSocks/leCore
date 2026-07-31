@@ -107,3 +107,44 @@ def test_missing_generator_fails_loudly_rather_than_being_skipped():
     dropped files in this repo before, and a silent skip turns that into a green run that regenerated nothing."""
     missing, _failed, _changed = regen_docs.run(check=False, root=str(ROOT / "tests" / "_no_such_dir"))
     assert set(missing) == {g for g, _ in regen_docs.GENERATORS}, "absent generators must all be reported"
+
+
+def test_ci_gates_run_once_and_every_shard_is_covered():
+    """CI SHAPE, pinned after the 20-minute timeout. Two properties that are cheap to state and expensive to
+    lose:
+
+    1. THE GATES RUN ONCE. They used to sit inside the `pytest` job; sharding that job four ways would have
+       run every lint/audit/doc-drift gate FOUR TIMES per push for identical results. They now live in their
+       own unsharded `gates` job.
+    2. THE SHARD COUNT IN ci.yml MATCHES THE ONE PASSED TO shard_tests.py. A matrix of 4 with a
+       `--num-shards 3` command would silently drop a quarter of the suite -- green CI, untested code, which
+       is the worst failure this file can have."""
+    import re
+    import yaml
+    ci = ROOT / ".github" / "workflows" / "ci.yml"
+    if not ci.is_file():
+        pytest.skip("no ci.yml in this tree")
+    text = ci.read_text(encoding="utf-8")
+    spec = yaml.safe_load(text)
+    jobs = spec["jobs"]
+
+    gate_steps = [s for s in jobs["gates"]["steps"] if "Gate --" in (s.get("name") or "")]
+    assert gate_steps, "the gates job has no gate steps -- did they drift back into a sharded job?"
+    for name, job in jobs.items():
+        if job.get("strategy", {}).get("matrix"):
+            assert not [s for s in job.get("steps", []) if "Gate --" in (s.get("name") or "")], \
+                "job %r is sharded AND runs gates -- every gate would run once per shard" % name
+
+    for name, job in jobs.items():
+        matrix = job.get("strategy", {}).get("matrix", {})
+        if "shard" not in matrix:
+            continue
+        declared = len(matrix["shard"])
+        # width=huge: yaml.dump WRAPS at 80 columns by default, which split "--num-shards" across a
+        # newline and made this search silently find nothing -- a false green in the test meant to
+        # prevent a false green in CI.
+        used = {int(n) for n in re.findall(r'--num-shards\s+(\d+)', yaml.dump(job, width=10 ** 9))}
+        assert used, "job %r declares a shard matrix but never passes --num-shards" % name
+        assert used == {declared}, \
+            "job %r has %d shards in the matrix but passes --num-shards %s -- part of the suite would " \
+            "never run" % (name, declared, sorted(used))
