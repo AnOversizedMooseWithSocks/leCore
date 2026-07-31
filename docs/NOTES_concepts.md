@@ -47883,3 +47883,39 @@ FOR THE REASON ITS DOCSTRING NAMES IS A FALSE GREEN. This one had been passing f
 structurally incapable of catching its stated target. Checking the CHECK is worth doing whenever a question
 like "is this actually deterministic?" gets asked -- the honest answer came from measurement, and the
 measurement is now automated instead of being a thing I did once by hand.
+
+## WHY THE "FAST" SUITE KEPT RUNNING EVERYTHING: bot-committed artifacts hit the fail-safe
+
+Moose: the fast suite scopes tests to changed files -- so why does it fall back to running EVERYTHING when it
+cannot place a file? Answered by measuring which changes actually take that path, not by reading the code.
+
+tools/select_tests.py had two "ALL" exits, both deliberately FAIL-SAFE (never skip a test that might depend on
+the change). The .py one is fine. The other -- "any non-.py, non-inert file -> ALL" -- was firing on ROUTINE
+BOT PUSHES, because the bots commit exactly those files: docs.yml commits capabilities.json,
+semantic-coverage.yml commits lecore_data/routing/index_128d.npz and tools/semantic/routing_seed.npz.xz.
+MEASURED before changing anything: capabilities.json is named by 1 test, the routing artifacts by 5 -- and any
+one of them pulled in all 629 test files. tools/ and .yml/.md turned out to be handled correctly already
+(47 tools modules ARE in the map; .md/.yml are inert), so the whole cost sat on three committed artifacts.
+
+FIX: a non-.py change now looks for what actually READS it, by filename, so it cannot go stale the way a
+hand-kept table would. Result: the routing index scopes to 3 tests instead of 629. capabilities.json and the
+seed still return ALL, correctly -- a NON-test module reads each, which makes the reach unbounded.
+
+THE SAFETY HALF NEEDED THREE CORRECTIONS, and the tests caught every one:
+  1. First cut counted any MENTION of the filename. Both engine "references" turned out to be DOCSTRING PROSE
+     ("capabilities.json / describe_skill records...", "the shipped q8 index (...npz preferred)"), which
+     dragged ~509 tests back in -- no better than ALL and dishonest about why. Now a line must also do
+     path/open/load work to count as a read.
+  2. First cut returned an EMPTY SET when nothing matched, which the caller read as "no tests affected" --
+     an unknown binary would have selected NOTHING. That is the exact safety property the fallback exists for,
+     inverted. Now "nothing reads it" returns None -> ALL.
+  3. A hypothetical path (features/mystery_dataset.zip, named only as a FIXTURE STRING inside
+     test_select_tests.py) matched that test and broke the contract it pins. Now a file must EXIST in the tree
+     to be scoped: you cannot reason about what reads a file you cannot see.
+Pinned by test_a_committed_data_artifact_scopes_to_its_readers_not_the_world, which asserts BOTH directions --
+the artifact scopes small AND every selected test really names it, plus unknown paths still force ALL.
+
+LESSON: a fail-safe default is correct and should stay, but it is worth measuring WHAT KEEPS HITTING IT. Here
+the answer was "our own bots, on every push", and the fallback was doing its job on inputs that never needed
+it. The fix is to make the tool able to reason about the known cases -- not to weaken the fallback for the
+unknown ones.

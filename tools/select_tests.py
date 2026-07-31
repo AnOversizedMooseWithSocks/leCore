@@ -32,7 +32,9 @@ Usage:
 Importable too: affected_tests(changed_files, root=".") -> sorted list of test paths, or the string "ALL".
 """
 import ast
+import io
 import os
+import re
 import sys
 
 # directories that are never project modules (mirrors reorganize_repo.py's DEFAULT_IGNORE)
@@ -152,6 +154,62 @@ def _transitive(name, direct, _cache):
     return seen
 
 
+def _reads_file(src, base):
+    """Does this source actually READ `base`, as opposed to merely mentioning it in prose?
+
+    The distinction is load-bearing. Both engine references to our two committed artifacts turned out to be
+    DOCSTRING TEXT ("capabilities.json / describe_skill records...", "the shipped q8 index (...npz preferred)"),
+    and counting those as dependencies pulled ~509 tests back in -- no better than ALL, and dishonest about
+    why. A read looks like the filename inside a string that is passed to something that opens it, so require
+    the name to appear on a line that also does path/open/load work."""
+    for line in src.splitlines():
+        if base not in line:
+            continue
+        if re.search(r'(open|load|read|Path|path|join|glob|np\.load|npz|resolve)\s*[\(．.]|=\s*["\']', line):
+            if '"""' not in line and not line.lstrip().startswith("#"):
+                return True
+    return False
+
+
+def _data_file_dependents(rel_path, root, modules, direct, _cache):
+    """Tests affected by a NON-.py file, or None when that cannot be determined safely.
+
+    WHY THIS EXISTS. Every non-.py, non-inert change used to return "ALL" -- run all 629 test files. The
+    intent was right (never skip a test that might depend on a data file) but it fired on ROUTINE BOT PUSHES:
+    docs.yml commits capabilities.json and semantic-coverage.yml commits the routing index and seed. Measured:
+    capabilities.json is read by 1 test and the routing artifacts by 5, yet either pulled in all of them.
+
+    Dependents are found BY SEARCHING FOR THE FILENAME, so this cannot go stale the way a hand-kept table
+    does. ONLY TEST FILES COUNT as direct readers; if a NON-test module reads the file, the dependency is
+    indirect and unbounded, so this returns None and the caller falls back to ALL. None is also returned when
+    NOTHING reads it -- a file nobody names by hand may still be picked up by a directory scan, and "no test
+    could possibly care" is not something this tool can prove. Unknown data keeps the safe behaviour; only
+    files whose readers are DEMONSTRABLY a small set of tests get scoped."""
+    base = os.path.basename(rel_path)
+    if not base:
+        return None
+    if not os.path.exists(os.path.join(root, rel_path)):
+        # THE FILE IS NOT IN THE TREE -- deleted, or a path this checkout has never seen. Scoping requires
+        # looking at what reads it, and there is nothing to look at, so fall back to ALL. This also stops a
+        # filename that appears only as a FIXTURE STRING inside some test from masquerading as a reader:
+        # tests/test_select_tests.py names "features/mystery_dataset.zip" to assert this very fallback, and
+        # without this check the tool would helpfully select that one test and break the contract it pins.
+        return None
+    hits = set()
+    for name, rel in modules.items():
+        try:
+            src = io.open(os.path.join(root, rel), encoding="utf-8", errors="ignore").read()
+        except OSError:
+            continue
+        if not _reads_file(src, base):
+            continue
+        if os.path.basename(rel)[:-3].startswith("test_"):
+            hits.add(name)
+        else:
+            return None                                          # a non-test module reads it -> unbounded
+    return hits or None                                          # nothing reads it by name -> stay safe
+
+
 def affected_tests(changed_files, root="."):
     """The test files affected by `changed_files`: those whose transitive imports include a changed module, plus any
     changed test file itself, plus the always-run (dynamic-import) test files. Returns a sorted list of REAL file
@@ -160,6 +218,8 @@ def affected_tests(changed_files, root="."):
     test_names = sorted(n for n in modules if os.path.basename(modules[n])[:-3].startswith("test_"))
 
     changed_modules = set()
+    data_tests = set()                                          # tests reached via a NON-.py data file
+    _data_cache = {}
     for f in changed_files:
         f = f.strip().replace("\\", "/").lstrip("./")
         if not f:
@@ -177,7 +237,13 @@ def affected_tests(changed_files, root="."):
             else:
                 return "ALL"                                    # a .py we can't place in the map -> don't risk it
         else:
-            return "ALL"                                        # data / binary / unknown -> run the whole suite
+            data_hits = _data_file_dependents(f, root, modules, direct, _data_cache)
+            if data_hits is None:
+                return "ALL"                                    # genuinely unplaceable -> run the whole suite
+            data_tests |= data_hits                             # a KNOWN data file reaches only its readers
+
+    if not changed_modules and data_tests:
+        return sorted(modules[t] for t in data_tests)           # only data changed, and we know its readers
 
     if not changed_modules:
         # only inert files changed (docs / config) -> no test can be affected. The doc-drift GATES in CI
@@ -194,7 +260,7 @@ def affected_tests(changed_files, root="."):
         reach = _transitive(t, direct, _cache)
         if (reach & changed_modules) or (t in changed_modules):  # imports something changed, or IS the changed test
             picked.add(t)
-    return sorted(modules[t] for t in picked)
+    return sorted(modules[t] for t in picked | data_tests)
 
 
 def _selftest():
