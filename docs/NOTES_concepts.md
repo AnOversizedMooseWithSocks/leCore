@@ -47950,3 +47950,26 @@ outcome this file can produce. Mutation-tested: changing the matrix to 3 shards 
 AND THE PIN'S OWN INSTRUMENT WAS BROKEN FIRST: yaml.dump WRAPS at 80 columns, which split "--num-shards"
 across a newline so the search found nothing -- a false green inside the test written to prevent a false
 green. Fixed with width=10**9. Third time this session that checking the check mattered.
+
+## MY OWN CI-SHAPE TEST IMPORTED PyYAML -- a test that widened the dependency surface it exists to protect
+
+The pin added for the sharding change (test_ci_gates_run_once_and_every_shard_is_covered) imported `yaml` to
+read ci.yml. PyYAML is NOT in requirements.txt and must not be: the core promises NumPy/Flask/stdlib/hashlib,
+CI installs exactly requirements.txt, so the test passed locally (PyYAML present) and died on the runner with
+ModuleNotFoundError. A test written to protect CI correctness quietly added a fourth-party dependency to the
+project that exists to avoid them -- caught by the very runner it was meant to guard.
+
+REWRITTEN ON STDLIB: _ci_jobs() splits ci.yml by INDENTATION (a job is a 2-space `name:` line; everything
+more-indented belongs to it), which is enough to answer both questions and, as a bonus, sidesteps the
+yaml.dump line-wrapping bug the previous version had. MUTATION-TESTED BOTH PROPERTIES, since both fail
+silently: a 3-shard matrix against `--num-shards 4` fails it, and a gate step smuggled into the sharded
+pytest job fails it.
+
+SWEPT THE REST OF THE SUITE for the same mistake rather than assuming mine was the only one: the only genuine
+third-party imports in tests/ are `numba` and `ziglang`, both DOCUMENTED opt-in accelerators, both guarded
+(ImportError -> skip) and green with neither installed. Everything else flagged was stdlib (zlib, lzma,
+tomllib, socketserver, colorsys, wave) or a repo-local tool. So the outlier was mine.
+
+LESSON: "it passes locally" is worth exactly nothing when local has packages CI does not. The dependency
+constraint is part of the contract a test must respect, not just something the core respects -- and the
+cheapest check is to read requirements.txt before reaching for a convenient parser.
