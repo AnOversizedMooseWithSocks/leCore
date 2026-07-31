@@ -28,6 +28,17 @@ on:
 
 jobs:
   pytest:
+    # SHARDED, because the unscoped path is the whole suite in one 20-minute box and it started timing out.
+    # `timeout-minutes` is PER JOB, so four shard jobs give the fast path 4x the budget -- the same reasoning
+    # (and the same tool) already applied to `full-suite` below, whose comment calls --num-shards "the whole
+    # tuning knob". SCOPED runs are NOT split: when select_tests returns a real list it is small, so shard 0
+    # runs it whole and the other three exit immediately -- sharding a 14-file selection would cost more in
+    # runner startup than it saves. Branch protection keeps working via the `pytest-gate` job below, which is
+    # what a required check should point at now.
+    strategy:
+      fail-fast: false            # one slow shard failing must not cancel the others -- we want the full picture
+      matrix:
+        shard: [0, 1, 2, 3]
     # This job now handles ONLY the per-change path (a push or a PR): affected-test selection + the gates below.
     # The FULL suite (schedule / manual / version tag) moved to the sharded `full-suite` matrix job at the bottom --
     # GitHub's timeout-minutes budget is PER JOB, so one 20-minute job could never hold the true full run
@@ -90,7 +101,14 @@ jobs:
           # cannot fit one job's 20-minute budget. This job's fallback for an unscopable change is the FAST suite
           # (the default `-m 'not slow'` from pyproject.toml): complete coverage of the fast tests, and the weekly
           # sharded run remains the safety net for the slow ones.
-          run_fast () { echo "== FAST suite ($1) =="; pytest -q -n auto --durations=15; }
+          # THE UNSCOPED PATH IS SHARDED. Same deterministic bin-packing the full suite uses, so shard i is the
+          # same set on every run and the four shards exactly cover the suite (--selfcheck asserts it).
+          run_fast () {
+            echo "== FAST suite ($1) -- shard ${{ matrix.shard }} of 4 =="
+            FILES=$(python tools/shard_tests.py --shard ${{ matrix.shard }} --num-shards 4)
+            if [ -z "$FILES" ]; then echo "shard is empty"; return 0; fi
+            pytest -q -n auto --durations=15 $FILES
+          }
 
           # --- work out what changed, then run only the affected tests ---
           if [ "$EVENT" = "pull_request" ]; then
@@ -113,6 +131,10 @@ jobs:
           elif [ -z "$SELECTED" ]; then
             echo "== no tests affected by these changes (docs/config only) -- nothing to run =="
           else
+            if [ "${{ matrix.shard }}" != "0" ]; then
+              echo "== scoped selection runs whole on shard 0; nothing for shard ${{ matrix.shard }} =="
+              exit 0
+            fi
             echo "== running only the affected tests =="; echo "$SELECTED"
             pytest -q -n auto --durations=15 $SELECTED
           fi
@@ -120,6 +142,41 @@ jobs:
       # Keep API_QUICKREF.md current on its own: regenerate it and fail if the committed copy is stale.
       # This is a drift check (no write-back needed) -- if it fails, run `python apiquickref.py` locally and
       # commit the result. The generator only reads source with `ast`, so this step is fast and side-effect-free.
+
+  gates:
+    # THE LINT/AUDIT/DOC-DRIFT GATES, ONCE. They used to live inside the `pytest` job -- which is now a 4-way
+    # shard matrix, so leaving them there would run every gate FOUR TIMES per push for identical results.
+    # They are seconds each and share nothing with the test run, so they belong in their own unsharded job:
+    # cheaper, and a gate failure is now reported separately from a test failure instead of being buried in
+    # whichever shard happened to reach it first.
+    if: (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MPLBACKEND: Agg
+      PYTHONHASHSEED: "0"
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+        with:
+          # Full history so a pull_request can diff against its base branch's merge-base (origin/base...HEAD) to find
+          # exactly the files this PR changed. Cheap for this repo; needed by the affected-tests selection below.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # the version the suite is developed against
+          cache: pip               # reuse the pip wheel cache between runs
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
       - name: Check API_QUICKREF.md is up to date
         run: |
           python apiquickref.py
@@ -206,6 +263,23 @@ jobs:
   # cover/disjoint/determinism). If a shard ever nears the budget again, raise --num-shards here and in the
   # matrix -- that is the whole tuning knob.
   # ---------------------------------------------------------------------------------------------------------
+
+  pytest-gate:
+    # ONE STABLE CHECK NAME for branch protection. A matrix job reports as "pytest (0)".."pytest (3)", so a
+    # required check pinned to "pytest" would no longer match anything. This job depends on every shard and
+    # on the gates, and fails if any of them did -- point branch protection at `pytest-gate`.
+    if: always() && ((github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) || github.event_name == 'pull_request')
+    needs: [pytest, gates]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any shard or gate failed
+        run: |
+          echo "pytest shards: ${{ needs.pytest.result }}"
+          echo "gates:         ${{ needs.gates.result }}"
+          if [ "${{ needs.pytest.result }}" != "success" ] || [ "${{ needs.gates.result }}" != "success" ]; then
+            echo "::error::a test shard or a gate failed"; exit 1
+          fi
+
   full-suite:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest

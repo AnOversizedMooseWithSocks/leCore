@@ -107,3 +107,68 @@ def test_missing_generator_fails_loudly_rather_than_being_skipped():
     dropped files in this repo before, and a silent skip turns that into a green run that regenerated nothing."""
     missing, _failed, _changed = regen_docs.run(check=False, root=str(ROOT / "tests" / "_no_such_dir"))
     assert set(missing) == {g for g, _ in regen_docs.GENERATORS}, "absent generators must all be reported"
+
+
+def _ci_jobs(text):
+    """Split ci.yml into {job_name: raw_text} using INDENTATION ONLY -- no yaml module.
+
+    WHY NOT PyYAML: it is not in requirements.txt and must not be. The core promises NumPy/Flask/stdlib, CI
+    installs exactly that, and a test that imports a fourth-party parser to inspect a config file quietly
+    widens the dependency surface the whole project is built to avoid. It also fails on the runner, which is
+    how this was caught. A job is a 2-space-indented `name:` line; everything more-indented below belongs to
+    it. That is enough to answer both questions here, and it sidesteps the line-wrapping bug the yaml.dump
+    version had as a bonus."""
+    jobs, name, buf, in_jobs = {}, None, [], False
+    for line in text.splitlines(True):
+        if re.match(r'^jobs:\s*$', line):
+            in_jobs = True
+            continue
+        if not in_jobs:
+            continue
+        if re.match(r'^\S', line):                                # back to top level -> jobs section ended
+            break
+        head = re.match(r'^  ([A-Za-z][\w-]*):\s*$', line)
+        if head:
+            if name:
+                jobs[name] = "".join(buf)
+            name, buf = head.group(1), []
+            continue
+        if name:
+            buf.append(line)
+    if name:
+        jobs[name] = "".join(buf)
+    return jobs
+
+
+def test_ci_gates_run_once_and_every_shard_is_covered():
+    """CI SHAPE, pinned after the 20-minute timeout. Two properties, both of which fail SILENTLY:
+
+    1. THE GATES RUN ONCE. They used to sit inside the `pytest` job; sharding that job four ways would have
+       run every lint/audit/doc-drift gate FOUR TIMES per push for identical results. They now live in their
+       own unsharded `gates` job.
+    2. THE SHARD COUNT IN ci.yml MATCHES THE ONE PASSED TO shard_tests.py. A matrix of 4 with a
+       `--num-shards 3` command would silently drop a quarter of the suite -- green CI, untested code."""
+    import re
+    ci = ROOT / ".github" / "workflows" / "ci.yml"
+    if not ci.is_file():
+        pytest.skip("no ci.yml in this tree")
+    jobs = _ci_jobs(ci.read_text(encoding="utf-8"))
+    assert "pytest" in jobs and "gates" in jobs, sorted(jobs)
+
+    assert "Gate --" in jobs["gates"], "the gates job has no gate steps -- did they drift into a sharded job?"
+    for name, body in jobs.items():
+        sharded = re.search(r'^\s+shard:\s*\[', body, re.M)
+        if sharded and "Gate --" in body:
+            raise AssertionError("job %r is sharded AND runs gates -- every gate would run once per shard" % name)
+
+    for name, body in jobs.items():
+        m = re.search(r'^\s+shard:\s*\[([^\]]*)\]', body, re.M)
+        if not m:
+            continue
+        declared = len([x for x in m.group(1).split(",") if x.strip()])
+        used = {int(n) for n in re.findall(r'--num-shards\s+(\d+)', body)}
+        assert used, "job %r declares a shard matrix but never passes --num-shards" % name
+        assert used == {declared}, \
+            "job %r has %d shards in the matrix but passes --num-shards %s -- part of the suite would " \
+            "never run" % (name, declared, sorted(used))
+
